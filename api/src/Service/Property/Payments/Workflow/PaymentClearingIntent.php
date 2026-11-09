@@ -81,8 +81,7 @@ final class PaymentClearingIntent
         $sourceId = $row['source_kind'] === 'bank' ? $row['bank_transaction_id'] : $row['cash_document_id'];
         if ($actual['entry']['source_type'] !== $row['source_kind'] || $actual['entry']['source_id'] !== (int) $sourceId
             || $actual['entry']['entry_date'] !== $expected['header']['entry_date'] || $actual['entry']['reversed_by'] !== null
-            || PropertyInput::hash(\MyInvoice\Service\Property\Payments\PaymentJournalProof::canonicalLines($actual['lines']))
-                !== PropertyInput::hash(\MyInvoice\Service\Property\Payments\PaymentJournalProof::canonicalLines($expected['lines']))) PaymentException::reject('posted_ledger_mismatch');
+            || !\MyInvoice\Service\Property\Payments\PaymentJournalProof::matches($actual['lines'], $expected['lines'])) PaymentException::reject('posted_ledger_mismatch');
         $repository->bindJournal($this->supplier, $this->workflowId, $this->version, $entry);
     }
 }

@@ -441,6 +441,22 @@ Nové předkontace se do zaúčtovaných revizí nepromítají. Zmrazený sníme
 vlastní sadu účtů, takže opakované zaúčtování staršího období vypadá přesně jako
 poprvé.
 
+**Zaúčtování mezd souhrnně, nebo po zaměstnancích.** Pod předkontacemi zvolíte,
+jak se mzdový předpis zapíše do deníku:
+
+- **Souhrnně za firmu a středisko** (výchozí). Řádky, ve formě jednoduchého
+  zápisu dvojice 521/331, 524/336, 331/336, 331/342 a další, jsou za celou firmu
+  a středisko.
+- **Po zaměstnancích.** Každý zaměstnanec má vlastní řádky, ve formě
+  jednoduchého zápisu vlastní dvojice, s osobním číslem v textu řádku. Pojistné
+  zaměstnavatele (524) se rozdělí na pracovní vztahy, souhrnně zůstane jen
+  závazek vůči institucím a haléřové zaokrouhlení. Hodí se pro controlling.
+
+Účty a částky jsou v obou případech stejné. Volba se uloží do snímku běhu při
+výpočtu, takže platí pro běhy přepočítané po uložení; už zaúčtované revize se
+nemění. Jména zaměstnanců deník nenese, ukazuje je sestava
+[Podrobné zaúčtování mezd](81_Shoda_uctovani_mezd.md#8155-podrobne-zauctovani-mezd).
+
 ### 90.14.6 Předkontace pro zvláštní mzdové situace
 
 Tyto předkontace se použijí jen v konkrétní situaci. Nevyplněná předkontace
@@ -454,6 +470,7 @@ použije bezpečnou výchozí hodnotu; vyplňte ji tam, kde se vaše osnova liš
 | **Nedaňová část benefitu** | osvobozená část nepeněžního benefitu | 528 |
 | **Cestovní náhrady** | vyúčtování pracovní cesty promítnuté do mzdy | 512 proti 331 nebo 366 |
 | **Zákonné pojištění odpovědnosti** | čtvrtletní předpis pojistného podle vyhlášky č. 125/1993 Sb. | 548 / 379.400 |
+| **Odměna jednatele, který není společníkem** | odměna za výkon funkce u vztahu bez příznaku společníka | 523 / 331 (prázdné = 523 / 366) |
 
 Příspěvek na spoření u rizikové práce se zaměstnanci nevyplácí a penzijní
 společnost není institucí sociálního ani zdravotního pojištění, proto nejde na

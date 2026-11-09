@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 final class FundingNativeTest extends TestCase
 {
     use FundingFixture;
+    use \MyInvoice\Tests\Support\PairedJournalAssertions;
     public function testReferenceLongAdvancesAdministrationAndOwnerIncome():void
     {
         $this->fundingOpening();$this->fundingIssue();$s=$this->f['supplier'];$house=$this->f['house']['id'];$read=new FundingRead($this->db);
@@ -23,5 +24,13 @@ final class FundingNativeTest extends TestCase
         $final=$read->at($s,null,'2026-12-31');self::assertTrue($final['matches'],json_encode($final['differences']));self::assertSame('22500000',$final['totals']['955.100']);self::assertSame('200000',$final['totals']['324.200']);self::assertSame('500000',$final['totals']['379.920']);self::assertSame($final['totals'],$final['ledger_totals']);self::assertSame('30000000',$final['component_totals']['opening']['955.100']);self::assertSame('12000000',$final['component_totals']['issued']['955.100']);self::assertSame('-24000000',$final['component_totals']['draw']['955.100']);
         $before=$read->at($s,$house,'2026-02-28');self::assertTrue($before['matches']);self::assertSame('42000000',$before['totals']['955.100']);$unit=$read->at($s,null,'2026-12-31',null,$this->f['units']['G12']);self::assertTrue($unit['matches']);self::assertSame('450000',$unit['totals']['955.100']);
         $q=$this->db->pdo()->prepare("SELECT c.account_code,SUM(CASE l.side WHEN 'debit' THEN l.amount ELSE -l.amount END) balance FROM journal_entry_lines l JOIN chart_of_accounts c ON c.supplier_id=l.supplier_id AND c.id=l.account_id WHERE l.supplier_id=? AND (LEFT(c.account_code,1)='0' OR c.account_code IN ('549.900','549.910','518.200','649.100','649.200')) GROUP BY c.account_code");$q->execute([$s]);self::assertSame(['518.200'=>'10000.00','549.900'=>'90000.00','549.910'=>'150000.00','649.100'=>'-240000.00','649.200'=>'-10000.00'],array_column($q->fetchAll(\PDO::FETCH_ASSOC),'balance','account_code'));
+    }
+
+    /** Jednoduchá forma: příjem, převod, výplata i čerpání záloh fondu jsou po dvojicích a důkazy fondu je přijmou. */
+    #[\PHPUnit\Framework\Attributes\Group('pairs-e2e')]
+    public function testReferenceLongAdvancesAdministrationAndOwnerIncomeInSingleEntryForm():void
+    {
+        $this->testReferenceLongAdvancesAdministrationAndOwnerIncome();
+        $this->assertSupplierJournalPaired($this->db->pdo(),$this->f['supplier']);
     }
 }

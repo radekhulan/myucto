@@ -333,6 +333,11 @@ final class Config
                 'oidc' => [
                     'enabled' => false,
                     'session_lifetime_hours' => 12,
+                    // API tokeny a MCP připojení vydané z přihlášení přes Entra ID platí
+                    // jen do session_lifetime_hours od posledního ověření v Entra ID, takže
+                    // uživatele zablokovaného v Entra ID nepřežijí. Vypnuto = tokeny platí
+                    // do své vlastní expirace a přístup se odebírá deaktivací účtu.
+                    'tokens_follow_identity' => false,
                     // Poskytovatel povinný pro celou instalaci (např. 'entra'). Platí
                     // pro všechny firmy i uživatele včetně správce instance, heslo
                     // se pak nepoužívá. Prázdné = přihlášení heslem i přes poskytovatele.
@@ -434,6 +439,12 @@ final class Config
                     'approver' => \MyInvoice\Service\Payroll\Ruleset\VendorRulesetApprover::DEFAULT_NAME,
                 ],
             ],
+            // Výchozí forma účetního zápisu NOVÝCH firem instalace ('composite' = složený,
+            // 'single' = jednoduchý po dvojicích). Stávající firmy se nemění, firma si formu
+            // dál přepíná sama v nastavení účetnictví. Viz EntryFormInstallationDefault.
+            'accounting' => [
+                'default_entry_form' => 'composite',
+            ],
             'ares' => [
                 'api'       => 'https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty',
                 'cache_ttl' => 86400,
@@ -473,6 +484,7 @@ final class Config
             'MYINVOICE_APP_ENV'     => ['app.env', 'string'],
             'MYINVOICE_APP_DEBUG'   => ['app.debug', 'bool'],
             'MYINVOICE_OVERDUE_INCLUDES_TODAY' => ['invoices.overdue_includes_today', 'bool'],
+            'MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM' => ['accounting.default_entry_form', 'string'],
             'MYINVOICE_INVOICE_PUBLIC_LINKS' => ['invoices.public_links', 'bool'],
             'MYINVOICE_APP_URL'     => ['app.url', 'string'],
             'MYINVOICE_DOMAINS_ENABLED' => ['domains.enabled', 'bool'],
@@ -537,6 +549,7 @@ final class Config
             'MYINVOICE_OIDC_ENABLED'                 => ['auth.oidc.enabled', 'bool'],
             'MYINVOICE_OIDC_SESSION_LIFETIME_HOURS'  => ['auth.oidc.session_lifetime_hours', 'int'],
             'MYINVOICE_OIDC_REQUIRED'                => ['auth.oidc.required_provider', 'string'],
+            'MYINVOICE_OIDC_TOKENS_FOLLOW_IDENTITY'  => ['auth.oidc.tokens_follow_identity', 'bool'],
             'MYINVOICE_OIDC_ENTRA_ENABLED'           => ['auth.oidc.providers.entra.enabled', 'bool'],
             'MYINVOICE_OIDC_ENTRA_LABEL'             => ['auth.oidc.providers.entra.label', 'string'],
             'MYINVOICE_OIDC_ENTRA_TENANT_ID'         => ['auth.oidc.providers.entra.tenant_id', 'string'],

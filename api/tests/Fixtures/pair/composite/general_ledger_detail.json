@@ -1,0 +1,2474 @@
+[
+    {
+        "kind": "start",
+        "account": {
+            "account_id": "account:022",
+            "account_code": "022",
+            "name": "Hmotné movité věci a jejich soubory",
+            "account_type": "asset",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 20000.0,
+                    "d": 0.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 20000,
+            "turnover_d": 0,
+            "closing_md": 20000,
+            "closing_d": 0,
+            "line_count": 1
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:022",
+            "group_code": "022",
+            "entry_id": "entry:asset",
+            "entry_date": "2099-03-05",
+            "document_no": "FP-2",
+            "description": "Nákup stroje",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:26",
+            "line_no": 0,
+            "account_id": "account:022",
+            "account_code": "022",
+            "side": "debit",
+            "amount": "20000.00",
+            "is_red_storno": 0,
+            "counter_accounts": "321",
+            "balance": 20000
+        }
+    },
+    {
+        "kind": "end",
+        "account": {
+            "account_id": "account:022",
+            "account_code": "022",
+            "name": "Hmotné movité věci a jejich soubory",
+            "account_type": "asset",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 20000.0,
+                    "d": 0.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 20000,
+            "turnover_d": 0,
+            "closing_md": 20000,
+            "closing_d": 0,
+            "line_count": 1
+        }
+    },
+    {
+        "kind": "start",
+        "account": {
+            "account_id": "account:211",
+            "account_code": "211",
+            "name": "Pokladna",
+            "account_type": "asset",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 450.0
+                },
+                "2099-03": {
+                    "md": 5000.0,
+                    "d": 0.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 5000,
+            "turnover_d": 450,
+            "closing_md": 4550,
+            "closing_d": 0,
+            "line_count": 4
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:211",
+            "group_code": "211",
+            "entry_id": "entry:cash",
+            "entry_date": "2099-02-03",
+            "document_no": "PD-1",
+            "description": "Pokladní doklad",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:15",
+            "line_no": 2,
+            "account_id": "account:211",
+            "account_code": "211",
+            "side": "credit",
+            "amount": "100.00",
+            "is_red_storno": 0,
+            "counter_accounts": "512, 513",
+            "balance": -100
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:211",
+            "group_code": "211",
+            "entry_id": "entry:cash",
+            "entry_date": "2099-02-03",
+            "document_no": "PD-1",
+            "description": "Pokladní doklad",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:16",
+            "line_no": 3,
+            "account_id": "account:211",
+            "account_code": "211",
+            "side": "credit",
+            "amount": "100.00",
+            "is_red_storno": 0,
+            "counter_accounts": "512, 513",
+            "balance": -200
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:211",
+            "group_code": "211",
+            "entry_id": "entry:mn",
+            "entry_date": "2099-02-10",
+            "document_no": "ID-1",
+            "description": "Složený zápis M : N",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:20",
+            "line_no": 3,
+            "account_id": "account:211",
+            "account_code": "211",
+            "side": "credit",
+            "amount": "250.00",
+            "is_red_storno": 0,
+            "counter_accounts": "512, 513",
+            "balance": -450
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:211",
+            "group_code": "211",
+            "entry_id": "entry:transfer",
+            "entry_date": "2099-03-01",
+            "document_no": "BV-3",
+            "description": "Výběr do pokladny",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:24",
+            "line_no": 0,
+            "account_id": "account:211",
+            "account_code": "211",
+            "side": "debit",
+            "amount": "5000.00",
+            "is_red_storno": 0,
+            "counter_accounts": "221",
+            "balance": 4550
+        }
+    },
+    {
+        "kind": "end",
+        "account": {
+            "account_id": "account:211",
+            "account_code": "211",
+            "name": "Pokladna",
+            "account_type": "asset",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 450.0
+                },
+                "2099-03": {
+                    "md": 5000.0,
+                    "d": 0.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 5000,
+            "turnover_d": 450,
+            "closing_md": 4550,
+            "closing_d": 0,
+            "line_count": 4
+        }
+    },
+    {
+        "kind": "start",
+        "account": {
+            "account_id": "account:221",
+            "account_code": "221",
+            "name": "Peněžní prostředky na účtech",
+            "account_type": "asset",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 1210.0,
+                    "d": 1830.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 50000.0,
+                    "d": 25000.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 51210,
+            "turnover_d": 26830,
+            "closing_md": 24380,
+            "closing_d": 0,
+            "line_count": 5
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:221",
+            "group_code": "221",
+            "entry_id": "entry:receipt",
+            "entry_date": "2099-01-20",
+            "document_no": "BV-1",
+            "description": "Úhrada FV-1",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:7",
+            "line_no": 0,
+            "account_id": "account:221",
+            "account_code": "221",
+            "side": "debit",
+            "amount": "1210.00",
+            "is_red_storno": 0,
+            "counter_accounts": "311",
+            "balance": 1210
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:221",
+            "group_code": "221",
+            "entry_id": "entry:bulk",
+            "entry_date": "2099-01-25",
+            "document_no": "BV-2",
+            "description": "Hromadná platba",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:12",
+            "line_no": 3,
+            "account_id": "account:221",
+            "account_code": "221",
+            "side": "credit",
+            "amount": "1830.00",
+            "is_red_storno": 0,
+            "counter_accounts": "321, 568",
+            "balance": -620
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:221",
+            "group_code": "221",
+            "entry_id": "entry:transfer",
+            "entry_date": "2099-03-01",
+            "document_no": "BV-3",
+            "description": "Výběr do pokladny",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:25",
+            "line_no": 1,
+            "account_id": "account:221",
+            "account_code": "221",
+            "side": "credit",
+            "amount": "5000.00",
+            "is_red_storno": 0,
+            "counter_accounts": "211",
+            "balance": -5620
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:221",
+            "group_code": "221",
+            "entry_id": "entry:asset_pay",
+            "entry_date": "2099-03-06",
+            "document_no": "BV-4",
+            "description": "Úhrada stroje",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:29",
+            "line_no": 1,
+            "account_id": "account:221",
+            "account_code": "221",
+            "side": "credit",
+            "amount": "20000.00",
+            "is_red_storno": 0,
+            "counter_accounts": "321",
+            "balance": -25620
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:221",
+            "group_code": "221",
+            "entry_id": "entry:loan",
+            "entry_date": "2099-03-10",
+            "document_no": "BV-5",
+            "description": "Úvěr",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:30",
+            "line_no": 0,
+            "account_id": "account:221",
+            "account_code": "221",
+            "side": "debit",
+            "amount": "50000.00",
+            "is_red_storno": 0,
+            "counter_accounts": "461",
+            "balance": 24380
+        }
+    },
+    {
+        "kind": "end",
+        "account": {
+            "account_id": "account:221",
+            "account_code": "221",
+            "name": "Peněžní prostředky na účtech",
+            "account_type": "asset",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 1210.0,
+                    "d": 1830.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 50000.0,
+                    "d": 25000.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 51210,
+            "turnover_d": 26830,
+            "closing_md": 24380,
+            "closing_d": 0,
+            "line_count": 5
+        }
+    },
+    {
+        "kind": "start",
+        "account": {
+            "account_id": "account:311",
+            "account_code": "311",
+            "name": "Pohledávky z obchodních vztahů (odběratelé)",
+            "account_type": "asset",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 1210.0,
+                    "d": 1210.0
+                },
+                "2099-02": {
+                    "md": -121.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 13220.0,
+                    "d": 0.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 14309,
+            "turnover_d": 1210,
+            "closing_md": 13099,
+            "closing_d": 0,
+            "line_count": 4
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:311",
+            "group_code": "311",
+            "entry_id": "entry:invoice",
+            "entry_date": "2099-01-10",
+            "document_no": "FV-1",
+            "description": "Vydaná faktura",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:1",
+            "line_no": 0,
+            "account_id": "account:311",
+            "account_code": "311",
+            "side": "debit",
+            "amount": "1210.00",
+            "is_red_storno": 0,
+            "counter_accounts": "343.200, 602",
+            "balance": 1210
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:311",
+            "group_code": "311",
+            "entry_id": "entry:receipt",
+            "entry_date": "2099-01-20",
+            "document_no": "BV-1",
+            "description": "Úhrada FV-1",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:8",
+            "line_no": 1,
+            "account_id": "account:311",
+            "account_code": "311",
+            "side": "credit",
+            "amount": "1210.00",
+            "is_red_storno": 0,
+            "counter_accounts": "221",
+            "balance": 0
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:311",
+            "group_code": "311",
+            "entry_id": "entry:storno",
+            "entry_date": "2099-02-15",
+            "document_no": "FV-2",
+            "description": "Opravný doklad",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:21",
+            "line_no": 0,
+            "account_id": "account:311",
+            "account_code": "311",
+            "side": "debit",
+            "amount": "-121.00",
+            "is_red_storno": 1,
+            "counter_accounts": "343.200, 602",
+            "balance": -121
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:311",
+            "group_code": "311",
+            "entry_id": "entry:sale2",
+            "entry_date": "2099-03-20",
+            "document_no": "FV-3",
+            "description": "Vydaná faktura dvě sazby",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:32",
+            "line_no": 0,
+            "account_id": "account:311",
+            "account_code": "311",
+            "side": "debit",
+            "amount": "13220.00",
+            "is_red_storno": 0,
+            "counter_accounts": "343.200, 602, 604",
+            "balance": 13099
+        }
+    },
+    {
+        "kind": "end",
+        "account": {
+            "account_id": "account:311",
+            "account_code": "311",
+            "name": "Pohledávky z obchodních vztahů (odběratelé)",
+            "account_type": "asset",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 1210.0,
+                    "d": 1210.0
+                },
+                "2099-02": {
+                    "md": -121.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 13220.0,
+                    "d": 0.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 14309,
+            "turnover_d": 1210,
+            "closing_md": 13099,
+            "closing_d": 0,
+            "line_count": 4
+        }
+    },
+    {
+        "kind": "start",
+        "account": {
+            "account_id": "account:321",
+            "account_code": "321",
+            "name": "Závazky z obchodních vztahů (dodavatelé)",
+            "account_type": "liability",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 1815.0,
+                    "d": 1210.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 250.0
+                },
+                "2099-03": {
+                    "md": 20000.0,
+                    "d": 20000.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 21815,
+            "turnover_d": 21460,
+            "closing_md": 355,
+            "closing_d": 0,
+            "line_count": 6
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:321",
+            "group_code": "321",
+            "entry_id": "entry:purchase",
+            "entry_date": "2099-01-12",
+            "document_no": "FP-1",
+            "description": "Přijatá faktura",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:6",
+            "line_no": 2,
+            "account_id": "account:321",
+            "account_code": "321",
+            "side": "credit",
+            "amount": "1210.00",
+            "is_red_storno": 0,
+            "counter_accounts": "343.100, 513",
+            "balance": -1210
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:321",
+            "group_code": "321",
+            "entry_id": "entry:bulk",
+            "entry_date": "2099-01-25",
+            "document_no": "BV-2",
+            "description": "Hromadná platba",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:9",
+            "line_no": 0,
+            "account_id": "account:321",
+            "account_code": "321",
+            "side": "debit",
+            "amount": "1210.00",
+            "is_red_storno": 0,
+            "counter_accounts": "221",
+            "balance": 0
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:321",
+            "group_code": "321",
+            "entry_id": "entry:bulk",
+            "entry_date": "2099-01-25",
+            "document_no": "BV-2",
+            "description": "Hromadná platba",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:10",
+            "line_no": 1,
+            "account_id": "account:321",
+            "account_code": "321",
+            "side": "debit",
+            "amount": "605.00",
+            "is_red_storno": 0,
+            "counter_accounts": "221",
+            "balance": 605
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:321",
+            "group_code": "321",
+            "entry_id": "entry:mn",
+            "entry_date": "2099-02-10",
+            "document_no": "ID-1",
+            "description": "Složený zápis M : N",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:19",
+            "line_no": 2,
+            "account_id": "account:321",
+            "account_code": "321",
+            "side": "credit",
+            "amount": "250.00",
+            "is_red_storno": 0,
+            "counter_accounts": "512, 513",
+            "balance": 355
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:321",
+            "group_code": "321",
+            "entry_id": "entry:asset",
+            "entry_date": "2099-03-05",
+            "document_no": "FP-2",
+            "description": "Nákup stroje",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:27",
+            "line_no": 1,
+            "account_id": "account:321",
+            "account_code": "321",
+            "side": "credit",
+            "amount": "20000.00",
+            "is_red_storno": 0,
+            "counter_accounts": "022",
+            "balance": -19645
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:321",
+            "group_code": "321",
+            "entry_id": "entry:asset_pay",
+            "entry_date": "2099-03-06",
+            "document_no": "BV-4",
+            "description": "Úhrada stroje",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:28",
+            "line_no": 0,
+            "account_id": "account:321",
+            "account_code": "321",
+            "side": "debit",
+            "amount": "20000.00",
+            "is_red_storno": 0,
+            "counter_accounts": "221",
+            "balance": 355
+        }
+    },
+    {
+        "kind": "end",
+        "account": {
+            "account_id": "account:321",
+            "account_code": "321",
+            "name": "Závazky z obchodních vztahů (dodavatelé)",
+            "account_type": "liability",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 1815.0,
+                    "d": 1210.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 250.0
+                },
+                "2099-03": {
+                    "md": 20000.0,
+                    "d": 20000.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 21815,
+            "turnover_d": 21460,
+            "closing_md": 355,
+            "closing_d": 0,
+            "line_count": 6
+        }
+    },
+    {
+        "kind": "start",
+        "account": {
+            "account_id": "account:343",
+            "account_code": "343",
+            "name": "Daň z přidané hodnoty",
+            "account_type": "liability",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 210.0,
+                    "d": 210.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": -21.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 2220.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 210,
+            "turnover_d": 2409,
+            "closing_md": 0,
+            "closing_d": 2199,
+            "line_count": 5
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:343",
+            "group_code": "343",
+            "entry_id": "entry:invoice",
+            "entry_date": "2099-01-10",
+            "document_no": "FV-1",
+            "description": "Vydaná faktura",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:3",
+            "line_no": 2,
+            "account_id": "account:343.200",
+            "account_code": "343.200",
+            "side": "credit",
+            "amount": "210.00",
+            "is_red_storno": 0,
+            "counter_accounts": "311",
+            "balance": -210
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:343",
+            "group_code": "343",
+            "entry_id": "entry:purchase",
+            "entry_date": "2099-01-12",
+            "document_no": "FP-1",
+            "description": "Přijatá faktura",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:5",
+            "line_no": 1,
+            "account_id": "account:343.100",
+            "account_code": "343.100",
+            "side": "debit",
+            "amount": "210.00",
+            "is_red_storno": 0,
+            "counter_accounts": "321",
+            "balance": 0
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:343",
+            "group_code": "343",
+            "entry_id": "entry:storno",
+            "entry_date": "2099-02-15",
+            "document_no": "FV-2",
+            "description": "Opravný doklad",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:23",
+            "line_no": 2,
+            "account_id": "account:343.200",
+            "account_code": "343.200",
+            "side": "credit",
+            "amount": "-21.00",
+            "is_red_storno": 1,
+            "counter_accounts": "311",
+            "balance": 21
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:343",
+            "group_code": "343",
+            "entry_id": "entry:sale2",
+            "entry_date": "2099-03-20",
+            "document_no": "FV-3",
+            "description": "Vydaná faktura dvě sazby",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:34",
+            "line_no": 2,
+            "account_id": "account:343.200",
+            "account_code": "343.200",
+            "side": "credit",
+            "amount": "2100.00",
+            "is_red_storno": 0,
+            "counter_accounts": "311",
+            "balance": -2079
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:343",
+            "group_code": "343",
+            "entry_id": "entry:sale2",
+            "entry_date": "2099-03-20",
+            "document_no": "FV-3",
+            "description": "Vydaná faktura dvě sazby",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:36",
+            "line_no": 4,
+            "account_id": "account:343.200",
+            "account_code": "343.200",
+            "side": "credit",
+            "amount": "120.00",
+            "is_red_storno": 0,
+            "counter_accounts": "311",
+            "balance": -2199
+        }
+    },
+    {
+        "kind": "end",
+        "account": {
+            "account_id": "account:343",
+            "account_code": "343",
+            "name": "Daň z přidané hodnoty",
+            "account_type": "liability",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 210.0,
+                    "d": 210.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": -21.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 2220.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 210,
+            "turnover_d": 2409,
+            "closing_md": 0,
+            "closing_d": 2199,
+            "line_count": 5
+        }
+    },
+    {
+        "kind": "start",
+        "account": {
+            "account_id": "account:461",
+            "account_code": "461",
+            "name": "Dlouhodobé závazky k úvěrovým institucím",
+            "account_type": "liability",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 50000.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 0,
+            "turnover_d": 50000,
+            "closing_md": 0,
+            "closing_d": 50000,
+            "line_count": 1
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:461",
+            "group_code": "461",
+            "entry_id": "entry:loan",
+            "entry_date": "2099-03-10",
+            "document_no": "BV-5",
+            "description": "Úvěr",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:31",
+            "line_no": 1,
+            "account_id": "account:461",
+            "account_code": "461",
+            "side": "credit",
+            "amount": "50000.00",
+            "is_red_storno": 0,
+            "counter_accounts": "221",
+            "balance": -50000
+        }
+    },
+    {
+        "kind": "end",
+        "account": {
+            "account_id": "account:461",
+            "account_code": "461",
+            "name": "Dlouhodobé závazky k úvěrovým institucím",
+            "account_type": "liability",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 50000.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 0,
+            "turnover_d": 50000,
+            "closing_md": 0,
+            "closing_d": 50000,
+            "line_count": 1
+        }
+    },
+    {
+        "kind": "start",
+        "account": {
+            "account_id": "account:512",
+            "account_code": "512",
+            "name": "Cestovné",
+            "account_type": "expense",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 300.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 300,
+            "turnover_d": 0,
+            "closing_md": 300,
+            "closing_d": 0,
+            "line_count": 2
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:512",
+            "group_code": "512",
+            "entry_id": "entry:cash",
+            "entry_date": "2099-02-03",
+            "document_no": "PD-1",
+            "description": "Pokladní doklad",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:13",
+            "line_no": 0,
+            "account_id": "account:512",
+            "account_code": "512",
+            "side": "debit",
+            "amount": "100.00",
+            "is_red_storno": 0,
+            "counter_accounts": "211",
+            "balance": 100
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:512",
+            "group_code": "512",
+            "entry_id": "entry:mn",
+            "entry_date": "2099-02-10",
+            "document_no": "ID-1",
+            "description": "Složený zápis M : N",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:18",
+            "line_no": 1,
+            "account_id": "account:512",
+            "account_code": "512",
+            "side": "debit",
+            "amount": "200.00",
+            "is_red_storno": 0,
+            "counter_accounts": "211, 321",
+            "balance": 300
+        }
+    },
+    {
+        "kind": "end",
+        "account": {
+            "account_id": "account:512",
+            "account_code": "512",
+            "name": "Cestovné",
+            "account_type": "expense",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 300.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 300,
+            "turnover_d": 0,
+            "closing_md": 300,
+            "closing_d": 0,
+            "line_count": 2
+        }
+    },
+    {
+        "kind": "start",
+        "account": {
+            "account_id": "account:513",
+            "account_code": "513",
+            "name": "Náklady na reprezentaci",
+            "account_type": "expense",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 1000.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 400.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 1400,
+            "turnover_d": 0,
+            "closing_md": 1400,
+            "closing_d": 0,
+            "line_count": 3
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:513",
+            "group_code": "513",
+            "entry_id": "entry:purchase",
+            "entry_date": "2099-01-12",
+            "document_no": "FP-1",
+            "description": "Přijatá faktura",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:4",
+            "line_no": 0,
+            "account_id": "account:513",
+            "account_code": "513",
+            "side": "debit",
+            "amount": "1000.00",
+            "is_red_storno": 0,
+            "counter_accounts": "321",
+            "balance": 1000
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:513",
+            "group_code": "513",
+            "entry_id": "entry:cash",
+            "entry_date": "2099-02-03",
+            "document_no": "PD-1",
+            "description": "Pokladní doklad",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:14",
+            "line_no": 1,
+            "account_id": "account:513",
+            "account_code": "513",
+            "side": "debit",
+            "amount": "100.00",
+            "is_red_storno": 0,
+            "counter_accounts": "211",
+            "balance": 1100
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:513",
+            "group_code": "513",
+            "entry_id": "entry:mn",
+            "entry_date": "2099-02-10",
+            "document_no": "ID-1",
+            "description": "Složený zápis M : N",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:17",
+            "line_no": 0,
+            "account_id": "account:513",
+            "account_code": "513",
+            "side": "debit",
+            "amount": "300.00",
+            "is_red_storno": 0,
+            "counter_accounts": "211, 321",
+            "balance": 1400
+        }
+    },
+    {
+        "kind": "end",
+        "account": {
+            "account_id": "account:513",
+            "account_code": "513",
+            "name": "Náklady na reprezentaci",
+            "account_type": "expense",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 1000.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 400.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 1400,
+            "turnover_d": 0,
+            "closing_md": 1400,
+            "closing_d": 0,
+            "line_count": 3
+        }
+    },
+    {
+        "kind": "start",
+        "account": {
+            "account_id": "account:568",
+            "account_code": "568",
+            "name": "Ostatní finanční náklady",
+            "account_type": "expense",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 15.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 15,
+            "turnover_d": 0,
+            "closing_md": 15,
+            "closing_d": 0,
+            "line_count": 1
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:568",
+            "group_code": "568",
+            "entry_id": "entry:bulk",
+            "entry_date": "2099-01-25",
+            "document_no": "BV-2",
+            "description": "Hromadná platba",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:11",
+            "line_no": 2,
+            "account_id": "account:568",
+            "account_code": "568",
+            "side": "debit",
+            "amount": "15.00",
+            "is_red_storno": 0,
+            "counter_accounts": "221",
+            "balance": 15
+        }
+    },
+    {
+        "kind": "end",
+        "account": {
+            "account_id": "account:568",
+            "account_code": "568",
+            "name": "Ostatní finanční náklady",
+            "account_type": "expense",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 15.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 15,
+            "turnover_d": 0,
+            "closing_md": 15,
+            "closing_d": 0,
+            "line_count": 1
+        }
+    },
+    {
+        "kind": "start",
+        "account": {
+            "account_id": "account:602",
+            "account_code": "602",
+            "name": "Tržby z prodeje služeb",
+            "account_type": "revenue",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 0.0,
+                    "d": 1000.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": -100.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 10000.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 0,
+            "turnover_d": 10900,
+            "closing_md": 0,
+            "closing_d": 10900,
+            "line_count": 3
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:602",
+            "group_code": "602",
+            "entry_id": "entry:invoice",
+            "entry_date": "2099-01-10",
+            "document_no": "FV-1",
+            "description": "Vydaná faktura",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:2",
+            "line_no": 1,
+            "account_id": "account:602",
+            "account_code": "602",
+            "side": "credit",
+            "amount": "1000.00",
+            "is_red_storno": 0,
+            "counter_accounts": "311",
+            "balance": -1000
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:602",
+            "group_code": "602",
+            "entry_id": "entry:storno",
+            "entry_date": "2099-02-15",
+            "document_no": "FV-2",
+            "description": "Opravný doklad",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:22",
+            "line_no": 1,
+            "account_id": "account:602",
+            "account_code": "602",
+            "side": "credit",
+            "amount": "-100.00",
+            "is_red_storno": 1,
+            "counter_accounts": "311",
+            "balance": -900
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:602",
+            "group_code": "602",
+            "entry_id": "entry:sale2",
+            "entry_date": "2099-03-20",
+            "document_no": "FV-3",
+            "description": "Vydaná faktura dvě sazby",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:33",
+            "line_no": 1,
+            "account_id": "account:602",
+            "account_code": "602",
+            "side": "credit",
+            "amount": "10000.00",
+            "is_red_storno": 0,
+            "counter_accounts": "311",
+            "balance": -10900
+        }
+    },
+    {
+        "kind": "end",
+        "account": {
+            "account_id": "account:602",
+            "account_code": "602",
+            "name": "Tržby z prodeje služeb",
+            "account_type": "revenue",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 0.0,
+                    "d": 1000.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": -100.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 10000.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 0,
+            "turnover_d": 10900,
+            "closing_md": 0,
+            "closing_d": 10900,
+            "line_count": 3
+        }
+    },
+    {
+        "kind": "start",
+        "account": {
+            "account_id": "account:604",
+            "account_code": "604",
+            "name": "Tržby za zboží",
+            "account_type": "revenue",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 1000.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 0,
+            "turnover_d": 1000,
+            "closing_md": 0,
+            "closing_d": 1000,
+            "line_count": 1
+        }
+    },
+    {
+        "kind": "line",
+        "item": {
+            "group_id": "account:604",
+            "group_code": "604",
+            "entry_id": "entry:sale2",
+            "entry_date": "2099-03-20",
+            "document_no": "FV-3",
+            "description": "Vydaná faktura dvě sazby",
+            "source_type": "manual",
+            "source_id": null,
+            "line_id": "line:35",
+            "line_no": 3,
+            "account_id": "account:604",
+            "account_code": "604",
+            "side": "credit",
+            "amount": "1000.00",
+            "is_red_storno": 0,
+            "counter_accounts": "311",
+            "balance": -1000
+        }
+    },
+    {
+        "kind": "end",
+        "account": {
+            "account_id": "account:604",
+            "account_code": "604",
+            "name": "Tržby za zboží",
+            "account_type": "revenue",
+            "is_synthetic": true,
+            "parent_id": null,
+            "parent_code": null,
+            "parent_name": null,
+            "opening_md": 0,
+            "opening_d": 0,
+            "months": {
+                "2099-01": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-02": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-03": {
+                    "md": 0.0,
+                    "d": 1000.0
+                },
+                "2099-04": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-05": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-06": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-07": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-08": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-09": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-10": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-11": {
+                    "md": 0.0,
+                    "d": 0.0
+                },
+                "2099-12": {
+                    "md": 0.0,
+                    "d": 0.0
+                }
+            },
+            "turnover_md": 0,
+            "turnover_d": 1000,
+            "closing_md": 0,
+            "closing_d": 1000,
+            "line_count": 1
+        }
+    }
+]

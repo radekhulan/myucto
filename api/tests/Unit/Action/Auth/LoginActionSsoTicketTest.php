@@ -140,11 +140,28 @@ final class LoginActionSsoTicketTest extends TestCase
         self::assertSame(5, $captured['context']->externalIdentityId);
     }
 
+    public function testUserWithoutEntraKeepsPasswordAndTotpWhenEntraIsNotEnforced(): void
+    {
+        // Entra ID je v instalaci zapnuté, ale nevynucené, a uživatel ho nemá
+        // propojené: heslo a TOTP fungují beze změny a sezení s Entra nesouvisí.
+        $body = ['sso_ticket' => '', 'email' => 'user@example.invalid', 'password' => 'synthetic-password'];
+        [$challenge] = $this->login(null, true, body: $body, passwordLogin: true);
+        self::assertSame(401, $challenge->getStatusCode());
+        self::assertStringContainsString('totp_required', (string) $challenge->getBody());
+
+        [$response, $captured] = $this->login(null, true, body: $body + ['totp' => '123456'], passwordLogin: true);
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('totp', $captured['context']->authMethod);
+        self::assertSame('strong', $captured['context']->assuranceLevel);
+        self::assertNull($captured['context']->externalIdentityId);
+        self::assertFalse($captured['consumed']);
+    }
+
     /**
      * @param array{provider:string,user_id:int,external_identity_id:int,return_to:?string}|null $ticket
      * @return array{0:ResponseInterface,1:array<string,mixed>}
      */
-    private function login(?array $ticket, bool $totpEnabled, ?string $requiredProvider = null, array $body = [], bool $requireMfa = false): array
+    private function login(?array $ticket, bool $totpEnabled, ?string $requiredProvider = null, array $body = [], bool $requireMfa = false, bool $passwordLogin = false): array
     {
         $statement = $this->createMock(\PDOStatement::class);
         $statement->method('execute')->willReturn(true);
@@ -161,10 +178,18 @@ final class LoginActionSsoTicketTest extends TestCase
         $db->method('pdo')->willReturn($pdo);
 
         $hasher = $this->createMock(PasswordHasher::class);
-        $hasher->expects(self::never())->method('verify');
+        if ($passwordLogin) {
+            $hasher->expects(self::once())->method('verify')->willReturn(true);
+        } else {
+            $hasher->expects(self::never())->method('verify');
+        }
         $hasher->method('needsRehash')->willReturn(false);
         $turnstile = $this->createMock(TurnstileVerifier::class);
-        $turnstile->expects(self::never())->method('verify');
+        if ($passwordLogin) {
+            $turnstile->method('verify')->willReturn(true);
+        } else {
+            $turnstile->expects(self::never())->method('verify');
+        }
         $bruteForce = $this->createMock(BruteForceGuard::class);
         $bruteForce->method('check')->willReturn(BruteForceGuard::STATE_OK);
         $ipMatcher = $this->createMock(IpMatcher::class);

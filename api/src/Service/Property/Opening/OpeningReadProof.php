@@ -63,7 +63,7 @@ final class OpeningReadProof
         if(!isset($context['lines'])){
             $ledger=(new PaymentJournalProof($this->db))->snapshot($supplier,$batch['journal_entry_id'],$current);$expectedReversal=$batch['status']==='reversed'?$batch['reversal_entry_id']:null;
             if($ledger['entry']['reversed_by']!==$expectedReversal||$ledger['entry']['source_type']!=='opening'||$ledger['entry']['entry_date']!==$batch['accounting_date'])OpeningException::reject('ledger_changed');
-            if($expectedReversal!==null){$mirror=(new PaymentJournalProof($this->db))->snapshot($supplier,$expectedReversal,$current);$expected=$ledger['lines'];foreach($expected as &$line)$line['side']=$line['side']==='debit'?'credit':'debit';unset($line);if(PropertyInput::hash(PaymentJournalProof::canonicalLines($expected))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($mirror['lines'])))OpeningException::reject('reversal_changed');}
+            if($expectedReversal!==null){$mirror=(new PaymentJournalProof($this->db))->snapshot($supplier,$expectedReversal,$current);$expected=$ledger['lines'];foreach($expected as &$line)$line['side']=$line['side']==='debit'?'credit':'debit';unset($line);if(!PaymentJournalProof::matches($expected, $mirror['lines']))OpeningException::reject('reversal_changed');}
             $context['ledger']=$ledger;$context['lines']=array_column($ledger['lines'],null,'id');
         }
         $components=$scope['components'][$id]??[];if(count($components)!==count($fact['components']))OpeningException::reject('component_missing');

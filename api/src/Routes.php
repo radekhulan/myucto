@@ -92,6 +92,7 @@ use MyInvoice\Action\Payroll\PayrollDeadlineOverviewAction;
 use MyInvoice\Action\Payroll\PayrollDeductionAgreementAction;
 use MyInvoice\Action\Payroll\PayrollDimensionAction;
 use MyInvoice\Action\Payroll\PayrollDimensionCostReportAction;
+use MyInvoice\Action\Payroll\PayrollPostingDetailReportAction;
 use MyInvoice\Action\Payroll\PayrollDiscountIntentAction;
 use MyInvoice\Action\Payroll\PayrollDocumentAction;
 use MyInvoice\Action\Payroll\PayrollDocumentDeliveryAction;
@@ -699,6 +700,9 @@ final class Routes
         // ?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv & month=YYYY-MM nebo period=quarterly&year&quarter
         $app->get    ('/api/invoices/export',       ExportAction::class);
         $app->get    ('/api/invoices/preview-varsymbol', PreviewVarsymbolAction::class);
+        // Výběr řady z číselníku v editoru a výchozí řada uživatele (bod 4).
+        $app->get    ('/api/invoices/number-series',         [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'invoices']);
+        $app->put    ('/api/invoices/number-series/default', [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'setInvoicesDefault']);
         $app->post   ('/api/invoices',              CreateInvoiceAction::class);
         // Převzetí faktury/dobropisu už vystaveného jinde (e-shop) bez přepočtu (issue #145).
         $app->post   ('/api/invoices/import',       \MyInvoice\Action\Invoice\ImportIssuedInvoiceAction::class);
@@ -805,6 +809,8 @@ final class Routes
         $app->get    ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'preview']);
         $app->post   ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'renumber']);
         $app->get    ('/api/purchase-invoices',                           ListPurchaseInvoicesAction::class);
+        $app->get    ('/api/purchase-invoices/number-series',             [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'purchase']);
+        $app->put    ('/api/purchase-invoices/number-series/default',     [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'setPurchaseDefault']);
         $app->post   ('/api/purchase-invoices',                           CreatePurchaseInvoiceAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}',                GetPurchaseInvoiceAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/items',          GetPurchaseInvoiceItemsAction::class);
@@ -1249,6 +1255,15 @@ final class Routes
                 '/reports/dimension-costs/{year:[0-9]{4}}',
                 [PayrollDimensionCostReportAction::class, 'show'],
             );
+            // Podrobné zaúčtování mezd po zaměstnancích a druzích mezd za měsíc.
+            $g->get(
+                '/reports/posting-detail',
+                [PayrollPostingDetailReportAction::class, 'show'],
+            );
+            $g->get(
+                '/reports/posting-detail/export.{format:xlsx|csv}',
+                [PayrollPostingDetailReportAction::class, 'export'],
+            );
             // Kontrola přepočtu převzatého měsíce proti číslům původního systému.
             // Bez ní je přepočet historického měsíce hazard: původní systém ta čísla
             // už podal do JMHZ, na pojišťovny a na finanční úřad.
@@ -1636,6 +1651,7 @@ final class Routes
             $g->patch('/employments/{id:[0-9]+}/relation-type', [PayrollEmploymentAction::class, 'changeRelationType']);
             $g->post('/employments/{id:[0-9]+}/merge-into', [PayrollEmploymentAction::class, 'mergeInto']);
             $g->patch('/employments/{id:[0-9]+}/meal-entitlement-basis', [PayrollEmploymentAction::class, 'setMealEntitlementBasis']);
+            $g->patch('/employments/{id:[0-9]+}/statutory-partner', [PayrollEmploymentAction::class, 'setStatutoryPartner']);
             $g->post('/employments/{id:[0-9]+}/start-confirmation', [PayrollEmploymentAction::class, 'confirmStart']);
             $g->post(
                 '/employments/{id:[0-9]+}/transitions/{target:preregistered|active|suspended|ended|archived|no_show}',
@@ -2754,6 +2770,9 @@ final class Routes
             // `source` je `invoices` nebo `purchase-invoices`.
             $g->get   ('/journal/posting-preview/{source:invoices|purchase-invoices}/{id:[0-9]+}',
                 [JournalAction::class, 'postingPreview']);
+            // Náhled zápisu v editoru faktury z neuloženého stavu (uložení v odvolané transakci).
+            $g->post  ('/journal/draft-posting-preview/{source:invoices|purchase-invoices}',
+                \MyInvoice\Action\Accounting\DraftPostingPreviewAction::class);
             // Přeúčtování už zaúčtovaného dokladu — plán (co se stane) + provedení.
             // KONKRÉTNÍ cesty PŘED generickým /journal/{id} (segmenty nejsou číselné).
             // `bank-transactions` = bankovní pohyb (v deníku zdroj `bank`); bankovní
@@ -2790,6 +2809,19 @@ final class Routes
             $g->post  ('/setup-assistant/jobs/{id:[0-9]+}/rollback', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'rollback']);
             $g->delete('/setup-assistant/jobs/{id:[0-9]+}/snapshot', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'deleteSnapshot']);
             $g->post  ('/journal/{id:[0-9]+}/reverse',        [JournalAction::class, 'reverse']);
+            // Jednoduchý (párový) zápis: storno vybraných dvojic a přeúčtování jedné dvojice.
+            // KONKRÉTNÍ cesty PŘED generickým /journal/{id}.
+            $g->post  ('/journal/{id:[0-9]+}/pairs/reverse',                [\MyInvoice\Action\Accounting\JournalPairAction::class, 'reverse']);
+            $g->post  ('/journal/{id:[0-9]+}/pairs/{pairNo:[0-9]+}/repost', [\MyInvoice\Action\Accounting\JournalPairAction::class, 'repost']);
+            // Forma účetního zápisu firmy v čase (jednoduchý / složený).
+            $g->get   ('/entry-form', [\MyInvoice\Action\Accounting\EntryFormAction::class, 'get']);
+            $g->post  ('/entry-form', [\MyInvoice\Action\Accounting\EntryFormAction::class, 'schedule']);
+            // Převod starších zápisů na dvojice (náhled nanečisto, provedení, stav běhu).
+            $g->get   ('/pair-conversion',                      [\MyInvoice\Action\Accounting\PairConversionAction::class, 'list']);
+            $g->post  ('/pair-conversion/preview',              [\MyInvoice\Action\Accounting\PairConversionAction::class, 'preview']);
+            $g->post  ('/pair-conversion/apply',                [\MyInvoice\Action\Accounting\PairConversionAction::class, 'apply']);
+            $g->get   ('/pair-conversion/{id:[0-9]+}',          [\MyInvoice\Action\Accounting\PairConversionAction::class, 'get']);
+            $g->post  ('/pair-conversion/{id:[0-9]+}/cancel',   [\MyInvoice\Action\Accounting\PairConversionAction::class, 'cancel']);
             // Smazání celé storno dvojice (zápis + protizápis) v otevřeném období.
             $g->delete('/journal/{id:[0-9]+}/reversal-pair', [JournalAction::class, 'deleteReversalPair']);
             $g->delete('/journal/{id:[0-9]+}',                [JournalAction::class, 'delete']);
@@ -3253,6 +3285,8 @@ final class Routes
             $g->get   ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'list']);
             $g->post  ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'create']);
             $g->get   ('/internal-documents/export',                [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'export']);
+            $g->get   ('/internal-documents/number-series',         [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'internal']);
+            $g->put   ('/internal-documents/number-series/default', [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'setInternalDefault']);
             $g->post  ('/internal-documents/from-entry/{id:[0-9]+}', [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'fromEntry']);
             $g->get   ('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'get']);
             $g->put   ('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'update']);
@@ -3262,6 +3296,8 @@ final class Routes
             $g->post  ('/cash-documents',                      [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'create']);
             $g->get   ('/cash-documents/unpaid',               [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'unpaid']);
             $g->get   ('/cash-documents/rule-presets',         [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'rulePresets']);
+            $g->get   ('/cash-documents/number-series',        [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'cash']);
+            $g->put   ('/cash-documents/number-series/default', [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'setCashDefault']);
             $g->get   ('/cash-documents/{id:[0-9]+}',          [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'get']);
             $g->put   ('/cash-documents/{id:[0-9]+}',          [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'update']);
             $g->delete('/cash-documents/{id:[0-9]+}',          [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'delete']);
@@ -3779,6 +3815,13 @@ final class Routes
         $app->post('/api/settings/accounting-activation/jobs/{id:[0-9]+}/force-complete', [AccountingActivationAction::class, 'forceComplete']);
         $app->get ('/api/settings/supplier/invoice-counter', [SupplierInvoiceCounterAction::class, 'peek']);
         $app->put ('/api/settings/supplier/invoice-counter', SupplierInvoiceCounterAction::class);
+        // Číselník řad všech druhů dokladů (migrace 2265).
+        $app->get   ('/api/settings/number-series',                       [\MyInvoice\Action\Settings\NumberSeriesAction::class, 'list']);
+        $app->get   ('/api/settings/number-series/completeness',          [\MyInvoice\Action\Settings\NumberSeriesAction::class, 'completeness']);
+        $app->post  ('/api/settings/number-series',                       [\MyInvoice\Action\Settings\NumberSeriesAction::class, 'create']);
+        $app->put   ('/api/settings/number-series/{id:[0-9]+}',           [\MyInvoice\Action\Settings\NumberSeriesAction::class, 'update']);
+        $app->post  ('/api/settings/number-series/{id:[0-9]+}/default',   [\MyInvoice\Action\Settings\NumberSeriesAction::class, 'setDefault']);
+        $app->delete('/api/settings/number-series/{id:[0-9]+}',           [\MyInvoice\Action\Settings\NumberSeriesAction::class, 'delete']);
         $app->get('/api/settings/email-templates', [SupplierEmailTemplateAction::class, 'list']);
         $app->get('/api/settings/email-templates/{code:[a-z_]+}/{locale:cs|en}', [SupplierEmailTemplateAction::class, 'get']);
         $app->put('/api/settings/email-templates/{code:[a-z_]+}/{locale:cs|en}', [SupplierEmailTemplateAction::class, 'put']);

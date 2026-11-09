@@ -319,7 +319,7 @@ Podstatné vlastnosti:
 | Kniha jízd | **čtení i zápis** - vozidla, jízdy a tankování; daňový souhrn jen ke čtení |
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
 | Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář - **jen čtení** |
-| Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník: **jen čtení**; výjimkou jsou koncepty ostatních pohledávek a závazků a založení či úprava analytického účtu v osnově |
+| Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník včetně dvojic jednoduchého zápisu a formy zápisu firmy: **jen čtení** ([§ 105.8.15](#105815-jednoduchy-zapis-a-dvojice-v-deniku)); výjimkou jsou koncepty ostatních pohledávek a závazků a založení či úprava analytického účtu v osnově |
 | Ostatní pohledávky a závazky | čtení dokladů, úhrad, opakování a splátek; **zápis jen konceptů**: založení, úprava, smazání, splátkový kalendář (i vyčtený ze smlouvy), opakování bez automatického účtování, dimenze a připojení smlouvy. Nic se nezaúčtuje ([§ 105.8.8.5](#105885-ostatni-pohledavky-a-zavazky)) |
 | Dimenze | typy a hodnoty, zisk, roční a měsíční vývoj, manažerské cash flow, rozvaha a výsledovka s filtrem dimenze, přiřazení na dokladech a kontrola pravidel - **jen čtení** |
 | Statistika | tržby, zisk, trendy, top odběratelé a dodavatelé, cash flow, platební morálka, koncentrace, riziko odchodu |
@@ -718,6 +718,7 @@ Podrobnosti v [§ 105.8.8.6](#105886-soubory-a-prilohy).
 - „Ukaž obratovou předvahu za letošní období.“
 - „Jak se zaúčtovala faktura číslo 2026001?“
 - „Co visí v saldu - komu jsme nespárovali platby?“
+- „Z jakých dvojic se skládá zápis 1234 a účtujeme jednoduchým zápisem?“
 
 **Ostatní pohledávky a závazky** *(zápis jen s tokenem čtení a zápis)*
 
@@ -1433,6 +1434,32 @@ identifikátory metadat k povinnému `date`. Zachovává `complete`, `findings`,
 Používá současnou znalost evidence. Nepřijímá `known_at`, neinicializuje
 osnovu nebo dimenze a nemění účetnictví. Podrobnosti jsou v kapitole
 [REST API](103_API.md).
+
+### 105.8.15 Jednoduchý zápis a dvojice v deníku
+
+Firma, která účtuje jednoduchým zápisem (řádky deníku po dvojicích Účet MD /
+Účet Dal), vrací nástroje deníku navíc údaje o dvojicích. Všechno je **jen
+čtení**; formu zápisu, storno ani přeúčtování dvojice asistent nemění, to se
+dělá v aplikaci.
+
+- `get_journal_entry` vrací kromě řádků (`pair_no`, `line_text`) pole `pairs`:
+  číslo dvojice, účet MD, účet Dal, částku, text a případný opravný zápis
+  (`reversed_by_entry_id`). Zápis bez dvojic, který nejde rozdělit, nese
+  `pair_status` se stavem (`composite_mn` = zápis M : N k ruční úpravě,
+  `ineligible` = převod nepřipadá v úvahu) a důvodem.
+- `list_journal_entries` vrací jen hlavičky zápisů; dvojice a posouzení jsou
+  až v detailu zápisu.
+- `account_statement` nese u každého pohybu jediný protiúčet dvojice
+  (`counter_account_id`, `pair_no`) a stav `pair_status`: `paired` (řádek je
+  ve dvojici), `derived` (starší zápis 1 : N rozložený na pohyby po dílech,
+  `pair_piece` je pořadí dílu) nebo `composite_mn`. Odpověď je pak označená
+  `layout: "pairs"`. Podle protiúčtu jde filtrovat (`counter_account_id`).
+- `journal_entry_form` vrací formu zápisu firmy k dnešnímu dni
+  (`composite` nebo `single`) a historii změn s datem účinnosti. Firma bez
+  historie účtuje složeným zápisem.
+
+Dvojice a jejich ovládání v aplikaci popisuje kapitola
+[Účetní deník](52_Ucetni_denik.md).
 
 ## Čtecí nástroje služeb a financování vlastníků
 

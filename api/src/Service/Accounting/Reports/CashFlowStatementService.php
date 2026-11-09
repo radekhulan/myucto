@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Accounting\Reports;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use PDO;
 
 /**
@@ -40,6 +41,11 @@ use PDO;
  * Převod mezi vlastními peněžními účty (211 ↔ 221, peníze na cestě 261) se vylučuje —
  * není to tok „ven ani dovnitř", jen přesun uvnitř skupiny peněžních prostředků.
  *
+ * Jednoduchý zápis: řádek dvojice se zařadí podle svého protiúčtu, tedy jen když je
+ * partnerem dvojice peněžní účet. Zápis, který vedle platby nese i nepeněžní dvojice
+ * (předpis a úhrada v jednom), tak do toků přispěje jen úhradou. Starší složené zápisy
+ * zůstávají u dnešního výpočtu; firma bez jednoduchého zápisu jde dnešním SQL.
+ *
  * Read-only: nic neúčtuje.
  */
 final class CashFlowStatementService
@@ -72,6 +78,7 @@ final class CashFlowStatementService
         // Mezičlen plateb kartou může ležet pod 261 — jeho analytiky ale peníze nejsou:
         // platba kartou odešla z banky v den platby, ne až při vypořádání s dokladem.
         private readonly \MyInvoice\Service\Accounting\Card\CardClearingAccounts $cardAccounts,
+        private readonly EntryFormService $entryForms,
     ) {}
 
     /** SQL podmínka „účet není analytikou mezičlenu karty" pro alias účtu (prázdná, když karty nejsou). */
@@ -189,6 +196,40 @@ final class CashFlowStatementService
             self::CASH_PREFIXES,
         )) . ') AND ' . $this->notCardClearing($supplierId, 'ca');
         $bookkeeping = "'" . implode("', '", self::BOOKKEEPING_SOURCE_TYPES) . "'";
+        $touchesCashSql = "EXISTS (
+                        SELECT 1
+                          FROM journal_entry_lines c
+                          JOIN chart_of_accounts ca ON ca.id = c.account_id
+                         WHERE c.entry_id = l.entry_id
+                           AND c.supplier_id = l.supplier_id
+                           AND ({$touchesCash})
+                    )";
+        if ($this->entryForms->hasAnySingle($supplierId)) {
+            // Dvojice: tok jen když je partnerem dvojice peněžní účet (lookup po
+            // idx_jel_supplier_entry_pair). Řádky bez dvojice jen mezi sebou dnešním
+            // pravidlem; jejich podmnožina je vyvážená, rozklad dál sedí konstrukčně.
+            $touchesCashSql = "(CASE WHEN l.pair_no IS NOT NULL
+                    THEN EXISTS (
+                        SELECT 1
+                          FROM journal_entry_lines c
+                          JOIN chart_of_accounts ca ON ca.id = c.account_id
+                         WHERE c.supplier_id = l.supplier_id
+                           AND c.entry_id = l.entry_id
+                           AND c.pair_no = l.pair_no
+                           AND c.id <> l.id
+                           AND ({$touchesCash})
+                    )
+                    ELSE EXISTS (
+                        SELECT 1
+                          FROM journal_entry_lines c
+                          JOIN chart_of_accounts ca ON ca.id = c.account_id
+                         WHERE c.entry_id = l.entry_id
+                           AND c.supplier_id = l.supplier_id
+                           AND c.pair_no IS NULL
+                           AND ({$touchesCash})
+                    )
+                END)";
+        }
 
         $sql =
             "SELECT a.account_code AS counter_code,
@@ -203,14 +244,7 @@ final class CashFlowStatementService
                 AND e.entry_date BETWEEN ? AND ?
                 AND e.source_type NOT IN ({$bookkeeping})
                 AND {$nonCash}
-                AND EXISTS (
-                        SELECT 1
-                          FROM journal_entry_lines c
-                          JOIN chart_of_accounts ca ON ca.id = c.account_id
-                         WHERE c.entry_id = l.entry_id
-                           AND c.supplier_id = l.supplier_id
-                           AND ({$touchesCash})
-                    )
+                AND {$touchesCashSql}
            GROUP BY a.account_code
              HAVING amount <> 0
               ORDER BY a.account_code";

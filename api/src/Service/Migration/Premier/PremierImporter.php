@@ -313,6 +313,10 @@ final class PremierImporter
             } elseif ($dryRun && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
+            if ($dryRun) {
+                // Forma zápisu zapsaná zkouškou se vrátila s ní; sdílená odpověď procesu taky.
+                \MyInvoice\Service\Accounting\EntryForm\EntryFormService::forgetShared($supplierId);
+            }
         }
         return $protocol;
     }
@@ -322,7 +326,11 @@ final class PremierImporter
     {
         return [
             ChartJournalImporter::STEP_CHART => fn () => $this->journal->chart($ctx),
-            ChartJournalImporter::STEP_JOURNAL => fn () => $this->journal->journal($ctx),
+            ChartJournalImporter::STEP_JOURNAL => function () use ($ctx): void {
+                // Forma zápisu nové firmy dřív, než do deníku přijde první převzatý zápis.
+                $this->unit->applyEntryFormDefault($ctx->supplierId);
+                $this->journal->journal($ctx);
+            },
             self::STEP_ACCOUNTING_MODE => fn () => $this->switchMode($ctx),
             PartnerImporter::STEP => fn () => $this->partners->import($ctx),
             InvoiceImporter::STEP_PURCHASE => fn () => $this->invoices->importPurchases($ctx, $documents),

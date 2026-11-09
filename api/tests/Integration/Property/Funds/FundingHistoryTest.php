@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase;
 final class FundingHistoryTest extends TestCase
 {
     use FundingFixture;
+    use \MyInvoice\Tests\Support\PairedJournalAssertions;
     public static function sourceHistories():array{return [['income',false],['income',true],['transfer',false],['transfer',true],['issued',false],['issued',true],['opening',true]];}
     #[DataProvider('sourceHistories')]
     public function testLaterReversalPreservesHistoricalSourceDetails(string $kind,bool $knowledge):void
@@ -25,5 +26,14 @@ final class FundingHistoryTest extends TestCase
         elseif($charge!==null){$this->container->get(\MyInvoice\Repository\Property\Charges\Issuance\IssuanceRepository::class)->reverse($s,$charge['id'],['row_version'=>$charge['row_version'],'accounting_date'=>'2026-04-01','effective_at'=>'2026-04-01T12:00:00+02:00','reason'=>'Synthetic later native reversal','evidence_ref'=>'Synthetic reversal instruction','idempotency_key'=>'history-issued-reversal'],$this->f['actor']);}
         else{$q=$this->db->pdo()->prepare('SELECT id FROM property_opening_batches WHERE supplier_id=? ORDER BY id LIMIT 1');$q->execute([$s]);$original=(new \MyInvoice\Service\Property\Opening\OpeningReadProof($this->db))->batch($s,(int)$q->fetchColumn(),true);$request=\MyInvoice\Service\Property\Opening\OpeningRequest::replay($original['request']);$request['mode']='revision';$request['expected_revision']=1;$request['reason']='Synthetic later opening correction';$owner=$this->container->get(\MyInvoice\Repository\Property\Opening\OpeningRepository::class);$owner->apply($s,$request,$owner->preview($s,$request)['preview_hash'],'history-opening-replacement',$this->f['actor']);}
         $after=$read->at($s,$this->f['house']['id'],$queryDate,$known);self::assertTrue($after['matches']);foreach(['totals','unit_balances','income_lots','sources']as$field)self::assertSame($before[$field],$after[$field],$kind.' historical '.$field);
+    }
+
+    /** Jednoduchá forma: storno operace fondu zrcadlí dvojice originálu a historie zdrojů zůstává. */
+    #[DataProvider('sourceHistories')]
+    #[\PHPUnit\Framework\Attributes\Group('pairs-e2e')]
+    public function testLaterReversalPreservesHistoricalSourceDetailsInSingleEntryForm(string $kind,bool $knowledge):void
+    {
+        $this->testLaterReversalPreservesHistoricalSourceDetails($kind,$knowledge);
+        $this->assertSupplierJournalPaired($this->db->pdo(),$this->f['supplier']);
     }
 }

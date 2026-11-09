@@ -30,6 +30,20 @@ final class MyuctoImportProfile
      * nejsou v otisku dat a protokol je dál vede mimo rozsah převodu.
      */
     public const CONTEXT_TABLES = ['supplier_accounting_frameworks'];
+    /**
+     * Forma účetního zápisu zdroje: historie formy a k deníku patřící posouzení zápisů bez
+     * dvojic a storna dvojic. Obnova je přenáší vlastní cestou (historie nahradí výchozí
+     * formu instalace nové firmy, posouzení a storna nemají vlastní `id`). Export bez nich
+     * (starší verze nebo firma bez volby) = složený zápis.
+     */
+    public const ENTRY_FORM_HISTORY_TABLE = 'accounting_entry_form_history';
+    /** Tabulky deníku s klíčem (supplier_id, entry_id, …) místo `id`; čtou se v pořadí exportu. */
+    public const KEYLESS_JOURNAL_TABLES = ['journal_entry_pair_status', 'journal_pair_reversals'];
+    /** Vazby tabulek bez `id` na zápisy deníku. */
+    public const KEYLESS_ENTRY_REFERENCES = [
+        'journal_entry_pair_status' => ['entry_id'],
+        'journal_pair_reversals' => ['entry_id', 'reversal_entry_id'],
+    ];
     /** Tabulky účetnictví: když je export nese, musí cíl vést stejný účetní rámec (vyhláška 500/504). */
     public const FRAMEWORK_BOUND_TABLES = ['chart_of_accounts', 'accounting_periods', 'journal_entries'];
     public const GLOBAL_KEYS = ['countries' => ['iso2'], 'vat_rates' => ['code', 'rate_percent', 'country']];

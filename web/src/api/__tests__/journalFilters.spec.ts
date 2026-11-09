@@ -25,6 +25,11 @@ describe('accountingApi.listJournal', () => {
     expect(params()).toMatchObject({ reversal: 'reversed' })
   })
 
+  it('posílá filtr dvojic (jen složené M : N) na server', async () => {
+    await accountingApi.listJournal({ pair_status: 'composite_mn' })
+    expect(params()).toMatchObject({ pair_status: 'composite_mn' })
+  })
+
   it('bez zvoleného stavu stornování parametr neposílá', async () => {
     await accountingApi.listJournal({ posted: true })
     expect(params()).not.toHaveProperty('reversal')

@@ -159,6 +159,22 @@ pořadové číslo resetuje.
 
 Podrobnosti o šablonách, placeholderech, prioritě úrovní a mezerách v číslování jsou v [§ 95.13.3](#95133-ciselne-rady-faktur).
 
+### 95.6.1 Číselník řad: víc řad pro jeden druh dokladu
+
+Záložka **Číselník řad** v `Firma → Nastavení` ukazuje všechny číselné řady firmy na jednom místě: řady vydaných faktur, záloh, dobropisů a zjednodušených dokladů, řady zákazníků a kategorií tržby, přijaté doklady, pokladní doklady (PPD a VPD firmy i vlastní řady pokladen), interní doklady, sklad, objednávky, ostatní položky, zápočty, uzávěrkové řady a řady bankovních účtů. Řady, které firma už má, jsou v číselníku od aktualizace aplikace, se stejnými čísly a se stejným příštím číslem jako dřív (pod názvem mají označení *převedená*).
+
+Další řadu založíte pro vydané faktury, zálohové faktury, dobropisy, přijaté doklady, příjmové a výdajové pokladní doklady a interní doklady:
+
+1. Otevřete `Firma → Nastavení`, záložku **Číselník řad**, a klikněte na **Nová řada**.
+2. Zvolte **Druh dokladu**. U pokladních dokladů vyberte i **Pokladnu**, nebo nechte **Všechny pokladny**.
+3. Vyplňte **Název řady** (například *Hotovostní účtenky*), **Prefix** (například `HP`) a **Tvar čísla**. Výchozí tvar `{PREFIX}{YY}{CCCC}` dá `HP260001`. Pod formulářem je náhled příštího čísla.
+4. Zvolte, kdy se má řada číslovat znovu od jedničky (**Každý rok**, **Každý měsíc**, **Bez resetu**). Navazujete-li na řadu z jiného programu, vyplňte **Příští číslo**.
+5. Chcete-li, aby nové doklady daného druhu dostávaly číslo z této řady automaticky, zaškrtněte **Výchozí řada pro tento druh dokladu**, a klikněte na **Uložit**.
+
+**Jak poznáte, že je hotovo:** Řada je v číselníku ve skupině svého druhu a v editoru dokladu toho druhu se v hlavičce objeví pole **Číselná řada** s výběrem.
+
+Pravidla výběru, ukončení řady a kontroly úplnosti jsou v [§ 95.13.3](#95133-ciselne-rady-faktur) v části *Číselník řad*.
+
 ## 95.7 Krok za krokem: branding e-mailů a PDF
 
 V e-mailech klientům se jako **From** zobrazí název dodavatele (místo technické adresy) a jako **Reply-To** e-mail
@@ -481,6 +497,20 @@ ani kategorie, které ještě nebyly uložené.
 > Šablony různých řad se musí lišit **číslicí**, ne jen písmenem nebo pomlčkou, protože bankovní párování
 > variabilní symbol normalizuje na číslice. Kolizi hlásí kontrola v nastavení dodavatele (pokrývá řady
 > dodavatele, zákazníků i kategorií tržeb).
+
+#### Číselník řad
+
+**Výběr řady v editoru.** Pole **Číselná řada** se v hlavičce dokladu ukáže jen tehdy, když má druh dokladu víc než jednu řadu. Firma, která si v číselníku žádnou řadu nepřidá, editory vidí beze změny. Předvybraná je výchozí řada a doklad dostane číslo z vybrané řady až při vystavení (pokladní a interní doklad při zaúčtování, přijatý doklad při přijetí). Ruční číslo dokladu má přednost a výběr řady pak skryje. U pokladních dokladů se nabízejí řady zvolené pokladny a řady pro všechny pokladny; víc řad v jedné pokladně sdílí jednu pokladní knihu i zůstatek, liší se jen číslem dokladu.
+
+**Výchozí řada.** Platí v tomto pořadí: řada vybraná na dokladu, **moje výchozí** řada uživatele (nabídka řádku *Nastavit jako moji výchozí*, u pokladních dokladů pro danou pokladnu), výchozí řada pokladny a výchozí řada druhu dokladu. Převedená řada faktur zůstává výchozí, dokud výchozí nenastavíte jinou řadu. Když se doklad čísluje převedenou řadou faktur, platí dál řady zákazníků a kategorií tržby (tabulka výše). Řada založená v číselníku má přednost před řadou zákazníka i kategorie, pokud ji na dokladu vyberete nebo je výchozí. Zjednodušený daňový doklad bez výběru řady zůstává ve vlastní řadě firmy, má-li ji.
+
+**Tvar čísla nové řady.** Placeholdery `{PREFIX}`, `{YYYY}`, `{YY}`, `{MM}` (i s posunem), `{C…}` a u přijatých dokladů `{PP}` (daňový prefix). Řada se resetem nesmí opakovat, proto roční řada musí mít v čísle rok a měsíční rok i měsíc. Čísla nové řady se nesmí plést s jinou řadou téhož druhu dokladů (vydané faktury, zálohy a dobropisy jsou jeden prostor čísel), takovou šablonu číselník odmítne. Liší-li se řady vydaných dokladů jen písmenem, číselník na to upozorní, protože bankovní párování bere z variabilního symbolu jen číslice. Tvar čísla a prefix jde měnit, dokud z řady nevzniklo žádné číslo. Tvar převedené řady se mění tam, kde dosud (záložka Číslování faktur, karta zákazníka, kategorie tržby, **Nástroje → Účetní nastavení → Číselné řady**, bankovní účet); příští číslo převedené řady vydaných dokladů a řad účetních dokladů jde nastavit i v číselníku.
+
+**Výdej čísla.** Číslo nové řady se přiděluje ve stejném kroku, který ho zapíše na doklad. Když vystavení neprojde, číslo se vrátí do řady, a smazaný poslední doklad řady vrátí své číslo stejně jako u dosavadních řad. Dvě souběžná vystavení z jedné řady dostanou dvě po sobě jdoucí čísla.
+
+**Ukončení řady.** Nabídka řádku **Ukončit řadu** nastaví datum, po kterém řada žádné číslo nevydá; v editorech se pak nenabízí. Výchozí řadu ukončit nejde, nejdřív nastavte výchozí jinou řadu. Smazat jde jen nová řada, ze které ještě nevzniklo žádné číslo; převedenou řadu ani řadu s doklady smazat nejde.
+
+**Kontrola úplnosti po řadách.** Pod číselníkem je **Kontrola úplnosti po řadách**: pro zvolený rok ukáže u každé řady počet dokladů a chybějící čísla. Převedené řady vydaných daňových dokladů se kontrolují stejně jako v sestavě [Úplnost číselné řady](46_Ucetni_kontroly_a_inventarizace.md#466-krok-za-krokem-uplnost-ciselne-rady-vydanych-dokladu), nové řady podle dokladů, které z nich dostaly číslo, s ohledem na ručně nastavené příští číslo. Doklady nových řad faktur a dobropisů se v sestavě Úplnost číselné řady ukazují jako samostatná řada.
 
 **Kde se to projeví.** V editoru konceptu vidíte placeholder s předpokládaným číslem. Při vystavení se atomicky
 vezme další counter z databáze a uloží jako neměnný variabilní symbol. V editoru konceptu můžete číslo přepsat

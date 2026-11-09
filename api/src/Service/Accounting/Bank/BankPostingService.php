@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Bank;
 
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
+use MyInvoice\Service\Accounting\DocumentEntryNumber;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\AccountRoleResolver;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
@@ -22,6 +24,7 @@ use MyInvoice\Service\Accounting\AutoPostingPolicyService;
 use MyInvoice\Service\Accounting\ForeignCurrencyAccountPolicy;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\OperationType;
+use MyInvoice\Service\Accounting\Pair\JournalPairer;
 use MyInvoice\Service\Accounting\PolicyInput;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -191,6 +194,29 @@ final class BankPostingService
     }
 
     /**
+     * Ruční zaúčtování pohybu dvojicí MD/D: stejný účet na obou stranách nic nezaúčtuje
+     * (zůstatek se nehne, pohyb ale vypadá zaúčtovaný), proto se odmítne v každé formě
+     * zápisu. Porovnává se až po doplnění analytiky banky, kdy „221" a „221.100" splynou.
+     *
+     * @param list<array<string,mixed>> $lines
+     */
+    private static function assertDistinctPairAccounts(array $lines): void
+    {
+        $codes = array_values(array_unique(array_map(
+            static fn (array $l): string => (string) $l['account_code'],
+            $lines,
+        )));
+        if (count($lines) >= 2 && count($codes) === 1) {
+            throw new PostingException(
+                'same_account',
+                'Účet MD a účet Dal se musí lišit, na obou stranách je účet ' . $codes[0] . '.',
+                422,
+                ['account_code' => $codes[0]],
+            );
+        }
+    }
+
+    /**
      * Má transakce živý zápis TOTOŽNÝ s předloženými řádky? Vrací jeho id, jinak null.
      *
      * Porovnává se množina (strana, kód účtu, podepsaná částka v haléřích) — tedy účetní obsah,
@@ -208,22 +234,30 @@ final class BankPostingService
         $entryId = (int) $existing['id'];
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT c.account_code AS code, jel.side, jel.amount, jel.is_red_storno
+            'SELECT c.account_code AS code, jel.side, jel.amount, jel.is_red_storno, jel.pair_no
                FROM journal_entry_lines jel
                JOIN chart_of_accounts c ON c.id = jel.account_id
               WHERE jel.entry_id = ? AND jel.supplier_id = ?'
         );
         $stmt->execute([$entryId, $supplierId]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        // Zápis jednoduché formy je rozdělený na dvojice (221 po protiúčtech), takže
+        // se srovnává součet po straně a účtu. Zápis bez dvojic beze změny po řádcích.
+        $paired = array_filter($rows, static fn (array $r): bool => $r['pair_no'] !== null) !== [];
 
-        $signature = static function (array $rows): array {
+        $signature = static function (array $rows) use ($paired): array {
             $out = [];
             foreach ($rows as $r) {
-                $out[] = sprintf(
-                    '%s|%s|%d',
-                    (string) $r['side'],
-                    (string) $r['code'],
-                    JournalLineAmount::signedCents($r)
-                );
+                $key = (string) $r['side'] . '|' . (string) $r['code'];
+                if ($paired) {
+                    $out[$key] = ($out[$key] ?? 0) + JournalLineAmount::signedCents($r);
+                    continue;
+                }
+                $out[] = $key . '|' . JournalLineAmount::signedCents($r);
+            }
+            if ($paired) {
+                ksort($out);
+                return $out;
             }
             sort($out);
             return $out;
@@ -239,7 +273,7 @@ final class BankPostingService
             $lines
         ));
 
-        return $signature($stmt->fetchAll(\PDO::FETCH_ASSOC)) === $proposed ? $entryId : null;
+        return $signature($rows) === $proposed ? $entryId : null;
     }
 
     // ── hlavní hook ─────────────────────────────────────────────────────────────
@@ -724,6 +758,10 @@ final class BankPostingService
             }
         }
 
+        $texts = $this->paymentTexts($supplierId, (string) ($tx['posted_at'] ?? ''),
+            array_map(static fn (array $a): array => ['invoice', (int) $a['invoice_id']], $allocations),
+            array_map(static fn (array $a): array => ['purchase_invoice', (int) $a['purchase_invoice_id']], $purchaseRefundAllocations),
+        );
         $lines = [$this->line($bankAcc, 'debit', $absAmount)];
         $allocSum = 0.0;
         foreach ($allocations as $a) {
@@ -731,14 +769,14 @@ final class BankPostingService
             $counter = $this->incomingCounterAccount($supplierId, $invId, $receivable);
             $alloc = round((float) $a['amount'], 2);
             $allocSum += $alloc;
-            $lines[] = $this->line($counter, 'credit', $alloc);
+            $lines[] = $this->line($counter, 'credit', $alloc) + self::textOf($texts, 'invoice', $invId);
         }
         foreach ($purchaseRefundAllocations as $a) {
             $pfId = (int) $a['purchase_invoice_id'];
             $counter = $this->incomingPurchaseRefundCounter($supplierId, $pfId);
             $alloc = round((float) $a['amount'], 2);
             $allocSum += $alloc;
-            $lines[] = $this->line($counter, 'credit', $alloc);
+            $lines[] = $this->line($counter, 'credit', $alloc) + self::textOf($texts, 'purchase_invoice', $pfId);
         }
 
         $this->appendRounding($lines, $absAmount - round($allocSum, 2), $supplierId, (string) $tx['posted_at']);
@@ -889,9 +927,12 @@ final class BankPostingService
             $this->line($bankAcc, 'debit', $net),
             $this->line(AccountRoleResolver::fromConnection($this->db)->resolve($supplierId, 'bank.fee', (string) $tx['posted_at']), 'debit', $fee),
         ];
+        $texts = $this->paymentTexts($supplierId, (string) ($tx['posted_at'] ?? ''),
+            array_map(static fn (array $a): array => ['invoice', (int) $a['invoice_id']], $allocations), []);
         foreach ($allocations as $allocation) {
             $counter = $this->incomingCounterAccount($supplierId, (int) $allocation['invoice_id'], $receivable);
-            $lines[] = $this->line($counter, 'credit', (float) $allocation['amount']);
+            $lines[] = $this->line($counter, 'credit', (float) $allocation['amount'])
+                + self::textOf($texts, 'invoice', (int) $allocation['invoice_id']);
         }
         return ['lines' => $lines];
     }
@@ -963,6 +1004,12 @@ final class BankPostingService
             }
         }
 
+        $texts = $this->paymentTexts($supplierId, (string) ($tx['posted_at'] ?? ''),
+            array_map(static fn (array $a): array => ['purchase_invoice', (int) $a['purchase_invoice_id']],
+                array_values(array_filter($allocations, static fn (array $a): bool => $a['invoice_id'] === null))),
+            array_map(static fn (array $a): array => ['invoice', (int) $a['invoice_id']],
+                array_values(array_filter($allocations, static fn (array $a): bool => $a['invoice_id'] !== null))),
+        );
         $lines = [];
         $allocSum = 0.0;
         foreach ($allocations as $a) {
@@ -971,7 +1018,9 @@ final class BankPostingService
                 : $this->outgoingCounterAccount($supplierId, (int) $a['purchase_invoice_id'], $payable);
             $alloc = round((float) $a['amount'], 2);
             $allocSum += $alloc;
-            $lines[] = $this->line($counter, 'debit', $alloc);
+            $lines[] = $this->line($counter, 'debit', $alloc) + ($a['invoice_id'] !== null
+                ? self::textOf($texts, 'invoice', (int) $a['invoice_id'])
+                : self::textOf($texts, 'purchase_invoice', (int) $a['purchase_invoice_id']));
         }
         $lines[] = $this->line($bankAcc, 'credit', $absAmount);
 
@@ -1005,6 +1054,8 @@ final class BankPostingService
             throw new PostingException('allocation_mismatch', 'Rozpad korunové platby neodpovídá částce bankovní transakce.');
         }
 
+        $texts = $this->paymentTexts($supplierId, (string) ($tx['posted_at'] ?? ''),
+            array_map(static fn (array $a): array => ['purchase_invoice', (int) $a['purchase_invoice_id']], $allocations), []);
         $lines = [];
         foreach ($allocations as $allocation) {
             $purchaseId = (int) $allocation['purchase_invoice_id'];
@@ -1031,7 +1082,7 @@ final class BankPostingService
                 $currency,
                 $rate,
                 $foreign,
-            );
+            ) + self::textOf($texts, 'purchase_invoice', $purchaseId);
         }
         $lines[] = $this->line($bankAcc, 'credit', $bankCzk);
         $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], 0.0, false);
@@ -1822,8 +1873,8 @@ final class BankPostingService
         $remainderCents = (int) round(abs($remainderCzk) * 100.0);
         if ($remainderCents > 0) {
             $lines[] = $incoming
-                ? $this->line($profile->account('rounding.gain'), 'credit', $remainderCents / 100.0)
-                : $this->line($profile->account('rounding.loss'), 'debit', $remainderCents / 100.0);
+                ? $this->supplementaryLine($profile->account('rounding.gain'), 'credit', $remainderCents / 100.0)
+                : $this->supplementaryLine($profile->account('rounding.loss'), 'debit', $remainderCents / 100.0);
             $diff += $incoming ? -$remainderCents : $remainderCents;
         }
         if ($diff === 0) {
@@ -1831,9 +1882,9 @@ final class BankPostingService
         }
         [$loss, $gain] = $this->fxResultAccounts($supplierId, $entryDate);
         if ($diff > 0) {
-            $lines[] = $this->line($gain, 'credit', $diff / 100.0);
+            $lines[] = $this->supplementaryLine($gain, 'credit', $diff / 100.0);
         } else {
-            $lines[] = $this->line($loss, 'debit', -$diff / 100.0);
+            $lines[] = $this->supplementaryLine($loss, 'debit', -$diff / 100.0);
         }
     }
 
@@ -2052,16 +2103,17 @@ final class BankPostingService
             return null;
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT c.account_code, jel.side, jel.amount, jel.currency_code, jel.fx_rate, jel.amount_foreign
+            'SELECT c.account_code, jel.side, jel.amount, jel.currency_code, jel.fx_rate, jel.amount_foreign, jel.pair_no
                FROM journal_entry_lines jel
                JOIN chart_of_accounts c ON c.id = jel.account_id AND c.supplier_id = jel.supplier_id
               WHERE jel.entry_id = ? AND jel.supplier_id = ?
               ORDER BY jel.line_no, jel.id'
         );
         $stmt->execute([(int) $entry['id'], $supplierId]);
+        $clearing = null;
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
-            if ($this->cardRegime->isClearingCode($supplierId, (string) $row['account_code'])) {
-                return [
+            if ($clearing === null && $this->cardRegime->isClearingCode($supplierId, (string) $row['account_code'])) {
+                $clearing = [
                     'code'           => (string) $row['account_code'],
                     'side'           => (string) $row['side'],
                     'amount'         => round((float) $row['amount'], 2),
@@ -2069,9 +2121,19 @@ final class BankPostingService
                     'fx_rate'        => $row['fx_rate'] !== null ? (float) $row['fx_rate'] : null,
                     'amount_foreign' => $row['amount_foreign'] !== null ? (float) $row['amount_foreign'] : null,
                 ];
+                continue;
+            }
+            // Zápis po dvojicích může mít mezičlen rozdělený na díly (přeúčtovaný pohyb
+            // s víc protiúčty): vypořádání patří celé částce, díly se sečtou.
+            if ($clearing !== null && $row['pair_no'] !== null
+                && (string) $row['account_code'] === $clearing['code'] && (string) $row['side'] === $clearing['side']) {
+                $clearing['amount'] = round($clearing['amount'] + (float) $row['amount'], 2);
+                if ($clearing['amount_foreign'] !== null && $row['amount_foreign'] !== null) {
+                    $clearing['amount_foreign'] = round($clearing['amount_foreign'] + (float) $row['amount_foreign'], 2);
+                }
             }
         }
-        return null;
+        return $clearing;
     }
 
     /**
@@ -3004,7 +3066,7 @@ final class BankPostingService
                 $lines[$i]['account_code'] = $preview['code'] ?? $line['account_code'];
                 $result['resolved'] = $result['resolved'] && ($preview['resolved'] ?? false);
             }
-            $result['lines'] = $lines;
+            $result['lines'] = JournalPairer::stripPairKeys($lines);
         } catch (PostingException $e) {
             $result['reason'] = $e->errorCode;
         }
@@ -3111,7 +3173,7 @@ final class BankPostingService
             'suggestion_id' => $suggestionId,
             'bank_transaction_id' => $txId,
             'currency' => $baseCurrency,
-            'lines' => $lines,
+            'lines' => JournalPairer::stripPairKeys($lines),
             'accounts_resolved' => $resolved,
         ];
     }
@@ -3499,7 +3561,11 @@ final class BankPostingService
             // u automatiky i schvalování návrhu. Ruční zaúčtování jako jediné tenhle krok
             // vynechávalo, takže holé '221' z modalu skončilo na syntetice a rozbilo
             // jednoúčtovou (a tím jednoměnovou) analytiku, kterou zbytek systému udržuje.
-            $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $this->withBankAnalytic($supplierId, $tx, $lines), [
+            $lines = $this->withBankAnalytic($supplierId, $tx, $lines);
+            if (!is_array($rawLines) || $rawLines === []) {
+                self::assertDistinctPairAccounts($lines);
+            }
+            $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $lines, [
                 'entry_date'    => (string) $tx['posted_at'],
                 'document_date' => (string) $tx['posted_at'],
                 'description'   => $description,
@@ -4324,6 +4390,88 @@ final class BankPostingService
         return ['account_code' => $code, 'side' => $side, 'amount' => round($amount, 2)];
     }
 
+    /**
+     * Text dvojice hromadné úhrady: „Úhrada FV 2027001", „Úhrada FP 2027015", u vratky
+     * „Vratka FV/FP …". Jen u pohybu s víc doklady, jehož datum zaúčtování spadá do
+     * jednoduché formy zápisu (složený zápis text nedostane a zůstává beze změny). Číslo dokladu jako číslo
+     * zápisu dokladu ({@see DocumentEntryNumber::sql()}), jedním dotazem na druh dokladu.
+     *
+     * @param list<array{0:string,1:int}> $payments doklady hrazené pohybem [typ, id]
+     * @param list<array{0:string,1:int}> $refunds doklady vracené pohybem [typ, id]
+     * @return array<string,string> "typ:id" => text
+     */
+    private function paymentTexts(int $supplierId, string $entryDate, array $payments, array $refunds): array
+    {
+        if (count($payments) + count($refunds) < 2 || $entryDate === ''
+            || !$this->entryForms()->formAt($supplierId, $entryDate, true)->isSingle()) {
+            return [];
+        }
+        $labels = ['invoice' => 'FV', 'purchase_invoice' => 'FP'];
+        $ids = [];
+        foreach ([...$payments, ...$refunds] as [$type, $id]) {
+            $ids[$type][$id] = $id;
+        }
+        $numbers = [];
+        foreach (['invoice' => 'invoices', 'purchase_invoice' => 'purchase_invoices'] as $type => $table) {
+            if (empty($ids[$type])) {
+                continue;
+            }
+            $in = implode(',', array_fill(0, count($ids[$type]), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT d.id, ' . DocumentEntryNumber::sql("'{$type}'", 'd.id', 'd.supplier_id') . " AS no
+                   FROM {$table} d WHERE d.supplier_id = ? AND d.id IN ({$in})"
+            );
+            $stmt->execute([$supplierId, ...array_values($ids[$type])]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                if ($row['no'] !== null) {
+                    $numbers[$type . ':' . $row['id']] = (string) $row['no'];
+                }
+            }
+        }
+        $texts = [];
+        foreach ([['Úhrada', $payments], ['Vratka', $refunds]] as [$verb, $docs]) {
+            foreach ($docs as [$type, $id]) {
+                $no = $numbers[$type . ':' . $id] ?? null;
+                if ($no !== null) {
+                    $texts[$type . ':' . $id] = $verb . ' ' . $labels[$type] . ' ' . $no;
+                }
+            }
+        }
+        return $texts;
+    }
+
+    /**
+     * @param array<string,string> $texts
+     * @return array{line_text?:string}
+     */
+    private static function textOf(array $texts, string $type, int $id): array
+    {
+        return isset($texts[$type . ':' . $id]) ? ['line_text' => $texts[$type . ':' . $id]] : [];
+    }
+
+    private ?EntryFormService $entryForms = null;
+
+    private function entryForms(): EntryFormService
+    {
+        return $this->entryForms ??= new EntryFormService(
+            $this->db,
+            $this->activity,
+            new \MyInvoice\Repository\AccountingModeRepository($this->db),
+            new \MyInvoice\Security\FrameworkScopePolicy($this->db),
+        );
+    }
+
+    /**
+     * Doplňkový řádek úhrady (haléřové vyrovnání, kurzový rozdíl). V jednoduchém zápisu
+     * se páruje postupně s hlavním řádkem strany (JournalPairer, role `rounding`), takže
+     * hromadná úhrada s rozdílem zůstane rozdělitelná na dvojice. Složená firma klíč
+     * nevidí, zaúčtování ho zahodí.
+     */
+    private function supplementaryLine(string $code, string $side, float $amount): array
+    {
+        return $this->line($code, $side, $amount) + ['pair_role' => JournalPairer::ROLE_ROUNDING];
+    }
+
     /** @param array<string,mixed> $line */
     private function redStornoFlag(array $line, int $index): bool
     {
@@ -4881,9 +5029,9 @@ final class BankPostingService
         }
         $profile = AccountRoleResolver::fromConnection($this->db)->forDate($supplierId, $entryDate);
         if ($cents > 0) {
-            $lines[] = $this->line($profile->account('rounding.gain'), 'credit', $cents / 100.0);
+            $lines[] = $this->supplementaryLine($profile->account('rounding.gain'), 'credit', $cents / 100.0);
         } else {
-            $lines[] = $this->line($profile->account('rounding.loss'), 'debit', -$cents / 100.0);
+            $lines[] = $this->supplementaryLine($profile->account('rounding.loss'), 'debit', -$cents / 100.0);
         }
     }
 

@@ -44,9 +44,21 @@ final readonly class SessionAuthContext
         return new self(self::EXTERNAL_PREFIX . $provider, 'strong', $verifiedAt, null, $externalIdentityId);
     }
 
+    /**
+     * Poskytovatel identity organizace (Entra ID). Jen u něj správce zablokuje
+     * účet centrálně, takže sezení i tokeny z jeho přihlášení musí blokaci
+     * následovat bez ohledu na to, zda MFA ověřil poskytovatel, nebo MyÚčto.
+     */
+    public const ORGANIZATION_PROVIDER = 'entra';
+
     public static function isExternalMethod(?string $authMethod): bool
     {
         return $authMethod !== null && str_starts_with($authMethod, self::EXTERNAL_PREFIX);
+    }
+
+    public static function isOrganizationIdentityMethod(?string $authMethod): bool
+    {
+        return $authMethod === self::EXTERNAL_PREFIX . self::ORGANIZATION_PROVIDER;
     }
 
     public function withExternalIdentity(string $provider, int $externalIdentityId): self

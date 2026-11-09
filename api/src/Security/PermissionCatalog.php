@@ -84,6 +84,7 @@ final class PermissionCatalog
             ['accounting.periods.manage', 'accounting', 'Spravovat období', $staffOnly],
             ['accounting.periods.close', 'accounting', 'Uzavřít období', $staffOnly],
             ['accounting.periods.close_override', 'accounting', 'Uzavřít období přes nezaúčtované doklady', $staffOnly],
+            ['accounting.period_lock', 'accounting', 'Posunout zámek účtování k datu', $staffOnly],
             ['accounting.offsets', 'accounting', 'Vzájemné zápočty', $staffOnly],
             ['accounting.templates', 'accounting', 'Účetní šablony', $staffOnly],
             ['property', 'property', 'Registr SVJ', $staffOnly],
@@ -242,7 +243,7 @@ final class PermissionCatalog
                 // Úprava vystavené faktury mění doklad, který už odběratel dostal; roli ji
                 // přidělí správce v editoru rolí, výchozí účetní ji nemá.
                 'invoices.edit_issued',
-                'accounting.periods.close', 'accounting.periods.manage',
+                'accounting.periods.close', 'accounting.periods.manage', 'accounting.period_lock',
                 'property.registry.confirm', 'property.receivables.confirm', 'property.charges.confirm', 'property.charges.reverse', 'property.payments.reverse', 'property.opening.revise', 'property.settlements.reverse', 'property.funds.reverse',
                 'settings.ai_provider', 'settings.bank_accounts', 'settings.branding', 'settings.invoice_defaults',
                 'settings.company.write', 'settings.domains', 'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'utilities.import',

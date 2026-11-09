@@ -117,6 +117,10 @@ export interface JournalLine {
   amount_foreign: number | null
   cost_center: string | null
   line_no: number
+  /** Číslo dvojice v zápisu (jednoduchý zápis); null = složený zápis. */
+  pair_no?: number | null
+  /** Text řádku / dvojice (jednoduchý zápis). */
+  line_text?: string | null
   /** Dimenze řádku (Firma → Dimenze): typ → hodnota; chodí v detailu zápisu. */
   dimensions?: Record<number, number>
   /** Rozpad řádku mezi víc hodnot typu: typ → [{value_id, share}]; chodí v detailu zápisu. */
@@ -184,6 +188,11 @@ export interface JournalEntry {
    * zápočet). Podklad pro odznak ve sloupci Zdroj; obsah panelu dodá /journal/{id}/related.
    */
   has_related?: boolean
+  /**
+   * Posouzení zápisu bez dvojic, jen u firem s jednoduchou formou: `composite_mn` = nejde
+   * rozdělit (M : N, k ruční úpravě), `ineligible` = převod ho fyzicky nedělí; null = dvojice má.
+   */
+  pair_status?: 'composite_mn' | 'ineligible' | null
   /** Interní doklad, jehož zaúčtováním (posting) nebo stornem (reversal) zápis je (migrace 2193). */
   internal_document?: { id: number; document_no: string | null; status: 'draft' | 'posted' | 'reversed'; role: 'posting' | 'reversal' } | null
   automation?: AutomationProvenance | null
@@ -228,6 +237,8 @@ export interface JournalEntryWithLines extends JournalEntry {
 /** Jeden navržený řádek kontace — MD/DAL s názvem účtu, ať uživatel nepotvrzuje holá čísla. */
 export interface PostingPreviewLine {
   account_code: string
+  /** Číslo dvojice, když firma k datu účtuje jednoduchým zápisem. */
+  pair_no?: number | null
   account_name: string | null
   side: 'debit' | 'credit'
   is_red_storno?: boolean
@@ -265,8 +276,66 @@ export interface PostingPreview {
   rule_basis: { vendor_client_id: number; vendor_name: string; expense_kind: string } | null
 }
 
-export interface JournalEntryDetail extends JournalEntry {
+/**
+ * Náhled zápisu v editoru faktury z neuloženého stavu. Server doklad uloží akcí Uložit
+ * v transakci, která se odvolá, takže návrh je tentýž, jaký pak vznikne zaúčtováním.
+ */
+export interface DraftPostingPreview {
+  source_type: 'invoice' | 'purchase_invoice'
+  doc_id: number | null
+  entry_date: string | null
+  lines: PostingPreviewLine[]
+  balanced: boolean
+  /** Id živého zápisu, když je doklad už zaúčtovaný (pak se nesimuluje a `lines` je prázdné). */
+  already_posted: number | null
+}
+
+/**
+ * Stav řádku v opisu účtu, hlavní knize a otevřených položkách (firma s jednoduchým zápisem):
+ * `paired` = řádek nese `pair_no`, `derived` = starší zápis 1 : N rozložený za běhu,
+ * `composite_mn` = M : N, protiúčty zůstávají v původním tvaru.
+ */
+export type JournalLineStatus = 'paired' | 'derived' | 'composite_mn'
+
+/** Posouzení zápisu bez fyzických dvojic v detailu: `composite_mn` = M : N k ruční úpravě, `ineligible` = převod nepřipadá v úvahu. */
+export type JournalPairAssessment = 'composite_mn' | 'ineligible'
+
+/** Posouzení zápisu bez dvojic z tabulky `journal_entry_pair_status` (detail zápisu). */
+export interface JournalPairAssessmentInfo {
+  status: JournalPairAssessment
+  reason: string | null
+}
+
+/** Stav zápisu v exportu deníku (`layout: "pairs"`). */
+export type JournalExportPairStatus = JournalLineStatus
+
+/** Forma účetního zápisu firmy: složený (dosavadní) nebo jednoduchý (po dvojicích). */
+export type EntryForm = 'composite' | 'single'
+
+/** Dvojice jednoduchého zápisu: účet MD proti účtu Dal se stejnou částkou. */
+export interface JournalEntryPair {
+  pair_no: number
+  debit_line_id: number
+  credit_line_id: number
+  debit_account_code: string
+  credit_account_code: string
+  debit_account_name?: string | null
+  credit_account_name?: string | null
+  amount: number
+  is_red_storno?: boolean
+  line_text?: string | null
+  /** Zápis, který dvojici stornoval (storno dvojice nebo přeúčtování). */
+  reversed_by_entry_id?: number | null
+}
+
+export interface JournalEntryDetail extends Omit<JournalEntry, 'pair_status'> {
   lines: JournalLine[]
+  /** Forma zápisu k datu zápisu; backend ji v detailu dnes nevrací (forma firmy je v GET /accounting/entry-form). */
+  entry_form?: EntryForm
+  /** Dvojice zápisu; u zápisu bez dvojic klíč chybí. */
+  pairs?: JournalEntryPair[]
+  /** Posouzení zápisu bez fyzických dvojic; klíč chybí u zápisu s dvojicemi i u složeného zápisu bez posouzení. */
+  pair_status?: JournalPairAssessmentInfo
   /** Měkké vazby na doklady (migrace 1514); chodí s detailem zápisu. */
   links?: JournalDocumentLink[]
   /** Varování pravidel dimenzí (vynucení „varovat") po zaúčtování. */
@@ -480,6 +549,7 @@ export interface JournalHistoryLine {
   amount: number
   cost_center: string | null
   line_no: number
+  pair_no?: number
 }
 
 export interface JournalHistoryHeader {
@@ -570,6 +640,8 @@ export interface JournalFilters {
   amount_to?: number
   /** Jen zápisy s nálezem noční kontroly integrity deníku (JournalIntegrityService). */
   integrity?: 'amount_mismatch'
+  /** Jen zápisy označené k ruční úpravě (M : N, které nejde rozdělit na dvojice). */
+  pair_status?: 'composite_mn'
   /**
    * Hodnoty dimenzí oddělené čárkou; zápis projde, nese-li je (nebo podřízené) aspoň jeden
    * jeho řádek. Různé typy musí platit na témže řádku, u stejného typu stačí kterákoli.
@@ -590,6 +662,21 @@ export interface ManualLinePayload {
   /** Dimenze řádku: typ → hodnota. */
   dimensions?: Record<number, number>
   /** Rozpad řádku mezi víc hodnot typu: typ → [{value_id, share}], součet 100 %. */
+  dimension_splits?: DimensionSplits
+  /** Číslo dvojice (jednoduchý zápis). */
+  pair_no?: number
+  line_text?: string
+}
+
+/** Dvojice ručního zápisu: účet MD, účet Dal, kladná částka, text. */
+export interface ManualPairPayload {
+  debit_account_code: string
+  credit_account_code: string
+  amount: number
+  is_red_storno?: boolean
+  line_text?: string
+  cost_center?: string
+  dimensions?: Record<number, number>
   dimension_splits?: DimensionSplits
 }
 
@@ -613,14 +700,123 @@ export interface ManualEntryPayload {
   entry_date: string
   description?: string
   document_no?: string
-  lines: ManualLinePayload[]
+  /** Složený zápis: řádky. Jednoduchý zápis posílá `pairs`. */
+  lines?: ManualLinePayload[]
+  /** Jednoduchý zápis: dvojice. */
+  pairs?: ManualPairPayload[]
   /** Doklady, se kterými zápis souvisí. Neplatná vazba zápis vůbec nezaloží. */
   links?: JournalLinkPayload[]
+}
+
+// ── Forma účetního zápisu a převod na dvojice (bod 6) ─────────────────────
+export interface EntryFormHistoryRow {
+  valid_from: string
+  entry_form: EntryForm
+  created_by: number | null
+  created_at: string
+  note: string | null
+}
+
+export interface EntryFormState {
+  /** Forma k dnešnímu dni. */
+  entry_form: EntryForm
+  history: EntryFormHistoryRow[]
+}
+
+export interface ScheduleEntryFormPayload {
+  valid_from: string
+  entry_form: EntryForm
+  conversion_preview_id?: number
+  note?: string
+}
+
+export type PairConversionStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+
+/** Počty klasifikace zápisů v běhu převodu (náhled nanečisto i provedení). */
+export interface PairConversionCounts {
+  /** Zápisy v rozsahu běhu a kolik jich běh zpracoval. */
+  total?: number
+  processed?: number
+  /** Už po dvojicích (nic se nemění). */
+  paired?: number
+  /** Rozdělí se na dvojice automaticky (1 : N). */
+  auto?: number
+  /** Zůstanou složené M : N (k ruční úpravě). */
+  composite_mn?: number
+  /** Beze změny (uzavřené období, vazby, mzdy). */
+  ineligible?: number
+  /** Důvod -> počet zápisů M : N / nezpůsobilých zápisů. */
+  composite_mn_reasons?: Record<string, number>
+  ineligible_reasons?: Record<string, number>
+  /** Zdrojový typ -> klasifikace -> počet. */
+  by_source_type?: Record<string, Partial<Record<'paired' | 'auto' | 'composite_mn' | 'ineligible', number>>>
+  /** Jen provedení: převedené, přeskočené (složená forma) a neúspěšné zápisy. */
+  converted?: number
+  skipped_composite_form?: number
+  failed?: number
+}
+
+export interface PairConversionSampleItem {
+  entry_id: number
+  entry_date?: string
+  document_no?: string | null
+  source_type?: string
+  source_id?: number | null
+  status: 'composite_mn' | 'ineligible'
+  reason?: string | null
+}
+
+export interface PairConversionRun {
+  id: number
+  mode: 'preview' | 'apply'
+  status: PairConversionStatus
+  date_from: string | null
+  date_to: string | null
+  counts: PairConversionCounts | null
+  sample: PairConversionSampleItem[] | null
+  error: string | null
+  created_by: number | null
+  created_at: string
+  finished_at: string | null
+}
+
+export interface PairConversionRange {
+  date_from?: string
+  date_to?: string
+}
+
+export interface ReversePairsPayload {
+  pair_nos: number[]
+  entry_date?: string
+  description?: string
+}
+
+export interface RepostPairPayload {
+  debit_account_code: string
+  credit_account_code: string
+  line_text?: string
+  entry_date?: string
+  description?: string
+}
+
+/**
+ * Jak se dvojice přeúčtovala: na místě, daňově neutrálně v zamčeném datu, nebo opravným zápisem.
+ * `entry` je přeúčtovaný zápis (`in_place`, `tax_neutral`) nebo nový opravný zápis (`correction_entry`),
+ * `pair_no` je číslo dvojice v něm (u opravného zápisu vždy 2, dvojice 1 je zrcadlo původní).
+ */
+export interface RepostPairResult {
+  mode: 'in_place' | 'tax_neutral' | 'correction_entry'
+  pair_no: number
+  /** Zápis tak, jak ho vrací `JournalEntryRepository::find` (hlavička a řádky, bez `pairs`). */
+  entry: JournalEntry & { lines?: JournalLine[] }
 }
 
 // ── Šablony ručních zápisů (Fáze F, mzdový můstek, audit 2026-07) ──────────
 export interface JournalTemplateLine {
   line_no: number
+  /** Číslo dvojice (šablona po dvojicích); null = řádková šablona. */
+  pair_no?: number | null
+  line_text?: string | null
   label: string | null
   account_code: string
   side: JournalSide
@@ -650,6 +846,8 @@ export interface JournalTemplateDetail {
 }
 
 export interface JournalTemplateLinePayload {
+  pair_no?: number | null
+  line_text?: string | null
   account_code: string
   side: JournalSide
   amount?: number | null
@@ -704,6 +902,10 @@ export interface PostingRule {
   credit_account_code: string | null
   priority: number
   is_active: boolean
+  /** Hodí se na řádek přijaté faktury (určuje server z předkontace). */
+  line_purchase?: boolean
+  /** Hodí se na řádek vydané faktury. */
+  line_sale?: boolean
 }
 
 /** GET /posting-rules vrací objekt keyed rule_key → pravidlo (prázdné → {}). */
@@ -1257,8 +1459,16 @@ export interface AccountStatementItem {
   source_settlement_doc_id: number | null
   line_id: number
   line_no: number
-  /** Účty opačné strany téhož zápisu. */
+  /** Účty opačné strany téhož zápisu; u řádku s dvojicí jediný protiúčet. */
   counter_accounts: string | null
+  /** Protiúčet dvojice (jednoduchý zápis); null = protiúčet z heuristiky složeného zápisu. */
+  counter_account_id?: number | null
+  /** Číslo dvojice řádku; null u řádku složeného zápisu (jen u firmy s jednoduchým zápisem). */
+  pair_no?: number | null
+  /** Stav řádku (jen u firmy s jednoduchým zápisem). */
+  pair_status?: JournalLineStatus | null
+  /** Pořadí dílu starší 1 : N rozložené na víc pohybů (1..n); jinak null (jen v opisu účtu). */
+  pair_piece?: number | null
   partner: string | null
   variable_symbol: string | null
   currency: string
@@ -1296,6 +1506,9 @@ export interface OpenItemLine {
   source_settlement_doc_type: string | null
   source_settlement_doc_id: number | null
   counter_accounts: string | null
+  counter_account_id?: number | null
+  pair_no?: number | null
+  pair_status?: JournalLineStatus | null
   partner: string | null
   variable_symbol: string | null
   currency: string
@@ -1387,6 +1600,8 @@ export interface AccountStatementReport {
   counter_totals: AccountCounterTotal[] | null
   /** Vybraný protiúčet: podíl na obratu účtu, ne součet zobrazených řádků. Jen na první stránce. */
   counter_filter: { account_id: number; account_code: string; name: string; md: number; d: number } | null
+  /** `pairs` u firmy s jednoduchým zápisem: řádky nesou `pair_no`, `pair_status`, `pair_piece`; jinak klíč chybí. */
+  layout?: 'pairs'
 }
 
 export type StatementScope = 'auto' | 'full' | 'small' | 'micro'
@@ -2160,6 +2375,11 @@ export const POSTING_ERROR_CODES = [
   // Přeúčtování: datum je zamčené (§35 soft-close) resp. storno i oprava by padly
   // na jiné datum než původní zápis a uživatel to ještě nepotvrdil.
   'date_locked', 'repost_date_shift_confirmation_required', 'version_conflict',
+  // Protiúčet a předkontace řádku faktury (zaúčtování už při zadání dokladu).
+  'mixed_counter_accounts', 'invalid_counter_account', 'counter_account_with_advance',
+  'counter_account_not_applicable', 'invalid_posting_rule',
+  // Automatický zápis v jednoduché formě nejde rozložit na dvojice; text ze serveru má přednost.
+  'automatic_pairing_failed',
 ] as const
 
 /** Vrátí i18n klíč pro hlášku k chybovému kódu zaúčtování (fallback = generic). */
@@ -2176,6 +2396,9 @@ export function postingErrorI18nKey(code: string | null | undefined): string {
 export function postingErrorMessage(t: (key: string) => string, e: any): string {
   const err = e?.response?.data?.error
   const code = typeof err?.code === 'string' ? err.code : null
+  const serverMessage = typeof err?.message === 'string' && err.message !== '' ? err.message : null
+  // Protiúčet a předkontace: server říká, který účet či klíč a proč nejde použít.
+  if (serverMessage && (code === 'invalid_counter_account' || code === 'invalid_posting_rule' || code === 'automatic_pairing_failed')) return serverMessage
   if ((POSTING_ERROR_CODES as readonly string[]).includes(code ?? '')) {
     return t(`accounting.posting_errors.${code}`)
   }
@@ -2463,6 +2686,7 @@ export const accountingApi = {
     if (filters?.amount_from !== undefined) params.amount_from = filters.amount_from
     if (filters?.amount_to !== undefined) params.amount_to = filters.amount_to
     if (filters?.integrity) params.integrity = filters.integrity
+    if (filters?.pair_status) params.pair_status = filters.pair_status
     if (filters?.dimension_value_id) {
       params.dimension_value_id = filters.dimension_value_id
       if (filters.dimension_descendants === false) params.dimension_descendants = 0
@@ -2492,6 +2716,10 @@ export const accountingApi = {
    */
   postingPreview: (source: 'invoices' | 'purchase-invoices', id: number) =>
     api.get<PostingPreview>(`/accounting/journal/posting-preview/${source}/${id}`).then(r => r.data),
+  /** Náhled zápisu v editoru faktury: tělo dokladu jako při uložení, nic se neuloží. */
+  draftPostingPreview: (source: 'invoices' | 'purchase-invoices', docId: number | null, document: object, signal?: AbortSignal) =>
+    api.post<DraftPostingPreview>(`/accounting/journal/draft-posting-preview/${source}`, { doc_id: docId, document }, { signal })
+      .then(r => r.data),
   // Hromadné zaúčtování z výběru v seznamu (A2) — vrací souhrnný report ok/fail.
   postInvoicesBulk: (ids: number[]) =>
     api.post<BulkPostReport>('/accounting/journal/post-invoices-bulk', { ids }).then(r => r.data),
@@ -2512,6 +2740,29 @@ export const accountingApi = {
     api.get<PostingOrigin>(`/accounting/journal/posting-origin/${source}/${id}`).then(r => r.data),
   reverseEntry: (id: number) =>
     api.post<JournalEntryDetail>(`/accounting/journal/${id}/reverse`).then(r => r.data),
+  /** Storno vybraných dvojic jednoduchého zápisu: vznikne opravný zápis, původní zápis zůstává. */
+  reversePairs: (id: number, payload: ReversePairsPayload) =>
+    api.post<JournalEntryDetail>(`/accounting/journal/${id}/pairs/reverse`, payload).then(r => r.data),
+  /** Přeúčtování jedné dvojice (jiné účty MD/Dal); server rozhodne na místě × opravným zápisem. */
+  repostPair: (id: number, pairNo: number, payload: RepostPairPayload) =>
+    api.post<RepostPairResult>(`/accounting/journal/${id}/pairs/${pairNo}/repost`, payload).then(r => r.data),
+  /** Forma účetního zápisu firmy dnes + historie změn. */
+  getEntryForm: () =>
+    api.get<EntryFormState>('/accounting/entry-form').then(r => r.data),
+  /** Naplánuje změnu formy od data (jen admin firmy). */
+  scheduleEntryForm: (payload: ScheduleEntryFormPayload) =>
+    api.post<EntryFormState & { conversion: { run_id: number | null; error: string | null } | null }>('/accounting/entry-form', payload).then(r => r.data),
+  listPairConversions: () =>
+    api.get<{ runs: PairConversionRun[] }>('/accounting/pair-conversion').then(r => r.data.runs ?? []),
+  /** Náhled převodu nanečisto; vrací id běhu, výsledek se čte pollingem. */
+  previewPairConversion: (range: PairConversionRange = {}) =>
+    api.post<{ run_id: number }>('/accounting/pair-conversion/preview', range).then(r => r.data.run_id),
+  applyPairConversion: (range: PairConversionRange = {}) =>
+    api.post<{ run_id: number }>('/accounting/pair-conversion/apply', range).then(r => r.data.run_id),
+  getPairConversion: (id: number) =>
+    api.get<PairConversionRun>(`/accounting/pair-conversion/${id}`).then(r => r.data),
+  cancelPairConversion: (id: number) =>
+    api.post<{ cancelled: boolean }>(`/accounting/pair-conversion/${id}/cancel`).then(r => r.data),
   /** `ackLocked` = účetní potvrdil zásah do uzamčeného období (odpověď 409 `date_locked` s `can_acknowledge`). */
   deleteEntry: (id: number, ackLocked = false) =>
     api.delete<{ ok: boolean }>(`/accounting/journal/${id}`, {

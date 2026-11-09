@@ -1345,6 +1345,10 @@ final class SettingsAction
             // GET /api/settings/mode-switch-preview a nabídne uživateli instrukci k backfillu.
             if (array_key_exists('accounting_mode', $body) && $body['accounting_mode'] === 'double_entry') {
                 $this->coaSeeder->seedForSupplier($id);
+                if (($current['accounting_mode'] ?? null) !== 'double_entry') {
+                    $actor = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+                    $this->supplierInitializer->applyEntryFormDefault($id, (int) ($actor['id'] ?? 0));
+                }
                 $pending = $this->pendingAccountingBackfillCounts($id);
                 if ($pending['total'] > 0) {
                     $this->log($request, 'supplier.mode_switch_pending_backfill', $id, $pending);

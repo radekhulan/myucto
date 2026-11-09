@@ -337,7 +337,7 @@ final class JournalEntryTemplateRepository
         }
 
         $lstmt = $this->db->pdo()->prepare(
-            'SELECT line_no, label, account_code, side, default_amount, cost_center
+            'SELECT line_no, label, account_code, side, default_amount, cost_center, pair_no, line_text
                FROM journal_entry_template_lines
               WHERE template_id = ?
               ORDER BY line_no ASC'
@@ -354,6 +354,13 @@ final class JournalEntryTemplateRepository
                 'default_amount' => $l['default_amount'] !== null ? (float) $l['default_amount'] : null,
                 'cost_center'    => $l['cost_center'] !== null ? (string) $l['cost_center'] : null,
             ];
+            // Dvojice jednoduchého zápisu jen u šablony, která je má; ostatní šablony beze změny.
+            if ($l['pair_no'] !== null) {
+                $lines[count($lines) - 1]['pair_no'] = (int) $l['pair_no'];
+            }
+            if ($l['line_text'] !== null) {
+                $lines[count($lines) - 1]['line_text'] = (string) $l['line_text'];
+            }
         }
 
         return [
@@ -387,8 +394,8 @@ final class JournalEntryTemplateRepository
 
             $insLine = $pdo->prepare(
                 'INSERT INTO journal_entry_template_lines
-                    (template_id, line_no, label, account_code, side, default_amount, cost_center)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)'
+                    (template_id, line_no, label, account_code, side, default_amount, cost_center, pair_no, line_text)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             foreach (array_values($lines) as $i => $l) {
                 $insLine->execute([
@@ -399,6 +406,8 @@ final class JournalEntryTemplateRepository
                     $l['side'],
                     $l['amount'],
                     ($l['cost_center'] ?? null) !== null && $l['cost_center'] !== '' ? $l['cost_center'] : null,
+                    isset($l['pair_no']) ? (int) $l['pair_no'] : null,
+                    ($l['line_text'] ?? null) !== null && $l['line_text'] !== '' ? $l['line_text'] : null,
                 ]);
             }
             if ($ownTx) {
@@ -441,8 +450,8 @@ final class JournalEntryTemplateRepository
             }
             $insLine = $pdo->prepare(
                 'INSERT INTO journal_entry_template_lines
-                    (template_id, line_no, label, account_code, side, default_amount, cost_center)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)'
+                    (template_id, line_no, label, account_code, side, default_amount, cost_center, pair_no, line_text)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             foreach (array_values($lines ?? []) as $i => $l) {
                 $insLine->execute([
@@ -453,6 +462,8 @@ final class JournalEntryTemplateRepository
                     $l['side'],
                     $l['amount'],
                     ($l['cost_center'] ?? null) !== null && $l['cost_center'] !== '' ? $l['cost_center'] : null,
+                    isset($l['pair_no']) ? (int) $l['pair_no'] : null,
+                    ($l['line_text'] ?? null) !== null && $l['line_text'] !== '' ? $l['line_text'] : null,
                 ]);
             }
             if ($ownTx) {

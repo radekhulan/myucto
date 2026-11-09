@@ -136,6 +136,19 @@ describe('PostTransactionModal — našeptávač účtů', () => {
     m.createRule.mockReset().mockResolvedValue({ rule: { id: 10 } })
   })
 
+  it('pole účtů MD a Dal jsou zarovnaná doleva jako zbytek formuláře', async () => {
+    const wrapper = await open(10)
+    expect(wrapper.get('[data-test="posting-debit"]').classes()).toContain('text-left')
+    expect(wrapper.get('[data-test="posting-credit"]').classes()).toContain('text-left')
+  })
+
+  it('nápověda k saldokontnímu účtu se zalamuje, i když dialog leží v buňce s nowrap a text-right', async () => {
+    const wrapper = await open(10)
+    const hint = wrapper.get('[data-test="posting-debit"]').element.closest('.overflow-y-auto') as HTMLElement
+    expect(hint.classList.contains('whitespace-normal')).toBe(true)
+    expect(hint.classList.contains('text-left')).toBe(true)
+  })
+
   it('prefills matched invoice accounts from the backend preview, including bank analytic', async () => {
     m.previewTransaction.mockResolvedValue({ bank_account_code: '221.400', matched: true, resolved: true, reason: null, lines: [
       { account_code: '221.400', side: 'debit', amount: 10 },

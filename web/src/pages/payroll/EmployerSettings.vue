@@ -78,6 +78,7 @@ const accountRows: Array<{
   { key: 'employment_gross', debit: 'employment_gross_debit', credit: 'employment_gross_credit' },
   { key: 'partner_gross', debit: 'partner_gross_debit', credit: 'partner_gross_credit' },
   { key: 'statutory_gross', debit: 'statutory_gross_debit', credit: 'statutory_gross_credit' },
+  { key: 'statutory_nonpartner_gross', debit: null, credit: 'statutory_nonpartner_gross_credit' },
   { key: 'employer_insurance', debit: 'employer_insurance_debit', credit: null },
   { key: 'social_insurance', debit: null, credit: 'social_insurance_credit' },
   { key: 'health_insurance', debit: null, credit: 'health_insurance_credit' },
@@ -120,6 +121,9 @@ const defaultAccounts: PayrollEmployerAccounts = {
   // Nepovinná — prázdná, dokud se nenačte nastavení firmy (výchozí 648 dá
   // server jen firmě, která ho v osnově má).
   enforcement_fee_revenue_credit: '',
+  // Nepovinná — prázdná = odměna jednatele proti 366 jako dřív; nově zakládané
+  // firmě server nabídne 331.
+  statutory_nonpartner_gross_credit: '',
   partner_settlement_credit: '365',
   risky_savings_debit: '527',
   risky_savings_credit: '379',
@@ -140,6 +144,7 @@ const form = reactive<EmployerSettingsForm>({
   payroll_contact_email: null,
   payroll_contact_phone: null,
   wage_rounding: 'ceil',
+  posting_granularity: 'summary',
   accounts: { ...defaultAccounts },
 })
 const formOffices = ref<FormOffice[]>([])
@@ -263,6 +268,7 @@ function fillForm(value: PayrollEmployerSettings) {
   form.payroll_contact_email = value.payroll_contact_email
   form.payroll_contact_phone = value.payroll_contact_phone
   form.wage_rounding = value.wage_rounding ?? 'ceil'
+  form.posting_granularity = value.posting_granularity ?? 'summary'
   // Sloučení, ne náhrada: server, který novou předkontaci ještě nezná (starší
   // API proti novějšímu klientovi, nedoběhlá migrace), by jinak nechal klíč
   // `undefined` a stránka by spadla na prvním našeptávači účtu.
@@ -307,6 +313,7 @@ async function save() {
       payroll_contact_email: nullable(form.payroll_contact_email),
       payroll_contact_phone: nullable(form.payroll_contact_phone),
       wage_rounding: form.wage_rounding,
+      posting_granularity: form.posting_granularity,
       accounts: normalizedAccounts(),
       offices: formOffices.value.map(office => ({
         code: office.code.trim().toUpperCase(),
@@ -1082,6 +1089,23 @@ onMounted(async () => {
             </div>
           </article>
         </div>
+      </section>
+
+      <section
+        v-if="activeTab === 'accounting'"
+        class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+      >
+        <div class="mb-5">
+          <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.employer.posting_granularity_title') }}</h2>
+          <p class="mt-1 max-w-3xl text-sm text-neutral-500">{{ t('payroll.employer.posting_granularity_hint') }}</p>
+        </div>
+        <label class="block max-w-xl">
+          <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.posting_granularity_label') }}</span>
+          <select v-model="form.posting_granularity" data-testid="posting-granularity" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
+            <option value="summary">{{ t('payroll.employer.posting_granularity_summary') }}</option>
+            <option value="employee">{{ t('payroll.employer.posting_granularity_employee') }}</option>
+          </select>
+        </label>
       </section>
 
       <EmployerPolicies v-if="activeTab === 'policies'" :can-write="canWrite" />

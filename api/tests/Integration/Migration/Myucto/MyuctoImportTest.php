@@ -158,6 +158,193 @@ final class MyuctoImportTest extends TestCase
         self::assertSame([], $repeat['created']); self::assertSame(1, $repeat['existing']['invoices']); self::assertSame(1, $this->targetCount('invoices'));
     }
 
+    public function testCompositeSourceStaysCompositeInInstallationWithSingleDefault(): void
+    {
+        $this->installationDefaultSingle($this->target);
+        $package = (new MyuctoExportReader())->read($this->makeArchive(self::ENTRY_FORM_TABLES, 'entry-form-export.zip'));
+        self::assertSame([], $package['tables']['accounting_entry_form_history']);
+
+        $this->importer->import($package, $this->target, $this->actor, 'synthetic-entry-form', false);
+
+        self::assertSame([], $this->entryFormHistory($this->target), 'Obnova složené firmy nesmí převzít výchozí formu instalace.');
+        self::assertSame($this->journalImage($this->source), $this->journalImage($this->target));
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM journal_entry_lines WHERE pair_no IS NOT NULL AND supplier_id = ' . $this->target)->fetchColumn());
+        $audit = $this->pdo->prepare("SELECT payload FROM activity_log WHERE action = 'accounting.entry_form_changed' AND entity_type = 'supplier' AND entity_id = ? ORDER BY id DESC LIMIT 1");
+        $audit->execute([$this->target]);
+        $payload = json_decode((string) $audit->fetchColumn(), true);
+        self::assertSame('myucto_import', $payload['source'] ?? null);
+        self::assertSame([], $payload['to'] ?? null);
+    }
+
+    public function testExportFromOlderVersionWithoutEntryFormTablesIsComposite(): void
+    {
+        $this->installationDefaultSingle($this->target);
+        $package = (new MyuctoExportReader())->read($this->archive);
+        self::assertArrayNotHasKey('accounting_entry_form_history', $package['tables']);
+
+        $this->importer->import($package, $this->target, $this->actor, 'synthetic-entry-form', false);
+
+        self::assertSame([], $this->entryFormHistory($this->target));
+        self::assertSame($this->journalImage($this->source), $this->journalImage($this->target));
+        $repeat = $this->importer->import((new MyuctoExportReader())->read($this->makeArchive(self::ENTRY_FORM_TABLES, 'entry-form-export.zip')),
+            $this->target, $this->actor, 'synthetic-entry-form', false);
+        self::assertSame([], $repeat['created'], 'Export s prázdnými tabulkami formy má stejný otisk jako export starší verze.');
+    }
+
+    #[DataProvider('singleTargets')]
+    public function testSingleSourceRestoresSingleWithPairsHistoryAndAssessments(bool $installationDefault): void
+    {
+        if ($installationDefault) {
+            $this->installationDefaultSingle($this->target);
+        }
+        $this->singleSourceJournal();
+        $package = (new MyuctoExportReader())->read($this->makeArchive(self::ENTRY_FORM_TABLES, 'entry-form-export.zip'));
+        self::assertCount(1, $package['tables']['journal_entry_pair_status']);
+        self::assertCount(1, $package['tables']['journal_pair_reversals']);
+
+        $report = $this->importer->import($package, $this->target, $this->actor, 'synthetic-entry-form', false);
+
+        self::assertSame(1, $report['created']['journal_entry_pair_status']);
+        self::assertSame(1, $report['created']['journal_pair_reversals']);
+        self::assertSame([['2090-06-01', 'single', 'Syntetická volba jednoduchého zápisu', '2090-05-20 08:00:00', $this->actor]], $this->entryFormHistory($this->target));
+        self::assertSame($this->journalImage($this->source), $this->journalImage($this->target));
+        $unpaired = $this->pdo->query("SELECT COUNT(*) FROM journal_entry_lines l JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+            WHERE l.supplier_id = {$this->target} AND e.entry_date >= '2090-06-01' AND l.pair_no IS NULL
+              AND NOT EXISTS (SELECT 1 FROM journal_entry_pair_status s WHERE s.supplier_id = e.supplier_id AND s.entry_id = e.id)")->fetchColumn();
+        self::assertSame(0, (int) $unpaired, 'V období jednoduchého zápisu má každý řádek dvojici nebo zápis posouzení.');
+        self::assertSame($this->pairTablesImage($this->source), $this->pairTablesImage($this->target));
+        self::assertTrue((new \MyInvoice\Service\Accounting\EntryForm\EntryFormService($this->db, new \MyInvoice\Service\ActivityLogger($this->db),
+            new \MyInvoice\Repository\AccountingModeRepository($this->db), new \MyInvoice\Security\FrameworkScopePolicy($this->db)))
+            ->formAt($this->target, '2090-06-15', true)->isSingle());
+
+        $repeat = $this->importer->import($package, $this->target, $this->actor, 'synthetic-entry-form', false);
+        self::assertSame([], $repeat['created']);
+        self::assertSame(1, $repeat['existing']['journal_pair_reversals']);
+    }
+
+    public static function singleTargets(): iterable
+    {
+        yield 'nová firma s výchozí formou instalace single' => [true];
+        yield 'nová firma bez výchozí formy' => [false];
+    }
+
+    public function testTargetWithOwnDifferentEntryFormRejectsRestoreBeforeAnyWrite(): void
+    {
+        $this->pdo->prepare("INSERT INTO accounting_entry_form_history (supplier_id, valid_from, entry_form, note) VALUES (?, '2090-01-01', 'single', 'Syntetická vlastní volba')")
+            ->execute([$this->target]);
+        $package = (new MyuctoExportReader())->read($this->archive);
+        try {
+            $this->importer->import($package, $this->target, $this->actor, 'synthetic-entry-form', false);
+            self::fail('Firma s vlastní jinou formou zápisu nesmí obnovu převzít tiše.');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('liší od exportu k 2090-01-01: export účtuje složeným zápisem, cílová firma jednoduchým zápisem', $e->getMessage());
+        }
+        self::assertSame(0, $this->targetCount('journal_entries'));
+        self::assertSame(0, $this->targetCount('invoices'));
+        self::assertSame('single', $this->entryFormHistory($this->target)[0][1]);
+    }
+
+    public function testPairedJournalWithoutSingleFormInExportIsRejected(): void
+    {
+        $this->singleSourceJournal();
+        $package = (new MyuctoExportReader())->read($this->makeArchive(self::ENTRY_FORM_TABLES, 'entry-form-export.zip'));
+        $package['tables']['accounting_entry_form_history'] = [];
+        try {
+            $this->importer->import($package, $this->target, $this->actor, 'synthetic-entry-form', false);
+            self::fail('Deník po dvojicích bez jednoduchého zápisu v exportu nesmí projít.');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('nenese jednoduchý zápis', $e->getMessage());
+        }
+        self::assertSame(0, $this->targetCount('journal_entries'));
+    }
+
+    private const ENTRY_FORM_TABLES = ['accounting_entry_form_history', 'journal_entry_pair_status', 'journal_pair_reversals'];
+
+    private function installationDefaultSingle(int $supplier): void
+    {
+        $default = new \MyInvoice\Service\Accounting\EntryForm\EntryFormInstallationDefault(
+            $this->db, new Config(['accounting' => ['default_entry_form' => 'single']]),
+        );
+        self::assertNotNull($default->apply($supplier, $this->actor));
+        self::assertSame('single', $this->entryFormHistory($supplier)[0][1]);
+    }
+
+    /** Zdroj v jednoduchém zápisu od 2090-06-01: zápis po dvojicích, storno dvojice a posouzený zápis M : N. */
+    private function singleSourceJournal(): void
+    {
+        $this->pdo->prepare("INSERT INTO accounting_entry_form_history (supplier_id, valid_from, entry_form, created_by, created_at, note) VALUES (?, '2090-06-01', 'single', ?, '2090-05-20 08:00:00', 'Syntetická volba jednoduchého zápisu')")
+            ->execute([$this->source, $this->actor]);
+        $period = (int) $this->pdo->query('SELECT id FROM accounting_periods WHERE supplier_id = ' . $this->source)->fetchColumn();
+        $account = [];
+        foreach ($this->pdo->query('SELECT account_code, id FROM chart_of_accounts WHERE supplier_id = ' . $this->source)->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $account[$row['account_code']] = (int) $row['id'];
+        }
+        $entry = function (string $date, string $description, array $lines) use ($period, $account): int {
+            $this->pdo->prepare("INSERT INTO journal_entries (supplier_id, period_id, entry_date, description, source_type, source_id, posted_at) VALUES (?, ?, ?, ?, 'manual', NULL, ?)")
+                ->execute([$this->source, $period, $date, $description, $date . ' 00:00:00']);
+            $id = (int) $this->pdo->lastInsertId();
+            foreach ($lines as $index => [$pair, $code, $side, $amount, $text]) {
+                $this->pdo->prepare('INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, line_no, pair_no, line_text, side, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$this->source, $id, $account[$code], $index + 1, $pair, $text, $side, $amount]);
+            }
+            return $id;
+        };
+        $paired = $entry('2090-06-15', 'Syntetický zápis po dvojicích', [
+            [1, '311990', 'debit', '100.00', 'Syntetická dvojice 1'], [1, '602990', 'credit', '100.00', 'Syntetická dvojice 1'],
+            [2, '311990', 'debit', '21.00', 'Syntetická dvojice 2'], [2, '343990', 'credit', '21.00', 'Syntetická dvojice 2'],
+        ]);
+        $reversal = $entry('2090-06-20', 'Syntetické storno dvojice', [
+            [1, '602990', 'debit', '100.00', 'Storno dvojice 1'], [1, '311990', 'credit', '100.00', 'Storno dvojice 1'],
+        ]);
+        $this->pdo->prepare('INSERT INTO journal_pair_reversals (supplier_id, entry_id, pair_no, reversal_entry_id, reversal_pair_no, replacement_pair_no, created_by, created_at) VALUES (?, ?, 1, ?, 1, NULL, ?, ?)')
+            ->execute([$this->source, $paired, $reversal, $this->actor, '2090-06-20 10:00:00']);
+        $composite = $entry('2090-06-25', 'Syntetický zápis M : N', [
+            [null, '311990', 'debit', '60.00', null], [null, '343990', 'debit', '40.00', null],
+            [null, '602990', 'credit', '70.00', null], [null, '343990', 'credit', '30.00', null],
+        ]);
+        $this->pdo->prepare("INSERT INTO journal_entry_pair_status (supplier_id, entry_id, status, reason, run_id, assessed_at) VALUES (?, ?, 'composite_mn', 'synthetic', NULL, '2090-06-25 10:00:00')")
+            ->execute([$this->source, $composite]);
+    }
+
+    /** @return list<array{0:string,1:string,2:?string,3:string,4:?int}> */
+    private function entryFormHistory(int $supplier): array
+    {
+        $stmt = $this->pdo->prepare('SELECT valid_from, entry_form, note, created_at, created_by FROM accounting_entry_form_history WHERE supplier_id = ? ORDER BY valid_from');
+        $stmt->execute([$supplier]);
+        return array_map(static fn (array $r): array => [$r['valid_from'], $r['entry_form'], $r['note'], $r['created_at'], $r['created_by'] === null ? null : (int) $r['created_by']],
+            $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** Deník firmy bez interních ID: všechny sloupce zápisů a řádků (včetně dvojic) s kódem účtu. */
+    private function journalImage(int $supplier): array
+    {
+        $entries = $this->pdo->query('SELECT * FROM journal_entries WHERE supplier_id = ' . $supplier . ' ORDER BY entry_date, id')->fetchAll(PDO::FETCH_ASSOC);
+        $image = [];
+        foreach ($entries as $entry) {
+            $lines = $this->pdo->query('SELECT l.*, a.account_code FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+                WHERE l.supplier_id = ' . $supplier . ' AND l.entry_id = ' . (int) $entry['id'] . ' ORDER BY l.line_no, l.id')->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($lines as &$line) {
+                unset($line['id'], $line['supplier_id'], $line['entry_id'], $line['account_id']);
+            }
+            unset($line);
+            unset($entry['id'], $entry['supplier_id'], $entry['period_id'], $entry['source_id'], $entry['active_source_id'], $entry['created_by'], $entry['posted_by']);
+            $image[] = [$entry, $lines];
+        }
+        return $image;
+    }
+
+    /** Posouzení a storna dvojic s datem zápisu místo ID. */
+    private function pairTablesImage(int $supplier): array
+    {
+        return [
+            $this->pdo->query('SELECT e.entry_date, s.status, s.reason, s.run_id, s.assessed_at FROM journal_entry_pair_status s
+                JOIN journal_entries e ON e.id = s.entry_id AND e.supplier_id = s.supplier_id WHERE s.supplier_id = ' . $supplier)->fetchAll(PDO::FETCH_ASSOC),
+            $this->pdo->query('SELECT e.entry_date, r.pair_no, x.entry_date AS reversal_date, r.reversal_pair_no, r.replacement_pair_no, r.created_at FROM journal_pair_reversals r
+                JOIN journal_entries e ON e.id = r.entry_id AND e.supplier_id = r.supplier_id
+                JOIN journal_entries x ON x.id = r.reversal_entry_id AND x.supplier_id = r.supplier_id WHERE r.supplier_id = ' . $supplier)->fetchAll(PDO::FETCH_ASSOC),
+        ];
+    }
+
     public function testUnusedSetupPeriodOfNewCompanyIsReplacedByExportPeriods(): void
     {
         $this->pdo->prepare("INSERT INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on, created_reason) VALUES (?, 2090, '2090-01-01', '2090-12-31', 'setup')")

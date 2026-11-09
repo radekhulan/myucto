@@ -292,12 +292,10 @@ final class QuickReceiptService
         }
 
         $issueDate = new \DateTimeImmutable($today);
-        $varsymbol = $this->varsymbol->next(
+        [$varsymbol, $usedSeriesId] = $this->varsymbol->nextForInvoice(
             $supplierId,
-            VarsymbolGenerator::seriesTypeFor($invoice),
+            ['client_id' => $clientId] + $invoice,
             $issueDate,
-            $clientId,
-            (int) ($invoice['revenue_category_id'] ?? 0),
         );
         $snapshots = $this->snapshots->build(
             $clientId,
@@ -318,6 +316,7 @@ final class QuickReceiptService
             $invoiceId,
             $supplierId,
         ]);
+        $this->varsymbol->recordSeries($invoiceId, $invoice, $usedSeriesId);
         if ($issue->rowCount() === 0) {
             throw new \RuntimeException('Doklad účtenky byl mezitím změněn.');
         }

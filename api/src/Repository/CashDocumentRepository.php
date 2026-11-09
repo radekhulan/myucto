@@ -19,7 +19,7 @@ final class CashDocumentRepository
         'id, supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date,
          partner_name, partner_ic, partner_dic, description, vat_mode, total_amount, currency_code,
          fx_rate, amount_foreign, rule_key, counter_account_code, project_id, invoice_id, purchase_invoice_id, invoice_payment_id,
-         journal_entry_id, reversal_entry_id, status, created_by, created_at, updated_at';
+         journal_entry_id, reversal_entry_id, status, number_series_id, created_by, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -429,6 +429,7 @@ final class CashDocumentRepository
         $r['journal_entry_id'] = $r['journal_entry_id'] !== null ? (int) $r['journal_entry_id'] : null;
         $r['reversal_entry_id'] = $r['reversal_entry_id'] !== null ? (int) $r['reversal_entry_id'] : null;
         $r['created_by'] = $r['created_by'] !== null ? (int) $r['created_by'] : null;
+        $r['number_series_id'] = ($r['number_series_id'] ?? null) !== null ? (int) $r['number_series_id'] : null;
         return $r;
     }
 }

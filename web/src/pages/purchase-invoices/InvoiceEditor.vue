@@ -51,6 +51,11 @@ import { rowKey } from '@/utils/rowKey'
 import { purchaseExpenseAccountOptions } from '@/utils/chartAccountOptions'
 import ExpenseKindSuggestionHint from '@/components/purchase/ExpenseKindSuggestionHint.vue'
 import AccrualSuggestionHint from '@/components/accounting/AccrualSuggestionHint.vue'
+import ItemPostingFields from '@/components/accounting/ItemPostingFields.vue'
+import DraftPostingPreviewPanel from '@/components/accounting/DraftPostingPreviewPanel.vue'
+import { useEditorPosting } from '@/composables/useEditorPosting'
+import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
+import type { PostingRule } from '@/api/accounting'
 import { detectAccrualPeriod, type AccrualPeriod } from '@/utils/accrualPeriod'
 import { reverseChargeCodeForKind } from '@/utils/reverseChargeSupplyCode'
 import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
@@ -74,6 +79,7 @@ import { useSidePreview } from '@/composables/useSidePreview'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
+import NumberSeriesSelect from '@/components/numberSeries/NumberSeriesSelect.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import { useDimensions } from '@/composables/useDimensions'
 import DurationInput from '@/components/ui/DurationInput.vue'
@@ -860,7 +866,12 @@ const vatClaimPeriodLabel = computed(() => {
   return parsed.toLocaleDateString(locale.value === 'en' ? 'en-US' : 'cs-CZ', { month: 'long', year: 'numeric' })
 })
 
+// Řada z číselníku pro interní číslo (jen doklad bez čísla). undefined = beze změny,
+// null = výchozí řada. Výběr se ukáže jen při víc řadách přijatých dokladů.
+const numberSeriesId = ref<number | null | undefined>(undefined)
+
 function populate(inv: PurchaseInvoice) {
+  numberSeriesId.value = inv.varsymbol ? undefined : ((inv as { number_series_id?: number | null }).number_series_id ?? undefined)
   windowVendor.value = inv.vendor_id ? { id: inv.vendor_id, name: inv.vendor_company_name ?? '' } : null
   form.value.vendor_id = inv.vendor_id
   form.value.vendor_invoice_number = inv.vendor_invoice_number
@@ -1001,6 +1012,19 @@ const itemsConflictWithHeader = computed(() => form.value.items.some(itemVatConf
 const headerDiffersFromRozpis = computed(() => headerDiffersFromAllocations(headerVat.value, vatAllocations.value))
 function itemDetailsFilled(it: PurchaseInvoiceItem): boolean {
   return (showItemAccount.value && !!it.expense_account_code) || itemClassDiffers(it) || itemVatConflict(it)
+    || (editorPosting.enabled.value && (!!it.counter_account_code || !!it.posting_rule_key))
+}
+
+// ─── ZAÚČTOVÁNÍ UŽ PŘI ZADÁNÍ (předkontace a protiúčet řádku, náhled, Uložit a zaúčtovat) ───
+const editorPosting = useEditorPosting()
+const postingErrorToast = useAccountingPeriodToast()
+onMounted(() => { void editorPosting.load() })
+/** Závazek, který platí bez volby na řádku — nápověda v poli protiúčtu. */
+const defaultCounterAccount = computed(() =>
+  editorPosting.ruleAccount(derivedIsFixedAsset.value ? 'invoice.dhm.received' : 'invoice.services.received', 'credit') ?? '321')
+/** Předkontace řádku doplní účet nákladu, který řádek ještě nemá (server pak totéž). */
+function applyItemRule(it: PurchaseInvoiceItem, rule: PostingRule) {
+  if (!it.expense_account_code && rule.debit_account_code) it.expense_account_code = rule.debit_account_code
 }
 function toggleItemDetails(it: PurchaseInvoiceItem) {
   if (itemDetailsOpen.has(it)) itemDetailsOpen.delete(it)
@@ -1071,6 +1095,8 @@ function addItem(hideDropzone = true) {
     vat_rate_id: vatRates.value.find(v => v.is_default)?.id || vatRates.value[0]?.id || 1,
     order_index: form.value.items.length,
     expense_kind: null,
+    counter_account_code: null,
+    posting_rule_key: null,
     accrual_from: null,
     accrual_to: null,
     stock_item_id: null,
@@ -1537,12 +1563,43 @@ async function submit() {
     return
   }
   try {
-    const payload: PurchaseInvoicePayload = {
+    const payload = buildPayload()
+    const itemDimsSnapshot = docDims.snapshot(form.value.items)
+    let inv: PurchaseInvoice
+    if (isEdit.value && invoiceId.value) {
+      // Force flag z URL query (?force=1) — pro admin edit received/booked faktur
+      const force = String(route.query.force ?? '') === '1'
+      inv = await purchaseInvoicesApi.update(invoiceId.value, payload, force, forceMode.value ?? undefined)
+    } else {
+      inv = await purchaseInvoicesApi.create(payload)
+    }
+    await docDims.save(inv.id, itemDimsSnapshot)
+    // Upload pending PDF pokud byl drop před save
+    if (pendingPdfFile.value && !submissionId.value) {
+      await uploadPdfToInvoice(inv.id, pendingPdfFile.value)
+      pendingPdfFile.value = null
+      setPendingPdfUrl(null)
+    }
+    const posted = postAfterSave ? await postSavedInvoice(inv) : false
+    if (!posted) toast.success(isEdit.value ? t('common.saved') : t('common.created'))
+    afterSaveWarnings(inv)
+    router.push(`/purchase-invoices/${inv.id}`)
+  } catch (e: any) {
+    await handleSubmitError(e)
+  } finally {
+    submitting.value = false
+  }
+}
+
+/** Tělo dokladu pro uložení i pro náhled zápisu (náhled ho uloží v odvolané transakci). */
+function buildPayload(): PurchaseInvoicePayload {
+  return {
       ...(submission.value ? { submission_id: submission.value.id } : {}),
       ...(allowDuplicateNumber ? { allow_duplicate_number: true } : {}),
       vendor_id: form.value.vendor_id!,
       vendor_invoice_number: form.value.vendor_invoice_number,
       varsymbol: form.value.varsymbol || null,
+      number_series_id: form.value.varsymbol ? undefined : numberSeriesId.value,
       document_kind: form.value.document_kind,
       issue_date: form.value.issue_date,
       tax_date: form.value.tax_date || null,
@@ -1612,28 +1669,53 @@ async function submit() {
         vat_classification_code: it.vat_classification_code,
         expense_kind: it.expense_kind ?? null,
         expense_account_code: it.expense_account_code?.trim() || null,
+        counter_account_code: it.counter_account_code?.trim() || null,
+        posting_rule_key: it.posting_rule_key || null,
         accrual_from: it.accrual_from ?? null,
         accrual_to: it.accrual_to ?? null,
         stock_item_id: it.stock_item_id ?? null,
       })),
     }
-    const itemDimsSnapshot = docDims.snapshot(form.value.items)
-    let inv: PurchaseInvoice
-    if (isEdit.value && invoiceId.value) {
-      // Force flag z URL query (?force=1) — pro admin edit received/booked faktur
-      const force = String(route.query.force ?? '') === '1'
-      inv = await purchaseInvoicesApi.update(invoiceId.value, payload, force, forceMode.value ?? undefined)
-    } else {
-      inv = await purchaseInvoicesApi.create(payload)
-    }
-    await docDims.save(inv.id, itemDimsSnapshot)
-    // Upload pending PDF pokud byl drop před save
-    if (pendingPdfFile.value && !submissionId.value) {
-      await uploadPdfToInvoice(inv.id, pendingPdfFile.value)
-      pendingPdfFile.value = null
-      setPendingPdfUrl(null)
-    }
-    toast.success(isEdit.value ? t('common.saved') : t('common.created'))
+}
+
+/** Náhled zápisu pod položkami: jen když doklad jde uložit (dodavatel, číslo dokladu, měna, vyplněné položky). */
+const previewPayload = computed<PurchaseInvoicePayload | null>(() =>
+  editorPosting.enabled.value && form.value.vendor_id && form.value.currency_id
+    && form.value.vendor_invoice_number.trim() !== '' && form.value.items.length > 0
+    && form.value.items.every(it => (it.description || '').trim() !== '' && (Number(it.unit_price_without_vat) || 0) !== 0)
+    ? buildPayload()
+    : null)
+
+let postAfterSave = false
+/** Uložit a zaúčtovat: uloží doklad stejnou cestou jako Uložit a pak ho zaúčtuje. */
+async function saveAndPost() {
+  if (!editorPosting.canPost.value) return
+  postAfterSave = true
+  try {
+    await submit()
+  } finally {
+    postAfterSave = false
+  }
+}
+
+/**
+ * Zaúčtuje právě uložený doklad. Koncept se neúčtuje, proto ho nejdřív přijme (stejná
+ * akce jako tlačítko Přijmout v detailu). Chyba zaúčtování uložení nevrací: doklad je
+ * uložený a uživatel to vidí v hlášce.
+ */
+async function postSavedInvoice(inv: PurchaseInvoice): Promise<boolean> {
+  try {
+    const target = inv.status === 'draft' ? await purchaseInvoicesApi.transition(inv.id, 'received') : inv
+    await accountingApi.postPurchase(target.id)
+    toast.success(t('accounting.editor_posting.posted_toast'))
+    return true
+  } catch (e: any) {
+    postingErrorToast(e)
+    return false
+  }
+}
+
+function afterSaveWarnings(inv: PurchaseInvoice) {
     // Non-blocking varování ze serveru (např. dobropis s kladným součtem — issue #35).
     for (const code of inv._warnings ?? []) {
       if (code === 'exchange_rate_cnb_deviation') {
@@ -1662,8 +1744,9 @@ async function submit() {
       }
     }
     notifyCashSettlement(inv._cash_settlement)
-    router.push(`/purchase-invoices/${inv.id}`)
-  } catch (e: any) {
+}
+
+async function handleSubmitError(e: any) {
     const data = e?.response?.data?.error
     // Zaúčtovaný doklad v uzavřeném období: server chce zvolený režim úpravy (B11).
     if (data?.code === 'force_mode_required' && String(route.query.force ?? '') === '1') {
@@ -1695,9 +1778,6 @@ async function submit() {
     toast.error(error.value)
     await nextTick()
     paneDom.querySelector('[data-error-banner]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  } finally {
-    submitting.value = false
-  }
 }
 
 function fieldErr(key: string): string | null {
@@ -2032,6 +2112,8 @@ useWindowTitle(
                    placeholder="PF2605001" />
             <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.fields.varsymbol_hint') }}</p>
           </div>
+          <NumberSeriesSelect v-if="!form.varsymbol" class="sm:col-span-2"
+            :scope="{ module: 'purchase-invoices' }" v-model="numberSeriesId" />
         </div>
 
         <!-- Dates -->
@@ -2297,6 +2379,11 @@ useWindowTitle(
                   <span v-if="showItemAccount && hasVatAllocations" class="text-xs text-neutral-500" data-test="item-account-allocations">
                     {{ t('purchase_invoice.items.expense_account_allocations') }}
                   </span>
+                  <ItemPostingFields v-if="editorPosting.enabled.value" direction="purchase"
+                    v-model:rule-key="it.posting_rule_key" v-model:counter-account="it.counter_account_code"
+                    :rules="editorPosting.rules.value" :accounts="editorPosting.accounts.value"
+                    :default-counter="defaultCounterAccount"
+                    @rule-applied="(r: PostingRule) => applyItemRule(it, r)" />
                   <label class="flex items-center gap-2 text-xs text-neutral-500">
                     <span class="shrink-0">{{ t('purchase_invoice.items.vat_classification') }}</span>
                     <select v-model="it.vat_classification_code" :aria-label="t('purchase_invoice.items.vat_classification')"
@@ -2449,6 +2536,11 @@ useWindowTitle(
                   </select>
                   <span v-if="hasVatAllocations" class="mt-1 block text-xs text-neutral-500">{{ t('purchase_invoice.items.expense_account_allocations') }}</span>
                 </label>
+                <ItemPostingFields v-if="editorPosting.enabled.value" class="mt-2" direction="purchase" stacked
+                  v-model:rule-key="it.posting_rule_key" v-model:counter-account="it.counter_account_code"
+                  :rules="editorPosting.rules.value" :accounts="editorPosting.accounts.value"
+                  :default-counter="defaultCounterAccount"
+                  @rule-applied="(r: PostingRule) => applyItemRule(it, r)" />
                 <label class="mt-2 block text-xs text-neutral-600">
                   {{ t('purchase_invoice.items.vat_classification') }}
                   <select v-model="it.vat_classification_code" :aria-label="t('purchase_invoice.items.vat_classification')"
@@ -2544,6 +2636,10 @@ useWindowTitle(
           </table>
         </div>
       </div>
+
+      <!-- Náhled zápisu (zaúčtování už při zadání): tentýž výpočet jako Zaúčtovat. -->
+      <DraftPostingPreviewPanel v-if="editorPosting.enabled.value" source="purchase-invoices"
+        :doc-id="invoiceId" :payload="previewPayload" />
 
       <!-- Box 2b: Rekapitulace DPH — editovatelná dle dokladu dodavatele (§ 73 ZDPH).
            Pod reverse-charge se skrývá (na dokladu zahr. dodavatele není česká DPH). -->
@@ -2909,13 +3005,21 @@ useWindowTitle(
       </div>
 
       <!-- Submit bar — sticky bottom -->
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm flex items-center justify-between gap-2">
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm flex flex-wrap items-center justify-between gap-2">
         <RouterLink to="/purchase-invoices" class="px-4 h-10 inline-flex items-center text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors">
           ← {{ t('purchase_invoice.actions.back') }}
         </RouterLink>
-        <button type="submit" :disabled="submitting" class="cursor-pointer px-5 h-10 inline-flex items-center text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white rounded-md disabled:opacity-50">
-          {{ submitting ? '…' : t('purchase_invoice.actions.save') }}
-        </button>
+        <div class="flex flex-wrap items-center gap-2">
+          <button v-if="editorPosting.canPost.value" type="button" :disabled="submitting" data-test="save-and-post"
+            :title="t('accounting.editor_posting.save_and_post_hint_purchase')"
+            :class="btnFilled('success')" class="whitespace-nowrap" @click="saveAndPost">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('accounting.editor_posting.save_and_post') }}
+          </button>
+          <button type="submit" :disabled="submitting" class="cursor-pointer px-5 h-10 inline-flex items-center text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white rounded-md disabled:opacity-50 whitespace-nowrap">
+            {{ submitting ? '…' : t('purchase_invoice.actions.save') }}
+          </button>
+        </div>
       </div>
     </form>
 

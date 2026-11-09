@@ -29,11 +29,12 @@ use MyInvoice\Service\Accounting\AccountCodeRangeException;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentRepostService;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\JournalEntryDeletionRules;
 use MyInvoice\Service\Accounting\JournalHistoryService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\JournalLinkService;
-use MyInvoice\Service\Accounting\JournalLineAmount;
+use MyInvoice\Service\Accounting\InvoicePostingProposal;
 use MyInvoice\Service\Accounting\InternalDocumentException;
 use MyInvoice\Service\Accounting\InternalDocumentService;
 use MyInvoice\Service\Accounting\ManualJournalEntryException;
@@ -122,6 +123,8 @@ final class JournalAction
         private readonly OtherItemService $otherItems,
         private readonly ManualJournalEntryService $manualEntries,
         private readonly InternalDocumentService $internalDocuments,
+        private readonly InvoicePostingProposal $proposal,
+        private readonly EntryFormService $entryForms,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -167,6 +170,11 @@ final class JournalAction
         $documentCounts = $includeDocuments ? $this->listExtras->documentCounts($supplierId, $entryIds) : [];
         // Odkaz na interní doklad, jehož zaúčtováním nebo stornem zápis je (migrace 2193).
         $internalDocuments = $this->internalDocuments->forJournalEntries($supplierId, $entryIds);
+        // Posouzení zápisu bez dvojic jen u firmy s jednoduchým zápisem; složená firma
+        // klíč nedostane a odpověď zůstává beze změny.
+        $pairStatuses = $this->entryForms->hasAnySingle($supplierId)
+            ? $this->journal->pairStatusesForEntries($supplierId, $entryIds)
+            : null;
         $vatBySource = [];
         if ($includeVat) {
             foreach (['invoice', 'purchase_invoice'] as $source) {
@@ -181,6 +189,9 @@ final class JournalAction
             $item['automation'] = $provenance[(int) $item['id']] ?? null;
             $item['has_related'] = isset($related[(int) $item['id']]);
             $item['internal_document'] = $internalDocuments[(int) $item['id']] ?? null;
+            if ($pairStatuses !== null) {
+                $item['pair_status'] = $pairStatuses[(int) $item['id']] ?? null;
+            }
             if ($includePosting) {
                 $item['posting_lines'] = $linesByEntry[(int) $item['id']] ?? [];
             }
@@ -313,6 +324,11 @@ final class JournalAction
         if (in_array(($q['reversal'] ?? null), ['reversed', 'reversal', 'any', 'none'], true)) {
             $filters['reversal'] = (string) $q['reversal'];
         }
+        // Zápisy jednoduché formy, které zůstaly složené (M : N k ruční úpravě) nebo
+        // převod nepřipadá v úvahu.
+        if (in_array(($q['pair_status'] ?? null), ['composite_mn', 'ineligible'], true)) {
+            $filters['pair_status'] = (string) $q['pair_status'];
+        }
         // Rozsah účtů je prefixový včetně krajů (AccountCodeRange): 5 až 5 = celá třída 5.
         $from = $q['account_from'] ?? '';
         $to = $q['account_to'] ?? '';
@@ -405,6 +421,21 @@ final class JournalAction
             $line['dimension_splits'] = (object) ($lineSplits[(int) $line['id']] ?? []);
             return $line;
         }, $entry['lines']);
+        // Jednoduchý zápis: dvojice a posouzení zápisu bez dvojic. Složený zápis bez
+        // posouzení klíče nedostane, odpověď zůstává jako dřív.
+        $entry += $this->journal->pairView($supplierId, $id, $entry['lines']);
+        if (isset($entry['pairs'])) {
+            // Názvy účtů dvojice z řádků, které už nesou název z osnovy (žádný další dotaz).
+            $names = array_column($entry['lines'], 'account_name', 'id');
+            foreach ($entry['pairs'] as &$pair) {
+                $pair['debit_account_name'] = $names[$pair['debit_line_id']] ?? null;
+                $pair['credit_account_name'] = $names[$pair['credit_line_id']] ?? null;
+            }
+            unset($pair);
+        }
+        if ($this->entryForms->hasAnySingle($supplierId)) {
+            $entry['entry_form'] = $this->entryForms->formAt($supplierId, (string) $entry['entry_date'])->value;
+        }
         $entry['automation'] = $this->automationProvenance->forJournalEntries($supplierId, [$id])[$id] ?? null;
         // Měkké vazby na doklady (migrace 1514) — detail zápisu je jediné místo, kde
         // je uživatel spravuje, takže chodí rovnou s ním, ne dalším requestem.
@@ -436,8 +467,15 @@ final class JournalAction
 
         // Tvar řádků, dimenze i volitelné měkké vazby na doklady (migrace 1514) ověřuje
         // sdílená služba ručních zápisů, stejnou cestou účtují i interní doklady.
+        // Jednoduchý zápis: `pairs` (účet MD, účet Dal, částka). Ve složené formě se dvojice
+        // převedou na řádky bez čísla dvojice; `lines` zůstává pro oba tvary.
+        if (array_key_exists('pairs', $body) && array_key_exists('lines', $body)) {
+            return Json::error($response, 'validation_failed', 'Zadejte buď pairs, nebo lines.', 422);
+        }
         try {
-            $lines = $this->manualEntries->normalizeLines($supplierId, $body['lines'] ?? null);
+            $lines = array_key_exists('pairs', $body)
+                ? $this->manualEntries->normalizePairs($supplierId, $body['pairs'], $this->manualEntries->singleAt($supplierId, $entryDate))
+                : $this->manualEntries->normalizeLines($supplierId, $body['lines'] ?? null);
             $links = $this->manualEntries->normalizeLinks($supplierId, $body['links'] ?? []);
         } catch (ManualJournalEntryException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
@@ -817,18 +855,14 @@ final class JournalAction
         }
 
         // Override z AI klasifikace je součástí NÁVRHU, ne až zaúčtování — jinak by
-        // uživatel potvrzoval jiné řádky, než jaké se nakonec zapíšou.
+        // uživatel potvrzoval jiné řádky, než jaké se nakonec zapíšou. Řádky skládá
+        // sdílený návrh ({@see InvoicePostingProposal}), tentýž jako zaúčtování.
         $aiOverride = $sourceType === 'purchase_invoice'
             ? $this->aiOverrides->debitOverrideForPurchase($supplierId, $docId)
             : null;
 
         try {
-            $lines = $sourceType === 'invoice'
-                ? $this->posting->buildFromInvoice($supplierId, $docId, ['entry_date' => $docDate])
-                : $this->posting->buildFromPurchaseInvoice($supplierId, $docId, array_filter([
-                    'entry_date' => $docDate,
-                    'debit_account_code' => $aiOverride,
-                ], static fn (mixed $value): bool => $value !== null));
+            $lines = $this->proposal->lines($supplierId, $sourceType, $docId, $docDate);
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
         }
@@ -916,49 +950,13 @@ final class JournalAction
      */
     private function describeLines(int $supplierId, array $lines): array
     {
-        $codes = array_values(array_unique(array_map(
-            static fn (array $l): string => (string) $l['account_code'],
-            $lines,
-        )));
-        if ($codes === []) {
-            return [];
-        }
-
-        $ph = implode(',', array_fill(0, count($codes), '?'));
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT account_code, name FROM chart_of_accounts
-              WHERE supplier_id = ? AND account_code IN ({$ph})"
-        );
-        $stmt->execute(array_merge([$supplierId], $codes));
-        $names = [];
-        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
-            $names[(string) $r['account_code']] = (string) $r['name'];
-        }
-
-        return array_map(static function (array $l) use ($names): array {
-            $code = (string) $l['account_code'];
-
-            return [
-                'account_code' => $code,
-                'account_name' => $names[$code] ?? null,
-                'side'         => (string) $l['side'],
-                'amount'       => round((float) $l['amount'], 2),
-                'is_red_storno' => (bool) ($l['is_red_storno'] ?? false),
-                'cost_center'  => $l['cost_center'] ?? null,
-            ];
-        }, $lines);
+        return $this->proposal->describe($supplierId, $lines);
     }
 
     /** @param list<array<string,mixed>> $lines */
     private static function linesBalanced(array $lines): bool
     {
-        $delta = 0;
-        foreach ($lines as $l) {
-            $cents = JournalLineAmount::signedCents($l);
-            $delta += (string) $l['side'] === 'debit' ? $cents : -$cents;
-        }
-
-        return $delta === 0;
+        return InvoicePostingProposal::balanced($lines);
     }
 
     /** Id už existujícího zápisu dokladu, nebo null. Náhled tím řekne, že je zaúčtováno. */
@@ -1055,12 +1053,7 @@ final class JournalAction
         }
 
         try {
-            $lines = $customLines ?? ($sourceType === 'invoice'
-                ? $this->posting->buildFromInvoice($supplierId, $docId, ['entry_date' => $entryDate ?? $docDate])
-                : $this->posting->buildFromPurchaseInvoice($supplierId, $docId, array_filter([
-                    'entry_date' => $entryDate ?? $docDate,
-                    'debit_account_code' => $this->aiOverrides->debitOverrideForPurchase($supplierId, $docId),
-                ], static fn (mixed $value): bool => $value !== null)));
+            $lines = $customLines ?? $this->proposal->lines($supplierId, $sourceType, $docId, $entryDate ?? $docDate);
 
             $effectiveEntryDate = $entryDate ?? $docDate;
             $meta = array_merge($this->auditMeta($request), [
@@ -1901,13 +1894,7 @@ final class JournalAction
     /** Datum účetního případu z dokladu (DUZP / vystavení). NULL = doklad neexistuje. */
     private function fetchDocDate(string $table, int $supplierId, int $id): ?string
     {
-        // Whitelisted table names (interní volání) — ne z uživatelského vstupu.
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(tax_date, issue_date) AS d FROM {$table} WHERE id = ? AND supplier_id = ?"
-        );
-        $stmt->execute([$id, $supplierId]);
-        $d = $stmt->fetchColumn();
-        return $d === false || $d === null ? null : (string) $d;
+        return $this->proposal->documentDate($supplierId, $table === 'invoices' ? 'invoice' : 'purchase_invoice', $id);
     }
 
     private function nullableString(mixed $v): ?string

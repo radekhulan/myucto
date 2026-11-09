@@ -8,7 +8,11 @@ use MyInvoice\Repository\LedgerReportRepository;
 use MyInvoice\Service\Accounting\AccountCodeRange;
 use MyInvoice\Service\Accounting\AccountCodeRangeException;
 
-/** Podrobný export sdílí PS a obraty s hlavní knihou; doklady předává po dávkách. */
+/**
+ * Podrobný export sdílí PS a obraty s hlavní knihou; doklady předává po dávkách.
+ * U firmy s jednoduchým zápisem nese pohyb pole dvojic jako opis účtu a řádek staršího
+ * zápisu 1 : N se rozloží na díly ({@see JournalLineContext::pieceMovements()}).
+ */
 final class GeneralLedgerDetailService
 {
     /**
@@ -102,7 +106,7 @@ final class GeneralLedgerDetailService
         $started = false;
         $balance = $md = $d = $count = 0;
         foreach ($rows as $batch) {
-            foreach ($this->context->withCounterAccounts($supplierId, $batch) as $line) {
+            foreach ($this->context->withCounterAccounts($supplierId, $batch, true) as $line) {
                 while ((int) $accounts[$index]['account_id'] !== (int) $line['group_id']) {
                     $a = $accounts[$index++];
                     if (!$started) yield ['kind' => 'start', 'account' => $a];
@@ -120,10 +124,19 @@ final class GeneralLedgerDetailService
                     $started = true;
                 }
                 $count++;
-                $amount = (int) round($line['amount'] * 100);
-                if ($line['side'] === 'debit') { $md += $amount; $balance += $amount; }
-                else { $d += $amount; $balance -= $amount; }
-                yield ['kind' => 'line', 'item' => $line + ['balance' => $balance / 100]];
+                // Jednoduchý zápis: řádek staršího zápisu 1 : N jde po dílech jako v opisu účtu;
+                // počet řádků pro kontrolu proti souhrnu zůstává po řádcích deníku.
+                $movements = JournalLineContext::pieceMovements($line);
+                unset($line['pair_pieces']);
+                if (array_key_exists('pair_status', $line)) {
+                    $line += ['pair_piece' => null];
+                }
+                foreach ($movements === null ? [$line] : array_column($movements, 'row') as $move) {
+                    $amount = (int) round($move['amount'] * 100);
+                    if ($move['side'] === 'debit') { $md += $amount; $balance += $amount; }
+                    else { $d += $amount; $balance -= $amount; }
+                    yield ['kind' => 'line', 'item' => $move + ['balance' => $balance / 100]];
+                }
             }
         }
         while (isset($accounts[$index])) {

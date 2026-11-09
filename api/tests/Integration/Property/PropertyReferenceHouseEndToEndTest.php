@@ -36,6 +36,7 @@ use PHPUnit\Framework\TestCase;
 final class PropertyReferenceHouseEndToEndTest extends TestCase
 {
     use PropertyChargeFixture;
+    use \MyInvoice\Tests\Support\PairedJournalAssertions;
 
     private const ACCOUNTS = ['315.100', '315.110', '315.120', '315.130', '315.210', '315.300', '315.400', '324.110', '324.200',
         '379.900', '379.910', '379.920', '388.210', '389.110', '518.200', '518.900', '549.900', '549.910', '641.900', '644.100',
@@ -120,9 +121,68 @@ final class PropertyReferenceHouseEndToEndTest extends TestCase
         if (isset($this->pdo) && $this->pdo->inTransaction()) $this->pdo->rollBack();
     }
 
+    /**
+     * Otisk deníku domu ve složené formě (účty, strany, částky, pořadí řádků, dvojice,
+     * počet dimenzí) z doby před jednoduchým zápisem SVJ: firma bez volby musí zapsat
+     * bajtově totéž.
+     */
+    private const COMPOSITE_JOURNAL_FINGERPRINT = '16131c11e5b13d7aa2d5f2456a77de6c158f3b82116a615ad66e965fcbdbaad7';
+
     public function testReferenceHouseTwoYearsMatchesBalanceSheets(): void
     {
         PropertyInstant::withNormalizationContext($this->referenceHouseTwoYears(...));
+        self::assertSame(self::COMPOSITE_JOURNAL_FINGERPRINT, $this->journalFingerprint());
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM journal_entry_pair_status WHERE supplier_id=' . $this->supplier)->fetchColumn());
+    }
+
+    /**
+     * Týž dům v jednoduché formě zápisu od počátku: všechny zápisy modulu nemovitostí
+     * (otevření, předpisy, úhrady, fondy, životní cyklus a vyúčtování služby, vratka)
+     * i uzávěrky rámce 504 jsou po dvojicích, součet dvojic = obrat zápisu, důkazy zápisů
+     * projdou a zůstatky, výkazy i podúčty vyjdou stejně jako ve složené formě.
+     */
+    #[\PHPUnit\Framework\Attributes\Group('pairs-e2e')]
+    public function testReferenceHouseTwoYearsInSingleEntryForm(): void
+    {
+        self::assertTrue((new \MyInvoice\Service\Accounting\EntryForm\EntryFormService($this->db, new \MyInvoice\Service\ActivityLogger($this->db),
+            new \MyInvoice\Repository\AccountingModeRepository($this->db), new \MyInvoice\Security\FrameworkScopePolicy($this->db)))->formAt($this->supplier, '2026-01-01', true)->isSingle());
+        PropertyInstant::withNormalizationContext($this->referenceHouseTwoYears(...));
+        self::assertGreaterThan(30, $this->assertSupplierJournalPaired($this->pdo, $this->supplier));
+    }
+
+    /**
+     * Otisk tvaru deníku firmy bez identifikátorů, které se mezi běhy mění. Pořadí
+     * jednotek závisí na identifikátorech a s ním i to, které jednotce připadne haléřový
+     * zbytek předpisu; zápisy se proto porovnávají jako množina a bez částek (ty hlídají
+     * zůstatky účtů a výkazy). Pořadí řádků uzávěrky jde po buňkách dimenzí, tedy taky
+     * podle identifikátorů: řádky zápisu se porovnají jako množina, `line_no` jen jako
+     * souvislá řada od prvního čísla.
+     */
+    private function journalFingerprint(): string
+    {
+        $q = $this->pdo->prepare('SELECT e.id entry_id, e.entry_date, e.source_type, e.posted_at IS NOT NULL posted, e.reversed_by IS NOT NULL reversed,
+                a.account_code, l.side, l.is_red_storno, l.currency_code, l.cost_center, l.line_no, l.pair_no, l.line_text,
+                (SELECT COUNT(*) FROM journal_entry_line_dimensions d WHERE d.supplier_id=l.supplier_id AND d.line_id=l.id) dims,
+                (SELECT COUNT(*) FROM journal_entry_line_dimension_splits d WHERE d.supplier_id=l.supplier_id AND d.line_id=l.id) splits
+            FROM journal_entries e JOIN journal_entry_lines l ON l.supplier_id=e.supplier_id AND l.entry_id=e.id
+            JOIN chart_of_accounts a ON a.supplier_id=l.supplier_id AND a.id=l.account_id
+            WHERE e.supplier_id=? ORDER BY e.id, l.line_no, l.id');
+        $q->execute([$this->supplier]);
+        $entries = $lineNos = [];
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $id = $row['entry_id'];
+            $lineNos[$id][] = (int) $row['line_no'];
+            unset($row['entry_id'], $row['line_no']);
+            $entries[$id][] = json_encode(array_values($row), JSON_THROW_ON_ERROR);
+        }
+        foreach ($lineNos as $id => $numbers) {
+            self::assertSame(range($numbers[0], $numbers[0] + count($numbers) - 1), $numbers, 'Zápis #' . $id);
+            sort($entries[$id], SORT_STRING);
+            $entries[$id] = $numbers[0] . ':' . implode('|', $entries[$id]);
+        }
+        $entries = array_values($entries);
+        sort($entries, SORT_STRING);
+        return hash('sha256', implode("\n", $entries));
     }
 
     private function referenceHouseTwoYears(): void

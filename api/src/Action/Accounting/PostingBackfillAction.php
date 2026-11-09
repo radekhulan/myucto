@@ -62,8 +62,18 @@ final class PostingBackfillAction
             $this->jobs->listForTenant($supplierId, 'document_backfill', limit: 5),
         );
 
+        $pending = $this->pending->count($supplierId);
+
         return Json::ok($response, [
-            'pending' => $this->pending->count($supplierId),
+            'pending' => $pending,
+            // Stav pro stránku: `all_posted` = nic nečeká, `backfill` = je co doúčtovat,
+            // `manual_only` = faktury jsou zaúčtované, zbytek čeká na ruční zaúčtování
+            // (banka, pokladna, zápočty), které tahle úloha nedělá.
+            'state'   => match (true) {
+                $pending['backfill_total'] > 0 => 'backfill',
+                $pending['manual_total'] > 0   => 'manual_only',
+                default                        => 'all_posted',
+            },
             'jobs'    => $jobs,
         ]);
     }

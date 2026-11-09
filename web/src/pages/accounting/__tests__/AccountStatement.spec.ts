@@ -87,6 +87,28 @@ describe('AccountStatement.vue', () => {
     expect(m.replace.mock.calls.at(-1)?.[0].query.counter).toBe('21')
   })
 
+  it('u řádku s dvojicí ukáže jediný protiúčet a označí rozložený starší zápis i M : N', async () => {
+    const base = statement().items[0]
+    m.getAccountStatement.mockResolvedValue(statement({
+      items: [
+        { ...base, line_id: 1, counter_accounts: '221', pair_no: 1, counter_account_id: 21 },
+        { ...base, line_id: 2, counter_accounts: '602', pair_status: 'derived' },
+        { ...base, line_id: 3, counter_accounts: '501, 502', pair_status: 'composite_mn' },
+      ],
+      total: 3,
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const cells = wrapper.findAll('[data-test="counter-cell"]')
+    expect(cells.map(c => c.text())).toEqual([
+      '221',
+      '602accounting.pairs.statement.derived',
+      '501, 502accounting.pairs.badge_mn',
+    ])
+    expect(cells[0].find('span').exists()).toBe(false)
+  })
+
   it('filtr z výběru a jeho zrušení', async () => {
     const wrapper = mountPage()
     await flushPromises()

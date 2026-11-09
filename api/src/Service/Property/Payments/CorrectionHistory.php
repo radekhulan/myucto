@@ -61,7 +61,7 @@ final class CorrectionHistory
                 $fact=json_decode($op['snapshot_json'],true,flags:JSON_THROW_ON_ERROR);
                 if(!hash_equals($op['snapshot_hash'],PropertyInput::hash($fact))||($fact['correction_id']??null)!==(int)$row['id']||PropertyInput::hash($fact['lines'])!==PropertyInput::hash($snapshot['lines']))PaymentException::reject('history_corrupt');
                 $ledger=$ledgers[(int)$op['journal_entry_id']];
-                if($ledger['entry']['source_type']!=='unit_payment'||$ledger['entry']['source_id']!==(int)$op['id']||$ledger['entry']['entry_date']!==$snapshot['request']['accounting_date']||$ledger['entry']['reversed_by']!==($row['status']==='reversed'?(int)$op['reversal_entry_id']:null)||PropertyInput::hash(PaymentJournalProof::canonicalLines($ledger['lines']))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($snapshot['lines'])))PaymentException::reject('ledger_mismatch');
+                if($ledger['entry']['source_type']!=='unit_payment'||$ledger['entry']['source_id']!==(int)$op['id']||$ledger['entry']['entry_date']!==$snapshot['request']['accounting_date']||$ledger['entry']['reversed_by']!==($row['status']==='reversed'?(int)$op['reversal_entry_id']:null)||!PaymentJournalProof::matches($ledger['lines'], $snapshot['lines']))PaymentException::reject('ledger_mismatch');
             }elseif($snapshot['relief_cents']!=='0')PaymentException::reject('history_corrupt');
         }
         (new IssuanceJournalProof($this->db))->assertEntries($supplier,$proofs);

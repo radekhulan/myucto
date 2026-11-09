@@ -25,6 +25,7 @@ final class BackfillService
         private readonly \MyInvoice\Service\Accounting\InvoiceSettlementService $settlements,
         private readonly ActivityLogger $logger,
         private readonly \MyInvoice\Service\Accounting\AutoPostingPolicyService $autoPosting,
+        private readonly \MyInvoice\Service\Accounting\EntryForm\EntryFormInstallationDefault $entryFormDefault,
     ) {}
 
     public function run(int $jobId): void
@@ -59,6 +60,11 @@ final class BackfillService
         $log = fn (string $line): mixed => $this->jobs->appendLog($jobId, $line);
 
         try {
+            // Výchozí forma zápisu instalace platí od prvního zápisu aktivace (otevírací
+            // rozvaha i doúčtovaná historie). Kontrola nanečisto formu nezapisuje.
+            if (!$dryRun) {
+                $this->entryFormDefault->apply($supplierId, $userId, activating: true);
+            }
             $opening = $this->opening->draft($supplierId);
             if (!$opening['totals']['balanced']) {
                 throw new \MyInvoice\Service\Accounting\PostingException(

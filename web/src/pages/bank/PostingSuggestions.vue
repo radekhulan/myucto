@@ -18,6 +18,7 @@ import {
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import WhyChip from '@/components/automation/WhyChip.vue'
 import ConfidenceLabel from '@/components/automation/ConfidenceLabel.vue'
 import {
@@ -198,9 +199,17 @@ async function bulkApprove() {
   }
 }
 
-async function unpost(it: PostingSuggestion) {
+const unpostConfirm = ref<PostingSuggestion | null>(null)
+
+function unpost(it: PostingSuggestion) {
   if (busyId.value) return
-  if (!confirm(t('bank.posting.unpost_confirm'))) return
+  unpostConfirm.value = it
+}
+
+async function confirmUnpost() {
+  const it = unpostConfirm.value
+  unpostConfirm.value = null
+  if (!it || busyId.value) return
   busyId.value = it.id
   try {
     await bankPostingApi.unpost(it.transaction.id)
@@ -464,5 +473,9 @@ useWindowRefresh(() => Promise.all([load(), loadCounts()]), () => busyId.value =
       </div>
     </div>
     <PaginationBar :page="page" :per-page="perPage" :total="total" @update:page="page = $event" />
+    <ConfirmDialog v-if="unpostConfirm"
+      :title="t('bank.posting.action_unpost')" :message="t('bank.posting.unpost_confirm')"
+      :confirm-label="t('bank.posting.action_reverse')" variant="danger"
+      @confirm="confirmUnpost" @cancel="unpostConfirm = null" />
   </div>
 </template>

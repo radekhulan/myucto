@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Opis účtu</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selectory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; padding: 0 6mm; }
+    .header-period { text-align: center; font-size: 10pt; margin-top: 2mm; }
+    .header-sub { text-align: center; font-size: 8pt; color: #555; margin-top: 1mm; }
+    .opening-line { font-size: 9pt; font-weight: bold; margin-bottom: 2mm; }
+    table.book { width: 100%; border-collapse: collapse; margin: 0; } /* bez okraje: šev mezi kusy tabulky nesmí dělat mezeru */
+    table.book thead th {
+        font-size: 7pt;
+        font-weight: normal;
+        color: #555;
+        text-align: right;
+        padding: 1mm 1.5mm;
+        border-bottom: 0.3pt solid #ccc;
+        vertical-align: bottom;
+    }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td {
+        padding: 0.8mm 1.5mm;
+        font-size: 8pt;
+        border-bottom: 0.2pt solid #eee;
+        vertical-align: top;
+    }
+    table.book tfoot td {
+        font-weight: bold;
+        font-size: 8pt;
+        padding: 1.5mm 1.5mm;
+        border-top: 0.5pt solid #333;
+        border-bottom: 0.5pt solid #333;
+    }
+    .num { text-align: right; }
+    /* Pevné šířky všech sloupců: dlouhá sestava se sází po kusech (ChunkedHtmlWriter)
+       a kusy i hlavička stránky musí lícovat, proto procenta se součtem 100 %. */
+    .col-date { width: 7%; }
+    .col-doc { width: 11%; }
+    .col-desc { width: 40%; }
+    .col-counter { width: 9%; }
+    .col-num { width: 11%; }
+    .unusual { color: #b91c1c; }
+    .sign-note { font-size: 7pt; color: #555; margin-bottom: 2mm; }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width:30%;">
+            <div class="header-meta">Ze dne: <date></div>
+                            <div class="header-meta">Strana výběru: 1 (po 100000)</div>
+                    </td>
+        <td style="width:40%;">
+            <div class="header-title">Opis účtu 221</div>
+            <div class="header-period">Peněžní prostředky na účtech</div>
+                            <div class="header-sub">Za období: 01.01.2099 – 31.12.2099</div>
+                    </td>
+        <td style="width:30%;"></td>
+    </tr>
+</table>
+
+<div class="opening-line">Počáteční zůstatek: <span class="">0,00</span></div>
+    <div class="sign-note">Zůstatek je se znaménkem podle typu účtu, červeně neobvyklá strana.</div>
+
+<table class="book">
+    <thead>
+        <tr>
+            <th class="thl col-date">Datum</th>
+            <th class="thl col-doc">Doklad</th>
+            <th class="thl col-desc">Popis</th>
+            <th class="thl col-counter">Protiúčet</th>
+            <th class="col-num">MD</th>
+            <th class="col-num">D</th>
+            <th class="col-num">Zůstatek</th>
+        </tr>
+    </thead>
+    <tbody>
+                    <tr>
+                <td class="col-date">20.01.2099</td>
+                <td class="col-doc">BV-1</td>
+                <td class="col-desc">Úhrada FV-1</td>
+                <td class="col-counter">311</td>
+                <td class="num col-num">1 210,00</td>
+                <td class="num col-num"></td>
+                <td class="num col-num ">1 210,00</td>
+            </tr>
+                    <tr>
+                <td class="col-date">25.01.2099</td>
+                <td class="col-doc">BV-2</td>
+                <td class="col-desc">Hromadná platba</td>
+                <td class="col-counter">321, 568</td>
+                <td class="num col-num"></td>
+                <td class="num col-num">1 830,00</td>
+                <td class="num col-num unusual">-620,00</td>
+            </tr>
+                    <tr>
+                <td class="col-date">01.03.2099</td>
+                <td class="col-doc">BV-3</td>
+                <td class="col-desc">Výběr do pokladny</td>
+                <td class="col-counter">211</td>
+                <td class="num col-num"></td>
+                <td class="num col-num">5 000,00</td>
+                <td class="num col-num unusual">-5 620,00</td>
+            </tr>
+                    <tr>
+                <td class="col-date">06.03.2099</td>
+                <td class="col-doc">BV-4</td>
+                <td class="col-desc">Úhrada stroje</td>
+                <td class="col-counter">321</td>
+                <td class="num col-num"></td>
+                <td class="num col-num">20 000,00</td>
+                <td class="num col-num unusual">-25 620,00</td>
+            </tr>
+                    <tr>
+                <td class="col-date">10.03.2099</td>
+                <td class="col-doc">BV-5</td>
+                <td class="col-desc">Úvěr</td>
+                <td class="col-counter">461</td>
+                <td class="num col-num">50 000,00</td>
+                <td class="num col-num"></td>
+                <td class="num col-num ">24 380,00</td>
+            </tr>
+            </tbody>
+    <tfoot>
+        <tr>
+            <td colspan="4">Obraty za období / konečný zůstatek</td>
+            <td class="num">51 210,00</td>
+            <td class="num">26 830,00</td>
+            <td class="num ">24 380,00</td>
+        </tr>
+    </tfoot>
+</table>
+
+<div class="opening-line" style="margin-top:4mm;">Součty podle protiúčtu</div>
+<table class="book">
+    <thead>
+        <tr>
+            <th class="thl col-doc">Protiúčet</th>
+            <th class="thl" style="width:67%;">Název</th>
+            <th class="col-num">MD</th>
+            <th class="col-num">D</th>
+        </tr>
+    </thead>
+    <tbody>
+                    <tr>
+                <td class="col-doc">211</td>
+                <td>Pokladna</td>
+                <td class="num col-num">0,00</td>
+                <td class="num col-num">5 000,00</td>
+            </tr>
+                    <tr>
+                <td class="col-doc">311</td>
+                <td>Pohledávky z obchodních vztahů (odběratelé)</td>
+                <td class="num col-num">1 210,00</td>
+                <td class="num col-num">0,00</td>
+            </tr>
+                    <tr>
+                <td class="col-doc">321</td>
+                <td>Závazky z obchodních vztahů (dodavatelé)</td>
+                <td class="num col-num">0,00</td>
+                <td class="num col-num">21 815,00</td>
+            </tr>
+                    <tr>
+                <td class="col-doc">461</td>
+                <td>Dlouhodobé závazky k úvěrovým institucím</td>
+                <td class="num col-num">50 000,00</td>
+                <td class="num col-num">0,00</td>
+            </tr>
+                    <tr>
+                <td class="col-doc">568</td>
+                <td>Ostatní finanční náklady</td>
+                <td class="num col-num">0,00</td>
+                <td class="num col-num">15,00</td>
+            </tr>
+            </tbody>
+</table>
+
+</body>
+</html>

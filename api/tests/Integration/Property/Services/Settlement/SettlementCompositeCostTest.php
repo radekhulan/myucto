@@ -13,6 +13,7 @@ final class SettlementCompositeCostTest extends TestCase
 {
     use \MyInvoice\Tests\Support\ChargeIssuanceFixture;
     use \MyInvoice\Tests\Support\SharedFixtureSavepointTrait;
+    use \MyInvoice\Tests\Support\PairedJournalAssertions;
     private Connection $db;
     private \DI\Container $container;
     protected function setUp():void{$this->container=Bootstrap::buildContainer();$this->db=$this->container->get(Connection::class);self::assertSame(getenv('MYINVOICE_DB_NAME'),$this->db->pdo()->query('SELECT DATABASE()')->fetchColumn());self::assertStringEndsWith('_test',getenv('MYINVOICE_DB_NAME'));$this->db->pdo()->exec("SET SESSION sql_mode='STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'");$this->beginSharedFixtureTest($this->db->pdo());}
@@ -20,7 +21,8 @@ final class SettlementCompositeCostTest extends TestCase
     /** Základ je pro všechny testy stejný, staví se jednou za třídu pro každou variantu. */
     private function base(bool $applyKnown=false,bool $distinctContext=false):array
     {
-        return $this->sharedFixture('composite-'.(int)$applyKnown.(int)$distinctContext,fn()=>$this->buildBase($applyKnown,$distinctContext));
+        $form=str_ends_with($this->name(),'InSingleEntryForm')?'-single':'';
+        return $this->sharedFixture('composite-'.(int)$applyKnown.(int)$distinctContext.$form,fn()=>$this->buildBase($applyKnown,$distinctContext));
     }
     private function buildBase(bool $applyKnown,bool $distinctContext):array
     {
@@ -118,5 +120,22 @@ final class SettlementCompositeCostTest extends TestCase
     {
         $d=$this->base();$f=$d['f'];$app=\Slim\Factory\AppFactory::create(null,$this->container);\MyInvoice\Routes::register($app);$app->add($this->container->get(\MyInvoice\Middleware\CsrfMiddleware::class));$app->add(new \MyInvoice\Middleware\ApiScopeMiddleware(new \Slim\Psr7\Factory\ResponseFactory()));$app->add(new \MyInvoice\Middleware\ApiVersionRewriteMiddleware());$http=new SettlementHttpTest('testNativeHttpRoundtripPreservesCurrentMoneyIdempotencyAndCuratedPublicIsolation');foreach(['db'=>$this->db,'f'=>$f,'app'=>$app] as $key=>$value)(new \ReflectionProperty($http,$key))->setValue($http,$value);$call=fn(string $method,string $path,array $body=[],bool $bearer=false,array $query=[])=>(new \ReflectionMethod($http,'http'))->invoke($http,$method,$path,$body,null,$bearer,true,$query);
         [$status,$catalog]=$call('GET','/api/property/service-settlements/catalog/costs',[],false,['unit_id'=>$f['units']['U02'],'service_id'=>$f['service']['id'],'date'=>'2027-04-01','s3_line_id'=>$d['selector']['id']]);self::assertSame(200,$status,json_encode($catalog));$candidates=array_values(array_filter($catalog['items'],fn($item)=>$item['cost_cents']==='13200000'));self::assertCount(1,$candidates);$candidate=$candidates[0];$request=array_intersect_key($d['facts'],array_flip(['unit_id','service_id','period_from','period_to','cutoff_at','recipient_ids','evidence']))+['segment_key'=>'COMPOSITE-HTTP-FINAL','accounting_date'=>'2027-04-01','known_at'=>'2027-04-01T12:00:00+02:00','selectors'=>[$candidate['selector']],'cost_source_id'=>$candidate['cost_source_id']];[$status,$preview]=$call('POST','/api/property/service-settlements/prepare',['request'=>$request,'expected_revision'=>0]);self::assertSame(200,$status,json_encode($preview));self::assertCount(2,$preview['document']['cost']['sources']);[$status,$saved]=$call('POST','/api/property/service-settlements',['request'=>$request,'expected_revision'=>0,'preview_hash'=>$preview['preview_hash'],'idempotency_key'=>'composite-http-save']);self::assertSame(200,$status,json_encode($saved));$application=['accounting_date'=>'2027-04-01','evidence'=>'Synthetic HTTP full composite disposition','advances'=>[['origin_key'=>'s3_line:'.$d['selector']['id'],'applied_cents'=>'13200000']],'reliefs'=>[],'opening_credits'=>[],'new_claim'=>null];[$status,$plan]=$call('POST','/api/property/service-settlements/'.$saved['id'].'/preview',['request'=>$application,'expected_version'=>0]);self::assertSame(200,$status,json_encode($plan));[$status,$done]=$call('POST','/api/property/service-settlements/'.$saved['id'].'/apply',['request'=>$application,'expected_version'=>0,'preview_hash'=>$plan['preview_hash'],'idempotency_key'=>'composite-http-apply']);self::assertSame(200,$status,json_encode($done));self::assertSame('0.00',$this->balance($f['supplier'],'315.210'));self::assertSame('0.00',$this->balance($f['supplier'],'324.110'));[$status,$public]=$call('GET','/api/v1/property/catalog/service-settlements/'.$saved['id'],[],true);self::assertSame(200,$status,json_encode($public));(new \ReflectionMethod($http,'assertRedacted'))->invoke($http,$public);
+    }
+
+    /**
+     * Jednoduchá forma: vyúčtování s dílčími náklady se rozdělí na dvojice uvnitř pohybu
+     * (záloha proti každému dílčímu nákladu), účinky vyúčtování ukazují na své řádky
+     * a storno vyúčtování zrcadlí dvojice originálu.
+     */
+    #[\PHPUnit\Framework\Attributes\Group('pairs-e2e')]
+    public function testEveryNativeCostContextSurvivesCompositeJournalAndReversalInSingleEntryForm():void
+    {
+        $this->testEveryNativeCostContextSurvivesCompositeJournalAndReversal();
+        $supplier=$this->base(false,true)['f']['supplier'];
+        $this->assertSupplierJournalPaired($this->db->pdo(),$supplier);
+        $q=$this->db->pdo()->prepare("SELECT COUNT(*) FROM journal_entries e WHERE e.supplier_id=? AND e.source_type='property_service_settlement'
+            AND (SELECT COUNT(*) FROM journal_entry_lines l WHERE l.supplier_id=e.supplier_id AND l.entry_id=e.id) > 2");
+        $q->execute([$supplier]);
+        self::assertSame(2,(int)$q->fetchColumn(),'Vyúčtování i jeho storno jsou rozdělené po dílčích nákladech.');
     }
 }

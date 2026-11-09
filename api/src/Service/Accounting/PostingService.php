@@ -17,6 +17,10 @@ use MyInvoice\Service\Accounting\Dimension\DimensionAccountRouter;
 use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
+use MyInvoice\Service\Accounting\Pair\JournalPairer;
+use MyInvoice\Service\Accounting\Pair\JournalPairException;
+use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
@@ -67,6 +71,9 @@ use PDO;
  */
 final class PostingService
 {
+    /** Automatický zápis v jednoduché formě nejde rozložit na dvojice (doklad zůstal nezaúčtovaný). */
+    public const AUTOMATIC_PAIRING_FAILED = 'automatic_pairing_failed';
+
     public const POSTABLE_ISSUED_INVOICE_TYPES = ['invoice', 'credit_note', 'tax_document', 'penalty'];
 
     /**
@@ -79,6 +86,25 @@ final class PostingService
      * kurzové zaokrouhlení dvou nezávislých přepočtů — hlavičky a per-řádku).
      */
     private const ROUNDING_TOLERANCE_CENTS = 200;
+
+    /**
+     * Zdroje typovaných vlastníků NNO: jejich zápisy hlídají vlastní důkazy řádků, proto
+     * je jednoduchá forma nedělí na dvojice (vedou se jako `ineligible`). Zdroje SVJ sem
+     * nepatří: jejich důkazy porovnávají zápis po dvojicích
+     * ({@see \MyInvoice\Service\Accounting\Pair\TypedJournalPairs}).
+     */
+    private const PAIR_TYPED_SOURCES = [
+        'nonprofit_capital' => true, 'nonprofit_membership' => true,
+    ];
+
+    /**
+     * Zdroje modulu nemovitostí SVJ: dimenze jednotek si vede modul sám a jeho důkazy
+     * (PaymentJournalProof, IssuanceJournalProof) porovnávají zapsané řádky s plánem,
+     * proto jim zaúčtování po dvojicích středisko a dimenze na druhou stranu nedoplňuje.
+     */
+    private const PAIR_OWN_ANALYTICS_SOURCES = [
+        'unit_charge' => true, 'unit_payment' => true,
+    ];
 
     /**
      * Fallback účtu pro daň v režimu OSS, když kontace `oss.output.vat` chybí (instance,
@@ -158,6 +184,19 @@ final class PostingService
 
     private ?ProductPostingDefaults $productDefaults = null;
     private ?RevenueRuleMatcher $revenueRules = null;
+    private ?ItemPostingAccounts $itemPosting = null;
+
+    private ?EntryFormService $entryForms = null;
+
+    /** Posouzení párování posledního prepareDocumentLines() ({@see lastPairOutcome()}). */
+    private ?array $pairOutcome = null;
+
+    /**
+     * Účtuje doklad, který se právě skládá (buildFromInvoice / buildFromPurchaseInvoice),
+     * firma k jeho datu po dvojicích? Jen tehdy dostanou řádky builderu klíče pro
+     * JournalPairer; složená firma má řádky přesně jako dřív (i v náhledu a auditu).
+     */
+    private bool $pairHints = false;
 
     private ?BankDocumentNumber $bankDocumentNumber = null;
 
@@ -229,8 +268,9 @@ final class PostingService
     }
 
     /** @return list<array<string,mixed>> */
-    public function prepareDocumentLines(int $supplierId, string $sourceType, ?int $sourceId, array $lines, string $entryDate, bool $currentRead = false): array
+    public function prepareDocumentLines(int $supplierId, string $sourceType, ?int $sourceId, array $lines, string $entryDate, bool $currentRead = false, bool $keepComposite = false): array
     {
+        $this->pairOutcome = null;
         // 1) překlad CODE → account_id (v rámci osnovy firmy) + kontrola vyváženosti.
         //    Vyváženost se ověřuje na RESOLVED řádcích (částky zaokr. na 2 des. místa),
         //    tj. přesně na tom, co se uloží — ne na surovém vstupu.
@@ -245,6 +285,11 @@ final class PostingService
             $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap, $entryDate, $currentRead),
             $entryDate,
         );
+        foreach ($resolved as $i => $line) {
+            if (isset($line['split_siblings'])) {
+                unset($resolved[$i]['current_dimensions'], $resolved[$i]['split_siblings']);
+            }
+        }
         // Účtotvorná dimenze (migrace 1952): hodnota dimenze přepíše výsledkovou syntetiku
         // na analytiku z mapy, rozpad typu rozdělí řádek po analytikách. Až po razítkování
         // a rozpadech dokladu — rozhoduje výsledná dimenze řádku, ať ji dal doklad, položka,
@@ -260,7 +305,110 @@ final class PostingService
 
         self::assertBalanced($resolved); // v haléřích; UnbalancedEntryException při nerovnosti
 
-        return $resolved;
+        return $this->pairLines($supplierId, $sourceType, $entryDate, $resolved, $currentRead, $keepComposite);
+    }
+
+    /**
+     * Jednoduchý (párový) zápis: ve firmě, která má k `entry_date` jednoduchou formu,
+     * rozloží vyvážené řádky na dvojice ({@see JournalPairer}). Tím jdou dvojicemi všechny
+     * cesty přes PostingService najednou, včetně náhledu zápisu v editoru dokladu.
+     *
+     * Složená forma: řídicí klíče builderu (`pair_group`, `pair_role`) i `pair_no` se
+     * zahodí a řádky jsou přesně jako dřív. Nerozdělitelný zápis (M : N bez pravidla):
+     * ruční zápis se odmítne (`pairing_required`), automatický taky
+     * ({@see AUTOMATIC_PAIRING_FAILED}) a doklad zůstane nezaúčtovaný. Výjimkou je mzdový
+     * předpis, který se zaúčtuje složeně a posouzení si přečte postDocumentOnce()
+     * z {@see $pairOutcome}.
+     * Typovaní vlastníci (SVJ předpisy) a importy (`$keepComposite`) zůstávají složené.
+     *
+     * @param list<array<string,mixed>> $resolved
+     * @return list<array<string,mixed>>
+     */
+    private function pairLines(int $supplierId, string $sourceType, string $entryDate, array $resolved, bool $currentRead, bool $keepComposite): array
+    {
+        $form = $this->entryForms()->formAt($supplierId, $entryDate, $currentRead);
+        if (!$form->isSingle()) {
+            $hasPairs = false;
+            foreach ($resolved as $line) {
+                if (isset($line['pair_no'])) {
+                    $hasPairs = true;
+                    break;
+                }
+            }
+            if ($hasPairs) {
+                throw new PostingException(
+                    JournalPairInvariant::COMPOSITE_FORM,
+                    JournalPairInvariant::message(JournalPairInvariant::COMPOSITE_FORM),
+                );
+            }
+            return JournalPairer::stripPairKeys($resolved);
+        }
+        if ($keepComposite || isset(self::PAIR_TYPED_SOURCES[$sourceType])) {
+            $this->pairOutcome = ['status' => 'ineligible', 'reason' => $keepComposite ? 'import' : 'typed_owner'];
+            return JournalPairer::stripPairKeys($resolved);
+        }
+        try {
+            $result = JournalPairer::pair($resolved);
+        } catch (JournalPairException $e) {
+            throw new PostingException($e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
+        }
+        if ($result['status'] === JournalPairer::STATUS_PAIRED) {
+            // Středisko, zakázka a dimenze dvojice i na saldokontní straně (311, 321, …),
+            // aby přehledy a rozvaha po dimenzi seděly po dvojicích.
+            return isset(self::PAIR_OWN_ANALYTICS_SOURCES[$sourceType])
+                ? $result['lines']
+                : JournalPairer::shareAnalytics($result['lines']);
+        }
+        $reason = (string) ($result['reason'] ?? JournalPairer::REASON_MANY_TO_MANY);
+        if ($sourceType === 'manual') {
+            throw new PostingException(
+                'pairing_required',
+                'Zápis v období s jednoduchou formou zápisu musí být po dvojicích (účet MD, účet Dal, částka).',
+                422,
+                ['reason' => $reason],
+            );
+        }
+        // Platí i pro mzdový předpis: ten skládá dvojice sám (PayrollPostingLineBuilder::
+        // singleEntryLines, přeřazení střediska jako storno a nová dvojice), takže M : N
+        // z něj znamená chybu a předpis zůstane nezaúčtovaný.
+        throw self::automaticPairingFailed($sourceType, $reason);
+    }
+
+    /**
+     * Automatický zápis v jednoduché formě, který nejde rozložit na dvojice, se do deníku
+     * nezapíše: doklad zůstane nezaúčtovaný (fronta doúčtování, ruční zaúčtování po
+     * dvojicích) a automatika ho zaloguje jako každou jinou chybu zaúčtování.
+     */
+    public static function automaticPairingFailed(string $sourceType, string $reason): PostingException
+    {
+        return new PostingException(
+            self::AUTOMATIC_PAIRING_FAILED,
+            'Zápis dokladu nejde v jednoduché formě rozložit na dvojice MD/Dal. Doklad zůstal nezaúčtovaný: '
+                . 'zaúčtujte ho ručně po dvojicích nebo upravte předkontaci.',
+            422,
+            ['reason' => $reason, 'source_type' => $sourceType],
+        );
+    }
+
+    /**
+     * Posouzení posledního {@see prepareDocumentLines()}: null = dvojice nebo složená forma,
+     * jinak stav pro `journal_entry_pair_status` (zápis zůstal v jednoduché formě složený).
+     *
+     * @return array{status:string, reason:string}|null
+     */
+    public function lastPairOutcome(): ?array
+    {
+        return $this->pairOutcome;
+    }
+
+    private function entryForms(): EntryFormService
+    {
+        return $this->entryForms ??= new EntryFormService(
+            $this->db,
+            $this->activity,
+            new \MyInvoice\Repository\AccountingModeRepository($this->db),
+            new \MyInvoice\Security\FrameworkScopePolicy($this->db),
+        );
     }
 
     /**
@@ -309,7 +457,7 @@ final class PostingService
             }
             if ($lockedUntil !== null && $entryDate <= $lockedUntil) {
                 throw new PostingException('date_locked', 'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
-                    . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. Zámek posuň v nastavení účetnictví (jen admin).');
+                    . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. Zámek posuň v nastavení účetnictví (smí správce nebo role s právem posunout zámek).');
             }
             $dates[$entryDate] = true;
             $ids[$sourceId] = true;
@@ -510,7 +658,21 @@ final class PostingService
                 throw self::dateLockedException($entryDate, (string) $lockedUntil);
             }
 
-            $resolved = $batchDocument['resolved_lines'] ?? $this->prepareDocumentLines($supplierId, $sourceType, $sourceId, $lines, $entryDate, true);
+            // Importy převzaté historie zůstávají složené i v jednoduché formě; o rozdělení
+            // rozhodne převod zápisů (`entry_form_override` = 'composite').
+            $keepComposite = ($meta['entry_form_override'] ?? null) === 'composite';
+            if (isset($batchDocument['resolved_lines'])) {
+                // Dávka předpisů SVJ skládala řádky (i dvojice) už v preflightu.
+                $resolved = $batchDocument['resolved_lines'];
+                $pairOutcome = null;
+                if (array_filter($resolved, static fn (array $l): bool => isset($l['pair_no'])) === []
+                    && $this->entryForms()->formAt($supplierId, $entryDate, true)->isSingle()) {
+                    throw self::automaticPairingFailed($sourceType, JournalPairer::REASON_MANY_TO_MANY);
+                }
+            } else {
+                $resolved = $this->prepareDocumentLines($supplierId, $sourceType, $sourceId, $lines, $entryDate, true, $keepComposite);
+                $pairOutcome = $this->pairOutcome;
+            }
 
             // Přeúčtování ručními řádky přebírá aktuální stopu i ze stornovaného zdroje.
             // Čtení patří až za zámky období a nastavení, stejně jako ostatní čtení deníku.
@@ -556,6 +718,12 @@ final class PostingService
                 'posted_at'     => $posted ? ($meta['posted_at'] ?? date('Y-m-d H:i:s')) : null,
                 'posted_by'     => $postedBy,
             ];
+            if ($pairOutcome !== null) {
+                // Zápis zůstal v jednoduché formě složený: zapisovač řádků ho přijme jen
+                // s posouzením a zaznamená ho do journal_entry_pair_status.
+                $header['pair_status'] = $pairOutcome['status'];
+                $header['pair_status_reason'] = $pairOutcome['reason'];
+            }
             if ($batchContext !== null) $header['issuance_posting_batch_context'] = $batchContext;
 
             // Idempotence se ptá na AKTIVNÍ zápis dokladu (migrace 1752). Stornovaný
@@ -793,7 +961,10 @@ final class PostingService
                 throw new PostingException('unbalanced_entry', 'Výměna řádků zápisu #' . $entryId . ' by porušila podvojnost.');
             }
 
-            $this->journal->replaceSomeLines($entryId, $supplierId, $expectedRowVersion, array_map('intval', $removeLineIds), $resolved);
+            [$removeIds, $writeLines, $pairHeader, $renumber] = $this->pairReplacement(
+                $supplierId, $entryId, $entryDate, $existing, array_map('intval', $removeLineIds), $resolved,
+            );
+            $this->journal->replaceSomeLines($entryId, $supplierId, $expectedRowVersion, $removeIds, $writeLines, $pairHeader, $renumber);
             $this->activity->log(
                 'accounting.posted',
                 $meta['user_id'] ?? null,
@@ -821,6 +992,135 @@ final class PostingService
             }
             throw $e;
         }
+    }
+
+    /**
+     * Výměna části řádků v zápisu po dvojicích: odebírá se vždy CELÁ dvojice (partner
+     * odebraného řádku se vrací jako nový řádek), nové řádky se rozloží na dvojice
+     * ({@see JournalPairer}) a jejich čísla obsadí uvolněná čísla dvojic, aby zápis držel
+     * čísla 1..n. Dvojice s číslem nad n se přečíslují dolů (ne ta, na kterou odkazuje
+     * storno dvojice). Zápis bez dvojic zůstává složený se svým posouzením. Složená forma:
+     * řádky beze změny.
+     *
+     * @param array<int,array<string,mixed>> $existing živé řádky zápisu podle id
+     * @param list<int> $removeIds
+     * @param list<array<string,mixed>> $resolved nové řádky
+     * @return array{0:list<int>, 1:list<array<string,mixed>>, 2:array<string,mixed>, 3:array<int,int>}
+     *         odebrané řádky, zapisované řádky, hlavička posouzení, přečíslování zachovaných dvojic
+     */
+    private function pairReplacement(int $supplierId, int $entryId, string $entryDate, array $existing, array $removeIds, array $resolved): array
+    {
+        $paired = false;
+        foreach ($existing as $line) {
+            if (isset($line['pair_no'])) {
+                $paired = true;
+                break;
+            }
+        }
+        $single = $this->entryForms()->formAt($supplierId, $entryDate, true)->isSingle();
+        if (!$paired) {
+            foreach ($resolved as $i => $line) {
+                if (isset($line['pair_no'])) {
+                    throw new PostingException(JournalPairInvariant::COMPOSITE_FORM, JournalPairInvariant::message(JournalPairInvariant::COMPOSITE_FORM));
+                }
+                unset($resolved[$i]['pair_group'], $resolved[$i]['pair_role']);
+            }
+            if (!$single) {
+                return [$removeIds, $resolved, [], []];
+            }
+            $stmt = $this->db->pdo()->prepare('SELECT status, reason FROM journal_entry_pair_status WHERE supplier_id = ? AND entry_id = ?');
+            $stmt->execute([$supplierId, $entryId]);
+            $status = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            $header = in_array($status['status'] ?? null, JournalPairInvariant::UNPAIRED_STATUSES, true)
+                ? ['pair_status' => $status['status'], 'pair_status_reason' => $status['reason']]
+                : ['pair_status' => 'composite_mn', 'pair_status_reason' => 'partial_replace'];
+            return [$removeIds, JournalPairer::stripPairKeys($resolved), $header, []];
+        }
+
+        $remove = array_fill_keys($removeIds, true);
+        $removedPairs = [];
+        foreach ($removeIds as $lineId) {
+            $removedPairs[(int) ($existing[$lineId]['pair_no'] ?? 0)] = true;
+        }
+        $partners = [];
+        foreach ($existing as $lineId => $line) {
+            if (!isset($remove[$lineId]) && isset($line['pair_no'], $removedPairs[(int) $line['pair_no']])) {
+                $partners[] = $line;
+                $remove[$lineId] = true;
+            }
+        }
+        $carried = array_map(static function (array $line): array {
+            unset($line['id'], $line['entry_id'], $line['supplier_id'], $line['line_no'], $line['pair_no']);
+            return $line;
+        }, $partners === [] ? [] : $this->currentDimensionLines($supplierId, $partners));
+        try {
+            $result = JournalPairer::pair([...$resolved, ...$carried]);
+        } catch (JournalPairException $e) {
+            throw new PostingException($e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
+        }
+        if ($result['status'] !== JournalPairer::STATUS_PAIRED) {
+            throw new PostingException(
+                'pairing_required',
+                'Vyměněné řádky zápisu #' . $entryId . ' nejde rozložit na dvojice.',
+                422,
+                ['reason' => $result['reason'] ?? null],
+            );
+        }
+        if ($single) {
+            $result['lines'] = JournalPairer::shareAnalytics($result['lines']);
+        }
+
+        $retained = [];
+        foreach ($existing as $lineId => $line) {
+            if (!isset($remove[$lineId]) && isset($line['pair_no'])) {
+                $retained[(int) $line['pair_no']] = true;
+            }
+        }
+        $preset = [];
+        foreach ($resolved as $line) {
+            $pairNo = JournalPairInvariant::pairNoOf($line);
+            if ($pairNo !== null) {
+                if (isset($retained[$pairNo])) {
+                    throw new PostingException(JournalPairInvariant::NUMBERING, JournalPairInvariant::message(JournalPairInvariant::NUMBERING));
+                }
+                $preset[$pairNo] = true;
+            }
+        }
+        $generated = [];
+        foreach ($result['lines'] as $line) {
+            if (!isset($preset[(int) $line['pair_no']])) {
+                $generated[(int) $line['pair_no']] = true;
+            }
+        }
+        $n = count($retained) + count($preset) + count($generated);
+        $occupied = $retained + $preset;
+        $free = array_values(array_diff(range(1, max(1, $n)), array_keys($occupied)));
+        $overflow = array_values(array_filter(array_keys($occupied), static fn (int $no): bool => $no > $n));
+        sort($overflow);
+        $map = [];
+        foreach (array_keys($generated) as $i => $no) {
+            $map[$no] = $free[$i];
+        }
+        $renumber = [];
+        $newPreset = [];
+        foreach ($overflow as $i => $no) {
+            $target = $free[count($generated) + $i];
+            if (isset($preset[$no])) {
+                $newPreset[$no] = $target;
+            } else {
+                $renumber[$no] = $target;
+            }
+        }
+        if ($renumber !== [] && array_intersect(array_keys($renumber), $this->journal->reversedPairNos($supplierId, $entryId)) !== []) {
+            throw new PostingException('pair_renumber_blocked', 'Zápis #' . $entryId . ' má stornovanou dvojici, kterou by výměna musela přečíslovat.', 409);
+        }
+        $lines = array_map(static function (array $line) use ($map, $newPreset): array {
+            $no = (int) $line['pair_no'];
+            $line['pair_no'] = $map[$no] ?? $newPreset[$no] ?? $no;
+            return $line;
+        }, $result['lines']);
+
+        return [array_keys($remove), $lines, $single ? [] : ['pairs_inherited' => true], $renumber];
     }
 
     /**
@@ -861,8 +1161,37 @@ final class PostingService
         );
     }
 
-    /** @param array{entry_date?:string, description?:?string, posted_by?:?int, user_id?:?int, ip?:?string, user_agent?:?string} $meta */
-    private function reverseOnce(int $supplierId, int $entryId, array $meta): int
+    /**
+     * Storno vybraných dvojic jednoduchého zápisu opravným zápisem (kritérium f). Datum,
+     * období a zámky přesně jako {@see reverse()}; originál zůstává jako celek nestornovaný
+     * a vazby jdou do `journal_pair_reversals`. S `$replacement` (jen pro jednu dvojici)
+     * nese opravný zápis i novou dvojici přeúčtování se stejnou částkou.
+     * Pravidla, kdy je storno dvojice dovolené (doklady, mzdy), drží volající
+     * ({@see Pair\JournalPairCorrectionService}).
+     *
+     * @param list<int> $pairNos
+     * @param array{entry_date?:string, description?:?string, posted_by?:?int, user_id?:?int, ip?:?string, user_agent?:?string} $meta
+     * @param array{debit_account_code:string, credit_account_code:string, line_text?:?string}|null $replacement
+     * @return int id opravného zápisu
+     */
+    public function reversePairs(int $supplierId, int $entryId, array $pairNos, array $meta = [], ?array $replacement = null): int
+    {
+        $pairNos = array_values(array_unique(array_map('intval', $pairNos)));
+        if ($pairNos === [] || ($replacement !== null && count($pairNos) !== 1)) {
+            throw new PostingException('validation_failed', 'Vyberte dvojice ke stornu (přeúčtovat jde jen jedna dvojice).');
+        }
+        return TransactionFailure::retrying(
+            $this->db->pdo(),
+            fn (): int => $this->reverseOnce($supplierId, $entryId, $meta, $pairNos, $replacement),
+        );
+    }
+
+    /**
+     * @param array{entry_date?:string, description?:?string, posted_by?:?int, user_id?:?int, ip?:?string, user_agent?:?string} $meta
+     * @param list<int>|null $pairNos null = storno celého zápisu
+     * @param array{debit_account_code:string, credit_account_code:string, line_text?:?string}|null $replacement
+     */
+    private function reverseOnce(int $supplierId, int $entryId, array $meta, ?array $pairNos = null, ?array $replacement = null): int
     {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
@@ -944,7 +1273,7 @@ final class PostingService
                 throw new PostingException(
                     'date_locked',
                     'Zámek období k ' . $lockedUntil . ' zasahuje i aktuální datum — storno nelze '
-                        . 'zaúčtovat do otevřeného data. Posuň zámek zpět v nastavení účetnictví (jen admin).',
+                        . 'zaúčtovat do otevřeného data. Posuň zámek zpět v nastavení účetnictví (smí správce nebo role s právem posunout zámek).',
                 );
             }
             $reversalDate = $today;
@@ -972,33 +1301,43 @@ final class PostingService
         // proto se ruší kladným řádkem na stejné straně.
         // Dimenze se přenáší ze stejného důvodu jako zakázka — storno musí odečíst
         // tam, kam původní řádek přičetl.
+        // Zakázka se do storna MUSÍ přenést, jinak by protizápis náklad akce odečetl
+        // z „bez zakázky" a v marži by původní řádek zůstal navždy. Zrcadlo skládá
+        // jediné místo JournalLineAmount::mirrorLines() (storno celého zápisu i dvojic).
+        // Dvojice, které už stornovalo nebo přeúčtovalo storno dvojice, se nezrcadlí znovu.
+        $reversedPairs = array_flip($this->journal->reversedPairNos($supplierId, $entryId));
+        if ($pairNos !== null) {
+            $wanted = array_flip($pairNos);
+            $origLines = array_values(array_filter(
+                $origLines,
+                static fn (array $line): bool => isset($line['pair_no'], $wanted[(int) $line['pair_no']]),
+            ));
+            if (count($origLines) !== 2 * count($pairNos)) {
+                throw new PostingException('pair_not_found', 'Zápis #' . $entryId . ' nemá všechny vybrané dvojice.', 404);
+            }
+            foreach ($pairNos as $pairNo) {
+                if (isset($reversedPairs[$pairNo])) {
+                    throw new PostingException('pair_already_reversed', 'Dvojice #' . $pairNo . ' už byla stornována nebo přeúčtována.', 409);
+                }
+            }
+        } elseif ($reversedPairs !== []) {
+            $origLines = array_values(array_filter(
+                $origLines,
+                static fn (array $line): bool => !isset($line['pair_no']) || !isset($reversedPairs[(int) $line['pair_no']]),
+            ));
+            if ($origLines === []) {
+                throw new PostingException('empty_entry', 'Všechny dvojice zápisu #' . $entryId . ' už jsou stornované.');
+            }
+        }
         $assignments = new DimensionAssignmentRepository($this->db);
         $origLineIds = array_map(static fn (array $l): int => (int) ($l['id'] ?? 0), $origLines);
-        $origDims = $assignments->lineDimensions($supplierId, $origLineIds, true);
-        $origSplits = $assignments->lineSplits($supplierId, $origLineIds, true);
-        $origOrigins = $assignments->lineOrigins($supplierId, $origLineIds, true);
-        $origSplitOrigins = $assignments->lineSplitOrigins($supplierId, $origLineIds, true);
-        $mirror = [];
-        foreach ($origLines as $line) {
-            $reversalLine = JournalLineAmount::reversal($line);
-            $mirror[] = [
-                'account_id'     => (int) $line['account_id'],
-                'side'           => $reversalLine['side'],
-                'amount'         => $line['amount'],
-                'is_red_storno'  => $reversalLine['is_red_storno'],
-                'currency_code'  => $line['currency_code'] ?? null,
-                'fx_rate'        => $line['fx_rate'] ?? null,
-                'amount_foreign' => $line['amount_foreign'] ?? null,
-                'cost_center'    => $line['cost_center'] ?? null,
-                // Zakázka se do storna MUSÍ přenést, jinak by protizápis náklad akce
-                // odečetl z „bez zakázky" a v marži by původní řádek zůstal navždy.
-                'project_id'     => isset($line['project_id']) ? (int) $line['project_id'] : null,
-                'dimensions'     => $origDims[(int) ($line['id'] ?? 0)] ?? [],
-                'dimension_splits' => $origSplits[(int) ($line['id'] ?? 0)] ?? [],
-                'dimension_origins' => $origOrigins[(int) ($line['id'] ?? 0)] ?? [],
-                'dimension_split_origins' => $origSplitOrigins[(int) ($line['id'] ?? 0)] ?? [],
-            ];
-        }
+        $mirror = JournalLineAmount::mirrorLines(
+            $origLines,
+            $assignments->lineDimensions($supplierId, $origLineIds, true),
+            $assignments->lineSplits($supplierId, $origLineIds, true),
+            $assignments->lineOrigins($supplierId, $origLineIds, true),
+            $assignments->lineSplitOrigins($supplierId, $origLineIds, true),
+        );
 
         $header = [
             'supplier_id'   => $supplierId,
@@ -1017,7 +1356,46 @@ final class PostingService
             'posted_by'     => $meta['posted_by'] ?? null,
         ];
 
+            if ($pairNos !== null) {
+                $replacementLines = [];
+                if ($replacement !== null) {
+                    $amount = $origLines[0]['amount'];
+                    $codeMap = $this->accounts->codeToIdMap($supplierId, $reversalDate, true);
+                    $replacementLines = $this->resolveLines($supplierId, [
+                        ['account_code' => (string) $replacement['debit_account_code'], 'side' => 'debit', 'amount' => $amount,
+                            'line_text' => $replacement['line_text'] ?? null],
+                        ['account_code' => (string) $replacement['credit_account_code'], 'side' => 'credit', 'amount' => $amount,
+                            'line_text' => $replacement['line_text'] ?? null],
+                    ], $codeMap, (string) $original['source_type'], $reversalDate, true);
+                    if ((int) $replacementLines[0]['account_id'] === (int) $replacementLines[1]['account_id']) {
+                        throw new PostingException(JournalPairInvariant::SAME_ACCOUNT, JournalPairInvariant::message(JournalPairInvariant::SAME_ACCOUNT));
+                    }
+                }
+                $header['description'] = $meta['description'] ?? ('Storno dvojic účetního zápisu #' . $entryId);
+                $reversalId = $this->journal->insertPairReversal(
+                    $header, $mirror, $entryId, $pairNos, $replacementLines,
+                    isset($meta['user_id']) ? (int) $meta['user_id'] : null,
+                );
+                $this->activity->log(
+                    'accounting.reversed',
+                    $meta['user_id'] ?? null,
+                    'journal_entry',
+                    $reversalId,
+                    ['original_entry_id' => $entryId, 'reversal_entry_id' => $reversalId, 'pair_nos' => $pairNos,
+                        'replacement' => $replacement, 'lines' => $mirror],
+                    $meta['ip'] ?? null,
+                    $meta['user_agent'] ?? null,
+                    $supplierId,
+                );
+                if ($ownTx) {
+                    $pdo->commit();
+                }
+                return $reversalId;
+            }
             $reversalId = $this->journal->insertReversal($header, $mirror, $entryId);
+            if ($reversedPairs !== []) {
+                $this->reverseReplacementPairs($supplierId, $entryId, ['entry_date' => $reversalDate] + $meta);
+            }
             if (in_array((string) $original['source_type'], ['bank', 'cash'], true)
                 && $original['source_id'] !== null) {
                 $column = $original['source_type'] === 'bank' ? 'bank_transaction_id' : 'cash_document_id';
@@ -1052,6 +1430,51 @@ final class PostingService
                 $pdo->rollBack();
             }
             throw $e;
+        }
+    }
+
+    /**
+     * Storno celého zápisu po přeúčtování dvojice opravným zápisem: originál zrcadlí jen
+     * dvojice, které nikdo nestornoval, ale nová dvojice přeúčtování žije v opravném
+     * zápisu. Aby storno zrušilo CELÝ doklad (všechny dvojice), stornuje se i ona, a pokud
+     * byla sama přeúčtovaná dál, pak její poslední náhrada. Čisté storno dvojice (bez
+     * náhrady) už je zrušené a nic dalšího nepotřebuje. Složený zápis sem nevstoupí.
+     *
+     * @param array<string,mixed> $meta
+     */
+    private function reverseReplacementPairs(int $supplierId, int $entryId, array $meta): void
+    {
+        $links = $this->db->pdo()->prepare(
+            'SELECT r.reversal_entry_id, r.replacement_pair_no
+               FROM journal_pair_reversals r
+               JOIN journal_entries e ON e.supplier_id = r.supplier_id AND e.id = r.reversal_entry_id
+              WHERE r.supplier_id = ? AND r.entry_id = ? AND r.replacement_pair_no IS NOT NULL
+                AND e.reversed_by IS NULL
+              ORDER BY r.pair_no'
+        );
+        $links->execute([$supplierId, $entryId]);
+        foreach ($links->fetchAll(PDO::FETCH_ASSOC) as $link) {
+            $this->reverseLivePair($supplierId, (int) $link['reversal_entry_id'], (int) $link['replacement_pair_no'], $meta);
+        }
+    }
+
+    /** @param array<string,mixed> $meta */
+    private function reverseLivePair(int $supplierId, int $entryId, int $pairNo, array $meta): void
+    {
+        $next = $this->db->pdo()->prepare(
+            'SELECT r.reversal_entry_id, r.replacement_pair_no
+               FROM journal_pair_reversals r
+               JOIN journal_entries e ON e.supplier_id = r.supplier_id AND e.id = r.reversal_entry_id
+              WHERE r.supplier_id = ? AND r.entry_id = ? AND r.pair_no = ? AND e.reversed_by IS NULL'
+        );
+        $next->execute([$supplierId, $entryId, $pairNo]);
+        $link = $next->fetch(PDO::FETCH_ASSOC);
+        if ($link === false) {
+            $this->reverseOnce($supplierId, $entryId, $meta, [$pairNo]);
+            return;
+        }
+        if ($link['replacement_pair_no'] !== null) {
+            $this->reverseLivePair($supplierId, (int) $link['reversal_entry_id'], (int) $link['replacement_pair_no'], $meta);
         }
     }
 
@@ -1426,6 +1849,14 @@ final class PostingService
         // DDKP (daňový doklad k přijaté platbě, §28/2/d ZDPH) NENÍ běžná faktura:
         // zákazník už zaplatil zálohu (zaúčtováno 221/324), doklad jen přiznává DPH ze
         // zálohy → 324/343, ŽÁDNÉ 311, ŽÁDNÝ výnos 602 (viz buildAdvanceVatDocumentLines).
+        if (in_array($invoiceType, ['tax_document', 'penalty'], true)) {
+            // Doklad bez pohledávky: protiúčet z řádků tu nemá kam jít, chyba je hlasitá.
+            $this->itemCounterAccount(
+                $supplierId, 'sale', $invoiceId, $inv, $opts,
+                self::documentPostingDate($inv, isset($opts['entry_date']) ? (string) $opts['entry_date'] : null),
+                (bool) ($opts['current_read'] ?? $this->db->pdo()->inTransaction()),
+            );
+        }
         if ((string) ($inv['invoice_type'] ?? 'invoice') === 'tax_document') {
             return $this->buildAdvanceVatDocumentLines($supplierId, $invoiceId, $inv, $opts);
         }
@@ -1447,6 +1878,7 @@ final class PostingService
 
         $entryDate = self::documentPostingDate($inv, isset($opts['entry_date']) ? (string) $opts['entry_date'] : null);
         $currentRead = (bool) ($opts['current_read'] ?? $this->db->pdo()->inTransaction());
+        $this->pairHints = $this->entryForms()->formAt($supplierId, $entryDate, $currentRead)->isSingle();
         $rate    = $this->fxRate($inv);
         $totalCzk = round((float) $inv['total_with_vat'] * $rate, 2);
 
@@ -1485,6 +1917,19 @@ final class PostingService
         $receivable = $rule['debit_account_code'] ?? '311';
         $revenue    = $rule['credit_account_code'] ?? '602';
         $cc = $opts['cost_center'] ?? null;
+        // Protiúčet zadaný na řádcích (zaúčtování při zadání faktury) nahradí pohledávku
+        // předkontace. Bez něj zůstává zápis beze změny.
+        $itemCounter = $this->itemCounterAccount($supplierId, 'sale', $invoiceId, $inv, $opts, $entryDate, $currentRead);
+        if ($itemCounter !== null) {
+            if ($deduction['active']) {
+                throw new PostingException(
+                    'counter_account_with_advance',
+                    'Doklad zúčtovává zálohu, protiúčet na řádku u něj nelze použít. Zaúčtujte ho s protiúčtem z předkontace dokladu.',
+                    422,
+                );
+            }
+            $receivable = $itemCounter;
+        }
 
         // Rozpad výnosu po POLOŽKÁCH (1177) — zrcadlo nákladové strany z §DM. Faktura běžně
         // míchá prodej majetku se službami a jedna noha by celý základ poslala na jeden účet.
@@ -1748,10 +2193,17 @@ final class PostingService
         // chybně naúčtoval na 518 (dvojí náklad s vyúčtovací fakturou). Zrcadlo vydané strany
         // (invoice_type='tax_document' → buildAdvanceVatDocumentLines).
         if ((string) ($pi['document_kind'] ?? '') === 'tax_document') {
+            // DDKP nemá závazek: protiúčet z řádků tu nemá kam jít, chyba je hlasitá.
+            $this->itemCounterAccount(
+                $supplierId, 'purchase', $purchaseInvoiceId, $pi, $opts,
+                self::documentPostingDate($pi, isset($opts['entry_date']) ? (string) $opts['entry_date'] : null),
+                (bool) ($opts['current_read'] ?? $this->db->pdo()->inTransaction()),
+            );
             return $this->buildPurchaseAdvanceVatDocumentLines($supplierId, $purchaseInvoiceId, $pi, $opts);
         }
         $entryDate = self::documentPostingDate($pi, isset($opts['entry_date']) ? (string) $opts['entry_date'] : null);
         $currentRead = (bool) ($opts['current_read'] ?? $this->db->pdo()->inTransaction());
+        $this->pairHints = $this->entryForms()->formAt($supplierId, $entryDate, $currentRead)->isSingle();
         $opts['entry_date'] = $entryDate;
         $opts['current_read'] = $currentRead;
         $debitOverride = array_key_exists('debit_account_code', $opts)
@@ -1791,7 +2243,8 @@ final class PostingService
         if (!$taxDeductible) {
             $expense = $this->nonDeductibleExpenseAccount($supplierId, $expense, $entryDate, $currentRead);
         }
-        $payable = $this->purchasePayable($supplierId, $pi, $rule, $defaultKey);
+        $payable = $this->itemCounterAccount($supplierId, 'purchase', $purchaseInvoiceId, $pi, $opts, $entryDate, $currentRead)
+            ?? $this->purchasePayable($supplierId, $pi, $rule, $defaultKey);
         $cc = $opts['cost_center'] ?? null;
 
         $pct = max(0.0, min(100.0, (float) ($pi['vat_deduction_percent'] ?? 100))) / 100.0;
@@ -1838,10 +2291,15 @@ final class PostingService
                 // Samovyměření: obě nohy patří na RŮZNÉ analytiky — odpočet na vstup, přiznaná
                 // daň na výstup. Na plochém 343 se okamžitě vynetovaly a v zúčtování období
                 // po nich nezůstala stopa.
+                // Jednoduchý zápis: plný odpočet samovyměřené daně je samostatná dvojice
+                // 343 vstup / 343 výstup (skupina ji drží stranou od závazku).
+                $rcGroup = self::cents($deductibleSelfAssessed) === self::cents($selfAssessedVat);
                 if ($deductibleSelfAssessed !== 0.0) {
-                    $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleSelfAssessed, $expenseSide, $isCreditNote), abs($deductibleSelfAssessed), $cc);  // nárok na odpočet
+                    $input = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleSelfAssessed, $expenseSide, $isCreditNote), abs($deductibleSelfAssessed), $cc);  // nárok na odpočet
+                    $lines[] = $rcGroup ? $this->pairHint($input, 'pair_group', 'reverse_charge') : $input;
                 }
-                $lines[] = $this->line($this->outputVatAccount($supplierId), self::sideBySign($selfAssessedVat, $payableSide, $isCreditNote), abs($selfAssessedVat), $cc); // povinnost přiznat daň
+                $output = $this->line($this->outputVatAccount($supplierId), self::sideBySign($selfAssessedVat, $payableSide, $isCreditNote), abs($selfAssessedVat), $cc); // povinnost přiznat daň
+                $lines[] = $rcGroup ? $this->pairHint($output, 'pair_group', 'reverse_charge') : $output;
             }
             if ($deductibleSupplierVat !== 0.0) {
                 $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleSupplierVat, $expenseSide, $isCreditNote), abs($deductibleSupplierVat), $cc);
@@ -1976,7 +2434,7 @@ final class PostingService
     ): ?array {
         $suggestions = $this->expenseClassification->suggestForInvoice($supplierId, $purchaseInvoiceId, $entryDate, $currentRead);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, description, vat_rate_snapshot, expense_kind, expense_account_code,
+            'SELECT id, description, vat_rate_snapshot, expense_kind, expense_account_code, posting_rule_key,
                     expense_classification_source, total_without_vat, total_vat, stock_item_id, is_fixed_asset
                FROM purchase_invoice_items
               WHERE purchase_invoice_id = ?'
@@ -2010,7 +2468,10 @@ final class PostingService
         foreach ($items as $row) {
             $kindValue = $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null;
             $override = trim((string) ($row['expense_account_code'] ?? ''));
-            $override = $override === '' ? null : $override;
+            // Předkontace řádku doplní účet MD, který řádek sám nemá; ruční účet má přednost.
+            $override = $override === ''
+                ? $this->itemPosting()->ruleItemAccount($supplierId, $row['posting_rule_key'] ?? null, 'purchase')
+                : $override;
 
             $approved = $itemOverrides[(int) $row['id']] ?? null;
             if (is_array($approved)) {
@@ -2282,7 +2743,7 @@ final class PostingService
     private function issuedItemRows(int $supplierId, int $invoiceId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ii.id, ii.small_asset_id, ii.asset_id, ii.total_without_vat, ii.revenue_account_code, ii.stock_item_id,
+            'SELECT ii.id, ii.small_asset_id, ii.asset_id, ii.total_without_vat, ii.revenue_account_code, ii.posting_rule_key, ii.stock_item_id,
                     ii.item_kind, ii.vat_rate_id, ii.vat_classification_code, ii.description, ii.seller_item_code,
                     ii.vat_rate_snapshot, ii.total_vat, si.eet_item_kind
                FROM invoice_items ii
@@ -2297,7 +2758,9 @@ final class PostingService
         );
         $unresolved = [];
         foreach ($items as $i => $row) {
-            $own = ProductPostingDefaults::code($row['revenue_account_code'] ?? null);
+            // Předkontace řádku doplní účet Dal, který řádek sám nemá; ruční účet má přednost.
+            $own = ProductPostingDefaults::code($row['revenue_account_code'] ?? null)
+                ?? $this->itemPosting()->ruleItemAccount($supplierId, $row['posting_rule_key'] ?? null, 'sale');
             $product = $products[(int) ($row['stock_item_id'] ?? 0)]['revenue']['code'] ?? null;
             $items[$i]['item_revenue_account'] = $own ?? $product;
             $items[$i]['item_revenue_source'] = $own !== null ? 'item' : ($product !== null ? 'product' : null);
@@ -2757,7 +3220,8 @@ final class PostingService
         }
 
         $rule = $this->rules->resolve($supplierId, self::DEFAULT_RECEIVED_RULE_KEY);
-        $payable = $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY);
+        $payable = $this->itemCounterAccount($supplierId, 'purchase', (int) $pi['id'], $pi, $opts, $entryDate, $currentRead)
+            ?? $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY);
         $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
         $this->appendRounding($lines, $totalCzk, $allocatedCzk, $cc, !$isCreditNote);
         $this->appendAdvanceSettlementPurchase($supplierId, $pi, $lines);
@@ -2786,6 +3250,80 @@ final class PostingService
             $rulePayable,
             (string) ($default['credit_account_code'] ?? PurchasePayableAccount::DEFAULT_PAYABLE),
         );
+    }
+
+    private function itemPosting(): ItemPostingAccounts
+    {
+        return $this->itemPosting ??= new ItemPostingAccounts($this->db, $this->rules);
+    }
+
+    /**
+     * Protiúčet (závazek / pohledávka) zadaný na řádcích dokladu ({@see ItemPostingAccounts}).
+     * NULL = řádky ho neurčují a platí předkontace dokladu, tedy dosavadní zápis beze změny.
+     *
+     * Explicitní `rule_key` od volajícího je pokyn pro celý doklad (ruční zaúčtování
+     * s vybranou předkontací), proto protiúčet řádků přebíjí — stejně jako rozpad účtů.
+     * U dokladu, který zúčtovává zálohu, se protiúčet z řádků nepřipouští: pár zúčtování
+     * zálohy (321/314, 324/311) bere saldokonto z vlastní předkontace a dva různé
+     * závazky by úhrada ani zúčtování neuzavřely.
+     *
+     * @param 'purchase'|'sale' $direction
+     * @param array<string,mixed> $doc hlavička z {@see fetchDocHeader}
+     * @param array<string,mixed> $opts
+     */
+    private function itemCounterAccount(int $supplierId, string $direction, int $docId, array $doc, array $opts, string $entryDate, bool $currentRead): ?string
+    {
+        if (isset($opts['rule_key'])) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            $direction === 'purchase'
+                ? 'SELECT counter_account_code, posting_rule_key FROM purchase_invoice_items
+                    WHERE purchase_invoice_id = ? AND (counter_account_code IS NOT NULL OR posting_rule_key IS NOT NULL)'
+                : 'SELECT counter_account_code, posting_rule_key FROM invoice_items
+                    WHERE invoice_id = ? AND (counter_account_code IS NOT NULL OR posting_rule_key IS NOT NULL)'
+        );
+        $stmt->execute([$docId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows === []) {
+            return null;
+        }
+        $counter = $this->itemPosting()->documentCounterAccount($supplierId, $rows, $direction, $entryDate, $currentRead);
+        if ($counter === null) {
+            return null;
+        }
+        $kind = $direction === 'purchase' ? (string) ($doc['document_kind'] ?? 'invoice') : (string) ($doc['invoice_type'] ?? 'invoice');
+        if (in_array($kind, ['tax_document', 'penalty'], true)) {
+            throw new PostingException(
+                'counter_account_not_applicable',
+                'Doklad tohoto druhu nemá ' . ($direction === 'purchase' ? 'závazek' : 'pohledávku') . ', protiúčet na řádku u něj nelze použít.',
+                422,
+            );
+        }
+        $advance = $direction === 'purchase'
+            ? (int) ($doc['advance_purchase_invoice_id'] ?? 0) > 0
+            : $this->issuedSettlesProforma($supplierId, (int) ($doc['parent_invoice_id'] ?? 0));
+        if ($advance) {
+            throw new PostingException(
+                'counter_account_with_advance',
+                'Doklad zúčtovává zálohu, protiúčet na řádku u něj nelze použít. Zaúčtujte ho s protiúčtem z předkontace dokladu.',
+                422,
+            );
+        }
+
+        return $counter;
+    }
+
+    /** Vydaná faktura navázaná na proformu (vyúčtování zálohy). Dobropis na fakturu sem nepatří. */
+    private function issuedSettlesProforma(int $supplierId, int $parentId): bool
+    {
+        if ($parentId <= 0) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT invoice_type FROM invoices WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$parentId, $supplierId]);
+
+        return $stmt->fetchColumn() === 'proforma';
     }
 
     /** @return list<array<string,mixed>> */
@@ -2886,8 +3424,8 @@ final class PostingService
             // Vyrovnání zálohy tu nese sám předpis na 311 proti inkasu zálohy.
             return;
         }
-        $lines[] = $this->line($draw, 'debit', $received, null);
-        $lines[] = $this->line($recv, 'credit', $received, null);
+        $lines[] = $this->pairHint($this->line($draw, 'debit', $received, null), 'pair_group', 'advance');
+        $lines[] = $this->pairHint($this->line($recv, 'credit', $received, null), 'pair_group', 'advance');
     }
 
     /**
@@ -2939,8 +3477,8 @@ final class PostingService
         if ($draw === $recv) {
             return;
         }
-        $lines[] = $this->line($draw, 'debit', $amount, null);
-        $lines[] = $this->line($recv, 'credit', $amount, null);
+        $lines[] = $this->pairHint($this->line($draw, 'debit', $amount, null), 'pair_group', 'advance');
+        $lines[] = $this->pairHint($this->line($recv, 'credit', $amount, null), 'pair_group', 'advance');
     }
 
     /** Základ odečtený ze zálohy ostatními nestornovanými fakturami proformy (v Kč). */
@@ -3039,8 +3577,8 @@ final class PostingService
             // Zrcadlo vydané strany: záloha vedená přímo na závazku, pár se vyruší.
             return;
         }
-        $lines[] = $this->line($draw, 'debit', $paid, null);
-        $lines[] = $this->line($advAcc, 'credit', $paid, null);
+        $lines[] = $this->pairHint($this->line($draw, 'debit', $paid, null), 'pair_group', 'advance');
+        $lines[] = $this->pairHint($this->line($advAcc, 'credit', $paid, null), 'pair_group', 'advance');
     }
 
     /**
@@ -3174,7 +3712,7 @@ final class PostingService
             'date_locked',
             'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
                 . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. '
-                . 'Zámek posuňte v Měsíční kontrole tlačítkem Uzamknout k datu (jen admin).',
+                . 'Zámek posuňte v Měsíční kontrole tlačítkem Uzamknout k datu (smí správce nebo role s právem posunout zámek).',
         );
     }
 
@@ -4155,6 +4693,22 @@ final class PostingService
                 $resolvedLine['fx_rate']        = $line['fx_rate'] ?? null;
                 $resolvedLine['amount_foreign'] = $line['amount_foreign'] ?? null;
             }
+            // Klíče jednoduchého zápisu (kontrakt JournalPairer): dvojici skládá až
+            // prepareDocumentLines(); složená forma řídicí klíče zahodí.
+            foreach (['pair_no', 'pair_group', 'pair_role', 'pair_link'] as $field) {
+                if (isset($line[$field]) && $line[$field] !== '') {
+                    $resolvedLine[$field] = $line[$field];
+                }
+            }
+            if (isset($line['line_text']) && trim((string) $line['line_text']) !== '') {
+                $resolvedLine['line_text'] = mb_substr(trim((string) $line['line_text']), 0, 255);
+            }
+            // Přeúčtování ve formě single: dimenze shodného původního řádku, které razítko
+            // ponechá místo nového rozdělení podle položek ({@see DocumentRepostService}).
+            if (isset($line['current_dimensions'], $line['split_siblings']) && is_array($line['current_dimensions'])) {
+                $resolvedLine['current_dimensions'] = array_map('intval', $line['current_dimensions']);
+                $resolvedLine['split_siblings'] = (int) $line['split_siblings'];
+            }
             $out[] = $resolvedLine;
         }
         if ($sawOffbalance && $sawOnBalance) {
@@ -4407,6 +4961,18 @@ final class PostingService
     }
 
     /**
+     * Klíč kontraktu JournalPairer (`pair_group`, `pair_role`) do řádku builderu, jen když
+     * firma skládaný doklad účtuje po dvojicích ({@see $pairHints}).
+     *
+     * @param array<string,mixed> $line
+     * @return array<string,mixed>
+     */
+    private function pairHint(array $line, string $key, string $value): array
+    {
+        return $this->pairHints ? $line + [$key => $value] : $line;
+    }
+
+    /**
      * Doplní řádku (typicky saldokonto 311/321) cizoměnovou stopu, pokud doklad
      * NENÍ v účetní měně (CZK). U CZK dokladu ponechá řádek bez měny (NULL =
      * účetní měna, není co přeceňovat). amount_foreign = celková částka dokladu
@@ -4479,10 +5045,12 @@ final class PostingService
                 ),
             );
         }
+        // `pair_role` = haléřový řádek: v jednoduchém zápisu se páruje postupně s velkým
+        // řádkem své strany (JournalPairer, krok c). Složená forma klíč zahodí.
         if ($cents > 0) {
-            $lines[] = $this->line('648', 'credit', $cents / 100, $cc);
+            $lines[] = $this->pairHint($this->line('648', 'credit', $cents / 100, $cc), 'pair_role', JournalPairer::ROLE_ROUNDING);
         } else {
-            $lines[] = $this->line('548', 'debit', -$cents / 100, $cc);
+            $lines[] = $this->pairHint($this->line('548', 'debit', -$cents / 100, $cc), 'pair_role', JournalPairer::ROLE_ROUNDING);
         }
     }
 }

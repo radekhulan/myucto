@@ -406,6 +406,42 @@ final class PayrollEmploymentAction
     }
 
     /**
+     * Člen statutárního orgánu je zároveň společníkem (odměna za výkon funkce
+     * proti 366 místo 331, viz PayrollAccountingDefaults::relationGrossCredit()).
+     *
+     * @param array{id:string} $args
+     */
+    public function setStatutoryPartner(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $partner = $body['statutory_partner'] ?? null;
+            if (!is_bool($partner)) {
+                throw new \InvalidArgumentException('statutory_partner musí být true nebo false.');
+            }
+            $employment = $this->employments->setStatutoryPartner(
+                $this->currentSupplierId($request),
+                (int) $args['id'],
+                $partner,
+                $this->validator->rowVersion($body),
+                $this->userId($request),
+                $this->ip($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+
+        return Json::ok($response, ['employment' => $employment]);
+    }
+
+    /**
      * Nástup odhadnutý z hlášení je ověřený (smlouva, přihláška) a platí.
      *
      * @param array{id:string} $args

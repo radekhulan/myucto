@@ -58,7 +58,7 @@ final class PaymentsCloneScrubber
                 $snapshot=$this->references($this->text(self::decode($r['snapshot_json'])));
                 if($r['status']==='pending')continue;
                 $ledger=(new PaymentJournalProof($this->db))->current((int)$r['supplier_id'],(int)$r['journal_entry_id']);
-                if($ledger['entry']['source_type']!=='unit_payment'||$ledger['entry']['source_id']!==($r['kind']==='reversal'?null:(int)$r['id'])||$ledger['entry']['entry_date']!==$r['accounting_date']||$ledger['entry']['reversed_by']!==($r['status']==='reversed'?(int)$r['reversal_entry_id']:null)||PropertyInput::hash(PaymentJournalProof::canonicalLines($ledger['lines']))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($snapshot['lines'])))PaymentException::reject('ledger_mismatch');
+                if($ledger['entry']['source_type']!=='unit_payment'||$ledger['entry']['source_id']!==($r['kind']==='reversal'?null:(int)$r['id'])||$ledger['entry']['entry_date']!==$r['accounting_date']||$ledger['entry']['reversed_by']!==($r['status']==='reversed'?(int)$r['reversal_entry_id']:null)||!PaymentJournalProof::matches($ledger['lines'], $snapshot['lines']))PaymentException::reject('ledger_mismatch');
             }
             $this->assertMaterialized();
             $pdo->commit();return $this->hashes;

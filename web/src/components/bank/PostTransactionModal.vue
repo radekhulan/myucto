@@ -401,7 +401,8 @@ onMounted(async () => {
 
 <template>
   <div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-    <div class="bg-surface rounded-xl shadow-lg max-w-md w-full max-h-[85vh] overflow-y-auto overflow-x-hidden p-5">
+    <!-- Dialog se vykresluje uvnitř buňky tabulky (text-right, nowrap): bez resetu by se texty nezalamovaly. -->
+    <div class="bg-surface rounded-xl shadow-lg max-w-md w-full max-h-[85vh] overflow-y-auto overflow-x-hidden p-5 text-left whitespace-normal">
       <h3 class="text-lg font-semibold mb-1">{{ t('bank.posting.modal_title') }}</h3>
 
       <!-- Kontext transakce -->
@@ -426,14 +427,14 @@ onMounted(async () => {
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.debit') }}</label>
             <input v-model="debit" :list="debitListId" type="text" data-test="posting-debit"
-              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono text-left" />
             <div v-if="debit && accountByCode[debit]" class="text-xs text-neutral-500 mt-0.5 truncate">{{ accountName(debit) }}</div>
             <div v-else-if="debit" class="text-xs text-danger-500 mt-0.5">{{ t('bank.posting.err_account_not_found') }}</div>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.credit') }}</label>
             <input v-model="credit" :list="creditListId" type="text" data-test="posting-credit"
-              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono text-left" />
             <div v-if="credit && accountByCode[credit]" class="text-xs text-neutral-500 mt-0.5 truncate">{{ accountName(credit) }}</div>
             <div v-else-if="credit" class="text-xs text-danger-500 mt-0.5">{{ t('bank.posting.err_account_not_found') }}</div>
           </div>
@@ -469,7 +470,7 @@ onMounted(async () => {
           </select>
           <div class="flex-1 min-w-0">
             <input v-model="l.account_code" :list="splitListId" type="text" data-test="posting-split" :placeholder="t('bank.posting.split_account')"
-              class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
+              class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm font-mono text-left" />
             <div v-if="l.account_code && accountByCode[l.account_code]" class="text-xs text-neutral-500 mt-0.5 truncate">
               {{ accountName(l.account_code) }}
             </div>
@@ -591,7 +592,7 @@ onMounted(async () => {
         <table class="w-full text-sm">
           <tbody v-if="splitMode">
             <tr v-for="(line, index) in splitLines" :key="index">
-              <td class="py-0.5 font-mono" :class="accountByCode[line.account_code] ? 'text-neutral-700' : 'text-danger-500'">
+              <td class="py-0.5 font-mono text-left" :class="accountByCode[line.account_code] ? 'text-neutral-700' : 'text-danger-500'">
                 {{ t(line.side === 'debit' ? 'bank.posting.debit' : 'bank.posting.credit') }} {{ line.account_code || '—' }}
               </td>
               <td class="py-0.5 text-right font-mono text-neutral-700">{{ formatMoney(line.amount ?? 0, 'CZK') }}</td>
@@ -599,13 +600,13 @@ onMounted(async () => {
           </tbody>
           <tbody v-else>
             <tr>
-              <td class="py-0.5 font-mono" :class="debitValid ? 'text-neutral-700' : 'text-danger-500'">
+              <td class="py-0.5 font-mono text-left" :class="debitValid ? 'text-neutral-700' : 'text-danger-500'">
                 {{ t('bank.posting.debit') }} {{ debit || '—' }}
               </td>
               <td class="py-0.5 text-right font-mono text-neutral-700">{{ formatMoney(absAmount, currency) }}</td>
             </tr>
             <tr>
-              <td class="py-0.5 font-mono" :class="creditValid ? 'text-neutral-700' : 'text-danger-500'">
+              <td class="py-0.5 font-mono text-left" :class="creditValid ? 'text-neutral-700' : 'text-danger-500'">
                 {{ t('bank.posting.credit') }} {{ credit || '—' }}
               </td>
               <td class="py-0.5 text-right font-mono text-neutral-700">{{ formatMoney(absAmount, currency) }}</td>

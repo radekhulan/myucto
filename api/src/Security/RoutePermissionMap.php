@@ -319,6 +319,9 @@ final class RoutePermissionMap
         ['DELETE', '#^/api/payroll/employments/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Oprava druhu vztahu je oprava jeho založení, proto totéž právo.
         ['PATCH', '#^/api/payroll/employments/[0-9]+/relation-type$#', 'payroll.employment.write', AccessLevel::WRITE],
+        // Společník u výkonu funkce mění zaúčtování odměny, ne založení vztahu,
+        // ale je to údaj vztahu, proto totéž právo.
+        ['PATCH', '#^/api/payroll/employments/[0-9]+/statutory-partner$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Sloučení je oprava založení dvou vztahů a končí smazáním jednoho z nich.
         ['POST', '#^/api/payroll/employments/[0-9]+/merge-into$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/time/month$#', 'payroll', AccessLevel::READ],
@@ -339,6 +342,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/year-close/[0-9]{4}/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/reports/annual/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
         ['GET', '#^/api/payroll/reports/dimension-costs/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
+        ['GET', '#^/api/payroll/reports/posting-detail(?:/export\.(?:xlsx|csv))?$#', 'payroll.reports', AccessLevel::READ],
         // Kontrola přepočtu proti mzdám převzatým z původního systému — čtení
         // mzdových dat osob, tedy stejné právo jako ostatní mzdové sestavy.
         ['GET', '#^/api/payroll/reports/migration-reconciliation/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
@@ -811,6 +815,9 @@ final class RoutePermissionMap
         ['POST', '#^/api/accounting/periods/[0-9]+/closing/fx-preview$#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/periods/[0-9]+/(closing|close|open-next|revert)(/|$)#', 'accounting.periods.close', AccessLevel::WRITE],
         ['*', '#^/api/accounting/periods(/|$)#', 'accounting.periods.manage', AccessLevel::WRITE],
+        // Náhled zápisu v editoru faktury nic nezapíše (uložení se odvolá). Čtení účetnictví
+        // stačí, právo uložit doklad ověřuje akce stejně jako uložení samo.
+        ['POST', '#^/api/accounting/journal/draft-posting-preview/(invoices|purchase-invoices)$#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/journal/(post|transfer)|^/api/accounting/journal/post-(invoice|purchase)/#', 'accounting.journal.post', AccessLevel::WRITE],
         // Přeúčtování dokladu je zápis do deníku, ne editace zápisu — TOTÉŽ právo jako
         // zaúčtování výš. Bez explicitního pravidla by spadlo na obecné
@@ -821,6 +828,9 @@ final class RoutePermissionMap
         // obecné `/api/accounting` níž: je to zápis do deníku, ne čtení nastavení.
         ['GET', '#^/api/accounting/posting-backfill(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/posting-backfill(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Převod starších zápisů na dvojice fyzicky dělí řádky deníku → právo účtovat.
+        ['GET', '#^/api/accounting/pair-conversion(/|$)#', 'accounting', AccessLevel::READ],
+        ['*', '#^/api/accounting/pair-conversion(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/setup-assistant(/|$)#', 'accounting', AccessLevel::READ],
         ['PUT', '#^/api/accounting/setup-assistant/runs/[0-9]+/proposals/[0-9]+$#', 'accounting.templates', AccessLevel::WRITE],
         ['POST', '#^/api/accounting/setup-assistant/(analysis|runs/[0-9]+/approve)$#', 'accounting.templates', AccessLevel::WRITE],

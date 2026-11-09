@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Auth;
 
 use MyInvoice\Infrastructure\Cache\RedisFactory;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseCapacityGate;
@@ -37,6 +38,11 @@ final class ApiTokenService
          * (Bootstrap); `null` mají jen přímo sestavené testy.
          */
         private readonly ?LicenseCapacityGate $capacity = null,
+        /**
+         * Strop platnosti tokenů vydaných ze sezení přes Entra ID
+         * (`auth.oidc.session_lifetime_hours`). Bez konfigurace platí výchozí strop.
+         */
+        private readonly ?Config $config = null,
     ) {}
 
     /**
@@ -179,6 +185,9 @@ final class ApiTokenService
         if ((int) $row['user_is_active'] !== 1 || (int) $row['user_role_active'] !== 1) {
             return null;
         }
+        if (!$this->issuingIdentityFresh((int) $row['user_id'], $row['issued_auth_method'] ?? null)) {
+            return null;
+        }
 
         $row['id']                = (int) $row['id'];
         $row['user_id']           = (int) $row['user_id'];
@@ -189,6 +198,39 @@ final class ApiTokenService
         $row['user_totp_enabled'] = (int) ($row['user_totp_enabled'] ?? 0) === 1;
         $row['eet_external_by_default'] = (int) ($row['eet_external_by_default'] ?? 0) === 1;
         return $row;
+    }
+
+    /**
+     * Token vydaný ze sezení přes Entra ID (`issued_auth_method = oidc:entra`,
+     * PAT i MCP připojení) platí, jen dokud se uživatel přes Entra ID úspěšně
+     * ověřil v posledních `auth.oidc.session_lifetime_hours`. Uživatele
+     * zablokovaného v Entra ID tak token přežije nejvýš o stejný strop jako
+     * sezení. Po dalším přihlášení přes Entra ID token zase funguje, dokud
+     * neskončí jeho vlastní platnost. Tokeny vydané jinak se nemění.
+     *
+     * Platí jen se zapnutým `auth.oidc.tokens_follow_identity`; bez něj
+     * token platí do své vlastní expirace.
+     */
+    public function issuingIdentityFresh(int $userId, ?string $issuedAuthMethod, ?PDO $pdo = null): bool
+    {
+        if (!(bool) $this->config?->get('auth.oidc.tokens_follow_identity', false)) {
+            return true;
+        }
+        if (!SessionAuthContext::isOrganizationIdentityMethod($issuedAuthMethod)) {
+            return true;
+        }
+        $stmt = ($pdo ?? $this->db->pdo())->prepare(
+            'SELECT 1 FROM user_external_identities
+              WHERE user_id = ? AND provider = ?
+                AND last_used_at > UTC_TIMESTAMP(6) - INTERVAL ? SECOND
+              LIMIT 1'
+        );
+        $stmt->execute([
+            $userId,
+            SessionAuthContext::ORGANIZATION_PROVIDER,
+            SessionManager::externalLifetimeSeconds($this->config),
+        ]);
+        return $stmt->fetchColumn() !== false;
     }
 
     /**

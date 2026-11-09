@@ -40,6 +40,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\TaxReturnRepository;
 use MyInvoice\Repository\SaldoRepository;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
+use MyInvoice\Service\Accounting\Pair\PairGroups;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\JournalLineAmount;
@@ -893,7 +894,7 @@ final class ClosingService
                     $docNo = $existing !== null && $existing['document_no'] !== null
                         ? (string) $existing['document_no']
                         : $this->series->next($supplierId, 'fx', $fiscalYear);
-                    $entryIds[$slot] = $this->posting->postDocument($supplierId, 'fx_revaluation', $sourceId, $lines, [
+                    $entryIds[$slot] = $this->posting->postDocument($supplierId, 'fx_revaluation', $sourceId, PairGroups::consecutive($lines, 'fx'), [
                         'entry_date' => $endsOn,
                         'document_no' => $docNo,
                         'description' => 'Kurzové rozdíly k rozvahovému dni',
@@ -1012,7 +1013,7 @@ final class ClosingService
                     $docNo = $existing !== null && $existing['document_no'] !== null
                         ? (string) $existing['document_no']
                         : $this->series->next($supplierId, 'closing', $fiscalYear);
-                    $entryIds[$slot] = $this->posting->postDocument($supplierId, 'closing', $sourceId, $def['lines'], [
+                    $entryIds[$slot] = $this->posting->postDocument($supplierId, 'closing', $sourceId, PairGroups::consecutive($def['lines'], 'stock'), [
                         'entry_date' => $endsOn,
                         'document_no' => $docNo,
                         'description' => (string) $def['description'],
@@ -3518,10 +3519,12 @@ final class ClosingService
                     throw new ClosingException('validation_failed', 'Částka přídělu musí být kladná.');
                 }
                 $sum = round($sum + $amt, 2);
+                // pair_group: příděly proti 431 a srážková daň proti 342 jsou dvě
+                // samostatné skupiny dvojic jednoduchého zápisu (složená firma klíč nevidí).
                 if ($isLoss) {
-                    $lines[] = ['account_code' => $code, 'side' => 'debit', 'amount' => $amt];
+                    $lines[] = ['account_code' => $code, 'side' => 'debit', 'amount' => $amt, 'pair_group' => 'distribution'];
                 } else {
-                    $lines[] = ['account_code' => $code, 'side' => 'credit', 'amount' => $amt];
+                    $lines[] = ['account_code' => $code, 'side' => 'credit', 'amount' => $amt, 'pair_group' => 'distribution'];
                     if ($kind === 'shares') {
                         $sharesGross = round($sharesGross + $amt, 2);
                         $sharesLines[] = ['code' => $code, 'amt' => $amt];
@@ -3547,7 +3550,7 @@ final class ClosingService
                 );
             }
 
-            $lines[] = ['account_code' => '431', 'side' => $isLoss ? 'credit' : 'debit', 'amount' => $sum];
+            $lines[] = ['account_code' => '431', 'side' => $isLoss ? 'credit' : 'debit', 'amount' => $sum, 'pair_group' => 'distribution'];
 
             // Srážková daň §36 odst. 3 ZDP: každý shares řádek představuje jednoho
             // poplatníka; základ i daň se zaokrouhlí na celé Kč dolů per poplatník.
@@ -3557,12 +3560,12 @@ final class ClosingService
                     $tax = (float) floor(floor($sl['amt']) * $withholdingRate);
                     if ($tax > 0) {
                         $withholding += $tax;
-                        $lines[] = ['account_code' => $sl['code'], 'side' => 'debit', 'amount' => $tax];
+                        $lines[] = ['account_code' => $sl['code'], 'side' => 'debit', 'amount' => $tax, 'pair_group' => 'withholding'];
                     }
                 }
                 $withholding = round($withholding, 2);
                 if ($withholding > 0) {
-                    $lines[] = ['account_code' => '342', 'side' => 'credit', 'amount' => $withholding];
+                    $lines[] = ['account_code' => '342', 'side' => 'credit', 'amount' => $withholding, 'pair_group' => 'withholding'];
                 }
             }
 
@@ -4011,7 +4014,7 @@ final class ClosingService
                 if ($profile->framework === AccountingFrameworkService::CZ_504) {
                     $entryId = $this->post504Carry($supplierId, $period, $period, 'close_books', $rowVersion, ['entry_date' => $endsOn, 'document_no' => $docNo, 'description' => 'Uzavření účetních knih ' . $fiscalYear] + $meta);
                 } else {
-                $entryId = $this->posting->postDocument($supplierId, 'closing', $periodId, $lines, [
+                $entryId = $this->posting->postDocument($supplierId, 'closing', $periodId, PairGroups::consecutive($lines, 'closing'), [
                     'entry_date' => $endsOn,
                     'document_no' => $docNo,
                     'description' => 'Uzavření účetních knih ' . $fiscalYear,
@@ -4215,7 +4218,7 @@ final class ClosingService
                 if ($openingProfile->framework === AccountingFrameworkService::CZ_504) {
                     $entryId = $this->post504Carry($supplierId, $period, $next, 'open_next', $rowVersion, ['entry_date' => $nextStart, 'document_no' => $docNo, 'description' => 'Otevření účetních knih ' . $nextFy] + $meta);
                 } else {
-                $entryId = $this->posting->postDocument($supplierId, 'opening', $nextId, $lines, [
+                $entryId = $this->posting->postDocument($supplierId, 'opening', $nextId, PairGroups::consecutive($lines, 'opening'), [
                     'entry_date' => $nextStart,
                     'document_no' => $docNo,
                     'description' => 'Otevření účetních knih ' . $nextFy,
@@ -4262,7 +4265,7 @@ final class ClosingService
                     $revDocNo = $existingRev !== null && $existingRev['document_no'] !== null
                         ? (string) $existingRev['document_no']
                         : $this->series->next($supplierId, 'fx', $nextFy);
-                    $fxReversalId = $this->posting->postDocument($supplierId, 'fx_revaluation', $revSourceId, $revLines, [
+                    $fxReversalId = $this->posting->postDocument($supplierId, 'fx_revaluation', $revSourceId, PairGroups::consecutive($revLines, 'fx'), [
                         'entry_date' => $nextStart,
                         'document_no' => $revDocNo,
                         'description' => 'Storno přecenění saldokonta k 1. dni období',
@@ -4306,7 +4309,7 @@ final class ClosingService
                 $relDocNo = $existingRel !== null && $existingRel['document_no'] !== null
                     ? (string) $existingRel['document_no']
                     : $this->series->next($supplierId, 'opening', $nextFy);
-                $stockReleaseId = $this->posting->postDocument($supplierId, 'closing', $relSourceId, $releaseLines, [
+                $stockReleaseId = $this->posting->postDocument($supplierId, 'closing', $relSourceId, PairGroups::consecutive($releaseLines, 'stock'), [
                     'entry_date' => $nextStart,
                     'document_no' => $relDocNo,
                     'description' => 'Počáteční stav zásob do spotřeby (způsob B) ' . $nextFy,

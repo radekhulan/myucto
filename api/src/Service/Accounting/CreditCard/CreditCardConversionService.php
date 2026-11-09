@@ -145,11 +145,20 @@ final class CreditCardConversionService
                 $line['fx_rate'] = $l['fx_rate'];
                 $line['amount_foreign'] = $l['amount_foreign'];
             }
+            // Jednoduchý zápis: dvojice i jejich text zůstávají, mění se jen účet banky.
+            // Složený zápis tyto klíče nemá.
+            if (isset($l['pair_no'])) {
+                $line['pair_no'] = (int) $l['pair_no'];
+            }
+            if (isset($l['line_text'])) {
+                $line['line_text'] = (string) $l['line_text'];
+            }
             $lines[] = $line;
         }
         if (!$changed) {
             return false;
         }
+        self::assertNoSameAccountPair($lines, $entry['entry_id']);
         $this->posting->postDocument($supplierId, 'bank', $entry['tx_id'], $lines, [
             'entry_date'          => (string) $header['entry_date'],
             'document_date'       => $header['document_date'] ?? null,
@@ -161,6 +170,35 @@ final class CreditCardConversionService
         ]);
         $this->posting->restampDimensions($supplierId, 'bank', $entry['tx_id']);
         return true;
+    }
+
+    /**
+     * Dvojice, jejíž obě nohy převod přesune na týž úvěrový účet (převod mezi analytikou
+     * a holou 221 téhož účtu), by měla stejný účet na MD i Dal. Invariant dvojic ji
+     * odmítne až uprostřed převodu, proto se to řekne dřív a srozumitelně: zápis je
+     * potřeba nejdřív opravit v deníku.
+     *
+     * @param list<array<string,mixed>> $lines
+     */
+    private static function assertNoSameAccountPair(array $lines, int $entryId): void
+    {
+        $byPair = [];
+        foreach ($lines as $line) {
+            if (isset($line['pair_no'])) {
+                $byPair[$line['pair_no']][] = (string) $line['account_code'];
+            }
+        }
+        foreach ($byPair as $pairNo => $codes) {
+            if (count($codes) === 2 && $codes[0] === $codes[1]) {
+                throw new PostingException(
+                    'credit_card_same_account_pair',
+                    'Zápis #' . $entryId . ' má v dvojici ' . $pairNo . ' na obou stranách účet, který převod přesune na '
+                        . $codes[0] . '. Opravte zápis v deníku a převod spusťte znovu.',
+                    409,
+                    ['entry_id' => $entryId, 'pair_no' => $pairNo],
+                );
+            }
+        }
     }
 
     /**

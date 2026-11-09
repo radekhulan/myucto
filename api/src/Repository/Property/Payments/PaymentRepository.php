@@ -57,10 +57,10 @@ final class PaymentRepository
                 $intent = \MyInvoice\Service\Property\Payments\Workflow\PaymentSettlementIntent::fromPending($this->db, $this, $supplier, $id);
                 $entry = (new \MyInvoice\Repository\JournalEntryRepository($this->db, new \MyInvoice\Service\ActivityLogger($this->db)))->insertPropertySettlement($intent);
             } else {
-            $entry=$this->posting->postDocument($supplier,'unit_payment',$id,$snapshot['lines'],['entry_date'=>$request['accounting_date'],'posted_by'=>$actor,'description'=>$request['reason']]);
+            $entry=$this->posting->postDocument($supplier,'unit_payment',$id,\MyInvoice\Service\Accounting\Pair\TypedJournalPairs::withoutCarriedPairs($snapshot['lines']),['entry_date'=>$request['accounting_date'],'posted_by'=>$actor,'description'=>$request['reason']]);
             }
             $actual=(new PaymentJournalProof($this->db))->current($supplier,$entry);
-            if(PropertyInput::hash(PaymentJournalProof::canonicalLines($snapshot['lines']))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($actual['lines'])))PaymentException::reject('posted_ledger_mismatch');
+            if(!PaymentJournalProof::matches($snapshot['lines'],$actual['lines']))PaymentException::reject('posted_ledger_mismatch');
             $creditId=null;
             if($request['kind']==='allocation') {
                 foreach($snapshot['allocations'] as $allocation)$this->execute('INSERT INTO unit_payment_allocations (supplier_id,operation_id,debt_id,charge_id,charge_line_id,opening_component_id,settlement_effect_id,accessory_id,debtor_id,liability_group,amount_cents,allocation_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',[$supplier,$id,$allocation['debt_id'],$allocation['charge_id'],$allocation['charge_line_id'],$allocation['opening_component_id']??null,$allocation['settlement_effect_id']??null,$allocation['accessory_id'],$allocation['debtor_id'],$allocation['liability_group'],$allocation['amount_cents'],self::json($allocation)]);
@@ -251,7 +251,7 @@ final class PaymentRepository
         $anchor=(new PaymentJournalProof($this->db))->current($supplier,$intent->sourceEntryId);
         if($pending['id']!==$intent->intentId||$original['journal_entry_id']!==$intent->sourceEntryId||$anchor['entry']['reversed_by']!==$entry
             ||$actual['entry']['source_type']!=='unit_payment'||$actual['entry']['source_id']!==null||$actual['entry']['reversed_by']!==null||$actual['entry']['entry_date']!==$intent->accountingDate
-            ||PropertyInput::hash(PaymentJournalProof::canonicalLines($actual['lines']))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($pending['snapshot']['lines'])))PaymentException::reject('reversal_intent');
+            ||!PaymentJournalProof::matches($actual['lines'], $pending['snapshot']['lines']))PaymentException::reject('reversal_intent');
         $this->cas("UPDATE unit_payment_operations SET status='reversed',reversal_entry_id=?,row_version=row_version+1 WHERE supplier_id=? AND id=? AND row_version=? AND status='posted' AND snapshot_hash=?",[$entry,$supplier,$original['id'],$original['row_version'],$original['snapshot_hash']]);
         $this->cas("UPDATE unit_payment_operations SET status='posted',journal_entry_id=?,row_version=2 WHERE supplier_id=? AND id=? AND status='pending' AND row_version=1 AND request_hash=? AND snapshot_hash=?",[$entry,$supplier,$pending['id'],$pending['request_hash'],$pending['snapshot_hash']]);
         if($source!==null)$this->cas('UPDATE unit_payment_sources SET consumed_cents=?,consumed_native_minor=?,row_version=row_version+1 WHERE supplier_id=? AND id=? AND row_version=?',[
@@ -349,11 +349,11 @@ final class PaymentRepository
         }elseif($row['source_amount_cents']!==null||$row['source_native_minor']!==null)PaymentException::reject('history_corrupt');
         if(in_array($row['status'],['posted','reversed'],true)) {
             $actual=(new PaymentJournalProof($this->db))->current($supplier,(int)$row['journal_entry_id']);
-            if($actual['entry']['source_type']!=='unit_payment'||$actual['entry']['source_id']!==($row['kind']==='reversal'?null:$id)||$actual['entry']['reversed_by']!==($row['status']==='reversed'?(int)$row['reversal_entry_id']:null)||$actual['entry']['entry_date']!==$row['accounting_date']||PropertyInput::hash(PaymentJournalProof::canonicalLines($actual['lines']))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($snapshot['lines'])))PaymentException::reject('ledger_mismatch');
+            if($actual['entry']['source_type']!=='unit_payment'||$actual['entry']['source_id']!==($row['kind']==='reversal'?null:$id)||$actual['entry']['reversed_by']!==($row['status']==='reversed'?(int)$row['reversal_entry_id']:null)||$actual['entry']['entry_date']!==$row['accounting_date']||!PaymentJournalProof::matches($actual['lines'], $snapshot['lines']))PaymentException::reject('ledger_mismatch');
         }
         if($row['status']==='reversed') {
             $mirror=(new PaymentJournalProof($this->db))->current($supplier,(int)$row['reversal_entry_id']);$lines=$snapshot['lines'];foreach($lines as &$line)$line['side']=$line['side']==='debit'?'credit':'debit';unset($line);
-            if($mirror['entry']['source_type']!=='unit_payment'||$mirror['entry']['source_id']!==null||$mirror['entry']['reversed_by']!==null||PropertyInput::hash(PaymentJournalProof::canonicalLines($mirror['lines']))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($lines)))PaymentException::reject('ledger_mismatch');
+            if($mirror['entry']['source_type']!=='unit_payment'||$mirror['entry']['source_id']!==null||$mirror['entry']['reversed_by']!==null||!PaymentJournalProof::matches($mirror['lines'], $lines))PaymentException::reject('ledger_mismatch');
         }
         $actualAllocations=[];foreach($this->all('SELECT * FROM unit_payment_allocations WHERE supplier_id=? AND operation_id=? ORDER BY id FOR UPDATE',[$supplier,$id]) as $allocation){
             $fact=self::decode($allocation['allocation_json']);foreach(['debt_id','charge_id','charge_line_id','accessory_id','debtor_id','liability_group','amount_cents'] as $key){$actual=$allocation[$key];if(is_int($fact[$key]))$actual=(int)$actual;if($actual!==$fact[$key])PaymentException::reject('history_corrupt');}if(($fact['settlement_effect_id']??null)!==(($allocation['settlement_effect_id']??null)===null?null:(int)$allocation['settlement_effect_id']))PaymentException::reject('history_corrupt');$actualAllocations[]=$fact;

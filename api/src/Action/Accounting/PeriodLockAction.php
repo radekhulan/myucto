@@ -8,6 +8,8 @@ use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Vat\FiledVatPeriodLookup;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -20,12 +22,16 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * možné jen s protizápisem do otevřeného data.
  *
  *   GET /api/accounting/period-lock — čtení (readonly+)
- *   PUT /api/accounting/period-lock — nastavení/posun zámku — ADMIN only, povinný reason
+ *   PUT /api/accounting/period-lock — nastavení/posun zámku, povinný reason;
+ *       smí ten, kdo spravuje účetní období, nebo role s právem `accounting.period_lock`
+ *       (hlavní účetní), viz {@see RequestAuthorization::canChangePeriodLock()}
  *
  * Auto-posun zámku VPŘED dělá i {@see \MyInvoice\Service\Report\TaxSubmissionArchiver}
  * po archivaci DPH přiznání (VAT-lock/H7). Tento endpoint umožní zámek posunout ručně
- * i ZPĚT (oprava už podaného období) nebo zrušit (locked_until = null) — proto admin-only
- * + povinné zdůvodnění do activity_log (before/after + reason).
+ * i ZPĚT (oprava už podaného období) nebo zrušit (locked_until = null), proto povinné
+ * zdůvodnění do activity_log (before/after + reason). Posun zpět přes podané období DPH
+ * nebo přes uzavřené účetní období zůstává jen správcům
+ * ({@see RequestAuthorization::canUnlockProtectedPeriods()}); hlavní účetní dostane 409.
  */
 final class PeriodLockAction
 {
@@ -39,6 +45,7 @@ final class PeriodLockAction
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
+        private readonly FiledVatPeriodLookup $filedVat,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -50,8 +57,8 @@ final class PeriodLockAction
 
     public function update(Request $request, Response $response): Response
     {
-        if (!$this->requireAdmin($request, $response, $err)) {
-            return $err;
+        if (!RequestAuthorization::canChangePeriodLock($request)) {
+            return Json::error($response, 'forbidden', 'Zámek účtování k datu smí posunout jen správce nebo role s právem posunout zámek.', 403);
         }
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
@@ -77,6 +84,13 @@ final class PeriodLockAction
         }
 
         $before = $this->settings->getLockedUntil($supplierId);
+        if ($before !== null && ($lockedUntil === null || $lockedUntil < $before)
+            && !RequestAuthorization::canUnlockProtectedPeriods($request)) {
+            $blocked = $this->protectedPeriodIn($supplierId, $lockedUntil, $before);
+            if ($blocked !== null) {
+                return Json::error($response, $blocked[0], $blocked[1], 409);
+            }
+        }
         $this->settings->setLockedUntil($supplierId, $lockedUntil);
 
         $this->activity->log(
@@ -91,5 +105,42 @@ final class PeriodLockAction
         );
 
         return Json::ok($response, ['locked_until' => $lockedUntil]);
+    }
+
+    /**
+     * Odemyká posun zpět (z `$before` na `$after`, null = zrušení) uzavřené účetní období
+     * nebo podané období DPH? Vrací [kód, hláška] první pojistky, nebo null.
+     *
+     * @return array{0:string, 1:string}|null
+     */
+    private function protectedPeriodIn(int $supplierId, ?string $after, string $before): ?array
+    {
+        $pdo = $this->db->pdo();
+        $from = $after !== null ? (new \DateTimeImmutable($after))->modify('+1 day')->format('Y-m-d') : null;
+        $closed = $pdo->prepare(
+            "SELECT fiscal_year FROM accounting_periods
+              WHERE supplier_id = ? AND status <> 'open' AND starts_on <= ? AND (? IS NULL OR ends_on >= ?)
+              ORDER BY starts_on LIMIT 1"
+        );
+        $closed->execute([$supplierId, $before, $from, $from]);
+        $year = $closed->fetchColumn();
+        if ($year !== false) {
+            return ['period_lock_closed_period', 'Zámek nejde posunout zpět do uzavřeného účetního období ' . $year . '. Posun zpět přes uzavřené období smí jen správce.'];
+        }
+
+        if ($from === null) {
+            $first = $pdo->prepare('SELECT MIN(starts_on) FROM accounting_periods WHERE supplier_id = ?');
+            $first->execute([$supplierId]);
+            $from = (string) ($first->fetchColumn() ?: substr($before, 0, 4) . '-01-01');
+        }
+        $month = new \DateTimeImmutable(substr($from, 0, 7) . '-01');
+        $last = new \DateTimeImmutable(substr($before, 0, 7) . '-01');
+        for (; $month <= $last; $month = $month->modify('+1 month')) {
+            $filed = $this->filedVat->describe($supplierId, $month->format('Y-m-d'));
+            if ($filed !== null) {
+                return ['period_lock_filed_vat', 'Zámek nejde posunout zpět přes podané období (' . $filed . '). Podané se opravuje opravným zápisem; posun zpět přes podané období smí jen správce.'];
+            }
+        }
+        return null;
     }
 }

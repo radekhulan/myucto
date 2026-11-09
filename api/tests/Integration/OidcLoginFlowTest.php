@@ -276,6 +276,112 @@ final class OidcLoginFlowTest extends TestCase
         self::assertGreaterThan(11 * 3600, $lifetime);
     }
 
+    public function testEntraSessionCompletedByLocalSecondFactorIsCappedToo(): void
+    {
+        // `skip_mfa = false`: Entra ID nahrazuje jen heslo a druhý faktor ověří
+        // MyÚčto. Sezení vzniklé bez místního faktoru (basic) nebo před zřízením
+        // povinného MFA (setup) musí blokaci v Entra ID následovat stejně.
+        $result = $this->loginRoundTrip(self::guid(), invite: $this->invites->issue($this->userId, 'entra', null));
+        foreach (['basic', 'setup'] as $level) {
+            $session = $this->sessions->create(
+                $this->userId,
+                self::IP,
+                self::UA,
+                new SessionAuthContext('oidc:entra', $level, externalIdentityId: (int) $result->externalIdentityId),
+            );
+            $lifetime = $session['expires_at'] - $session['issued_at']->getTimestamp();
+            self::assertLessThanOrEqual(12 * 3600, $lifetime, $level);
+            self::assertGreaterThan(11 * 3600, $lifetime, $level);
+        }
+    }
+
+    public function testEntraSessionEndsWithinCapOfLastEntraVerification(): void
+    {
+        // Sezení odvozené později (vlastní doména, dokončení MFA setupu) nesmí
+        // strop začít počítat znovu: běží od posledního ověření u Entra ID.
+        $result = $this->loginRoundTrip(self::guid(), invite: $this->invites->issue($this->userId, 'entra', null));
+        $this->db->pdo()->prepare(
+            'UPDATE user_external_identities SET last_used_at = UTC_TIMESTAMP(6) - INTERVAL 11 HOUR WHERE id = ?'
+        )->execute([(int) $result->externalIdentityId]);
+
+        $session = $this->sessions->create(
+            $this->userId,
+            self::IP,
+            self::UA,
+            SessionAuthContext::externalIdentity('entra', new \DateTimeImmutable(), (int) $result->externalIdentityId),
+        );
+        $lifetime = $session['expires_at'] - $session['issued_at']->getTimestamp();
+        self::assertLessThanOrEqual(3600, $lifetime);
+        self::assertGreaterThan(3500, $lifetime);
+    }
+
+    public function testSessionsWithoutEntraKeepRegularLifetime(): void
+    {
+        // Entra ID je zapnuté, ale uživatel ho nepoužívá: heslo + TOTP i Google
+        // jako první faktor mají dál běžnou platnost sezení.
+        $regular = (int) $this->config->get('session.lifetime_days', 30) * 86400;
+        $totp = $this->sessions->create($this->userId, self::IP, self::UA, SessionAuthContext::strong('totp', new \DateTimeImmutable()));
+        self::assertSame($regular, $totp['expires_at'] - $totp['issued_at']->getTimestamp());
+
+        $google = $this->sessions->create(
+            $this->userId,
+            self::IP,
+            self::UA,
+            new SessionAuthContext('oidc:google', 'basic', externalIdentityId: 424242),
+        );
+        self::assertSame($regular, $google['expires_at'] - $google['issued_at']->getTimestamp());
+    }
+
+    public function testB2bGuestInviteLinksIdentityAndYieldsEntraSession(): void
+    {
+        // Host B2B: v tenantu objednatele má vlastní oid, domovského vydavatele
+        // v `idp` a v `preferred_username` přepsané UPN. Pozvánku přijme podle
+        // e-mailu v claimu `email`, dál se páruje jen podle oid a tenantu.
+        $oid = self::guid();
+        $guest = [
+            'idp' => 'https://sts.windows.net/' . self::guid() . '/',
+            'preferred_username' => 'host_partner.example#EXT#@tenant.example',
+            'email' => $this->email,
+        ];
+        $result = $this->loginRoundTrip($oid, invite: $this->invites->issue($this->userId, 'entra', null), claims: $guest);
+        self::assertSame($this->userId, (int) $result->user['id']);
+
+        $identity = $this->identities->findForUser($this->userId, (int) $result->externalIdentityId);
+        self::assertNotNull($identity);
+        self::assertSame($oid, $identity['subject']);
+        self::assertSame(FakeOidcIdp::TENANT, $identity['tenant_id']);
+        $payload = $this->db->pdo()->prepare(
+            "SELECT payload FROM activity_log WHERE user_id = ? AND action = 'auth.oidc_linked' ORDER BY id DESC LIMIT 1"
+        );
+        $payload->execute([$this->userId]);
+        self::assertTrue(json_decode((string) $payload->fetchColumn(), true)['guest'] ?? false);
+
+        // Relace z přihlášení hosta je sezení Entra ID se stropem platnosti.
+        $session = $this->sessions->create(
+            $this->userId,
+            self::IP,
+            self::UA,
+            SessionAuthContext::externalIdentity('entra', new \DateTimeImmutable(), (int) $result->externalIdentityId),
+        );
+        $context = $this->sessions->loadAuthenticationContext($session['token']);
+        self::assertSame('oidc:entra', $context['session']['auth_method'] ?? null);
+        self::assertSame((int) $result->externalIdentityId, (int) ($context['session']['external_identity_id'] ?? 0));
+        self::assertLessThanOrEqual(12 * 3600, $session['expires_at'] - $session['issued_at']->getTimestamp());
+
+        // Další přihlášení hosta páruje oid, i když se e-mail v tokenu změnil.
+        $again = $this->loginRoundTrip($oid, claims: ['email' => 'jina-adresa@example.test'] + $guest);
+        self::assertSame($this->userId, (int) $again->user['id']);
+
+        // Instalace, která hosty nepovoluje, téhož hosta nepustí.
+        $binding = OidcFlowStore::newBinding();
+        $noGuests = FakeOidcIdp::provider(false);
+        $url = $this->service->start($noGuests, OidcFlowStore::PURPOSE_LOGIN, $binding, null);
+        $this->idp->nextClaims = $this->idp->claims($oid, (string) $this->idp->lastNonce, $guest);
+        $this->expectOidcError(OidcException::NOT_LINKED, fn () => $this->service->complete(
+            $noGuests, ['state' => self::queryParam($url, 'state'), 'code' => 'c'], $binding, null, self::IP, self::UA,
+        ));
+    }
+
     public function testStepUpIssuesProofOnlyForLinkedIdentityOfSameSession(): void
     {
         $oid = self::guid();

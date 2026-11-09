@@ -116,6 +116,24 @@ final class RbacSourceGuardsTest extends TestCase
         self::assertStringContainsString('RequestAuthorization::canChangeFiledVatPeriod($request)', $kinds);
     }
 
+    /** Změnu formy účetního zápisu rozhoduje helper RequestAuthorization, ne vlastní kontrola na správce. */
+    public function testEntryFormChangeUsesPermissionHelper(): void
+    {
+        $action = SourceCorpus::read(dirname(__DIR__, 2) . '/src/Action/Accounting/EntryFormAction.php');
+        self::assertStringContainsString('RequestAuthorization::canChangeEntryForm($request)', $action);
+        self::assertStringNotContainsString('isCompanyAdmin(', $action);
+    }
+
+    /** Posun zámku k datu a jeho pojistky (podané DPH, uzavřené období) rozhodují helpery RequestAuthorization. */
+    public function testPeriodLockUsesPermissionHelpers(): void
+    {
+        $action = SourceCorpus::read(dirname(__DIR__, 2) . '/src/Action/Accounting/PeriodLockAction.php');
+        self::assertStringContainsString('RequestAuthorization::canChangePeriodLock($request)', $action);
+        self::assertStringContainsString('RequestAuthorization::canUnlockProtectedPeriods($request)', $action);
+        self::assertStringNotContainsString('isCompanyAdmin(', $action);
+        self::assertStringNotContainsString('requireAdmin(', $action);
+    }
+
     /** Vrácení importu historie skladu, retry/cancel jeho úlohy i zastavení převzetí rozhoduje helper, ne vlastní kontrola. */
     public function testStockHistoryRollbackUsesPermissionHelper(): void
     {

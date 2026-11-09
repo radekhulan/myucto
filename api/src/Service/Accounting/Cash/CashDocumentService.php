@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Cash;
 
+use MyInvoice\Service\NumberSeries\NumberSeriesAllocator;
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
+use MyInvoice\Service\NumberSeries\NumberSeriesKinds;
+use MyInvoice\Service\NumberSeries\NumberSeriesSelection;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\CashDocumentRepository;
@@ -82,6 +86,8 @@ final class CashDocumentService
         private readonly \MyInvoice\Service\Accounting\AdvanceSettlementSync $advanceSettlement,
         private readonly \MyInvoice\Service\PurchaseInvoice\PurchasePaidStatusRestore $paidStatusRestore,
         private readonly EetCashDocumentRecorder $eet,
+        private readonly NumberSeriesSelection $numberSeriesSelection,
+        private readonly NumberSeriesAllocator $numberSeries,
     ) {}
 
     /**
@@ -118,6 +124,11 @@ final class CashDocumentService
         try {
             $docId = $this->documents->insert($supplierId, $doc, $userId);
             $this->documents->replaceVatLines($docId, $doc['vat_mode'] === 'vat' ? $doc['vat_lines'] : []);
+            // Řada z číselníku: volba z hlavičky, jinak výchozí řada uživatele pro pokladnu.
+            self::seriesGuard(fn () => $this->numberSeriesSelection->apply(
+                'cash_documents', $supplierId, $docId, $data,
+                NumberSeriesKinds::cashKind((string) $doc['doc_type']), (int) $doc['register_id'], $userId, isNew: true,
+            ));
 
             if ($post) {
                 $result = $this->doPost($supplierId, $docId, $userId, self::eetDeviceId($data));
@@ -176,6 +187,16 @@ final class CashDocumentService
         try {
             $this->documents->updateHeader($supplierId, $id, $doc);
             $this->documents->replaceVatLines($id, $doc['vat_mode'] === 'vat' ? $doc['vat_lines'] : []);
+            // Řada patří druhu a pokladně: po změně směru nebo pokladny se volba bez nové
+            // volby vrací na výchozí řadu.
+            if (!array_key_exists('number_series_id', $data)
+                && ((int) $doc['register_id'] !== (int) $existing['register_id'] || $doc['doc_type'] !== $existing['doc_type'])) {
+                $data['number_series_id'] = null;
+            }
+            self::seriesGuard(fn () => $this->numberSeriesSelection->apply(
+                'cash_documents', $supplierId, $id, $data,
+                NumberSeriesKinds::cashKind((string) $doc['doc_type']), (int) $doc['register_id'],
+            ));
             if ($ownTx) {
                 $pdo->commit();
             }
@@ -444,6 +465,22 @@ final class CashDocumentService
         $entry = (new \MyInvoice\Repository\JournalEntryRepository($this->db, new \MyInvoice\Service\ActivityLogger($this->db)))->insertPropertyClearing($intent, $number);
         $this->documents->markPosted($supplier, $id, $number, $entry);
         return ['id' => $id, 'journal_entry_id' => $entry, 'doc_number' => $number];
+    }
+
+    /**
+     * Chyba číselníku řad (neplatná nebo ukončená řada) je validační chyba pokladny.
+     *
+     * @template T
+     * @param callable(): T $fn
+     * @return T
+     */
+    private static function seriesGuard(callable $fn): mixed
+    {
+        try {
+            return $fn();
+        } catch (NumberSeriesException $e) {
+            throw new CashException($e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
     }
 
     /** @param ?int $eetDeviceId zařízení EET, když pokladna žádné namapované nemá */
@@ -858,6 +895,23 @@ final class CashDocumentService
         $this->validateDoc($supplierId, $doc, $doc['vat_lines'], $register);
 
         $docNumber = $doc['doc_number'];
+        // Nová řada z číselníku (volba na dokladu, výchozí řada pokladny nebo druhu). Víc řad
+        // jedné pokladny sdílí její pokladní knihu i zůstatek, liší se jen číslem dokladu.
+        $native = $docNumber === null
+            ? self::seriesGuard(fn () => $this->numberSeries->nativeFor(
+                $supplierId,
+                NumberSeriesKinds::cashKind((string) $doc['doc_type']),
+                $doc['number_series_id'] ?? null,
+                new \DateTimeImmutable((string) $doc['issue_date']),
+                (int) $doc['register_id'],
+            ))
+            : null;
+        if ($native !== null) {
+            $docNumber = $this->numberSeries->allocate(
+                $supplierId, $native, new \DateTimeImmutable((string) $doc['issue_date']), 'PF',
+                (int) substr((string) $doc['issue_date'], 0, 4),
+            );
+        }
         if ($docNumber === null) {
             $seriesCode = $doc['doc_type'] === 'in' ? 'cash_in' : 'cash_out';
             $fiscalYear = (int) substr((string) $doc['issue_date'], 0, 4);
@@ -874,6 +928,11 @@ final class CashDocumentService
                 }
             }
             $docNumber = $this->series->next($supplierId, $seriesCode, $fiscalYear, $seriesScope);
+        }
+        $usedSeries = $native !== null ? (int) $native['id'] : null;
+        if (($doc['number_series_id'] ?? null) !== $usedSeries && $doc['doc_number'] === null) {
+            $this->db->pdo()->prepare('UPDATE cash_documents SET number_series_id = ? WHERE id = ? AND supplier_id = ?')
+                ->execute([$usedSeries, $id, $supplierId]);
         }
 
         // Daňová evidence (DE §6, R6): posted doklad BEZ journalu a BEZ posting enginu /

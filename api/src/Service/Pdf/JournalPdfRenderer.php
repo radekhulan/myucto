@@ -9,12 +9,17 @@ namespace MyInvoice\Service\Pdf;
  * MD/D/částka/popis, na šířku se vejde bez zalomení). Data = výstup
  * JournalExportService::build() (audit 2026-07). Číslování stran přes
  * {@see ReportPdfRendererBase::withPageNumbers()} (§13 ZoÚ — deník je zákonná kniha).
+ * Jednoduchý zápis (`layout = 'pairs'`) má vlastní šablonu s řádkem na dvojici; deník
+ * firmy bez jednoduchého zápisu se sází beze změny.
  */
 final class JournalPdfRenderer extends ReportPdfRendererBase
 {
     public function render(array $data): string
     {
-        $body = $this->renderTemplate('journal.twig', $data);
+        if (!empty($data['filters']['source_type'])) {
+            $data['filters']['source_type'] = \MyInvoice\Service\Accounting\Reports\JournalSourceLabel::label((string) $data['filters']['source_type']);
+        }
+        $body = $this->renderTemplate(($data['layout'] ?? null) === 'pairs' ? 'journal_pairs.twig' : 'journal.twig', $data);
         $mpdf = $this->mpdf(['format' => 'A4', 'orientation' => 'L']);
         $mpdf->SetTitle('Účetní deník');
         $this->withPageNumbers($mpdf, 'Účetní deník');

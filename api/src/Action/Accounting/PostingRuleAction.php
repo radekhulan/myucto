@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\PostingRuleChartAlignmentService;
+use MyInvoice\Service\Accounting\PostingRuleLineScope;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -46,6 +47,11 @@ final class PostingRuleAction
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
         $map = $this->rules->effectiveMap($supplierId);
+        foreach ($map as $key => $rule) {
+            $scope = PostingRuleLineScope::forRule((string) $key, $rule['debit_account_code'] ?? null, $rule['credit_account_code'] ?? null);
+            $map[$key]['line_purchase'] = $scope['purchase'];
+            $map[$key]['line_sale'] = $scope['sale'];
+        }
         // Objekt keyed rule_key → pravidlo (JSON object). Prázdné → {}.
         return Json::ok($response, (object) $map);
     }

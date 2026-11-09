@@ -61,6 +61,8 @@ final class JournalHistoryService
         $prevLines = [];
         $currentLines = [];
         $last = count($headers) - 1;
+        // Záznam activity_log patří nejvýš jedné verzi (verze vzniklé v téže sekundě).
+        $usedActivity = [];
 
         foreach ($headers as $i => $h) {
             // Řádky "narozené" ve stejné transakci jako TATO verze hlavičky — tj. jejich
@@ -79,8 +81,10 @@ final class JournalHistoryService
                 return $l['valid_from'] >= $h['valid_from'] && ($windowEnd === null || $l['valid_from'] < $windowEnd);
             }));
             if ($bornInWindow !== []) {
-                usort($bornInWindow, static fn (array $a, array $b): int => $a['line_no'] <=> $b['line_no']);
-                $currentLines = $bornInWindow;
+                // Výměna jen části řádků (přeúčtování dvojice na místě, replaceSomeLines)
+                // nechá ostatní řádky žít dál, takže sada verze = řádky živé na konci
+                // jejího okna, ne jen nově narozené. Při přepisu všech řádků je to totéž.
+                $currentLines = self::aliveAtWindowEnd($lines, $h['valid_from'], $windowEnd);
             }
             $windowLines = $currentLines;
 
@@ -95,12 +99,16 @@ final class JournalHistoryService
             // zápisu) → verze storna by se tvářila jako „zaúčtoval X", což je nepravda.
             // Pro storno-verzi se atribuce hledá VÝHRADNĚ přes entity_id protizápisu;
             // pokud se nedohledá, radši žádná atribuce (null) než hádaná/chybná.
-            $changedBy = null;
-            if ($prevHeader !== null) {
+            // Vznik zápisu (první verze) nese autora taky (§ 35 odst. 3 ZoÚ: kdo a kdy
+            // u každé verze): záznam zaúčtování v activity_log, jinak kdo zápis zaúčtoval.
+            if ($prevHeader === null) {
+                $changedBy = $this->nearestActivity($activity, (string) $h['valid_from'], $usedActivity)
+                    ?? self::postedBy($h);
+            } else {
                 $isReversalTransition = $prevHeader['reversed_by'] === null && $h['reversed_by'] !== null;
                 $changedBy = $isReversalTransition
                     ? $this->reversalActivity((int) $h['reversed_by'])
-                    : $this->nearestActivity($activity, (string) $h['valid_from']);
+                    : $this->nearestActivity($activity, (string) $h['valid_from'], $usedActivity);
             }
 
             $versions[] = [
@@ -139,12 +147,53 @@ final class JournalHistoryService
     }
 
     /**
+     * Řádky živé na konci okna verze: narozené před koncem okna a smazané až s další
+     * verzí nebo vůbec (aktuální verze). Seřazené podle line_no.
+     *
+     * @param list<array<string,mixed>> $lines
+     * @return list<array<string,mixed>>
+     */
+    private static function aliveAtWindowEnd(array $lines, string $windowStart, ?string $windowEnd): array
+    {
+        $alive = array_values(array_filter($lines, static function (array $l) use ($windowStart, $windowEnd): bool {
+            if ($windowEnd === null) {
+                return $l['valid_from'] >= $windowStart || (int) substr((string) $l['valid_to'], 0, 4) >= 2038;
+            }
+            return $l['valid_from'] < $windowEnd && $l['valid_to'] >= $windowEnd;
+        }));
+        if ($windowEnd === null) {
+            $alive = array_values(array_filter($alive, static fn (array $l): bool => (int) substr((string) $l['valid_to'], 0, 4) >= 2038));
+        }
+        usort($alive, static fn (array $a, array $b): int => [$a['line_no'], $a['id']] <=> [$b['line_no'], $b['id']]);
+        return $alive;
+    }
+
+    /**
+     * Autor vzniku zápisu, když activity_log záznam chybí (převzaté zápisy, importy).
+     *
+     * @param array<string,mixed> $header
+     * @return array<string,mixed>|null
+     */
+    private static function postedBy(array $header): ?array
+    {
+        if ($header['posted_by'] === null) {
+            return null;
+        }
+        return [
+            'action'     => 'accounting.posted',
+            'user_id'    => (int) $header['posted_by'],
+            'user_name'  => $header['posted_by_name'],
+            'created_at' => $header['posted_at'],
+        ];
+    }
+
+    /**
      * @param array<string,mixed> $line
-     * @return array{account_code:?string, account_name:?string, side:string, amount:float, is_red_storno:bool, cost_center:?string, line_no:int}
+     * @return array{account_code:?string, account_name:?string, side:string, amount:float, is_red_storno:bool, cost_center:?string, line_no:int, pair_no?:int}
      */
     private function exportLine(array $line): array
     {
-        return [
+        $out = [
             'account_code' => $line['account_code'] ?? null,
             'account_name' => $line['account_name'] ?? null,
             'side'         => $line['side'],
@@ -153,6 +202,11 @@ final class JournalHistoryService
             'cost_center'  => $line['cost_center'] ?? null,
             'line_no'      => (int) $line['line_no'],
         ];
+        // Číslo dvojice jen u zápisu po dvojicích; složený zápis má výstup beze změny.
+        if (isset($line['pair_no'])) {
+            $out['pair_no'] = (int) $line['pair_no'];
+        }
+        return $out;
     }
 
     /**
@@ -284,9 +338,10 @@ final class JournalHistoryService
      * leží v řádu milisekund/sekund od sebe. NENÍ to FK vazba — jen prezentační pomoc.
      *
      * @param list<array<string,mixed>> $activity
+     * @param array<int,true> $used už přiřazené záznamy (jeden záznam = nejvýš jedna verze)
      * @return array<string,mixed>|null
      */
-    private function nearestActivity(array $activity, string $validFrom): ?array
+    private function nearestActivity(array $activity, string $validFrom, array &$used = []): ?array
     {
         if ($activity === []) {
             return null;
@@ -300,6 +355,9 @@ final class JournalHistoryService
         $best = null;
         $bestDiff = null;
         foreach ($activity as $a) {
+            if (isset($used[$a['id']])) {
+                continue;
+            }
             try {
                 $t = new \DateTimeImmutable((string) $a['created_at']);
             } catch (\Throwable) {
@@ -317,6 +375,7 @@ final class JournalHistoryService
         if ($best === null) {
             return null;
         }
+        $used[$best['id']] = true;
         return [
             'action'     => $best['action'],
             'user_id'    => $best['user_id'],

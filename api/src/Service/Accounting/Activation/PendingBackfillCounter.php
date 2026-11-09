@@ -94,6 +94,12 @@ final class PendingBackfillCounter
             'bank_transactions' => $bankTransactions,
             'settlements' => $settlements,
             'total' => $cashDocuments + $invoices + $purchaseInvoices + $bankTransactions + $settlements,
+            // Doúčtování dokladů (úloha {@see \MyInvoice\Service\Accounting\PostingBackfillJobService})
+            // zpracuje jen faktury. Pohyby banky, pokladní doklady a zápočty čekají na zaúčtování
+            // jinou cestou (fronta banky, pokladna, průvodce aktivací). Bez rozdělení stránka
+            // hlásila „3 bankovních pohybů" a zároveň neměla co spustit.
+            'backfill_total' => $invoices + $purchaseInvoices,
+            'manual_total' => $cashDocuments + $bankTransactions + $settlements,
         ];
     }
 }

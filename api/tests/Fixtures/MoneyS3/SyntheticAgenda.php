@@ -503,6 +503,22 @@ final class SyntheticAgenda
         return $files;
     }
 
+    /**
+     * Agenda, ve které má interní doklad řádek se syntetickým účtem na straně MD a jeho
+     * analytikou `000` na straně Dal (`311` / `311000`): v MyÚčtu je to tentýž účet.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithSameAccountRow(): array
+    {
+        $files = self::files();
+        $rows = iterator_to_array(Ms3Table::fromString($files['ROK.002/UcDenik.DAT'], 'UCDENIK')->rows(), false);
+        $rows[] = ['Cislo' => 501, 'Zdroj' => 'ID', 'Doklad' => 'ID25001', 'Datum' => '2025-01-01', 'Popis' => 'Přeúčtování na analytiku',
+            'UcMD' => '311', 'UcD' => '311000', 'Castka' => 100.0];
+        $files['ROK.002/UcDenik.DAT'] = Ms3FixtureWriter::table(self::JOURNAL_FIELDS, $rows);
+        return $files;
+    }
+
     public static function filesWithChangedDimensions(int $year = 2024): array
     {
         $files = self::files();

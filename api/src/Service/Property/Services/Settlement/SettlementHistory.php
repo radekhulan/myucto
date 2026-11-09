@@ -56,7 +56,7 @@ final class SettlementHistory
         if(PropertyInput::hash($receipt)!==$row['receipt_hash']||PropertyInput::hash($envelope)!==$row['request_hash']||$request['request_hash']!==$row['request_hash']||PropertyInput::hash($preview)!==$request['preview_hash']||PropertyInput::hash($receipt['preview'])!==$request['preview_hash']||$request['document_id']!==$row['document_id']||$request['reversal_of']!==$row['reversal_of']||$request['created_by']!==$row['created_by']||$request['idempotency_key']!==$row['idempotency_key'])SettlementEvidence::reject('history_corrupt');
         $reversed=$this->one('SELECT id,journal_entry_id FROM property_service_settlement_applications WHERE supplier_id=? AND reversal_of=?'.$suffix,[$supplier,$id]);
         $ledger=(new PaymentJournalProof($this->db))->snapshot($supplier,(int)$row['journal_entry_id'],$current);$expected=$receipt['ledger'];$expected['entry']['reversed_by']=$reversed?(int)$reversed['journal_entry_id']:null;
-        if(PropertyInput::hash($ledger)!==PropertyInput::hash($expected)||$ledger['entry']['source_type']!=='property_service_settlement'||$ledger['entry']['source_id']!==($row['reversal_of']===null?(int)$row['request_id']:null)||$ledger['entry']['entry_date']!==$row['accounting_date']||$ledger['entry']['period_id']!==(int)$row['period_id']||PropertyInput::hash(PaymentJournalProof::canonicalLines($ledger['lines']))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($preview['plan']['lines'])))SettlementEvidence::reject('ledger_mismatch');
+        if(PropertyInput::hash($ledger)!==PropertyInput::hash($expected)||$ledger['entry']['source_type']!=='property_service_settlement'||$ledger['entry']['source_id']!==($row['reversal_of']===null?(int)$row['request_id']:null)||$ledger['entry']['entry_date']!==$row['accounting_date']||$ledger['entry']['period_id']!==(int)$row['period_id']||!PaymentJournalProof::matches($ledger['lines'], $preview['plan']['lines']))SettlementEvidence::reject('ledger_mismatch');
         if($row['reversal_of']===null&&isset($preview['plan']['document']['cost']['sources'])){$plan=$preview['plan'];$input=$plan['document'];unset($input['amounts']);$canonical=SettlementPlanner::calculate(SettlementDocument::fromEvidence($input),$plan['current'],$plan['request']);if(PropertyInput::hash($canonical)!==PropertyInput::hash($plan))SettlementEvidence::reject('history_corrupt');$container=\MyInvoice\Bootstrap::buildContainer();$container->set(Connection::class,$this->db);(new SettlementCostProof($this->db))->assertRecorded($supplier,$input['unit_id'],$input['service_id'],$row['accounting_date'],['from'=>$input['period_from'],'to'=>$input['period_to']],$input['cost'],$container->get(SettlementOriginAdapter::class));}
 
         $expectedEffects=$row['reversal_of']===null?self::effects($preview,$receipt['ledger']):[];
@@ -76,7 +76,7 @@ final class SettlementHistory
             if(PropertyInput::hash($originalReceipt)!==$original['receipt_hash']||($preview['application_id']??null)!==(int)$original['id']||($preview['application_hash']??null)!==$original['receipt_hash']||($preview['source_entry_id']??null)!==(int)$original['journal_entry_id']||($preview['document_id']??null)!==(int)$original['document_id']||($envelope['application_id']??null)!==(int)$original['id']||($envelope['accounting_date']??null)!==$row['accounting_date']||$row['accounting_date']<$original['accounting_date'])SettlementEvidence::reject('history_corrupt');
             $originalLedger=(new PaymentJournalProof($this->db))->snapshot($supplier,(int)$original['journal_entry_id'],$current);$expectedOriginal=$originalReceipt['ledger'];$expectedOriginal['entry']['reversed_by']=(int)$row['journal_entry_id'];
             $reversalLines=array_map(fn($line)=>JournalLineAmount::reversal($line),$originalReceipt['preview']['plan']['lines']);
-            if(PropertyInput::hash($originalLedger)!==PropertyInput::hash($expectedOriginal)||PropertyInput::hash(PaymentJournalProof::canonicalLines($reversalLines))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($preview['plan']['lines'])))SettlementEvidence::reject('ledger_mismatch');
+            if(PropertyInput::hash($originalLedger)!==PropertyInput::hash($expectedOriginal)||!PaymentJournalProof::matches($reversalLines, $preview['plan']['lines']))SettlementEvidence::reject('ledger_mismatch');
         }elseif($reversed){
             $reverse=$this->application($supplier,(int)$reversed['id'],$current);
             if($reverse['reversal_of']!==$id||$reverse['document_id']!==(int)$row['document_id'])SettlementEvidence::reject('history_corrupt');
@@ -137,7 +137,7 @@ final class SettlementHistory
             else{
                 $original=$applications[(int)$app['reversal_of']]??null;$originalReceipt=$original?self::decode($original['receipt_json']):null;
                 if(!$original||$original['reversal_of']!==null||$original['document_id']!==$app['document_id']||$receipt['preview']['application_hash']!==$original['receipt_hash']||$receipt['preview']['source_entry_id']!==(int)$original['journal_entry_id'])SettlementEvidence::reject('history_corrupt');
-                $lines=array_map(fn($line)=>JournalLineAmount::reversal($line),$originalReceipt['preview']['plan']['lines']);if(PropertyInput::hash(PaymentJournalProof::canonicalLines($lines))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($receipt['preview']['plan']['lines'])))SettlementEvidence::reject('ledger_mismatch');
+                $lines=array_map(fn($line)=>JournalLineAmount::reversal($line),$originalReceipt['preview']['plan']['lines']);if(!PaymentJournalProof::matches($lines, $receipt['preview']['plan']['lines']))SettlementEvidence::reject('ledger_mismatch');
             }
             $receipts[$id]=$receipt;
         }
@@ -207,7 +207,7 @@ final class SettlementHistory
     }
     public static function effects(array $preview,array $ledger):array
     {
-        $plan=$preview['plan'];$starts=SettlementPlanner::journal($plan['movements'])['starts'];$sources=[];foreach($plan['document']['origins'] as $source)$sources[$source['kind'].':'.$source['id']]=$source;$out=[];
+        $plan=$preview['plan'];$starts=self::ledgerStarts($plan['movements'],$ledger['lines']);$sources=[];foreach($plan['document']['origins'] as $source)$sources[$source['kind'].':'.$source['id']]=$source;$out=[];
         foreach($plan['movements'] as $index=>$movement){$source=$sources[$movement['origin_key']]??null;$kind=match($movement['kind']){'advance_application'=>'advance_applied','principal_reduction'=>'claim_reduction','allocation_release'=>'allocation_relief','opening_paid_credit'=>'opening_paid_credit','new_claim'=>'new_claim'};
             $effect=['kind'=>$kind,'debt_id'=>$source['debt_id']??null,'charge_line_id'=>($source['kind']??null)==='s3_line'?$source['id']:null,'opening_component_id'=>($source['kind']??null)==='opening_component'?$source['id']:null,'allocation_id'=>$movement['allocation_id'],'amount_cents'=>$movement['amount_cents'],'movement_index'=>$index];
             if(in_array($kind,['allocation_relief','opening_paid_credit'],true)){
@@ -218,5 +218,31 @@ final class SettlementHistory
             $out[]=$effect;
         }
         return $out;
+    }
+
+    /**
+     * Pozice prvního řádku každého pohybu v zapsaném zápisu. Složený zápis i zápis po
+     * dvojicích bez dělení řádků leží jako plán. Jednoduchá forma rozdělí pohyb s dílčími
+     * náklady na dvojice uvnitř pohybu ({@see \MyInvoice\Service\Accounting\Pair\TypedJournalPairs::runs()}):
+     * pohyb s N dílčími náklady zabere 2N řádků, ostatní dva. Řádek, na který se účinek
+     * odkazuje, musí i pak odpovídat řádku plánu.
+     *
+     * @return array<int,int>
+     */
+    private static function ledgerStarts(array $movements,array $ledgerLines):array
+    {
+        $journal=SettlementPlanner::journal($movements);
+        if(count($ledgerLines)===count($journal['lines']))return $journal['starts'];
+        $starts=[];$position=0;
+        foreach($movements as $index=>$movement){
+            $starts[$index]=$position;$width=isset($movement['cost_credits'])?count($movement['cost_credits']):1;
+            if($width===1){
+                foreach([0,1] as $offset){$want=$journal['lines'][$journal['starts'][$index]+$offset];$have=$ledgerLines[$position+$offset]??null;
+                    if($have===null||$have['account_code']!==$want['account_code']||$have['side']!==$want['side']||bccomp((string)$have['amount'],(string)$want['amount'],2)!==0)SettlementEvidence::reject('ledger_mismatch');}
+            }
+            $position+=2*$width;
+        }
+        if($position!==count($ledgerLines))SettlementEvidence::reject('ledger_mismatch');
+        return $starts;
     }
 }

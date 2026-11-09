@@ -10,9 +10,10 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   accountingApi, type JournalHistoryResponse, type JournalHistoryLineChange,
+  type JournalHistoryLine, type JournalHistoryVersion,
 } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
-import { formatDate, formatMoney } from '@/composables/useFormat'
+import { formatDate, formatDateTime, formatMoney } from '@/composables/useFormat'
 import { ICONS } from '@/components/ui/buttonStyles'
 import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 
@@ -63,8 +64,33 @@ async function toggle(isOpen: boolean) {
   }
 }
 
-function lineKey(c: JournalHistoryLineChange): string {
-  return `${c.type}-${c.line_no}`
+type RowState = 'same' | 'added' | 'changed' | 'removed'
+interface HistoryRow {
+  key: string
+  state: RowState
+  line: JournalHistoryLine
+  before?: JournalHistoryLine
+}
+
+/** Celý zápis verze; rozdíl proti předchozí verzi je označený stavem řádku, odebrané řádky jsou na konci. */
+function versionRows(v: JournalHistoryVersion): HistoryRow[] {
+  const changes = new Map<number, JournalHistoryLineChange>()
+  for (const c of v.line_changes ?? []) changes.set(c.line_no, c)
+  const rows: HistoryRow[] = (v.lines ?? []).map((line) => {
+    const c = changes.get(line.line_no)
+    const state: RowState = c?.type === 'added' ? 'added' : c?.type === 'changed' ? 'changed' : 'same'
+    return { key: `l-${line.line_no}`, state, line, before: state === 'changed' ? c?.before : undefined }
+  })
+  for (const c of v.line_changes ?? []) {
+    if (c.type === 'removed' && c.line) rows.push({ key: `r-${c.line_no}`, state: 'removed', line: c.line })
+  }
+  return rows
+}
+function rowClass(state: RowState): string {
+  if (state === 'added') return 'bg-success-50'
+  if (state === 'changed') return 'bg-warning-50'
+  if (state === 'removed') return 'bg-danger-50 text-neutral-500'
+  return ''
 }
 function lineSideLabel(side: string): string {
   return t(`accounting.journal.side.${side}`)
@@ -76,55 +102,65 @@ function lineSideLabel(side: string): string {
     <div>
       <div v-if="loading" class="text-xs text-neutral-400 py-2">{{ t('common.loading') }}</div>
       <template v-else-if="history">
-        <p v-if="history.versions.length <= 1" class="text-xs text-neutral-400">{{ t('accounting.journal.history.no_changes') }}</p>
-        <ol v-else class="space-y-3">
+        <p v-if="history.versions.length <= 1" class="text-xs text-neutral-400 mb-2">{{ t('accounting.journal.history.no_changes') }}</p>
+        <ol class="space-y-3">
           <li v-for="v in history.versions" :key="v.version" class="border border-neutral-200 rounded-md px-3 py-2 bg-neutral-50">
             <div class="flex items-center flex-wrap gap-2 text-xs">
               <span class="font-semibold text-neutral-700">{{ t('accounting.journal.history.version', { n: v.version }) }}</span>
               <span v-if="v.is_current" class="px-1.5 py-0.5 rounded bg-success-50 text-success-600 font-medium">{{ t('accounting.journal.history.current') }}</span>
-              <span class="text-neutral-400">{{ formatDate(v.valid_from) }}</span>
-              <span v-if="v.changed_by" class="text-neutral-500">
-                - {{ v.changed_by.user_name || t('accounting.journal.history.unknown_user') }}
+              <span class="text-neutral-400">{{ formatDateTime(v.valid_from) }}</span>
+              <span class="text-neutral-500">
+                - {{ v.changed_by?.user_name || t('accounting.journal.history.unknown_user') }}
               </span>
             </div>
 
-            <!-- první (nejstarší) verze = vznik zápisu, žádný diff -->
             <p v-if="!v.header_changes && !v.line_changes" class="text-xs text-neutral-400 mt-1">
               {{ t('accounting.journal.history.created') }}
             </p>
 
-            <template v-else>
-              <ul v-if="v.header_changes && Object.keys(v.header_changes).length" class="mt-1.5 space-y-0.5">
-                <li v-for="(diff, field) in v.header_changes" :key="field" class="text-xs text-neutral-600">
-                  <span class="font-medium">{{ fieldLabel(String(field)) }}:</span>
-                  <span class="text-neutral-400 line-through ml-1">{{ fieldValue(String(field), diff.before) }}</span>
-                  <span class="mx-1">→</span>
-                  <span class="text-neutral-800">{{ fieldValue(String(field), diff.after) }}</span>
-                </li>
-              </ul>
+            <ul v-if="v.header_changes && Object.keys(v.header_changes).length" class="mt-1.5 space-y-0.5">
+              <li v-for="(diff, field) in v.header_changes" :key="field" class="text-xs text-neutral-600">
+                <span class="font-medium">{{ fieldLabel(String(field)) }}:</span>
+                <span class="text-neutral-400 line-through ml-1">{{ fieldValue(String(field), diff.before) }}</span>
+                <span class="mx-1">→</span>
+                <span class="text-neutral-800">{{ fieldValue(String(field), diff.after) }}</span>
+              </li>
+            </ul>
 
-              <ul v-if="v.line_changes && v.line_changes.length" class="mt-1.5 space-y-0.5">
-                <li v-for="c in v.line_changes" :key="lineKey(c)" class="text-xs">
-                  <template v-if="c.type === 'added' && c.line">
-                    <span class="text-success-600 font-medium">+ </span>
-                    <span class="font-mono">{{ c.line.account_code }}</span> {{ c.line.account_name }}
-                    - {{ lineSideLabel(c.line.side) }} {{ formatMoney(journalAmount(c.line)) }}
-                  </template>
-                  <template v-else-if="c.type === 'removed' && c.line">
-                    <span class="text-danger-500 font-medium">− </span>
-                    <span class="font-mono line-through">{{ c.line.account_code }}</span> {{ c.line.account_name }}
-                    - {{ lineSideLabel(c.line.side) }} {{ formatMoney(journalAmount(c.line)) }}
-                  </template>
-                  <template v-else-if="c.type === 'changed' && c.before && c.after">
-                    <span class="text-warning-600 font-medium">~ </span>
-                    <span class="font-mono">{{ c.after.account_code }}</span> {{ c.after.account_name }}:
-                    <span class="text-neutral-400 line-through">{{ lineSideLabel(c.before.side) }} {{ formatMoney(journalAmount(c.before)) }}</span>
-                    <span class="mx-1">→</span>
-                    <span>{{ lineSideLabel(c.after.side) }} {{ formatMoney(journalAmount(c.after)) }}</span>
-                  </template>
-                </li>
-              </ul>
-            </template>
+            <div v-if="v.lines && v.lines.length" class="mt-2 overflow-x-auto" data-testid="history-lines">
+              <table class="w-full text-xs">
+                <thead>
+                  <tr class="text-left text-neutral-500">
+                    <th class="font-medium pr-3 py-0.5">{{ t('accounting.journal.history.col_pair') }}</th>
+                    <th class="font-medium pr-3 py-0.5">{{ t('accounting.journal.history.col_account') }}</th>
+                    <th class="font-medium pr-3 py-0.5">{{ lineSideLabel('debit') }}</th>
+                    <th class="font-medium pr-3 py-0.5">{{ lineSideLabel('credit') }}</th>
+                    <th class="font-medium py-0.5 w-full">{{ t('accounting.journal.history.col_change') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in versionRows(v)" :key="row.key" :class="rowClass(row.state)" :data-state="row.state">
+                    <td class="pr-3 py-0.5 whitespace-nowrap">{{ row.line.pair_no ? row.line.pair_no : '' }}</td>
+                    <td class="pr-3 py-0.5">
+                      <span class="font-mono" :class="row.state === 'removed' ? 'line-through' : ''">{{ row.line.account_code }}</span> {{ row.line.account_name }}
+                    </td>
+                    <td class="pr-3 py-0.5 text-right whitespace-nowrap tabular-nums">{{ row.line.side === 'debit' ? formatMoney(journalAmount(row.line)) : '' }}</td>
+                    <td class="pr-3 py-0.5 text-right whitespace-nowrap tabular-nums">{{ row.line.side === 'credit' ? formatMoney(journalAmount(row.line)) : '' }}</td>
+                    <td class="py-0.5 text-neutral-600">
+                      <template v-if="row.state === 'added'"><span class="text-success-600 font-medium">+ {{ t('accounting.journal.history.line_added') }}</span></template>
+                      <template v-else-if="row.state === 'removed'"><span class="text-danger-500 font-medium">− {{ t('accounting.journal.history.line_removed') }}</span></template>
+                      <template v-else-if="row.state === 'changed' && row.before">
+                        <span class="text-warning-600 font-medium">~ {{ t('accounting.journal.history.line_changed') }}:</span>
+                        <span class="text-neutral-400 line-through ml-1">
+                          <span class="font-mono">{{ row.before.account_code }}</span>
+                          {{ lineSideLabel(row.before.side) }} {{ formatMoney(journalAmount(row.before)) }}
+                        </span>
+                      </template>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </li>
         </ol>
       </template>

@@ -10,6 +10,7 @@ use PHPUnit\Framework\TestCase;
 final class OpeningImplementationTest extends TestCase {
  use PropertyChargeFixture;
  use MyInvoice\Tests\Support\PaymentCorrectionFixture;
+ use MyInvoice\Tests\Support\PairedJournalAssertions;
  private Connection $db;
  private array $f;
  public function testBalancedPersonalOpening():void {
@@ -47,6 +48,11 @@ final class OpeningImplementationTest extends TestCase {
 
 
 
+   if(str_ends_with($this->name(),'InSingleEntryForm'))self::assertGreaterThan(0,$this->assertSupplierJournalPaired($pdo,$s));
   }finally{if($pdo->inTransaction())$pdo->rollBack();}
  }
+
+ /** Jednoduchá forma: počáteční stav i jeho oprava (protizápis a nový zápis) jsou po dvojicích a důkazy je přijmou. */
+ #[\PHPUnit\Framework\Attributes\Group('pairs-e2e')]
+ public function testBalancedPersonalOpeningInSingleEntryForm():void {$this->testBalancedPersonalOpening();}
 }

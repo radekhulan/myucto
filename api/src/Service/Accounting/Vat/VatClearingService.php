@@ -11,6 +11,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\VatClearingRunRepository;
+use MyInvoice\Service\Accounting\Pair\PairGroups;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\TakenOverRecord;
@@ -434,7 +435,7 @@ final class VatClearingService
             $supplierId,
             self::SOURCE_TYPE,
             $result['source_id'],
-            $lines,
+            PairGroups::consecutive($lines, 'vat_clearing'),
             [
                 'entry_date'  => $result['period_end'],
                 'document_no' => 'DPH-' . $result['period_label'],
@@ -752,7 +753,7 @@ final class VatClearingService
             );
         if (!$status['writable']) {
             $note .= $status['writable_reason'] === 'date_locked'
-                ? ' Období je uzamčené — přepočet až po posunutí zámku (jen admin).'
+                ? ' Období je uzamčené — přepočet až po posunutí zámku (smí správce nebo role s právem posunout zámek).'
                 : ' Období není otevřené — rozdíl patří do dodatečného přiznání, ne do zavřených knih.';
         }
 

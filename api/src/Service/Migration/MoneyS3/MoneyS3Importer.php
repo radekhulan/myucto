@@ -13,6 +13,7 @@ use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Migration\Shared\FiscalYearMismatchException;
 use MyInvoice\Service\Migration\Shared\MigrationPeriods;
@@ -561,6 +562,10 @@ final class MoneyS3Importer
             } elseif ($dryRun && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
+            if ($dryRun) {
+                // Forma zápisu zapsaná zkouškou se vrátila s ní; sdílená odpověď procesu taky.
+                EntryFormService::forgetShared($supplierId);
+            }
         }
         return $protocol;
     }
@@ -592,7 +597,11 @@ final class MoneyS3Importer
         $seedDate = $this->periods->findByYear($ctx->supplierId, $first['year'])['starts_on'] ?? $first['starts_on'];
         return [
             ChartImporter::STEP => fn () => $this->chart->run($ctx, $seedDate),
-            JournalImporter::STEP => fn () => $this->journal->run($ctx),
+            JournalImporter::STEP => function () use ($ctx): void {
+                // Forma zápisu nové firmy dřív, než do deníku přijde první převzatý zápis.
+                $this->unit->applyEntryFormDefault($ctx->supplierId);
+                $this->journal->run($ctx);
+            },
             self::STEP_ACCOUNTING_MODE => fn () => $this->switchMode($ctx),
             CodebookImporter::STEP_PARTNERS => fn () => $this->codebooks->importPartners($ctx),
             CodebookImporter::STEP_POSTING_RULES => fn () => $this->codebooks->importPostingRules($ctx),

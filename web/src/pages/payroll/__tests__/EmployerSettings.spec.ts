@@ -99,6 +99,7 @@ const defaultAccounts: PayrollEmployerAccounts = {
   other_deductions_credit: '379',
   enforcement_deductions_credit: '379',
   enforcement_fee_revenue_credit: '648',
+  statutory_nonpartner_gross_credit: '331',
   partner_settlement_credit: '365',
   risky_savings_debit: '527',
   risky_savings_credit: '379',

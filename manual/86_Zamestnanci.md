@@ -946,7 +946,8 @@ o výpočtu, podání i zaúčtování:
 |---|---:|---:|
 | pracovní poměr mimo výkon funkce, zaměstnání malého rozsahu, DPP, DPČ | 521 | 331 |
 | příjem společníka ze závislé činnosti | 522 | 366 |
-| odměna za výkon funkce člena orgánu | 523 | 366 |
+| odměna za výkon funkce člena orgánu, který je společníkem | 523 | 366 |
+| odměna za výkon funkce člena orgánu, který společníkem není | 523 | 331 nebo 366 |
 | pojistné hrazené zaměstnavatelem | 524 | 336 |
 
 Odměna jednatele za výkon funkce není totéž co pracovní poměr jednatele mimo
@@ -955,6 +956,14 @@ osoby. Převzatý vztah z Mzdové rekapitulace zachovává dosavadní kontaci; p
 ostrým použitím zkontrolujte právní titul, protože starší karta
 „jednatel-společník" nerozliší smlouvu o výkonu funkce od ostatní závislé
 činnosti. Výchozí účty nastavíte v [Nastavení mezd](90_Nastaveni_mezd.md).
+
+U vztahu **odměna za výkon funkce** zaškrtněte na kartě vztahu **Člen orgánu je
+zároveň společníkem**, je-li jednatel společníkem. Jeho odměna se pak účtuje
+523/366 a pojistné, daň i zápočet čisté mzdy jdou z 366 (366/336, 366/342,
+366/365). U jednatele, který společníkem není, se odměna účtuje 523/331, má-li
+firma v nastavení mezd vyplněnou předkontaci **Odměna jednatele, který není
+společníkem**; jinak jde jako dřív proti 366. Nově zakládaná firma ji má
+předvyplněnou. Změna platí pro běhy přepočítané po uložení.
 
 ### 86.12.8 Životní cyklus vztahu
 

@@ -65,12 +65,18 @@ import { appIsoDate, addDaysIso } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import ItemAccrualFields from '@/components/invoice/ItemAccrualFields.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
-import { ICONS } from '@/components/ui/buttonStyles'
+import ItemPostingFields from '@/components/accounting/ItemPostingFields.vue'
+import DraftPostingPreviewPanel from '@/components/accounting/DraftPostingPreviewPanel.vue'
+import { useEditorPosting } from '@/composables/useEditorPosting'
+import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
+import { accountingApi, type PostingRule } from '@/api/accounting'
+import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
 import { documentVatInputs, itemVatInputs, loadedItemVatCode, type LoadedItemVat } from './itemVatClassification'
 import { useResultAccounts } from '@/composables/useResultAccounts'
 import DurationInput from '@/components/ui/DurationInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
+import NumberSeriesSelect from '@/components/numberSeries/NumberSeriesSelect.vue'
 import { useDocumentDimensions, applyPrefill } from '@/composables/useDocumentDimensions'
 import { durationTotal, isPreciseUnitPrice, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, unitPriceForAmount, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
 import { amountItems, blankTextItem, isTextItem, textItemPayload } from '@/utils/invoiceTextRow'
@@ -1064,6 +1070,22 @@ function itemVatEditable(item: InvoiceItem): boolean {
 function itemDetailsAvailable(item: InvoiceItem): boolean {
   return itemAccountEditable(item) || itemVatEditable(item)
 }
+
+// ─── ZAÚČTOVÁNÍ UŽ PŘI ZADÁNÍ (předkontace a protiúčet řádku, náhled, Uložit a zaúčtovat) ───
+const editorPosting = useEditorPosting()
+const postingErrorToast = useAccountingPeriodToast()
+onMounted(() => { void editorPosting.load() })
+/** Druhy dokladu, které se účtují do deníku (PostingService::POSTABLE_ISSUED_INVOICE_TYPES). */
+const POSTABLE_TYPES = ['invoice', 'credit_note', 'tax_document', 'penalty']
+const editorPostable = computed(() => editorPosting.enabled.value && POSTABLE_TYPES.includes(form.value.invoice_type))
+const canSaveAndPost = computed(() => editorPostable.value && editorPosting.canPost.value
+  && (editedStatus.value !== 'draft' || auth.canWrite('invoices.issue')))
+/** Pohledávka, která platí bez volby na řádku — nápověda v poli protiúčtu. */
+const defaultCounterAccount = computed(() => editorPosting.ruleAccount('invoice.services.issued', 'debit') ?? '311')
+/** Předkontace řádku doplní výnosový účet, který řádek ještě nemá (server pak totéž). */
+function applyItemRule(item: InvoiceItem, rule: PostingRule) {
+  if (!item.revenue_account_code && rule.credit_account_code) item.revenue_account_code = rule.credit_account_code
+}
 function toggleItemDetails(item: InvoiceItem) {
   if (itemDetailsOpen.has(item)) itemDetailsOpen.delete(item)
   else itemDetailsOpen.add(item)
@@ -1425,6 +1447,16 @@ function blankItem(): InvoiceItem {
   return item
 }
 
+// Řada z číselníku zvolená v hlavičce konceptu. undefined = beze změny (do payloadu
+// nejde), null = výchozí řada druhu. Výběr se ukáže jen u druhu s víc řadami.
+const numberSeriesId = ref<number | null | undefined>(undefined)
+const numberSeriesType = computed<'invoice' | 'proforma' | 'credit_note'>(() =>
+  form.value.invoice_type === 'proforma' || form.value.invoice_type === 'credit_note' ? form.value.invoice_type : 'invoice')
+// Synchronně: načtení dokladu mění typ dřív, než se z něj nastaví řada, a ta se nesmí smazat.
+watch(numberSeriesType, () => {
+  if (numberSeriesId.value != null) numberSeriesId.value = null
+}, { flush: 'sync' })
+
 // Náhled čísla faktury — backend zná aktuální counter pro per-supplier templ.
 // Volá se při mount + při změně typu / data; cancellation nemá číslo.
 async function loadVarsymbolPreview() {
@@ -1440,6 +1472,7 @@ async function loadVarsymbolPreview() {
       form.value.client_id ?? undefined,
       form.value.revenue_category_id ?? undefined,
       varsymbolSeriesType(form.value.invoice_type, form.value.is_simplified) === 'simplified',
+      numberSeriesId.value,
     )
     varsymbolAutoPreview.value = r.varsymbol
     varsymbolAutoHasTemplate.value = r.has_template
@@ -1448,7 +1481,7 @@ async function loadVarsymbolPreview() {
     varsymbolAutoHasTemplate.value = false
   }
 }
-watch(() => [form.value.invoice_type, form.value.issue_date, form.value.client_id, form.value.revenue_category_id, form.value.is_simplified], () => {
+watch(() => [form.value.invoice_type, form.value.issue_date, form.value.client_id, form.value.revenue_category_id, form.value.is_simplified, numberSeriesId.value], () => {
   if (loaded.value && editedStatus.value === 'draft') loadVarsymbolPreview()
 })
 
@@ -1670,6 +1703,7 @@ onMounted(async () => {
       payment_schedule: (inv.payment_schedule ?? []).map(r => ({ ...r })),
       calendar_contract_ref: inv.calendar_contract_ref ?? '',
     })
+    numberSeriesId.value = inv.status === 'draft' ? (inv.number_series_id ?? undefined) : undefined
     rememberLoadedStockPrices()
     // Pořadí položek bez slevových řádků = pořadí na serveru (sleva se generuje na konec).
     void docDims.load(inv.id, form.value.items)
@@ -2797,7 +2831,21 @@ async function submit() {
   submitting.value = true
   error.value = ''
   try {
-    const payload: InvoicePayload = {
+    await saveDocument(buildPayload(form.value.items))
+  } catch (e: any) {
+    error.value = apiErrorMessage(e, t('common.save_failed'))
+    // Toast + scroll k bannéru — uživatel může být odscrollovaný dole u tlačítka Uložit.
+    toast.error(error.value)
+    await nextTick()
+    paneDom.querySelector('[data-error-banner]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  } finally {
+    submitting.value = false
+  }
+}
+
+/** Tělo dokladu pro uložení i pro náhled zápisu (náhled ho uloží v odvolané transakci). */
+function buildPayload(items: InvoiceItem[]): InvoicePayload {
+  return {
       invoice_type: form.value.invoice_type,
       // Zjednodušený doklad bez odběratele: backend doplní koncového zákazníka firmy.
       client_id: form.value.client_id ?? null,
@@ -2844,11 +2892,12 @@ async function submit() {
       // Volitelný ruční varsymbol — backend ho akceptuje jen u draftu;
       // prázdný řetězec → backend uloží NULL a vygeneruje při issue automaticky.
       varsymbol: form.value.varsymbol.trim(),
+      number_series_id: numberSeriesId.value,
       vat_classification_code: form.value.vat_classification_code,
       revenue_category: form.value.revenue_category,
       revenue_category_id: form.value.revenue_category_id,
       // Textový řádek jde jen jako druh + text + pořadí; zbytek si server vynuluje.
-      items: form.value.items.map((it, i) => isTextItem(it) ? textItemPayload(it, i) : ({
+      items: items.map((it, i) => isTextItem(it) ? textItemPayload(it, i) : ({
         description: it.description,
         quantity: itemQuantity(it),
         duration_minutes: isTimeItem(it) ? (it.duration_minutes ?? null) : null,
@@ -2873,6 +2922,8 @@ async function submit() {
         accrual_to: it.accrual_to || null,
         // Výnosový účet položky (F1) — round-trip jako ostatní pole položky.
         revenue_account_code: (it.revenue_account_code ?? '').trim() || null,
+        counter_account_code: (it.counter_account_code ?? '').trim() || null,
+        posting_rule_key: it.posting_rule_key || null,
         seller_item_code: it.seller_item_code ?? null,
         oss_applicable: it.oss_applicable ?? false,
         oss_consumer_country: it.oss_applicable ? (it.oss_consumer_country || null) : null,
@@ -2898,7 +2949,10 @@ async function submit() {
         oss_needs_manual_review: it.oss_applicable ? (it.oss_needs_manual_review ?? false) : false,
       })),
     }
+}
 
+/** Uloží doklad a jeho navázané části (dimenze, výkazy, přílohy) a přejde na detail. */
+async function saveDocument(payload: InvoicePayload): Promise<void> {
     const legacyItemIndex = wrBillingLegacyItemId.value == null ? -1 : form.value.items.findIndex(item => item.id === wrBillingLegacyItemId.value)
     const itemDimsSnapshot = docDims.snapshot(form.value.items)
     let saved: Invoice
@@ -3026,19 +3080,50 @@ async function submit() {
         toast.warning(apiErrorMessage(e, t('invoice.attachments.post_save_failed')))
       }
     }
+    if (postAfterSave) await postSavedInvoice(saved)
     if (eetChoiceVisible.value && eetOnSave.value !== 'none') {
       router.push({ path: `/invoices/${saved.id}`, query: { eet: eetOnSave.value } })
     } else {
       router.push(`/invoices/${saved.id}`)
     }
-  } catch (e: any) {
-    error.value = apiErrorMessage(e, t('common.save_failed'))
-    // Toast + scroll k bannéru — uživatel může být odscrollovaný dole u tlačítka Uložit.
-    toast.error(error.value)
-    await nextTick()
-    paneDom.querySelector('[data-error-banner]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+/**
+ * Náhled zápisu pod položkami: jen u účtovaného druhu dokladu a jen když doklad jde
+ * uložit. Prázdné řádky vynechá stejně jako uložení; rozepsaná položka (bez popisu
+ * nebo s nulovou cenou) náhled odloží, server by ji odmítl validací.
+ */
+const previewPayload = computed<InvoicePayload | null>(() => {
+  if (!editorPostable.value || !form.value.currency_id || (!form.value.client_id && !form.value.is_simplified)) return null
+  const items = form.value.items.filter(it =>
+    (it.description || '').trim() !== '' || (Number(it.unit_price_without_vat) || 0) !== 0)
+  const complete = items.every(it => (it.description || '').trim() !== '' && (Number(it.unit_price_without_vat) || 0) !== 0)
+  return items.length > 0 && complete ? buildPayload(items) : null
+})
+
+let postAfterSave = false
+/** Uložit a zaúčtovat: uloží doklad stejnou cestou jako Uložit, koncept vystaví a zaúčtuje. */
+async function saveAndPost() {
+  if (!canSaveAndPost.value) return
+  postAfterSave = true
+  try {
+    await submit()
   } finally {
-    submitting.value = false
+    postAfterSave = false
+  }
+}
+
+/**
+ * Zaúčtuje právě uložený doklad. Koncept se neúčtuje, proto ho nejdřív vystaví (stejná
+ * akce jako Vystavit v detailu). Chyba zaúčtování uložení nevrací: doklad zůstane uložený.
+ */
+async function postSavedInvoice(saved: Invoice): Promise<void> {
+  try {
+    const issued = saved.status === 'draft' ? await invoicesApi.issue(saved.id) : saved
+    await accountingApi.postInvoice(issued.id)
+    toast.success(t('accounting.editor_posting.posted_toast'))
+  } catch (e: any) {
+    postingErrorToast(e)
   }
 }
 
@@ -3347,6 +3432,8 @@ useWindowTitle(
             <!-- Ruční override čísla faktury — jen u draftu; prázdné = vygeneruje se při Vystavení.
                  Placeholder ukazuje, jaké číslo dostane fakturu při Issue (z preview API).
                  Když není žádný template (ani per-supplier ani v cfg), ukáže warning. -->
+            <NumberSeriesSelect v-if="editedStatus === 'draft' && !form.varsymbol.trim()"
+              :scope="{ module: 'invoices', type: numberSeriesType }" v-model="numberSeriesId" />
             <div v-if="editedStatus === 'draft'">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t(varsymbolLabelKey) }}</label>
               <input v-model="form.varsymbol" type="text" maxlength="20"
@@ -3641,6 +3728,11 @@ useWindowTitle(
                     <ChartAccountSelect v-model="item.revenue_account_code" :accounts="resultAccounts.issuedItemAccounts.value"
                       class="w-56 max-w-full" compact :placeholder="t('invoice.item_account.placeholder')" />
                   </label>
+                  <ItemPostingFields v-if="editorPostable && itemAccountEditable(item)" direction="sale"
+                    v-model:rule-key="item.posting_rule_key" v-model:counter-account="item.counter_account_code"
+                    :rules="editorPosting.rules.value" :accounts="editorPosting.accounts.value"
+                    :default-counter="defaultCounterAccount"
+                    @rule-applied="(r: PostingRule) => applyItemRule(item, r)" />
                   <label v-if="itemVatEditable(item)" :title="t('invoice.item_details.vat_classification_hint')"
                     class="flex items-center gap-2">
                     <span class="whitespace-nowrap">{{ t('invoice.item_details.vat_classification') }}</span>
@@ -3843,6 +3935,12 @@ useWindowTitle(
                 <ChartAccountSelect v-model="item.revenue_account_code" :accounts="resultAccounts.issuedItemAccounts.value"
                   compact :placeholder="t('invoice.item_account.placeholder')" />
               </label>
+              <ItemPostingFields v-if="editorPostable && itemAccountEditable(item) && itemDetailsOpen.has(item)"
+                class="mt-1.5" direction="sale" stacked
+                v-model:rule-key="item.posting_rule_key" v-model:counter-account="item.counter_account_code"
+                :rules="editorPosting.rules.value" :accounts="editorPosting.accounts.value"
+                :default-counter="defaultCounterAccount"
+                @rule-applied="(r: PostingRule) => applyItemRule(item, r)" />
               <label v-if="itemVatEditable(item) && itemDetailsOpen.has(item)" class="mt-1.5 block text-xs font-medium text-neutral-600">
                 <span class="mb-1 block">{{ t('invoice.item_details.vat_classification') }}</span>
                 <select :value="itemVatCode(item) ?? ''" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm"
@@ -3986,6 +4084,10 @@ useWindowTitle(
           </div>
         </div>
       </div>
+
+      <!-- Náhled zápisu (zaúčtování už při zadání): tentýž výpočet jako Zaúčtovat. -->
+      <DraftPostingPreviewPanel v-if="editorPostable" source="invoices"
+        :doc-id="invoiceId ?? null" :payload="previewPayload" />
 
       <!-- Klasifikace (VAT pro DPH přiznání + volitelný revenue tag) -->
       <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
@@ -4628,12 +4730,20 @@ useWindowTitle(
       </fieldset>
 
       <!-- Action bar -->
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 flex justify-between items-center shadow-sm">
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 flex flex-wrap justify-between items-center gap-2 shadow-sm">
         <RouterLink to="/invoices" class="px-4 py-2 text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors">{{ t('common.back') }}</RouterLink>
-        <button type="submit" :disabled="submitting"
-          class="px-5 h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md">
-          {{ submitting ? t('common.saving') : (isEdit ? t('common.save') : t('common.create')) }}
-        </button>
+        <div class="flex flex-wrap items-center gap-2">
+          <button v-if="canSaveAndPost" type="button" :disabled="submitting" data-test="save-and-post"
+            :title="t('accounting.editor_posting.save_and_post_hint_sale')"
+            :class="btnFilled('success')" class="whitespace-nowrap" @click="saveAndPost">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('accounting.editor_posting.save_and_post') }}
+          </button>
+          <button type="submit" :disabled="submitting"
+            class="px-5 h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md whitespace-nowrap">
+            {{ submitting ? t('common.saving') : (isEdit ? t('common.save') : t('common.create')) }}
+          </button>
+        </div>
       </div>
     </form>
 

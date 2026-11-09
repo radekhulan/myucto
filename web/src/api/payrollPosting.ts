@@ -1,4 +1,5 @@
 import { api } from './client'
+import { downloadApiFile } from '@/utils/downloadFile'
 
 // MZ-18-W07 — reconciliation účetního můstku mezd (mzda ↔ deník ↔ platby).
 // Read-only report; žádné mutační metody.
@@ -62,9 +63,45 @@ export interface PayrollPostingReconciliation {
   categories: PayrollPostingReconciliationCategory[]
 }
 
+/** Řádek souhrnu za firmu: druh mzdy a dvojice účtů. */
+export interface PayrollPostingDetailSummaryRow {
+  label: string
+  debit_account: string | null
+  credit_account: string | null
+  hours: number | null
+  amount_minor: number
+}
+
+/** Řádek rozpadu po zaměstnancích a druzích mezd. */
+export interface PayrollPostingDetailRow extends PayrollPostingDetailSummaryRow {
+  employee_id: number | null
+  personal_number: string | null
+  name: string | null
+  component_code: string | null
+  cost_center: string | null
+}
+
+/** Sestava podrobného zaúčtování mezd za měsíc. */
+export interface PayrollPostingDetailReport {
+  period: string
+  runs: Array<{ run_id: number; revision_no: number; journal_entry_id: number | null }>
+  summary: PayrollPostingDetailSummaryRow[]
+  rows: PayrollPostingDetailRow[]
+  totals: { amount_minor: number; hours: number | null }
+}
+
 export const payrollPostingApi = {
   reconciliation: (period: string) =>
     api.get<PayrollPostingReconciliation>('/payroll/posting/reconciliation', {
       params: { period },
     }).then(response => response.data),
+  detail: (period: string) =>
+    api.get<{ report: PayrollPostingDetailReport }>('/payroll/reports/posting-detail', {
+      params: { period },
+    }).then(response => response.data.report),
+  exportDetail: (format: 'xlsx' | 'csv', period: string): Promise<void> =>
+    downloadApiFile(
+      `/payroll/reports/posting-detail/export.${format}?${new URLSearchParams({ period }).toString()}`,
+      `zauctovani-mezd-${period}.${format}`,
+    ).then(() => undefined),
 }

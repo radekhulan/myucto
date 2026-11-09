@@ -407,6 +407,7 @@ const probableEarningInput = ref('')
  */
 const probableEarningOpen = ref(false)
 const mealBasis = ref<PayrollMealEntitlementBasis>('shift')
+const statutoryPartner = ref(false)
 const saveMode = ref<TermsSaveMode>('correct')
 const versionEffectiveFrom = ref(todayIso())
 /**
@@ -765,6 +766,7 @@ function hydrate(employment: PayrollEmployment) {
   probableEarningInput.value = minorToInput(terms.probable_hourly_earning_minor ?? null)
   probableEarningOpen.value = probableEarningInput.value !== ''
   mealBasis.value = employment.meal_entitlement_basis
+  statutoryPartner.value = employment.statutory_partner ?? false
   versionEffectiveFrom.value = defaultNewTermsDate.value
   correctedEffectiveFrom.value = terms.effective_from ?? ''
   saveMode.value = 'correct'
@@ -990,6 +992,16 @@ async function save(options: { endRecurringBase?: boolean } = {}): Promise<boole
         props.employment.id,
         rowVersion,
         mealBasis.value,
+      )
+      rowVersion = updated.row_version
+      emit('updated', updated)
+    }
+    if (props.employment.relation_type === 'statutory_body'
+      && statutoryPartner.value !== (props.employment.statutory_partner ?? false)) {
+      const updated = await payrollApi.setEmploymentStatutoryPartner(
+        props.employment.id,
+        rowVersion,
+        statutoryPartner.value,
       )
       rowVersion = updated.row_version
       emit('updated', updated)
@@ -2117,6 +2129,19 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               <option value="calendar_day">{{ t('payroll.people.meal_entitlement_basis.calendar_day') }}</option>
             </select>
             <span :class="HINT">{{ t('payroll.people.meal_entitlement_basis.hint') }}</span>
+          </label>
+
+          <label v-if="employment.relation_type === 'statutory_body'" :class="FIELD">
+            <span class="flex items-center gap-2 text-sm text-neutral-700">
+              <input
+                v-model="statutoryPartner"
+                type="checkbox"
+                :disabled="!canEditTerms || busy"
+                data-test="employment-statutory-partner"
+              >
+              {{ t('payroll.people.statutory_partner.label') }}
+            </span>
+            <span :class="HINT">{{ t('payroll.people.statutory_partner.hint') }}</span>
           </label>
 
           <label class="flex items-center gap-2 self-end text-sm text-neutral-700">

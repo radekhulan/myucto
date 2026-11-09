@@ -270,13 +270,21 @@ return [
         //
         // Microsoft Entra ID výchozně nahrazuje celé přihlášení včetně MFA (MFA vynucuje
         // tenant, typicky Conditional Access). skip_mfa=false zachová místní MFA.
-        // Firma může v Nastavení → Přihlášení
-        // vyžadovat přihlášení výhradně přes Entra; heslo a passkey tam pak neplatí.
+        // required_provider='entra' (ENV MYINVOICE_OIDC_REQUIRED) vynutí přihlášení
+        // přes Entra pro celou instalaci, tedy pro všechny firmy a všechny uživatele
+        // včetně technického správce. Heslo, passkey ani záložní kód pak neplatí
+        // a výjimka neexistuje; při výpadku Entra se vynucení vypne v konfiguraci.
         // Tajemství patří do ENV (MYINVOICE_OIDC_ENTRA_CLIENT_SECRET), ne sem.
         'oidc' => [
             'enabled'                => false,
-            'session_lifetime_hours' => 12,   // sezení z poskytovatele platí kratší dobu (zablokovaný uživatel)
-            'break_glass_roles'      => ['instance_admin'], // smí vždy heslo + MFA
+            'required_provider'      => '', // 'entra' = přihlášení jen přes Entra ID
+            // Strop platnosti sezení z Entra ID od posledního ověření u Entra.
+            'session_lifetime_hours' => 12,
+            // true = stejný strop platí i pro API tokeny a MCP připojení vydané ze sezení
+            // přes Entra ID, takže uživatel zablokovaný v Entra ID přestane mít přístup
+            // nejpozději po něm (ENV MYINVOICE_OIDC_TOKENS_FOLLOW_IDENTITY=1).
+            // false = tokeny platí do své vlastní expirace, přístup ukončí deaktivace účtu.
+            'tokens_follow_identity' => false,
             'providers' => [
                 'entra' => [
                     'enabled'       => false,
@@ -289,7 +297,7 @@ return [
                 ],
                 // Google, Apple a Seznam nahrazují jen heslo. Druhý faktor (passkey,
                 // TOTP) se po návratu ověří v MyÚčto stejně jako po hesle, citlivé
-                // operace je potvrdit nemohou a firma je nemůže vynutit.
+                // operace je potvrdit nemohou a instalace je nemůže vynutit.
                 'google' => [
                     'enabled'       => false,
                     'client_id'     => '', // …apps.googleusercontent.com
@@ -514,6 +522,14 @@ return [
         // skryje a veřejné stránky dřív rozeslaných odkazů vrací 404.
         // ENV varianta: MYINVOICE_INVOICE_PUBLIC_LINKS=0
         'public_links' => true,
+    ],
+    'accounting' => [
+        // Výchozí forma účetního zápisu nově založených firem: 'composite' (složený
+        // zápis, výchozí) nebo 'single' (jednoduchý zápis po dvojicích MD/Dal od
+        // začátku účetnictví). Týká se jen firem založených nebo aktivovaných
+        // v podvojném účetnictví po nastavení; stávající firmy se nemění.
+        // ENV varianta: MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM=single
+        'default_entry_form' => 'composite',
     ],
     'pagination' => [
         // Velikost stránky pro tlačítko "Další" v UI seznamech.

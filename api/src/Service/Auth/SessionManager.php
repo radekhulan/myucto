@@ -102,14 +102,16 @@ final class SessionManager
         $familyId = random_bytes(32);
         $deviceClass = SessionDeviceClass::fromUserAgent($userAgent);
         $lifetimeSeconds = $lifetimeDays * 86400;
-        // Uživatele zablokovaného u poskytovatele identity nemáme jak odhlásit,
-        // takže sezení, kterým poskytovatel nahradil celé přihlášení (Entra ID),
-        // platí kratší dobu. U Googlu a dalších rozhoduje i místní druhý faktor. Platí i pro sezení
-        // vlastní domény odvozené z canonical sezení (DomainLoginService).
-        if (SessionAuthContext::isExternalMethod($authContext->authMethod) && $authContext->assuranceLevel === 'strong') {
+        if (self::isLifetimeCapped($authContext)) {
             $lifetimeSeconds = min($lifetimeSeconds, $this->externalSessionLifetimeSeconds());
         }
-        $expiresAt = $cutoff->epochSeconds + $lifetimeSeconds;
+        $expiresAt = $this->anchorToIdentityVerification(
+            $pdo,
+            $cutoff,
+            $userId,
+            $authContext,
+            $cutoff->epochSeconds + $lifetimeSeconds,
+        );
         $stmt = $pdo->prepare(
             'INSERT INTO sessions
                 (id, user_id, csrf_token, ip, user_agent, device_class, supplier_domain_id,
@@ -151,8 +153,65 @@ final class SessionManager
 
     public function externalSessionLifetimeSeconds(): int
     {
-        $hours = (int) $this->config->get('auth.oidc.session_lifetime_hours', 12);
+        return self::externalLifetimeSeconds($this->config);
+    }
+
+    /**
+     * Strop platnosti sezení z přihlášení u poskytovatele identity
+     * (`auth.oidc.session_lifetime_hours`). Stejný strop platí pro API tokeny
+     * a MCP připojení vydaná ze sezení přes Entra ID (ApiTokenService).
+     */
+    public static function externalLifetimeSeconds(?Config $config): int
+    {
+        $hours = (int) ($config?->get('auth.oidc.session_lifetime_hours', 12) ?? 12);
         return max(1, min(720, $hours)) * 3600;
+    }
+
+    /**
+     * Uživatele zablokovaného u poskytovatele identity nemáme jak odhlásit,
+     * takže sezení z jeho přihlášení platí kratší dobu. U Entra ID vždy, i když
+     * druhý faktor ověřilo MyÚčto (`skip_mfa = false`): blokaci provádí správce
+     * tenantu a sezení ji musí následovat. U Googlu a dalších poskytovatelů jen
+     * tehdy, když poskytovatel nahradil celé přihlášení. Platí i pro sezení
+     * vlastní domény odvozené z canonical sezení (DomainLoginService).
+     */
+    private static function isLifetimeCapped(SessionAuthContext $authContext): bool
+    {
+        return SessionAuthContext::isExternalMethod($authContext->authMethod)
+            && ($authContext->assuranceLevel === 'strong'
+                || SessionAuthContext::isOrganizationIdentityMethod($authContext->authMethod));
+    }
+
+    /**
+     * Sezení z Entra ID nesmí skončit později než strop od posledního úspěšného
+     * ověření u poskytovatele (`user_external_identities.last_used_at`). Jinak by
+     * sezení odvozené ze staršího sezení (vlastní doména, dokončení MFA setupu)
+     * běželo strop znovu od začátku, přestože poskytovatel uživatele mezitím
+     * zablokoval.
+     */
+    private function anchorToIdentityVerification(
+        PDO $pdo,
+        SecurityTime $cutoff,
+        int $userId,
+        SessionAuthContext $authContext,
+        int $expiresAt,
+    ): int {
+        if (!SessionAuthContext::isOrganizationIdentityMethod($authContext->authMethod)
+            || $authContext->externalIdentityId === null
+        ) {
+            return $expiresAt;
+        }
+        $stmt = $pdo->prepare(
+            'SELECT TIMESTAMPDIFF(SECOND, last_used_at, ?)
+               FROM user_external_identities
+              WHERE id = ? AND user_id = ? AND last_used_at IS NOT NULL'
+        );
+        $stmt->execute([$cutoff->utcSql, $authContext->externalIdentityId, $userId]);
+        $age = $stmt->fetchColumn();
+        if (!is_numeric($age)) {
+            return min($expiresAt, $cutoff->epochSeconds + $this->externalSessionLifetimeSeconds());
+        }
+        return min($expiresAt, $cutoff->epochSeconds + $this->externalSessionLifetimeSeconds() - max(0, (int) $age));
     }
 
     /**
@@ -475,6 +534,7 @@ final class SessionManager
                     (int) $setupSession['external_identity_id'],
                 );
                 $expiresAt = min($expiresAt, $cutoff->epochSeconds + $this->externalSessionLifetimeSeconds());
+                $expiresAt = $this->anchorToIdentityVerification($pdo, $cutoff, $userId, $authContext, $expiresAt);
             }
 
             $revoke = $pdo->prepare(

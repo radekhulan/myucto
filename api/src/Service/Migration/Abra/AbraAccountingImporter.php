@@ -15,6 +15,9 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
+use MyInvoice\Service\Accounting\Pair\JournalPairException;
+use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
 use MyInvoice\Service\Accounting\OtherItemException;
 use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
@@ -64,6 +67,8 @@ final class AbraAccountingImporter
         private readonly AccountingUnitSwitch $accountingUnit,
         private readonly OtherItemService $otherItems,
     ) {}
+
+    private ?EntryFormService $entryForms = null;
 
     /**
      * @return array{ok:bool,blockers:list<string>,warnings:list<string>,years:list<int>,periods:list<array<string,mixed>>}
@@ -270,6 +275,9 @@ final class AbraAccountingImporter
         try {
             $nested ? $pdo->exec('SAVEPOINT abra_accounting_import') : $pdo->beginTransaction();
             (new AccountingFrameworkImportGuard($this->db))->assertCz500Periods($supplierId, $preflight['periods'], true);
+            // Forma zápisu nové firmy dřív, než převod zapíše první zápis deníku (podvojné
+            // účetnictví přepne až na konci); zablokovaný převod ji vrátí s transakcí.
+            $this->accountingUnit->applyEntryFormDefault($supplierId);
             $this->checkCancelled($cancelled);
             $sourceOss = $snapshot['_meta']['source_oss'] ?? [];
             if (is_array($sourceOss)) (new AbraOssSettingsImporter($this->db))->apply($supplierId, $sourceOss);
@@ -1379,6 +1387,12 @@ final class AbraAccountingImporter
                 $this->failed($report, 'journal_entries', ['journal_target_reference_missing']);
                 continue;
             }
+            $pairNo = $this->abraPairNo($supplierId, (string) $plan['date'], (int) $debitId, (int) $creditId,
+                (string) $plan['amount'], (bool) $plan['is_red_storno']);
+            if (is_string($pairNo)) {
+                $this->failed($report, 'journal_entries', [$pairNo]);
+                continue;
+            }
             $this->db->pdo()->prepare('INSERT INTO journal_entries
                 (supplier_id, period_id, entry_date, document_date, document_no, description, source_type, source_id, posted_at, posted_by)
                 VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, NOW(), ?)')->execute([
@@ -1388,14 +1402,14 @@ final class AbraAccountingImporter
             $id = (int) $this->db->pdo()->lastInsertId();
             $insert = $this->db->pdo()->prepare('INSERT INTO journal_entry_lines
                 (entry_id, supplier_id, account_id, side, amount, is_red_storno, cost_center,
-                 currency_code, amount_foreign, fx_rate, line_no)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                 currency_code, amount_foreign, fx_rate, line_no, pair_no)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
             foreach ([[$debitId, 'debit', 1], [$creditId, 'credit', 2]] as [$accountId, $side, $lineNo]) {
                 $fxLine = ($plan['fx_bank_side'] ?? null) === $side;
                 $insert->execute([$id, $supplierId, $accountId, $side, number_format($plan['amount'], 2, '.', ''),
                     $plan['is_red_storno'] ? 1 : 0, $plan['cost_center'],
                     $fxLine ? $plan['fx_currency'] : null, $fxLine ? $plan['fx_amount_foreign'] : null,
-                    $fxLine ? $plan['fx_rate'] : null, $lineNo]);
+                    $fxLine ? $plan['fx_rate'] : null, $lineNo, $pairNo]);
             }
             $this->imports->remember($supplierId, 'ucetni-denik', $plan['source_key'], $plan['source_hash'], 'journal_entry', $id, $plan['year']);
             $this->logger->log('migration.abra.journal_imported', $userId > 0 ? $userId : null,
@@ -1503,6 +1517,14 @@ final class AbraAccountingImporter
                     $this->failed($report, 'opening_balances', [$lockReason]);
                     continue;
                 }
+                $debitId = $netCents > 0 ? $accountIds[$account] : $openingAccount;
+                $creditId = $netCents > 0 ? $openingAccount : $accountIds[$account];
+                $amount = number_format(abs($netCents) / 100, 2, '.', '');
+                $pairNo = $this->abraPairNo($supplierId, $this->periodStart($year, $periodPlans), (int) $debitId, (int) $creditId, $amount, false);
+                if (is_string($pairNo)) {
+                    $this->failed($report, 'opening_balances', [$pairNo]);
+                    continue;
+                }
                 $this->db->pdo()->prepare('INSERT INTO journal_entries
                     (supplier_id, period_id, entry_date, document_no, description, source_type, posted_at, posted_by)
                     VALUES (?, ?, ?, ?, ?, "opening", NOW(), ?)')->execute([
@@ -1510,17 +1532,14 @@ final class AbraAccountingImporter
                     'ABRA-PS-' . $year, 'Počáteční stav převzatý z ABRA Flexi', $userId > 0 ? $userId : null,
                 ]);
                 $id = (int) $this->db->pdo()->lastInsertId();
-                $debitId = $netCents > 0 ? $accountIds[$account] : $openingAccount;
-                $creditId = $netCents > 0 ? $openingAccount : $accountIds[$account];
-                $amount = number_format(abs($netCents) / 100, 2, '.', '');
                 $insert = $this->db->pdo()->prepare('INSERT INTO journal_entry_lines
                     (entry_id, supplier_id, account_id, side, amount, is_red_storno,
-                     currency_code, amount_foreign, fx_rate, line_no)
-                    VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)');
+                     currency_code, amount_foreign, fx_rate, line_no, pair_no)
+                    VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)');
                 foreach ([[$debitId, 'debit', 1], [$creditId, 'credit', 2]] as [$lineAccount, $side, $lineNo]) {
                     $fx = $lineAccount === $accountIds[$account] ? ($openingFx[$account] ?? null) : null;
                     $insert->execute([$id, $supplierId, $lineAccount, $side, $amount,
-                        $fx['currency'] ?? null, $fx['amount_foreign'] ?? null, $fx['fx_rate'] ?? null, $lineNo]);
+                        $fx['currency'] ?? null, $fx['amount_foreign'] ?? null, $fx['fx_rate'] ?? null, $lineNo, $pairNo]);
                 }
                 $this->imports->remember($supplierId, 'stav-uctu', $key, $hash, 'journal_entry', $id, $year);
                 $this->logger->log('migration.abra.opening_imported', $userId > 0 ? $userId : null,
@@ -1529,6 +1548,31 @@ final class AbraAccountingImporter
                 $report['counts']['journal_lines_created'] = ($report['counts']['journal_lines_created'] ?? 0) + 2;
             }
         }
+    }
+
+    /**
+     * Zápis převodu z ABRA je vždy jedna dvojice MD/Dal. Ve firmě s jednoduchou formou
+     * k datu zápisu dostane číslo dvojice 1, ve složené zůstane bez čísla. Převod píše
+     * řádky vlastním INSERT, proto sám prochází invariantem dvojic jako zapisovač deníku.
+     *
+     * @return int|string|null číslo dvojice, null = složená forma, string = kód chyby pro report
+     */
+    private function abraPairNo(int $supplierId, string $date, int $debitId, int $creditId, string $amount, bool $redStorno): int|string|null
+    {
+        $this->entryForms ??= new EntryFormService($this->db, $this->logger,
+            new \MyInvoice\Repository\AccountingModeRepository($this->db), new \MyInvoice\Security\FrameworkScopePolicy($this->db));
+        $form = $this->entryForms->formAt($supplierId, $date, currentRead: true);
+        $pairNo = $form->isSingle() ? 1 : null;
+        $lines = [
+            ['account_id' => $debitId, 'side' => 'debit', 'amount' => $amount, 'is_red_storno' => $redStorno, 'pair_no' => $pairNo],
+            ['account_id' => $creditId, 'side' => 'credit', 'amount' => $amount, 'is_red_storno' => $redStorno, 'pair_no' => $pairNo],
+        ];
+        try {
+            JournalPairInvariant::assert(['entry_date' => $date], $lines, $form);
+        } catch (JournalPairException $e) {
+            return $e->errorCode;
+        }
+        return $pairNo;
     }
 
     private function openingAdjustmentLockReason(int $supplierId, int $periodId, string $date, int $year): ?string
@@ -1625,6 +1669,13 @@ final class AbraAccountingImporter
                 $this->failed($report, 'opening_balances', [$lockReason]);
                 return;
             }
+            $amount = number_format(abs($delta) / 100, 2, '.', '');
+            $pairNo = $this->abraPairNo($supplierId, $date, (int) ($delta > 0 ? $accountIds[$account] : $openingId),
+                (int) ($delta > 0 ? $openingId : $accountIds[$account]), $amount, false);
+            if (is_string($pairNo)) {
+                $this->failed($report, 'opening_balances', [$pairNo]);
+                return;
+            }
             $this->db->pdo()->prepare('INSERT INTO journal_entries
                 (supplier_id, period_id, entry_date, document_no, description, source_type, posted_at, posted_by)
                 VALUES (?, ?, ?, ?, ?, "opening", NOW(), ?)')->execute([
@@ -1633,13 +1684,12 @@ final class AbraAccountingImporter
             ]);
             $entryId = (int) $this->db->pdo()->lastInsertId();
             $insert = $this->db->pdo()->prepare('INSERT INTO journal_entry_lines
-                (entry_id, supplier_id, account_id, side, amount, is_red_storno, line_no)
-                VALUES (?, ?, ?, ?, ?, 0, ?)');
-            $amount = number_format(abs($delta) / 100, 2, '.', '');
+                (entry_id, supplier_id, account_id, side, amount, is_red_storno, line_no, pair_no)
+                VALUES (?, ?, ?, ?, ?, 0, ?, ?)');
             $insert->execute([$entryId, $supplierId, $delta > 0 ? $accountIds[$account] : $openingId,
-                'debit', $amount, 1]);
+                'debit', $amount, 1, $pairNo]);
             $insert->execute([$entryId, $supplierId, $delta > 0 ? $openingId : $accountIds[$account],
-                'credit', $amount, 2]);
+                'credit', $amount, 2, $pairNo]);
             $key = $year . '|' . $account . '|' . (($sequence[$account] ?? 0) + 1);
             $sequence[$account] = ($sequence[$account] ?? 0) + 1;
             $this->imports->remember($supplierId, 'stav-uctu-uprava', $key,

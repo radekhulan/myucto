@@ -101,7 +101,7 @@
                 <td class="col-date">{{ item.entry_date|cz_date }}</td>
                 <td class="col-doc">{{ item.document_no }}</td>
                 <td class="col-desc">{{ item.description|slice(0, 60) }}</td>
-                <td class="col-counter">{{ item.counter_accounts }}</td>
+                <td class="col-counter">{{ item.counter_accounts }}{% if item.pair_status is defined and item.pair_status == 'composite_mn' %} (M : N){% endif %}</td>
                 <td class="num col-num">{{ item.side == 'debit' ? item.amount|cz_money : '' }}</td>
                 <td class="num col-num">{{ item.side == 'credit' ? item.amount|cz_money : '' }}</td>
                 <td class="num col-num {{ item.balance_unusual ? 'unusual' : '' }}">{{ (item.balance_signed ?? item.balance)|cz_money }}</td>
