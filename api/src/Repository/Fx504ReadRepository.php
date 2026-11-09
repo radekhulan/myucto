@@ -41,7 +41,7 @@ final class Fx504ReadRepository
                 if ($start !== null && ($anchor === null || $start > $anchor)) $anchor = $start;
             }
         }
-        $stmt = $this->db->pdo()->prepare("SELECT l.*, e.entry_date, e.source_type, e.source_id, e.row_version AS entry_version,
+        $stmt = $this->db->pdo()->prepare("SELECT " . JournalLineProofColumns::select('l') . ", e.entry_date, e.source_type, e.source_id, e.row_version AS entry_version,
                 a.account_code, a.account_type, a.name AS account_name
             FROM journal_entries e JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
             JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id

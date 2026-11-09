@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingFrameworkRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\JointAllocationKeyRepository;
+use MyInvoice\Repository\JournalLineProofColumns;
 use MyInvoice\Service\Accounting\AccountingFrameworkService;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy;
@@ -130,7 +131,7 @@ final class JointAllocationPreviewService
     {
         $pdo = $this->db->pdo();
         $marks = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = $pdo->prepare("SELECT l.*, e.entry_date AS source_date, e.period_id AS source_period_id, e.source_type,
+        $stmt = $pdo->prepare("SELECT " . JournalLineProofColumns::select('l') . ", e.entry_date AS source_date, e.period_id AS source_period_id, e.source_type,
                 e.source_id, e.document_no, e.description AS entry_description, a.account_code, a.name AS account_name,
                 e.posted_at, e.reversed_by, e.row_version AS source_version, a.account_type
             FROM journal_entry_lines l
