@@ -3090,13 +3090,15 @@ async function saveDocument(payload: InvoicePayload): Promise<void> {
 
 /**
  * Náhled zápisu pod položkami: jen u účtovaného druhu dokladu a jen když doklad jde
- * uložit. Prázdné řádky vynechá stejně jako uložení.
+ * uložit. Prázdné řádky vynechá stejně jako uložení; rozepsaná položka (bez popisu
+ * nebo s nulovou cenou) náhled odloží, server by ji odmítl validací.
  */
 const previewPayload = computed<InvoicePayload | null>(() => {
   if (!editorPostable.value || !form.value.currency_id || (!form.value.client_id && !form.value.is_simplified)) return null
   const items = form.value.items.filter(it =>
     (it.description || '').trim() !== '' || (Number(it.unit_price_without_vat) || 0) !== 0)
-  return items.length > 0 ? buildPayload(items) : null
+  const complete = items.every(it => (it.description || '').trim() !== '' && (Number(it.unit_price_without_vat) || 0) !== 0)
+  return items.length > 0 && complete ? buildPayload(items) : null
 })
 
 let postAfterSave = false

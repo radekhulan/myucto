@@ -18877,7 +18877,7 @@
       "title": "Náhled zápisu",
       "loading": "Počítám náhled…",
       "refresh": "Přepočítat",
-      "incomplete": "Náhled zápisu se zobrazí po vyplnění partnera, měny a aspoň jedné položky.",
+      "incomplete": "Náhled zápisu se zobrazí po vyplnění dokladu (číslo, partner, měna a položky s popisem a cenou).",
       "empty": "Doklad zatím nemá co zaúčtovat.",
       "balanced": "Vyrovnaný",
       "unbalanced": "Nevyrovnaný",

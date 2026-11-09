@@ -1678,9 +1678,11 @@ function buildPayload(): PurchaseInvoicePayload {
     }
 }
 
-/** Náhled zápisu pod položkami: jen když doklad jde uložit (dodavatel, měna, položky). */
+/** Náhled zápisu pod položkami: jen když doklad jde uložit (dodavatel, číslo dokladu, měna, vyplněné položky). */
 const previewPayload = computed<PurchaseInvoicePayload | null>(() =>
-  editorPosting.enabled.value && form.value.vendor_id && form.value.currency_id && form.value.items.length > 0
+  editorPosting.enabled.value && form.value.vendor_id && form.value.currency_id
+    && form.value.vendor_invoice_number.trim() !== '' && form.value.items.length > 0
+    && form.value.items.every(it => (it.description || '').trim() !== '' && (Number(it.unit_price_without_vat) || 0) !== 0)
     ? buildPayload()
     : null)
 

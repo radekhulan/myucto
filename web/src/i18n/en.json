@@ -18877,7 +18877,7 @@
       "title": "Journal entry preview",
       "loading": "Calculating preview…",
       "refresh": "Recalculate",
-      "incomplete": "The entry preview appears once the partner, currency and at least one item are filled in.",
+      "incomplete": "The posting preview appears once the document is filled in (number, partner, currency and items with a description and a price).",
       "empty": "The document has nothing to post yet.",
       "balanced": "Balanced",
       "unbalanced": "Unbalanced",

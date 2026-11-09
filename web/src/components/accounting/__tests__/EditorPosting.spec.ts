@@ -93,4 +93,15 @@ describe('DraftPostingPreviewPanel', () => {
 
     expect(wrapper.find('[data-test="draft-posting-error"]').text()).toBe('Období je uzavřené.')
   })
+
+  it('validační chybu 4xx ukáže jako neutrální hlášku, ne jako chybu', async () => {
+    m.draftPostingPreview.mockRejectedValue({ response: { status: 400, data: { error: { code: 'validation', message: 'Validace selhala' } } } })
+    const wrapper = mount(DraftPostingPreviewPanel, { props: { source: 'invoices', docId: null, payload: { items: [1] } } })
+
+    await vi.advanceTimersByTimeAsync(800)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="draft-posting-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="draft-posting-invalid"]').exists()).toBe(true)
+  })
 })
