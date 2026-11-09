@@ -2753,11 +2753,12 @@ final class PayrollPostingLineBuilderTest extends TestCase
     }
 
     /**
-     * Opravná revize, která jen přeřadí středisko na stejném nákladovém účtu, je
-     * přeúčtování 521/521 a dvojicí být nemůže (MD a Dal stejný účet). Builder vrátí
-     * null a předpis se zaúčtuje složeně s označením k ruční úpravě.
+     * Opravná revize, která jen přeřadí středisko na stejném nákladovém účtu, by rozdílem
+     * dala MD 521 / Dal 521, a to dvojicí být nemůže. Jednotka se proto zaúčtuje jako
+     * storno původní dvojice (331/521 se starým střediskem) a nová dvojice (521/331
+     * s novým střediskem): platné dvojice se stejnými součty po účtech a střediscích.
      */
-    public function testCostCentreMoveOnTheSameAccountIsNotAPair(): void
+    public function testCostCentreMoveOnTheSameAccountIsStornoAndNewPair(): void
     {
         $snapshot = $this->snapshotWithCostCentres();
         $result = $this->calculatedResult();
@@ -2769,14 +2770,61 @@ final class PayrollPostingLineBuilderTest extends TestCase
         $movedResult['source_snapshot_hash'] = $this->snapshotHash($moved);
         $correction = $this->builder->build($moved, $movedResult, $this->statutorySets(), PayrollAccountingDefaults::codes(), $first->targetAllocations);
 
-        self::assertNull($this->builder->singleEntryLines($correction->targetAllocations, $first->targetAllocations));
+        $lines = $this->builder->singleEntryLines($correction->targetAllocations, $first->targetAllocations);
+        self::assertNotNull($lines);
+        $this->assertValidPairsWithTheSameTotals($correction->lines, $lines);
+        $pairs = [];
+        for ($i = 0; $i < count($lines); $i += 2) {
+            $pairs[] = $lines[$i]['account_code'] . ($lines[$i]['cost_center'] ?? '')
+                . '/' . $lines[$i + 1]['account_code'] . ($lines[$i + 1]['cost_center'] ?? '');
+        }
+        self::assertContains('521MONTAZ/331', $pairs);
+        self::assertContains('331/521VYROBA', $pairs);
 
         [$plainSnapshot, $plainResult] = $this->everyCostPathRevision(false);
         $sets = $this->statutorySetsWithRelationships();
         $previous = $this->builder->build($plainSnapshot, $plainResult, $sets, PayrollAccountingDefaults::codes());
         [$centred, $centredResult] = $this->everyCostPathRevision(true);
         $added = $this->builder->build($centred, $centredResult, $sets, PayrollAccountingDefaults::codes(), $previous->targetAllocations);
-        self::assertNull($this->builder->singleEntryLines($added->targetAllocations, $previous->targetAllocations));
+        $addedLines = $this->builder->singleEntryLines($added->targetAllocations, $previous->targetAllocations);
+        self::assertNotNull($addedLines);
+        $this->assertValidPairsWithTheSameTotals($added->lines, $addedLines);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $composite řádky složeného zápisu z build()
+     * @param list<array<string,mixed>> $lines řádky dvojic
+     */
+    private function assertValidPairsWithTheSameTotals(array $composite, array $lines): void
+    {
+        // Storno a nová dvojice dají na protiúčtu obrat na obou stranách; zůstatek
+        // po účtech, střediscích a dimenzích musí sedět na složený zápis.
+        $net = function (array $rows): array {
+            $map = [];
+            foreach ($rows as $line) {
+                $key = $line['account_code'] . '|' . ($line['cost_center'] ?? '')
+                    . '|' . self::dimensionsKey($line['dimensions'] ?? []);
+                $map[$key] = ($map[$key] ?? 0) + ($line['side'] === 'debit' ? 1 : -1) * $line['amount_minor'];
+            }
+            $map = array_filter($map, static fn (int $value): bool => $value !== 0);
+            ksort($map);
+            return $map;
+        };
+        self::assertSame($net($composite), $net($lines));
+        $resolved = array_map(static fn (array $line): array => [
+            'account_code' => $line['account_code'],
+            'side' => $line['side'],
+            'amount' => number_format($line['amount_minor'] / 100, 2, '.', ''),
+            'pair_group' => $line['pair_group'],
+        ], $lines);
+        $paired = \MyInvoice\Service\Accounting\Pair\JournalPairer::pair($resolved);
+        self::assertSame('paired', $paired['status']);
+        self::assertCount(count($lines), $paired['lines']);
+        \MyInvoice\Service\Accounting\Pair\JournalPairInvariant::assert(
+            ['entry_date' => '2026-06-30'],
+            $paired['lines'],
+            \MyInvoice\Service\Accounting\EntryForm\EntryForm::Single,
+        );
     }
 
     /**
