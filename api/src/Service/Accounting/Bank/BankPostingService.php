@@ -758,7 +758,7 @@ final class BankPostingService
             }
         }
 
-        $texts = $this->paymentTexts($supplierId,
+        $texts = $this->paymentTexts($supplierId, (string) ($tx['posted_at'] ?? ''),
             array_map(static fn (array $a): array => ['invoice', (int) $a['invoice_id']], $allocations),
             array_map(static fn (array $a): array => ['purchase_invoice', (int) $a['purchase_invoice_id']], $purchaseRefundAllocations),
         );
@@ -927,7 +927,7 @@ final class BankPostingService
             $this->line($bankAcc, 'debit', $net),
             $this->line(AccountRoleResolver::fromConnection($this->db)->resolve($supplierId, 'bank.fee', (string) $tx['posted_at']), 'debit', $fee),
         ];
-        $texts = $this->paymentTexts($supplierId,
+        $texts = $this->paymentTexts($supplierId, (string) ($tx['posted_at'] ?? ''),
             array_map(static fn (array $a): array => ['invoice', (int) $a['invoice_id']], $allocations), []);
         foreach ($allocations as $allocation) {
             $counter = $this->incomingCounterAccount($supplierId, (int) $allocation['invoice_id'], $receivable);
@@ -1004,7 +1004,7 @@ final class BankPostingService
             }
         }
 
-        $texts = $this->paymentTexts($supplierId,
+        $texts = $this->paymentTexts($supplierId, (string) ($tx['posted_at'] ?? ''),
             array_map(static fn (array $a): array => ['purchase_invoice', (int) $a['purchase_invoice_id']],
                 array_values(array_filter($allocations, static fn (array $a): bool => $a['invoice_id'] === null))),
             array_map(static fn (array $a): array => ['invoice', (int) $a['invoice_id']],
@@ -1054,7 +1054,7 @@ final class BankPostingService
             throw new PostingException('allocation_mismatch', 'Rozpad korunové platby neodpovídá částce bankovní transakce.');
         }
 
-        $texts = $this->paymentTexts($supplierId,
+        $texts = $this->paymentTexts($supplierId, (string) ($tx['posted_at'] ?? ''),
             array_map(static fn (array $a): array => ['purchase_invoice', (int) $a['purchase_invoice_id']], $allocations), []);
         $lines = [];
         foreach ($allocations as $allocation) {
@@ -4392,17 +4392,18 @@ final class BankPostingService
 
     /**
      * Text dvojice hromadné úhrady: „Úhrada FV 2027001", „Úhrada FP 2027015", u vratky
-     * „Vratka FV/FP …". Jen u pohybu s víc doklady a u firmy s jednoduchým zápisem (složená
-     * firma text nedostane, zaúčtování by ho stejně zahodilo). Číslo dokladu jako číslo
+     * „Vratka FV/FP …". Jen u pohybu s víc doklady, jehož datum zaúčtování spadá do
+     * jednoduché formy zápisu (složený zápis text nedostane a zůstává beze změny). Číslo dokladu jako číslo
      * zápisu dokladu ({@see DocumentEntryNumber::sql()}), jedním dotazem na druh dokladu.
      *
      * @param list<array{0:string,1:int}> $payments doklady hrazené pohybem [typ, id]
      * @param list<array{0:string,1:int}> $refunds doklady vracené pohybem [typ, id]
      * @return array<string,string> "typ:id" => text
      */
-    private function paymentTexts(int $supplierId, array $payments, array $refunds): array
+    private function paymentTexts(int $supplierId, string $entryDate, array $payments, array $refunds): array
     {
-        if (count($payments) + count($refunds) < 2 || !$this->entryForms()->hasAnySingle($supplierId)) {
+        if (count($payments) + count($refunds) < 2 || $entryDate === ''
+            || !$this->entryForms()->formAt($supplierId, $entryDate, true)->isSingle()) {
             return [];
         }
         $labels = ['invoice' => 'FV', 'purchase_invoice' => 'FP'];

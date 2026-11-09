@@ -364,9 +364,10 @@ final class JournalPairerTest extends TestCase
     {
         self::assertSame(['lines' => [], 'status' => JournalPairer::STATUS_PAIRED], JournalPairer::pair([]));
         self::assertSame(
-            [['account_id' => 1, 'side' => 'debit', 'amount' => '1.00']],
+            [['account_id' => 1, 'side' => 'debit', 'amount' => '1.00', 'line_text' => 'x']],
             JournalPairer::stripPairKeys([['account_id' => 1, 'side' => 'debit', 'amount' => '1.00',
-                'pair_no' => 1, 'line_text' => 'x', 'pair_group' => 'g', 'pair_role' => 'rounding']]),
+                'pair_no' => 1, 'line_text' => 'x', 'pair_group' => 'g', 'pair_role' => 'rounding',
+                'pair_link' => ['doc_type' => 'invoice', 'doc_id' => 1]]]),
         );
     }
 

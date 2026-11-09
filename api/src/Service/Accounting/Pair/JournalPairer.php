@@ -164,8 +164,10 @@ final class JournalPairer
     }
 
     /**
-     * Řádky bez řídicích klíčů a bez `pair_no` / `line_text` — tvar složeného zápisu,
-     * když volající zápis nerozdělí (unpairable, složená firma).
+     * Řádky bez klíčů dvojice (`pair_no`, `pair_group`, `pair_role`, `pair_link`) — tvar
+     * složeného zápisu, když volající zápis nerozdělí (unpairable, složená firma).
+     * Text řádku (`line_text`) zůstává, poslal-li ho builder výslovně (např. mzdy po
+     * zaměstnancích s osobním číslem); dnešní buildery ho ve složené formě neposílají.
      *
      * @param list<array<string,mixed>> $lines
      * @return list<array<string,mixed>>
@@ -173,7 +175,7 @@ final class JournalPairer
     public static function stripPairKeys(array $lines): array
     {
         return array_map(static function (array $line): array {
-            foreach ([...self::CONTROL_KEYS, 'pair_no', 'line_text'] as $key) {
+            foreach ([...self::CONTROL_KEYS, 'pair_no', 'pair_link'] as $key) {
                 unset($line[$key]);
             }
             return $line;

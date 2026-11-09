@@ -333,6 +333,17 @@ final class ManualPairEntryTest extends TestCase
         self::assertSame([1, 1, 2, 2], array_column($this->lineRows($entryId), 3));
     }
 
+    public function testCompositeFormKeepsExplicitLineTextAndDropsPairKeys(): void
+    {
+        $entryId = $this->posting->postDocument($this->supplierId, 'opening', null, [
+            ['account_code' => '521', 'side' => 'debit', 'amount' => 30, 'line_text' => 'Os. č. 7 hrubá mzda', 'pair_group' => 'g1'],
+            ['account_code' => '331', 'side' => 'credit', 'amount' => 30, 'pair_group' => 'g1'],
+        ], ['entry_date' => self::YEAR . '-03-10', 'user_id' => $this->userId]);
+
+        self::assertSame([['521', 'debit', '30.00', null, 'Os. č. 7 hrubá mzda'], ['331', 'credit', '30.00', null, null]],
+            $this->lineRows($entryId));
+    }
+
     public function testAutomaticManyToManyEntryInCompositeFormIsPostedUnchanged(): void
     {
         $entryId = $this->posting->postDocument($this->supplierId, 'opening', null, [
