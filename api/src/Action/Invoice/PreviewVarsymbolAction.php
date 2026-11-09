@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
@@ -60,11 +61,18 @@ final class PreviewVarsymbolAction
 
         // Zjednodušený daňový doklad (`simplified=1`) může mít vlastní řadu (migrace 2037);
         // řadu volí týž helper jako vystavení, ať náhled ukáže číslo, které doklad dostane.
-        $series = VarsymbolGenerator::seriesTypeFor([
-            'invoice_type'  => $type,
-            'is_simplified' => filter_var($params['simplified'] ?? false, FILTER_VALIDATE_BOOLEAN),
-        ]);
-        $varsymbol = $this->varsymbol->preview($supplierId, $series, $for, $clientId, $category);
+        // Řada z číselníku (`number_series_id` z hlavičky editoru) jde stejnou volbou jako vystavení.
+        try {
+            $varsymbol = $this->varsymbol->previewForInvoice($supplierId, [
+                'invoice_type'        => $type,
+                'is_simplified'       => filter_var($params['simplified'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'client_id'           => $clientId,
+                'revenue_category_id' => $category,
+                'number_series_id'    => (int) ($params['number_series_id'] ?? 0) ?: null,
+            ], $for);
+        } catch (NumberSeriesException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
 
         return Json::ok($response, [
             'varsymbol'    => $varsymbol,

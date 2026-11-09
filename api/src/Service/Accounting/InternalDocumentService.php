@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting;
 
+use MyInvoice\Service\NumberSeries\NumberSeriesAllocator;
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
+use MyInvoice\Service\NumberSeries\NumberSeriesSelection;
 use MyInvoice\Http\IsoDate;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
@@ -42,6 +45,8 @@ final class InternalDocumentService
         private readonly DimensionService $dimensions,
         private readonly JournalEntryRepository $journal,
         private readonly ChartOfAccountsRepository $accounts,
+        private readonly NumberSeriesSelection $numberSeriesSelection,
+        private readonly NumberSeriesAllocator $numberSeries,
     ) {}
 
     public function get(int $supplierId, int $id): array
@@ -67,6 +72,7 @@ final class InternalDocumentService
         $id = $this->inTransaction(function () use ($supplierId, $data, $userId): int {
             $id = $this->documents->insert($supplierId, $data, $userId);
             $this->documents->replaceLines($supplierId, $id, $data['lines']);
+            self::seriesGuard(fn () => $this->numberSeriesSelection->apply('internal_documents', $supplierId, $id, $input, 'manual', 0, $userId, isNew: true));
             return $id;
         });
         return $this->get($supplierId, $id);
@@ -98,6 +104,7 @@ final class InternalDocumentService
                     !== $this->manualEntries->fiscalYear($supplierId, $data['entry_date']);
             $this->documents->updateDraft($supplierId, $id, $data, $userId, $clearNumber);
             $this->documents->replaceLines($supplierId, $id, $data['lines']);
+            self::seriesGuard(fn () => $this->numberSeriesSelection->apply('internal_documents', $supplierId, $id, $input, 'manual'));
         });
         return $this->get($supplierId, $id);
     }
@@ -144,7 +151,7 @@ final class InternalDocumentService
                 }
                 $entryDate = (string) $doc['entry_date'];
                 // Číslo z dřívějšího zaúčtování (zápis smazaný v deníku) se použije znovu.
-                $number = $doc['document_no'] ?? $this->freeNumber($supplierId, $entryDate, $id);
+                $number = $doc['document_no'] ?? $this->seriesNumber($supplierId, $doc, $entryDate, $id);
                 $userId = isset($audit['user_id']) ? (int) $audit['user_id'] : null;
                 $entryId = $this->manualEntries->post($supplierId, $lines, array_merge($audit, [
                     'entry_date' => $entryDate,
@@ -199,6 +206,45 @@ final class InternalDocumentService
                 isset($audit['user_id']) ? (int) $audit['user_id'] : null);
         }));
         return $this->get($supplierId, $id);
+    }
+
+    /**
+     * Číslo pro zaúčtovávaný koncept: z nové řady číselníku (volba na dokladu nebo výchozí
+     * řada interních dokladů), jinak z dosavadní řady ID. Nová řada se čísluje po účetních
+     * letech stejně jako ID a použitá řada se zapíše na doklad.
+     *
+     * @param array<string,mixed> $doc
+     */
+    private function seriesNumber(int $supplierId, array $doc, string $entryDate, int $id): string
+    {
+        $chosen = ($doc['number_series_id'] ?? null) !== null ? (int) $doc['number_series_id'] : null;
+        $date = new \DateTimeImmutable($entryDate);
+        $native = self::seriesGuard(fn () => $this->numberSeries->nativeFor($supplierId, 'manual', $chosen, $date));
+        $number = $native !== null
+            ? self::seriesGuard(fn () => $this->numberSeries->allocate(
+                $supplierId, $native, $date, 'PF', $this->manualEntries->fiscalYear($supplierId, $entryDate),
+            ))
+            : $this->freeNumber($supplierId, $entryDate, $id);
+        $used = $native !== null ? (int) $native['id'] : null;
+        if ($used !== $chosen) {
+            $this->db->pdo()->prepare('UPDATE internal_documents SET number_series_id = ? WHERE id = ? AND supplier_id = ?')
+                ->execute([$used, $id, $supplierId]);
+        }
+        return $number;
+    }
+
+    /**
+     * @template T
+     * @param callable(): T $fn
+     * @return T
+     */
+    private static function seriesGuard(callable $fn): mixed
+    {
+        try {
+            return $fn();
+        } catch (NumberSeriesException $e) {
+            throw new InternalDocumentException($e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
     }
 
     /**

@@ -128,6 +128,7 @@ final class FinalDraftToTaxDocument
                     !empty($draft['issue_date']) ? new \DateTimeImmutable((string) $draft['issue_date']) : null,
                     (int) ($draft['client_id'] ?? 0),
                     (int) ($draft['revenue_category_id'] ?? 0),
+                    isset($draft['number_series_id']) ? (int) $draft['number_series_id'] : null,
                 );
             }
             $this->repo->delete($draftId);

@@ -786,22 +786,18 @@ final class RecurringInvoiceGenerator
         if ($ownTransaction) $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
         if ($ownTransaction) $pdo->beginTransaction();
         $varsymbol = null;
+        $usedSeriesId = null;
         try {
             // Číslo se čerpá ve stejné transakci jako vystavení: když vystavení zablokuje
             // sklad, rollback vrátí do řady i číslo (dřív v ní zůstala díra).
-            $varsymbol = $this->varsymbol->next(
-                $supplierId,
-                VarsymbolGenerator::seriesTypeFor($invoice),
-                $issueDate,
-                (int) $invoice['client_id'],
-                (int) ($invoice['revenue_category_id'] ?? 0),
-            );
+            [$varsymbol, $usedSeriesId] = $this->varsymbol->nextForInvoice($supplierId, $invoice, $issueDate);
             $issueParams[0] = $varsymbol;
             $issue = $pdo->prepare($issueSql);
             $issue->execute($issueParams);
             if ($issue->rowCount() === 0) {
                 throw new \RuntimeException('Faktura byla mezitím změněna.');
             }
+            $this->varsymbol->recordSeries($invoiceId, $invoice, $usedSeriesId);
             // I dříve otevřený koncept může mít platby; PDF/statistiky obnoví stávající tok po commitu.
             $this->payments->recompute($invoiceId, refreshOutputs: false);
             InvoiceIssuer::record($pdo, $invoiceId, $issuerId);
@@ -827,6 +823,7 @@ final class RecurringInvoiceGenerator
                     $issueDate,
                     (int) $invoice['client_id'],
                     (int) ($invoice['revenue_category_id'] ?? 0),
+                    $usedSeriesId,
                 );
             }
             throw $e;

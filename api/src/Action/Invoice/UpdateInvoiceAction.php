@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
+use MyInvoice\Service\NumberSeries\NumberSeriesKinds;
+use MyInvoice\Service\NumberSeries\NumberSeriesSelection;
 use MyInvoice\Service\Stock\InvoiceItemTracking;
 use MyInvoice\Service\Stock\IssuedInvoiceStockGuard;
 use MyInvoice\Service\Stock\StockException;
@@ -83,6 +86,7 @@ final class UpdateInvoiceAction
         // Limit zjednodušeného dokladu podle roku dokladu (§ 30 ZDPH), viz simplifiedRejection().
         private readonly \MyInvoice\Repository\TaxConstantsRepository $taxConstants,
         private readonly FiledVatPeriodLookup $filedPeriods,
+        private readonly NumberSeriesSelection $numberSeries,
     ) {}
 
     /**
@@ -533,6 +537,17 @@ final class UpdateInvoiceAction
         // Přečíslování při změně typu: nové číslo se přidělí ve stejné transakci, která
         // ho zapíše na doklad, a staré se uvolní až po úspěšném zápisu. Odmítnutí
         // zápisu vrátí rollback vše do původního stavu.
+        // Volba řady z číselníku jde měnit jen na konceptu; vystavený doklad má řadu danou číslem.
+        $seriesKind = NumberSeriesKinds::issuedKind((string) ($body['invoice_type'] ?? $existingType));
+        if ($isIssued) {
+            unset($body['number_series_id']);
+        } else {
+            try {
+                $this->numberSeries->fromBody((int) ($existing['supplier_id'] ?? 0), $body, $seriesKind);
+            } catch (NumberSeriesException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
+        }
         $pdo = $this->db->pdo();
         $renumberTx = false;
         $abortRenumber = static function (): void {};
@@ -546,7 +561,17 @@ final class UpdateInvoiceAction
             }
             [$newDate, $newClient, $newCategory] = $renumberScope['new'];
             try {
-                $newVs = $this->varsymbol->next($renumberScope['supplier_id'], $renumberScope['new_series'], $newDate, $newClient, $newCategory);
+                // Cílová řada = výchozí řada nového druhu v číselníku; řada vybraná pro původní
+                // typ k novému druhu nepatří.
+                [$newVs, $newSeriesId] = $this->varsymbol->nextForInvoice($renumberScope['supplier_id'], [
+                    'invoice_type'        => $renumber['to_type'],
+                    'is_simplified'       => $renumberScope['new_series'] === VarsymbolGenerator::SIMPLIFIED,
+                    'client_id'           => $newClient,
+                    'revenue_category_id' => $newCategory,
+                ], $newDate);
+            } catch (\MyInvoice\Service\NumberSeries\NumberSeriesException $e) {
+                if ($renumberTx && $pdo->inTransaction()) $pdo->rollBack();
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
             } catch (\InvalidArgumentException | \RuntimeException $e) {
                 if (TransactionFailure::rollbackIfAborted($pdo, $e)) throw $e;
                 if ($renumberTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -554,12 +579,12 @@ final class UpdateInvoiceAction
             }
             $body['varsymbol'] = $newVs;
             $renumber['to'] = $newVs;
-            $abortRenumber = function () use ($pdo, $renumberTx, $renumberScope, $newVs, $newDate, $newClient, $newCategory): void {
+            $abortRenumber = function () use ($pdo, $renumberTx, $renumberScope, $newVs, $newDate, $newClient, $newCategory, $newSeriesId): void {
                 if ($renumberTx) {
                     if ($pdo->inTransaction()) $pdo->rollBack();
                     return;
                 }
-                $this->varsymbol->releaseIfLatest($renumberScope['supplier_id'], $renumberScope['new_series'], $newVs, $newDate, $newClient, $newCategory);
+                $this->varsymbol->releaseIfLatest($renumberScope['supplier_id'], $renumberScope['new_series'], $newVs, $newDate, $newClient, $newCategory, $newSeriesId);
             };
         }
         try {
@@ -595,9 +620,14 @@ final class UpdateInvoiceAction
         if ($renumber !== null) {
             [$oldDate, $oldClient, $oldCategory] = $renumberScope['old'];
             if ($renumberScope['supplier_id'] > 0 && $renumber['from'] !== '') {
-                $this->varsymbol->releaseIfLatest($renumberScope['supplier_id'], $renumberScope['old_series'], $renumber['from'], $oldDate, $oldClient, $oldCategory);
+                $this->varsymbol->releaseIfLatest($renumberScope['supplier_id'], $renumberScope['old_series'], $renumber['from'], $oldDate, $oldClient, $oldCategory,
+                    isset($existing['number_series_id']) ? (int) $existing['number_series_id'] : null);
             }
+            $this->varsymbol->recordSeries($id, $existing, $newSeriesId);
             if ($renumberTx) $pdo->commit();
+        }
+        if (!$isIssued) {
+            $this->numberSeries->apply('invoices', (int) ($existing['supplier_id'] ?? 0), $id, $body, $seriesKind);
         }
         try {
             if (DocumentItemsPayload::replaces($body)) {

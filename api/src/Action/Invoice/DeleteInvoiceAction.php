@@ -107,16 +107,16 @@ final class DeleteInvoiceAction
         $children = $this->db->pdo()->prepare(
             $periodCandidate ? 'WITH RECURSIVE deletion_tree AS (
                 SELECT id, supplier_id, invoice_type, is_simplified, varsymbol, status, issue_date, tax_date, parent_invoice_id,
-                       effective_tax_date, booked_at, revenue_category_id
+                       effective_tax_date, booked_at, revenue_category_id, number_series_id
                   FROM invoices FORCE INDEX (idx_inv_parent) WHERE supplier_id = ? AND parent_invoice_id = ?
                 UNION DISTINCT
                 SELECT i.id, i.supplier_id, i.invoice_type, i.is_simplified, i.varsymbol, i.status, i.issue_date, i.tax_date, i.parent_invoice_id,
-                       i.effective_tax_date, i.booked_at, i.revenue_category_id
+                       i.effective_tax_date, i.booked_at, i.revenue_category_id, i.number_series_id
                   FROM deletion_tree parent STRAIGHT_JOIN invoices i FORCE INDEX (idx_inv_parent) ON parent.id = i.parent_invoice_id
                  WHERE i.supplier_id = ?
              ) SELECT * FROM deletion_tree WHERE id <> ?'
             : 'SELECT id, supplier_id, invoice_type, is_simplified, varsymbol, status, issue_date, tax_date, parent_invoice_id,
-                      effective_tax_date, booked_at, revenue_category_id
+                      effective_tax_date, booked_at, revenue_category_id, number_series_id
                  FROM invoices WHERE supplier_id = ? AND parent_invoice_id = ?'
         );
         $children->execute($periodCandidate ? [$supplierId, $id, $supplierId, $id] : [$supplierId, $id]);
@@ -318,7 +318,8 @@ final class DeleteInvoiceAction
                     $parentCat = (int) ($existing['revenue_category_id'] ?? 0);
                     // Řada, ze které číslo přišlo (zjednodušený doklad může mít vlastní).
                     $parentSeries = VarsymbolGenerator::seriesTypeFor($existing);
-                    if ($this->varsymbol->releaseIfLatest($supplierId, $parentSeries, $parentVs, $issueDate, $clientId ?? 0, $parentCat)) {
+                    if ($this->varsymbol->releaseIfLatest($supplierId, $parentSeries, $parentVs, $issueDate, $clientId ?? 0, $parentCat,
+                        isset($existing['number_series_id']) ? (int) $existing['number_series_id'] : null)) {
                         $counterReleased[] = ['id' => $id, 'varsymbol' => $parentVs, 'type' => $parentType];
                     }
                 }
@@ -329,7 +330,8 @@ final class DeleteInvoiceAction
                 if ($cvs === '' || !in_array($ctype, ['invoice', 'proforma', 'credit_note'], true)) continue;
                 $cdate = !empty($child['issue_date']) ? new \DateTimeImmutable($child['issue_date']) : null;
                 $ccat  = (int) ($child['revenue_category_id'] ?? 0);
-                if ($this->varsymbol->releaseIfLatest($supplierId, VarsymbolGenerator::seriesTypeFor($child), $cvs, $cdate, $clientId ?? 0, $ccat)) {
+                if ($this->varsymbol->releaseIfLatest($supplierId, VarsymbolGenerator::seriesTypeFor($child), $cvs, $cdate, $clientId ?? 0, $ccat,
+                    isset($child['number_series_id']) ? (int) $child['number_series_id'] : null)) {
                     $counterReleased[] = ['id' => (int) $child['id'], 'varsymbol' => $cvs, 'type' => $ctype];
                 }
             }
