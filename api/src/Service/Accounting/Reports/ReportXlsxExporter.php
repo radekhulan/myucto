@@ -1255,6 +1255,9 @@ final class ReportXlsxExporter
      */
     public function journal(array $data): array
     {
+        if (($data['layout'] ?? null) === 'pairs') {
+            return $this->journalPairs($data);
+        }
         $ss = new Spreadsheet();
         $sheet = $ss->getActiveSheet();
         $sheet->setTitle('Účetní deník');
@@ -1323,6 +1326,88 @@ final class ReportXlsxExporter
         $sheet->setCellValue("G{$tr}", (float) ($t['debit'] ?? 0));
         $sheet->setCellValue("H{$tr}", (float) ($t['credit'] ?? 0));
         $sheet->getStyle("G{$tr}:H{$tr}")->getFont()->setBold(true);
+
+        return $this->out($ss, 'ucetni-denik-' . (string) ($filters['date_from'] ?? '') . '_' . (string) ($filters['date_to'] ?? '') . '.xlsx');
+    }
+
+    /**
+     * Účetní deník jednoduchého zápisu (`layout = 'pairs'`, JournalExportService::build()):
+     * hlavička zápisu a pod ní jeden řádek na dvojici se sloupci Účet MD, Účet Dal a Částka.
+     * Zápis M : N, který jde jen v původním tvaru, má v popisu značku a řádky po účtech
+     * (účet ve sloupci své strany). Červené storno má zápornou částku.
+     *
+     * @param array<string,mixed> $data
+     * @return array{bytes:string, filename:string, mime:string}
+     */
+    private function journalPairs(array $data): array
+    {
+        $ss = new Spreadsheet();
+        $sheet = $ss->getActiveSheet();
+        $sheet->setTitle('Účetní deník');
+        $sheet->setCellValue('A1', 'Účetní deník');
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        $entity = $data['entity'] ?? [];
+        $sheet->setCellValueExplicit('A2', (string) ($entity['name'] ?? '') . ' — IČO: ' . (string) ($entity['ico'] ?? ''), DataType::TYPE_STRING);
+        $filters = $data['filters'] ?? [];
+        $sub = 'Období: ' . $this->czDate((string) ($filters['date_from'] ?? '')) . ' – ' . $this->czDate((string) ($filters['date_to'] ?? ''));
+        if (!empty($filters['source_type'])) {
+            $sub .= ' · Zdroj: ' . (string) $filters['source_type'];
+        }
+        $sheet->setCellValue('A3', $sub);
+
+        $headers = ['Datum', 'Doklad', 'Popis', 'Původ', 'Dvojice', 'Účet MD', 'Název MD', 'Účet Dal', 'Název Dal', 'Částka', 'Text', 'Středisko'];
+        $cols = count($headers);
+        $head = 5;
+        $this->headerRow($sheet, $head, $headers);
+
+        $r = $head + 1;
+        foreach ($data['entries'] ?? [] as $entry) {
+            $desc = (string) ($entry['description'] ?? '');
+            if (!empty($entry['reversed_by'])) $desc .= ' [stornováno #' . (int) $entry['reversed_by'] . ']';
+            if (empty($entry['posted_at'])) $desc .= ' [koncept]';
+            $composite = ($entry['pair_status'] ?? null) === JournalLineContext::PAIR_STATUS_COMPOSITE;
+            if ($composite) $desc .= ' [složený zápis M : N]';
+
+            $sheet->setCellValue([1, $r], $this->czDate((string) $entry['entry_date']));
+            $sheet->setCellValueExplicit([2, $r], (string) ($entry['document_no'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([3, $r], $desc, DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([4, $r], (string) ($entry['automation_origin'] ?? 'ručně'), DataType::TYPE_STRING);
+            // Stejný význam částky hlavičky jako v deníku po řádcích (viz journal()).
+            $sheet->setCellValue([10, $r], (float) $entry['amount']);
+            $this->boldRow($sheet, $r, $cols);
+            $r++;
+
+            if (!$composite) {
+                foreach ($entry['pairs'] ?? [] as $pair) {
+                    $sheet->setCellValue([5, $r], (int) $pair['pair_no']);
+                    $sheet->setCellValueExplicit([6, $r], (string) $pair['debit_account_code'], DataType::TYPE_STRING);
+                    $sheet->setCellValueExplicit([7, $r], (string) $pair['debit_account_name'], DataType::TYPE_STRING);
+                    $sheet->setCellValueExplicit([8, $r], (string) $pair['credit_account_code'], DataType::TYPE_STRING);
+                    $sheet->setCellValueExplicit([9, $r], (string) $pair['credit_account_name'], DataType::TYPE_STRING);
+                    $sheet->setCellValue([10, $r], (float) $pair['amount']);
+                    $sheet->setCellValueExplicit([11, $r], (string) ($pair['text'] ?? ''), DataType::TYPE_STRING);
+                    $sheet->setCellValueExplicit([12, $r], (string) ($pair['cost_center'] ?? ''), DataType::TYPE_STRING);
+                    $r++;
+                }
+                continue;
+            }
+            foreach ($entry['lines'] ?? [] as $line) {
+                $debit = ($line['side'] ?? '') === 'debit';
+                $sheet->setCellValueExplicit([$debit ? 6 : 8, $r], (string) ($line['account_code'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValueExplicit([$debit ? 7 : 9, $r], (string) ($line['account_name'] ?? ''), DataType::TYPE_STRING);
+                $sheet->setCellValue([10, $r], JournalLineAmount::signed($line));
+                $sheet->setCellValueExplicit([12, $r], (string) ($line['cost_center'] ?? ''), DataType::TYPE_STRING);
+                $r++;
+            }
+        }
+        $this->finishTable($sheet, $head, max($head, $r - 1), $cols, 10);
+
+        $t = $data['totals'] ?? [];
+        $tr = $r + 1;
+        $sheet->setCellValue("A{$tr}", 'Počet zápisů: ' . (int) ($t['count'] ?? 0));
+        $sheet->getStyle("A{$tr}")->getFont()->setBold(true);
+        $sheet->setCellValue("J{$tr}", (float) ($t['debit'] ?? 0));
+        $sheet->getStyle("J{$tr}")->getFont()->setBold(true);
 
         return $this->out($ss, 'ucetni-denik-' . (string) ($filters['date_from'] ?? '') . '_' . (string) ($filters['date_to'] ?? '') . '.xlsx');
     }

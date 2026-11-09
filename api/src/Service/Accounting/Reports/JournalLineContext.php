@@ -275,16 +275,18 @@ final class JournalLineContext
     }
 
     /**
-     * Díly řádků staršího zápisu bez dvojic, rozloženého za běhu (nic se nezapisuje).
+     * Dvojice staršího zápisu bez `pair_no`, rozloženého za běhu (nic se nezapisuje).
      * Jen jednoznačné rozložení: každá částka spárovaná podle shody je na obou účinných
-     * stranách nejvýš jednou a její dvojice nemá stejný účet; zbytek je 1 : N. Pak se díly
-     * {@see JournalPairer} kryjí s poměrným dělením v SQL ({@see \MyInvoice\Repository\LedgerReportRepository::accountCounterTotals()})
-     * i s filtrem protiúčtu. Jinak null (zápis zůstává v původním tvaru).
+     * stranách nejvýš jednou, její dvojice nemá stejný účet ani rozdílné červené storno;
+     * zbytek je 1 : N. Pak se díly {@see JournalPairer} kryjí s poměrným dělením v SQL
+     * ({@see \MyInvoice\Repository\LedgerReportRepository::accountCounterTotals()}) i s filtrem
+     * protiúčtu. Jinak null: zápis zůstává v původním tvaru (M : N, nejednoznačné dvojice
+     * se shodnou částkou, které rozhodne až převod). Sdílí opis účtu i export deníku.
      *
-     * @param list<array{line_id:int, account_id:int, account_code:string, parent_id:?int, side:string, raw_side:string, is_red_storno:bool, amount:string, amount_foreign:?string, amount_cents:int}> $lines
-     * @return array<int, list<array{amount_cents:int, amount_foreign_cents:?int, counter_account_id:int, counter_account_code:string, counter_parent_id:?int}>>|null
+     * @param list<array{line_id:int, account_id:int, side:string, raw_side:string, is_red_storno:bool, amount:string, amount_foreign:?string, amount_cents:int}> $lines
+     * @return list<array{pair_no:int, debit_line_id:int, credit_line_id:int, amount:string, debit_amount_foreign:?string, credit_amount_foreign:?string}>|null
      */
-    public static function derivedPieces(array $lines): ?array
+    public static function derivedPairs(array $lines): ?array
     {
         if ($lines === []) {
             return null;
@@ -304,10 +306,8 @@ final class JournalLineContext
                 return null;
             }
         }
-        $byId = [];
         $input = [];
         foreach ($lines as $l) {
-            $byId[$l['line_id']] = $l;
             $input[] = [
                 'id'             => $l['line_id'],
                 'account_id'     => $l['account_id'],
@@ -325,14 +325,48 @@ final class JournalLineContext
         foreach ($result['lines'] as $piece) {
             $byPair[(int) $piece['pair_no']][] = $piece;
         }
+        // MD a Dal podle ZAPSANÉ strany: červené storno zůstává na svých stranách se
+        // zápornou částkou, stejně jako v deníku.
+        $pairs = [];
+        foreach ($byPair as $pairNo => [$first, $second]) {
+            [$debit, $credit] = $first['side'] === 'debit' ? [$first, $second] : [$second, $first];
+            $pairs[] = [
+                'pair_no'               => $pairNo,
+                'debit_line_id'         => (int) $debit['id'],
+                'credit_line_id'        => (int) $credit['id'],
+                'amount'                => (string) $debit['amount'],
+                'debit_amount_foreign'  => self::nonEmpty($debit['amount_foreign'] ?? null),
+                'credit_amount_foreign' => self::nonEmpty($credit['amount_foreign'] ?? null),
+            ];
+        }
+        return $pairs;
+    }
+
+    /**
+     * Díly řádků z {@see derivedPairs()}: pro každý řádek jeho díly v pořadí dvojic
+     * s protiúčtem dílu.
+     *
+     * @param list<array{line_id:int, account_id:int, account_code:string, parent_id:?int, side:string, raw_side:string, is_red_storno:bool, amount:string, amount_foreign:?string, amount_cents:int}> $lines
+     * @return array<int, list<array{amount_cents:int, amount_foreign_cents:?int, counter_account_id:int, counter_account_code:string, counter_parent_id:?int}>>|null
+     */
+    public static function derivedPieces(array $lines): ?array
+    {
+        $pairs = self::derivedPairs($lines);
+        if ($pairs === null) {
+            return null;
+        }
+        $byId = [];
+        foreach ($lines as $l) {
+            $byId[$l['line_id']] = $l;
+        }
         $pieces = [];
-        foreach ($byPair as [$a, $b]) {
-            foreach ([[$a, $b], [$b, $a]] as [$own, $counter]) {
-                $counterLine = $byId[(int) $counter['id']];
-                $pieces[(int) $own['id']][] = [
-                    'amount_cents'         => JournalLineAmount::cents($own['amount']),
-                    'amount_foreign_cents' => isset($own['amount_foreign']) && $own['amount_foreign'] !== null && $own['amount_foreign'] !== ''
-                        ? JournalLineAmount::cents($own['amount_foreign']) : null,
+        foreach ($pairs as $pair) {
+            foreach ([['debit', 'credit'], ['credit', 'debit']] as [$ownSide, $counterSide]) {
+                $counterLine = $byId[$pair[$counterSide . '_line_id']];
+                $foreign = $pair[$ownSide . '_amount_foreign'];
+                $pieces[$pair[$ownSide . '_line_id']][] = [
+                    'amount_cents'         => JournalLineAmount::cents($pair['amount']),
+                    'amount_foreign_cents' => $foreign !== null ? JournalLineAmount::cents($foreign) : null,
                     'counter_account_id'   => $counterLine['account_id'],
                     'counter_account_code' => $counterLine['account_code'],
                     'counter_parent_id'    => $counterLine['parent_id'],
@@ -340,6 +374,11 @@ final class JournalLineContext
             }
         }
         return $pieces;
+    }
+
+    private static function nonEmpty(mixed $value): ?string
+    {
+        return $value === null || $value === '' ? null : (string) $value;
     }
 
     /**
