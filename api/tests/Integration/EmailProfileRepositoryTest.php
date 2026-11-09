@@ -97,6 +97,46 @@ final class EmailProfileRepositoryTest extends TestCase
         }
     }
 
+    public function testMicrosoft365SecretPersistsOnlyForTheConfiguredMailbox(): void
+    {
+        $id = $this->profiles->createProfile($this->supplierId, [
+            'name' => 'Syntetický OAuth profil',
+            'code' => 'itest_oauth_' . bin2hex(random_bytes(4)),
+            'from_email' => 'synthetic@example.test',
+            'imap_sent_enabled' => true,
+            'imap_auth_mode' => 'microsoft365',
+            'imap_username' => 'shared@example.test',
+            'imap_oauth_tenant_id' => '11111111-1111-4111-8111-111111111111',
+            'imap_oauth_client_id' => '22222222-2222-4222-8222-222222222222',
+            'imap_oauth_client_secret' => 'synthetic-secret-one',
+            'imap_host' => 'external.example.test',
+        ], $this->userId);
+        $this->createdEmailProfiles[] = $id;
+
+        $public = $this->profiles->findProfile($this->supplierId, $id);
+        self::assertSame('outlook.office365.com', $public['imap_host']);
+        self::assertTrue($public['has_imap_oauth_client_secret']);
+        self::assertFalse($public['has_imap_password']);
+        self::assertArrayNotHasKey('imap_oauth_client_secret', $public);
+        self::assertArrayNotHasKey('imap_oauth_client_secret_enc', $public);
+        $stored = $this->profiles->findProfile($this->supplierId, $id, false, true)['imap_oauth_client_secret_enc'];
+        self::assertStringStartsWith('enc:v2:', $stored);
+        $draft = $this->profiles->imapProbeSettingsForDraft($this->supplierId, ['imap_folder' => 'Sent Items'], $id);
+        self::assertSame($stored, $draft['imap_oauth_client_secret_enc']);
+
+        try {
+            $this->profiles->updateProfile($this->supplierId, $id, ['imap_username' => 'other@example.test']);
+            self::fail('Změna schránky vyžaduje znovu zadat Client Secret.');
+        } catch (\InvalidArgumentException) {
+            self::assertSame('shared@example.test', $this->profiles->findProfile($this->supplierId, $id)['imap_username']);
+        }
+
+        $this->profiles->updateProfile($this->supplierId, $id, ['imap_oauth_client_secret' => 'synthetic-secret-two']);
+        self::assertNotSame($stored, $this->profiles->findProfile($this->supplierId, $id, false, true)['imap_oauth_client_secret_enc']);
+        $this->profiles->updateProfile($this->supplierId, $id, ['imap_sent_enabled' => false]);
+        self::assertFalse($this->profiles->findProfile($this->supplierId, $id)['has_imap_oauth_client_secret']);
+    }
+
     public function testCreateUpdateAndDefaultProfile(): void
     {
         $firstId = $this->profiles->createProfile($this->supplierId, [

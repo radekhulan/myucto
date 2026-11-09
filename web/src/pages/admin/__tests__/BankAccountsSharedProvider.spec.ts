@@ -119,6 +119,31 @@ describe('BankAccounts — společný parser provider', () => {
     m.updateBankEmailProvider.mockResolvedValue(undefined)
   })
 
+  it('uloží Microsoft 365 účet s údaji aplikace a adresou schránky', async () => {
+    m.createBankEmailImapAccount.mockResolvedValueOnce({})
+    const wrapper = await mountWith([])
+    await wrapper.findAll('button').find(button => button.text() === 'bank_accounts.new_imap')!.trigger('click')
+    const label = (key: string) => wrapper.findAll('label').find(item => item.text().startsWith(key))!
+    await label('settings.imap_auth_mode').get('select').setValue('microsoft365')
+    expect(wrapper.findAll('label').some(item => item.text() === 'bank_accounts.host')).toBe(false)
+    await label('settings.imap_oauth_mailbox').get('input').setValue('shared@example.test')
+    await label('settings.imap_oauth_tenant_id').get('input').setValue('11111111-1111-4111-8111-111111111111')
+    await label('settings.imap_oauth_client_id').get('input').setValue('22222222-2222-4222-8222-222222222222')
+    await label('settings.imap_oauth_client_secret').get('input').setValue('synthetic-client-secret')
+    await label('bank_accounts.require_email_auth').get('input').setValue(false)
+    await wrapper.findAll('button').find(button => button.text() === 'bank_accounts.save_imap')!.trigger('click')
+    await flushPromises()
+    expect(m.createBankEmailImapAccount).toHaveBeenCalledWith(expect.objectContaining({
+      auth_mode: 'microsoft365',
+      username: 'shared@example.test',
+      oauth_tenant_id: '11111111-1111-4111-8111-111111111111',
+      oauth_client_id: '22222222-2222-4222-8222-222222222222',
+      oauth_client_secret: 'synthetic-client-secret',
+      password: undefined,
+    }))
+    wrapper.unmount()
+  })
+
   it('nová schránka nabízí označení po načtení vypnuté a uloží jeho zapnutí nezávisle na akci po úspěchu', async () => {
     let saved: unknown
     m.createBankEmailImapAccount.mockImplementationOnce(async payload => { saved = { ...payload }; return {} })

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Mail;
 
+use MyInvoice\Service\Mail\Imap\ImapAuthentication;
+use MyInvoice\Service\Mail\Imap\ImapAuthSettings;
 use Webklex\PHPIMAP\Client;
 use Webklex\PHPIMAP\ClientManager;
 use Webklex\PHPIMAP\Folder;
@@ -12,8 +14,10 @@ final class SentMailImapAppender implements SentMailAppenderInterface
 {
     private ?\Closure $clientFactory;
 
-    public function __construct(?callable $clientFactory = null)
-    {
+    public function __construct(
+        ?callable $clientFactory = null,
+        private readonly ?ImapAuthentication $authentication = null,
+    ) {
         $this->clientFactory = $clientFactory !== null ? \Closure::fromCallable($clientFactory) : null;
     }
 
@@ -29,7 +33,7 @@ final class SentMailImapAppender implements SentMailAppenderInterface
 
         try {
             $settings = $this->settings($profile);
-            $client = $this->client($settings);
+            $client = $this->client($settings, $profile);
             $client->connect();
             try {
                 $folder = $this->folder($client, $settings);
@@ -64,7 +68,7 @@ final class SentMailImapAppender implements SentMailAppenderInterface
 
         try {
             $settings = $this->settings($profile);
-            $client = $this->client($settings);
+            $client = $this->client($settings, $profile);
             $client->connect();
             try {
                 $folder = $this->folder($client, $settings);
@@ -92,7 +96,7 @@ final class SentMailImapAppender implements SentMailAppenderInterface
 
         try {
             $settings = $this->settings($profile);
-            $client = $this->client($settings);
+            $client = $this->client($settings, $profile);
             $client->connect();
             try {
                 $folders = $this->folderMetadata($client);
@@ -114,7 +118,9 @@ final class SentMailImapAppender implements SentMailAppenderInterface
     {
         $host = $this->requiredString($profile['imap_host'] ?? null, 'imap_host');
         $username = $this->requiredString($profile['imap_username'] ?? null, 'imap_username');
-        $password = $this->requiredString($profile['imap_password'] ?? null, 'imap_password');
+        $password = ($profile['imap_auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT
+            ? ''
+            : $this->requiredString($profile['imap_password'] ?? null, 'imap_password');
         $folder = $this->requiredString($profile['imap_folder'] ?? 'Sent', 'imap_folder');
         $encryption = (string) ($profile['imap_encryption'] ?? 'ssl');
         if (!in_array($encryption, ['none', 'tls', 'ssl'], true)) {
@@ -139,10 +145,15 @@ final class SentMailImapAppender implements SentMailAppenderInterface
     /**
      * @param array<string,mixed> $settings
      */
-    private function client(array $settings): Client
+    private function client(array $settings, array $profile): Client
     {
+        $auth = [];
+        if (($profile['imap_auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT) {
+            $auth = ($this->authentication ?? throw new \LogicException('IMAP OAuth není nakonfigurován.'))
+                ->options($profile, ImapAuthSettings::SENT, 'imap_');
+        }
         if ($this->clientFactory !== null) {
-            $client = ($this->clientFactory)($settings);
+            $client = ($this->clientFactory)($auth + $settings);
             if (!$client instanceof Client) {
                 throw new \RuntimeException('IMAP client factory vrátila neplatný klient.');
             }
@@ -162,10 +173,11 @@ final class SentMailImapAppender implements SentMailAppenderInterface
                 'sequence' => \Webklex\PHPIMAP\IMAP::ST_UID,
                 'rfc822' => true,
                 'soft_fail' => true,
+                'debug' => false,
             ],
         ]);
 
-        return $manager->make([
+        return $manager->make($auth + [
             'host' => $settings['host'],
             'port' => $settings['port'],
             'protocol' => 'imap',
@@ -333,6 +345,9 @@ final class SentMailImapAppender implements SentMailAppenderInterface
      */
     private function sanitizedErrorMessage(\Throwable $e, ?array $settings = null, ?array $profile = null): string
     {
+        if (($profile['imap_auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT) {
+            return ImapAuthentication::failureMessage($e);
+        }
         $message = trim($e->getMessage());
         if ($message === '') {
             $message = get_class($e);

@@ -4,15 +4,25 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Service\Bank\EmailNotice;
 
+use GuzzleHttp\Client as HttpClient;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\Psr7\Response;
+use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeMessage;
 use MyInvoice\Service\Bank\EmailNotice\EmailNoticeTextNormalizer;
 use MyInvoice\Service\Bank\EmailNotice\WebklexImapMailboxClient;
+use MyInvoice\Service\Mail\Imap\ImapAuthentication;
+use MyInvoice\Service\OAuth\OAuthTokenClient;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Clock\MockClock;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Webklex\PHPIMAP\Client;
 use Webklex\PHPIMAP\Folder;
 use Webklex\PHPIMAP\Message;
 use Webklex\PHPIMAP\Query\WhereQuery;
+use Webklex\PHPIMAP\Support\FolderCollection;
+use Webklex\PHPIMAP\Support\MessageCollection;
 
 final class WebklexImapMailboxClientTest extends TestCase
 {
@@ -72,6 +82,53 @@ final class WebklexImapMailboxClientTest extends TestCase
     {
         yield 'server nepotvrdil zápis' => [false, false];
         yield 'server nevrátil příznak' => [true, false];
+    }
+
+    public function testMicrosoft365ListsFetchesAndPostProcessesWithXoauth2(): void
+    {
+        $message = $this->createMock(Message::class);
+        $message->expects(self::once())->method('setFlag')->with('Seen')->willReturn(true);
+        $message->expects(self::once())->method('hasFlag')->with('seen')->willReturn(true);
+        $query = $this->createMock(WhereQuery::class);
+        $query->expects(self::once())->method('__call')->with('all', [])->willReturnSelf();
+        $query->method('leaveUnread')->willReturnSelf();
+        $query->method('fetchOrderDesc')->willReturnSelf();
+        $query->method('limit')->willReturnSelf();
+        $query->expects(self::once())->method('get')->willReturn(MessageCollection::make([]));
+        $query->expects(self::once())->method('getMessageByUid')->with(42)->willReturn($message);
+        $folder = $this->createMock(Folder::class);
+        $folder->path = 'INBOX';
+        $folder->expects(self::exactly(2))->method('query')->willReturn($query);
+        $client = $this->createMock(PostProcessImapClientStub::class);
+        $client->expects(self::exactly(3))->method('connect')->willReturnSelf();
+        $client->expects(self::exactly(3))->method('disconnect')->willReturnSelf();
+        $client->method('getFolders')->willReturn(FolderCollection::make([$folder]));
+        $client->method('getFolderByPath')->willReturn($folder);
+        $http = new HttpClient(['handler' => new MockHandler([
+            new Response(200, [], '{"access_token":"synthetic-bearer","expires_in":3600}'),
+        ])]);
+        $authentication = new ImapAuthentication(
+            new OAuthTokenClient($http),
+            new SecretEncryption(new Config([])),
+            new MockClock(),
+        );
+        $mailbox = new WebklexImapMailboxClient(new EmailNoticeTextNormalizer(), static function (array $settings) use ($client): Client {
+            self::assertSame('oauth', $settings['authentication']);
+            self::assertSame('synthetic-bearer', $settings['password']);
+            self::assertSame('shared@example.test', $settings['username']);
+            return $client;
+        }, $authentication);
+        $settings = [
+            'auth_mode' => 'microsoft365',
+            'username' => 'shared@example.test',
+            'oauth_tenant_id' => '11111111-1111-4111-8111-111111111111',
+            'oauth_client_id' => '22222222-2222-4222-8222-222222222222',
+            'oauth_client_secret' => 'synthetic-client-secret',
+            'mark_seen_after_import' => true,
+        ];
+        self::assertSame(['INBOX'], $mailbox->test($settings)['folders']);
+        self::assertSame([], $mailbox->latest($settings, 10));
+        self::assertNull($mailbox->postProcess($settings, $this->notice(), 'success', true));
     }
 
     private function imapClient(Message $message, bool $connect): WebklexImapMailboxClient

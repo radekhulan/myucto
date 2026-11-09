@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Mail\Imap\ImapAuthSettings;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 
 final class BankEmailNoticeRepository
@@ -73,10 +74,38 @@ final class BankEmailNoticeRepository
      */
     public function saveImapAccount(int $supplierId, array $body, ?int $id = null, ?int $distributeUserId = null): array
     {
-        $current = $id !== null ? $this->imapAccountRaw($supplierId, $id) : null;
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $account = $this->persistImapAccount($supplierId, $body, $id, $distributeUserId);
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+            return $account;
+        } catch (\Throwable $error) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $error;
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $body
+     * @return array<string,mixed>
+     */
+    private function persistImapAccount(int $supplierId, array $body, ?int $id, ?int $distributeUserId): array
+    {
+        $current = $id !== null ? $this->imapAccountRaw($supplierId, $id, true) : null;
         if ($id !== null && $current === null) {
             throw new \RuntimeException('IMAP účet nebyl nalezen.');
         }
+        $draft = array_replace($current ?? [], $body);
+        $auth = ImapAuthSettings::normalize($draft, $current ?? []);
+        $body = array_replace($auth['auth_mode'] === ImapAuthSettings::MICROSOFT ? $draft : $body, $auth);
         // Rozdělování do dalších firem platí v rozsahu oprávnění uživatele, který ho
         // zapnul. Ten se mění jen zapnutím: běžná úprava účtu jiným adminem rozsah
         // firem tiše nepřesune na jeho oprávnění.
@@ -93,7 +122,7 @@ final class BankEmailNoticeRepository
                 throw new \RuntimeException('Rozdělování do více firem potřebuje uživatele, v jehož rozsahu oprávnění poběží.');
             }
         }
-        $passwordEnc = $current['password_enc'] ?? null;
+        $passwordEnc = $auth['auth_mode'] === ImapAuthSettings::PASSWORD ? ($current['password_enc'] ?? null) : null;
         if (array_key_exists('password', $body) && trim((string) $body['password']) !== '') {
             $passwordEnc = $this->secrets->encrypt((string) $body['password']);
         }
@@ -102,13 +131,14 @@ final class BankEmailNoticeRepository
             throw new \RuntimeException('Název IMAP účtu je povinný.');
         }
 
+        $encryption = $body['encryption'] ?? 'ssl';
         $data = [
             'supplier_id' => $supplierId,
             'name' => $name,
             'enabled' => !empty($body['enabled']) ? 1 : 0,
             'host' => trim((string) ($body['host'] ?? '')),
             'port' => max(1, min(65535, (int) ($body['port'] ?? 993))),
-            'encryption' => in_array($body['encryption'] ?? 'ssl', ['ssl', 'tls', 'none'], true) ? (string) $body['encryption'] : 'ssl',
+            'encryption' => in_array($encryption, ['ssl', 'tls', 'none'], true) ? $encryption : 'ssl',
             'validate_cert' => array_key_exists('validate_cert', $body) ? (int) (bool) $body['validate_cert'] : 1,
             // Fail-closed default: ověření autenticity (DKIM/DMARC) je u NOVÉHO účtu
             // ZAPNUTÉ, stejně jako DB default. Chybí-li klíč v payloadu u existujícího
@@ -143,6 +173,12 @@ final class BankEmailNoticeRepository
             'email_auth_serv_id' => $this->nullable($body['email_auth_serv_id'] ?? null),
             'username' => trim((string) ($body['username'] ?? '')),
             'password_enc' => $passwordEnc,
+            'auth_mode' => $auth['auth_mode'],
+            'oauth_tenant_id' => $auth['oauth_tenant_id'],
+            'oauth_client_id' => $auth['oauth_client_id'],
+            'oauth_client_secret_enc' => $id === null ? null : ImapAuthSettings::encryptedSecret(
+                $this->secrets, $auth, $supplierId, $id, ImapAuthSettings::INCOMING,
+            ),
             'folder' => trim((string) ($body['folder'] ?? 'INBOX')) ?: 'INBOX',
             'max_messages_per_run' => max(1, min(500, (int) ($body['max_messages_per_run'] ?? 50))),
             'process_from_date' => $this->dateOrNull($body['process_from_date'] ?? null),
@@ -169,6 +205,8 @@ final class BankEmailNoticeRepository
                            distribute_user_id = :distribute_user_id,
                            forwarded_from = :forwarded_from,
                            email_auth_serv_id = :email_auth_serv_id, username = :username, password_enc = :password_enc,
+                           auth_mode = :auth_mode, oauth_tenant_id = :oauth_tenant_id, oauth_client_id = :oauth_client_id,
+                           oauth_client_secret_enc = :oauth_client_secret_enc,
                            folder = :folder, max_messages_per_run = :max_messages_per_run,
                            process_from_date = :process_from_date, success_action = :success_action,
                            success_flag = :success_flag, success_move_folder = :success_move_folder,
@@ -182,17 +220,26 @@ final class BankEmailNoticeRepository
 
         $sql = 'INSERT INTO bank_email_imap_settings
                   (supplier_id, name, enabled, host, port, encryption, validate_cert, require_email_auth, allow_forwarded, ingest_notices, mark_seen_after_import, ingest_pdf_invoices, ingest_pdf_statements, distribute_to_suppliers, distribute_user_id, forwarded_from, email_auth_serv_id,
-                   username, password_enc, folder,
+                   username, password_enc, auth_mode, oauth_tenant_id, oauth_client_id, oauth_client_secret_enc, folder,
                    max_messages_per_run, process_from_date, success_action, success_flag, success_move_folder,
                    failure_action, failure_flag, failure_move_folder, retry_failed, max_attempts)
                 VALUES
                   (:supplier_id, :name, :enabled, :host, :port, :encryption, :validate_cert, :require_email_auth, :allow_forwarded, :ingest_notices, :mark_seen_after_import, :ingest_pdf_invoices, :ingest_pdf_statements, :distribute_to_suppliers, :distribute_user_id, :forwarded_from, :email_auth_serv_id,
-                   :username, :password_enc, :folder,
+                   :username, :password_enc, :auth_mode, :oauth_tenant_id, :oauth_client_id, :oauth_client_secret_enc, :folder,
                    :max_messages_per_run, :process_from_date, :success_action, :success_flag, :success_move_folder,
                    :failure_action, :failure_flag, :failure_move_folder, :retry_failed, :max_attempts)';
         $this->db->pdo()->prepare($sql)->execute($data);
 
-        return $this->imapAccount($supplierId, (int) $this->db->pdo()->lastInsertId()) ?? $this->emptyImapAccount($supplierId);
+        $id = (int) $this->db->pdo()->lastInsertId();
+        if ($auth['auth_mode'] === ImapAuthSettings::MICROSOFT) {
+            $this->db->pdo()->prepare(
+                'UPDATE bank_email_imap_settings SET oauth_client_secret_enc = ? WHERE supplier_id = ? AND id = ?'
+            )->execute([
+                ImapAuthSettings::encryptedSecret($this->secrets, $auth, $supplierId, $id, ImapAuthSettings::INCOMING),
+                $supplierId, $id,
+            ]);
+        }
+        return $this->imapAccount($supplierId, $id) ?? $this->emptyImapAccount($supplierId);
     }
 
     public function deleteImapAccount(int $supplierId, int $id): bool
@@ -758,9 +805,13 @@ final class BankEmailNoticeRepository
     /**
      * @return array<string,mixed>|null
      */
-    private function imapAccountRaw(int $supplierId, int $id): ?array
+    private function imapAccountRaw(int $supplierId, int $id, bool $lock = false): ?array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT * FROM bank_email_imap_settings WHERE supplier_id = ? AND id = ?');
+        $pdo = $this->db->pdo();
+        $lock = $lock && $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql';
+        $stmt = $pdo->prepare(
+            'SELECT * FROM bank_email_imap_settings WHERE supplier_id = ? AND id = ?' . ($lock ? ' FOR UPDATE' : '')
+        );
         $stmt->execute([$supplierId, $id]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $row ?: null;
@@ -805,6 +856,10 @@ final class BankEmailNoticeRepository
             'retry_failed' => false,
             'max_attempts' => 3,
             'has_password' => false,
+            'auth_mode' => ImapAuthSettings::PASSWORD,
+            'oauth_tenant_id' => null,
+            'oauth_client_id' => null,
+            'has_oauth_client_secret' => false,
         ];
     }
 
@@ -917,6 +972,10 @@ final class BankEmailNoticeRepository
         $row['retry_failed'] = (bool) $row['retry_failed'];
         $row['max_attempts'] = (int) $row['max_attempts'];
         $row['has_password'] = !empty($row['password_enc']);
+        $row['has_oauth_client_secret'] = !empty($row['oauth_client_secret_enc']);
+        if (!$includeSecret) {
+            unset($row['oauth_client_secret_enc']);
+        }
         if ($includeSecret && !empty($row['password_enc'])) {
             $row['password'] = $this->secrets->decrypt((string) $row['password_enc']);
         }

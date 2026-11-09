@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Bank\EmailNotice;
 
+use MyInvoice\Service\Mail\Imap\ImapAuthentication;
+use MyInvoice\Service\Mail\Imap\ImapAuthSettings;
 use MyInvoice\Support\PdfBytes;
 use Webklex\PHPIMAP\ClientManager;
 
@@ -12,28 +14,36 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
     public function __construct(
         private readonly EmailNoticeTextNormalizer $normalizer,
         private readonly ?\Closure $clientFactory = null,
+        private readonly ?ImapAuthentication $authentication = null,
     ) {}
 
     public function latest(array $settings, int $limit): array
     {
-        $client = $this->client($settings);
-        $client->connect();
         try {
-            $folder = $this->folder($client, $settings);
-            $messages = $folder->query()
-                ->all()
-                ->leaveUnread()
-                ->fetchOrderDesc()
-                ->limit(max(1, $limit))
-                ->get();
+            $client = $this->client($settings);
+            $client->connect();
+            try {
+                $folder = $this->folder($client, $settings);
+                $messages = $folder->query()
+                    ->all()
+                    ->leaveUnread()
+                    ->fetchOrderDesc()
+                    ->limit(max(1, $limit))
+                    ->get();
 
-            $out = [];
-            foreach ($messages as $message) {
-                $out[] = $this->toNoticeMessage($message, $settings);
+                $out = [];
+                foreach ($messages as $message) {
+                    $out[] = $this->toNoticeMessage($message, $settings);
+                }
+                return $out;
+            } finally {
+                $client->disconnect();
             }
-            return $out;
-        } finally {
-            $client->disconnect();
+        } catch (\Throwable $e) {
+            if (($settings['auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT) {
+                throw new \RuntimeException(ImapAuthentication::failureMessage($e));
+            }
+            throw $e;
         }
     }
 
@@ -123,7 +133,7 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
             $client->disconnect();
             return ['ok' => true, 'message' => 'IMAP připojení je funkční.', 'folders' => $folders];
         } catch (\Throwable $e) {
-            return ['ok' => false, 'message' => $e->getMessage()];
+            return ['ok' => false, 'message' => $this->failureMessage($settings, $e)];
         }
     }
 
@@ -166,7 +176,7 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
             }
             return null;
         } catch (\Throwable $e) {
-            return $e->getMessage();
+            return $this->failureMessage($settings, $e);
         }
     }
 
@@ -175,8 +185,13 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
      */
     private function client(array $settings): \Webklex\PHPIMAP\Client
     {
+        $auth = [];
+        if (($settings['auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT) {
+            $auth = ($this->authentication ?? throw new \LogicException('IMAP OAuth není nakonfigurován.'))
+                ->options($settings, ImapAuthSettings::INCOMING);
+        }
         if ($this->clientFactory !== null) {
-            return ($this->clientFactory)($settings);
+            return ($this->clientFactory)($auth + $settings);
         }
         if (!class_exists(ClientManager::class)) {
             throw new \RuntimeException('Knihovna webklex/php-imap není nainstalovaná.');
@@ -193,9 +208,10 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
                 'fetch_order' => 'desc',
                 'rfc822' => true,
                 'soft_fail' => true,
+                'debug' => false,
             ],
         ]);
-        return $manager->make([
+        return $manager->make($auth + [
             'host' => (string) ($settings['host'] ?? ''),
             'port' => (int) ($settings['port'] ?? 993),
             'protocol' => 'imap',
@@ -208,6 +224,14 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
             'timeout' => 30,
             'extensions' => [],
         ]);
+    }
+
+    /** @param array<string,mixed> $settings */
+    private function failureMessage(array $settings, \Throwable $error): string
+    {
+        return ($settings['auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT
+            ? ImapAuthentication::failureMessage($error)
+            : $error->getMessage();
     }
 
     /**

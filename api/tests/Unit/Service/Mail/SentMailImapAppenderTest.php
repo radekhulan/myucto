@@ -4,8 +4,16 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Service\Mail;
 
+use GuzzleHttp\Client as HttpClient;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\Psr7\Response;
+use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Mail\Imap\ImapAuthentication;
 use MyInvoice\Service\Mail\SentMailImapAppender;
+use MyInvoice\Service\OAuth\OAuthTokenClient;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Clock\MockClock;
 use Webklex\PHPIMAP\Client;
 use Webklex\PHPIMAP\Folder;
 use Webklex\PHPIMAP\Support\FolderCollection;
@@ -209,6 +217,51 @@ final class SentMailImapAppenderTest extends TestCase
         self::assertSame('Sent Items', $result['folders'][2]['path'] ?? null);
         self::assertTrue($result['folders'][2]['sent'] ?? false);
         self::assertTrue($result['folders'][2]['system'] ?? false);
+    }
+
+    public function testMicrosoft365ListsFoldersAndArchivesWithXoauth2(): void
+    {
+        $folder = new FakeImapFolder('Sent');
+        $client = new FakeImapClient();
+        $client->foldersByPath['Sent'] = $folder;
+        $client->folders = FolderCollection::make([$folder]);
+        $http = new HttpClient(['handler' => new MockHandler([
+            new Response(200, [], '{"access_token":"synthetic-bearer","expires_in":3600}'),
+        ])]);
+        $authentication = new ImapAuthentication(
+            new OAuthTokenClient($http),
+            new SecretEncryption(new Config([])),
+            new MockClock(),
+        );
+        $appender = new SentMailImapAppender(static function (array $settings) use ($client): Client {
+            self::assertSame('outlook.office365.com', $settings['host']);
+            self::assertTrue($settings['validate_cert']);
+            self::assertSame('oauth', $settings['authentication']);
+            self::assertSame('synthetic-bearer', $settings['password']);
+            self::assertSame('shared@example.test', $settings['username']);
+            return $client;
+        }, $authentication);
+        $profile = $this->profile([
+            'imap_auth_mode' => 'microsoft365',
+            'imap_username' => 'shared@example.test',
+            'imap_password' => null,
+            'imap_oauth_tenant_id' => '11111111-1111-4111-8111-111111111111',
+            'imap_oauth_client_id' => '22222222-2222-4222-8222-222222222222',
+            'imap_oauth_client_secret' => 'synthetic-client-secret',
+        ]);
+
+        self::assertSame('Sent', $appender->folders($profile)['folders'][0]['path']);
+        self::assertTrue($appender->test($profile)['ok']);
+        self::assertSame('saved', $appender->appendIfEnabled($profile, 'Syntetická zpráva')['status']);
+        self::assertSame('Syntetická zpráva', $folder->appends[1]['message']);
+
+        $encoded = base64_encode("user=shared@example.test\x01auth=Bearer synthetic-bearer\x01\x01");
+        $client->connectError = new \RuntimeException('AUTHENTICATE XOAUTH2 ' . $encoded . ' synthetic-bearer');
+        $result = $appender->appendIfEnabled($profile, 'Syntetická zpráva');
+        self::assertSame('failed', $result['status']);
+        self::assertStringContainsString('přístup aplikace ke schránce', $result['error']);
+        self::assertStringNotContainsString($encoded, $result['error']);
+        self::assertStringNotContainsString('synthetic-bearer', $result['error']);
     }
 
     public function testErrorMessageSanitizationRedactsCredentialsAndLocalPaths(): void

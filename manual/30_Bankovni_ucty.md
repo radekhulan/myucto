@@ -407,8 +407,10 @@ Každá firma může mít více IMAP účtů, typicky jeden pro každou banku.
 | Pole | Význam |
 |---|---|
 | **Název** | Popisek v UI, např. „RB avíza“ |
-| **Host**, **Port**, **Šifrování** | Připojení k IMAP serveru |
-| **Uživatel**, **Heslo** | Přístup ke schránce; heslo se ukládá šifrovaně |
+| **Přihlášení k IMAP** | **Heslo** nebo **Microsoft 365 (OAuth 2.0)** podle poskytovatele schránky |
+| **Host**, **Port**, **Šifrování** | Připojení k IMAP serveru v režimu **Heslo** |
+| **Uživatel**, **Heslo** | Přístup ke schránce v režimu **Heslo** |
+| **Tenant ID**, **Client ID**, **Client Secret**, **Adresa schránky** | Přístup přes Microsoft 365, viz [nastavení v Microsoft Entra a Exchange](96_Nastaveni.md#9671-pripojeni-schranky-microsoft-365-pres-imap) |
 | **Složka** | IMAP složka, např. `INBOX` nebo `INBOX.Banka` |
 | **Procházet** | Ověří připojení a nabídne složky ze serveru |
 | **Max. zpráv na běh** | Kolik nejnovějších e-mailů cron načte při jednom běhu |

@@ -55,6 +55,14 @@ final class OAuthTokenClient
         return $this->tokens($config, 'token_refresh', ['refresh_token' => $refreshToken, 'grant_type' => 'refresh_token']);
     }
 
+    public function clientCredentials(OAuthProviderConfig $config): OAuthTokenSet
+    {
+        return $this->tokens($config, 'client_credentials', [
+            'grant_type' => 'client_credentials',
+            'scope' => $config->scope,
+        ]);
+    }
+
     public function requestDeviceCode(OAuthProviderConfig $config, ?string $codeChallenge): OAuthDeviceAuthorization
     {
         if ($config->deviceAuthorizationUrl === null) {

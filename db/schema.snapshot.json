@@ -1167,7 +1167,8 @@
         "2261_payroll_jmhz_holiday_time_off.sql",
         "2262_drop_supplier_login_policy.sql",
         "2263_payroll_employment_relation_type_changed_event.sql",
-        "2264_payroll_employment_merged_event.sql"
+        "2264_payroll_employment_merged_event.sql",
+        "2265_microsoft365_imap_oauth.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3008,6 +3009,7 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "allow_forwarded": "tinyint(1) NOT NULL DEFAULT 0",
+                "auth_mode": "enum('password','microsoft365') NOT NULL DEFAULT 'password'",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "distribute_to_suppliers": "tinyint(1) NOT NULL DEFAULT 0",
                 "distribute_user_id": "bigint(20) unsigned NULL DEFAULT NULL",
@@ -3031,6 +3033,9 @@
                 "max_attempts": "int(10) unsigned NOT NULL DEFAULT 3",
                 "max_messages_per_run": "int(10) unsigned NOT NULL DEFAULT 50",
                 "name": "varchar(190) NOT NULL DEFAULT 'IMAP účet'",
+                "oauth_client_id": "char(36) NULL DEFAULT NULL",
+                "oauth_client_secret_enc": "text NULL DEFAULT NULL",
+                "oauth_tenant_id": "char(36) NULL DEFAULT NULL",
                 "password_enc": "text NULL DEFAULT NULL",
                 "port": "int(10) unsigned NOT NULL DEFAULT 993",
                 "process_from_date": "date NULL DEFAULT NULL",
@@ -5743,11 +5748,15 @@
                 "from_email": "varchar(190) NOT NULL",
                 "from_name": "varchar(120) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "imap_auth_mode": "enum('password','microsoft365') NOT NULL DEFAULT 'password'",
                 "imap_create_folder": "tinyint(1) NOT NULL DEFAULT 0",
                 "imap_encryption": "enum('none','tls','ssl') NOT NULL DEFAULT 'ssl'",
                 "imap_folder": "varchar(190) NULL DEFAULT NULL",
                 "imap_host": "varchar(190) NULL DEFAULT NULL",
                 "imap_mark_seen": "tinyint(1) NOT NULL DEFAULT 1",
+                "imap_oauth_client_id": "char(36) NULL DEFAULT NULL",
+                "imap_oauth_client_secret_enc": "text NULL DEFAULT NULL",
+                "imap_oauth_tenant_id": "char(36) NULL DEFAULT NULL",
                 "imap_on_failure": "enum('log_only','fail_send') NOT NULL DEFAULT 'log_only'",
                 "imap_password_enc": "varchar(512) NULL DEFAULT NULL",
                 "imap_port": "int(10) unsigned NULL DEFAULT NULL",

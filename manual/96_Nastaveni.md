@@ -244,6 +244,20 @@ Povinná pole jsou ve formuláři označená hvězdičkou. Před uložením i p�
 zobrazené povinné položky (Reply-To, DKIM, SMTP autentizace a IMAP podle zapnutých voleb) a bez jejich vyplnění akci
 nespustí. Podrobnosti viz [§ 96.16.6](#96166-odesilaci-profily-podrobnosti).
 
+### 96.7.1 Připojení schránky Microsoft 365 přes IMAP
+
+Postup platí pro archivaci odeslané pošty i pro [příchozí IMAP účet](30_Bankovni_ucty.md#30118-nastaveni-imap-uctu). MyÚčto se přihlašuje jako aplikace. Stačí odchozí HTTPS do Microsoft Entra a IMAP přes TLS na `outlook.office365.com:993`.
+
+1. V Microsoft Entra zaregistrujte aplikaci pro účty pouze ve vašem tenantu. Poznamenejte si **Directory (tenant) ID** a **Application (client) ID**. Vytvořte Client Secret a zkopírujte jeho hodnotu.
+2. V **API permissions** přidejte aplikační oprávnění **Office 365 Exchange Online → IMAP.AccessAsApp**. Správce tenantu potvrdí **Grant admin consent**.
+3. Správce Exchange Online zaregistruje instanci podnikové aplikace příkazem `New-ServicePrincipal -AppId <ClientID> -ObjectId <ObjectID>`. Použije Object ID z **Enterprise applications**. Identitu registrovaného principalu zjistí přes `Get-ServicePrincipal`.
+4. Přidělte přístup jen k určené běžné nebo sdílené schránce příkazem `Add-MailboxPermission -Identity <AdresaSchranky> -User <ExchangeServicePrincipalIdentity> -AccessRights FullAccess`. Ověřte, že je pro schránku povolený IMAP.
+5. V MyÚčtu zvolte **Microsoft 365 (OAuth 2.0)** a vyplňte Tenant ID, Client ID, Client Secret a adresu schránky. Načtěte složky a ověřte připojení. Test archivace zapíše testovací zprávu do cílové složky. Nastavení odesílacího transportu se volí samostatně.
+
+Před vypršením Client Secret vytvořte v Entra nový, uložte jej v každé konfiguraci MyÚčta, která jej používá, a ověřte připojení. Po úspěšném testu můžete starý secret odebrat. Při změně tenantu, aplikace nebo schránky MyÚčto požádá o nové zadání secretu.
+
+[Postup Microsoftu pro přístup k Exchange Online přes OAuth](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth)
+
 ## 96.8 Krok za krokem: uložené filtry a zobrazení tabulek
 
 Na seznamech dokladů (Vydané i Přijaté faktury, Klienti, Sklad - položky i doklady, Pokladna, Deník, Hlavní kniha,
