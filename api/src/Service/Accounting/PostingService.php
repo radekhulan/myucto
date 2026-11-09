@@ -368,12 +368,9 @@ final class PostingService
                 ['reason' => $reason],
             );
         }
-        if ($sourceType === 'payroll') {
-            // Mzdový předpis skládá dvojice sám (PayrollPostingLineBuilder::singleEntryLines);
-            // co z něj zbude M : N, zůstává zatím složené s označením.
-            $this->pairOutcome = ['status' => 'composite_mn', 'reason' => $reason];
-            return JournalPairer::stripPairKeys($resolved);
-        }
+        // Platí i pro mzdový předpis: ten skládá dvojice sám (PayrollPostingLineBuilder::
+        // singleEntryLines, přeřazení střediska jako storno a nová dvojice), takže M : N
+        // z něj znamená chybu a předpis zůstane nezaúčtovaný.
         throw self::automaticPairingFailed($sourceType, $reason);
     }
 

@@ -1919,7 +1919,7 @@ Instalace může mít jednoduchý zápis jako **výchozí formu nových firem** 
 proměnná prostředí `MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM=single`). Firma, která pak vstoupí do podvojného
 účetnictví (založení, převod z jiného programu, aktivace účetnictví), účtuje po dvojicích od začátku, pro všechna
 data. Stávající firmy a firmy, které už mají zápisy v deníku, se nezmění.
-Jednoduchý zápis zatím není dostupný pro společenství vlastníků jednotek a neziskové organizace.
+Jednoduchý zápis mají obchodní společnosti, podnikatelé a společenství vlastníků jednotek. Spolky a ostatní neziskové organizace ho zatím nemají.
 
 #### 52.14.16.2 Krok za krokem: ruční zápis po dvojicích
 
