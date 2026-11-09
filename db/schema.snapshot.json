@@ -1167,7 +1167,8 @@
         "2261_payroll_jmhz_holiday_time_off.sql",
         "2262_drop_supplier_login_policy.sql",
         "2263_payroll_employment_relation_type_changed_event.sql",
-        "2264_payroll_employment_merged_event.sql"
+        "2264_payroll_employment_merged_event.sql",
+        "2265_stock_receipt_invoice_links.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7179,6 +7180,7 @@
                 "line_discount_pct": "decimal(7,3) NULL DEFAULT NULL",
                 "linked_work_report_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "list_unit_price": "decimal(16,6) NULL DEFAULT NULL",
+                "manual_price": "tinyint(1) NOT NULL DEFAULT 0",
                 "order_index": "int(11) NOT NULL DEFAULT 0",
                 "oss_applicable": "tinyint(1) NOT NULL DEFAULT 0",
                 "oss_consumer_country": "char(2) NULL DEFAULT NULL",
@@ -25861,6 +25863,30 @@
             "checks": {
                 "chk_spr_match": "`match_type` = 'default' and `match_id` is null or `match_type` <> 'default' and `match_id` is not null and `match_id` > 0"
             }
+        },
+        "stock_receipt_invoice_links": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "document_id": "bigint(20) unsigned NOT NULL",
+                "invoice_id": "bigint(20) unsigned NOT NULL",
+                "line_no": "int(10) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, document_id, line_no, invoice_id)",
+                "fk_stock_receipt_invoice_document": "BTREE (document_id)",
+                "fk_stock_receipt_invoice_invoice": "BTREE (invoice_id)",
+                "ix_stock_receipt_invoice_tenant": "BTREE (supplier_id, invoice_id)"
+            },
+            "foreign_keys": {
+                "fk_stock_receipt_invoice_document": "(document_id) -> stock_documents (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_stock_receipt_invoice_invoice": "(invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_stock_receipt_invoice_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "stock_tags": {
             "type": "BASE TABLE",

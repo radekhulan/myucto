@@ -229,6 +229,18 @@ final class RecurringTemplateOssApiTest extends TestCase
      * ale bez země spotřeby) se ukládá jako NE-OSS, protože takovou položku by cron při
      * každém běhu vyrobil jako neplatnou.
      */
+    public function testManualPriceFlagDoesNotLetNonPositiveTemplateThrough(): void
+    {
+        $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
+        $payload = $this->payload($today, ['manual_price' => true]);
+        $payload['items'][0]['unit_price_without_vat'] = 0;
+
+        $created = $this->call('create', 'POST', $payload);
+
+        self::assertSame(400, $created['status'], json_encode($created['body'], JSON_UNESCAPED_UNICODE));
+        self::assertArrayHasKey('amount_to_pay', $created['body']['error']['fields'] ?? []);
+    }
+
     public function testOssWithoutConsumerCountryIsStoredAsNonOss(): void
     {
         $this->setSupplierOss(true, '2020-01-01', null);

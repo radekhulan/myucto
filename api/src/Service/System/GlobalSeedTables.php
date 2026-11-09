@@ -560,7 +560,7 @@ final class GlobalSeedTables
         'stock_item_relations', 'stock_item_tags', 'stock_item_templates', 'stock_item_units',
         'stock_item_vendors', 'stock_items', 'stock_landed_costs', 'stock_levels', 'stock_locales',
         'stock_media', 'stock_packaging_units', 'stock_price_level_rules', 'stock_price_levels',
-        'stock_pricing_exchange_rates', 'stock_pricing_profiles', 'stock_pricing_rules', 'stock_tags',
+        'stock_pricing_exchange_rates', 'stock_pricing_profiles', 'stock_pricing_rules', 'stock_receipt_invoice_links', 'stock_tags',
         'stock_take_lines', 'stock_takes', 'stock_tracking_allocations', 'stock_tracking_units',
         'stock_valuation_rows', 'stock_valuation_snapshots',
         'submission_defect_notices', 'submission_inbox_messages', 'submission_inbox_polls',

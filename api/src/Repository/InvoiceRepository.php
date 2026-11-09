@@ -167,6 +167,14 @@ final class InvoiceRepository
         return $this->hasLineDiscount;
     }
 
+    private ?bool $hasManualPrice = null;
+
+    /** Příznak „cenu zadá člověk" (migrace 2265); starší instance ho nemají. */
+    private function supportsManualPrice(): bool
+    {
+        return $this->hasManualPrice ??= $this->db->hasColumn('invoice_items', 'manual_price');
+    }
+
     /** Sloupec výběru sériových čísel a šarží na řádku (migrace 2016); starší instance ho nemají. */
     private function supportsItemTracking(): bool
     {
@@ -710,6 +718,9 @@ final class InvoiceRepository
         }
         if ($this->supportsWorkReportBilling()) {
             $ossSelect .= ', ii.linked_work_report_id, ii.work_report_billing_key';
+        }
+        if ($this->supportsManualPrice()) {
+            $ossSelect .= ', ii.manual_price';
         }
         $stmt = $this->db->pdo()->prepare(
              'SELECT ii.id, ii.invoice_id, ii.description, ii.quantity, ii.duration_minutes, ii.unit,
@@ -1942,6 +1953,10 @@ final class InvoiceRepository
             $ossColumns[] = \MyInvoice\Service\Invoice\LineDiscount::LIST_COLUMN;
             $ossColumns[] = \MyInvoice\Service\Invoice\LineDiscount::PERCENT_COLUMN;
         }
+        $supportsManualPrice = $this->supportsManualPrice();
+        if ($supportsManualPrice) {
+            $ossColumns[] = 'manual_price';
+        }
 
         if ($supportsBilling) array_push($ossColumns, 'linked_work_report_id', 'work_report_billing_key');
 
@@ -1963,7 +1978,7 @@ final class InvoiceRepository
         //   Klasifikační kód: CZ klient → '1'/'2'/'3' (tuzemsko podle sazby)
         //                     EU klient s 0% → '22' (služby), non-EU s 0% → '26' (vývoz)
         $metaStmt = $pdo->prepare(
-            'SELECT i.reverse_charge, i.discount_percent, i.language, co.iso2,
+            'SELECT i.reverse_charge, i.discount_percent, i.language, co.iso2, i.status,
                     COALESCE(i.tax_date, i.issue_date) AS doc_date
                FROM invoices i
                JOIN clients c    ON c.id  = i.client_id
@@ -1973,6 +1988,8 @@ final class InvoiceRepository
         $metaStmt->execute([$invoiceId]);
         $meta = $metaStmt->fetch(PDO::FETCH_ASSOC) ?: ['reverse_charge' => 0, 'discount_percent' => 0, 'language' => 'cs', 'iso2' => 'CZ', 'doc_date' => null];
         $reverseCharge = (bool) $meta['reverse_charge'];
+        // Příznak „cenu zadá člověk" (2265) nese jen koncept, viz InvoiceAmountPolicy.
+        $isDraft = ($meta['status'] ?? 'draft') === 'draft';
         $countryIso = (string) ($meta['iso2'] ?? 'CZ');
         $discountPercent = self::clampDiscountPercent($meta['discount_percent'] ?? 0);
         $language = (string) ($meta['language'] ?? 'cs');
@@ -2011,6 +2028,9 @@ final class InvoiceRepository
                 }
                 if ($supportsLineDiscount) {
                     array_push($params, null, null);
+                }
+                if ($supportsManualPrice) {
+                    $params[] = 0;
                 }
                 array_push($params, null, null);
                 $stmt->execute($params);
@@ -2087,6 +2107,10 @@ final class InvoiceRepository
             }
             if ($supportsLineDiscount) {
                 array_push($params, ...\MyInvoice\Service\Invoice\LineDiscount::columns($item));
+            }
+            if ($supportsManualPrice) {
+                // Příznak platí jen dokud cena chybí: první zadaná cena ho zhasne.
+                $params[] = $isDraft && !empty($item['manual_price']) && (float) ($item['unit_price_without_vat'] ?? 0) === 0.0 ? 1 : 0;
             }
             if ($supportsBilling) array_push($params, $item['linked_work_report_id'] ?? null, $item['work_report_billing_key'] ?? null);
             $stmt->execute($params);
@@ -2255,6 +2279,9 @@ final class InvoiceRepository
             }
             if ($this->supportsLineDiscount()) {
                 array_push($params, null, null);   // hlavičková sleva není sleva z ceníku
+            }
+            if ($this->supportsManualPrice()) {
+                $params[] = 0;
             }
             array_push($params, null, null);
             $stmt->execute($params);
@@ -3113,6 +3140,7 @@ final class InvoiceRepository
         // Ceníková cena a sleva řádku (2035) jdou ven vždy, na starší instanci jako null.
         $row['list_unit_price']        = isset($row['list_unit_price']) ? (float) $row['list_unit_price'] : null;
         $row['line_discount_pct']      = isset($row['line_discount_pct']) ? (float) $row['line_discount_pct'] : null;
+        $row['manual_price']           = !empty($row['manual_price']);
         $row['vat_rate_snapshot']      = (float) $row['vat_rate_snapshot'];
         foreach (['total_without_vat', 'total_vat', 'total_with_vat'] as $f) {
             $row[$f] = (float) $row[$f];
