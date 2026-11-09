@@ -15,7 +15,10 @@ use MyInvoice\Service\Mail\Imap\ImapAuthentication;
 use MyInvoice\Service\Mail\Imap\ImapAuthSettings;
 use MyInvoice\Service\OAuth\OAuthException;
 use MyInvoice\Service\OAuth\OAuthTokenClient;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
+use Webklex\PHPIMAP\Exceptions\ResponseException;
 use Symfony\Component\Clock\MockClock;
 
 final class ImapAuthenticationTest extends TestCase
@@ -105,10 +108,61 @@ final class ImapAuthenticationTest extends TestCase
             self::fail('Neplatný Client Secret musí přihlášení zastavit.');
         } catch (OAuthException $error) {
             self::assertSame(OAuthException::INVALID_CLIENT, $error->errorCode);
-            $message = ImapAuthentication::failureMessage($error);
+            $message = $auth->reportFailure($error, 'configuration', ImapAuthSettings::INCOMING, 'list_folders', $this->settings());
             self::assertStringContainsString('Client Secret', $message);
             self::assertStringNotContainsString(self::SECRET, $message . $error->getMessage());
         }
+    }
+
+    #[DataProvider('failurePhases')]
+    public function testDiagnosticLogsOnlySafePhaseAndCode(
+        \Throwable $error,
+        string $stage,
+        string $loggedStage,
+        string $code,
+    ): void {
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('warning')->with('imap_oauth_failure', [
+            'stage' => $loggedStage,
+            'code' => $code,
+            'oauth_http_status' => null,
+            'purpose' => ImapAuthSettings::INCOMING,
+            'operation' => 'list_folders',
+            'supplier_id' => 1,
+            'connection_id' => 2,
+        ]);
+        $auth = new ImapAuthentication(new OAuthTokenClient(new Client()), $this->secrets(), new MockClock(), $logger);
+        $message = $auth->reportFailure($error, $stage, ImapAuthSettings::INCOMING, 'list_folders', $this->settings());
+
+        self::assertStringContainsString('[' . $code . ']', $message);
+        self::assertStringNotContainsString(self::SECRET, $message);
+        self::assertStringNotContainsString('synthetic-bearer', $message);
+    }
+
+    public static function failurePhases(): iterable
+    {
+        yield 'Exchange odmítne autentizaci' => [
+            new ResponseException('got failure response: NO AUTHENTICATE failed synthetic-bearer'),
+            'connect', 'authenticate', 'imap_auth_rejected',
+        ];
+        yield 'TLS' => [
+            new \RuntimeException('connection failed', 0, new \RuntimeException('certificate verify failed')),
+            'connect', 'connect', 'imap_tls_failed',
+        ];
+        yield 'časový limit' => [
+            new \RuntimeException('connection timed out'),
+            'connect', 'connect', 'imap_timeout',
+        ];
+        yield 'otevření složky' => [
+            new \RuntimeException(self::SECRET), 'select_folder', 'select_folder', 'imap_folder_failed',
+        ];
+        yield 'seznam složek' => [
+            new ResponseException('NO AUTHENTICATE failed synthetic-bearer'),
+            'list_folders', 'list_folders', 'imap_list_failed',
+        ];
+        yield 'zápis zprávy' => [
+            new \RuntimeException(self::SECRET), 'write_message', 'write_message', 'imap_write_failed',
+        ];
     }
 
     private function settings(): array

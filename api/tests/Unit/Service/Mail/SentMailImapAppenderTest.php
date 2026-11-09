@@ -256,12 +256,17 @@ final class SentMailImapAppenderTest extends TestCase
         self::assertSame('Syntetická zpráva', $folder->appends[1]['message']);
 
         $encoded = base64_encode("user=shared@example.test\x01auth=Bearer synthetic-bearer\x01\x01");
-        $client->connectError = new \RuntimeException('AUTHENTICATE XOAUTH2 ' . $encoded . ' synthetic-bearer');
+        $client->connectError = new \RuntimeException('NO AUTHENTICATE failed. XOAUTH2 ' . $encoded . ' synthetic-bearer');
         $result = $appender->appendIfEnabled($profile, 'Syntetická zpráva');
         self::assertSame('failed', $result['status']);
-        self::assertStringContainsString('přístup aplikace ke schránce', $result['error']);
+        self::assertStringContainsString('[imap_auth_rejected]', $result['error']);
         self::assertStringNotContainsString($encoded, $result['error']);
         self::assertStringNotContainsString('synthetic-bearer', $result['error']);
+        $client->connectError = null;
+        $folder->appendError = new \RuntimeException('synthetic-client-secret');
+        $result = $appender->appendIfEnabled($profile, 'Syntetická zpráva');
+        self::assertStringContainsString('[imap_write_failed]', $result['error']);
+        self::assertStringNotContainsString('synthetic-client-secret', $result['error']);
     }
 
     public function testErrorMessageSanitizationRedactsCredentialsAndLocalPaths(): void

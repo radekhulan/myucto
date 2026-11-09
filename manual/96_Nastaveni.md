@@ -256,6 +256,8 @@ Postup platí pro archivaci odeslané pošty i pro [příchozí IMAP účet](30_
 
 Před vypršením Client Secret vytvořte v Entra nový, uložte jej v každé konfiguraci MyÚčta, která jej používá, a ověřte připojení. Po úspěšném testu můžete starý secret odebrat. Při změně tenantu, aplikace nebo schránky MyÚčto požádá o nové zadání secretu.
 
+Při chybě ukáže test fázi a diagnostický kód. Například `imap_auth_rejected` znamená, že MyÚčto získalo token, ale Exchange odmítl přihlášení ke schránce. V provozním logu hledejte `imap_oauth_failure` podle firmy a IMAP účtu nebo odesílacího profilu. Úspěšný ruční test najdete pod `imap_oauth_probe_succeeded`.
+
 [Postup Microsoftu pro přístup k Exchange Online přes OAuth](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth)
 
 ## 96.8 Krok za krokem: uložené filtry a zobrazení tabulek

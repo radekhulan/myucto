@@ -698,6 +698,7 @@ final class Bootstrap
                 new \MyInvoice\Service\OAuth\OAuthTokenClient(new \GuzzleHttp\Client(), $c->get(LoggerInterface::class), 'imap_oauth'),
                 $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
                 $c->get(ClockInterface::class),
+                $c->get(LoggerInterface::class),
             ),
             \MyInvoice\Service\Mail\SentMailImapAppender::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Mail\SentMailImapAppender(
                 authentication: $c->get(\MyInvoice\Service\Mail\Imap\ImapAuthentication::class),

@@ -19,11 +19,15 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
 
     public function latest(array $settings, int $limit): array
     {
+        $stage = 'configuration';
         try {
             $client = $this->client($settings);
+            $stage = 'connect';
             $client->connect();
             try {
+                $stage = 'select_folder';
                 $folder = $this->folder($client, $settings);
+                $stage = 'read_messages';
                 $messages = $folder->query()
                     ->all()
                     ->leaveUnread()
@@ -41,7 +45,7 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
             }
         } catch (\Throwable $e) {
             if (($settings['auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT) {
-                throw new \RuntimeException(ImapAuthentication::failureMessage($e));
+                throw new \RuntimeException($this->failureMessage($settings, $e, $stage, 'scan'));
             }
             throw $e;
         }
@@ -123,17 +127,26 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
 
     public function test(array $settings): array
     {
+        $stage = 'configuration';
         try {
             $client = $this->client($settings);
+            $stage = 'connect';
             $client->connect();
-            $folders = [];
-            foreach ($client->getFolders(false) as $folder) {
-                $folders[] = (string) $folder->path;
+            try {
+                $stage = 'list_folders';
+                $folders = [];
+                foreach ($client->getFolders(false) as $folder) {
+                    $folders[] = (string) $folder->path;
+                }
+            } finally {
+                $client->disconnect();
             }
-            $client->disconnect();
+            if (($settings['auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT) {
+                $this->authentication?->reportProbeSuccess(ImapAuthSettings::INCOMING, 'list_folders', $settings, count($folders));
+            }
             return ['ok' => true, 'message' => 'IMAP připojení je funkční.', 'folders' => $folders];
         } catch (\Throwable $e) {
-            return ['ok' => false, 'message' => $this->failureMessage($settings, $e)];
+            return ['ok' => false, 'message' => $this->failureMessage($settings, $e, $stage, 'list_folders')];
         }
     }
 
@@ -148,12 +161,17 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
             return 'Zprávu nelze upravit: chybí IMAP UID.';
         }
 
+        $stage = 'configuration';
         try {
             $client = $this->client($settings);
+            $stage = 'connect';
             $client->connect();
             try {
+                $stage = 'select_folder';
                 $folder = $this->folder($client, $settings);
+                $stage = 'read_messages';
                 $imapMessage = $folder->query()->leaveUnread()->getMessageByUid($message->uid);
+                $stage = 'update_message';
                 // Příznak zapisujeme před případným přesunem, který mění složku a UID.
                 if ($markSeen || ($action === 'mark_seen' && $kind === 'success')) {
                     if (!$imapMessage->setFlag('Seen') || !$imapMessage->hasFlag('seen')) {
@@ -176,7 +194,7 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
             }
             return null;
         } catch (\Throwable $e) {
-            return $this->failureMessage($settings, $e);
+            return $this->failureMessage($settings, $e, $stage, 'postprocess');
         }
     }
 
@@ -227,11 +245,14 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
     }
 
     /** @param array<string,mixed> $settings */
-    private function failureMessage(array $settings, \Throwable $error): string
+    private function failureMessage(array $settings, \Throwable $error, string $stage, string $operation): string
     {
-        return ($settings['auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT
-            ? ImapAuthentication::failureMessage($error)
-            : $error->getMessage();
+        if (($settings['auth_mode'] ?? null) !== ImapAuthSettings::MICROSOFT) {
+            return $error->getMessage();
+        }
+
+        return $this->authentication?->reportFailure($error, $stage, ImapAuthSettings::INCOMING, $operation, $settings)
+            ?? 'Microsoft 365: služba OAuth není nakonfigurována. [imap_configuration_invalid]';
     }
 
     /**

@@ -9,6 +9,9 @@ use MyInvoice\Service\OAuth\OAuthException;
 use MyInvoice\Service\OAuth\OAuthProviderConfig;
 use MyInvoice\Service\OAuth\OAuthTokenClient;
 use Psr\Clock\ClockInterface;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
+use Webklex\PHPIMAP\Exceptions\AuthFailedException;
 
 final class ImapAuthentication
 {
@@ -19,6 +22,7 @@ final class ImapAuthentication
         private readonly OAuthTokenClient $oauth,
         private readonly SecretEncryption $secrets,
         private readonly ClockInterface $clock,
+        private readonly LoggerInterface $logger = new NullLogger(),
     ) {}
 
     /**
@@ -70,19 +74,92 @@ final class ImapAuthentication
         ];
     }
 
-    /** Pro OAuth nepřebíráme text výjimky z protokolu, může obsahovat celý příkaz XOAUTH2. */
-    public static function failureMessage(\Throwable $error): string
+    /**
+     * Do logu ani do UI nepředáváme text z protokolu, může obsahovat příkaz XOAUTH2.
+     *
+     * @param array<string,mixed> $settings
+     */
+    public function reportFailure(\Throwable $error, string $stage, string $purpose, string $operation, array $settings): string
+    {
+        [$code, $message] = $this->describeFailure($error, $stage);
+        $this->logger->warning('imap_oauth_failure', [
+            'stage' => $stage,
+            'code' => $code,
+            'oauth_http_status' => $error instanceof OAuthException ? $error->httpStatus : null,
+        ] + $this->logContext($purpose, $operation, $settings));
+
+        return 'Microsoft 365: ' . $message . ' [' . $code . ']';
+    }
+
+    /** @param array<string,mixed> $settings */
+    public function reportProbeSuccess(string $purpose, string $operation, array $settings, int $folderCount): void
+    {
+        $this->logger->info('imap_oauth_probe_succeeded', [
+            'folder_count' => $folderCount,
+        ] + $this->logContext($purpose, $operation, $settings));
+    }
+
+    /** @param array<string,mixed> $settings */
+    private function logContext(string $purpose, string $operation, array $settings): array
+    {
+        return [
+            'purpose' => $purpose,
+            'operation' => $operation,
+            'supplier_id' => (int) ($settings['supplier_id'] ?? 0) ?: null,
+            'connection_id' => (int) ($settings['id'] ?? 0) ?: null,
+        ];
+    }
+
+    /** @return array{string,string} */
+    private function describeFailure(\Throwable $error, string &$stage): array
     {
         if ($error instanceof OAuthException) {
+            $stage = 'token';
             return match ($error->errorCode) {
-                OAuthException::ENCRYPTION_KEY, OAuthException::INVALID_CLIENT, OAuthException::INVALID_GRANT
-                    => 'Microsoft 365: ověř Client ID, Tenant ID a platnost uloženého Client Secret.',
-                OAuthException::REMOTE_UNAVAILABLE, OAuthException::RATE_LIMITED
-                    => 'Microsoft 365: autorizační služba je dočasně nedostupná.',
-                default => 'Microsoft 365: získání přístupového tokenu selhalo. Ověř registraci aplikace a souhlas správce.',
+                OAuthException::ENCRYPTION_KEY => ['oauth_secret_unreadable', 'Client Secret nelze načíst. Ověř šifrovací klíč aplikace nebo zadej secret znovu.'],
+                OAuthException::INVALID_CLIENT, OAuthException::INVALID_GRANT
+                    => ['oauth_credentials_rejected', 'Entra odmítla přihlašovací údaje. Ověř Tenant ID, Client ID a platnost Client Secret.'],
+                OAuthException::REMOTE_UNAVAILABLE => ['oauth_endpoint_unreachable', 'Autorizační služba Microsoft Entra není dostupná.'],
+                OAuthException::RATE_LIMITED => ['oauth_rate_limited', 'Microsoft Entra omezila četnost požadavků. Zkus to později.'],
+                default => ['oauth_token_failed', 'Získání tokenu selhalo. Ověř registraci aplikace a souhlas správce.'],
             };
         }
 
-        return 'Microsoft 365: operace IMAP selhala. Ověř povolení IMAP, přístup aplikace ke schránce a cílovou složku.';
+        if ($stage === 'connect') {
+            return $this->describeConnectFailure($error, $stage);
+        }
+
+        return match ($stage) {
+            'list_folders' => ['imap_list_failed', 'Přihlášení k Exchange proběhlo, ale seznam složek se nepodařilo načíst.'],
+            'select_folder' => ['imap_folder_failed', 'Přihlášení k Exchange proběhlo, ale cílovou složku se nepodařilo otevřít nebo vytvořit.'],
+            'read_messages' => ['imap_read_failed', 'Přihlášení k Exchange proběhlo, ale zprávy se nepodařilo načíst.'],
+            'write_message' => ['imap_write_failed', 'Přihlášení k Exchange proběhlo, ale zprávu se nepodařilo uložit do složky.'],
+            'update_message' => ['imap_update_failed', 'Přihlášení k Exchange proběhlo, ale zprávu se nepodařilo označit nebo přesunout.'],
+            default => ['imap_configuration_invalid', 'Zkontroluj konfiguraci připojení Microsoft 365.'],
+        };
+    }
+
+    /** @return array{string,string} */
+    private function describeConnectFailure(\Throwable $error, string &$stage): array
+    {
+        $rejected = false;
+        for ($item = $error; $item !== null; $item = $item->getPrevious()) {
+            $message = $item->getMessage();
+            if (preg_match('/certificate verify|peer certificate|SSL operation failed/i', $message)) {
+                return ['imap_tls_failed', 'Zabezpečené spojení s Exchange na portu 993 selhalo. Ověř důvěryhodnost certifikátu a TLS.'];
+            }
+            if (preg_match('/timed? out|timeout/i', $message)) {
+                return ['imap_timeout', 'Exchange na portu 993 neodpověděl včas. Ověř síť a firewall.'];
+            }
+            $rejected = $rejected || $item instanceof AuthFailedException
+                || preg_match('/got failure response: (NO|BAD) |AUTHENTICATE failed|authenticated but not connected/i', $message) === 1;
+        }
+
+        if ($rejected) {
+            $stage = 'authenticate';
+            return ['imap_auth_rejected', 'Token byl získán, ale Exchange odmítl přihlášení IMAP. Ověř registraci aplikace v Exchange, oprávnění FullAccess ke schránce a povolený IMAP.'];
+        }
+
+        return ['imap_connection_failed', 'Spojení s Exchange se nepodařilo navázat. Ověř dostupnost outlook.office365.com na portu 993.'];
     }
 }

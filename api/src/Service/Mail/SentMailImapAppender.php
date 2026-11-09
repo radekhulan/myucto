@@ -31,12 +31,16 @@ final class SentMailImapAppender implements SentMailAppenderInterface
             return $this->skipped();
         }
 
+        $stage = 'configuration';
         try {
             $settings = $this->settings($profile);
             $client = $this->client($settings, $profile);
+            $stage = 'connect';
             $client->connect();
             try {
+                $stage = 'select_folder';
                 $folder = $this->folder($client, $settings);
+                $stage = 'write_message';
                 $folder->appendMessage($rawMessage, $this->appendFlags($settings), date('d-M-Y H:i:s O'));
             } finally {
                 $client->disconnect();
@@ -51,7 +55,7 @@ final class SentMailImapAppender implements SentMailAppenderInterface
             return [
                 'status' => 'failed',
                 'folder' => isset($settings) ? $settings['folder'] : $this->stringOrNull($profile['imap_folder'] ?? null),
-                'error' => $this->sanitizedErrorMessage($e, $settings ?? null, $profile),
+                'error' => $this->sanitizedErrorMessage($e, $settings ?? null, $profile, $stage, 'append'),
             ];
         }
     }
@@ -66,21 +70,29 @@ final class SentMailImapAppender implements SentMailAppenderInterface
             return ['ok' => true, 'message' => 'Ukládání do IMAP složky je vypnuté.'];
         }
 
+        $stage = 'configuration';
         try {
             $settings = $this->settings($profile);
             $client = $this->client($settings, $profile);
+            $stage = 'connect';
             $client->connect();
             try {
+                $stage = 'select_folder';
                 $folder = $this->folder($client, $settings);
+                $stage = 'write_message';
                 $folder->appendMessage($this->probeMessage(), $this->appendFlags($settings), date('d-M-Y H:i:s O'));
+                $stage = 'list_folders';
                 $folders = $this->folderMetadata($client);
             } finally {
                 $client->disconnect();
             }
 
+            if (($profile['imap_auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT) {
+                $this->authentication?->reportProbeSuccess(ImapAuthSettings::SENT, 'test_append', $profile, count($folders));
+            }
             return ['ok' => true, 'message' => 'IMAP připojení, cílová složka a zápis testovací zprávy jsou funkční.', 'folders' => $folders];
         } catch (\Throwable $e) {
-            return ['ok' => false, 'message' => $this->sanitizedErrorMessage($e, $settings ?? null, $profile)];
+            return ['ok' => false, 'message' => $this->sanitizedErrorMessage($e, $settings ?? null, $profile, $stage, 'test_append')];
         }
     }
 
@@ -94,19 +106,25 @@ final class SentMailImapAppender implements SentMailAppenderInterface
             return ['ok' => true, 'message' => 'Ukládání do IMAP složky je vypnuté.', 'folders' => []];
         }
 
+        $stage = 'configuration';
         try {
             $settings = $this->settings($profile);
             $client = $this->client($settings, $profile);
+            $stage = 'connect';
             $client->connect();
             try {
+                $stage = 'list_folders';
                 $folders = $this->folderMetadata($client);
             } finally {
                 $client->disconnect();
             }
 
+            if (($profile['imap_auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT) {
+                $this->authentication?->reportProbeSuccess(ImapAuthSettings::SENT, 'list_folders', $profile, count($folders));
+            }
             return ['ok' => true, 'message' => 'IMAP složky byly načteny.', 'folders' => $folders];
         } catch (\Throwable $e) {
-            return ['ok' => false, 'message' => $this->sanitizedErrorMessage($e, $settings ?? null, $profile)];
+            return ['ok' => false, 'message' => $this->sanitizedErrorMessage($e, $settings ?? null, $profile, $stage, 'list_folders')];
         }
     }
 
@@ -343,10 +361,17 @@ final class SentMailImapAppender implements SentMailAppenderInterface
      * @param array<string,mixed>|null $settings
      * @param array<string,mixed>|null $profile
      */
-    private function sanitizedErrorMessage(\Throwable $e, ?array $settings = null, ?array $profile = null): string
+    private function sanitizedErrorMessage(
+        \Throwable $e,
+        ?array $settings = null,
+        ?array $profile = null,
+        string $stage = 'configuration',
+        string $operation = 'append',
+    ): string
     {
         if (($profile['imap_auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT) {
-            return ImapAuthentication::failureMessage($e);
+            return $this->authentication?->reportFailure($e, $stage, ImapAuthSettings::SENT, $operation, $profile)
+                ?? 'Microsoft 365: služba OAuth není nakonfigurována. [imap_configuration_invalid]';
         }
         $message = trim($e->getMessage());
         if ($message === '') {
