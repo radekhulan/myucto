@@ -43,6 +43,14 @@ final class JournalListPairsTest extends PairsTestCase
         self::assertNull($statuses[$paired]);
         self::assertSame('composite_mn', $statuses[$composite]);
 
+        $withLines = array_column($this->call('list', [], ['include_posting_accounts' => '1'])['items'], 'posting_lines', 'id');
+        self::assertSame(
+            [['side' => 'debit', 'amount' => 300, 'is_red_storno' => false, 'cost_center' => null, 'account_code' => '518', 'pair_no' => 1, 'line_text' => 'Služba'],
+             ['side' => 'credit', 'amount' => 300, 'is_red_storno' => false, 'cost_center' => null, 'account_code' => '211', 'pair_no' => 1, 'line_text' => 'Služba']],
+            array_map(static fn (array $l): array => array_diff_key($l, ['account_name' => 1]), $withLines[$paired]),
+            'Řádky seznamu nesou číslo a text dvojice, nic dalšího.',
+        );
+
         $filtered = $this->call('list', [], ['pair_status' => 'composite_mn']);
         self::assertSame([$composite], array_map('intval', array_column($filtered['items'], 'id')));
         self::assertSame(1, $filtered['total']);

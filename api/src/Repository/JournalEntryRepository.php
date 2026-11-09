@@ -2169,20 +2169,24 @@ final class JournalEntryRepository
 
     /**
      * Řádky pro seznam zápisů (export) obohacené o kód/název účtu — jeden dotaz
-     * pro celou dávku (žádné N+1), seskupené podle entry_id.
+     * pro celou dávku (žádné N+1), seskupené podle entry_id. `pair_no` a `line_text`
+     * nese jen řádek, který je má (složený zápis klíče nedostane).
+     *
+     * `$withLineIds` (dvojice exportu deníku): navíc `line_id`, `account_id` a
+     * `amount_foreign`, ze kterých se skládají dvojice i starší zápisy rozložené za běhu.
      *
      * @param list<int> $entryIds
      * @return array<int, list<array<string,mixed>>> keyed entry_id
      */
-    public function linesForEntries(array $entryIds, int $supplierId): array
+    public function linesForEntries(array $entryIds, int $supplierId, bool $withLineIds = false): array
     {
         if ($entryIds === []) {
             return [];
         }
         $place = implode(',', array_fill(0, count($entryIds), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT jel.entry_id, jel.side, jel.amount, jel.is_red_storno, jel.cost_center, jel.line_no,
-                    jel.pair_no, jel.line_text, c.account_code, c.name AS account_name
+            "SELECT jel.id, jel.entry_id, jel.account_id, jel.side, jel.amount, jel.amount_foreign, jel.is_red_storno,
+                    jel.cost_center, jel.line_no, jel.pair_no, jel.line_text, c.account_code, c.name AS account_name
                FROM journal_entry_lines jel
                JOIN chart_of_accounts c ON c.id = jel.account_id
               WHERE jel.entry_id IN ({$place}) AND jel.supplier_id = ?
@@ -2193,7 +2197,7 @@ final class JournalEntryRepository
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $entryId = (int) $r['entry_id'];
-            $out[$entryId][] = self::castPairColumns([
+            $line = [
                 'side'         => $r['side'],
                 'amount'       => (float) $r['amount'],
                 'is_red_storno' => (bool) $r['is_red_storno'],
@@ -2202,7 +2206,16 @@ final class JournalEntryRepository
                 'account_name' => $r['account_name'],
                 'pair_no'      => $r['pair_no'],
                 'line_text'    => $r['line_text'],
-            ]);
+            ];
+            if ($withLineIds) {
+                $line += [
+                    'line_id'        => (int) $r['id'],
+                    'account_id'     => (int) $r['account_id'],
+                    'amount_decimal' => (string) $r['amount'],
+                    'amount_foreign' => $r['amount_foreign'] === null ? null : (string) $r['amount_foreign'],
+                ];
+            }
+            $out[$entryId][] = self::castPairColumns($line);
         }
         return $out;
     }
