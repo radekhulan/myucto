@@ -158,6 +158,7 @@ final class PostingService
 
     private ?ProductPostingDefaults $productDefaults = null;
     private ?RevenueRuleMatcher $revenueRules = null;
+    private ?ItemPostingAccounts $itemPosting = null;
 
     private ?BankDocumentNumber $bankDocumentNumber = null;
 
@@ -1426,6 +1427,14 @@ final class PostingService
         // DDKP (daňový doklad k přijaté platbě, §28/2/d ZDPH) NENÍ běžná faktura:
         // zákazník už zaplatil zálohu (zaúčtováno 221/324), doklad jen přiznává DPH ze
         // zálohy → 324/343, ŽÁDNÉ 311, ŽÁDNÝ výnos 602 (viz buildAdvanceVatDocumentLines).
+        if (in_array($invoiceType, ['tax_document', 'penalty'], true)) {
+            // Doklad bez pohledávky: protiúčet z řádků tu nemá kam jít, chyba je hlasitá.
+            $this->itemCounterAccount(
+                $supplierId, 'sale', $invoiceId, $inv, $opts,
+                self::documentPostingDate($inv, isset($opts['entry_date']) ? (string) $opts['entry_date'] : null),
+                (bool) ($opts['current_read'] ?? $this->db->pdo()->inTransaction()),
+            );
+        }
         if ((string) ($inv['invoice_type'] ?? 'invoice') === 'tax_document') {
             return $this->buildAdvanceVatDocumentLines($supplierId, $invoiceId, $inv, $opts);
         }
@@ -1485,6 +1494,19 @@ final class PostingService
         $receivable = $rule['debit_account_code'] ?? '311';
         $revenue    = $rule['credit_account_code'] ?? '602';
         $cc = $opts['cost_center'] ?? null;
+        // Protiúčet zadaný na řádcích (zaúčtování při zadání faktury) nahradí pohledávku
+        // předkontace. Bez něj zůstává zápis beze změny.
+        $itemCounter = $this->itemCounterAccount($supplierId, 'sale', $invoiceId, $inv, $opts, $entryDate, $currentRead);
+        if ($itemCounter !== null) {
+            if ($deduction['active']) {
+                throw new PostingException(
+                    'counter_account_with_advance',
+                    'Doklad zúčtovává zálohu, protiúčet na řádku u něj nelze použít. Zaúčtujte ho s protiúčtem z předkontace dokladu.',
+                    422,
+                );
+            }
+            $receivable = $itemCounter;
+        }
 
         // Rozpad výnosu po POLOŽKÁCH (1177) — zrcadlo nákladové strany z §DM. Faktura běžně
         // míchá prodej majetku se službami a jedna noha by celý základ poslala na jeden účet.
@@ -1748,6 +1770,12 @@ final class PostingService
         // chybně naúčtoval na 518 (dvojí náklad s vyúčtovací fakturou). Zrcadlo vydané strany
         // (invoice_type='tax_document' → buildAdvanceVatDocumentLines).
         if ((string) ($pi['document_kind'] ?? '') === 'tax_document') {
+            // DDKP nemá závazek: protiúčet z řádků tu nemá kam jít, chyba je hlasitá.
+            $this->itemCounterAccount(
+                $supplierId, 'purchase', $purchaseInvoiceId, $pi, $opts,
+                self::documentPostingDate($pi, isset($opts['entry_date']) ? (string) $opts['entry_date'] : null),
+                (bool) ($opts['current_read'] ?? $this->db->pdo()->inTransaction()),
+            );
             return $this->buildPurchaseAdvanceVatDocumentLines($supplierId, $purchaseInvoiceId, $pi, $opts);
         }
         $entryDate = self::documentPostingDate($pi, isset($opts['entry_date']) ? (string) $opts['entry_date'] : null);
@@ -1791,7 +1819,8 @@ final class PostingService
         if (!$taxDeductible) {
             $expense = $this->nonDeductibleExpenseAccount($supplierId, $expense, $entryDate, $currentRead);
         }
-        $payable = $this->purchasePayable($supplierId, $pi, $rule, $defaultKey);
+        $payable = $this->itemCounterAccount($supplierId, 'purchase', $purchaseInvoiceId, $pi, $opts, $entryDate, $currentRead)
+            ?? $this->purchasePayable($supplierId, $pi, $rule, $defaultKey);
         $cc = $opts['cost_center'] ?? null;
 
         $pct = max(0.0, min(100.0, (float) ($pi['vat_deduction_percent'] ?? 100))) / 100.0;
@@ -1976,7 +2005,7 @@ final class PostingService
     ): ?array {
         $suggestions = $this->expenseClassification->suggestForInvoice($supplierId, $purchaseInvoiceId, $entryDate, $currentRead);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, description, vat_rate_snapshot, expense_kind, expense_account_code,
+            'SELECT id, description, vat_rate_snapshot, expense_kind, expense_account_code, posting_rule_key,
                     expense_classification_source, total_without_vat, total_vat, stock_item_id, is_fixed_asset
                FROM purchase_invoice_items
               WHERE purchase_invoice_id = ?'
@@ -2010,7 +2039,10 @@ final class PostingService
         foreach ($items as $row) {
             $kindValue = $row['expense_kind'] !== null ? (string) $row['expense_kind'] : null;
             $override = trim((string) ($row['expense_account_code'] ?? ''));
-            $override = $override === '' ? null : $override;
+            // Předkontace řádku doplní účet MD, který řádek sám nemá; ruční účet má přednost.
+            $override = $override === ''
+                ? $this->itemPosting()->ruleItemAccount($supplierId, $row['posting_rule_key'] ?? null, 'purchase')
+                : $override;
 
             $approved = $itemOverrides[(int) $row['id']] ?? null;
             if (is_array($approved)) {
@@ -2282,7 +2314,7 @@ final class PostingService
     private function issuedItemRows(int $supplierId, int $invoiceId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT ii.id, ii.small_asset_id, ii.asset_id, ii.total_without_vat, ii.revenue_account_code, ii.stock_item_id,
+            'SELECT ii.id, ii.small_asset_id, ii.asset_id, ii.total_without_vat, ii.revenue_account_code, ii.posting_rule_key, ii.stock_item_id,
                     ii.item_kind, ii.vat_rate_id, ii.vat_classification_code, ii.description, ii.seller_item_code,
                     ii.vat_rate_snapshot, ii.total_vat, si.eet_item_kind
                FROM invoice_items ii
@@ -2297,7 +2329,9 @@ final class PostingService
         );
         $unresolved = [];
         foreach ($items as $i => $row) {
-            $own = ProductPostingDefaults::code($row['revenue_account_code'] ?? null);
+            // Předkontace řádku doplní účet Dal, který řádek sám nemá; ruční účet má přednost.
+            $own = ProductPostingDefaults::code($row['revenue_account_code'] ?? null)
+                ?? $this->itemPosting()->ruleItemAccount($supplierId, $row['posting_rule_key'] ?? null, 'sale');
             $product = $products[(int) ($row['stock_item_id'] ?? 0)]['revenue']['code'] ?? null;
             $items[$i]['item_revenue_account'] = $own ?? $product;
             $items[$i]['item_revenue_source'] = $own !== null ? 'item' : ($product !== null ? 'product' : null);
@@ -2757,7 +2791,8 @@ final class PostingService
         }
 
         $rule = $this->rules->resolve($supplierId, self::DEFAULT_RECEIVED_RULE_KEY);
-        $payable = $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY);
+        $payable = $this->itemCounterAccount($supplierId, 'purchase', (int) $pi['id'], $pi, $opts, $entryDate, $currentRead)
+            ?? $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY);
         $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
         $this->appendRounding($lines, $totalCzk, $allocatedCzk, $cc, !$isCreditNote);
         $this->appendAdvanceSettlementPurchase($supplierId, $pi, $lines);
@@ -2786,6 +2821,80 @@ final class PostingService
             $rulePayable,
             (string) ($default['credit_account_code'] ?? PurchasePayableAccount::DEFAULT_PAYABLE),
         );
+    }
+
+    private function itemPosting(): ItemPostingAccounts
+    {
+        return $this->itemPosting ??= new ItemPostingAccounts($this->db, $this->rules);
+    }
+
+    /**
+     * Protiúčet (závazek / pohledávka) zadaný na řádcích dokladu ({@see ItemPostingAccounts}).
+     * NULL = řádky ho neurčují a platí předkontace dokladu, tedy dosavadní zápis beze změny.
+     *
+     * Explicitní `rule_key` od volajícího je pokyn pro celý doklad (ruční zaúčtování
+     * s vybranou předkontací), proto protiúčet řádků přebíjí — stejně jako rozpad účtů.
+     * U dokladu, který zúčtovává zálohu, se protiúčet z řádků nepřipouští: pár zúčtování
+     * zálohy (321/314, 324/311) bere saldokonto z vlastní předkontace a dva různé
+     * závazky by úhrada ani zúčtování neuzavřely.
+     *
+     * @param 'purchase'|'sale' $direction
+     * @param array<string,mixed> $doc hlavička z {@see fetchDocHeader}
+     * @param array<string,mixed> $opts
+     */
+    private function itemCounterAccount(int $supplierId, string $direction, int $docId, array $doc, array $opts, string $entryDate, bool $currentRead): ?string
+    {
+        if (isset($opts['rule_key'])) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            $direction === 'purchase'
+                ? 'SELECT counter_account_code, posting_rule_key FROM purchase_invoice_items
+                    WHERE purchase_invoice_id = ? AND (counter_account_code IS NOT NULL OR posting_rule_key IS NOT NULL)'
+                : 'SELECT counter_account_code, posting_rule_key FROM invoice_items
+                    WHERE invoice_id = ? AND (counter_account_code IS NOT NULL OR posting_rule_key IS NOT NULL)'
+        );
+        $stmt->execute([$docId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows === []) {
+            return null;
+        }
+        $counter = $this->itemPosting()->documentCounterAccount($supplierId, $rows, $direction, $entryDate, $currentRead);
+        if ($counter === null) {
+            return null;
+        }
+        $kind = $direction === 'purchase' ? (string) ($doc['document_kind'] ?? 'invoice') : (string) ($doc['invoice_type'] ?? 'invoice');
+        if (in_array($kind, ['tax_document', 'penalty'], true)) {
+            throw new PostingException(
+                'counter_account_not_applicable',
+                'Doklad tohoto druhu nemá ' . ($direction === 'purchase' ? 'závazek' : 'pohledávku') . ', protiúčet na řádku u něj nelze použít.',
+                422,
+            );
+        }
+        $advance = $direction === 'purchase'
+            ? (int) ($doc['advance_purchase_invoice_id'] ?? 0) > 0
+            : $this->issuedSettlesProforma($supplierId, (int) ($doc['parent_invoice_id'] ?? 0));
+        if ($advance) {
+            throw new PostingException(
+                'counter_account_with_advance',
+                'Doklad zúčtovává zálohu, protiúčet na řádku u něj nelze použít. Zaúčtujte ho s protiúčtem z předkontace dokladu.',
+                422,
+            );
+        }
+
+        return $counter;
+    }
+
+    /** Vydaná faktura navázaná na proformu (vyúčtování zálohy). Dobropis na fakturu sem nepatří. */
+    private function issuedSettlesProforma(int $supplierId, int $parentId): bool
+    {
+        if ($parentId <= 0) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT invoice_type FROM invoices WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$parentId, $supplierId]);
+
+        return $stmt->fetchColumn() === 'proforma';
     }
 
     /** @return list<array<string,mixed>> */
