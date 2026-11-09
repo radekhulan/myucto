@@ -11,6 +11,7 @@ import {
   type JournalEntryDetail,
   type AccountingPeriod,
   type ChartAccount,
+  type JournalEntryPair,
 } from '@/api/accounting'
 import { usePaneDom } from '@/composables/usePaneDom'
 import { requestSupplierId } from '@/workspace/supplierContext'
@@ -39,6 +40,10 @@ import AutomationBadge from '@/components/automation/AutomationBadge.vue'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import JournalEntryDetailPanel from '@/components/accounting/JournalEntryDetailPanel.vue'
+import JournalPairsTable from '@/components/accounting/JournalPairsTable.vue'
+import Modal from '@/components/ui/Modal.vue'
+import type { ActionItem } from '@/components/ui/ActionBar.vue'
+import { apiErrorText, hasAnySingle } from '@/utils/entryForm'
 import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
 import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import { journalSourceLink } from '@/utils/journalSourceLink'
@@ -97,6 +102,8 @@ const filters = reactive({
   // seznam dotčených zápisů dopočítá naživo — proklik z dashboardu jinak umí
   // ukázat jen JEDEN zápis a u víc nálezů skončí na nefiltrovaném deníku.
   integrity: '' as '' | 'amount_mismatch',
+  // Zápisy označené k ruční úpravě (M : N, které nejde rozdělit na dvojice); jen firmy s jednoduchou formou.
+  pair_status: '' as '' | 'composite_mn',
   // Hodnota dimenze (Firma → Dimenze) včetně podřízených, stejně jako u sestav.
   dimension_value_ids: [] as number[],
   dimension_descendants: true,
@@ -168,6 +175,7 @@ async function load(reset = true): Promise<boolean> {
       amount_from: filters.amount_from === '' ? undefined : Number(filters.amount_from),
       amount_to: filters.amount_to === '' ? undefined : Number(filters.amount_to),
       integrity: filters.integrity || undefined,
+      pair_status: filters.pair_status || undefined,
       dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids),
       dimension_descendants: filters.dimension_descendants,
       sort_key: tbl.sort.value?.key,
@@ -235,6 +243,7 @@ function resetFilters() {
   filters.amount_from = ''
   filters.amount_to = ''
   filters.integrity = ''
+  filters.pair_status = ''
   filters.dimension_value_ids = []
   filters.dimension_descendants = true
   sourceIdFilter.value = ''
@@ -267,6 +276,7 @@ function buildQuery(): Record<string, string> {
   if (filters.amount_from !== '') q.amount_from = String(filters.amount_from)
   if (filters.amount_to !== '') q.amount_to = String(filters.amount_to)
   if (filters.integrity) q.integrity = filters.integrity
+  if (filters.pair_status) q.pair_status = filters.pair_status
   if (filters.dimension_value_ids.length > 0) {
     q.dimension_value_id = dimensionValueIdsParam(filters.dimension_value_ids) as string
     if (!filters.dimension_descendants) q.dimension_descendants = '0'
@@ -315,6 +325,7 @@ function hydrateFilters(q: Record<string, unknown>) {
   filters.amount_from = numberValue('amount_from')
   filters.amount_to = numberValue('amount_to')
   filters.integrity = value('integrity') === 'amount_mismatch' ? 'amount_mismatch' : ''
+  filters.pair_status = value('pair_status') === 'composite_mn' ? 'composite_mn' : ''
   filters.dimension_value_ids = parseDimensionValueIds(value('dimension_value_id'))
   filters.dimension_descendants = value('dimension_descendants') !== '0'
 }
@@ -350,6 +361,7 @@ const activeFilterCount = computed(() => {
   if (filters.account_from || filters.account_to) n++
   if (filters.amount_from !== '' || filters.amount_to !== '') n++
   if (filters.integrity) n++
+  if (filters.pair_status) n++
   if (filters.dimension_value_ids.length > 0) n++
   return n
 })
@@ -381,6 +393,7 @@ const filterChips = computed<FilterChip[]>(() => {
     chips.push({ key: 'amount_range', label: t('accounting.journal.filter_amount_from'), value: `${filters.amount_from !== '' ? filters.amount_from : '…'} – ${filters.amount_to !== '' ? filters.amount_to : '…'}` })
   }
   if (filters.integrity) chips.push({ key: 'integrity', value: t('accounting.journal.filter_integrity') })
+  if (filters.pair_status) chips.push({ key: 'pair_status', value: t('accounting.pairs.filter_mn') })
   if (filters.dimension_value_ids.length > 0) {
     const ids = filters.dimension_value_ids
     const first = dims.valueById.value.get(ids[0])
@@ -413,6 +426,7 @@ function clearFilter(key: string) {
     case 'account_range': filters.account_from = ''; filters.account_to = ''; break
     case 'amount_range': filters.amount_from = ''; filters.amount_to = ''; break
     case 'integrity': filters.integrity = ''; break
+    case 'pair_status': filters.pair_status = ''; break
     case 'dimension': filters.dimension_value_ids = []; filters.dimension_descendants = true; break
   }
   applyFilters()
@@ -559,6 +573,7 @@ function exportQueryParams(): Record<string, string | number> {
   if (filters.amount_from !== '') q.amount_from = filters.amount_from
   if (filters.amount_to !== '') q.amount_to = filters.amount_to
   if (filters.integrity) q.integrity = filters.integrity
+  if (filters.pair_status) q.pair_status = filters.pair_status
   if (filters.dimension_value_ids.length > 0) {
     q.dimension_value_id = dimensionValueIdsParam(filters.dimension_value_ids) as string
     if (!filters.dimension_descendants) q.dimension_descendants = 0
@@ -588,6 +603,8 @@ function downloadBlob(blob: Blob, filename: string) {
 onMounted(async () => {
   await ensurePrefsLoaded()
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
+  // Prvky dvojic (filtr M : N) se ukazují jen firmě, která někdy zapnula jednoduchý zápis.
+  accountingApi.getEntryForm().then(v => { hasSingleForm.value = hasAnySingle(v.history) }).catch(() => { hasSingleForm.value = false })
   // Osnova jen pro našeptávání filtru — výpadek nesmí zabránit načtení deníku.
   accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] })
   // Číselník dimenzí pro popisek chipu filtru; při vypnutých dimenzích nic nenačte.
@@ -604,6 +621,103 @@ onMounted(async () => {
   await load()
 })
 
+const hasSingleForm = ref(false)
+
+// ── Dvojice jednoduchého zápisu: storno a přeúčtování vybraných dvojic ─────
+// Akce visí na výběru dvojic v tabulce dvojic (JournalPairsTable + ActionBar). Server rozhoduje
+// o pravidlech (zámky, mzdy 409); tady se akce jen neukazují tam, kde je jisté, že nepůjdou:
+// protizápis, stornovaný zápis, mzdy. U dokladů (faktury, banka, pokladna ...) jen přeúčtování,
+// čisté storno dvojice jen u ručních a interních zápisů (jinak by zápis nesedel s dokladem).
+const pairSelection = ref<Record<number, number[]>>({})
+const pairBusy = ref(false)
+const repostPairDialog = reactive({ open: false, entry: null as JournalEntryDetail | null, pair: null as JournalEntryPair | null,
+  debit: '', credit: '', text: '', date: '', saving: false, error: '' })
+
+function selectedPairs(entryId: number): number[] { return pairSelection.value[entryId] ?? [] }
+function setSelectedPairs(entryId: number, nos: number[]) { pairSelection.value = { ...pairSelection.value, [entryId]: nos } }
+function entryHasPairs(d: JournalEntryDetail): boolean { return (d.pairs?.length ?? 0) > 0 }
+function pairsEditable(d: JournalEntryDetail): boolean {
+  return auth.canWrite('accounting') && entryHasPairs(d) && !d.reversed_by && !d.reverses_entry_id
+    && !d.source_type.startsWith('payroll')
+}
+function pairsDisabled(d: JournalEntryDetail): number[] {
+  return (d.pairs ?? []).filter(p => p.reversed_by_entry_id).map(p => p.pair_no)
+}
+function pairActions(d: JournalEntryDetail): ActionItem[] {
+  const picked = selectedPairs(d.id)
+  const canPureReverse = d.source_type === 'manual' || !!d.internal_document
+  return [
+    {
+      key: 'pair-repost', label: t('accounting.pairs.action_repost'), icon: 'edit', tier: 'primary', variant: 'warning',
+      show: pairsEditable(d), disabled: picked.length !== 1 || pairBusy.value,
+      disabledReason: picked.length === 1 ? undefined : t('accounting.pairs.repost_pick_one'),
+      run: () => openRepostPair(d),
+    },
+    {
+      key: 'pair-reverse', label: t('accounting.pairs.action_reverse'), icon: 'uturn', tier: 'secondary', variant: 'danger',
+      show: pairsEditable(d) && canPureReverse, disabled: picked.length === 0 || pairBusy.value,
+      disabledReason: picked.length === 0 ? t('accounting.pairs.reverse_pick_some') : undefined,
+      run: () => void reversePairs(d),
+    },
+  ]
+}
+
+async function reversePairs(d: JournalEntryDetail) {
+  const nos = selectedPairs(d.id)
+  if (nos.length === 0) return
+  if (!confirm(t('accounting.pairs.reverse_confirm', { n: nos.length, nos: nos.join(', ') }))) return
+  pairBusy.value = true
+  try {
+    const created = await accountingApi.reversePairs(d.id, { pair_nos: nos })
+    toast.success(t('accounting.pairs.reversed', { id: created.id }))
+    pairSelection.value = { ...pairSelection.value, [d.id]: [] }
+    collapseAll()
+    await load()
+  } catch (e) {
+    toast.error(apiErrorText(e, t))
+  } finally {
+    pairBusy.value = false
+  }
+}
+
+function openRepostPair(d: JournalEntryDetail) {
+  const pair = (d.pairs ?? []).find(p => p.pair_no === selectedPairs(d.id)[0]) ?? null
+  if (!pair) return
+  Object.assign(repostPairDialog, {
+    open: true, entry: d, pair, debit: pair.debit_account_code, credit: pair.credit_account_code,
+    text: pair.line_text ?? '', date: '', saving: false, error: '',
+  })
+}
+
+async function submitRepostPair() {
+  const d = repostPairDialog.entry
+  const pair = repostPairDialog.pair
+  if (!d || !pair) return
+  repostPairDialog.error = ''
+  if (!repostPairDialog.debit.trim()) { repostPairDialog.error = t('accounting.error.pair_missing_debit_account'); return }
+  if (!repostPairDialog.credit.trim()) { repostPairDialog.error = t('accounting.error.pair_missing_credit_account'); return }
+  if (repostPairDialog.debit.trim() === repostPairDialog.credit.trim()) { repostPairDialog.error = t('accounting.error.pair_same_account'); return }
+  repostPairDialog.saving = true
+  try {
+    const result = await accountingApi.repostPair(d.id, pair.pair_no, {
+      debit_account_code: repostPairDialog.debit.trim(),
+      credit_account_code: repostPairDialog.credit.trim(),
+      ...(repostPairDialog.text.trim() ? { line_text: repostPairDialog.text.trim() } : {}),
+      ...(repostPairDialog.date ? { entry_date: repostPairDialog.date } : {}),
+    })
+    toast.success(t(['in_place', 'tax_neutral', 'correction'].includes(result.mode)
+      ? `accounting.pairs.repost_done_${result.mode}` : 'accounting.pairs.repost_done'))
+    repostPairDialog.open = false
+    pairSelection.value = { ...pairSelection.value, [d.id]: [] }
+    collapseAll()
+    await load()
+  } catch (e) {
+    repostPairDialog.error = apiErrorText(e, t)
+  } finally {
+    repostPairDialog.saving = false
+  }
+}
+
 // ── Expand / detail ────────────────────────────────────────────────────────
 // Rozbalených zápisů může být VÍC najednou: účetní typicky porovnává doklad s jeho
 // úhradou nebo se stornem, a akordeon, který při otevření druhého zavřel první,
@@ -617,6 +731,7 @@ function isExpanded(id: number): boolean { return expandedIds.value.includes(id)
 function isDetailLoading(id: number): boolean { return detailLoadingIds.value.includes(id) }
 
 function collapseAll() {
+  pairSelection.value = {}
   expandedIds.value = []
   details.value = {}
   detailLoadingIds.value = []
@@ -803,6 +918,7 @@ async function focusEntry(entryId: number): Promise<boolean> {
   filters.amount_from = ''
   filters.amount_to = ''
   filters.integrity = ''
+  filters.pair_status = ''
   filters.dimension_value_ids = []
   filters.dimension_descendants = true
   sourceIdFilter.value = ''
@@ -1031,6 +1147,14 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
             <option value="amount_mismatch">{{ t('accounting.journal.filter_integrity_amount_mismatch') }}</option>
           </select>
         </div>
+        <div v-if="hasSingleForm">
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.pairs.filter_status') }}</label>
+          <select v-model="filters.pair_status" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option value="composite_mn">{{ t('accounting.pairs.filter_mn') }}</option>
+          </select>
+        </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_account_from') }}</label>
           <input v-model.trim="filters.account_from" type="text" :list="`${pageId}-journal-coa`" @change="applyFilters"
@@ -1158,6 +1282,8 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                     </button>
                     <span v-else class="text-neutral-500 text-xs">{{ sourceLabel(e.source_type) }}</span>
                     <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
+                    <span v-if="e.pair_status === 'composite_mn'" :title="t('accounting.pairs.badge_mn_title')"
+                      class="whitespace-nowrap text-[10px] px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 font-medium" data-test="pair-badge-mn">{{ t('accounting.pairs.badge_mn') }}</span>
                     <!--
                       Odznak „má protějšek" (doklad ↔ úhrada). Bez něj by účetní musel
                       rozbalit každý řádek, aby zjistil, jestli je zápis na něco navázaný;
@@ -1212,15 +1338,26 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 <td :colspan="visibleColCount"
                   class="px-3 py-3 bg-primary-50/60 border-x-2 border-b-2 border-primary-500/60">
                   <div v-if="isDetailLoading(e.id)" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
-                  <JournalEntryDetailPanel v-else-if="details[e.id]"
-                    :detail="details[e.id]!" :related-key="relatedVersion[e.id] ?? 0"
-                    :can-write="auth.canWrite('accounting')" :can-delete="canDeleteEntry(details[e.id]!)"
-                    :can-delete-pair="canDeletePair(details[e.id]!)"
-                    :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to"
-                    @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry"
-                    @description-updated="onDescriptionUpdated" @links-changed="onLinksChanged"
-                    @reverse="reverse" @remove="deleteEntry" @remove-pair="deleteEntryPair" @open-reversal="openReversal"
-                    @reposted="onReposted" />
+                  <template v-else-if="details[e.id]">
+                    <section v-if="entryHasPairs(details[e.id]!)" class="mb-3" data-test="journal-entry-pairs">
+                      <div class="mb-1 text-xs font-medium text-neutral-600">{{ t('accounting.pairs.title') }}</div>
+                      <JournalPairsTable :pairs="details[e.id]!.pairs!" :selectable="pairsEditable(details[e.id]!)"
+                        :model-value="selectedPairs(e.id)" :disabled-pairs="pairsDisabled(details[e.id]!)"
+                        :actions="pairActions(details[e.id]!)" @update:model-value="nos => setSelectedPairs(e.id, nos)"
+                        @open-entry="onFocusEntry" />
+                      <p v-if="pairsEditable(details[e.id]!) && details[e.id]!.source_type !== 'manual' && !details[e.id]!.internal_document"
+                        class="mt-1 text-xs text-neutral-500">{{ t('accounting.pairs.document_repost_only') }}</p>
+                    </section>
+                    <JournalEntryDetailPanel
+                      :detail="details[e.id]!" :related-key="relatedVersion[e.id] ?? 0"
+                      :can-write="auth.canWrite('accounting')" :can-delete="canDeleteEntry(details[e.id]!)"
+                      :can-delete-pair="canDeletePair(details[e.id]!)"
+                      :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to"
+                      @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry"
+                      @description-updated="onDescriptionUpdated" @links-changed="onLinksChanged"
+                      @reverse="reverse" @remove="deleteEntry" @remove-pair="deleteEntryPair" @open-reversal="openReversal"
+                      @reposted="onReposted" />
+                  </template>
                 </td>
               </tr>
             </template>
@@ -1265,6 +1402,8 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
               <span class="text-neutral-400">·</span>
               <span :data-custom-color="!!colors.color('source')" :style="colors.cellStyle('source')">{{ sourceLabel(e.source_type) }}<template v-if="e.source_asset_name || e.source_id"> {{ e.source_asset_name || ('#' + e.source_id) }}</template></span>
               <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
+              <span v-if="e.pair_status === 'composite_mn'" :title="t('accounting.pairs.badge_mn_title')"
+                class="whitespace-nowrap text-[10px] px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 font-medium">{{ t('accounting.pairs.badge_mn') }}</span>
               <span v-if="e.has_related" :title="t('accounting.journal.related.badge_title')" class="inline-flex items-center text-neutral-400">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" />
@@ -1297,15 +1436,26 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
           </div>
           <div v-if="isExpanded(e.id)" class="px-3 pb-3 border-t border-primary-500/30">
             <div v-if="isDetailLoading(e.id)" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
-            <JournalEntryDetailPanel v-else-if="details[e.id]" class="pt-3"
-              :detail="details[e.id]!" :related-key="relatedVersion[e.id] ?? 0"
-              :can-write="auth.canWrite('accounting')" :can-delete="canDeleteEntry(details[e.id]!)"
-              :can-delete-pair="canDeletePair(details[e.id]!)"
-              :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to"
-              @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry"
-              @description-updated="onDescriptionUpdated" @links-changed="onLinksChanged"
-              @reverse="reverse" @remove="deleteEntry" @remove-pair="deleteEntryPair" @open-reversal="openReversal"
-              @reposted="onReposted" />
+            <div v-else-if="details[e.id]" class="pt-3">
+              <section v-if="entryHasPairs(details[e.id]!)" class="mb-3" data-test="journal-entry-pairs">
+                <div class="mb-1 text-xs font-medium text-neutral-600">{{ t('accounting.pairs.title') }}</div>
+                <JournalPairsTable :pairs="details[e.id]!.pairs!" :selectable="pairsEditable(details[e.id]!)"
+                  :model-value="selectedPairs(e.id)" :disabled-pairs="pairsDisabled(details[e.id]!)"
+                  :actions="pairActions(details[e.id]!)" @update:model-value="nos => setSelectedPairs(e.id, nos)"
+                  @open-entry="onFocusEntry" />
+                <p v-if="pairsEditable(details[e.id]!) && details[e.id]!.source_type !== 'manual' && !details[e.id]!.internal_document"
+                  class="mt-1 text-xs text-neutral-500">{{ t('accounting.pairs.document_repost_only') }}</p>
+              </section>
+              <JournalEntryDetailPanel
+                :detail="details[e.id]!" :related-key="relatedVersion[e.id] ?? 0"
+                :can-write="auth.canWrite('accounting')" :can-delete="canDeleteEntry(details[e.id]!)"
+                :can-delete-pair="canDeletePair(details[e.id]!)"
+                :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to"
+                @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry"
+                @description-updated="onDescriptionUpdated" @links-changed="onLinksChanged"
+                @reverse="reverse" @remove="deleteEntry" @remove-pair="deleteEntryPair" @open-reversal="openReversal"
+                @reposted="onReposted" />
+            </div>
           </div>
         </div>
       </div>
@@ -1320,6 +1470,50 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="onFocusEntry" />
     <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
+
+    <!-- Přeúčtování jedné dvojice: nové účty MD/Dal, částka zůstává. Na místě, nebo opravným zápisem
+         rozhodne server podle zámků a období. -->
+    <Modal v-if="repostPairDialog.open && repostPairDialog.pair" :title="t('accounting.pairs.repost_title', { n: repostPairDialog.pair.pair_no })"
+      width-class="max-w-lg" @close="repostPairDialog.open = false">
+      <div class="space-y-3">
+        <p class="text-sm text-neutral-600">{{ t('accounting.pairs.repost_hint', { amount: formatMoney(repostPairDialog.pair.amount) }) }}</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.pairs.col_debit') }}</label>
+            <input v-model.trim="repostPairDialog.debit" type="text" :list="`${pageId}-journal-coa`"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" data-test="repost-debit" />
+            <div v-if="accountName(repostPairDialog.debit)" class="mt-1 text-xs text-neutral-500 truncate">{{ accountName(repostPairDialog.debit) }}</div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.pairs.col_credit') }}</label>
+            <input v-model.trim="repostPairDialog.credit" type="text" :list="`${pageId}-journal-coa`"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" data-test="repost-credit" />
+            <div v-if="accountName(repostPairDialog.credit)" class="mt-1 text-xs text-neutral-500 truncate">{{ accountName(repostPairDialog.credit) }}</div>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.pairs.col_text') }}</label>
+            <input v-model="repostPairDialog.text" type="text" maxlength="255" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.pairs.repost_date') }}</label>
+            <DateInput v-model="repostPairDialog.date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+            <p class="mt-1 text-xs text-neutral-500">{{ t('accounting.pairs.repost_date_hint') }}</p>
+          </div>
+        </div>
+        <div v-if="repostPairDialog.error" class="text-sm text-danger-500" role="alert" data-test="repost-error">{{ repostPairDialog.error }}</div>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" @click="repostPairDialog.open = false">{{ t('common.cancel') }}</button>
+          <button type="button" :class="btnFilled('warning')" :disabled="repostPairDialog.saving" data-test="repost-save" @click="submitRepostPair">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ repostPairDialog.saving ? t('common.saving') : t('accounting.pairs.action_repost') }}
+          </button>
+        </div>
+      </template>
+    </Modal>
 
     <datalist :id="`${pageId}-journal-coa`">
       <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">

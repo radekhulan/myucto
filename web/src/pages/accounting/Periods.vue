@@ -18,6 +18,7 @@ import { formatDate } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import EntryFormSettings from '@/components/accounting/EntryFormSettings.vue'
 
 // embedded = vykresleno jako záložka uvnitř ToolsPage.vue (Nástroje); hlavičku dodává obálka.
 defineProps<{ embedded?: boolean }>()
@@ -434,6 +435,10 @@ function statusBadge(status: string): string {
         </div>
       </div>
     </div>
+
+    <!-- Forma účetního zápisu (jednoduchý / složený od data); jediný nový prvek, který složená firma vidí. -->
+    <EntryFormSettings v-if="auth.canWrite('accounting.periods.manage')" class="mt-4"
+      :can-change="auth.isCompanyAdminRole" />
 
     <!-- Modal: nové období -->
     <div v-if="showForm" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
