@@ -424,6 +424,60 @@ final class JournalExportAndHistoryTest extends TestCase
         self::assertGreaterThan(500, strlen($res['raw']));
     }
 
+    /**
+     * BEZ OPRAVY PADÁ: XLSX deníku bez filtru dat měl v hlavičce „Období:  –  ", Původ
+     * „ručně" i u zápisu z pokladny a desetinné částky jako `16445.59999999999854`.
+     * Platí pro každou firmu (deník po řádcích, firma bez jednoduchého zápisu).
+     */
+    public function testExportXlsxHeaderOriginAndDecimalAmounts(): void
+    {
+        $registerId = $this->cashRegister();
+        $docId = $this->cashDocument($registerId, 'PD-2099-777');
+        $entryId = $this->posting->postDocument($this->supplierId, 'cash', $docId, [
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 16445.60],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 16445.60],
+        ], ['entry_date' => self::YEAR . '-03-03', 'user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        $data = $this->journalExport->build($this->supplierId, ['entry_id' => $entryId]);
+        self::assertSame('Pokladna', $data['entries'][0]['automation_origin']);
+
+        $out = $this->xlsx->journal($data);
+        $path = tempnam(sys_get_temp_dir(), 'jexp');
+        self::assertNotFalse($path);
+        file_put_contents($path, $out['bytes']);
+        $zip = new \ZipArchive();
+        self::assertTrue($zip->open($path));
+        $xml = (string) $zip->getFromName('xl/worksheets/sheet1.xml');
+        $zip->close();
+        $sheet = IOFactory::load($path)->getActiveSheet();
+        unlink($path);
+
+        self::assertSame('Období: vše', $sheet->getCell('A3')->getValue());
+        self::assertSame('Pokladna', $sheet->getCell('D6')->getValue());
+        self::assertStringContainsString('<v>16445.6</v>', $xml);
+        self::assertDoesNotMatchRegularExpression('#<v>-?\d+\.\d{12,}</v>#', $xml);
+
+        $sub = $this->xlsx->journal(['filters' => ['date_from' => self::YEAR . '-03-01', 'source_type' => 'payroll'], 'entries' => []]);
+        $path = tempnam(sys_get_temp_dir(), 'jexp');
+        self::assertNotFalse($path);
+        file_put_contents($path, $sub['bytes']);
+        $sheet = IOFactory::load($path)->getActiveSheet();
+        unlink($path);
+        self::assertSame('Období: od 01.03.' . self::YEAR . ' · Zdroj: Mzdy', $sheet->getCell('A3')->getValue());
+    }
+
+    /** Každý zdroj zápisu (enum `journal_entries.source_type`) má v exportu český název. */
+    public function testEverySourceTypeHasExportLabel(): void
+    {
+        $type = (string) $this->db->pdo()->query(
+            "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'journal_entries' AND COLUMN_NAME = 'source_type'"
+        )->fetchColumn();
+        preg_match_all("/'([a-z_]+)'/", $type, $m);
+        self::assertNotEmpty($m[1]);
+        self::assertSame([], array_values(array_diff($m[1], \MyInvoice\Service\Accounting\Reports\JournalSourceLabel::known())));
+    }
+
     public function testRedStornoExportUsesNegativeHeaderDetailsAndTotals(): void
     {
         $entryId = $this->posting->postDocument($this->supplierId, 'manual', null, [

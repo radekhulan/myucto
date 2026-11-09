@@ -1270,9 +1270,9 @@ final class ReportXlsxExporter
         $entity = $data['entity'] ?? [];
         $sheet->setCellValueExplicit('A2', (string) ($entity['name'] ?? '') . ' — IČO: ' . (string) ($entity['ico'] ?? ''), DataType::TYPE_STRING);
         $filters = $data['filters'] ?? [];
-        $sub = 'Období: ' . $this->czDate((string) ($filters['date_from'] ?? '')) . ' – ' . $this->czDate((string) ($filters['date_to'] ?? ''));
+        $sub = 'Období: ' . JournalSourceLabel::period($this->czDate((string) ($filters['date_from'] ?? '')), $this->czDate((string) ($filters['date_to'] ?? '')));
         if (!empty($filters['source_type'])) {
-            $sub .= ' · Zdroj: ' . (string) $filters['source_type'];
+            $sub .= ' · Zdroj: ' . JournalSourceLabel::label((string) $filters['source_type']);
         }
         $sheet->setCellValue('A3', $sub);
 
@@ -1353,9 +1353,9 @@ final class ReportXlsxExporter
         $entity = $data['entity'] ?? [];
         $sheet->setCellValueExplicit('A2', (string) ($entity['name'] ?? '') . ' — IČO: ' . (string) ($entity['ico'] ?? ''), DataType::TYPE_STRING);
         $filters = $data['filters'] ?? [];
-        $sub = 'Období: ' . $this->czDate((string) ($filters['date_from'] ?? '')) . ' – ' . $this->czDate((string) ($filters['date_to'] ?? ''));
+        $sub = 'Období: ' . JournalSourceLabel::period($this->czDate((string) ($filters['date_from'] ?? '')), $this->czDate((string) ($filters['date_to'] ?? '')));
         if (!empty($filters['source_type'])) {
-            $sub .= ' · Zdroj: ' . (string) $filters['source_type'];
+            $sub .= ' · Zdroj: ' . JournalSourceLabel::label((string) $filters['source_type']);
         }
         $sheet->setCellValue('A3', $sub);
 
@@ -1896,6 +1896,7 @@ final class ReportXlsxExporter
     {
         $tmp = tempnam(sys_get_temp_dir(), 'repexp_') . '.xlsx';
         (new XlsxWriter($ss))->save($tmp);
+        XlsxFloatCells::normalize($tmp);
         $bytes = (string) file_get_contents($tmp);
         @unlink($tmp);
         $ss->disconnectWorksheets();

@@ -83,11 +83,7 @@ final class JournalExportService
             $lines = $linesByEntry[$entry['id']] ?? [];
             $entry['lines'] = $lines;
             $entry['automation'] = $provenance[(int) $entry['id']] ?? null;
-            $entry['automation_origin'] = match ($entry['automation']['mode'] ?? null) {
-                'auto' => 'automaticky',
-                'approved' => 'potvrzeno',
-                default => 'ručně',
-            };
+            $entry['automation_origin'] = JournalSourceLabel::origin((string) ($entry['source_type'] ?? ''), $entry['automation']);
             if ($pairsByEntry !== null) {
                 $entry += $pairsByEntry[(int) $entry['id']] ?? ['pair_status' => JournalLineContext::PAIR_STATUS_COMPOSITE, 'pairs' => []];
             }
@@ -102,12 +98,13 @@ final class JournalExportService
         }
         unset($entry);
 
+        [$dateFrom, $dateTo] = $this->periodBounds($supplierId, $filters);
         $out = [
             'entity'  => $this->loadEntity($supplierId),
             'filters' => [
                 'document_no' => $filters['document_no'] ?? null,
-                'date_from'   => $filters['date_from'] ?? null,
-                'date_to'     => $filters['date_to'] ?? null,
+                'date_from'   => $dateFrom,
+                'date_to'     => $dateTo,
                 'source_type' => $filters['source_type'] ?? null,
                 'posted'      => array_key_exists('posted', $filters) ? $filters['posted'] : null,
                 'automation'  => $filters['automation'] ?? null,
@@ -219,6 +216,29 @@ final class JournalExportService
             'text'                => $text !== '' ? $text : null,
             'cost_center'         => $costCenter !== null && $costCenter !== '' ? (string) $costCenter : null,
         ];
+    }
+
+    /**
+     * Meze období do hlavičky exportu. Filtr jen na účetní období (bez dat) by jinak
+     * v hlavičce ukázal prázdné období; doplní se z hranic období, data filtru mají přednost.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{0:?string, 1:?string}
+     */
+    private function periodBounds(int $supplierId, array $filters): array
+    {
+        $from = $filters['date_from'] ?? null;
+        $to = $filters['date_to'] ?? null;
+        if (empty($filters['period_id']) || ($from !== null && $to !== null)) {
+            return [$from, $to];
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT starts_on, ends_on FROM accounting_periods WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([(int) $filters['period_id'], $supplierId]);
+        $period = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($period === false) {
+            return [$from, $to];
+        }
+        return [$from ?? (string) $period['starts_on'], $to ?? (string) $period['ends_on']];
     }
 
     /**

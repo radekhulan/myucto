@@ -16,6 +16,9 @@ final class JournalPdfRenderer extends ReportPdfRendererBase
 {
     public function render(array $data): string
     {
+        if (!empty($data['filters']['source_type'])) {
+            $data['filters']['source_type'] = \MyInvoice\Service\Accounting\Reports\JournalSourceLabel::label((string) $data['filters']['source_type']);
+        }
         $body = $this->renderTemplate(($data['layout'] ?? null) === 'pairs' ? 'journal_pairs.twig' : 'journal.twig', $data);
         $mpdf = $this->mpdf(['format' => 'A4', 'orientation' => 'L']);
         $mpdf->SetTitle('Účetní deník');
