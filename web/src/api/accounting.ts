@@ -2674,6 +2674,7 @@ export const accountingApi = {
     if (filters?.amount_from !== undefined) params.amount_from = filters.amount_from
     if (filters?.amount_to !== undefined) params.amount_to = filters.amount_to
     if (filters?.integrity) params.integrity = filters.integrity
+    if (filters?.pair_status) params.pair_status = filters.pair_status
     if (filters?.dimension_value_id) {
       params.dimension_value_id = filters.dimension_value_id
       if (filters.dimension_descendants === false) params.dimension_descendants = 0
