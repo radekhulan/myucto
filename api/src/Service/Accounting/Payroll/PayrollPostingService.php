@@ -305,7 +305,7 @@ final class PayrollPostingService
             $supplierId,
             'manual',
             $preview['source_id'],
-            $preview['lines'],
+            PayrollCalculator::pairGroups($preview['lines']),
             array_merge($meta, [
                 'entry_date'  => $preview['entry_date'],
                 // Popis se bere z NÁHLEDU, ne ze vstupu: s vybraným zaměstnancem rozhoduje

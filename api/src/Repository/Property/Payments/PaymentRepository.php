@@ -60,7 +60,7 @@ final class PaymentRepository
             $entry=$this->posting->postDocument($supplier,'unit_payment',$id,$snapshot['lines'],['entry_date'=>$request['accounting_date'],'posted_by'=>$actor,'description'=>$request['reason']]);
             }
             $actual=(new PaymentJournalProof($this->db))->current($supplier,$entry);
-            if(PropertyInput::hash(PaymentJournalProof::canonicalLines($snapshot['lines']))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($actual['lines'])))PaymentException::reject('posted_ledger_mismatch');
+            if(!PaymentJournalProof::matches($snapshot['lines'],$actual['lines']))PaymentException::reject('posted_ledger_mismatch');
             $creditId=null;
             if($request['kind']==='allocation') {
                 foreach($snapshot['allocations'] as $allocation)$this->execute('INSERT INTO unit_payment_allocations (supplier_id,operation_id,debt_id,charge_id,charge_line_id,opening_component_id,settlement_effect_id,accessory_id,debtor_id,liability_group,amount_cents,allocation_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',[$supplier,$id,$allocation['debt_id'],$allocation['charge_id'],$allocation['charge_line_id'],$allocation['opening_component_id']??null,$allocation['settlement_effect_id']??null,$allocation['accessory_id'],$allocation['debtor_id'],$allocation['liability_group'],$allocation['amount_cents'],self::json($allocation)]);

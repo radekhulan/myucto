@@ -3268,7 +3268,11 @@ export const TOOLS = [
     api: false,
     apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Výpis z účtu',
-    description: 'Všechny pohyby na jednom účtu účtové osnovy za období.',
+    description:
+      'Všechny pohyby na jednom účtu účtové osnovy za období. U každého pohybu je `counter_accounts` (protiúčet); '
+      + 'řádek jednoduchého zápisu nese jediný protiúčet (`counter_account_id`) a číslo dvojice (`pair_no`). '
+      + 'Starší složený zápis 1 : N je rozložený na pohyby (`pair_derived`), zápis M : N zůstává v původním tvaru (`pair_composite_mn`). '
+      + 'Podle protiúčtu jde filtrovat a součty protiúčtů přicházejí s první stránkou (`counter_totals`).',
     inputSchema: schema({
       account_id: int('ID účtu — viz `chart_of_accounts`.'),
       from: date('Počátek rozsahu.'),
@@ -3374,7 +3378,9 @@ export const TOOLS = [
     title: 'Účetní deník',
     description:
       'Účetní zápisy s filtry na období, datum, zdrojový doklad a text. '
-      + 'Pro dotazy „jak se zaúčtovala tahle faktura" použij `source_type` + `source_id`.',
+      + 'Pro dotazy „jak se zaúčtovala tahle faktura" použij `source_type` + `source_id`. '
+      + 'U firmy s jednoduchým zápisem zápis nese `pairs` (dvojice účet MD / účet Dal s částkou) a `pair_status` '
+      + '(`composite_mn` = zápis M : N k ruční úpravě); filtr `pair_status` vybere právě tyto zápisy.',
     inputSchema: schema({
       query: str('Fulltext přes popis zápisu.'),
       period_id: int('ID účetního období.'),
@@ -3387,6 +3393,7 @@ export const TOOLS = [
       automation: str('Původ zaúčtování.', { enum: ['auto', 'approved', 'manual'] }),
       reversal: str('Stav storna.', { enum: ['reversed', 'reversal', 'any', 'none'] }),
       integrity: str('Jen zjištěné rozdíly částek dokladu a deníku.', { enum: ['amount_mismatch'] }),
+      pair_status: str('Jen zápisy označené k ruční úpravě (M : N, které nejde rozdělit na dvojice).', { enum: ['composite_mn'] }),
       account_from: str('Účet od, včetně; stačí začátek kódu (5, 501).'),
       account_to: str('Účet do, včetně analytik (5 až 5 = celá třída 5).'),
       amount_from: num('Částka od, včetně.'),
@@ -3409,6 +3416,7 @@ export const TOOLS = [
       automation: a.automation,
       reversal: a.reversal,
       integrity: a.integrity,
+      pair_status: a.pair_status,
       account_from: a.account_from,
       account_to: a.account_to,
       amount_from: a.amount_from,
@@ -3425,10 +3433,25 @@ export const TOOLS = [
     api: false,
     apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail účetního zápisu',
-    description: 'Řádky zápisu (MD / D), účty, částky a vazba na zdrojový doklad.',
+    description:
+      'Řádky zápisu (MD / D), účty, částky a vazba na zdrojový doklad. U firmy s jednoduchým zápisem také `entry_form`, '
+      + '`pairs` (dvojice: číslo, účet MD, účet Dal, částka, text, případný opravný zápis) a `pair_no` / `line_text` na řádcích.',
     inputSchema: schema({ id: int('ID účetního zápisu.') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/accounting/journal/${seg(a.id)}`, null, tool),
+  },
+  {
+    name: 'journal_entry_form',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Forma účetního zápisu firmy',
+    description:
+      'Forma účetního zápisu firmy (`composite` = složený, `single` = jednoduchý po dvojicích účet MD / účet Dal) '
+      + 'k dnešnímu dni a historie změn s datem účinnosti. Firma bez historie účtuje složeným zápisem. Jen čtení, '
+      + 'změna formy se dělá v aplikaci.',
+    inputSchema: schema({}),
+    write: false,
+    run: (c, a, tool) => c.get('/accounting/entry-form', null, tool),
   },
   {
     name: 'cash_journal',

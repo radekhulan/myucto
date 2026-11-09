@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
+use MyInvoice\Service\NumberSeries\NumberSeriesSelection;
 use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -58,6 +60,7 @@ final class CreatePurchaseInvoiceAction
         private readonly TenantReferenceGuard $tenantRefs,
         private readonly PurchaseInvoiceSubmissionRepository $submissions,
         private readonly PurchaseInvoiceSubmissionCompletionService $submissionCompletion,
+        private readonly NumberSeriesSelection $numberSeries,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -182,6 +185,17 @@ final class CreatePurchaseInvoiceAction
                 (string) ($body['document_kind'] ?? 'invoice'), $supplierId, 0,
             );
         }
+
+        // Řada z číselníku: volba z hlavičky, jinak výchozí řada uživatele. Doklad
+        // založený rovnou jako přijatý dostane číslo už v createDraft().
+        try {
+            $series = $this->numberSeries->fromBody($supplierId, $body, 'purchase');
+        } catch (NumberSeriesException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        $body['number_series_id'] = $series === false
+            ? $this->numberSeries->userDefaultFor($supplierId, 'purchase', 0, $userId)
+            : $series;
 
         $pdo = $this->db->pdo();
         $ownTransaction = !$pdo->inTransaction();

@@ -844,6 +844,7 @@ onMounted(async () => {
                                       <th class="px-2 py-1 text-left font-medium w-24">{{ t('accounting.account_statement.col_date') }}</th>
                                       <th class="px-2 py-1 text-left font-medium w-36">{{ t('accounting.account_statement.col_document') }}</th>
                                       <th class="px-2 py-1 text-left font-medium w-24">{{ t('accounting.account_statement.col_line_account') }}</th>
+                                      <th class="px-2 py-1 text-left font-medium w-28">{{ t('accounting.account_statement.col_counter_account') }}</th>
                                       <th class="px-2 py-1 text-left font-medium">{{ t('accounting.account_statement.col_description') }}</th>
                                       <th class="px-2 py-1 text-right font-medium w-28">{{ t('accounting.account_statement.col_md') }}</th>
                                       <th class="px-2 py-1 text-right font-medium w-28">{{ t('accounting.account_statement.col_d') }}</th>
@@ -862,6 +863,7 @@ onMounted(async () => {
                                              :title="t('accounting.journal.bank_ref_hint', { ref: it.source_bank_ref })">{{ it.source_bank_ref }}</div>
                                       </td>
                                       <td class="px-2 py-1 font-mono text-xs text-neutral-500">{{ it.account_code }}</td>
+                                      <td class="px-2 py-1 font-mono text-xs text-neutral-600 whitespace-nowrap" data-test="month-counter">{{ it.counter_accounts || '' }}<span v-if="it.pair_composite_mn" class="ml-1 font-sans text-[10px] px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 font-medium" :title="t('accounting.pairs.statement.mn_title')">{{ t('accounting.pairs.badge_mn') }}</span></td>
                                       <td class="px-2 py-1">{{ it.description || '—' }}</td>
                                       <td class="px-2 py-1 text-right font-mono">
                                         <template v-if="it.side === 'debit'">{{ formatMoney(it.amount) }}</template>

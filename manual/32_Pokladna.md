@@ -211,7 +211,7 @@ Obráceně lze pokladní doklad připojit i z detailu dokumentu v sekci **Souvis
 
 Formulář nového dokladu se otevírá tlačítkem **Příjem** nebo **Výdej** z hlavní stránky pokladny, případně z rychlé akce v menu (ikona plus u položky Pokladna). Předvyplní se typ dokladu podle zvoleného tlačítka a aktuální nebo výchozí pokladna. Pokladní doklad ale může vzniknout i bez toho, že byste sem vůbec šli: přímo z editoru faktury volbou způsobu úhrady **Hotově** (viz [§ 32.11.7](#32117-doklad-vznikly-z-faktury-hotovostni-vyrovnani)).
 
-Hlavička obsahuje typ dokladu (příjem **P**, výdej **V**), **Pokladnu** (z aktivních) a **Datum** (datum vystavení = datum pokladního pohybu). Číslo dokladu (řada `PPD-RRRR-####` / `VPD-RRRR-####`) se přiděluje **až při vystavení**, ne při rozepsání formuláře. Prefix a tvar čísla se nastavují v **Nástrojích → Číselné řady**, a to v obou účetních režimech (daňové evidenci se řady účetního deníku nenabízejí).
+Hlavička obsahuje typ dokladu (příjem **P**, výdej **V**), **Pokladnu** (z aktivních) a **Datum** (datum vystavení = datum pokladního pohybu). Číslo dokladu (řada `PPD-RRRR-####` / `VPD-RRRR-####`) se přiděluje **až při vystavení**, ne při rozepsání formuláře. Prefix a tvar čísla se nastavují v **Nástrojích → Číselné řady**, a to v obou účetních režimech (daňové evidenci se řady účetního deníku nenabízejí). Pokladna může mít i víc řad, například `HP` pro hotovostní účtenky vedle PPD pro úhrady faktur: další řadu založíte v číselníku řad ([§ 95.6.1](95_Multi_supplier.md#9561-ciselnik-rad-vic-rad-pro-jeden-druh-dokladu)) a v hlavičce dokladu ji pak vyberete v poli **Číselná řada**. Doklady všech řad jedné pokladny jsou v jedné pokladní knize a tvoří jeden zůstatek.
 
 <!-- cols: 24 76 -->
 | Typ | Dostupné účely |

@@ -2641,4 +2641,157 @@ final class PayrollPostingLineBuilderTest extends TestCase
             \MyInvoice\Service\Payroll\Ruleset\CanonicalJson::encode($snapshot),
         );
     }
+
+    /**
+     * Jednoduchá forma zápisu: předpis po dvojicích předkontací. Součty po účtech,
+     * stranách, střediscích a dimenzích musí sedět na složené řádky, párovač je
+     * převezme beze zbytku a každá dvojice má dva různé účty.
+     *
+     * @return iterable<string, array{\Closure(self):array{0:array<string,mixed>,1:list<array<string,mixed>>}}>
+     */
+    public static function singleEntryScenarios(): iterable
+    {
+        $codes = PayrollAccountingDefaults::codes();
+        yield 'základní předpis' => [static fn (self $t): array => [
+            $t->builder->build($t->snapshot(), $t->calculatedResult(), $t->statutorySets(), $codes), [],
+        ]];
+        yield 'střediska a rozpad 524' => [static function (self $t) use ($codes): array {
+            $snapshot = $t->snapshotWithCostCentres();
+            $result = $t->calculatedResult();
+            $result['source_snapshot_hash'] = $t->snapshotHash($snapshot);
+            return [$t->builder->build($snapshot, $result, $t->statutorySetsWithRelationships(), $codes), []];
+        }];
+        yield 'procentní rozpad 70/30' => [static function (self $t) use ($codes): array {
+            $snapshot = $t->snapshotWithSplit(7_000, 3_000);
+            $result = $t->calculatedResult();
+            $result['source_snapshot_hash'] = $t->snapshotHash($snapshot);
+            return [$t->builder->build($snapshot, $result, $t->statutorySetsWithRelationships(), $codes), []];
+        }];
+        yield 'daňový bonus' => [static fn (self $t): array => [
+            $t->builder->build($t->snapshot(), $t->bonusResult(), $t->bonusStatutorySets(), $codes), [],
+        ]];
+        yield 'zápočet se společníkem' => [static function (self $t) use ($codes): array {
+            $snapshot = $t->snapshotWithSettlementRule();
+            $result = $t->calculatedResult();
+            $result['source_snapshot_hash'] = $t->snapshotHash($snapshot);
+            return [$t->builder->build($snapshot, $result, $t->statutorySets(), $codes), []];
+        }];
+        yield 'cestovné' => [static function (self $t) use ($codes): array {
+            [$snapshot, $result] = $t->travelRevision();
+            return [$t->builder->build($snapshot, $result, $t->statutorySets(), $codes), []];
+        }];
+        yield 'benefit v koši osvobození' => [static function (self $t) use ($codes): array {
+            [$snapshot, $result] = $t->benefitBasketRevision(60_000, 40_000);
+            return [$t->builder->build($snapshot, $result, $t->statutorySets(), $codes), []];
+        }];
+        yield 'všechny nákladové cesty se středisky' => [static function (self $t) use ($codes): array {
+            [$snapshot, $result] = $t->everyCostPathRevision(true);
+            return [$t->builder->build($snapshot, $result, $t->statutorySetsWithRelationships(), $codes), []];
+        }];
+        yield 'opravná revize snižuje pojistné' => [static function (self $t) use ($codes): array {
+            $first = $t->builder->build($t->snapshot(), $t->calculatedResult(), $t->statutorySets(), $codes);
+            $sets = $t->statutorySets();
+            $sets['social_insurance']['result_snapshot']['employer_contribution_minor_units'] = 138_800;
+            return [$t->builder->build($t->snapshot(), $t->calculatedResult(), $sets, $codes, $first->targetAllocations), $first->targetAllocations];
+        }];
+        yield 'opravná revize zvýší mzdu' => [static function (self $t) use ($codes): array {
+            $first = $t->builder->build($t->snapshot(), $t->calculatedResult(), $t->statutorySets(), $codes);
+            $sets = $t->statutorySets();
+            $sets['social_insurance']['result_snapshot']['employer_contribution_minor_units'] = 158_800;
+            return [$t->builder->build($t->snapshot(), $t->calculatedResult(), $sets, $codes, $first->targetAllocations), $first->targetAllocations];
+        }];
+    }
+
+    /** @param \Closure(self):array{0:\MyInvoice\Service\Payroll\Posting\PayrollPostingPreview,1:list<array<string,mixed>>} $scenario */
+    #[\PHPUnit\Framework\Attributes\DataProvider('singleEntryScenarios')]
+    public function testSingleEntryLinesArePairsWithTheSameTotals(\Closure $scenario): void
+    {
+        [$preview, $previous] = $scenario($this);
+        $lines = $this->builder->singleEntryLines($preview->targetAllocations, $previous);
+
+        self::assertNotNull($lines, 'Předpis musí jít rozdělit na dvojice.');
+        self::assertSame($this->detailedMap($preview->lines), $this->detailedMap($lines));
+
+        $resolved = array_map(static fn (array $line): array => [
+            'account_code' => $line['account_code'],
+            'side' => $line['side'],
+            'amount' => number_format($line['amount_minor'] / 100, 2, '.', ''),
+            'pair_group' => $line['pair_group'],
+        ], $lines);
+        $paired = \MyInvoice\Service\Accounting\Pair\JournalPairer::pair($resolved);
+        self::assertSame('paired', $paired['status']);
+        self::assertCount(count($lines), $paired['lines'], 'Každá skupina je přesně jedna dvojice.');
+        \MyInvoice\Service\Accounting\Pair\JournalPairInvariant::assert(
+            ['entry_date' => '2026-06-30'],
+            $paired['lines'],
+            \MyInvoice\Service\Accounting\EntryForm\EntryForm::Single,
+        );
+    }
+
+    /** Dvojice předkontací ze Zadání: 521/331, 524/336, 331/336, 331/342 souhrnně. */
+    public function testSingleEntryLinesFollowThePostingPairs(): void
+    {
+        $preview = $this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $pairs = [];
+        $lines = $this->builder->singleEntryLines($preview->targetAllocations, []);
+        self::assertNotNull($lines);
+        for ($i = 0; $i < count($lines); $i += 2) {
+            $pairs[$lines[$i]['account_code'] . '/' . $lines[$i + 1]['account_code']] =
+                ($pairs[$lines[$i]['account_code'] . '/' . $lines[$i + 1]['account_code']] ?? 0) + $lines[$i]['amount_minor'];
+        }
+
+        self::assertSame(100_000, $pairs['521/331']);
+        self::assertSame(202_800, ($pairs['524/336.100'] ?? 0) + ($pairs['524/336.200'] ?? 0));
+        self::assertArrayHasKey('331/342.100', $pairs);
+        self::assertArrayHasKey('331/336.100', $pairs);
+        self::assertSame(['debit', 'credit'], [$lines[0]['side'], $lines[1]['side']]);
+    }
+
+    /**
+     * Opravná revize, která jen přeřadí středisko na stejném nákladovém účtu, je
+     * přeúčtování 521/521 a dvojicí být nemůže (MD a Dal stejný účet). Builder vrátí
+     * null a předpis se zaúčtuje složeně s označením k ruční úpravě.
+     */
+    public function testCostCentreMoveOnTheSameAccountIsNotAPair(): void
+    {
+        $snapshot = $this->snapshotWithCostCentres();
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+        $first = $this->builder->build($snapshot, $result, $this->statutorySets(), PayrollAccountingDefaults::codes());
+        $moved = $this->snapshotWithCostCentres();
+        $moved['people'][0]['employments'][0]['dimensions'] = [$this->dimension('cost_center', 'MONTAZ', null)];
+        $movedResult = $this->calculatedResult();
+        $movedResult['source_snapshot_hash'] = $this->snapshotHash($moved);
+        $correction = $this->builder->build($moved, $movedResult, $this->statutorySets(), PayrollAccountingDefaults::codes(), $first->targetAllocations);
+
+        self::assertNull($this->builder->singleEntryLines($correction->targetAllocations, $first->targetAllocations));
+
+        [$plainSnapshot, $plainResult] = $this->everyCostPathRevision(false);
+        $sets = $this->statutorySetsWithRelationships();
+        $previous = $this->builder->build($plainSnapshot, $plainResult, $sets, PayrollAccountingDefaults::codes());
+        [$centred, $centredResult] = $this->everyCostPathRevision(true);
+        $added = $this->builder->build($centred, $centredResult, $sets, PayrollAccountingDefaults::codes(), $previous->targetAllocations);
+        self::assertNull($this->builder->singleEntryLines($added->targetAllocations, $previous->targetAllocations));
+    }
+
+    /**
+     * @param list<array<string,mixed>> $lines
+     * @return array<string,int> účet|strana|středisko|dimenze => haléře
+     */
+    private function detailedMap(array $lines): array
+    {
+        $map = [];
+        foreach ($lines as $line) {
+            $key = $line['account_code'] . '|' . $line['side'] . '|' . ($line['cost_center'] ?? '')
+                . '|' . self::dimensionsKey($line['dimensions'] ?? []);
+            $map[$key] = ($map[$key] ?? 0) + $line['amount_minor'];
+        }
+        ksort($map);
+        return $map;
+    }
 }

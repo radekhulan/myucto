@@ -76,6 +76,7 @@ import { useResultAccounts } from '@/composables/useResultAccounts'
 import DurationInput from '@/components/ui/DurationInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
+import NumberSeriesSelect from '@/components/numberSeries/NumberSeriesSelect.vue'
 import { useDocumentDimensions, applyPrefill } from '@/composables/useDocumentDimensions'
 import { durationTotal, isPreciseUnitPrice, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, unitPriceForAmount, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
 import { amountItems, blankTextItem, isTextItem, textItemPayload } from '@/utils/invoiceTextRow'
@@ -1446,6 +1447,16 @@ function blankItem(): InvoiceItem {
   return item
 }
 
+// Řada z číselníku zvolená v hlavičce konceptu. undefined = beze změny (do payloadu
+// nejde), null = výchozí řada druhu. Výběr se ukáže jen u druhu s víc řadami.
+const numberSeriesId = ref<number | null | undefined>(undefined)
+const numberSeriesType = computed<'invoice' | 'proforma' | 'credit_note'>(() =>
+  form.value.invoice_type === 'proforma' || form.value.invoice_type === 'credit_note' ? form.value.invoice_type : 'invoice')
+// Synchronně: načtení dokladu mění typ dřív, než se z něj nastaví řada, a ta se nesmí smazat.
+watch(numberSeriesType, () => {
+  if (numberSeriesId.value != null) numberSeriesId.value = null
+}, { flush: 'sync' })
+
 // Náhled čísla faktury — backend zná aktuální counter pro per-supplier templ.
 // Volá se při mount + při změně typu / data; cancellation nemá číslo.
 async function loadVarsymbolPreview() {
@@ -1461,6 +1472,7 @@ async function loadVarsymbolPreview() {
       form.value.client_id ?? undefined,
       form.value.revenue_category_id ?? undefined,
       varsymbolSeriesType(form.value.invoice_type, form.value.is_simplified) === 'simplified',
+      numberSeriesId.value,
     )
     varsymbolAutoPreview.value = r.varsymbol
     varsymbolAutoHasTemplate.value = r.has_template
@@ -1469,7 +1481,7 @@ async function loadVarsymbolPreview() {
     varsymbolAutoHasTemplate.value = false
   }
 }
-watch(() => [form.value.invoice_type, form.value.issue_date, form.value.client_id, form.value.revenue_category_id, form.value.is_simplified], () => {
+watch(() => [form.value.invoice_type, form.value.issue_date, form.value.client_id, form.value.revenue_category_id, form.value.is_simplified, numberSeriesId.value], () => {
   if (loaded.value && editedStatus.value === 'draft') loadVarsymbolPreview()
 })
 
@@ -1691,6 +1703,7 @@ onMounted(async () => {
       payment_schedule: (inv.payment_schedule ?? []).map(r => ({ ...r })),
       calendar_contract_ref: inv.calendar_contract_ref ?? '',
     })
+    numberSeriesId.value = inv.status === 'draft' ? (inv.number_series_id ?? undefined) : undefined
     rememberLoadedStockPrices()
     // Pořadí položek bez slevových řádků = pořadí na serveru (sleva se generuje na konec).
     void docDims.load(inv.id, form.value.items)
@@ -2879,6 +2892,7 @@ function buildPayload(items: InvoiceItem[]): InvoicePayload {
       // Volitelný ruční varsymbol — backend ho akceptuje jen u draftu;
       // prázdný řetězec → backend uloží NULL a vygeneruje při issue automaticky.
       varsymbol: form.value.varsymbol.trim(),
+      number_series_id: numberSeriesId.value,
       vat_classification_code: form.value.vat_classification_code,
       revenue_category: form.value.revenue_category,
       revenue_category_id: form.value.revenue_category_id,
@@ -3416,6 +3430,8 @@ useWindowTitle(
             <!-- Ruční override čísla faktury — jen u draftu; prázdné = vygeneruje se při Vystavení.
                  Placeholder ukazuje, jaké číslo dostane fakturu při Issue (z preview API).
                  Když není žádný template (ani per-supplier ani v cfg), ukáže warning. -->
+            <NumberSeriesSelect v-if="editedStatus === 'draft' && !form.varsymbol.trim()"
+              :scope="{ module: 'invoices', type: numberSeriesType }" v-model="numberSeriesId" />
             <div v-if="editedStatus === 'draft'">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t(varsymbolLabelKey) }}</label>
               <input v-model="form.varsymbol" type="text" maxlength="20"

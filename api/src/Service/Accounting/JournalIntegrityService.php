@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\EntryForm\EntryForm;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
+use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
 use MyInvoice\Service\Bank\BankTransactionReleaseService;
 use PDO;
 
@@ -43,6 +46,18 @@ use PDO;
  * Výsledek se ukládá do `journal_integrity_findings` (poslední běh per typ) —
  * dashboard čte odsud, ať se plný sweep deníku nepočítá při každém requestu.
  *
+ * Jednoduchý (párový) zápis: firma, která někdy měla formu `single`, dostane navíc
+ * kontroly dvojic ({@see PAIR_TYPES}), ukládané do téže tabulky:
+ *   - pair_incomplete      — dvojice nemá právě dva řádky, nebo zápis míchá řádky
+ *                            s číslem dvojice a bez něj (I1, I2);
+ *   - pair_unbalanced      — dvojice o dvou řádcích nemá jednu účinnou stranu MD
+ *                            a jednu Dal, stejnou částku a stejné červené storno (I2, I3);
+ *   - pair_same_account    — oba řádky dvojice na stejném účtu (I4);
+ *   - single_unpaired      — zaúčtovaný zápis v období jednoduché formy bez jediné
+ *                            dvojice a bez stavu composite_mn/ineligible
+ *                            v journal_entry_pair_status (I1).
+ * Firma bez jednoduché formy tyto kontroly nespouští ani neukládá (nepozná změnu).
+ *
  * EP-11: {@see checkTenantIntegrity} přidává tvrdé tenantové/strukturální invarianty
  * (cross-tenant období/zápis, datum mimo období, nekladná částka, FX metadata).
  * Ty se vyhodnocují VŽDY NAŽIVO (aktuální stav, ne poslední naplánovaný běh) a
@@ -57,6 +72,12 @@ final class JournalIntegrityService
     public const TYPE_ENTRY_WITHOUT_BOOKED = 'entry_without_booked';
     public const TYPE_AMOUNT_MISMATCH = 'amount_mismatch';
     public const TYPE_CANCELLED_WITH_ENTRY = 'cancelled_with_entry';
+
+    // Jednoduchý (párový) zápis — jen firmy s historií formy `single`.
+    public const TYPE_PAIR_UNBALANCED = 'pair_unbalanced';
+    public const TYPE_PAIR_INCOMPLETE = 'pair_incomplete';
+    public const TYPE_PAIR_SAME_ACCOUNT = 'pair_same_account';
+    public const TYPE_SINGLE_UNPAIRED = 'single_unpaired';
 
     // EP-11: tvrdé tenantové/strukturální invarianty deníku. NEUKLÁDAJÍ se do
     // journal_integrity_findings (ta má ENUM jen pro TYPES výše) — vyhodnocují se
@@ -78,6 +99,17 @@ final class JournalIntegrityService
         self::TYPE_ENTRY_WITHOUT_BOOKED,
         self::TYPE_AMOUNT_MISMATCH,
         self::TYPE_CANCELLED_WITH_ENTRY,
+    ];
+
+    /**
+     * @var list<string> Kontroly dvojic jednoduchého zápisu (ENUM 2266). Spouští se a ukládají
+     *     jen u firmy, která má v historii formu `single` ({@see EntryFormService::hasAnySingle()}).
+     */
+    public const PAIR_TYPES = [
+        self::TYPE_PAIR_UNBALANCED,
+        self::TYPE_PAIR_INCOMPLETE,
+        self::TYPE_PAIR_SAME_ACCOUNT,
+        self::TYPE_SINGLE_UNPAIRED,
     ];
 
     /** @var list<string> Live-only tenantové/strukturální invarianty (EP-11). */
@@ -106,7 +138,10 @@ final class JournalIntegrityService
      */
     private const AMOUNT_TOLERANCE = 1.00;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly EntryFormService $entryForms,
+    ) {}
 
     /**
      * ID dodavatelů v podvojném účetnictví (jen ti mají smysl kontrolovat —
@@ -125,18 +160,41 @@ final class JournalIntegrityService
     /**
      * Spustí všechny kontroly pro jednoho dodavatele. ČISTĚ ČTECÍ — žádný zápis.
      *
+     * Firma s jednoduchou formou dostane navíc klíče {@see PAIR_TYPES}.
+     *
      * @return array<string, array{count:int, sample:list<array<string,mixed>>}>
      *         klíč = typ nálezu; count = celkový počet; sample = prvních N řádků.
      */
     public function check(int $supplierId): array
     {
-        return [
+        $findings = [
             self::TYPE_ORPHAN_ENTRY        => $this->checkOrphanEntries($supplierId),
             self::TYPE_UNBALANCED_ENTRY    => $this->checkUnbalancedEntries($supplierId),
             self::TYPE_BOOKED_WITHOUT_ENTRY => $this->checkBookedWithoutEntry($supplierId),
             self::TYPE_ENTRY_WITHOUT_BOOKED => $this->checkEntryWithoutBooked($supplierId),
             self::TYPE_AMOUNT_MISMATCH     => $this->checkAmountMismatch($supplierId),
             self::TYPE_CANCELLED_WITH_ENTRY => $this->checkCancelledWithEntry($supplierId),
+        ];
+        return $findings + $this->checkPairs($supplierId);
+    }
+
+    /**
+     * Kontroly dvojic jednoduchého zápisu ({@see PAIR_TYPES}). Firma bez formy `single`
+     * v historii vrací prázdné pole: žádný dotaz navíc, žádný nový řádek nálezů.
+     *
+     * @return array<string, array{count:int, sample:list<array<string,mixed>>}>
+     */
+    public function checkPairs(int $supplierId): array
+    {
+        $this->entryForms->forget($supplierId);
+        if (!$this->entryForms->hasAnySingle($supplierId)) {
+            return [];
+        }
+        return [
+            self::TYPE_PAIR_UNBALANCED   => $this->checkPairGroups($supplierId, self::TYPE_PAIR_UNBALANCED),
+            self::TYPE_PAIR_INCOMPLETE   => $this->checkPairIncomplete($supplierId),
+            self::TYPE_PAIR_SAME_ACCOUNT => $this->checkPairGroups($supplierId, self::TYPE_PAIR_SAME_ACCOUNT),
+            self::TYPE_SINGLE_UNPAIRED   => $this->checkSingleUnpaired($supplierId),
         ];
     }
 
@@ -192,7 +250,10 @@ final class JournalIntegrityService
                  detail        = VALUES(detail),
                  checked_at    = VALUES(checked_at)"
         );
-        foreach (self::TYPES as $type) {
+        foreach ([...self::TYPES, ...self::PAIR_TYPES] as $type) {
+            if (!isset($findings[$type])) {
+                continue;
+            }
             $f = $findings[$type];
             $stmt->execute([
                 'sid'        => $supplierId,
@@ -750,10 +811,137 @@ final class JournalIntegrityService
         return $this->countAndSample($supplierId, "SELECT COUNT(*) " . $sql, $select);
     }
 
+    // ── jednoduchý (párový) zápis ──────────────────────────────────────────────
+
+    /**
+     * Dvojice o právě dvou řádcích, které porušují I2/I3 (pair_unbalanced) nebo I4
+     * (pair_same_account). Skupina (zápis, dvojice) jde po indexu
+     * idx_jel_supplier_entry_pair; řádky bez `pair_no` (složené firmy, starší zápisy)
+     * se do skupin nedostanou. Účinná strana: červené storno stranu obrací.
+     *
+     * @return array{count:int, sample:list<array<string,mixed>>}
+     */
+    private function checkPairGroups(int $supplierId, string $type): array
+    {
+        $effectiveDebit = "SUM(CASE WHEN (l.side = 'debit') <> (l.is_red_storno = 1) THEN 1 ELSE 0 END)";
+        $having = $type === self::TYPE_PAIR_SAME_ACCOUNT
+            ? "COUNT(*) = 2 AND {$effectiveDebit} = 1 AND MIN(l.amount) = MAX(l.amount)
+               AND MIN(l.is_red_storno) = MAX(l.is_red_storno) AND MIN(l.account_id) = MAX(l.account_id)"
+            : "COUNT(*) = 2 AND ({$effectiveDebit} <> 1 OR MIN(l.amount) <> MAX(l.amount)
+               OR MIN(l.is_red_storno) <> MAX(l.is_red_storno))";
+        $base =
+            "SELECT l.entry_id, l.pair_no, COUNT(*) AS line_count,
+                    MIN(l.account_id) AS account_id, MIN(l.amount) AS debit, MAX(l.amount) AS credit
+               FROM journal_entry_lines l FORCE INDEX (idx_jel_supplier_entry_pair)
+              WHERE l.supplier_id = :sid AND l.pair_no IS NOT NULL
+              GROUP BY l.entry_id, l.pair_no
+             HAVING {$having}";
+        return $this->groupCountAndSample($base, ['sid' => $supplierId]);
+    }
+
+    /**
+     * Dvojice, které nemají právě dva řádky, a zápisy, které míchají řádky s číslem
+     * dvojice a bez něj (I1, I2).
+     *
+     * @return array{count:int, sample:list<array<string,mixed>>}
+     */
+    private function checkPairIncomplete(int $supplierId): array
+    {
+        $base =
+            "SELECT l.entry_id, l.pair_no, COUNT(*) AS line_count
+               FROM journal_entry_lines l FORCE INDEX (idx_jel_supplier_entry_pair)
+              WHERE l.supplier_id = :sid AND l.pair_no IS NOT NULL
+              GROUP BY l.entry_id, l.pair_no
+             HAVING COUNT(*) <> 2
+             UNION ALL
+             SELECT l.entry_id, NULL AS pair_no, COUNT(*) AS line_count
+               FROM journal_entry_lines l FORCE INDEX (idx_jel_supplier_entry_pair)
+              WHERE l.supplier_id = :sid2
+              GROUP BY l.entry_id
+             HAVING COUNT(l.pair_no) > 0 AND COUNT(l.pair_no) < COUNT(*)";
+        return $this->groupCountAndSample($base, ['sid' => $supplierId, 'sid2' => $supplierId]);
+    }
+
+    /**
+     * Zaúčtovaný zápis v období jednoduché formy bez jediné dvojice a bez stavu
+     * composite_mn/ineligible (I1). Okna formy `single` z historie (SSOT
+     * EntryFormService), zápisy po indexu idx_je_supplier_entry_date.
+     *
+     * @return array{count:int, sample:list<array<string,mixed>>}
+     */
+    private function checkSingleUnpaired(int $supplierId): array
+    {
+        $windows = [];
+        $open = null;
+        foreach ($this->entryForms->history($supplierId) as $row) {
+            $single = EntryForm::from($row['entry_form']) === EntryForm::Single;
+            if ($single && $open === null) {
+                $open = $row['valid_from'];
+            } elseif (!$single && $open !== null) {
+                $windows[] = [$open, $row['valid_from']];
+                $open = null;
+            }
+        }
+        if ($open !== null) {
+            $windows[] = [$open, null];
+        }
+        if ($windows === []) {
+            return ['count' => 0, 'sample' => []];
+        }
+        $params = ['sid' => $supplierId];
+        $ranges = [];
+        foreach ($windows as $i => [$from, $to]) {
+            $params['from' . $i] = $from;
+            if ($to === null) {
+                $ranges[] = "je.entry_date >= :from{$i}";
+            } else {
+                $params['to' . $i] = $to;
+                $ranges[] = "(je.entry_date >= :from{$i} AND je.entry_date < :to{$i})";
+            }
+        }
+        $statuses = implode(',', array_map(static fn (string $s): string => "'{$s}'", JournalPairInvariant::UNPAIRED_STATUSES));
+        $sql =
+            "FROM journal_entries je
+             WHERE je.supplier_id = :sid
+               AND je.posted_at IS NOT NULL
+               AND (" . implode(' OR ', $ranges) . ")
+               AND EXISTS (SELECT 1 FROM journal_entry_lines l
+                            WHERE l.supplier_id = je.supplier_id AND l.entry_id = je.id)
+               AND NOT EXISTS (SELECT 1 FROM journal_entry_lines l FORCE INDEX (idx_jel_supplier_entry_pair)
+                                WHERE l.supplier_id = je.supplier_id AND l.entry_id = je.id AND l.pair_no IS NOT NULL)
+               AND NOT EXISTS (SELECT 1 FROM journal_entry_pair_status s
+                                WHERE s.supplier_id = je.supplier_id AND s.entry_id = je.id
+                                  AND s.status IN ({$statuses}))";
+        $select = "SELECT je.id AS entry_id, je.source_type, je.source_id, je.document_no, je.entry_date " . $sql
+            . " ORDER BY je.entry_date, je.id LIMIT " . self::DETAIL_LIMIT;
+        return $this->countAndSample($supplierId, "SELECT COUNT(*) " . $sql, $select, $params);
+    }
+
+    /**
+     * Počet a vzorek nad dotazem se skupinami (GROUP BY … HAVING).
+     *
+     * @param array<string,int|string> $params
+     * @return array{count:int, sample:list<array<string,mixed>>}
+     */
+    private function groupCountAndSample(string $base, array $params): array
+    {
+        $pdo = $this->db->pdo();
+        $cnt = $pdo->prepare("SELECT COUNT(*) FROM ({$base}) x");
+        $cnt->execute($params);
+        $count = (int) $cnt->fetchColumn();
+        $sample = [];
+        if ($count > 0) {
+            $stmt = $pdo->prepare("SELECT * FROM ({$base}) x ORDER BY entry_id, pair_no LIMIT " . self::DETAIL_LIMIT);
+            $stmt->execute($params);
+            $sample = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        }
+        return ['count' => $count, 'sample' => $this->normalizeRows($sample)];
+    }
+
     // ── helpers ────────────────────────────────────────────────────────────────
 
     /**
-     * @param array<string,int>|null $params
+     * @param array<string,int|string>|null $params
      * @return array{count:int, sample:list<array<string,mixed>>}
      */
     private function countAndSample(int $supplierId, string $countSql, string $selectSql, ?array $params = null): array
@@ -784,7 +972,7 @@ final class JournalIntegrityService
         foreach ($rows as $row) {
             $norm = [];
             foreach ($row as $k => $v) {
-                if (in_array($k, ['entry_id', 'source_id', 'line_id', 'period_id', 'account_id'], true) && $v !== null) {
+                if (in_array($k, ['entry_id', 'source_id', 'line_id', 'period_id', 'account_id', 'pair_no', 'line_count'], true) && $v !== null) {
                     $norm[$k] = (int) $v;
                 } elseif (in_array($k, ['debit', 'credit', 'expected', 'amount', 'fx_rate', 'amount_foreign'], true) && $v !== null) {
                     $norm[$k] = (float) $v;

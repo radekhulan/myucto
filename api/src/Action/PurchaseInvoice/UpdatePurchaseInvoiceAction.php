@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
+use MyInvoice\Service\NumberSeries\NumberSeriesSelection;
 use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -67,6 +69,7 @@ final class UpdatePurchaseInvoiceAction
         private readonly CashSettlementService $cashSettlement,
         private readonly \MyInvoice\Service\Document\AttachmentCheck\AttachmentCheckService $attachmentChecks,
         private readonly PurchaseFiledVatPeriod $filedPeriods,
+        private readonly NumberSeriesSelection $numberSeries,
     ) {}
 
     /**
@@ -323,6 +326,17 @@ final class UpdatePurchaseInvoiceAction
         // beginTransaction(): resolve sahá na ČNB (síť/cache), a síťové volání se nesmí
         // dostat dovnitř zápisové transakce. Výsledek se vloží do těla, takže ho zapíše
         // existující updateDraft() jedním atomickým UPDATE.
+        // Volba řady z číselníku jde měnit, dokud doklad nemá číslo.
+        if (!empty($existing['varsymbol'])) {
+            unset($body['number_series_id']);
+        } else {
+            try {
+                $this->numberSeries->fromBody($supplierId, $body, 'purchase');
+            } catch (NumberSeriesException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
+        }
+
         $rateDecision = $this->rateReloader->resolveForUpdate($supplierId, $existing, $body);
         foreach ($rateDecision['apply'] as $col => $value) {
             $body[$col] = $value;
@@ -373,6 +387,7 @@ final class UpdatePurchaseInvoiceAction
                     409,
                 );
             }
+            $this->numberSeries->apply('purchase_invoices', $supplierId, $id, $body, 'purchase');
             // Jen když tělo položky opravdu poslalo — jinak by částečný PUT (samotné DUZP,
             // poznámka) doklad vyprázdnil ({@see DocumentItemsPayload}).
             // Přenesení bylo v hlavičce už před uložením → tuzemský kód 40/41 na řádku je

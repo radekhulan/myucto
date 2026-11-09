@@ -25,6 +25,7 @@ use MyInvoice\Service\Invoice\InvoiceIssuer;
 use MyInvoice\Service\Invoice\InvoiceItemKind;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Invoice\InvoiceIssueTaxGate;
@@ -347,7 +348,8 @@ final class IssueInvoiceAction
         // Ve vlastní transakci vrátí číslo do řady rollback. V cizí by zůstalo
         // spotřebované, proto ho odmítnutí vrací ručně.
         $allocated = false;
-        $releaseAllocated = function () use (&$allocated, &$varsymbol, $ownTransaction, $supplierId, $invoice, $issueDate): void {
+        $usedSeriesId = null;
+        $releaseAllocated = function () use (&$allocated, &$varsymbol, &$usedSeriesId, $ownTransaction, $supplierId, $invoice, $issueDate): void {
             if ($allocated && !$ownTransaction) {
                 $this->varsymbol->releaseIfLatest(
                     $supplierId,
@@ -356,6 +358,7 @@ final class IssueInvoiceAction
                     $issueDate,
                     (int) $invoice['client_id'],
                     (int) ($invoice['revenue_category_id'] ?? 0),
+                    $usedSeriesId,
                 );
             }
         };
@@ -365,14 +368,12 @@ final class IssueInvoiceAction
             $this->billing->assertCurrent($id, $supplierId);
             if ($varsymbol === null) {
                 try {
-                    // Zjednodušený doklad má vlastní řadu, je-li ve firmě nastavená.
-                    $varsymbol = $this->varsymbol->next(
-                        $supplierId,
-                        VarsymbolGenerator::seriesTypeFor($invoice),
-                        $issueDate,
-                        (int) $invoice['client_id'],
-                        (int) ($invoice['revenue_category_id'] ?? 0),
-                    );
+                    // Řada z číselníku (volba na konceptu nebo výchozí řada druhu); zjednodušený
+                    // doklad má vlastní řadu, je-li ve firmě nastavená.
+                    [$varsymbol, $usedSeriesId] = $this->varsymbol->nextForInvoice($supplierId, $invoice, $issueDate);
+                } catch (NumberSeriesException $e) {
+                    if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                    return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
                 } catch (\InvalidArgumentException | \RuntimeException $e) {
                     if (TransactionFailure::rollbackIfAborted($pdo, $e)) throw $e;
                     if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
@@ -387,6 +388,7 @@ final class IssueInvoiceAction
                 $releaseAllocated();
                 return Json::error($response, 'race_condition', 'Faktura byla mezitím změněna.', 409);
             }
+            $this->varsymbol->recordSeries($id, $invoice, $usedSeriesId);
             // Koncept může mít úhrady už před potvrzením. Výstupy obnoví běžná větev po commitu.
             if (!$autoPaid) $this->payments->recompute($id, refreshOutputs: false);
             InvoiceIssuer::record($pdo, $id, isset($user['id']) ? (int) $user['id'] : null);

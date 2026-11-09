@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Reports;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use PDO;
 
@@ -20,6 +21,13 @@ use PDO;
  * všechny odpovídající zápisy. MAX_ROWS je tvrdý strop proti obřímu/neúmyslnému
  * exportu celé historie firmy v jednom requestu; při překročení Action vrátí 422
  * s pokynem zúžit rozsah dat (stejný vzor jako BULK_POST_LIMIT v JournalAction).
+ *
+ * Jednoduchý zápis (firma má {@see EntryFormService::hasAnySingle()}): export má
+ * `layout = 'pairs'` a zápis nese `pairs` = jeden řádek na dvojici {pair_no, účet MD,
+ * účet Dal, částka, text, středisko} a `pair_status`. Zápisy s `pair_no` jdou po svých
+ * dvojicích, starší zápisy rozložené za běhu ({@see JournalLineContext::derivedPairs()}),
+ * M : N zůstane s řádky v původním tvaru a se stavem `composite_mn`. Limit zůstává na
+ * počtu ZÁPISŮ, ne řádků. Firma bez jednoduchého zápisu dostane přesně dnešní data.
  */
 final class JournalExportService
 {
@@ -36,6 +44,7 @@ final class JournalExportService
         private readonly JournalEntryRepository $journal,
         private readonly Connection $db,
         private readonly AutomationProvenanceService $automationProvenance,
+        private readonly EntryFormService $entryForms,
     ) {}
 
     /**
@@ -57,6 +66,7 @@ final class JournalExportService
         $ids = array_map(static fn (array $e): int => (int) $e['id'], $entries);
         $linesByEntry = $this->journal->linesForEntries($ids, $supplierId);
         $provenance = $this->automationProvenance->forJournalEntries($supplierId, $ids);
+        $pairsByEntry = $this->entryForms->hasAnySingle($supplierId) ? $this->pairsForEntries($supplierId, $ids) : null;
 
         $totalDebit = 0.0;
         $totalCredit = 0.0;
@@ -69,6 +79,9 @@ final class JournalExportService
                 'approved' => 'potvrzeno',
                 default => 'ručně',
             };
+            if ($pairsByEntry !== null) {
+                $entry += $pairsByEntry[(int) $entry['id']] ?? ['pair_status' => JournalLineContext::PAIR_STATUS_COMPOSITE, 'pairs' => []];
+            }
             foreach ($lines as $line) {
                 $amount = JournalLineAmount::signed($line);
                 if ($line['side'] === 'debit') {
@@ -80,7 +93,7 @@ final class JournalExportService
         }
         unset($entry);
 
-        return [
+        $out = [
             'entity'  => $this->loadEntity($supplierId),
             'filters' => [
                 'document_no' => $filters['document_no'] ?? null,
@@ -96,6 +109,118 @@ final class JournalExportService
                 'credit' => round($totalCredit, 2),
                 'count'  => count($entries),
             ],
+        ];
+        if ($pairsByEntry !== null) {
+            $out['layout'] = 'pairs';
+        }
+        return $out;
+    }
+
+    /**
+     * Dvojice zápisů exportu jedním dotazem (po dávkách id). Stav: `paired` (řádky nesou
+     * `pair_no`), `derived` (starší zápis rozložený za běhu), `composite_mn` (zůstává
+     * po řádcích).
+     *
+     * @param list<int> $entryIds
+     * @return array<int, array{pair_status:string, pairs:list<array<string,mixed>>}>
+     */
+    private function pairsForEntries(int $supplierId, array $entryIds): array
+    {
+        $lines = [];
+        foreach (array_chunk($entryIds, 1000) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT l.id, l.entry_id, l.account_id, c.account_code, c.name AS account_name, l.side AS raw_side,
+                        l.amount, l.amount_foreign, l.is_red_storno, l.cost_center, l.pair_no, l.line_text,
+                        CASE WHEN l.is_red_storno = 1
+                             THEN (CASE WHEN l.side = 'debit' THEN 'credit' ELSE 'debit' END)
+                             ELSE l.side END AS side
+                   FROM journal_entry_lines l
+                   JOIN chart_of_accounts c ON c.id = l.account_id
+                  WHERE l.supplier_id = ? AND l.entry_id IN ({$in})
+                  ORDER BY l.entry_id, l.line_no, l.id"
+            );
+            $stmt->execute([$supplierId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $lines[(int) $r['entry_id']][(int) $r['id']] = [
+                    'line_id'        => (int) $r['id'],
+                    'account_id'     => (int) $r['account_id'],
+                    'account_code'   => (string) $r['account_code'],
+                    'account_name'   => (string) $r['account_name'],
+                    'side'           => (string) $r['side'],
+                    'raw_side'       => (string) $r['raw_side'],
+                    'is_red_storno'  => (bool) $r['is_red_storno'],
+                    'amount'         => (string) $r['amount'],
+                    'amount_foreign' => $r['amount_foreign'] === null ? null : (string) $r['amount_foreign'],
+                    'amount_cents'   => JournalLineAmount::cents((string) $r['amount']),
+                    'cost_center'    => $r['cost_center'],
+                    'pair_no'        => $r['pair_no'] === null ? null : (int) $r['pair_no'],
+                    'line_text'      => $r['line_text'],
+                ];
+            }
+        }
+
+        $out = [];
+        foreach ($lines as $entryId => $byId) {
+            $byPairNo = [];
+            foreach ($byId as $l) {
+                if ($l['pair_no'] !== null) {
+                    $byPairNo[$l['pair_no']][] = $l;
+                }
+            }
+            if ($byPairNo !== [] && count($byPairNo) * 2 === count($byId)) {
+                ksort($byPairNo);
+                $rows = [];
+                foreach ($byPairNo as $pairNo => $pair) {
+                    if (count($pair) !== 2 || $pair[0]['raw_side'] === $pair[1]['raw_side']) {
+                        $rows = null;
+                        break;
+                    }
+                    [$debit, $credit] = $pair[0]['raw_side'] === 'debit' ? [$pair[0], $pair[1]] : [$pair[1], $pair[0]];
+                    $rows[] = self::pairRow($pairNo, $debit, $credit, $debit['amount']);
+                }
+                if ($rows !== null) {
+                    $out[$entryId] = ['pair_status' => JournalLineContext::PAIR_STATUS_PAIRED, 'pairs' => $rows];
+                    continue;
+                }
+            }
+            $derived = $byPairNo === [] ? JournalLineContext::derivedPairs(array_values($byId)) : null;
+            if ($derived === null) {
+                $out[$entryId] = ['pair_status' => JournalLineContext::PAIR_STATUS_COMPOSITE, 'pairs' => []];
+                continue;
+            }
+            $rows = [];
+            foreach ($derived as $pair) {
+                $rows[] = self::pairRow($pair['pair_no'], $byId[$pair['debit_line_id']], $byId[$pair['credit_line_id']], $pair['amount']);
+            }
+            $out[$entryId] = ['pair_status' => JournalLineContext::PAIR_STATUS_DERIVED, 'pairs' => $rows];
+        }
+        return $out;
+    }
+
+    /**
+     * Řádek exportu za dvojici. Částka je se znaménkem (červené storno záporně), text
+     * dvojice z `line_text`, středisko z řádku, který ho nese (automatika ho razítkuje jen
+     * na výsledkový řádek).
+     *
+     * @param array<string,mixed> $debit
+     * @param array<string,mixed> $credit
+     * @return array<string,mixed>
+     */
+    private static function pairRow(int $pairNo, array $debit, array $credit, string $amount): array
+    {
+        $text = trim((string) ($debit['line_text'] ?? '')) !== '' ? (string) $debit['line_text'] : (string) ($credit['line_text'] ?? '');
+        $costCenter = $debit['cost_center'] !== null && $debit['cost_center'] !== '' ? $debit['cost_center'] : $credit['cost_center'];
+        return [
+            'pair_no'             => $pairNo,
+            'debit_account_code'  => $debit['account_code'],
+            'debit_account_name'  => $debit['account_name'],
+            'credit_account_code' => $credit['account_code'],
+            'credit_account_name' => $credit['account_name'],
+            'amount'              => JournalLineAmount::signed(['amount' => $amount, 'is_red_storno' => $debit['is_red_storno']]),
+            'is_red_storno'       => $debit['is_red_storno'],
+            'text'                => $text !== '' ? $text : null,
+            'cost_center'         => $costCenter !== null && $costCenter !== '' ? (string) $costCenter : null,
         ];
     }
 

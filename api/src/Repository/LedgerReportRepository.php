@@ -194,20 +194,55 @@ final class LedgerReportRepository
      * Filtr protiúčtu běží nad hotovým běžícím zůstatkem, takže vyfiltrovaný řádek ukazuje
      * skutečný zůstatek účtu po tomto pohybu, ne součet jen vybraných řádků.
      *
+     * `$pairs` (firma má jednoduchý zápis, EntryFormService::hasAnySingle()): řádky nesou
+     * `pair_no` a filtr protiúčtu bere u dvojice jen jejího partnera. Bez něj jde přesně
+     * dnešní SQL.
+     *
      * @return list<array<string,mixed>>
      */
-    public function accountLines(int $supplierId, int $accountId, string $from, string $to, int $limit, int $offset, bool $excludeClosing = false, ?int $counterAccountId = null): array
+    public function accountLines(int $supplierId, int $accountId, string $from, string $to, int $limit, int $offset, bool $excludeClosing = false, ?int $counterAccountId = null, bool $pairs = false): array
+    {
+        [$sql, $params] = $this->accountLinesQuery($supplierId, $accountId, $from, $to, $limit, $offset, $excludeClosing, $counterAccountId, $pairs);
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return array_map(static function (array $r): array {
+            $r['entry_id'] = (int) $r['entry_id'];
+            $r['line_id'] = (int) $r['line_id'];
+            $r['source_id'] = $r['source_id'] === null ? null : (int) $r['source_id'];
+            $r['amount'] = round((float) $r['amount'], 2);
+            $r['is_red_storno'] = (bool) $r['is_red_storno'];
+            $r['line_no'] = (int) $r['line_no'];
+            $r['running_delta'] = round((float) $r['running_delta'], 2);
+            $r['line_account_id'] = (int) $r['line_account_id'];
+            foreach (['source_statement_id', 'source_register_id', 'source_asset_id', 'source_settlement_doc_id'] as $k) {
+                $r[$k] = $r[$k] === null ? null : (int) $r[$k];
+            }
+            if (array_key_exists('pair_no', $r)) {
+                $r['pair_no'] = $r['pair_no'] === null ? null : (int) $r['pair_no'];
+            }
+            return $r;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * SQL a parametry {@see accountLines()}; samostatně kvůli EXPLAIN testům plánu.
+     *
+     * @internal
+     * @return array{0:string, 1:list<mixed>}
+     */
+    public function accountLinesQuery(int $supplierId, int $accountId, string $from, string $to, int $limit, int $offset, bool $excludeClosing = false, ?int $counterAccountId = null, bool $pairs = false): array
     {
         $accountDefinitions=AccountDefinitionRepository::relation($to,$supplierId);
         $limit = max(1, $limit);
         $offset = max(0, $offset);
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
-        [$counterSql, $counterParams] = $this->counterAccountFilter('t.entry_id', 't.effective_side', 't.amount', $supplierId, $counterAccountId);
-        $stmt = $this->db->pdo()->prepare(
+        [$counterSql, $counterParams] = $this->counterAccountFilter('t.entry_id', 't.effective_side', 't.amount', $supplierId, $counterAccountId, $pairs ? 't.pair_no' : null);
+        $pairColumn = $pairs ? 'l.pair_no, ' : '';
+        $sql =
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT * FROM (
                 SELECT e.id AS entry_id, e.entry_date, e.document_no, e.description, e.source_type, e.source_id,
                        ca.id AS line_account_id, ca.account_code, ca.name AS line_account_name,
-                       l.id AS line_id, l.side, l.amount, l.is_red_storno, l.line_no, l.currency_code, l.amount_foreign,
+                       l.id AS line_id, l.side, l.amount, l.is_red_storno, l.line_no, {$pairColumn}l.currency_code, l.amount_foreign,
                        " . self::effectiveSideSql('l') . " AS effective_side,
                        bt.statement_id AS source_statement_id,
                        bt.bank_ref AS source_bank_ref,
@@ -242,23 +277,8 @@ final class LedgerReportRepository
             ) t
             WHERE 1 = 1{$counterSql}
             ORDER BY t.entry_date, t.entry_id, t.line_no
-            LIMIT {$limit} OFFSET {$offset}"
-        );
-        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams, ...$counterParams]);
-        return array_map(static function (array $r): array {
-            $r['entry_id'] = (int) $r['entry_id'];
-            $r['line_id'] = (int) $r['line_id'];
-            $r['source_id'] = $r['source_id'] === null ? null : (int) $r['source_id'];
-            $r['amount'] = round((float) $r['amount'], 2);
-            $r['is_red_storno'] = (bool) $r['is_red_storno'];
-            $r['line_no'] = (int) $r['line_no'];
-            $r['running_delta'] = round((float) $r['running_delta'], 2);
-            $r['line_account_id'] = (int) $r['line_account_id'];
-            foreach (['source_statement_id', 'source_register_id', 'source_asset_id', 'source_settlement_doc_id'] as $k) {
-                $r[$k] = $r[$k] === null ? null : (int) $r[$k];
-            }
-            return $r;
-        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+            LIMIT {$limit} OFFSET {$offset}";
+        return [$sql, [$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams, ...$counterParams]];
     }
 
     /**
@@ -333,12 +353,26 @@ final class LedgerReportRepository
     /**
      * Celkový počet řádků opisu účtu v rozsahu (pro paginaci).
      */
-    public function accountLinesTotal(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false, ?int $counterAccountId = null): int
+    public function accountLinesTotal(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false, ?int $counterAccountId = null, bool $pairs = false): int
+    {
+        [$sql, $params] = $this->accountLinesTotalQuery($supplierId, $accountId, $from, $to, $excludeClosing, $counterAccountId, $pairs);
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * SQL a parametry {@see accountLinesTotal()}; samostatně kvůli EXPLAIN testům plánu.
+     *
+     * @internal
+     * @return array{0:string, 1:list<mixed>}
+     */
+    public function accountLinesTotalQuery(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false, ?int $counterAccountId = null, bool $pairs = false): array
     {
         $accountDefinitions=AccountDefinitionRepository::relation($to,$supplierId);
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
-        [$counterSql, $counterParams] = $this->counterAccountFilter('l.entry_id', self::effectiveSideSql('l'), 'l.amount', $supplierId, $counterAccountId);
-        $stmt = $this->db->pdo()->prepare(
+        [$counterSql, $counterParams] = $this->counterAccountFilter('l.entry_id', self::effectiveSideSql('l'), 'l.amount', $supplierId, $counterAccountId, $pairs ? 'l.pair_no' : null);
+        $sql =
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COUNT(*)
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
@@ -346,10 +380,8 @@ final class LedgerReportRepository
                JOIN {$accountDefinitions} ca ON ca.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
-                AND e.entry_date BETWEEN ? AND ?{$technicalSql}{$counterSql}"
-        );
-        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams, ...$counterParams]);
-        return (int) $stmt->fetchColumn();
+                AND e.entry_date BETWEEN ? AND ?{$technicalSql}{$counterSql}";
+        return [$sql, [$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams, ...$counterParams]];
     }
 
     /**
@@ -364,15 +396,49 @@ final class LedgerReportRepository
      * 1 210 má protiúčty 602 za 1 000 a 343 za 210 i vedle dvojice v témže zápisu.
      * Řádek bez protistrany (jednostranný zápis) má protiúčet NULL.
      *
+     * Jednoduchý zápis (`$pairs`, firma má EntryFormService::hasAnySingle()): řádek s `pair_no`
+     * má za protiúčet jen druhý řádek své dvojice, celou částkou. Dvojice je místo částky
+     * klíčem skupiny (`entry_id, pair_no`), takže je vždy spárovaná a do poměrného dělení
+     * nevstupuje; řádky bez `pair_no` se párují a dělí dnešním pravidlem jen mezi sebou.
+     * U starších zápisů 1 : N dává poměrné dělení přesně díly {@see \MyInvoice\Service\Accounting\Pair\JournalPairer}.
+     * Bez `$pairs` jde přesně dnešní SQL.
+     *
      * Stejné pravidlo žije třikrát (výkon nedovoluje jednu implementaci): tady v SQL,
-     * ve filtru {@see pairedSql()} a v PHP v {@see \MyInvoice\Service\Accounting\Reports\JournalLineContext}.
-     * Při změně upravte všechna tři místa, jinak se rozejde protiúčet řádku, filtr a součty.
+     * ve filtru {@see counterAccountFilter()} a v PHP v {@see \MyInvoice\Service\Accounting\Reports\JournalLineContext}.
+     * Při změně upravte všechna tři místa, jinak se rozejde protiúčet řádku, filtr a součty
+     * (hlídá CounterAccountConsistencyTest).
      *
      * @return list<array{account_id:?int, account_code:?string, name:?string, parent_id:?int, md:float, d:float}>
      */
-    public function accountCounterTotals(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false): array
+    public function accountCounterTotals(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false, bool $pairs = false): array
+    {
+        [$sql, $params] = $this->accountCounterTotalsQuery($supplierId, $accountId, $from, $to, $excludeClosing, $pairs);
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return array_map(static fn (array $r): array => [
+            'account_id'   => $r['account_id'] === null ? null : (int) $r['account_id'],
+            'account_code' => $r['account_code'] === null ? null : (string) $r['account_code'],
+            'name'         => $r['name'] === null ? null : (string) $r['name'],
+            'parent_id'    => $r['parent_id'] === null ? null : (int) $r['parent_id'],
+            'md'           => (float) $r['md'],
+            'd'            => (float) $r['d'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * SQL a parametry {@see accountCounterTotals()}; samostatně kvůli EXPLAIN testům plánu.
+     *
+     * @internal
+     * @return array{0:string, 1:list<mixed>}
+     */
+    public function accountCounterTotalsQuery(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false, bool $pairs = false): array
     {
         $accountDefinitions = AccountDefinitionRepository::relation($to, $supplierId);
+        // Klíč skupiny spárovaných řádků: dnes částka v zápisu, u jednoduchého zápisu dvojice
+        // (řádky bez dvojice dál podle částky, ale jen mezi sebou).
+        $groupInner = $pairs ? 'o.entry_id, o.pair_no, CASE WHEN o.pair_no IS NULL THEN o.amount END' : 'o.entry_id, o.amount';
+        $groupOuter = $pairs ? 'x.entry_id, x.pair_no, x.pair_amount' : 'x.entry_id, x.amount';
+        $pairColumns = $pairs ? 'o.pair_no, CASE WHEN o.pair_no IS NULL THEN o.amount END AS pair_amount, ' : '';
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
         // Jeden průchod řádky zápisů účtu, bez spojení řádku s protistranou: každý řádek zápisu
         // dostane okny součty vlastních řádků (podle účinné a zapsané strany) a z nich svůj díl.
@@ -384,7 +450,7 @@ final class LedgerReportRepository
             "SUM(CASE WHEN x.is_own AND " . ($paired === 'p' ? '' : 'NOT ') . "x.paired AND x.effective_side = '{$eff}' AND x.side = '{$side}'"
             . " THEN x.signed_amount END) OVER (PARTITION BY {$partition})";
         $own = [];
-        foreach (['u' => 'x.entry_id', 'p' => 'x.entry_id, x.amount'] as $kind => $partition) {
+        foreach (['u' => 'x.entry_id', 'p' => $groupOuter] as $kind => $partition) {
             foreach (['d' => 'debit', 'c' => 'credit'] as $e => $eff) {
                 foreach (['md' => 'debit', 'd' => 'credit'] as $res => $side) {
                     $own[] = $ownSum($kind, $eff, $side, $partition) . " AS own_{$kind}{$e}_{$res}";
@@ -397,7 +463,7 @@ final class LedgerReportRepository
         // navíc). free_total > 0: nespárovaný řádek se do něj počítá a částka je kladná
         // (chk_jel_amount_positive).
         $freeShare = static fn (string $sum): string => "({$sum} * c.amount / c.free_total)";
-        $stmt = $this->db->pdo()->prepare(
+        $sql =
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . ", " : "WITH ") . "own_accounts AS (
                 SELECT ca.id FROM {$accountDefinitions} ca WHERE ca.id = ? OR ca.parent_id = ?
             ),
@@ -419,11 +485,11 @@ final class LedgerReportRepository
                        SUM(NOT x.paired AND x.effective_side = 'credit') OVER (PARTITION BY x.entry_id) AS free_c,
                        " . implode(",
                        ", $own) . "
-                  FROM (SELECT o.entry_id, o.account_id, o.amount, o.side, o.signed_amount, " . self::effectiveSideSql('o') . " AS effective_side,
+                  FROM (SELECT o.entry_id, o.account_id, o.amount, o.side, o.signed_amount, {$pairColumns}" . self::effectiveSideSql('o') . " AS effective_side,
                                o.account_id IN (SELECT id FROM own_accounts) AS is_own,
-                               SUM(" . self::effectiveSideSql('o') . " = 'debit') OVER (PARTITION BY o.entry_id, o.amount) AS n_debit,
-                               SUM(" . self::effectiveSideSql('o') . " = 'debit') OVER (PARTITION BY o.entry_id, o.amount)
-                                 = SUM(" . self::effectiveSideSql('o') . " = 'credit') OVER (PARTITION BY o.entry_id, o.amount) AS paired
+                               SUM(" . self::effectiveSideSql('o') . " = 'debit') OVER (PARTITION BY {$groupInner}) AS n_debit,
+                               SUM(" . self::effectiveSideSql('o') . " = 'debit') OVER (PARTITION BY {$groupInner})
+                                 = SUM(" . self::effectiveSideSql('o') . " = 'credit') OVER (PARTITION BY {$groupInner}) AS paired
                           FROM entries e
                           STRAIGHT_JOIN journal_entry_lines o FORCE INDEX (idx_jel_supplier_entry)
                                ON o.supplier_id = ? AND o.entry_id = e.entry_id) x
@@ -450,17 +516,8 @@ final class LedgerReportRepository
             SELECT x.account_id, a.account_code, a.name, a.parent_id, x.md, x.d
               FROM allocated x
          LEFT JOIN {$accountDefinitions} a ON a.id = x.account_id
-             ORDER BY a.account_code IS NULL, a.account_code"
-        );
-        $stmt->execute([$accountId, $accountId, $supplierId, $from, $to, ...$technicalParams, $supplierId]);
-        return array_map(static fn (array $r): array => [
-            'account_id'   => $r['account_id'] === null ? null : (int) $r['account_id'],
-            'account_code' => $r['account_code'] === null ? null : (string) $r['account_code'],
-            'name'         => $r['name'] === null ? null : (string) $r['name'],
-            'parent_id'    => $r['parent_id'] === null ? null : (int) $r['parent_id'],
-            'md'           => (float) $r['md'],
-            'd'            => (float) $r['d'],
-        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+             ORDER BY a.account_code IS NULL, a.account_code";
+        return [$sql, [$accountId, $accountId, $supplierId, $from, $to, ...$technicalParams, $supplierId]];
     }
 
     /**
@@ -475,15 +532,20 @@ final class LedgerReportRepository
      * Skalární poddotaz místo EXISTS záměrně: EXISTS plánovač převede na semi-join řízený
      * řádky protiúčtu, u účtu s tisíci pohyby pak dotaz běžel přes sekundu místo milisekund.
      *
+     * Jednoduchý zápis (`$pairNoExpr`): řádek s `pair_no` vyhoví jen partnerem své dvojice
+     * (jeden lookup po idx_jel_supplier_entry_pair), řádek bez `pair_no` dnešním pravidlem
+     * mezi řádky bez dvojice. Bez `$pairNoExpr` jde přesně dnešní SQL.
+     *
      * @return array{0:string, 1:list<int>}
      */
-    private function counterAccountFilter(string $entryExpr, string $sideExpr, string $amountExpr, int $supplierId, ?int $counterAccountId): array
+    private function counterAccountFilter(string $entryExpr, string $sideExpr, string $amountExpr, int $supplierId, ?int $counterAccountId, ?string $pairNoExpr = null): array
     {
         if ($counterAccountId === null) {
             return ['', []];
         }
-        return [
-            " AND (SELECT 1 FROM journal_entry_lines cl
+        if ($pairNoExpr === null) {
+            return [
+                " AND (SELECT 1 FROM journal_entry_lines cl
                      JOIN chart_of_accounts cc ON cc.id = cl.account_id
                     WHERE cl.supplier_id = ? AND cl.entry_id = {$entryExpr}
                       AND (cl.account_id = ? OR cc.parent_id = ?)
@@ -492,16 +554,43 @@ final class LedgerReportRepository
                            OR (NOT " . self::pairedSql($entryExpr, $amountExpr) . "
                                AND NOT " . self::pairedSql('cl.entry_id', 'cl.amount') . "))
                     LIMIT 1) = 1",
-            [$supplierId, $counterAccountId, $counterAccountId, $supplierId, $supplierId],
+                [$supplierId, $counterAccountId, $counterAccountId, $supplierId, $supplierId],
+            ];
+        }
+        return [
+            " AND (CASE WHEN {$pairNoExpr} IS NOT NULL
+                   THEN (SELECT 1 FROM journal_entry_lines cl
+                           JOIN chart_of_accounts cc ON cc.id = cl.account_id
+                          WHERE cl.supplier_id = ? AND cl.entry_id = {$entryExpr} AND cl.pair_no = {$pairNoExpr}
+                            AND (cl.account_id = ? OR cc.parent_id = ?)
+                            AND " . self::effectiveSideSql('cl') . " <> {$sideExpr}
+                          LIMIT 1)
+                   ELSE (SELECT 1 FROM journal_entry_lines cl
+                           JOIN chart_of_accounts cc ON cc.id = cl.account_id
+                          WHERE cl.supplier_id = ? AND cl.entry_id = {$entryExpr} AND cl.pair_no IS NULL
+                            AND (cl.account_id = ? OR cc.parent_id = ?)
+                            AND " . self::effectiveSideSql('cl') . " <> {$sideExpr}
+                            AND (cl.amount = {$amountExpr}
+                                 OR (NOT " . self::pairedSql($entryExpr, $amountExpr, true) . "
+                                     AND NOT " . self::pairedSql('cl.entry_id', 'cl.amount', true) . "))
+                          LIMIT 1)
+                   END) = 1",
+            [
+                $supplierId, $counterAccountId, $counterAccountId,
+                $supplierId, $counterAccountId, $counterAccountId, $supplierId, $supplierId,
+            ],
         ];
     }
 
-    /** Tvoří řádky dané částky v zápisu dvojici? Pravidlo viz {@see accountCounterTotals()}. */
-    private static function pairedSql(string $entryExpr, string $amountExpr): string
+    /**
+     * Tvoří řádky dané částky v zápisu dvojici? Pravidlo viz {@see accountCounterTotals()}.
+     * `$unpairedOnly`: jen mezi řádky bez `pair_no` (jednoduchý zápis).
+     */
+    private static function pairedSql(string $entryExpr, string $amountExpr, bool $unpairedOnly = false): string
     {
         return "(SELECT SUM(" . self::effectiveSideSql('pg') . " = 'debit') = SUM(" . self::effectiveSideSql('pg') . " = 'credit')
                    FROM journal_entry_lines pg
-                  WHERE pg.supplier_id = ? AND pg.entry_id = {$entryExpr} AND pg.amount = {$amountExpr})";
+                  WHERE pg.supplier_id = ? AND pg.entry_id = {$entryExpr} AND pg.amount = {$amountExpr}" . ($unpairedOnly ? ' AND pg.pair_no IS NULL' : '') . ")";
     }
 
     /** Strana, na které řádek skutečně působí: červené storno MD je účinkem Dal a naopak. */

@@ -436,6 +436,8 @@ ID. Rozdělení je idempotentní a administrátor ho může vzít zpět.
 2. V tabulce řad per účetní rok upravte **Prefix** (1 až 10 znaků A až Z a 0 až 9, uloží se velkými písmeny), **Tvar čísla** a **Další číslo**. Sloupec **Náhled** rovnou ukazuje, jak bude příští číslo vypadat.
 3. Uložte.
 
+Tyto řady jsou zároveň v číselníku řad firmy (`Firma → Nastavení`, záložka **Číselník řad**, [§ 95.6.1](95_Multi_supplier.md#9561-ciselnik-rad-vic-rad-pro-jeden-druh-dokladu)), kde jde pro pokladní a interní doklady založit další řady, nastavit výchozí řadu pokladny nebo uživatele a zkontrolovat úplnost po řadách.
+
 Tabulka drží řady dokladů per účetní rok:
 
 <!-- cols: 56 20 24 -->
@@ -489,6 +491,23 @@ Příloha k závěrce a uzávěrkový balíček respektují účetní rámec zvo
 - **Daně vůči finančnímu úřadu vykazovat v rozvaze souhrnně**: přeplatek jedné daně se v rozvaze započte s nedoplatkem jiné (§ 58 odst. 2 vyhlášky 500/2002 Sb.), volitelně **od účetního období**; viz [§ 57.7.2.1](57_Rozvaha.md#57721-souhrnne-vykazani-dani-vuci-financnimu-uradu).
 - **Minulé období výkazů převzít z uzavřeného výkazu minulého roku**: sloupec minulého období se sestaví s výjimkami mapování a volbami platnými v minulém roce; bez volby podle pravidel běžného roku. Viz [§ 57.7.1](57_Rozvaha.md#5771-obdobi-den-a-verze).
 - **Průměrný přepočtený počet zaměstnanců**: jde do přílohy K II. oddílu přiznání DPPO; aplikace úvazky nedopočítává, doplňte ručně.
+
+**Forma účetního zápisu:**
+
+Blok **Forma účetního zápisu** na stránce Účetní období (vidí ho uživatel se správou období) ukazuje dnešní formu firmy
+a historii změn: **Složený zápis** (dosavadní, výchozí) nebo **Jednoduchý zápis (po dvojicích)**, kde každý zápis tvoří
+dvojice Účet MD / Účet Dal ([§ 52.14.16](52_Ucetni_denik.md#521416-jednoduchy-zapis-po-dvojicich)).
+
+1. Jako správce firmy klikněte na **Změnit formu zápisu**.
+2. Zvolte formu a datum **Platí od**. Datum musí ležet v otevřeném a nezamčeném období, doporučený je první den období.
+3. Při přechodu na jednoduchý zápis spusťte **náhled převodu**. Ukáže, kolik zápisů od data se rozdělí automaticky, kolik se
+   zobrazí po dvojicích beze změny dat, kolik zůstane složených (M : N) a kolik se nezmění (uzavřené období, vazby na
+   úhrady, mzdy). Náhled nic nezapisuje.
+4. Uložte změnu. Zapíše se do auditního logu.
+
+Server změnu odmítne, když datum leží v uzavřeném nebo uzamčeném období, existuje novější změna formy, firma k datu
+nevede podvojné účetnictví, nebo jde o společenství vlastníků jednotek či neziskovou organizaci. Rozvaha, výsledovka,
+předvaha a přiznání k DPH vycházejí po přepnutí stejně jako před ním.
 
 > [!TIP]
 > Řada PP (Převody mezi účty) se využívá i mimo uzávěrkový průvodce. Na obrazovce ručního zápisu

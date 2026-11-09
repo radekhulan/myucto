@@ -63,6 +63,8 @@ export interface CashDocument {
   id: number; supplier_id: number; register_id: number
   doc_type: CashDocType; purpose: CashPurpose
   doc_number: string | null               // null jen u draftu (FE v1 drafty nezobrazuje)
+  /** Řada z číselníku: na konceptu volba, u čísla nová řada (null = dosavadní PPD/VPD). */
+  number_series_id?: number | null
   issue_date: string; tax_date: string | null
   partner_name: string | null; partner_ic: string | null; partner_dic: string | null
   description: string
@@ -81,6 +83,8 @@ export interface CashDocument {
 
 export interface CreateCashDocumentPayload {
   register_id: number; doc_type: CashDocType; purpose: CashPurpose
+  /** Řada z číselníku (víc řad v jedné pokladně); vynechané = beze změny, null = výchozí řada. */
+  number_series_id?: number | null
   issue_date: string; tax_date?: string | null
   description: string; total_amount: number
   amount_foreign?: number | null; fx_rate?: number | null   // valutová pokladna — částka v cizí měně + volitelný ruční kurz

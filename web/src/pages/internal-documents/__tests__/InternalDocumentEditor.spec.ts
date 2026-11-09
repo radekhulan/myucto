@@ -20,6 +20,7 @@ vi.mock('@/api/accounting', () => ({
       { id: 3, account_code: '546', name: 'Odpis pohledávky', is_active: true, account_type: 'expense' },
     ]),
     listCostCenters: vi.fn().mockResolvedValue([]),
+    getEntryForm: vi.fn().mockResolvedValue({ entry_form: 'composite', history: [] }),
   },
 }))
 vi.mock('@/api/internalDocuments', async () => {

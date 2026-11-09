@@ -352,6 +352,16 @@ function runAutoBackfills(\PDO $db, string $binDir, Connection $connection): voi
             'script'  => 'backfill-submission-folders.php',
         ],
         [
+            // Převod stávajících číselných řad do číselníku (migrace 2268), viz NumberSeriesCatalog.
+            'name'    => 'number-series-convert',
+            'reason'  => 'firem bez převedených číselných řad v číselníku',
+            'count'   => static fn (): int => (new \MyInvoice\Service\NumberSeries\NumberSeriesCatalog(
+                $connection,
+                new \MyInvoice\Repository\NumberSeriesRepository($connection),
+            ))->pending(),
+            'script'  => 'number-series-convert.php',
+        ],
+        [
             // Bankovní zápisy v otevřených obdobích s číslem mimo řadu účtu (migrace 1896),
             // viz BankDocumentNumberBackfill.
             'name'    => 'bank-document-series',

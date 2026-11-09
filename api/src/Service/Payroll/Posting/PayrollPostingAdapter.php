@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Posting;
 
 use MyInvoice\Repository\Payroll\PayrollPostingBatchRepository;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnedException;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
@@ -17,6 +18,7 @@ final class PayrollPostingAdapter
         private readonly PostingService $posting,
         private readonly PayrollPeriodOwnershipService $periodOwnership,
         private readonly PayrollPostingLineBuilder $lineBuilder,
+        private readonly EntryFormService $entryForms,
     ) {}
 
     /**
@@ -165,6 +167,17 @@ final class PayrollPostingAdapter
                 ];
             }
 
+            // Jednoduchá (párová) forma k datu zápisu: tytéž částky po dvojicích
+            // předkontací (souhrnně za firmu a středisko). Dávka i její otisky se
+            // počítají dál ze složených řádků, takže revize nemění target ani delta hash.
+            $journalLines = $preview->lines;
+            if ($this->entryForms->formAt($supplierId, $entryDate, true)->isSingle()) {
+                $journalLines = $this->lineBuilder->singleEntryLines(
+                    $preview->targetAllocations,
+                    $previous['allocations'] ?? [],
+                ) ?? $preview->lines;
+            }
+
             $journalEntryId = $this->posting->postDocument(
                 $supplierId,
                 'payroll',
@@ -175,6 +188,9 @@ final class PayrollPostingAdapter
                         'side' => $line['side'],
                         'amount' => self::decimal($line['amount_minor']),
                     ];
+                    if (isset($line['pair_group'])) {
+                        $mapped['pair_group'] = $line['pair_group'];
+                    }
                     if (isset($line['cost_center'])) {
                         $mapped['cost_center'] = $line['cost_center'];
                     }
@@ -185,7 +201,7 @@ final class PayrollPostingAdapter
                         $mapped['dimensions'] = $line['dimensions'];
                     }
                     return $mapped;
-                }, $preview->lines),
+                }, $journalLines),
                 [
                     'entry_date' => $entryDate,
                     'document_date' => $documentDate,

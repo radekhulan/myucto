@@ -79,6 +79,7 @@ import { useSidePreview } from '@/composables/useSidePreview'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
+import NumberSeriesSelect from '@/components/numberSeries/NumberSeriesSelect.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import { useDimensions } from '@/composables/useDimensions'
 import DurationInput from '@/components/ui/DurationInput.vue'
@@ -865,7 +866,12 @@ const vatClaimPeriodLabel = computed(() => {
   return parsed.toLocaleDateString(locale.value === 'en' ? 'en-US' : 'cs-CZ', { month: 'long', year: 'numeric' })
 })
 
+// Řada z číselníku pro interní číslo (jen doklad bez čísla). undefined = beze změny,
+// null = výchozí řada. Výběr se ukáže jen při víc řadách přijatých dokladů.
+const numberSeriesId = ref<number | null | undefined>(undefined)
+
 function populate(inv: PurchaseInvoice) {
+  numberSeriesId.value = inv.varsymbol ? undefined : ((inv as { number_series_id?: number | null }).number_series_id ?? undefined)
   windowVendor.value = inv.vendor_id ? { id: inv.vendor_id, name: inv.vendor_company_name ?? '' } : null
   form.value.vendor_id = inv.vendor_id
   form.value.vendor_invoice_number = inv.vendor_invoice_number
@@ -1593,6 +1599,7 @@ function buildPayload(): PurchaseInvoicePayload {
       vendor_id: form.value.vendor_id!,
       vendor_invoice_number: form.value.vendor_invoice_number,
       varsymbol: form.value.varsymbol || null,
+      number_series_id: form.value.varsymbol ? undefined : numberSeriesId.value,
       document_kind: form.value.document_kind,
       issue_date: form.value.issue_date,
       tax_date: form.value.tax_date || null,
@@ -2103,6 +2110,8 @@ useWindowTitle(
                    placeholder="PF2605001" />
             <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.fields.varsymbol_hint') }}</p>
           </div>
+          <NumberSeriesSelect v-if="!form.varsymbol" class="sm:col-span-2"
+            :scope="{ module: 'purchase-invoices' }" v-model="numberSeriesId" />
         </div>
 
         <!-- Dates -->
