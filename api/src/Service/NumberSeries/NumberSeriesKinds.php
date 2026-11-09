@@ -57,8 +57,50 @@ final class NumberSeriesKinds
         'internal' => ['table' => 'internal_documents', 'number' => 'document_no', 'date' => 'entry_date'],
     ];
 
+    /**
+     * Názvy druhů a rozsahů pro hlášky serveru. Zrcadlí `number_series.kinds`
+     * a `number_series.scopes` v `web/src/i18n/cs.json`, ze kterých skládá popisek
+     * řady bez názvu frontend ({@see self::displayName()}).
+     */
+    private const KIND_NAMES = [
+        'invoice' => 'Faktury', 'proforma' => 'Zálohové faktury', 'credit_note' => 'Dobropisy',
+        'simplified' => 'Zjednodušené daňové doklady', 'purchase' => 'Přijaté doklady',
+        'cash_in' => 'Příjmové pokladní doklady', 'cash_out' => 'Výdajové pokladní doklady',
+        'manual' => 'Interní doklady', 'stock_in' => 'Příjemky', 'stock_out' => 'Výdejky',
+        'stock_transfer' => 'Převodky', 'purchase_order' => 'Objednávky',
+        'other_receivable' => 'Ostatní pohledávky', 'other_payable' => 'Ostatní závazky',
+        'offset' => 'Zápočty', 'closing' => 'Uzávěrkové zápisy', 'opening' => 'Otevření účtů',
+        'fx' => 'Kurzové rozdíly', 'transfer' => 'Převody', 'bank' => 'Bankovní výpisy',
+    ];
+
+    private const SCOPE_NAMES = [
+        'cash_register' => 'pokladna', 'client' => 'klient', 'revenue_category' => 'kategorie tržby',
+        'other_item_kind' => 'druh', 'bank_account' => 'účet',
+    ];
+
     /** Šablona nové řady, dokud ji uživatel nezmění (`HP260001`). */
     public const DEFAULT_NATIVE_TEMPLATE = '{PREFIX}{YY}{CCCC}';
+
+    /**
+     * Zobrazovaný název řady: vlastní název, jinak (převedená řada má `name` prázdné)
+     * druh dokladu doplněný o rozsah, např. „Faktury - klient Alfa s.r.o.".
+     * Stejně skládá popisek seznam řad ve frontendu (`numberSeriesLabel`).
+     *
+     * @param string $scopeLabel název pokladny, klienta, kategorie nebo účtu ('' = firemní řada)
+     */
+    public static function displayName(string $kind, string $name, string $scopeType, string $scopeLabel): string
+    {
+        if (trim($name) !== '') {
+            return trim($name);
+        }
+        $kindName = self::KIND_NAMES[$kind] ?? $kind;
+        if ($scopeLabel === '') {
+            return $kindName;
+        }
+        $scope = self::SCOPE_NAMES[$scopeType] ?? '';
+
+        return $kindName . ' - ' . ($scope !== '' ? $scope . ' ' : '') . $scopeLabel;
+    }
 
     public static function exists(string $kind): bool
     {

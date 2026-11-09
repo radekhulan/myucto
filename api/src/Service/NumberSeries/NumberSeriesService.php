@@ -610,7 +610,12 @@ final class NumberSeriesService
             if (self::matches($mine, $theirs, $date) || self::matches($theirs, $mine, $date)) {
                 throw new NumberSeriesException(
                     'template_overlap',
-                    'Čísla řady by se mohla plést s řadou „' . $this->label($row, $this->scopeNames($supplierId)) . '" (' . $other['template'] . '). Zvolte jiný prefix nebo tvar čísla.',
+                    'Čísla řady by se mohla plést s řadou „' . NumberSeriesKinds::displayName(
+                        (string) $row['doc_kind'],
+                        (string) $row['name'],
+                        (string) $row['scope_type'],
+                        $this->label(['name' => ''] + $row, $this->scopeNames($supplierId)),
+                    ) . '" (' . $other['template'] . '). Zvolte jiný prefix nebo tvar čísla.',
                 );
             }
             // Bankovní párování bere z variabilního symbolu jen číslice ({@see VarsymbolSeriesCollisionChecker}).
