@@ -29,6 +29,7 @@ use MyInvoice\Service\Accounting\AccountCodeRangeException;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentRepostService;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\JournalEntryDeletionRules;
 use MyInvoice\Service\Accounting\JournalHistoryService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
@@ -123,6 +124,7 @@ final class JournalAction
         private readonly ManualJournalEntryService $manualEntries,
         private readonly InternalDocumentService $internalDocuments,
         private readonly InvoicePostingProposal $proposal,
+        private readonly EntryFormService $entryForms,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -168,6 +170,11 @@ final class JournalAction
         $documentCounts = $includeDocuments ? $this->listExtras->documentCounts($supplierId, $entryIds) : [];
         // Odkaz na interní doklad, jehož zaúčtováním nebo stornem zápis je (migrace 2193).
         $internalDocuments = $this->internalDocuments->forJournalEntries($supplierId, $entryIds);
+        // Posouzení zápisu bez dvojic jen u firmy s jednoduchým zápisem; složená firma
+        // klíč nedostane a odpověď zůstává beze změny.
+        $pairStatuses = $this->entryForms->hasAnySingle($supplierId)
+            ? $this->journal->pairStatusesForEntries($supplierId, $entryIds)
+            : null;
         $vatBySource = [];
         if ($includeVat) {
             foreach (['invoice', 'purchase_invoice'] as $source) {
@@ -182,6 +189,9 @@ final class JournalAction
             $item['automation'] = $provenance[(int) $item['id']] ?? null;
             $item['has_related'] = isset($related[(int) $item['id']]);
             $item['internal_document'] = $internalDocuments[(int) $item['id']] ?? null;
+            if ($pairStatuses !== null) {
+                $item['pair_status'] = $pairStatuses[(int) $item['id']] ?? null;
+            }
             if ($includePosting) {
                 $item['posting_lines'] = $linesByEntry[(int) $item['id']] ?? [];
             }
@@ -314,6 +324,11 @@ final class JournalAction
         if (in_array(($q['reversal'] ?? null), ['reversed', 'reversal', 'any', 'none'], true)) {
             $filters['reversal'] = (string) $q['reversal'];
         }
+        // Zápisy jednoduché formy, které zůstaly složené (M : N k ruční úpravě) nebo
+        // převod nepřipadá v úvahu.
+        if (in_array(($q['pair_status'] ?? null), ['composite_mn', 'ineligible'], true)) {
+            $filters['pair_status'] = (string) $q['pair_status'];
+        }
         // Rozsah účtů je prefixový včetně krajů (AccountCodeRange): 5 až 5 = celá třída 5.
         $from = $q['account_from'] ?? '';
         $to = $q['account_to'] ?? '';
@@ -409,6 +424,18 @@ final class JournalAction
         // Jednoduchý zápis: dvojice a posouzení zápisu bez dvojic. Složený zápis bez
         // posouzení klíče nedostane, odpověď zůstává jako dřív.
         $entry += $this->journal->pairView($supplierId, $id, $entry['lines']);
+        if (isset($entry['pairs'])) {
+            // Názvy účtů dvojice z řádků, které už nesou název z osnovy (žádný další dotaz).
+            $names = array_column($entry['lines'], 'account_name', 'id');
+            foreach ($entry['pairs'] as &$pair) {
+                $pair['debit_account_name'] = $names[$pair['debit_line_id']] ?? null;
+                $pair['credit_account_name'] = $names[$pair['credit_line_id']] ?? null;
+            }
+            unset($pair);
+        }
+        if ($this->entryForms->hasAnySingle($supplierId)) {
+            $entry['entry_form'] = $this->entryForms->formAt($supplierId, (string) $entry['entry_date'])->value;
+        }
         $entry['automation'] = $this->automationProvenance->forJournalEntries($supplierId, [$id])[$id] ?? null;
         // Měkké vazby na doklady (migrace 1514) — detail zápisu je jediné místo, kde
         // je uživatel spravuje, takže chodí rovnou s ním, ne dalším requestem.
