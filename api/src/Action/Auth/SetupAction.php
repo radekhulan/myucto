@@ -110,6 +110,7 @@ final class SetupAction
             $periodProvisioner,
             $autoPosting,
             $log,
+            new \MyInvoice\Service\Accounting\EntryForm\EntryFormInstallationDefault($db, $config),
         );
     }
 

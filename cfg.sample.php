@@ -523,6 +523,14 @@ return [
         // ENV varianta: MYINVOICE_INVOICE_PUBLIC_LINKS=0
         'public_links' => true,
     ],
+    'accounting' => [
+        // Výchozí forma účetního zápisu nově založených firem: 'composite' (složený
+        // zápis, výchozí) nebo 'single' (jednoduchý zápis po dvojicích MD/Dal od
+        // začátku účetnictví). Týká se jen firem založených nebo aktivovaných
+        // v podvojném účetnictví po nastavení; stávající firmy se nemění.
+        // ENV varianta: MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM=single
+        'default_entry_form' => 'composite',
+    ],
     'pagination' => [
         // Velikost stránky pro tlačítko "Další" v UI seznamech.
         // Min/max hranice (5 / 200) se enforcují v API; mimo rozsah API hodnotu clampuje.

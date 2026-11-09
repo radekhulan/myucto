@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Service\Accounting\AutoPostingPolicyService;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormInstallationDefault;
 use PDO;
 
 /**
@@ -31,6 +32,7 @@ final class AccountingUnitSwitch
         private readonly Connection $db,
         private readonly AccountingModeRepository $modes,
         private readonly AutoPostingPolicyService $policy,
+        private readonly EntryFormInstallationDefault $entryFormDefault,
     ) {}
 
     /** @return array<string,mixed> stav automatiky a režimu před převodem */
@@ -104,6 +106,8 @@ final class AccountingUnitSwitch
                   WHERE supplier_id = ? AND effective_from > ? AND effective_from <= ? AND accounting_mode <> 'double_entry'"
             )->execute([$supplierId, $since, $until]);
         }
+        // Výchozí forma zápisu instalace dřív, než převod zapíše první zápis deníku.
+        $this->entryFormDefault->apply($supplierId, null, activating: true);
         if (!$onSupplier) {
             $this->modes->record($supplierId, $since, 'double_entry');
             return;

@@ -439,6 +439,12 @@ final class Config
                     'approver' => \MyInvoice\Service\Payroll\Ruleset\VendorRulesetApprover::DEFAULT_NAME,
                 ],
             ],
+            // Výchozí forma účetního zápisu NOVÝCH firem instalace ('composite' = složený,
+            // 'single' = jednoduchý po dvojicích). Stávající firmy se nemění, firma si formu
+            // dál přepíná sama v nastavení účetnictví. Viz EntryFormInstallationDefault.
+            'accounting' => [
+                'default_entry_form' => 'composite',
+            ],
             'ares' => [
                 'api'       => 'https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty',
                 'cache_ttl' => 86400,
@@ -478,6 +484,7 @@ final class Config
             'MYINVOICE_APP_ENV'     => ['app.env', 'string'],
             'MYINVOICE_APP_DEBUG'   => ['app.debug', 'bool'],
             'MYINVOICE_OVERDUE_INCLUDES_TODAY' => ['invoices.overdue_includes_today', 'bool'],
+            'MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM' => ['accounting.default_entry_form', 'string'],
             'MYINVOICE_INVOICE_PUBLIC_LINKS' => ['invoices.public_links', 'bool'],
             'MYINVOICE_APP_URL'     => ['app.url', 'string'],
             'MYINVOICE_DOMAINS_ENABLED' => ['domains.enabled', 'bool'],
