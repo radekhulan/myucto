@@ -31,6 +31,7 @@ vi.mock('@/api/accounting', () => ({
     listJournal: m.listJournal,
     exportReport: m.exportReport,
     getEntry: m.getEntry,
+    getEntryForm: vi.fn().mockResolvedValue({ entry_form: 'composite', history: [] }),
   },
 }))
 vi.mock('vue-router', () => ({

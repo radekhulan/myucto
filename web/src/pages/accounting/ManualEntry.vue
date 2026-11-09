@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { journalAmount } from '@/utils/journalAmount'
-import { ref, onMounted, reactive, computed, useId } from 'vue'
+import { ref, onMounted, reactive, computed, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, useRoute } from 'vue-router'
 import {
   accountingApi,
   type ChartAccount, type CostCenter, type JournalSide, type ManualLinePayload,
   type JournalTemplateSummary, type JournalTemplateLinePayload,
-  type LinkCandidate, type JournalLinkPayload,
+  type LinkCandidate, type JournalLinkPayload, type EntryFormHistoryRow, type ManualPairPayload,
 } from '@/api/accounting'
 import { transferApi } from '@/api/closing'
 import { documentsApi } from '@/api/documents'
@@ -21,6 +21,8 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import JournalPairsEditor, { type PairEditorRow } from '@/components/accounting/JournalPairsEditor.vue'
+import { apiErrorInfo, apiErrorText, entryFormAt, linesToPairs, pairsToLines } from '@/utils/entryForm'
 import { compactDimensions, type DimensionMap } from '@/api/dimensions'
 import { useDimensions } from '@/composables/useDimensions'
 
@@ -57,6 +59,43 @@ const form = reactive({
   document_no: '',
 })
 const lines = ref<LineRow[]>([emptyLine('debit'), emptyLine('credit')])
+
+// ── Forma zápisu (bod 6): jednoduchý zápis po dvojicích, složený po řádcích ──
+// Forma se čte z historie firmy k datu zápisu; firma bez volby (složená) nevidí nic nového.
+interface PairRow extends PairEditorRow { dimensions: DimensionMap }
+function emptyPair(): PairRow {
+  return { debit_account_code: '', credit_account_code: '', amount: null, line_text: '', cost_center: '', dimensions: {} }
+}
+const entryFormHistory = ref<EntryFormHistoryRow[]>([])
+const entryForm = computed(() => entryFormAt(entryFormHistory.value, form.entry_date))
+const isSingle = computed(() => entryForm.value === 'single')
+const pairs = ref<PairRow[]>([emptyPair()])
+const pairErrors = ref<Record<number, string>>({})
+const pairsEditor = ref<InstanceType<typeof JournalPairsEditor> | null>(null)
+
+function pairsFromLines(src: LineRow[]): PairRow[] | null {
+  const drafts = linesToPairs(src.map(l => ({ account_code: l.account_code, side: l.side, amount: l.amount, is_red_storno: l.is_red_storno })))
+  if (!drafts) return null
+  return drafts.map(d => ({ ...emptyPair(), ...d }))
+}
+
+// Změna data přes hranici formy (např. před datum přepnutí) převede rozepsané řádky
+// na dvojice a zpět, kde je převod jednoznačný; jinak se začne prázdnou verzí.
+watch(isSingle, (single) => {
+  pairErrors.value = {}
+  if (single) {
+    if (lines.value.every(l => !l.account_code.trim() && l.amount == null)) { pairs.value = [emptyPair()]; return }
+    const converted = pairsFromLines(lines.value)
+    if (converted) pairs.value = converted
+    else { pairs.value = [emptyPair()]; toast.warning(t('accounting.pairs.manual.lines_not_pairable')) }
+  } else {
+    const filled = pairs.value.filter(p => p.debit_account_code.trim() || p.credit_account_code.trim() || p.amount != null)
+    lines.value = filled.length
+      ? pairsToLines(filled.map(p => ({ debit_account_code: p.debit_account_code, credit_account_code: p.credit_account_code, amount: Number(p.amount) || 0, is_red_storno: p.is_red_storno })))
+        .map(l => ({ ...emptyLine(l.side), account_code: l.account_code, amount: l.amount, is_red_storno: l.is_red_storno }))
+      : [emptyLine('debit'), emptyLine('credit')]
+  }
+})
 /** Dokumenty (Dokumenty → soubory), které se na zápis z AI návrhu navážou po uložení. */
 const aiDraftDocumentIds = ref<number[]>([])
 
@@ -97,6 +136,7 @@ onMounted(async () => {
   await Promise.all([
     accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] }),
     accountingApi.listCostCenters().then(v => { costCenters.value = v }).catch(() => { costCenters.value = [] }),
+    accountingApi.getEntryForm().then(v => { entryFormHistory.value = v.history }).catch(() => { entryFormHistory.value = [] }),
   ])
 
   // Návrh z AI asistenta („Upravit v ručním zápisu") jede v history.state,
@@ -112,6 +152,7 @@ onMounted(async () => {
       amount: Number(l.amount) || null,
     }))
     aiDraftDocumentIds.value = (aiDraft.document_ids ?? []).filter(id => Number.isInteger(id) && id > 0)
+    if (isSingle.value) adoptLinesAsPairs()
     return
   }
 
@@ -130,6 +171,20 @@ onMounted(async () => {
         cost_center: l.cost_center ?? '',
         dimensions: { ...(l.dimensions ?? {}) },
       }))
+      if (isSingle.value) {
+        if (src.pairs?.length) {
+          pairs.value = src.pairs.map(p => ({
+            ...emptyPair(),
+            debit_account_code: p.debit_account_code,
+            credit_account_code: p.credit_account_code,
+            amount: p.amount,
+            line_text: p.line_text ?? '',
+            is_red_storno: !!p.is_red_storno,
+          }))
+        } else {
+          adoptLinesAsPairs()
+        }
+      }
       // Vazby na doklady jedou s kopií: opravný zápis se skoro vždy váže na tentýž
       // doklad jako ten původní. Doklad mezitím smazaný (bez popisu) se vynechá.
       pickedLinks.value = (src.links ?? [])
@@ -206,10 +261,19 @@ async function saveExtras(entryId: number) {
   note.value = ''
 }
 
+/** Řádky načtené ze zdroje (AI návrh, kopie, šablona) převede na dvojice, kde je to jednoznačné. */
+function adoptLinesAsPairs() {
+  const converted = pairsFromLines(lines.value)
+  if (converted) {
+    pairs.value = converted
+  } else {
+    pairs.value = [emptyPair()]
+    toast.warning(t('accounting.pairs.manual.lines_not_pairable'))
+  }
+}
+
 function addLine() { lines.value.push(emptyLine()) }
 function removeLine(i: number) { if (lines.value.length > 1) lines.value.splice(i, 1) }
-const linesHaveAccounts = computed(() =>
-  lines.value.length > 0 && lines.value.every(l => l.account_code.trim() !== ''))
 
 const totalDebit = computed(() =>
   lines.value.filter(l => l.side === 'debit').reduce((s, l) => s + journalAmount(l), 0),
@@ -224,7 +288,9 @@ const balanced = computed(() => diff.value === 0 && lines.value.some(l => Number
 const hasEmptyLine = computed(() =>
   lines.value.some(l => !l.account_code.trim() || !(Number(l.amount) > 0)),
 )
-const canSubmit = computed(() => balanced.value && !hasEmptyLine.value && !saving.value)
+const canSubmit = computed(() => isSingle.value
+  ? !!pairsEditor.value?.complete && !saving.value
+  : balanced.value && !hasEmptyLine.value && !saving.value)
 
 /**
  * @param andNew Po úspěchu nenaviguje do deníku, ale vyčistí řádky pro další zápis
@@ -233,11 +299,30 @@ const canSubmit = computed(() => balanced.value && !hasEmptyLine.value && !savin
 async function save(andNew = false) {
   if (blockDemoMutation()) return
   error.value = ''
+  pairErrors.value = {}
   if (!form.entry_date) { error.value = t('accounting.manual.date_required'); return }
-  if (hasEmptyLine.value) { error.value = t('accounting.manual.lines_incomplete'); return }
-  if (!balanced.value) { error.value = t('accounting.manual.not_balanced'); return }
+  if (isSingle.value) {
+    if (!pairsEditor.value?.complete) { error.value = t('accounting.pairs.manual.pairs_incomplete'); return }
+  } else {
+    if (hasEmptyLine.value) { error.value = t('accounting.manual.lines_incomplete'); return }
+    if (!balanced.value) { error.value = t('accounting.manual.not_balanced'); return }
+  }
 
-  const payloadLines: ManualLinePayload[] = lines.value.map(l => {
+  const payloadPairs: ManualPairPayload[] = isSingle.value ? pairs.value.map(p => {
+    const pair: ManualPairPayload = {
+      debit_account_code: p.debit_account_code.trim(),
+      credit_account_code: p.credit_account_code.trim(),
+      amount: Number(p.amount),
+      is_red_storno: !!p.is_red_storno,
+    }
+    if (p.line_text.trim()) pair.line_text = p.line_text.trim()
+    if (p.cost_center?.trim()) pair.cost_center = p.cost_center.trim()
+    const pairDims = compactDimensions(p.dimensions)
+    if (dims.enabled.value && Object.keys(pairDims).length > 0) pair.dimensions = pairDims
+    return pair
+  }) : []
+
+  const payloadLines: ManualLinePayload[] = isSingle.value ? [] : lines.value.map(l => {
     const line: ManualLinePayload = {
       account_code: l.account_code.trim(),
       side: l.side,
@@ -262,7 +347,7 @@ async function save(andNew = false) {
       entry_date: form.entry_date,
       description: form.description.trim() || undefined,
       document_no: form.document_no.trim() || undefined,
-      lines: payloadLines,
+      ...(isSingle.value ? { pairs: payloadPairs } : { lines: payloadLines }),
       ...(payloadLinks.length ? { links: payloadLinks } : {}),
     })
     toast.success(t('accounting.manual.saved', { id: entry.id }))
@@ -279,16 +364,19 @@ async function save(andNew = false) {
     if (andNew) {
       form.document_no = ''
       lines.value = [emptyLine('debit'), emptyLine('credit')]
+      pairs.value = [emptyPair()]
       pickedLinks.value = []
     } else {
       router.push('/accounting/journal')
     }
   } catch (e: any) {
-    const code = e?.response?.data?.error?.code
-    const localized = code ? t(`accounting.error.${code}`) : ''
-    error.value = (localized && localized !== `accounting.error.${code}`)
-      ? localized
-      : (e?.response?.data?.error?.message || t('common.error'))
+    const info = apiErrorInfo(e)
+    // Chyba dvojice míří na řádek editoru (index = číslo dvojice - 1), ostatní do hlášky formuláře.
+    if (isSingle.value && info.pairNo !== null && info.code.startsWith('pair_')) {
+      pairErrors.value = { [info.pairNo - 1]: apiErrorText({ response: { data: { error: { code: info.code, message: info.message } } } }, t) }
+    } else {
+      error.value = apiErrorText(e, t, true)
+    }
   } finally {
     saving.value = false
   }
@@ -301,22 +389,40 @@ const templateError = ref('')
 const templateForm = reactive({ name: '', description: '', keepAmounts: false })
 const templateLineLabels = ref<string[]>([])
 
+/** Řádky pro šablonu: ve formě jednoduchý zápis dvojice rozepsané na MD a Dal s číslem dvojice. */
+interface TemplateSourceLine extends LineRow { pair_no?: number; line_text?: string }
+const templateSource = computed<TemplateSourceLine[]>(() => isSingle.value
+  ? pairs.value.flatMap((p, i) => (['debit', 'credit'] as const).map(side => ({
+      ...emptyLine(side),
+      account_code: side === 'debit' ? p.debit_account_code : p.credit_account_code,
+      amount: p.amount,
+      is_red_storno: p.is_red_storno,
+      cost_center: p.cost_center ?? '',
+      dimensions: p.dimensions,
+      pair_no: i + 1,
+      line_text: p.line_text,
+    })))
+  : lines.value)
+const templateHasAccounts = computed(() =>
+  templateSource.value.length > 0 && templateSource.value.every(l => l.account_code.trim() !== ''))
+
 function openSaveTemplate() {
   templateError.value = ''
   templateForm.name = ''
   templateForm.description = ''
   templateForm.keepAmounts = false
-  templateLineLabels.value = lines.value.map(l => accountByCode.value[l.account_code]?.name ?? '')
+  templateLineLabels.value = templateSource.value.map(l => accountByCode.value[l.account_code]?.name ?? '')
   showSaveTemplate.value = true
 }
 
 async function submitSaveTemplate() {
   templateError.value = ''
-  if (lines.value.some(l => l.is_red_storno)) { templateError.value = t('accounting.journal.red_storno_template_unsupported'); return }
+  if (templateSource.value.some(l => l.is_red_storno)) { templateError.value = t('accounting.journal.red_storno_template_unsupported'); return }
   const name = templateForm.name.trim()
   if (!name) { templateError.value = t('accounting.manual.template.name_required'); return }
 
-  const payloadLines: JournalTemplateLinePayload[] = lines.value.map((l, i) => ({
+  const payloadLines: JournalTemplateLinePayload[] = templateSource.value.map((l, i) => ({
+    ...(l.pair_no ? { pair_no: l.pair_no, line_text: l.line_text?.trim() || null } : {}),
     account_code: l.account_code.trim(),
     side: l.side,
     amount: templateForm.keepAmounts && Number(l.amount) > 0 ? Number(l.amount) : null,
@@ -367,6 +473,35 @@ async function openLoadTemplate() {
   }
 }
 
+/**
+ * Šablona po dvojicích (řádky s `pair_no`) naplní editor dvojic přímo; řádková šablona
+ * se převede, kde je párování jednoznačné, jinak uživatel dvojice zadá sám.
+ */
+function applyTemplatePairs(tplLines: { pair_no?: number | null; line_text?: string | null; account_code: string; side: JournalSide; default_amount: number | null; cost_center: string | null; dimensions?: Record<number, number> }[]) {
+  if (tplLines.length > 0 && tplLines.every(l => l.pair_no)) {
+    const byNo = new Map<number, typeof tplLines>()
+    for (const l of tplLines) byNo.set(l.pair_no!, [...(byNo.get(l.pair_no!) ?? []), l])
+    const built: PairRow[] = []
+    for (const [, group] of [...byNo.entries()].sort((a, b) => a[0] - b[0])) {
+      const debit = group.find(l => l.side === 'debit')
+      const credit = group.find(l => l.side === 'credit')
+      if (!debit || !credit) { adoptLinesAsPairs(); return }
+      built.push({
+        ...emptyPair(),
+        debit_account_code: debit.account_code,
+        credit_account_code: credit.account_code,
+        amount: debit.default_amount,
+        line_text: debit.line_text ?? credit.line_text ?? '',
+        cost_center: debit.cost_center ?? credit.cost_center ?? '',
+        dimensions: { ...(debit.dimensions ?? credit.dimensions ?? {}) },
+      })
+    }
+    pairs.value = built
+    return
+  }
+  adoptLinesAsPairs()
+}
+
 /** Předvyplní řádky ManualEntry ze šablony; needitovatelné nic není — účet/strana/částka lze v gridu přepsat. */
 async function applyTemplate(id: number): Promise<void> {
   loadingTemplateDetail.value = true
@@ -380,6 +515,7 @@ async function applyTemplate(id: number): Promise<void> {
       cost_center: l.cost_center ?? '',
       dimensions: { ...(l.dimensions ?? {}) },
     }))
+    if (isSingle.value) applyTemplatePairs(tpl.lines)
     if (!form.description.trim()) form.description = tpl.name
     showLoadTemplate.value = false
   } catch (e: any) {
@@ -409,6 +545,7 @@ async function importTemplateCsv() {
       cost_center: l.cost_center ?? '',
       dimensions: {},
     }))
+    if (isSingle.value) adoptLinesAsPairs()
     const tpl = templates.value.find(t2 => t2.id === selectedTemplateId.value)
     if (tpl && !form.description.trim()) form.description = tpl.name
     showLoadTemplate.value = false
@@ -595,8 +732,23 @@ async function submitTransfer(force = false) {
         <DocumentLinkPicker :excluded="pickedKeys" @select="addPickedLink" />
       </div>
 
+      <!-- Dvojice (jednoduchý zápis): Účet MD, Účet Dal, Částka, text. Zápis je vyrovnaný z definice. -->
+      <div v-if="isSingle" data-test="manual-pairs">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+          <label class="text-sm font-medium text-neutral-700">{{ t('accounting.pairs.manual.pairs') }}</label>
+          <span class="text-xs px-2 py-0.5 rounded bg-primary-50 text-primary-700">{{ t('accounting.pairs.settings.form_single') }}</span>
+        </div>
+        <p class="text-xs text-neutral-500 mb-2">{{ t('accounting.pairs.manual.hint') }}</p>
+        <JournalPairsEditor ref="pairsEditor" v-model="pairs" :accounts="accounts" :errors="pairErrors"
+          with-cost-center :cost-center-list-id="`${pageId}-cost-center-options`" list-id="manual-pairs-coa">
+          <template #extra="{ pair }">
+            <DimensionFields v-if="dims.enabled.value" v-model="(pair as PairRow).dimensions" compact class="col-span-12" />
+          </template>
+        </JournalPairsEditor>
+      </div>
+
       <!-- Řádky -->
-      <div>
+      <div v-else>
         <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
           <label class="text-sm font-medium text-neutral-700">{{ t('accounting.manual.lines') }}</label>
           <button type="button" @click="addLine" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']">
@@ -645,7 +797,7 @@ async function submitTransfer(force = false) {
       </div>
 
       <!-- Balance indikátor -->
-      <div class="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 pt-3">
+      <div v-if="!isSingle" class="flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 pt-3">
         <div class="flex items-center gap-4 text-sm">
           <span class="text-neutral-500">{{ t('accounting.journal.side.debit') }}: <strong class="font-mono text-neutral-800">{{ formatMoney(totalDebit) }}</strong></span>
           <span class="text-neutral-500">{{ t('accounting.journal.side.credit') }}: <strong class="font-mono text-neutral-800">{{ formatMoney(totalCredit) }}</strong></span>
@@ -701,7 +853,7 @@ async function submitTransfer(force = false) {
       <div v-if="error" class="text-sm text-danger-500">{{ error }}</div>
 
       <div class="flex flex-wrap justify-end gap-2 border-t border-neutral-200 pt-3">
-        <button type="button" @click="openSaveTemplate" :disabled="!linesHaveAccounts" :class="btnOutline('neutral')">
+        <button type="button" @click="openSaveTemplate" :disabled="!templateHasAccounts" :class="btnOutline('neutral')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
           <span class="whitespace-nowrap">{{ t('accounting.manual.template.save_as') }}</span>
         </button>
@@ -812,7 +964,7 @@ async function submitTransfer(force = false) {
           </div>
           <div class="space-y-1.5">
             <label class="block text-sm font-medium text-neutral-700">{{ t('accounting.manual.template.line_labels') }}</label>
-            <div v-for="(l, i) in lines" :key="i" class="flex items-center gap-2 text-sm">
+            <div v-for="(l, i) in templateSource" :key="i" class="flex items-center gap-2 text-sm">
               <span class="font-mono text-xs text-neutral-500 w-24 shrink-0 truncate">{{ l.account_code || '—' }} {{ t(`accounting.journal.side.${l.side}`) }}</span>
               <input v-model="templateLineLabels[i]" type="text" maxlength="255"
                 :placeholder="t('accounting.manual.template.line_label_placeholder')"

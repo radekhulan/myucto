@@ -2,7 +2,8 @@
 import { computed, nextTick, onMounted, reactive, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { accountingApi, type ChartAccount, type CostCenter, type LinkCandidate, type LinkableDocType } from '@/api/accounting'
+import { accountingApi, type ChartAccount, type CostCenter, type EntryFormHistoryRow, type LinkCandidate, type LinkableDocType } from '@/api/accounting'
+import { apiErrorText, entryFormAt } from '@/utils/entryForm'
 import type { Client } from '@/api/clients'
 import {
   internalDocumentsApi, INTERNAL_DOCUMENT_KINDS,
@@ -46,6 +47,10 @@ const error = ref('')
 const accounts = ref<ChartAccount[]>([])
 const costCenters = ref<CostCenter[]>([])
 const activeTemplate = ref<string | null>(null)
+// Firma s jednoduchým zápisem k datu účetního případu: server řádky rozdělí na dvojice (1 : N),
+// zápis M : N odmítne kódem `pairing_required`; jinak se nic nemění.
+const entryFormHistory = ref<EntryFormHistoryRow[]>([])
+const isSingleForm = computed(() => entryFormAt(entryFormHistory.value, form.entry_date || form.document_date) === 'single')
 
 const today = appIsoDate()
 const form = reactive({
@@ -178,7 +183,7 @@ function payload(): InternalDocumentPayload {
 }
 
 function errorMessage(e: any): string {
-  return e?.response?.data?.error?.message || t('common.error')
+  return apiErrorText(e, t)
 }
 
 /**
@@ -233,6 +238,7 @@ async function load() {
     const requests: Promise<unknown>[] = [
       accountingApi.listAccounts().then(value => { accounts.value = value }).catch(() => { accounts.value = [] }),
       accountingApi.listCostCenters().then(value => { costCenters.value = value }).catch(() => { costCenters.value = [] }),
+      accountingApi.getEntryForm().then(value => { entryFormHistory.value = value.history }).catch(() => { entryFormHistory.value = [] }),
     ]
     if (isEdit.value) {
       requests.push(internalDocumentsApi.get(editId.value).then(doc => {
@@ -335,6 +341,7 @@ onMounted(load)
           <div>
             <h2 class="font-semibold">{{ t('internal_documents.lines') }}</h2>
             <p class="mt-0.5 text-sm text-neutral-500">{{ t('internal_documents.lines_hint') }}</p>
+            <p v-if="isSingleForm" class="mt-1 text-sm text-primary-700" data-test="single-form-hint">{{ t('accounting.pairs.internal.hint') }}</p>
           </div>
           <div class="flex flex-wrap gap-2">
             <button type="button" :disabled="!canBalance" data-test="balance" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" @click="balance">

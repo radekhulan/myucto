@@ -228,6 +228,12 @@ bloku opis vyfiltrujete.
 Řádek složeného zápisu se ukáže celý, sloupec **Zůstatek** dál ukazuje zůstatek
 celého účtu a filtr platí i pro export. Výběr syntetiky zahrne její analytiky.
 
+**Jednoduchý zápis.** U firmy s jednoduchým zápisem ([§ 52.14.16](52_Ucetni_denik.md#521416-jednoduchy-zapis-po-dvojicich))
+má každý pohyb z dvojice jediný protiúčet, celou částku a číslo dvojice, takže součty po protiúčtech i filtr vycházejí přesně
+a bez dělení poměrem. Starší složený zápis 1 : N se v opisu zobrazí rozložený na pohyby (odznak **rozloženo**), data zůstanou
+beze změny. Zápis M : N, který nejde rozložit, zůstane v původním tvaru s odznakem **M : N**. V měsíčním rozpadu hlavní knihy
+je u řádků sloupec **Protiúčet**. Firma se složeným zápisem vidí opis stejně jako dosud.
+
 Záložka **Inventura účtu** ukazuje účetní a skutečný stav účtu a jeho analytik
 z [inventarizačního protokolu](69_Inventarizace_rozvahovych_uctu.md) k rozvahovému
 dni. Vedou na ni odkazy z rozvahy a výsledovky po účtech.
