@@ -30,6 +30,8 @@ final class ConfigSnapshot
         '379afca8f93768980d6b6ed1a16a24d928adc410b90eb10edc04204dab761c27',
         // Bez auth.oidc.break_glass_roles (vynucení i pro správce instance); DB, údaje ani runtime cesty beze změny.
         'aace5ef9e71fa14494ce3e846d0f0122bca05802dbd29a7a546b95ca3e8a3757',
+        // auth.oidc.tokens_follow_identity a jeho ENV; DB, údaje ani runtime cesty beze změny.
+        '1687fd715e9208862829ae59cf16e6f586fce828330fe416d8e624d6610cceb3',
     ];
 
     private static ?Config $config = null;
