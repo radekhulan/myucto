@@ -47,7 +47,7 @@ import type { ActionItem } from '@/components/ui/ActionBar.vue'
 import { apiErrorText, hasAnySingle } from '@/utils/entryForm'
 import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
 import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
-import { journalSourceLink } from '@/utils/journalSourceLink'
+import { journalSourceLink, journalSourceRefLabel } from '@/utils/journalSourceLink'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
@@ -1309,7 +1309,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                         <path stroke-linecap="round" stroke-linejoin="round"
                           d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                       </svg>
-                      {{ sourceLabel(e.source_type) }} {{ e.source_asset_name || ('#' + e.source_id) }}
+                      {{ sourceLabel(e.source_type) }} {{ journalSourceRefLabel(e) }}
                     </button>
                     <span v-else class="text-neutral-500 text-xs">{{ sourceLabel(e.source_type) }}</span>
                     <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
@@ -1433,7 +1433,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
               <span class="font-mono" :data-custom-color="!!colors.color('date')" :style="colors.cellStyle('date')">{{ formatDate(e.entry_date) }}</span>
               <span class="text-neutral-400">·</span>
-              <span :data-custom-color="!!colors.color('source')" :style="colors.cellStyle('source')">{{ sourceLabel(e.source_type) }}<template v-if="e.source_asset_name || e.source_id"> {{ e.source_asset_name || ('#' + e.source_id) }}</template></span>
+              <span :data-custom-color="!!colors.color('source')" :style="colors.cellStyle('source')">{{ sourceLabel(e.source_type) }}<template v-if="journalSourceRefLabel(e)"> {{ journalSourceRefLabel(e) }}</template></span>
               <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
               <span v-if="e.pair_status === 'composite_mn'" :title="t('accounting.pairs.badge_mn_title')"
                 class="whitespace-nowrap text-[10px] px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 font-medium">{{ t('accounting.pairs.badge_mn') }}</span>

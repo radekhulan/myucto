@@ -32,6 +32,17 @@ export interface JournalSourceRef {
   source_settlement_doc_id?: number | null
 }
 
+/**
+ * Doplněk štítku zdroje v deníku. Protizápis (storno) nese `source_id` NULL a jeho zdroj
+ * je dohledaný přes stornovaný zápis (`source_link_id`); bez žádného ID se nevypíše nic,
+ * nikdy „#null".
+ */
+export function journalSourceRefLabel(entry: JournalSourceRef & { source_asset_name?: string | null }): string {
+  if (entry.source_asset_name) return entry.source_asset_name
+  const id = entry.source_id ?? entry.source_link_id
+  return id ? `#${id}` : ''
+}
+
 export function journalSourceLink(entry: JournalSourceRef): RouteLocationRaw | null {
   const sourceId = entry.source_link_id ?? entry.source_id
   if (entry.source_type === 'invoice' && sourceId) {

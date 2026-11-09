@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { journalSourceLink } from '@/utils/journalSourceLink'
+import { journalSourceLink, journalSourceRefLabel } from '@/utils/journalSourceLink'
 
 describe('journalSourceLink', () => {
   it('opens the exact issued charge, including a reversal source', () => {
@@ -23,5 +23,13 @@ describe('journalSourceLink', () => {
       name: 'other-item-detail', params: { id: 43 },
     })
     expect(journalSourceLink({ source_type: 'other_item', source_id: null })).toBeNull()
+  })
+})
+
+describe('journalSourceRefLabel', () => {
+  it('storno zápis bez source_id nese ID zdroje z link_id, nikdy „#null“', () => {
+    expect(journalSourceRefLabel({ source_type: 'invoice', source_id: null, source_link_id: 12485 })).toBe('#12485')
+    expect(journalSourceRefLabel({ source_type: 'invoice', source_id: null })).toBe('')
+    expect(journalSourceRefLabel({ source_type: 'asset', source_id: 5, source_asset_name: 'Stroj' })).toBe('Stroj')
   })
 })
