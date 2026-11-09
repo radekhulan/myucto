@@ -14931,6 +14931,7 @@
       "rule_key_custom": "Jiné - vyberu protiúčet ručně",
       "rule_key_hint": "Předvolba doplní protiúčet podle kontace. Nesedí-li nic, zvolte „Jiné“ a vyberte účet z osnovy.",
       "number_hint": "Číslo se přidělí při uložení (řada PPD-2026-…).",
+      "number_hint_series": "Číslo se přidělí při uložení (řada {series}).",
       "simplified_limit_hint": "Zjednodušený daňový doklad do 10 000 Kč vč. DPH (§30 ZDPH).",
       "purchase_over_10k_hint": "Od {amount} doklad zaevidujte jako přijatou fakturu a uhraďte režimem Úhrada faktury (§30 ZDPH).",
       "vat_rate_add": "Přidat sazbu",

@@ -85,6 +85,18 @@ vi.mock('@/api/documents', () => ({
   },
 }))
 
+vi.mock('@/api/numberSeries', () => ({
+  numberSeriesApi: {
+    options: vi.fn().mockResolvedValue({
+      kind: 'cash_receipt', multiple: true, default_id: 1,
+      series: [
+        { id: 1, name: 'Příjmové', label: '', storage: 'native', prefix: 'PPD', template: '{PREFIX}-{YYYY}-{NNNN}', valid_to: null },
+        { id: 2, name: 'Pokladna B', label: '', storage: 'native', prefix: 'PB', template: '{PREFIX}-{YYYY}-{NNNN}', valid_to: null },
+      ],
+    }),
+  },
+}))
+
 import CashDocumentEditor from '@/pages/accounting/CashDocumentEditor.vue'
 
 function register(overrides: Partial<CashRegister> = {}): CashRegister {
@@ -412,6 +424,19 @@ describe('CashDocumentEditor.vue', () => {
   })
 
   // ── M-16: koncept / PUT / post jsou z UI dosažitelné ──────────────────────
+  it('nápověda k číslu ukazuje vybranou řadu, ne napevno PPD', async () => {
+    const wrapper = await mountEditor()
+    await (wrapper.vm as any).$nextTick()
+    expect(wrapper.find('[data-test="cash-number-hint"]').text()).toContain('"series":"PPD"')
+
+    const select = wrapper.find('select option[value="2"]').element.parentElement as HTMLSelectElement
+    select.value = '2'
+    await select.dispatchEvent(new Event('change'))
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="cash-number-hint"]').text()).toContain('"series":"PB"')
+  })
+
   it('„Uložit jako koncept" pošle post:false', async () => {
     m.createDocument.mockResolvedValue({ id: 7, doc_number: null, journal_entry_id: null, status: 'draft', warnings: [] })
     const wrapper = await mountEditor()

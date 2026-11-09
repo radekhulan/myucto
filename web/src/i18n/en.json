@@ -14931,6 +14931,7 @@
       "rule_key_custom": "Other — I'll pick the counter account myself",
       "rule_key_hint": "A preset fills in the counter account from the posting rule. If none fits, pick “Other” and choose an account from the chart.",
       "number_hint": "The number is assigned on save (series PPD-2026-…).",
+      "number_hint_series": "The number is assigned on save (series {series}).",
       "simplified_limit_hint": "Simplified tax document up to CZK 10,000 incl. VAT (§30 VAT Act).",
       "purchase_over_10k_hint": "From {amount} record the document as a received invoice and pay it via Invoice payment (§30 VAT Act).",
       "vat_rate_add": "Add rate",
