@@ -114,7 +114,7 @@ describe('ManualEntry: jednoduchý zápis po dvojicích', () => {
 
   it('chyba pair_* ze serveru se ukáže u dvojice, ke které patří', async () => {
     m.getEntryForm.mockResolvedValue(single)
-    m.createEntry.mockRejectedValue({ response: { data: { error: { code: 'pair_amount_not_positive', message: 'x', context: { pair_no: 1 } } } } })
+    m.createEntry.mockRejectedValue({ response: { data: { error: { code: 'pair_amount_not_positive', message: 'x', pair_no: 1 } } } })
     const w = mountPage()
     await flushPromises()
     await fillPair(w, '221', '311', '10')

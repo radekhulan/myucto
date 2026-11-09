@@ -33,8 +33,8 @@ describe('apiErrorText', () => {
       'accounting.pairs.pair_label': `Dvojice ${params?.n}`,
       'common.error': 'Chyba',
     })[key] ?? key
-  const err = (code: string, message: string, context?: Record<string, unknown>) =>
-    ({ response: { data: { error: { code, message, context } } } })
+  const err = (code: string, message: string, extra?: Record<string, unknown>) =>
+    ({ response: { data: { error: { code, message, ...extra } } } })
 
   it('přeloží kód a připojí číslo dvojice', () => {
     expect(apiErrorText(err('pair_same_account', 'x', { pair_no: 2 }), t)).toBe('Dvojice 2: Účty musí být různé.')
@@ -45,6 +45,7 @@ describe('apiErrorText', () => {
     expect(apiErrorText({}, t)).toBe('Chyba')
     expect(apiErrorText(err('validation_failed', 'Konkrétní důvod'), t)).toBe('Konkrétní důvod')
     expect(apiErrorInfo(err('pair_same_account', 'x', { pair_no: 0 })).pairNo).toBeNull()
+    expect(apiErrorInfo({ response: { data: { error: { code: 'pair_same_account', context: { pair_no: 3 } } } } }).pairNo).toBe(3)
   })
 })
 

@@ -13707,6 +13707,14 @@ paths:
           - debit_accounts
           - credit_accounts
       - in: query
+        name: pair_status
+        description: >-
+          `composite_mn` = jen zápisy označené k ruční úpravě (M : N, které nejde rozdělit na dvojice);
+          dotaz je podložený indexem `journal_entry_pair_status`.
+        schema:
+          type: string
+          enum: [composite_mn]
+      - in: query
         name: include_vat_breakdown
         description: 1 = doplnit rozpad DPH zdrojových faktur jen v seznamu
         schema:
@@ -13946,7 +13954,10 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '422':
-          description: Nevyvážený zápis / zavřené období / neznámý účet
+          description: >-
+            Nevyvážený zápis / zavřené období / neznámý účet; u dvojic `pair_missing_debit_account`,
+            `pair_missing_credit_account`, `pair_same_account`, `pair_amount_not_positive`, `pair_unbalanced`,
+            `pair_incomplete`, `pair_numbering`, `pair_in_composite_form`, `single_unpaired`, `pairing_required`
           content:
             application/json:
               schema:
@@ -14333,6 +14344,97 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/accounting/journal/{id}/pairs/reverse:
+    post:
+      tags: [Accounting]
+      summary: Storno vybraných dvojic jednoduchého zápisu
+      description: >-
+        Účetní/admin, právo `accounting.journal.write`. Vytvoří opravný zápis se zrcadlem vybraných dvojic;
+        původní zápis zůstává nestornovaný (`journal_pair_reversals` eviduje vazbu). U zápisů vzniklých
+        zaúčtováním dokladu (faktura, banka) čisté storno dvojice nejde, ty se jen přeúčtovávají. Mzdový
+        zápis vrací 409 `payroll_reversal_forbidden`. Přes API token nedostupné (`token_write_forbidden`).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pair_nos]
+              properties:
+                pair_nos: { type: array, minItems: 1, items: { type: integer, minimum: 1 }, description: Čísla stornovaných dvojic. }
+                entry_date: { type: string, format: date, description: Datum opravného zápisu; výchozí podle období. }
+                description: { type: string, maxLength: 255 }
+      responses:
+        '201':
+          description: Opravný zápis
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalEntryDetail' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Mzdový zápis (`payroll_reversal_forbidden`), zamčené nebo uzavřené období
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Neplatný výběr dvojic nebo období (`validation_failed`, `pair_*`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/accounting/journal/{id}/pairs/{pairNo}/repost:
+    post:
+      tags: [Accounting]
+      summary: Přeúčtování jedné dvojice jednoduchého zápisu
+      description: >-
+        Účetní/admin, právo `accounting.journal.write`. Změní účty MD a Dal dvojice při zachované částce.
+        V otevřeném nezamčeném období se dvojice přepíše na místě (původní obsah zůstává v historii zápisu),
+        v zamčeném datu s daňově neutrální změnou jako u přeúčtování dokladu, jinak vznikne opravný zápis
+        (červené storno dvojice a nová dvojice). Odpověď říká, která cesta se použila. Přes API token nedostupné
+        (`token_write_forbidden`).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: pairNo, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [debit_account_code, credit_account_code]
+              properties:
+                debit_account_code: { type: string }
+                credit_account_code: { type: string }
+                line_text: { type: string, maxLength: 255 }
+                entry_date: { type: string, format: date }
+                description: { type: string, maxLength: 255 }
+      responses:
+        '200':
+          description: Dvojice přeúčtována
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode: { type: string, enum: [in_place, tax_neutral, correction], description: Použitá cesta. }
+                  pair_no: { type: integer, description: Číslo nové dvojice v zápisu `entry`. }
+                  entry: { $ref: '#/components/schemas/JournalEntryDetail' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Mzdový zápis (`payroll_reversal_forbidden`), zamčené nebo uzavřené období bez možnosti opravy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Chybějící nebo shodné účty (`pair_missing_debit_account`, `pair_missing_credit_account`, `pair_same_account`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/accounting/journal/{id}/reversal-pair:
     delete:
       tags: [Accounting]
@@ -14452,6 +14554,8 @@ paths:
                       side: { type: string, enum: [debit, credit] }
                       amount: { type: number, minimum: 0 }
                       label: { type: string }
+                      pair_no: { type: [integer, "null"], minimum: 1, description: "Číslo dvojice (šablona po dvojicích): každé číslo má právě jeden řádek MD a jeden Dal." }
+                      line_text: { type: [string, "null"], maxLength: 255, description: "Text dvojice." }
                       cost_center: { type: string }
                       dimensions: { type: object, additionalProperties: { type: integer }, description: "Dimenze (Firma → Dimenze): id typu → id hodnoty." }
       responses:
@@ -14503,6 +14607,8 @@ paths:
                       side: { type: string, enum: [debit, credit] }
                       amount: { type: number, minimum: 0 }
                       label: { type: string }
+                      pair_no: { type: [integer, "null"], minimum: 1, description: "Číslo dvojice (šablona po dvojicích): každé číslo má právě jeden řádek MD a jeden Dal." }
+                      line_text: { type: [string, "null"], maxLength: 255, description: "Text dvojice." }
                       cost_center: { type: string }
                       dimensions: { type: object, additionalProperties: { type: integer }, description: "Dimenze (Firma → Dimenze): id typu → id hodnoty." }
       responses:
@@ -41296,6 +41402,8 @@ components:
         source_settlement_doc_type: { type: [string, 'null'] }
         source_settlement_doc_id: { type: [integer, 'null'], format: int64 }
         counter_accounts: { type: [string, 'null'] }
+        counter_account_id: { type: [integer, 'null'], description: "Protiúčet dvojice (jednoduchý zápis); null u řádku složeného zápisu." }
+        pair_no: { type: [integer, 'null'], description: "Číslo dvojice řádku; null u řádku složeného zápisu." }
         partner: { type: [string, 'null'] }
         variable_symbol: { type: [string, 'null'] }
         currency: { type: string }
@@ -46239,6 +46347,14 @@ components:
           - 'null'
         row_version:
           type: integer
+        pair_status:
+          type: [string, "null"]
+          enum: [derived, composite_mn, ineligible, null]
+          description: >-
+            Posouzení zápisu bez fyzických dvojic u firmy s jednoduchým zápisem: `derived` = starší
+            složený zápis 1 : N, v opisu a exportu se zobrazuje po dvojicích; `composite_mn` = zápis M : N,
+            který nejde jednoznačně rozdělit (k ruční úpravě); `ineligible` = převod nepřipadá v úvahu
+            (uzavřené období, vazby na úhrady, mzdy). U firmy se složeným zápisem vždy `null`.
         created_at:
           type: string
           format: date-time
@@ -46461,6 +46577,30 @@ components:
             lines:
               type: array
               items: { $ref: '#/components/schemas/JournalLineDetail' }
+            entry_form:
+              type: string
+              enum: [composite, single]
+              description: Forma zápisu firmy k datu zápisu.
+            pairs:
+              type: array
+              description: >-
+                Dvojice zápisu (jednoduchý zápis): řádek MD a řádek Dal se stejným `pair_no`, stejnou částkou
+                a různými účty. U zápisu bez dvojic prázdné. Součet částek dvojic se rovná součtu MD zápisu.
+              items: { $ref: '#/components/schemas/JournalPair' }
+
+    JournalPair:
+      type: object
+      required: [pair_no, debit_line_id, credit_line_id, debit_account_code, credit_account_code, amount]
+      properties:
+        pair_no: { type: integer, minimum: 1, description: Číslo dvojice v zápisu, od 1 bez mezer. }
+        debit_line_id: { type: integer }
+        credit_line_id: { type: integer }
+        debit_account_code: { type: string }
+        credit_account_code: { type: string }
+        amount: { type: number, format: float, description: "Kladná velikost částky dvojice." }
+        is_red_storno: { type: boolean, default: false }
+        line_text: { type: [string, "null"], description: Text dvojice (zapsaný na oba řádky dvojice). }
+        reversed_by_entry_id: { type: [integer, "null"], description: Opravný zápis, který dvojici stornoval nebo přeúčtoval. }
 
     JournalLine:
       type: object
@@ -46475,6 +46615,8 @@ components:
         amount_foreign: { type: [number, "null"], format: float }
         cost_center: { type: [string, "null"] }
         line_no: { type: integer }
+        pair_no: { type: [integer, "null"], description: "Číslo dvojice řádku (jednoduchý zápis); null u složeného zápisu." }
+        line_text: { type: [string, "null"], description: "Text řádku nebo dvojice (jednoduchý zápis)." }
 
     JournalLineDetail:
       allOf:
@@ -46487,11 +46629,36 @@ components:
 
     ManualJournalEntry:
       type: object
-      required: [entry_date, lines]
+      required: [entry_date]
+      anyOf:
+        - required: [lines]
+        - required: [pairs]
+      description: >-
+        Pošlete `lines` (složený zápis) nebo `pairs` (jednoduchý zápis po dvojicích). Firma s jednoduchým
+        zápisem k `entry_date` přijme `pairs`, nebo `lines`, které server jednoznačně rozdělí na dvojice (1 : N);
+        jinak 422 `pairing_required`. Firma se složeným zápisem přijme `pairs` a uloží je jako řádky bez `pair_no`.
       properties:
         entry_date: { type: string, format: date }
         description: { type: [string, "null"] }
         document_no: { type: [string, "null"] }
+        pairs:
+          type: array
+          minItems: 1
+          description: >-
+            Dvojice jednoduchého zápisu. Server odmítne dvojici bez účtu MD (`pair_missing_debit_account`),
+            bez účtu Dal (`pair_missing_credit_account`), se stejnými účty (`pair_same_account`) nebo s nulovou
+            či zápornou částkou (`pair_amount_not_positive`); chyba nese v `error.pair_no` číslo dvojice.
+          items:
+            type: object
+            required: [debit_account_code, credit_account_code, amount]
+            properties:
+              debit_account_code: { type: string, example: "221" }
+              credit_account_code: { type: string, example: "311" }
+              amount: { type: number, format: float, example: 1000.00, description: "Kladná velikost částky i při červeném stornu." }
+              is_red_storno: { type: boolean, default: false }
+              line_text: { type: [string, "null"], maxLength: 255 }
+              cost_center: { type: [string, "null"], description: "Středisko výsledkového účtu dvojice." }
+              dimensions: { type: object, additionalProperties: { type: integer }, description: "Dimenze (Firma → Dimenze): id typu → id hodnoty." }
         lines:
           type: array
           minItems: 1
@@ -61850,6 +62017,20 @@ components:
           type:
           - string
           - 'null'
+          description: >-
+            Účty opačné strany téhož zápisu. U řádku s dvojicí (`pair_no`) jediný protiúčet dvojice.
+        counter_account_id:
+          type: [integer, 'null']
+          description: Protiúčet dvojice (jednoduchý zápis); null u řádku složeného zápisu, kde protiúčet vychází z párování podle částek.
+        pair_no:
+          type: [integer, 'null']
+          description: Číslo dvojice řádku v zápisu; null u řádku složeného zápisu.
+        pair_derived:
+          type: boolean
+          description: "Starší složený zápis 1 : N rozložený na pohyby za běhu, data zůstala beze změny."
+        pair_composite_mn:
+          type: boolean
+          description: "Zápis M : N, který nejde rozložit na dvojice; protiúčty jsou v původním tvaru."
         partner:
           type:
           - string

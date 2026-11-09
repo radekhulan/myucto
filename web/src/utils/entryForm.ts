@@ -48,18 +48,24 @@ export const PAIR_ERROR_CODES = [
 export interface ApiErrorInfo {
   code: string
   message: string
-  /** Index dvojice (1..n), na kterou chyba ukazuje (`context.pair_no`), jinak null. */
+  /** Číslo dvojice (1..n), na kterou chyba ukazuje (`error.pair_no`), jinak null. */
   pairNo: number | null
 }
 
-/** Rozbalí chybu z axiosu: kód, text serveru a číslo dvojice z kontextu. */
+/**
+ * Rozbalí chybu z axiosu: kód, text serveru a číslo dvojice. Server slévá kontext výjimky
+ * přímo do objektu `error` (`error.pair_no`), pro jistotu se čte i vnořené `context`/`data`.
+ */
 export function apiErrorInfo(e: unknown): ApiErrorInfo {
-  const err = (e as { response?: { data?: { error?: { code?: string; message?: string; data?: Record<string, unknown>; context?: Record<string, unknown> } } } })
-    ?.response?.data?.error
-  const ctx = err?.context ?? err?.data
-  const raw = ctx && typeof ctx === 'object' ? (ctx as Record<string, unknown>).pair_no : undefined
+  const err = (e as { response?: { data?: { error?: Record<string, unknown> } } })?.response?.data?.error
+  const nested = [err?.context, err?.data].find(v => v && typeof v === 'object') as Record<string, unknown> | undefined
+  const raw = err?.pair_no ?? nested?.pair_no
   const pairNo = typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? raw : null
-  return { code: err?.code ?? '', message: err?.message ?? '', pairNo }
+  return {
+    code: typeof err?.code === 'string' ? err.code : '',
+    message: typeof err?.message === 'string' ? err.message : '',
+    pairNo,
+  }
 }
 
 /**
