@@ -116,9 +116,9 @@ Přímé předání příkazu bance je určené pro tuzemské příkazy v CZK. P
 Aby se avíza načítala, potřebujete IMAP účet, mapování na bankovní účet a parser.
 
 1. Otevřete záložku **Bankovní avíza a PDF z e-mailu** a rozbalte nastavení.
-2. V části **Vaše nastavení pro načítání bankovních avíz a PDF z e-mailů** klikněte na **Nový IMAP účet**. Vyplňte **Název**, **Host**, **Port**, **Šifrování**, **Uživatel**, **Heslo** a **Složka** (nebo klikněte na **Procházet** a vyberte ze serveru).
+2. V části **Vaše nastavení pro načítání bankovních avíz a PDF z e-mailů** klikněte na **Nový IMAP účet** a vyplňte **Název**. Pro Exchange Online zvolte **Microsoft 365 (OAuth 2.0)** a pokračujte podle [návodu pro Microsoft Entra, Exchange a MyÚčto](96_Nastaveni.md#9671-pripojeni-schranky-microsoft-365-pres-imap). U schránky s přihlášením heslem vyplňte **Host**, **Port**, **Šifrování**, **Uživatel** a **Heslo**. Klikněte na **Procházet** a vyberte **Složku**.
 3. Zapněte **Povolit zpracování bankovních avíz z tohoto účtu** a **Načítat bankovní avíza**. Zkontrolujte **Vyžadovat ověření autenticity (DKIM/DMARC)** a vyplňte **Důvěryhodný authserv-id** (viz [§ 30.11.9](#30119-overeni-autenticity-e-mailu-dkimdmarc)).
-4. Klikněte na **Test**, pak na **Uložit IMAP účet**.
+4. Klikněte na **Uložit IMAP účet**, potom u účtu v seznamu na **Test**.
 5. V části **Mapování bankovních avíz** u každého bankovního účtu vyberte **IMAP účet**, **Parser** (nebo nechte **Automatický výběr**) a **Toleranci**. Klikněte na **Uložit mapování**.
 6. Klikněte na **Spustit scan**.
 
