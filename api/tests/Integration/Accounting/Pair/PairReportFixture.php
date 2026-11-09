@@ -223,6 +223,29 @@ trait PairReportFixture
         return true;
     }
 
+    /**
+     * Zápis rovnou po dvojicích (jako ruční zápis jednoduché firmy): dvojice {MD, Dal, částka}.
+     *
+     * @param list<array{0:string,1:string,2:string}> $pairs
+     */
+    private function postPairs(string $date, string $documentNo, string $description, array $pairs): int
+    {
+        $lines = [];
+        foreach ($pairs as [$debit, $credit, $amount]) {
+            $lines[] = [$debit, 'debit', $amount];
+            $lines[] = [$credit, 'credit', $amount];
+        }
+        $entryId = $this->manual($date, $documentNo, $description, $lines);
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare('SELECT id FROM journal_entry_lines WHERE supplier_id = ? AND entry_id = ? ORDER BY line_no, id');
+        $stmt->execute([$this->supplierId, $entryId]);
+        $update = $pdo->prepare('UPDATE journal_entry_lines SET pair_no = ?, line_no = ? WHERE id = ?');
+        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $i => $lineId) {
+            $update->execute([intdiv($i, 2) + 1, $i + 1, (int) $lineId]);
+        }
+        return $entryId;
+    }
+
     /** @param array<string,int> $entries */
     private function pairAllInPlace(array $entries): void
     {
