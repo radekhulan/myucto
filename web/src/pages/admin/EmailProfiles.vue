@@ -12,6 +12,7 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import ImapOAuthFields from '@/components/settings/ImapOAuthFields.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -95,6 +96,10 @@ const draft = reactive<EmailProfilePayload>({
   imap_validate_cert: true,
   imap_username: '',
   imap_password: '',
+  imap_auth_mode: 'password',
+  imap_oauth_tenant_id: '',
+  imap_oauth_client_id: '',
+  imap_oauth_client_secret: '',
   imap_folder: 'Sent',
   imap_create_folder: false,
   imap_mark_seen: true,
@@ -172,10 +177,18 @@ const smtpPasswordRequired = computed(() =>
   && draft.smtp_auth_enabled
   && (editingId.value === null || !editingHasSmtpPassword.value),
 )
+const imapUsesMicrosoft = computed(() => draft.imap_auth_mode === 'microsoft365')
 const imapPasswordRequired = computed(() =>
-  configureImapSent.value
+  configureImapSent.value && !imapUsesMicrosoft.value
   && (editingId.value === null || !editingHasImapPassword.value),
 )
+const imapOAuthSecretSaved = computed(() => {
+  const profile = profiles.value.find(row => row.id === editingId.value)
+  return profile?.has_imap_oauth_client_secret === true
+    && normalizeEmail(draft.imap_username) === normalizeEmail(profile.imap_username)
+    && normalizeEmail(draft.imap_oauth_tenant_id) === normalizeEmail(profile.imap_oauth_tenant_id)
+    && normalizeEmail(draft.imap_oauth_client_id) === normalizeEmail(profile.imap_oauth_client_id)
+})
 
 onMounted(load)
 
@@ -199,6 +212,10 @@ watch(
     draft.imap_host,
     draft.imap_username,
     draft.imap_password,
+    draft.imap_auth_mode,
+    draft.imap_oauth_tenant_id,
+    draft.imap_oauth_client_id,
+    draft.imap_oauth_client_secret,
     draft.imap_folder,
     imapPasswordRequired.value,
   ],
@@ -222,6 +239,10 @@ watch(
     draft.imap_validate_cert,
     draft.imap_username,
     draft.imap_password,
+    draft.imap_auth_mode,
+    draft.imap_oauth_tenant_id,
+    draft.imap_oauth_client_id,
+    draft.imap_oauth_client_secret,
     draft.imap_timeout,
   ],
   () => {
@@ -285,6 +306,10 @@ function resetDraft() {
   draft.imap_validate_cert = true
   draft.imap_username = ''
   draft.imap_password = ''
+  draft.imap_auth_mode = 'password'
+  draft.imap_oauth_tenant_id = ''
+  draft.imap_oauth_client_id = ''
+  draft.imap_oauth_client_secret = ''
   draft.imap_folder = 'Sent'
   draft.imap_create_folder = false
   draft.imap_mark_seen = true
@@ -342,6 +367,10 @@ function editProfile(profile: EmailProfile) {
   draft.imap_validate_cert = profile.imap_validate_cert
   draft.imap_username = profile.imap_username || ''
   draft.imap_password = ''
+  draft.imap_auth_mode = profile.imap_auth_mode ?? 'password'
+  draft.imap_oauth_tenant_id = profile.imap_oauth_tenant_id ?? ''
+  draft.imap_oauth_client_id = profile.imap_oauth_client_id ?? ''
+  draft.imap_oauth_client_secret = ''
   draft.imap_folder = profile.imap_folder || 'Sent'
   draft.imap_create_folder = profile.imap_create_folder
   draft.imap_mark_seen = profile.imap_mark_seen
@@ -388,7 +417,11 @@ function payload(): EmailProfilePayload {
     imap_encryption: configureImapSent.value ? (draft.imap_encryption || 'ssl') : 'ssl',
     imap_validate_cert: configureImapSent.value ? Boolean(draft.imap_validate_cert) : true,
     imap_username: configureImapSent.value ? (draft.imap_username || null) : null,
-    imap_password: configureImapSent.value && draft.imap_password ? draft.imap_password : null,
+    imap_password: configureImapSent.value && !imapUsesMicrosoft.value ? draft.imap_password || null : null,
+    imap_auth_mode: configureImapSent.value ? draft.imap_auth_mode : 'password',
+    imap_oauth_tenant_id: configureImapSent.value && imapUsesMicrosoft.value ? draft.imap_oauth_tenant_id : null,
+    imap_oauth_client_id: configureImapSent.value && imapUsesMicrosoft.value ? draft.imap_oauth_client_id : null,
+    imap_oauth_client_secret: configureImapSent.value && imapUsesMicrosoft.value ? draft.imap_oauth_client_secret : null,
     imap_folder: configureImapSent.value ? (draft.imap_folder || 'Sent') : null,
     imap_create_folder: configureImapSent.value ? Boolean(draft.imap_create_folder) : false,
     imap_mark_seen: configureImapSent.value ? Boolean(draft.imap_mark_seen) : true,
@@ -412,7 +445,11 @@ function imapBrowsePayload(): Partial<EmailProfilePayload> {
     imap_encryption: draft.imap_encryption || 'ssl',
     imap_validate_cert: Boolean(draft.imap_validate_cert),
     imap_username: draft.imap_username || null,
-    imap_password: draft.imap_password || null,
+    imap_password: imapUsesMicrosoft.value ? null : draft.imap_password || null,
+    imap_auth_mode: draft.imap_auth_mode,
+    imap_oauth_tenant_id: imapUsesMicrosoft.value ? draft.imap_oauth_tenant_id : null,
+    imap_oauth_client_id: imapUsesMicrosoft.value ? draft.imap_oauth_client_id : null,
+    imap_oauth_client_secret: imapUsesMicrosoft.value ? draft.imap_oauth_client_secret : null,
     imap_folder: draft.imap_folder || 'Sent',
     imap_create_folder: Boolean(draft.imap_create_folder),
     imap_mark_seen: Boolean(draft.imap_mark_seen),
@@ -624,18 +661,7 @@ function validateDraft(): boolean {
       ? 'settings.email_profile_validation_smtp_access_token'
       : 'settings.email_profile_validation_smtp_password'))
   }
-  if (configureImapSent.value && isBlank(draft.imap_host)) {
-    errors.push(t('settings.email_profile_validation_imap_host'))
-  }
-  if (configureImapSent.value && isBlank(draft.imap_username)) {
-    errors.push(t('settings.email_profile_validation_imap_username'))
-  }
-  if (imapPasswordRequired.value && isBlank(draft.imap_password)) {
-    errors.push(t('settings.email_profile_validation_imap_password'))
-  }
-  if (configureImapSent.value && isBlank(draft.imap_folder)) {
-    errors.push(t('settings.email_profile_validation_imap_folder'))
-  }
+  if (configureImapSent.value) validateImapFields(errors)
 
   validationErrors.value = errors
   return errors.length === 0
@@ -644,11 +670,24 @@ function validateDraft(): boolean {
 function validateImapSettings(): boolean {
   validationScope.value = 'imap'
   const errors: string[] = []
-  if (isBlank(draft.imap_host)) {
+  validateImapFields(errors)
+  validationErrors.value = errors
+  return errors.length === 0
+}
+
+function validateImapFields(errors: string[]) {
+  if (imapUsesMicrosoft.value) {
+    if (isBlank(draft.imap_oauth_tenant_id) || isBlank(draft.imap_oauth_client_id)) {
+      errors.push(t('settings.imap_oauth_ids_required'))
+    }
+    if (!imapOAuthSecretSaved.value && isBlank(draft.imap_oauth_client_secret)) {
+      errors.push(t('settings.imap_oauth_secret_required'))
+    }
+  } else if (isBlank(draft.imap_host)) {
     errors.push(t('settings.email_profile_validation_imap_host'))
   }
   if (isBlank(draft.imap_username)) {
-    errors.push(t('settings.email_profile_validation_imap_username'))
+    errors.push(t(imapUsesMicrosoft.value ? 'settings.imap_oauth_mailbox_required' : 'settings.email_profile_validation_imap_username'))
   }
   if (imapPasswordRequired.value && isBlank(draft.imap_password)) {
     errors.push(t('settings.email_profile_validation_imap_password'))
@@ -656,9 +695,6 @@ function validateImapSettings(): boolean {
   if (isBlank(draft.imap_folder)) {
     errors.push(t('settings.email_profile_validation_imap_folder'))
   }
-
-  validationErrors.value = errors
-  return errors.length === 0
 }
 
 function isBlank(value: unknown): boolean {
@@ -916,16 +952,23 @@ function certificateCommonName(subject: string | null | undefined): string | nul
           </label>
           <div v-if="configureImapSent" class="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
             <label class="block text-xs font-medium text-neutral-600">
+              {{ t('settings.imap_auth_mode') }}
+              <select v-model="draft.imap_auth_mode" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+                <option value="password">{{ t('settings.imap_auth_password') }}</option>
+                <option value="microsoft365">{{ t('settings.imap_auth_microsoft365') }}</option>
+              </select>
+            </label>
+            <label v-if="!imapUsesMicrosoft" class="block text-xs font-medium text-neutral-600">
               {{ t('settings.email_profile_imap_host') }}
               <span class="ml-0.5 text-danger-600" :title="t('common.required')" aria-hidden="true">*</span>
               <span class="sr-only">{{ t('common.required') }}</span>
               <input v-model="draft.imap_host" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
             </label>
-            <label class="block text-xs font-medium text-neutral-600">
+            <label v-if="!imapUsesMicrosoft" class="block text-xs font-medium text-neutral-600">
               {{ t('settings.email_profile_imap_port') }}
               <input v-model.number="draft.imap_port" type="number" min="1" max="65535" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
             </label>
-            <label class="block text-xs font-medium text-neutral-600">
+            <label v-if="!imapUsesMicrosoft" class="block text-xs font-medium text-neutral-600">
               {{ t('settings.email_profile_imap_encryption') }}
               <select v-model="draft.imap_encryption" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
                 <option value="ssl">{{ t('settings.email_profile_smtp_encryption_ssl') }}</option>
@@ -961,12 +1004,15 @@ function certificateCommonName(subject: string | null | undefined): string | nul
             </div>
             <div class="grid grid-cols-1 gap-4 md:col-span-2 md:grid-cols-2">
               <label class="block text-xs font-medium text-neutral-600">
-                {{ t('settings.email_profile_imap_username') }}
+                {{ t(imapUsesMicrosoft ? 'settings.imap_oauth_mailbox' : 'settings.email_profile_imap_username') }}
                 <span class="ml-0.5 text-danger-600" :title="t('common.required')" aria-hidden="true">*</span>
                 <span class="sr-only">{{ t('common.required') }}</span>
-                <input v-model="draft.imap_username" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
+                <input v-model="draft.imap_username" :type="imapUsesMicrosoft ? 'email' : 'text'" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
               </label>
-              <label class="block text-xs font-medium text-neutral-600">
+              <ImapOAuthFields v-if="imapUsesMicrosoft"
+                v-model:tenant-id="draft.imap_oauth_tenant_id" v-model:client-id="draft.imap_oauth_client_id"
+                v-model:client-secret="draft.imap_oauth_client_secret" :secret-saved="imapOAuthSecretSaved" />
+              <label v-else class="block text-xs font-medium text-neutral-600">
                 {{ t('settings.email_profile_imap_password') }}
                 <span v-if="imapPasswordRequired" class="ml-0.5 text-danger-600" :title="t('common.required')" aria-hidden="true">*</span>
                 <span v-if="imapPasswordRequired" class="sr-only">{{ t('common.required') }}</span>
@@ -986,7 +1032,7 @@ function certificateCommonName(subject: string | null | undefined): string | nul
                 <option value="fail_send">{{ t('settings.email_profile_imap_on_failure_fail_send') }}</option>
               </select>
             </label>
-            <label class="inline-flex items-center gap-2 text-sm text-neutral-700">
+            <label v-if="!imapUsesMicrosoft" class="inline-flex items-center gap-2 text-sm text-neutral-700">
               <input v-model="draft.imap_validate_cert" type="checkbox" class="h-4 w-4 accent-primary-600" />
               {{ t('settings.email_profile_imap_validate_cert') }}
             </label>

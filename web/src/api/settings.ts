@@ -554,6 +554,8 @@ export interface CurrencyAccount {
   invoices_count?: number
 }
 
+export type ImapAuthMode = 'password' | 'microsoft365'
+
 export interface BankEmailImapSettings {
   id: number | null
   supplier_id: number
@@ -590,9 +592,18 @@ export interface BankEmailImapSettings {
   retry_failed: boolean
   max_attempts: number
   has_password: boolean
+  auth_mode?: ImapAuthMode
+  oauth_tenant_id?: string | null
+  oauth_client_id?: string | null
+  has_oauth_client_secret?: boolean
   last_scan_at?: string | null
   last_scan_status?: 'ok' | 'error' | null
   last_scan_message?: string | null
+}
+
+export type BankEmailImapPayload = Partial<BankEmailImapSettings> & {
+  password?: string
+  oauth_client_secret?: string | null
 }
 
 export interface BankEmailProvider {
@@ -867,6 +878,10 @@ export interface EmailProfile {
   imap_validate_cert: boolean
   imap_username: string | null
   has_imap_password: boolean
+  imap_auth_mode?: ImapAuthMode
+  imap_oauth_tenant_id?: string | null
+  imap_oauth_client_id?: string | null
+  has_imap_oauth_client_secret?: boolean
   imap_folder: string | null
   imap_create_folder: boolean
   imap_mark_seen: boolean
@@ -915,6 +930,10 @@ export interface EmailProfilePayload {
   imap_validate_cert?: boolean
   imap_username?: string | null
   imap_password?: string | null
+  imap_auth_mode?: ImapAuthMode
+  imap_oauth_tenant_id?: string | null
+  imap_oauth_client_id?: string | null
+  imap_oauth_client_secret?: string | null
   imap_folder?: string | null
   imap_create_folder?: boolean
   imap_mark_seen?: boolean
@@ -1212,19 +1231,19 @@ export const settingsApi = {
 
   getBankEmailOverview: () =>
     api.get<BankEmailOverview>('/settings/bank-email-notices').then(r => r.data),
-  updateBankEmailImap: (payload: Partial<BankEmailImapSettings> & { password?: string }) =>
+  updateBankEmailImap: (payload: BankEmailImapPayload) =>
     api.put<BankEmailImapSettings>('/settings/bank-email-notices/imap', payload).then(r => r.data),
   testBankEmailImap: () =>
     api.post<{ ok: boolean; message: string; folders?: string[] }>('/settings/bank-email-notices/imap/test', {}).then(r => r.data),
-  createBankEmailImapAccount: (payload: Partial<BankEmailImapSettings> & { password?: string }) =>
+  createBankEmailImapAccount: (payload: BankEmailImapPayload) =>
     api.post<BankEmailImapSettings>('/settings/bank-email-notices/imap-accounts', payload).then(r => r.data),
-  updateBankEmailImapAccount: (id: number, payload: Partial<BankEmailImapSettings> & { password?: string }) =>
+  updateBankEmailImapAccount: (id: number, payload: BankEmailImapPayload) =>
     api.put<BankEmailImapSettings>(`/settings/bank-email-notices/imap-accounts/${id}`, payload).then(r => r.data),
   deleteBankEmailImapAccount: (id: number) =>
     api.delete<{ deleted: boolean }>(`/settings/bank-email-notices/imap-accounts/${id}`).then(r => r.data),
   testBankEmailImapAccount: (id: number) =>
     api.post<{ ok: boolean; message: string; folders?: string[] }>(`/settings/bank-email-notices/imap-accounts/${id}/test`, {}).then(r => r.data),
-  browseBankEmailImapFolders: (payload: Partial<BankEmailImapSettings> & { password?: string }, id?: number | null) =>
+  browseBankEmailImapFolders: (payload: BankEmailImapPayload, id?: number | null) =>
     api.post<{ ok: boolean; message: string; folders?: string[] }>(
       id ? `/settings/bank-email-notices/imap-accounts/${id}/folders` : '/settings/bank-email-notices/imap-accounts/folders',
       payload,

@@ -16,6 +16,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeMessage;
 use MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeScanner;
 use MyInvoice\Service\Bank\EmailNotice\ImapMailboxClientInterface;
+use MyInvoice\Service\Mail\Imap\ImapAuthSettings;
 use MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeProvider;
 use MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeParserRepository;
 use MyInvoice\Service\IpMatcher;
@@ -271,7 +272,13 @@ final class BankEmailNoticeAction
             }
         }
 
-        $settings = $this->imapProbeSettings($saved, $body);
+        try {
+            $settings = $this->imapProbeSettings($saved, $body);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
+        $settings['supplier_id'] = $sid;
+        $settings['id'] = $id > 0 ? $id : null;
         $result = $this->imap->test($settings);
         return Json::ok($response, $result, !empty($result['ok']) ? 200 : 400);
     }
@@ -446,7 +453,7 @@ final class BankEmailNoticeAction
             $settings['password'] = '';
         }
 
-        return $settings;
+        return array_replace($settings, ImapAuthSettings::normalize($settings, $saved));
     }
 
     /**

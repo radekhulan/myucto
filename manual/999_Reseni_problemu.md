@@ -24,6 +24,7 @@
 | Varování v administraci o konfiguraci | Klíč, MFA, zámek session | [§ 999.5.1.9](#999519-varovani-secretencryptionkey-spatna-delka-klice) až [§ 999.5.1.12](#9995112-varovani-sessionlockconfiguration) |
 | Nejde upravit vystavená faktura, chybí QR, špatné údaje v PDF | Vystavený doklad je neměnný | [§ 999.5.2](#99952-faktury) |
 | Faktura klientovi nedorazila | Záznam o odeslání, SMTP, SPF a DKIM | [§ 999.5.3](#99953-e-maily) |
+| Microsoft 365 odmítá připojení přes IMAP | Kód z testu MyÚčta, oprávnění aplikace a schránky v Exchange | [Diagnostika Microsoft 365 IMAP](96_Nastaveni.md#96715-diagnostika-pripojeni) |
 | Výpis se nenahrál, nesedí zůstatek, nepáruje se platba | Import výpisů a párování | [§ 999.5.4](#99954-banka) |
 | Import do Pohody hlásí chybu | Kódy pro export | [§ 999.5.5](#99955-exporty) |
 | Plánovaná úloha neběží | Systém → Diagnostika, Systém → Plánované úlohy | [§ 999.5.6](#99956-cron-a-automatika) |
