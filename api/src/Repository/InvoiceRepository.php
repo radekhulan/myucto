@@ -170,7 +170,7 @@ final class InvoiceRepository
 
     private ?bool $hasManualPrice = null;
 
-    /** Příznak „cenu zadá člověk" (migrace 2265); starší instance ho nemají. */
+    /** Příznak „cenu zadá člověk" (migrace 2274); starší instance ho nemají. */
     private function supportsManualPrice(): bool
     {
         return $this->hasManualPrice ??= $this->db->hasColumn('invoice_items', 'manual_price');

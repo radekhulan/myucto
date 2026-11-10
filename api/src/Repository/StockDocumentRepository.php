@@ -389,7 +389,7 @@ final class StockDocumentRepository
     }
 
     /**
-     * Vydané faktury vzniklé z řádků příjemky (migrace 2265), novější první. Storno faktury
+     * Vydané faktury vzniklé z řádků příjemky (migrace 2274), novější první. Storno faktury
      * tu zůstává: je to historie dokladu, rozhoduje až kontrola dvojího vytvoření.
      *
      * Skladník bez práva na faktury dostane jen čísla řádků nestornovaných faktur: stačí na
@@ -450,7 +450,7 @@ final class StockDocumentRepository
     }
 
     /**
-     * Příjemky, z jejichž řádků faktura vznikla (migrace 2265).
+     * Příjemky, z jejichž řádků faktura vznikla (migrace 2274).
      *
      * @return list<array<string,mixed>>
      */
