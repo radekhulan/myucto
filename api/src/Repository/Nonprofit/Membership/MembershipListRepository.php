@@ -38,16 +38,17 @@ final class MembershipListRepository
 
     /**
      * ID posledního kandidáta dávky (stejné hledání jako seznam), nebo null, když za kurzorem už víc kandidátů není.
-     * Stav „bez předpisu“ hledá členy bez předpisu, proto prochází členy; ostatní stavy jen členy s předpisem v rozsahu.
+     * Stav „bez předpisu“ prochází členy bez předpisu v rozsahu; ostatní stavy jen členy s předpisem v rozsahu.
      */
     private function chunkUpperBound(int $supplier, int $after, int $chunk, array $filter): ?int
     {
         [$search, $params] = $this->searchCondition($filter);
         if ($filter['payment_status'] === 'none') {
+            [$none, $noneParams] = $this->withoutClaimCondition($filter);
             $sql = 'SELECT m.id FROM nonprofit_members m FORCE INDEX(uq_nm_tenant)
                 JOIN clients c ON c.supplier_id=m.supplier_id AND c.id=m.client_id
-                WHERE m.supplier_id=? AND m.id>?' . $search . ' ORDER BY m.id';
-            $params = [$supplier, $after, ...$params];
+                WHERE m.supplier_id=? AND m.id>?' . $search . $none . ' ORDER BY m.id';
+            $params = [$supplier, $after, ...$params, ...$noneParams];
         } else {
             [$cases, $caseParams] = $this->caseCondition($filter, 'x');
             $join = $search === '' ? '' : ' JOIN nonprofit_members m ON m.supplier_id=x.supplier_id AND m.id=x.member_id
@@ -69,6 +70,19 @@ final class MembershipListRepository
     private function candidateIndex(array $filter): string
     {
         return $filter['title_key'] === '' ? 'uq_nmcc_identity' : 'ix_nmcc_list_title';
+    }
+
+    /**
+     * Člen bez předpisu v rozsahu: přesně tytéž spojení a podmínky jako CTE claims v query(),
+     * takže finanční agregace pro tyto členy nic nenačte a stav „bez předpisu“ nepočítá úhrady.
+     */
+    private function withoutClaimCondition(array $filter): array
+    {
+        [$cases, $params] = $this->caseCondition($filter, 'nx');
+        return [' AND NOT EXISTS(SELECT 1 FROM nonprofit_membership_charge_cases nx FORCE INDEX(uq_nmcc_identity)
+            JOIN nonprofit_membership_charge_operations nxo ON nxo.supplier_id=nx.supplier_id AND nxo.case_id=nx.id AND nxo.id=nx.head_operation_id AND nxo.operation=\'issue\'
+            JOIN nonprofit_membership_charge_claims nxc ON nxc.supplier_id=nxo.supplier_id AND nxc.operation_id=nxo.id AND nxc.kind=\'issue\'
+            WHERE nx.supplier_id=m.supplier_id AND nx.member_id=m.id' . $cases . ')', $params];
     }
 
     /** Rozsah předpisů podle roku a titulu; stejné podmínky pro výběr kandidátů i finanční agregaci. */
@@ -122,19 +136,25 @@ final class MembershipListRepository
             $search .= ' AND m.id IN (' . implode(',', array_fill(0, count($memberIds), '?')) . ')';
             array_push($params, ...$memberIds);
         }
-        if (!in_array($filter['payment_status'], ['all', 'none'], true)) {
+        if ($filter['payment_status'] === 'none') {
+            [$none, $noneParams] = $this->withoutClaimCondition($filter);
+            $search .= $none; array_push($params, ...$noneParams);
+        } elseif ($filter['payment_status'] !== 'all') {
             // Stav s předpisem: do agregace vstupují jen členové s předpisem v rozsahu, ne celé ID pásmo dávky.
             [$cases, $caseParams] = $this->caseCondition($filter, 'x');
-            if ($filter['title_key'] === '') {
+            if ($filter['title_key'] === '' || $upper !== null) {
+                // Omezená dávka (nebo filtr bez titulu): předpisy čteme jen u členů dávky podle člena.
                 $search .= ' AND EXISTS(SELECT 1 FROM nonprofit_membership_charge_cases x FORCE INDEX(uq_nmcc_identity)
                     WHERE x.supplier_id=m.supplier_id AND x.member_id=m.id' . $cases . ')';
+                array_push($params, ...$caseParams);
             } else {
-                // Titul: členy bereme z krycího indexu titulu, ne prověřováním každého člena dávky.
+                // Poslední dávka titulu nemá horní mez a u řídkého titulu pokrývá skoro celou firmu:
+                // členy bereme z krycího indexu titulu místo prověřování každého člena za kurzorem.
                 $search .= ' AND m.id IN(SELECT x.member_id FROM nonprofit_membership_charge_cases x FORCE INDEX(ix_nmcc_list_title)
-                    WHERE x.supplier_id=?' . $cases . ')';
-                $params[] = $supplier;
+                    WHERE x.supplier_id=?' . $cases . ' AND x.member_id>?)';
+                array_push($params, $supplier, ...$caseParams);
+                $params[] = $after;
             }
-            array_push($params, ...$caseParams);
         }
         [$cases, $caseParams] = $this->caseCondition($filter, 'cc');
         $condition = 'cc.supplier_id=?' . $cases; $params[] = $supplier; array_push($params, ...$caseParams);

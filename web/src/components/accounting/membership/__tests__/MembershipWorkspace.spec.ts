@@ -574,4 +574,59 @@ describe('Membership workspace', () => {
       expect(w.get('[data-section="workspace-error"]').text()).toBe(cs.nonprofitMembership.listNeedPeriod)
     } finally { vi.useRealTimers(); w.unmount() }
   })
+
+  it('reloads titles for the applied year, not for an unapplied year in the form', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-year"]').setValue('9999')
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(w.get('[data-section="workspace-error"]').text()).toBe(cs.nonprofitMembership.listNeedPeriod)
+      await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
+      w.findComponent(Detail).vm.$emit('changed');await flushPromises()
+      expect(api.titles).toHaveBeenLastCalledWith(5,Number(appIsoDate().slice(0,4)),undefined)
+      expect(w.find('[data-section="titles-error"]').exists()).toBe(false)
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('reloads with the applied filters while a batch is locked', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    w.findComponent(MembershipBatchFlow).vm.$emit('lock', true);await flushPromises()
+    await w.get('[data-field="member-year"]').setValue('202')
+    const calls=api.members.mock.calls.length
+    await w.get('[data-action="reload-members"]').trigger('click');await flushPromises()
+    expect(api.members).toHaveBeenCalledTimes(calls+1)
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:Number(appIsoDate().slice(0,4))}))
+    expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('requests titles once when reloading a changed year', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-year"]').setValue('2025')
+      const before=api.titles.mock.calls.length
+      await w.get('[data-action="reload-members"]').trigger('click');await flushPromises()
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(api.titles).toHaveBeenCalledTimes(before+1)
+      expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('does not apply a partially typed year when the status changes during the delay', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-year"]').setValue('202')
+      await w.get('[data-field="member-payment-status"]').setValue('unpaid')
+      expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
+      await w.get('[data-field="member-year"]').setValue('2025')
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
+      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2025,payment_status:'unpaid'}))
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
 })
