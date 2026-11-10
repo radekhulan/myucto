@@ -1205,6 +1205,26 @@ final class PohodaImportTest extends TestCase
         self::assertSame(0, $this->rows('invoices', $supplierId, sprintf("varsymbol <> '%s' AND reverse_charge = 1", SyntheticPohodaExport::REVERSE_SALE)));
     }
 
+    /** Ř. 26: tuzemský odběratel = § 71i, zahraniční = služba s místem plnění mimo tuzemsko. */
+    public function testLine26SplitsByCustomerCountry(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withOtherSupplyLine26($dir);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        foreach ([SyntheticPohodaExport::LINE26_DOMESTIC => '71i', SyntheticPohodaExport::LINE26_FOREIGN => '26s'] as $number => $code) {
+            self::assertSame(1, $this->rows('invoices', $supplierId, sprintf(
+                "varsymbol = '%s' AND vat_classification_code = '%s' AND reverse_charge = 0 AND status <> 'draft'", $number, $code)), $number . ' ' . $this->explain($protocol));
+            $items = $this->db->pdo()->prepare(
+                'SELECT DISTINCT ii.vat_classification_code FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+                  WHERE i.supplier_id = ? AND i.varsymbol = ?');
+            $items->execute([$supplierId, $number]);
+            self::assertSame([$code], $items->fetchAll(\PDO::FETCH_COLUMN), $number . ': položky nesou kód hlavičky.');
+        }
+    }
+
     /** Dvě firmy v jednom procesu: kontakty každé dostanou měnu z číselníku své firmy. */
     public function testPartnerCurrencyBelongsToItsOwnSupplier(): void
     {

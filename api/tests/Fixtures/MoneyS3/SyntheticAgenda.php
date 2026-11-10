@@ -1467,6 +1467,39 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda s vydanými fakturami v členění `19Ř26` (1 000 Kč bez daně): FV25026 tuzemskému
+     * odběrateli (dodání knih § 71i) a FV25027 slovenskému odběrateli (země z DIČ).
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithOtherSupplyLine26(): array
+    {
+        $files = self::files();
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        $append('ROK.002/UcDenik.DAT', self::JOURNAL_FIELDS, [
+            ['Cislo' => 51, 'Zdroj' => 'FV', 'Doklad' => 'FV25026', 'Datum' => '2025-08-05', 'DatPlnDPH' => '2025-08-05', 'Popis' => 'Knihy', 'UcMD' => '311000', 'UcD' => '602000', 'Castka' => 1000.0],
+            ['Cislo' => 52, 'Zdroj' => 'FV', 'Doklad' => 'FV25027', 'Datum' => '2025-08-06', 'DatPlnDPH' => '2025-08-06', 'Popis' => 'Služby', 'UcMD' => '311000', 'UcD' => '602000', 'Castka' => 1000.0],
+        ]);
+        $invoice = static fn (string $number, string $vs, string $date, array $partner): array => $partner + [
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => '19Ř26', 'Uhrada' => 'převodem',
+            'Doklad' => $number, 'VarSymbol' => $vs,
+            'Vystaveno' => $date, 'DatUcPr' => $date, 'PlnenoDPH' => $date, 'Splatno' => '2025-08-20',
+            'Zaklad_0' => 1000.0, 'DPH_2' => 0.0, 'CelkemSDPH' => 1000.0, 'Popis' => 'Plnění ř. 26',
+        ];
+        $append('ROK.002/VFaktury.DAT', self::ISSUED_FIELDS, [
+            $invoice('FV25026', '2025026', '2025-08-05', ['O_ICO' => self::CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::CUSTOMER_ICO,
+                'O_Nazev' => 'Odběratel Beta a.s.', 'O_Ulice' => 'Ukázková 7', 'O_Mesto' => 'Ostrava', 'O_Psc' => '702 00']),
+            $invoice('FV25027', '2025027', '2025-08-06', ['O_DIC' => 'SK2020000000',
+                'O_Nazev' => 'Zahraničný odberateľ s.r.o.', 'O_Ulice' => 'Testovacia 1', 'O_Mesto' => 'Bratislava', 'O_Psc' => '811 01']),
+        ]);
+        return $files;
+    }
+
+    /**
      * Agenda, ve které licence z EU FP25005 zní na 1 030 Kč (kurz faktury), ale samovyměření
      * ICH25001 má základ 1 000 Kč (kurz ke dni plnění). Rozdíl 30 Kč je jen kurzový.
      *

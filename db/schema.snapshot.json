@@ -1175,7 +1175,8 @@
         "2269_internal_document_line_pairs.sql",
         "2270_payroll_posting_granularity.sql",
         "2271_payroll_statutory_nonpartner_account.sql",
-        "2272_accounting_period_lock_permission.sql"
+        "2272_accounting_period_lock_permission.sql",
+        "2273_vat_classification_71i_line26.sql"
     ],
     "tables": {
         "abra_flexi_connections": {

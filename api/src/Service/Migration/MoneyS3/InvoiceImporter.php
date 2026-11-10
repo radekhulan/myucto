@@ -9,6 +9,7 @@ use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyDecision;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
+use MyInvoice\Service\Migration\Shared\MigratedClientCountry;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
@@ -60,6 +61,8 @@ final class InvoiceImporter
 
     private readonly ForeignCurrencyTakeover $foreignCurrency;
 
+    private readonly MigratedClientCountry $clientCountry;
+
     public function __construct(
         private readonly Connection $db,
         private readonly MoneyS3ImportRepository $map,
@@ -70,6 +73,7 @@ final class InvoiceImporter
     ) {
         $this->rates = new MigrationVatRateLookup($db);
         $this->foreignCurrency = new ForeignCurrencyTakeover($db);
+        $this->clientCountry = new MigratedClientCountry($db);
     }
 
     public function importPurchases(ImportContext $ctx): void
@@ -336,6 +340,13 @@ final class InvoiceImporter
                 continue;
             }
             [$class, $amounts] = self::classifyLines($r, true, $amounts, self::lineCodes($r, $itemCodes[$r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0)] ?? []));
+            // Ř. 26 (`19Ř26`) u tuzemského odběratele je § 71i, ne služba mimo tuzemsko.
+            $class['code'] = $this->clientCountry->saleCode($class['code'], $ctx->supplierId, $clientId);
+            foreach ($amounts['items'] as $i => $item) {
+                if (array_key_exists('code', $item)) {
+                    $amounts['items'][$i]['code'] = $this->clientCountry->saleCode($item['code'], $ctx->supplierId, $clientId);
+                }
+            }
             $review = $class['reasons'] !== [];
             if ($review && self::historicalUnposted($ctx, $year, 'FV', $docNo)) {
                 $p->count(self::STEP_ISSUED, 'unposted_review_skipped');
@@ -481,6 +492,7 @@ final class InvoiceImporter
                 'country' => trim((string) ($r['AdStat'] ?? '')),
             ];
             $clientId = $this->codebooks->resolvePartner($ctx, $snapshot);
+            $resolved['code'] = $this->clientCountry->saleCode($resolved['code'], $ctx->supplierId, $clientId);
             $paidAt = $ctx->taxRecords ? null : self::date($r, ['UhDatum']);
             $id = $this->writer->insertIssued(new MigratedIssuedDocument(
                 supplierId: $ctx->supplierId,

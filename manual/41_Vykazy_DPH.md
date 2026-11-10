@@ -565,6 +565,7 @@ Každá faktura (nebo její řádek) má klasifikaci DPH, například `1`, `40`,
 | **26c** | Cestovní služba § 89, cena snížená o přirážku včetně daně | 26 | - |
 | **1p** / **2p** | Použité zboží § 90, přirážka, 21 % / 12 % | 1 / 2 | KH A.4 s `kod_rezim_pl=2` |
 | **3** | Osvobozené plnění bez nároku na odpočet (§ 51) | 50 | - |
+| **71i** | Dodání v tuzemsku osvobozené s nárokem na odpočet, § 71i (knihy včetně elektronických) | 26 | - |
 | **3m** | Příležitostné osvobozené plnění vyloučené z koeficientu § 76 odst. 4 | 50 | - |
 | **20** | Dodání zboží do jiného členského státu | 20 | SH kód plnění 0 |
 | **22** | Poskytnutí služby do JČS (§ 9 odst. 1) | 21 | SH kód plnění 3 |
@@ -596,6 +597,8 @@ Každá faktura (nebo její řádek) má klasifikaci DPH, například `1`, `40`,
 Kódy s příponou (`1m`, `25s5`, `26s` a další) se od základní varianty liší jediným atributem: vyloučením z koeficientu, kódem předmětu plnění, zvláštním režimem, nebo řádkem přiznání. Číselník je editovatelný. V `Systém → Sazby a číselníky`, na záložce **Klasifikace DPH**, si můžete přidat vlastní kód, včetně kódu předmětu plnění s písmenným sufixem (`1a`, `3a`) z číselníku MFČR.
 
 **Cestovní služba podle § 89** se na dokladu rozepisuje na dva řádky. Přirážka snížená o daň má kód `1c` nebo `2c` a jde na ř. 1 nebo 2 a do kontrolního hlášení s režimem 1. Zbytek ceny, tedy cena snížená o přirážku včetně daně, má kód `26c` a sazbu 0 % a jde na ř. 26 mimo kontrolní hlášení (metodika GFŘ č. j. 67743/21/7100-20116-050701). Příklad: cena 140 Kč, náklady 120 Kč, přirážka 20 Kč dává řádek `1c` se základem 16,53 Kč a DPH 3,47 Kč a řádek `26c` se 120 Kč. Do A.4 nebo A.5 se doklad zařadí podle celé částky dokladu včetně daně, ne podle přirážky.
+
+**Dodání knih podle § 71i** (takzvaná nulová sazba) je osvobozené plnění s nárokem na odpočet. Položka má sazbu 0 % a kód `71i`, který zvolíte výslovně v klasifikaci DPH položky; automaticky ho aplikace nenabízí, tuzemská položka s nulovou sazbou zůstává bez kódu. Plnění jde na ř. 26, do kontrolního hlášení ani souhrnného hlášení nevstupuje a v koeficientu § 76 je v čitateli i jmenovateli. Kód `3` pro knihy nepoužívejte: znamená osvobození bez nároku na odpočet a ř. 50 by snížil koeficient. Převod z POHODY, Money S3, ABRA, PREMIER a Stereo NX dává plnění z ř. 26 tuzemskému odběrateli kód `71i`, zahraničnímu `26s`.
 
 MyÚčto přirážku nepočítá, její výši určíte vy. U zálohy přebírá daňový doklad k přijaté platbě kódy z proformy a platbu dělí v poměru jejích řádků. Pokud se přirážka ze zálohy podle § 89 odst. 4 až 6 liší, opravte částky v konceptu daňového dokladu před vystavením. Vyúčtovací faktura a odpočty záloh kódy přebírají také. PDF vydané faktury vypisuje základ a DPH, ale § 89 odst. 14 uvedení daně z přirážky na dokladu pro zákazníka zakazuje, takže takové PDF zákazníkovi neposílejte.
 

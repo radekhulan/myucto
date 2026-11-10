@@ -675,6 +675,35 @@ final class SyntheticPohodaExport
             self::entry('Vydané faktury', self::REVERSE_SALE, 'Stavební práce', 1000, '311001', '602000', '2026-01-18'));
     }
 
+    /** Vydané faktury v členění na ř. 26 ({@see withOtherSupplyLine26()}). */
+    public const LINE26_DOMESTIC = '26FV0011';
+    public const LINE26_FOREIGN = '26FV0012';
+
+    /**
+     * Agenda z {@see write()} s členěním `UDnulova` (ř. 26) a dvěma vydanými fakturami na 1 000 Kč
+     * bez daně: 26FV0011 tuzemskému odběrateli (dodání knih § 71i) a 26FV0012 odběrateli z USA
+     * (služba s místem plnění mimo tuzemsko).
+     */
+    public static function withOtherSupplyLine26(string $agendaDir): void
+    {
+        $append = static function (string $file, string $closing, string $xml): void {
+            $content = (string) file_get_contents($file);
+            file_put_contents($file, str_replace($closing, (string) iconv('UTF-8', 'Windows-1250', $xml) . $closing, $content));
+        };
+        $append($agendaDir . '/06_cleneni_dph.xml', '</lst:listClassificationVAT>',
+            '<lst:classificationVAT version="2.0"><vat:classificationVATHeader><vat:code>UDnulova</vat:code><vat:name>Plnění s nárokem na odpočet ř. 26</vat:name>'
+            . '<vat:lineInVATReturn>26</vat:lineInVATReturn><vat:sectionInVATLedgerStatement>Nezahrnovat</vat:sectionInVATLedgerStatement></vat:classificationVATHeader></lst:classificationVAT>');
+        $foreignPartner = '<inv:partnerIdentity><typ:address><typ:company>Overseas Test Inc.</typ:company><typ:city>Boston</typ:city><typ:street>Test Street 1</typ:street>'
+            . '<typ:zip>02101</typ:zip><typ:country><typ:ids>US</typ:ids></typ:country></typ:address></inv:partnerIdentity>';
+        $domestic = str_replace('<typ:ids>UD</typ:ids>', '<typ:ids>UDnulova</typ:ids>', self::invoice('issuedInvoice', self::LINE26_DOMESTIC, '260011', '2026-01-19', 1000, 0));
+        $foreign = (string) preg_replace('~<inv:partnerIdentity>.*?</inv:partnerIdentity>~s', $foreignPartner,
+            str_replace('<typ:ids>UD</typ:ids>', '<typ:ids>UDnulova</typ:ids>', self::invoice('issuedInvoice', self::LINE26_FOREIGN, '260012', '2026-01-20', 1000, 0)));
+        $append($agendaDir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>', $domestic . $foreign);
+        $append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Vydané faktury', self::LINE26_DOMESTIC, 'Knihy', 1000, '311001', '602000', '2026-01-19')
+            . self::entry('Vydané faktury', self::LINE26_FOREIGN, 'Služby', 1000, '311001', '602000', '2026-01-20'));
+    }
+
     /** Přijatá faktura za službu z EU se samovyměřením ({@see withSelfAssessedForeignPurchase()}). */
     public const SELF_ASSESSED_PURCHASE = '26PF0010';
     public const SELF_ASSESSMENT_DOCUMENT = '26DD0001';
