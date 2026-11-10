@@ -11,6 +11,8 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
+use MyInvoice\Repository\Payroll\PayrollInputRepository;
+use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Absence\PayrollImportAbsenceCompensationMaterializer;
 use MyInvoice\Service\Sample\SamplePayrollPurger;
@@ -29,20 +31,25 @@ use PDO;
  *
  * ── Co blokuje ────────────────────────────────────────────────────────────────
  * Zdroj smí mít jen to, co by šlo smazat, a navíc data, která se jen přesouvají:
- * mzdové vstupy v konceptu, docházku bez schválení, nepřítomnosti, směny,
- * kalendáře a pravidla příplatků. Z blokátorů mazání
- * ({@see PayrollEmploymentDeletionRepository}) proto při sloučení neplatí jen
- * „mzdové vstupy" (`payroll_employment_has_inputs`): vstupy se nemažou, ale
- * stěhují, a blokují jen schválené a zamčené. Všechno ostatní (registrace,
+ * mzdové vstupy, docházku, nepřítomnosti, směny, kalendáře a pravidla
+ * příplatků. Z blokátorů mazání ({@see PayrollEmploymentDeletionRepository})
+ * proto při sloučení neplatí jen „mzdové vstupy" (`payroll_employment_has_inputs`):
+ * vstupy se nemažou, ale stěhují. Schválení vstupů a docházky zdroje sloučení
+ * samo vrátí ({@see self::revertApprovals()}), protože se posuzovalo
+ * podle zdroje a u cíle se schvaluje znovu; blokuje jen zamčený vstup.
+ * Mění-li se převzetím podmínek druh cílového vztahu, vrátí stejně i schválení
+ * cíle: posuzovalo se podle dosavadního druhu.
+ * Mzdový běh zdroje i cíle za dotčené měsíce blokuje dřív, takže vrácené
+ * schválení nikde započítané není. Všechno ostatní (registrace,
  * JMHZ, ELDP, mzdový běh, výstupní doklady, nároky hodinové mzdy, cesty,
  * spoření, dávky) drží dál, protože se počítalo nebo hlásilo právě pod id
  * zdroje a přesunem by se ten vztah k podání ztratil.
  *
  * Souhrn pracovního měsíce pro JMHZ (`payroll_jmhz_work_month_revisions`)
- * vzniká už schválením docházky, není to podání. Schválený měsíc zdroje
- * sloučení blokuje; po znovuotevření zůstane souhrn jen jako historie
- * schválení měsíce, který se přesouvá, a zmizí se zdrojem
- * ({@see self::dropWorkMonthRevisions()}).
+ * vzniká už schválením docházky, není to podání. Po znovuotevření měsíce
+ * zůstane jen jako historie schválení měsíce, který se přesouvá, a zmizí se
+ * zdrojem ({@see self::dropWorkMonthRevisions()}). Totéž platí pro prázdný
+ * měsíc cíle, který nahradí měsíc zdroje.
  *
  * Každá tabulka s `employment_id` má v {@see self::TABLES} výslovné rozhodnutí.
  * Nová tabulka bez rozhodnutí neprojde testem `PayrollEmploymentMergeTablesTest`.
@@ -72,20 +79,19 @@ final class PayrollEmploymentMergeService
      */
     public const TABLES = [
         // ── Přesouvá se ─────────────────────────────────────────────────────
-        // Mzdové vstupy: koncept a zrušené. Schválený a zamčený se počítal
-        // podle zdroje. Klíč deduplikace nese id vztahu, přepisuje se.
+        // Mzdové vstupy. Schválené se před přesunem vrátí do konceptu, zamčený
+        // zpracoval mzdový běh. Klíč deduplikace nese id vztahu, přepisuje se.
         'payroll_inputs' => [
             'action' => self::MOVE,
             'handler' => 'inputs',
-            'blocks' => ['where' => "{t}.status IN ('approved', 'locked')", 'reason' => 'approved'],
+            'blocks' => ['where' => "{t}.status = 'locked'", 'reason' => 'locked'],
         ],
         // Pracovní měsíc docházky. Souhrny importu a ruční souhrny jsou
         // neměnné (triggery), takže se měsíc zkopíruje k cíli i s nimi
-        // a originál zmizí s FK kaskádou zdroje. Schválený měsíc blokuje.
+        // a originál zmizí s FK kaskádou zdroje. Schválený se nejdřív otevře.
         'payroll_time_months' => [
             'action' => self::MOVE,
             'handler' => 'time_months',
-            'blocks' => ['where' => "{t}.status = 'approved'", 'reason' => 'approved'],
         ],
         'payroll_time_month_import_summaries' => ['action' => self::MOVE, 'handler' => 'time_month_child'],
         'payroll_time_month_manual_summaries' => ['action' => self::MOVE, 'handler' => 'time_month_child'],
@@ -212,10 +218,10 @@ final class PayrollEmploymentMergeService
             'code' => 'payroll_merge_source_has_termination',
             'message' => 'Slučovaný vztah má zapsané skončení nebo pozůstalé. Takový vztah sloučit nelze.',
         ],
-        'approved' => [
-            'code' => 'payroll_merge_source_has_approved',
-            'message' => 'Slučovaný vztah má schválené nebo zamčené mzdové vstupy nebo schválenou docházku. '
-                . 'Schválení se posuzovalo podle tohoto vztahu; nejdřív ho vraťte, teprve pak půjde vztah sloučit.',
+        'locked' => [
+            'code' => 'payroll_merge_source_has_locked_inputs',
+            'message' => 'Slučovaný vztah má zamčené mzdové vstupy, které už zpracoval mzdový běh. '
+                . 'Takový vztah sloučit nelze.',
         ],
     ];
 
@@ -227,6 +233,8 @@ final class PayrollEmploymentMergeService
         private readonly PayrollEmploymentRepository $employments,
         private readonly PayrollEmploymentDeletionRepository $deletion,
         private readonly ActivityLogger $activityLogger,
+        private readonly PayrollInputRepository $inputs,
+        private readonly PayrollTimeRepository $time,
     ) {}
 
     /**
@@ -348,13 +356,27 @@ final class PayrollEmploymentMergeService
         sort($periods);
         $this->assertTargetNotInRun($supplierId, $targetId, $targetCode, $periods);
 
+        $typeChanges = $adoptTerms && (string) $source['relation_type'] !== (string) $target['relation_type'];
+        $reverted = $this->revertApprovals($supplierId, $sourceId, $userId);
+        if ($typeChanges) {
+            $targetReverted = $this->revertApprovals($supplierId, $targetId, $userId);
+            $reverted = [
+                'inputs' => $reverted['inputs'] + $targetReverted['inputs'],
+                'months' => $reverted['months'] + $targetReverted['months'],
+            ];
+        }
         $plan = $this->timeMonthPlan($supplierId, $sourceId, $targetId, $targetCode);
         $inputs = $this->inputPlan($supplierId, $sourceId, $targetId, $targetCode);
         $this->assertNoUniqueCollisions($supplierId, $sourceId, $targetId, $targetCode);
         $sourceTerms = $this->latestTerms($supplierId, $sourceId);
         $dimensions = $this->count($supplierId, 'payroll_employment_dimensions', $sourceId);
 
-        $droppedSummaries = $this->dropWorkMonthRevisions($supplierId, $sourceId);
+        $droppedSummaries = array_merge(
+            $this->dropWorkMonthRevisions($supplierId, 'employment_id', [$sourceId]),
+            $typeChanges
+                ? $this->dropWorkMonthRevisions($supplierId, 'employment_id', [$targetId])
+                : $this->dropWorkMonthRevisions($supplierId, 'time_month_id', $plan['replace']),
+        );
         $moved = [];
         foreach (self::TABLES as $table => $decision) {
             if ($decision['action'] !== self::MOVE) {
@@ -410,6 +432,7 @@ final class PayrollEmploymentMergeService
             $moved,
             $inputs,
             $dimensions,
+            $reverted,
         );
         $this->activityLogger->log(
             'payroll.employment.merged',
@@ -420,6 +443,7 @@ final class PayrollEmploymentMergeService
                 'adopt_terms' => $adoptTerms,
                 'note' => $note,
                 'dropped_jmhz_work_month_revisions' => $droppedSummaries,
+                'reverted_approvals' => $reverted,
             ],
             $ip,
             $userAgent,
@@ -552,11 +576,14 @@ final class PayrollEmploymentMergeService
             $byOwner[(int) $month['employment_id']][(string) $month['period_start']] = $month;
         }
         $entries = $this->entryPeriods($supplierId, [$sourceId, $targetId]);
+        // Hodiny nesou jen vstupy z docházky. Ručně zadaná odměna nebo nulová
+        // měsíční mzda cíle z měsíce druhý zdroj hodin nedělá.
         $targetInputs = $this->db->pdo()->prepare(
             "SELECT DISTINCT period_start FROM payroll_inputs
-              WHERE supplier_id = ? AND employment_id = ? AND status <> 'cancelled'"
+              WHERE supplier_id = ? AND employment_id = ? AND status <> 'cancelled'
+                AND (external_id LIKE 'attendance:%' OR external_id LIKE ?)"
         );
-        $targetInputs->execute([$supplierId, $targetId]);
+        $targetInputs->execute([$supplierId, $targetId, PayrollImportAbsenceCompensationMaterializer::EXTERNAL_ID_PREFIX . '%']);
         $inputPeriods = array_flip(array_map('strval', $targetInputs->fetchAll(PDO::FETCH_COLUMN)));
 
         $plan = ['copy' => [], 'replace' => []];
@@ -568,9 +595,11 @@ final class PayrollEmploymentMergeService
                 continue;
             }
             $targetMonth = $byOwner[$targetId][$period] ?? null;
+            // Schválení a souhrn JMHZ prázdného měsíce cíle hodiny nenesou,
+            // měsíc zdroje ho nahradí.
             $targetUses = isset($entries[$targetId][$period])
                 || isset($inputPeriods[$period])
-                || ($targetMonth !== null && (self::monthHasWork($targetMonth) || (int) $targetMonth['has_jmhz'] > 0));
+                || ($targetMonth !== null && self::monthHasContent($targetMonth));
             if ($targetUses) {
                 throw new PayrollDeletionException(
                     'payroll_merge_time_month_conflict',
@@ -592,6 +621,14 @@ final class PayrollEmploymentMergeService
         }
 
         return $plan;
+    }
+
+    /** @param array<string,mixed> $month */
+    private static function monthHasContent(array $month): bool
+    {
+        return (string) $month['work_source'] !== 'entries'
+            || (int) $month['has_import'] > 0
+            || (int) $month['has_manual'] > 0;
     }
 
     /** @param array<string,mixed> $month */
@@ -734,26 +771,77 @@ final class PayrollEmploymentMergeService
     }
 
     /**
+     * Vrátí schválení vztahu: schválené vstupy do konceptu a schválené měsíce
+     * docházky znovu otevře. Vstupy první, otevření měsíce s importem schválené
+     * importní vstupy nepustí. Stejná cesta jako tlačítka Vrátit do konceptu
+     * a Znovu otevřít, jen za účetní najednou.
+     *
+     * @return array{inputs:int,months:int}
+     */
+    private function revertApprovals(int $supplierId, int $employmentId, ?int $userId): array
+    {
+        $pdo = $this->db->pdo();
+        $inputs = $pdo->prepare(
+            "SELECT id, row_version FROM payroll_inputs
+              WHERE supplier_id = ? AND employment_id = ? AND status = 'approved'
+              ORDER BY id"
+        );
+        $inputs->execute([$supplierId, $employmentId]);
+        $revertedInputs = 0;
+        foreach ($inputs->fetchAll(PDO::FETCH_ASSOC) as $input) {
+            $this->inputs->revertToDraft($supplierId, (int) $input['id'], (int) $input['row_version']);
+            ++$revertedInputs;
+        }
+        $months = $pdo->prepare(
+            "SELECT period_start, row_version FROM payroll_time_months
+              WHERE supplier_id = ? AND employment_id = ? AND status = 'approved'
+              ORDER BY period_start"
+        );
+        $months->execute([$supplierId, $employmentId]);
+        $reopened = 0;
+        foreach ($months->fetchAll(PDO::FETCH_ASSOC) as $month) {
+            $this->time->reopenMonth(
+                $supplierId,
+                $employmentId,
+                (string) $month['period_start'],
+                (int) $month['row_version'],
+                'Sloučení do jiného pracovního vztahu téže osoby',
+                $userId,
+            );
+            ++$reopened;
+        }
+
+        return ['inputs' => $revertedInputs, 'months' => $reopened];
+    }
+
+    /**
      * Smaže souhrny JMHZ zdroje i události schválení, které na ně ukazují.
      *
      * Obojí je append-only. Triggery pustí smazání jen řádku, který je
      * výslovně označený v `sample_data_entries` a jen při nastavené
      * `@payroll_sample_purge_supplier_id` (migrace 1995). Značky vzniknou
-     * a zmizí v téže transakci. Schválený měsíc a podání JMHZ sloučení
-     * zablokovaly dřív, takže tu jde jen o historii znovu otevřených měsíců.
+     * a zmizí v téže transakci. Měsíce zdroje jsou v tu chvíli otevřené,
+     * mzdový běh a podání JMHZ sloučení zablokovaly dřív, takže jde jen
+     * o historii schválení: u zdroje a u prázdného měsíce cíle, který se nahrazuje.
      *
+     * @param 'employment_id'|'time_month_id' $column
+     * @param list<int> $ids
      * @return list<array{id:int,period_start:string,revision_no:int,summary_sha256:string}> pro auditní záznam
      */
-    private function dropWorkMonthRevisions(int $supplierId, int $sourceId): array
+    private function dropWorkMonthRevisions(int $supplierId, string $column, array $ids): array
     {
+        if ($ids === []) {
+            return [];
+        }
         $pdo = $this->db->pdo();
+        $placeholders = implode(', ', array_fill(0, count($ids), '?'));
         $stmt = $pdo->prepare(
-            'SELECT id, period_start, time_month_revision_no, summary_sha256
+            "SELECT id, period_start, time_month_revision_no, summary_sha256
                FROM payroll_jmhz_work_month_revisions
-              WHERE supplier_id = ? AND employment_id = ?
-              ORDER BY id'
+              WHERE supplier_id = ? AND {$column} IN ({$placeholders})
+              ORDER BY id"
         );
-        $stmt->execute([$supplierId, $sourceId]);
+        $stmt->execute([$supplierId, ...$ids]);
         $revisions = $stmt->fetchAll(PDO::FETCH_ASSOC);
         if ($revisions === []) {
             return [];
@@ -953,6 +1041,7 @@ final class PayrollEmploymentMergeService
         array $moved,
         array $inputs,
         int $dimensions,
+        array $reverted,
     ): array {
         $stmt = $this->db->pdo()->prepare(
             'SELECT EXISTS (SELECT 1 FROM payroll_registration_a1_profiles profile
@@ -992,6 +1081,13 @@ final class PayrollEmploymentMergeService
                     'Slučovaný vztah skončil %s. Cílový vztah zůstal ve svém stavu; skončil-li také, ukončete ho akcí Ukončit.',
                     self::dateLabel($sourceEnd),
                 ),
+            ];
+        }
+        if ($reverted['inputs'] > 0 || $reverted['months'] > 0) {
+            $warnings[] = [
+                'code' => 'source_approval_reverted',
+                'message' => 'Schválení docházky a mzdových vstupů se vrátilo, protože se posuzovalo podle slučovaného '
+                    . 'vztahu nebo podle dosavadního druhu cílového vztahu. U cílového vztahu měsíce zkontrolujte a znovu schvalte.',
             ];
         }
         $drafts = count(array_filter($inputs, static fn (array $input): bool => $input['status'] === 'draft'));

@@ -211,25 +211,43 @@ final class PayrollEmploymentMergeApiTest extends TestCase
         self::assertSame($registered['row_version'] + 1, $merged['row_version']);
     }
 
-    public function testApprovedInputBlocksMerge(): void
+    public function testApprovedInputIsRevertedAndMoved(): void
     {
         $registered = $this->employment('REG-3', 'employment', '2026-02-20', true, null);
         $manual = $this->employment('DPP-3', 'dpp', '2026-02-07', false, null);
-        $this->input((int) $manual['id'], 'approved', null);
+        $inputId = $this->input((int) $manual['id'], 'approved', null);
+
+        $response = $this->merge($manual, $registered, true);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertContains('source_approval_reverted', array_column($this->json($response)['warnings'], 'code'));
+        $input = $this->db->pdo()->query('SELECT employment_id, status FROM payroll_inputs WHERE id = ' . $inputId)->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame((int) $registered['id'], (int) $input['employment_id']);
+        self::assertSame('draft', $input['status'], 'U cíle se vstup schvaluje znovu.');
+    }
+
+    public function testLockedInputBlocksMerge(): void
+    {
+        $registered = $this->employment('REG-4', 'employment', '2026-02-20', true, null);
+        $manual = $this->employment('DPP-4', 'dpp', '2026-02-07', false, null);
+        $inputId = $this->input((int) $manual['id'], 'approved', null);
+        $this->db->pdo()->exec("UPDATE payroll_inputs SET status = 'locked' WHERE id = {$inputId}");
 
         $response = $this->merge($manual, $registered, true);
 
         self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
-        self::assertSame('payroll_merge_source_has_approved', $this->json($response)['error']['code']);
+        self::assertSame('payroll_merge_source_has_locked_inputs', $this->json($response)['error']['code']);
         self::assertSame(1, $this->countRows('payroll_employments', 'id', (int) $manual['id']));
     }
 
     /**
-     * Schválení docházky zapíše souhrn JMHZ, který je neměnný a drží zdroj
-     * cizím klíčem. Po znovuotevření měsíce to není podání a sloučení ho
-     * zahodí, jinak by zdroj nešlo smazat nikdy.
+     * Reálný průběh: účetní u ručního vztahu schválí importovanou docházku
+     * i vstupy a u registrovaného zadá nulovou měsíční mzdu a schválí prázdný
+     * měsíc. Schválení zapsalo neměnný souhrn JMHZ, který drží zdroj cizím
+     * klíčem; podání to není. Sloučení schválení vrátí, souhrn zahodí a nulový
+     * vstup ani prázdný měsíc cíle mu nevadí.
      */
-    public function testReopenedApprovedAttendanceDoesNotBlockMerge(): void
+    public function testApprovedAttendanceAndTargetPlaceholdersDoNotBlockMerge(): void
     {
         $registered = $this->employment('REG-9', 'employment', '2026-02-20', true, null);
         $this->importedRegistration((int) $registered['id']);
@@ -260,25 +278,22 @@ final class PayrollEmploymentMergeApiTest extends TestCase
         self::assertNotNull($importId);
         $result = $this->approvals->applyBatch($this->supplierId, $importId, true, $this->userId);
         self::assertSame(1, $result['approved'], (string) json_encode($result, JSON_UNESCAPED_UNICODE));
-        $approved = $this->time->monthState($this->supplierId, (int) $manual['id'], self::FEBRUARY);
+        self::assertSame('approved', $this->time->monthState($this->supplierId, (int) $manual['id'], self::FEBRUARY)['status'] ?? null);
         self::assertSame(1, $this->countRows('payroll_jmhz_work_month_revisions', 'employment_id', (int) $manual['id']));
-
-        $blocked = $this->merge($manual, $registered, true);
-        self::assertSame(409, $blocked->getStatusCode(), (string) $blocked->getBody());
-        self::assertSame('payroll_merge_source_has_approved', $this->json($blocked)['error']['code']);
-
-        $this->time->reopenMonth(
-            $this->supplierId,
-            (int) $manual['id'],
-            self::FEBRUARY,
-            (int) $approved['row_version'],
-            'Sloučení do registrovaného vztahu',
-            $this->userId,
-        );
+        $sourceInput = $this->input((int) $manual['id'], 'approved', "attendance:2026-02:{$manual['id']}:ODMENA");
+        $placeholder = $this->input((int) $registered['id'], 'approved', 'quick-monthly:MZDA_MESICNI');
+        $pdo->prepare(
+            'INSERT INTO payroll_time_months
+                (supplier_id, employment_id, period_start, status, approved_by, approved_at, last_changed_by)
+             VALUES (?, ?, ?, "approved", ?, NOW(), ?)',
+        )->execute([$this->supplierId, $registered['id'], self::FEBRUARY, $this->userId, $this->userId]);
 
         $response = $this->merge($manual, $registered, true);
 
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertContains('source_approval_reverted', array_column($this->json($response)['warnings'], 'code'));
+        self::assertSame('draft', $pdo->query('SELECT status FROM payroll_inputs WHERE id = ' . $sourceInput)->fetchColumn());
+        self::assertSame('draft', $pdo->query('SELECT status FROM payroll_inputs WHERE id = ' . $placeholder)->fetchColumn(), 'Vstup cíle se počítal podle dosavadního druhu, schvaluje se znovu.');
         self::assertSame(0, $this->countRows('payroll_employments', 'id', (int) $manual['id']));
         self::assertSame(0, $this->countRows('payroll_jmhz_work_month_revisions', 'employment_id', (int) $manual['id']));
         self::assertSame(0, (int) $this->db->pdo()->query(
