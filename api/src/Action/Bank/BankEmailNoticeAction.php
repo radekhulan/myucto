@@ -17,6 +17,7 @@ use MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeMessage;
 use MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeScanner;
 use MyInvoice\Service\Bank\EmailNotice\ImapMailboxClientInterface;
 use MyInvoice\Service\Mail\Imap\ImapAuthSettings;
+use MyInvoice\Service\Mail\Imap\ImapPasswordRequiredException;
 use MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeProvider;
 use MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeParserRepository;
 use MyInvoice\Service\IpMatcher;
@@ -83,6 +84,8 @@ final class BankEmailNoticeAction
                 isset($current['id']) ? (int) $current['id'] : null,
                 $this->userId($request),
             );
+        } catch (ImapPasswordRequiredException $e) {
+            return Json::error($response, ImapPasswordRequiredException::CODE, $e->getMessage(), 422);
         } catch (\Throwable $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
@@ -118,6 +121,8 @@ final class BankEmailNoticeAction
         if ($denied = $this->distributionDenied($request, $response, $body, $current)) return $denied;
         try {
             $settings = $this->repo->saveImapAccount($sid, $body, $id, $this->userId($request));
+        } catch (ImapPasswordRequiredException $e) {
+            return Json::error($response, ImapPasswordRequiredException::CODE, $e->getMessage(), 422);
         } catch (\Throwable $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
@@ -274,6 +279,8 @@ final class BankEmailNoticeAction
 
         try {
             $settings = $this->imapProbeSettings($saved, $body);
+        } catch (ImapPasswordRequiredException $e) {
+            return Json::error($response, ImapPasswordRequiredException::CODE, $e->getMessage(), 422);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
@@ -445,15 +452,21 @@ final class BankEmailNoticeAction
     {
         $settings = array_merge($saved, $body);
         $formPassword = trim((string) ($body['password'] ?? ''));
+        $usesSavedPassword = false;
         if ($formPassword !== '') {
             $settings['password'] = (string) $body['password'];
         } elseif (isset($saved['password'])) {
             $settings['password'] = (string) $saved['password'];
+            $usesSavedPassword = true;
         } else {
             $settings['password'] = '';
         }
 
-        return array_replace($settings, ImapAuthSettings::normalize($settings, $saved));
+        $settings = array_replace($settings, ImapAuthSettings::normalize($settings, $saved));
+        if ($usesSavedPassword && $settings['auth_mode'] === ImapAuthSettings::PASSWORD) {
+            ImapAuthSettings::assertPasswordTargetUnchanged($saved, $settings);
+        }
+        return $settings;
     }
 
     /**

@@ -41,7 +41,7 @@ final class ImapAuthSettings
         $client = self::uuid($draft[$prefix . 'oauth_client_id'] ?? null, 'Client ID');
         $mailbox = $draft[$prefix . 'username'] ?? null;
         if (!is_string($mailbox) || strlen(trim($mailbox)) > 190 || !filter_var(trim($mailbox), FILTER_VALIDATE_EMAIL)) {
-            throw new \InvalidArgumentException('Pro Microsoft 365 zadej e-mailovou adresu schránky.');
+            throw new \InvalidArgumentException('Pro Microsoft 365 zadejte e-mailovou adresu schránky.');
         }
         $mailbox = strtolower(trim($mailbox));
         $secret = $draft[$prefix . 'oauth_client_secret'] ?? '';
@@ -57,7 +57,7 @@ final class ImapAuthSettings
                 || ($current[$prefix . 'oauth_client_id'] ?? null) !== $client
                 || ($current[$prefix . 'username'] ?? null) !== $mailbox
                 || empty($current[$prefix . 'oauth_client_secret_enc'])) {
-                throw new \InvalidArgumentException('Zadej Client Secret pro aktuální aplikaci a schránku Microsoft 365.');
+                throw new \InvalidArgumentException('Zadejte Client Secret pro aktuální aplikaci a schránku Microsoft 365.');
             }
             $encrypted = $current[$prefix . 'oauth_client_secret_enc'];
         }
@@ -91,6 +91,35 @@ final class ImapAuthSettings
         }
 
         return $secrets->encryptFor($secret, self::context($settings, $supplierId, $id, $purpose, $prefix));
+    }
+
+    /**
+     * Uložené heslo smí jít jen na server, pro který ho uživatel zadal. Jinak by
+     * kdokoli s právem upravit účet přesměroval host na vlastní server a heslo
+     * ke schránce si tam odchytil, aniž by ho kdy viděl.
+     *
+     * @param array<string,mixed> $current Uložené hodnoty z databáze.
+     * @param array<string,mixed> $next Výsledné hodnoty, se kterými se heslo použije.
+     */
+    public static function assertPasswordTargetUnchanged(array $current, array $next): void
+    {
+        foreach (['host', 'port', 'encryption', 'username'] as $field) {
+            if (self::targetValue($field, $current[$field] ?? null) !== self::targetValue($field, $next[$field] ?? null)) {
+                throw new ImapPasswordRequiredException(
+                    'Měníte server, port, šifrování nebo uživatele IMAP účtu. Zadejte proto znovu heslo.'
+                );
+            }
+        }
+    }
+
+    private static function targetValue(string $field, mixed $value): string
+    {
+        $value = trim((string) ($value ?? ''));
+        return match ($field) {
+            'port' => (string) (int) $value,
+            'host' => strtolower($value),
+            default => $value,
+        };
     }
 
     /** @param array<string,mixed> $settings */

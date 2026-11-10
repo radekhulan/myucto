@@ -116,12 +116,12 @@ final class ImapAuthentication
         if ($error instanceof OAuthException) {
             $stage = 'token';
             return match ($error->errorCode) {
-                OAuthException::ENCRYPTION_KEY => ['oauth_secret_unreadable', 'Client Secret nelze načíst. Ověř šifrovací klíč aplikace nebo zadej secret znovu.'],
+                OAuthException::ENCRYPTION_KEY => ['oauth_secret_unreadable', 'Client Secret nelze načíst. Ověřte šifrovací klíč aplikace nebo zadejte secret znovu.'],
                 OAuthException::INVALID_CLIENT, OAuthException::INVALID_GRANT
-                    => ['oauth_credentials_rejected', 'Entra odmítla přihlašovací údaje. Ověř Tenant ID, Client ID a platnost Client Secret.'],
+                    => ['oauth_credentials_rejected', 'Entra odmítla přihlašovací údaje. Ověřte Tenant ID, Client ID a platnost Client Secret.'],
                 OAuthException::REMOTE_UNAVAILABLE => ['oauth_endpoint_unreachable', 'Autorizační služba Microsoft Entra není dostupná.'],
-                OAuthException::RATE_LIMITED => ['oauth_rate_limited', 'Microsoft Entra omezila četnost požadavků. Zkus to později.'],
-                default => ['oauth_token_failed', 'Získání tokenu selhalo. Ověř registraci aplikace a souhlas správce.'],
+                OAuthException::RATE_LIMITED => ['oauth_rate_limited', 'Microsoft Entra omezila četnost požadavků. Zkuste to později.'],
+                default => ['oauth_token_failed', 'Získání tokenu selhalo. Ověřte registraci aplikace a souhlas správce.'],
             };
         }
 
@@ -135,7 +135,7 @@ final class ImapAuthentication
             'read_messages' => ['imap_read_failed', 'Přihlášení k Exchange proběhlo, ale zprávy se nepodařilo načíst.'],
             'write_message' => ['imap_write_failed', 'Přihlášení k Exchange proběhlo, ale zprávu se nepodařilo uložit do složky.'],
             'update_message' => ['imap_update_failed', 'Přihlášení k Exchange proběhlo, ale zprávu se nepodařilo označit nebo přesunout.'],
-            default => ['imap_configuration_invalid', 'Zkontroluj konfiguraci připojení Microsoft 365.'],
+            default => ['imap_configuration_invalid', 'Zkontrolujte konfiguraci připojení Microsoft 365.'],
         };
     }
 
@@ -146,10 +146,10 @@ final class ImapAuthentication
         for ($item = $error; $item !== null; $item = $item->getPrevious()) {
             $message = $item->getMessage();
             if (preg_match('/certificate verify|peer certificate|SSL operation failed/i', $message)) {
-                return ['imap_tls_failed', 'Zabezpečené spojení s Exchange na portu 993 selhalo. Ověř důvěryhodnost certifikátu a TLS.'];
+                return ['imap_tls_failed', 'Zabezpečené spojení s Exchange na portu 993 selhalo. Ověřte důvěryhodnost certifikátu a TLS.'];
             }
             if (preg_match('/timed? out|timeout/i', $message)) {
-                return ['imap_timeout', 'Exchange na portu 993 neodpověděl včas. Ověř síť a firewall.'];
+                return ['imap_timeout', 'Exchange na portu 993 neodpověděl včas. Ověřte síť a firewall.'];
             }
             $rejected = $rejected || $item instanceof AuthFailedException
                 || preg_match('/got failure response: (NO|BAD) |AUTHENTICATE failed|authenticated but not connected/i', $message) === 1;
@@ -157,9 +157,9 @@ final class ImapAuthentication
 
         if ($rejected) {
             $stage = 'authenticate';
-            return ['imap_auth_rejected', 'Token byl získán, ale Exchange odmítl přihlášení IMAP. Ověř registraci aplikace v Exchange, oprávnění FullAccess ke schránce a povolený IMAP.'];
+            return ['imap_auth_rejected', 'Token byl získán, ale Exchange odmítl přihlášení IMAP. Ověřte registraci aplikace v Exchange, oprávnění FullAccess ke schránce a povolený IMAP.'];
         }
 
-        return ['imap_connection_failed', 'Spojení s Exchange se nepodařilo navázat. Ověř dostupnost outlook.office365.com na portu 993.'];
+        return ['imap_connection_failed', 'Spojení s Exchange se nepodařilo navázat. Ověřte dostupnost outlook.office365.com na portu 993.'];
     }
 }
