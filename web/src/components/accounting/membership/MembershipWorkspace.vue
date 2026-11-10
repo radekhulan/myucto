@@ -40,7 +40,7 @@ const detailPane = ref<HTMLElement | null>(null)
 const dataVersion = ref(0)
 const route = useRoute(), router = useRouter()
 const titles = ref<string[]>([]), titlesError = ref(false)
-let titlesTicket = 0, hydrating = false
+let titlesTicket = 0, hydrating = false, titlesYear: number | null | undefined
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
 let pendingRouteFilters = false, pendingFormFilters = false
 function cancelSearchTimer() {
@@ -113,7 +113,7 @@ watch(() => selected.value?.id, async id => {
 async function load(append = false) {
   const ticket = ++generation, supplier = props.supplier
   const selectedIds = [...checkedMembers.value]
-  if (!append) { members.value=[]; nextAfter.value=null }
+  // Obnova ponechá zobrazený seznam, dokud nepřijdou nová data; vyprázdní ho jen změna filtrů nebo firmy.
   loading.value = true; error.value = ''
   try {
     const page = await membershipApi.members(supplier, append ? nextAfter.value ?? 0 : 0, 50, appliedFilters.value)
@@ -149,7 +149,7 @@ async function loadPeriods() {
 }
 
 async function reloadAll() {
-  await Promise.all([load(), loadPeriods(), loadTitles()])
+  await Promise.all([load(), loadPeriods(), loadTitles(true)])
 }
 
 function chooseClient(client: Client | null) {
@@ -211,14 +211,18 @@ const createActions = computed<ActionItem[]>(() => [
   { key: 'create-member', label: t('nonprofitMembership.createMember'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: creating.value || !clientId.value || !numberValid.value, disabledReason: t('nonprofitMembership.createNeedsInput'), run: () => { void create() } },
 ])
 
-async function loadTitles() {
+/** Tituly závisí jen na firmě a roce; bez vynucení je pro rok, který se už načítá nebo načetl, nečteme znovu. */
+async function loadTitles(force = false) {
+  const year = /^\d{4}$/.test(String(filterYear.value)) ? Number(filterYear.value) : undefined
+  if (!force && !titlesError.value && titlesYear === (year ?? null)) return
+  titlesYear = year ?? null
   const supplier = props.supplier, ticket = ++titlesTicket
   titlesError.value = false
   try {
     const items: string[] = []
     let after: string | undefined
     do {
-      const page = await membershipApi.titles(supplier, /^\d{4}$/.test(String(filterYear.value)) ? Number(filterYear.value) : undefined, after)
+      const page = await membershipApi.titles(supplier, year, after)
       if (!alive || ticket !== titlesTicket || supplier !== props.supplier) return
       items.push(...page.items)
       if (page.next_after_title_key === null) break
@@ -264,7 +268,13 @@ watch(search, () => {
   cancelSearchTimer()
   searchTimeout = setTimeout(() => {searchTimeout = null; if (alive) applyFilters()}, 300)
 }, {flush: 'sync'})
-watch([filterYear, titleKey, paymentStatus], () => {if (!hydrating) {applyFilters(); void loadTitles()}}, {flush: 'sync'})
+// Rozepsaný rok (např. „202“) ještě není filtr: seznam i tituly načteme až po stejné prodlevě jako u hledání.
+watch(filterYear, () => {
+  if (hydrating) return
+  cancelSearchTimer()
+  searchTimeout = setTimeout(() => {searchTimeout = null; if (alive) {applyFilters(); void loadTitles()}}, 300)
+}, {flush: 'sync'})
+watch([titleKey, paymentStatus], () => {if (!hydrating) applyFilters()}, {flush: 'sync'})
 watch(() => route?.query, () => {
   cancelSearchTimer()
   // Navigace má přednost před rozepsaným hledáním; během dávky ji použijeme až po odemčení.
@@ -284,9 +294,6 @@ watch(batchLocked, locked => {
   }
 })
 
-const filterActions = computed<ActionItem[]>(() => [
-  {key:'filter-members',label:t('nonprofitMembership.reload'),icon:'cycle',variant:'neutral',tier:'secondary',show:!!error.value,disabled:loading.value || batchLocked.value,run:() => applyFilters()},
-])
 </script>
 
 <template>
@@ -344,10 +351,14 @@ const filterActions = computed<ActionItem[]>(() => [
         <label :class="formLabel">{{ t('nonprofitMembership.listYear') }}<input v-model="filterYear" :class="field" :disabled="batchLocked" type="number" min="1900" max="9998" step="1" data-field="member-year" /></label>
         <label :class="formLabel">{{ t('nonprofitMembership.titleKey') }}<SearchableSelect :model-value="titleKey || null" :options="titleOptions" :disabled="batchLocked" :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" data-field="member-title" @update:model-value="titleKey = typeof $event === 'string' ? $event : ''" /></label>
         <label :class="formLabel">{{ t('nonprofitMembership.listPaymentStatus') }}<select v-model="paymentStatus" :class="field" :disabled="batchLocked" data-field="member-payment-status"><option v-for="status in ['all','paid','unpaid','unproven','none'] as const" :key="status" :value="status">{{ t(`nonprofitMembership.listStatus_${status}`) }}</option></select></label>
-        <template #actions><ActionBar v-if="error" :actions="filterActions" /></template>
       </FilterBar>
       <p v-if="paymentStatus !== 'all'" class="text-xs text-neutral-500" data-section="status-year-help">{{ t('nonprofitMembership.listStatusNeedsYear') }}</p>
-      <p v-if="titlesError" role="alert" :class="errorBox">{{ t('nonprofitMembership.titlesError') }} <button type="button" :class="btnOutline('neutral')" @click="loadTitles"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.cycle" /></svg>{{ t('nonprofitMembership.reload') }}</button></p>
+      <div v-if="titlesError" role="alert" :class="[errorBox, 'flex flex-wrap items-center gap-2']" data-section="titles-error">
+        <span>{{ t('nonprofitMembership.titlesError') }}</span>
+        <button type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" data-action="reload-titles" @click="loadTitles(true)">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>{{ t('nonprofitMembership.reload') }}
+        </button>
+      </div>
 
       <p v-if="loading && !members.length" role="status" class="text-sm text-neutral-500" data-section="members-loading">{{ t('common.loading') }}</p>
       <div v-else-if="!members.length && !loading && !error" class="space-y-2 text-sm text-neutral-500" data-section="members-empty">
@@ -369,7 +380,7 @@ const filterActions = computed<ActionItem[]>(() => [
             <p v-if="row.contribution.claim_count" class="flex flex-wrap gap-x-3 gap-y-1 text-neutral-500" data-field="contribution-amounts">
               <span class="whitespace-nowrap">{{ t('nonprofitMembership.listPrescribed') }}: {{ formatMoneyMinor(Number(row.contribution.prescribed_cents)) }}</span>
               <span class="whitespace-nowrap">{{ t('nonprofitMembership.listPaid') }}: {{ formatMoneyMinor(row.contribution.paid_cents === null ? null : Number(row.contribution.paid_cents)) }}</span>
-              <span class="whitespace-nowrap">{{ t('nonprofitMembership.sumProvenOpen') }}: {{ formatMoneyMinor(row.contribution.open_cents === null ? null : Number(row.contribution.open_cents)) }}</span>
+              <span class="whitespace-nowrap">{{ t('nonprofitMembership.sumOpen') }}: {{ formatMoneyMinor(row.contribution.open_cents === null ? null : Number(row.contribution.open_cents)) }}</span>
             </p>
           </template>
         </div>

@@ -343,6 +343,61 @@ final class MembershipNativeTest extends TestCase
         foreach($pairReads as $rows)self::assertLessThanOrEqual(4.0,$rows,'Párování stránky nesmí načíst skupiny ostatních členů.');
     }
 
+    public function testMemberSummaryCountsUnpairedClaimAsOpenAndOnlyDamagedProofAsNeedingReview(): void
+    {
+        $member=$this->member('SYN-SUMMARY','summary');
+        $open=$this->issueTitle($member['id'],'CLENSTVI','summary-open');
+        $damaged=$this->issueTitle($member['id'],'VSTUP','summary-damaged');
+        // Úmyslně poškozené syntetické úložiště, nikoli podporovaná cesta účetní opravy.
+        $this->pdo->prepare('UPDATE journal_entry_lines SET amount=19999 WHERE supplier_id=? AND id=?')->execute([$this->supplier,$damaged['operation']['receivable_line_id']]);
+        $detail=(new MembershipReconciliationService($this->balances))->memberBalance($this->supplier,$member['id']);
+        $byOperation=array_column($detail['items'],null,'operation_id');
+        self::assertSame('unreconciled',$byOperation[$open['operation']['id']]['settlement']['status']);
+        self::assertSame('ambiguous',$byOperation[$damaged['operation']['id']]['settlement']['status']);
+        self::assertSame($byOperation[$open['operation']['id']]['amount_cents'],$detail['page_open_cents'],'Nespárovaný předpis je otevřený celou částkou.');
+        self::assertSame(1,$detail['page_needs_review_count'],'K prověření je jen předpis s poškozeným důkazem.');
+        self::assertArrayNotHasKey('page_proven_open_cents',$detail);
+        self::assertArrayNotHasKey('page_unreconciled_count',$detail);
+    }
+
+    public function testStatusFilterScansMembersInBoundedChunksFromTheCursor(): void
+    {
+        $ids=[];
+        foreach(['none','none','unpaid','none','unpaid'] as $i=>$kind){
+            $member=$this->member('SYN-CHUNK-'.$i,'chunk-'.$i);
+            if($kind==='unpaid')$this->issue($member['id'],'chunk-'.$i);
+            $ids[]=$member['id'];
+        }
+        $filter=\MyInvoice\Service\Nonprofit\Membership\MembershipListFilter::parse(['year'=>2026,'payment_status'=>'unpaid']);
+        $tiny=new \MyInvoice\Repository\Nonprofit\Membership\MembershipListRepository($this->db,1);
+        // Dávky 1, 2, 4 členů: stránka se musí doplnit přes hranice dávek a pokračovat od kurzoru.
+        self::assertSame([$ids[2]],array_column($tiny->page($this->supplier,0,1,$filter),'id'));
+        self::assertSame([$ids[2],$ids[4]],array_column($tiny->page($this->supplier,0,5,$filter),'id'));
+        self::assertSame([$ids[4]],array_column($tiny->page($this->supplier,$ids[2],5,$filter),'id'));
+        self::assertSame([],$tiny->page($this->supplier,$ids[4],5,$filter));
+        $filter['search']='SYN-CHUNK-4';
+        self::assertSame([$ids[4]],array_column($tiny->page($this->supplier,0,5,$filter),'id'),'Dávka počítá jen členy odpovídající hledání.');
+        $filter['search']='';
+        self::assertSame(array_column($tiny->page($this->supplier,0,5,$filter),'id'),
+            array_column((new \MyInvoice\Repository\Nonprofit\Membership\MembershipListRepository($this->db))->page($this->supplier,0,5,$filter),'id'));
+
+        // Další stránka ani dávka nesmí číst předpisy členů před kurzorem nebo za hranicí dávky.
+        $repo=new \MyInvoice\Repository\Nonprofit\Membership\MembershipListRepository($this->db);
+        foreach([[$ids[2],null,1.0],[$ids[1],$ids[2],1.0]] as [$after,$upper,$max]){
+            [$sql,$params]=$repo->query($this->supplier,$after,5,$filter,null,$upper);
+            $q=$this->pdo->prepare('ANALYZE FORMAT=JSON '.$sql);$q->execute($params);
+            $plan=json_decode((string)$q->fetchColumn(),true,flags:JSON_THROW_ON_ERROR);
+            $examined=[];
+            $walk=function(array $node)use(&$walk,&$examined):void {
+                if (($node['table_name']??null)==='cc' && isset($node['r_rows'],$node['r_loops'])) $examined[]=(float)$node['r_rows']*(float)$node['r_loops'];
+                foreach($node as $value)if(is_array($value))$walk($value);
+            };
+            $walk($plan);
+            self::assertNotEmpty($examined,'Měření musí skutečně číst účetní případy.');
+            foreach($examined as $rows)self::assertLessThanOrEqual($max,$rows,'Filtr úhrady nesmí agregovat předpisy mimo dávku od kurzoru.');
+        }
+    }
+
     private function listRows(array $query = [], int $after = 0, int $limit = 100): array
     {
         $filter = \MyInvoice\Service\Nonprofit\Membership\MembershipListFilter::parse($query + ['year' => 2026]);

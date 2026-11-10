@@ -34,7 +34,7 @@ export interface ClaimRow {
   title_key: string; period_from: string; period_to: string; settlement: ClaimSettlement
 }
 export interface MemberBalance {
-  member_id: number; page_active_claim_cents: number; page_proven_open_cents: number; page_unreconciled_count: number
+  member_id: number; page_active_claim_cents: number; page_open_cents: number; page_needs_review_count: number
   items: ClaimRow[]; next_after_claim_id: number | null
 }
 export interface MemberDetail { member: MemberIdentity; history: MemberRevision[]; balance: MemberBalance }

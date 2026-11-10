@@ -48,7 +48,7 @@ describe('obnova výběru a skutečná navigace během dávky', () => {
     await w.get('[data-action="reload-members"]').trigger('click'); await flushPromises()
     expect(w.find('[data-section="workspace-error"]').exists()).toBe(true)
     expect(batch.props('selectedMemberIds')).toEqual([1])
-    if (mode === 'retry') await w.get('[data-action="filter-members"]').trigger('click')
+    if (mode === 'retry') await w.get('[data-action="reload-members"]').trigger('click')
     else await vi.advanceTimersByTimeAsync(300)
     await flushPromises()
     expect(batch.props('selectedMemberIds')).toEqual([1])

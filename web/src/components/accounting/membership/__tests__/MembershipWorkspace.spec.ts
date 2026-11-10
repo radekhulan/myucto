@@ -468,4 +468,50 @@ describe('Membership workspace', () => {
     expect(sections).toEqual(['members', 'reconciliation'])
     w.unmount()
   })
+
+  it('waits until the year is typed before loading members or titles', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      const members=api.members.mock.calls.length, titles=api.titles.mock.calls.length
+      for (const value of ['2','20','202','2025']) {
+        await w.get('[data-field="member-year"]').setValue(value)
+        await vi.advanceTimersByTimeAsync(100)
+        expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
+      }
+      expect(api.members).toHaveBeenCalledTimes(members)
+      expect(api.titles).toHaveBeenCalledTimes(titles)
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(api.members).toHaveBeenCalledTimes(members+1)
+      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2025}))
+      expect(api.titles).toHaveBeenCalledTimes(titles+1)
+      expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('keeps the current rows visible while a refresh is loading', async () => {
+    const w=mounted();await flushPromises()
+    let resolve: (value: MemberPage) => void = () => {}
+    api.members.mockReturnValueOnce(new Promise<MemberPage>(r => {resolve = r}))
+    await w.get('[data-action="reload-members"]').trigger('click');await flushPromises()
+    expect(w.findAll('[data-section="member-row"]')).toHaveLength(3)
+    resolve(page([row(1)]));await flushPromises()
+    expect(w.findAll('[data-section="member-row"]')).toHaveLength(1)
+    w.unmount()
+  })
+
+  it('shows one styled retry for a title loading failure', async () => {
+    api.titles.mockRejectedValue(new Error('Synthetic titles failure'))
+    api.members.mockRejectedValueOnce(new Error('Synthetic members failure'))
+    const w=mounted();await flushPromises()
+    expect(w.find('[data-action="filter-members"]').exists()).toBe(false)
+    const retry=w.get('[data-section="titles-error"]').findAll('button')
+    expect(retry).toHaveLength(1)
+    expect(retry[0].classes()).toContain('whitespace-nowrap')
+    expect(retry[0].get('svg').attributes('stroke-width')).toBe('2')
+    api.titles.mockResolvedValue({items: ['SYNTHETIC'], next_after_title_key: null})
+    await retry[0].trigger('click');await flushPromises()
+    expect(w.find('[data-section="titles-error"]').exists()).toBe(false)
+    w.unmount()
+  })
 })

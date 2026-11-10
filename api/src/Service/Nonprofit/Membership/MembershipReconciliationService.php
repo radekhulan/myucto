@@ -19,20 +19,21 @@ final class MembershipReconciliationService
         $evidence = $this->balances->pairingEvidence($supplier, $claims);
         $rows = [];
         $activeClaimCents = 0;
-        $provenOpenCents = 0;
-        $unreconciled = 0;
+        $openCents = 0;
+        $needsReview = 0;
         foreach ($claims as $claim) {
             $settlement = $this->settlement($claim, $evidence[$claim['claim_id']] ?? null);
             if ($claim['reversal_claim_id'] === null) $activeClaimCents += $claim['amount_cents'];
-            if ($settlement['open_cents'] !== null) $provenOpenCents += $settlement['open_cents'];
-            if ($settlement['status'] === 'unreconciled' || $settlement['status'] === 'ambiguous') $unreconciled++;
+            // Nespárovaný předpis je neuhrazený celou částkou; neurčený zůstatek mají jen předpisy k prověření.
+            if ($settlement['open_cents'] !== null) $openCents += $settlement['open_cents'];
+            if ($settlement['status'] === 'ambiguous') $needsReview++;
             $rows[] = $claim + ['settlement' => $settlement];
         }
         return [
             'member_id' => $member,
             'page_active_claim_cents' => $activeClaimCents,
-            'page_proven_open_cents' => $provenOpenCents,
-            'page_unreconciled_count' => $unreconciled,
+            'page_open_cents' => $openCents,
+            'page_needs_review_count' => $needsReview,
             'items' => $rows,
             'next_after_claim_id' => $more ? $claims[array_key_last($claims)]['claim_id'] : null,
         ];
