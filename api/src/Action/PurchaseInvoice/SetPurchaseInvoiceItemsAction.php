@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -91,6 +92,7 @@ final class SetPurchaseInvoiceItemsAction
 
         // Hlavička se tu nemění: přenesení v ní už bylo, kód 40/41 je vědomá tuzemská
         // položka smíšeného dokladu ({@see PurchaseInvoiceRepository::reconcileReverseChargeItemCodes()}).
+        $items = StoredPurchaseItemColumns::carryOver($items, (array) ($existing['items'] ?? []));
         $this->repo->replaceItems($id, $items, (bool) ($existing['reverse_charge'] ?? false));
         $this->calc->recompute($id);
 

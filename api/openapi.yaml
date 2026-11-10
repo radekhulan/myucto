@@ -51614,9 +51614,10 @@ components:
 
     PurchaseInvoiceItemPayload:
       type: object
-      description: "Uložení řádků faktury je náhrada celého seznamu (DELETE + INSERT). Pole, která klient nepošle zpět, zaniknou, včetně `seller_item_code`, `item_ean`, `intrastat_cn8_code` a `intrastat_country_of_origin`."
+      description: "Uložení řádků faktury je náhrada celého seznamu (DELETE + INSERT). Pole, která klient nepošle zpět, zaniknou. Výjimkou jsou `stock_item_id`, `seller_item_code`, `item_ean`, `intrastat_cn8_code` a `intrastat_country_of_origin`: chybí-li klíč v položce, která odpovídá uloženému řádku, převezme se uložená hodnota. Řádek se páruje podle `id`, bez něj podle pořadí, ale jen při shodném popisu. Explicitní `null` hodnotu smaže."
       required: [description, quantity, unit_price_without_vat, vat_rate_id]
       properties:
+        id: { type: integer, description: "Volitelné id uloženého řádku (z detailu dokladu). Slouží jen ke spárování pro převzetí vynechaných sloupců; řádek se uloží s novým id." }
         description: { type: string }
         quantity: { type: number }
         duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Volitelná přesná délka v celých minutách. Vyžaduje hodinovou jednotku a prázdný `stock_item_id`; vynecháno/NULL zachová legacy výpočet." }
@@ -51630,10 +51631,10 @@ components:
         expense_account_code: { type: [string, "null"], description: "Vlastní nákladový účet položky; NULL odvodí účet z druhu nákladu." }
         accrual_from: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381) — začátek období. Jen spolu s `accrual_to`; neplatná dvojice se uloží jako bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381) — konec období (včetně)." }
-        seller_item_code: { type: [string, "null"], maxLength: 80, description: "Kód položky dodavatele. Delší kód se nezkracuje, uloží se null. Round-trip: uložení položek je DELETE + INSERT, nepošlete-li kód zpět, zanikne." }
-        item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží, jen číslice v délce 8, 12, 13 nebo 14, jinak se uloží null. Round-trip stejně jako `seller_item_code`." }
-        intrastat_cn8_code: { type: [string, "null"], description: "Kód KN8, tečky se odstraní; co nemá 8 číslic, se neuloží. Round-trip stejně jako `seller_item_code`." }
-        intrastat_country_of_origin: { type: [string, "null"], description: "Země původu (ISO alpha-2); jiný tvar se neuloží. Round-trip stejně jako `seller_item_code`." }
+        seller_item_code: { type: [string, "null"], maxLength: 80, description: "Kód položky dodavatele. Delší kód se nezkracuje, uloží se null. Vynechaný klíč převezme hodnotu uloženého řádku, explicitní `null` kód smaže (viz popis schématu)." }
+        item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží, jen číslice v délce 8, 12, 13 nebo 14, jinak se uloží null. Vynechání a `null` stejně jako u `seller_item_code`." }
+        intrastat_cn8_code: { type: [string, "null"], description: "Kód KN8, tečky se odstraní; co nemá 8 číslic, se neuloží. Vynechání a `null` stejně jako u `seller_item_code`." }
+        intrastat_country_of_origin: { type: [string, "null"], description: "Země původu (ISO alpha-2); jiný tvar se neuloží. Vynechání a `null` stejně jako u `seller_item_code`." }
         stock_item_id:
           type: [integer, "null"]
           description: |
@@ -51641,6 +51642,7 @@ components:
             předvyplnění příjemkového wizardu; skutečný pohyb dělá až příjemka
             (POST /api/purchase-invoices/{id}/stock-receipt). Musí patřit stejnému
             dodavateli, jinak se tiše ignoruje (uloží se NULL).
+            Vynechaný klíč převezme vazbu uloženého řádku, explicitní `null` ji zruší.
 
     AiAssistSettings:
       type: object
