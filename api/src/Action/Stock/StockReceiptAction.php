@@ -7,6 +7,8 @@ namespace MyInvoice\Action\Stock;
 use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Stock\StockException;
@@ -41,7 +43,14 @@ final class StockReceiptAction
             return $err;
         }
         try {
-            return Json::ok($response, $this->service->proposeForPurchaseInvoice($supplierId, (int) $args['id']));
+            $overrides = [];
+            $raw = $request->getQueryParams()['stock_item_ids'] ?? [];
+            foreach (is_array($raw) ? $raw : [] as $itemId => $cardId) {
+                if ((int) $itemId > 0 && (int) $cardId > 0) {
+                    $overrides[(int) $itemId] = (int) $cardId;
+                }
+            }
+            return Json::ok($response, $this->service->proposeForPurchaseInvoice($supplierId, (int) $args['id'], $overrides));
         } catch (\Throwable $e) {
             return $this->mapStockError($response, $e);
         }
@@ -59,7 +68,13 @@ final class StockReceiptAction
         $piId = (int) $args['id'];
         $body = (array) ($request->getParsedBody() ?? []);
         try {
-            $result = $this->service->createReceipt($supplierId, $piId, $body, $this->userId($request));
+            $result = $this->service->createReceipt(
+                $supplierId,
+                $piId,
+                $body,
+                $this->userId($request),
+                RequestAuthorization::allows($request, 'stock.items.write', AccessLevel::WRITE),
+            );
             $this->log($request, 'stock.receipt_created', (int) $result['id'], ['purchase_invoice_id' => $piId]);
             return Json::ok($response, $result, 201);
         } catch (\Throwable $e) {

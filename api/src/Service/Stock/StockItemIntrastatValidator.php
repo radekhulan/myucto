@@ -13,6 +13,9 @@ final class StockItemIntrastatValidator
         'KUR', 'MWH', 'LTR', 'LPA', 'MTR', 'MTK', 'MTQ', 'MQM', 'NPR', 'PCE', 'CEN', 'MIL', 'TJO', 'ZZZ',
     ];
 
+    /** Kódy původu Intrastatu mimo číselník zemí (QU = neznámá země, QV = neznámý stát EU). */
+    public const NON_ISO_ORIGIN_CODES = ['QU', 'QV'];
+
     public function __construct(private readonly Connection $db) {}
 
     /**
@@ -33,7 +36,7 @@ final class StockItemIntrastatValidator
         if ($countryOfOrigin === false
             || ($countryOfOrigin !== null && preg_match('/^[A-Z]{2}$/', $countryOfOrigin) !== 1)
             || ($countryOfOrigin !== null
-                && !in_array($countryOfOrigin, ['QU', 'QV'], true)
+                && !in_array($countryOfOrigin, self::NON_ISO_ORIGIN_CODES, true)
                 && !$this->countryExists($countryOfOrigin))) {
             throw new \InvalidArgumentException('Země původu musí být platný dvoupísmenný ISO kód.');
         }

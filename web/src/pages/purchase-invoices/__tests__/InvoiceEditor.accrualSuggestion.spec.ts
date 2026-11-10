@@ -265,6 +265,21 @@ describe('InvoiceEditor.vue — návrh časového rozlišení z textu položky',
     expect(payload.items.map((row: PurchaseInvoiceItem) => row.unit_price_without_vat)).toEqual([100, 100])
   })
 
+  it('kód zboží a EAN jdou v detailu položky opravit a chybný EAN se ohlásí', async () => {
+    const wrapper = await mountEditor([{ ...item(1, 'Díl'), seller_item_code: 'SPATNE', item_ean: '8590000000015' } as ReturnType<typeof item>])
+    await openItemDetails(wrapper)
+    await wrapper.find('[data-test="item-seller-code"]').setValue('SPRAVNE')
+    expect(wrapper.find('[data-test="item-ean-invalid"]').exists()).toBe(false)
+    await wrapper.find('[data-test="item-ean"]').setValue('8590000000011')
+    expect(wrapper.find('[data-test="item-ean-invalid"]').exists()).toBe(true)
+    await wrapper.find('[data-test="item-ean"]').setValue('8590000000022')
+    expect(wrapper.find('[data-test="item-ean-invalid"]').exists()).toBe(false)
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    const saved = m.update.mock.calls[0][1].items[0]
+    expect([saved.seller_item_code, saved.item_ean]).toEqual(['SPRAVNE', '8590000000022'])
+  })
+
   it('kód hlavičky přepíše položky jen na výslovnou volbu', async () => {
     const wrapper = await mountEditor([
       { ...item(1, 'Správa kampaně'), vat_classification_code: '23' },

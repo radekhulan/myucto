@@ -711,7 +711,7 @@ final class AnonymizationPolicy
         'public_holidays' => ['code' => 'keep', 'month_day' => 'keep', 'name' => 'keep', 'note' => 'keep'],
         'purchase_invoice_approvals' => ['comment' => 'text', 'token_hash' => 'token'],
         'purchase_invoice_counters' => ['period' => 'keep'],
-        'purchase_invoice_items' => ['counter_account_code' => 'keep', 'description' => 'text', 'expense_account_code' => 'keep', 'posting_rule_key' => 'keep', 'unit' => 'keep', 'vat_classification_code' => 'keep'],
+        'purchase_invoice_items' => ['counter_account_code' => 'keep', 'description' => 'text', 'expense_account_code' => 'keep', 'intrastat_cn8_code' => 'keep', 'intrastat_country_of_origin' => 'keep', 'item_ean' => 'keep', 'posting_rule_key' => 'keep', 'seller_item_code' => 'keep', 'unit' => 'keep', 'vat_classification_code' => 'keep'],
         'purchase_invoice_inbox_dismissed' => ['sha256' => 'keep', 'vendor_invoice_number' => 'keep'],
         'purchase_invoice_submissions' => ['detected_buyer_dic' => 'dic', 'detected_buyer_ic' => 'ico', 'document_sha256' => 'keep', 'extraction_error' => 'text', 'extraction_source' => 'keep', 'note' => 'text', 'status_reason' => 'text'],
         'purchase_invoice_vat_allocations' => ['account_code' => 'keep', 'description' => 'text', 'vat_classification_code' => 'keep'],

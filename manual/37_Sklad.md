@@ -141,13 +141,16 @@ Počáteční zásoby naskladníte podle [§ 37.4.3](#3743-pocatecni-stav-zasob)
 
 ### 37.4.2 Naskladnění z přijaté faktury
 
-1. Otevřete detail [přijaté faktury](23_Prijate_faktury.md). Řádky, které se mají
-   naskladnit, musí být napojené na skladovou kartu.
-2. Klikněte na **Přijmout na sklad**. Tlačítko je jen u faktury, která má aspoň
-   jeden dosud nenaskladněný řádek napojený na kartu.
+1. Otevřete detail [přijaté faktury](23_Prijate_faktury.md). Řádek se naskladní na
+   kartu, na kterou je napojený. Řádek s kódem zboží se s kartou spáruje sám
+   ([§ 37.12.5.2](#371252-naskladneni-z-prijate-faktury)).
+2. Klikněte na **Přijmout na sklad**. Tlačítko je u faktury, která má aspoň jeden
+   dosud nenaskladněný řádek s kartou nebo s kódem zboží.
 3. V průvodci zkontrolujte **zbývající množství k naskladnění**. Můžete ho
    přepsat na menší (částečné naskladnění), zvolit jinou kartu, nebo rovnou
-   z popisu řádku založit novou skladovou kartu.
+   z popisu řádku založit novou skladovou kartu. Když řádku s kódem vyberete kartu
+   ručně, nechte zaškrtnuté **Zapamatovat kód**. Po zaúčtování příjemky se kód uloží ke kartě
+   a příště se řádek spáruje sám.
 4. Podle potřeby zahrňte vedlejší pořizovací náklady. Nabídnou se řádky téže
    faktury, které nemají skladovou kartu (typicky doprava).
 5. Potvrďte. Vznikne **rozpracovaná příjemka**. Otevřete ji v
@@ -1108,9 +1111,9 @@ nezobrazuje nikdy.
 #### 37.12.5.2 Naskladnění z přijaté faktury
 
 Na detailu [přijaté faktury](23_Prijate_faktury.md) je tlačítko **Přijmout na sklad**,
-pokud má alespoň jeden dosud nenaskladněný řádek navázaný na skladovou kartu. Faktura
-bez jediné takové vazby tlačítko nenabízí. Akce otevře průvodce naskladněním. Ten
-nabídne řádky faktury s vazbou na skladovou kartu a **zbývající množství
+pokud má alespoň jeden dosud nenaskladněný řádek s kartou nebo s kódem zboží. Faktura
+bez takového řádku tlačítko nenabízí. Akce otevře průvodce naskladněním. Ten
+nabídne řádky faktury s kartou i řádky s kódem bez karty a **zbývající množství
 k naskladnění**: fakturované množství mínus součet množství, které už bylo
 naskladněno dřívějšími zaúčtovanými příjemkami napojenými na tentýž řádek faktury.
 Pokus naskladnit víc systém odmítne hláškou „Množství přesahuje zbývající k příjmu
@@ -1118,6 +1121,37 @@ z faktury“ (s tolerancí na zaokrouhlení asi 0,0005 jednotky). Kontroluje se 
 zakládání konceptu příjemky, ne až při zaúčtování. Pole lze ručně přepsat na menší
 množství (částečné naskladnění). K jednotlivým řádkům lze zvolit existující kartu,
 napojit jinou nebo rovnou z popisu řádku faktury **založit novou skladovou kartu**.
+Po změně karty průvodce přepočte zbývající množství a cenu podle balení nové karty,
+cenu pak můžete ručně upravit. Zbytek částečně naskladněného řádku jde přijmout jen na
+stejnou kartu jako dřívější příjemka.
+
+**Párování podle kódu.** Vytěžení z PDF, ISDOC i Pohoda XML přebírá z řádku kód zboží
+dodavatele a EAN. Řádek bez napojené karty průvodce spáruje v tomto pořadí: kód uložený
+u karty pro tohoto dodavatele (nabídky dodavatelů), platný EAN z řádku, kód karty, kód
+řádku jako EAN karty. První dvě shody průvodce použije sám. Shodu podle kódu karty a kódu
+jako EAN jen navrhne se štítkem **Navrženo…, zkontrolujte**, protože vlastní kód karty se
+s kódem dodavatele může shodovat náhodou. Kartu potvrdíte založením příjemky, nebo vyberete
+jinou. Bere jen aktivní karty, které nejsou služba. Když kódu odpovídá víc karet, řádek
+zůstane bez karty a vyberete ji ručně. Řádek vedený jako služba se nenabízí. Párování nezapisuje
+kartu na řádek faktury, takže nemění její zaúčtování. Vyberete-li kartu ručně nebo potvrdíte návrh, průvodce
+nabídne **Zapamatovat kód**. U karty vybrané ručně je volba zaškrtnutá, u návrhu ji musíte zaškrtnout sami.
+Kód se uloží ke kartě pro tohoto dodavatele až při zaúčtování příjemky; smazání konceptu kartu nezmění. Má-li kód
+u tohoto dodavatele jiná karta, průvodce u volby napíše, ze které karty se odebere. Volbu v konceptu zrušíte
+v editoru příjemky odkazem **Neukládat**. Volba je jen pro uživatele, který smí upravovat skladové karty, ostatním
+se nenabídne a při přímém volání rozhraní se požadavek odmítne. Zaúčtuje-li koncept s touto volbou někdo bez tohoto
+práva, příjemka se zaúčtuje, karta se nezmění a aplikace to oznámí. Zápis je v logu aktivit u cílové karty i u karet,
+kterým se kód odebral. Storno příjemky uložený kód nevrací, opravíte ho ručně na kartě v nabídkách dodavatelů.
+
+**Intrastat z faktury.** Kód zboží a zemi původu umí přečíst vytěžení z PDF. Formáty ISDOC a Pohoda XML
+tyto údaje u řádku faktury nenesou. Uvádí-li řádek kód zboží a zemi původu, průvodce je ukáže s volbou
+**Po zaúčtování doplnit na kartu**. Volba je nezaškrtnutá. Se zaškrtnutím se hodnoty doplní
+až po zaúčtování příjemky a jen tam, kde na kartě chybí; vyplněné hodnoty se nepřepisují.
+Volbu vidí a smí nastavit jen uživatel, který smí upravovat skladové karty, a v editoru
+příjemky ji lze před zaúčtováním zrušit. Zaúčtuje-li koncept s touto volbou někdo bez tohoto
+práva, příjemka se zaúčtuje, karta se nezmění a aplikace to oznámí. Zápis je v logu aktivit.
+Hodnotu lze vzít jen z řádku faktury, ze které příjemka vznikla. Storno příjemky doplněné
+údaje z karty neodebere: hodnota zůstane a opravíte ji ručně na kartě, záznam o doplnění
+najdete v logu aktivit.
 
 Volitelně lze zahrnout i **vedlejší pořizovací náklady**. Kandidáti se nabídnou
 automaticky: jsou to řádky **téže** přijaté faktury, které nemají napojenou žádnou

@@ -129,7 +129,7 @@ v sekci **Originální PDF od dodavatele**.
 3. Je-li doklad v režimu přenesené daňové povinnosti, zaškrtněte **Reverse charge** a postupujte podle
    [§ 23.11.10](#231110-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba).
 4. U položek vyberte **Druh nákladu** (**Služba**, **Materiál**, **Drobný majetek**, **Drobný nehmotný majetek**,
-   **Dlouhodobý majetek**). Šipka za druhem nákladu rozbalí podrobnosti položky: **Nákladový účet** a **Členění DPH**.
+   **Dlouhodobý majetek**). Šipka za druhem nákladu rozbalí podrobnosti položky: **Nákladový účet**, **Členění DPH**, **Kód zboží dodavatele** a **EAN**. Podle kódu a EAN se řádek páruje se skladovou kartou, špatně přečtený údaj tu opravíte. EAN s chybnou kontrolní číslicí se neuloží.
    Do výkazů DPH jde členění položky. Liší-li se od hlavičky, je to u položky vidět a u hlavičky se nabídne
    **Použít na všechny položky**; změna hlavičky sama položky nepřepíše. Je-li doklad **Bez nároku na odpočet**,
    ukazuje položka u kódu „bez nároku podle hlavičky" a do DPH nejde; kód s nárokem (40, 41) u ní editor označí jako

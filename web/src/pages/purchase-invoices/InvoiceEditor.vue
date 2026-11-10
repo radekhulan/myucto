@@ -1032,6 +1032,16 @@ const defaultCounterAccount = computed(() =>
 function applyItemRule(it: PurchaseInvoiceItem, rule: PostingRule) {
   if (!it.expense_account_code && rule.debit_account_code) it.expense_account_code = rule.debit_account_code
 }
+/** EAN s chybnou kontrolní číslicí server neuloží, ať to uživatel vidí hned. Stejný výpočet jako PohodaStock::ean. */
+function itemEanInvalid(it: PurchaseInvoiceItem): boolean {
+  const ean = (it.item_ean ?? '').trim()
+  if (ean === '') return false
+  if (!/^(\d{8}|\d{12,14})$/.test(ean)) return true
+  const parity = ean.length % 2
+  let sum = 0
+  for (let i = 0; i < ean.length - 1; i++) sum += Number(ean[i]) * (i % 2 === parity ? 3 : 1)
+  return (10 - (sum % 10)) % 10 !== Number(ean[ean.length - 1])
+}
 function toggleItemDetails(it: PurchaseInvoiceItem) {
   if (itemDetailsOpen.has(it)) itemDetailsOpen.delete(it)
   else itemDetailsOpen.add(it)
@@ -1684,6 +1694,10 @@ function buildPayload(): PurchaseInvoicePayload {
         accrual_from: it.accrual_from ?? null,
         accrual_to: it.accrual_to ?? null,
         stock_item_id: it.stock_item_id ?? null,
+        seller_item_code: it.seller_item_code ?? null,
+        item_ean: it.item_ean ?? null,
+        intrastat_cn8_code: it.intrastat_cn8_code ?? null,
+        intrastat_country_of_origin: it.intrastat_country_of_origin ?? null,
       })),
     }
 }
@@ -2436,6 +2450,18 @@ useWindowTitle(
                   <span v-else-if="it.vat_classification_code && it.vat_classification_code === form.vat_classification_code" class="text-xs text-neutral-500">
                     {{ t('purchase_invoice.items.vat_classification_same') }}
                   </span>
+                  <label class="flex items-center gap-2 text-xs text-neutral-500">
+                    <span class="shrink-0">{{ t('purchase_invoice.items.seller_item_code') }}</span>
+                    <input v-model="it.seller_item_code" type="text" maxlength="80" data-test="item-seller-code"
+                      class="w-44 h-8 px-2 border border-neutral-300 rounded bg-surface text-sm text-neutral-900 font-mono" />
+                  </label>
+                  <label class="flex items-center gap-2 text-xs text-neutral-500">
+                    <span class="shrink-0">{{ t('purchase_invoice.items.item_ean') }}</span>
+                    <input v-model="it.item_ean" type="text" inputmode="numeric" maxlength="14" data-test="item-ean"
+                      class="w-40 h-8 px-2 border rounded bg-surface text-sm text-neutral-900 font-mono"
+                      :class="itemEanInvalid(it) ? 'border-warning-500' : 'border-neutral-300'" />
+                  </label>
+                  <span v-if="itemEanInvalid(it)" class="text-xs text-warning-700" data-test="item-ean-invalid">{{ t('purchase_invoice.items.item_ean_invalid') }}</span>
                 </div>
               </td>
             </tr>
@@ -2592,6 +2618,18 @@ useWindowTitle(
                 <p v-else-if="it.vat_classification_code && it.vat_classification_code === form.vat_classification_code" class="mt-1 text-xs text-neutral-500">
                   {{ t('purchase_invoice.items.vat_classification_same') }}
                 </p>
+                <label class="mt-2 block text-xs text-neutral-600">
+                  {{ t('purchase_invoice.items.seller_item_code') }}
+                  <input v-model="it.seller_item_code" type="text" maxlength="80"
+                    class="mt-1 w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm font-mono" />
+                </label>
+                <label class="mt-2 block text-xs text-neutral-600">
+                  {{ t('purchase_invoice.items.item_ean') }}
+                  <input v-model="it.item_ean" type="text" inputmode="numeric" maxlength="14"
+                    class="mt-1 w-full h-10 px-2 border rounded bg-surface text-sm font-mono"
+                    :class="itemEanInvalid(it) ? 'border-warning-500' : 'border-neutral-300'" />
+                </label>
+                <p v-if="itemEanInvalid(it)" class="mt-1 text-xs text-warning-700">{{ t('purchase_invoice.items.item_ean_invalid') }}</p>
               </template>
               <template v-if="showAccrual">
                 <button
