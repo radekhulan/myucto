@@ -82,6 +82,7 @@ import { durationTotal, isPreciseUnitPrice, isTimeItem, itemAmount, itemQuantity
 import { amountItems, blankTextItem, isTextItem, textItemPayload } from '@/utils/invoiceTextRow'
 import { groupInvoiceStockAvailability, invoiceStockAvailabilityKey, stockSearchBadge } from './invoiceStockAvailability'
 import { unchangedRows, useUnitDecimals } from '@/composables/useUnitDecimals'
+import { SIMPLIFIED_LIMIT_WITH_VAT, simplifiedOnlyClientProblem } from '@/utils/simplifiedOnlyClient'
 import {
   availabilityQuantity,
   availabilityUnit,
@@ -1660,6 +1661,7 @@ onMounted(async () => {
     editedVarsymbol.value = inv.varsymbol
     storedItemQuantities.value = inv.items.filter(i => i.item_kind !== 'discount').map(i => ({ quantity: i.quantity, unit: i.unit }))
     editedType.value = inv.invoice_type
+    clientSimplifiedOnly.value = inv.client_simplified_only === true
     Object.assign(form.value, {
       invoice_type: (inv.invoice_type === 'proforma' || inv.invoice_type === 'credit_note'
         || hasPaymentSchedule(inv.invoice_type))
@@ -1821,12 +1823,19 @@ async function onClientChange() {
   } else {
     selectedClientOption.value = null
     viesResult.value = null
+    clientSimplifiedOnly.value = false
   }
 }
 
 async function applyClientDefaults(clientId: number) {
   const c = clients.value.find(c => c.id === clientId)
   if (!c) return
+  clientSimplifiedOnly.value = c.simplified_only === true
+  // Drobnému zákazníkovi bez adresy (#310) jde jen zjednodušený doklad, předvol ho.
+  if (clientSimplifiedOnly.value && supplierIsVatPayer.value && form.value.invoice_type === 'invoice' && !form.value.is_simplified) {
+    form.value.is_simplified = true
+    onSimplifiedToggle()
+  }
   form.value.currency_id = c.currency_default_id
   form.value.currency = c.currency_default
   form.value.language = c.language
@@ -2135,7 +2144,6 @@ const computed_totals = computed(() => {
  * Limit se posuzuje z částky VČETNĚ daně: doklad se základem 9 000 Kč je s 21 % na
  * 10 890 Kč, tedy nad limitem, přestože na základ se pohodlně vejde.
  */
-const SIMPLIFIED_LIMIT_WITH_VAT = 10000
 const SIMPLIFIED_FORBIDDEN_LINES: Record<string, string> = {
   '20': 'invoice.simplified_blocked_eu',
   '25': 'invoice.simplified_blocked_reverse_charge',
@@ -2156,6 +2164,27 @@ const simplifiedBlockedReason = computed<string | null>(() => {
   const key = line === null ? undefined : SIMPLIFIED_FORBIDDEN_LINES[String(line)]
 
   return key === undefined ? null : t(key)
+})
+
+// Drobný zákazník bez adresy (#310): z karty odběratele, u uloženého dokladu z detailu.
+const clientSimplifiedOnly = ref(false)
+const simplifiedOnlyClientWarning = computed<string | null>(() => {
+  const total = Math.abs(computed_totals.value.with_vat)
+  const problem = simplifiedOnlyClientProblem({
+    simplifiedOnly: clientSimplifiedOnly.value,
+    supplierIsVatPayer: supplierIsVatPayer.value,
+    invoiceType: form.value.invoice_type,
+    isSimplified: form.value.is_simplified,
+    totalWithVat: total,
+  })
+  if (problem === 'requires_simplified') return t('invoice.simplified_only_client_requires')
+  if (problem === 'over_limit') {
+    return t('invoice.simplified_only_client_over_limit', {
+      limit: formatMoney(SIMPLIFIED_LIMIT_WITH_VAT, form.value.currency),
+      total: formatMoney(total, form.value.currency),
+    })
+  }
+  return null
 })
 
 /**
@@ -3406,7 +3435,13 @@ useWindowTitle(
                 <input v-model="form.hide_customer_on_pdf" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
                 <span>{{ t('invoice.hide_customer_on_pdf') }}</span>
               </label>
-              <p v-if="form.is_simplified && simplifiedBlockedReason"
+              <p v-if="simplifiedOnlyClientWarning" data-test="simplified-only-client-warning"
+                 class="text-xs text-warning-600 mt-1 ml-6">{{ simplifiedOnlyClientWarning }}</p>
+              <p v-else-if="clientSimplifiedOnly && form.client_id" data-test="simplified-only-client-hint"
+                 class="text-xs text-neutral-500 mt-1 ml-6">
+                {{ t('invoice.simplified_only_client_hint', { limit: formatMoney(SIMPLIFIED_LIMIT_WITH_VAT, form.currency) }) }}
+              </p>
+              <p v-else-if="form.is_simplified && simplifiedBlockedReason"
                  class="text-xs text-warning-600 mt-1 ml-6">{{ simplifiedBlockedReason }}</p>
               <p v-else-if="form.is_simplified && !form.client_id" class="text-xs text-neutral-500 mt-1 ml-6">
                 {{ t('invoice.simplified_document_walk_in_hint') }}

@@ -73,6 +73,8 @@ export interface Client {
   is_vendor?: boolean
   /** Dodavatel je benzínka — pro automatické rozpoznávání tankování v knize jízd. */
   is_fuel_station?: boolean
+  /** Drobný zákazník bez adresy (#310): jen zjednodušené daňové doklady (§ 30 ZDPH). */
+  simplified_only?: boolean
   auto_send_reminders: boolean
   payment_due_default?: number | null
   payment_due_unit?: 'days' | 'month' | null
@@ -269,6 +271,8 @@ export interface ClientPayload {
   is_vendor?: boolean
   /** Dodavatel je benzínka — pro automatické rozpoznávání tankování v knize jízd. */
   is_fuel_station?: boolean
+  /** Drobný zákazník bez adresy (#310): jen zjednodušené daňové doklady (§ 30 ZDPH). */
+  simplified_only?: boolean
   auto_send_reminders: boolean
   payment_due_default?: number | null
   payment_due_unit?: 'days' | 'month' | null
