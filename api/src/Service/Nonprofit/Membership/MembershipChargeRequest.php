@@ -11,8 +11,9 @@ final class MembershipChargeRequest
     public static function issue(array $input): array
     {
         $allowed = ['member_id', 'title_key', 'period_from', 'period_to', 'accounting_date', 'due_date', 'amount',
-            'receivable_account', 'revenue_account', 'title_reference', 'evidence', 'nonreciprocal', 'reason', 'classification'];
+            'receivable_account', 'revenue_account', 'title_reference', 'evidence', 'nonreciprocal', 'reason', 'classification', 'rate_id'];
         if (array_diff(array_keys($input), $allowed) !== []) self::invalid('Požadavek obsahuje neznámé pole.');
+        if (array_key_exists('rate_id', $input) && (!is_int($input['rate_id']) || $input['rate_id'] <= 0)) self::invalid('Vyberte platnou sazbu.');
         if (!is_int($input['member_id'] ?? null) || $input['member_id'] <= 0) self::invalid('Vyberte člena této organizace.');
         $input['title_key'] = self::key($input['title_key'] ?? null, 'právního titulu');
         foreach (['period_from', 'period_to', 'accounting_date', 'due_date'] as $field) {

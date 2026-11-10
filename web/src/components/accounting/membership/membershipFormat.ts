@@ -87,3 +87,16 @@ export function errorCode(e: unknown): string {
 export function errorMessage(e: unknown): string {
   return (e as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ?? ''
 }
+
+/** Známý kód přeložíme; pro neznámý použijeme lokalizovaný text, nikoli zprávu serveru v jiném jazyce. */
+export function membershipError(i18n: { t: (key: string) => string; te: (key: string) => boolean }, e: unknown, _fallbackText = ''): string {
+  const code = typeof e === 'string' ? e : errorCode(e)
+  const key = `nonprofitMembership.serverErrors.${code}`
+  if (code && i18n.te(key)) return i18n.t(key)
+  return i18n.t('nonprofitMembership.error')
+}
+
+/** Firma má přednost, u fyzické osoby zobrazujeme jméno kontaktu. */
+export function membershipMemberLabel(row: { company_name?: string | null; first_name?: string | null; last_name?: string | null }): string {
+  return row.company_name?.trim() || [row.first_name, row.last_name].filter(Boolean).join(' ').trim()
+}

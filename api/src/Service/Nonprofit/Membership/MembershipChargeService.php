@@ -34,6 +34,36 @@ final class MembershipChargeService
         return $this->issueContext($supplier, $request, false);
     }
 
+    /** Náhled omezené stránky: společné účetní podklady a historie se čtou dávkově, nikoli N+1. */
+    public function previewIssuePage(int $supplier, array $template, array $ids): array
+    {
+        if ($ids === [] || count($ids) > 50) throw new \InvalidArgumentException('Stránka dávky vyžaduje 1–50 členů.');
+        $request = MembershipChargeRequest::issue(['member_id' => $ids[0]] + $template);
+        if (isset($request['rate_id'])) (new MembershipRateService($this->db))->assertUsable($supplier, $request['rate_id'], false, $request['period_from']);
+        $common = $this->commonIssueContext($supplier, $request, false);
+        $classification = (new MembershipClassification($this->db))->resolve($supplier, $request['classification']);
+        $members = $this->members->batchContexts($supplier, $ids);
+        $titles = $this->charges->batchTitleContexts($supplier, $ids, $request['title_key'], $request['period_from'], $request['period_to']);
+        $out = [];
+        foreach ($ids as $id) {
+            try {
+                $context = $members[$id] ?? throw new MembershipException('nonprofit_membership_member_not_found', 'Člen nebyl nalezen v této organizaci.', 404);
+                if (isset($context['error'])) throw $context['error'];
+                $request['member_id'] = $id;
+                $out[$id] = ['preview' => $this->issueContext($supplier, $request, false, $context + $titles[$id] + compact('common', 'classification'))];
+            } catch (MembershipException $e) {
+                $existing = null;
+                if ($e->errorCode === 'nonprofit_membership_claim_overlap') {
+                    foreach ($titles[$id]['overlaps'] as $case) {
+                        if ($case['period_from'] === $request['period_from'] && $case['period_to'] === $request['period_to']) $existing = $case;
+                    }
+                }
+                $out[$id] = ['error' => $e, 'existing' => $existing];
+            }
+        }
+        return $out;
+    }
+
     public function confirmIssue(int $supplier, array $input, int $expectedVersion, string $previewHash, string $idempotencyKey, int $actor): array
     {
         $request = MembershipChargeRequest::issue($input);
@@ -140,11 +170,13 @@ final class MembershipChargeService
         }));
     }
 
-    private function issueContext(int $supplier, array $request, bool $current): array
+    private function issueContext(int $supplier, array $request, bool $current, ?array $loaded = null): array
     {
-        $member = $this->members->member($supplier, $request['member_id'], $current)
+        // Sazba je pouze zdroj předvyplnění. Důkaz ani jeho ověření na měnitelném číselníku nezávisí.
+        if ($loaded === null && isset($request['rate_id'])) (new MembershipRateService($this->db))->assertUsable($supplier, $request['rate_id'], $current, $request['period_from']);
+        $member = $loaded['member'] ?? $this->members->member($supplier, $request['member_id'], $current)
             ?? throw new MembershipException('nonprofit_membership_member_not_found', 'Člen nebyl nalezen v této organizaci.', 404);
-        $history = $this->members->history($supplier, $member['id'], $current);
+        $history = $loaded['history'] ?? $this->members->history($supplier, $member['id'], $current);
         $revision = MembershipRevisionTimeline::at($history, $request['accounting_date']);
         if ($revision === null || $revision['status'] !== 'active') throw new MembershipException('nonprofit_membership_inactive', 'Členství není k účetnímu datu aktivní.', 409);
         $covered = [];
@@ -158,6 +190,27 @@ final class MembershipChargeService
         if ($covered === [] || $covered[0]['effective_from'] > $request['period_from'] || $lastCovered['effective_to'] !== null && $lastCovered['effective_to'] <= $request['period_to']) {
             throw new MembershipException('nonprofit_membership_period_inactive', 'Členství není aktivní po celé období příspěvku.', 409);
         }
+        $common = $loaded['common'] ?? $this->commonIssueContext($supplier, $request, $current);
+        ['frameworks' => $frameworks, 'period' => $period, 'legal' => $legal, 'accounts' => $accounts, 'deferral' => $deferral] = $common;
+        $cases = $loaded['cases'] ?? $this->charges->casesForTitle($supplier, $member['id'], $request['title_key'], $current);
+        $case = null;
+        foreach ($cases as $candidate) if ($candidate['period_from'] === $request['period_from'] && $candidate['period_to'] === $request['period_to']) $case = $candidate;
+        $overlaps = $loaded['overlaps'] ?? $this->charges->activeOverlaps($supplier, $member['id'], $request['title_key'], $request['period_from'], $request['period_to'], $current);
+        if ($overlaps !== []) throw new MembershipException('nonprofit_membership_claim_overlap', 'Člen už má aktivní předpis stejného titulu pro překrývající se období.', 409, ['case_ids' => array_column($overlaps, 'id')]);
+        $classification = $loaded['classification'] ?? (new MembershipClassification($this->db))->resolve($supplier, $request['classification'], $current);
+        $plan = MembershipJournalPlan::issue($accounts['receivable']['account_code'], $accounts['revenue']['account_code'], $request['amount'], $classification);
+        $proof = ['schema' => 'nonprofit_membership_charge.v1', 'member' => $member,
+            'member_revision' => $this->revisionProof($revision), 'membership_intervals' => $covered,
+            'legal_profile' => $legal, 'accounting_period' => $this->periodProof($period), 'framework' => $frameworks,
+            'legal_title' => $request['legal_title'], 'accounts' => $accounts, 'classification' => $classification,
+            'tax_treatment' => 'unclassified_requires_explicit_j6_decision'];
+        $preview = ['request' => $request, 'case_id' => $case['id'] ?? null, 'expected_case_version' => $case['row_version'] ?? 0,
+            'proof' => $proof, 'journal_plan' => $plan, 'deferral' => $deferral];
+        return $preview + ['preview_hash' => NonprofitTaxRules::hash($preview), 'case' => $case, 'member' => $member];
+    }
+
+    private function commonIssueContext(int $supplier, array $request, bool $current): array
+    {
         $framework = new AccountingFrameworkService($this->db, new AccountingFrameworkRepository($this->db));
         $frameworks = $framework->forInterval($supplier, $request['period_from'], $request['period_to'], $current);
         if (array_values(array_unique($frameworks)) !== [AccountingFrameworkService::CZ_504]) throw new MembershipException('nonprofit_membership_framework_required', 'Členský příspěvek vyžaduje rámec 504 po celé období.', 409);
@@ -180,21 +233,7 @@ final class MembershipChargeService
                 ['required_account' => $revenueRole]);
         }
         $deferral = $this->deferralProposal($request, $period);
-        $cases = $this->charges->casesForTitle($supplier, $member['id'], $request['title_key'], $current);
-        $case = null;
-        foreach ($cases as $candidate) if ($candidate['period_from'] === $request['period_from'] && $candidate['period_to'] === $request['period_to']) $case = $candidate;
-        $overlaps = $this->charges->activeOverlaps($supplier, $member['id'], $request['title_key'], $request['period_from'], $request['period_to'], $current);
-        if ($overlaps !== []) throw new MembershipException('nonprofit_membership_claim_overlap', 'Člen už má aktivní předpis stejného titulu pro překrývající se období.', 409, ['case_ids' => array_column($overlaps, 'id')]);
-        $classification = (new MembershipClassification($this->db))->resolve($supplier, $request['classification'], $current);
-        $plan = MembershipJournalPlan::issue($accounts['receivable']['account_code'], $accounts['revenue']['account_code'], $request['amount'], $classification);
-        $proof = ['schema' => 'nonprofit_membership_charge.v1', 'member' => $member,
-            'member_revision' => $this->revisionProof($revision), 'membership_intervals' => $covered,
-            'legal_profile' => $legal, 'accounting_period' => $this->periodProof($period), 'framework' => $frameworks,
-            'legal_title' => $request['legal_title'], 'accounts' => $accounts, 'classification' => $classification,
-            'tax_treatment' => 'unclassified_requires_explicit_j6_decision'];
-        $preview = ['request' => $request, 'case_id' => $case['id'] ?? null, 'expected_case_version' => $case['row_version'] ?? 0,
-            'proof' => $proof, 'journal_plan' => $plan, 'deferral' => $deferral];
-        return $preview + ['preview_hash' => NonprofitTaxRules::hash($preview), 'case' => $case, 'member' => $member];
+        return compact('frameworks', 'period', 'legal', 'accounts', 'deferral');
     }
 
     /**

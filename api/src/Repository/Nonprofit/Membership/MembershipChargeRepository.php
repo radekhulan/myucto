@@ -29,8 +29,8 @@ final class MembershipChargeRepository
 
     public function insertCommand(int $supplier, string $key, array $request, string $hash, int $actor): array
     {
-        $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_membership_charge_commands(supplier_id,idempotency_key,request_json,request_hash,created_by,created_at) VALUES(?,?,?,?,?,UTC_TIMESTAMP(6))');
-        $q->execute([$supplier, $key, NonprofitTaxRules::canonicalJson($request), $hash, $actor]);
+        $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_membership_charge_commands(supplier_id,idempotency_key,request_json,request_hash,created_by,rate_id,created_at) VALUES(?,?,?,?,?,?,UTC_TIMESTAMP(6))');
+        $q->execute([$supplier, $key, NonprofitTaxRules::canonicalJson($request), $hash, $actor, $request['request']['rate_id'] ?? null]);
         return $this->command($supplier, $key, true) ?? throw new \LogicException('Inserted membership command disappeared.');
     }
 
@@ -64,6 +64,25 @@ final class MembershipChargeRepository
         $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_membership_charge_cases(supplier_id,member_id,title_key,period_from,period_to,created_by,created_at) VALUES(?,?,?,?,?,?,UTC_TIMESTAMP(6))');
         $q->execute([$supplier, $member, $title, $from, $to, $actor]);
         return $this->caseById($supplier, (int) $this->db->pdo()->lastInsertId(), true) ?? throw new \LogicException('Inserted charge case disappeared.');
+    }
+
+    public function batchTitleContexts(int $supplier, array $ids, string $title, string $from, string $to): array
+    {
+        if ($ids === [] || count($ids) > 50) throw new \InvalidArgumentException('Stránka dávky vyžaduje 1–50 členů.');
+        $marks = implode(',', array_fill(0, count($ids), '?'));
+        $q = $this->db->pdo()->prepare("SELECT c.*,o.operation head_kind,o.amount_cents head_amount_cents
+            FROM nonprofit_membership_charge_cases c LEFT JOIN nonprofit_membership_charge_operations o
+              ON o.supplier_id=c.supplier_id AND o.id=c.head_operation_id AND o.case_id=c.id
+            WHERE c.supplier_id=? AND c.member_id IN ({$marks}) AND c.title_key=? AND c.period_from<=? AND c.period_to>=?
+            ORDER BY c.member_id,c.period_from,c.period_to,c.id");
+        $q->execute([$supplier, ...$ids, $title, $to, $from]);
+        $out = array_fill_keys($ids, ['cases' => [], 'overlaps' => []]);
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $raw) {
+            $row = $this->caseRow($raw);
+            $out[$row['member_id']]['cases'][] = $row;
+            if ($raw['head_kind'] === 'issue') $out[$row['member_id']]['overlaps'][] = $row;
+        }
+        return $out;
     }
 
     public function operation(int $supplier, int $operation, bool $lock = false): ?array
