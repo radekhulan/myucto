@@ -403,16 +403,19 @@ se smaže. Volba **Převzít druh, nástup, konec a odměňování z tohoto vzta
 určitou a hodinovou sazbu ze slučovaného vztahu. Bez ní zůstanou podmínky
 cíle beze změny. Na časové ose cíle zůstane záznam **Sloučen jiný vztah**.
 
+Schválenou docházku a schválené mzdové vstupy slučovaného vztahu sloučení samo
+vrátí do konceptu, protože se posuzovaly podle něj. Mění-li se převzetím
+podmínek druh cílového vztahu, vrátí stejně i schválení cílového vztahu. Po
+sloučení proto měsíce u cílového vztahu zkontrolujte a znovu schvalte. Ručně
+zadané vstupy cílového vztahu (např. nulová měsíční mzda) ani jeho prázdný
+pracovní měsíc sloučení nevadí.
+
 Sloučení nejde, pokud má slučovaný vztah registraci ČSSZ, hlášení JMHZ,
-mzdový běh, schválené nebo zamčené mzdové vstupy, schválenou docházku,
-průměrný výdělek, knihu dovolené nebo případ nemocenské. Nejde ani do
-ukončeného či archivovaného vztahu, do vztahu ve mzdovém běhu za měsíce, kterých
-se přesun týká, a když docházku za stejný měsíc mají oba vztahy. Schválenou
-docházku slučovaného vztahu nejdřív znovu otevřete a schválené mzdové vstupy
-vraťte do konceptu. Souhrn pro JMHZ z dřívějšího schválení docházky sloučení
-nebrání a zanikne se slučovaným vztahem; po sloučení měsíc schválíte u cílového
-vztahu. Nulové nebo zkušební vstupy cílového vztahu za tentýž měsíc předem
-zrušte. Posune-li se
+mzdový běh, zamčené mzdové vstupy, průměrný výdělek, knihu dovolené nebo
+případ nemocenské. Nejde ani do ukončeného či archivovaného vztahu, do vztahu
+ve mzdovém běhu za měsíce, kterých se přesun týká, a když docházku za stejný
+měsíc mají oba vztahy (časové záznamy, souhrn importu nebo vstupy z importu
+docházky). Posune-li se
 nástup nebo změní druh registrovaného vztahu, aplikace vás upozorní, že máte
 u ČSSZ podat opravu registrace. Import docházky páruje lidi podle osobního
 čísla; liší-li se osobní čísla obou vztahů, upravte po sloučení osobní číslo
