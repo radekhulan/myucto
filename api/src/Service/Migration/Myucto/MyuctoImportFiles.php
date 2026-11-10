@@ -40,6 +40,30 @@ final class MyuctoImportFiles
         return $writes;
     }
 
+    /**
+     * Soubory, které aplikace hledá podle firmy a názvu (dokumenty podle otisku, archiv
+     * PDF vydaných faktur), patří na pevnou cestu pod cílovou firmou. Shodný soubor, který
+     * tam už je, se ponechá (obnova ho nevlastní a rollback ho nesmaže), odlišný obnovu zastaví.
+     *
+     * @param list<array{area:string,path:string,sha256:string,content:string}> $stored
+     */
+    public function prepareStored(array $stored, int $supplierId): array
+    {
+        $patterns = ['documents' => '~\A[0-9a-f]{2}/[^/]+\z~D', 'invoices' => '~\A_archive/(?:[0-9]{4}-[0-9]{2}/)?[^/]+\z~D'];
+        $writes = [];
+        foreach ($stored as $file) {
+            $pattern = $patterns[$file['area']] ?? throw new RuntimeException('Nepodporované úložiště souboru importu.');
+            if (!preg_match($pattern, $file['path']) || !MyuctoExportReader::safePath($file['path'])) {
+                throw new RuntimeException('Neplatná cesta souboru importu.');
+            }
+            $root = RuntimePaths::storage($file['area']);
+            $target = rtrim($root, '/\\') . DIRECTORY_SEPARATOR . 'sup-' . $supplierId . DIRECTORY_SEPARATOR
+                . str_replace('/', DIRECTORY_SEPARATOR, $file['path']);
+            $writes[$target] = ['content' => $file['content'], 'sha256' => $file['sha256'], 'root' => $root, 'shared' => true];
+        }
+        return $writes;
+    }
+
     public function publish(array $writes): void
     {
         foreach ($writes as $path => $asset) {
@@ -49,6 +73,12 @@ final class MyuctoImportFiles
             if ($realRoot === false || $realParent === false
                 || !str_starts_with(strtolower($realParent . DIRECTORY_SEPARATOR), strtolower(rtrim($realRoot, '/\\') . DIRECTORY_SEPARATOR))) {
                 throw new RuntimeException('Cílová cesta souboru překračuje úložiště.');
+            }
+            if (($asset['shared'] ?? false) && is_file($path)) {
+                if (is_link($path) || !hash_equals($asset['sha256'], (string) hash_file('sha256', $path))) {
+                    throw new RuntimeException('V úložišti cílové firmy už je jiný soubor se stejným názvem.');
+                }
+                continue;
             }
             $stream = @fopen($path, 'x+b');
             if ($stream === false) {

@@ -23,6 +23,10 @@ final class MyuctoImporter
 {
     private readonly UnusedAccountingPeriods $unusedPeriods;
     private readonly ActivityLogger $activity;
+    /** @var array<string,array<string,string>> vazby podle cizích klíčů schématu, po tabulkách */
+    private array $fkReferences = [];
+    /** @var array<string,int> vynechané vazby uvnitř JSON hodnot (vazba konceptu interního dokladu) */
+    private array $droppedLinks = [];
 
     public function __construct(
         private readonly Connection $db,
@@ -52,8 +56,10 @@ final class MyuctoImporter
             throw new RuntimeException('Import vyžaduje vlastní transakci.');
         }
         $tables = $package['tables'];
-        // Export bez formy zápisu (starší verze) a export firmy bez volby mají stejný otisk dat.
-        foreach ([MyuctoImportProfile::ENTRY_FORM_HISTORY_TABLE, ...MyuctoImportProfile::KEYLESS_JOURNAL_TABLES] as $table) {
+        // Export bez formy zápisu (starší verze), bez dokumentů, dimenzí a dalších později
+        // přidaných tabulek a export firmy, která je nemá vyplněné, mají stejný otisk dat.
+        foreach ([MyuctoImportProfile::ENTRY_FORM_HISTORY_TABLE, ...MyuctoImportProfile::KEYLESS_JOURNAL_TABLES,
+            ...MyuctoImportProfile::OPTIONAL_GRAPH_TABLES, ...array_keys(MyuctoImportProfile::KEYLESS_TABLES)] as $table) {
             if (($tables[$table] ?? null) === []) {
                 unset($tables[$table]);
             }
@@ -64,12 +70,21 @@ final class MyuctoImporter
         }
         $sourceSupplier = MyuctoExportReader::id($package['manifest']['supplier']['id']);
         $root = $tables['supplier'][$sourceSupplier];
+        $stored = $package['stored_files'] ?? [];
+        $sourceKey = 'myucto:' . hash('sha256', $source . ':' . $sourceSupplier);
+        $digestParts = [$tables, $package['assets'] ?? []];
+        if ($stored !== []) {
+            $digestParts[] = array_map(static fn (array $file): array => [$file['area'], $file['path'], $file['sha256']], $stored);
+        }
+        $digest = MyuctoImportProfile::VERSION . ':' . hash('sha256', serialize($digestParts));
         $schema = SchemaMetadataProvider::load($pdo);
+        $this->fkReferences = [];
+        $this->droppedLinks = [];
+        [$dropped, $softDetached] = $this->pruneOutsideGraph($tables);
         $this->validateRows($tables, $sourceSupplier, $schema);
+        $this->validateKeylessRows($tables, $sourceSupplier, $schema);
         MyuctoAccountingGraph::validate($tables);
         $entryFormHistory = $this->assertExportEntryForm($tables, $sourceSupplier, $schema);
-        $sourceKey = 'myucto:' . hash('sha256', $source . ':' . $sourceSupplier);
-        $digest = MyuctoImportProfile::VERSION . ':' . hash('sha256', serialize([$tables, $package['assets'] ?? []]));
         $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
         $pdo->beginTransaction();
         try {
@@ -124,22 +139,41 @@ final class MyuctoImporter
             }
             $this->restoreEntryForm($pdo, $entryFormHistory, $supplierId, $actorId, $previous === false);
             $replacedPeriods = [];
+            $replacedSetup = [];
             if ($previous === false) {
                 $replacedPeriods = $this->replaceUnusedPeriods($pdo, $supplierId, ($tables['accounting_periods'] ?? []) !== []);
-                $this->assertEmptyTarget($pdo, $supplierId, $replacedPeriods !== null);
+                $replacedSetup = $this->replaceSetupDefaults($pdo, $tables, $supplierId);
+                $this->assertEmptyTarget($pdo, $tables, $supplierId, $replacedPeriods !== null);
             }
             $writes = $this->files->prepare($tables, $package['assets'] ?? [], $supplierId, substr($sourceKey, 7, 16) . '-' . substr($digest, 0, 16));
+            $writes += $this->files->prepareStored($stored, $supplierId);
             $reportFiles = count($writes);
             $map = ['supplier' => [$sourceSupplier => $supplierId]];
             $reused = [];
             $existing = [];
+            $detached = self::detachedReferences($tables);
+            foreach ($softDetached as $column => $count) {
+                $detached[$column] = ($detached[$column] ?? 0) + $count;
+            }
+            ksort($detached);
             $report = ['dry_run' => $dryRun, 'supplier_id' => $supplierId, 'source_supplier_id' => $sourceSupplier,
                 'created' => [], 'reused' => [], 'existing' => [], 'replaced_periods' => $replacedPeriods ?? [], 'outside_scope' => $package['skipped'],
-                'files' => $reportFiles, 'reconciliation' => [], 'detached' => self::detachedReferences($tables)];
+                'files' => $reportFiles, 'reconciliation' => [], 'detached' => $detached,
+                'replaced_setup' => $replacedSetup, 'dropped' => $dropped, 'missing_files' => $package['missing_files'] ?? [],
+                'numbering_check' => self::numberingCheck($tables)];
             foreach (MyuctoImportProfile::GLOBAL_KEYS as $table => $keys) {
                 foreach ($tables[$table] ?? [] as $id => $row) {
                     $map[$table][$id] = $this->lookup($pdo, $table, $keys, $row, null)
                         ?? throw new RuntimeException('Chybí shodný globální číselník: ' . $table . ':' . $id . '.');
+                }
+            }
+            $previousMap = [];
+            if ($previous !== false) {
+                // Mapování celé předchozí obnovy jedním dotazem, ne po řádcích.
+                $stmt = $pdo->prepare("SELECT external_id, internal_id, entity_type FROM external_entity_map WHERE supplier_id = ? AND source_key = ? AND entity_type IN ('myucto_graph', 'myucto_reused')");
+                $stmt->execute([$supplierId, $sourceKey]);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $mapped) {
+                    $previousMap[(string) $mapped['external_id']] = $mapped;
                 }
             }
             foreach (MyuctoImportProfile::TABLES as $table) {
@@ -156,12 +190,7 @@ final class MyuctoImporter
                 $next = (int) $pdo->query('SELECT id FROM `' . $table . '` ORDER BY id DESC LIMIT 1 FOR UPDATE')->fetchColumn();
                 foreach ($rows as $id => $row) {
                     if ($previous !== false) {
-                        $stmt = $pdo->prepare("SELECT internal_id, entity_type FROM external_entity_map WHERE supplier_id = ? AND source_key = ? AND entity_type IN ('myucto_graph', 'myucto_reused') AND external_id = ?");
-                        $stmt->execute([$supplierId, $sourceKey, $table . ':' . $id]);
-                        $mapped = $stmt->fetch(PDO::FETCH_ASSOC);
-                        if ($mapped === false) {
-                            throw new RuntimeException('Chybí mapování již importovaného grafu.');
-                        }
+                        $mapped = $previousMap[$table . ':' . $id] ?? throw new RuntimeException('Chybí mapování již importovaného grafu.');
                         $map[$table][$id] = (int) $mapped['internal_id'];
                         if ($mapped['entity_type'] === 'myucto_reused') {
                             $reused[$table][$id] = true;
@@ -170,7 +199,8 @@ final class MyuctoImporter
                         }
                     } else {
                         $keys = MyuctoImportProfile::REUSE_KEYS[$table] ?? null;
-                        $mapped = $keys === null ? null : $this->lookup($pdo, $table, $keys, $row, $supplierId);
+                        $lookupRow = $keys === null ? null : $this->reuseLookupRow($table, $row, $map, $schema);
+                        $mapped = $lookupRow === null ? null : $this->lookup($pdo, $table, $keys, $lookupRow, $supplierId);
                         if ($mapped !== null) {
                             $map[$table][$id] = $mapped;
                             $reused[$table][$id] = true;
@@ -201,6 +231,9 @@ final class MyuctoImporter
                         $pending[$table][$id] = $row;
                     }
                 }
+            }
+            foreach ($this->droppedLinks as $key => $count) {
+                $report['dropped'][$key] = ($report['dropped'][$key] ?? 0) + $count;
             }
             if ($previous === false) {
                 $this->adoptSetupRows($pdo, $reused, $prepared, $map, $schema);
@@ -266,6 +299,10 @@ final class MyuctoImporter
                     ['source' => 'myucto_import', 'source_entry_id' => (int) $sourceEntryId], null, null, $supplierId);
             }
             $this->restoreKeylessJournal($pdo, $tables, $map, $supplierId, $actorId, $previous === false, $schema, $report);
+            $this->restoreKeylessTables($pdo, $tables, $map, $supplierId, $previous === false, $schema, $report);
+            if ($previous === false && ($package['manifest']['origin']['type'] ?? null) !== 'myinvoice-backup') {
+                $report['numbering_adopted'] = $this->adoptSupplierNumbering($pdo, $root, $target, $supplierId, $schema);
+            }
             foreach ($deferred as [$table, $id, $values]) {
                 $set = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = ?', array_keys($values)));
                 foreach (['updated_at', 'computed_at'] as $stamp) {
@@ -276,10 +313,16 @@ final class MyuctoImporter
                 $pdo->prepare('UPDATE `' . $table . '` SET ' . $set . ' WHERE id = ?')->execute([...array_values($values), $id]);
             }
             foreach ($prepared as $table => $rows) {
+                $actualRows = [];
+                foreach (array_chunk(array_map(static fn (int|string $id): int => $map[$table][$id], array_keys($rows)), 500) as $chunk) {
+                    $stmt = $pdo->prepare('SELECT * FROM `' . $table . '` WHERE id IN (' . implode(', ', array_fill(0, count($chunk), '?')) . ')');
+                    $stmt->execute($chunk);
+                    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                        $actualRows[(int) $row['id']] = $row;
+                    }
+                }
                 foreach ($rows as $id => $expected) {
-                    $stmt = $pdo->prepare('SELECT * FROM `' . $table . '` WHERE id = ?');
-                    $stmt->execute([$map[$table][$id]]);
-                    $actual = $stmt->fetch(PDO::FETCH_ASSOC);
+                    $actual = $actualRows[$map[$table][$id]] ?? false;
                     if ($actual === false) {
                         throw new RuntimeException('Rekonciliace: cílový řádek chybí.');
                     }
@@ -323,6 +366,9 @@ final class MyuctoImporter
                         throw new RuntimeException('Soubor již převzatého dokladu chybí nebo byl změněn.');
                     }
                 }
+            }
+            foreach (['detached', 'dropped', 'replaced_setup'] as $section) {
+                ksort($report[$section]);
             }
             if ($dryRun) {
                 $pdo->rollBack();
@@ -595,6 +641,407 @@ final class MyuctoImporter
     }
 
     /**
+     * Řádky bez vlastního `id` mimo deník ({@see MyuctoImportProfile::KEYLESS_TABLES}).
+     * Cíl se načte po tabulkách jedním dotazem a porovná v paměti; při první obnově se
+     * chybějící řádky vloží, při opakované musí všechny sedět. Počítadlo číselné řady,
+     * které cíl už má, se jen zvedne na hodnotu zdroje (nikdy nesníží) a při opakované
+     * obnově smí být výš, protože firma mezitím vydala další doklady.
+     *
+     * @param array<string,array<int|string,array<string,mixed>>> $tables
+     * @param array<string,array<int|string,int>> $map
+     */
+    private function restoreKeylessTables(PDO $pdo, array $tables, array $map, int $supplierId, bool $firstRestore, array $schema, array &$report): void
+    {
+        foreach (MyuctoImportProfile::KEYLESS_TABLES as $table => $definition) {
+            $rows = $tables[$table] ?? [];
+            if ($rows === []) {
+                continue;
+            }
+            $columns = $schema['columns'][$table] ?? throw new RuntimeException('Cílová verze nezná tabulku exportu: ' . $table . '.');
+            $counters = $definition['counter'] ?? [];
+            $keyOf = static fn (array $row): string => implode("\x1f", array_map(static fn (string $c): string => (string) $row[$c], $definition['key']));
+            $load = function () use ($pdo, $table, $columns, $supplierId, $keyOf): array {
+                if (isset($columns['supplier_id'])) {
+                    $stmt = $pdo->prepare('SELECT * FROM `' . $table . '` WHERE supplier_id = ? FOR UPDATE');
+                } else {
+                    $stmt = $pdo->prepare('SELECT c.* FROM `' . $table . '` c JOIN number_series n ON n.id = c.series_id WHERE n.supplier_id = ? FOR UPDATE');
+                }
+                $stmt->execute([$supplierId]);
+                $out = [];
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $out[$keyOf($row)] = $row;
+                }
+                return $out;
+            };
+            $actual = $load();
+            $expected = [];
+            foreach ($rows as $row) {
+                $out = $this->remapKeyless($table, $definition, $row, $map, $supplierId, $columns, $report);
+                if ($out === null) {
+                    continue;
+                }
+                $key = $keyOf($out);
+                if (isset($expected[$key])) {
+                    throw new RuntimeException('Export obsahuje duplicitní řádek ' . $table . '.');
+                }
+                $expected[$key] = $out;
+                if (!isset($actual[$key])) {
+                    if (!$firstRestore) {
+                        throw new RuntimeException('Rekonciliace: cílový řádek chybí (' . $table . ').');
+                    }
+                    $names = array_keys($out);
+                    $pdo->prepare('INSERT INTO `' . $table . '` (`' . implode('`, `', $names) . '`) VALUES (' . implode(', ', array_fill(0, count($names), '?')) . ')')
+                        ->execute(array_values($out));
+                    $report['created'][$table] = ($report['created'][$table] ?? 0) + 1;
+                } elseif ($firstRestore && $counters === []) {
+                    throw new RuntimeException('Cílová firma už obsahuje vlastní data: ' . $table . '.');
+                } elseif ($firstRestore) {
+                    $set = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = GREATEST(`' . $c . '`, ?)', $counters));
+                    $where = implode(' AND ', array_map(static fn (string $c): string => '`' . $c . '` = ?', $definition['key']));
+                    $pdo->prepare('UPDATE `' . $table . '` SET ' . $set . ' WHERE ' . $where)->execute([
+                        ...array_map(static fn (string $c): mixed => $out[$c], $counters),
+                        ...array_map(static fn (string $c): mixed => $out[$c], $definition['key']),
+                    ]);
+                    $report['existing'][$table] = ($report['existing'][$table] ?? 0) + 1;
+                } else {
+                    $report['existing'][$table] = ($report['existing'][$table] ?? 0) + 1;
+                }
+            }
+            $actual = $load();
+            foreach ($expected as $key => $out) {
+                $row = $actual[$key] ?? throw new RuntimeException('Rekonciliace: cílový řádek chybí (' . $table . ').');
+                foreach ($out as $column => $value) {
+                    if (in_array($column, $counters, true)) {
+                        if (bccomp((string) $row[$column], (string) $value) < 0) {
+                            throw new RuntimeException('Rekonciliace: počítadlo ' . $table . '.' . $column . ' je níž než ve zdroji.');
+                        }
+                        continue;
+                    }
+                    if ($column === 'updated_at') {
+                        continue;
+                    }
+                    if (!$this->same($value, $row[$column] ?? null, $columns[$column]['DATA_TYPE'])) {
+                        throw new RuntimeException('Rekonciliace: liší se ' . $table . '.' . $column . '.');
+                    }
+                }
+                $report['reconciliation'][$table] = ($report['reconciliation'][$table] ?? 0) + 1;
+            }
+        }
+    }
+
+    /**
+     * Přemapuje řádek tabulky bez `id`; vrátí null, když tolerantní tabulka míří na doklad
+     * mimo export (řádek se vynechá a vykáže v `dropped`).
+     *
+     * @param array<string,mixed> $definition
+     * @param array<string,array<int|string,int>> $map
+     * @return array<string,mixed>|null
+     */
+    private function remapKeyless(string $table, array $definition, array $row, array $map, int $supplierId, array $columns, array &$report): ?array
+    {
+        $out = $row;
+        if (isset($columns['supplier_id'])) {
+            $out['supplier_id'] = $supplierId;
+        }
+        foreach ($definition['refs'] ?? [] as $column => $target) {
+            $value = $row[$column] ?? null;
+            if ($value === null || (string) $value === '0') {
+                continue;
+            }
+            $out[$column] = $map[$target][MyuctoExportReader::id($value)]
+                ?? throw new RuntimeException('Chybí zdrojová vazba ' . $table . '.' . $column . ' → ' . $target . '.');
+        }
+        foreach ($definition['polymorphic'] ?? [] as $column => [$typeColumn, $targets]) {
+            $type = (string) ($row[$typeColumn] ?? '');
+            $target = $targets[$type] ?? null;
+            $mapped = $target === null ? null : ($map[$target][MyuctoExportReader::id($row[$column] ?? null)] ?? null);
+            if ($mapped === null) {
+                if (!($definition['tolerant'] ?? false)) {
+                    throw new RuntimeException('Chybí zdrojová vazba ' . $table . '.' . $column . ' (' . $type . ').');
+                }
+                $report['dropped'][$table . '.' . $type] = ($report['dropped'][$table . '.' . $type] ?? 0) + 1;
+                return null;
+            }
+            $out[$column] = $mapped;
+        }
+        foreach ($definition['detached'] ?? [] as $column) {
+            if (($out[$column] ?? null) !== null) {
+                $report['detached'][$table . '.' . $column] = ($report['detached'][$table . '.' . $column] ?? 0) + 1;
+                $out[$column] = null;
+            }
+        }
+        if ($table === 'internal_document_lines' && ($row['dimensions_json'] ?? null) !== null) {
+            $out['dimensions_json'] = $this->remapDimensionsJson((string) $row['dimensions_json'], $map);
+        }
+        foreach ($out as $column => $_) {
+            if (($columns[$column]['GENERATION_EXPRESSION'] ?? '') !== '') {
+                unset($out[$column]);
+            }
+        }
+        return $out;
+    }
+
+    /** Dimenze řádku interního dokladu jsou mapa typ dimenze → hodnota; obě ID se přemapují. */
+    private function remapDimensionsJson(string $json, array $map): string
+    {
+        $dimensions = json_decode($json, true, 16, JSON_THROW_ON_ERROR);
+        if (!is_array($dimensions) || $dimensions === []) {
+            return $json;
+        }
+        $out = [];
+        foreach ($dimensions as $type => $value) {
+            $mappedType = $map['dimension_types'][MyuctoExportReader::id((string) $type)]
+                ?? throw new RuntimeException('Chybí zdrojová vazba dimenze řádku interního dokladu.');
+            $out[(string) $mappedType] = $map['dimension_values'][MyuctoExportReader::id($value)]
+                ?? throw new RuntimeException('Chybí zdrojová vazba hodnoty dimenze řádku interního dokladu.');
+        }
+        return json_encode($out, JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * Vazby konceptu interního dokladu na doklady firmy se přemapují; vazba na doklad, který
+     * export nenese, se vynechá a vykáže (stejně jako obnova účetního archivu).
+     */
+    private function remapInternalDocumentLinks(string $json, array $map): ?string
+    {
+        $links = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($links) || $links === []) {
+            return $json;
+        }
+        $restored = [];
+        foreach ($links as $link) {
+            $reference = ['invoice' => 'invoices', 'purchase_invoice' => 'purchase_invoices', 'bank' => 'bank_transactions',
+                'cash' => 'cash_documents'][is_array($link) ? (string) ($link['doc_type'] ?? '') : ''] ?? null;
+            $id = is_array($link) ? ($link['doc_id'] ?? null) : null;
+            $newId = $reference !== null && (is_int($id) || (is_string($id) && ctype_digit($id))) && (int) $id > 0
+                ? ($map[$reference][(int) $id] ?? null) : null;
+            if ($newId === null) {
+                $this->droppedLinks['internal_documents.document_links_json'] = ($this->droppedLinks['internal_documents.document_links_json'] ?? 0) + 1;
+                continue;
+            }
+            $restored[] = array_replace($link, ['doc_id' => $newId]);
+        }
+        return $restored === [] ? null : json_encode($restored, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * Číselná řada nese ve svém klíči (`legacy_key`) ID pokladny, klienta, kategorie tržby
+     * nebo bankovního účtu, ke kterému patří. V cíli má tentýž klíč s přemapovaným ID,
+     * jinak by řada z průvodce a převedená řada byly dvě různé řady.
+     */
+    private static function numberSeriesKey(string $key, mixed $sourceScope, mixed $targetScope): string
+    {
+        if (preg_match('/\A(client|revenue_category):([0-9]+):([a-z_]+)\z/D', $key, $m) === 1) {
+            [$embedded, $build] = [$m[2], static fn (string $id): string => $m[1] . ':' . $id . ':' . $m[3]];
+        } elseif (preg_match('/\Adoc:([a-z_]+):([0-9]+)\z/D', $key, $m) === 1 && $m[2] !== '0') {
+            [$embedded, $build] = [$m[2], static fn (string $id): string => 'doc:' . $m[1] . ':' . $id];
+        } elseif (preg_match('/\Abank:([0-9]+)\z/D', $key, $m) === 1) {
+            [$embedded, $build] = [$m[1], static fn (string $id): string => 'bank:' . $id];
+        } else {
+            return $key;
+        }
+        if ($embedded !== (string) $sourceScope || $targetScope === null) {
+            throw new RuntimeException('Klíč číselné řady nesedí na její rozsah: ' . $key . '.');
+        }
+        return $build((string) $targetScope);
+    }
+
+    /**
+     * Řádek pro párování podle přirozeného klíče: vazby v klíči (typ dimenze, pokladna řady)
+     * se porovnají už s přemapovanými hodnotami cíle. Vrátí null, když řádek párovat nejde
+     * (nová řada bez `legacy_key`, rodič bez mapování).
+     *
+     * @param array<string,array<int|string,int>> $map
+     * @return array<string,mixed>|null
+     */
+    private function reuseLookupRow(string $table, array $row, array $map, array $schema): ?array
+    {
+        $refs = $this->references($table, $schema, $row);
+        $columns = [...MyuctoImportProfile::REUSE_KEYS[$table], ...($table === 'number_series' ? ['scope_id'] : [])];
+        $source = $row;
+        foreach ($columns as $column) {
+            $target = $refs[$column] ?? null;
+            if ($target === null || $target === 'users' || ($row[$column] ?? null) === null || (string) $row[$column] === '0') {
+                continue;
+            }
+            $mapped = $map[$target][MyuctoExportReader::id($row[$column])] ?? null;
+            if ($mapped === null) {
+                return null;
+            }
+            $row[$column] = $mapped;
+        }
+        if ($table === 'number_series') {
+            if (($row['legacy_key'] ?? null) === null) {
+                return null;
+            }
+            $row['legacy_key'] = self::numberSeriesKey((string) $row['legacy_key'], $source['scope_id'] ?? null, $row['scope_id'] ?? null);
+        }
+        return $row;
+    }
+
+    /**
+     * Před kontrolou grafu: řady pro ostatní doklady (jejich druhy obnova nepřenáší)
+     * a historie oprav účtování u smazaného dokladu se vynechají, měkké vazby na řádek,
+     * který export nenese (ani po vynechání), se vynulují. Obojí se vykáže, nic nezmizí potichu.
+     *
+     * @param array<string,array<int|string,array<string,mixed>>> $tables
+     * @return array{0:array<string,int>,1:array<string,int>} [vynechané řádky, odpojené vazby]
+     */
+    private function pruneOutsideGraph(array &$tables): array
+    {
+        $dropped = [];
+        $detached = [];
+        $droppedSeries = [];
+        foreach (['number_series' => ['scope_id', 'scope_type'], 'accounting_document_series' => ['register_id', 'series_code']] as $table => [$column, $typeColumn]) {
+            $targets = MyuctoImportProfile::POLYMORPHIC_TARGETS[$table][$column][1];
+            foreach ($tables[$table] ?? [] as $id => $row) {
+                $type = (string) ($row[$typeColumn] ?? '');
+                if (!array_key_exists($type, $targets) && (string) ($row[$column] ?? '0') !== '0') {
+                    unset($tables[$table][$id]);
+                    $dropped[$table . '.' . $type] = ($dropped[$table . '.' . $type] ?? 0) + 1;
+                    if ($table === 'number_series') {
+                        $droppedSeries[(int) $id] = true;
+                    }
+                }
+            }
+        }
+        foreach ($tables['number_series_counters'] ?? [] as $id => $row) {
+            if (isset($droppedSeries[MyuctoExportReader::id($row['series_id'] ?? null)])) {
+                unset($tables['number_series_counters'][$id]);
+                $dropped['number_series_counters'] = ($dropped['number_series_counters'] ?? 0) + 1;
+            }
+        }
+        foreach (MyuctoImportProfile::SOFT_REFERENCES as $table => $columns) {
+            foreach ($tables[$table] ?? [] as $id => $row) {
+                foreach ($columns as $column) {
+                    $value = $row[$column] ?? null;
+                    $target = MyuctoImportProfile::EXTRA_REFERENCES[$table][$column];
+                    if ($value !== null && !isset($tables[$target][MyuctoExportReader::id($value)])) {
+                        $tables[$table][$id][$column] = null;
+                        $detached[$table . '.' . $column] = ($detached[$table . '.' . $column] ?? 0) + 1;
+                    }
+                }
+            }
+        }
+        foreach (MyuctoImportProfile::TOLERANT_TABLES as $table) {
+            foreach ($tables[$table] ?? [] as $id => $row) {
+                foreach (MyuctoImportProfile::POLYMORPHIC_TARGETS[$table] ?? [] as $column => [$typeColumn, $targets]) {
+                    $type = (string) ($row[$typeColumn] ?? '');
+                    $target = $targets[$type] ?? null;
+                    if ($target !== null && ($row[$column] ?? null) !== null && !isset($tables[$target][MyuctoExportReader::id($row[$column])])) {
+                        unset($tables[$table][$id]);
+                        $dropped[$table . '.' . $type] = ($dropped[$table . '.' . $type] ?? 0) + 1;
+                        continue 2;
+                    }
+                }
+            }
+        }
+        ksort($dropped);
+        return [$dropped, $detached];
+    }
+
+    /**
+     * @param array<string,array<int|string,array<string,mixed>>> $tables
+     */
+    private function validateKeylessRows(array $tables, int $sourceSupplier, array $schema): void
+    {
+        foreach (MyuctoImportProfile::KEYLESS_TABLES as $table => $definition) {
+            foreach ($tables[$table] ?? [] as $row) {
+                if (array_diff_key($row, $schema['columns'][$table] ?? []) !== []) {
+                    throw new RuntimeException('Cílová verze nezná sloupce exportu: ' . $table . '.');
+                }
+                foreach ($definition['key'] as $column) {
+                    if (!array_key_exists($column, $row) || $row[$column] === null) {
+                        throw new RuntimeException('Export obsahuje neplatný řádek ' . $table . '.');
+                    }
+                }
+                if (isset($schema['columns'][$table]['supplier_id'])) {
+                    if (MyuctoExportReader::id($row['supplier_id'] ?? null) !== $sourceSupplier) {
+                        throw new RuntimeException('Export obsahuje data jiné firmy: ' . $table . '.');
+                    }
+                } elseif (!isset($tables['number_series'][MyuctoExportReader::id($row['series_id'] ?? null)])) {
+                    throw new RuntimeException('Graf nemá zdrojového rodiče: ' . $table . '.');
+                }
+                foreach ($row as $value) {
+                    if ($value !== null && !is_scalar($value)) {
+                        throw new RuntimeException('Neplatná hodnota řádku exportu.');
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Výchozí nastavení nové firmy, které export nese, první obnova nahradí nastavením
+     * zdroje ({@see MyuctoImportProfile::REPLACED_SETUP_TABLES}).
+     *
+     * @return array<string,int> počet smazaných výchozích řádků po tabulkách
+     */
+    private function replaceSetupDefaults(PDO $pdo, array $tables, int $supplierId): array
+    {
+        $replaced = [];
+        foreach (MyuctoImportProfile::REPLACED_SETUP_TABLES as $table => $condition) {
+            if (($tables[$table] ?? []) === []) {
+                continue;
+            }
+            $stmt = $pdo->prepare('DELETE FROM `' . $table . '` WHERE supplier_id = ? AND ' . $condition);
+            $stmt->execute([$supplierId]);
+            if ($stmt->rowCount() > 0) {
+                $replaced[$table] = $stmt->rowCount();
+            }
+        }
+        return $replaced;
+    }
+
+    /**
+     * Počítadla, bez kterých by další vydaný doklad nenavázal na převedené: export
+     * s doklady, ale bez počítadla jejich řady (starší verze, MyInvoice, zdroj s čísly
+     * zadanými ručně), vyžaduje kontrolu řad před vystavením dalšího dokladu.
+     *
+     * @return list<string>
+     */
+    private static function numberingCheck(array $tables): array
+    {
+        $check = [];
+        foreach (['invoices' => 'invoice_counters', 'purchase_invoices' => 'purchase_invoice_counters'] as $documents => $counters) {
+            if (($tables[$documents] ?? []) !== [] && ($tables[$counters] ?? []) === []) {
+                $check[] = $counters;
+            }
+        }
+        return $check;
+    }
+
+    /**
+     * Firma se obnovou nepřepisuje, převezme jen číslovací nastavení zdroje (šablony čísel
+     * dokladů, období řady faktur, číslování přijatých dokladů), ať další doklad navazuje
+     * na převedené. Jen při první obnově a jen u nativního exportu MyÚčta.
+     *
+     * @return list<string> převzaté sloupce
+     */
+    private function adoptSupplierNumbering(PDO $pdo, array $root, array $target, int $supplierId, array $schema): array
+    {
+        $values = [];
+        foreach ($root as $column => $value) {
+            if ((str_ends_with($column, MyuctoImportProfile::SUPPLIER_NUMBERING_SUFFIX) || in_array($column, MyuctoImportProfile::SUPPLIER_NUMBERING_COLUMNS, true))
+                && isset($schema['columns']['supplier'][$column]) && array_key_exists($column, $target)
+                && !$this->same($value, $target[$column], $schema['columns']['supplier'][$column]['DATA_TYPE'])) {
+                $values[$column] = $value;
+            }
+        }
+        if ($values === []) {
+            return [];
+        }
+        $set = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = ?', array_keys($values)));
+        if (isset($schema['columns']['supplier']['updated_at'])) {
+            $set .= ', updated_at = updated_at';
+        }
+        $pdo->prepare('UPDATE supplier SET ' . $set . ' WHERE id = ?')->execute([...array_values($values), $supplierId]);
+        $columns = array_keys($values);
+        sort($columns);
+        return $columns;
+    }
+
+    /**
      * Nese-li export účetnictví, musí cíl vést v každém okamžiku stejný účetní rámec
      * (vyhláška 500, nebo 504 u neziskových organizací). Osnova i deník se přebírají
      * beze změny, takže deník podle vyhlášky 504 ve firmě s rámcem 500 (a naopak) by
@@ -698,23 +1145,39 @@ final class MyuctoImporter
             $refs['doc_id'] = MyuctoImportProfile::DOCUMENT_TYPES[$row['doc_type'] ?? '']
                 ?? throw new RuntimeException('Nepodporovaný typ dokladu skupiny zaúčtování.');
         }
+        foreach (MyuctoImportProfile::POLYMORPHIC_TARGETS[$table] ?? [] as $column => [$typeColumn, $targets]) {
+            $value = $row[$column] ?? null;
+            if ($value === null || (string) $value === '0') {
+                continue;
+            }
+            $type = (string) ($row[$typeColumn] ?? '');
+            if (!array_key_exists($type, $targets)) {
+                throw new RuntimeException('Nepodporovaný druh vazby ' . $table . '.' . $column . ': ' . $type . '.');
+            }
+            if ($targets[$type] !== null) {
+                $refs[$column] = $targets[$type];
+            }
+        }
         if (isset($schema['columns'][$table]['supplier_id'])) {
             $refs['supplier_id'] = 'supplier';
         }
-        foreach ($schema['foreignKeyRows'] as $fk) {
-            if ($fk['TABLE_NAME'] === $table) {
-                // U složeného FK (supplier_id, entry_id) je supplier_id stále
-                // vlastníkem firmy, nikoli ID rodičovského zápisu.
-                if ($fk['COLUMN_NAME'] === 'supplier_id') continue;
-                // Odpojená vazba míří mimo převáděný graf a remap() ji vynuluje.
-                if (in_array($fk['COLUMN_NAME'], MyuctoImportProfile::DETACHED_REFERENCES[$table] ?? [], true)) continue;
-                if ($fk['REFERENCED_COLUMN_NAME'] !== 'id') {
-                    throw new RuntimeException('Nepodporovaná reference schématu.');
+        if (!isset($this->fkReferences[$table])) {
+            $this->fkReferences[$table] = [];
+            foreach ($schema['foreignKeyRows'] as $fk) {
+                if ($fk['TABLE_NAME'] === $table) {
+                    // U složeného FK (supplier_id, entry_id) je supplier_id stále
+                    // vlastníkem firmy, nikoli ID rodičovského zápisu.
+                    if ($fk['COLUMN_NAME'] === 'supplier_id') continue;
+                    // Odpojená vazba míří mimo převáděný graf a remap() ji vynuluje.
+                    if (in_array($fk['COLUMN_NAME'], MyuctoImportProfile::DETACHED_REFERENCES[$table] ?? [], true)) continue;
+                    if ($fk['REFERENCED_COLUMN_NAME'] !== 'id') {
+                        throw new RuntimeException('Nepodporovaná reference schématu.');
+                    }
+                    $this->fkReferences[$table][$fk['COLUMN_NAME']] = $fk['REFERENCED_TABLE_NAME'];
                 }
-                $refs[$fk['COLUMN_NAME']] = $fk['REFERENCED_TABLE_NAME'];
             }
         }
-        return $refs;
+        return [...$refs, ...$this->fkReferences[$table]];
     }
 
     private function remap(string $table, array $row, array $map, int $actorId, array $schema): array
@@ -794,6 +1257,31 @@ final class MyuctoImporter
         if ($table === 'currencies' || $table === 'cash_registers') {
             $out['is_default'] = 0;
         }
+        if ($table === 'number_series' && ($row['legacy_key'] ?? null) !== null) {
+            $out['legacy_key'] = self::numberSeriesKey((string) $row['legacy_key'], $row['scope_id'] ?? null, $out['scope_id'] ?? null);
+        }
+        if ($table === 'documents' && ($out['thumb_status'] ?? null) === 'generated') {
+            $out['thumb_status'] = 'none';
+        }
+        if ($table === 'internal_documents' && ($row['document_links_json'] ?? null) !== null) {
+            $out['document_links_json'] = $this->remapInternalDocumentLinks((string) $row['document_links_json'], $map);
+        }
+        if ($table === 'accounting_closing_steps' && ($row['step_key'] ?? null) === 'provisions' && ($row['payload'] ?? null) !== null) {
+            $payload = json_decode((string) $row['payload'], true, 512, JSON_THROW_ON_ERROR);
+            $changed = false;
+            foreach (is_array($payload) && is_array($payload['entries'] ?? null) ? $payload['entries'] : [] as $index => $entry) {
+                foreach (['invoice_id' => 'invoices', 'entry_id' => 'journal_entries'] as $key => $reference) {
+                    if (is_array($entry) && !empty($entry[$key])) {
+                        $payload['entries'][$index][$key] = $map[$reference][MyuctoExportReader::id($entry[$key])]
+                            ?? throw new RuntimeException('Chybí zdrojová vazba opravné položky uzávěrky → ' . $reference . '.');
+                        $changed = true;
+                    }
+                }
+            }
+            if ($changed) {
+                $out['payload'] = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+            }
+        }
         foreach ($out as $column => $_) {
             if (($schema['columns'][$table][$column]['GENERATION_EXPRESSION'] ?? '') !== '') {
                 unset($out[$column]);
@@ -857,11 +1345,15 @@ final class MyuctoImporter
         }
     }
 
-    private function assertEmptyTarget(PDO $pdo, int $supplierId, bool $unusedPeriods): void
+    private function assertEmptyTarget(PDO $pdo, array $tables, int $supplierId, bool $unusedPeriods): void
     {
         $scopes = $this->scopes->resolveAll($supplierId);
         foreach (MyuctoImportProfile::TABLES as $table) {
             if (isset(MyuctoImportProfile::REUSE_KEYS[$table]) || ($unusedPeriods && $table === 'accounting_periods')) {
+                continue;
+            }
+            // Tabulku, kterou export nenese (starší verze, MyInvoice), obnova nezapisuje.
+            if (in_array($table, MyuctoImportProfile::OPTIONAL_GRAPH_TABLES, true) && ($tables[$table] ?? []) === []) {
                 continue;
             }
             $scope = $scopes[$table] ?? throw new RuntimeException('Nelze ověřit vlastnictví cílového grafu ' . $table . '.');
@@ -930,6 +1422,9 @@ final class MyuctoImporter
             'vat_classifications' => ['code', 'direction', 'dphdp3_line', 'dphdp3_line_secondary', 'kh_section', 'vat_rate', 'is_reverse_charge', 'kod_pred_pl', 'kh_regime_code', 'kh_bad_debt', 'archived'],
             'cash_registers' => ['currency_code', 'account_code'], 'supplier_bank_accounts' => ['account_number', 'bank_code', 'currency'],
             'posting_rules' => ['rule_key', 'priority', 'description', 'debit_account_code', 'credit_account_code', 'is_active'],
+            'dimension_types' => ['code', 'kind'], 'dimension_values' => ['type_id', 'code'],
+            'number_series' => ['legacy_key', 'doc_kind', 'scope_type', 'scope_id'],
+            'accounting_document_series' => ['series_code', 'fiscal_year', 'register_id'],
             default => ['code', 'label'],
         };
         foreach ($fields as $field) {

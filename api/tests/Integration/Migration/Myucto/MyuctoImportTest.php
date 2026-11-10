@@ -97,6 +97,18 @@ final class MyuctoImportTest extends TestCase
         if (!isset($this->source, $this->target)) return;
         $ids = [$this->source, $this->target];
         foreach ($ids as $id) {
+            $this->pdo->prepare('UPDATE documents SET parent_document_id = NULL, signature_for_id = NULL WHERE supplier_id = ?')->execute([$id]);
+            $this->pdo->prepare('UPDATE document_folders SET parent_id = NULL WHERE supplier_id = ?')->execute([$id]);
+            $this->pdo->prepare('UPDATE dimension_values SET parent_id = NULL WHERE supplier_id = ?')->execute([$id]);
+            $this->pdo->prepare('DELETE p FROM invoice_pdfs p JOIN invoices i ON i.id = p.invoice_id WHERE i.supplier_id = ?')->execute([$id]);
+            $this->pdo->prepare('DELETE c FROM number_series_counters c JOIN number_series n ON n.id = c.series_id WHERE n.supplier_id = ?')->execute([$id]);
+            foreach (['document_links', 'document_dimensions', 'journal_entry_line_dimensions', 'document_extractions', 'document_files', 'documents', 'document_folders',
+                'internal_document_lines', 'internal_documents', 'journal_entry_document_links', 'journal_entry_templates', 'journal_entry_notes',
+                'tax_advance_schedules', 'income_tax_returns', 'accounting_corrections', 'bank_posting_rules', 'bank_card_merchant_map', 'expense_classification_rules',
+                'bank_rule_templates', 'auto_posting_policy', 'pdf_signature_output_settings', 'accounting_closing_steps', 'dimension_values', 'dimension_types',
+                'invoice_counters', 'purchase_invoice_counters', 'number_series', 'accounting_document_series', 'supplier_bank_accounts'] as $table) {
+                $this->pdo->prepare('DELETE FROM `' . $table . '` WHERE supplier_id = ?')->execute([$id]);
+            }
             $this->pdo->prepare('DELETE bt FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bs.supplier_id = ?')->execute([$id]);
             $this->pdo->prepare('DELETE FROM bank_statements WHERE supplier_id = ?')->execute([$id]);
             foreach (['de_movement_classification_history', 'de_movement_classification', 'posting_rules', 'cash_documents', 'cash_registers', 'journal_entry_lines', 'journal_entries', 'accounting_periods', 'chart_of_accounts'] as $table) $this->pdo->prepare('DELETE FROM `' . $table . '` WHERE supplier_id = ?')->execute([$id]);
@@ -532,6 +544,301 @@ final class MyuctoImportTest extends TestCase
         self::assertSame(1, $repeat['existing']['vat_clearing_runs']);
     }
 
+    /**
+     * Obnova reálného exportu přenesla jen doklady a deník; dokumenty, dimenze, interní
+     * doklady, poznámky a šablony deníku, daně, automatiku banky, historii oprav a číselné
+     * řady bylo nutné doplnit ručně a nová firma si nechala své výchozí nastavení.
+     */
+    public function testCompleteCompanyIsRestoredWithDocumentsAutomationAndNumbering(): void
+    {
+        $fixture = $this->seedCompleteCompany();
+        $this->seedTargetDefaults();
+        $targetSeries = (int) $this->pdo->query("SELECT id FROM number_series WHERE legacy_key = 'issued:invoice' AND supplier_id = " . $this->target)->fetchColumn();
+        $package = (new MyuctoExportReader())->read($this->makeArchive(array_keys(MyuctoImportProfile::KEYLESS_TABLES), 'complete-export.zip', $fixture['files']));
+        // Vazba na ostatní doklad (obnova je nepřenáší) se vynechá a vykáže.
+        $package['tables']['document_links'][] = ['document_id' => $fixture['document'], 'supplier_id' => $this->source,
+            'entity_type' => 'other_item', 'entity_id' => 987654, 'created_at' => '2090-01-20 10:00:00'];
+        $oldDataDir = getenv('MYINVOICE_DATA_DIR');
+        putenv('MYINVOICE_DATA_DIR=' . $this->root . '/runtime');
+        try {
+            $dry = $this->importer->import($package, $this->target, $this->actor, 'synthetic-complete');
+            self::assertSame(2, $dry['created']['documents']);
+            self::assertSame(0, $this->targetCount('documents'));
+            self::assertSame([], glob($this->root . '/runtime/storage/documents/sup-' . $this->target . '/*/*') ?: []);
+            self::assertSame([], glob($this->root . '/runtime/storage/invoices/sup-' . $this->target . '/_archive/*/*') ?: []);
+            self::assertSame(1, $this->targetCount('bank_rule_templates'), 'Nanečisto se výchozí nastavení cíle nemění.');
+
+            $report = $this->importer->import($package, $this->target, $this->actor, 'synthetic-complete', false);
+
+            foreach (['document_folders' => 2, 'documents' => 2, 'document_files' => 1, 'document_dms_messages' => 1, 'document_extractions' => 2,
+                'document_links' => 2, 'invoice_pdfs' => 1, 'dimension_types' => 1, 'dimension_values' => 2, 'document_dimensions' => 1,
+                'journal_entry_line_dimensions' => 1, 'internal_documents' => 1, 'internal_document_lines' => 2, 'journal_entry_document_links' => 1,
+                'journal_entry_templates' => 1, 'journal_entry_template_lines' => 2, 'journal_entry_notes' => 1, 'income_tax_returns' => 1,
+                'tax_advance_schedules' => 1, 'bank_posting_rules' => 1, 'bank_card_merchant_map' => 1, 'expense_classification_rules' => 1,
+                'bank_rule_templates' => 1, 'auto_posting_policy' => 1, 'pdf_signature_output_settings' => 1, 'accounting_corrections' => 1,
+                'accounting_closing_steps' => 1, 'number_series' => 1, 'number_series_counters' => 1, 'invoice_counters' => 2,
+                'accounting_document_series' => 1] as $table => $count) {
+                self::assertSame($count, $report['created'][$table] ?? 0, $table);
+            }
+            self::assertSame(1, $report['reused']['number_series'] ?? 0);
+            self::assertSame(['purchase_invoice_counters' => 1], $report['existing']);
+            self::assertSame(['accounting_corrections.bank_transaction' => 1, 'document_links.other_item' => 1, 'internal_documents.document_links_json' => 1, 'number_series.other_item_kind' => 1], $report['dropped']);
+            self::assertSame(['bank_posting_rules.last_rejected_tx_id' => 1], $report['detached']);
+            self::assertSame(['auto_posting_policy' => 1, 'bank_rule_templates' => 1, 'journal_entry_templates' => 1, 'pdf_signature_output_settings' => 1], $report['replaced_setup']);
+            self::assertSame([], $report['numbering_check']);
+            self::assertSame(['invoice_number_format', 'invoice_number_period'], $report['numbering_adopted']);
+            self::assertSame(4, $report['files']);
+            self::assertSame([], $report['outside_scope']);
+
+            $t = $this->target;
+            $invoice = (int) $this->pdo->query('SELECT id FROM invoices WHERE supplier_id = ' . $t)->fetchColumn();
+            $purchase = (int) $this->pdo->query('SELECT id FROM purchase_invoices WHERE supplier_id = ' . $t)->fetchColumn();
+            $entry = (int) $this->pdo->query('SELECT id FROM journal_entries WHERE supplier_id = ' . $t)->fetchColumn();
+            $line = (int) $this->pdo->query('SELECT MIN(id) FROM journal_entry_lines WHERE supplier_id = ' . $t)->fetchColumn();
+            $client = (int) $this->pdo->query('SELECT id FROM clients WHERE supplier_id = ' . $t)->fetchColumn();
+            $period = (int) $this->pdo->query('SELECT id FROM accounting_periods WHERE supplier_id = ' . $t)->fetchColumn();
+
+            // 1. Dokumenty: strom složek, dokument z rozbalené zprávy, koš, soubory a vazby.
+            $folders = $this->pdo->query('SELECT id, parent_id, name FROM document_folders WHERE supplier_id = ' . $t . ' ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+            self::assertNull($folders[0]['parent_id']);
+            self::assertSame((int) $folders[0]['id'], (int) $folders[1]['parent_id']);
+            $documents = $this->pdo->query('SELECT * FROM documents WHERE supplier_id = ' . $t . ' ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+            self::assertSame((int) $folders[1]['id'], (int) $documents[0]['folder_id']);
+            self::assertSame((int) $documents[0]['id'], (int) $documents[1]['parent_document_id']);
+            self::assertSame((int) $documents[1]['id'], (int) $documents[0]['signature_for_id']);
+            self::assertSame([$this->actor, null, 'none'], [(int) $documents[0]['uploaded_by'], $documents[0]['thumb_path'], $documents[0]['thumb_status']]);
+            self::assertSame(['2090-01-25 08:00:00', $this->actor], [$documents[1]['deleted_at'], (int) $documents[1]['deleted_by']]);
+            foreach ($fixture['documentContents'] as $sha => $content) {
+                self::assertSame($content, file_get_contents($this->root . '/runtime/storage/documents/sup-' . $t . '/' . substr($sha, 0, 2) . '/' . $sha));
+            }
+            self::assertSame((int) $documents[0]['id'], (int) $this->pdo->query('SELECT document_id FROM document_files WHERE supplier_id = ' . $t)->fetchColumn());
+            self::assertSame((int) $documents[1]['id'], (int) $this->pdo->query('SELECT m.document_id FROM document_dms_messages m JOIN documents d ON d.id = m.document_id WHERE d.supplier_id = ' . $t)->fetchColumn());
+            self::assertSame([null, (int) $documents[0]['id']], array_map(static fn ($v): ?int => $v === null ? null : (int) $v,
+                $this->pdo->query('SELECT document_id FROM document_extractions WHERE supplier_id = ' . $t . ' ORDER BY document_id IS NOT NULL')->fetchAll(PDO::FETCH_COLUMN)));
+            $links = $this->pdo->query('SELECT entity_type, entity_id FROM document_links WHERE supplier_id = ' . $t . ' ORDER BY entity_type')->fetchAll(PDO::FETCH_KEY_PAIR);
+            self::assertSame(['invoice' => $invoice, 'purchase_invoice' => $purchase], array_map('intval', $links));
+
+            // 2. Archiv PDF vydaných faktur.
+            $pdf = $this->pdo->query('SELECT p.invoice_id, p.filename FROM invoice_pdfs p JOIN invoices i ON i.id = p.invoice_id WHERE i.supplier_id = ' . $t)->fetch(PDO::FETCH_ASSOC);
+            self::assertSame($invoice, (int) $pdf['invoice_id']);
+            self::assertSame($fixture['archiveContent'], file_get_contents($this->root . '/runtime/storage/invoices/sup-' . $t . '/_archive/2090-01/' . $pdf['filename']));
+
+            // 3. Dimenze a jejich přiřazení dokladům i řádkům deníku.
+            $type = (int) $this->pdo->query('SELECT id FROM dimension_types WHERE supplier_id = ' . $t)->fetchColumn();
+            $values = $this->pdo->query('SELECT code, id FROM dimension_values WHERE supplier_id = ' . $t)->fetchAll(PDO::FETCH_KEY_PAIR);
+            self::assertSame((int) $values['SYN-A'], (int) $this->pdo->query("SELECT parent_id FROM dimension_values WHERE code = 'SYN-A1' AND supplier_id = " . $t)->fetchColumn());
+            self::assertSame([$invoice, $type, (int) $values['SYN-A']], array_map('intval', $this->pdo->query('SELECT doc_id, dimension_type_id, dimension_value_id FROM document_dimensions WHERE supplier_id = ' . $t)->fetch(PDO::FETCH_NUM)));
+            self::assertSame([$line, (int) $values['SYN-A1']], array_map('intval', $this->pdo->query('SELECT line_id, dimension_value_id FROM journal_entry_line_dimensions WHERE supplier_id = ' . $t)->fetch(PDO::FETCH_NUM)));
+
+            // 4. Interní doklad s řádky (dimenze v JSON se přemapují).
+            $internal = $this->pdo->query('SELECT id, partner_id, document_links_json FROM internal_documents WHERE supplier_id = ' . $t)->fetch(PDO::FETCH_ASSOC);
+            self::assertSame($client, (int) $internal['partner_id']);
+            self::assertSame([['doc_type' => 'invoice', 'doc_id' => $invoice]], json_decode((string) $internal['document_links_json'], true));
+            self::assertSame([(string) $type => (int) $values['SYN-A']], json_decode((string) $this->pdo->query('SELECT dimensions_json FROM internal_document_lines WHERE position = 1 AND supplier_id = ' . $t)->fetchColumn(), true));
+
+            // 5. Deník: vazby zápisu na doklady, šablony, poznámky.
+            self::assertSame([$entry, $invoice], array_map('intval', $this->pdo->query('SELECT entry_id, doc_id FROM journal_entry_document_links WHERE supplier_id = ' . $t)->fetch(PDO::FETCH_NUM)));
+            self::assertSame(['Syntetická šablona'], $this->pdo->query('SELECT name FROM journal_entry_templates WHERE supplier_id = ' . $t)->fetchAll(PDO::FETCH_COLUMN));
+            self::assertSame([$entry, 'Syntetická poznámka'], [(int) ($note = $this->pdo->query('SELECT entry_id, body FROM journal_entry_notes WHERE supplier_id = ' . $t)->fetch(PDO::FETCH_ASSOC))['entry_id'], $note['body']]);
+
+            // 6. Daně: přiznání a zálohy z něj.
+            $return = (int) $this->pdo->query('SELECT id FROM income_tax_returns WHERE supplier_id = ' . $t)->fetchColumn();
+            self::assertSame($return, (int) $this->pdo->query('SELECT source_return_id FROM tax_advance_schedules WHERE supplier_id = ' . $t)->fetchColumn());
+
+            // 7. Banka a automatika; výchozí nastavení nové firmy nahradilo nastavení zdroje.
+            self::assertSame([null, 0], array_map(static fn ($v): ?int => $v === null ? null : (int) $v, $this->pdo->query('SELECT last_rejected_tx_id, hit_count FROM bank_posting_rules WHERE supplier_id = ' . $t)->fetch(PDO::FETCH_NUM)));
+            self::assertSame($client, (int) $this->pdo->query('SELECT client_id FROM bank_card_merchant_map WHERE supplier_id = ' . $t)->fetchColumn());
+            self::assertSame($client, (int) $this->pdo->query('SELECT vendor_client_id FROM expense_classification_rules WHERE supplier_id = ' . $t)->fetchColumn());
+            self::assertSame(['synthetic.source'], $this->pdo->query('SELECT template_key FROM bank_rule_templates WHERE supplier_id = ' . $t)->fetchAll(PDO::FETCH_COLUMN));
+            self::assertSame(['document.invoice' => 'auto'], $this->pdo->query('SELECT operation_type, level FROM auto_posting_policy WHERE supplier_id = ' . $t)->fetchAll(PDO::FETCH_KEY_PAIR));
+            self::assertSame(['invoice' => 1], array_map('intval', $this->pdo->query('SELECT output_type, enabled FROM pdf_signature_output_settings WHERE supplier_id = ' . $t)->fetchAll(PDO::FETCH_KEY_PAIR)));
+
+            // 8. Historie oprav a kroků uzávěrky.
+            self::assertSame($invoice, (int) $this->pdo->query('SELECT entity_id FROM accounting_corrections WHERE supplier_id = ' . $t)->fetchColumn());
+            self::assertSame($period, (int) $this->pdo->query('SELECT period_id FROM accounting_closing_steps WHERE supplier_id = ' . $t)->fetchColumn());
+
+            // 9. Číselné řady navazují: řada z průvodce převzala předponu zdroje, počítadla sedí.
+            $series = $this->pdo->query('SELECT legacy_key, id, prefix, template, scope_id FROM number_series WHERE supplier_id = ' . $t . ' ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+            self::assertSame([['issued:invoice', $targetSeries, 'FV', '{YY}{CCCC}', 0], [null, null, null, 'K{CCC}', $client]],
+                array_map(static fn (array $r): array => [$r['legacy_key'], $r['legacy_key'] === null ? null : (int) $r['id'], $r['prefix'], $r['template'], (int) $r['scope_id']], $series));
+            self::assertSame($targetSeries, (int) $this->pdo->query('SELECT number_series_id FROM invoices WHERE id = ' . $invoice)->fetchColumn(), 'Doklad zůstane ve své řadě.');
+            self::assertSame(4, (int) $this->pdo->query('SELECT c.last_number FROM number_series_counters c JOIN number_series n ON n.id = c.series_id WHERE n.supplier_id = ' . $t)->fetchColumn());
+            self::assertSame(['0' => 12, (string) $client => 3], array_map('intval', $this->pdo->query("SELECT client_id, last_number FROM invoice_counters WHERE supplier_id = {$t} ORDER BY client_id")->fetchAll(PDO::FETCH_KEY_PAIR)));
+            self::assertSame(5, (int) $this->pdo->query("SELECT last_number FROM purchase_invoice_counters WHERE supplier_id = {$t} AND period = '209001'")->fetchColumn());
+            self::assertSame(['ID', 5], [($ads = $this->pdo->query('SELECT prefix, next_number FROM accounting_document_series WHERE supplier_id = ' . $t)->fetch(PDO::FETCH_ASSOC))['prefix'], (int) $ads['next_number']]);
+            self::assertSame(['{YY}{CCCC}', 'year'], array_values($this->pdo->query('SELECT invoice_number_format, invoice_number_period FROM supplier WHERE id = ' . $t)->fetch(PDO::FETCH_ASSOC)));
+
+            // Opakovaná obnova týchž dat projde; firma mezitím smí vydat další doklad.
+            $this->pdo->prepare("UPDATE invoice_counters SET last_number = 13 WHERE supplier_id = ? AND client_id = 0")->execute([$t]);
+            $repeat = $this->importer->import($package, $this->target, $this->actor, 'synthetic-complete', false);
+            self::assertSame([], $repeat['created']);
+            self::assertSame(2, $repeat['existing']['documents']);
+            self::assertSame(2, $repeat['existing']['invoice_counters']);
+            self::assertSame(2, $repeat['reconciliation']['document_links']);
+
+            // Změněný obsah obnovené firmy opakovaná obnova odhalí.
+            $this->pdo->prepare("UPDATE journal_entry_notes SET body = 'Změněno' WHERE supplier_id = ?")->execute([$t]);
+            try {
+                $this->importer->import($package, $this->target, $this->actor, 'synthetic-complete', false);
+                self::fail('Změněná poznámka musí rekonciliaci zastavit.');
+            } catch (\RuntimeException $e) {
+                self::assertStringContainsString('journal_entry_notes.body', $e->getMessage());
+            }
+        } finally {
+            putenv($oldDataDir === false ? 'MYINVOICE_DATA_DIR' : 'MYINVOICE_DATA_DIR=' . $oldDataDir);
+        }
+    }
+
+    /**
+     * Export starší verze ani převod zálohy MyInvoice nové tabulky nenese: obnova projde
+     * jako dřív, výchozí nastavení cíle zůstane a řady bez počítadel vykáže ke kontrole.
+     */
+    public function testExportWithoutNewTablesRestoresUnchangedAndFlagsNumbering(): void
+    {
+        $this->seedTargetDefaults();
+        $package = (new MyuctoExportReader())->read($this->archive);
+        foreach ([...MyuctoImportProfile::OPTIONAL_GRAPH_TABLES, ...array_keys(MyuctoImportProfile::KEYLESS_TABLES)] as $table) {
+            self::assertSame([], $package['tables'][$table] ?? [], $table);
+            unset($package['tables'][$table]);
+        }
+        self::assertArrayNotHasKey('stored_files', $package);
+        $report = $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false);
+        self::assertSame([], array_intersect_key($report['created'], array_flip([...MyuctoImportProfile::OPTIONAL_GRAPH_TABLES, ...array_keys(MyuctoImportProfile::KEYLESS_TABLES)])));
+        self::assertSame(['invoice_counters', 'purchase_invoice_counters'], $report['numbering_check']);
+        self::assertSame([], $report['replaced_setup']);
+        self::assertSame(1, $this->targetCount('bank_rule_templates'));
+        self::assertSame(1, $this->targetCount('journal_entry_templates'));
+        self::assertSame(1, $this->targetCount('purchase_invoice_counters'));
+
+        // Obnova starším profilem ze shodných dat se dá zopakovat i s úplným profilem.
+        $this->pdo->prepare("UPDATE external_entity_map SET external_id = REPLACE(external_id, ?, 'vat-clearing-runs-v1:')
+            WHERE supplier_id = ? AND entity_type = 'myucto_import'")
+            ->execute([MyuctoImportProfile::VERSION . ':', $this->target]);
+        $repeat = $this->importer->import((new MyuctoExportReader())->read($this->archive), $this->target, $this->actor, 'synthetic-instance', false);
+        self::assertSame([], $repeat['created']);
+        self::assertSame(1, $repeat['existing']['invoices']);
+    }
+
+    /** Výchozí nastavení, které nová firma dostane při založení a průvodci řad. */
+    private function seedTargetDefaults(): void
+    {
+        $t = $this->target;
+        $this->pdo->prepare("INSERT INTO bank_rule_templates (supplier_id, template_key, name_cs, name_en, direction, operation_type, rule_key) VALUES (?, 'synthetic.default', 'Výchozí', 'Default', 'outgoing', 'bank.fee', 'bank.fee')")->execute([$t]);
+        $this->pdo->prepare("INSERT INTO auto_posting_policy (supplier_id, operation_type, level) VALUES (?, 'document.invoice', 'suggest')")->execute([$t]);
+        $this->pdo->prepare("INSERT INTO pdf_signature_output_settings (supplier_id, output_type) VALUES (?, 'invoice')")->execute([$t]);
+        $this->pdo->prepare("INSERT INTO journal_entry_templates (supplier_id, name, is_seeded, seed_key) VALUES (?, 'Mzdy', 1, 'payroll')")->execute([$t]);
+        $this->pdo->prepare("INSERT INTO number_series (supplier_id, doc_kind, scope_type, scope_id, storage, legacy_key, name, is_default) VALUES (?, 'invoice', 'company', 0, 'legacy', 'issued:invoice', '', 1)")->execute([$t]);
+        $this->pdo->prepare("INSERT INTO purchase_invoice_counters (supplier_id, period, last_number) VALUES (?, '209001', 1)")->execute([$t]);
+    }
+
+    /**
+     * Zdrojová firma se vším, co obnova nově přenáší (skupiny 1–9 zadání).
+     *
+     * @return array{files:list<array{storage_path:string,content:string,kind:string}>,documentContents:array<string,string>,archiveContent:string,document:int}
+     */
+    private function seedCompleteCompany(): array
+    {
+        $s = $this->source;
+        $a = $this->actor;
+        $pdo = $this->pdo;
+        $client = (int) $pdo->query('SELECT id FROM clients WHERE supplier_id = ' . $s)->fetchColumn();
+        $entry = (int) $pdo->query('SELECT id FROM journal_entries WHERE supplier_id = ' . $s)->fetchColumn();
+        $line = (int) $pdo->query('SELECT MIN(id) FROM journal_entry_lines WHERE supplier_id = ' . $s)->fetchColumn();
+        $period = (int) $pdo->query('SELECT id FROM accounting_periods WHERE supplier_id = ' . $s)->fetchColumn();
+        $insert = function (string $table, array $row) use ($pdo): int {
+            $pdo->prepare('INSERT INTO `' . $table . '` (`' . implode('`, `', array_keys($row)) . '`) VALUES (' . implode(', ', array_fill(0, count($row), '?')) . ')')->execute(array_values($row));
+            return (int) $pdo->lastInsertId();
+        };
+        $root = $insert('document_folders', ['supplier_id' => $s, 'name' => 'Syntetická složka', 'created_by' => $a]);
+        $child = $insert('document_folders', ['supplier_id' => $s, 'parent_id' => $root, 'name' => 'Syntetická podsložka', 'created_by' => $a]);
+        $contents = ["%PDF-synthetic-dms-original\n", "synthetic-dms-extracted\n"];
+        $shas = array_map(static fn (string $c): string => hash('sha256', $c), $contents);
+        $document = $insert('documents', ['supplier_id' => $s, 'folder_id' => $child, 'title' => 'Syntetický dokument', 'original_name' => 'syntheticky.pdf',
+            'filename' => $shas[0], 'sha256' => $shas[0], 'mime_type' => 'application/pdf', 'size_bytes' => strlen($contents[0]), 'doc_type' => 'pdf',
+            'thumb_path' => 'sup-' . $s . '/_thumbs/synthetic.png', 'thumb_status' => 'generated', 'uploaded_by' => $a, 'created_at' => '2090-01-20 08:00:00']);
+        $extracted = $insert('documents', ['supplier_id' => $s, 'folder_id' => $child, 'title' => 'Syntetická příloha zprávy', 'original_name' => 'priloha.txt',
+            'filename' => $shas[1], 'sha256' => $shas[1], 'mime_type' => 'text/plain', 'size_bytes' => strlen($contents[1]), 'doc_type' => 'other',
+            'source' => 'zfo_extract', 'parent_document_id' => $document, 'uploaded_by' => $a, 'deleted_at' => '2090-01-25 08:00:00', 'deleted_by' => $a,
+            'created_at' => '2090-01-20 08:00:00']);
+        $pdo->prepare('UPDATE documents SET signature_for_id = ? WHERE id = ?')->execute([$extracted, $document]);
+        $insert('document_files', ['document_id' => $document, 'supplier_id' => $s, 'role' => 'primary', 'sha256' => $shas[0], 'filename' => $shas[0], 'uploaded_by' => $a]);
+        $insert('document_dms_messages', ['document_id' => $extracted, 'dm_id' => '1234567890', 'direction' => 'received', 'sender_box_id' => 'abc1234']);
+        $insert('document_extractions', ['supplier_id' => $s, 'document_id' => null, 'sha256' => hash('sha256', 'synthetic-unlinked'), 'status' => 'ok', 'extracted_at' => '2090-01-20 08:00:00']);
+        $insert('document_extractions', ['supplier_id' => $s, 'document_id' => $document, 'sha256' => $shas[0], 'status' => 'ok', 'extracted_at' => '2090-01-20 08:00:00']);
+        $insert('document_links', ['document_id' => $document, 'supplier_id' => $s, 'entity_type' => 'invoice', 'entity_id' => $this->invoice]);
+        $insert('document_links', ['document_id' => $document, 'supplier_id' => $s, 'entity_type' => 'purchase_invoice', 'entity_id' => $this->purchase]);
+        $archiveContent = "%PDF-synthetic-archived-invoice\n";
+        $archiveName = '20900115-101010-' . substr(hash('sha256', $archiveContent), 0, 8) . '-Faktura-SYNTHETIC.pdf';
+        $insert('invoice_pdfs', ['invoice_id' => $this->invoice, 'filename' => $archiveName, 'size_bytes' => strlen($archiveContent),
+            'sha256' => hash('sha256', $archiveContent), 'was_sent' => 1, 'reason' => 'sent', 'archived_at' => '2090-01-15 10:10:10']);
+
+        $type = $insert('dimension_types', ['supplier_id' => $s, 'code' => 'syn_stredisko', 'name' => 'Syntetické středisko', 'kind' => 'cost_center']);
+        $value = $insert('dimension_values', ['type_id' => $type, 'supplier_id' => $s, 'code' => 'SYN-A', 'name' => 'Syntetická hodnota', 'responsible_user_id' => $a]);
+        $subValue = $insert('dimension_values', ['type_id' => $type, 'supplier_id' => $s, 'parent_id' => $value, 'code' => 'SYN-A1', 'name' => 'Syntetická podhodnota']);
+        $insert('document_dimensions', ['supplier_id' => $s, 'doc_type' => 'invoice', 'doc_id' => $this->invoice, 'item_no' => 0,
+            'dimension_type_id' => $type, 'dimension_value_id' => $value, 'assignment_origin' => 'manual']);
+        $insert('journal_entry_line_dimensions', ['line_id' => $line, 'dimension_type_id' => $type, 'supplier_id' => $s,
+            'dimension_value_id' => $subValue, 'assignment_origin' => 'manual']);
+
+        $internal = $insert('internal_documents', ['supplier_id' => $s, 'kind' => 'manual', 'title' => 'Syntetický interní doklad', 'document_date' => '2090-01-31',
+            'entry_date' => '2090-01-31', 'partner_id' => $client, 'amount' => '50.00', 'status' => 'draft', 'origin' => 'draft', 'created_by' => $a,
+            'document_links_json' => json_encode([['doc_type' => 'invoice', 'doc_id' => $this->invoice], ['doc_type' => 'invoice', 'doc_id' => 987654321]])]);
+        $insert('internal_document_lines', ['supplier_id' => $s, 'internal_document_id' => $internal, 'position' => 1, 'account_code' => '311990',
+            'side' => 'debit', 'amount' => '50.00', 'dimensions_json' => json_encode([(string) $type => $value])]);
+        $insert('internal_document_lines', ['supplier_id' => $s, 'internal_document_id' => $internal, 'position' => 2, 'account_code' => '602990',
+            'side' => 'credit', 'amount' => '50.00']);
+
+        $insert('journal_entry_document_links', ['supplier_id' => $s, 'entry_id' => $entry, 'doc_type' => 'invoice', 'doc_id' => $this->invoice, 'created_by' => $a]);
+        $template = $insert('journal_entry_templates', ['supplier_id' => $s, 'name' => 'Syntetická šablona', 'is_seeded' => 0, 'created_by' => $a]);
+        $insert('journal_entry_template_lines', ['template_id' => $template, 'line_no' => 1, 'account_code' => '311990', 'side' => 'debit']);
+        $insert('journal_entry_template_lines', ['template_id' => $template, 'line_no' => 2, 'account_code' => '602990', 'side' => 'credit']);
+        $insert('journal_entry_notes', ['supplier_id' => $s, 'entry_id' => $entry, 'body' => 'Syntetická poznámka', 'created_by' => $a]);
+
+        $return = $insert('income_tax_returns', ['supplier_id' => $s, 'year' => 2089, 'taxpayer_type' => 'po', 'inputs' => '{}', 'created_by' => $a,
+            'created_at' => '2090-03-01 10:00:00']);
+        $insert('tax_advance_schedules', ['supplier_id' => $s, 'taxpayer_type' => 'po', 'advance_kind' => 'tax', 'period_year' => 2090, 'seq_no' => 1,
+            'amount' => '1000.00', 'due_date' => '2090-06-15', 'source_return_id' => $return]);
+
+        $insert('bank_posting_rules', ['supplier_id' => $s, 'name' => 'Syntetické pravidlo', 'direction' => 'outgoing', 'message_contains' => 'SYNTETICKY',
+            'debit_account_code' => '311990', 'credit_account_code' => '602990', 'last_rejected_tx_id' => 987654321, 'created_by' => $a]);
+        $insert('bank_card_merchant_map', ['supplier_id' => $s, 'merchant_key' => 'synthetic merchant', 'client_id' => $client]);
+        $insert('expense_classification_rules', ['supplier_id' => $s, 'name' => 'Syntetické zařazení', 'vendor_client_id' => $client,
+            'expense_kind' => 'service', 'created_by' => $a]);
+        $insert('bank_rule_templates', ['supplier_id' => $s, 'template_key' => 'synthetic.source', 'name_cs' => 'Zdroj', 'name_en' => 'Source',
+            'direction' => 'incoming', 'operation_type' => 'bank.interest', 'rule_key' => 'bank.interest']);
+        $insert('auto_posting_policy', ['supplier_id' => $s, 'operation_type' => 'document.invoice', 'level' => 'auto', 'updated_by' => $a]);
+        $insert('pdf_signature_output_settings', ['supplier_id' => $s, 'output_type' => 'invoice', 'enabled' => 1]);
+
+        $insert('accounting_corrections', ['supplier_id' => $s, 'event_type' => 'manual_post', 'entity_type' => 'invoice', 'entity_id' => $this->invoice, 'created_by' => $a]);
+        // Oprava u pohybu, který ve zdroji mezitím zanikl.
+        $insert('accounting_corrections', ['supplier_id' => $s, 'event_type' => 'reject', 'entity_type' => 'bank_transaction', 'entity_id' => 987654321]);
+        $insert('accounting_closing_steps', ['supplier_id' => $s, 'period_id' => $period, 'step_key' => 'precheck', 'status' => 'done', 'done_by' => $a]);
+
+        $legacySeries = $insert('number_series', ['supplier_id' => $s, 'doc_kind' => 'invoice', 'scope_type' => 'company', 'scope_id' => 0, 'storage' => 'legacy',
+            'legacy_key' => 'issued:invoice', 'name' => '', 'prefix' => 'FV', 'template' => '{YY}{CCCC}', 'period' => 'year', 'is_default' => 1]);
+        $pdo->prepare('UPDATE invoices SET number_series_id = ? WHERE id = ?')->execute([$legacySeries, $this->invoice]);
+        $native = $insert('number_series', ['supplier_id' => $s, 'doc_kind' => 'invoice', 'scope_type' => 'client', 'scope_id' => $client, 'storage' => 'native',
+            'name' => 'Syntetická řada klienta', 'template' => 'K{CCC}', 'period' => 'year', 'is_default' => 0]);
+        $insert('number_series_counters', ['series_id' => $native, 'period_key' => '2090', 'last_number' => 4]);
+        $insert('number_series', ['supplier_id' => $s, 'doc_kind' => 'other_receivable', 'scope_type' => 'other_item_kind', 'scope_id' => 987654,
+            'storage' => 'legacy', 'legacy_key' => 'doc:other_receivable:987654', 'name' => 'Ostatní']);
+        $insert('invoice_counters', ['supplier_id' => $s, 'client_id' => 0, 'revenue_category_id' => 0, 'invoice_type' => 'invoice', 'period' => '2090', 'last_number' => 12]);
+        $insert('invoice_counters', ['supplier_id' => $s, 'client_id' => $client, 'revenue_category_id' => 0, 'invoice_type' => 'invoice', 'period' => '2090', 'last_number' => 3]);
+        $insert('purchase_invoice_counters', ['supplier_id' => $s, 'period' => '209001', 'last_number' => 5]);
+        $insert('accounting_document_series', ['supplier_id' => $s, 'series_code' => 'manual', 'register_id' => 0, 'fiscal_year' => 2090, 'prefix' => 'ID', 'next_number' => 5]);
+        $pdo->prepare("UPDATE supplier SET invoice_number_format = '{YY}{CCCC}', invoice_number_period = 'year' WHERE id = ?")->execute([$s]);
+        $pdo->prepare("UPDATE supplier SET invoice_number_format = NULL, invoice_number_period = 'month' WHERE id = ?")->execute([$this->target]);
+
+        $files = [];
+        foreach ($contents as $index => $content) {
+            $files[] = ['storage_path' => 'documents/sup-' . $s . '/' . substr($shas[$index], 0, 2) . '/' . $shas[$index], 'content' => $content, 'kind' => 'document'];
+        }
+        $files[] = ['storage_path' => 'invoices/sup-' . $s . '/_archive/2090-01/' . $archiveName, 'content' => $archiveContent, 'kind' => 'attachment'];
+
+        return ['files' => $files, 'documentContents' => array_combine($shas, $contents), 'archiveContent' => $archiveContent,
+            'document' => $document];
+    }
+
     public function testMissingPostingDocumentRollsBackEntireGraph(): void
     {
         $package = (new MyuctoExportReader())->read($this->archive);
@@ -584,6 +891,8 @@ final class MyuctoImportTest extends TestCase
             $config = $container->get(Config::class);
             $sourcePath = (string) $config->get('purchase_invoice.archive_storage') . '/sup-' . $this->source . '/synthetic-original.pdf';
             mkdir(dirname($sourcePath), 0700, true); file_put_contents($sourcePath, "%PDF-synthetic-original\n");
+            // Počítadla řad export nese (tabulka s `supplier_id`); obnova je dřív zahazovala mimo rozsah.
+            $this->pdo->prepare("INSERT INTO invoice_counters (supplier_id, client_id, revenue_category_id, invoice_type, period, last_number) VALUES (?, 0, 0, 'invoice', '2090', 7)")->execute([$this->source]);
             $exporter = $container->get(\MyInvoice\Service\Export\Instance\InstanceExportService::class);
             $export = $exporter->runForSupplier($this->source, [\MyInvoice\Service\Export\Instance\InstanceExportService::PART_RESTORE], targetDir: $this->root . '/native-export');
             $package = (new MyuctoExportReader())->read($export['abs_path'], (string) $config->get('cron.backup.password', ''));
@@ -596,6 +905,8 @@ final class MyuctoImportTest extends TestCase
             self::assertCount(3, $package['tables']['posting_rules']);
             self::assertCount(14, $package['tables']['de_movement_classification']);
             self::assertCount(30, $package['tables']['de_movement_classification_history']);
+            self::assertCount(1, $package['tables']['invoice_counters']);
+            self::assertArrayNotHasKey('invoice_counters', $package['skipped']);
             $report = $container->get(MyuctoImporter::class)->import($package, $this->target, $this->actor, 'synthetic-live-export');
             self::assertSame(1, $report['created']['invoices']); self::assertSame(1, $report['files']);
             self::assertSame(0, $this->targetCount('invoices'));
@@ -1013,8 +1324,11 @@ final class MyuctoImportTest extends TestCase
             ->execute([$supplier, $from, $framework]);
     }
 
-    /** @param list<string> $extraTables */
-    private function makeArchive(array $extraTables = [], string $name = 'synthetic-export.zip'): string
+    /**
+     * @param list<string> $extraTables
+     * @param list<array{storage_path:string,content:string,kind:string}> $files soubory úložiště v `restore.files`
+     */
+    private function makeArchive(array $extraTables = [], string $name = 'synthetic-export.zip', array $files = []): string
     {
         $path = $this->root . '/' . $name; $zip = new ZipArchive(); self::assertTrue($zip->open($path, ZipArchive::CREATE));
         $schema = SchemaMetadataProvider::load($this->pdo); $tables = []; $shared = []; $checksums = [];
@@ -1037,7 +1351,14 @@ final class MyuctoImportTest extends TestCase
         $bytes = "%PDF-synthetic-original\n";
         $zip->addFromString('doklady/synthetic-original.pdf', $bytes);
         $checksums['doklady/synthetic-original.pdf'] = ['sha256' => hash('sha256', $bytes), 'size' => strlen($bytes)];
-        $manifest = ['format' => 'myucto-instance-export', 'version' => 6, 'supplier' => ['id' => $this->source], 'restore' => ['available' => true, 'documents' => [['entry' => 'doklady/synthetic-original.pdf', 'storage_path' => 'purchase-invoices/sup-' . $this->source . '/synthetic-original.pdf']]],
+        $restoreFiles = [];
+        foreach ($files as $index => $file) {
+            $entry = 'prilohy/synthetic-' . $index . '.bin';
+            $zip->addFromString($entry, $file['content']);
+            $checksums[$entry] = ['sha256' => hash('sha256', $file['content']), 'size' => strlen($file['content'])];
+            $restoreFiles[] = ['entry' => $entry, 'storage_path' => $file['storage_path'], 'sha256' => hash('sha256', $file['content']), 'kind' => $file['kind']];
+        }
+        $manifest = ['format' => 'myucto-instance-export', 'version' => 6, 'supplier' => ['id' => $this->source], 'restore' => ['available' => true, 'files' => $restoreFiles, 'documents' => [['entry' => 'doklady/synthetic-original.pdf', 'storage_path' => 'purchase-invoices/sup-' . $this->source . '/synthetic-original.pdf']]],
             'sections' => ['data' => ['tables' => $tables, 'shared_tables' => $shared]], 'checksums' => $checksums];
         $zip->addFromString('manifest.json', json_encode($manifest, JSON_THROW_ON_ERROR)); self::assertTrue($zip->close()); return $path;
     }

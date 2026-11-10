@@ -67,6 +67,60 @@ final class MyuctoImportReferenceCoverageTest extends TestCase
         }
     }
 
+    /**
+     * Tabulky bez vlastního `id` mají rozhodnutí v definici KEYLESS_TABLES: vazba na graf,
+     * polymorfní vazba, nebo odpojené nastavení. Jinak by obnova sloupec přenesla se
+     * zdrojovým ID, které v cílové instalaci znamená jiný řádek.
+     */
+    public function testEveryReferenceOfKeylessTableHasDecision(): void
+    {
+        $tables = $this->snapshotTables();
+        $missing = [];
+        foreach (MyuctoImportProfile::KEYLESS_TABLES as $table => $definition) {
+            self::assertArrayHasKey($table, $tables, "Převáděná tabulka {$table} ve schématu není.");
+            foreach ($definition['key'] as $column) {
+                self::assertArrayHasKey($column, $tables[$table]['columns'], "{$table}: klíč {$column} ve schématu není.");
+            }
+            foreach ($tables[$table]['columns'] as $column => $definitionSql) {
+                if ($column === 'supplier_id' || !(str_ends_with($column, '_id') || str_ends_with($column, '_by'))
+                    || str_contains(strtoupper((string) $definitionSql), 'GENERATED')) {
+                    continue;
+                }
+                if (isset($definition['refs'][$column]) || isset($definition['polymorphic'][$column])
+                    || in_array($column, $definition['detached'] ?? [], true)) {
+                    continue;
+                }
+                $missing[] = $table . '.' . $column;
+            }
+            foreach (array_keys($definition['refs'] ?? []) as $column) {
+                self::assertArrayHasKey($column, $tables[$table]['columns'], "{$table}.{$column} ve schématu není.");
+            }
+        }
+        self::assertSame([], $missing, 'Vazba tabulky bez id nemá rozhodnutí v MyuctoImportProfile::KEYLESS_TABLES.');
+    }
+
+    public function testDerivedDecisionsAreConsistent(): void
+    {
+        foreach (MyuctoImportProfile::POLYMORPHIC_TARGETS as $table => $columns) {
+            foreach (array_keys($columns) as $column) {
+                self::assertContains($column, MyuctoImportProfile::POLYMORPHIC_REFERENCES[$table] ?? [], "{$table}.{$column} chybí v POLYMORPHIC_REFERENCES.");
+            }
+        }
+        foreach (MyuctoImportProfile::SOFT_REFERENCES as $table => $columns) {
+            foreach ($columns as $column) {
+                self::assertArrayHasKey($column, MyuctoImportProfile::EXTRA_REFERENCES[$table] ?? [], "Měkká vazba {$table}.{$column} chybí v EXTRA_REFERENCES.");
+            }
+        }
+        foreach (MyuctoImportProfile::TOLERANT_TABLES as $table) {
+            self::assertArrayHasKey($table, MyuctoImportProfile::POLYMORPHIC_TARGETS, "Tolerantní tabulka {$table} nemá polymorfní vazbu.");
+        }
+        foreach (array_keys(MyuctoImportProfile::REPLACED_SETUP_TABLES) as $table) {
+            self::assertTrue(in_array($table, MyuctoImportProfile::OPTIONAL_GRAPH_TABLES, true) || isset(MyuctoImportProfile::KEYLESS_TABLES[$table]),
+                "Nahrazované výchozí nastavení {$table} obnova nepřenáší.");
+        }
+        self::assertStringNotContainsString(':', substr(MyuctoImportProfile::VERSION . ':', 0, 16), 'Prvních 16 znaků otisku je v cestě souborů.');
+    }
+
     /** @return array<string,array<string,mixed>> */
     private function snapshotTables(): array
     {

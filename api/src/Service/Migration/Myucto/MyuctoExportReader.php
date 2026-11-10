@@ -98,10 +98,9 @@ final class MyuctoExportReader
                         || !is_int($info['rows'] ?? null) || $info['rows'] < 0 || isset($tables[$table])) {
                         throw new RuntimeException('Neplatná definice tabulky v exportu.');
                     }
-                    $supported = in_array($table, [...MyuctoImportProfile::TABLES, ...MyuctoImportProfile::CONFIG_TABLES, ...MyuctoImportProfile::CONTEXT_TABLES,
-                        MyuctoImportProfile::ENTRY_FORM_HISTORY_TABLE, ...MyuctoImportProfile::KEYLESS_JOURNAL_TABLES,
-                        'supplier', ...array_keys(MyuctoImportProfile::GLOBAL_KEYS)], true);
-                    $keyless = in_array($table, MyuctoImportProfile::KEYLESS_JOURNAL_TABLES, true);
+                    $keyless = in_array($table, [...MyuctoImportProfile::KEYLESS_JOURNAL_TABLES, ...array_keys(MyuctoImportProfile::KEYLESS_TABLES)], true);
+                    $supported = $keyless || in_array($table, [...MyuctoImportProfile::TABLES, ...MyuctoImportProfile::CONFIG_TABLES, ...MyuctoImportProfile::CONTEXT_TABLES,
+                        MyuctoImportProfile::ENTRY_FORM_HISTORY_TABLE, 'supplier', ...array_keys(MyuctoImportProfile::GLOBAL_KEYS)], true);
                     // Kontextová tabulka se jen čte ke kontrole a v protokolu zůstává mimo rozsah převodu.
                     if (in_array($table, MyuctoImportProfile::CONTEXT_TABLES, true) && $info['rows'] > 0) {
                         $skipped[$table] = $info['rows'];
@@ -240,10 +239,83 @@ final class MyuctoExportReader
                 }
                 $tables['bank_statements'][$id][$asset['column']] = $this->content($zip, $asset['entry'], $bytes);
             }
-            return ['manifest' => $manifest, 'tables' => $tables, 'skipped' => $skipped, 'assets' => $assets, 'context' => $context];
+            [$stored, $missing] = $this->storedFiles($zip, $tables, $available, $supplierId, $bytes);
+            $package = ['manifest' => $manifest, 'tables' => $tables, 'skipped' => $skipped, 'assets' => $assets, 'context' => $context];
+            if ($stored !== [] || $missing !== []) {
+                $package['stored_files'] = $stored;
+                $package['missing_files'] = $missing;
+            }
+            return $package;
         } finally {
             $zip->close();
         }
+    }
+
+    /**
+     * Soubory modulu Dokumenty a archivu PDF vydaných faktur. Aplikace je hledá podle
+     * firmy a názvu souboru (dokument podle otisku, archiv podle data v názvu), takže se
+     * obnoví na stejnou relativní cestu pod cílovou firmou. Obsah musí sedět na otisk
+     * v datech; soubor, který export nenese (ve zdroji chyběl), obnova vykáže.
+     *
+     * @param array<string,array<int|string,array<string,mixed>>> $tables
+     * @param array<string,array<string,mixed>> $available zdrojová cesta => položka manifestu
+     * @return array{0:list<array{area:string,path:string,sha256:string,content:string}>,1:array<string,int>}
+     */
+    private function storedFiles(ZipArchive $zip, array $tables, array $available, int $supplierId, int &$bytes): array
+    {
+        $wanted = [];
+        $missing = [];
+        foreach (['documents', 'document_files'] as $table) {
+            foreach ($tables[$table] ?? [] as $row) {
+                $sha = $row['sha256'] ?? null;
+                $name = $row['filename'] ?? null;
+                if (!is_string($sha) || !preg_match('/\A[0-9a-f]{64}\z/D', $sha) || !is_string($name)
+                    || str_contains($name, '/') || !self::safePath($name)) {
+                    throw new RuntimeException('Neplatný soubor dokumentu v exportu: ' . $table . '.');
+                }
+                $path = substr($sha, 0, 2) . '/' . $name;
+                if (isset($available['documents/sup-' . $supplierId . '/' . $path])) {
+                    $wanted['documents/sup-' . $supplierId . '/' . $path] = ['documents', $path, $sha];
+                } else {
+                    $missing[$table] = ($missing[$table] ?? 0) + 1;
+                }
+            }
+        }
+        $archivePrefix = 'invoices/sup-' . $supplierId . '/_archive/';
+        $archive = [];
+        foreach (array_keys($available) as $storage) {
+            if (str_starts_with($storage, $archivePrefix)) {
+                $name = basename($storage);
+                if (isset($archive[$name])) {
+                    throw new RuntimeException('Archiv vydaných faktur obsahuje dvakrát týž soubor: ' . $name . '.');
+                }
+                $archive[$name] = $storage;
+            }
+        }
+        foreach ($tables['invoice_pdfs'] ?? [] as $row) {
+            $name = $row['filename'] ?? null;
+            $sha = $row['sha256'] ?? null;
+            if (!is_string($name) || str_contains($name, '/') || !self::safePath($name) || !is_string($sha)) {
+                throw new RuntimeException('Neplatný soubor archivu vydané faktury v exportu.');
+            }
+            $storage = $archive[$name] ?? null;
+            if ($storage === null) {
+                $missing['invoice_pdfs'] = ($missing['invoice_pdfs'] ?? 0) + 1;
+                continue;
+            }
+            $wanted[$storage] = ['invoices', substr($storage, strlen('invoices/sup-' . $supplierId . '/')), $sha];
+        }
+        $stored = [];
+        foreach ($wanted as $storage => [$area, $path, $sha]) {
+            $content = $this->content($zip, $available[$storage]['entry'], $bytes);
+            if (!hash_equals(strtolower($sha), hash('sha256', $content))) {
+                throw new RuntimeException('Soubor exportu nesouhlasí s otiskem v datech: ' . $storage . '.');
+            }
+            $stored[] = ['area' => $area, 'path' => $path, 'sha256' => hash('sha256', $content), 'content' => $content];
+        }
+        ksort($missing);
+
+        return [$stored, $missing];
     }
 
     private function content(ZipArchive $zip, string $entry, int &$bytes): string
