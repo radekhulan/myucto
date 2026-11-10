@@ -267,6 +267,10 @@ final class StockValueTrendTest extends StockTestCase
         self::assertArrayNotHasKey('input', $job);
         self::assertSame(['restarts' => 0], $job['report']);
         self::assertFalse($job['reused']);
+        self::assertSame($this->userId, $job['created_by']); // vlastnictví úlohy pozná UI i po znovunačtení stránky (reused)
+        $again = json_decode((string) $action->createValueTrendJob($req('POST', [], ['from' => '2026-01-01', 'to' => '2026-03-15']), new \Slim\Psr7\Response())->getBody(), true);
+        self::assertTrue($again['reused']);
+        self::assertSame($this->userId, $again['created_by']);
         $notReady = $action->valueTrendJobResult($req('GET'), new \Slim\Psr7\Response(), ['id' => $job['id']]);
         self::assertSame(409, $notReady->getStatusCode());
         $svc = $this->container->get(StockValueTrendService::class);
@@ -414,6 +418,32 @@ final class StockValueTrendTest extends StockTestCase
     public static function failurePhases(): array
     {
         return ['po první dávce plnění' => [2], 'uprostřed výpočtu' => [5]];
+    }
+
+    /** Otisk čte jen doklady změněné od začátku průchodu: storno starého dokladu i smazání převzaté historie ho ale změní. */
+    public function testChangeOfOldDocumentOrHistoryRollbackRestarts(): void
+    {
+        ['sid' => $sid, 'root' => $root] = $this->fiveCards();
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE stock_documents SET updated_at = NOW() - INTERVAL 1 DAY WHERE supplier_id = ?')->execute([$sid]);
+        $docs = $pdo->prepare('SELECT id FROM stock_documents WHERE supplier_id = ? ORDER BY id');
+        $docs->execute([$sid]);
+        $ids = array_map('intval', $docs->fetchAll(\PDO::FETCH_COLUMN));
+        $svc = $this->service(2);
+        $jobs = $this->container->get(\MyInvoice\Service\Eshop\CatalogJobService::class);
+        $id = (int) $svc->enqueue($sid, ['2026-01-31'], null, $root, true)['id'];
+        $this->advanceToCompute($svc, $sid, $id);
+        $this->documents->reverse($sid, $ids[0], [], $this->userId);
+        $svc->tick($sid, 1);
+        self::assertSame(1, $jobs->find($sid, $id)['report']['restarts']);
+
+        $this->advanceToCompute($svc, $sid, $id);
+        $pdo->prepare('DELETE FROM stock_document_lines WHERE supplier_id = ? AND document_id = ?')->execute([$sid, $ids[1]]);
+        $pdo->prepare('DELETE FROM stock_documents WHERE supplier_id = ? AND id = ?')->execute([$sid, $ids[1]]);
+        $jobs->enqueue($sid, \MyInvoice\Service\Stock\StockHistoryImportService::ROLLBACK_KIND, [], 0, 1, $this->userId);
+        $pdo->prepare('UPDATE warehouses SET valuation_version = valuation_version + 1 WHERE supplier_id = ?')->execute([$sid]);
+        $svc->tick($sid, 1);
+        self::assertSame(2, $jobs->find($sid, $id)['report']['restarts']);
     }
 
     public function testMovementAfterLastDateDoesNotRestart(): void

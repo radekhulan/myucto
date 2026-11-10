@@ -24540,7 +24540,7 @@ paths:
                 warehouse_id: { type: integer, minimum: 1 }
                 group_parent_id: { type: integer, minimum: 1, description: Skupiny tvoří přímé podkategorie této kategorie; bez něj kategorie nejvyšší úrovně. }
       responses:
-        '202': { description: 'Úloha zařazena. `reused: true` = vrácena už existující úloha téhož zadání (zrušit ji smí jen ten, kdo ji založil).' }
+        '202': { description: 'Úloha zařazena. `reused: true` = vrácena už existující úloha téhož zadání; `created_by` je id zakladatele (zrušit ji smí jen on, nebo uživatel s právem zápisu do skladu).' }
         '422':
           $ref: '#/components/responses/ValidationFailed'
   /api/v1/stock/reports/value-trend-jobs/{id}:

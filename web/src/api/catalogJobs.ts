@@ -20,6 +20,7 @@ export interface CatalogJob {
   updated_at: string
   finished_at: string | null
   attempts: number
+  created_by?: number | null
   currencies?: string[]
 }
 

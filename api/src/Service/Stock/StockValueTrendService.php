@@ -186,7 +186,7 @@ final class StockValueTrendService
         $restarts = (int) $report['restarts'];
         $current = $this->snapshots->versions($supplierId, $warehouseIds);
         if ($current != $input['source_versions']) {
-            if ($this->fingerprint($supplierId, $last, $input['warehouse_id']) !== $report['fp']) {
+            if (!isset($report['since']) || $this->fingerprint($supplierId, $last, $input['warehouse_id'], $report['since']) !== $report['fp']) {
                 if ($restarts >= self::MAX_RESTARTS) {
                     throw new StockException('stock_value_trend_stale', 'Během výpočtu se změnil sklad, spusťte výpočet znovu.', 409);
                 }
@@ -265,26 +265,33 @@ final class StockValueTrendService
         $pdo->prepare('INSERT INTO stock_valuation_rows (job_id, supplier_id, warehouse_id, stock_item_id, started, completed) VALUES (?, ?, 0, 0, 1, 1)')
             ->execute([$job['id'], $supplierId]);
         $dates = $input['dates'];
-        $fp = $this->fingerprint($supplierId, end($dates), $input['warehouse_id']);
+        $since = (string) $pdo->query('SELECT NOW()')->fetchColumn();
+        $fp = $this->fingerprint($supplierId, end($dates), $input['warehouse_id'], $since);
         $n = count($dates);
         return ['checkpoint' => $checkpoint, 'done' => false, 'report' => [
-            'phase' => 'fill', 'fill_cursor' => 0, 'fp' => $fp, 'restarts' => $restarts,
+            'phase' => 'fill', 'fill_cursor' => 0, 'since' => $since, 'fp' => $fp, 'restarts' => $restarts,
             'sums' => array_fill(0, $n, []), 'counts' => array_fill(0, $n, []),
         ]];
     }
 
     /**
      * Otisk dokladů, které ovlivňují výsledek: zaúčtované a stornované doklady s datem do posledního
-     * data sestavy (u filtru skladu jen jeho). Přibyl-li doklad, nebo byl některý stornován či změněn,
-     * otisk se změní; pohyb po datu sestavy ho nemění. Dotaz se spouští jen po změně `valuation_version`.
+     * data sestavy (u filtru skladu jen jeho) změněné od začátku průchodu `$since`; čte se jen to, co
+     * se od té doby změnilo (index `idx_sd_supplier_updated`), ne celá historie. Zaúčtovaný doklad
+     * maže jen vrácení převzaté historie, to se pozná podle jeho úlohy změněné od `$since`.
+     * Přibyl-li doklad, nebo byl některý stornován, změněn či smazán, otisk se změní; pohyb po datu
+     * sestavy ho nemění. Dotaz se spouští jen po změně `valuation_version`.
      */
-    private function fingerprint(int $supplierId, string $last, ?int $warehouseId): string
+    private function fingerprint(int $supplierId, string $last, ?int $warehouseId, string $since): string
     {
-        $stmt = $this->db->pdo()->prepare("SELECT COUNT(*), COALESCE(SUM(UNIX_TIMESTAMP(d.updated_at)), 0), COALESCE(SUM(d.status = 'reversed'), 0)
-            FROM stock_documents d WHERE d.supplier_id = ? AND d.status IN ('posted','reversed') AND d.doc_date <= ?"
+        $pdo = $this->db->pdo();
+        $changed = $pdo->prepare("SELECT COUNT(*), COALESCE(SUM(UNIX_TIMESTAMP(d.updated_at)), 0), COALESCE(SUM(d.status = 'reversed'), 0)
+            FROM stock_documents d WHERE d.supplier_id = ? AND d.updated_at >= ? AND d.status IN ('posted','reversed') AND d.doc_date <= ?"
             . ($warehouseId !== null ? ' AND (d.warehouse_id = ? OR d.warehouse_to_id = ?)' : ''));
-        $stmt->execute(array_merge([$supplierId, $last], $warehouseId !== null ? [$warehouseId, $warehouseId] : []));
-        return implode(':', $stmt->fetch(PDO::FETCH_NUM));
+        $changed->execute(array_merge([$supplierId, $since, $last], $warehouseId !== null ? [$warehouseId, $warehouseId] : []));
+        $rollbacks = $pdo->prepare('SELECT COUNT(*), COALESCE(MAX(updated_at), 0) FROM catalog_jobs WHERE supplier_id = ? AND kind = ? AND updated_at >= ?');
+        $rollbacks->execute([$supplierId, StockHistoryImportService::ROLLBACK_KIND, $since]);
+        return implode(':', [...$changed->fetch(PDO::FETCH_NUM), ...$rollbacks->fetch(PDO::FETCH_NUM)]);
     }
 
     /**

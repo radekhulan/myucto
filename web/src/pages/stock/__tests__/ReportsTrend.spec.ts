@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   getValueTrendStatus: vi.fn(),
   getValueTrend: vi.fn(),
   cancelValueTrend: vi.fn(),
+  canWriteStock: true,
 }))
 
 vi.mock('@/api/stock', () => ({
@@ -21,7 +22,7 @@ vi.mock('@/api/eshop', () => ({ eshopApi: { listCategories: m.listCategories, li
 vi.mock('@/api/catalogJobs', () => ({
   catalogJobsApi: { createValueTrend: m.createValueTrend, getValueTrendStatus: m.getValueTrendStatus, getValueTrend: m.getValueTrend, cancelValueTrend: m.cancelValueTrend },
 }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: (key: string) => key === 'eshop', canWrite: () => true }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { id: 5 }, canRead: (key: string) => key === 'eshop', canWrite: () => m.canWriteStock }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: m.toastError, warning: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({
   formatMoney: (value: number) => String(value), formatDate: (value: string) => value, formatNumber: (value: number) => String(value), formatDateTime: (value: string) => value,
@@ -29,7 +30,7 @@ vi.mock('@/composables/useFormat', () => ({
 vi.mock('@/composables/useTablePrefs', () => ({
   useTablePrefs: (_key: string, columns: unknown[]) => ({ columns, isVisible: () => true, densityClass: ref('') }),
 }))
-vi.mock('@/components/ui/buttonStyles', () => ({ ICONS: new Proxy({}, { get: () => 'M0 0' }), btnOutline: () => '' }))
+vi.mock('@/components/ui/buttonStyles', () => ({ ICONS: new Proxy({}, { get: () => 'M0 0' }), btnFilled: () => '', btnOutline: () => '' }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), RouterLink: { template: '<a><slot /></a>' } }))
 
@@ -49,6 +50,7 @@ const report = (jobId: number, total: string) => ({
 describe('Reports – vývoj hodnoty', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.canWriteStock = true
     m.reportStatus.mockResolvedValue({ items: [], totals: { value_total: '0', count: 0 } })
     m.listWarehouses.mockResolvedValue([])
     m.listCategories.mockResolvedValue([{ id: 12, name: 'Typ zboží', path: '/12/', depth: 0, archived: false }])
@@ -68,6 +70,11 @@ describe('Reports – vývoj hodnoty', () => {
     await wrapper.find('[data-test="tab-trend"]').trigger('click')
     await flushPromises()
     await wrapper.find('[data-test="trend-run"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="trend-run"]').attributes('disabled')).toBeDefined() // během zakládání nejde spustit znovu
+    await wrapper.findAll('button').find(b => b.text() === 'stock.reports.tab_status')!.trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-test="tab-trend"]').trigger('click')
     await flushPromises()
     await wrapper.find('[data-test="trend-group"]').setValue(12)
     await flushPromises()
@@ -177,6 +184,34 @@ describe('Reports – vývoj hodnoty', () => {
     await flushPromises()
     expect(wrapper.find('[data-test="trend-shared"]').exists()).toBe(false)
     expect(m.cancelValueTrend).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('vlastní úlohu vrácenou znovu (po načtení stránky) pozná podle zakladatele a nabídne zrušení', async () => {
+    m.canWriteStock = false
+    m.createValueTrend.mockResolvedValue({ id: 12, status: 'running', reused: true, created_by: 5 })
+    m.getValueTrendStatus.mockResolvedValue({ id: 12, status: 'running', created_by: 5 })
+    const wrapper = mount(Reports, { global: { stubs } })
+    await flushPromises()
+    await wrapper.find('[data-test="tab-trend"]').trigger('click')
+    await wrapper.find('[data-test="trend-run"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="trend-shared"]').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'CatalogJobProgress' }).props('canCancel')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('úlohu jiného uživatele bez práva zápisu do skladu zrušit nenabídne', async () => {
+    m.canWriteStock = false
+    m.createValueTrend.mockResolvedValue({ id: 13, status: 'running', reused: true, created_by: 6 })
+    m.getValueTrendStatus.mockResolvedValue({ id: 13, status: 'running', created_by: 6 })
+    const wrapper = mount(Reports, { global: { stubs } })
+    await flushPromises()
+    await wrapper.find('[data-test="tab-trend"]').trigger('click')
+    await wrapper.find('[data-test="trend-run"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="trend-shared"]').exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'CatalogJobProgress' }).props('canCancel')).toBe(false)
     wrapper.unmount()
   })
 })

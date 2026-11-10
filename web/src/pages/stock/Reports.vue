@@ -12,7 +12,7 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, RouterLink } from 'vue-router'
 import { formatMoney, formatDate, formatDateTime, formatNumber } from '@/composables/useFormat'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -184,7 +184,9 @@ const trendReport = ref<StockValueTrendReport | null>(null)
 const trendGroup = ref<'' | number>('') // vlastní volba, aby se nepletla se seskupením ocenění
 let loadSeq = 0 // novější načtení nesmí přepsat starší odpověď
 const trendJob = ref<CatalogJob | null>(null)
-const trendJobOwn = ref(false) // úloha založená touto stránkou; sdílenou (reused) jen přestaneme sledovat
+const trendJobStarted = ref(false) // úloha založená touto stránkou; sdílenou (reused) při odchodu jen přestaneme sledovat
+const trendJobOwn = computed(() => trendJob.value?.created_by != null && trendJob.value.created_by === auth.user?.id)
+const trendCanCancel = computed(() => trendJobOwn.value || auth.canWrite('stock'))
 const cancellingTrend = ref(false)
 let trendTimer: ReturnType<typeof setTimeout> | undefined
 let trendGeneration = 0
@@ -195,7 +197,7 @@ async function abandonTrend() {
   clearTrendTimer()
   ++trendGeneration
   const job = trendJob.value
-  if (job && trendJobOwn.value && ['queued', 'running'].includes(job.status)) await catalogJobsApi.cancelValueTrend(job.id).catch(() => {})
+  if (job && trendJobStarted.value && ['queued', 'running'].includes(job.status)) await catalogJobsApi.cancelValueTrend(job.id).catch(() => {})
 }
 async function startTrend(seq: number) {
   await abandonTrend()
@@ -209,7 +211,7 @@ async function startTrend(seq: number) {
   })
   if (generation !== trendGeneration || seq !== loadSeq) return
   trendJob.value = job
-  trendJobOwn.value = !job.reused
+  trendJobStarted.value = !job.reused
   await pollTrend(generation)
 }
 async function pollTrend(generation = trendGeneration) {
@@ -469,7 +471,10 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
             </select>
           </div>
         </template>
-        <button v-if="tab === 'trend'" type="button" @click="load" data-test="trend-run" :class="btnOutline('primary')">{{ t('stock.reports.trend_run') }}</button>
+        <button v-if="tab === 'trend'" type="button" @click="load" :disabled="loading" data-test="trend-run" :class="btnFilled('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
+          {{ t('stock.reports.trend_run') }}
+        </button>
         <div v-if="tab === 'valuation' && categories.length">
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.filter_group') }}</label>
           <select v-model="valuationGroup" data-test="valuation-group" @change="onValuationGroupChange" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[12rem]">
@@ -737,7 +742,7 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
     <!-- Vývoj hodnoty -->
     <template v-else-if="tab === 'trend'">
       <p v-if="!trendJob && !trendReport && !loading" class="text-sm text-neutral-500 mb-3" data-test="trend-hint">{{ t('stock.reports.trend_hint') }}</p>
-      <CatalogJobProgress v-if="trendJob && ['queued', 'running'].includes(trendJob.status)" class="mb-2" :job="trendJob" :cancelling="cancellingTrend" :can-cancel="trendJobOwn" @cancel="cancelTrend" />
+      <CatalogJobProgress v-if="trendJob && ['queued', 'running'].includes(trendJob.status)" class="mb-2" :job="trendJob" :cancelling="cancellingTrend" :can-cancel="trendCanCancel" @cancel="cancelTrend" />
       <div v-if="trendJob && !trendJobOwn && ['queued', 'running'].includes(trendJob.status)" class="mb-4 flex items-center gap-3 text-sm text-neutral-600" data-test="trend-shared">
         <span>{{ t('stock.reports.trend_shared') }}</span>
         <button type="button" :class="btnOutline('neutral')" data-test="trend-stop-watching" @click="stopWatchingTrend">{{ t('stock.reports.trend_stop_watching') }}</button>
