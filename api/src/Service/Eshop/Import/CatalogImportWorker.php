@@ -93,10 +93,15 @@ final class CatalogImportWorker
                 $media = $this->mediaImports->sealUrls($supplierId, $job['id'], $checkpoint, $mediaUrls);
                 $identity = $profile['identity'] === 'sku' ? $values['sku'] : hash('sha256', (string) $values[$profile['identity']]);
                 $existing = $this->writer->identify($supplierId, $profile, $values);
-                $before = $existing === null ? null : $this->writer->state($supplierId, (int) $existing['id']);
-                $after = $this->trial($supplierId, $profile, $values, $before);
-                $productChanged = $before === null || $this->writer->comparable($before) !== $this->writer->comparable($after);
-                $status = $media === [] && !$productChanged ? 'unchanged' : 'ready';
+                if ($existing === null && $profile['mode'] === 'update') {
+                    // Režim jen aktualizace: neznámá karta není chyba, jen se nezakládá.
+                    $status = 'skipped';
+                } else {
+                    $before = $existing === null ? null : $this->writer->state($supplierId, (int) $existing['id']);
+                    $after = $this->trial($supplierId, $profile, $values, $before);
+                    $productChanged = $before === null || $this->writer->comparable($before) !== $this->writer->comparable($after);
+                    $status = $media === [] && !$productChanged ? 'unchanged' : 'ready';
+                }
             } catch (CatalogMediaFetchException $e) {
                 $error = $e->errorCode;
             } catch (EshopException|PricingInputException $e) {

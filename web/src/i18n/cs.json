@@ -17066,7 +17066,7 @@
         "unchanged": "Beze změny",
         "failed": "Chyba",
         "conflict": "Konflikt",
-        "skipped": "Přeskočeno",
+        "skipped": "Karta neexistuje",
         "unknown": "Neznámý stav"
       },
       "errors": {

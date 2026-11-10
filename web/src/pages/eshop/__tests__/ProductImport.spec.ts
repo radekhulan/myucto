@@ -504,6 +504,44 @@ describe('ProductImport', () => {
     expect(wrapper.text()).toContain('eshop.import2.media_report_title')
   })
 
+  it('shows row counts per status above the preview report', async () => {
+    mocks.preview.mockResolvedValue(job({ report: { counts: { ready: 3, skipped: 76 } } }))
+    mocks.items.mockResolvedValue(report('skipped'))
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+
+    const counts = wrapper.get('[data-test="report-counts"]').text()
+    expect(counts).toContain('eshop.import2.status.ready: 3')
+    expect(counts).toContain('eshop.import2.status.skipped: 76')
+
+    wrapper.unmount()
+  })
+
+  it('filters the preview report by status and resets the filter', async () => {
+    mocks.preview.mockResolvedValue(job({ report: { counts: { ready: 3, skipped: 76 } } }))
+    mocks.items.mockResolvedValue(report('skipped'))
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="report-filter-skipped"]').trigger('click')
+    await flushPromises()
+    expect(mocks.items).toHaveBeenLastCalledWith(31, 1, expect.any(AbortSignal), 'skipped')
+    expect(wrapper.get('[data-test="report-filter-skipped"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.text()).toContain('"total":79')
+
+    await wrapper.get('[data-test="report-filter-all"]').trigger('click')
+    await flushPromises()
+    expect(mocks.items).toHaveBeenLastCalledWith(31, 1, expect.any(AbortSignal))
+
+    wrapper.unmount()
+  })
+
   it('keeps apply conflicts accessible while the media child job runs', async () => {
     mocks.apply.mockResolvedValue(job({
       id: 32,

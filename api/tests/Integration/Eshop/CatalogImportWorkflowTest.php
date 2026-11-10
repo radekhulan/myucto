@@ -153,6 +153,26 @@ final class CatalogImportWorkflowTest extends StockTestCase
         self::assertSame(101, (int) $stmt->fetchColumn());
     }
 
+    public function testUpdateModeReportsUnknownSkuAsSkippedAndApplyIgnoresIt(): void
+    {
+        $sid = $this->createSupplier();
+        $id = $this->itemsRepo->insert($sid, ['sku' => '00001', 'name' => 'Known']);
+        $config = ['mode' => 'update', 'mapping' => ['sku' => 'sku', 'min_qty' => 'min']];
+        $preview = $this->preview($sid, "sku;min\n00001;5\n00002;7\n", $config);
+        self::assertSame(1, $preview['report']['counts']['ready']);
+        self::assertSame(1, $preview['report']['counts']['skipped']);
+        self::assertSame(0, $preview['report']['counts']['failed']);
+        $this->container->get(CatalogImportService::class)->apply($sid, $preview['id'], $this->userId);
+        $applied = $this->container->get(CatalogImportWorker::class)->tickKind($sid, CatalogImportService::APPLY_KIND);
+        self::assertSame(1, $applied['report']['counts']['applied']);
+        self::assertSame(0, $applied['report']['counts']['failed']);
+        self::assertNull($this->itemsRepo->findBySku($sid, '00002'));
+        self::assertSame('5.000', $this->itemsRepo->find($sid, $id)['min_qty']);
+        // Režim upsert beze změny: neznámá karta se založí.
+        $upsert = $this->preview($sid, "sku;name\n00002;New\n", ['mapping' => ['sku' => 'sku', 'name' => 'name']]);
+        self::assertSame(1, $upsert['report']['counts']['ready']);
+    }
+
     public function testExternalIdentityDoesNotFallBackToMatchingSku(): void
     {
         $sid = $this->createSupplier();
