@@ -298,6 +298,8 @@ final class ClientDomainMcpTest extends TestCase
     public function testClientCanRevokeOwnConnectionAfterLosingMcpPermission(): void
     {
         $grant=$this->grant();
+        // Kanonické klientské připojení vyžaduje členství ve firmě, ke které se váže.
+        $this->pdo->prepare('INSERT INTO user_suppliers (user_id,supplier_id) VALUES (?,?)')->execute([$this->user,$this->otherSupplier]);
         $foreign=$this->grantFor($this->canonical.'/mcp',$this->otherSupplier);
         $this->pdo->prepare('INSERT INTO users (email,password_hash,name,role_id,is_active) VALUES (?,?,?,?,1)')
             ->execute(['other-mcp-'.bin2hex(random_bytes(6)).'@example.test','synthetic-unused-hash','Jiný syntetický klient',$this->role]);
@@ -326,7 +328,11 @@ final class ClientDomainMcpTest extends TestCase
         self::assertSame(200,$this->request('DELETE',$this->origin.'/api/mcp/grants/'.$rows[0]['id'],session:true)->getStatusCode());
         self::assertNull(Bootstrap::buildContainer()->get(ApiTokenService::class)->validate($grant['access_token']));
         self::assertNull(Bootstrap::buildContainer()->get(McpOAuth::class)->refresh($grant['refresh_token'],$this->client));
-        self::assertIsArray(Bootstrap::buildContainer()->get(McpOAuth::class)->refresh($foreign['refresh_token'],$this->client));
+        // Odvolání na doméně se připojení jiné firmy nedotklo; obnovu mu ale
+        // zablokuje odebrané profile.mcp.
+        self::assertNull($this->pdo->query("SELECT revoked_at FROM mcp_oauth_grants WHERE id={$foreignId}")->fetchColumn());
+        self::assertIsArray(Bootstrap::buildContainer()->get(ApiTokenService::class)->validate($foreign['access_token']));
+        self::assertNull(Bootstrap::buildContainer()->get(McpOAuth::class)->refresh($foreign['refresh_token'],$this->client));
     }
 
     public function testWriteToolsRequireBothMcpAndAgendaPermission(): void

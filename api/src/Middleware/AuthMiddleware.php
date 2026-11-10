@@ -197,7 +197,10 @@ final class AuthMiddleware implements MiddlewareInterface
 
             if (($tokenRow['audience'] ?? 'api') === 'mcp') {
                 $tokenRow['mcp_resource'] = $resource;
-                $tokenRow['mcp_client_surface'] = $resource !== rtrim((string) $this->config->get('app.url', ''), '/') . '/mcp';
+                // Klientský povrch určuje typ role, ne adresa: klient má stejný
+                // omezený katalog i na kanonické adrese instalace.
+                $tokenRow['mcp_client_surface'] = ($tokenRow['user_role_type'] ?? null) === 'client'
+                    || $resource !== rtrim((string) $this->config->get('app.url', ''), '/') . '/mcp';
             }
 
             $ip = $this->ipMatcher->clientIp(

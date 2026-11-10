@@ -909,6 +909,8 @@ final class Bootstrap
             ),
             \MyInvoice\Action\Mcp\HostedMcpSettingsAction::class => \DI\autowire()->constructorParameter(
                 'resources', \DI\get(\MyInvoice\Service\Mcp\McpResourcePolicy::class),
+            )->constructorParameter(
+                'suppliers', \DI\get(\MyInvoice\Service\Tenant\SupplierAccessResolver::class),
             ),
             \MyInvoice\Action\Mcp\HostedMcpEndpointAction::class => \DI\autowire()->constructorParameter(
                 'clientTools', \DI\get(\MyInvoice\Service\Mcp\ClientMcpToolPolicy::class),
