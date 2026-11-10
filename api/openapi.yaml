@@ -2404,7 +2404,8 @@ paths:
         `related_party_type: null` nebo `""` smaže typ i při `related_party: true`.
 
         Schéma `ClientInput` je sdílené s POST, kde zůstávají povinné `company_name`, `street`,
-        `city` a `zip`. Na PUT jsou všechny vlastnosti nepovinné, ale jsou-li `company_name`,
+        `city` a `zip` (u drobného zákazníka `simplified_only: true` místo adresy `main_email`
+        nebo `phone`). Na PUT jsou všechny vlastnosti nepovinné, ale jsou-li `company_name`,
         `street`, `city` nebo `zip` poslány, nesmí být prázdné. Vynechané `country_iso2` zachová
         zemi; vynechání obou `currency_default_id` i `currency_default` zachová měnu (samotný kód
         `currency_default` přepíše uložené id měny). `email_contacts` a `price_level_id`: vynecháno
@@ -3361,7 +3362,11 @@ paths:
             Doklad neprošel zákonnou kontrolou — bez položek (`no_items`), storno
             se nevystavuje (`invalid_type`), chybí DIČ odběratele u přenesené daňové
             povinnosti (`reverse_charge_dic_missing`, § 29/2 ZDPH), zjednodušený doklad
-            nesplňuje podmínky (`simplified_document_not_allowed`, § 30 ZDPH), nebo
+            nesplňuje podmínky (`simplified_document_not_allowed`, § 30 ZDPH), odběratel je
+            drobný zákazník bez adresy (`simplified_only`) a doklad není zjednodušená faktura
+            (`simplified_only_client_requires_simplified`) nebo přesahuje limit § 30 odst. 1
+            (`simplified_only_client_over_limit`; řešením je doplnit kartu odběratele, nebo
+            snížit prodej), nebo
             kalendář nesplňuje podmínky § 31 a § 31a ZDPH: nemá rozpis plateb
             (`payment_schedule_missing`), součet základu, DPH nebo celkové částky rozpisu
             nesedí na doklad (`payment_schedule_mismatch`), splátkovému kalendáři chybí nájemní
@@ -48533,6 +48538,7 @@ components:
         is_customer: { type: boolean, description: "Role odběratele (vystavujeme mu faktury)" }
         is_vendor: { type: boolean, description: "Role dodavatele (evidujeme přijaté faktury)" }
         is_walk_in: { type: boolean, description: "Systémový koncový zákazník firmy pro zjednodušené doklady bez odběratele (§ 30 ZDPH). V seznamu klientů se nevrací." }
+        simplified_only: { type: boolean, description: "Drobný zákazník: karta jen se jménem a e-mailem nebo telefonem, `street`/`city`/`zip` mohou být prázdné. Plátce DPH mu smí vystavit jen zjednodušený daňový doklad (§ 30 ZDPH) do limitu 10 000 Kč s daní; nový koncept faktury je pro něj rovnou zjednodušený." }
         is_vat_payer: { type: boolean, description: "Plátce DPH — aktuální stav karty (ověřitelné online přes /clients/{id}/vat-status). Klienti historii plátcovství nevedou; doklady nesou per-doklad snapshot k datu vystavení." }
         auto_send_reminders: { type: boolean, description: "Automatické odesílání upomínek" }
         payment_due_default: { type: [integer, "null"], description: "Default splatnost pro nové faktury klienta" }
@@ -48670,7 +48676,9 @@ components:
     ClientInput:
       type: object
       required: [company_name, street, city, zip]
+      description: "Adresa (`street`, `city`, `zip`) není povinná u drobného zákazníka (`simplified_only: true`), ten místo ní musí mít `main_email` nebo `phone`."
       properties:
+        simplified_only: { type: boolean, default: false, description: "Drobný zákazník bez adresy, jen pro zjednodušené daňové doklady (§ 30 ZDPH). Nelze kombinovat s `reverse_charge`. Při PUT vynechání zachová uloženou hodnotu; vypnutí vyžaduje adresu." }
         company_name: { type: string, maxLength: 190, description: "Delší textová pole než uvedené maxLength = 400 `validation_failed`." }
         first_name: { type: [string, "null"], maxLength: 60 }
         last_name: { type: [string, "null"], maxLength: 60 }
@@ -48757,6 +48765,7 @@ components:
         client_company_name: { type: string, description: "Denormalizováno z klienta pro pohodlí výpisů" }
         client_main_email: { type: [string, "null"], format: email }
         client_is_walk_in: { type: boolean, description: "Odběratelem je systémový koncový zákazník (zjednodušený doklad bez údajů o odběrateli, § 30 ZDPH)." }
+        client_simplified_only: { type: boolean, description: "Odběratel je drobný zákazník bez adresy (`Client.simplified_only`), vystavit lze jen zjednodušený daňový doklad do limitu § 30 ZDPH." }
         project_id: { type: [integer, "null"] }
         project_name: { type: [string, "null"] }
         project_billing_template_id: { type: [integer, "null"], readOnly: true, description: "Výchozí šablona účtování zakázky, pouze v detailu faktury. Uložený výkaz má přednost před tímto výchozím nastavením." }
