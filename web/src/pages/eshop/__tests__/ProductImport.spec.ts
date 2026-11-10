@@ -299,6 +299,24 @@ describe('ProductImport', () => {
     expect(mocks.getJob).not.toHaveBeenCalled()
   })
 
+  it('shows category names instead of raw JSON in the preview diff', async () => {
+    const changed = report('ready')
+    Object.assign(changed.items[0].before, { categories: [{ category_id: 1, name: 'A - díly' }] })
+    Object.assign(changed.items[0].after, { categories: [{ category_id: 2, name: 'C - oblečení' }] })
+    mocks.items.mockResolvedValue(changed)
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('A - díly')
+    expect(wrapper.text()).toContain('C - oblečení')
+    expect(wrapper.text()).not.toContain('category_id')
+
+    wrapper.unmount()
+  })
+
   it('cancels an active job, aborts its poll, and allows a retry', async () => {
     mocks.preview.mockResolvedValue(job({
       status: 'queued',

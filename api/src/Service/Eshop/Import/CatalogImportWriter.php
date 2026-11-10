@@ -68,6 +68,7 @@ final class CatalogImportWriter
         $fields = array_merge(self::CORE, self::PRODUCT, ['id', 'row_version', 'sale_price_without_vat']);
         $state = array_intersect_key($card, array_flip($fields));
         $state['prices'] = $this->priceRows->listForItem($supplierId, $itemId);
+        $state['categories'] = $this->withCategoryNames($supplierId, $state['categories'] ?? []);
         $context = $this->masters->variantContext($supplierId, $itemId);
         $state['master_id'] = $context['master_id'] ?? null;
         $state['variant_options'] = $card['variant']['options'] ?? [];
@@ -113,6 +114,9 @@ final class CatalogImportWriter
                 throw new EshopException('master_invalid', 'Master produktu není dostupný nebo mapování není jednoznačné.', 422);
             }
             $values['master_id'] = (int) $masterId;
+        }
+        if (isset($values['category_code'])) {
+            $values = $this->withCategoryCode($supplierId, $values, $current === null ? [] : $this->cards->get($supplierId, $expectedId)['categories'] ?? []);
         }
         $base = array_replace($current ?? ['sku' => '', 'name' => '', 'item_type' => 'goods', 'unit' => 'ks', 'is_active' => true],
             array_intersect_key($values, array_flip(self::CORE)));
@@ -176,6 +180,52 @@ final class CatalogImportWriter
             $this->relations->replace($supplierId, $id, ['row_version' => $card['row_version'], 'items' => $values['relations']]);
         }
         return $this->state($supplierId, $id);
+    }
+
+    /** Název jen pro čitelný náhled; zápis ho nečte. */
+    private function withCategoryNames(int $supplierId, array $rows): array
+    {
+        if ($rows === []) {
+            return [];
+        }
+        $ids = array_map(static fn (array $row): int => (int) $row['category_id'], $rows);
+        $stmt = $this->db->pdo()->prepare('SELECT id, name FROM stock_categories WHERE supplier_id = ? AND id IN ('
+            . implode(',', array_fill(0, count($ids), '?')) . ')');
+        $stmt->execute([$supplierId, ...$ids]);
+        $names = $stmt->fetchAll(\PDO::FETCH_KEY_PAIR);
+        return array_map(static fn (array $row): array => $row + ['name' => $names[$row['category_id']] ?? null], $rows);
+    }
+
+    /**
+     * Zařadí kartu do kategorie podle kódu a vyřadí ji z ostatních kategorií se stejným nadřazeným.
+     * Zařazení v jiných větvích zůstává. Kategorie v kořeni se odmítne, sourozenci by byly všechny kořenové.
+     */
+    private function withCategoryCode(int $supplierId, array $values, array $current): array
+    {
+        $code = $values['category_code'];
+        unset($values['category_code']);
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare('SELECT id, parent_id FROM stock_categories WHERE supplier_id = ? AND code = ?');
+        $stmt->execute([$supplierId, $code]);
+        $target = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($target === false || $target['parent_id'] === null) {
+            throw new EshopException('import_category_invalid', 'Kategorie s tímto kódem neexistuje nebo nemá nadřazenou kategorii.', 422);
+        }
+        $targetId = (int) $target['id'];
+        $stmt = $pdo->prepare('SELECT id FROM stock_categories WHERE supplier_id = ? AND parent_id = ?');
+        $stmt->execute([$supplierId, $target['parent_id']]);
+        $siblings = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+        $inGroup = array_values(array_filter($current, static fn (array $row): bool => in_array((int) $row['category_id'], $siblings, true)));
+        if (count($inGroup) === 1 && (int) $inGroup[0]['category_id'] === $targetId) {
+            return $values;
+        }
+        $others = array_values(array_filter($current, static fn (array $row): bool => !in_array((int) $row['category_id'], $siblings, true)));
+        $values['categories'] = [...$others, [
+            'category_id' => $targetId,
+            'is_primary' => array_filter(array_column($inGroup, 'is_primary')) !== [],
+            'display_order' => $inGroup[0]['display_order'] ?? count($current),
+        ]];
+        return $values;
     }
 
     public function comparable(array $state): array
