@@ -86,6 +86,7 @@ final class CompleteInstanceRestoreService
                     $tables = (array) ($manifest['sections']['data']['tables'] ?? []);
                     foreach ($this->restoreTableOrder(array_keys($tables)) as $table) {
                         $info = (array) ($tables[$table] ?? []);
+                        $this->relocateCollidingGlobalRows($dir, (string) $table, $info['entry'] ?? null, $counts);
                         $this->restoreEntry($dir, (string) $table, $info['entry'] ?? null, $counts);
                     }
                     $this->restoreEntry($dir, 'user_suppliers', $identity['user_suppliers']['entry'] ?? null, $counts);
@@ -417,6 +418,63 @@ final class CompleteInstanceRestoreService
             $this->pdo->prepare($sql)->execute(array_values($row));
         }
         fclose($fh);
+    }
+
+    /**
+     * Globální řádky instalace (`supplier_id IS NULL`, např. výchozí předkontace) archiv
+     * nenese, cílová DB je má z migrací. Jejich `id` se ale mezi instalacemi liší podle
+     * pořadí migrací, takže firemní řádek z archivu může narazit na globální řádek se
+     * stejným `id`. Globální řádek se proto přesune na volné `id`; na tabulku, na kterou
+     * vede cizí klíč, by to rozbilo vazby, takže obnova místo toho skončí chybou.
+     *
+     * @param array<string,int> $counts
+     */
+    private function relocateCollidingGlobalRows(string $dir, string $table, mixed $entry, array $counts): void
+    {
+        if ($entry === null || !isset($counts[$table]) || !isset($this->tableColumns($table)['supplier_id'])
+            || $this->primaryKeyColumns($table) !== ['id']) {
+            return;
+        }
+        $ids = [];
+        $fh = fopen($this->entryPath($dir, (string) $entry), 'rb');
+        if ($fh === false) {
+            return;
+        }
+        try {
+            while (($line = fgets($fh)) !== false) {
+                $row = json_decode($line, true);
+                if (is_array($row) && isset($row['id']) && is_numeric($row['id'])) {
+                    $ids[] = (int) $row['id'];
+                }
+            }
+        } finally {
+            fclose($fh);
+        }
+        if ($ids === []) {
+            return;
+        }
+        $colliding = [];
+        foreach (array_chunk($ids, 1000) as $chunk) {
+            $stmt = $this->pdo->prepare('SELECT id FROM `' . $table . '` WHERE supplier_id IS NULL AND id IN ('
+                . implode(',', array_fill(0, count($chunk), '?')) . ')');
+            $stmt->execute($chunk);
+            array_push($colliding, ...array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+        }
+        if ($colliding === []) {
+            return;
+        }
+        foreach ($this->schema()['foreignKeyRows'] as $fk) {
+            if ($fk['REFERENCED_TABLE_NAME'] === $table) {
+                throw new InstanceExportException('restore_global_id_conflict',
+                    'Firemní řádky tabulky ' . $table . ' v archivu mají stejná ID jako globální řádky cílové instalace.');
+            }
+        }
+        $next = max(max($ids), (int) $this->pdo->query('SELECT MAX(id) FROM `' . $table . '`')->fetchColumn());
+        $preserveTimestamp = isset($this->tableColumns($table)['updated_at']) ? ', updated_at = updated_at' : '';
+        $move = $this->pdo->prepare('UPDATE `' . $table . '` SET id = ?' . $preserveTimestamp . ' WHERE id = ? AND supplier_id IS NULL');
+        foreach ($colliding as $id) {
+            $move->execute([++$next, $id]);
+        }
     }
 
     /** @param array<string,int> $counts */
