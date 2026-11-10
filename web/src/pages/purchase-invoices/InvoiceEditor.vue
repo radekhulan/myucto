@@ -427,8 +427,10 @@ const dropzoneVisible = ref(true)
 // jinak by blob zůstal viset v paměti.
 const pendingPdfUrl = ref<string | null>(null)
 const pendingPdfFile = ref<File | null>(null)
+// Předání účetní řídí právo `documents.submit` (klient i interní role). Superadmin ho má
+// implicitně, ale doklady zakládá sám, nabídka předání by mu jen překážela.
 const canSubmitDocuments = computed(() =>
-  auth.isClientRole && auth.canWrite('documents.submit'),
+  !auth.isSuperadmin && auth.canWrite('documents.submit'),
 )
 const canHandoffPendingDocument = computed(() =>
   canSubmitDocuments.value && pendingPdfFile.value !== null,

@@ -252,8 +252,11 @@ const isdsInboxLoading = ref(false)
 const isdsInboxError = ref('')
 const isdsAttachBusy = ref<number | null>(null)
 
+// Rozsah archivu připravených podání: klient, nebo interní role s `reports.submissions`
+// bez agendy výkazů (RequestAuthorization::usesClientTaxSubmissionScope).
+const clientScope = computed(() => auth.isClientRole || (!auth.canRead('reports') && auth.canRead('reports.submissions')))
 const canWrite = computed(() => auth.canWrite('reports.submit'))
-const canManage = computed(() => !auth.isClientRole && (auth.canWrite('reports.submissions.manage') || canWrite.value))
+const canManage = computed(() => !clientScope.value && (auth.canWrite('reports.submissions.manage') || canWrite.value))
 const canDelete = computed(() => canManage.value && auth.canWrite('reports.export'))
 const selected = computed(() => items.value.find(item => item.id === expandedId.value) ?? null)
 const submitEnvironment = computed<'production' | 'test' | null>(() => {
@@ -707,7 +710,7 @@ async function loadVatPayment(item: TaxSubmission) {
 
 watch(expandedId, () => {
   const item = selected.value
-  if (item && !auth.isClientRole && isdsDispatch(item)) void loadIsdsInbox(item)
+  if (item && !clientScope.value && isdsDispatch(item)) void loadIsdsInbox(item)
   if (item) void loadVatPayment(item)
   else vatPayment.value = null
 })
@@ -760,7 +763,7 @@ function canDirectTest(item: TaxSubmission): boolean {
 }
 
 function canResolveDirectAttempt(attempt: EpoAttempt | null): boolean {
-  if (auth.isClientRole || !canWrite.value) return false
+  if (clientScope.value || !canWrite.value) return false
   if (!attempt || attempt.channel !== 'epo_direct' || attempt.refresh_available) return false
   if (attempt.status === 'uncertain') return true
   if (attempt.status !== 'submitting') return false
@@ -1260,7 +1263,7 @@ async function toggleCredential(credential: EpoSigningCredential) {
 }
 
 async function deleteCredential(credential: EpoSigningCredential) {
-  if (auth.isClientRole || !canWrite.value) return
+  if (clientScope.value || !canWrite.value) return
   if (credential.linked_profiles_count > 0) {
     toast.error(t('reports.submissions.credential_used_by_profiles'))
     return
@@ -1612,7 +1615,7 @@ async function saveSettings() {
 }
 
 async function loadEpoEnvironment() {
-  if (auth.isClientRole && !canWrite.value) return
+  if (clientScope.value && !canWrite.value) return
   try {
     const settings = await epoSubmissionsApi.settings()
     epoEnvironment.value = settings.epo_environment
@@ -1684,7 +1687,7 @@ const submissionActions = computed<ActionItem[]>(() => {
       label: t('reports.submissions.isds.open_outbox'),
       icon: 'link',
       tier: 'overflow',
-      show: !auth.isClientRole && isdsDispatch(s) !== null,
+      show: !clientScope.value && isdsDispatch(s) !== null,
       to: isdsDispatch(s) ? isdsOutboxLink(isdsDispatch(s)!) : undefined,
     },
     {
@@ -1711,7 +1714,7 @@ const submissionActions = computed<ActionItem[]>(() => {
       icon: 'table',
       tier: 'secondary',
       variant: 'neutral',
-      show: !auth.isClientRole && auth.canRead('reports') && s.form_code === 'dphkh1' && ['submitted', 'accepted'].includes(s.status),
+      show: !clientScope.value && auth.canRead('reports') && s.form_code === 'dphkh1' && ['submitted', 'accepted'].includes(s.status),
       to: { name: 'reports-submissions-kh-evidence', params: { id: s.id } },
     },
     {
@@ -1813,9 +1816,9 @@ onMounted(async () => {
         </h2>
         <h1 v-else class="text-2xl font-semibold">{{ t('reports.submissions.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-1 max-w-3xl">
-          {{ t(scope === 'payroll' ? 'reports.submissions.payroll_subtitle' : auth.isClientRole ? 'reports.submissions.client_subtitle' : 'reports.submissions.subtitle') }}
+          {{ t(scope === 'payroll' ? 'reports.submissions.payroll_subtitle' : clientScope ? 'reports.submissions.client_subtitle' : 'reports.submissions.subtitle') }}
         </p>
-        <p v-if="canWrite || !auth.isClientRole" class="text-sm text-neutral-500 mt-2 max-w-3xl">{{ t('reports.submissions.channels_hint') }}</p>
+        <p v-if="canWrite || !clientScope" class="text-sm text-neutral-500 mt-2 max-w-3xl">{{ t('reports.submissions.channels_hint') }}</p>
       </div>
       <div class="flex flex-wrap gap-2">
         <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="openCredentialModal">
@@ -1864,7 +1867,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="canWrite || !auth.isClientRole" class="rounded-lg border border-primary-500/25 bg-primary-50 p-4 flex gap-3">
+    <div v-if="canWrite || !clientScope" class="rounded-lg border border-primary-500/25 bg-primary-50 p-4 flex gap-3">
       <svg class="w-5 h-5 text-primary-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/>
       </svg>
@@ -2112,7 +2115,7 @@ onMounted(async () => {
 
           <!-- U MOSS/OSS písemností panel nesvítí vůbec: sliboval by cestu, kterou
                portál odmítne, a přitom hned nad ním stojí opačné sdělení. -->
-          <div v-if="!isMossOssForm(selected) && (canWrite || !auth.isClientRole)" class="rounded-lg border border-primary-500/25 bg-primary-50/60 p-4">
+          <div v-if="!isMossOssForm(selected) && (canWrite || !clientScope)" class="rounded-lg border border-primary-500/25 bg-primary-50/60 p-4">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 class="font-medium text-sm text-primary-900">{{ t('reports.submissions.direct_panel_title') }}</h3>
@@ -2288,7 +2291,7 @@ onMounted(async () => {
                   {{ isdsReceiptBusy ? t('common.loading') : t('reports.submissions.isds.upload_receipt') }}
                 </button>
               </template>
-              <RouterLink v-if="!auth.isClientRole" :to="isdsOutboxLink(isdsDispatch(selected)!)" class="whitespace-nowrap" :class="btnOutlineSm('neutral')">
+              <RouterLink v-if="!clientScope" :to="isdsOutboxLink(isdsDispatch(selected)!)" class="whitespace-nowrap" :class="btnOutlineSm('neutral')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link"/>
                 </svg>
@@ -2296,7 +2299,7 @@ onMounted(async () => {
               </RouterLink>
             </div>
 
-            <div v-if="!auth.isClientRole" class="mt-4 border-t border-neutral-100 pt-3">
+            <div v-if="!clientScope" class="mt-4 border-t border-neutral-100 pt-3">
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <h4 class="font-medium text-sm">{{ t('reports.submissions.isds.inbox_title') }}</h4>
                 <button type="button" class="whitespace-nowrap" :class="btnOutlineSm('neutral')" :disabled="isdsInboxLoading" @click="loadIsdsInbox(selected)">
@@ -2533,7 +2536,7 @@ onMounted(async () => {
 
             <!-- Heslo pro dotaz na stav: bez něj se na Daňovém portálu nedá stáhnout opis.
                  Odhaluje se vědomě, přes step-up a se záznamem v auditu. -->
-            <div v-if="(canWrite || !auth.isClientRole) && statePasswordAttemptId(selected)" class="mt-3 border-t border-neutral-100 pt-3">
+            <div v-if="(canWrite || !clientScope) && statePasswordAttemptId(selected)" class="mt-3 border-t border-neutral-100 pt-3">
               <div class="text-xs text-neutral-500">{{ t('reports.submissions.state_password') }}</div>
               <div class="mt-1 flex items-center gap-2">
                 <code v-if="revealedPassword[selected.id]" class="rounded bg-neutral-50 px-2 py-1 text-xs tracking-wider">{{ revealedPassword[selected.id] }}</code>
@@ -2696,7 +2699,7 @@ onMounted(async () => {
     <TaxIsdsSendDialog
       v-if="canWrite && isdsDialogFor"
       :submission-id="isdsDialogFor.id"
-      :client-mode="auth.isClientRole"
+      :client-mode="clientScope"
       :title="`${formCodeLabel(isdsDialogFor.form_code)} · ${periodLabel(isdsDialogFor)}`"
       @close="isdsDialogFor = null"
       @changed="load(false)"
@@ -2811,7 +2814,7 @@ onMounted(async () => {
                     @click="toggleCredential(credential)">
                     {{ credential.enabled_for_supplier ? t('reports.submissions.disable_for_company') : t('reports.submissions.enable_for_company') }}
                   </button>
-                  <button v-if="!auth.isClientRole" type="button" :class="btnOutlineSm('danger')" :disabled="credentialBusy || credential.linked_profiles_count > 0" @click="deleteCredential(credential)">
+                  <button v-if="!clientScope" type="button" :class="btnOutlineSm('danger')" :disabled="credentialBusy || credential.linked_profiles_count > 0" @click="deleteCredential(credential)">
                     {{ t('common.delete') }}
                   </button>
                 </div>
@@ -2819,7 +2822,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <form v-if="auth.isClientRole" class="border-t border-neutral-200 pt-5 space-y-3" @submit.prevent="uploadOwnCredential">
+          <form v-if="clientScope" class="border-t border-neutral-200 pt-5 space-y-3" @submit.prevent="uploadOwnCredential">
             <h3 class="font-medium text-sm">{{ t('reports.submissions.own_certificate_title') }}</h3>
             <p class="text-xs text-neutral-500">{{ t('reports.submissions.own_certificate_hint') }}</p>
             <label class="block text-sm">
