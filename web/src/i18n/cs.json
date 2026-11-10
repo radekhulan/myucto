@@ -21746,6 +21746,7 @@
       "dismiss": "Skrýt",
       "source": {
         "rule": "dle pravidla",
+        "catalog": "dle katalogu",
         "keyword": "dle klíčového slova",
         "threshold": "dle limitu §26/2 ZDP",
         "ai": "dle AI"

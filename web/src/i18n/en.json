@@ -21746,6 +21746,7 @@
       "dismiss": "Hide",
       "source": {
         "rule": "by rule",
+        "catalog": "by catalog",
         "keyword": "by keyword",
         "threshold": "by the §26/2 ITA limit",
         "ai": "by AI"
