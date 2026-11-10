@@ -716,21 +716,14 @@ final class RecurringInvoiceGenerator
             return $items;
         }
 
-        $rate = $pdo->prepare(
-            'SELECT id FROM vat_rates
-              WHERE rate_percent = 0 AND is_reverse_charge = 0
-                AND valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)
-              ORDER BY valid_from DESC LIMIT 1'
-        );
-        $rate->execute([$referenceDate, $referenceDate]);
-        $zeroId = $rate->fetchColumn();
-        if ($zeroId === false) {
+        $zeroId = \MyInvoice\Service\Vat\VatStatusService::exemptRateIdAt($pdo, $referenceDate);
+        if ($zeroId === null) {
             // Žádná platná 0% sazba k datu — nech sazby být, guard případně chybu nahlásí.
             return $items;
         }
 
         foreach ($items as &$item) {
-            $item['vat_rate_id'] = (int) $zeroId;
+            $item['vat_rate_id'] = $zeroId;
             // Uložená klasifikace se sazbou padá taky. Kód jako '1' (tuzemské plnění
             // v základní sazbě) na coercnutém 0% řádku by tvrdil daň, kterou neplátce
             // nepřiznává — a oprava #30 přiřazení kódu neplátci a identifikované osobě

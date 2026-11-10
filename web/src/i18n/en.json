@@ -16148,6 +16148,29 @@
       "history_empty": "No goods receipt has been created from this invoice yet.",
       "draft_number": "Draft #{id}"
     },
+    "receipt_invoice": {
+      "action": "Create invoice",
+      "title": "Create an invoice from the goods receipt",
+      "hint": "A draft sales invoice is created from the selected lines. Prices follow the price level, serial numbers and lots are copied from the receipt. You review the invoice in the editor before issuing it.",
+      "price_level": "Document price level",
+      "price_level_client": "From the customer",
+      "already_invoiced": "Invoice {number} ({client}) already covers lines {lines}.",
+      "already_invoiced_hidden": "An invoice already covers lines {lines}.",
+      "already_invoiced_no_client": "Invoice {number} has already been created from lines {lines}.",
+      "created": "The draft invoice has been created. Before you open the editor, please note:",
+      "unavailable": "These units are no longer in the receipt warehouse, so they are not selected on the invoice:",
+      "unavailable_line": "Line {line} ({sku}): {units}",
+      "unavailable_lot": "lot {lot}, {available} of {requested} left",
+      "foreign_vat": "The customer is abroad and lines {lines} carry the domestic VAT rate. Check the rate or the reverse charge in the editor.",
+      "open_draft": "Open draft",
+      "oss_note": "Item {item}: {message}",
+      "draft": "draft",
+      "line_invoiced": "Already invoiced",
+      "submit": "Create draft invoice",
+      "submit_anyway": "Create draft anyway",
+      "list_title": "Invoices from this receipt",
+      "lines": "lines {lines}"
+    },
     "invoice_card": {
       "title": "Stock",
       "empty": "No stock documents.",
@@ -24618,6 +24641,8 @@
     "payment_schedule_mismatch_base": "The schedule base total ({total}) does not match the document base ({invoice}). Issuing will be rejected.",
     "payment_schedule_mismatch_vat": "The schedule VAT total ({total}) does not match the document VAT ({invoice}). Issuing will be rejected.",
     "payment_schedule_tax_date_hint": "An empty instalment tax point means its due date.",
+    "manual_price": "Enter the price",
+    "manual_price_warning": "Some lines are waiting for a price. Fill them in the editor before issuing the invoice.",
     "price_level": {
       "label": "Document price level",
       "from_client": "From customer ({name})",

@@ -114,6 +114,7 @@ final class RoutePermissionMap
 
         ['GET', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::READ],
         ['*', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::WRITE],
+        ['GET', '#^/api/invoices/[0-9]+/source-receipts$#', 'stock', AccessLevel::READ],
         ['*', '#^/api/invoices/[0-9]+/book$#', 'accounting.journal.post', AccessLevel::WRITE],
         // Faktura krytá ostatní pohledávkou: výběr čte ostatní položky, vazba mění zaúčtování.
         ['GET', '#^/api/invoices/[0-9]+/other-item-candidates$#', 'other_items', AccessLevel::READ],

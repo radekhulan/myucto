@@ -30,6 +30,20 @@ final class VatStatusService
         return self::payerAt($this->db->pdo(), $supplierId, $date);
     }
 
+    /** Nulová sazba „osvobozeno" platná k datu: tu nesou řádky neplátce. `null` = číselník ji nemá. */
+    public static function exemptRateIdAt(\PDO $pdo, string $date): ?int
+    {
+        $stmt = $pdo->prepare(
+            'SELECT id FROM vat_rates
+              WHERE rate_percent = 0 AND is_reverse_charge = 0
+                AND valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)
+              ORDER BY valid_from DESC LIMIT 1'
+        );
+        $stmt->execute([$date, $date]);
+        $id = $stmt->fetchColumn();
+        return $id === false ? null : (int) $id;
+    }
+
     /**
      * Statická varianta {@see isVatPayerAt()} pro kontexty bez DI kontejneru
      * (statické buildery jako EpoSupplierBlockBuilder, bin skripty). Táž SQL

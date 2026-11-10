@@ -382,6 +382,7 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $pdo->prepare('INSERT INTO invoice_items (invoice_id, description, quantity, unit_price_without_vat, total_without_vat, total_vat, total_with_vat, stock_item_id, warehouse_id, vat_rate_id, vat_rate_snapshot) VALUES (?, ?, 1, 10, 10, 0, 10, ?, ?, ?, 0)')
             ->execute([$invoiceId, 'Syntetická archivní položka', $items['COMPONENT'], $warehouse, $vatRateId]);
         $invoiceItemId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO stock_receipt_invoice_links (supplier_id, document_id, line_no, invoice_id) VALUES (?, ?, 1, ?)')->execute([$sid, $receipt['id'], $invoiceId]);
         $source = $documents->create($sid, ['doc_type' => 'issue', 'origin' => 'manual', 'description' => 'Syntetický archivní výdej', 'warehouse_id' => $warehouse, 'doc_date' => date('Y-m-d'), 'invoice_id' => $invoiceId,
             'lines' => [['stock_item_id' => $items['COMPONENT'], 'qty' => '1', 'invoice_item_id' => $invoiceItemId]]], $this->userId);
         $fulfillment = $container->get(\MyInvoice\Service\Stock\FulfillmentService::class);
@@ -439,6 +440,8 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $restoredTask = $fulfillment->find($newSid, (int) $newTask['id']);
         self::assertSame((int) $restoredItems['COMPONENT'], $restoredTask['lines'][0]['component_snapshot']['stock_item_id']);
         $restoredInvoiceItem = $pdo->query('SELECT ii.id FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE i.supplier_id = ' . $newSid)->fetchColumn();
+        $link = $pdo->query('SELECT l.line_no, d.description, i.supplier_id AS invoice_supplier FROM stock_receipt_invoice_links l JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id JOIN invoices i ON i.id = l.invoice_id WHERE l.supplier_id = ' . $newSid)->fetchAll(PDO::FETCH_ASSOC);
+        self::assertSame([['line_no' => 1, 'description' => 'Syntetický archivní příjem', 'invoice_supplier' => $newSid]], array_map(static fn (array $row): array => ['line_no' => (int) $row['line_no'], 'description' => $row['description'], 'invoice_supplier' => (int) $row['invoice_supplier']], $link));
         self::assertNotSame($invoiceItemId, (int) $restoredInvoiceItem);
         self::assertSame((int) $restoredInvoiceItem, (int) $restoredTask['lines'][0]['component_snapshot']['invoice_item_id']);
         $newAssembly = $pdo->query('SELECT * FROM product_assemblies WHERE supplier_id = ' . $newSid)->fetch(PDO::FETCH_ASSOC);

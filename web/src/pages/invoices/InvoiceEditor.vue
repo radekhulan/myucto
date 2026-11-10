@@ -2273,6 +2273,9 @@ const hasNonPositiveAmountToPay = computed(() =>
   // Připravený kladný přenos doplní položky až po uložení konceptu.
   && !(editedStatus.value === 'draft' && wrBillingPending.value
     && Number(wrBillingPendingPreview.value?.totals?.with_vat ?? wrBillingPendingPreview.value?.total_amount) > 0)
+  // Koncept jen z řádků „cenu zadá člověk" bez ceny smí být nulový, hlídá ho až vystavení (jako backend).
+  && !(amountItems(form.value.items).length > 0
+    && amountItems(form.value.items).every(it => it.manual_price && Number(it.unit_price_without_vat) === 0))
 )
 
 // Per-row check: záporné množství a záporná cena současně backend odmítne;
@@ -2915,6 +2918,7 @@ function buildPayload(items: InvoiceItem[]): InvoicePayload {
         warehouse_id: it.warehouse_id ?? null,
         // Vybraná sériová čísla / šarže — round-trip ze stejného důvodu jako karta.
         tracking_allocations: it.stock_item_id != null ? (it.tracking_allocations ?? []) : [],
+        manual_price: it.manual_price ?? false,
         // Totéž pro vazbu na kartu majetku (1177) — bez round-tripu by prodej zmizel.
         small_asset_id: it.small_asset_id ?? null,
         asset_id: it.asset_id ?? null,
@@ -3686,6 +3690,7 @@ useWindowTitle(
               <td class="px-3 py-2">
                 <input v-model="item.unit_price_without_vat" v-math="6" type="text" inputmode="decimal"
                   :class="['w-full h-9 px-2 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
+                <p v-if="item.manual_price && !Number(item.unit_price_without_vat)" data-test="manual-price" class="mt-1 text-xs font-medium text-warning-600 text-right">{{ t('invoice.manual_price') }}</p>
                 <p v-if="lineDiscountHint(item)" data-test="line-discount-hint" :title="t('invoice.line_discount.title')"
                   class="mt-1 text-xs text-neutral-500 text-right">{{ lineDiscountHint(item) }}</p>
               </td>
@@ -4068,6 +4073,7 @@ useWindowTitle(
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
                 <input v-model="item.unit_price_without_vat" v-math="6" type="text" inputmode="decimal"
                   :class="['w-full h-10 px-3 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
+                <p v-if="item.manual_price && !Number(item.unit_price_without_vat)" data-test="manual-price" class="mt-1 text-xs font-medium text-warning-600 text-right">{{ t('invoice.manual_price') }}</p>
                 <p v-if="lineDiscountHint(item)" data-test="line-discount-hint" :title="t('invoice.line_discount.title')"
                   class="mt-1 text-xs text-neutral-500 text-right">{{ lineDiscountHint(item) }}</p>
               </div>
