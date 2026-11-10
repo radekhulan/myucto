@@ -85,6 +85,33 @@ final class MyuctoImportProfile
         'tax_evidence_bank_rules' => ['created_by' => 'users'],
     ];
     public const PRESERVED_IDS = ['idoklad_id', 'fakturoid_id', 'import_batch_id'];
+    /**
+     * Polymorfní vazby: cílovou tabulku určuje druh dokladu nebo zdroje v řádku,
+     * proto nemají cizí klíč. Přemapuje je MyuctoImporter::remap(), resp. references().
+     */
+    public const POLYMORPHIC_REFERENCES = [
+        'journal_entries' => ['source_id'],
+        'journal_document_postings' => ['doc_id'],
+        'de_movement_classification_history' => ['source_id'],
+        'invoice_settlements' => ['doc_id'],
+        'offset_agreement_items' => ['doc_id'],
+        'credit_note_offsets' => ['invoice_id', 'credit_note_id'],
+    ];
+    /**
+     * Měkké vazby (záměrně bez cizího klíče) na nastavení, které obnova nepřenáší:
+     * řada z číselníku, cenová hladina skladu, šablona fakturace výkazů, pravidlo
+     * nákladů. Doklad si ponechá číslo, ceny i účty; vazba se vynuluje a obnova
+     * počet odpojených vazeb vykáže v protokolu, nic se nezahodí potichu.
+     */
+    public const DETACHED_REFERENCES = [
+        'clients' => ['price_level_id'],
+        'projects' => ['billing_template_id'],
+        'work_reports' => ['billing_template_id'],
+        'invoices' => ['number_series_id', 'price_level_id'],
+        'purchase_invoices' => ['number_series_id'],
+        'purchase_invoice_items' => ['expense_rule_id'],
+        'cash_documents' => ['number_series_id'],
+    ];
     public const RESET_COLUMNS = [
         'invoices' => ['public_token', 'approval_token', 'approval_receipt_hash', 'approval_token_expires_at', 'pdf_path', 'pdf_generated_at'],
         'bank_transactions' => ['processing_pending_at', 'processing_error'],

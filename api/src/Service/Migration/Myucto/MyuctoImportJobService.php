@@ -226,6 +226,13 @@ final class MyuctoImportJobService extends AbstractImportJobService
             }
             $result = $this->workflow->run($supplierId, (int) $job['created_by'], $token, (string) ($params['source_name'] ?? ''), $password, $apply, $apply);
             $this->jobs->setReport($jobId, $result);
+            $detached = $result['report']['detached'] ?? [];
+            if ($detached !== []) {
+                $this->jobs->appendLog($jobId, 'Vazby na nastavení, které obnova nepřenáší (řady číselníku, cenové hladiny, '
+                    . 'šablony fakturace, pravidla nákladů), se odpojily: '
+                    . implode(', ', array_map(static fn (string $column, int $count): string => $column . ' (' . $count . ')', array_keys($detached), $detached))
+                    . '. Doklady si ponechaly čísla i částky.');
+            }
             $this->jobs->updateProgress($jobId, [
                 'processed' => 1,
                 'created_count' => array_sum($result['report']['created'] ?? []),
