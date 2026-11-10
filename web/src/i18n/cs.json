@@ -28118,6 +28118,7 @@
       "bank_ignore": "Ignorovat platby"
     },
     "client_bank_hint": "Bankovní oprávnění klienta jsou volitelná. Import, párování a ignorování vyžadují čtení banky. Párování a jeho zrušení navíc vyžadují čtení dokladů a právo měnit jejich úhrady. Párování a import mohou spustit automatické zpracování úhrad a účetních zápisů podle nastavení firmy.",
+    "staff_client_scope_hint": "Interní roli lze přidělit i rozsah klienta: Předávat doklady účetní, Připravená podání DPH, KH a SH a Firemní podpisové profily. Bez modulu Daně a výkazy pracuje role s připravenými podáními stejně jako klient: jen DPH, KH a SH, jen z webové aplikace a bez správy nastavení podání.",
     "readonly_hint": "Vestavěná role Pouze pro čtení může mít zápis jen pro správu vlastních API tokenů. Ostatní oprávnění dovolují nejvýše čtení.",
     "title": "Role a oprávnění",
     "subtitle": "Nastavení přístupu k modulům a významným akcím.",

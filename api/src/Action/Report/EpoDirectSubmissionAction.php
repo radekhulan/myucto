@@ -41,7 +41,7 @@ final class EpoDirectSubmissionAction
         return Json::ok($response, $this->credentialService->listOwnedForSupplier(
             $this->userId($request),
             SupplierGuard::currentId($request),
-            RequestAuthorization::isClientType($request),
+            RequestAuthorization::usesClientTaxSubmissionScope($request),
         ));
     }
 
@@ -78,7 +78,7 @@ final class EpoDirectSubmissionAction
                 (string) ($body['label'] ?? ''),
                 $bytes,
                 (string) ($body['pfx_password'] ?? ''),
-                RequestAuthorization::isClientType($request),
+                RequestAuthorization::usesClientTaxSubmissionScope($request),
             );
             $this->audit(
                 $request,
@@ -160,7 +160,7 @@ final class EpoDirectSubmissionAction
                 'credentials' => $this->credentialService->listOwnedForSupplier(
                     $userId,
                     $supplierId,
-                    RequestAuthorization::isClientType($request),
+                    RequestAuthorization::usesClientTaxSubmissionScope($request),
                 ),
             ]);
         } catch (EpoSubmissionException $e) {

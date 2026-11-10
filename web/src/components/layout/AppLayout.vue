@@ -570,7 +570,11 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         { to: '/documents', label: t('nav.documents'), icon: ICONS.documents },
         { to: '/document-requests', label: t('nav.document_requests'), icon: ICONS.requestDoc },
-        ...(auth.isSuperadmin ? [{ to: '/portal/purchase-invoice-submissions', label: t('nav.submit_documents'), icon: ICONS.documents, permission: 'documents.submit' as PermissionKey }] : []),
+        // Předání dokladů účetní řídí právo `documents.submit` (klient i interní role).
+        { to: '/portal/purchase-invoice-submissions', label: t('nav.submit_documents'), icon: ICONS.documents, permission: 'documents.submit' as PermissionKey },
+        // Požadavky účetní na straně předávajícího. Kdo vidí interní Požadavky klientovi
+        // (`documents.requests`), má je tam, druhá položka se stejným názvem by mátla.
+        ...(!auth.canRead('documents.requests') ? [{ to: '/portal/document-requests', label: t('nav.document_requests'), icon: ICONS.requestDoc, permission: 'documents.submit' as PermissionKey }] : []),
         { to: '/documents/scan-attach', label: t('scan_attach.nav'), icon: ICONS.documents, permission: 'documents.upload' },
         { to: '/logbook', label: t('nav.logbook'), icon: ICONS.logbook, newTo: '/logbook?tab=trips&new=trip' },
         ...(svjScope && auth.hasCommercialFeatures ? [
@@ -647,7 +651,9 @@ const navSections = computed<NavSection[]>(() => {
         // nejdřív postaví výše v sekci a teďka se podá. Komerční modul (EPO napojení),
         // proto stejné hradítko jako u ostatních placených položek téhle sekce.
         ...(auth.hasCommercialFeatures ? [
-          { to: '/reports/submissions', label: t('nav.reports_submissions'), icon: ICONS.tax_archive, dividerBefore: true },
+          // Bez agendy výkazů stačí archiv připravených podání (`reports.submissions`).
+          { to: '/reports/submissions', label: t('nav.reports_submissions'), icon: ICONS.tax_archive, dividerBefore: true,
+            permission: (auth.canRead('reports') ? 'reports' : 'reports.submissions') as PermissionKey },
         ] : []),
         // Datová schránka i pro firmu bez mezd: odesílá daňová podání a přijímá
         // doručenky a zprávy od FÚ. Ve Mzdách zůstává taky, tam patří k podáním.
@@ -1016,14 +1022,14 @@ function filterNavigation(sections: NavSection[]): NavSection[] {
     items: section.items.filter(item => {
       if (item.external) return true
       if (item.to.startsWith('/portal/settings')) {
-        const allowed = OPERATIONAL_SETTINGS_KEYS.some(permission =>
-          (permission !== 'settings.signing_profiles' || auth.isClientRole) && auth.canWrite(permission))
+        const allowed = OPERATIONAL_SETTINGS_KEYS.some(permission => auth.canWrite(permission))
         if (!allowed || clientExperience.value) return allowed
         // Interní menu má Branding samostatně, QR a šablony v Nastavení firmy
         // a superadmin odesílací profily v Systém → E-maily. Druhá položka se
-        // ukáže jen kvůli oblasti, kterou role jinde v menu nenajde.
+        // ukáže jen kvůli oblasti, kterou role jinde v menu nenajde; firemní
+        // podpisové profily mají jen tady.
         if (auth.isSuperadmin) return false
-        return auth.canWrite('settings.email_profiles') || (!auth.canWrite('settings.company.write')
+        return auth.canWrite('settings.email_profiles') || auth.canWrite('settings.signing_profiles') || (!auth.canWrite('settings.company.write')
           && (auth.canWrite('settings.payment_qr') || auth.canWrite('settings.invoice_defaults') || auth.canWrite('settings.email_templates')))
       }
       const permission = navPermission(item)

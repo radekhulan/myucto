@@ -6,7 +6,7 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-10-seat-readonly-tokens-v2';
+    public const VERSION = '2026-11-staff-client-scope-v1';
 
     /** @var list<string> */
     private const GROUPS = [
@@ -25,7 +25,6 @@ final class PermissionCatalog
 
         $staffOnly = ['staff'];
         $both = ['staff', 'client'];
-        $clientOnly = ['client'];
         $rows = [
             ['dashboard', 'dashboard', 'Dashboard', $staffOnly],
             ['dashboard.portfolio', 'dashboard', 'Přehled firem', $staffOnly],
@@ -77,7 +76,7 @@ final class PermissionCatalog
             ['documents.requests', 'documents', 'Požadavky klientovi', $staffOnly],
             ['documents.inbox', 'documents', 'Příchozí doklady', $staffOnly],
             ['documents.inbox.delete', 'documents', 'Trvale vyřadit z příchozí fronty', $staffOnly],
-            ['documents.submit', 'documents', 'Předávat doklady účetní', $clientOnly],
+            ['documents.submit', 'documents', 'Předávat doklady účetní', $both],
             ['accounting', 'accounting', 'Účetnictví', $staffOnly],
             ['accounting.journal.write', 'accounting', 'Zápisy v deníku', $staffOnly],
             ['accounting.journal.post', 'accounting', 'Zaúčtovat doklad', $staffOnly],
@@ -117,7 +116,7 @@ final class PermissionCatalog
             ['tax_evidence.export', 'tax_evidence', 'Exportovat daňovou evidenci', $staffOnly],
             ['reports', 'reports', 'Daně a výkazy', $staffOnly],
             ['reports.finalize', 'reports', 'Finalizovat výkaz', $staffOnly],
-            ['reports.submissions', 'reports', 'Připravená podání DPH, KH a SH', $clientOnly],
+            ['reports.submissions', 'reports', 'Připravená podání DPH, KH a SH', $both],
             ['reports.submit', 'reports', 'Elektronicky podat', $both],
             ['reports.submissions.manage', 'reports', 'Spravovat nastavení daňových podání', $staffOnly],
             ['reports.reopen', 'reports', 'Znovu otevřít výkaz', $staffOnly],
@@ -182,7 +181,7 @@ final class PermissionCatalog
             ['settings.email_profiles', 'settings', 'Odesílací profily firmy', $both],
             ['settings.email_templates', 'settings', 'E-mailové šablony firmy', $both],
             ['settings.payment_qr', 'settings', 'Platební QR firmy', $both],
-            ['settings.signing_profiles', 'settings', 'Firemní podpisové profily a PDF podpisy', $clientOnly],
+            ['settings.signing_profiles', 'settings', 'Firemní podpisové profily a PDF podpisy', $both],
             ['settings.branding', 'settings', 'Branding firmy', $both],
             ['settings.invoice_defaults', 'settings', 'Výchozí hodnoty dokladů', $both],
             ['settings.ai_provider', 'settings', 'AI poskytovatel', $staffOnly],
@@ -256,6 +255,9 @@ final class PermissionCatalog
                 'payroll.erasure',
                 // Pokladní certifikát s privátním klíčem podepisuje evidenci tržeb jménem firmy.
                 'eet.certificates',
+                // Rozsah klienta (předání dokladů, připravená podání, firemní podpisy)
+                // dostane interní role jen výslovně v editoru rolí.
+                'documents.submit', 'reports.submissions', 'settings.signing_profiles',
             ];
             $read = [
                 'dashboard', 'dashboard.portfolio', 'tax_evidence', 'tax_evidence.export',

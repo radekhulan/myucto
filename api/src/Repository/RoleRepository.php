@@ -191,6 +191,12 @@ final class RoleRepository
             }
             if ($level !== AccessLevel::NONE) $out[(string) $key] = $level->value;
         }
+        // Archiv připravených podání je jen ke čtení pro každý typ role. Interní roli se
+        // ale k `reports.submit` nedoplňuje: samotné odeslání podává z agendy výkazů a archiv
+        // by ji přepnul do užšího rozsahu klienta (RequestAuthorization::usesClientTaxSubmissionScope).
+        if (isset($out['reports.submissions'])) {
+            $out['reports.submissions'] = AccessLevel::READ->value;
+        }
         if ($roleType === 'client') {
             // Podávání vždy zpřístupní i archiv připravených výkazů; obecný zápis
             // do výkazů tím klient nezíská, odeslání má samostatné oprávnění.

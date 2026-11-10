@@ -65,9 +65,14 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
         $staffPermissions = array_keys(array_filter(
             (new PermissionCatalog())->all(),
             // Samostatné MCP oprávnění je opt-in; staff zachovává přístup přes profile.tokens.
+            // Rozsah klienta (předání dokladů, připravená podání, firemní podpisy) jde interní
+            // roli přidělit, ale výchozí systémové role ho nedostávají.
             static fn (array $definition): bool => in_array('staff', $definition['role_types'], true)
-                && $definition['key'] !== 'profile.mcp',
+                && !in_array($definition['key'], ['profile.mcp', 'documents.submit', 'reports.submissions', 'settings.signing_profiles'], true),
         ));
+        self::assertSame(0, (int) $db->query("SELECT COUNT(*) FROM role_permissions rp JOIN roles r ON r.id = rp.role_id
+            WHERE r.role_type <> 'client' AND rp.permission_key IN ('documents.submit', 'reports.submissions', 'settings.signing_profiles')")->fetchColumn(),
+            'Migrace nesmí rozsah klienta přidělit žádné interní roli.');
         self::assertSame(0, (int) $db->query("SELECT COUNT(*) FROM role_permissions WHERE permission_key='profile.mcp'")->fetchColumn(),
             'Migrace nesmí nové MCP oprávnění automaticky přidělit žádné roli.');
         sort($staffPermissions);

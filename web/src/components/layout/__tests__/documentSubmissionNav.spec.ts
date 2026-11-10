@@ -18,6 +18,9 @@ const profiles = {
   client: { isSuperadmin: false, isClientRole: true, isCompanyAdminRole: false, isAccountantRole: false },
 }
 
+// Výchozí systémové interní role rozsah klienta nemají, dostane ho jen role, které ho správce přidělí.
+const CLIENT_SCOPE_DEFAULTS = ['documents.submit', 'reports.submissions', 'settings.signing_profiles']
+
 const layout = readFileSync(resolve(__dirname, '../AppLayout.vue'), 'utf8')
 const source = ts.createSourceFile('AppLayout.ts', layout.slice(layout.indexOf('>') + 1, layout.indexOf('</script>')), ts.ScriptTarget.Latest, true)
 const required = new Set(['navSections', 'accountantFirst', 'navPermission', 'filterNavigation', 'canExtractPurchase'])
@@ -34,7 +37,7 @@ const navigationCode = ts.transpileModule(declarations.map(declaration => declar
 function renderNavigation(role: Role, permissionOverrides: Record<string, boolean> = {}, options: { stockEnabled?: boolean; writeOverrides?: Record<string, boolean>; demo?: boolean } = {}) {
   const profile = profiles[role]
   const can = (permission: string, access = 'read') => profile.isSuperadmin
-    || (access === 'write' && options.writeOverrides?.[permission] !== undefined ? options.writeOverrides[permission]! : permissionOverrides[permission] ?? (permission === 'documents.submit' ? profile.isClientRole : true))
+    || (access === 'write' && options.writeOverrides?.[permission] !== undefined ? options.writeOverrides[permission]! : permissionOverrides[permission] ?? (CLIENT_SCOPE_DEFAULTS.includes(permission) ? profile.isClientRole : true))
   const auth = {
     ...profile,
     isAdminPlusRole: false, hasCommercialFeatures: true, hasPayrollFeatures: true,
@@ -62,6 +65,23 @@ describe('AppLayout document submission navigation', () => {
     const wrapper = renderNavigation(role)
     expect(wrapper.findAll('a[href="/portal/purchase-invoice-submissions"]')).toHaveLength(0)
     expect(wrapper.find('a[href="/purchase-invoices/incoming"]').exists()).toBe(true)
+  })
+
+  it('interní role s právem předávat doklady má odkaz v Dokumentech stejně jako superadmin', () => {
+    const wrapper = renderNavigation('accountant', { 'documents.submit': true, 'documents.requests': false })
+    expect(wrapper.findAll('a[href="/portal/purchase-invoice-submissions"]')).toHaveLength(1)
+    expect(wrapper.get('[data-section="documents"] a[href="/portal/purchase-invoice-submissions"]').text()).toBe('nav.submit_documents')
+    // Bez interních Požadavků klientovi vidí požadavky účetní na své straně.
+    expect(wrapper.findAll('[data-section="documents"] a[href="/portal/document-requests"]')).toHaveLength(1)
+    expect(wrapper.find('a[href="/document-requests"]').exists()).toBe(false)
+  })
+
+  it('interní roli s interními požadavky nezdvojuje položku Požadavky', () => {
+    const wrapper = renderNavigation('accountant', { 'documents.submit': true })
+    expect(wrapper.findAll('a[href="/portal/purchase-invoice-submissions"]')).toHaveLength(1)
+    expect(wrapper.find('a[href="/portal/document-requests"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/document-requests"]').exists()).toBe(true)
+    expect(renderNavigation('superadmin').find('a[href="/portal/document-requests"]').exists()).toBe(false)
   })
 })
 
@@ -120,6 +140,25 @@ describe('AppLayout client tax submissions', () => {
     expect(allowed.find('a[href="/admin/electronic-signatures"]').exists()).toBe(false)
     expect(renderNavigation('client', { 'reports.submissions': false, reports: true })
       .find('a[href="/reports/submissions"]').exists()).toBe(false)
+  })
+
+  it('interní role bez agendy výkazů vidí archiv připravených podání jen s vlastním právem', () => {
+    const scoped = renderNavigation('accountant', { 'reports.submissions': true, reports: false })
+    expect(scoped.findAll('a[href="/reports/submissions"]')).toHaveLength(1)
+    expect(scoped.find('a[href="/reports/dph"]').exists()).toBe(false)
+    expect(renderNavigation('accountant', { 'reports.submissions': false, reports: false })
+      .find('a[href="/reports/submissions"]').exists()).toBe(false)
+    expect(renderNavigation('accountant').findAll('a[href="/reports/submissions"]')).toHaveLength(1)
+  })
+})
+
+describe('AppLayout firemní podpisové profily', () => {
+  it('interní role s firemními podpisy dostane Nastavení firmy, jinak ne', () => {
+    const none = Object.fromEntries(OPERATIONAL_SETTINGS_KEYS.map(key => [key, false]))
+    const base = { ...none, 'settings.company.write': true }
+    expect(renderNavigation('accountant', base).find('a[href="/portal/settings"]').exists()).toBe(false)
+    expect(renderNavigation('accountant', { ...base, 'settings.signing_profiles': true }).find('a[href="/portal/settings"]').exists()).toBe(true)
+    expect(renderNavigation('client', { ...none, 'settings.signing_profiles': true }).find('a[href="/portal/settings"]').exists()).toBe(true)
   })
 })
 

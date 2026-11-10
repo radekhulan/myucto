@@ -116,7 +116,7 @@ final class TaxSubmissionAction
                 : null,
         ];
 
-        if (RequestAuthorization::isClientType($request)) {
+        if (RequestAuthorization::usesClientTaxSubmissionScope($request)) {
             $filters['allowed_form_codes'] = $filters['allowed_form_codes'] === null
                 ? ClientTaxSubmissionPolicy::FORM_CODES
                 : array_values(array_intersect($filters['allowed_form_codes'], ClientTaxSubmissionPolicy::FORM_CODES));

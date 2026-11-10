@@ -53,6 +53,8 @@ final class PurchaseInvoiceSubmissionFileAction
         bool $preview,
         bool $portal,
     ): Response {
+        // Portálový soubor řídí právo předávat doklady (klient i interní role), interní
+        // náhled fronty právo `documents.inbox`, které klient mít nemůže.
         $allowed = $portal
             ? RequestAuthorization::allowsClientDocumentPortal($request, AccessLevel::READ)
             : !RequestAuthorization::isClientType($request)

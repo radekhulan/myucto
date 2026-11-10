@@ -22,7 +22,8 @@ const tabs = computed<SettingsTab[]>(() => {
   if (auth.canWrite('settings.branding')) allowed.push('branding')
   if (auth.canWrite('settings.invoice_defaults')) allowed.push('invoice-defaults')
   if (auth.canWrite('settings.payment_qr')) allowed.push('payment-qr')
-  if (auth.isClientRole && auth.canWrite('settings.signing_profiles')) allowed.push('signing-profiles')
+  // Superadmin spravuje podpisy v Elektronických podpisech (OperationalSettingsAccess::clientSigningProfiles).
+  if (!auth.isSuperadmin && auth.canWrite('settings.signing_profiles')) allowed.push('signing-profiles')
   if (auth.canWrite('settings.email_templates')) allowed.push('email-templates')
   return allowed
 })

@@ -51,7 +51,7 @@ final class TaxSubmissionEpoAction
             return $denied;
         }
         $supplierId = SupplierGuard::currentId($request);
-        return Json::ok($response, RequestAuthorization::isClientType($request)
+        return Json::ok($response, RequestAuthorization::usesClientTaxSubmissionScope($request)
             ? ['epo_environment' => $this->environment()]
             : $this->settingsPayload($supplierId));
     }

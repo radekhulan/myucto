@@ -57,7 +57,7 @@ final class TaxSubmissionIsdsAction
             return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
         }
         $routes = $this->routing->routes(SupplierGuard::currentId($request));
-        if (RequestAuthorization::isClientType($request)) {
+        if (RequestAuthorization::usesClientTaxSubmissionScope($request)) {
             unset($routes['groups']['income']);
             $routes['recipients'] = [];
         }
