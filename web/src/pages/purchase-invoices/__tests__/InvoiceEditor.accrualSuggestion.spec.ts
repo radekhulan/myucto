@@ -243,6 +243,18 @@ describe('InvoiceEditor.vue — návrh časového rozlišení z textu položky',
     expect((selects[1].element as HTMLSelectElement).value).toBe('131')
   })
 
+  it('kód zboží dodavatele nebo EAN označí detail položky jako vyplněný', async () => {
+    const wrapper = await mountEditor([
+      { ...item(1, 'Šroub'), seller_item_code: 'SR-10' },
+      { ...item(2, 'Matice'), item_ean: '4006381333931' },
+      item(3, 'Podložka'),
+    ])
+    const toggles = wrapper.findAll('[data-test="item-details-toggle"]')
+    expect(toggles[0].classes()).toContain('bg-primary-50')
+    expect(toggles[1].classes()).toContain('bg-primary-50')
+    expect(toggles[2].classes()).not.toContain('bg-primary-50')
+  })
+
   it('změní členění DPH jen u vybrané položky (issue #150)', async () => {
     m.vatClassifications.mockResolvedValueOnce([
       { id: 1, code: '23', label: 'Pořízení zboží z EU', supplier_id: null, is_reverse_charge: true, dphdp3_line: 3 },
@@ -263,6 +275,21 @@ describe('InvoiceEditor.vue — návrh časového rozlišení z textu položky',
     expect(payload.vat_classification_code).toBe('24e')
     expect(payload.items.map((row: PurchaseInvoiceItem) => row.vat_classification_code)).toEqual(['24e', '23'])
     expect(payload.items.map((row: PurchaseInvoiceItem) => row.unit_price_without_vat)).toEqual([100, 100])
+  })
+
+  it('kód zboží a EAN jdou v detailu položky opravit a chybný EAN se ohlásí', async () => {
+    const wrapper = await mountEditor([{ ...item(1, 'Díl'), seller_item_code: 'SPATNE', item_ean: '8590000000015' } as ReturnType<typeof item>])
+    await openItemDetails(wrapper)
+    await wrapper.find('[data-test="item-seller-code"]').setValue('SPRAVNE')
+    expect(wrapper.find('[data-test="item-ean-invalid"]').exists()).toBe(false)
+    await wrapper.find('[data-test="item-ean"]').setValue('8590000000011')
+    expect(wrapper.find('[data-test="item-ean-invalid"]').exists()).toBe(true)
+    await wrapper.find('[data-test="item-ean"]').setValue('8590000000022')
+    expect(wrapper.find('[data-test="item-ean-invalid"]').exists()).toBe(false)
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    const saved = m.update.mock.calls[0][1].items[0]
+    expect([saved.seller_item_code, saved.item_ean]).toEqual(['SPRAVNE', '8590000000022'])
   })
 
   it('kód hlavičky přepíše položky jen na výslovnou volbu', async () => {

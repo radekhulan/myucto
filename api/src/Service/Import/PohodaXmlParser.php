@@ -1188,6 +1188,10 @@ final class PohodaXmlParser
 
         return [
             'description'            => $this->text($xpath, 'inv:text', $itemEl),
+            // Kód položky: řádek ho nese přímo, nebo jako vazbu na zásobu v Pohodě.
+            'seller_item_code'       => $this->text($xpath, 'inv:code', $itemEl)
+                ?: $this->text($xpath, 'inv:stockItem/typ:stockItem/typ:ids', $itemEl) ?: null,
+            'item_ean'               => $this->text($xpath, 'inv:stockItem/typ:stockItem/typ:EAN', $itemEl) ?: null,
             'quantity'               => $quantity,
             'duration_minutes'       => $durationMinutes,
             'unit'                   => $unit,

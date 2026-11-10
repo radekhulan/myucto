@@ -71,6 +71,9 @@ final class AutoIssueAndSendService
         // 1. Vystavit pokud draft
         if ($invoice['status'] === 'draft') {
             $this->billing->assertCurrent($invoiceId, (int) $invoice['supplier_id']);
+            if (InvoiceAmountPolicy::hasMissingManualPrice((array) ($invoice['items'] ?? []))) {
+                throw new \DomainException(InvoiceAmountPolicy::MANUAL_PRICE_MISSING_MESSAGE);
+            }
             if (
                 InvoiceAmountPolicy::requiresPositiveDraftAmountToPay(
                     (string) ($invoice['invoice_type'] ?? 'invoice'),

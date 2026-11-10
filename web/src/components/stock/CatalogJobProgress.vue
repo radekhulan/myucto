@@ -17,6 +17,9 @@ defineEmits<{ (e: 'cancel'): void }>()
 
 const { t } = useI18n()
 
+// Čistý výpočet (ocenění k datu, vývoj hodnoty) nic neukládá po dávkách: počty změn a poznámka o uložených změnách by mátly.
+const computationOnly = computed(() => props.job?.kind === 'stock_value_trend' || (props.job?.kind === 'stock_valuation' && !props.job.stock_take_id))
+
 const percent = computed(() => {
   if (!props.job?.total || props.job.total <= 0) return null
   return Math.min(100, Math.round(Number(props.job.checkpoint ?? 0) / props.job.total * 100))
@@ -45,6 +48,7 @@ const progressJob = computed(() => {
         :job="progressJob"
         :percent="percent"
         :cancelling="cancelling"
+        :show-outcome="!computationOnly"
         :show-cancel="canCancel && !job?.cancel_requested"
         counts-key="eshop.jobs.job_counts"
         :background-hint-key="['queued', 'running'].includes(job.status) ? 'eshop.jobs.job_background_hint' : 'eshop.jobs.job_finished_hint'"
@@ -54,6 +58,6 @@ const progressJob = computed(() => {
         @cancel="$emit('cancel')"
       />
       <p v-if="job?.cancel_requested && ['queued', 'running'].includes(job.status)" class="mt-2 text-xs text-warning-700">{{ t('eshop.jobs.cancel_requested') }}</p>
-      <p v-if="canCancel && ['queued', 'running'].includes(job.status)" class="mt-2 text-xs text-neutral-500">{{ t('eshop.jobs.cancel_boundary') }}</p>
+      <p v-if="canCancel && !computationOnly && ['queued', 'running'].includes(job.status)" class="mt-2 text-xs text-neutral-500">{{ t('eshop.jobs.cancel_boundary') }}</p>
   </div>
 </template>

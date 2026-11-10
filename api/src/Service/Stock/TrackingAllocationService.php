@@ -166,8 +166,34 @@ final class TrackingAllocationService
         if ($direction !== null && !in_array($direction, ['in', 'out'], true)) {
             throw new \InvalidArgumentException('Neplatný směr skladové alokace.');
         }
+        return self::canonicalAllocations($this->tracking->allocationsForLine($supplierId, $lineId), $direction);
+    }
+
+    /**
+     * Stejné jako {@see canonicalAllocationsForLine()} pro více řádků jedním dotazem.
+     *
+     * @param list<int> $lineIds
+     * @return array<int,list<array<string,mixed>>> řádek => alokace (řádek bez alokací chybí)
+     */
+    public function canonicalAllocationsForLines(int $supplierId, array $lineIds, ?string $direction = null): array
+    {
+        if ($direction !== null && !in_array($direction, ['in', 'out'], true)) {
+            throw new \InvalidArgumentException('Neplatný směr skladové alokace.');
+        }
         $result = [];
-        foreach ($this->tracking->allocationsForLine($supplierId, $lineId) as $allocation) {
+        foreach ($this->tracking->allocationsForLines($supplierId, $lineIds) as $lineId => $allocations) {
+            $canonical = self::canonicalAllocations($allocations, $direction);
+            if ($canonical !== []) {
+                $result[$lineId] = $canonical;
+            }
+        }
+        return $result;
+    }
+
+    private static function canonicalAllocations(array $allocations, ?string $direction): array
+    {
+        $result = [];
+        foreach ($allocations as $allocation) {
             if ($direction !== null && $allocation['direction'] !== $direction) continue;
             $result[] = [
                 'stock_tracking_unit_id' => (int) $allocation['stock_tracking_unit_id'],

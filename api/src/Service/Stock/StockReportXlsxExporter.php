@@ -114,6 +114,42 @@ final class StockReportXlsxExporter
     }
 
     /**
+     * @param array<string,mixed> $data výstup StockValueTrendService::result()
+     * @return array{bytes:string, filename:string, mime:string}
+     */
+    public function valueTrend(array $data): array
+    {
+        $dates = $data['dates'];
+        $ss = new Spreadsheet();
+        $sheet = $ss->getActiveSheet();
+        $sheet->setTitle('Vývoj hodnoty zásob');
+        $parentName = $data['parent']['name'] ?? null;
+        $sheet->setCellValue('A1', 'Vývoj hodnoty zásob' . ($parentName !== null ? ': ' . $parentName : ''));
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        $cols = count($dates) + 1;
+        $head = 3;
+        $this->headerRow($sheet, $head, ['Kategorie', ...array_map(fn (string $d): string => $this->czDate($d), $dates)]);
+        $r = $head + 1;
+        foreach ($data['groups'] as $group) {
+            $sheet->setCellValueExplicit([1, $r], self::valuationGroupLabel($group, $data['parent'] ?? null), DataType::TYPE_STRING);
+            foreach ($dates as $i => $d) {
+                $sheet->setCellValue([$i + 2, $r], (float) $group['values'][$d]);
+            }
+            $r++;
+        }
+        $sheet->setCellValue([1, $r], 'CELKEM');
+        foreach ($dates as $i => $d) {
+            $sheet->setCellValue([$i + 2, $r], (float) $data['totals'][$d]['value_total']);
+        }
+        $this->boldRow($sheet, $r, $cols);
+        $this->finishTable($sheet, $head, $r, $cols, 2);
+        $sheet->getStyle([2, $head + 1, $cols, $r])->getNumberFormat()->setFormatCode('#,##0.00');
+        $sheet->setCellValue([1, $r + 2], self::VALUATION_GROUPS_NOTE);
+
+        return $this->out($ss, 'vyvoj-hodnoty-zasob-' . $dates[0] . '-' . end($dates) . '.xlsx');
+    }
+
+    /**
      * @param array<string,mixed> $data výstup StockHistoryImportService::endState()
      * @return array{bytes:string, filename:string, mime:string}
      */

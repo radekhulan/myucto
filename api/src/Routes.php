@@ -713,6 +713,7 @@ final class Routes
         $app->post   ('/api/invoices/{id:[0-9]+}/attachment-check/acknowledge', [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'acknowledgeInvoice']);
         // Epic SKLAD (§7.3 Detail FV) — výdejky/vratky vzniklé k této faktuře.
         $app->get    ('/api/invoices/{id:[0-9]+}/stock-documents', [\MyInvoice\Action\Stock\StockDocumentAction::class, 'forInvoice']);
+        $app->get    ('/api/invoices/{id:[0-9]+}/source-receipts', [\MyInvoice\Action\Stock\StockDocumentAction::class, 'sourceReceipts']);
         $app->put    ('/api/invoices/{id:[0-9]+}',  UpdateInvoiceAction::class);
         $app->delete ('/api/invoices/{id:[0-9]+}',  DeleteInvoiceAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/issue',     IssueInvoiceAction::class);
@@ -4475,6 +4476,7 @@ final class Routes
             $g->post  ('/documents/{id:[0-9]+}/post',   [\MyInvoice\Action\Stock\StockDocumentAction::class, 'post']);
             $g->post  ('/documents/{id:[0-9]+}/reverse',[\MyInvoice\Action\Stock\StockDocumentAction::class, 'reverse']);
             $g->get   ('/documents/{id:[0-9]+}/pdf',    [\MyInvoice\Action\Stock\StockDocumentAction::class, 'pdf']);
+            $g->post  ('/documents/{id:[0-9]+}/invoice', [\MyInvoice\Action\Stock\ReceiptInvoiceAction::class, 'create']);
 
             $g->post  ('/opening-import/sources',       [\MyInvoice\Action\Stock\OpeningStockImportAction::class, 'upload']);
             $g->get   ('/opening-import/sources/{id:[0-9]+}/sample', [\MyInvoice\Action\Stock\OpeningStockImportAction::class, 'sample']);
@@ -4532,6 +4534,10 @@ final class Routes
             $g->get   ('/reports/valuation-jobs/{id:[0-9]+}', [\MyInvoice\Action\Stock\StockReportAction::class, 'valuationJobResult']);
             $g->get   ('/reports/valuation-jobs/{id:[0-9]+}/status', [\MyInvoice\Action\Stock\StockReportAction::class, 'valuationJobStatus']);
             $g->post  ('/reports/valuation-jobs/{id:[0-9]+}/cancel', [\MyInvoice\Action\Stock\StockReportAction::class, 'cancelValuationJob']);
+            $g->post  ('/reports/value-trend-jobs',       [\MyInvoice\Action\Stock\StockReportAction::class, 'createValueTrendJob']);
+            $g->get   ('/reports/value-trend-jobs/{id:[0-9]+}', [\MyInvoice\Action\Stock\StockReportAction::class, 'valueTrendJobResult']);
+            $g->get   ('/reports/value-trend-jobs/{id:[0-9]+}/status', [\MyInvoice\Action\Stock\StockReportAction::class, 'valueTrendJobStatus']);
+            $g->post  ('/reports/value-trend-jobs/{id:[0-9]+}/cancel', [\MyInvoice\Action\Stock\StockReportAction::class, 'cancelValueTrendJob']);
             $g->get   ('/reports/{name}/export',          [\MyInvoice\Action\Stock\StockReportAction::class, 'export']);
         });
 

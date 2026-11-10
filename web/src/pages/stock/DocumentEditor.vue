@@ -9,15 +9,16 @@ import {
 } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { formatUnitPrice } from '@/composables/useFormat'
+import { formatMoney, formatUnitPrice, statusBadgeClass, statusLabel } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import { codebooksApi, type Unit } from '@/api/codebooks'
 import { useUnitDecimals } from '@/composables/useUnitDecimals'
 import InsufficientStockDialog from '@/components/stock/InsufficientStockDialog.vue'
+import ReceiptInvoiceModal from '@/components/stock/ReceiptInvoiceModal.vue'
 import { insufficientStockItems, type InsufficientStockItem } from '@/components/stock/insufficientStock'
 
 const { t } = useI18n()
@@ -51,6 +52,8 @@ interface LineRow {
   // H2: vazba na PF řádek (načtená příjemka) — MUSÍ se přenášet zpět, jinak update
   // vynuluje remaining-qty / over-receipt / „Přijato X/Y" / PF-changed warning.
   purchase_invoice_item_id: number | null
+  remember_seller_code: boolean
+  fill_intrastat: boolean
   source_description: string | null
   source_qty: string | null
   tracking_mode: StockTrackingMode
@@ -60,7 +63,7 @@ interface LineRow {
 function blankLine(): LineRow {
   return {
     stock_item_id: null, qty: '1', unit_cost: '', extra_cost: '', note: '', unit: '', option: null,
-    purchase_invoice_item_id: null, source_description: null, source_qty: null,
+    purchase_invoice_item_id: null, remember_seller_code: false, fill_intrastat: false, source_description: null, source_qty: null,
     tracking_mode: 'none', tracking_allocations: [], tracking_units: [],
   }
 }
@@ -121,6 +124,7 @@ const rowOptions = reactive<Record<number, { value: number; label: string; secon
 const rowLoading = reactive<Record<number, boolean>>({})
 const itemsCache = new Map<number, StockItemSearchResult>()
 
+const invoiceOpen = ref(false)
 const isPosted = computed(() => doc.value?.status === 'posted')
 const isReversed = computed(() => doc.value?.status === 'reversed')
 /** Převzatý doklad (import historie skladu): storno backend odmítne, opravuje se vrácením importu. */
@@ -217,6 +221,8 @@ async function loadDocument() {
         unit: l.unit ?? '',
         option: l.sku ? { value: l.stock_item_id, label: `${l.sku} - ${l.name}`, secondary: l.unit } : null,
         purchase_invoice_item_id: l.purchase_invoice_item_id ?? null,
+        remember_seller_code: l.remember_seller_code === true,
+        fill_intrastat: l.fill_intrastat === true,
         source_description: l.source_description ?? null,
         source_qty: l.source_qty != null ? String(l.source_qty) : null,
         tracking_mode: l.tracking_mode ?? 'none',
@@ -289,6 +295,8 @@ function buildPayload(): StockDocumentPayload {
         extra_cost: isReceipt.value && totalExtraH > 0 ? (totalExtraH / 100).toFixed(2) : undefined,
         // H2: per-řádek vazba na PF řádek — backend validateBody je čte, replaceLines uloží.
         purchase_invoice_item_id: l.purchase_invoice_item_id ?? undefined,
+        remember_seller_code: l.remember_seller_code || undefined,
+        fill_intrastat: l.fill_intrastat || undefined,
         source_description: l.source_description ?? undefined,
         source_qty: l.source_qty ?? undefined,
         note: l.note.trim() || undefined,
@@ -329,6 +337,8 @@ async function saveDraft() {
       doc.value = await stockApi.createDocument(payload)
       router.replace(`/stock/documents/${doc.value.id}`)
     }
+    // Částky už jsou v extra_cost řádků, další uložení by je přičetlo znovu.
+    landedCosts.value = []
     toast.success(t('common.saved'))
     await loadDocument()
   } catch (e: any) {
@@ -406,6 +416,11 @@ const actions = computed<ActionItem[]>(() => [
   {
     key: 'print', label: t('stock.documents.print_pdf'), icon: 'download', tier: 'secondary', variant: 'neutral',
     show: !!docId.value, run: () => window.open(stockApi.documentPdfUrl(docId.value!), '_blank', 'noopener'),
+  },
+  {
+    // Jen zaúčtovaná: API koncept příjemky odmítne.
+    key: 'invoice', label: t('stock.receipt_invoice.action'), icon: 'doc', tier: 'secondary', variant: 'neutral',
+    show: auth.canWrite('stock.documents.write') && auth.canWrite('invoices.create') && isPosted.value && isReceipt.value, run: () => { invoiceOpen.value = true },
   },
   {
     key: 'reverse', label: t('stock.documents.cancel'), icon: 'uturn', tier: 'overflow', variant: 'danger',
@@ -549,6 +564,20 @@ onMounted(async () => {
               <p v-if="!isReceipt && row.stock_item_id" class="text-xs mt-0.5 text-neutral-400">
                 {{ t('stock.documents.col_available') }}: {{ rowAvailability(row) }}
               </p>
+              <div v-if="row.remember_seller_code && !readOnly" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
+                <span>{{ t('stock.receipt.remember_line_note') }}</span>
+                <button type="button" :class="btnOutlineSm('neutral')" @click="row.remember_seller_code = false">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                  {{ t('stock.receipt.remember_line_cancel') }}
+                </button>
+              </div>
+              <div v-if="row.fill_intrastat && !readOnly" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
+                <span>{{ t('stock.receipt.intrastat_line_note') }}</span>
+                <button type="button" :class="btnOutlineSm('neutral')" @click="row.fill_intrastat = false">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                  {{ t('stock.receipt.intrastat_line_cancel') }}
+                </button>
+              </div>
             </div>
             <div class="sm:col-span-2">
               <label class="block text-xs font-medium text-neutral-500 mb-1 sm:hidden">{{ t('stock.documents.col_qty') }}</label>
@@ -566,8 +595,8 @@ onMounted(async () => {
               <!-- Rozpuštěné vedlejší náklady jsou na řádku už uložené, ale sekce
                    níž se při načtení dokladu neplní. Bez tohohle řádku uživatel
                    nevidí, že tam nějaká částka je, a další náklad přičte navrch. -->
-              <p v-if="isReceipt && Number(row.extra_cost) > 0" class="text-xs mt-0.5 text-right text-neutral-500 font-mono">
-                {{ t('stock.documents.extra_cost_allocated') }}: {{ row.extra_cost }}
+              <p v-if="isReceipt && Number(row.extra_cost) > 0" class="text-xs mt-0.5 text-right text-neutral-500">
+                {{ t('stock.documents.extra_cost_allocated') }}: <span class="whitespace-nowrap">{{ formatMoney(row.extra_cost) }}</span>
               </p>
             </div>
             <div class="sm:col-span-3">
@@ -660,6 +689,26 @@ onMounted(async () => {
           </div>
         </div>
       </div>
+
+      <!-- Vydané faktury vzniklé z řádků příjemky -->
+      <div v-if="auth.canRead('invoices') && doc?.sales_invoices?.length" data-test="receipt-sales-invoices" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
+        <div class="px-5 py-3 border-b border-neutral-200">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.receipt_invoice.list_title') }}</h3>
+        </div>
+        <div class="divide-y divide-neutral-100">
+          <RouterLink v-for="i in doc.sales_invoices" :key="i.invoice_id" :to="`/invoices/${i.invoice_id}`"
+            class="flex flex-wrap items-center justify-between gap-2 px-5 py-2.5 text-sm hover:bg-neutral-50">
+            <span class="flex flex-wrap items-center gap-2">
+              <span class="font-mono text-xs text-neutral-500">{{ i.varsymbol || t('stock.receipt_invoice.draft') }}</span>
+              <span>{{ i.client_name }}</span>
+              <span class="text-xs text-neutral-500">{{ t('stock.receipt_invoice.lines', { lines: i.line_nos.join(', ') }) }}</span>
+            </span>
+            <span class="text-xs px-2 py-0.5 rounded" :class="statusBadgeClass(i.status ?? '')">{{ statusLabel(i.status ?? '') }}</span>
+          </RouterLink>
+        </div>
+      </div>
+
+      <ReceiptInvoiceModal v-if="invoiceOpen && doc" :document="doc" @close="invoiceOpen = false" />
 
       <div v-if="!readOnly" class="flex justify-end">
         <RouterLink to="/stock/documents" class="text-sm text-neutral-500 hover:text-neutral-700">{{ t('common.cancel') }}</RouterLink>

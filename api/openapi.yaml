@@ -23938,6 +23938,10 @@ paths:
                         type:
                         - integer
                         - 'null'
+                      fill_intrastat:
+                        type: boolean
+                        default: false
+                        description: Jen `true` doplní po zaúčtování Intrastat ze zdrojového řádku přijaté faktury na kartu. Při úpravě konceptu se musí poslat znovu. Nastavit ji smí jen token s právem `stock.items.write`, jinak 403 (`stock.error.card_write_forbidden`); bez práva lze jen ponechat volbu, kterou už má stejný řádek faktury se stejnou kartou, nebo ji zrušit.
                       source_description:
                         type:
                         - string
@@ -24084,6 +24088,70 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Nedostatek zásob, otevřená inventura na skladu, nebo uzavřené účetní období.' }
         '422': { description: 'Doklad není draft, nebo je neplatný (chybí sklad/řádky).' }
+  /api/v1/stock/documents/{id}/invoice:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [Stock, Invoices]
+      summary: Koncept vydané faktury z příjemky
+      description: |
+        Z řádků zaúčtované příjemky založí koncept vydané faktury pro odběratele.
+        Nikdy ji nevystaví. Ceny dává stejné nacenění jako `POST /api/v1/stock/items/quote`:
+        individuální cena, cenová hladina odběratele nebo hladina zvolená v `price_level_id`, akce.
+        Ceny jsou bez DPH, měna je výchozí měna odběratele. Sériová čísla a šarže z příjemky se
+        přenesou do `tracking_allocations` řádku, výdejka při vystavení vydá právě ty kusy.
+        Řádek, u kterého se cena nedá určit (`manual_price` nebo karta bez ceny v měně dokladu),
+        dostane cenu 0 a příznak `manual_price`. Dokud má takový řádek cenu 0, faktura se nevystaví
+        (`POST /api/v1/invoices/{id}/issue` vrátí 422 `manual_price_missing`). Opakované vytvoření
+        z týchž řádků s `allow_duplicate` se zapíše do historie činností.
+        Vazbu vidí `sales_invoices` na detailu příjemky a `GET /api/v1/invoices/{id}/source-receipts`.
+
+        Sazba DPH vychází z karty a odběratele: neplátce dostane nulovou sazbu, u plátce se přenesení
+        daně (`reverse_charge`) převezme z karty odběratele, identifikovaná osoba ho má u firmy s DIČ
+        z jiného státu EU (hlavička `vat_classification_code` 22), řádek do OSS dostane sazbu státu spotřeby.
+        Kus, který už není na skladě příjemky (nebo ho drží jiný koncept z téže příjemky), se do
+        `tracking_allocations` nepřevezme. Odpověď pak nese v `_warnings` kód
+        `receipt_tracking_unavailable` a v `_warning_meta` seznam `lines[]` (`line_id`, `line_no`, `sku`,
+        `units[]` s `serial_number`, `lot_code`, `requested`, `available`). Kód
+        `receipt_foreign_client_domestic_vat` hlásí řádky s tuzemskou sazbou u zahraničního odběratele
+        mimo OSS a bez přenesení daně. Chyby faktury odkazují na řádek příjemky: `error.line_id`,
+        `error.items[].line_id`, `error.fields` s klíči `lines.{line_id}.{pole}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id]
+              properties:
+                client_id: { type: integer, format: int64, description: Odběratel. }
+                price_level_id: { type: [integer, 'null'], format: int64, description: Cenová hladina dokladu. Přebije hladinu odběratele. }
+                lines:
+                  type: array
+                  minItems: 1
+                  description: Vybrané řádky příjemky. Bez klíče všechny.
+                  items:
+                    type: object
+                    required: [line_id]
+                    properties:
+                      line_id: { type: integer, format: int64, description: '`lines[].id` z detailu příjemky.' }
+                      manual_price: { type: boolean, default: false, description: Cenu zadá člověk v editoru. Cena 0 a označený řádek. }
+                allow_duplicate: { type: boolean, default: false, description: Založit fakturu i z řádků, ze kterých už nestornovaná faktura vznikla. }
+      responses:
+        '201':
+          description: Založený koncept faktury.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '400': { description: 'Doklad neprošel validací faktury nebo je datum v uzavřeném období.' }
+        '403': { description: Skladový modul není zapnutý nebo chybí právo psát skladové doklady či vytvářet faktury. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: '`stock.error.receipt_already_invoiced`: z vybraných řádků už faktura vznikla, `error.items` je vypíše jako `sales_invoices` na detailu příjemky (znovu s `allow_duplicate`). `stock.error.not_a_receipt`, `stock.error.receipt_not_posted`, `stock.error.receipt_reversed`: doklad není příjemka, není zaúčtovaný nebo je stornovaný.' }
+        '422': { description: 'Chybí odběratel, odběratel nebo hladina nepatří firmě, řádek na příjemce není, karta nemá sazbu DPH, nebo daňové zařazení řádku vyžaduje kontrolu (`stock.error.invoice_tax_review_required`).' }
   /api/v1/stock/documents/{id}/reverse:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -24447,6 +24515,75 @@ paths:
           description: Skupiny tvoří přímé podkategorie této kategorie; bez něj kategorie nejvyšší úrovně.
       responses:
         '200': { description: OK }
+  /api/v1/stock/reports/value-trend-jobs:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Stock]
+      summary: Sestava vývoje hodnoty zásob — spuštění výpočtu na pozadí
+      description: |
+        Ocenění zásob po kategoriích k více datům vedle sebe: konce měsíců od `from`
+        do `to` a samotné `to` (nejvýše 36 dat, jinak 422 na poli `to`). Každé datum
+        se rovná jednodenní sestavě ocenění. Výpočet běží jako úloha na pozadí (stav
+        a průběh viz `/status`). Seskupení po kategoriích se zadá jen žadateli
+        s právem číst katalog.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from]
+              properties:
+                from: { type: string, format: date }
+                to: { type: string, format: date, description: Výchozí dnešní datum. }
+                warehouse_id: { type: integer, minimum: 1 }
+                group_parent_id: { type: integer, minimum: 1, description: Skupiny tvoří přímé podkategorie této kategorie; bez něj kategorie nejvyšší úrovně. }
+      responses:
+        '202': { description: 'Úloha zařazena. `reused: true` = vrácena už existující úloha téhož zadání; `created_by` je id zakladatele (zrušit ji smí jen on, nebo uživatel s právem zápisu do skladu).' }
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /api/v1/stock/reports/value-trend-jobs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    get:
+      tags: [Stock]
+      summary: Sestava vývoje hodnoty zásob — výsledek
+      description: |
+        Dokončený výsledek je snímek (`computed_at`), zůstává čitelný i po dalších
+        pohybech skladu: `dates`, `groups` (hodnoty po datech) a `totals`. Bez práva
+        číst katalog je `groups` prázdné. Před dokončením 409. Přibude-li nebo se změní
+        doklad s datem do posledního data sestavy (u filtru skladu v něm), úloha se
+        sama dvakrát začne od začátku, pak selže s kódem `stock_value_trend_stale`;
+        opakování (retry) začne znovu s nulovým počtem restartů. Stejné zadání nad
+        stejným stavem skladu vrátí už existující úlohu.
+      responses:
+        '200': { description: OK }
+        '404': { description: Výpočet nenalezen }
+        '409': { description: Výpočet ještě není dokončen }
+  /api/v1/stock/reports/value-trend-jobs/{id}/status:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    get:
+      tags: [Stock]
+      summary: Stav a průběh výpočtu vývoje hodnoty zásob
+      responses:
+        '200': { description: OK }
+        '404': { description: Výpočet nenalezen }
+  /api/v1/stock/reports/value-trend-jobs/{id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    post:
+      tags: [Stock]
+      summary: Zrušení výpočtu vývoje hodnoty zásob
+      description: Zrušit smí zakladatel úlohy (stačí čtení skladu), jinak uživatel s právem zápisu do skladu (403).
+      responses:
+        '200': { description: OK }
+        '404': { description: Výpočet nenalezen }
+        '409': { description: Úlohu již nelze zrušit }
   /api/v1/stock/reports/sales:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -24515,12 +24652,13 @@ paths:
         enum:
         - status
         - valuation
+        - value-trend
         - sales
     get:
       tags:
       - Stock
       summary: Export sestavy (PDF/XLSX)
-      description: Export sestavy `status` nebo `valuation` (PDF i XLSX) a `sales` (jen
+      description: Export sestavy `status`, `valuation` nebo `value-trend` (PDF i XLSX) a `sales` (jen
         XLSX, nejvýše 20 000 řádků; vyžaduje i čtení vydaných faktur). Filtry jsou
         stejné jako u dat sestavy.
       parameters:
@@ -24586,7 +24724,7 @@ paths:
         description: Jen u sestavy valuation.
       - in: query
         name: job_id
-        description: Dokončená úloha ocenění; exportuje její výsledek a rozhodné datum.
+        description: Dokončená úloha ocenění; exportuje její výsledek a rozhodné datum. U sestavy value-trend povinné, dokončený výpočet z `/stock/reports/value-trend-jobs`.
         schema:
           type: integer
           minimum: 1
@@ -26121,6 +26259,25 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/StockDocument' }
         '403': { description: Skladový modul není u tohoto dodavatele zapnutý nebo token nemá právo číst sklad. }
+  /api/v1/invoices/{id}/source-receipts:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Invoices, Stock]
+      summary: Příjemky, ze kterých faktura vznikla
+      responses:
+        '200':
+          description: Příjemky s vazbou na tuto fakturu.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StockDocument' }
+        '403': { description: Skladový modul není u tohoto dodavatele zapnutý nebo token nemá právo číst sklad. }
   /api/v1/invoices/{id}/book:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -26234,6 +26391,16 @@ paths:
       tags: [Purchase invoices, Stock]
       summary: Návrh příjemky ke skladovým položkám přijaté faktury
       description: Vrací, co zbývá přijmout na sklad, navrhované pořizovací ceny a kandidáty vedlejších nákladů.
+      parameters:
+        - in: query
+          name: stock_item_ids
+          required: false
+          style: deepObject
+          explode: true
+          description: "Karta vybraná pro řádek faktury, `stock_item_ids[<purchase_invoice_item_id>]=<stock_item_id>`. Řádek se pak vrátí v `lines` se zbytkem a cenou přepočtenými podle balení této karty."
+          schema:
+            type: object
+            additionalProperties: { type: integer, format: int64 }
       responses:
         '200':
           description: Návrh příjemky nebo prázdný návrh pro druh dokladu, ze kterého příjemku nelze vytvořit.
@@ -26258,9 +26425,9 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StockDocument' }
-        '403': { description: Skladový modul není u tohoto dodavatele zapnutý nebo token nemá právo zapisovat do skladu. }
+        '403': { description: "Skladový modul není u tohoto dodavatele zapnutý, token nemá právo zapisovat do skladu, nebo řádek žádá uložení kódu nebo doplnění Intrastatu na kartu bez práva `stock.items.write` (kód chyby `stock.error.card_write_forbidden`)." }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: Požadované množství překračuje dosud nepřijaté množství. }
+        '409': { description: "Požadované množství překračuje dosud nepřijaté množství (`stock.error.over_receipt`), nebo se řádek faktury už přijímá na jinou kartu (`stock.error.receipt_card_mismatch`)." }
         '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/purchase-invoices/{id}/stock-receipts:
     parameters:
@@ -43359,6 +43526,8 @@ components:
         invoice_item_id: { type: [integer, 'null'], format: int64 }
         purchase_invoice_item_id: { type: [integer, 'null'], format: int64 }
         purchase_order_line_id: { type: [integer, 'null'], format: int64 }
+        remember_seller_code: { type: boolean, description: "Po zaúčtování uloží kód z řádku faktury ke kartě. Při úpravě konceptu pošlete zpět, jinak se volba zruší." }
+        fill_intrastat: { type: boolean, description: "Po zaúčtování příjemky doplnit Intrastat ze zdrojového řádku přijaté faktury na kartu, pokud tam chybí." }
         source_description: { type: [string, 'null'] }
         source_qty: { type: [string, 'null'] }
         line_no: { type: integer }
@@ -43410,6 +43579,19 @@ components:
         lines:
           type: array
           items: { $ref: '#/components/schemas/StockDocumentLine' }
+        sales_invoices:
+          type: array
+          readOnly: true
+          description: Jen na detailu příjemky. Vydané faktury vzniklé z jejích řádků, novější první. Bez práva číst faktury jen `line_nos` nestornovaných faktur.
+          items:
+            type: object
+            required: [line_nos]
+            properties:
+              invoice_id: { type: integer, format: int64 }
+              varsymbol: { type: [string, 'null'] }
+              status: { type: string }
+              client_name: { type: [string, 'null'] }
+              line_nos: { type: array, items: { type: integer }, description: Čísla řádků příjemky. }
         warnings:
           type: array
           items: { type: string }
@@ -43417,6 +43599,16 @@ components:
       type: object
       required: [purchase_invoice_item_id, stock_item_id, description, quantity, already_received, remaining_qty, unit_cost]
       properties:
+        order_index: { type: integer, description: "Pořadí řádku na faktuře." }
+        vendor_code_cards:
+          type: array
+          description: "Karty, u kterých má dodavatel kód z tohoto řádku uložený. Zapamatování kódu k jiné kartě jim ho odebere."
+          items:
+            type: object
+            properties:
+              id: { type: integer, format: int64 }
+              sku: { type: string }
+              name: { type: string }
         purchase_invoice_item_id: { type: integer, format: int64 }
         purchase_order_line_id: { type: [integer, 'null'], format: int64 }
         stock_item_id: { type: [integer, 'null'], format: int64 }
@@ -43425,6 +43617,11 @@ components:
         already_received: { type: string }
         remaining_qty: { type: string }
         unit_cost: { type: string }
+        seller_item_code: { type: [string, 'null'], description: "Kód položky dodavatele z řádku faktury." }
+        intrastat_cn8_code: { type: [string, 'null'], description: "Kód KN8 z řádku faktury. Na kartu se doplní jen s volbou `fill_intrastat` v `StockReceiptCreate`." }
+        intrastat_country_of_origin: { type: [string, 'null'], description: "Země původu z řádku faktury. Na kartu se doplní jen s volbou `fill_intrastat` v `StockReceiptCreate`." }
+        matched_stock_item_id: { type: [integer, 'null'], format: int64, description: "Karta spárovaná podle kódu. Může se lišit od `stock_item_id`, když je karta na řádku faktury přiřazená ručně. U návrhu (`match_source` sku nebo code_ean) je řádek v `unmatched_lines` se `stock_item_id` null: kartu potvrďte výslovným `lines[].stock_item_id` v POST." }
+        match_source: { type: [string, 'null'], enum: [vendor_sku, ean, sku, code_ean, null], description: "Podle čeho se karta spárovala. Samo se použije jen `vendor_sku` (kód dodavatele u karty) a `ean` (platný EAN z pole EAN řádku). `sku` (kód karty) a `code_ean` (kód řádku je platný EAN) jsou jen návrh." }
     StockReceiptCostCandidate:
       type: object
       required: [purchase_invoice_item_id, description, amount]
@@ -43450,6 +43647,10 @@ components:
             lines:
               type: array
               items: { $ref: '#/components/schemas/StockReceiptProposalLine' }
+            unmatched_lines:
+              type: array
+              description: Řádky s kódem bez karty použitelné samy, včetně návrhů podle kódu karty (`match_source` sku nebo code_ean, karta v `matched_stock_item_id`). Do příjemky jdou jen s výslovně zadaným `stock_item_id`. Stejné řádky jsou i v `cost_candidates`.
+              items: { $ref: '#/components/schemas/StockReceiptProposalLine' }
             cost_candidates:
               type: array
               items: { $ref: '#/components/schemas/StockReceiptCostCandidate' }
@@ -43459,6 +43660,7 @@ components:
           properties:
             purchase_invoice_id: { type: integer, format: int64 }
             lines: { type: array, maxItems: 0 }
+            unmatched_lines: { type: array, maxItems: 0 }
             cost_candidates: { type: array, maxItems: 0 }
             not_receivable_kind: { type: string, enum: [advance, tax_document, credit_note] }
     StockReceiptCreate:
@@ -43478,7 +43680,15 @@ components:
               purchase_invoice_item_id: { type: integer, format: int64 }
               stock_item_id: { type: integer, format: int64 }
               quantity: { type: [string, number] }
-              unit_cost: { type: [string, number, 'null'] }
+              unit_cost: { type: [string, number, 'null'], description: "Pořizovací cena za základní jednotku zvolené karty. Bez hodnoty ji server spočítá z řádku faktury podle balení zvolené karty." }
+              fill_intrastat:
+                type: boolean
+                default: false
+                description: "Jen `true` doplní po zaúčtování příjemky kód KN8 a zemi původu z řádku faktury na kartu, pokud tam chybí; existující hodnotu nepřepíše. Volbu smí poslat jen token s právem `stock.items.write`, jinak se požadavek odmítne se stavem 403 a příjemka nevznikne. Stejné právo musí mít i ten, kdo příjemku zaúčtuje: bez něj se příjemka zaúčtuje, karta se nezmění a odpověď zaúčtování to uvede ve `warnings`. Zápis je v logu aktivit."
+              remember_seller_code:
+                type: boolean
+                default: false
+                description: "Jen `true`: po zaúčtování příjemky uloží kód z řádku faktury ke kartě pro tohoto dodavatele a odebere ho z jeho ostatních karet. Nastavit vyžaduje právo `stock.items.write`, bez něj se požadavek odmítne se stavem 403 a příjemka nevznikne. Zaúčtuje-li koncept někdo bez tohoto práva, příjemka se zaúčtuje, karta se nezmění a odpověď nese varování. Zápis je v logu aktivit."
         landed_costs:
           type: array
           items:
@@ -50874,6 +51084,7 @@ components:
         unit_price_without_vat: { type: number, format: double, description: "Jednotková cena bez DPH, až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech). Může být záporná pro slevový řádek." }
         list_unit_price: { type: [number, "null"], format: double, description: "Ceníková cena za jednotku před slevou, ve stejném základu jako `unit_price_without_vat` (v režimu „ceny s DPH\" brutto). Informační údaj, částky dokladu z ní nevychází. NULL = neznámá." }
         line_discount_pct: { type: [number, "null"], format: double, description: "Sleva z ceníkové ceny v % (3 desetinná místa), dopočtená serverem z `list_unit_price` a `unit_price_without_vat`. Záporná = přirážka. NULL = bez slevy. S hlavičkovou slevou `discount_percent` nesouvisí." }
+        manual_price: { type: boolean, description: "Cenu řádku má zadat člověk (cena je zatím 0). Zhasne s první nenulovou cenou." }
         vat_rate_id: { type: integer, description: "FK do /codebooks/vat-rates (kontextově k supplierovi)" }
         vat_rate_snapshot:
           type: number
@@ -50952,6 +51163,7 @@ components:
         unit: { type: string, default: "ks", description: "Kód jednotky, s číselníkem `/codebooks/units` se páruje bez ohledu na velikost písmen." }
         unit_price_without_vat: { type: number, format: double, description: "Jednotková cena BEZ DPH, až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech). Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
         list_unit_price: { type: [number, "null"], format: double, description: "Volitelná ceníková cena za jednotku před slevou, ve stejném základu jako `unit_price_without_vat`. Kladné číslo, jinak se uloží NULL. Server z ní dopočítá `line_discount_pct`, poslané procento ignoruje. Při úpravě dokladu ji pošlete znovu (GET ji vrací), jinak se smaže." }
+        manual_price: { type: boolean, default: false, description: "Cenu řádku zadá člověk: koncept smí být zatím nulový, editor řádek označí. Uloží se jen u konceptu s cenou 0. Vystavení řádek s příznakem a cenou 0 odmítne (`manual_price_missing`). Při úpravě dokladu ho pošlete znovu." }
         vat_rate_id: { type: integer, description: "FK do /codebooks/vat-rates (kontextově k supplierovi)" }
         order_index: { type: integer, description: "Pořadí v rámci faktury. Default = pozice v poli." }
         vat_classification_code: { type: [string, "null"], description: "Volitelný kód klasifikace plnění (DPH přiznání / KH). Když nevyplněno, server dopočítá default podle sazby + reverse charge + země klienta." }
@@ -51375,6 +51587,10 @@ components:
           description: "Předkontace řádku (klíč z /accounting/posting-rules). Doplní nákladový účet a protiúčet, které řádek sám nemá; vyplněný účet má přednost."
         accrual_from: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381): začátek období, do kterého náklad řádku patří. NULL = bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Konec období nákladu řádku. Část nákladu za koncem účetního období odloží uzávěrka na 381." }
+        seller_item_code: { type: [string, "null"], maxLength: 80, description: "Kód položky dodavatele z dokladu. Podle něj se řádek v návrhu příjemky páruje se skladovou kartou." }
+        item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží z dokladu (jen číslice v délce 8, 12, 13 nebo 14), použije se při párování se skladovou kartou." }
+        intrastat_cn8_code: { type: [string, "null"], minLength: 8, maxLength: 8, description: "Kód KN8 z dokladu. Příjemka ho doplní na kartu, pokud tam chybí." }
+        intrastat_country_of_origin: { type: [string, "null"], minLength: 2, maxLength: 2, description: "Země původu (ISO alpha-2) z dokladu. Příjemka ji doplní na kartu, pokud tam chybí." }
         is_fixed_asset:
           type: boolean
           default: false
@@ -51398,8 +51614,10 @@ components:
 
     PurchaseInvoiceItemPayload:
       type: object
+      description: "Uložení řádků faktury je náhrada celého seznamu (DELETE + INSERT). Pole, která klient nepošle zpět, zaniknou. Výjimkou jsou `stock_item_id`, `seller_item_code`, `item_ean`, `intrastat_cn8_code` a `intrastat_country_of_origin`: chybí-li klíč v položce, která odpovídá uloženému řádku, převezme se uložená hodnota. Řádek se páruje podle `id`, bez něj podle pořadí, ale jen při shodném popisu. Explicitní `null` hodnotu smaže."
       required: [description, quantity, unit_price_without_vat, vat_rate_id]
       properties:
+        id: { type: integer, description: "Volitelné id uloženého řádku (z detailu dokladu). Slouží jen ke spárování pro převzetí vynechaných sloupců; řádek se uloží s novým id." }
         description: { type: string }
         quantity: { type: number }
         duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Volitelná přesná délka v celých minutách. Vyžaduje hodinovou jednotku a prázdný `stock_item_id`; vynecháno/NULL zachová legacy výpočet." }
@@ -51413,6 +51631,10 @@ components:
         expense_account_code: { type: [string, "null"], description: "Vlastní nákladový účet položky; NULL odvodí účet z druhu nákladu." }
         accrual_from: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381) — začátek období. Jen spolu s `accrual_to`; neplatná dvojice se uloží jako bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381) — konec období (včetně)." }
+        seller_item_code: { type: [string, "null"], maxLength: 80, description: "Kód položky dodavatele. Delší kód se nezkracuje, uloží se null. Vynechaný klíč převezme hodnotu uloženého řádku, explicitní `null` kód smaže (viz popis schématu)." }
+        item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží, jen číslice v délce 8, 12, 13 nebo 14, jinak se uloží null. Vynechání a `null` stejně jako u `seller_item_code`." }
+        intrastat_cn8_code: { type: [string, "null"], description: "Kód KN8, tečky se odstraní; co nemá 8 číslic, se neuloží. Vynechání a `null` stejně jako u `seller_item_code`." }
+        intrastat_country_of_origin: { type: [string, "null"], description: "Země původu (ISO alpha-2); jiný tvar se neuloží. Vynechání a `null` stejně jako u `seller_item_code`." }
         stock_item_id:
           type: [integer, "null"]
           description: |
@@ -51420,6 +51642,7 @@ components:
             předvyplnění příjemkového wizardu; skutečný pohyb dělá až příjemka
             (POST /api/purchase-invoices/{id}/stock-receipt). Musí patřit stejnému
             dodavateli, jinak se tiše ignoruje (uloží se NULL).
+            Vynechaný klíč převezme vazbu uloženého řádku, explicitní `null` ji zruší.
 
     AiAssistSettings:
       type: object

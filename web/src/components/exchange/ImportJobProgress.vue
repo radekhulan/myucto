@@ -22,8 +22,11 @@ withDefaults(defineProps<{
    * do jobu nepíše — „0 / 8" by po celou dobu tvrdilo, že se nic neděje.
    */
   showCount?: boolean
+  /** Počty vytvořených, přeskočených a chybných položek; u čistého výpočtu nemají smysl. */
+  showOutcome?: boolean
 }>(), {
   showCount: true,
+  showOutcome: true,
   showCancel: true,
   countsKey: 'imports.job_counts',
   backgroundHintKey: 'imports.job_background_hint',
@@ -65,7 +68,7 @@ const { t } = useI18n()
 
     <div v-if="showCount" class="flex justify-between text-xs text-neutral-600 flex-wrap gap-x-4">
       <span v-if="job.total_items">{{ job.processed }} / {{ job.total_items }}<span v-if="percent !== null"> ({{ percent }} %)</span></span>
-      <span>{{ t(countsKey, { created: job.created_count, changed: job.created_count, skipped: job.skipped_count, failed: job.failed_count }) }}</span>
+      <span v-if="showOutcome">{{ t(countsKey, { created: job.created_count, changed: job.created_count, skipped: job.skipped_count, failed: job.failed_count }) }}</span>
     </div>
 
     <p class="text-xs text-neutral-500">{{ t(backgroundHintKey) }}</p>

@@ -1176,7 +1176,12 @@
         "2270_payroll_posting_granularity.sql",
         "2271_payroll_statutory_nonpartner_account.sql",
         "2272_accounting_period_lock_permission.sql",
-        "2273_vat_classification_71i_line26.sql"
+        "2273_vat_classification_71i_line26.sql",
+        "2274_stock_receipt_invoice_links.sql",
+        "2275_purchase_invoice_item_codes.sql",
+        "2276_stock_item_match_indexes.sql",
+        "2277_purchase_invoice_item_intrastat.sql",
+        "2278_stock_documents_updated_index.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7220,6 +7225,7 @@
                 "line_discount_pct": "decimal(7,3) NULL DEFAULT NULL",
                 "linked_work_report_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "list_unit_price": "decimal(16,6) NULL DEFAULT NULL",
+                "manual_price": "tinyint(1) NOT NULL DEFAULT 0",
                 "order_index": "int(11) NOT NULL DEFAULT 0",
                 "oss_applicable": "tinyint(1) NOT NULL DEFAULT 0",
                 "oss_consumer_country": "char(2) NULL DEFAULT NULL",
@@ -23283,12 +23289,16 @@
                 "import_tax_base_czk": "decimal(12,2) NULL DEFAULT NULL",
                 "import_tax_excluded": "tinyint(1) NOT NULL DEFAULT 0",
                 "import_tax_vat_czk": "decimal(12,2) NULL DEFAULT NULL",
+                "intrastat_cn8_code": "char(8) NULL DEFAULT NULL",
+                "intrastat_country_of_origin": "char(2) NULL DEFAULT NULL",
                 "is_fixed_asset": "tinyint(1) NOT NULL DEFAULT 0",
+                "item_ean": "varchar(20) NULL DEFAULT NULL",
                 "order_index": "int(11) NOT NULL DEFAULT 0",
                 "posting_rule_key": "varchar(64) NULL DEFAULT NULL",
                 "purchase_invoice_id": "bigint(20) unsigned NOT NULL",
                 "purchase_order_line_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "quantity": "decimal(10,3) NOT NULL DEFAULT 1.000",
+                "seller_item_code": "varchar(80) NULL DEFAULT NULL",
                 "stock_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "total_vat": "decimal(12,2) NOT NULL DEFAULT 0.00",
                 "total_with_vat": "decimal(12,2) NOT NULL DEFAULT 0.00",
@@ -25250,6 +25260,7 @@
                 "doc_date": "date NULL DEFAULT NULL",
                 "document_id": "bigint(20) unsigned NOT NULL",
                 "extra_cost": "decimal(15,2) NOT NULL DEFAULT 0.00",
+                "fill_intrastat": "tinyint(1) NOT NULL DEFAULT 0",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "invoice_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "ledger_booked_at": "timestamp NULL DEFAULT NULL",
@@ -25258,6 +25269,7 @@
                 "purchase_invoice_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "purchase_order_line_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "qty": "decimal(14,3) NOT NULL",
+                "remember_seller_code": "tinyint(1) NOT NULL DEFAULT 0",
                 "source_description": "varchar(500) NULL DEFAULT NULL",
                 "source_qty": "decimal(14,3) NULL DEFAULT NULL",
                 "stock_item_id": "bigint(20) unsigned NOT NULL",
@@ -25328,6 +25340,7 @@
                 "idx_sd_po": "BTREE (purchase_order_id)",
                 "idx_sd_reversal": "BTREE (reversal_document_id)",
                 "idx_sd_supplier_status": "BTREE (supplier_id, status, doc_date)",
+                "idx_sd_supplier_updated": "BTREE (supplier_id, updated_at)",
                 "idx_sd_warehouse_date": "BTREE (warehouse_id, doc_date)",
                 "uq_sd_supplier_id": "UNIQUE BTREE (supplier_id, id)",
                 "uq_sd_supplier_number": "UNIQUE BTREE (supplier_id, doc_number)"
@@ -25722,6 +25735,7 @@
                 "idx_siv_offer": "BTREE (supplier_id, is_active, availability_state)",
                 "idx_siv_staleness": "BTREE (supplier_id, stock_qty_updated_at)",
                 "idx_siv_supplier": "BTREE (supplier_id)",
+                "idx_siv_vendor_sku": "BTREE (supplier_id, client_id, vendor_sku)",
                 "uq_siv_item_client": "UNIQUE BTREE (stock_item_id, client_id)"
             },
             "foreign_keys": {
@@ -25777,6 +25791,7 @@
                 "idx_si_export": "BTREE (supplier_id, export_eshop, item_type)",
                 "idx_si_manufacturer": "BTREE (manufacturer_id)",
                 "idx_si_supplier_active": "BTREE (supplier_id, is_active, item_type)",
+                "idx_si_supplier_ean": "BTREE (supplier_id, ean)",
                 "idx_si_supplier_lifecycle": "BTREE (supplier_id, lifecycle_status, is_active)",
                 "idx_si_supplier_name": "BTREE (supplier_id, name)",
                 "uq_si_supplier_id": "UNIQUE BTREE (supplier_id, id)",
@@ -26071,6 +26086,30 @@
             "checks": {
                 "chk_spr_match": "`match_type` = 'default' and `match_id` is null or `match_type` <> 'default' and `match_id` is not null and `match_id` > 0"
             }
+        },
+        "stock_receipt_invoice_links": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "document_id": "bigint(20) unsigned NOT NULL",
+                "invoice_id": "bigint(20) unsigned NOT NULL",
+                "line_no": "int(10) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, document_id, line_no, invoice_id)",
+                "fk_stock_receipt_invoice_document": "BTREE (document_id)",
+                "fk_stock_receipt_invoice_invoice": "BTREE (invoice_id)",
+                "ix_stock_receipt_invoice_tenant": "BTREE (supplier_id, invoice_id)"
+            },
+            "foreign_keys": {
+                "fk_stock_receipt_invoice_document": "(document_id) -> stock_documents (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_stock_receipt_invoice_invoice": "(invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_stock_receipt_invoice_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "stock_tags": {
             "type": "BASE TABLE",

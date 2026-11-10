@@ -32,6 +32,7 @@ use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatment;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatmentConflict;
+use MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns;
 use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
 use MyInvoice\Service\Vat\PurchaseFiledVatPeriod;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
@@ -394,7 +395,11 @@ final class UpdatePurchaseInvoiceAction
             // vědomá položka smíšeného dokladu, ne pozůstatek z doby před zatržením.
             $keepDomesticItemCodes = (bool) ($existing['reverse_charge'] ?? false);
             if (DocumentItemsPayload::replaces($body)) {
-                $this->repo->replaceItems($id, (array) $body['items'], $keepDomesticItemCodes);
+                $this->repo->replaceItems(
+                    $id,
+                    StoredPurchaseItemColumns::carryOver((array) $body['items'], (array) ($existing['items'] ?? [])),
+                    $keepDomesticItemCodes,
+                );
             } else {
                 // Zatržení přenesené povinnosti nebo změna kódu v hlavičce bez položek
                 // v těle musí srovnat i tuzemské kódy uložených řádků (issue #119).

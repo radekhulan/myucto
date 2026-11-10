@@ -151,6 +151,16 @@ final class UpdateInvoiceAction
         // plnění (OSS klíč je vyplněný, karta prázdná).
         if (isset($body['items']) && is_array($body['items'])) {
             $body['items'] = InvoiceItemKind::normalizeItems($body['items']);
+            // Příznak „cenu zadá člověk" patří jen konceptu: u vystavené faktury by obešel
+            // kontrolu kladné částky ({@see \MyInvoice\Service\Validation\InvoiceAmountPolicy}).
+            if ($existing['status'] !== 'draft') {
+                $body['items'] = array_map(static function (mixed $item): mixed {
+                    if (is_array($item)) {
+                        unset($item['manual_price']);
+                    }
+                    return $item;
+                }, $body['items']);
+            }
         }
 
         // Částečný PUT (#113): vynechaný klíč = uložená hodnota, ne default nového dokladu.

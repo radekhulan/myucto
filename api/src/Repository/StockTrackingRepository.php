@@ -167,7 +167,26 @@ final class StockTrackingRepository
         return array_map($this->castAllocation(...), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    public function balance(int $supplierId, int $unitId, ?int $warehouseId = null, ?int $locationId = null, bool $allLocations = false): int
+    /**
+     * @param list<int> $lineIds
+     * @return array<int,list<array<string,mixed>>> řádek => alokace v pořadí podle id
+     */
+    public function allocationsForLines(int $supplierId, array $lineIds): array
+    {
+        if ($lineIds === []) {
+            return [];
+        }
+        $in = implode(',', array_fill(0, count($lineIds), '?'));
+        $stmt = $this->db->pdo()->prepare("SELECT a.*, u.stock_item_id, u.tracking_type, u.lot_code, u.serial_number, u.expires_on FROM stock_tracking_allocations a JOIN stock_tracking_units u ON u.id = a.stock_tracking_unit_id AND u.supplier_id = a.supplier_id WHERE a.supplier_id = ? AND a.stock_document_line_id IN ($in) ORDER BY a.id");
+        $stmt->execute([$supplierId, ...$lineIds]);
+        $out = [];
+        foreach (array_map($this->castAllocation(...), $stmt->fetchAll(PDO::FETCH_ASSOC)) as $allocation) {
+            $out[(int) $allocation['stock_document_line_id']][] = $allocation;
+        }
+        return $out;
+    }
+
+    public function balance(int $supplierId, int $unitId,?int $warehouseId = null, ?int $locationId = null, bool $allLocations = false): int
     {
         $sql = "SELECT COALESCE(SUM(CASE WHEN a.direction = 'in' THEN a.quantity ELSE -a.quantity END), 0) FROM stock_tracking_allocations a JOIN stock_document_lines l ON l.id = a.stock_document_line_id AND l.supplier_id = a.supplier_id JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id WHERE a.supplier_id = ? AND a.stock_tracking_unit_id = ? AND d.status IN ('draft','posted','reversed')";
         $params = [$supplierId, $unitId];
@@ -195,6 +214,35 @@ final class StockTrackingRepository
             $row['quantity'] = (string) $row['quantity'];
             return $row;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Zásoba kusů více karet ve skladu jedním dotazem, sečtená přes umístění s kladným
+     * stavem (stejně jako součet {@see stockByKeys()}). Klíče se párují bez ohledu na
+     * velikost písmen.
+     *
+     * @param array<int,list<string>> $keysByItem karta => klíče `serial:…` / `lot:…|…`
+     * @return array<int,array<string,int>> karta => klíč malými písmeny => množství v tisícinách
+     */
+    public function stockByItemKeys(int $supplierId, int $warehouseId, array $keysByItem): array
+    {
+        $keysByItem = array_filter($keysByItem, static fn (array $keys): bool => $keys !== []);
+        if ($keysByItem === []) {
+            return [];
+        }
+        $itemIds = array_keys($keysByItem);
+        $keys = array_values(array_unique(array_merge(...array_values($keysByItem))));
+        $itemIn = implode(',', array_fill(0, count($itemIds), '?'));
+        $keyIn = implode(',', array_fill(0, count($keys), '?'));
+        $stmt = $this->db->pdo()->prepare("SELECT u.stock_item_id, u.tracking_key, SUM(CASE WHEN a.direction = 'in' THEN a.quantity ELSE -a.quantity END) AS quantity FROM stock_tracking_units u JOIN stock_tracking_allocations a ON a.supplier_id = u.supplier_id AND a.stock_tracking_unit_id = u.id JOIN stock_document_lines l ON l.id = a.stock_document_line_id AND l.supplier_id = a.supplier_id JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id WHERE u.supplier_id = ? AND u.stock_item_id IN ($itemIn) AND a.warehouse_id = ? AND u.tracking_key IN ($keyIn) AND d.status IN ('posted','reversed') GROUP BY u.stock_item_id, u.tracking_key, a.location_id HAVING quantity > 0");
+        $stmt->execute([$supplierId, ...$itemIds, $warehouseId, ...$keys]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $itemId = (int) $row['stock_item_id'];
+            $key = mb_strtolower((string) $row['tracking_key']);
+            $out[$itemId][$key] = ($out[$itemId][$key] ?? 0) + \MyInvoice\Service\Stock\StockValuation::qtyToT((string) $row['quantity']);
+        }
+        return $out;
     }
 
     /**

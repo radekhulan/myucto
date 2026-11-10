@@ -12,9 +12,10 @@ final class CatalogImportProfile
     public const FIELDS = [
         'id', 'external_id', 'sku', 'name', 'unit', 'ean', 'item_type', 'vat_rate_id',
         'min_qty', 'is_active', 'note', 'manufacturer_code', 'manufacturer_id',
-        'warranty_months', 'delivery_days', 'weight_g', 'export_eshop', 'is_stocked',
+        'warranty_months', 'delivery_days', 'weight_g', 'weight_kg', 'export_eshop', 'is_stocked',
         'pricing_base', 'categories', 'tag_ids', 'i18n', 'attributes', 'fees', 'price', 'prices',
         'master_id', 'master_external_id', 'variant_options', 'inheritance', 'relations', 'media_urls',
+        'category_code',
     ];
 
     public static function normalize(array $input): array
@@ -41,10 +42,16 @@ final class CatalogImportProfile
         if (isset($mapping['master_external_id']) && (!is_string($source) || !preg_match('/^[a-z0-9][a-z0-9_.-]{0,99}$/D', $source))) {
             throw new \InvalidArgumentException('import_source_key_required');
         }
+        if (isset($mapping['categories'], $mapping['category_code'])) {
+            throw new \InvalidArgumentException('import_mapping_invalid');
+        }
         foreach ($mapping as $header) {
             if (!is_string($header) || trim($header) === '' || mb_strlen($header) > 200) {
                 throw new \InvalidArgumentException('import_mapping_invalid');
             }
+        }
+        if (isset($mapping['weight_g'], $mapping['weight_kg'])) {
+            throw new \InvalidArgumentException('import_mapping_invalid');
         }
         $operations = $input['operations'] ?? [];
         if (!is_array($operations) || array_diff(array_keys($operations), self::FIELDS) !== []) {
@@ -105,12 +112,16 @@ final class CatalogImportProfile
                 $result[$field] = self::empty($field);
             }
         }
+        if (array_key_exists('weight_kg', $result)) {
+            $result['weight_g'] = $result['weight_kg'];
+            unset($result['weight_kg']);
+        }
         return $result;
     }
 
     private static function empty(string $field): mixed
     {
-        if (in_array($field, ['id', 'external_id', 'sku', 'name', 'unit', 'item_type', 'pricing_base', 'is_active', 'is_stocked', 'export_eshop'], true)) {
+        if (in_array($field, ['id', 'external_id', 'sku', 'name', 'unit', 'item_type', 'pricing_base', 'is_active', 'is_stocked', 'export_eshop', 'category_code'], true)) {
             throw new \InvalidArgumentException('import_required_value');
         }
         if ($field === 'inheritance') {
@@ -159,6 +170,14 @@ final class CatalogImportProfile
             }
             return (int) $value;
         }
+        if ($field === 'weight_kg') {
+            $kg = LocaleNumber::parse($value) ?? '';
+            if (!preg_match('/^\d{1,6}(?:\.\d{1,6})?$/D', $kg)) {
+                throw new \InvalidArgumentException('import_decimal_invalid');
+            }
+            // Gramy zaokrouhlené na celé číslo (půl nahoru).
+            return (int) bcadd(bcmul($kg, '1000', 6), '0.5', 0);
+        }
         if ($field === 'min_qty' || $field === 'price') {
             $value = LocaleNumber::parse($value) ?? '';
             $pattern = $field === 'price' ? '/^\d{1,10}(?:\.\d{1,6})?$/D' : '/^\d{1,11}(?:\.\d{1,3})?$/D';
@@ -170,7 +189,7 @@ final class CatalogImportProfile
                 : bcadd($value, '0', 3);
         }
         $limit = match ($field) {
-            'sku', 'manufacturer_code' => 50,
+            'sku', 'manufacturer_code', 'category_code' => 50,
             'master_external_id' => 255,
             'unit', 'ean' => 20,
             'note' => 10000,

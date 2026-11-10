@@ -133,6 +133,7 @@ final class ArchiveService
         'sales_order_reservations'    => 'id',
         'sales_order_operation_keys'  => 'operation, idempotency_key',
         'sales_order_invoice_links'   => 'order_id',
+        'stock_receipt_invoice_links' => 'document_id, line_no, invoice_id',
         'sales_order_fulfillment_links' => 'order_id, shipment_id',
         'sales_order_returns'         => 'id',
         'fulfillment_tasks'           => 'id',

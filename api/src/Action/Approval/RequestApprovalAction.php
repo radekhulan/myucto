@@ -66,6 +66,9 @@ final class RequestApprovalAction
         if (empty($invoice['project_id']) || !($invoice['project_requires_approval'] ?? false)) {
             return Json::error($response, 'not_required', 'Zakázka nevyžaduje schválení výkazu.', 409);
         }
+        if (InvoiceAmountPolicy::hasMissingManualPrice((array) ($invoice['items'] ?? []))) {
+            return Json::error($response, 'manual_price_missing', InvoiceAmountPolicy::MANUAL_PRICE_MISSING_MESSAGE, 422);
+        }
         if (
             InvoiceAmountPolicy::requiresPositiveDraftAmountToPay(
                 (string) ($invoice['invoice_type'] ?? 'invoice'),

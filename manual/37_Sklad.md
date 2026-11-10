@@ -141,13 +141,16 @@ Počáteční zásoby naskladníte podle [§ 37.4.3](#3743-pocatecni-stav-zasob)
 
 ### 37.4.2 Naskladnění z přijaté faktury
 
-1. Otevřete detail [přijaté faktury](23_Prijate_faktury.md). Řádky, které se mají
-   naskladnit, musí být napojené na skladovou kartu.
-2. Klikněte na **Přijmout na sklad**. Tlačítko je jen u faktury, která má aspoň
-   jeden dosud nenaskladněný řádek napojený na kartu.
+1. Otevřete detail [přijaté faktury](23_Prijate_faktury.md). Řádek se naskladní na
+   kartu, na kterou je napojený. Řádek s kódem zboží se s kartou spáruje sám
+   ([§ 37.12.5.2](#371252-naskladneni-z-prijate-faktury)).
+2. Klikněte na **Přijmout na sklad**. Tlačítko je u faktury, která má aspoň jeden
+   dosud nenaskladněný řádek s kartou nebo s kódem zboží.
 3. V průvodci zkontrolujte **zbývající množství k naskladnění**. Můžete ho
    přepsat na menší (částečné naskladnění), zvolit jinou kartu, nebo rovnou
-   z popisu řádku založit novou skladovou kartu.
+   z popisu řádku založit novou skladovou kartu. Když řádku s kódem vyberete kartu
+   ručně, nechte zaškrtnuté **Zapamatovat kód**. Po zaúčtování příjemky se kód uloží ke kartě
+   a příště se řádek spáruje sám.
 4. Podle potřeby zahrňte vedlejší pořizovací náklady. Nabídnou se řádky téže
    faktury, které nemají skladovou kartu (typicky doprava).
 5. Potvrďte. Vznikne **rozpracovaná příjemka**. Otevřete ji v
@@ -376,7 +379,33 @@ výběr kusů, které jsou ve zvoleném skladu skladem:
 V editoru dokladu přepněte typ na **Převodka**, zvolte různý zdrojový a cílový
 sklad, přidejte řádky a zaúčtujte. Číslo má tvar `PRE-RRRR-NNNN`.
 
-### 37.5.4 Oprava chybného dokladu
+### 37.5.4 Faktura z příjemky
+
+Když nakupujete zboží na zakázku, připravíte fakturu odběrateli rovnou z příjemky.
+
+1. Otevřete zaúčtovanou příjemku a klikněte na **Vytvořit fakturu**.
+2. Vyberte **odběratele**, případně **cenovou hladinu dokladu**, a označte řádky.
+3. Klikněte na **Vytvořit koncept faktury**. Otevře se editor faktury.
+
+Ceny plynou z běžného nacenění odběratele. Sériová čísla a šarže z příjemky se přenesou
+na řádky faktury, výdejka při vystavení vydá právě tyto kusy. Karta bez ceny v měně dokladu
+dostane cenu 0 a v editoru upozornění **Zadejte cenu**.
+
+Příjemka ukazuje faktury, které z ní vznikly, a faktura v kartě **Sklad** svou příjemku.
+Když z řádku už faktura vznikla, okno na to upozorní a řádek nabídne nezaškrtnutý. Vytvořit
+druhou fakturu jde dál, stornovaná faktura se nepočítá. Dobropis k faktuře řádky
+neuvolní: když zboží fakturujete znovu, zaškrtněte řádek vědomě. Taková faktura se zapíše
+do historie činností.
+
+Fakturu s řádkem bez ceny nejde vystavit, dokud cenu nedoplníte.
+
+Sériové číslo nebo šarži, které už na skladě příjemky nejsou (prodané, převedené nebo vybrané
+na jiném konceptu z této příjemky), koncept nepřevezme. Okno je vypíše dřív, než otevře editor,
+a kusy doplníte v editoru. Firma, která není plátcem DPH, dostane řádky s nulovou sazbou. Identifikovaná osoba má u firmy s DIČ z jiného státu EU navíc zapnuté přenesení daně, stejně jako v editoru faktury.
+U odběratele z ciziny bez přenesení daňové povinnosti zůstane tuzemská sazba a okno na to
+upozorní: sazbu nebo přenesení zkontrolujte v editoru.
+
+### 37.5.5 Oprava chybného dokladu
 
 Zaúčtovaný doklad nejde upravit. V editoru klikněte na **Stornovat**, vyplňte
 **Důvod storna** a potvrďte. Vznikne protidoklad se stejnými hodnotami.
@@ -502,9 +531,14 @@ a doplnění zásob ho začne navrhovat znovu. Zavřenou objednávku vrátíte t
 3. Záložka **Ocenění k datu** spočítá stav k historickému datu. Výpočet běží na
    pozadí, průběh je vidět na stránce. V poli **Seskupit podle kategorií** zvolte
    kategorii a nad tabulkou se objeví hodnota zásob po jejích podkategoriích.
-4. Záložka **Prodeje** ukáže, kolik kusů, komu a za kolik jste prodali (filtry
+4. Záložka **Vývoj hodnoty** ukáže hodnotu zásob po kategoriích ke koncům měsíců
+   vedle sebe. Zadejte **Od** (první sloupec je první konec měsíce od tohoto data)
+   a **Do** (poslední sloupec je přesně toto datum, třeba dnešek), případně sklad
+   a kategorii, jejíž podkategorie tvoří řádky, a stiskněte **Spočítat**. Výpočet
+   běží na pozadí, průběh je vidět na stránce a jde ho zrušit.
+5. Záložka **Prodeje** ukáže, kolik kusů, komu a za kolik jste prodali (filtry
    období, sklad, odběratel, kategorie; **Po odběratelích** a po kartách sečte).
-5. Pro export použijte **Export PDF** nebo **Export XLSX**.
+6. Pro export použijte **Export PDF** nebo **Export XLSX**.
 
 **Jak poznáte, že je hotovo:** sestava má součtový řádek (počet položek a celková
 hodnota) a export se stáhl.
@@ -1077,9 +1111,9 @@ nezobrazuje nikdy.
 #### 37.12.5.2 Naskladnění z přijaté faktury
 
 Na detailu [přijaté faktury](23_Prijate_faktury.md) je tlačítko **Přijmout na sklad**,
-pokud má alespoň jeden dosud nenaskladněný řádek navázaný na skladovou kartu. Faktura
-bez jediné takové vazby tlačítko nenabízí. Akce otevře průvodce naskladněním. Ten
-nabídne řádky faktury s vazbou na skladovou kartu a **zbývající množství
+pokud má alespoň jeden dosud nenaskladněný řádek s kartou nebo s kódem zboží. Faktura
+bez takového řádku tlačítko nenabízí. Akce otevře průvodce naskladněním. Ten
+nabídne řádky faktury s kartou i řádky s kódem bez karty a **zbývající množství
 k naskladnění**: fakturované množství mínus součet množství, které už bylo
 naskladněno dřívějšími zaúčtovanými příjemkami napojenými na tentýž řádek faktury.
 Pokus naskladnit víc systém odmítne hláškou „Množství přesahuje zbývající k příjmu
@@ -1087,6 +1121,37 @@ z faktury“ (s tolerancí na zaokrouhlení asi 0,0005 jednotky). Kontroluje se 
 zakládání konceptu příjemky, ne až při zaúčtování. Pole lze ručně přepsat na menší
 množství (částečné naskladnění). K jednotlivým řádkům lze zvolit existující kartu,
 napojit jinou nebo rovnou z popisu řádku faktury **založit novou skladovou kartu**.
+Po změně karty průvodce přepočte zbývající množství a cenu podle balení nové karty,
+cenu pak můžete ručně upravit. Zbytek částečně naskladněného řádku jde přijmout jen na
+stejnou kartu jako dřívější příjemka.
+
+**Párování podle kódu.** Vytěžení z PDF, ISDOC i Pohoda XML přebírá z řádku kód zboží
+dodavatele a EAN. Řádek bez napojené karty průvodce spáruje v tomto pořadí: kód uložený
+u karty pro tohoto dodavatele (nabídky dodavatelů), platný EAN z řádku, kód karty, kód
+řádku jako EAN karty. První dvě shody průvodce použije sám. Shodu podle kódu karty a kódu
+jako EAN jen navrhne se štítkem **Navrženo…, zkontrolujte**, protože vlastní kód karty se
+s kódem dodavatele může shodovat náhodou. Kartu potvrdíte založením příjemky, nebo vyberete
+jinou. Bere jen aktivní karty, které nejsou služba. Když kódu odpovídá víc karet, řádek
+zůstane bez karty a vyberete ji ručně. Řádek vedený jako služba se nenabízí. Párování nezapisuje
+kartu na řádek faktury, takže nemění její zaúčtování. Vyberete-li kartu ručně nebo potvrdíte návrh, průvodce
+nabídne **Zapamatovat kód**. U karty vybrané ručně je volba zaškrtnutá, u návrhu ji musíte zaškrtnout sami.
+Kód se uloží ke kartě pro tohoto dodavatele až při zaúčtování příjemky; smazání konceptu kartu nezmění. Má-li kód
+u tohoto dodavatele jiná karta, průvodce u volby napíše, ze které karty se odebere. Volbu v konceptu zrušíte
+v editoru příjemky odkazem **Neukládat**. Volba je jen pro uživatele, který smí upravovat skladové karty, ostatním
+se nenabídne a při přímém volání rozhraní se požadavek odmítne. Zaúčtuje-li koncept s touto volbou někdo bez tohoto
+práva, příjemka se zaúčtuje, karta se nezmění a aplikace to oznámí. Zápis je v logu aktivit u cílové karty i u karet,
+kterým se kód odebral. Storno příjemky uložený kód nevrací, opravíte ho ručně na kartě v nabídkách dodavatelů.
+
+**Intrastat z faktury.** Kód zboží a zemi původu umí přečíst vytěžení z PDF. Formáty ISDOC a Pohoda XML
+tyto údaje u řádku faktury nenesou. Uvádí-li řádek kód zboží a zemi původu, průvodce je ukáže s volbou
+**Po zaúčtování doplnit na kartu**. Volba je nezaškrtnutá. Se zaškrtnutím se hodnoty doplní
+až po zaúčtování příjemky a jen tam, kde na kartě chybí; vyplněné hodnoty se nepřepisují.
+Volbu vidí a smí nastavit jen uživatel, který smí upravovat skladové karty, a v editoru
+příjemky ji lze před zaúčtováním zrušit. Zaúčtuje-li koncept s touto volbou někdo bez tohoto
+práva, příjemka se zaúčtuje, karta se nezmění a aplikace to oznámí. Zápis je v logu aktivit.
+Hodnotu lze vzít jen z řádku faktury, ze které příjemka vznikla. Storno příjemky doplněné
+údaje z karty neodebere: hodnota zůstane a opravíte ji ručně na kartě, záznam o doplnění
+najdete v logu aktivit.
 
 Volitelně lze zahrnout i **vedlejší pořizovací náklady**. Kandidáti se nabídnou
 automaticky: jsou to řádky **téže** přijaté faktury, které nemají napojenou žádnou
@@ -1262,6 +1327,29 @@ omezit nedá a vždy zahrne celý sklad.
     Kdo kartu mezitím přeřadil, uvidí ji v nové kategorii i ve starším ocenění.
   - Změna seskupení výpočet neopakuje, jen znovu načte hotové ocenění. Export XLSX
     přidá list **Podle kategorií**, export PDF souhrnnou tabulku nad seznam.
+- **Vývoj hodnoty** ukáže hodnotu zásob po kategoriích **k více datům vedle sebe**:
+  ke koncům měsíců od data **Od** a k datu **Do** (nejvýše 36 sloupců, jinak
+  aplikace vyzve zkrátit období). Řádky jsou přímé podkategorie zvolené kategorie
+  (výchozí je kategorie nejvyšší úrovně), pod nimi je řádek **Celkem**.
+  - Hodnota za každé datum je stejná, jako vyjde v sestavě **Ocenění k datu** pro
+    tentýž den. Výpočet se spouští tlačítkem **Spočítat** a běží jako úloha na pozadí
+    s průběhem a možností zrušení. Čte sklad po malých dávkách, takže běžné zaúčtování
+    a výdeje neblokuje. Hotová tabulka je **snímek** s uvedeným časem výpočtu: zůstane
+    čitelná i exportovatelná, i když se sklad dál mění. Přibude-li během výpočtu nebo
+    se změní doklad s datem do posledního sloupce (u zvoleného skladu jen v něm),
+    aplikace výpočet sama dvakrát zopakuje od začátku, teprve potom ho ukončí s výzvou
+    ke spuštění znovu. Pohyby s pozdějším datem výpočet neovlivní. Totéž zadání nad
+    stejným stavem skladu se nepočítá znovu; rozpracovaný výpočet se zruší, když ho
+    spustíte znovu s jiným zadáním nebo stránku opustíte, ale jen ten, který jste
+    sami založili (cizí výpočet jen přestanete sledovat). Zrušit smí výpočet jeho
+    zakladatel, jiné uživatele zrušit smí jen správce skladu.
+  - Karty se zařazují podle **dnešních** kategorií, ne podle kategorií k danému
+    datu, a karta ve více kategoriích se počítá jen jednou (stejně jako u ocenění
+    k datu). Součet řádků se rovná řádku Celkem.
+  - Bez práva číst katalog se zobrazí jen řádek Celkem.
+  - Export XLSX má přesné částky s haléři. Export PDF je na šířku, částky jsou
+    v celých korunách (řádek Celkem je součet zaokrouhlených řádků) a víc než 12 dat
+    se rozdělí do více tabulek, každá na vlastní stránce. Exportuje se hotový výpočet.
 - **Prodeje** viz [§ 37.12.8.1](#371281-prodeje-skladovych-karet).
 
 Stav zásob a ocenění mají **součtový řádek** (počet položek a celková hodnota) a jdou

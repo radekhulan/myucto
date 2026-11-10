@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { StockValueTrendReport } from './stock'
 
 export type CatalogJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 
@@ -19,6 +20,7 @@ export interface CatalogJob {
   updated_at: string
   finished_at: string | null
   attempts: number
+  created_by?: number | null
   currencies?: string[]
 }
 
@@ -59,6 +61,10 @@ export const catalogJobsApi = {
   retry: (id: number, signal?: AbortSignal) => api.post<CatalogJob>(`/eshop/jobs/${id}/retry`, undefined, { signal }).then(r => r.data),
   cancel: (id: number, signal?: AbortSignal) => api.post<CatalogJob>(`/eshop/jobs/${id}/cancel`, undefined, { signal }).then(r => r.data),
   recomputePrices: () => api.post<CatalogJob>('/eshop/jobs/prices-recompute').then(r => r.data),
+  createValueTrend: (payload: { from: string; to: string; warehouse_id?: number; group_parent_id?: number }) => api.post<CatalogJob & { reused?: boolean }>('/stock/reports/value-trend-jobs', payload).then(r => r.data),
+  getValueTrend: (id: number) => api.get<StockValueTrendReport>(`/stock/reports/value-trend-jobs/${id}`).then(r => r.data),
+  getValueTrendStatus: (id: number) => api.get<CatalogJob>(`/stock/reports/value-trend-jobs/${id}/status`).then(r => r.data),
+  cancelValueTrend: (id: number) => api.post<CatalogJob>(`/stock/reports/value-trend-jobs/${id}/cancel`).then(r => r.data),
   createValuation: (payload: { date: string; warehouse_id?: number }) => api.post<CatalogJob>('/stock/reports/valuation-jobs', payload).then(r => r.data),
   getValuation: (id: number, params: { page?: number; limit?: number } & ValuationGroupParams = {}) => api.get<ValuationJobResult>(`/stock/reports/valuation-jobs/${id}`, { params }).then(r => r.data),
   getValuationStatus: (id: number) => api.get<CatalogJob>(`/stock/reports/valuation-jobs/${id}/status`).then(r => r.data),
