@@ -173,6 +173,24 @@ async function uploadFile(wrapper: ReturnType<typeof mountPage>) {
 }
 
 describe('ProductImport', () => {
+  it('does not show a price change when only the computed price metadata differs', async () => {
+    const same = report('unchanged')
+    const price = { currency_code: 'CZK', fixed_price: '100.00', computed_price: '100.00' }
+    same.items[0].before = { id: 8, row_version: 3, sku: 'A-1', price: '100.00', prices: [{ ...price, computed_context: { internal: true } }] }
+    same.items[0].after = { id: 8, row_version: 3, sku: 'A-1', price: '100.00', prices: [{ ...price, computed_context: { internal: false } }] }
+    mocks.items.mockResolvedValue(same)
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('eshop.import2.status.unchanged')
+    expect(wrapper.text()).not.toContain('eshop.import2.fields.prices')
+
+    wrapper.unmount()
+  })
+
   it('removes the resumed job from the URL when starting a new import', async () => {
     routeState.query = { tab: 'import', import_job: '31' }
     const wrapper = mountPage()
