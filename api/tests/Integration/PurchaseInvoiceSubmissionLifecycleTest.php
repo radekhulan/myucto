@@ -174,8 +174,11 @@ final class PurchaseInvoiceSubmissionLifecycleTest extends TestCase
         self::assertSame(404, $this->portalAction->delete($tenant, (new ResponseFactory())->createResponse(), ['id' => $row['id']])->getStatusCode());
         $readOnly = $this->clientRequest('DELETE')->withAttribute('auth.effective_role', new EffectiveRole(1, 'client', 'client', true, ['documents.submit' => AccessLevel::READ->value], 'client'));
         self::assertSame(403, $this->portalAction->delete($readOnly, (new ResponseFactory())->createResponse(), ['id' => $row['id']])->getStatusCode());
-        $staff = $this->clientRequest('DELETE')->withAttribute('auth.effective_role', new EffectiveRole(1, 'staff', 'staff', true, ['documents.submit' => AccessLevel::WRITE->value], 'accountant'));
-        self::assertSame(403, $this->portalAction->delete($staff, (new ResponseFactory())->createResponse(), ['id' => $row['id']])->getStatusCode());
+        // Interní role předává jen s právem `documents.submit` na zápis; účetní fronta ho nenahradí.
+        foreach ([['documents.submit' => AccessLevel::READ->value], ['documents.inbox' => AccessLevel::WRITE->value]] as $permissions) {
+            $staff = $this->clientRequest('DELETE')->withAttribute('auth.effective_role', new EffectiveRole(1, 'staff', 'staff', true, $permissions, 'accountant'));
+            self::assertSame(403, $this->portalAction->delete($staff, (new ResponseFactory())->createResponse(), ['id' => $row['id']])->getStatusCode());
+        }
         self::assertNull($this->documentDeletedAt($row['document_id']));
         $superadmin = $foreign->withAttribute('auth.effective_role', new EffectiveRole(1, 'superadmin', 'superadmin', true, [], 'superadmin'));
         self::assertSame(200, $this->portalAction->delete($superadmin, (new ResponseFactory())->createResponse(), ['id' => $row['id']])->getStatusCode());

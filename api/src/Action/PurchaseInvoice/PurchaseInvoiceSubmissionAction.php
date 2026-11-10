@@ -496,6 +496,8 @@ final class PurchaseInvoiceSubmissionAction
     private function deny(Request $request, Response $response, bool $write = false): ?Response
     {
         $level = $write ? AccessLevel::WRITE : AccessLevel::READ;
+        // Příchozí fronta je strana účetní. Interní role s `documents.submit` předává
+        // přes portál (PortalPurchaseInvoiceSubmissionAction); sem ji pustí jen `documents.inbox`.
         if (RequestAuthorization::isClientType($request)
             || !RequestAuthorization::allows($request, 'documents.inbox', $level)) {
             return Json::error($response, 'forbidden', 'K příchozím dokladům nemáte oprávnění.', 403);

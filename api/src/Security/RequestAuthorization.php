@@ -215,10 +215,14 @@ final class RequestAuthorization
         return self::effectiveRole($request)->isClientType();
     }
 
+    /**
+     * Předávání dokladů účetní (portálová fronta a požadavky účetní) rozhoduje právo
+     * `documents.submit`, ne typ role: dostane ho klient i interní role, které ho
+     * správce přidělí. Superadmin ho má implicitně.
+     */
     public static function allowsClientDocumentPortal(Request $request, AccessLevel $minimum = AccessLevel::READ): bool
     {
-        return (self::isClientType($request) || self::isSuperadmin($request))
-            && self::allows($request, 'documents.submit', $minimum);
+        return self::allows($request, 'documents.submit', $minimum);
     }
 
     /**
@@ -324,18 +328,42 @@ final class RequestAuthorization
             && self::allows($request, 'accounting.periods.manage', AccessLevel::WRITE);
     }
 
-    /** Klient čte jen připravená podání, interní role dál používají agendu výkazů. */
+    /**
+     * Pracuje požadavek s daňovými podáními jen v rozsahu archivu připravených podání?
+     * Ten rozsah má klient a interní role, která má `reports.submissions` bez agendy
+     * Daně a výkazy (`reports`): jen DPH, KH a SH ({@see ClientTaxSubmissionPolicy}),
+     * jen z přihlášené relace a bez správy nastavení, důkazů a mazání archivu.
+     * Interní role s `reports` zůstává u plné agendy výkazů a interní role bez
+     * `reports.submissions` se chová jako dřív (i s legacy samotným `reports.submit`).
+     */
+    public static function usesClientTaxSubmissionScope(Request $request): bool
+    {
+        return self::roleUsesClientTaxSubmissionScope(self::effectiveRole($request));
+    }
+
+    /** Totéž rozhodnutí nad už vyřešenou rolí (PermissionMiddleware ji má dřív než request). */
+    public static function roleUsesClientTaxSubmissionScope(EffectiveRole $role): bool
+    {
+        if ($role->isClientType()) return true;
+        if ($role->isSuperadmin()) return false;
+        self::$catalog ??= new PermissionCatalog();
+        self::$checker ??= new PermissionChecker(self::$catalog);
+        return !self::$checker->allows($role, 'reports', AccessLevel::READ)
+            && self::$checker->allows($role, 'reports.submissions', AccessLevel::READ);
+    }
+
+    /** Rozsah připravených podání čte jen archiv, interní role dál používají agendu výkazů. */
     public static function canReadTaxSubmissions(Request $request): bool
     {
-        return self::isClientType($request)
+        return self::usesClientTaxSubmissionScope($request)
             ? self::isSessionAuth($request) && self::allows($request, 'reports.submissions', AccessLevel::READ)
             : self::allows($request, 'reports', AccessLevel::READ);
     }
 
-    /** XML a důkazy jsou součástí klientského archivu; interní export má vlastní právo. */
+    /** XML a důkazy jsou součástí archivu připravených podání; interní export má vlastní právo. */
     public static function canExportTaxSubmission(Request $request): bool
     {
-        return self::isClientType($request)
+        return self::usesClientTaxSubmissionScope($request)
             ? self::canReadTaxSubmissions($request)
             : self::allows($request, 'reports.export', AccessLevel::READ);
     }
@@ -343,7 +371,7 @@ final class RequestAuthorization
     /** Řádek musí volající nejprve dohledat v aktuální firmě. */
     public static function canAccessTaxSubmission(Request $request, array $submission): bool
     {
-        return !self::isClientType($request)
+        return !self::usesClientTaxSubmissionScope($request)
             || (self::canReadTaxSubmissions($request)
                 && ClientTaxSubmissionPolicy::allowsForm((string) ($submission['form_code'] ?? '')));
     }
@@ -351,21 +379,25 @@ final class RequestAuthorization
     /** Mazání archivu zachovává původní právo interních rolí k exportu se zápisem. */
     public static function canDeleteTaxSubmission(Request $request): bool
     {
-        return !self::isClientType($request)
+        return !self::usesClientTaxSubmissionScope($request)
             && self::allows($request, 'reports.export', AccessLevel::WRITE);
     }
 
-    /** Správa důkazů a korespondence zůstává interním podávajícím rolím. */
+    /** Správa důkazů a korespondence zůstává interním podávajícím rolím s agendou výkazů. */
     public static function canManageTaxSubmissionEvidence(Request $request): bool
     {
-        return !self::isClientType($request)
+        return !self::usesClientTaxSubmissionScope($request)
             && self::allows($request, 'reports.submit', AccessLevel::WRITE);
     }
 
-    /** Stávající interní podávající role si zachovávají správu nastavení. */
+    /**
+     * Stávající interní podávající role si zachovávají správu nastavení. Rozsah
+     * připravených podání (klient i interní role bez `reports`) ji nemá ani
+     * s `reports.submit`: odeslání nesmí otevřít správu kanálů a složek.
+     */
     public static function canManageTaxSubmissions(Request $request): bool
     {
-        return !self::isClientType($request)
+        return !self::usesClientTaxSubmissionScope($request)
             && (self::allows($request, 'reports.submissions.manage', AccessLevel::WRITE)
                 || self::allows($request, 'reports.submit', AccessLevel::WRITE));
     }
@@ -448,14 +480,14 @@ final class RequestAuthorization
         string $permission,
         AccessLevel $minimum = AccessLevel::READ,
     ): bool {
-        if (self::isClientType($request)
-            && in_array($permission, ['reports.submissions', 'reports.submit'], true)
+        self::$catalog ??= new PermissionCatalog();
+        self::$checker ??= new PermissionChecker(self::$catalog);
+        if (in_array($permission, ['reports.submissions', 'reports.submit'], true)
             && !self::isSessionAuth($request)
+            && self::roleUsesClientTaxSubmissionScope(self::effectiveRole($request))
         ) {
             return false;
         }
-        self::$catalog ??= new PermissionCatalog();
-        self::$checker ??= new PermissionChecker(self::$catalog);
         return self::$checker->allows(self::effectiveRole($request), $permission, $minimum);
     }
 }
