@@ -22249,6 +22249,112 @@ paths:
                     type: [array, "null"]
                     items: { $ref: '#/components/schemas/InvoiceItemTrackingAllocation' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/stock/items/{id}/tracking-units:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags: [Stock]
+      summary: Šarže skladové karty po stránkách
+      description: |
+        Kmen šarží karty (id, kód, datum spotřeby), bez množství, pohybů a historie, seřazený
+        podle kódu a data. Lehká alternativa k `GET .../tracking` pro seznam šarží k opravě
+        (`PUT .../tracking-units/{unitId}`); sériová čísla se nevrací. Vrací i šarže s nulovým
+        stavem. Klientská role operaci nemá.
+      parameters:
+        - { in: query, name: q, schema: { type: string, maxLength: 100 }, description: "Hledání v kódu šarže (část kódu, bez ohledu na velikost písmen a diakritiku)." }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: per_page, schema: { type: integer, minimum: 5, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Stránka šarží.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer, description: "Id šarže (`unitId` pro PUT)." }
+                        lot_code: { type: string }
+                        expires_on: { type: [string, 'null'], format: date }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/stock/items/{id}/tracking-units/{unitId}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+      - in: path
+        name: unitId
+        required: true
+        description: Id šarže (`stock_tracking_unit_id` z `GET .../tracking`).
+        schema: { type: integer, minimum: 1 }
+    put:
+      tags: [Stock]
+      summary: Oprava kódu šarže a data spotřeby
+      description: |
+        Přepíše kód a datum spotřeby existující šarže karty (sériové číslo opravit nejde).
+        Chybějící klíč v těle hodnotu ponechá, `expires_on: null` datum smaže. Pohyby šarže
+        ukazují na její id, takže zůstávají; nový text se propíše do konceptů faktur,
+        nezaúčtovaných i zaúčtovaných skladových dokladů této karty (příjemka, výdejka,
+        převodka, protidoklad storna) a do rozpracované expedice (zásilka ve stavu `packing`,
+        řádky otevřených úloh vychystání).
+
+        Dobropis k vystavené faktuře vrací kusy, které výdejka faktury skutečně vydala,
+        a obnovení stornované faktury vydává kusy vrácené stornem, takže obě operace pracují
+        s opravenou šarží. Vystavené a stornované faktury (včetně uloženého PDF), vystavené
+        zálohové faktury, expedované zásilky, vratky a log čtečky si ponechají původní text.
+        Finální faktura vytvořená po opravě ze zálohové faktury proto nese starý kód a šarži
+        si v ní vyberete znovu z nabídky. Vratka k expedované zásilce bere identitu šarže ze snapshotu zásilky
+        (`GET /api/v1/stock/fulfillment/tasks/{id}`), ne z karty: vstup `stock_tracking_unit_id`
+        s novým kódem skončí `fulfillment_tracking_invalid`.
+
+        Šarže se stejným kódem (bez ohledu na velikost písmen a diakritiku) a datem, kterou
+        už má jiná šarže karty, se odmítne `tracking_unit_exists`. Změna jen velikosti písmen
+        u téže šarže projde. Beze změny hodnot vrátí 200 s nulovými počty a bez záznamu
+        v auditu. Vyžaduje právo `stock.items.write` a token s oprávněním k zápisu; klientská
+        role operaci nemá.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StockTrackingUnitUpdate' }
+      responses:
+        '200':
+          description: Opravená šarže a počet přepsaných kopií podle druhu.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockTrackingUnitUpdateResult' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            `tracking_unit_exists`: jiná šarže téže karty už má stejný kód a datum spotřeby.
+            `lock_conflict`: šarži nebo její doklady právě používá souběžné vystavení nebo
+            zaúčtování (zaklínění, vypršelo čekání na zámek); nic se nezměnilo, zkuste to znovu.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: |
+            `validation_failed`: kód šarže, který není text, je prázdný nebo delší než 100 znaků;
+            datum spotřeby, které není platné datum RRRR-MM-DD (číslo, boolean i prázdný text);
+            datum smaže jen výslovné `null`.
+            `tracking_mode_mismatch`: jde o sériové číslo.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /api/v1/stock/items/{id}/units:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -43721,6 +43827,28 @@ components:
         code: { type: string, maxLength: 50 }
         name: { type: string, maxLength: 100 }
         is_active: { type: boolean, default: true }
+    StockTrackingUnitUpdate:
+      type: object
+      properties:
+        lot_code: { type: string, minLength: 1, maxLength: 100, description: "Nový kód šarže; bez klíče zůstane stávající." }
+        expires_on: { type: [string, 'null'], format: date, description: "Nové datum spotřeby; bez klíče zůstane stávající, `null` ho smaže." }
+    StockTrackingUnitUpdateResult:
+      type: object
+      properties:
+        unit:
+          type: object
+          properties:
+            id: { type: integer }
+            lot_code: { type: string }
+            expires_on: { type: [string, 'null'], format: date }
+        updated:
+          type: object
+          description: Počet přepsaných kopií textu šarže podle druhu.
+          properties:
+            invoices: { type: integer, description: Řádky konceptů faktur. }
+            stock_drafts: { type: integer, description: Řádky nezaúčtovaných skladových dokladů. }
+            stock_posted: { type: integer, description: Řádky zaúčtovaných a stornovaných skladových dokladů. }
+            fulfillment: { type: integer, description: Rozpracované zásilky a řádky otevřených úloh vychystání. }
     StockItemUnitInput:
       type: object
       required: [unit_code, numerator, denominator]
