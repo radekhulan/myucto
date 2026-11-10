@@ -487,6 +487,17 @@ describe('GeneralLedger period navigation', () => {
       from: '2026-09-10', to: '2026-09-30', page: 1, opening_date: '2026-09-10', include_analytics: 0,
       dimension_value_id: '9', dimension_descendants: 1, vendor: 'Dodavatel A', after_closing: 1,
     }))
+    // Odkaz „Opis účtu" v hlavičce měsíce nese totéž zúžení, jinak by opis ukázal víc řádků.
+    const link = wrapper.findAllComponents({ name: 'RouterLink' })
+      .find(l => l.text() === 'accounting.account_statement.title')!
+    expect(link.props('to')).toMatchObject({
+      name: 'accounting-account-statement',
+      query: {
+        from: '2026-09-10', to: '2026-09-30', opening_date: '2026-09-10', include_analytics: '0',
+        dimension_value_id: '9', dimension_descendants: '1', vendor: 'Dodavatel A', after_closing: '1',
+      },
+    })
+    expect(link.props('to').query).not.toHaveProperty('client')
     wrapper.unmount()
   })
 

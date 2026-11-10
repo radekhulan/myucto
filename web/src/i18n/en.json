@@ -19742,7 +19742,11 @@
         "not_applicable": "Income statement accounts are not subject to inventory. They close to account 710, turnovers are in the account statement.",
         "no_rows": "The account has no movement in the period.",
         "no_period": "No accounting period exists for this date."
-      }
+      },
+      "scope_title": "Narrowed as in the general ledger:",
+      "scope_own_only": "Account's own entries only, without analytics",
+      "scope_remove": "Remove filter",
+      "scope_export_blocked": "A narrowed statement cannot be exported. Clear the general ledger filters to export."
     },
     "section18": {
       "title": "Cash flows and changes in equity",

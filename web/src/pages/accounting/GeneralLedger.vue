@@ -8,6 +8,7 @@ import {
   type GeneralLedgerReport,
   type GeneralLedgerAccount,
   type AccountStatementItem,
+  type AccountStatementParams,
   type ChartAccount,
 } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
@@ -318,6 +319,26 @@ function monthLineRange(ym: string): { from: string; to: string } {
   return { from: from < bookFrom ? bookFrom : from, to: to > bookTo ? bookTo : to }
 }
 
+/** Zúžení řádků měsíce podle zobrazené knihy; sdílí ho rozpad měsíce i odkaz na opis účtu. */
+function monthScope(): Omit<AccountStatementParams, 'from' | 'to'> {
+  const q = loadedQuery.value
+  const scope: Omit<AccountStatementParams, 'from' | 'to'> = {
+    after_closing: q?.after_closing,
+    // Otevírací zápis začátku knihy patří do PS, další (přelom roku ve všech obdobích
+    // po uzavření) je pohybem měsíce. Všechna období před uzavřením vyřazují všechny,
+    // což je výchozí pravidlo opisu.
+    opening_date: report.value?.all_periods && !q?.after_closing ? undefined : report.value?.from,
+    // S rozpadem je řádek syntetiky jen její vlastní pohyby, analytiky mají řádky své.
+    include_analytics: q?.analytics ? 0 : undefined,
+    vendor: q?.vendor,
+    client: q?.client,
+    item: q?.item,
+    dimension_value_id: q?.dimension_value_id,
+    dimension_descendants: q?.dimension_value_id ? q.dimension_descendants : undefined,
+  }
+  return Object.fromEntries(Object.entries(scope).filter(([, v]) => v !== undefined && v !== null && v !== ''))
+}
+
 // Pořadí požadavků na řádky měsíce: odpověď na zavřený měsíc, jiný účet, starý filtr
 // nebo předchozí stránku po znovuotevření se nesmí přimíchat k aktuálním řádkům.
 let monthSeq = 0
@@ -347,22 +368,10 @@ async function loadMonthLines(a: GeneralLedgerAccount, ym: string, page = 1) {
   const seq = monthSeq
   monthLoading.value = true
   const { from, to } = monthLineRange(ym)
-  const q = loadedQuery.value
   try {
     const r = await accountingApi.getAccountStatement(a.account_id, {
       from, to, page, per_page: MONTH_LINE_LIMIT,
-      after_closing: q?.after_closing,
-      // Otevírací zápis začátku knihy patří do PS, další (přelom roku ve všech obdobích
-      // po uzavření) je pohybem měsíce. Všechna období před uzavřením vyřazují všechny,
-      // což je výchozí pravidlo opisu.
-      opening_date: report.value?.all_periods && !q?.after_closing ? undefined : report.value?.from,
-      // S rozpadem je řádek syntetiky jen její vlastní pohyby, analytiky mají řádky své.
-      include_analytics: q?.analytics ? 0 : undefined,
-      vendor: q?.vendor,
-      client: q?.client,
-      item: q?.item,
-      dimension_value_id: q?.dimension_value_id,
-      dimension_descendants: q?.dimension_value_id ? q.dimension_descendants : undefined,
+      ...monthScope(),
     })
     // Mezitím mohl uživatel měsíc zavřít, otevřít jiný nebo změnit knihu — pozdní odpověď zahoď.
     if (seq !== monthSeq) return
@@ -381,9 +390,12 @@ function lineLink(it: AccountStatementItem) {
   return journalSourceLink(it) ?? journalEntryLink(it.entry_id)
 }
 
+/** Opis účtu za dny měsíce se stejným zúžením jako rozbalené řádky (opis ukáže filtry jako štítky). */
 function monthStatementLink(a: GeneralLedgerAccount, ym: string) {
   const { from, to } = monthLineRange(ym)
-  return statementLink(a, from, to)
+  const link = statementLink(a, from, to)
+  const scope = Object.fromEntries(Object.entries(monthScope()).map(([k, v]) => [k, String(v)]))
+  return { ...link, query: { ...link.query, ...scope } }
 }
 
 /**

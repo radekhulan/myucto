@@ -19742,7 +19742,11 @@
         "not_applicable": "Výsledkové účty se neinventarizují. Vedou do účtu 710, obraty najdete v opisu účtu.",
         "no_rows": "Účet nemá v období žádný pohyb.",
         "no_period": "K tomuto datu není založené účetní období."
-      }
+      },
+      "scope_title": "Zúženo podle hlavní knihy:",
+      "scope_own_only": "Jen zápisy účtu bez analytik",
+      "scope_remove": "Odebrat filtr",
+      "scope_export_blocked": "Zúžený opis nelze exportovat. Pro export zrušte filtry hlavní knihy."
     },
     "section18": {
       "title": "Peněžní toky a změny vlastního kapitálu",

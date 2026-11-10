@@ -6,6 +6,7 @@ import {
   accountingApi,
   type AccountStatementReport,
   type AccountStatementItem,
+  type AccountStatementParams,
   type AccountCounterTotal,
   type AccountInventoryReport,
   type OpenItemsReport,
@@ -65,6 +66,77 @@ function defaultRange(): { from: string; to: string } {
   return { from: `${appYear(today)}-01-01`, to: appIsoDate(today) }
 }
 
+/**
+ * Zúžení z rozbaleného měsíce hlavní knihy: opis ukáže tytéž řádky, které kniha sčítá
+ * do obratu. Filtry se zobrazí jako štítky a dají se odebrat.
+ */
+const SCOPE_KEYS = ['vendor', 'client', 'item', 'dimension_value_id', 'dimension_descendants', 'after_closing', 'opening_date', 'include_analytics'] as const
+type ScopeKey = typeof SCOPE_KEYS[number]
+type LedgerScope = Partial<Record<ScopeKey, string>>
+
+function scopeFromQuery(): LedgerScope {
+  const out: LedgerScope = {}
+  for (const k of SCOPE_KEYS) {
+    const v = route.query[k]
+    if (typeof v === 'string' && v !== '') out[k] = v
+  }
+  return out
+}
+const ledgerScope = ref<LedgerScope>(scopeFromQuery())
+
+/** Filtry knihy (ne jen pravidlo PS) — s nimi nejde filtr protiúčtu ani export. */
+const hasLedgerFilters = computed(() => {
+  const s = ledgerScope.value
+  return !!(s.vendor || s.client || s.item || s.dimension_value_id)
+})
+/** Export zná jen stav po uzávěrce; zúžený opis by se v exportu vydával za celý účet. */
+const exportBlocked = computed(() => hasLedgerFilters.value || !!ledgerScope.value.opening_date || ledgerScope.value.include_analytics === '0')
+
+function scopeParams(): Omit<AccountStatementParams, 'from' | 'to'> {
+  const s = ledgerScope.value
+  return {
+    ...(s.vendor ? { vendor: s.vendor } : {}),
+    ...(s.client ? { client: s.client } : {}),
+    ...(s.item ? { item: s.item } : {}),
+    ...(s.dimension_value_id ? { dimension_value_id: s.dimension_value_id, dimension_descendants: (s.dimension_descendants === '0' ? 0 : 1) as 0 | 1 } : {}),
+    ...(s.after_closing === '1' ? { after_closing: 1 as const } : {}),
+    ...(s.opening_date ? { opening_date: s.opening_date } : {}),
+    ...(s.include_analytics === '0' ? { include_analytics: 0 as const } : {}),
+  }
+}
+
+const scopeChips = computed(() => {
+  const s = ledgerScope.value
+  const chips: Array<{ keys: ScopeKey[]; label: string }> = []
+  if (s.vendor) chips.push({ keys: ['vendor'], label: `${t('accounting.general_ledger.filter_vendor')}: ${s.vendor}` })
+  if (s.client) chips.push({ keys: ['client'], label: `${t('accounting.general_ledger.filter_client')}: ${s.client}` })
+  if (s.item) chips.push({ keys: ['item'], label: `${t('accounting.general_ledger.filter_item')}: ${s.item}` })
+  if (s.dimension_value_id) {
+    const label = report.value?.dimension?.label || `#${s.dimension_value_id}`
+    chips.push({ keys: ['dimension_value_id', 'dimension_descendants'], label: `${t('accounting.general_ledger.export_dimension')}: ${label}` })
+  }
+  if (s.after_closing === '1') chips.push({ keys: ['after_closing'], label: t('accounting.reports.after_closing') })
+  if (s.include_analytics === '0') chips.push({ keys: ['include_analytics'], label: t('accounting.account_statement.scope_own_only') })
+  return chips
+})
+
+function setLedgerScope(next: LedgerScope) {
+  // Bez štítků zbývá jen pravidlo PS z knihy, které samo o sobě nic nezužuje.
+  if (Object.keys(next).every(k => k === 'opening_date')) next = {}
+  ledgerScope.value = next
+  const query: Record<string, unknown> = { ...route.query }
+  for (const k of SCOPE_KEYS) delete query[k]
+  router.replace({ query: { ...query, ...next } })
+  page.value = 1
+  load()
+}
+
+function removeScopeChip(keys: ScopeKey[]) {
+  const next = { ...ledgerScope.value }
+  for (const k of keys) delete next[k]
+  setLedgerScope(next)
+}
+
 const filters = reactive({
   from: typeof route.query.from === 'string' && route.query.from ? route.query.from : defaultRange().from,
   to: typeof route.query.to === 'string' && route.query.to ? route.query.to : defaultRange().to,
@@ -79,7 +151,8 @@ async function load() {
       to: filters.to,
       page: page.value,
       per_page: perPage.value,
-      ...(counterAccountId.value ? { counter_account_id: counterAccountId.value } : {}),
+      ...scopeParams(),
+      ...(counterAccountId.value && !hasLedgerFilters.value ? { counter_account_id: counterAccountId.value } : {}),
     })
     if (report.value.counter_totals !== null) {
       counterTotals.value = report.value.counter_totals
@@ -94,6 +167,14 @@ async function load() {
 }
 
 function applyFilters() {
+  // PS knihy patří k jejímu začátku; opis od dřívějšího dne by ho API odmítlo.
+  const opening = ledgerScope.value.opening_date
+  if (opening && opening > filters.from) {
+    const rest = { ...ledgerScope.value }
+    delete rest.opening_date
+    ledgerScope.value = rest
+    router.replace({ query: { ...route.query, opening_date: undefined } })
+  }
   page.value = 1
   openPage.value = 1
   suggestions.value = null
@@ -156,6 +237,7 @@ async function exportFile(format: 'pdf' | 'xlsx') {
       from: filters.from,
       to: filters.to,
       format,
+      ...(ledgerScope.value.after_closing === '1' ? { after_closing: 1 } : {}),
       ...(counterAccountId.value ? { counter_account_id: counterAccountId.value } : {}),
     })
     downloadBlob(r.data as unknown as Blob, `opis-uctu-${report.value.account.code}-${filters.from}-${filters.to}.${format}`)
@@ -494,11 +576,11 @@ onMounted(reload)
           {{ t('accounting.account_statement.account_card') }}
         </RouterLink>
         <template v-if="mode === 'movements'">
-          <button :disabled="!report || exporting" @click="exportFile('pdf')" :class="[btnOutline('primary'), 'whitespace-nowrap']">
+          <button :disabled="!report || exporting || exportBlocked" :title="exportBlocked ? t('accounting.account_statement.scope_export_blocked') : undefined" @click="exportFile('pdf')" :class="[btnOutline('primary'), 'whitespace-nowrap']">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             {{ t('accounting.account_statement.export_pdf') }}
           </button>
-          <button :disabled="!report || exporting" @click="exportFile('xlsx')" :class="[btnOutline('primary'), 'whitespace-nowrap']">
+          <button :disabled="!report || exporting || exportBlocked" :title="exportBlocked ? t('accounting.account_statement.scope_export_blocked') : undefined" @click="exportFile('xlsx')" :class="[btnOutline('primary'), 'whitespace-nowrap']">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             {{ t('accounting.account_statement.export_xlsx') }}
           </button>
@@ -550,7 +632,7 @@ onMounted(reload)
           <DateInput v-model="filters.to" @change="applyFilters"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
-        <div v-if="mode === 'movements'">
+        <div v-if="mode === 'movements' && !hasLedgerFilters">
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.account_statement.filter_counter') }}</label>
           <select :value="counterAccountId ?? ''" data-testid="counter-filter"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
@@ -566,6 +648,22 @@ onMounted(reload)
           <input v-model="onlyOpen" type="checkbox" class="rounded border-neutral-300" @change="toggleOnlyOpen" />
           {{ t('accounting.account_statement.open.only_open') }}
         </label>
+      </div>
+      <div v-if="mode === 'movements' && scopeChips.length" class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-neutral-100" data-testid="ledger-scope">
+        <span class="text-xs font-medium text-neutral-500">{{ t('accounting.account_statement.scope_title') }}</span>
+        <span v-for="c in scopeChips" :key="c.keys[0]" data-testid="ledger-scope-chip"
+          class="inline-flex items-center gap-1 h-7 max-w-full pl-2.5 pr-1 rounded-full border border-primary-200 bg-primary-50 text-primary-700 text-xs">
+          <span class="truncate">{{ c.label }}</span>
+          <button type="button" class="cursor-pointer shrink-0 w-5 h-5 inline-flex items-center justify-center rounded-full hover:bg-primary-100"
+            :title="t('accounting.account_statement.scope_remove')" :aria-label="`${t('accounting.account_statement.scope_remove')}: ${c.label}`"
+            @click="removeScopeChip(c.keys)">
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </span>
+        <button type="button" class="cursor-pointer whitespace-nowrap text-xs text-primary-600 hover:text-primary-700 hover:underline" data-testid="ledger-scope-clear"
+          @click="setLedgerScope({})">
+          {{ t('accounting.general_ledger.reset_filters') }}
+        </button>
       </div>
     </div>
 
