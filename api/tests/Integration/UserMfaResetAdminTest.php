@@ -12,7 +12,9 @@ use MyInvoice\Service\Auth\MfaStepUpService;
 use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Auth\StepUpOperationException;
+use MyInvoice\Service\Mail\Mailer;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -29,6 +31,9 @@ final class UserMfaResetAdminTest extends TestCase
     private Config $config;
     private SessionManager $manager;
     private MfaStepUpService $stepUp;
+    private \Slim\App $app;
+    /** Skutečná pošta by z testu odešla přes SMTP profil testovací DB. */
+    private Mailer&MockObject $mailer;
     /** @var list<int> */
     private array $users = [];
     private array $admin;
@@ -43,7 +48,10 @@ final class UserMfaResetAdminTest extends TestCase
         self::assertStringEndsWith('_test', (string) $this->db->pdo()->query('SELECT DATABASE()')->fetchColumn());
         $this->db->pdo()->exec("SET SESSION sql_mode = 'STRICT_ALL_TABLES,NO_ENGINE_SUBSTITUTION'");
         $this->manager = new SessionManager($this->db, $this->config, new DatabaseSecurityClock());
-        $container = Bootstrap::buildApp()->getContainer();
+        $this->app = Bootstrap::buildApp();
+        $container = $this->app->getContainer();
+        $this->mailer = $this->createMock(Mailer::class);
+        $container->set(Mailer::class, $this->mailer);
         $this->stepUp = $container->get(MfaStepUpService::class);
         $this->admin = $this->account('superadmin');
         $this->otherAdmin = $this->account('superadmin');
@@ -70,6 +78,9 @@ final class UserMfaResetAdminTest extends TestCase
         $targetId = $this->otherAdmin['user_id'];
         $this->withFactors($targetId);
         $token = $this->apiToken($targetId);
+        $email = (string) $this->db->pdo()->query("SELECT email FROM users WHERE id = {$targetId}")->fetchColumn();
+        $this->mailer->expects(self::once())->method('sendTemplate')
+            ->with('mfa_reset', 'cs', [$email], self::anything())->willReturn('250 OK');
 
         $response = $this->reset($this->admin, $targetId, self::REASON, $this->proof($this->admin, $targetId));
 
@@ -101,6 +112,7 @@ final class UserMfaResetAdminTest extends TestCase
 
     public function testResetNeedsProofBoundToTheTargetUser(): void
     {
+        $this->mailer->expects(self::never())->method('sendTemplate');
         $targetId = $this->staff['user_id'];
         $this->withFactors($targetId);
 
@@ -117,6 +129,7 @@ final class UserMfaResetAdminTest extends TestCase
 
     public function testRecoveryCodeCannotConfirmReset(): void
     {
+        $this->mailer->expects(self::never())->method('sendTemplate');
         $this->expectException(StepUpOperationException::class);
         $this->stepUp->issue(
             $this->admin['user_id'],
@@ -128,6 +141,7 @@ final class UserMfaResetAdminTest extends TestCase
 
     public function testOnlySuperadminMayResetAndNeverOwnAccount(): void
     {
+        $this->mailer->expects(self::never())->method('sendTemplate');
         $targetId = $this->staff['user_id'];
         foreach ([$this->technical, $this->staff] as $session) {
             $response = $this->reset($session, $this->otherAdmin['user_id'], self::REASON, '');
@@ -212,7 +226,7 @@ final class UserMfaResetAdminTest extends TestCase
             ->withHeader('X-CSRF-Token', $session['csrf_token'])
             ->withParsedBody($body);
 
-        return Bootstrap::buildApp()->handle($request);
+        return $this->app->handle($request);
     }
 
     private function json(ResponseInterface $response): array
