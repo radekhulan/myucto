@@ -114,7 +114,7 @@ export interface MembershipRateInput {
 export interface MembershipRate extends MembershipRateInput { id: number; supplier_id: number }
 export interface MembershipRatePage { items: MembershipRate[]; next_after_id: number | null; revenue_accounts?: {account_code: string; name: string}[] }
 export type MembershipBatchTemplate = Omit<MembershipIssueRequest, 'member_id'>
-export type MembershipBatchPhase = 'seeding' | 'preparing' | 'ready' | 'posting' | 'finished' | 'cancelled' | 'expired'
+export type MembershipBatchPhase = 'seeding' | 'preparing' | 'ready' | 'posting' | 'finished' | 'cancelled'
 export type MembershipBatchStatus = 'pending' | 'ready' | 'created' | 'existing' | 'rejected'
 export interface MembershipBatchCreate { template: MembershipBatchTemplate; selection_mode: 'active' | 'selected'; member_ids: number[]; idempotency_key: string }
 export interface MembershipBatchSummary { total: number; pending: number; ready: number; created: number; existing: number; rejected: number; planned_cents: string; created_cents: string; deferred_cents: string; deferral_date: string | null }

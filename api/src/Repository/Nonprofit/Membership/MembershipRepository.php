@@ -83,7 +83,7 @@ final class MembershipRepository
         foreach ($out as &$context) {
             if (isset($context['error'])) continue;
             try { $context['history'] = $this->validateHistory($context['history']); }
-            catch (MembershipException $e) { $context['error'] = $e; }
+            catch (\Throwable $e) { $context['error'] = $e; }
         }
         unset($context);
         return $out;

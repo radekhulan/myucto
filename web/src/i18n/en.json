@@ -40789,7 +40789,8 @@
       "nonprofit_membership_batch_not_found": "The batch was not found in this organisation.",
       "nonprofit_membership_batch_limit": "The selection exceeds the configured batch member limit.",
       "nonprofit_membership_batch_selection_invalid": "Check the selected batch members.",
-      "nonprofit_membership_batch_technical": "Technical failure for this member. Other results are retained."
+      "nonprofit_membership_batch_technical": "Technical failure for this member. Other results are retained.",
+      "nonprofit_membership_batch_cancelled": "The batch was cancelled before this member was processed."
     },
     "ratesEmptyRequired": "There are no rates yet. Create a rate in the catalog first.",
     "batchTitle": "Batch membership charges",
@@ -40834,7 +40835,6 @@
     "batchNeedNewPreview": "Approval is no longer valid. Prepare a new preview and approve it again.",
     "batchAccountsCaption": "Combined journal plan for prepared charges",
     "batchPhase_cancelled": "Batch cancelled",
-    "batchPhase_expired": "Approval expired",
     "batchPhase_seeding": "Preparing member selection",
     "batchRenewPreview": "Refresh batch preview"
   },

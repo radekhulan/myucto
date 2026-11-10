@@ -109,7 +109,7 @@ final class MembershipBatchRuntimeTest extends MembershipBatchReviewFixture
         $this->pdo->commit();
         $result = $this->interleave($ready, 'cancel', fn () => $this->batches->confirm($this->supplier, $id, $token, $this->actor));
         self::assertSame('completed', $result['status']); self::assertSame('cancelled', $result['detail']['batch']['phase']);
-        self::assertSame(10, $result['detail']['summary']['created']); self::assertSame(1, $result['detail']['summary']['ready']);
+        self::assertSame(10, $result['detail']['summary']['created']); self::assertSame(0, $result['detail']['summary']['ready']); self::assertSame(1, $result['detail']['summary']['rejected']);
         self::assertSame(10, $this->operationCount());
         $this->assertConfirmRejected($id, $token); $this->assertCounters($id);
     }

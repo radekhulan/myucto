@@ -115,7 +115,7 @@ async function work(kind: 'prepare' | 'confirm') {
       const result = kind === 'prepare' ? await membershipApi.prepareBatch(supplier, id) : await membershipApi.confirmBatch(supplier, id, token!)
       if (!alive || ticket !== epoch || supplier !== props.supplier) return
       detail.value = result
-      if (['finished', 'cancelled', 'expired'].includes(result.batch.phase) || (kind === 'prepare' && !['seeding', 'preparing'].includes(result.batch.phase))) { acknowledged.value = false; break }
+      if (['finished', 'cancelled'].includes(result.batch.phase) || (kind === 'prepare' && !['seeding', 'preparing'].includes(result.batch.phase))) { acknowledged.value = false; break }
     } while (!stopRequested.value)
     if (stopRequested.value) notice.value = t('nonprofitMembership.batchPaused')
   } catch (e) {
@@ -192,7 +192,7 @@ async function cancelBatch() {
 
 const actions = computed<ActionItem[]>(() => [
   {key: 'batch-prepare', label: t('nonprofitMembership.batchContinuePreview'), icon: 'eye', tier: 'primary', variant: 'primary', show: !!detail.value && ['seeding', 'preparing'].includes(detail.value.batch.phase), disabled: busy.value || !props.canManage, run: () => {void work('prepare')}},
-  {key: 'batch-renew', label: t('nonprofitMembership.batchRenewPreview'), icon: 'eye', variant: 'primary', show: !!detail.value && ['ready', 'posting', 'expired'].includes(detail.value.batch.phase) && (approvalExpired.value || detail.value.batch.phase === 'expired') && props.canManage, disabled: busy.value, run: () => {void renewPreview()}},
+  {key: 'batch-renew', label: t('nonprofitMembership.batchRenewPreview'), icon: 'eye', variant: 'primary', show: !!detail.value && ['ready', 'posting'].includes(detail.value.batch.phase) && approvalExpired.value && props.canManage, disabled: busy.value, run: () => {void renewPreview()}},
   {key: 'batch-cancel', label: t('nonprofitMembership.batchCancel'), icon: 'x', variant: 'warning', show: !!detail.value && ['seeding','preparing','ready','posting'].includes(detail.value.batch.phase) && props.canManage, disabled: busy.value, run: () => {cancelling.value = true}},
   {key: 'batch-pause', label: t('nonprofitMembership.batchPause'), icon: 'x', variant: 'warning', show: busy.value && !!detail.value, disabled: stopRequested.value, run: () => {stopRequested.value = true}},
   {key: 'batch-new', label: t('nonprofitMembership.batchNew'), icon: 'plus', show: !!detail.value && props.canManage, disabled: busy.value, run: () => {void newFromDetail()}},
@@ -265,7 +265,7 @@ onBeforeUnmount(() => {alive = false; epoch++; recentTicket++; dimensionsTicket+
         :ack-label="t('nonprofitMembership.batchAck')" :confirm-label="t(detail.batch.phase === 'posting' ? 'nonprofitMembership.batchContinuePosting' : 'nonprofitMembership.batchConfirm')"
         :blocked-reason="!classificationVisible ? t('nonprofitMembership.classificationProofMissing') : !detail.batch.approval_token ? t('nonprofitMembership.batchNeedNewPreview') : undefined"
         @confirm="work('confirm')" />
-      <p v-if="detail.batch.phase === 'expired' || approvalExpired" :class="warningBox">{{ t('nonprofitMembership.batchNeedNewPreview') }}</p>
+      <p v-if="approvalExpired" :class="warningBox">{{ t('nonprofitMembership.batchNeedNewPreview') }}</p>
       <div v-if="cancelling" :class="warningBox" role="alert">
         <p>{{ t('nonprofitMembership.batchCancelHelp') }}</p>
         <ActionBar :actions="[
