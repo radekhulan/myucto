@@ -403,6 +403,46 @@ final class MembershipNativeTest extends TestCase
         self::assertSame([$ids[2],$ids[4]],$tiny->matchingSelection($this->supplier,[$ids[0],$ids[2],$ids[4]],$filter));
     }
 
+    public function testStatusFilterFillsThePageAcrossChunksWithGrowingChunks(): void
+    {
+        $ids=[];
+        foreach(['paid','paid','unpaid','paid','paid','unpaid'] as $i=>$kind){
+            $member=$this->member('SYN-LOOP-'.$i,'loop-'.$i);
+            $issued=$this->issue($member['id'],'loop-'.$i);
+            if($kind==='paid')$this->payClaim($issued,'20000.00','loop-payment-'.$i);
+            $ids[]=$member['id'];
+        }
+        $filter=\MyInvoice\Service\Nonprofit\Membership\MembershipListFilter::parse(['year'=>2026,'payment_status'=>'unpaid']);
+        $tiny=new \MyInvoice\Repository\Nonprofit\Membership\MembershipListRepository($this->db,1);
+        $rows=[];
+        // Dávka 2 (ids 0–1) nic nenajde, dávka 4 (ids 2–5) doplní stránku: 2 × (hranice + agregace).
+        self::assertSame(4,$this->selectQueries(function()use($tiny,$filter,&$rows):void {$rows=$tiny->page($this->supplier,0,2,$filter);}));
+        self::assertSame([$ids[2],$ids[5]],array_column($rows,'id'));
+        self::assertSame(array_column($rows,'id'),array_column((new \MyInvoice\Repository\Nonprofit\Membership\MembershipListRepository($this->db))->page($this->supplier,0,2,$filter),'id'));
+        self::assertSame([$ids[5]],array_column($tiny->page($this->supplier,$ids[2],2,$filter),'id'));
+    }
+
+    public function testNoChargeFilterDoesNotAggregatePaymentsOfMembersWithCharges(): void
+    {
+        $with=[];
+        for($i=0;$i<3;$i++){$member=$this->member('SYN-NONE-WITH-'.$i,'none-with-'.$i);$this->issue($member['id'],'none-with-'.$i);$with[]=$member['id'];}
+        $without=$this->member('SYN-NONE-WITHOUT','none-without');
+        $filter=\MyInvoice\Service\Nonprofit\Membership\MembershipListFilter::parse(['year'=>2026,'payment_status'=>'none']);
+        $repo=new \MyInvoice\Repository\Nonprofit\Membership\MembershipListRepository($this->db);
+        self::assertSame([$without['id']],array_column($repo->page($this->supplier,0,50,$filter),'id'));
+        self::assertSame([$with[0],$with[1],$with[2]],array_column($repo->page($this->supplier,0,50,['payment_status'=>'unpaid']+$filter),'id'));
+        [$sql,$params]=$repo->query($this->supplier,0,50,$filter);
+        $q=$this->pdo->prepare('ANALYZE FORMAT=JSON '.$sql);$q->execute($params);
+        $plan=json_decode((string)$q->fetchColumn(),true,flags:JSON_THROW_ON_ERROR);
+        $reads=[];
+        $walk=function(array $node)use(&$walk,&$reads):void {
+            if (($node['table_name']??null)==='cc' && isset($node['r_rows'],$node['r_loops'])) $reads[]=(float)$node['r_rows']*(float)$node['r_loops'];
+            foreach($node as $value)if(is_array($value))$walk($value);
+        };
+        $walk($plan);
+        self::assertSame(0.0,array_sum($reads),'Stav bez předpisu nesmí agregovat předpisy členů, kteří předpis mají.');
+    }
+
     public function testRareTitleWithStatusFilterSkipsMembersWithoutTheTitle(): void
     {
         $ids=[];
@@ -425,6 +465,20 @@ final class MembershipNativeTest extends TestCase
         // Prázdný výsledek: kandidáti titulu docházejí hned, bez průchodu ostatními členy.
         $filter['payment_status']='paid';
         self::assertSame(2,$this->selectQueries(fn()=>$tiny->page($this->supplier,0,5,$filter)));
+        // Hustý titul: výběr členů dávky čte jen předpisy titulu v rozsahu dávky.
+        $filter=\MyInvoice\Service\Nonprofit\Membership\MembershipListFilter::parse(['year'=>2026,'title_key'=>'annual-2026','payment_status'=>'unpaid']);
+        [$sql,$params]=$tiny->query($this->supplier,$ids[2],5,$filter,null,$ids[3]);
+        $q=$this->pdo->prepare('ANALYZE FORMAT=JSON '.$sql);$q->execute($params);
+        $plan=json_decode((string)$q->fetchColumn(),true,flags:JSON_THROW_ON_ERROR);
+        $reads=[];
+        $walk=function(array $node)use(&$walk,&$reads):void {
+            if (($node['table_name']??null)==='x' && isset($node['r_rows'],$node['r_loops'])) $reads[]=(float)$node['r_rows']*(float)$node['r_loops'];
+            foreach($node as $value)if(is_array($value))$walk($value);
+        };
+        $walk($plan);
+        self::assertNotEmpty($reads);
+        // Každá instance CTE scope (dávka se vyhodnocuje víckrát) smí číst jen předpis jediného člena dávky.
+        foreach($reads as $rows)self::assertLessThanOrEqual(1.0,$rows,'Poddotaz titulu nesmí číst předpisy mimo dávku.');
     }
 
     private function listRows(array $query = [], int $after = 0, int $limit = 100): array

@@ -59,20 +59,21 @@ function formFilters(): MembershipListFilters | null {
   if ((!year && !title) || (year && (!/^[0-9]{4}$/.test(year) || Number(year)<1900 || Number(year)>9998))) {error.value=t('nonprofitMembership.listNeedPeriod');return null}
   return {search:search.value.trim(),year:year ? Number(year) : null,title_key:title,payment_status:paymentStatus.value}
 }
-function applyFilters(syncUrl = true) {
+function applyFilters(syncUrl = true, forceTitles = false) {
   cancelSearchTimer()
   if (batchLocked.value) {pendingFormFilters = true; return}
   const next = formFilters()
   if (!next) return
-  // Tituly závisí na roku; volání bez změny roku je díky deduplikaci v loadTitles levné.
-  void loadTitles()
   const year = next.year === null ? '' : String(next.year), title = next.title_key
   if (JSON.stringify(next) === JSON.stringify(appliedFilters.value)) {
     // Opakování načtení stejných filtrů musí znovu ověřit výběr, nikoli jej zahodit.
     if (error.value && !loading.value) void load()
+    void loadTitles(forceTitles)
     return
   }
   appliedFilters.value = next
+  // Tituly závisí na použitém roku; bez změny roku je volání díky deduplikaci v loadTitles levné.
+  void loadTitles(forceTitles)
   if (syncUrl && router) void router.replace({query: {...route?.query, search: next.search || undefined, year: year || '', title_key: title || undefined, payment_status: next.payment_status === 'all' ? undefined : next.payment_status}})
   if (checkedMembers.value.length) selectionNotice.value=t('nonprofitMembership.listSelectionCleared')
   checkedMembers.value=[]; members.value=[]; nextAfter.value=null
@@ -164,11 +165,13 @@ async function reloadAll() {
 
 /** Obnova nejdřív ověří formulář: neplatný rok nesmí tiše načíst data podle starých filtrů. */
 function reloadMembers() {
+  // Během dávky jsou filtry zmrazené (výběr dávky na nich závisí): obnovujeme data podle použitých filtrů
+  // a rozepsaný formulář ověříme a použijeme až po odemčení dávky.
   if (batchLocked.value) { void reloadAll(); return }
   const next = formFilters()
   if (!next) return
   if (JSON.stringify(next) !== JSON.stringify(appliedFilters.value)) {
-    applyFilters(); void loadPeriods(); void loadTitles(true); return
+    applyFilters(true, true); void loadPeriods(); return
   }
   void reloadAll()
 }
@@ -234,7 +237,8 @@ const createActions = computed<ActionItem[]>(() => [
 
 /** Tituly závisí jen na firmě a roce; bez vynucení je pro rok, který se už načítá nebo načetl, nečteme znovu. */
 async function loadTitles(force = false) {
-  const year = /^\d{4}$/.test(String(filterYear.value)) ? Number(filterYear.value) : undefined
+  // Rozepsaný nebo neplatný rok ve formuláři tituly nemění; platí jen použitý filtr.
+  const year = appliedFilters.value.year ?? undefined
   if (!force && !titlesError.value && titlesYear === (year ?? null)) return
   titlesYear = year ?? null
   const supplier = props.supplier, ticket = ++titlesTicket
@@ -295,7 +299,13 @@ watch(filterYear, () => {
   cancelSearchTimer()
   searchTimeout = setTimeout(() => {searchTimeout = null; if (alive) applyFilters()}, 300)
 }, {flush: 'sync'})
-watch([titleKey, paymentStatus], () => {if (!hydrating) applyFilters()}, {flush: 'sync'})
+// Běží-li prodleva rozepsaného roku nebo hledání, výběr titulu či stavu ji jen znovu naplánuje.
+watch([titleKey, paymentStatus], () => {
+  if (hydrating) return
+  if (searchTimeout === null) {applyFilters(); return}
+  cancelSearchTimer()
+  searchTimeout = setTimeout(() => {searchTimeout = null; if (alive) applyFilters()}, 300)
+}, {flush: 'sync'})
 watch(() => route?.query, () => {
   cancelSearchTimer()
   // Navigace má přednost před rozepsaným hledáním; během dávky ji použijeme až po odemčení.
