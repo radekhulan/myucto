@@ -1180,7 +1180,8 @@
         "2274_stock_receipt_invoice_links.sql",
         "2275_purchase_invoice_item_codes.sql",
         "2276_stock_item_match_indexes.sql",
-        "2277_purchase_invoice_item_intrastat.sql"
+        "2277_purchase_invoice_item_intrastat.sql",
+        "2278_stock_documents_updated_index.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -25339,6 +25340,7 @@
                 "idx_sd_po": "BTREE (purchase_order_id)",
                 "idx_sd_reversal": "BTREE (reversal_document_id)",
                 "idx_sd_supplier_status": "BTREE (supplier_id, status, doc_date)",
+                "idx_sd_supplier_updated": "BTREE (supplier_id, updated_at)",
                 "idx_sd_warehouse_date": "BTREE (warehouse_id, doc_date)",
                 "uq_sd_supplier_id": "UNIQUE BTREE (supplier_id, id)",
                 "uq_sd_supplier_number": "UNIQUE BTREE (supplier_id, doc_number)"

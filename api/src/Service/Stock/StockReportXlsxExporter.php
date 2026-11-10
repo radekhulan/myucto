@@ -114,7 +114,7 @@ final class StockReportXlsxExporter
     }
 
     /**
-     * @param array<string,mixed> $data výstup StockValueTrendService::report()
+     * @param array<string,mixed> $data výstup StockValueTrendService::result()
      * @return array{bytes:string, filename:string, mime:string}
      */
     public function valueTrend(array $data): array

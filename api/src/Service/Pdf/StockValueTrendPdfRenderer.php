@@ -8,7 +8,7 @@ use MyInvoice\Service\Stock\StockReportXlsxExporter;
 
 /**
  * PDF sestavy „Vývoj hodnoty zásob“ (A4 na šířku). Částky v celých Kč (přesné jsou v XLSX);
- * víc než {@see PER_TABLE} dat se rozdělí do více tabulek pod sebou. Data = výstup StockValueTrendService::report().
+ * víc než {@see PER_TABLE} dat se rozdělí do více tabulek pod sebou. Data = výstup StockValueTrendService::result().
  */
 final class StockValueTrendPdfRenderer extends ReportPdfRendererBase
 {
