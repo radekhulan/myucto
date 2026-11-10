@@ -216,6 +216,27 @@ final class AbraMappersTest extends TestCase
         self::assertSame('20', $document['items'][0]['vat_classification']);
     }
 
+    /** Ř. 26: tuzemský odběratel (i bez státu na dokladu) = § 71i, zahraniční = služba mimo tuzemsko. */
+    public function testIssuedLine26SplitsByCustomerCountry(): void
+    {
+        $row = static fn (int $id, array $partner): array => $partner + [
+            'id' => $id, 'datVyst' => '2026-03-01', 'datSplat' => '2026-03-15',
+            'mena' => 'code:CZK', 'zuctovano' => true,
+            'sumZklCelkem' => 100, 'sumDphCelkem' => 0, 'sumCelkem' => 100,
+            'polozkyDokladu' => [[
+                'id' => 1, 'mnozMj' => 1, 'sumZkl' => 100, 'sumDph' => 0,
+                'sumCelkem' => 100, 'szbDph' => 0, 'clenDph' => 'code:26',
+            ]],
+        ];
+
+        foreach ([[112, ['stat' => 'code:CZ'], '71i'], [113, [], '71i'], [114, ['stat' => 'code:US'], '26s']] as [$id, $partner, $code]) {
+            $document = (new AbraDocumentMapper())->map($row($id, $partner), 'faktura-vydana');
+            self::assertSame($code, $document['items'][0]['vat_classification'], (string) $id);
+        }
+        $purchase = (new AbraDocumentMapper())->map($row(115, ['stat' => 'code:CZ']), 'faktura-prijata');
+        self::assertNotSame('71i', $purchase['items'][0]['vat_classification'], 'Přijatý doklad se nepřeřazuje.');
+    }
+
     public function testPurchasedDomesticVatUsesSharedReturnClassification(): void
     {
         $document = (new AbraDocumentMapper())->map([

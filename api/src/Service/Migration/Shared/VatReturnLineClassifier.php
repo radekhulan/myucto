@@ -17,7 +17,8 @@ namespace MyInvoice\Service\Migration\Shared;
  *   uskutečněná plnění   ř. 1 / 2 tuzemsko (kód podle sazby), + ř. 51 prodej majetku mimo
  *                        koeficient, 20 dodání zboží do EU, 21 služba do EU, 22 vývoz,
  *                        23 nový dopravní prostředek, 24 zasílání zboží, 25 tuzemský přenos
- *                        (dodavatel, § 92a), 26 plnění s místem mimo tuzemsko, 31 třístranný
+ *                        (dodavatel, § 92a), 26 plnění s místem mimo tuzemsko (u tuzemského
+ *                        odběratele § 71i, {@see saleCodeForCustomer()}), 31 třístranný
  *                        obchod, 50 osvobozené bez nároku, 50 + 51 osvobozené mimo koeficient
  *   přijatá plnění       ř. 40 / 41 tuzemský odpočet, + ř. 47 pořízení majetku;
  *                        samovyměření = výstupní řádek + odpočet ř. 43 / 44: 3/4 zboží z EU,
@@ -73,7 +74,13 @@ final class VatReturnLineClassifier
     public const DEFAULT_REVERSE_SUBJECT = '4';
 
     /** Uskutečněná plnění mimo tuzemský ř. 1/2: řádek → kód zařazení. */
-    private const SALE_CODES = [20 => '20', 21 => '22', 22 => '26', 23 => '23n', 24 => '24z', 25 => '25s', 26 => '26s', 31 => '31', 50 => '3'];
+    private const SALE_CODES = [20 => '20', 21 => '22', 22 => '26', 23 => '23n', 24 => '24z', 25 => '25s', 26 => self::OTHER_FOREIGN_SALE_CODE, 31 => '31', 50 => '3'];
+
+    /** Ř. 26 u zahraničního odběratele: služba s místem plnění mimo tuzemsko (§ 9 odst. 1). */
+    public const OTHER_FOREIGN_SALE_CODE = '26s';
+
+    /** Ř. 26 u tuzemského odběratele: osvobozené dodání s nárokem na odpočet podle § 71i. */
+    public const DOMESTIC_EXEMPT_WITH_CREDIT_CODE = '71i';
 
     private const DOMESTIC_REVERSE_SALE_LINE = 25;
 
@@ -102,6 +109,26 @@ final class VatReturnLineClassifier
             return self::DOMESTIC_REVERSE_SALE[self::subject($subject)] ?? null;
         }
         return self::SALE_CODES[$line] ?? null;
+    }
+
+    /**
+     * Ř. 26 (pln_ost) nese dvě různá plnění: službu s místem plnění mimo tuzemsko (`26s`)
+     * a tuzemské dodání osvobozené s nárokem na odpočet podle § 71i (`71i`). Řádek přiznání
+     * je rozliší jen podle odběratele: tuzemský odběratel (CZ, nebo země neznámá) dostane
+     * `71i`, zahraniční `26s`. Stejné pravidlo jako výchozí klasifikace nové faktury
+     * ({@see \MyInvoice\Repository\InvoiceRepository::defaultSaleClassificationCode()}).
+     * Přiznání ani KH se tím nemění, obě klasifikace míří na ř. 26 bez oddílu KH.
+     *
+     * Jiné kódy vrací beze změny. Volají ho převody vydaných dokladů, jakmile znají zemi
+     * odběratele (ISO 3166-1 alpha-2, jak ji má karta klienta).
+     */
+    public static function saleCodeForCustomer(?string $code, ?string $customerCountry): ?string
+    {
+        if ($code !== self::OTHER_FOREIGN_SALE_CODE) {
+            return $code;
+        }
+        $country = strtoupper(trim((string) $customerCountry));
+        return $country === '' || $country === 'CZ' ? self::DOMESTIC_EXEMPT_WITH_CREDIT_CODE : $code;
     }
 
     /** Prodej majetku mimo koeficient (ř. 1/2 + 51) podle sazby: jen aktuální 21 % / 12 %. */

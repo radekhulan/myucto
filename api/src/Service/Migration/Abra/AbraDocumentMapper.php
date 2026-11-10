@@ -162,7 +162,15 @@ final class AbraDocumentMapper
         }
 
         $partner = $this->partner($row);
-        $docCode = trim((string) ($row['kod'] ?? $row['cisDosle'] ?? $key));
+        if ($kind === 'issued') {
+            // Ř. 26 u tuzemského odběratele je § 71i, ne služba mimo tuzemsko. Země je táž,
+            // kterou dostane karta klienta.
+            foreach ($items as &$item) {
+                $item['vat_classification'] = VatReturnLineClassifier::saleCodeForCustomer($item['vat_classification'], $partner['country']);
+            }
+            unset($item);
+        }
+        $docCode =trim((string) ($row['kod'] ?? $row['cisDosle'] ?? $key));
         $variableSymbol = preg_replace('/\D+/', '', (string) ($row['varSym'] ?? $row['kod'] ?? ''));
         $type = mb_strtolower(AbraSource::reference($row['typDokl'] ?? null));
         $isCredit = str_contains($type, 'dobrop') || str_contains($type, 'oprav') || $total['total'] < 0;

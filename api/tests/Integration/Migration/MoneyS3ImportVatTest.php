@@ -293,6 +293,27 @@ final class MoneyS3ImportVatTest extends MoneyS3ImportTestCase
         self::assertEqualsWithDelta(1000.0, (float) ($august['25']['base'] ?? 0), 0.005, json_encode($august, JSON_UNESCAPED_UNICODE) ?: '');
     }
 
+    /** `19Ř26`: tuzemský odběratel = § 71i, zahraniční = služba s místem plnění mimo tuzemsko. */
+    public function testLine26SplitsByCustomerCountry(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/r26.lz', SyntheticAgenda::filesWithOtherSupplyLine26());
+        $backup = Ms3Backup::extract($this->tmp . '/r26.lz', $this->tmp . '/r26');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        foreach (['FV25026' => '71i', 'FV25027' => '26s'] as $number => $code) {
+            self::assertSame(1, $this->rowCount('invoices', $supplierId, "varsymbol = '{$number}' AND vat_classification_code = '{$code}' AND status <> 'draft'"), $number . ' ' . $this->explain($protocol));
+            $items = $this->db->pdo()->prepare(
+                'SELECT DISTINCT ii.vat_classification_code FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+                  WHERE i.supplier_id = ? AND i.varsymbol = ?');
+            $items->execute([$supplierId, $number]);
+            self::assertSame([$code], $items->fetchAll(PDO::FETCH_COLUMN), $number);
+        }
+        $august = $this->container(DphPriznaniBuilder::class)->build($supplierId, 2025, 8, 'monthly')['summary']['lines'];
+        self::assertEqualsWithDelta(2000.0, (float) ($august['26']['base'] ?? 0), 0.005, 'Obě faktury na ř. 26.');
+    }
+
     /**
      * Doklad v cizí měně FP25004 (100 + 21 EUR, kurz 25 = 2 500 + 525 Kč z Money) se ve firmě
      * s eurem v číselníku měn převezme v EUR; firma bez eura ho převezme v Kč jako dřív.

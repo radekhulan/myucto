@@ -10,6 +10,7 @@ use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyDecision;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
+use MyInvoice\Service\Migration\Shared\MigratedClientCountry;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
@@ -126,6 +127,8 @@ final class InvoiceImporter
 
     private readonly ForeignCurrencyTakeover $foreignCurrency;
 
+    private readonly MigratedClientCountry $clientCountry;
+
     /** @var array<string,\PDOStatement> */
     private array $stmts = [];
 
@@ -141,6 +144,7 @@ final class InvoiceImporter
     ) {
         $this->rates = new MigrationVatRateLookup($db);
         $this->foreignCurrency = new ForeignCurrencyTakeover($db, createMissingCurrency: true);
+        $this->clientCountry = new MigratedClientCountry($db);
     }
 
     public function importIssued(PohodaContext $ctx): void
@@ -331,6 +335,13 @@ final class InvoiceImporter
         }
         $snapshot = PartnerImporter::snapshot(PohodaXml::get($doc['h'], 'partnerIdentity'));
         $clientId = $this->partners->resolvePartner($ctx, $snapshot);
+        // Ř. 26 u tuzemského odběratele je § 71i, ne služba mimo tuzemsko.
+        $class['code'] = $this->clientCountry->saleCode($class['code'], $ctx->supplierId, $clientId);
+        foreach ($amounts['items'] as $i => $item) {
+            if (isset($item['code'])) {
+                $amounts['items'][$i]['code'] = $this->clientCountry->saleCode($item['code'], $ctx->supplierId, $clientId);
+            }
+        }
         if (!$this->rateIssuedItems($ctx, $step, $doc, $amounts, $class, $clientId, $snapshot)) {
             return;
         }

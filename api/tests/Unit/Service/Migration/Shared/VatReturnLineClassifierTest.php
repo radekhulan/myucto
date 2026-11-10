@@ -111,6 +111,21 @@ final class VatReturnLineClassifierTest extends TestCase
         self::assertNull(Lines::saleFromLineSet([51]));
     }
 
+    /** Ř. 26: tuzemský odběratel (CZ nebo bez země) = § 71i, zahraniční = 26s; jiné kódy beze změny. */
+    public function testLine26CodeForCustomer(): void
+    {
+        self::assertSame('26s', Lines::saleCode(26));
+        self::assertSame('71i', Lines::saleCodeForCustomer(Lines::saleCode(26), 'CZ'));
+        self::assertSame('71i', Lines::saleCodeForCustomer('26s', ' cz '));
+        self::assertSame('71i', Lines::saleCodeForCustomer('26s', null));
+        self::assertSame('71i', Lines::saleCodeForCustomer('26s', ''));
+        self::assertSame('26s', Lines::saleCodeForCustomer('26s', 'US'));
+        self::assertSame('26s', Lines::saleCodeForCustomer('26s', 'SK'));
+        foreach (['3', '22', '26', '26c', '25s', null] as $code) {
+            self::assertSame($code, Lines::saleCodeForCustomer($code, 'CZ'));
+        }
+    }
+
     public function testPurchaseFromLineSet(): void
     {
         self::assertSame(['in_return' => true, 'deduction' => 'reduced', 'reverse' => false, 'code' => null, 'fixed_asset' => true], Lines::purchaseFromLineSet([40, 47], true));

@@ -11,6 +11,7 @@ use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter as PohodaPartners;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyDecision;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
+use MyInvoice\Service\Migration\Shared\MigratedClientCountry;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentItem;
 use MyInvoice\Service\Migration\Shared\MigratedDocumentWriter;
 use MyInvoice\Service\Migration\Shared\MigratedIssuedDocument;
@@ -60,6 +61,8 @@ final class InvoiceImporter
 
     private readonly ForeignCurrencyTakeover $foreignCurrency;
 
+    private readonly MigratedClientCountry $clientCountry;
+
     /** @var array<string,\PDOStatement> */
     private array $stmts = [];
 
@@ -74,6 +77,7 @@ final class InvoiceImporter
     ) {
         $this->rates = new MigrationVatRateLookup($db);
         $this->foreignCurrency = new ForeignCurrencyTakeover($db);
+        $this->clientCountry = new MigratedClientCountry($db);
     }
 
     public function importIssued(PremierContext $ctx, PremierDocuments $documents): void
@@ -209,7 +213,8 @@ final class InvoiceImporter
                     $reasons[] = "kód DPH „{$code}“ (plnění bez daně) u položky s daní";
                     continue;
                 }
-                $items[$i]['target_code'] = $class['code'];
+                // Ř. 26 u tuzemského odběratele je § 71i, ne služba mimo tuzemsko.
+                $items[$i]['target_code'] = $this->clientCountry->saleCode($class['code'], $ctx->supplierId, $clientId);
                 continue;
             }
             $reduced = $this->isReduced($ctx->vat, $code, (float) $item['rate']);
