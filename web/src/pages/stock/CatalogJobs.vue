@@ -44,7 +44,7 @@ const HISTORY_RUNS = ['stock_history_import_apply', 'stock_history_import_rollba
 /** Převzetí a vrácení historie skladu jde opakovat jen u poslední takové úlohy (starší backend odmítne). */
 const latestHistoryRun = computed(() => Math.max(0, ...jobs.value.filter(job => HISTORY_RUNS.includes(job.kind)).map(job => job.id)))
 function canRetry(job: CatalogJob) {
-  return (job.status === 'failed' || job.status === 'cancelled')
+  return (job.status === 'failed' || job.status === 'cancelled') && job.kind !== 'stock_value_trend'
     && (!HISTORY_RUNS.includes(job.kind) || job.id === latestHistoryRun.value)
 }
 /** Zastavené převzetí historie nechá zamčený sklad, zastavit ho smí jen správce firmy jako vrácení. */
