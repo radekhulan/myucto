@@ -317,6 +317,23 @@ describe('ProductImport', () => {
     wrapper.unmount()
   })
 
+  it('does not show a row that failed validation as clearing every field', async () => {
+    const failed = report('failed')
+    Object.assign(failed.items[0], { after: null, error_code: 'category_code_not_found' })
+    mocks.items.mockResolvedValue(failed)
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('123.45')
+    expect(wrapper.text()).not.toContain('eshop.import2.empty_value')
+    expect(wrapper.text()).not.toContain('Bez hodnoty')
+
+    wrapper.unmount()
+  })
+
   it('cancels an active job, aborts its poll, and allows a retry', async () => {
     mocks.preview.mockResolvedValue(job({
       status: 'queued',

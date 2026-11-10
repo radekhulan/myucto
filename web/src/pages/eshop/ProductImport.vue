@@ -847,8 +847,9 @@ function displayFieldValue(field: string, value: unknown): string {
 }
 
 function changedFields(item: CatalogImportItems['items'][number]): string[] {
+  if (item.after == null) return []
   const before = item.before ?? {}
-  const after = item.after ?? {}
+  const after = item.after
   return Object.keys({ ...before, ...after })
     .filter(field => !HIDDEN_DIFF_FIELDS.has(field))
     .filter(field => {
