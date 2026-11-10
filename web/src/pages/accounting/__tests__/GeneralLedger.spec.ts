@@ -55,7 +55,7 @@ vi.mock('vue-i18n', () => ({
 
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: m.toastError }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
-vi.mock('@/components/ui/buttonStyles', () => ({ ICONS: { download: 'M0 0' }, btnOutline: () => '', btnFilled: () => '' }))
+vi.mock('@/components/ui/buttonStyles', () => ({ ICONS: { download: 'M0 0' }, btnOutline: () => '', btnOutlineSm: () => '', btnFilled: () => '' }))
 vi.mock('@/components/ui/Modal.vue', () => ({ default: { props: ['title'], template: '<div role="dialog"><h2>{{ title }}</h2><slot /><slot name="footer" /></div>' } }))
 vi.mock('@/composables/usePaneDom', () => ({ usePaneDom: () => document }))
 vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined) }))
@@ -457,6 +457,161 @@ describe('GeneralLedger period navigation', () => {
     expect(m.replace).toHaveBeenCalledWith({ query: expect.objectContaining({
       vendor: 'Dodavatel A', client: 'Klient B', item: 'Služba C',
     }) })
+    wrapper.unmount()
+  })
+
+  it('rozbalený měsíc načte řádky se stejnými filtry a ve dnech rozsahu knihy', async () => {
+    Object.assign(routeQuery, {
+      from: '2026-09-10', to: '2026-12-31', dimension_value_id: '9', vendor: 'Dodavatel A', after_closing: '1',
+    })
+    m.getGeneralLedger.mockImplementation(() => Promise.resolve({
+      ...report(3),
+      from: '2026-09-10',
+      months: ['2026-09'],
+      accounts: [{ ...report(3).accounts[0], months: { '2026-09': { md: 100, d: 0 } } }],
+    }))
+    const statement = vi.mocked(accountingApi.getAccountStatement)
+    statement.mockReset()
+    statement.mockResolvedValue({ items: [], total: 0 } as never)
+    const wrapper = mount(GeneralLedger, {
+      global: { stubs: {
+        ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true,
+        DensityToggle: true, EmptyState: true,
+      } },
+    })
+    await flushPromises()
+    const month = wrapper.findAll('tr').filter(r => r.findAll('td.font-mono').some(td => td.text() === '2026-09')).at(-1)!
+    await month.trigger('click')
+    await flushPromises()
+    expect(statement).toHaveBeenCalledWith(3138611, expect.objectContaining({
+      from: '2026-09-10', to: '2026-09-30', page: 1, opening_date: '2026-09-10', include_analytics: 0,
+      dimension_value_id: '9', dimension_descendants: 1, vendor: 'Dodavatel A', after_closing: 1,
+    }))
+    wrapper.unmount()
+  })
+
+  it('další řádky měsíce načte se stejnými filtry, ne v opisu bez nich', async () => {
+    Object.assign(routeQuery, { to: '2026-09-20', dimension_value_id: '9' })
+    m.getGeneralLedger.mockImplementation(() => Promise.resolve({
+      ...report(3),
+      to: '2026-09-20',
+      months: ['2026-09'],
+      accounts: [{ ...report(3).accounts[0], months: { '2026-09': { md: 100, d: 0 } } }],
+    }))
+    const line = (id: number) => ({ entry_id: id, entry_date: '2026-09-01', side: 'debit', amount: 1, account_code: '221.400' })
+    const statement = vi.mocked(accountingApi.getAccountStatement)
+    statement.mockReset()
+    statement.mockResolvedValueOnce({ items: Array.from({ length: 200 }, (_, i) => line(i + 1)), total: 201 } as never)
+    statement.mockResolvedValueOnce({ items: [line(201)], total: 201 } as never)
+    const wrapper = mount(GeneralLedger, {
+      global: { stubs: {
+        ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true,
+        DensityToggle: true, EmptyState: true,
+      } },
+    })
+    await flushPromises()
+    await wrapper.findAll('tr').filter(r => r.findAll('td.font-mono').some(td => td.text() === '2026-09')).at(-1)!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.month_load_more')!.trigger('click')
+    await flushPromises()
+    expect(statement).toHaveBeenLastCalledWith(3138611, expect.objectContaining({
+      from: '2026-09-01', to: '2026-09-20', page: 2, dimension_value_id: '9',
+    }))
+    expect(wrapper.findAll('button').some(b => b.text() === 'accounting.general_ledger.month_load_more')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('jedno období před uzavřením i všechna období po uzavření posílají den PS = začátek knihy', async () => {
+    const statement = vi.mocked(accountingApi.getAccountStatement)
+    for (const [query, from] of [
+      [{}, '2026-01-01'],
+      [{ period_id: undefined, all_periods: '1', after_closing: '1' }, '2026-01-01'],
+    ] as const) {
+      for (const key of Object.keys(routeQuery)) delete routeQuery[key]
+      Object.assign(routeQuery, defaultRouteQuery, query)
+      if (!('period_id' in query) || query.period_id === undefined) delete routeQuery.period_id
+      if (!('all_periods' in query)) routeQuery.period_id = '3'
+      m.getGeneralLedger.mockImplementation((params: { all_periods?: number }) => Promise.resolve({
+        ...(params.all_periods ? allPeriodsReport() : report(3)),
+        months: ['2026-05'],
+        accounts: [{ ...report(3).accounts[0], months: { '2026-05': { md: 100, d: 0 } } }],
+      }))
+      statement.mockReset()
+      statement.mockResolvedValue({ items: [], total: 0 } as never)
+      const wrapper = mount(GeneralLedger, {
+        global: { stubs: {
+          ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true,
+          DensityToggle: true, EmptyState: true,
+        } },
+      })
+      await flushPromises()
+      await wrapper.findAll('tr').filter(r => r.findAll('td.font-mono').some(td => td.text() === '2026-05')).at(-1)!.trigger('click')
+      await flushPromises()
+      expect(statement.mock.calls.at(-1)?.[1]).toMatchObject({ opening_date: from, from: '2026-05-01', to: '2026-05-31' })
+      wrapper.unmount()
+    }
+  })
+
+  it('pozdní odpověď měsíce po změně účtu se nezobrazí', async () => {
+    m.getGeneralLedger.mockImplementation(() => Promise.resolve({
+      ...report(3),
+      months: ['2026-05'],
+      accounts: [
+        { ...report(3).accounts[0], months: { '2026-05': { md: 100, d: 0 } } },
+        { ...report(3).accounts[0], account_id: 3138612, account_code: '221.500', months: { '2026-05': { md: 50, d: 0 } } },
+      ],
+      totals: report(3).totals,
+    }))
+    let resolveLate: (v: unknown) => void = () => {}
+    const statement = vi.mocked(accountingApi.getAccountStatement)
+    statement.mockReset()
+    statement.mockImplementationOnce(() => new Promise(r => { resolveLate = r }) as never)
+    statement.mockResolvedValue({ items: [], total: 0 } as never)
+    const wrapper = mount(GeneralLedger, {
+      global: { stubs: {
+        ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true,
+        DensityToggle: true, EmptyState: true,
+      } },
+    })
+    await flushPromises()
+    await wrapper.findAll('tr').filter(r => r.findAll('td.font-mono').some(td => td.text() === '2026-05')).at(-1)!.trigger('click')
+    // Týž měsíc otevřený pod jiným účtem nesmí převzít pozdní řádky prvního účtu.
+    await wrapper.get('#gl-account-3138612').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('tr').filter(r => r.findAll('td.font-mono').some(td => td.text() === '2026-05')).at(-1)!.trigger('click')
+    await flushPromises()
+    expect(statement).toHaveBeenLastCalledWith(3138612, expect.anything())
+    resolveLate({ items: [{ entry_id: 1, entry_date: '2026-05-02', side: 'debit', amount: 100, account_code: '221.400', description: 'Pozdní řádek' }], total: 1 })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Pozdní řádek')
+    wrapper.unmount()
+  })
+
+  it('všechna období před uzavřením nechají vyřadit všechny otevírací zápisy', async () => {
+    delete routeQuery.period_id
+    routeQuery.all_periods = '1'
+    routeQuery.analytics = '0'
+    m.getGeneralLedger.mockImplementation(() => Promise.resolve({
+      ...allPeriodsReport(),
+      months: ['2027-01'],
+      accounts: [{ ...report(4).accounts[0], months: { '2027-01': { md: 100, d: 0 } } }],
+    }))
+    const statement = vi.mocked(accountingApi.getAccountStatement)
+    statement.mockReset()
+    statement.mockResolvedValue({ items: [], total: 0 } as never)
+    const wrapper = mount(GeneralLedger, {
+      global: { stubs: {
+        ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true,
+        DensityToggle: true, EmptyState: true,
+      } },
+    })
+    await flushPromises()
+    await wrapper.findAll('tr').filter(r => r.findAll('td.font-mono').some(td => td.text() === '2027-01')).at(-1)!.trigger('click')
+    await flushPromises()
+    const params = statement.mock.calls.at(-1)?.[1]
+    expect(params).toMatchObject({ from: '2027-01-01', to: '2027-01-31' })
+    expect(params?.opening_date).toBeUndefined()
+    expect(params?.include_analytics).toBeUndefined()
     wrapper.unmount()
   })
 

@@ -36,10 +36,20 @@ final class AccountStatementService
     ) {}
 
     /**
+     * @param AccountStatementScope|null $scope zúžení podle řádku hlavní knihy (rozbalený
+     *        měsíc ukazuje tytéž řádky, které kniha sčítá do obratu). Součty podle protiúčtu
+     *        se s filtry knihy nepočítají.
      * @return array<string,mixed> struktura dle spec §2.6
      */
-    public function build(int $supplierId, int $accountId, string $from, string $to, int $page, int $perPage, bool $afterClosing = false, ?int $counterAccountId = null): array
+    public function build(int $supplierId, int $accountId, string $from, string $to, int $page, int $perPage, bool $afterClosing = false, ?int $counterAccountId = null, ?AccountStatementScope $scope = null): array
     {
+        $scope ??= new AccountStatementScope();
+        $filters = $scope->filters;
+        if ($filters !== [] && $counterAccountId !== null) {
+            // Rozdělení obratu podle protiúčtu počítá s celými řádky; díl rozpadu dimenze ani
+            // zúžení na zápisy protistrany v něm nejsou.
+            throw new ReportException('validation_failed', 'Filtr protiúčtu nejde kombinovat s filtrem dimenze, dodavatele, odběratele ani položky.', 422);
+        }
         $account = $this->accounts->findById($supplierId, $accountId, $to);
         if ($account === null) {
             throw new ReportException('account_not_found', 'Účet #' . $accountId . ' neexistuje.', 404);
@@ -63,12 +73,12 @@ final class AccountStatementService
 
         $pairs = $this->entryForms->hasAnySingle($supplierId);
 
-        $opening = $this->ledger->accountOpening($supplierId, $accountId, $from, $periodStart, $excludeClosing);
-        $total   = $this->ledger->accountLinesTotal($supplierId, $accountId, $from, $to, $excludeClosing, $counterAccountId, $pairs);
+        $opening = $this->ledger->accountOpening($supplierId, $accountId, $from, $periodStart, $excludeClosing, $scope);
+        $total   = $this->ledger->accountLinesTotal($supplierId, $accountId, $from, $to, $excludeClosing, $counterAccountId, $pairs, $scope);
 
         $page = max(1, $page);
         $perPage = max(1, $perPage);
-        $lines = $this->ledger->accountLines($supplierId, $accountId, $from, $to, $perPage, ($page - 1) * $perPage, $excludeClosing, $counterAccountId, $pairs);
+        $lines = $this->ledger->accountLines($supplierId, $accountId, $from, $to, $perPage, ($page - 1) * $perPage, $excludeClosing, $counterAccountId, $pairs, $scope);
 
         $items = [];
         foreach ($lines as $l) {
@@ -114,10 +124,10 @@ final class AccountStatementService
             $items = self::expandPieces($items, $counterAccountId, $type, $normalSide);
         }
 
-        $turnovers = $this->ledger->accountTurnovers($supplierId, $accountId, $from, $to, $excludeClosing);
+        $turnovers = $this->ledger->accountTurnovers($supplierId, $accountId, $from, $to, $excludeClosing, $scope);
         // Součty jdou přes všechny pohyby účtu a stránkováním se nemění, stačí první stránka.
-        $counterTotals = $page === 1
-            ? self::reconcileCounterTotals($this->ledger->accountCounterTotals($supplierId, $accountId, $from, $to, $excludeClosing, $pairs), $turnovers)
+        $counterTotals = $page === 1 && $filters === []
+            ? self::reconcileCounterTotals($this->ledger->accountCounterTotals($supplierId, $accountId, $from, $to, $excludeClosing, $pairs, $scope), $turnovers)
             : null;
         $closing = round($opening + $turnovers['md'] - $turnovers['d'], 2);
 
@@ -144,6 +154,12 @@ final class AccountStatementService
             'turnover_d'      => $turnovers['d'],
             'counter_totals'  => $counterTotals,
             'counter_filter'  => $counterAccount === null || $counterTotals === null ? null : self::counterFilter($counterAccount, $counterTotals),
+            'vendor'          => $filters['vendor'] ?? null,
+            'client'          => $filters['client'] ?? null,
+            'item'            => $filters['item'] ?? null,
+            'dimension'       => isset($filters['dimension']) ? $filters['dimension']->toArray() : null,
+            'opening_date'    => $scope->openingDate,
+            'include_analytics' => $scope->withAnalytics,
         ];
         if ($pairs) {
             $out['layout'] = 'pairs';

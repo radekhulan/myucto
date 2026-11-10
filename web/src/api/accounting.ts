@@ -1430,6 +1430,25 @@ export interface BalanceInventorySaveResult {
   row_version: number
 }
 
+export interface AccountStatementParams {
+  from: string
+  to: string
+  page?: number
+  per_page?: number
+  counter_account_id?: number
+  after_closing?: 1
+  /** Den, jehož otevírací zápis patří do PS (rozbalený měsíc hlavní knihy: začátek knihy). */
+  opening_date?: string
+  /** 0 = jen účet sám, bez analytik (řádek syntetiky v knize s rozpadem). */
+  include_analytics?: 0 | 1
+  /** Filtry hlavní knihy: zúží řádky i počáteční stav; nejdou kombinovat s protiúčtem. */
+  vendor?: string
+  client?: string
+  item?: string
+  dimension_value_id?: number | string
+  dimension_descendants?: 0 | 1
+}
+
 export interface AccountStatementItem {
   entry_id: number
   entry_date: string
@@ -1602,6 +1621,13 @@ export interface AccountStatementReport {
   counter_filter: { account_id: number; account_code: string; name: string; md: number; d: number } | null
   /** `pairs` u firmy s jednoduchým zápisem: řádky nesou `pair_no`, `pair_status`, `pair_piece`; jinak klíč chybí. */
   layout?: 'pairs'
+  /** Použité zúžení podle hlavní knihy (viz AccountStatementParams). */
+  vendor?: string | null
+  client?: string | null
+  item?: string | null
+  dimension?: ReportDimensionFilter | null
+  opening_date?: string | null
+  include_analytics?: boolean
 }
 
 export type StatementScope = 'auto' | 'full' | 'small' | 'micro'
@@ -2952,7 +2978,7 @@ export const accountingApi = {
     api.get<AccountInventoryReport>(`/accounting/reports/balance-inventory/account/${accountId}`, { params: { as_of: asOf } }).then(r => r.data),
   getOpenItemsList: (params: { as_of: string; codes?: string }) =>
     api.get<OpenItemsListReport>('/accounting/reports/open-items-list', { params }).then(r => r.data),
-  getAccountStatement: (accountId: number, params: { from: string; to: string; page?: number; per_page?: number; counter_account_id?: number }) =>
+  getAccountStatement: (accountId: number, params: AccountStatementParams) =>
     api.get<AccountStatementReport>(`/accounting/reports/account-statement/${accountId}`, { params }).then(r => r.data),
   getOpenItems: (accountId: number, params: { as_of: string; only_open: 0 | 1; page?: number; per_page?: number }) =>
     api.get<OpenItemsReport>(`/accounting/open-items/${accountId}`, { params }).then(r => r.data),

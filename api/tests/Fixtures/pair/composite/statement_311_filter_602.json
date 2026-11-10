@@ -159,5 +159,11 @@
         "name": "Tržby z prodeje služeb",
         "md": 10900.0,
         "d": 0.0
-    }
+    },
+    "vendor": null,
+    "client": null,
+    "item": null,
+    "dimension": null,
+    "opening_date": null,
+    "include_analytics": true
 }

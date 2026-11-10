@@ -101,5 +101,11 @@
         "name": "Ostatní finanční náklady",
         "md": 0.0,
         "d": 15.0
-    }
+    },
+    "vendor": null,
+    "client": null,
+    "item": null,
+    "dimension": null,
+    "opening_date": null,
+    "include_analytics": true
 }

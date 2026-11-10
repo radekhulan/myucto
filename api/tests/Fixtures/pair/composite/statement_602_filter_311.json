@@ -135,5 +135,11 @@
         "name": "Pohledávky z obchodních vztahů (odběratelé)",
         "md": 0.0,
         "d": 10900.0
-    }
+    },
+    "vendor": null,
+    "client": null,
+    "item": null,
+    "dimension": null,
+    "opening_date": null,
+    "include_analytics": true
 }

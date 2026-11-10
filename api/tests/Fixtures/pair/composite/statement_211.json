@@ -178,5 +178,11 @@
             "d": 250.0
         }
     ],
-    "counter_filter": null
+    "counter_filter": null,
+    "vendor": null,
+    "client": null,
+    "item": null,
+    "dimension": null,
+    "opening_date": null,
+    "include_analytics": true
 }

@@ -87,5 +87,11 @@
     "turnover_md": 51210.0,
     "turnover_d": 26830.0,
     "counter_totals": null,
-    "counter_filter": null
+    "counter_filter": null,
+    "vendor": null,
+    "client": null,
+    "item": null,
+    "dimension": null,
+    "opening_date": null,
+    "include_analytics": true
 }
