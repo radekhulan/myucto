@@ -113,26 +113,37 @@ Mobilní aplikace Claude používá konektor přidaný k účtu. Ručně přidan
 v ChatGPT je vázaný na desktopového hostitele a do běžného mobilního chatu se
 nepřenáší (viz [§ 105.8.3.5](#105835-vzdalene-pripojeni-bez-stahovani)).
 
-### 105.4.1 Připojení klienta na vlastní doméně firmy
+### 105.4.1 Připojení klienta na vlastní doméně firmy nebo adrese instalace
 
 Správce může klientské roli výslovně přidělit oprávnění **Připojit AI asistenta (MCP)**.
 Úroveň **Čtení** dovolí připojení pouze pro čtení, úroveň **Zápis** umožní schválit
 čtení a zápis. Jednotlivé operace nadále vyžadují odpovídající oprávnění dané agendy.
 Výchozí klientské role toto oprávnění nemají.
 
-1. Otevřete aktivní klientskou doménu své firmy a v části **Firma → MCP server**
-   zkopírujte adresu, například `https://portal.firma.cz/mcp`.
+Klient se připojí dvěma způsoby se stejným rozsahem:
+
+- **Přes klientskou doménu firmy**, má-li firma aktivní doménu s klientským
+  rozhraním (například `https://portal.firma.cz/mcp`).
+- **Přes adresu instalace** (například `https://ucto.vase-firma.cz/mcp`), když
+  firma klientskou doménu nemá.
+
+1. V klientském portálu otevřete **Firma → MCP server** a zkopírujte uvedenou
+   adresu. Má-li firma aktivní klientskou doménu, stránka nabídne její adresu,
+   jinak adresu instalace.
 2. Adresu vložte do asistenta podporujícího vzdálené MCP s OAuth.
-3. Přihlaste se na hlavní doméně MyÚčta a potvrďte firmu, klientskou doménu
-   a rozsah. Při zapnutém MFA ověřte passkey nebo nový kód ověřovací aplikace.
+3. Přihlaste se na hlavní doméně MyÚčta a potvrďte firmu a rozsah. Přes adresu
+   instalace s přístupem k více firmám zvolte v poli **Firma** jednu z nich; pro
+   další firmu vytvořte samostatné připojení. Při zapnutém MFA ověřte passkey
+   nebo nový kód ověřovací aplikace.
 4. V asistentovi ověřte připojení a dostupnou firmu.
 
-Stránka **Firma → MCP server** obsahuje návod pro přidání konektoru v ChatGPT a Claude, přihlášení a ověření připojení. Do asistenta zadávejte adresu serveru končící `/mcp`; stránka `/portal/mcp` slouží ke správě připojení. Pro klientské připojení použijte aktivní HTTPS doménu firmy. Cloudový asistent potřebuje veřejně dostupnou doménu s důvěryhodným certifikátem; na `127.0.0.1` ani `localhost` vašeho počítače se nepřipojí.
+Stránka **Firma → MCP server** obsahuje návod pro přidání konektoru v ChatGPT a Claude, přihlášení a ověření připojení. Do asistenta zadávejte adresu serveru končící `/mcp`; stránka `/portal/mcp` slouží ke správě připojení. Cloudový asistent potřebuje adresu dostupnou z internetu přes HTTPS s důvěryhodným certifikátem; na `127.0.0.1` ani `localhost` vašeho počítače se nepřipojí.
 
-Blok **MCP server této instalace** zobrazuje adresu vrácenou serverem a tlačítko **Kopírovat adresu**. Adresu lze zkopírovat i při vypnutém MCP; samotné připojení vyžaduje jeho zapnutí. Na hlavní doméně se zobrazuje adresa hlavní instalace s upozorněním, že pro přístup omezený na jednu firmu je potřeba otevřít její klientskou doménu.
+Blok **MCP server této instalace** zobrazuje adresu vrácenou serverem a tlačítko **Kopírovat adresu**. Adresu lze zkopírovat i při vypnutém MCP; samotné připojení vyžaduje jeho zapnutí.
 
-Toto připojení platí pouze pro firmu a doménu uvedenou v souhlasu. Ani pozdější
-přidělení další firmy jeho rozsah nerozšíří. Seznam nástrojů je klientský výběr
+Připojení platí pouze pro firmu uvedenou v souhlasu, u klientské domény navíc
+jen pro tuto doménu. Ani pozdější přidělení další firmy jeho rozsah nerozšíří.
+Oprávnění **API tokeny** klientskou roli k připojení neopravňuje. Seznam nástrojů je klientský výběr
 fakturace, kontaktů, zakázek, přijatých dokladů, pravidelné fakturace, knihy jízd,
 ceníku a čtení skladových položek; konkrétní nabídka závisí na právech a rozsahu.
 Účetní a mzdové nástroje se klientským připojením nezpřístupňují.
@@ -210,15 +221,18 @@ a odebrání čerpání se provedou až s `confirm: true`. Bez potvrzení asiste
 ukáže náhled. Samotné odpojení vazby ponechá odečtenou zálohu na dokladu;
 odebrání čerpání odstraní i odpočtové řádky konceptu.
 
-Na stejné stránce v klientském portálu vidíte svá připojení pro tuto firmu
-na této doméně a můžete je odvolat i po odebrání oprávnění k novým připojením.
-Odebrání oprávnění nebo členství, vypnutí domény či její převedení na jinou
-firmu zablokuje další použití i obnovu tokenu. Přístupový token tohoto
-připojení nelze použít na jiné doméně ani přímo proti REST API.
+Na stejné stránce v klientském portálu vidíte svá připojení a můžete je odvolat
+i po odebrání oprávnění k novým připojením. Na hlavní doméně jsou to všechna vaše
+připojení, na klientské doméně připojení její firmy přes tuto doménu i přes adresu
+instalace. Odebrání oprávnění nebo členství ve firmě zablokuje další použití
+i obnovu tokenu, u připojení přes doménu také vypnutí domény či její převedení
+na jinou firmu. Přístupový token nelze použít na jiné adrese, než pro kterou
+vznikl, ani přímo proti REST API.
 
-Připojení vyžaduje zapnuté vzdálené MCP, dostupný serverový most a aktivní
-ověřenou doménu s klientským rozhraním. Doména pouze pro veřejné odkazy nestačí.
-Klientské MCP nevytváří oprávnění ke správě obecných API tokenů.
+Připojení vyžaduje zapnuté vzdálené MCP a dostupný serverový most. Připojení přes
+klientskou doménu navíc vyžaduje aktivní ověřenou doménu s klientským rozhraním;
+doména pouze pro veřejné odkazy nestačí. Klientské MCP nevytváří oprávnění ke
+správě obecných API tokenů.
 
 ## 105.5 Krok za krokem: lokální server (.mjs)
 

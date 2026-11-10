@@ -77,7 +77,7 @@ final class HostedMcpEndpointAction
         $input = [
             'scope' => $scope,
             'mcpResource' => $token['mcp_resource'] ?? null,
-            'allowedTools' => $custom ? ($this->clientTools?->allowed($request) ?? []) : null,
+            'allowedTools' => !empty($token['mcp_client_surface']) ? ($this->clientTools?->allowed($request) ?? []) : null,
             'token' => substr($request->getHeaderLine('Authorization'), 7),
             'boundSupplierId' => ($token['supplier_id'] ?? null) !== null ? (int) $token['supplier_id'] : null,
             'lockedSupplierId' => $domain instanceof TenantDomainContext && $domain->locksSupplier()

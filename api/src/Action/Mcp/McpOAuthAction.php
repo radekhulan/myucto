@@ -120,7 +120,7 @@ final class McpOAuthAction
             : $request->getQueryParams();
         foreach (['client_id', 'redirect_uri', 'response_type', 'code_challenge',
             'code_challenge_method', 'state', 'resource', 'scope', 'supplier_id', 'decision',
-            'password', 'totp_code', 'step_up_token', 'grant_scope'] as $key) {
+            'password', 'totp_code', 'step_up_token', 'grant_scope', 'grant_supplier_id'] as $key) {
             if (isset($params[$key]) && !is_string($params[$key]) && !is_int($params[$key])) {
                 return $this->html($response, '<h1>Neplatný požadavek na připojení MCP.</h1>', 400);
             }
@@ -160,7 +160,11 @@ final class McpOAuthAction
         $choices = [];
         $accessibleCount = 0;
         $canGrantWrite = false;
+        $writableSuppliers = [];
         $issuedAuthMethod = ((array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []))['auth_method'] ?? null;
+        // Klient dostane i na kanonické adrese připojení vázané na jednu firmu
+        // se stejnou kontrolou členství a profile.mcp jako na vlastní doméně.
+        $perSupplier = $target['supplier_id'] !== null || $this->resources->isClientUser((int) $user['id']);
         $available = ($user['is_superadmin'] ?? false) === true
             ? $this->db->pdo()->query('SELECT id AS supplier_id, COALESCE(NULLIF(display_name, \'\'), company_name) AS name FROM supplier ORDER BY id')->fetchAll(\PDO::FETCH_ASSOC)
             : $this->memberships->listForUser((int) $user['id']);
@@ -173,18 +177,32 @@ final class McpOAuthAction
             if (!$access->denied && $access->supplierId === $candidateId) {
                 $accessibleCount++;
                 $role = $this->roles->resolve($candidateRequest);
-                if ($target['supplier_id'] !== null
+                if ($perSupplier
                     ? $this->resources->allowsGrant($resource, (int) $user['id'], $candidateId, 'read', $issuedAuthMethod)
                     : $this->permissions->allows($role, 'profile.tokens', AccessLevel::READ)) {
                     $choices[] = $choice;
-                    $canGrantWrite = $canGrantWrite || ($target['supplier_id'] !== null
+                    $writable = $perSupplier
                         ? $this->resources->allowsGrant($resource, (int) $user['id'], $candidateId, 'read_write', $issuedAuthMethod)
-                        : $this->permissions->allows($role, 'profile.tokens', AccessLevel::WRITE));
+                        : $this->permissions->allows($role, 'profile.tokens', AccessLevel::WRITE);
+                    if ($writable) $writableSuppliers[] = $candidateId;
+                    $canGrantWrite = $canGrantWrite || $writable;
                 }
             }
         }
         if ($choices === []) {
             return $this->html($response, '<h1>Nemáte oprávnění k vydání API tokenu pro žádnou firmu.</h1>', 403);
+        }
+        $clientCanonical = $target['supplier_id'] === null && $perSupplier;
+        $grantSupplierId = $target['supplier_id'];
+        if ($clientCanonical && $request->getMethod() === 'POST') {
+            $choiceIds = array_map(static fn (array $choice): int => (int) $choice['supplier_id'], $choices);
+            $requested = isset($params['grant_supplier_id']) ? (int) $params['grant_supplier_id']
+                : (count($choiceIds) === 1 ? $choiceIds[0] : 0);
+            if (!in_array($requested, $choiceIds, true)) {
+                return $this->html($response, '<h1>Vyberte firmu, ke které asistenta připojujete.</h1>', 400);
+            }
+            $grantSupplierId = $requested;
+            $canGrantWrite = in_array($requested, $writableSuppliers, true);
         }
         $identity = $this->db->pdo()->prepare(
             'SELECT totp_secret, totp_enabled FROM users WHERE id = ? AND is_active = 1'
@@ -228,11 +246,28 @@ final class McpOAuthAction
                 $verification = '<p class="field-hint">Jste přihlášeni. Pro připojení stačí potvrdit přístup.</p>';
             }
             $permission = $scope === 'read_write' ? 'čtení a zápis' : 'pouze čtení';
-            $bindingNotice = $target['supplier_id'] !== null
+            if ($clientCanonical) {
+                if (count($choices) === 1) {
+                    $fields .= '<input type="hidden" name="grant_supplier_id" value="' . (int) $choices[0]['supplier_id'] . '">';
+                } else {
+                    $options = '';
+                    foreach ($choices as $choice) {
+                        $options .= '<option value="' . (int) $choice['supplier_id'] . '">'
+                            . self::escape((string) ($choice['name'] ?? $choice['supplier_name'] ?? $choice['supplier_id'])) . '</option>';
+                    }
+                    $grantChoice = '<label class="field">Firma<select name="grant_supplier_id" required>' . $options . '</select></label>' . $grantChoice;
+                }
+            }
+            $bindingNotice = $clientCanonical
+                ? '<p class="muted">' . (count($choices) === 1
+                    ? 'Přístup platí pouze pro firmu ' . self::escape((string) ($choices[0]['name'] ?? $choices[0]['supplier_name'] ?? $choices[0]['supplier_id'])) . '.'
+                    : 'Přístup platí pouze pro firmu, kterou vyberete. Pro další firmu vytvořte samostatné připojení.')
+                    . ' Další firmy přidělené uživateli se nezpřístupní. Přístup můžete odvolat v klientském portálu v části MCP.</p>'
+                : ($target['supplier_id'] !== null
                 ? '<p class="muted">Přístup platí pouze pro firmu ' . self::escape((string) ($choices[0]['name'] ?? $choices[0]['supplier_name'] ?? $target['supplier_id']))
                     . ' na adrese ' . self::escape($resource) . '. Další firmy přidělené uživateli se nezpřístupní. Přístup můžete odvolat v klientském portálu v části MCP.</p>'
                 : '<p class="muted">Přístup se vztahuje na všechny firmy, ke kterým máte práva, včetně těch přidaných později. Aktuálně jich můžete použít '
-                    . $accessibleCount . '. Práva ke každé firmě se kontrolují při každém volání. Přístup můžete kdykoli odvolat na stránce Firma → MCP server.</p>';
+                    . $accessibleCount . '. Práva ke každé firmě se kontrolují při každém volání. Přístup můžete kdykoli odvolat na stránce Firma → MCP server.</p>');
             $content = '<h1>Připojit MyÚčto k AI asistentovi</h1>'
                 . '<p class="lead">Aplikace <strong>' . self::escape((string) $client['client_name']) . '</strong> ('
                 . self::escape((string) $host) . ') žádá o přístup k vašim datům.</p>'
@@ -292,7 +327,7 @@ final class McpOAuthAction
             return $this->consentError($response, $params, 'Ověřte passkey nebo zadejte nový kód ověřovací aplikace.', 401);
         }
         $code = $this->oauth->createCode(
-            $clientId, (int) $user['id'], $target['supplier_id'], $redirect, $challenge, $grantScope, $resource,
+            $clientId, (int) $user['id'], $grantSupplierId, $redirect, $challenge, $grantScope, $resource,
             ((array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []))['auth_method'] ?? null,
         );
         return $this->finishConsent($response, self::redirectWith($redirect, [

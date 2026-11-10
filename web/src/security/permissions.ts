@@ -89,7 +89,8 @@ export const CLIENT_BANK_ACTION_KEYS = ['bank.import', 'bank.match', 'bank.ignor
 export function setRolePermission(
   permissions: Record<string, PermissionValue>, roleType: 'staff' | 'client', key: string, level: PermissionValue,
 ): void {
-  permissions[key] = roleType === 'client' && (key === 'bank' || key === 'stock' || key === 'reports.submissions') && level > 0 ? 1 : level
+  // Archiv připravených podání je jen ke čtení pro každý typ role (RoleRepository::validatePermissions).
+  permissions[key] = (key === 'reports.submissions' || (roleType === 'client' && (key === 'bank' || key === 'stock'))) && level > 0 ? 1 : level
   if (roleType !== 'client') return
   if (key === 'reports.submissions' && level === 0) {
     permissions['reports.submit'] = 0

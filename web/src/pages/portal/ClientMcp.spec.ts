@@ -96,7 +96,7 @@ describe('client domain MCP connections', () => {
     wrapper.unmount()
   })
 
-  it('labels the canonical endpoint separately and keeps the client-domain requirement', async () => {
+  it('lets a client connect through the canonical endpoint on the main domain', async () => {
     m.locked = false
     m.get.mockImplementation(async (path: string) => ({ data: path === '/mcp/settings'
       ? { enabled: true, node_available: true, endpoint: 'https://app.example.test/mcp' }
@@ -104,8 +104,8 @@ describe('client domain MCP connections', () => {
     }))
     const wrapper = mount(ClientMcp)
     await flushPromises()
-    expect(wrapper.text()).toContain('client_mcp.permission_required')
-    expect(wrapper.text()).not.toContain('client_mcp.instructions')
+    expect(wrapper.text()).toContain('client_mcp.instructions')
+    expect(wrapper.text()).not.toContain('client_mcp.permission_required')
     expect(wrapper.get('code').text()).toBe('https://app.example.test/mcp')
     expect(wrapper.text()).toContain('client_mcp.canonical_endpoint_hint')
     expect(wrapper.text()).toContain('client_mcp.description_main_domain')
@@ -113,6 +113,26 @@ describe('client domain MCP connections', () => {
     expect(wrapper.text()).toContain('client_mcp.step_authorize_main_domain')
     expect(wrapper.text()).toContain('client_mcp.empty_main_domain')
     expect(wrapper.text()).not.toMatch(/client_mcp\.(description|step_copy|step_authorize|empty)(?!_main_domain)/)
+    wrapper.unmount()
+  })
+
+  it('shows the company domain address on the main domain and revokes connections of both kinds', async () => {
+    m.locked = false
+    m.get.mockImplementation(async (path: string) => ({ data: path === '/mcp/settings'
+      ? { enabled: true, node_available: true, endpoint: 'https://portal.example.test/mcp' }
+      : { grants: [
+        { id: 7, client_name: 'Synthetic domain', resource: 'https://portal.example.test/mcp', scope: 'read', is_active: true, last_used_at: null },
+        { id: 9, client_name: 'Synthetic canonical', resource: 'https://app.example.test/mcp', scope: 'read', is_active: true, last_used_at: null },
+      ] },
+    }))
+    const wrapper = mount(ClientMcp)
+    await flushPromises()
+    expect(wrapper.get('code').text()).toBe('https://portal.example.test/mcp')
+    const revokes = wrapper.findAll('button').filter(button => button.text() === 'client_mcp.revoke')
+    expect(revokes).toHaveLength(2)
+    await revokes[1]!.trigger('click')
+    await flushPromises()
+    expect(m.remove).toHaveBeenCalledWith('/mcp/grants/9')
     wrapper.unmount()
   })
 

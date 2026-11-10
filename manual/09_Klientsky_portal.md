@@ -17,11 +17,12 @@ Výchozí klientská role tato práva nemá; postup a hranice přístupu popisuj
 [Klientské podávání připravených výkazů](49_Archiv_podani_a_rekonciliace.md#4921-klientske-podavani-pripravenych-vykazu).
 
 V části **Firma → MCP server** může klient spravovat připojení svého AI asistenta.
-Nové připojení na vlastní doméně firmy vyžaduje výslovně přidělené oprávnění
-**Připojit AI asistenta (MCP)**. Přihlášení a souhlas probíhají na hlavní doméně
-MyÚčta, připojení zůstává omezené na firmu klientské domény a aktuální práva
-uživatele. Vlastní připojení lze odvolat i po odebrání tohoto oprávnění.
-Postup popisuje [MCP server](105_MCP_server.md#10541-pripojeni-klienta-na-vlastni-domene-firmy).
+Nové připojení vyžaduje výslovně přidělené oprávnění **Připojit AI asistenta (MCP)**.
+Klient se připojí přes adresu klientské domény firmy, nebo přes adresu instalace,
+když firma klientskou doménu nemá. Přihlášení a souhlas probíhají na hlavní doméně
+MyÚčta, připojení zůstává omezené na jednu firmu potvrzenou v souhlasu a aktuální
+práva uživatele. Vlastní připojení lze odvolat i po odebrání tohoto oprávnění.
+Postup popisuje [MCP server](105_MCP_server.md#10541-pripojeni-klienta-na-vlastni-domene-firmy-nebo-adrese-instalace).
 
 Superadmin má v nabídce **Dokumenty → Předat doklady účetní** také přístup
 k předávání dokladů a odpovědím na požadavky účetní v právě vybrané firmě.
@@ -320,7 +321,13 @@ Dashboard účetní i domovská stránka klienta ukazují počet otevřených po
 
 Klient vidí vždy jen požadavky vlastní aktuálně zvolené firmy (stejný princip jako zbytek portálu, viz [§ 9.3](#93-krok-za-krokem-zalozeni-klientskeho-uctu)). Cizí požadavek vrátí 404, ne 403, aby se neprozrazovala ani jeho existence.
 
-Oprávnění **Předávat doklady účetní** patří jen klientským rolím. Oprávnění **Příchozí doklady** je interní a odděluje čtení fronty od jejího zpracování. Přístup k frontě sám nenahrazuje oprávnění vytvořit přijatou fakturu ani použít AI extrakci.
+Oprávnění **Předávat doklady účetní** mají klientské role a správce ho může přidělit i interní roli, například roli „Fakturace a dokumenty“ pro kolegu, který doklady jen předává. Výchozí interní role ho nemají. Oprávnění **Příchozí doklady** je interní a odděluje čtení fronty od jejího zpracování. Přístup k frontě sám nenahrazuje oprávnění vytvořit přijatou fakturu ani použít AI extrakci.
+
+Funkce klientského portálu se interní roli zpřístupňují oprávněními, ne samostatnou obrazovkou. Interní role může dostat:
+
+- **Předávat doklady účetní**: v menu `Dokumenty → Předat doklady účetní` předává originály stejně jako klient a vidí stav podání aktuální firmy. Na požadavky účetní odpovídá v `Dokumenty → Chybějící doklady`; má-li role i interní právo **Požadavky klientovi**, vede tato položka na interní přehled požadavků. Předání nedává přístup k příchozí frontě účetní a e-mailové urgence požadavků chodí dál jen klientům.
+- **Připravená podání DPH, KH a SH**: bez modulu **Daně a výkazy** pracuje role s archivem v `Daně → EPO podání a archív` stejně jako klient, tedy jen s přiznáním k DPH, kontrolním a souhrnným hlášením, jen z přihlášené webové aplikace a bez správy nastavení, důkazů a mazání. Role s modulem **Daně a výkazy** používá plnou agendu výkazů.
+- **Firemní podpisové profily a PDF podpisy**: spravuje firemní podpisové profily v `Firma → Nastavení firmy` ve stejném rozsahu jako klientský správce. Plnou správu podpisů dál dává interní právo **Elektronické podepisování**.
 
 ### 9.11.11 Vlastní doména: pravidla
 

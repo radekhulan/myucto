@@ -755,19 +755,27 @@ final class DocumentRequestTest extends TestCase
         $this->trackSubmissionFile($this->submissions->find((int) $row['submission_id'], $this->supplierA));
     }
 
-    public function testStaffCannotUseClientDocumentPortalEvenWithSubmissionPermission(): void
+    public function testStaffUsesDocumentPortalOnlyWithSubmissionPermission(): void
     {
         $action = new PortalPurchaseInvoiceSubmissionAction($this->submissions, $this->upload, $this->activity, $this->ipMatcher, $this->submissionDimensions, $this->buildDeletionService());
         $files = new PurchaseInvoiceSubmissionFileAction($this->submissions, $this->storage);
+        $responses = new ResponseFactory();
+        // Bez práva `documents.submit` portál nepomůže ani široké interní právo k dokumentům.
         foreach (['admin', 'admin_plus', 'accountant', 'readonly'] as $key) {
             $request = $this->inboxRequest('GET', '/api/portal/purchase-invoice-submissions')
-                ->withAttribute('auth.effective_role', new EffectiveRole(2, $key, 'staff', true, ['documents.submit' => AccessLevel::WRITE->value], $key));
-            $responses = new ResponseFactory();
+                ->withAttribute('auth.effective_role', new EffectiveRole(2, $key, 'staff', true, ['documents' => 2, 'documents.inbox' => 2, 'documents.requests' => 2], $key));
             self::assertSame(403, $action->list($request, $responses->createResponse())->getStatusCode(), $key);
             self::assertSame(403, $action->upload($request, $responses->createResponse())->getStatusCode(), $key);
             self::assertSame(403, $files->portalPreview($request, $responses->createResponse(), ['id' => '1'])->getStatusCode(), $key);
             self::assertSame(403, $this->buildPortalAction()->list($request, $responses->createResponse())->getStatusCode(), $key);
         }
+        // Interní role s právem čte stejný přehled jako klient, zápis jen s úrovní zápisu.
+        $reader = $this->inboxRequest('GET', '/api/portal/purchase-invoice-submissions')
+            ->withAttribute('auth.effective_role', new EffectiveRole(2, 'Fakturace a dokumenty', 'staff', true, ['documents.submit' => AccessLevel::READ->value]));
+        self::assertSame(200, $action->list($reader, $responses->createResponse())->getStatusCode());
+        self::assertSame(200, $this->buildPortalAction()->list($reader, $responses->createResponse())->getStatusCode());
+        self::assertSame(403, $action->upload($reader, $responses->createResponse())->getStatusCode());
+        self::assertSame(404, $files->portalPreview($reader, $responses->createResponse(), ['id' => '999999999'])->getStatusCode());
     }
 
     public function testPortalNeverServesInternalProcessingDiagnostics(): void

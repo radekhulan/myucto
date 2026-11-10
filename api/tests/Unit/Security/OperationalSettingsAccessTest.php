@@ -41,7 +41,9 @@ final class OperationalSettingsAccessTest extends TestCase
         ]));
         foreach (self::AREAS as $checkedArea => $checkedPermission) {
             self::assertSame(
-                $checkedPermission === $permission && $level === 2 && ($checkedArea !== 'clientSigningProfiles' || $type === 'client'),
+                // Firemní podpisy dostane klient i interní role, a to jen vlastním právem:
+                // široké `settings.signing` ani `settings.company.write` úzký editor neotevřou.
+                $checkedPermission === $permission && $level === 2,
                 OperationalSettingsAccess::$checkedArea($request),
                 $checkedArea,
             );

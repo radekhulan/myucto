@@ -57,7 +57,13 @@ info:
     odpovědí `401 invalid_token`. Na klientské doméně je připojení navíc pevně
     vázané na tuto doménu a její firmu; při každém volání se kontrolují aktuální
     oprávnění uživatele. Klientské role mohou získat samostatné oprávnění MCP,
-    vytváření obecných API tokenů jim tím nevzniká.
+    vytváření obecných API tokenů jim tím nevzniká. Klient se může připojit
+    i přes kanonickou adresu instalace (`<app.url>/mcp`); takové připojení je
+    vázané na jednu firmu vybranou při souhlasu a má stejný omezený rozsah
+    nástrojů jako připojení přes klientskou doménu. Odebrané oprávnění MCP nebo
+    členství ve firmě ukončí použití tokenu (`401 invalid_token`) i jeho obnovu
+    (`invalid_grant`). Volání mimo klientský rozsah skončí
+    `403 token_endpoint_forbidden`.
 
     ## Účetnictví a daně jen ke čtení
 
@@ -68,10 +74,13 @@ info:
     `403 token_write_forbidden` — i tokenu se scope `read_write`. Mzdová část má
     vlastní omezený kontrakt popsaný níže.
 
-    Klientské oprávnění `reports.submissions` je výjimkou i pro čtení: archiv
-    připravených DPH, KH a SH je klientovi dostupný pouze v přihlášené webové
-    session. Bearer token klientské role dostane `403` také na čtecích cestách
-    `/api/v1/reports/submissions/**`.
+    Oprávnění `reports.submissions` je výjimkou i pro čtení: archiv připravených
+    DPH, KH a SH je klientovi a interní roli bez `reports` dostupný pouze
+    v přihlášené webové session. Bearer token takové role dostane `403` také
+    na čtecích cestách `/api/v1/reports/submissions/**`.
+    Kde popis cest archivu podání mluví o klientovi nebo klientské roli, platí totéž
+    pro interní roli s `reports.submissions` bez `reports`: jen DPH, KH a SH, bez
+    správy nastavení, důkazů a mazání.
 
     Zápisové výjimky jsou dvě. První jsou **koncepty ostatních pohledávek a závazků**.
     Token se scope `read_write` smí založit koncept (`POST /accounting/other-items`),
@@ -9784,7 +9793,8 @@ paths:
       summary: Historie všech generovaných EPO XML výkazů
       description: |
         Interní role čtou archiv podle oprávnění `reports`. Role typu client
-        potřebuje čtení `reports.submissions` a přihlášení v prohlížeči; uvidí
+        a interní role s `reports.submissions` bez `reports` potřebují čtení
+        `reports.submissions` a přihlášení v prohlížeči; uvidí
         pouze snapshoty `dphdp3`, `dphkh1`, `dphshv` své vybrané firmy. Omezení
         platí i pro filtry, souhrny a přímé načtení podle `submission_id`.
       parameters:
@@ -9816,8 +9826,8 @@ paths:
       tags: [Reports]
       summary: Nastavení kořenových složek důkazního archivu EPO
       description: |
-        Klient s `reports.submissions` obdrží pouze `epo_environment` a jen ve
-        webové session. Interní role s `reports` může číst plné nastavení;
+        Klient (i interní role s `reports.submissions` bez `reports`) obdrží pouze
+        `epo_environment` a jen ve webové session. Interní role s `reports` může číst plné nastavení;
         interní správce s `reports.submissions.manage` potřebuje také čtení
         `reports`, zatímco držiteli původního `reports.submit` zůstává přístup.
       responses:
@@ -9835,7 +9845,8 @@ paths:
       summary: Uloží kořenové složky důkazního archivu EPO
       description: |
         Jen interní role s `reports.submissions.manage` nebo původním právem
-        `reports.submit`; klientská role změnu provést nesmí.
+        `reports.submit`; klientská role ani interní role s archivem bez `reports`
+        změnu provést nesmí.
         Částečná aktualizace (viz úvod). Obě ID složek jsou nepovinná: vynechané ID zůstane, `null`
         ho vymaže. Schéma `EpoSubmissionSettings` je sdílené s odpovědí, proto v něm zůstávají
         uvedené povinné vlastnosti.
@@ -9860,7 +9871,8 @@ paths:
       tags: [Reports]
       summary: Datové schránky finančního úřadu pro podání DPH, KH, SH a daně z příjmů
       description: |
-        Klient s `reports.submissions` obdrží pouze směrování DPH, KH a SH;
+        Klient (i interní role s `reports.submissions` bez `reports`) obdrží pouze
+        směrování DPH, KH a SH;
         skupina daně z příjmů chybí a seznam `recipients` je prázdný. Vyžaduje
         přihlášenou webovou session.
         Výchozí schránka se odvozuje z kódu finančního úřadu (krajské FÚ a Specializovaný FÚ),

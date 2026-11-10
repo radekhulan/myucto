@@ -232,7 +232,14 @@ final class DocumentRequestRepository
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** @return string[] e-maily portálových uživatelů (role client) přiřazených k firmě */
+    /**
+     * E-maily portálových uživatelů (role client) přiřazených k firmě.
+     *
+     * Urgence požadavků jde záměrně jen klientům: interní role s `documents.submit`
+     * požadavky vidí v aplikaci, ale e-mailem je neurguje (adresát urgence je klient firmy).
+     *
+     * @return string[]
+     */
     public function clientRecipientEmails(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(

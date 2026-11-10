@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { reactive } from 'vue'
-const m = vi.hoisted(() => ({ route: undefined as any, replace: vi.fn(), permissions: [] as string[], client: true }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ get isClientRole() { return m.client }, canWrite: (permission: string) => m.permissions.includes(permission) }) }))
+const m = vi.hoisted(() => ({ route: undefined as any, replace: vi.fn(), permissions: [] as string[], client: true, superadmin: false }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ get isClientRole() { return m.client }, get isSuperadmin() { return m.superadmin }, canWrite: (permission: string) => m.permissions.includes(permission) }) }))
 vi.mock('vue-router', () => ({ useRoute: () => m.route, useRouter: () => ({ replace: m.replace }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/pages/admin/EmailProfiles.vue', () => ({ default: { template: '<div data-test="email-profiles" />' } }))
@@ -17,6 +17,7 @@ describe('client operational settings tabs', () => {
   beforeEach(() => {
     m.replace.mockReset()
     m.client = true
+    m.superadmin = false
     m.permissions = ['settings.email_templates', 'settings.branding']
   })
   it('opens the first allowed tab when a forbidden tab is requested', () => {
@@ -28,8 +29,18 @@ describe('client operational settings tabs', () => {
     expect(wrapper.find('[data-test="email-profiles"]').exists()).toBe(false)
     wrapper.unmount()
   })
-  it('allows staff to use delegated operational tabs without exposing client signing', () => {
+  it('allows staff with the dedicated grant to manage company signing like a client', () => {
     m.client = false
+    m.permissions = ['settings.payment_qr', 'settings.signing_profiles']
+    m.route = reactive({ query: { tab: 'signing-profiles' } })
+    const wrapper = mount(ClientCompanySettings)
+    expect(wrapper.findAll('nav button').map(b => b.text())).toEqual(['settings.payment_qr_tab', 'settings.signing_profiles_title'])
+    expect(wrapper.find('[data-test="signing-profiles"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+  it('keeps superadmin on native signing management', () => {
+    m.client = false
+    m.superadmin = true
     m.permissions = ['settings.payment_qr', 'settings.signing_profiles']
     m.route = reactive({ query: { tab: 'signing-profiles' } })
     const wrapper = mount(ClientCompanySettings)

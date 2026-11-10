@@ -185,6 +185,7 @@ onMounted(load)
           </section>
         </div>
         <p v-if="form.role_type === 'client'" class="text-sm text-neutral-500">{{ t('roles.client_bank_hint') }}</p>
+        <p v-else-if="!locked" class="text-sm text-neutral-500">{{ t('roles.staff_client_scope_hint') }}</p>
         <div class="flex flex-wrap justify-end gap-2">
           <button type="button" :class="btnOutline('neutral')" @click="closeForm"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
           <button v-if="!locked" type="submit" :disabled="saving" :class="btnFilled('primary')"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button>

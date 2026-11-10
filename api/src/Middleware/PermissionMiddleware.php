@@ -115,11 +115,18 @@ final class PermissionMiddleware implements MiddlewareInterface
             ? 'bank.match' : $route->key;
         if ($permission !== null && array_any([$permission, ...$route->alternativeKeys],
             fn (string $key): bool => $this->checker->allows($role, $key, $route->minimum))) {
+            // Banka a sklad mají pro klienta vlastní úzké akce nad katalogem `client`;
+            // interní role je dostává přes interní práva, proto hranice podle typu role.
             if ($role->isClientType() && (!ClientBankRoutePolicy::allows($method, $path, $route->key)
-                || !ClientStockRoutePolicy::allows($method, $path, $route->key)
-                || !ClientTaxSubmissionPolicy::allowsRoute($method, $path)
-                || (preg_match('#^/api/reports/submissions(?:/|$)#D', $path) === 1
-                    && !RequestAuthorization::isSessionAuth($request)))) {
+                || !ClientStockRoutePolicy::allows($method, $path, $route->key))) {
+                return $this->forbidden($request);
+            }
+            // Archiv připravených podání rozhoduje rozsah práv, ne typ role: stejnou hranici
+            // má i interní role s `reports.submissions` bez agendy výkazů.
+            if (RequestAuthorization::roleUsesClientTaxSubmissionScope($role)
+                && (!ClientTaxSubmissionPolicy::allowsRoute($method, $path)
+                    || (preg_match('#^/api/reports/submissions(?:/|$)#D', $path) === 1
+                        && !RequestAuthorization::isSessionAuth($request)))) {
                 return $this->forbidden($request);
             }
             // Agendy NNO/504 a SVJ: oprávnění nestačí, firma musí být tou organizací.

@@ -53,7 +53,6 @@ final class PermissionCatalogTest extends TestCase
         return [
             'client accounting' => ['client', 'accounting'],
             'client lifecycle' => ['client', 'property.settlements.post'],
-            'staff client portal' => ['staff', 'documents.submit'],
             'unknown permission' => ['staff', 'synthetic.unknown.permission'],
         ];
     }
@@ -113,7 +112,7 @@ final class PermissionCatalogTest extends TestCase
         $catalog = new PermissionCatalog();
         $definitions = $catalog->all();
         self::assertSame(['staff'], $definitions['documents.inbox']['role_types']);
-        self::assertSame(['client'], $definitions['documents.submit']['role_types']);
+        self::assertSame(['staff', 'client'], $definitions['documents.submit']['role_types']);
 
         $checker = new PermissionChecker($catalog);
         $client = new EffectiveRole(4, 'Klient', 'client', true, $catalog->legacyPreset('client'));
@@ -122,6 +121,31 @@ final class PermissionCatalogTest extends TestCase
         self::assertFalse($checker->allows($client, 'documents.inbox'));
         self::assertTrue($checker->allows($accountant, 'documents.inbox', AccessLevel::WRITE));
         self::assertFalse($checker->allows($accountant, 'documents.submit'));
+        // Předávání dokladů je oprávnění, ne typ role: interní role ho dostane výslovně.
+        $delegated = new EffectiveRole(6, 'Fakturace a dokumenty', 'staff', true, ['documents.submit' => 2]);
+        self::assertTrue($checker->allows($delegated, 'documents.submit', AccessLevel::WRITE));
+        self::assertFalse($checker->allows($delegated, 'documents.inbox'));
+    }
+
+    public function testClientScopePermissionsCanBeGrantedToStaffButNotToDefaultRoles(): void
+    {
+        $catalog = new PermissionCatalog();
+        $repository = new \MyInvoice\Repository\RoleRepository($this->createStub(\MyInvoice\Infrastructure\Database\Connection::class), $catalog);
+        $validate = new \ReflectionMethod($repository, 'validatePermissions');
+        foreach (['documents.submit', 'reports.submissions', 'settings.signing_profiles'] as $key) {
+            self::assertTrue($catalog->allowsRoleType($key, 'staff'), $key);
+            self::assertTrue($catalog->allowsRoleType($key, 'client'), $key);
+            self::assertArrayHasKey($key, $validate->invoke($repository, 'staff', [$key => 2]), $key);
+            foreach (['accountant', 'readonly'] as $preset) {
+                self::assertArrayNotHasKey($key, $catalog->legacyPreset($preset), "$preset $key");
+            }
+        }
+        self::assertArrayHasKey('documents.submit', $catalog->legacyPreset('client'));
+        self::assertArrayNotHasKey('reports.submissions', $catalog->legacyPreset('client'));
+        self::assertArrayNotHasKey('settings.signing_profiles', $catalog->legacyPreset('client'));
+        // Archiv podání zůstává jen ke čtení a interní roli se k odeslání nedoplňuje.
+        self::assertSame(['reports.submissions' => 1], $validate->invoke($repository, 'staff', ['reports.submissions' => 2]));
+        self::assertSame(['reports.submit' => 2], $validate->invoke($repository, 'staff', ['reports.submit' => 2]));
     }
 
     /** Trvalé vyřazení originálu je samostatné právo, ne vlastnost účetní role. */

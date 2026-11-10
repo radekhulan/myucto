@@ -14,10 +14,12 @@ final class PermissionChecker
         if ($role->type === 'instance_admin' || $role->systemKey === 'instance_admin') return false;
         if (!$role->isActive || !$this->catalog->has($key)) return false;
         if (!$this->catalog->allowsRoleType($key, $role->type)) return false;
-        if ($role->isClientType()) {
-            if ($key === 'reports.submissions' && $minimum === AccessLevel::WRITE) return false;
-            if ($key === 'reports.submit' && !$role->level('reports.submissions')->allows(AccessLevel::READ)) return false;
-        }
+        // Archiv připravených podání je jen ke čtení pro každý typ role.
+        if ($key === 'reports.submissions' && $minimum === AccessLevel::WRITE) return false;
+        // Klient nemá jinou cestu k podáním než archiv, proto odeslání bez něj neplatí.
+        // Interní role si ponechává legacy samotné `reports.submit` (podává z agendy výkazů).
+        if ($role->isClientType() && $key === 'reports.submit'
+            && !$role->level('reports.submissions')->allows(AccessLevel::READ)) return false;
         if ($role->isClientType() && in_array($key, ['bank.import', 'bank.match', 'bank.ignore'], true)
             && !$role->level('bank')->allows(AccessLevel::READ)) return false;
         if ($role->isClientType() && ($key === 'stock' || str_starts_with($key, 'stock.'))) {
