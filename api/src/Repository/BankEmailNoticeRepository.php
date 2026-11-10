@@ -103,9 +103,12 @@ final class BankEmailNoticeRepository
         if ($id !== null && $current === null) {
             throw new \RuntimeException('IMAP účet nebyl nalezen.');
         }
+        // Chybějící klíč v těle znamená v obou režimech přihlášení „ponechat uloženou
+        // hodnotu“. Tajemství se ze sloučeného řádku nepřebírají: uložený řádek nese
+        // jen zašifrované sloupce a ty se níže řeší zvlášť.
         $draft = array_replace($current ?? [], $body);
         $auth = ImapAuthSettings::normalize($draft, $current ?? []);
-        $body = array_replace($auth['auth_mode'] === ImapAuthSettings::MICROSOFT ? $draft : $body, $auth);
+        $body = array_replace($draft, $auth);
         // Rozdělování do dalších firem platí v rozsahu oprávnění uživatele, který ho
         // zapnul. Ten se mění jen zapnutím: běžná úprava účtu jiným adminem rozsah
         // firem tiše nepřesune na jeho oprávnění.

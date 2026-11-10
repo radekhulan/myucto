@@ -62,6 +62,32 @@ final class BankEmailImapSettingsTest extends TestCase
         self::assertTrue($newEnabled['mark_seen_after_import']);
     }
 
+    public function testPartialUpdateKeepsStoredValuesInPasswordModeLikeMicrosoftMode(): void
+    {
+        $account = $this->repo->saveImapAccount(1, [
+            'name' => 'Syntetická schránka',
+            'enabled' => true,
+            'host' => 'imap.example.test',
+            'port' => 143,
+            'encryption' => 'tls',
+            'username' => 'avíza@example.test',
+            'password' => 'synthetic-basic',
+            'folder' => 'INBOX.Banka',
+            'success_action' => 'mark_seen',
+        ]);
+
+        $renamed = $this->repo->saveImapAccount(1, ['name' => 'Jiné jméno'], $account['id']);
+
+        self::assertSame('Jiné jméno', $renamed['name']);
+        self::assertTrue($renamed['enabled']);
+        self::assertSame('imap.example.test', $renamed['host']);
+        self::assertSame(143, $renamed['port']);
+        self::assertSame('tls', $renamed['encryption']);
+        self::assertSame('INBOX.Banka', $renamed['folder']);
+        self::assertSame('mark_seen', $renamed['success_action']);
+        self::assertTrue($renamed['has_password']);
+    }
+
     public function testOAuthSecretIsWriteOnlyAndBoundToItsMailbox(): void
     {
         $data = [
