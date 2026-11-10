@@ -127,7 +127,7 @@ describe('JmhzEmployerAnnualEvidenceSettings', () => {
     await flushPromises()
 
     const field = wrapper.get('[data-test="jmhz-annual-ownership"]').element as HTMLSelectElement
-    field.scrollIntoView = vi.fn()
+    Object.defineProperty(field, 'scrollIntoView', { configurable: true, writable: true, value: vi.fn() })
 
     await wrapper.get('[data-test="jmhz-annual-validation-link-ownership"]').trigger('click')
 

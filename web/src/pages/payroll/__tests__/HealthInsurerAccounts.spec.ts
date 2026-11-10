@@ -452,7 +452,7 @@ describe('HealthInsurerAccounts', () => {
   it('po asynchronním načtení respektuje přímý odkaz na účty pojišťoven', async () => {
     const scrollIntoView = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
-      configurable: true,
+      configurable: true, writable: true,
       value: scrollIntoView,
     })
     m.routeHash = '#health-insurer-accounts'

@@ -126,7 +126,7 @@ beforeEach(() => {
   m.listJournal.mockImplementation(async (params: { entry_id?: number }) => ({
     items: params.entry_id ? [entry(params.entry_id)] : [], total: params.entry_id ? 1 : 0, page: 1, per_page: 50,
   }))
-  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll })
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, writable: true, value: scroll })
 })
 
 describe('journal entry focus', () => {

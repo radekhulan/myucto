@@ -109,7 +109,7 @@ beforeEach(() => {
   m.routeQuery = reactive({})
   m.listPeriods.mockResolvedValue([{ id: 1, status: 'open', starts_on: '2010-01-01', ends_on: '2010-12-31', fiscal_year: 2010 }])
   m.listAccounts.mockResolvedValue([])
-  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, writable: true, value: vi.fn() })
   vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function (this: HTMLElement) {
     return (this.tagName === 'TR' ? [{}] : []) as unknown as DOMRectList
   })

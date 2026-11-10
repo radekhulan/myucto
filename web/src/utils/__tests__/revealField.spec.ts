@@ -22,7 +22,7 @@ describe('revealField', () => {
         </label>
       </details>`
     const target = document.querySelector<HTMLElement>('[data-a1-field]')!
-    target.scrollIntoView = vi.fn()
+    Object.defineProperty(target, 'scrollIntoView', { configurable: true, writable: true, value: vi.fn() })
 
     expect(revealField(fieldSelector('identity.citizenship_country_code'))).toBe(true)
 

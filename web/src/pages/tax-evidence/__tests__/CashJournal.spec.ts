@@ -283,7 +283,7 @@ describe('cash journal movement focus', () => {
     otherPane.dataset.cashJournalSource = 'bank-1'
     document.body.appendChild(otherPane)
     const scroll = vi.fn()
-    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll })
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, writable: true, value: scroll })
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList)
     const { wrapper } = await setup('?year=2010&source_type=bank&source_id=1&classification=private&from=2026-01-01&to=2026-01-31')
     expect(api.cashJournal).toHaveBeenLastCalledWith({ year: 2010 })
@@ -329,7 +329,7 @@ describe('cash journal movement focus', () => {
     let finishOld!: (value: CashJournalReport) => void
     api.cashJournal.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
     const scroll = vi.fn()
-    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll })
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, writable: true, value: scroll })
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList)
     const { wrapper, router } = await setup('?year=2010&source_type=bank&source_id=8')
     await router.push({ query: { year: '2026', source_type: 'bank', source_id: '1' } })
@@ -345,7 +345,7 @@ describe('cash journal movement focus', () => {
     const row = report().rows[0]!
     api.cashJournal.mockResolvedValue(report({ rows: [row, { ...row, source_id: 2 }] }))
     const scroll = vi.fn()
-    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll })
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, writable: true, value: scroll })
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList)
     const { wrapper, router } = await setup('?year=2026&source_type=bank&source_id=1')
     await router.push({ query: { year: '2026', source_type: 'bank', source_id: '2' } })
