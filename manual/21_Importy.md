@@ -1169,8 +1169,8 @@ dotací, kapitálu a podklady daně z příjmů neziskové organizace se nepřen
 Převod pro neziskové organizace nebyl ověřen a průvodce u nich ukáže výrazné
 upozornění; před převodem kontaktujte podporu.
 
-Některá nastavení převod nepřenáší: řady z číselníku řad, cenové hladiny
-skladu, šablony fakturace výkazů práce a pravidla rozúčtování nákladů. Doklady
+Některá nastavení převod nepřenáší: cenové hladiny skladu, šablony fakturace
+výkazů práce a pravidla rozúčtování nákladů. Doklady
 a odběratelé, kteří na ně odkazují, se převedou s čísly, cenami i účty beze
 změny, jen bez vazby na tato nastavení. Protokol běhu vypíše, u kolika řádků
 se vazba odpojila. Zápočty dobropisů se převádějí včetně vazby na fakturu.
@@ -1207,7 +1207,7 @@ ověří přenesené hodnoty a vrátí transakci i nově vytvořené soubory. Pr
 obsahuje počty vytvořených, použitých a již převzatých řádků, rekonciliaci
 po tabulkách a `outside_scope` — nepřenesené neprázdné tabulky.
 
-První profil přenáší partnery a jejich účty, měny, kategorie, střediska,
+Obnova přenáší partnery a jejich účty, měny, kategorie, střediska,
 účtovou osnovu, firemní předkontace, účetní období, zakázky a výkazy práce, faktury a jejich položky,
 pravidelné šablony, jednoduchý ceník, pokladnu, bankovní výpisy a transakce,
 úhrady, vypořádání a zápočty, majetek s odpisy a účetní deník. Přenáší také ruční
@@ -1218,6 +1218,44 @@ přijatých faktur, jejich zdrojové soubory a importovaná PDF vydaných faktur
 kopírují do nových cest; binární výpisy se obnovují k přemapovaným řádkům.
 PDF vydaných faktur vytvořená aplikací se mohou v cíli vygenerovat znovu.
 
+Obnova dále přenáší:
+
+- **Dokumenty**: strom složek, dokumenty včetně koše a příloh rozbalených
+  z datových zpráv, jejich soubory, údaje datových zpráv, vytěžení a vazby
+  na doklady, kontakty, zakázky a zápisy deníku. Soubory se uloží do úložiště
+  dokumentů cílové firmy, náhledy se vygenerují znovu.
+- **Archiv PDF vydaných faktur** (odeslané a archivované verze) včetně souborů.
+- **Analytické dimenze**: typy a hodnoty dimenzí a jejich přiřazení dokladům
+  a řádkům účetního deníku.
+- **Interní doklady** s řádky, **vazby účetních zápisů na doklady**, **šablony
+  účetních zápisů** a **poznámky k zápisům**.
+- **Daně**: přiznání k dani z příjmů a rozpis záloh na daň a pojistné.
+- **Banku a automatiku**: pravidla účtování banky, naučené protistrany
+  a obchodníky plateb kartou, pravidla zařazení nákladů, šablony bankovních
+  pravidel, nastavení automatického účtování a podepisování PDF výstupů.
+- **Historii** oprav účtování a kroků uzávěrky.
+- **Číselné řady a počítadla**: číselník řad, počítadla vydaných a přijatých
+  dokladů, řady účetních dokladů a číslovací nastavení firmy (šablony čísel
+  dokladů, období řady faktur, číslování přijatých dokladů). Další doklad
+  navazuje na převedené a převedené doklady zůstávají ve svých řadách.
+
+Výchozí nastavení, které nová firma dostane při založení nebo při prvním
+otevření (šablony bankovních pravidel, automatické účtování, podepisování PDF,
+doporučené šablony zápisů), první obnova nahradí nastavením zdroje, pokud ho
+export nese. Řady založené průvodcem se spárují s řadami zdroje a převezmou
+jejich předponu, název a šablonu. Počítadlo, které cílová firma už má, se jen
+zvýší na hodnotu zdroje. Podpisové profily, skupiny firem, vozidla a ostatní
+doklady se nepřenášejí; vazby na ně se odpojí a protokol je vypíše.
+
+Vazby na doklady, které export nenese (dokument nebo dimenze u ostatního
+dokladu, oprava účtování u smazaného pohybu), obnova vynechá a protokol je
+vypíše jako vynechané vazby. Soubory, které export nenese, protokol vypíše jako
+chybějící. Nenese-li export počítadla řad vydaných nebo přijatých dokladů
+(starší export, záloha MyInvoice, doklady číslované ručně), protokol upozorní,
+abyste před vystavením dalšího dokladu zkontrolovali číselné řady v nastavení.
+Export starší verze ani záloha MyInvoice tyto oblasti nenesou; obnova z nich
+probíhá jako dosud a výchozí nastavení cílové firmy ponechá.
+
 Firemní předkontace zachovají účty, priority a aktivitu; neúčtují doklady znovu.
 Globální instalační předkontace se nepřenášejí, proto se jejich výchozí pravidla
 mohou mezi instalacemi lišit. Nenulové kódy účtů předkontací musí být obsažené
@@ -1227,12 +1265,16 @@ Historie klasifikací zachová původní časy a změny kategorií; odkazy na au
 se stejně jako ostatní uživatelské odkazy převedou na importujícího uživatele.
 Zdrojové uživatelské účty se neobnovují.
 
-Firmu obnovenou starším profilem bez předkontací a klasifikací nelze tímto
-importem dodatečně rozšířit. Pro úplný přenos použijte prázdnou cílovou firmu;
-opakování obnovy provedené současným profilem zůstává bez duplicit.
+Firmu obnovenou starším profilem z exportu, který nesl i oblasti, jež starší
+profil nepřenášel (předkontace, klasifikace, dokumenty, dimenze, číselné řady
+a další výše), nelze tímto importem dodatečně rozšířit. Pro úplný přenos použijte
+prázdnou cílovou firmu; opakování obnovy provedené současným profilem zůstává
+bez duplicit.
 
-Mzdy, skladové grafy, DMS, přístupové a komunikační profily ani další tabulky
-mimo tento seznam první profil nepřenáší. Doklad s živou vazbou na nepodporovaný
+Mzdy, skladové grafy, přihlašovací údaje a tokeny (bankovní spojení, e-mailové
+profily), auditní log, historii AI, importní úlohy a převodní mapy, návrhy
+a doporučení automatiky, mezipaměti, nálezy kontroly deníku, data bankovních
+API ani další tabulky mimo tento seznam obnova nepřenáší. Doklad s živou vazbou na nepodporovaný
 graf se odmítne, vazba se tiše nenuluje. Rovněž se odmítají nepodporovaná
 syntetická ID závěrkových zápisů. Zkontrolujte proto před ostrým importem
 `outside_scope` a celý výsledek zkoušky. Limit načtených dat a potřebných souborů
