@@ -1169,6 +1169,12 @@ dotací, kapitálu a podklady daně z příjmů neziskové organizace se nepřen
 Převod pro neziskové organizace nebyl ověřen a průvodce u nich ukáže výrazné
 upozornění; před převodem kontaktujte podporu.
 
+Některá nastavení převod nepřenáší: řady z číselníku řad, cenové hladiny
+skladu, šablony fakturace výkazů práce a pravidla rozúčtování nákladů. Doklady
+a odběratelé, kteří na ně odkazují, se převedou s čísly, cenami i účty beze
+změny, jen bez vazby na tato nastavení. Protokol běhu vypíše, u kolika řádků
+se vazba odpojila. Zápočty dobropisů se převádějí včetně vazby na fakturu.
+
 Průvodce přijímá ZIP do **2 GiB**, nahrává jej po částech a používá stejný
 importér jako CLI. Vybraná data a přílohy mají společný limit **64 MiB / 100 000
 řádků**. Kontrola i obnova běží na pozadí ve společném workeru importů. Stránku

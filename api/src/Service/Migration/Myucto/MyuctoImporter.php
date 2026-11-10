@@ -135,7 +135,7 @@ final class MyuctoImporter
             $existing = [];
             $report = ['dry_run' => $dryRun, 'supplier_id' => $supplierId, 'source_supplier_id' => $sourceSupplier,
                 'created' => [], 'reused' => [], 'existing' => [], 'replaced_periods' => $replacedPeriods ?? [], 'outside_scope' => $package['skipped'],
-                'files' => $reportFiles, 'reconciliation' => []];
+                'files' => $reportFiles, 'reconciliation' => [], 'detached' => self::detachedReferences($tables)];
             foreach (MyuctoImportProfile::GLOBAL_KEYS as $table => $keys) {
                 foreach ($tables[$table] ?? [] as $id => $row) {
                     $map[$table][$id] = $this->lookup($pdo, $table, $keys, $row, null)
@@ -331,6 +331,29 @@ final class MyuctoImporter
         }
     }
 
+    /**
+     * Kolik měkkých vazeb na nastavení mimo export obnova odpojí, po sloupcích.
+     *
+     * @param array<string,array<int|string,array<string,mixed>>> $tables
+     * @return array<string,int> `tabulka.sloupec` => počet řádků
+     */
+    private static function detachedReferences(array $tables): array
+    {
+        $counts = [];
+        foreach (MyuctoImportProfile::DETACHED_REFERENCES as $table => $columns) {
+            foreach ($tables[$table] ?? [] as $row) {
+                foreach ($columns as $column) {
+                    if (($row[$column] ?? null) !== null) {
+                        $counts[$table . '.' . $column] = ($counts[$table . '.' . $column] ?? 0) + 1;
+                    }
+                }
+            }
+        }
+        ksort($counts);
+
+        return $counts;
+    }
+
     private function validateRows(array $tables, int $supplierId, array $schema): void
     {
         foreach (MyuctoImportProfile::TABLES as $table) {
@@ -361,7 +384,8 @@ final class MyuctoImporter
                     if ($value !== null && $column !== 'id' && (str_ends_with($column, '_id') || str_ends_with($column, '_by'))
                         && !isset($this->references($table, $schema, $row)[$column])
                         && !in_array($column, MyuctoImportProfile::PRESERVED_IDS, true)
-                        && !in_array($column, ['source_id', 'doc_id'], true)) {
+                        && !in_array($column, MyuctoImportProfile::POLYMORPHIC_REFERENCES[$table] ?? [], true)
+                        && !in_array($column, MyuctoImportProfile::DETACHED_REFERENCES[$table] ?? [], true)) {
                         throw new RuntimeException('Nepodporovaná vazba ' . $table . '.' . $column . '; data se nebudou tiše zahazovat.');
                     }
                 }
@@ -731,7 +755,7 @@ final class MyuctoImporter
             }
             $out['supplier_snapshot'] = json_encode($snapshot, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
         }
-        foreach (MyuctoImportProfile::RESET_COLUMNS[$table] ?? [] as $column) {
+        foreach ([...MyuctoImportProfile::RESET_COLUMNS[$table] ?? [], ...MyuctoImportProfile::DETACHED_REFERENCES[$table] ?? []] as $column) {
             if (isset($schema['columns'][$table][$column])) {
                 $out[$column] = null;
             }

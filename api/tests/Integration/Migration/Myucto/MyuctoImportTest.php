@@ -416,6 +416,46 @@ final class MyuctoImportTest extends TestCase
         self::assertSame(3, $this->targetCount('journal_document_postings'));
     }
 
+    /**
+     * Export z produkce nesl zápočet dobropisu a vazby na číselník řad. Obnova
+     * je odmítla jako „nepodporovanou vazbu", přestože zápočet umí přemapovat
+     * a ostatní vazby míří na nastavení, které obnova nepřenáší.
+     */
+    public function testCreditNoteOffsetIsRemappedAndSettingsReferencesAreDetached(): void
+    {
+        $package = (new MyuctoExportReader())->read($this->archive);
+        $creditNote = max(array_keys($package['tables']['invoices'])) + 1;
+        $package['tables']['invoices'][$creditNote] = array_replace($package['tables']['invoices'][$this->invoice], [
+            'id' => $creditNote, 'invoice_type' => 'credit_note', 'varsymbol' => 'SYNTHETIC-2090-02',
+            'total_without_vat' => '-100.00', 'total_vat' => '-21.00', 'total_with_vat' => '-121.00',
+        ]);
+        $package['tables']['invoices'][$this->invoice]['number_series_id'] = 987654;
+        $package['tables']['invoices'][$this->invoice]['price_level_id'] = 987655;
+        $item = array_key_first($package['tables']['purchase_invoice_items']);
+        $package['tables']['purchase_invoice_items'][$item]['expense_rule_id'] = 987656;
+        $package['tables']['credit_note_offsets'][1] = [
+            'id' => 1, 'supplier_id' => $this->source, 'doc_type' => 'invoice', 'invoice_id' => $this->invoice,
+            'credit_note_id' => $creditNote, 'amount' => '121.00', 'offset_on' => '2090-01-01',
+            'invoice_payment_id' => null, 'created_by' => $this->actor, 'created_at' => '2090-01-01 00:00:00',
+        ];
+
+        $report = $this->importer->import($package, $this->target, $this->actor, 'synthetic-credit-note', false);
+
+        self::assertSame(1, $report['created']['credit_note_offsets']);
+        self::assertSame(
+            ['invoices.number_series_id' => 1, 'invoices.price_level_id' => 1, 'purchase_invoice_items.expense_rule_id' => 1],
+            $report['detached'],
+        );
+        $ids = $this->pdo->query('SELECT invoice_type, id FROM invoices WHERE supplier_id=' . $this->target)->fetchAll(PDO::FETCH_KEY_PAIR);
+        $offset = $this->pdo->query('SELECT invoice_id, credit_note_id FROM credit_note_offsets WHERE supplier_id=' . $this->target)->fetch(PDO::FETCH_ASSOC);
+        self::assertSame([(int) $ids['invoice'], (int) $ids['credit_note']], [(int) $offset['invoice_id'], (int) $offset['credit_note_id']]);
+        $invoice = $this->pdo->query('SELECT number_series_id, price_level_id, varsymbol FROM invoices WHERE id=' . (int) $ids['invoice'])->fetch(PDO::FETCH_ASSOC);
+        self::assertSame([null, null, 'SYNTHETIC-2090-01'], [$invoice['number_series_id'], $invoice['price_level_id'], $invoice['varsymbol']]);
+
+        $repeat = $this->importer->import($package, $this->target, $this->actor, 'synthetic-credit-note', false);
+        self::assertSame(1, $repeat['existing']['credit_note_offsets']);
+    }
+
     public function testMissingPostingDocumentRollsBackEntireGraph(): void
     {
         $package = (new MyuctoExportReader())->read($this->archive);
