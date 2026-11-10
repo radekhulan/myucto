@@ -115,8 +115,10 @@ final class VatReturnLineClassifier
      * Ř. 26 (pln_ost) nese dvě různá plnění: službu s místem plnění mimo tuzemsko (`26s`)
      * a tuzemské dodání osvobozené s nárokem na odpočet podle § 71i (`71i`). Řádek přiznání
      * je rozliší jen podle odběratele: tuzemský odběratel (CZ, nebo země neznámá) dostane
-     * `71i`, zahraniční `26s`. Stejné pravidlo jako výchozí klasifikace nové faktury
-     * ({@see \MyInvoice\Repository\InvoiceRepository::defaultSaleClassificationCode()}).
+     * `71i`, zahraniční `26s`. Výchozí klasifikace nové faktury
+     * ({@see \MyInvoice\Repository\InvoiceRepository::defaultSaleClassificationCode()}) dává
+     * `26s` také jen zahraničnímu odběrateli, tuzemské 0% položce ale kód 71i sama nevolí:
+     * převod ho odvozuje z ř. 26 zdroje, u nového dokladu ho účetní volí výslovně.
      * Přiznání ani KH se tím nemění, obě klasifikace míří na ř. 26 bez oddílu KH.
      *
      * Jiné kódy vrací beze změny. Volají ho převody vydaných dokladů, jakmile znají zemi
