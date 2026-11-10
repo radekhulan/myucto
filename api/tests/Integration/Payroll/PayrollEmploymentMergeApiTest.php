@@ -8,7 +8,9 @@ use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
+use MyInvoice\Service\Payroll\Time\PayrollTimeImportApprovalService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -32,6 +34,8 @@ final class PayrollEmploymentMergeApiTest extends TestCase
     private Connection $db;
     private PayrollEmploymentAction $action;
     private PayrollTimeRepository $time;
+    private PayrollTimeImportApprovalService $approvals;
+    private PayrollAttendanceImportRepository $imports;
     private int $supplierId;
     private int $otherSupplierId;
     private int $employeeId;
@@ -49,6 +53,8 @@ final class PayrollEmploymentMergeApiTest extends TestCase
         $this->db = $container->get(Connection::class);
         $this->action = $container->get(PayrollEmploymentAction::class);
         $this->time = $container->get(PayrollTimeRepository::class);
+        $this->approvals = $container->get(PayrollTimeImportApprovalService::class);
+        $this->imports = $container->get(PayrollAttendanceImportRepository::class);
 
         $pdo = $this->db->pdo();
         $sourceSupplierId = (int) ($pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
@@ -216,6 +222,79 @@ final class PayrollEmploymentMergeApiTest extends TestCase
         self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
         self::assertSame('payroll_merge_source_has_approved', $this->json($response)['error']['code']);
         self::assertSame(1, $this->countRows('payroll_employments', 'id', (int) $manual['id']));
+    }
+
+    /**
+     * Schválení docházky zapíše souhrn JMHZ, který je neměnný a drží zdroj
+     * cizím klíčem. Po znovuotevření měsíce to není podání a sloučení ho
+     * zahodí, jinak by zdroj nešlo smazat nikdy.
+     */
+    public function testReopenedApprovedAttendanceDoesNotBlockMerge(): void
+    {
+        $registered = $this->employment('REG-9', 'employment', '2026-02-20', true, null);
+        $this->importedRegistration((int) $registered['id']);
+        $manual = $this->employment('DPP-9', 'dpp', '2026-02-07', false, null);
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_module_state (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "setup", "2026-01-01", ?, NOW())',
+        )->execute([$this->supplierId, $this->userId]);
+        $importId = $this->imports->insertBatch(
+            $this->supplierId,
+            self::FEBRUARY,
+            'attendance',
+            random_bytes(32),
+            [['name' => 'dochazka.xlsx', 'sha256' => hash('sha256', 'syntetický soubor docházky')]],
+            [],
+            1,
+            [[
+                'employment_id' => (int) $manual['id'],
+                'meaning' => 'worked_hours',
+                'component_code' => '',
+                'quantity_millihours' => 52_000,
+                'amount_minor' => null,
+                'source_ref' => 'dochazka.xlsx!List1!C3',
+            ]],
+            $this->userId,
+        );
+        self::assertNotNull($importId);
+        $result = $this->approvals->applyBatch($this->supplierId, $importId, true, $this->userId);
+        self::assertSame(1, $result['approved'], (string) json_encode($result, JSON_UNESCAPED_UNICODE));
+        $approved = $this->time->monthState($this->supplierId, (int) $manual['id'], self::FEBRUARY);
+        self::assertSame(1, $this->countRows('payroll_jmhz_work_month_revisions', 'employment_id', (int) $manual['id']));
+
+        $blocked = $this->merge($manual, $registered, true);
+        self::assertSame(409, $blocked->getStatusCode(), (string) $blocked->getBody());
+        self::assertSame('payroll_merge_source_has_approved', $this->json($blocked)['error']['code']);
+
+        $this->time->reopenMonth(
+            $this->supplierId,
+            (int) $manual['id'],
+            self::FEBRUARY,
+            (int) $approved['row_version'],
+            'Sloučení do registrovaného vztahu',
+            $this->userId,
+        );
+
+        $response = $this->merge($manual, $registered, true);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(0, $this->countRows('payroll_employments', 'id', (int) $manual['id']));
+        self::assertSame(0, $this->countRows('payroll_jmhz_work_month_revisions', 'employment_id', (int) $manual['id']));
+        self::assertSame(0, (int) $this->db->pdo()->query(
+            "SELECT COUNT(*) FROM sample_data_entries WHERE supplier_id = {$this->supplierId} AND entity_type LIKE 'payroll_row_%'"
+        )->fetchColumn(), 'Značky pro smazání souhrnů nezůstaly.');
+        $target = $this->time->monthState($this->supplierId, (int) $registered['id'], self::FEBRUARY);
+        self::assertSame('open', $target['status'] ?? null, 'Únor je u cíle otevřený ke schválení.');
+        self::assertSame(1, $this->countRows('payroll_registration_a1_profiles', 'employment_id', (int) $registered['id']));
+
+        $log = $this->db->pdo()->query(
+            "SELECT payload FROM activity_log WHERE action = 'payroll.employment.merged' AND entity_id = " . (int) $registered['id']
+            . ' ORDER BY id DESC LIMIT 1'
+        )->fetchColumn();
+        $dropped = json_decode((string) $log, true)['dropped_jmhz_work_month_revisions'] ?? [];
+        self::assertCount(1, $dropped, 'Auditní záznam nese otisk zahozeného souhrnu.');
+        self::assertSame(self::FEBRUARY, $dropped[0]['period_start']);
     }
 
     public function testTargetInPayrollRunForMovedPeriodBlocksMerge(): void
