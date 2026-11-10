@@ -160,6 +160,24 @@ final class CatalogImportWorkflowTest extends StockTestCase
         self::assertSame(1, $repeat['report']['counts']['unchanged']);
     }
 
+    public function testCategoryRenameBetweenPreviewAndApplyIsNotConflict(): void
+    {
+        $sid = $this->createSupplier();
+        $groups = $this->category($sid, 'skupiny');
+        $a = $this->category($sid, 'A', $groups);
+        $c = $this->category($sid, 'C', $groups);
+        $id = $this->itemsRepo->insert($sid, ['sku' => 'DIL', 'name' => 'Fixture']);
+        $this->container->get(\MyInvoice\Repository\StockItemCategoryRepository::class)->add($sid, $id, $a, true, 0);
+
+        $preview = $this->preview($sid, "sku;skupina\nDIL;C\n", ['mode' => 'update', 'mapping' => ['sku' => 'sku', 'category_code' => 'skupina']]);
+        $this->db->pdo()->prepare('UPDATE stock_categories SET name = ? WHERE id = ?')->execute(['C - přejmenovaná', $c]);
+        $this->container->get(CatalogImportService::class)->apply($sid, $preview['id'], $this->userId);
+        $applied = $this->container->get(CatalogImportWorker::class)->tickKind($sid, CatalogImportService::APPLY_KIND);
+
+        self::assertSame(1, $applied['report']['counts']['applied']);
+        self::assertSame(0, $applied['report']['counts']['failed']);
+    }
+
     public function testCategoryCodeChangesDealerPriceThroughCategoryRule(): void
     {
         $sid = $this->createSupplier();

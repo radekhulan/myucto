@@ -242,6 +242,9 @@ final class CatalogImportWriter
                 if ($section === 'prices') {
                     unset($row['computed_context']['output']['calculation_date']);
                 }
+                if ($section === 'categories') {
+                    unset($row['name']);
+                }
                 ksort($row);
                 $state[$section][$index] = $row;
             }
