@@ -21,6 +21,16 @@ final class CatalogImportProfileTest extends TestCase
         );
     }
 
+    public function testWeightInKilogramsIsConvertedToGrams(): void
+    {
+        $profile = CatalogImportProfile::normalize(['mapping' => ['sku' => 'Kód', 'weight_kg' => 'Net Weight']]);
+        self::assertSame(['sku' => '000123', 'weight_g' => 1], CatalogImportProfile::map($profile, ['Kód', 'Net Weight'], ['000123', '0,001']));
+        self::assertSame(['sku' => 'A', 'weight_g' => 1250], CatalogImportProfile::map($profile, ['Kód', 'Net Weight'], ['A', '1.25']));
+        self::assertSame(['sku' => 'A', 'weight_g' => 1], CatalogImportProfile::map($profile, ['Kód', 'Net Weight'], ['A', '0,0005']));
+        $this->expectException(\InvalidArgumentException::class);
+        CatalogImportProfile::normalize(['mapping' => ['sku' => 'Kód', 'weight_kg' => 'A', 'weight_g' => 'B']]);
+    }
+
     public function testMissingAndBlankFieldsRemainUntouchedUnlessExplicitlyCleared(): void
     {
         $profile = CatalogImportProfile::normalize(['mapping' => ['sku' => 'sku', 'ean' => 'ean', 'note' => 'note'], 'operations' => ['note' => 'preserve', 'categories' => 'clear']]);
