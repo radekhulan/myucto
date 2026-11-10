@@ -168,7 +168,9 @@ describe('BankAccounts — společný parser provider', () => {
     }])
     const button = (key: string) => wrapper.findAll('button').find(item => item.text() === key)!
     const input = (key: string) => wrapper.findAll('label').find(item => item.text().startsWith(key))!.get('input')
+    expect(wrapper.get('[data-testid="imap-auth-badge"]').text()).toBe('settings.imap_auth_microsoft365_short')
     await button('common.edit').trigger('click')
+    expect(input('settings.imap_oauth_tenant_id').classes()).toContain('h-10')
     const target = input(field)
     const secret = input('settings.imap_oauth_client_secret')
     expect(secret.attributes('placeholder')).toBe('settings.imap_oauth_secret_saved')
@@ -210,6 +212,7 @@ describe('BankAccounts — společný parser provider', () => {
       require_email_auth: false,
     }])
     const button = (key: string) => wrapper.findAll('button').find(item => item.text() === key)!
+    expect(wrapper.get('[data-testid="imap-auth-badge"]').text()).toBe('settings.imap_auth_password')
     const host = () => wrapper.findAll('div').find(item => item.find('label').exists() && item.get('label').text() === 'bank_accounts.host')!.get('input')
     await button('common.edit').trigger('click')
     const password = wrapper.get('input[type="password"]')

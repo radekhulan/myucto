@@ -27471,6 +27471,7 @@
     "imap_auth_mode": "IMAP authentication",
     "imap_auth_password": "Password",
     "imap_auth_microsoft365": "Microsoft 365 (OAuth 2.0)",
+    "imap_auth_microsoft365_short": "Microsoft 365",
     "imap_oauth_mailbox": "Mailbox address",
     "imap_oauth_tenant_id": "Tenant ID",
     "imap_oauth_client_id": "Client ID",

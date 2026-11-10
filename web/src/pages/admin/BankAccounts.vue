@@ -1278,7 +1278,13 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                     {{ t('bank_accounts.distribute_badge', { n: account.distribute_supplier_count ?? 0 }) }}
                   </span>
                 </td>
-                <td class="px-3 py-2 font-mono text-xs">{{ account.host || '—' }}<span v-if="account.port">:{{ account.port }}</span></td>
+                <td class="px-3 py-2">
+                  <div class="font-mono text-xs">{{ account.host || '—' }}<span v-if="account.port">:{{ account.port }}</span></div>
+                  <span data-testid="imap-auth-badge" class="inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-xs whitespace-nowrap"
+                    :class="account.auth_mode === 'microsoft365' ? 'bg-primary-50 text-primary-700' : 'bg-neutral-100 text-neutral-700'">
+                    {{ account.auth_mode === 'microsoft365' ? t('settings.imap_auth_microsoft365_short') : t('settings.imap_auth_password') }}
+                  </span>
+                </td>
                 <td class="px-3 py-2">{{ account.folder || 'INBOX' }}</td>
                 <td class="px-3 py-2">{{ account.max_messages_per_run }}</td>
                 <td class="px-3 py-2">
@@ -1336,12 +1342,14 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               </select>
             </div>
             <label class="block text-sm font-medium text-neutral-700">
-              <span class="block mb-1">{{ t(imapUsesMicrosoft ? 'settings.imap_oauth_mailbox' : 'bank_accounts.username') }}</span>
-              <input v-model="imapDraft.username" :type="imapUsesMicrosoft ? 'email' : 'text'" class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
+              <span class="block mb-1">{{ t(imapUsesMicrosoft ? 'settings.imap_oauth_mailbox' : 'bank_accounts.username') }}<RequiredMark v-if="imapUsesMicrosoft" /></span>
+              <input v-model="imapDraft.username" :type="imapUsesMicrosoft ? 'email' : 'text'" :required="imapUsesMicrosoft" class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
             </label>
             <ImapOAuthFields v-if="imapUsesMicrosoft"
               v-model:tenant-id="imapDraft.oauth_tenant_id" v-model:client-id="imapDraft.oauth_client_id"
-              v-model:client-secret="imapDraft.oauth_client_secret" :secret-saved="imapOAuthSecretSaved" />
+              v-model:client-secret="imapDraft.oauth_client_secret" :secret-saved="imapOAuthSecretSaved"
+              label-class="block text-sm font-medium text-neutral-700"
+              input-class="mt-1 w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
             <div v-else>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.password') }}<RequiredMark v-if="imapPasswordRequired" /></label>
               <input ref="imapPasswordInput" v-model="imapDraft.password" type="password" :required="imapPasswordRequired"
