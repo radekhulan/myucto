@@ -188,6 +188,17 @@ final class RequestAuthorization
         return self::isSessionAuth($request) && $role->isActive && $role->isSuperadmin();
     }
 
+    /**
+     * Reset MFA jiného uživatele. Jen superadmin z webového přihlášení; účet
+     * spravuje UserAdminAction a reset odebírá cizímu účtu faktory, proto ani
+     * správce firmy, ani technický správce instance.
+     */
+    public static function canResetUserMfa(Request $request): bool
+    {
+        $role = self::effectiveRole($request);
+        return self::isSessionAuth($request) && $role->isActive && $role->isSuperadmin();
+    }
+
     /** Přehled a ukončování browserových relací patří výhradně superadminovi. */
     public static function canManageUserSessions(Request $request): bool
     {

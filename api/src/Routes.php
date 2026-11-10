@@ -3741,6 +3741,7 @@ final class Routes
         $app->post   ('/api/admin/users',           [UserAdminAction::class, 'create']);
         $app->put    ('/api/admin/users/{id:[0-9]+}', [UserAdminAction::class, 'update']);
         $app->post   ('/api/admin/users/{id:[0-9]+}/password-link', [UserAdminAction::class, 'sendPasswordSetup']);
+        $app->post   ('/api/admin/users/{id:[0-9]+}/mfa-reset', \MyInvoice\Action\Admin\UserMfaResetAction::class);
         $app->get    ('/api/admin/users/{id:[0-9]+}/identities', [\MyInvoice\Action\Admin\UserExternalIdentityAdminAction::class, 'list']);
         $app->post   ('/api/admin/users/{id:[0-9]+}/identities/invite', [\MyInvoice\Action\Admin\UserExternalIdentityAdminAction::class, 'invite']);
         $app->delete ('/api/admin/users/{id:[0-9]+}/identities/{identityId:[0-9]+}', [\MyInvoice\Action\Admin\UserExternalIdentityAdminAction::class, 'unlink']);

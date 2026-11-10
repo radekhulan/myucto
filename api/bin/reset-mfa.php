@@ -73,9 +73,8 @@ if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
 $app = \MyInvoice\Bootstrap::buildApp();
 $container = $app->getContainer();
 $pdo = $container->get(\MyInvoice\Infrastructure\Database\Connection::class)->pdo();
-$sessions = $container->get(\MyInvoice\Service\Auth\SessionManager::class);
 
-$stmt = $pdo->prepare('SELECT id, email, totp_enabled FROM users WHERE email = ? LIMIT 1');
+$stmt = $pdo->prepare('SELECT id, email FROM users WHERE email = ? LIMIT 1');
 $stmt->execute([$email]);
 $user = $stmt->fetch(\PDO::FETCH_ASSOC);
 if (!$user) {
@@ -83,42 +82,13 @@ if (!$user) {
     exit(3);
 }
 
-$pdo->prepare('UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?')
-    ->execute([(int) $user['id']]);
-
-// E-mailové 2FA: zruš důvěryhodná zařízení (vynutí znovuověření) a čekající kódy.
-$td = $pdo->prepare('DELETE FROM trusted_devices WHERE user_id = ?');
-$td->execute([(int) $user['id']]);
-$otp = $pdo->prepare('DELETE FROM login_otps WHERE user_id = ?');
-$otp->execute([(int) $user['id']]);
-$passkeys = $pdo->prepare(
-    'UPDATE webauthn_credentials
-        SET revoked_at = COALESCE(revoked_at, UTC_TIMESTAMP(6))
-      WHERE user_id = ? AND revoked_at IS NULL'
-);
-$passkeys->execute([(int) $user['id']]);
-$ceremonies = $pdo->prepare('DELETE FROM webauthn_ceremonies WHERE user_id = ?');
-$ceremonies->execute([(int) $user['id']]);
-$proofs = $pdo->prepare('DELETE FROM mfa_step_up_proofs WHERE user_id = ?');
-$proofs->execute([(int) $user['id']]);
-// Záložní kódy jsou taky faktor — rescue, který je nechá platit, by po sobě zanechal
-// tichou zadní vrátka u účtu, jehož ostatní faktory se právě odvolávaly.
-$recoveryCodes = $container->get(\MyInvoice\Service\Auth\MfaRecoveryCodeService::class)
-    ->revokeAll((int) $user['id']);
-
 // API tokeny a MCP připojení: kdo účet ovládl, mohl si přes unesenou session
 // vyrazit dlouhodobý token, který by jinak reset faktorů přežil. Nouzový reset
 // je reakce na ztrátu kontroly nad účtem, proto se ruší všechny; integrace si
-// majitel po obnově vystaví znovu.
-$mcpGrants = $pdo->prepare(
-    'UPDATE mcp_oauth_grants SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL'
-);
-$mcpGrants->execute([(int) $user['id']]);
-$apiTokensRevoked = $container->get(\MyInvoice\Service\Auth\ApiTokenService::class)
-    ->revokeAllForUser((int) $user['id']);
-
-$killed = $sessions->destroyAllForUser((int) $user['id']);
-$wasEnabled = ((int) ($user['totp_enabled'] ?? 0) === 1) ? 'ano' : 'ne';
+// majitel po obnově vystaví znovu. Reset z administrace je nechává.
+$result = $container->get(\MyInvoice\Service\Auth\MfaResetService::class)
+    ->reset((int) $user['id'], true);
+$wasEnabled = $result['totp_was_enabled'] ? 'ano' : 'ne';
 
 // Přes ActivityLogger, NE syrovým INSERTem: jen tudy se článek zapečetí do
 // hash-chainu (§ 33a). Syrový zápis nechával `hash = NULL`, takže nejcitlivější
@@ -132,14 +102,7 @@ $container->get(\MyInvoice\Service\ActivityLogger::class)->log(
     (int) $user['id'],
     'user',
     (int) $user['id'],
-    [
-        'passkeys_revoked' => $passkeys->rowCount(),
-        'trusted_devices_removed' => $td->rowCount(),
-        'recovery_codes_revoked' => $recoveryCodes,
-        'api_tokens_revoked' => $apiTokensRevoked,
-        'mcp_grants_revoked' => $mcpGrants->rowCount(),
-        'sessions_invalidated' => $killed,
-        'totp_was_enabled' => ((int) ($user['totp_enabled'] ?? 0) === 1),
+    $result + [
         'via' => 'cli:reset-mfa',
         'operator_os_user' => cliOperator(),
         'operator_host' => gethostname() ?: null,
@@ -147,10 +110,11 @@ $container->get(\MyInvoice\Service\ActivityLogger::class)->log(
 );
 
 echo "✓ MFA reset pro {$user['email']} (id={$user['id']}, TOTP původně aktivní: {$wasEnabled}).\n";
-echo "  Odvoláno {$passkeys->rowCount()} passkeys, {$td->rowCount()} důvěryhodných zařízení, "
-    . "{$otp->rowCount()} e-mailových kódů, {$ceremonies->rowCount()} flow, "
-    . "{$proofs->rowCount()} proofů, $recoveryCodes záložních kódů a $killed session(í).\n";
-echo "  Zrušeno $apiTokensRevoked API tokenů a {$mcpGrants->rowCount()} MCP připojení; "
+echo "  Odvoláno {$result['passkeys_revoked']} passkeys, {$result['trusted_devices_removed']} důvěryhodných zařízení, "
+    . "{$result['login_otps_removed']} e-mailových kódů, {$result['ceremonies_removed']} flow, "
+    . "{$result['step_up_proofs_removed']} proofů, {$result['recovery_codes_revoked']} záložních kódů "
+    . "a {$result['sessions_invalidated']} session(í).\n";
+echo "  Zrušeno {$result['api_tokens_revoked']} API tokenů a {$result['mcp_grants_revoked']} MCP připojení; "
     . "integrace je potřeba po obnově účtu napojit novým tokenem.\n";
 
 // E-mailové OTP zůstává po resetu jediným druhým faktorem — a to je přesně ten

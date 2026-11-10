@@ -1,0 +1,23 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#18181b;">Two-factor authentication was reset</h1>
+
+<p style="margin:0 0 16px;">Hello{% if name %} {{ name }}{% endif %},</p>
+
+<p style="margin:0 0 16px;">on {{ resetAt }} the administrator{% if actorName %} <strong>{{ actorName }}</strong>{% endif %} reset
+two-factor authentication for your <strong>MyÚčto.cz</strong> account. Your authenticator app, passkeys and
+recovery codes no longer work and you were signed out on all devices.</p>
+
+<p style="margin:0 0 16px;">After your next sign-in, set up two-factor authentication again in your profile (Security).</p>
+
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ loginUrl }}" style="display:inline-block;background:{{ accent }};color:#ffffff;text-decoration:none;font-weight:600;padding:12px 28px;border-radius:6px;font-size:15px;">
+    Sign in
+  </a>
+</p>
+
+<p style="margin:0;font-size:13px;color:#71717a;">
+  If you did not ask for this reset, contact the administrator immediately.
+</p>
+{% endblock %}
