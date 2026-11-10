@@ -7,9 +7,10 @@ namespace MyInvoice\Service\Migration\Myucto;
 /** Explicit first import profile: business records, no instance credentials or runtime jobs. */
 final class MyuctoImportProfile
 {
-    public const VERSION = 'posting-groups-v1';
+    /** Prvních 16 znaků otisku je součástí cesty importovaných souborů, takže dvojtečka musí stát až za nimi. */
+    public const VERSION = 'vat-clearing-runs-v1';
     /** Starší profily, jejichž obnova se shodnými daty je pro aktuální profil úplná. */
-    public const COMPATIBLE_VERSIONS = ['classifications-v1'];
+    public const COMPATIBLE_VERSIONS = ['classifications-v1', 'posting-groups-v1'];
     public const TABLES = [
         'currencies', 'revenue_categories', 'expense_categories', 'cost_centers',
         'chart_of_accounts', 'vat_classifications', 'accounting_periods', 'clients', 'client_bank_accounts',
@@ -21,7 +22,7 @@ final class MyuctoImportProfile
         'cash_documents', 'cash_document_vat_lines', 'invoice_settlements', 'credit_note_offsets',
         'offset_agreements', 'offset_agreement_items', 'assets', 'asset_improvements',
         'depreciation_entries', 'small_assets', 'journal_entries', 'journal_entry_lines', 'journal_document_postings',
-        'posting_rules', 'de_movement_classification', 'de_movement_classification_history',
+        'vat_clearing_runs', 'posting_rules', 'de_movement_classification', 'de_movement_classification_history',
         'tax_evidence_bank_rules', 'supplier_email_templates',
     ];
     public const CONFIG_TABLES = ['supplier_vat_status_history'];
@@ -83,8 +84,14 @@ final class MyuctoImportProfile
             'cash_document_id' => 'cash_documents', 'classified_by' => 'users'],
         'de_movement_classification_history' => ['changed_by' => 'users'],
         'tax_evidence_bank_rules' => ['created_by' => 'users'],
+        'vat_clearing_runs' => ['entry_id' => 'journal_entries', 'computed_by' => 'users'],
     ];
     public const PRESERVED_IDS = ['idoklad_id', 'fakturoid_id', 'import_batch_id'];
+    /**
+     * Deterministické klíče zdaňovacího období ({@see \MyInvoice\Service\Accounting\Vat\VatClearingService::sourceIdFor()}),
+     * nikoli ID řádku. Mezi instancemi znamenají totéž období, proto se přenáší beze změny.
+     */
+    public const PERIOD_KEYS = ['vat_clearing_runs' => ['source_id']];
     /**
      * Polymorfní vazby: cílovou tabulku určuje druh dokladu nebo zdroje v řádku,
      * proto nemají cizí klíč. Přemapuje je MyuctoImporter::remap(), resp. references().
@@ -111,6 +118,18 @@ final class MyuctoImportProfile
         'purchase_invoices' => ['number_series_id'],
         'purchase_invoice_items' => ['expense_rule_id'],
         'cash_documents' => ['number_series_id'],
+        // Podání DPH obnova nepřenáší; běh zúčtování si ponechá formulář, variantu i čas podání.
+        'vat_clearing_runs' => ['submission_id'],
+    ];
+    /**
+     * Výchozí nastavení, které nová firma dostane při založení (bankovní účet a měny z ARES
+     * a průvodce). Při první obnově do prázdné firmy se párují podle přirozeného klíče
+     * a jejich popisné údaje převezme cíl ze zdroje, jinak by obnova ztratila IBAN,
+     * analytiku nebo řadu bankovních dokladů a vícoměnový účet by zůstal jednoměnový.
+     */
+    public const ADOPTED_SETUP_COLUMNS = [
+        'supplier_bank_accounts' => ['label', 'iban', 'currency', 'currency_id', 'analytic_suffix', 'document_series', 'kind', 'is_active'],
+        'currencies' => ['account_number', 'bank_code', 'bank_name', 'iban', 'bic'],
     ];
     public const RESET_COLUMNS = [
         'invoices' => ['public_token', 'approval_token', 'approval_receipt_hash', 'approval_token_expires_at', 'pdf_path', 'pdf_generated_at'],

@@ -202,6 +202,9 @@ final class MyuctoImporter
                     }
                 }
             }
+            if ($previous === false) {
+                $this->adoptSetupRows($pdo, $reused, $prepared, $map, $schema);
+            }
             while ($pending !== []) {
                 $progress = false;
                 foreach ($pending as $table => $rows) {
@@ -227,6 +230,13 @@ final class MyuctoImporter
                         }
                         if ($wait) {
                             continue;
+                        }
+                        // Stornovaný zápis, jehož storno ještě není vložené, by byl do doplnění
+                        // `reversed_by` aktivní a kolidoval by s novým zaúčtováním téhož dokladu
+                        // (uq_je_supplier_active_source). Vazbu na doklad proto dostane až spolu se stornem.
+                        if ($table === 'journal_entries' && array_key_exists('reversed_by', $late) && ($write['source_id'] ?? null) !== null) {
+                            $late['source_id'] = $write['source_id'];
+                            $write['source_id'] = null;
                         }
                         $columns = array_keys($write);
                         $pdo->prepare('INSERT INTO `' . $table . '` (`' . implode('`, `', $columns) . '`) VALUES (' . implode(', ', array_fill(0, count($columns), '?')) . ')')->execute(array_values($write));
@@ -258,8 +268,10 @@ final class MyuctoImporter
             $this->restoreKeylessJournal($pdo, $tables, $map, $supplierId, $actorId, $previous === false, $schema, $report);
             foreach ($deferred as [$table, $id, $values]) {
                 $set = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = ?', array_keys($values)));
-                if (isset($schema['columns'][$table]['updated_at'])) {
-                    $set .= ', updated_at = updated_at';
+                foreach (['updated_at', 'computed_at'] as $stamp) {
+                    if (isset($schema['columns'][$table][$stamp]) && !isset($values[$stamp])) {
+                        $set .= ', `' . $stamp . '` = `' . $stamp . '`';
+                    }
                 }
                 $pdo->prepare('UPDATE `' . $table . '` SET ' . $set . ' WHERE id = ?')->execute([...array_values($values), $id]);
             }
@@ -385,6 +397,7 @@ final class MyuctoImporter
                         && !isset($this->references($table, $schema, $row)[$column])
                         && !in_array($column, MyuctoImportProfile::PRESERVED_IDS, true)
                         && !in_array($column, MyuctoImportProfile::POLYMORPHIC_REFERENCES[$table] ?? [], true)
+                        && !in_array($column, MyuctoImportProfile::PERIOD_KEYS[$table] ?? [], true)
                         && !in_array($column, MyuctoImportProfile::DETACHED_REFERENCES[$table] ?? [], true)) {
                         throw new RuntimeException('Nepodporovaná vazba ' . $table . '.' . $column . '; data se nebudou tiše zahazovat.');
                     }
@@ -693,6 +706,8 @@ final class MyuctoImporter
                 // U složeného FK (supplier_id, entry_id) je supplier_id stále
                 // vlastníkem firmy, nikoli ID rodičovského zápisu.
                 if ($fk['COLUMN_NAME'] === 'supplier_id') continue;
+                // Odpojená vazba míří mimo převáděný graf a remap() ji vynuluje.
+                if (in_array($fk['COLUMN_NAME'], MyuctoImportProfile::DETACHED_REFERENCES[$table] ?? [], true)) continue;
                 if ($fk['REFERENCED_COLUMN_NAME'] !== 'id') {
                     throw new RuntimeException('Nepodporovaná reference schématu.');
                 }
@@ -725,6 +740,8 @@ final class MyuctoImporter
                 'offset' => 'offset_agreements', 'settlement' => 'invoice_settlements',
                 'closing', 'opening', 'income_tax', 'deferred_tax', 'profit_distribution', 'stock' => 'accounting_periods',
                 'manual' => null,
+                // Zúčtování DPH nese klíč zdaňovacího období (VatClearingService::sourceIdFor()), ne ID dokladu.
+                'vat_clearing' => null,
                 default => throw new RuntimeException('Nepodporovaný zdroj účetního zápisu: ' . $row['source_type'] . '.'),
             };
             if ($target !== null) {
@@ -807,6 +824,37 @@ final class MyuctoImporter
         $pdo->prepare('DELETE FROM accounting_periods WHERE supplier_id = ?')->execute([$supplierId]);
         return array_map(static fn (array $p): array => ['fiscal_year' => (int) $p['fiscal_year'],
             'starts_on' => (string) $p['starts_on'], 'ends_on' => (string) $p['ends_on']], $periods);
+    }
+
+    /**
+     * Výchozí nastavení prázdné firmy spárované při první obnově převezme popisné údaje
+     * ze zdroje ({@see MyuctoImportProfile::ADOPTED_SETUP_COLUMNS}). Přirozený klíč párování
+     * (číslo účtu a banka, kód měny) zůstává a hlídá ho dál assertReusable().
+     *
+     * @param array<string,array<int|string,true>> $reused
+     * @param array<string,array<int|string,array<string,mixed>>> $prepared
+     * @param array<string,array<int|string,int>> $map
+     */
+    private function adoptSetupRows(PDO $pdo, array $reused, array $prepared, array $map, array $schema): void
+    {
+        foreach (MyuctoImportProfile::ADOPTED_SETUP_COLUMNS as $table => $columns) {
+            $columns = array_values(array_filter($columns, static fn (string $c): bool => isset($schema['columns'][$table][$c])));
+            foreach (array_keys($reused[$table] ?? []) as $id) {
+                $row = $prepared[$table][$id] ?? null;
+                if ($row === null) {
+                    continue;
+                }
+                $values = array_intersect_key($row, array_flip($columns));
+                if ($values === []) {
+                    continue;
+                }
+                $set = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = ?', array_keys($values)));
+                if (isset($schema['columns'][$table]['updated_at'])) {
+                    $set .= ', updated_at = updated_at';
+                }
+                $pdo->prepare('UPDATE `' . $table . '` SET ' . $set . ' WHERE id = ?')->execute([...array_values($values), $map[$table][$id]]);
+            }
+        }
     }
 
     private function assertEmptyTarget(PDO $pdo, int $supplierId, bool $unusedPeriods): void

@@ -456,6 +456,82 @@ final class MyuctoImportTest extends TestCase
         self::assertSame(1, $repeat['existing']['credit_note_offsets']);
     }
 
+    /**
+     * Export z produkce nesl tři věci, na kterých obnova skončila: zápis zúčtování DPH
+     * (`source_id` je klíč období, ne doklad), přeúčtovaný doklad (stornovaný zápis má
+     * storno s vyšším ID, takže byl při vkládání chvíli aktivní vedle nového zaúčtování)
+     * a vícoměnový bankovní účet, který nová firma při založení dostala jako jednoměnový.
+     */
+    public function testVatClearingReversedPostingAndSetupBankAccountAreRestored(): void
+    {
+        $package = (new MyuctoExportReader())->read($this->archive);
+        $original = reset($package['tables']['journal_entries']);
+        $lines = array_filter($package['tables']['journal_entry_lines'], static fn (array $line): bool => (int) $line['entry_id'] === (int) $original['id']);
+        $nextEntry = max(array_keys($package['tables']['journal_entries']));
+        $nextLine = max(array_keys($package['tables']['journal_entry_lines']));
+        $add = function (array $values) use (&$package, &$nextEntry, &$nextLine, $original, $lines): int {
+            $id = ++$nextEntry;
+            $package['tables']['journal_entries'][$id] = array_replace($original, ['id' => $id, 'reversed_by' => null], $values);
+            foreach ($lines as $line) {
+                ++$nextLine;
+                $package['tables']['journal_entry_lines'][$nextLine] = array_replace($line, ['id' => $nextLine, 'entry_id' => $id]);
+            }
+            return $id;
+        };
+        $reversedPosting = $add(['source_type' => 'purchase_invoice', 'source_id' => $this->purchase, 'description' => 'Syntetické původní zaúčtování']);
+        $reversal = $add(['source_type' => 'purchase_invoice', 'source_id' => null, 'description' => 'Syntetické storno']);
+        $package['tables']['journal_entries'][$reversedPosting]['reversed_by'] = $reversal;
+        $add(['source_type' => 'purchase_invoice', 'source_id' => $this->purchase, 'description' => 'Syntetické nové zaúčtování']);
+        $periodKey = \MyInvoice\Service\Accounting\Vat\VatClearingService::sourceIdFor(2090, 1, 'monthly');
+        $clearing = $add(['source_type' => 'vat_clearing', 'source_id' => $periodKey, 'description' => 'Syntetické zúčtování DPH']);
+        $package['tables']['vat_clearing_runs'][1] = [
+            'id' => 1, 'supplier_id' => $this->source, 'source_id' => $periodKey, 'period_year' => 2090, 'period_first_month' => 1,
+            'period_type' => 'monthly', 'period_start' => '2090-01-01', 'period_end' => '2090-01-31', 'entry_id' => $clearing,
+            'input_vat' => '21.00', 'output_vat' => '21.00', 'settlement' => '0.00', 'status' => 'posted', 'trigger_source' => 'return_filed',
+            'submission_id' => 987654, 'submission_form' => 'dphdp3', 'submission_variant' => 'B', 'submitted_at' => '2090-02-20 10:00:00',
+            'computed_at' => '2090-02-20 10:00:00', 'computed_by' => $this->actor,
+        ];
+        $currency = (int) $this->pdo->query('SELECT default_currency_id FROM supplier WHERE id = ' . $this->source)->fetchColumn();
+        $package['tables']['supplier_bank_accounts'][1] = [
+            'id' => 1, 'supplier_id' => $this->source, 'currency_id' => null, 'label' => 'Syntetický vícoměnový účet',
+            'account_number' => '1000000005', 'bank_code' => '0100', 'iban' => 'CZ0001000000001000000005', 'currency' => null,
+            'account_canonical' => '1000000005', 'bank_code_norm' => '0100', 'kind' => 'current', 'analytic_suffix' => '002',
+            'document_series' => 'BSYN', 'source' => 'currencies', 'is_active' => 1,
+            'created_at' => '2090-01-01 00:00:00', 'updated_at' => '2090-01-01 00:00:00',
+        ];
+        self::assertGreaterThan(0, $currency);
+        $targetCurrency = (int) $this->pdo->query('SELECT default_currency_id FROM supplier WHERE id = ' . $this->target)->fetchColumn();
+        $this->pdo->prepare("INSERT INTO supplier_bank_accounts (supplier_id, currency_id, label, account_number, bank_code, currency, account_canonical, bank_code_norm, source)
+            VALUES (?, ?, 'Výchozí účet z průvodce', '1000000005', '0100', 'CZK', '1000000005', '0100', 'currencies')")->execute([$this->target, $targetCurrency]);
+
+        $dry = $this->importer->import($package, $this->target, $this->actor, 'synthetic-clearing');
+        self::assertSame(1, $dry['created']['vat_clearing_runs']);
+        $report = $this->importer->import($package, $this->target, $this->actor, 'synthetic-clearing', false);
+
+        self::assertSame(1, $report['created']['vat_clearing_runs']);
+        self::assertSame(['vat_clearing_runs.submission_id' => 1], $report['detached']);
+        $purchase = (int) $this->pdo->query('SELECT id FROM purchase_invoices WHERE supplier_id = ' . $this->target)->fetchColumn();
+        $postings = $this->pdo->query("SELECT description, source_id, reversed_by IS NOT NULL AS reversed FROM journal_entries
+            WHERE supplier_id = {$this->target} AND source_type = 'purchase_invoice' ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+        self::assertSame([
+            ['Syntetické původní zaúčtování', $purchase, 1],
+            ['Syntetické storno', null, 0],
+            ['Syntetické nové zaúčtování', $purchase, 0],
+        ], array_map(static fn (array $r): array => [$r['description'], $r['source_id'] === null ? null : (int) $r['source_id'], (int) $r['reversed']], $postings));
+        $entry = $this->pdo->query("SELECT id, source_id FROM journal_entries WHERE supplier_id = {$this->target} AND source_type = 'vat_clearing'")->fetch(PDO::FETCH_ASSOC);
+        self::assertSame($periodKey, (int) $entry['source_id']);
+        $run = $this->pdo->query('SELECT source_id, entry_id, submission_id, submission_variant, settlement, computed_at FROM vat_clearing_runs WHERE supplier_id = ' . $this->target)->fetch(PDO::FETCH_ASSOC);
+        self::assertSame([$periodKey, (int) $entry['id'], null, 'B', '0.00', '2090-02-20 10:00:00'],
+            [(int) $run['source_id'], (int) $run['entry_id'], $run['submission_id'], $run['submission_variant'], $run['settlement'], $run['computed_at']]);
+        $account = $this->pdo->query('SELECT label, iban, currency, currency_id, analytic_suffix, document_series FROM supplier_bank_accounts WHERE supplier_id = ' . $this->target)->fetchAll(PDO::FETCH_ASSOC);
+        self::assertSame([['label' => 'Syntetický vícoměnový účet', 'iban' => 'CZ0001000000001000000005', 'currency' => null, 'currency_id' => null,
+            'analytic_suffix' => '002', 'document_series' => 'BSYN']], $account);
+
+        $repeat = $this->importer->import($package, $this->target, $this->actor, 'synthetic-clearing', false);
+        self::assertSame([], $repeat['created']);
+        self::assertSame(1, $repeat['existing']['vat_clearing_runs']);
+    }
+
     public function testMissingPostingDocumentRollsBackEntireGraph(): void
     {
         $package = (new MyuctoExportReader())->read($this->archive);

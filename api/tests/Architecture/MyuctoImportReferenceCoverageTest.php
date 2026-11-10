@@ -37,7 +37,8 @@ final class MyuctoImportReferenceCoverageTest extends TestCase
                     || isset(MyuctoImportProfile::EXTRA_REFERENCES[$table][$column])
                     || in_array($column, MyuctoImportProfile::PRESERVED_IDS, true)
                     || in_array($column, MyuctoImportProfile::POLYMORPHIC_REFERENCES[$table] ?? [], true)
-                    || in_array($column, MyuctoImportProfile::DETACHED_REFERENCES[$table] ?? [], true)) {
+                    || in_array($column, MyuctoImportProfile::DETACHED_REFERENCES[$table] ?? [], true)
+                    || in_array($column, MyuctoImportProfile::PERIOD_KEYS[$table] ?? [], true)) {
                     continue;
                 }
                 $missing[] = $table . '.' . $column;
@@ -55,7 +56,8 @@ final class MyuctoImportReferenceCoverageTest extends TestCase
     public function testDeclaredDecisionsReferToExistingColumnsOfImportedTables(): void
     {
         $tables = $this->snapshotTables();
-        foreach (['POLYMORPHIC_REFERENCES' => MyuctoImportProfile::POLYMORPHIC_REFERENCES, 'DETACHED_REFERENCES' => MyuctoImportProfile::DETACHED_REFERENCES] as $name => $decisions) {
+        foreach (['POLYMORPHIC_REFERENCES' => MyuctoImportProfile::POLYMORPHIC_REFERENCES, 'DETACHED_REFERENCES' => MyuctoImportProfile::DETACHED_REFERENCES,
+            'PERIOD_KEYS' => MyuctoImportProfile::PERIOD_KEYS] as $name => $decisions) {
             foreach ($decisions as $table => $columns) {
                 self::assertContains($table, MyuctoImportProfile::TABLES, "{$name}: {$table} obnova nepřenáší.");
                 foreach ($columns as $column) {
