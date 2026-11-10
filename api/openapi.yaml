@@ -24447,6 +24447,75 @@ paths:
           description: Skupiny tvoří přímé podkategorie této kategorie; bez něj kategorie nejvyšší úrovně.
       responses:
         '200': { description: OK }
+  /api/v1/stock/reports/value-trend-jobs:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Stock]
+      summary: Sestava vývoje hodnoty zásob — spuštění výpočtu na pozadí
+      description: |
+        Ocenění zásob po kategoriích k více datům vedle sebe: konce měsíců od `from`
+        do `to` a samotné `to` (nejvýše 36 dat, jinak 422 na poli `to`). Každé datum
+        se rovná jednodenní sestavě ocenění. Výpočet běží jako úloha na pozadí (stav
+        a průběh viz `/status`). Seskupení po kategoriích se zadá jen žadateli
+        s právem číst katalog.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from]
+              properties:
+                from: { type: string, format: date }
+                to: { type: string, format: date, description: Výchozí dnešní datum. }
+                warehouse_id: { type: integer, minimum: 1 }
+                group_parent_id: { type: integer, minimum: 1, description: Skupiny tvoří přímé podkategorie této kategorie; bez něj kategorie nejvyšší úrovně. }
+      responses:
+        '202': { description: 'Úloha zařazena. `reused: true` = vrácena už existující úloha téhož zadání (zrušit ji smí jen ten, kdo ji založil).' }
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /api/v1/stock/reports/value-trend-jobs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    get:
+      tags: [Stock]
+      summary: Sestava vývoje hodnoty zásob — výsledek
+      description: |
+        Dokončený výsledek je snímek (`computed_at`), zůstává čitelný i po dalších
+        pohybech skladu: `dates`, `groups` (hodnoty po datech) a `totals`. Bez práva
+        číst katalog je `groups` prázdné. Před dokončením 409. Přibude-li nebo se změní
+        doklad s datem do posledního data sestavy (u filtru skladu v něm), úloha se
+        sama dvakrát začne od začátku, pak selže s kódem `stock_value_trend_stale`;
+        opakování (retry) začne znovu s nulovým počtem restartů. Stejné zadání nad
+        stejným stavem skladu vrátí už existující úlohu.
+      responses:
+        '200': { description: OK }
+        '404': { description: Výpočet nenalezen }
+        '409': { description: Výpočet ještě není dokončen }
+  /api/v1/stock/reports/value-trend-jobs/{id}/status:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    get:
+      tags: [Stock]
+      summary: Stav a průběh výpočtu vývoje hodnoty zásob
+      responses:
+        '200': { description: OK }
+        '404': { description: Výpočet nenalezen }
+  /api/v1/stock/reports/value-trend-jobs/{id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    post:
+      tags: [Stock]
+      summary: Zrušení výpočtu vývoje hodnoty zásob
+      description: Zrušit smí zakladatel úlohy (stačí čtení skladu), jinak uživatel s právem zápisu do skladu (403).
+      responses:
+        '200': { description: OK }
+        '404': { description: Výpočet nenalezen }
+        '409': { description: Úlohu již nelze zrušit }
   /api/v1/stock/reports/sales:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -24515,12 +24584,13 @@ paths:
         enum:
         - status
         - valuation
+        - value-trend
         - sales
     get:
       tags:
       - Stock
       summary: Export sestavy (PDF/XLSX)
-      description: Export sestavy `status` nebo `valuation` (PDF i XLSX) a `sales` (jen
+      description: Export sestavy `status`, `valuation` nebo `value-trend` (PDF i XLSX) a `sales` (jen
         XLSX, nejvýše 20 000 řádků; vyžaduje i čtení vydaných faktur). Filtry jsou
         stejné jako u dat sestavy.
       parameters:
@@ -24586,7 +24656,7 @@ paths:
         description: Jen u sestavy valuation.
       - in: query
         name: job_id
-        description: Dokončená úloha ocenění; exportuje její výsledek a rozhodné datum.
+        description: Dokončená úloha ocenění; exportuje její výsledek a rozhodné datum. U sestavy value-trend povinné, dokončený výpočet z `/stock/reports/value-trend-jobs`.
         schema:
           type: integer
           minimum: 1

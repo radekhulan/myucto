@@ -139,7 +139,7 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
      */
     private function deniedReadLevelMutation(string $path): bool
     {
-        foreach (['/api/automation/recommendations/', '/api/stock/reports/valuation-jobs'] as $prefix) {
+        foreach (['/api/automation/recommendations/', '/api/stock/reports/valuation-jobs', '/api/stock/reports/value-trend-jobs'] as $prefix) {
             if (str_starts_with($path, $prefix)) {
                 return true;
             }
