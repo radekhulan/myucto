@@ -705,7 +705,7 @@ i technické účty se do limitu aktivních uživatelů počítají, a to i při
 jiné role pouze pro jednu firmu. Podrobnosti jsou v [§ 104.10.3](104_Licence_a_aktivace.md#104103-zkusebni-obdobi-a-stavy-licence).
 
 Provozní nastavení firmy má šest samostatných oprávnění: **Odesílací profily firmy**, **E-mailové šablony firmy**,
-**Branding firmy**, **Platební QR firmy**, **Výchozí hodnoty dokladů** a klientské **Firemní podpisové profily a PDF podpisy**. Každou oblast lze
+**Branding firmy**, **Platební QR firmy**, **Výchozí hodnoty dokladů** a **Firemní podpisové profily a PDF podpisy**. Každou oblast lze
 samostatně zakázat nebo povolit pro zápis. V `Firma → Nastavení firmy` se zobrazí jen povolené záložky; totéž platí
 pro přímý odkaz a pro vlastní klientskou doménu. Samotné **Nastavení firmy** přístup do těchto editorů nezapíná.
 Právo **Měnit nastavení firmy** zůstává interní správě právních, daňových a účetních údajů.
@@ -713,15 +713,16 @@ Oprávnění **Branding firmy** umožňuje upravit také vzhled PDF: kompaktní 
 
 Interní role mají branding v položce `Firma → Branding`, platební QR a e-mailové šablony v `Firma → Nastavení`
 a superadmin odesílací profily v `Systém → E-maily a certifikáty`. Položka `Firma → Nastavení firmy` se jim proto
-v menu ukáže jen kvůli oblasti, kterou jinde nenajdou: odesílacím profilům, nebo platebnímu QR, e-mailovým šablonám a výchozím hodnotám dokladů
-u role bez práva **Měnit nastavení firmy**.
+v menu ukáže jen kvůli oblasti, kterou jinde nenajdou: odesílacím profilům, firemním podpisovým profilům, nebo platebnímu QR,
+e-mailovým šablonám a výchozím hodnotám dokladů u role bez práva **Měnit nastavení firmy**.
 
 Oprávnění **Výchozí hodnoty dokladů** (`settings.invoice_defaults`) se zápisem dovolí měnit výchozí splatnost včetně jednotky, hodinovou sazbu a zapnutí a český i anglický text poznámky pod položkami. Interní správce je najde v `Firma → Nastavení`; klient a interní uživatel bez práva měnit celé nastavení firmy v `Firma → Nastavení firmy → Výchozí hodnoty dokladů`. Hodnoty se používají při zakládání nových dokladů; již uložené koncepty a vystavené doklady zůstávají beze změny. Měna, DPH a zaokrouhlování do tohoto oprávnění nepatří. Poznámka může mít nejvýše 5 000 znaků a hodinová sazba šest desetinných míst. Běžná klientská a účetní role toto právo ve výchozím stavu nemá. Odebrání práva platí i pro uživatele s právem **Měnit nastavení firmy**.
 
-Klient s právem spravovat firemní podpisové profily může pro firmu nahrát certifikát P12/PFX a nastavit jeho použití
+Klient nebo interní role s právem spravovat firemní podpisové profily může pro firmu nahrát certifikát P12/PFX a nastavit jeho použití
 pro PDF výstupy. Pro propojení profilu s odesílacím profilem potřebuje také správu odesílacích profilů. Správa se týká
 firemních profilů s nativním backendem a šifrovaným uložením hesla; osobní profily a osobní trezor certifikátů zůstávají
-součástí interní správy. Podrobnosti jsou v [kapitole 99](99_Elektronicke_podpisy.md).
+součástí interní správy (právo **Elektronické podepisování**). Superadmin spravuje podpisy jen v `Systém → E-maily a certifikáty`.
+Podrobnosti jsou v [kapitole 99](99_Elektronicke_podpisy.md).
 Díky přepisu role u konkrétní firmy lze stejnému uživateli povolit například branding ve firmě A a ve firmě B mu jej
 zakázat. Podrobný rozsah popisuje [§ 9.11.2 Delegované nastavení firmy](09_Klientsky_portal.md#9112-delegovane-nastaveni-firmy).
 
@@ -729,8 +730,16 @@ Klientským rolím lze přidělit také existující práva **Zakázky**, **Vytv
 pro **Knihu jízd**, její správu, import a mazání. U skladu lze povolit čtení, správu skladových karet a expedici;
 provozní akce vyžadují i čtení skladu. Tyto oblasti se běžné klientské roli automaticky nezapínají.
 
-Předávání originálů používá záměrně oddělená práva. Klientské **Předávat doklady účetní** dovolí pouze vložit a sledovat
-vlastní podání aktuální firmy. Interní **Příchozí doklady** dovolí účetní frontu číst nebo zpracovávat, včetně nahrání
+Interní roli lze přidělit i rozsah klienta: **Předávat doklady účetní**, **Připravená podání DPH, KH a SH** a
+**Firemní podpisové profily a PDF podpisy**. Hodí se pro roli typu „Fakturace a dokumenty“, která vystavuje faktury
+a doklady účetní jen předává. Výchozí systémové role tato práva nemají, dostane je jen role, které je správce přidělí.
+Interní role bez modulu **Daně a výkazy** pracuje s připravenými podáními stejně jako klient: jen přiznání k DPH,
+kontrolní a souhrnné hlášení, jen z webové aplikace a bez správy nastavení podání, důkazů a mazání. Funkce se zobrazí
+v běžném menu (`Dokumenty → Předat doklady účetní`, `Daně → EPO podání a archív`, `Firma → Nastavení firmy`);
+podrobnosti jsou v [§ 9.11.10](09_Klientsky_portal.md#91110-opravneni-a-izolace-firem).
+
+Předávání originálů používá záměrně oddělená práva. **Předávat doklady účetní** dovolí pouze vložit a sledovat
+vlastní podání aktuální firmy a odpovídat na požadavky účetní. Interní **Příchozí doklady** dovolí účetní frontu číst nebo zpracovávat, včetně nahrání
 dokladu, který přišel mimo portál; pro vznik faktury a případnou AI extrakci jsou navíc potřeba jejich vlastní oprávnění.
 **Trvale vyřadit z příchozí fronty** je samostatné právo a žádná systémová role kromě správce ho nemá. Odmítnutí dokladu
 totiž originál záměrně nemaže (zůstává v Dokumentech i v auditní stopě), takže úklid fronty i s originálem je vědomý zásah.

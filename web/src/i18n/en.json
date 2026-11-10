@@ -28118,6 +28118,7 @@
       "bank_ignore": "Ignore payments"
     },
     "client_bank_hint": "Client bank permissions are optional. Importing, matching and ignoring require bank read access. Matching and unmatching also require document read access and permission to change their payments. Matching and importing can trigger automatic payment processing and journal entries according to company settings.",
+    "staff_client_scope_hint": "An internal role can also receive the client scope: Hand over documents to the accountant, Prepared VAT, control statement and recapitulative statement filings, and Company signing profiles. Without the Taxes and reports module, the role works with prepared filings like a client: VAT, control statement and recapitulative statement only, only from the web app and without managing filing settings.",
     "readonly_hint": "The built-in Read-only role can have write access only to manage its own API tokens. All other permissions allow at most reading.",
     "title": "Roles and permissions",
     "subtitle": "Control access to modules and significant actions.",

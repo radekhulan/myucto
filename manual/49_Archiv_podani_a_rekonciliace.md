@@ -40,7 +40,8 @@ Související výpočty jsou popsány v kapitolách [Výkazy DPH](41_Vykazy_DPH.
 Účetní může připravit XML a vlastní podání přenechat klientovi. Správce v **Systém → Role a oprávnění**
 u vlastní role typu **client** povolí čtení **Připravená podání DPH, KH a SH** (`reports.submissions`).
 Výchozí klientská role zůstává bez přístupu. Přístup platí i na klientské doméně a vždy jen pro vybranou
-firmu, ke které je klient přiřazen.
+firmu, ke které je klient přiřazen. Stejné právo lze dát i interní roli; bez modulu **Daně a výkazy** pak
+pracuje s archivem ve stejném rozsahu jako klient a nastavení podání nespravuje.
 
 Samotné čtení dovoluje prohlížet archiv přiznání k DPH, kontrolních a souhrnných hlášení, stáhnout
 jejich připravené XML a přiložená potvrzení a zobrazit platební údaje DPH včetně QR platby.

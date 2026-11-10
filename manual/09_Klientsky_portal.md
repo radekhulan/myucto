@@ -320,7 +320,13 @@ Dashboard účetní i domovská stránka klienta ukazují počet otevřených po
 
 Klient vidí vždy jen požadavky vlastní aktuálně zvolené firmy (stejný princip jako zbytek portálu, viz [§ 9.3](#93-krok-za-krokem-zalozeni-klientskeho-uctu)). Cizí požadavek vrátí 404, ne 403, aby se neprozrazovala ani jeho existence.
 
-Oprávnění **Předávat doklady účetní** patří jen klientským rolím. Oprávnění **Příchozí doklady** je interní a odděluje čtení fronty od jejího zpracování. Přístup k frontě sám nenahrazuje oprávnění vytvořit přijatou fakturu ani použít AI extrakci.
+Oprávnění **Předávat doklady účetní** mají klientské role a správce ho může přidělit i interní roli, například roli „Fakturace a dokumenty“ pro kolegu, který doklady jen předává. Výchozí interní role ho nemají. Oprávnění **Příchozí doklady** je interní a odděluje čtení fronty od jejího zpracování. Přístup k frontě sám nenahrazuje oprávnění vytvořit přijatou fakturu ani použít AI extrakci.
+
+Funkce klientského portálu se interní roli zpřístupňují oprávněními, ne samostatnou obrazovkou. Interní role může dostat:
+
+- **Předávat doklady účetní**: v menu `Dokumenty → Předat doklady účetní` předává originály stejně jako klient a vidí stav podání aktuální firmy. Na požadavky účetní odpovídá v `Dokumenty → Chybějící doklady`; má-li role i interní právo **Požadavky klientovi**, vede tato položka na interní přehled požadavků. Předání nedává přístup k příchozí frontě účetní a e-mailové urgence požadavků chodí dál jen klientům.
+- **Připravená podání DPH, KH a SH**: bez modulu **Daně a výkazy** pracuje role s archivem v `Daně → EPO podání a archív` stejně jako klient, tedy jen s přiznáním k DPH, kontrolním a souhrnným hlášením, jen z přihlášené webové aplikace a bez správy nastavení, důkazů a mazání. Role s modulem **Daně a výkazy** používá plnou agendu výkazů.
+- **Firemní podpisové profily a PDF podpisy**: spravuje firemní podpisové profily v `Firma → Nastavení firmy` ve stejném rozsahu jako klientský správce. Plnou správu podpisů dál dává interní právo **Elektronické podepisování**.
 
 ### 9.11.11 Vlastní doména: pravidla
 
