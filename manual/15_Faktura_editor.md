@@ -207,6 +207,8 @@ Rozdíl mezi stornem a dobropisem a zaúčtování dobropisu viz [§ 15.9.9](#15
 | Uložení faktury s prodejem majetku skončí chybou | Karta majetku už byla prodána jiným dokladem, nebo je vyřazená | Vyberte jinou kartu, viz [§ 15.9.3](#1593-polozky) |
 | Doklad zálohy nelze automaticky zaúčtovat | Vyúčtovací faktura neodečítá zálohu podle daňového dokladu k platbě, faktury dohromady odečítají víc, než ze zálohy bylo, chybí zaúčtovaná úhrada zálohy, nebo je k proformě bez daňového dokladu víc vyúčtovacích faktur | Opravte odpočet ([§ 15.4.2](#1542-cerpat-jednu-zalohu-postupne-vic-fakturami-milniky)), zaúčtujte úhradu zálohy, nebo dořešte ručním zápisem, viz [§ 15.9.8](#1598-zalohova-faktura-a-danovy-doklad) |
 | Pole data se neuloží | Neplatné datum (např. `31. 2.`) | Opravte datum |
+| „Odběratel … je veden jako drobný zákazník bez adresy. Lze mu vystavit jen zjednodušený daňový doklad…“ | Klient je drobný zákazník a doklad není zjednodušená faktura | Zaškrtněte **Zjednodušený daňový doklad**, nebo doplňte na kartě klienta adresu a volbu **Drobný zákazník** vypněte |
+| „…zjednodušený daňový doklad lze vystavit jen do 10 000 Kč včetně daně…“ u drobného zákazníka | Doklad přesahuje limit § 30 ZDPH | Doplňte na kartě klienta adresu a vystavte běžnou fakturu, nebo prodej snižte |
 
 ## 15.9 Podrobnosti a pravidla
 
@@ -296,6 +298,13 @@ Jedna faktura odečítá vždy jen jednu zálohu.
   zůstane, jen se nevytiskne na PDF ani webové faktuře (ISDOC, i ten vložený do PDF, odběratele
   nese dál). Výchozí hodnotu nastavíte ve
   `Firma → Nastavení` na záložce **Fakturace** (viz [§ 40.9.10](40_Fakturujeme.md#40910-zjednoduseny-danovy-doklad-30-zdph)).
+- **Drobný zákazník bez adresy** (viz [§ 18.3.1](18_Klienti.md#1831-drobny-zakaznik-bez-adresy)): po výběru
+  takového klienta editor u plátce rovnou zaškrtne **Zjednodušený daňový doklad** a pod ním
+  připomene limit 10 000 Kč včetně DPH. Zrušíte-li zaškrtnutí, změníte typ na zálohovou fakturu
+  či dobropis nebo přesáhne-li doklad limit, editor zobrazí varování a vystavení se odmítne.
+  Řešením je doplnit na kartě klienta adresu (pak lze vystavit běžnou fakturu), nebo prodej snížit.
+  Doklad pošlete zákazníkovi e-mailem stejně jako jakoukoli jinou fakturu. Stejné pravidlo platí
+  i pro pravidelnou fakturaci, automatické vystavení, rychlou účtenku a API.
 
 > [!WARNING]
 > Pokud změníte klienta uprostřed editace, zakázka se vyresetuje (původní patřila jinému
