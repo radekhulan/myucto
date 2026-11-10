@@ -71,6 +71,7 @@ const MUTATION_RULES: readonly (readonly [RegExp, AreaSet])[] = [
   [/^\/(?:bank|bank-statements|bank-transactions|bank-match-suggestions|payment-cards|credit-cards)(?:\/|$)/, ['bank']],
   [/^\/cash(?:\/|$)/, ['cash']],
   [/^\/eet(?:\/|$)/, ['eet']],
+  [/^\/stock\/reports\//, []],
   [/^\/(?:stock|price-list-items)(?:\/|$)/, ['stock']],
   [/^\/(?:eshop|catalog)(?:\/|$)/, ['eshop']],
   [/^\/(?:portal\/)?(?:documents|document-folders|document-requests|scan-attach|attachment-checks)(?:\/|$)/, ['documents']],

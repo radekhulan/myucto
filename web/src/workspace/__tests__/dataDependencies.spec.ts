@@ -38,7 +38,7 @@ describe('závislosti dat mezi okny', () => {
 
   it('výpočty a nastavení uživatele nic nezmění', () => {
     for (const api of ['/invoices/bulk-oss/preview', '/accounting/bank-posting-suggestions/bulk-preview', '/clients/lookup-ares',
-      '/accounting/bank-posting-rules/dry-run', '/stock/items/quote', '/auth/login', '/user/preferences', '/license/tier/quote']) {
+      '/accounting/bank-posting-rules/dry-run', '/stock/items/quote', '/stock/reports/valuation-jobs', '/stock/reports/value-trend-jobs', '/stock/reports/value-trend-jobs/7/cancel', '/auth/login', '/user/preferences', '/license/tier/quote']) {
       expect(changedAreas(api), api).toEqual([])
       expect(affected('/', api), api).toBe(false)
     }
