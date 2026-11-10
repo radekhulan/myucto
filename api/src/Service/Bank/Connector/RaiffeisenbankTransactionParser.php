@@ -4,8 +4,20 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Bank\Connector;
 
+/**
+ * Převod pohybů RB Premium API na kontrakt importéru výpisů.
+ *
+ * Dokumentace RB nezaručuje znaménko částky, délku `entryReference`, časové pásmo
+ * `bookingDate` ani formát čísla účtu protistrany a symbolů. Odmítnutý pohyb přitom
+ * shodí celý výpis, takže napojení nejde ani ověřit. Pohyb se proto odmítne jen tehdy,
+ * když chybí to, bez čeho ho nejde zaúčtovat (reference, částka, směr, datum, měna účtu);
+ * doplňkové údaje se normalizují, zkrátí na šířku sloupce, nebo vynechají.
+ */
 final class RaiffeisenbankTransactionParser
 {
+    private const TIMEZONE = 'Europe/Prague';
+    private const BANK_REF_MAX = 40;
+
     /**
      * @param list<array<string,mixed>> $transactions
      * @return array{header:array<string,mixed>,transactions:list<array<string,mixed>>}
@@ -36,7 +48,10 @@ final class RaiffeisenbankTransactionParser
             if (!is_array($transaction)) {
                 throw $this->invalid($index, 'pohyb není objekt');
             }
-            $parsed[] = $this->transaction($transaction, $currency, $fromDate, $toDate, $index);
+            $row = $this->transaction($transaction, $currency, $index);
+            if ($row !== null) {
+                $parsed[] = $row;
+            }
         }
 
         return [
@@ -53,226 +68,184 @@ final class RaiffeisenbankTransactionParser
         ];
     }
 
-    /** @return array<string,mixed> */
-    private function transaction(
-        array $transaction,
-        string $currency,
-        \DateTimeImmutable $from,
-        \DateTimeImmutable $to,
-        int|string $index,
-    ): array {
+    /** @return array<string,mixed>|null null = pohyb bez peněžního dopadu (nulová částka) */
+    private function transaction(array $transaction, string $currency, int|string $index): ?array
+    {
         $reference = $this->requiredString($transaction, 'entryReference', $index);
-        if (
-            strlen($reference) > 40
-            || !preg_match('/^[A-Za-z0-9][A-Za-z0-9._:\/-]*$/D', $reference)
-        ) {
-            throw $this->invalid($index, 'neplatné entryReference');
-        }
 
         $amount = $transaction['amount'] ?? null;
         if (!is_array($amount) || !array_key_exists('value', $amount)) {
             throw $this->invalid($index, 'chybí amount.value');
         }
         $transactionCurrency = strtoupper($this->requiredString($amount, 'currency', $index));
-        if (!preg_match('/^[A-Z]{3}$/', $transactionCurrency) || $transactionCurrency !== $currency) {
+        if ($transactionCurrency !== $currency) {
             throw $this->invalid($index, 'měna pohybu neodpovídá účtu');
         }
-        $amountValue = $this->amount($amount['value'], $index);
         $direction = $this->requiredString($transaction, 'creditDebitIndication', $index);
-        if (
-            !in_array($direction, ['DBIT', 'CRDT'], true)
-            || ($direction === 'DBIT' && $amountValue >= 0)
-            || ($direction === 'CRDT' && $amountValue <= 0)
-        ) {
-            throw $this->invalid($index, 'částka neodpovídá DBIT/CRDT');
+        if (!in_array($direction, ['DBIT', 'CRDT'], true)) {
+            throw $this->invalid($index, 'neznámý směr pohybu');
         }
+        $cents = $this->cents($amount['value'], $index);
+        if ($cents === 0) {
+            return null;
+        }
+        // Směr určuje creditDebitIndication; RB může vracet částku se znaménkem i bez něj.
+        $cents = $direction === 'DBIT' ? -abs($cents) : abs($cents);
 
-        $bookingDate = $this->bookingDate(
-            $this->requiredString($transaction, 'bookingDate', $index),
-            $index,
-        );
-        if ($bookingDate < $from || $bookingDate > $to) {
-            throw $this->invalid($index, 'bookingDate je mimo požadované období');
-        }
+        $rawDate = $this->optionalString($transaction, 'bookingDate')
+            ?? $this->optionalString($transaction, 'valueDate')
+            ?? throw $this->invalid($index, 'chybí bookingDate');
+        $bookingDate = $this->bookingDate($rawDate, $index);
 
-        $entryDetails = $transaction['entryDetails'] ?? [];
-        if (!is_array($entryDetails)) {
-            throw $this->invalid($index, 'neplatné entryDetails');
-        }
-        $details = $entryDetails['transactionDetails'] ?? [];
-        if (!is_array($details)) {
-            throw $this->invalid($index, 'neplatné transactionDetails');
-        }
-        $relatedParties = $details['relatedParties'] ?? [];
-        if (!is_array($relatedParties)) {
-            throw $this->invalid($index, 'neplatné relatedParties');
-        }
-        $counterParty = $relatedParties['counterParty'] ?? [];
-        if (!is_array($counterParty)) {
-            throw $this->invalid($index, 'neplatná protistrana');
-        }
-        $organisation = $counterParty['organisationIdentification'] ?? [];
-        if (!is_array($organisation)) {
-            throw $this->invalid($index, 'neplatná identifikace protistrany');
-        }
-        $counterAccount = $counterParty['account'] ?? [];
-        if (!is_array($counterAccount)) {
-            throw $this->invalid($index, 'neplatný účet protistrany');
-        }
-        $remittance = $details['remittanceInformation'] ?? [];
-        if (!is_array($remittance)) {
-            throw $this->invalid($index, 'neplatné remittanceInformation');
-        }
-        $creditorReference = $remittance['creditorReferenceInformation'] ?? [];
-        if (!is_array($creditorReference)) {
-            throw $this->invalid($index, 'neplatné creditorReferenceInformation');
-        }
+        $details = $this->object($this->object($transaction['entryDetails'] ?? null)['transactionDetails'] ?? null);
+        $counterParty = $this->object($this->object($details['relatedParties'] ?? null)['counterParty'] ?? null);
+        $organisation = $this->object($counterParty['organisationIdentification'] ?? null);
+        $remittance = $this->object($details['remittanceInformation'] ?? null);
+        $creditorReference = $this->object($remittance['creditorReferenceInformation'] ?? null);
 
-        $name = $this->optionalString($counterParty, 'name', $index)
-            ?? $this->optionalString($organisation, 'name', $index);
-        $name = $this->bounded($name, 190, $index, 'název protistrany');
-        $descriptionParts = array_values(array_filter([
-            $this->optionalString($remittance, 'unstructured', $index),
-            $this->optionalString($details, 'originatorMessage', $index),
-        ], static fn (?string $value): bool => $value !== null));
-        $description = $descriptionParts !== [] ? implode(' | ', $descriptionParts) : null;
-        $description = $this->bounded($description, 255, $index, 'popis');
+        $name = $this->optionalString($counterParty, 'name') ?? $this->optionalString($organisation, 'name');
+        $description = implode(' | ', array_values(array_filter([
+            $this->optionalString($remittance, 'unstructured'),
+            $this->optionalString($details, 'originatorMessage'),
+        ], static fn (?string $value): bool => $value !== null)));
 
         return [
-            'posted_at' => $bookingDate->format('Y-m-d'),
-            'amount' => $amountValue,
+            'posted_at' => $bookingDate,
+            'amount' => (float) ($cents / 100),
             'currency' => $transactionCurrency,
-            'variable_symbol' => $this->symbol($creditorReference, 'variable', 20, $index),
-            'constant_symbol' => $this->symbol($creditorReference, 'constant', 10, $index),
-            'specific_symbol' => $this->symbol($creditorReference, 'specific', 20, $index),
-            'counterparty_account' => $this->counterpartyAccount($counterAccount, $index),
-            'counterparty_bank' => $this->bankCode($organisation, $index),
-            'counterparty_name' => $name,
-            'description' => $description,
-            'bank_ref' => $reference,
+            'variable_symbol' => $this->symbol($creditorReference, 'variable', 20),
+            'constant_symbol' => $this->symbol($creditorReference, 'constant', 10),
+            'specific_symbol' => $this->symbol($creditorReference, 'specific', 20),
+            'counterparty_account' => $this->counterpartyAccount($this->object($counterParty['account'] ?? null)),
+            'counterparty_bank' => $this->bankCode($organisation),
+            'counterparty_name' => $this->truncate($name, 190),
+            'description' => $this->truncate($description !== '' ? $description : null, 255),
+            'bank_ref' => $this->bankRef($reference),
         ];
     }
 
-    private function amount(mixed $raw, int|string $index): float
+    /** Reference delší než sloupec nebo s neobvyklými znaky se nahradí stabilním otiskem, aby párování duplicit zůstalo deterministické. */
+    private function bankRef(string $reference): string
     {
-        if (is_int($raw)) {
-            $decimal = (string) $raw;
-        } elseif (is_float($raw) && is_finite($raw)) {
-            $decimal = json_encode($raw, JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR);
-        } else {
-            throw $this->invalid($index, 'amount.value není konečné číslo');
+        if (strlen($reference) <= self::BANK_REF_MAX && preg_match('/^[\x21-\x7E]+$/D', $reference)) {
+            return $reference;
         }
-        if (!preg_match('/^(-?)(0|[1-9]\d{0,11})(?:\.(\d{1,2}))?$/D', $decimal, $match)) {
-            throw $this->invalid($index, 'amount.value nemá přesnost na celé centy');
-        }
-        $cents = ((int) $match[2] * 100) + (int) str_pad($match[3] ?? '', 2, '0');
-        if ($cents === 0) {
-            throw $this->invalid($index, 'nulová částka');
-        }
-        if ($match[1] === '-') {
-            $cents = -$cents;
-        }
-        return $cents / 100;
+        return 'RB-' . substr(hash('sha256', $reference), 0, self::BANK_REF_MAX - 3);
     }
 
-    private function bookingDate(string $raw, int|string $index): \DateTimeImmutable
+    private function cents(mixed $raw, int|string $index): int
     {
-        if (!preg_match(
-            '/^(\d{4}-\d{2}-\d{2})(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)?$/D',
-            $raw,
-            $match,
-        )) {
+        if (is_string($raw) && is_numeric(trim($raw))) {
+            $raw = (float) trim($raw);
+        }
+        if (is_int($raw)) {
+            return $raw * 100;
+        }
+        if (!is_float($raw) || !is_finite($raw) || abs($raw) >= 1e12) {
+            throw $this->invalid($index, 'amount.value není konečné číslo');
+        }
+        return (int) round($raw * 100);
+    }
+
+    /** Datum zaúčtování v kalendáři banky: čas s pásmem se převede do SEČ/SELČ, stejně jako se RB ptáme na období. */
+    private function bookingDate(string $raw, int|string $index): string
+    {
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', $raw)) {
+            try {
+                return $this->date($raw, 'bookingDate')->format('Y-m-d');
+            } catch (\RuntimeException) {
+                throw $this->invalid($index, 'neplatné bookingDate');
+            }
+        }
+        if (!preg_match('/^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/D', $raw, $match)) {
             throw $this->invalid($index, 'neplatné bookingDate');
         }
         try {
-            return $this->date($match[1], 'bookingDate');
-        } catch (\RuntimeException) {
+            $this->date($match[1], 'bookingDate');
+            $local = new \DateTimeZone(self::TIMEZONE);
+            $moment = new \DateTimeImmutable($raw, $local);
+        } catch (\Throwable) {
             throw $this->invalid($index, 'neplatné bookingDate');
         }
+        return ($match[2] ?? '') === '' ? $match[1] : $moment->setTimezone($local)->format('Y-m-d');
     }
 
-    private function counterpartyAccount(array $account, int|string $index): ?string
+    /** @param array<string,mixed> $account */
+    private function counterpartyAccount(array $account): ?string
     {
-        $iban = $this->optionalString($account, 'iban', $index);
+        $iban = $this->optionalString($account, 'iban');
         if ($iban !== null) {
-            $iban = strtoupper(str_replace(' ', '', $iban));
-            if (!preg_match('/^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$/D', $iban)) {
-                throw $this->invalid($index, 'neplatný IBAN protistrany');
+            $iban = strtoupper((string) preg_replace('/\s+/', '', $iban));
+            if (preg_match('/^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$/D', $iban)) {
+                return $iban;
             }
-            return $iban;
         }
-        $number = $this->optionalString($account, 'accountNumber', $index);
-        $prefix = $this->optionalString($account, 'accountNumberPrefix', $index);
-        if ($number === null && $prefix === null) {
+        $number = $this->optionalString($account, 'accountNumber');
+        if ($number === null) {
             return null;
         }
-        if ($number === null || !preg_match('/^[A-Za-z0-9]{1,34}$/D', $number)) {
-            throw $this->invalid($index, 'neplatné číslo účtu protistrany');
+        $number = (string) preg_replace('/\s+/', '', $number);
+        $prefix = $this->optionalString($account, 'accountNumberPrefix');
+        if ($prefix === null && preg_match('/^(\d{1,6})-(\d{1,10})$/D', $number, $parts)) {
+            [$prefix, $number] = [$parts[1], $parts[2]];
         }
-        if ($prefix === null || preg_match('/^0+$/D', $prefix)) {
+        if (!preg_match('/^[A-Za-z0-9]{1,34}$/D', $number)) {
+            return null;
+        }
+        if ($prefix === null || preg_match('/^0+$/D', $prefix) || !preg_match('/^\d{1,6}$/D', $prefix) || !preg_match('/^\d{1,10}$/D', $number)) {
             return $number;
-        }
-        if (!preg_match('/^\d{1,6}$/D', $prefix) || !preg_match('/^\d{1,10}$/D', $number)) {
-            throw $this->invalid($index, 'neplatný prefix účtu protistrany');
         }
         return ltrim($prefix, '0') . '-' . $number;
     }
 
-    private function bankCode(array $organisation, int|string $index): ?string
+    /** @param array<string,mixed> $organisation */
+    private function bankCode(array $organisation): ?string
     {
-        $bankCode = $this->optionalString($organisation, 'bankCode', $index);
-        if ($bankCode !== null && !preg_match('/^\d{4}$/D', $bankCode)) {
-            throw $this->invalid($index, 'neplatný kód banky protistrany');
-        }
-        return $bankCode;
+        $bankCode = $this->optionalString($organisation, 'bankCode');
+        return $bankCode !== null && preg_match('/^\d{4}$/D', $bankCode) ? $bankCode : null;
     }
 
-    private function symbol(array $source, string $key, int $maxLength, int|string $index): ?string
+    /** Symbol jiný než číselný nebo delší než sloupec se vynechá; pohyb zůstane, jen bez symbolu. */
+    private function symbol(array $source, string $key, int $maxLength): ?string
     {
-        $symbol = $this->optionalString($source, $key, $index);
+        $symbol = $this->optionalString($source, $key);
         if ($symbol === null) {
             return null;
         }
-        if (!preg_match('/^\d+$/D', $symbol)) {
-            throw $this->invalid($index, "neplatný symbol {$key}");
-        }
-        $symbol = ltrim($symbol, '0');
-        if ($symbol === '') {
-            return null;
-        }
-        if (strlen($symbol) > $maxLength) {
-            throw $this->invalid($index, "příliš dlouhý symbol {$key}");
-        }
-        return $symbol;
+        $symbol = ltrim((string) preg_replace('/\s+/', '', $symbol), '0');
+        return $symbol !== '' && preg_match('/^\d+$/D', $symbol) && strlen($symbol) <= $maxLength ? $symbol : null;
     }
 
     private function requiredString(array $source, string $key, int|string $index): string
     {
-        $value = $this->optionalString($source, $key, $index);
-        if ($value === null) {
-            throw $this->invalid($index, "chybí {$key}");
-        }
-        return $value;
+        return $this->optionalString($source, $key) ?? throw $this->invalid($index, "chybí {$key}");
     }
 
-    private function optionalString(array $source, string $key, int|string $index): ?string
+    private function optionalString(array $source, string $key): ?string
     {
-        if (!array_key_exists($key, $source) || $source[$key] === null) {
+        $value = $source[$key] ?? null;
+        if (is_int($value) || is_float($value)) {
+            $value = (string) $value;
+        }
+        if (!is_string($value)) {
             return null;
         }
-        if (!is_string($source[$key]) || !mb_check_encoding($source[$key], 'UTF-8')) {
-            throw $this->invalid($index, "neplatné textové pole {$key}");
+        if (!mb_check_encoding($value, 'UTF-8')) {
+            $value = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
         }
-        $value = trim($source[$key]);
+        $value = trim($value);
         return $value !== '' ? $value : null;
     }
 
-    private function bounded(?string $value, int $maxLength, int|string $index, string $field): ?string
+    /** @return array<string,mixed> */
+    private function object(mixed $value): array
     {
-        if ($value !== null && mb_strlen($value) > $maxLength) {
-            throw $this->invalid($index, "příliš dlouhé pole {$field}");
-        }
-        return $value;
+        return is_array($value) ? $value : [];
+    }
+
+    private function truncate(?string $value, int $maxLength): ?string
+    {
+        return $value !== null && mb_strlen($value) > $maxLength ? rtrim(mb_substr($value, 0, $maxLength)) : $value;
     }
 
     private function date(string $raw, string $field): \DateTimeImmutable

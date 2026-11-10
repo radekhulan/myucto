@@ -480,8 +480,9 @@ final class BankConnectionService
     {
         try {
             return $connector instanceof StructuredBankConnector ? $connector->parseStatement($content) : $this->parser->parse($content);
-        } catch (\Throwable) {
-            throw new BankConnectorOperationException('statement_invalid');
+        } catch (\Throwable $e) {
+            // Důvod (pozice a druh vady, bez údajů pohybu) jde do diagnostiky, jinak nejde poznat, co banka poslala jinak.
+            throw new BankConnectorOperationException('statement_invalid', [], $e);
         }
     }
 
