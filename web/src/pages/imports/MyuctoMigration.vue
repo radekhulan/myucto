@@ -323,6 +323,15 @@ onBeforeUnmount(() => { revision++; stopPolling() })
         <h3 class="font-semibold">{{ t('myucto_import.outside_scope') }}</h3>
         <ul class="mt-2 list-disc pl-5"><li v-for="(count, table) in result.report.outside_scope" :key="table">{{ label(String(table)) }}: {{ count }}</li></ul>
       </div>
+      <div v-if="result.report.numbering_check?.length" class="rounded-lg border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-700" data-testid="myucto-numbering-check">
+        {{ t('myucto_import.numbering_check', { tables: result.report.numbering_check.map((table) => label(table)).join(', ') }) }}
+      </div>
+      <template v-for="section in (['dropped', 'missing_files'] as const)" :key="section">
+        <div v-if="Object.keys(result.report[section] ?? {}).length" class="rounded-lg border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-700">
+          <h3 class="font-semibold">{{ section === 'dropped' ? t('myucto_import.dropped') : t('myucto_import.missing_files') }}</h3>
+          <ul class="mt-2 list-disc pl-5"><li v-for="(count, key) in result.report[section]" :key="key">{{ label(String(key).split('.')[0]) }}: {{ count }}</li></ul>
+        </div>
+      </template>
       <template v-if="passed">
         <label class="flex items-start gap-2 text-sm text-neutral-700"><input v-model="confirmed" type="checkbox" :disabled="busy" class="mt-0.5"><span>{{ t('myucto_import.confirm', { name: suppliers.currentSupplier?.company_name ?? '' }) }}</span></label>
         <div class="flex flex-wrap gap-3">
