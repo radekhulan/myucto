@@ -24055,6 +24055,7 @@
     "deleted_with_cascade": "Smazáno včetně {n} navazujícího dokladu",
     "delete_failed": "Smazání selhalo",
     "issue_confirm": "Vystavit fakturu? Po vystavení už ji nelze editovat.",
+    "issue_confirm_cn": "Vystavit dobropis? Po vystavení už ho nelze editovat.",
     "issue_no_items": "Faktura musí mít aspoň jednu položku.",
     "issue_failed": "Vystavení selhalo",
     "issued_as": "Vystaveno jako {varsymbol}",

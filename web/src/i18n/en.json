@@ -24055,6 +24055,7 @@
     "deleted_with_cascade": "Deleted with {n} linked document(s)",
     "delete_failed": "Delete failed",
     "issue_confirm": "Issue invoice? Once issued it cannot be edited.",
+    "issue_confirm_cn": "Issue credit note? Once issued it cannot be edited.",
     "issue_no_items": "Invoice must contain at least one item.",
     "issue_failed": "Issue failed",
     "issued_as": "Issued as {varsymbol}",
