@@ -169,7 +169,7 @@ final class ClientRepository
         $sql = "SELECT c.id, c.supplier_id, c.company_name, c.ic, c.dic, c.tax_number, c.main_email, c.language,
                        c.currency_default_id, cur.code AS currency_default,
                        c.reverse_charge, c.is_vat_payer, c.is_customer, c.is_vendor, c.is_fuel_station,
-                       c.auto_send_reminders,
+                       c.simplified_only, c.auto_send_reminders,
                        c.payment_due_default, c.payment_due_unit, c.default_payment_method, c.hourly_rate,
                        c.default_expense_category_id, c.default_revenue_category_id,
                        c.price_level_id, pl.name AS price_level_name,
@@ -274,8 +274,9 @@ final class ClientRepository
              auto_send_reminders, payment_due_default, payment_due_unit, default_payment_method, hourly_rate, note,
              default_expense_category_id, default_revenue_category_id,
              invoice_number_format, proforma_number_format, credit_note_number_format, invoice_number_period,
-             default_branding_profile_id, email_subject_format, email_attachment_name_format, email_attach_isdoc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+             default_branding_profile_id, email_subject_format, email_attachment_name_format, email_attach_isdoc,
+             simplified_only)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([
             $supplierId,
@@ -287,9 +288,9 @@ final class ClientRepository
             // Národní daňové číslo (#120) — SK DIČ / DE Steuernummer / PL NIP / HU Adószám;
             // `dic` u takových klientů nese VAT ID s prefixem (u SK = IČ DPH).
             $this->nullable($data, 'tax_number'),
-            (string) $data['street'],
-            (string) $data['city'],
-            (string) $data['zip'],
+            (string) ($data['street'] ?? ''),
+            (string) ($data['city'] ?? ''),
+            (string) ($data['zip'] ?? ''),
             $countryId,
             $this->nullable($data, 'main_email'),
             $this->nullable($data, 'phone'),
@@ -323,6 +324,7 @@ final class ClientRepository
             ClientEmailFormat::normalize($data['email_subject_format'] ?? null),
             ClientEmailFormat::normalize($data['email_attachment_name_format'] ?? null),
             $emailAttachIsdoc,
+            self::simplifiedOnlyFlag($data) ?? 0,
         ]);
         return (int) $this->db->pdo()->lastInsertId();
     }
@@ -468,6 +470,26 @@ final class ClientRepository
         return $id;
     }
 
+    /**
+     * Drobný zákazník (#310, migrace 2282): karta bez adresy, které lze vystavit jen
+     * zjednodušený daňový doklad (§ 30 ZDPH).
+     */
+    public function isSimplifiedOnly(int $clientId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT simplified_only FROM clients WHERE id = ?');
+        $stmt->execute([$clientId]);
+        return (int) $stmt->fetchColumn() === 1;
+    }
+
+    /** Příznak drobného zákazníka z payloadu; `null` = klíč chybí, uložená hodnota se nemění. */
+    private static function simplifiedOnlyFlag(array $data): ?int
+    {
+        if (!array_key_exists('simplified_only', $data) || $data['simplified_only'] === null) {
+            return null;
+        }
+        return filter_var($data['simplified_only'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
+    }
+
     public function isWalkInCustomer(int $clientId): bool
     {
         $stmt = $this->db->pdo()->prepare('SELECT is_walk_in FROM clients WHERE id = ?');
@@ -533,6 +555,7 @@ final class ClientRepository
             'invoice_number_format', 'proforma_number_format', 'credit_note_number_format',
             'invoice_number_period', 'related_party_type', 'related_party_note',
             'email_subject_format', 'email_attachment_name_format', 'email_attach_isdoc',
+            'simplified_only',
         ] as $key) {
             if (!array_key_exists($key, $data) && array_key_exists($key, $current)) {
                 $data[$key] = $current[$key];
@@ -648,7 +671,8 @@ final class ClientRepository
                 -- Typ a doložení doplňuje mergeWithStored(), explicitní null je smaže.
                 related_party = COALESCE(?, related_party),
                 related_party_type = ?,
-                related_party_note = ?
+                related_party_note = ?,
+                simplified_only = COALESCE(?, simplified_only)
                 WHERE id = ?';
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
@@ -658,9 +682,9 @@ final class ClientRepository
             $this->nullable($data, 'ic'),
             $this->nullable($data, 'dic'),
             $this->nullable($data, 'tax_number'),
-            (string) $data['street'],
-            (string) $data['city'],
-            (string) $data['zip'],
+            (string) ($data['street'] ?? ''),
+            (string) ($data['city'] ?? ''),
+            (string) ($data['zip'] ?? ''),
             $countryId,
             $this->nullable($data, 'main_email'),
             $this->nullable($data, 'phone'),
@@ -696,6 +720,7 @@ final class ClientRepository
             array_key_exists('related_party', $data) ? (int) (bool) $data['related_party'] : null,
             $this->nullable($data, 'related_party_type'),
             $this->nullable($data, 'related_party_note'),
+            self::simplifiedOnlyFlag($data),
             $id,
         ]);
 
@@ -918,6 +943,7 @@ final class ClientRepository
         if (array_key_exists('is_customer', $row)) $row['is_customer'] = (bool) $row['is_customer'];
         if (array_key_exists('is_vendor', $row))   $row['is_vendor']   = (bool) $row['is_vendor'];
         if (array_key_exists('is_walk_in', $row))  $row['is_walk_in']  = (bool) $row['is_walk_in'];
+        if (array_key_exists('simplified_only', $row)) $row['simplified_only'] = (bool) $row['simplified_only'];
         if (array_key_exists('is_fuel_station', $row)) $row['is_fuel_station'] = (bool) $row['is_fuel_station'];
         // Formulář čte příznak striktně (`=== true`); bez přetypování přišla `1`, checkbox
         // zůstal prázdný a uložení karty spojenou osobu i s typem vztahu tiše smazalo.
