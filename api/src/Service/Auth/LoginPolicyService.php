@@ -72,6 +72,17 @@ class LoginPolicyService
             : $authMethod !== 'oidc';
     }
 
+    /**
+     * Přihlašuje se instalace místními faktory (TOTP, passkey)? Ne, když je
+     * vynucený silný poskytovatel: přihlášení včetně MFA pak drží on.
+     */
+    public function localFactorsUsed(): bool
+    {
+        $required = $this->requiredProvider();
+
+        return $required === null || $this->providers->get($required)?->isStrong() !== true;
+    }
+
     /** Smí sezení (nebo token) vydané touto metodou přihlášení pracovat? */
     public function authMethodAllowed(?string $authMethod): bool
     {

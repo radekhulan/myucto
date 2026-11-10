@@ -50,6 +50,17 @@ final class MfaStepUpService
     }
 
     /**
+     * Reset MFA jiného uživatele superadminem. Proof je vázaný na konkrétní účet,
+     * takže potvrzení jednoho resetu nejde použít na jiný. Záložní kód ho
+     * potvrdit nesmí (není v RECOVERY_OPERATIONS): odebírá cizímu účtu faktory.
+     */
+    public static function userMfaResetOperation(int $userId): string
+    {
+        if ($userId < 1) throw new \InvalidArgumentException('Neplatné ID uživatele.');
+        return 'user.mfa_reset:' . $userId;
+    }
+
+    /**
      * `oidc` = čerstvé přihlášení u poskytovatele identity s `prompt=login`
      * (OidcLoginService). U poskytovatele, kterému instalace svěřuje celé
      * přihlášení včetně MFA, je to rovnocenné passkey. Neprochází
@@ -95,6 +106,7 @@ final class MfaStepUpService
         }
         $isPasskeyRevoke = preg_match('/^passkey\.revoke:([1-9][0-9]*)$/D', $operation, $passkeyMatches) === 1;
         $isDomainActivation = preg_match('/^domain\.activate:([1-9][0-9]*)$/D', $operation) === 1;
+        $isUserMfaReset = preg_match('/^user\.mfa_reset:([1-9][0-9]*)$/D', $operation) === 1;
         if ($operation !== self::OPERATION_API_TOKEN_CREATE
             && $operation !== self::OPERATION_PASSKEY_REGISTER
             && $operation !== self::OPERATION_TOTP_ENABLE
@@ -104,6 +116,7 @@ final class MfaStepUpService
             && $operation !== self::OPERATION_OIDC_LINK
             && !$isPasskeyRevoke
             && !$isDomainActivation
+            && !$isUserMfaReset
         ) {
             throw new StepUpOperationException('Nepovolený účel step-up ověření.');
         }

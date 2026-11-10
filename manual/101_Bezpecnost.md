@@ -392,7 +392,7 @@ neomezuje.
 <!-- cols: 30 34 36 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| Nemáte autentikátor ani klíč | Zařízení je ztracené | Zadejte záložní kód ([§ 101.5](#1015-krok-za-krokem-zalozni-kody)); jinak správce spustí `php api/bin/reset-mfa.php <email>` ([§ 101.11.2.4](#1011124-obnova-pristupu)) |
+| Nemáte autentikátor ani klíč | Zařízení je ztracené | Zadejte záložní kód ([§ 101.5](#1015-krok-za-krokem-zalozni-kody)); jinak superadmin resetuje MFA v **Administrace → Uživatelé**, případně spustí `php api/bin/reset-mfa.php <email>` ([§ 101.11.2.4](#1011124-obnova-pristupu)) |
 | Odebrat poslední silný faktor nejde | Je vynucené MFA | Nejdřív zaregistrujte druhý klíč nebo zapněte TOTP |
 | Přístupové klíče nejsou dostupné | `app.url` není HTTPS DNS adresa, nebo je v konfiguraci vypnutá metoda `passkey` | Opravte `app.url` ([§ 101.11.2.1](#1011121-passkeys)) |
 | Přihlášení hlásí `503 passkeys_unavailable` | WebAuthn je nedostupný a účet nemá jiný druhý faktor | Opravte `app.url`, případně `reset-mfa.php` |
@@ -674,10 +674,28 @@ přístupovým klíčem zapisuje `auth.passkey_step_up_failed` (při přihláše
 validátoru nebo `unknown_credential`, podle které se dá dohledat, proč klíč
 neprošel.
 
-##### Rescue na serveru
+##### Reset superadminem v aplikaci
 
 Nejprve použijte jinou zaregistrovanou passkey, TOTP nebo záložní kód. Pokud není
-dostupné nic z toho, správce může na serveru spustit:
+dostupné nic z toho, superadmin otevře **Administrace → Uživatelé**, u uživatele
+**Upravit** a v části **Dvoufázové ověření** klikne na **Resetovat MFA**.
+
+- Resetovat lze kohokoli kromě sebe, i jiného superadmina. Vlastní MFA si každý
+  spravuje v profilu.
+- Uvedete důvod (aspoň 10 znaků) a reset potvrdíte **vlastním** dvoufázovým
+  ověřením: přístupovým klíčem, kódem z aplikace, nebo účtem organizace. Heslo
+  ani záložní kód nestačí, superadmin bez MFA si ho musí nejdřív zapnout.
+- Reset vypne TOTP, odvolá passkeys, záložní kódy a důvěryhodná zařízení
+  a odhlásí uživatele ze všech zařízení. **API tokeny a MCP připojení zůstanou.**
+- Uživateli přijde e-mail o resetu. Do activity logu se zapíše `user.mfa_reset`
+  s důvodem, tím, kdo reset provedl, a čím ho potvrdil.
+
+Při vynuceném přihlášení přes silného poskytovatele identity (Entra ID) se reset
+nenabízí, dvoufázové ověření tam spravuje poskytovatel.
+
+##### Rescue na serveru
+
+Když se do aplikace nedostane ani superadmin, správce může na serveru spustit:
 
 ```bash
 php api/bin/reset-mfa.php vas@email.cz

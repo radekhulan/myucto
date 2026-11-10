@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
 import UserExternalIdentitiesAdmin from '@/components/settings/UserExternalIdentitiesAdmin.vue'
+import UserMfaResetAdmin from '@/components/settings/UserMfaResetAdmin.vue'
 import ActiveSessions from '@/components/security/ActiveSessions.vue'
 import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 
@@ -359,6 +360,8 @@ onMounted(load)
         </div>
 
         <UserExternalIdentitiesAdmin v-if="form.id !== null && ssoEnabled" :user-id="form.id" :email="form.email" />
+
+        <UserMfaResetAdmin v-if="form.id !== null && localFactorsAllowed" :user-id="form.id" @reset="load" />
 
         <section v-if="!selectedIsSuperadmin" class="border-t border-neutral-200 pt-4 space-y-3">
           <div><h3 class="font-medium">{{ t(selectedIsInstanceAdmin ? 'instance_admin.technical_scope' : 'users.suppliers_title') }}<RequiredMark v-if="!selectedIsInstanceAdmin" /></h3><p class="text-xs text-neutral-500">{{ t(selectedIsInstanceAdmin ? 'instance_admin.technical_scope_hint' : 'users.suppliers_hint') }}</p></div>

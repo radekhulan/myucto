@@ -1,0 +1,18 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Dvoufázové ověření bylo resetováno
+----------------------------------
+
+Dobrý den{% if name %} {{ name }}{% endif %},
+
+správce{% if actorName %} {{ actorName }}{% endif %} dne {{ resetAt }} resetoval dvoufázové ověření Vašeho účtu
+v MyÚčto.cz. Ověřovací aplikace, passkeys i záložní kódy přestaly platit a byli jste odhlášeni
+ze všech zařízení.
+
+Po příštím přihlášení si dvoufázové ověření nastavte znovu v profilu (Zabezpečení):
+
+{{ loginUrl }}
+
+Pokud jste o reset nežádali, ihned kontaktujte správce aplikace.
+{% endblock %}

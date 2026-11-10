@@ -104,6 +104,8 @@ Stránka `Systém → Uživatelé` je jen pro superadmina.
 4. Ponechte zapnuté **Aktivní** (vypnutý uživatel se nemůže přihlásit).
 5. Uložte.
 
+**Resetovat MFA:** když uživatel ztratí telefon nebo přístupový klíč, otevřete jeho úpravu a v části **Dvoufázové ověření** klikněte na **Resetovat MFA**. Uvedete důvod a reset potvrdíte vlastním dvoufázovým ověřením. Podrobnosti v [§ 101.11.2.4](101_Bezpecnost.md#1011124-obnova-pristupu).
+
 **Přiřadit firmy:** v editaci uživatele vyhledejte firmu podle názvu, IČO nebo ID a přidejte ji. Každý uživatel kromě
 superadmina má přístup pouze k firmám, které mu superadmin výslovně přidá. U přiřazené firmy ponechte **Výchozí roli**,
 nebo vyberte jinou aktivní roli stejného typu.

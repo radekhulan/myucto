@@ -230,6 +230,11 @@ export const adminApi = {
   /** Pošle existujícímu uživateli jednorázový odkaz na nastavení hesla. */
   sendUserPasswordLink: (id: number) =>
     api.post<{ ok: boolean }>(`/admin/users/${id}/password-link`).then(r => r.data),
+  /** Superadmin resetuje MFA jinému uživateli; `stepUpToken` je proof vlastního MFA pro `user.mfa_reset:{id}`. */
+  resetUserMfa: (id: number, reason: string, stepUpToken: string) =>
+    api.post<{ ok: boolean; mail_sent: boolean; passkeys_revoked: number; sessions_invalidated: number; totp_was_enabled: boolean }>(
+      `/admin/users/${id}/mfa-reset`, { reason, step_up_token: stepUpToken },
+    ).then(r => r.data),
   // Epic F0 — přiřazení firem uživateli (prázdné = bez omezení, vidí všechny firmy)
   listUserSuppliers: (id: number) =>
     api.get<UserSupplierAssignment[]>(`/admin/users/${id}/suppliers`).then(r => r.data),

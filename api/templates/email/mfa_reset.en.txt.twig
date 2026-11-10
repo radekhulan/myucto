@@ -1,0 +1,18 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Two-factor authentication was reset
+-----------------------------------
+
+Hello{% if name %} {{ name }}{% endif %},
+
+on {{ resetAt }} the administrator{% if actorName %} {{ actorName }}{% endif %} reset two-factor authentication
+for your MyÚčto.cz account. Your authenticator app, passkeys and recovery codes no longer work
+and you were signed out on all devices.
+
+After your next sign-in, set up two-factor authentication again in your profile (Security):
+
+{{ loginUrl }}
+
+If you did not ask for this reset, contact the administrator immediately.
+{% endblock %}

@@ -9,7 +9,7 @@ use MyInvoice\Infrastructure\Config\Config;
 
 final class EmailTemplateCatalog
 {
-    public const CODES = ['invoice_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'purchase_invoice_approval', 'recurring_draft_reminder', 'document_request_reminder', 'password_reset', 'user_invite', 'user_sso_invite', 'login_otp', 'email_profile_test', 'work_report_link', 'work_report_access_code', 'payroll_document_secure_link', 'payroll_document_access_code'];
+    public const CODES = ['invoice_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'purchase_invoice_approval', 'recurring_draft_reminder', 'document_request_reminder', 'password_reset', 'user_invite', 'user_sso_invite', 'mfa_reset', 'login_otp', 'email_profile_test', 'work_report_link', 'work_report_access_code', 'payroll_document_secure_link', 'payroll_document_access_code'];
     public const LOCALES = ['cs', 'en'];
 
     public const SUPPLIER_CODES = ['invoice_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'purchase_invoice_approval', 'recurring_draft_reminder', 'document_request_reminder', 'work_report_link', 'work_report_access_code'];
@@ -74,6 +74,7 @@ final class EmailTemplateCatalog
                 'password_reset'    => 'Obnova hesla — ' . $app,
                 'user_invite'       => 'Váš účet je připravený — ' . $app,
                 'user_sso_invite'   => 'Přihlášení účtem organizace — ' . $app,
+                'mfa_reset'         => 'Dvoufázové ověření bylo resetováno — ' . $app,
                 'login_otp'         => 'Ověřovací kód pro přihlášení — ' . $app,
                 'email_profile_test'=> 'Test odesílacího profilu — ' . $app,
                 'invoice_send'      => 'Faktura — ' . $app,
@@ -93,6 +94,7 @@ final class EmailTemplateCatalog
                 'password_reset'    => 'Password reset — ' . $app,
                 'user_invite'       => 'Your account is ready — ' . $app,
                 'user_sso_invite'   => 'Sign in with your organisation account — ' . $app,
+                'mfa_reset'         => 'Two-factor authentication was reset — ' . $app,
                 'login_otp'         => 'Sign-in verification code — ' . $app,
                 'email_profile_test'=> 'Sending profile test — ' . $app,
                 'invoice_send'      => 'Invoice — ' . $app,
@@ -122,6 +124,7 @@ final class EmailTemplateCatalog
             'password_reset'    => 'Obnova hesla',
             'user_invite'       => 'Pozvánka nového uživatele',
             'user_sso_invite'   => 'Pozvánka k přihlášení účtem organizace',
+            'mfa_reset'         => 'Dvoufázové ověření bylo resetováno',
             'login_otp'         => 'Ověřovací kód pro přihlášení',
             'email_profile_test'=> 'Test odesílacího profilu',
             'work_report_link'  => 'Náhled na výkaz práce — MyÚčto.cz',
@@ -141,6 +144,7 @@ final class EmailTemplateCatalog
             'password_reset'    => 'Password reset',
             'user_invite'       => 'New user invitation',
             'user_sso_invite'   => 'Invitation to sign in with your organisation account',
+            'mfa_reset'         => 'Two-factor authentication was reset',
             'login_otp'         => 'Sign-in verification code',
             'email_profile_test'=> 'Sending profile test',
             'work_report_link'  => 'Work report preview — MyÚčto.cz',
