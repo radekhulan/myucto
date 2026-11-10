@@ -26652,6 +26652,8 @@
     "username": "User",
     "password": "Password",
     "password_saved_placeholder": "Saved, leave empty",
+    "imap_password_required": "You are changing the server, port, encryption or user of the IMAP account. Please enter the mailbox password again.",
+    "imap_password_required_placeholder": "Enter the password again",
     "folder": "Folder",
     "browse": "Browse",
     "browsing": "Loading…",

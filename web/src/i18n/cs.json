@@ -26652,6 +26652,8 @@
     "username": "Uživatel",
     "password": "Heslo",
     "password_saved_placeholder": "Uloženo, ponechte prázdné",
+    "imap_password_required": "Měníte server, port, šifrování nebo uživatele IMAP účtu. Zadejte proto znovu heslo ke schránce.",
+    "imap_password_required_placeholder": "Zadejte heslo znovu",
     "folder": "Složka",
     "browse": "Procházet",
     "browsing": "Načítám…",

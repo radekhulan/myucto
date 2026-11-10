@@ -93,6 +93,35 @@ final class ImapAuthSettings
         return $secrets->encryptFor($secret, self::context($settings, $supplierId, $id, $purpose, $prefix));
     }
 
+    /**
+     * Uložené heslo smí jít jen na server, pro který ho uživatel zadal. Jinak by
+     * kdokoli s právem upravit účet přesměroval host na vlastní server a heslo
+     * ke schránce si tam odchytil, aniž by ho kdy viděl.
+     *
+     * @param array<string,mixed> $current Uložené hodnoty z databáze.
+     * @param array<string,mixed> $next Výsledné hodnoty, se kterými se heslo použije.
+     */
+    public static function assertPasswordTargetUnchanged(array $current, array $next): void
+    {
+        foreach (['host', 'port', 'encryption', 'username'] as $field) {
+            if (self::targetValue($field, $current[$field] ?? null) !== self::targetValue($field, $next[$field] ?? null)) {
+                throw new ImapPasswordRequiredException(
+                    'Měníte server, port, šifrování nebo uživatele IMAP účtu. Zadejte proto znovu heslo.'
+                );
+            }
+        }
+    }
+
+    private static function targetValue(string $field, mixed $value): string
+    {
+        $value = trim((string) ($value ?? ''));
+        return match ($field) {
+            'port' => (string) (int) $value,
+            'host' => strtolower($value),
+            default => $value,
+        };
+    }
+
     /** @param array<string,mixed> $settings */
     public static function context(array $settings, int $supplierId, int $id, string $purpose, string $prefix = ''): string
     {

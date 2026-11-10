@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ImapOAuthFields from '@/components/settings/ImapOAuthFields.vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -17,7 +17,7 @@ import {
 } from '@/api/settings'
 import { clientsApi, type CrpDphAccount } from '@/api/clients'
 import { bankApi, type AccountBalancesResponse } from '@/api/bank'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate, formatDateTime } from '@/composables/useFormat'
 import { useChartColors } from '@/composables/useTheme'
@@ -26,6 +26,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import BankConnectionsPanel from '@/components/bank/BankConnectionsPanel.vue'
@@ -203,6 +204,17 @@ const imapOAuthSecretSaved = computed(() => {
     && normalize(imapDraft.oauth_tenant_id) === normalize(account.oauth_tenant_id)
     && normalize(imapDraft.oauth_client_id) === normalize(account.oauth_client_id)
 })
+// Uložené heslo server použije jen pro stejný server, port, šifrování a uživatele.
+const imapPasswordRequired = computed(() => {
+  if (imapUsesMicrosoft.value || imapDraft.password?.trim()) return false
+  const account = imapAccounts.value.find(row => row.id === editingImapId.value)
+  if (!account || account.auth_mode === 'microsoft365' || !account.has_password) return false
+  return (imapDraft.host ?? '').trim().toLowerCase() !== (account.host ?? '').trim().toLowerCase()
+    || Number(imapDraft.port) !== Number(account.port)
+    || imapDraft.encryption !== account.encryption
+    || (imapDraft.username ?? '').trim() !== (account.username ?? '').trim()
+})
+const imapPasswordInput = ref<HTMLInputElement | null>(null)
 watch(() => [imapDraft.auth_mode, imapDraft.username, imapDraft.oauth_tenant_id, imapDraft.oauth_client_id], () => {
   folderOptions.value = []
 })
@@ -569,8 +581,19 @@ function validateImapOAuthSecret(): boolean {
   return true
 }
 
+function promptImapPassword() {
+  toast.error(t('bank_accounts.imap_password_required'))
+  void nextTick(() => imapPasswordInput.value?.focus())
+}
+
+function validateImapPassword(): boolean {
+  if (!imapPasswordRequired.value) return true
+  promptImapPassword()
+  return false
+}
+
 async function saveImapAccount() {
-  if (!validateImapOAuthSecret()) return
+  if (!validateImapOAuthSecret() || !validateImapPassword()) return
   if (imapDraft.require_email_auth && !imapDraft.email_auth_serv_id?.trim()) {
     toast.error(t('bank_accounts.email_auth_serv_id_hint'))
     return
@@ -587,7 +610,8 @@ async function saveImapAccount() {
     closeImapForm()
     await load()
   } catch (e) {
-    toast.error(apiErrorMessage(e, t('bank_accounts.imap_save_failed')))
+    if (apiErrorCode(e) === 'imap_password_required') promptImapPassword()
+    else toast.error(apiErrorMessage(e, t('bank_accounts.imap_save_failed')))
   } finally {
     saving.value = false
   }
@@ -607,7 +631,7 @@ async function testImapAccount(account: BankEmailImapSettings) {
 }
 
 async function browseImapFolders() {
-  if (!validateImapOAuthSecret()) return
+  if (!validateImapOAuthSecret() || !validateImapPassword()) return
   browsingFolders.value = true
   folderOptions.value = []
   try {
@@ -619,7 +643,8 @@ async function browseImapFolders() {
       toast.info(t('bank_accounts.folders_none'))
     }
   } catch (e: any) {
-    toast.error(e?.response?.data?.message || apiErrorMessage(e, t('bank_accounts.folders_failed')))
+    if (apiErrorCode(e) === 'imap_password_required') promptImapPassword()
+    else toast.error(e?.response?.data?.message || apiErrorMessage(e, t('bank_accounts.folders_failed')))
   } finally {
     browsingFolders.value = false
   }
@@ -1318,8 +1343,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               v-model:tenant-id="imapDraft.oauth_tenant_id" v-model:client-id="imapDraft.oauth_client_id"
               v-model:client-secret="imapDraft.oauth_client_secret" :secret-saved="imapOAuthSecretSaved" />
             <div v-else>
-              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.password') }}</label>
-              <input v-model="imapDraft.password" type="password" :placeholder="imapDraft.has_password ? t('bank_accounts.password_saved_placeholder') : ''"
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.password') }}<RequiredMark v-if="imapPasswordRequired" /></label>
+              <input ref="imapPasswordInput" v-model="imapDraft.password" type="password" :required="imapPasswordRequired"
+                :placeholder="imapPasswordRequired ? t('bank_accounts.imap_password_required_placeholder') : imapDraft.has_password ? t('bank_accounts.password_saved_placeholder') : ''"
                 class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
             </div>
             <div>

@@ -39,7 +39,10 @@ vi.mock('@/api/settings', () => ({
 vi.mock('@/api/clients', () => ({ clientsApi: { lookupBank: vi.fn() } }))
 vi.mock('@/api/bank', () => ({ bankApi: { accountBalances: m.accountBalances } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ get isClientRole() { return m.client } }) }))
-vi.mock('@/api/errors', () => ({ apiErrorMessage: (_e: unknown, fallback: string) => fallback }))
+vi.mock('@/api/errors', () => ({
+  apiErrorMessage: (_e: unknown, fallback: string) => fallback,
+  apiErrorCode: (e: any) => e?.response?.data?.error?.code ?? '',
+}))
 
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError, warning: vi.fn() }),
@@ -191,6 +194,56 @@ describe('BankAccounts — společný parser provider', () => {
     expect(m.updateBankEmailImapAccount).toHaveBeenCalledWith(7, expect.objectContaining({
       oauth_client_secret: 'synthetic-new-secret',
     }))
+    wrapper.unmount()
+  })
+
+  it('po změně serveru vyžádá znovu heslo před uložením i načtením složek', async () => {
+    const wrapper = await mountWith([], [], [{
+      id: 8,
+      name: 'Syntetická avíza',
+      auth_mode: 'password',
+      host: 'imap.example.test',
+      port: 993,
+      encryption: 'ssl',
+      username: 'aviza@example.test',
+      has_password: true,
+      require_email_auth: false,
+    }])
+    const button = (key: string) => wrapper.findAll('button').find(item => item.text() === key)!
+    const host = () => wrapper.findAll('div').find(item => item.find('label').exists() && item.get('label').text() === 'bank_accounts.host')!.get('input')
+    await button('common.edit').trigger('click')
+    const password = wrapper.get('input[type="password"]')
+    expect(password.attributes('required')).toBeUndefined()
+
+    await host().setValue('attacker.example.test')
+    expect(password.attributes('required')).toBeDefined()
+    await button('bank_accounts.save_imap').trigger('click')
+    await button('bank_accounts.browse').trigger('click')
+    expect(m.updateBankEmailImapAccount).not.toHaveBeenCalled()
+    expect(m.browseBankEmailImapFolders).not.toHaveBeenCalled()
+    expect(m.toastError).toHaveBeenCalledWith('bank_accounts.imap_password_required')
+
+    await password.setValue('synthetic-new-password')
+    m.updateBankEmailImapAccount.mockResolvedValueOnce({})
+    await button('bank_accounts.save_imap').trigger('click')
+    await flushPromises()
+    expect(m.updateBankEmailImapAccount).toHaveBeenCalledWith(8, expect.objectContaining({
+      host: 'attacker.example.test',
+      password: 'synthetic-new-password',
+    }))
+    wrapper.unmount()
+  })
+
+  it('odmítnutí serveru kvůli uloženému heslu převede na výzvu k zadání hesla', async () => {
+    const wrapper = await mountWith([], [], [{
+      id: 9, name: 'Syntetická avíza', auth_mode: 'password', host: 'imap.example.test', port: 993,
+      encryption: 'ssl', username: 'aviza@example.test', has_password: true, require_email_auth: false,
+    }])
+    await wrapper.findAll('button').find(item => item.text() === 'common.edit')!.trigger('click')
+    m.browseBankEmailImapFolders.mockRejectedValueOnce({ response: { data: { error: { code: 'imap_password_required', message: 'x' } } } })
+    await wrapper.findAll('button').find(item => item.text() === 'bank_accounts.browse')!.trigger('click')
+    await flushPromises()
+    expect(m.toastError).toHaveBeenCalledWith('bank_accounts.imap_password_required')
     wrapper.unmount()
   })
 

@@ -126,8 +126,10 @@ final class BankEmailNoticeRepository
             }
         }
         $passwordEnc = $auth['auth_mode'] === ImapAuthSettings::PASSWORD ? ($current['password_enc'] ?? null) : null;
+        $reusesStoredPassword = $passwordEnc !== null;
         if (array_key_exists('password', $body) && trim((string) $body['password']) !== '') {
             $passwordEnc = $this->secrets->encrypt((string) $body['password']);
+            $reusesStoredPassword = false;
         }
         $name = trim((string) ($body['name'] ?? ($current['name'] ?? 'Výchozí IMAP účet')));
         if ($name === '') {
@@ -194,6 +196,9 @@ final class BankEmailNoticeRepository
             'retry_failed' => !empty($body['retry_failed']) ? 1 : 0,
             'max_attempts' => max(1, min(20, (int) ($body['max_attempts'] ?? 3))),
         ];
+        if ($reusesStoredPassword) {
+            ImapAuthSettings::assertPasswordTargetUnchanged($current ?? [], $data);
+        }
 
         if ($id !== null) {
             $data['id'] = $id;
