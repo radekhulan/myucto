@@ -226,6 +226,50 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         self::assertSame((int) $stmt->fetchColumn(), (int) $links[0]['doc_id']);
     }
 
+    public function testDimensionCatalogAndFrameworkTimelineSurviveArchiveRoundTrip(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, '2096-01-01', 'cz_500'), (?, '2097-01-01', 'cz_504')")
+            ->execute([$this->supplierId, $this->supplierId]);
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id, code, name, kind, sort_order) VALUES (?, 'ZAK', 'Zakázka', 'custom', 1), (?, 'STR', 'Středisko', 'custom', 2)")
+            ->execute([$this->supplierId, $this->supplierId]);
+        $typeId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name) VALUES (?, ?, 'P', 'Rodič')")->execute([$typeId, $this->supplierId]);
+        $parentId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, parent_id, code, name) VALUES (?, ?, ?, 'C1', 'Dítě 1'), (?, ?, ?, 'C2', 'Dítě 2')")
+            ->execute([$typeId, $this->supplierId, $parentId, $typeId, $this->supplierId, $parentId]);
+        $snapshot = function (int $sid) use ($pdo): array {
+            $q = $pdo->prepare('SELECT effective_from, accounting_framework FROM supplier_accounting_frameworks WHERE supplier_id = ? ORDER BY effective_from');
+            $q->execute([$sid]); $frameworks = $q->fetchAll(PDO::FETCH_ASSOC);
+            $q = $pdo->prepare('SELECT code, name, kind, sort_order FROM dimension_types WHERE supplier_id = ? ORDER BY code');
+            $q->execute([$sid]); $types = $q->fetchAll(PDO::FETCH_ASSOC);
+            $q = $pdo->prepare('SELECT t.code type_code, v.code, v.name, p.code parent_code FROM dimension_values v
+                JOIN dimension_types t ON t.id = v.type_id AND t.supplier_id = v.supplier_id
+                LEFT JOIN dimension_values p ON p.id = v.parent_id AND p.supplier_id = v.supplier_id
+                WHERE v.supplier_id = ? ORDER BY t.code, v.code');
+            $q->execute([$sid]); $values = $q->fetchAll(PDO::FETCH_ASSOC);
+            return compact('frameworks', 'types', 'values');
+        };
+        $source = $snapshot($this->supplierId);
+        self::assertCount(2, $source['types']);
+        self::assertCount(3, $source['values']);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $path = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $path;
+        $report = $this->restore->restore($path);
+        $newSid = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+
+        self::assertSame($source, $snapshot($newSid));
+        self::assertSame($source, $snapshot($this->supplierId), 'Obnova nesmí měnit ani zdvojit číselník zdrojové firmy.');
+        $q = $pdo->prepare('SELECT COUNT(*) FROM dimension_values v LEFT JOIN dimension_types t ON t.id = v.type_id
+            LEFT JOIN dimension_values p ON p.id = v.parent_id
+            WHERE v.supplier_id = ? AND (t.supplier_id <> v.supplier_id OR (v.parent_id IS NOT NULL AND p.supplier_id <> v.supplier_id))');
+        $q->execute([$newSid]);
+        self::assertSame(0, (int) $q->fetchColumn(), 'Obnovené hodnoty nesmí odkazovat do zdrojové firmy.');
+    }
+
     protected function setUp(): void
     {
         $rootDir = dirname(__DIR__, 4);
