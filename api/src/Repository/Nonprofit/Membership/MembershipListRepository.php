@@ -18,9 +18,10 @@ final class MembershipListRepository
 
     /**
      * Souhrn i filtr úhrady před stránkováním; částky souhrnů zůstávají přesné řetězce.
-     * Bez filtru úhrady stačí jeden dotaz nad stránkou členů. S filtrem se členové prověřují po dávkách
-     * podle ID od kurzoru, dokud se stránka nezaplní nebo členové nedojdou. Každé „Načíst další“ tak
-     * pokračuje od posledního vráceného člena a nepočítá znovu stav celé firmy.
+     * Bez filtru úhrady stačí jeden dotaz nad stránkou členů. S filtrem se kandidáti prověřují po dávkách
+     * podle ID od kurzoru, dokud se stránka nezaplní nebo kandidáti nedojdou. Každé „Načíst další“ tak
+     * pokračuje od posledního vráceného člena a nepočítá znovu stav celé firmy. Kandidáty stavů s předpisem
+     * vybírá index předpisů, takže řídký titul neagreguje členy bez předpisu ve zvoleném roce nebo titulu.
      */
     public function page(int $supplier, int $after, int $limit, array $filter): array
     {
@@ -30,21 +31,56 @@ final class MembershipListRepository
             $upper = $this->chunkUpperBound($supplier, $cursor, $chunk, $filter);
             array_push($rows, ...$this->fetch($supplier, $cursor, $limit - count($rows), $filter, $upper));
             if (count($rows) >= $limit || $upper === null) return $rows;
-            // Řídký výskyt stavu: další dávka je větší, aby počet dotazů rostl jen logaritmicky.
+            // Řídký výskyt stavu: dávka se zdvojuje až do MAX_CHUNK, nad ním počet dotazů roste lineárně s kandidáty.
             $cursor = $upper; $chunk = min(self::MAX_CHUNK, $chunk * 2);
         }
     }
 
-    /** ID posledního člena dávky (stejné hledání jako seznam), nebo null, když za kurzorem už víc členů není. */
+    /**
+     * ID posledního kandidáta dávky (stejné hledání jako seznam), nebo null, když za kurzorem už víc kandidátů není.
+     * Stav „bez předpisu“ hledá členy bez předpisu, proto prochází členy; ostatní stavy jen členy s předpisem v rozsahu.
+     */
     private function chunkUpperBound(int $supplier, int $after, int $chunk, array $filter): ?int
     {
         [$search, $params] = $this->searchCondition($filter);
-        $q = $this->db->pdo()->prepare('SELECT m.id FROM nonprofit_members m FORCE INDEX(uq_nm_tenant)
-            JOIN clients c ON c.supplier_id=m.supplier_id AND c.id=m.client_id
-            WHERE m.supplier_id=? AND m.id>?' . $search . ' ORDER BY m.id LIMIT 1 OFFSET ' . ($chunk - 1));
-        $q->execute([$supplier, $after, ...$params]);
+        if ($filter['payment_status'] === 'none') {
+            $sql = 'SELECT m.id FROM nonprofit_members m FORCE INDEX(uq_nm_tenant)
+                JOIN clients c ON c.supplier_id=m.supplier_id AND c.id=m.client_id
+                WHERE m.supplier_id=? AND m.id>?' . $search . ' ORDER BY m.id';
+            $params = [$supplier, $after, ...$params];
+        } else {
+            [$cases, $caseParams] = $this->caseCondition($filter, 'x');
+            $join = $search === '' ? '' : ' JOIN nonprofit_members m ON m.supplier_id=x.supplier_id AND m.id=x.member_id
+                JOIN clients c ON c.supplier_id=m.supplier_id AND c.id=m.client_id';
+            $sql = 'SELECT x.member_id FROM nonprofit_membership_charge_cases x FORCE INDEX(' . $this->candidateIndex($filter) . ')' . $join . '
+                WHERE x.supplier_id=? AND x.member_id>?' . $cases . $search . ' GROUP BY x.member_id ORDER BY x.member_id';
+            $params = [$supplier, $after, ...$caseParams, ...$params];
+        }
+        $q = $this->db->pdo()->prepare($sql . ' LIMIT 1 OFFSET ' . ($chunk - 1));
+        $q->execute($params);
         $id = $q->fetchColumn();
         return $id === false ? null : (int) $id;
+    }
+
+    /**
+     * Index pro výběr kandidátů: u titulu krycí ix_nmcc_list_title (řídký titul nečte předpisy ostatních titulů),
+     * bez titulu uq_nmcc_identity v pořadí členů.
+     */
+    private function candidateIndex(array $filter): string
+    {
+        return $filter['title_key'] === '' ? 'uq_nmcc_identity' : 'ix_nmcc_list_title';
+    }
+
+    /** Rozsah předpisů podle roku a titulu; stejné podmínky pro výběr kandidátů i finanční agregaci. */
+    private function caseCondition(array $filter, string $alias): array
+    {
+        $sql = ''; $params = [];
+        if ($filter['year'] !== null) {
+            $sql .= " AND {$alias}.period_to>=? AND {$alias}.period_from<?";
+            array_push($params, $filter['year'] . '-01-01', ($filter['year'] + 1) . '-01-01');
+        }
+        if ($filter['title_key'] !== '') { $sql .= " AND {$alias}.title_key=?"; $params[] = $filter['title_key']; }
+        return [$sql, $params];
     }
 
     private function fetch(int $supplier, int $after, int $limit, array $filter, ?int $upper): array
@@ -86,12 +122,22 @@ final class MembershipListRepository
             $search .= ' AND m.id IN (' . implode(',', array_fill(0, count($memberIds), '?')) . ')';
             array_push($params, ...$memberIds);
         }
-        $condition = 'cc.supplier_id=?'; $params[] = $supplier;
-        if ($filter['year'] !== null) {
-            $condition .= ' AND cc.period_to>=? AND cc.period_from<?';
-            array_push($params, $filter['year'] . '-01-01', ($filter['year'] + 1) . '-01-01');
+        if (!in_array($filter['payment_status'], ['all', 'none'], true)) {
+            // Stav s předpisem: do agregace vstupují jen členové s předpisem v rozsahu, ne celé ID pásmo dávky.
+            [$cases, $caseParams] = $this->caseCondition($filter, 'x');
+            if ($filter['title_key'] === '') {
+                $search .= ' AND EXISTS(SELECT 1 FROM nonprofit_membership_charge_cases x FORCE INDEX(uq_nmcc_identity)
+                    WHERE x.supplier_id=m.supplier_id AND x.member_id=m.id' . $cases . ')';
+            } else {
+                // Titul: členy bereme z krycího indexu titulu, ne prověřováním každého člena dávky.
+                $search .= ' AND m.id IN(SELECT x.member_id FROM nonprofit_membership_charge_cases x FORCE INDEX(ix_nmcc_list_title)
+                    WHERE x.supplier_id=?' . $cases . ')';
+                $params[] = $supplier;
+            }
+            array_push($params, ...$caseParams);
         }
-        if ($filter['title_key'] !== '') { $condition .= ' AND cc.title_key=?'; $params[] = $filter['title_key']; }
+        [$cases, $caseParams] = $this->caseCondition($filter, 'cc');
+        $condition = 'cc.supplier_id=?' . $cases; $params[] = $supplier; array_push($params, ...$caseParams);
         // Finanční agregace vždy začíná omezenými členy: bez filtru úhrady stránkou, s filtrem dávkou
         // (after, upper] nebo výběrem ID. Stav celé firmy se nepočítá ani pro další stránky.
         $scopeLimit = $filter['payment_status'] === 'all' ? " ORDER BY m.id LIMIT {$limit}" : '';

@@ -387,15 +387,44 @@ final class MembershipNativeTest extends TestCase
             [$sql,$params]=$repo->query($this->supplier,$after,5,$filter,null,$upper);
             $q=$this->pdo->prepare('ANALYZE FORMAT=JSON '.$sql);$q->execute($params);
             $plan=json_decode((string)$q->fetchColumn(),true,flags:JSON_THROW_ON_ERROR);
-            $examined=[];
-            $walk=function(array $node)use(&$walk,&$examined):void {
-                if (($node['table_name']??null)==='cc' && isset($node['r_rows'],$node['r_loops'])) $examined[]=(float)$node['r_rows']*(float)$node['r_loops'];
+            $reads=['cc'=>[],'l'=>[],'i'=>[]];
+            $walk=function(array $node)use(&$walk,&$reads):void {
+                $table=(string)($node['table_name']??'');
+                if (isset($reads[$table],$node['r_rows'],$node['r_loops'])) $reads[$table][]=(float)$node['r_rows']*(float)$node['r_loops'];
                 foreach($node as $value)if(is_array($value))$walk($value);
             };
             $walk($plan);
-            self::assertNotEmpty($examined,'Měření musí skutečně číst účetní případy.');
-            foreach($examined as $rows)self::assertLessThanOrEqual($max,$rows,'Filtr úhrady nesmí agregovat předpisy mimo dávku od kurzoru.');
+            foreach($reads as $table=>$values){
+                self::assertNotEmpty($values,'Měření musí skutečně číst tabulku '.$table.'.');
+                foreach($values as $rows)self::assertLessThanOrEqual($table==='cc'?$max:2.0,$rows,'Filtr úhrady nesmí číst '.$table.' mimo dávku od kurzoru.');
+            }
         }
+        // Obnova výběru se stavem: dva vybraní členové z různých dávek, třetí neodpovídá stavu.
+        self::assertSame([$ids[2],$ids[4]],$tiny->matchingSelection($this->supplier,[$ids[0],$ids[2],$ids[4]],$filter));
+    }
+
+    public function testRareTitleWithStatusFilterSkipsMembersWithoutTheTitle(): void
+    {
+        $ids=[];
+        for($i=0;$i<6;$i++){
+            $member=$this->member('SYN-RARE-'.$i,'rare-'.$i);
+            $this->issue($member['id'],'rare-'.$i);
+            $ids[]=$member['id'];
+        }
+        $rare=$this->member('SYN-RARE-TITLE','rare-title');
+        $this->issueTitle($rare['id'],'RARE','rare-title-claim');
+        $tiny=new \MyInvoice\Repository\Nonprofit\Membership\MembershipListRepository($this->db,2);
+        $filter=\MyInvoice\Service\Nonprofit\Membership\MembershipListFilter::parse(['year'=>2026,'title_key'=>'RARE','payment_status'=>'unpaid']);
+        $rows=[];
+        self::assertSame(2,$this->selectQueries(function()use($tiny,$filter,&$rows):void {$rows=$tiny->page($this->supplier,0,5,$filter);}),
+            'Kandidáti dávky se berou z předpisů titulu, ne ze všech členů firmy.');
+        self::assertSame([$rare['id']],array_column($rows,'id'));
+        // Stav „bez předpisu“ dál prochází členy, protože hledá právě členy bez předpisu titulu.
+        $filter['payment_status']='none';
+        self::assertSame($ids,array_column($tiny->page($this->supplier,0,6,$filter),'id'));
+        // Prázdný výsledek: kandidáti titulu docházejí hned, bez průchodu ostatními členy.
+        $filter['payment_status']='paid';
+        self::assertSame(2,$this->selectQueries(fn()=>$tiny->page($this->supplier,0,5,$filter)));
     }
 
     private function listRows(array $query = [], int $after = 0, int $limit = 100): array
