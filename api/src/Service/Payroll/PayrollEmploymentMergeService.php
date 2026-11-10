@@ -13,6 +13,7 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Absence\PayrollImportAbsenceCompensationMaterializer;
+use MyInvoice\Service\Sample\SamplePayrollPurger;
 use PDO;
 
 /**
@@ -36,6 +37,12 @@ use PDO;
  * JMHZ, ELDP, mzdový běh, výstupní doklady, nároky hodinové mzdy, cesty,
  * spoření, dávky) drží dál, protože se počítalo nebo hlásilo právě pod id
  * zdroje a přesunem by se ten vztah k podání ztratil.
+ *
+ * Souhrn pracovního měsíce pro JMHZ (`payroll_jmhz_work_month_revisions`)
+ * vzniká už schválením docházky, není to podání. Schválený měsíc zdroje
+ * sloučení blokuje; po znovuotevření zůstane souhrn jen jako historie
+ * schválení měsíce, který se přesouvá, a zmizí se zdrojem
+ * ({@see self::dropWorkMonthRevisions()}).
  *
  * Každá tabulka s `employment_id` má v {@see self::TABLES} výslovné rozhodnutí.
  * Nová tabulka bez rozhodnutí neprojde testem `PayrollEmploymentMergeTablesTest`.
@@ -110,6 +117,9 @@ final class PayrollEmploymentMergeService
         // Účetní zatřídění platí cíle; odlišné zatřídění zdroje hlásí varování.
         'payroll_employment_dimensions' => ['action' => self::DROP],
         'payroll_registration_change_scans' => ['action' => self::DROP],
+        // Souhrny JMHZ dřívějších schválení docházky zdroje. Jsou neměnné a drží
+        // je cizí klíč, proto je maže dropWorkMonthRevisions() ještě před přesunem měsíců.
+        'payroll_jmhz_work_month_revisions' => ['action' => self::DROP],
 
         // ── Blokuje ─────────────────────────────────────────────────────────
         'payroll_registration_a1_profiles' => ['action' => self::BLOCK, 'reason' => 'registration'],
@@ -119,7 +129,6 @@ final class PayrollEmploymentMergeService
         'payroll_registration_change_proposals' => ['action' => self::BLOCK, 'reason' => 'registration'],
         'payroll_employment_external_ids' => ['action' => self::BLOCK, 'reason' => 'registration'],
         'payroll_identity_resolution_tasks' => ['action' => self::BLOCK, 'reason' => 'registration'],
-        'payroll_jmhz_work_month_revisions' => ['action' => self::BLOCK, 'reason' => 'submission'],
         'payroll_jmhz_eldp_evidence_snapshots' => ['action' => self::BLOCK, 'reason' => 'submission'],
         'payroll_jmhz_eldp_idempotency_claims' => ['action' => self::BLOCK, 'reason' => 'submission'],
         'payroll_jmhz_ordinary_evidence_snapshots' => ['action' => self::BLOCK, 'reason' => 'submission'],
@@ -345,6 +354,7 @@ final class PayrollEmploymentMergeService
         $sourceTerms = $this->latestTerms($supplierId, $sourceId);
         $dimensions = $this->count($supplierId, 'payroll_employment_dimensions', $sourceId);
 
+        $droppedSummaries = $this->dropWorkMonthRevisions($supplierId, $sourceId);
         $moved = [];
         foreach (self::TABLES as $table => $decision) {
             if ($decision['action'] !== self::MOVE) {
@@ -406,7 +416,11 @@ final class PayrollEmploymentMergeService
             $userId,
             'payroll_employment',
             $targetId,
-            $completed['diff'] + ['adopt_terms' => $adoptTerms, 'note' => $note],
+            $completed['diff'] + [
+                'adopt_terms' => $adoptTerms,
+                'note' => $note,
+                'dropped_jmhz_work_month_revisions' => $droppedSummaries,
+            ],
             $ip,
             $userAgent,
             $supplierId,
@@ -717,6 +731,77 @@ final class PayrollEmploymentMergeService
                 );
             }
         }
+    }
+
+    /**
+     * Smaže souhrny JMHZ zdroje i události schválení, které na ně ukazují.
+     *
+     * Obojí je append-only. Triggery pustí smazání jen řádku, který je
+     * výslovně označený v `sample_data_entries` a jen při nastavené
+     * `@payroll_sample_purge_supplier_id` (migrace 1995). Značky vzniknou
+     * a zmizí v téže transakci. Schválený měsíc a podání JMHZ sloučení
+     * zablokovaly dřív, takže tu jde jen o historii znovu otevřených měsíců.
+     *
+     * @return list<array{id:int,period_start:string,revision_no:int,summary_sha256:string}> pro auditní záznam
+     */
+    private function dropWorkMonthRevisions(int $supplierId, int $sourceId): array
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'SELECT id, period_start, time_month_revision_no, summary_sha256
+               FROM payroll_jmhz_work_month_revisions
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY id'
+        );
+        $stmt->execute([$supplierId, $sourceId]);
+        $revisions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($revisions === []) {
+            return [];
+        }
+        $revisionIds = array_map(static fn (array $row): int => (int) $row['id'], $revisions);
+        $placeholders = implode(', ', array_fill(0, count($revisionIds), '?'));
+        $events = $pdo->prepare(
+            "SELECT id FROM payroll_time_month_events
+              WHERE supplier_id = ? AND jmhz_work_summary_revision_id IN ({$placeholders})"
+        );
+        $events->execute([$supplierId, ...$revisionIds]);
+        $eventIds = array_map('intval', $events->fetchAll(PDO::FETCH_COLUMN));
+
+        $rows = ['payroll_time_month_events' => $eventIds, 'payroll_jmhz_work_month_revisions' => $revisionIds];
+        $mark = $pdo->prepare('INSERT INTO sample_data_entries (supplier_id, entity_type, entity_id) VALUES (?, ?, ?)');
+        foreach ($rows as $table => $ids) {
+            foreach ($ids as $id) {
+                $mark->execute([$supplierId, SamplePayrollPurger::ownershipType($table), $id]);
+            }
+        }
+        $pdo->prepare('SET @payroll_sample_purge_supplier_id = ?')->execute([$supplierId]);
+        try {
+            foreach ($rows as $table => $ids) {
+                if ($ids === []) {
+                    continue;
+                }
+                $in = implode(', ', array_fill(0, count($ids), '?'));
+                $pdo->prepare("DELETE FROM {$table} WHERE supplier_id = ? AND id IN ({$in})")
+                    ->execute([$supplierId, ...$ids]);
+            }
+        } finally {
+            $pdo->exec('SET @payroll_sample_purge_supplier_id = NULL');
+        }
+        foreach ($rows as $table => $ids) {
+            if ($ids === []) {
+                continue;
+            }
+            $in = implode(', ', array_fill(0, count($ids), '?'));
+            $pdo->prepare("DELETE FROM sample_data_entries WHERE supplier_id = ? AND entity_type = ? AND entity_id IN ({$in})")
+                ->execute([$supplierId, SamplePayrollPurger::ownershipType($table), ...$ids]);
+        }
+
+        return array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'period_start' => (string) $row['period_start'],
+            'revision_no' => (int) $row['time_month_revision_no'],
+            'summary_sha256' => (string) $row['summary_sha256'],
+        ], $revisions);
     }
 
     /** @param list<array{id:int,external_id:?string,status:string}> $inputs */
