@@ -57,7 +57,13 @@ info:
     odpovědí `401 invalid_token`. Na klientské doméně je připojení navíc pevně
     vázané na tuto doménu a její firmu; při každém volání se kontrolují aktuální
     oprávnění uživatele. Klientské role mohou získat samostatné oprávnění MCP,
-    vytváření obecných API tokenů jim tím nevzniká.
+    vytváření obecných API tokenů jim tím nevzniká. Klient se může připojit
+    i přes kanonickou adresu instalace (`<app.url>/mcp`); takové připojení je
+    vázané na jednu firmu vybranou při souhlasu a má stejný omezený rozsah
+    nástrojů jako připojení přes klientskou doménu. Odebrané oprávnění MCP nebo
+    členství ve firmě ukončí použití tokenu (`401 invalid_token`) i jeho obnovu
+    (`invalid_grant`). Volání mimo klientský rozsah skončí
+    `403 token_endpoint_forbidden`.
 
     ## Účetnictví a daně jen ke čtení
 

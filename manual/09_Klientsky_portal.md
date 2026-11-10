@@ -17,11 +17,12 @@ Výchozí klientská role tato práva nemá; postup a hranice přístupu popisuj
 [Klientské podávání připravených výkazů](49_Archiv_podani_a_rekonciliace.md#4921-klientske-podavani-pripravenych-vykazu).
 
 V části **Firma → MCP server** může klient spravovat připojení svého AI asistenta.
-Nové připojení na vlastní doméně firmy vyžaduje výslovně přidělené oprávnění
-**Připojit AI asistenta (MCP)**. Přihlášení a souhlas probíhají na hlavní doméně
-MyÚčta, připojení zůstává omezené na firmu klientské domény a aktuální práva
-uživatele. Vlastní připojení lze odvolat i po odebrání tohoto oprávnění.
-Postup popisuje [MCP server](105_MCP_server.md#10541-pripojeni-klienta-na-vlastni-domene-firmy).
+Nové připojení vyžaduje výslovně přidělené oprávnění **Připojit AI asistenta (MCP)**.
+Klient se připojí přes adresu klientské domény firmy, nebo přes adresu instalace,
+když firma klientskou doménu nemá. Přihlášení a souhlas probíhají na hlavní doméně
+MyÚčta, připojení zůstává omezené na jednu firmu potvrzenou v souhlasu a aktuální
+práva uživatele. Vlastní připojení lze odvolat i po odebrání tohoto oprávnění.
+Postup popisuje [MCP server](105_MCP_server.md#10541-pripojeni-klienta-na-vlastni-domene-firmy-nebo-adrese-instalace).
 
 Superadmin má v nabídce **Dokumenty → Předat doklady účetní** také přístup
 k předávání dokladů a odpovědím na požadavky účetní v právě vybrané firmě.
