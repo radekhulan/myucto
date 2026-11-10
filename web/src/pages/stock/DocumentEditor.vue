@@ -9,7 +9,7 @@ import {
 } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { formatUnitPrice, statusBadgeClass, statusLabel } from '@/composables/useFormat'
+import { formatMoney, formatUnitPrice, statusBadgeClass, statusLabel } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
@@ -595,8 +595,8 @@ onMounted(async () => {
               <!-- Rozpuštěné vedlejší náklady jsou na řádku už uložené, ale sekce
                    níž se při načtení dokladu neplní. Bez tohohle řádku uživatel
                    nevidí, že tam nějaká částka je, a další náklad přičte navrch. -->
-              <p v-if="isReceipt && Number(row.extra_cost) > 0" class="text-xs mt-0.5 text-right text-neutral-500 font-mono">
-                {{ t('stock.documents.extra_cost_allocated') }}: {{ row.extra_cost }}
+              <p v-if="isReceipt && Number(row.extra_cost) > 0" class="text-xs mt-0.5 text-right text-neutral-500">
+                {{ t('stock.documents.extra_cost_allocated') }}: <span class="whitespace-nowrap">{{ formatMoney(row.extra_cost) }}</span>
               </p>
             </div>
             <div class="sm:col-span-3">
