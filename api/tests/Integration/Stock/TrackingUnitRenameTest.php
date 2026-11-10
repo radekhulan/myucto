@@ -246,6 +246,69 @@ final class TrackingUnitRenameTest extends StockTestCase
         }
     }
 
+    /**
+     * Automatická výdejka vystavení má na každý řádek faktury jeden řádek dokladu (umístění
+     * jsou alokace téhož řádku), takže víc vrácených výdejek téhož řádku s původem `invoice`
+     * vzniká jen opakovaným stornem a obnovením. Obnovení vydá kusy poslední z nich, ne součet.
+     * Vydání po částech (zásilky vychystání) obnovení nevydává: faktura je řízená expedicí.
+     * Druhé storno nesmí stornovat protidoklad prvního storna (jinak by zboží znovu vydalo
+     * a obnovení by pak výdej přeskočilo).
+     */
+    public function testRepeatedCancelAndUncancelIssuesLotsOfTheLastIssueOnly(): void
+    {
+        $sid = $this->createSupplier();
+        $wh = $this->warehouse($sid);
+        $item = $this->lotItem($sid, 'REN-Q2-C');
+        $this->receiveLot($sid, $wh, $item, '6', 'L-A', self::OLD_EXPIRES);
+        $this->receiveLot($sid, $wh, $item, '10', 'L-B', self::NEW_EXPIRES);
+        $unitA = $this->unitId($sid, $item, 'L-A');
+        $invoiceId = $this->createInvoice($sid, [$this->line($item, $wh, '10', [
+            ['quantity' => '6', 'lot_code' => 'L-A', 'expires_on' => self::OLD_EXPIRES],
+            ['quantity' => '4', 'lot_code' => 'L-B', 'expires_on' => self::NEW_EXPIRES],
+        ])]);
+        self::assertSame(200, $this->issue($sid, $invoiceId)->getStatusCode());
+        $invoiceItemId = (int) $this->storedItems($invoiceId)[0]['id'];
+        $uncancel = function () use ($sid, $invoiceId): void {
+            $res = $this->container->get(\MyInvoice\Action\Invoice\UncancelInvoiceAction::class)(
+                $this->adminRequest($sid, 'POST', []), new Psr7Response(), ['id' => (string) $invoiceId],
+            );
+            self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        };
+
+        $this->cancelInvoice($sid, $invoiceId, 'internal');
+        $uncancel();
+        self::assertSame(0, $this->unitBalance($sid, $item, 'lot:L-A|2027-01-31'));
+        self::assertSame(6000, $this->unitBalance($sid, $item, 'lot:L-B|2027-03-01'));
+
+        $this->cancelInvoice($sid, $invoiceId, 'internal');
+        self::assertSame(200, $this->rename($sid, $item, $unitA, ['lot_code' => self::NEW . '-A', 'expires_on' => self::OLD_EXPIRES])->getStatusCode());
+        self::assertSame(6000, $this->unitBalance($sid, $item, 'lot:L-NEW-A|2027-01-31'), 'Druhé storno vrátilo zboží (protidoklad prvního storna se nestornuje).');
+        self::assertSame(10000, $this->unitBalance($sid, $item, 'lot:L-B|2027-03-01'));
+        self::assertSame(['reversed' => 2], $this->issueStatuses($sid, $invoiceId), 'Dvě vrácené výdejky téhož řádku faktury, žádná zaúčtovaná.');
+        $returned = $this->container->get(\MyInvoice\Repository\StockTrackingRepository::class)
+            ->issuedUnitsByInvoiceItem($sid, $invoiceId, 'reversed');
+        self::assertSame([$invoiceItemId], array_keys($returned));
+        $byLot = [];
+        foreach ($returned[$invoiceItemId] as $unit) {
+            $byLot[$unit['lot_code']] = ($byLot[$unit['lot_code']] ?? 0.0) + (float) $unit['quantity'];
+        }
+        ksort($byLot);
+        self::assertEqualsWithDelta(['L-B' => 4.0, self::NEW . '-A' => 6.0], $byLot, 0.0001, 'Kusy poslední vrácené výdejky, ne součet obou.');
+
+        $uncancel();
+        self::assertSame(0, $this->unitBalance($sid, $item, 'lot:L-NEW-A|2027-01-31'), 'Obnovení vydalo opravenou šarži znovu celou.');
+        self::assertSame(6000, $this->unitBalance($sid, $item, 'lot:L-B|2027-03-01'), 'Druhou šarži jen jednou.');
+        self::assertSame(['posted' => 1, 'reversed' => 2], $this->issueStatuses($sid, $invoiceId));
+    }
+
+    /** @return array<string,int> */
+    private function issueStatuses(int $sid, int $invoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT status, COUNT(*) FROM stock_documents WHERE supplier_id = ? AND invoice_id = ? AND doc_type = 'issue' AND origin = 'invoice' GROUP BY status ORDER BY status");
+        $stmt->execute([$sid, $invoiceId]);
+        return array_map('intval', $stmt->fetchAll(\PDO::FETCH_KEY_PAIR));
+    }
+
     public function testIssuedProformaIsNotRewrittenAndFinalNeedsNewLotSelection(): void
     {
         $sid = $this->createSupplier();

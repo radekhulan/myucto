@@ -174,8 +174,10 @@ final class StockIssueService
         unset($row);
         $hasPostedIssue = false;
         $hasPostedReturn = false;
-        foreach ($this->docsRepo->listByInvoice($supplierId, $invoiceId) as $existing) {
-            if (!self::coversInvoice($existing, 'invoice')) {
+        $existingDocs = $this->docsRepo->listByInvoice($supplierId, $invoiceId);
+        $counters = self::counterDocumentIds($existingDocs);
+        foreach ($existingDocs as $existing) {
+            if (isset($counters[(int) $existing['id']]) || !self::coversInvoice($existing, 'invoice')) {
                 continue;
             }
             $hasPostedIssue = $hasPostedIssue || (string) $existing['doc_type'] === 'issue';
@@ -371,8 +373,13 @@ final class StockIssueService
     {
         $this->assertInTransaction();
 
-        foreach ($this->docsRepo->listByInvoice($supplierId, $invoiceId) as $doc) {
-            if ((string) $doc['status'] !== 'posted') {
+        $docs = $this->docsRepo->listByInvoice($supplierId, $invoiceId);
+        $counters = self::counterDocumentIds($docs);
+        foreach ($docs as $doc) {
+            // Protidoklad dřívějšího storna (po obnovení faktury zůstává zaúčtovaný) se
+            // nestornuje: storno by zboží předchozího cyklu znovu vydalo a nové storno
+            // by se vynulovalo.
+            if ((string) $doc['status'] !== 'posted' || isset($counters[(int) $doc['id']])) {
                 continue;
             }
             // Jen automaticky vzniklé doklady — ručně založený doklad s vazbou
@@ -398,6 +405,23 @@ final class StockIssueService
      *
      * @param array<string,mixed> $doc
      */
+    /**
+     * Protidoklady storna mezi doklady faktury (nesou `invoice_id` originálu).
+     *
+     * @param list<array<string,mixed>> $docs
+     * @return array<int,true>
+     */
+    private static function counterDocumentIds(array $docs): array
+    {
+        $ids = [];
+        foreach ($docs as $doc) {
+            if ($doc['reversal_document_id'] !== null) {
+                $ids[(int) $doc['reversal_document_id']] = true;
+            }
+        }
+        return $ids;
+    }
+
     private static function coversInvoice(array $doc, string $origin): bool
     {
         return (string) $doc['status'] === 'posted'
