@@ -364,7 +364,7 @@ onBeforeUnmount(() => {
     <Teleport to="body">
       <div
         v-if="hint"
-        class="pointer-events-none fixed z-[80] max-w-64 -translate-x-1/2 bg-neutral-900 px-2 py-1 text-xs leading-snug whitespace-pre-line text-white shadow-lg dark:bg-neutral-700"
+        class="pointer-events-none fixed z-[80] w-max max-w-64 -translate-x-1/2 bg-neutral-900 px-2 py-1 text-xs leading-snug whitespace-pre-line text-white shadow-lg dark:bg-surface-raised dark:ring-1 dark:ring-neutral-300"
         :style="{ left: `${hint.x}px`, top: `${hint.y}px` }"
         role="tooltip"
         data-window-tabs-hint
