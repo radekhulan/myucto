@@ -68,15 +68,15 @@ Pro změnu společných údajů nebo nové zpracování členů po opravě odmí
 
 Seznam můžete prohledat podle části jména kontaktu nebo členského čísla. Zvolte rok příspěvku a případně přesné označení ve výběru titulů. Vyhledávání se použije po krátké prodlevě, ostatní filtry ihned. Aktivní filtry jsou vidět jako odstranitelné štítky a ukládají se do adresy stránky. Rok vybírá příspěvky, jejichž období do zvoleného roku zasahuje. Pro zobrazení všech období jednoho titulu vyberte označení, rok nechte prázdný a stav úhrady ponechte **Vše**. Filtrování podle stavu úhrady vyžaduje konkrétní rok; při prázdném roce se doplní aktuální rok. Přehled všech období může nad velkou historií trvat déle. Volba roku nemění účetní datum ani stav členství.
 
-U člena uvidíte částku předepsaných aktivních příspěvků za vybraný titul nebo rok a stav **Uhrazeno**, **Neuhrazeno (doložený zůstatek)**, **K prověření** nebo **Bez předpisu pro zvolený titul nebo rok**. Stornované předpisy se do těchto součtů nezahrnují. Prokázaná úhrada a zůstatek vycházejí ze stejného nativního párování jako detail člena.
+U člena uvidíte částku předepsaných aktivních příspěvků za vybraný titul nebo rok a stav **Uhrazeno**, **Neuhrazeno**, **K prověření** nebo **Bez předpisu pro zvolený titul nebo rok**. Stornované předpisy se do těchto součtů nezahrnují. Prokázaná úhrada a zůstatek vycházejí ze stejného nativního párování jako detail člena.
 
-Předpis bez spárované úhrady se zobrazí jako neuhrazený s nulovou úhradou a plným zůstatkem. Pokud jsou účetní důkazy poškozené nebo je párování nejednoznačné, úhrada a zůstatek se zobrazí jako neurčené, nikoli jako potvrzený dluh. Filtr neuhrazených proto zahrnuje jen doložený kladný zůstatek; neprokázané platby mají vlastní filtr. Částečná prokázaná úhrada patří mezi neuhrazené. Filtry se uplatní před stránkováním celého seznamu.
+Předpis bez spárované úhrady se zobrazí jako neuhrazený s nulovou úhradou a plným zůstatkem. Pokud jsou účetní důkazy poškozené nebo je párování nejednoznačné, úhrada a zůstatek se zobrazí jako neurčené, nikoli jako potvrzený dluh. Filtr **Neuhrazeno** proto zahrnuje předpisy bez spárované úhrady i předpisy uhrazené jen zčásti; předpisy k prověření mají vlastní filtr **K prověření**. Filtry se uplatní před stránkováním celého seznamu.
 
 Změna filtrů zruší zaškrtnuté členy pro novou dávku a oznámí to. Obnova dat ověří celý výběr včetně členů z dalších stránek a zachová ty, kteří stále odpovídají filtrům. Pouhé použití nezměněných filtrů výběr zachová. Již uložená dávka se tím nemění. Detail otevřeného člena stále ukazuje celou jeho historii a předpisy, nezávisle na filtrech seznamu.
 
 ### Párování a kontrola období
 
-Pohledávky se zobrazují po stránkách. Přehled rozlišuje předepsanou částku a prokázaný otevřený zůstatek. Úhrada je doložená teprve přes skutečné párování s nativním bankovním nebo pokladním dokladem.
+Pohledávky se zobrazují po stránkách. Přehled rozlišuje předepsanou částku a zůstatek k úhradě. Úhrada je doložená teprve přes skutečné párování s nativním bankovním nebo pokladním dokladem; předpis bez spárované úhrady má zůstatek ve výši celé částky.
 
 Párování se nedělá na této stránce. Otevřete opis účtu pohledávky v hlavní knize, přepněte na **Otevřené položky - párování** a spojte řádek předpisu s řádkem platby do okruhu ([kap. 55.8.5.1](55_Hlavni_kniha.md)). Úhrada se prokáže jen u okruhu, ve kterém je jediná pohledávka z této evidence.
 
@@ -94,6 +94,6 @@ Při nejistém výsledku odeslání obnovte přehled nebo opakujte stejný zmraz
 
 Kurátorované katalogy členských rolí a pohledávek jsou dostupné s oprávněním ke čtení účetnictví také přes API token a MCP. Seznamy i detaily používají stejnou obálku; stránka obsahuje nejvýše 100 záznamů a pokračovací kurzor je vázaný na firmu a filtry. Výstup neobsahuje jména, členská čísla, právní podklady ani interní otisky a aktéry.
 
-U členských rolí zadejte rozhodné datum `as_of` a případně okamžik tehdejší znalosti `known_at`. Pokud jej vynecháte, připne jej první stránka. Později zaznamenaná revize tak nezmění navazující stránky téhož čtení. U pohledávek se čte aktuální účetní stav a doložená nativní bankovní nebo pokladní párování; historický okamžik úhrad se nepřijímá. Neprokázané úhrady a otevřené částky zůstávají `null`. Katalog sám nepotvrzuje osvobození příjmu ani oprávnění k finanční operaci.
+U členských rolí zadejte rozhodné datum `as_of` a případně okamžik tehdejší znalosti `known_at`. Pokud jej vynecháte, připne jej první stránka. Později zaznamenaná revize tak nezmění navazující stránky téhož čtení. U pohledávek se čte aktuální účetní stav a doložená nativní bankovní nebo pokladní párování; historický okamžik úhrad se nepřijímá. U pohledávek k prověření zůstávají uhrazená i otevřená částka `null`. Katalog sám nepotvrzuje osvobození příjmu ani oprávnění k finanční operaci.
 
 Historické role vyžadují průkazný okamžik zaznamenání. Pokud jej starší záznam nemá doložený, časový katalog vrátí chybu místo odhadování časové zóny nebo vynechání člena. U pohledávky může být čas zaznamenání `null` se stavem `unproven`; ověření její částky a účetních podkladů tím zůstává samostatné. Původní časové údaje se při aktualizaci ani anonymizované kopii nepřepočítávají odhadem.

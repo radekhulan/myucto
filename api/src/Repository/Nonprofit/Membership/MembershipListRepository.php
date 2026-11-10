@@ -10,12 +10,46 @@ use PDO;
 
 final class MembershipListRepository
 {
-    public function __construct(private readonly Connection $db) {}
+    /** Nejvyšší počet členů, které jeden dotaz s filtrem úhrady prověří. */
+    private const MAX_CHUNK = 4000;
 
-    /** Souhrn i filtr úhrady před stránkováním v jediném dotazu; částky souhrnů zůstávají přesné řetězce. */
+    /** @param int $firstChunk počet členů v první prověřované dávce filtru úhrady (testy ho zmenšují) */
+    public function __construct(private readonly Connection $db, private readonly int $firstChunk = 200) {}
+
+    /**
+     * Souhrn i filtr úhrady před stránkováním; částky souhrnů zůstávají přesné řetězce.
+     * Bez filtru úhrady stačí jeden dotaz nad stránkou členů. S filtrem se členové prověřují po dávkách
+     * podle ID od kurzoru, dokud se stránka nezaplní nebo členové nedojdou. Každé „Načíst další“ tak
+     * pokračuje od posledního vráceného člena a nepočítá znovu stav celé firmy.
+     */
     public function page(int $supplier, int $after, int $limit, array $filter): array
     {
-        [$sql, $params] = $this->query($supplier, $after, $limit, $filter);
+        if ($filter['payment_status'] === 'all') return $this->fetch($supplier, $after, $limit, $filter, null);
+        $rows = []; $cursor = $after; $chunk = max($this->firstChunk, $limit);
+        while (true) {
+            $upper = $this->chunkUpperBound($supplier, $cursor, $chunk, $filter);
+            array_push($rows, ...$this->fetch($supplier, $cursor, $limit - count($rows), $filter, $upper));
+            if (count($rows) >= $limit || $upper === null) return $rows;
+            // Řídký výskyt stavu: další dávka je větší, aby počet dotazů rostl jen logaritmicky.
+            $cursor = $upper; $chunk = min(self::MAX_CHUNK, $chunk * 2);
+        }
+    }
+
+    /** ID posledního člena dávky (stejné hledání jako seznam), nebo null, když za kurzorem už víc členů není. */
+    private function chunkUpperBound(int $supplier, int $after, int $chunk, array $filter): ?int
+    {
+        [$search, $params] = $this->searchCondition($filter);
+        $q = $this->db->pdo()->prepare('SELECT m.id FROM nonprofit_members m FORCE INDEX(uq_nm_tenant)
+            JOIN clients c ON c.supplier_id=m.supplier_id AND c.id=m.client_id
+            WHERE m.supplier_id=? AND m.id>?' . $search . ' ORDER BY m.id LIMIT 1 OFFSET ' . ($chunk - 1));
+        $q->execute([$supplier, $after, ...$params]);
+        $id = $q->fetchColumn();
+        return $id === false ? null : (int) $id;
+    }
+
+    private function fetch(int $supplier, int $after, int $limit, array $filter, ?int $upper): array
+    {
+        [$sql, $params] = $this->query($supplier, $after, $limit, $filter, null, $upper);
         $q = $this->db->pdo()->prepare($sql); $q->execute($params);
         return array_map(static function (array $row): array {
             foreach (['id', 'supplier_id', 'client_id', 'created_by'] as $field) $row[$field] = (int) $row[$field];
@@ -27,17 +61,26 @@ final class MembershipListRepository
         }, $q->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    /** Veřejné sestavení pro EXPLAIN stejného dotazu jako v aplikaci, bez odlišné měřicí kopie. */
-    public function query(int $supplier, int $after, int $limit, array $filter, ?array $memberIds = null): array
+    /** @return array{string, list<string>} */
+    private function searchCondition(array $filter): array
+    {
+        if ($filter['search'] === '') return ['', []];
+        $like = '%' . strtr($filter['search'], ['=' => '==', '%' => '=%', '_' => '=_']) . '%';
+        return [" AND (m.member_number LIKE ? ESCAPE '=' OR c.company_name LIKE ? ESCAPE '=' OR c.first_name LIKE ? ESCAPE '=' OR c.last_name LIKE ? ESCAPE '=')",
+            [$like, $like, $like, $like]];
+    }
+
+    /**
+     * Veřejné sestavení pro EXPLAIN stejného dotazu jako v aplikaci, bez odlišné měřicí kopie.
+     * $upper omezuje členy na dávku (after, upper]; bez filtru úhrady se místo toho omezí přímo stránka.
+     */
+    public function query(int $supplier, int $after, int $limit, array $filter, ?array $memberIds = null, ?int $upper = null): array
     {
         $limit = max(1, min(501, $limit));
         $params = [$supplier, $after];
-        $search = '';
-        if ($filter['search'] !== '') {
-            $search = " AND (m.member_number LIKE ? ESCAPE '=' OR c.company_name LIKE ? ESCAPE '=' OR c.first_name LIKE ? ESCAPE '=' OR c.last_name LIKE ? ESCAPE '=')";
-            $like = '%' . strtr($filter['search'], ['=' => '==', '%' => '=%', '_' => '=_']) . '%';
-            array_push($params, $like, $like, $like, $like);
-        }
+        [$search, $searchParams] = $this->searchCondition($filter);
+        array_push($params, ...$searchParams);
+        if ($upper !== null) { $search .= ' AND m.id<=?'; $params[] = $upper; }
         if ($memberIds !== null) {
             if ($memberIds === [] || count($memberIds)>500) throw new \InvalidArgumentException('Výběr vyžaduje 1–500 členů.');
             $search .= ' AND m.id IN (' . implode(',', array_fill(0, count($memberIds), '?')) . ')';
@@ -49,14 +92,10 @@ final class MembershipListRepository
             array_push($params, $filter['year'] . '-01-01', ($filter['year'] + 1) . '-01-01');
         }
         if ($filter['title_key'] !== '') { $condition .= ' AND cc.title_key=?'; $params[] = $filter['title_key']; }
-        $allStates = $filter['payment_status'] === 'all';
-        $index = $allStates ? 'uq_nmcc_identity' : ($filter['title_key'] === '' ? 'ix_nmcc_deferral' : 'ix_nmcc_list_title');
-        // Bez filtru úhrady nejdřív omezíme členy; do finanční agregace vstupuje jen tato stránka.
-        // Při filtru úhrady se naopak musí nejdřív zjistit stav všech kandidátů a až pak použít LIMIT.
-        $scopeLimit = $allStates ? " ORDER BY m.id LIMIT {$limit}" : '';
-        $claimsSource = $allStates
-            ? "scope m STRAIGHT_JOIN nonprofit_membership_charge_cases cc FORCE INDEX({$index}) ON cc.supplier_id=m.supplier_id AND cc.member_id=m.id"
-            : "nonprofit_membership_charge_cases cc FORCE INDEX({$index}) JOIN scope m ON m.supplier_id=cc.supplier_id AND m.id=cc.member_id";
+        // Finanční agregace vždy začíná omezenými členy: bez filtru úhrady stránkou, s filtrem dávkou
+        // (after, upper] nebo výběrem ID. Stav celé firmy se nepočítá ani pro další stránky.
+        $scopeLimit = $filter['payment_status'] === 'all' ? " ORDER BY m.id LIMIT {$limit}" : '';
+        $claimsSource = "scope m STRAIGHT_JOIN nonprofit_membership_charge_cases cc FORCE INDEX(uq_nmcc_identity) ON cc.supplier_id=m.supplier_id AND cc.member_id=m.id";
         $pairingSql = MembershipBalanceRepository::nativePairingTotalsSql();
         // Požadavky materializujeme podle pohledávky, aby optimizer nezačal účetními řádky celé firmy.
         // Unikátní claim/receivable-line/PK párovací položky zaručují shodu pro validní data.
