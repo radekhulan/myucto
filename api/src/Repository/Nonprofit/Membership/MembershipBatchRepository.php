@@ -242,13 +242,7 @@ final class MembershipBatchRepository
             throw new MembershipException('nonprofit_membership_batch_not_ready', 'Tuto dávku nelze znovu připravit.', 409);
         }
         while (($items = $this->workPage($supplier, $batch, 'ready', 50)) !== []) {
-            // Finanční commit mohl předcházet zápisu výsledku při starším běhu.
-            $q = $this->db->pdo()->prepare("SELECT i.member_id,o.id operation_id FROM nonprofit_membership_batch_members i
-                JOIN nonprofit_membership_charge_commands c ON c.supplier_id=i.supplier_id AND c.idempotency_key=CONCAT('batch-',?,'-member-',i.member_id)
-                JOIN nonprofit_membership_charge_operations o ON o.supplier_id=c.supplier_id AND o.command_id=c.id
-                WHERE i.supplier_id=? AND i.batch_id=? AND i.member_id IN (" . implode(',', array_fill(0, count($items), '?')) . ') FOR UPDATE');
-            $q->execute([$current['batch_uid'], $supplier, $batch, ...array_column($items, 'member_id')]);
-            $committed = $q->fetchAll(PDO::FETCH_KEY_PAIR);
+            $committed = $this->committedOperations($supplier, $batch, $current['batch_uid'], $items);
             foreach ($items as &$item) {
                 $item['status'] = isset($committed[$item['member_id']]) ? 'created' : 'pending';
                 $item['operation_id'] = $committed[$item['member_id']] ?? null;
@@ -266,8 +260,39 @@ final class MembershipBatchRepository
 
     public function cancel(int $supplier, int $batch): void
     {
-        $this->find($supplier, $batch, true);
+        $current = $this->find($supplier, $batch, true);
+        if ($current === null || in_array($current['phase'], ['finished', 'cancelled'], true)) return;
         $this->db->pdo()->prepare("UPDATE nonprofit_membership_batches SET phase='cancelled',approval_token=NULL,approval_expires_at=NULL WHERE supplier_id=? AND id=? AND phase<>'finished'")->execute([$supplier, $batch]);
+        // Nezpracovaní členové zrušené dávky nesmí v souhrnu vypadat jako připravení k zaúčtování.
+        foreach (['ready', 'pending'] as $status) {
+            while (($items = $this->workPage($supplier, $batch, $status, 50)) !== []) {
+                $committed = $status === 'ready' ? $this->committedOperations($supplier, $batch, $current['batch_uid'], $items) : [];
+                foreach ($items as &$item) {
+                    if (isset($committed[$item['member_id']])) {
+                        $item['status'] = 'created'; $item['operation_id'] = $committed[$item['member_id']];
+                        continue;
+                    }
+                    $item['status'] = 'rejected';
+                    $item['preview_hash'] = null; $item['expected_case_version'] = null;
+                    $item['deferred_cents'] = 0; $item['deferral_date'] = null;
+                    $item['error_code'] = 'nonprofit_membership_batch_cancelled';
+                    $item['error_message'] = 'Dávka byla zrušena dříve, než byl člen zpracován.';
+                }
+                unset($item);
+                $this->changeRows($supplier, $batch, $items, $status);
+            }
+        }
+    }
+
+    /** Finanční commit mohl předcházet zápisu výsledku položky při starším běhu. */
+    private function committedOperations(int $supplier, int $batch, string $uid, array $items): array
+    {
+        $q = $this->db->pdo()->prepare("SELECT i.member_id,o.id operation_id FROM nonprofit_membership_batch_members i
+            JOIN nonprofit_membership_charge_commands c ON c.supplier_id=i.supplier_id AND c.idempotency_key=CONCAT('batch-',?,'-member-',i.member_id)
+            JOIN nonprofit_membership_charge_operations o ON o.supplier_id=c.supplier_id AND o.command_id=c.id
+            WHERE i.supplier_id=? AND i.batch_id=? AND i.member_id IN (" . implode(',', array_fill(0, count($items), '?')) . ') FOR UPDATE');
+        $q->execute([$uid, $supplier, $batch, ...array_column($items, 'member_id')]);
+        return $q->fetchAll(PDO::FETCH_KEY_PAIR);
     }
 
     public function summary(int $supplier, int $batch, bool $current = false): array

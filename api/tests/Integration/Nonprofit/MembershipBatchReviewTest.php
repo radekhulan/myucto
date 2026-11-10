@@ -18,6 +18,8 @@ use MyInvoice\Service\Nonprofit\Membership\MembershipChargeService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipException;
 use MyInvoice\Service\Nonprofit\Membership\MembershipMemberService;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitLegalProfileService;
+use Monolog\Handler\TestHandler;
+use Monolog\Logger;
 use PDO;
 use PDOStatement;
 use PHPUnit\Framework\TestCase;
@@ -144,7 +146,11 @@ final class MembershipBatchReviewTest extends TestCase
         $first = $this->batches->create($this->supplier, $this->input([$this->member('CANCEL-PREP')]), $this->actor);
         $id = $first['batch']['id'];
         $this->batches->cancel($this->supplier, $id, $this->actor);
-        self::assertSame('cancelled', $this->batches->prepare($this->supplier, $id)['batch']['phase']);
+        $early = $this->batches->prepare($this->supplier, $id);
+        self::assertSame('cancelled', $early['batch']['phase']);
+        self::assertSame([0, 0, 1], [$early['summary']['pending'], $early['summary']['ready'], $early['summary']['rejected']]);
+        self::assertSame('nonprofit_membership_batch_cancelled', $early['items'][0]['error_code']);
+        $this->assertCounters($id);
         $ids = [];
         for ($i = 0; $i < 11; ++$i) $ids[] = $this->member('CANCEL-' . $i);
         $ready = $this->ready($ids, 'partial'); $id = $ready['batch']['id'];
@@ -153,6 +159,11 @@ final class MembershipBatchReviewTest extends TestCase
         self::assertSame(10, $partial['summary']['created']);
         $cancelled = $this->batches->cancel($this->supplier, $id, $this->actor);
         self::assertSame(10, $cancelled['summary']['created']);
+        self::assertSame(0, $cancelled['summary']['ready']);
+        self::assertSame(1, $cancelled['summary']['rejected']);
+        self::assertSame((string) (10 * 50000), $cancelled['summary']['planned_cents']);
+        self::assertSame(['rejected', 'nonprofit_membership_batch_cancelled'], [$cancelled['items'][10]['status'], $cancelled['items'][10]['error_code']]);
+        self::assertSame($cancelled['summary'], $this->batches->cancel($this->supplier, $id, $this->actor)['summary']);
         $this->assertConfirmRejected($id, $ready['batch']['approval_token']);
         self::assertSame(10, $this->operationCount());
         $this->assertCounters($id);
@@ -250,6 +261,29 @@ final class MembershipBatchReviewTest extends TestCase
         self::assertSame(2, $this->operationCount());
         self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_membership_charge_cases WHERE supplier_id=' . $this->supplier)->fetchColumn());
         self::assertSame(2, (int) $this->pdo->query("SELECT COUNT(*) FROM journal_entries WHERE supplier_id=" . $this->supplier . " AND source_type='nonprofit_membership'")->fetchColumn());
+        $this->assertCounters($id);
+    }
+
+    public function testUnknownPreviewFailureRejectsOneMemberAndPreparesTheRest(): void
+    {
+        $ids = [$this->member('PREVIEW-FIRST'), $this->member('PREVIEW-MIDDLE'), $this->member('PREVIEW-LAST')];
+        $log = new TestHandler();
+        $batches = new MembershipBatchService($this->db, $this->charges, logger: new Logger('test', [$log]));
+        $created = $batches->create($this->supplier, $this->input($ids), $this->actor); $id = $created['batch']['id'];
+        $previous = $this->pdo->getAttribute(PDO::ATTR_STATEMENT_CLASS);
+        BatchReviewFailureStatement::$rows = static function (string $sql, array $rows) use ($ids): array {
+            if (!str_contains($sql, 'FROM nonprofit_member_revisions WHERE supplier_id=? AND member_id IN')) return $rows;
+            foreach ($rows as &$row) if ((int) $row['member_id'] === $ids[1]) $row['parent_hash'] = null;
+            return $rows;
+        };
+        $this->pdo->setAttribute(PDO::ATTR_STATEMENT_CLASS, [BatchReviewFailureStatement::class]);
+        try { $prepared = $batches->prepare($this->supplier, $id); }
+        finally { $this->pdo->setAttribute(PDO::ATTR_STATEMENT_CLASS, $previous); BatchReviewFailureStatement::$rows = null; }
+        self::assertSame('ready', $prepared['batch']['phase']);
+        self::assertSame(['ready', 'rejected', 'ready'], array_column($prepared['items'], 'status'));
+        self::assertSame('nonprofit_membership_batch_technical', $prepared['items'][1]['error_code']);
+        self::assertSame(2, $prepared['summary']['ready']); self::assertSame(1, $prepared['summary']['rejected']);
+        self::assertTrue($log->hasErrorThatContains('technická chyba při přípravě'));
         $this->assertCounters($id);
     }
 
@@ -366,10 +400,17 @@ final class MembershipBatchReviewTest extends TestCase
 final class BatchReviewFailureStatement extends PDOStatement
 {
     public static ?\Closure $fail = null;
+    public static ?\Closure $rows = null;
 
     public function execute(?array $params = null): bool
     {
         if (self::$fail !== null) (self::$fail)($this->queryString, $params);
         return parent::execute($params);
+    }
+
+    public function fetchAll(int $mode = PDO::FETCH_DEFAULT, mixed ...$args): array
+    {
+        $rows = parent::fetchAll($mode, ...$args);
+        return self::$rows === null ? $rows : (self::$rows)($this->queryString, $rows);
     }
 }

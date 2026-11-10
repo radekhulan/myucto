@@ -14,10 +14,12 @@ use MyInvoice\Service\Accounting\AccountingFrameworkService;
 use MyInvoice\Service\Accounting\AccountRoleResolver;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitLegalProfileService;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxRules;
 use PDO;
+use PDOException;
 
 final class MembershipChargeService
 {
@@ -59,9 +61,30 @@ final class MembershipChargeService
                     }
                 }
                 $out[$id] = ['error' => $e, 'existing' => $existing];
+            } catch (PostingException $e) {
+                if ($e->httpStatus >= 500) {
+                    $out[$id] = $this->technicalPreviewFailure($e);
+                    continue;
+                }
+                $out[$id] = ['error' => new MembershipException($e->errorCode, $e->getMessage(), $e->httpStatus, previous: $e), 'existing' => null];
+            } catch (\Throwable $e) {
+                // Odvolanou transakci, lock wait a chybu databáze uvnitř cizí transakce
+                // nelze převést na výsledek položky: opakování řeší vlastník transakce
+                // a nezpracovaní členové zůstávají ve stavu pending.
+                if (TransactionFailure::aborted($e)
+                    || ($e instanceof PDOException && ((int) ($e->errorInfo[1] ?? 0) === 1205 || $this->db->pdo()->inTransaction()))) {
+                    throw $e;
+                }
+                $out[$id] = $this->technicalPreviewFailure($e);
             }
         }
         return $out;
+    }
+
+    private function technicalPreviewFailure(\Throwable $failure): array
+    {
+        return ['error' => new MembershipException('nonprofit_membership_batch_technical', 'Položku nelze připravit kvůli technické chybě.', 500, previous: $failure),
+            'existing' => null, 'failure' => $failure];
     }
 
     public function confirmIssue(int $supplier, array $input, int $expectedVersion, string $previewHash, string $idempotencyKey, int $actor): array

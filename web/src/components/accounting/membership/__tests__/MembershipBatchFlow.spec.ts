@@ -69,7 +69,7 @@ describe('hromadný předpis', () => {
     expect(w.find('[data-action="confirm"]').exists()).toBe(false)
     expect(w.text()).toContain(cs.nonprofitMembership.batchPhase_cancelled)
     w.unmount()
-    api.prepareBatch.mockResolvedValue({...state('expired'),batch:{...state('expired').batch,approval_token:null}})
+    api.prepareBatch.mockResolvedValue({...state('ready'),batch:{...state('ready').batch,approval_expires_at:'2000-01-01 00:00:00'}})
     const expired=mounted(); await flushPromises()
     expired.findComponent(Issue).vm.$emit('batchRequest',request); await flushPromises()
     expect(expired.text()).toContain(cs.nonprofitMembership.batchNeedNewPreview)

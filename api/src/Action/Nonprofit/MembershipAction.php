@@ -68,13 +68,12 @@ final class MembershipAction
             $after = $this->queryInteger($query['after_id'] ?? 0, 'after_id', 0);
             $active = $this->queryInteger($query['active_only'] ?? 1, 'active_only', 0, 1);
             $items = (new MembershipRateRepository($this->db))->page($supplier, $after, (bool) $active);
-            $date=$query['date']??date('Y-m-d');
-            if(!is_string($date)||!IsoDate::isValid($date)) throw new MembershipException('nonprofit_membership_rate_invalid','Neplatné datum výběru účtů.',422);
+            $date = $query['date'] ?? date('Y-m-d');
+            if (!is_string($date) || !IsoDate::isValid($date)) throw new MembershipException('nonprofit_membership_rate_invalid', 'Neplatné datum výběru účtů.', 422);
             return ['items' => $items, 'next_after_id' => count($items) === 100 ? $items[array_key_last($items)]['id'] : null,
-                'revenue_accounts'=>(new MembershipRateService($this->db))->revenueAccounts($supplier,$date)];
+                'revenue_accounts' => (new MembershipRateService($this->db))->revenueAccounts($supplier, $date)];
         });
     }
-
 
     public function batches(Request $request, Response $response): Response
     {
@@ -87,22 +86,25 @@ final class MembershipAction
 
     public function batch(Request $request, Response $response, array $args): Response
     {
-        return $this->handle($request, $response, false, fn (int $supplier): array => $this->batchResponse($request,$this->batchService->detail($supplier, (int) $args['id'],
+        return $this->handle($request, $response, false, fn (int $supplier): array => $this->batchResponse($request, $this->batchService->detail(
+            $supplier,
+            (int) $args['id'],
             $this->queryInteger($request->getQueryParams()['after_member_id'] ?? 0, 'after_member_id', 0),
-            write: RequestAuthorization::allows($request,'accounting.journal.post',AccessLevel::WRITE))));
+            write: RequestAuthorization::allows($request, 'accounting.journal.post', AccessLevel::WRITE),
+        )));
     }
 
     public function createBatch(Request $request, Response $response): Response
     {
         return $this->handle($request, $response, true, function (int $supplier) use ($request): array {
             $body = $this->body($request, ['template', 'selection_mode', 'member_ids', 'idempotency_key']);
-            return $this->batchResponse($request,$this->batchService->create($supplier, $body, $this->actor($request)));
+            return $this->batchResponse($request, $this->batchService->create($supplier, $body, $this->actor($request)));
         }, 201);
     }
 
     public function prepareBatch(Request $request, Response $response, array $args): Response
     {
-        return $this->handle($request, $response, true, fn (int $supplier): array => $this->batchResponse($request,$this->batchService->prepare($supplier, (int) $args['id'])));
+        return $this->handle($request, $response, true, fn (int $supplier): array => $this->batchResponse($request, $this->batchService->prepare($supplier, (int) $args['id'])));
     }
 
     public function confirmBatch(Request $request, Response $response, array $args): Response
@@ -110,27 +112,31 @@ final class MembershipAction
         return $this->handle($request, $response, true, function (int $supplier) use ($request, $args): array {
             $body = $this->body($request, ['approval_token']);
             if (!is_string($body['approval_token'])) throw new MembershipException('nonprofit_membership_batch_invalid', 'Potvrzení dávky nemá platný tvar.');
-            return $this->batchResponse($request,$this->batchService->confirm($supplier, (int) $args['id'], $body['approval_token'], $this->actor($request)));
+            return $this->batchResponse($request, $this->batchService->confirm($supplier, (int) $args['id'], $body['approval_token'], $this->actor($request)));
         });
     }
 
     public function cancelBatch(Request $request, Response $response, array $args): Response
     {
-        return $this->handle($request,$response,true,fn(int $supplier): array =>
-            $this->batchResponse($request,$this->batchService->cancel($supplier,(int)$args['id'],$this->actor($request))));
+        return $this->handle($request, $response, true, fn (int $supplier): array => $this->batchResponse(
+            $request,
+            $this->batchService->cancel($supplier, (int) $args['id'], $this->actor($request)),
+        ));
     }
 
     public function renewBatchPreview(Request $request, Response $response, array $args): Response
     {
-        return $this->handle($request,$response,true,fn(int $supplier): array =>
-            $this->batchResponse($request,$this->batchService->renewPreview($supplier,(int)$args['id'],$this->actor($request))));
+        return $this->handle($request, $response, true, fn (int $supplier): array => $this->batchResponse(
+            $request,
+            $this->batchService->renewPreview($supplier, (int) $args['id'], $this->actor($request)),
+        ));
     }
 
     /** Interní identita replaye nepatří do DTO a schvalovací token je pouze pro zapisující roli. */
-    private function batchResponse(Request $request,array $result): array
+    private function batchResponse(Request $request, array $result): array
     {
-        unset($result['batch']['request_hash'],$result['batch']['idempotency_key'],$result['batch']['batch_uid']);
-        if(!RequestAuthorization::allows($request,'accounting.journal.post',AccessLevel::WRITE)) unset($result['batch']['approval_token']);
+        unset($result['batch']['request_hash'], $result['batch']['idempotency_key'], $result['batch']['batch_uid']);
+        if (!RequestAuthorization::allows($request, 'accounting.journal.post', AccessLevel::WRITE)) unset($result['batch']['approval_token']);
         return $result;
     }
 

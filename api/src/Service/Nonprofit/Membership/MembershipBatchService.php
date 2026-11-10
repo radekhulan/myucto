@@ -22,14 +22,15 @@ final class MembershipBatchService
 {
     private readonly MembershipBatchRepository $batches;
     private readonly ActivityLogger $activity;
-    private readonly int $maximumMembers;
+    private readonly ?int $maximumOverride;
+    private ?int $memberLimit = null;
     private readonly LoggerInterface $logger;
 
     public function __construct(private readonly Connection $db, private readonly MembershipChargeService $charges, ?ActivityLogger $activity = null, ?int $maximumMembers = null, ?LoggerInterface $logger = null)
     {
         $this->batches = new MembershipBatchRepository($db);
         $this->activity = $activity ?? new ActivityLogger($db);
-        $this->maximumMembers = self::maximumMembers($maximumMembers);
+        $this->maximumOverride = $maximumMembers === null ? null : self::maximumMembers($maximumMembers);
         // Action předává aplikační logger. Přímé CLI volání bez DI nesmí chybu zahodit;
         // PHP error log respektuje provozní umístění nastavené Bootstrapem.
         $this->logger = $logger ?? new Logger('myinvoice', [new ErrorLogHandler()]);
@@ -49,6 +50,18 @@ final class MembershipBatchService
             throw new \InvalidArgumentException('MYINVOICE_MEMBERSHIP_BATCH_MAX_MEMBERS vyžaduje celé číslo 1–5000.');
         }
         return (int) $raw;
+    }
+
+    /** Neplatná provozní ENV nesmí shodit čtecí endpointy; dávka použije výchozí limit. */
+    private function memberLimit(): int
+    {
+        if ($this->memberLimit !== null) return $this->memberLimit;
+        try {
+            return $this->memberLimit = self::maximumMembers($this->maximumOverride);
+        } catch (\InvalidArgumentException $e) {
+            $this->logger->warning('Členská dávka: neplatná konfigurace limitu, použije se výchozí 5000.', ['exception' => $e]);
+            return $this->memberLimit = 5000;
+        }
     }
 
     public function create(int $supplier, array $body, int $actor): array
@@ -74,7 +87,7 @@ final class MembershipBatchService
                 if (!hash_equals($existing['request_hash'], $hash)) throw new MembershipException('nonprofit_membership_idempotency_conflict', 'Klíč dávky už patří jinému požadavku.', 409);
                 return ['id' => $existing['id'], 'created' => false];
             }
-            if (count($ids) > $this->maximumMembers) self::invalid();
+            if (count($ids) > $this->memberLimit()) self::invalid();
             if ($body['selection_mode'] === 'selected') $this->batches->assertSelection($supplier, $ids);
             $normalized = $this->rateRequest($supplier, $body['template'], true);
             $template = $normalized;
@@ -115,9 +128,14 @@ final class MembershipBatchService
         $ids = array_map('intval', array_column($work, 'member_id'));
         $amounts = array_column($work, 'amount_cents', 'member_id');
         if ($ids !== []) {
-            $results = $this->charges->previewIssuePage($supplier, $batch['template'], $ids);
+            $results = TransactionFailure::retrying($this->db->pdo(), fn (): array => $this->charges->previewIssuePage($supplier, $batch['template'], $ids), 3);
             $rows = [];
             foreach ($results as $member => $result) {
+                if (isset($result['failure'])) {
+                    $this->logger->error('Členská dávka: technická chyba při přípravě položky.', [
+                        'supplier_id' => $supplier, 'batch_id' => $id, 'member_id' => $member, 'exception' => $result['failure'],
+                    ]);
+                }
                 $preview = $result['preview'] ?? null;
                 $existing = $result['existing'] ?? null;
                 $error = $result['error'] ?? null;
@@ -241,7 +259,7 @@ final class MembershipBatchService
     private function seedPage(int $supplier, int $id): void
     {
         try {
-            TransactionFailure::retrying($this->db->pdo(), fn () => $this->batches->seed($supplier, $id, $this->maximumMembers), 3);
+            TransactionFailure::retrying($this->db->pdo(), fn () => $this->batches->seed($supplier, $id, $this->memberLimit()), 3);
         } catch (MembershipException $e) {
             if ($e->errorCode !== 'nonprofit_membership_batch_limit') throw $e;
             // Částečný seed nikdy nesmí dospět k souhlasu s neúplným výběrem.

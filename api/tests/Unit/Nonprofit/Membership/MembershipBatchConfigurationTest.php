@@ -63,9 +63,25 @@ final class MembershipBatchConfigurationTest extends TestCase
         $db = new Connection(new Config([]));
         $configured = new MembershipBatchService($db, $charges);
         $overridden = new MembershipBatchService($db, $charges, maximumMembers: 15);
-        $property = new \ReflectionProperty(MembershipBatchService::class, 'maximumMembers');
-        self::assertSame(125, $property->getValue($configured));
-        self::assertSame(15, $property->getValue($overridden));
+        $limit = new \ReflectionMethod(MembershipBatchService::class, 'memberLimit');
+        self::assertSame(125, $limit->invoke($configured));
+        self::assertSame(15, $limit->invoke($overridden));
+    }
+
+    public function testInvalidEnvironmentDoesNotBreakConstructionAndFallsBackToDefault(): void
+    {
+        putenv('MYINVOICE_MEMBERSHIP_BATCH_MAX_MEMBERS=invalid');
+        $handler = new TestHandler();
+        $charges = (new \ReflectionClass(MembershipChargeService::class))->newInstanceWithoutConstructor();
+        $service = new MembershipBatchService(new Connection(new Config([])), $charges, logger: new Logger('synthetic-batch', [$handler]));
+        self::assertFalse($handler->hasWarningRecords(), 'Konfigurace se nesmí číst už při sestavení akce.');
+        $limit = new \ReflectionMethod(MembershipBatchService::class, 'memberLimit');
+        self::assertSame(5000, $limit->invoke($service));
+        self::assertSame(5000, $limit->invoke($service));
+        self::assertCount(1, $handler->getRecords());
+        self::assertTrue($handler->hasWarningThatContains('neplatná konfigurace limitu'));
+        try { new MembershipBatchService(new Connection(new Config([])), $charges, maximumMembers: 0); self::fail('Neplatný override byl přijat.'); }
+        catch (\InvalidArgumentException) { self::assertTrue(true); }
     }
 
     public function testApplicationDiagnosticsContainExceptionAndOperationIdentity(): void

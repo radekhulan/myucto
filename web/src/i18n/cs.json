@@ -40462,7 +40462,8 @@
       "nonprofit_membership_batch_not_found": "Dávka nebyla v této organizaci nalezena.",
       "nonprofit_membership_batch_limit": "Výběr překračuje nastavený limit členů dávky.",
       "nonprofit_membership_batch_selection_invalid": "Opravte výběr členů dávky.",
-      "nonprofit_membership_batch_technical": "Technická chyba člena. Ostatní výsledky zůstávají zachovány."
+      "nonprofit_membership_batch_technical": "Technická chyba člena. Ostatní výsledky zůstávají zachovány.",
+      "nonprofit_membership_batch_cancelled": "Dávka byla zrušena dříve, než byl člen zpracován."
     },
     "ratesEmptyRequired": "Zatím tu není žádná sazba. Nejprve založte sazbu v číselníku.",
     "batchTitle": "Hromadný předpis příspěvků",
@@ -40507,7 +40508,6 @@
     "batchNeedNewPreview": "Souhlas již není platný. Připravte nový náhled a potvrďte jej novým souhlasem.",
     "batchAccountsCaption": "Souhrnný účetní zápis připravených předpisů",
     "batchPhase_cancelled": "Dávka zrušena",
-    "batchPhase_expired": "Souhlas vypršel",
     "batchPhase_seeding": "Příprava výběru členů",
     "batchRenewPreview": "Obnovit náhled dávky"
   },
