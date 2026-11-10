@@ -190,9 +190,10 @@ final class McpOAuth
         }
     }
 
-    public function listForUser(int $userId, ?int $supplierId = null, ?string $resource = null): array
+    /** @param list<string>|null $resources */
+    public function listForUser(int $userId, ?int $supplierId = null, ?array $resources = null): array
     {
-        return $this->listGrants($userId, $supplierId, $resource);
+        return $this->listGrants($userId, $supplierId, $resources);
     }
 
     /**
@@ -204,8 +205,10 @@ final class McpOAuth
         return $this->listGrants(null);
     }
 
-    private function listGrants(?int $userId, ?int $supplierId = null, ?string $resource = null): array
+    /** @param list<string>|null $resources */
+    private function listGrants(?int $userId, ?int $supplierId = null, ?array $resources = null): array
     {
+        $resources = $resources !== null ? array_values($resources) : null;
         $stmt = $this->db->pdo()->prepare(
             'SELECT g.id, c.client_name, g.supplier_id, s.display_name AS supplier_name,
                     s.company_name AS supplier_company, g.scope, g.created_at, g.expires_at,
@@ -218,10 +221,10 @@ final class McpOAuth
                LEFT JOIN users u ON u.id = g.user_id'
             . ($userId !== null ? ' WHERE g.user_id = ?' : '')
             . ($supplierId !== null ? ' AND g.supplier_id = ?' : '')
-            . ($resource !== null ? ' AND g.resource = ?' : '')
+            . ($resources !== null ? ' AND g.resource IN (' . self::placeholders($resources) . ')' : '')
             . ' ORDER BY g.revoked_at IS NOT NULL, g.created_at DESC, g.id DESC'
         );
-        $stmt->execute([...($userId !== null ? [$userId] : []), ...($supplierId !== null ? [$supplierId] : []), ...($resource !== null ? [$resource] : [])]);
+        $stmt->execute([...($userId !== null ? [$userId] : []), ...($supplierId !== null ? [$supplierId] : []), ...($resources ?? [])]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         foreach ($rows as &$row) {
             $row['id'] = (int) $row['id'];
@@ -235,9 +238,10 @@ final class McpOAuth
         return $rows;
     }
 
-    public function revokeForUser(int $grantId, int $userId, ?int $supplierId = null, ?string $resource = null): bool
+    /** @param list<string>|null $resources */
+    public function revokeForUser(int $grantId, int $userId, ?int $supplierId = null, ?array $resources = null): bool
     {
-        return $this->revokeGrant($grantId, $userId, $supplierId, $resource) !== null;
+        return $this->revokeGrant($grantId, $userId, $supplierId, $resources) !== null;
     }
 
     /**
@@ -249,8 +253,10 @@ final class McpOAuth
         return $this->revokeGrant($grantId, null);
     }
 
-    private function revokeGrant(int $grantId, ?int $userId, ?int $supplierId = null, ?string $resource = null): ?int
+    /** @param list<string>|null $resources */
+    private function revokeGrant(int $grantId, ?int $userId, ?int $supplierId = null, ?array $resources = null): ?int
     {
+        $resources = $resources !== null ? array_values($resources) : null;
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
@@ -258,9 +264,9 @@ final class McpOAuth
                 'SELECT access_token_id, user_id FROM mcp_oauth_grants WHERE id = ?'
                 . ($userId !== null ? ' AND user_id = ?' : '')
                 . ($supplierId !== null ? ' AND supplier_id = ?' : '')
-                . ($resource !== null ? ' AND resource = ?' : '') . ' FOR UPDATE'
+                . ($resources !== null ? ' AND resource IN (' . self::placeholders($resources) . ')' : '') . ' FOR UPDATE'
             );
-            $stmt->execute([$grantId, ...($userId !== null ? [$userId] : []), ...($supplierId !== null ? [$supplierId] : []), ...($resource !== null ? [$resource] : [])]);
+            $stmt->execute([$grantId, ...($userId !== null ? [$userId] : []), ...($supplierId !== null ? [$supplierId] : []), ...($resources ?? [])]);
             $grant = $stmt->fetch(PDO::FETCH_ASSOC);
             if ($grant === false) {
                 $pdo->rollBack();
@@ -287,6 +293,13 @@ final class McpOAuth
             'refresh_token' => $refresh,
             'scope' => $scope . ' offline_access',
         ];
+    }
+
+    /** @param list<string> $values */
+    private static function placeholders(array $values): string
+    {
+        // Prázdný výčet nesmí rozšířit výběr: IN (NULL) nevybere nic.
+        return $values === [] ? 'NULL' : implode(', ', array_fill(0, count($values), '?'));
     }
 
     private static function randomToken(string $prefix): string

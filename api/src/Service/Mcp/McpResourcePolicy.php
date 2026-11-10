@@ -54,7 +54,45 @@ final class McpResourcePolicy
             ? ['resource' => $resource, 'supplier_id' => (int) $supplier] : null;
     }
 
-    /** Stejná kontrola při vydání, obnově tokenu i při každém jeho použití. */
+    /**
+     * Adresa MCP, kterou klientská stránka nabídne pro firmu: aktivní klientská
+     * doména firmy, jinak kanonická adresa instalace.
+     */
+    public function clientEndpoint(int $supplierId): string
+    {
+        if ($supplierId > 0 && filter_var($this->config->get('domains.enabled', false), FILTER_VALIDATE_BOOL)) {
+            $statement = $this->db->pdo()->prepare(
+                "SELECT hostname FROM supplier_domains
+                  WHERE supplier_id = ? AND status = 'active' AND purpose IN ('portal', 'all')
+                  ORDER BY id LIMIT 1"
+            );
+            $statement->execute([$supplierId]);
+            $host = $statement->fetchColumn();
+            if (is_string($host) && $host !== '') {
+                $endpoint = 'https://' . strtolower($host) . '/mcp';
+                if ($this->resolve($endpoint) !== null) return $endpoint;
+            }
+        }
+        return $this->canonical();
+    }
+
+    /** Je výchozí role uživatele klientská? Typ role se per firmu změnit nesmí (PermissionResolver). */
+    public function isClientUser(int $userId): bool
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT r.role_type FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?'
+        );
+        $statement->execute([$userId]);
+        return $statement->fetchColumn() === 'client';
+    }
+
+    /**
+     * Stejná kontrola při vydání, obnově tokenu i při každém jeho použití.
+     *
+     * Kanonická adresa: interní role mají připojení napříč firmami a práva se
+     * kontrolují při každém volání API. Klientská role dostane připojení jen pro
+     * jednu firmu a stejně jako na vlastní doméně se ověřuje členství a profile.mcp.
+     */
     public function allowsGrant(string $resource, int $userId, ?int $supplierId, string $scope, ?string $issuedAuthMethod = null): bool
     {
         // Grant z přihlášení, které vynucený poskytovatel identity nepřipouští,
@@ -62,9 +100,13 @@ final class McpResourcePolicy
         if (!$this->loginPolicy->authMethodAllowed($issuedAuthMethod)) return false;
         $target = $this->resolve($resource);
         if ($target === null) return false;
-        // Dosavadní canonical připojení mohou být i bez vazby na jedinou firmu.
-        if ($target['supplier_id'] === null) return true;
-        if ($target['supplier_id'] !== $supplierId) return false;
+        if ($target['supplier_id'] === null) {
+            if (!$this->isClientUser($userId)) return true;
+            // Klientské připojení bez vazby na firmu se nevydá ani neobnoví.
+            if ($supplierId === null || $supplierId < 1) return false;
+        } elseif ($target['supplier_id'] !== $supplierId) {
+            return false;
+        }
         $statement = $this->db->pdo()->prepare(
             'SELECT u.id, u.role_id, r.role_type, r.system_key FROM users u JOIN roles r ON r.id=u.role_id
              JOIN user_suppliers us ON us.user_id=u.id AND us.supplier_id=?
