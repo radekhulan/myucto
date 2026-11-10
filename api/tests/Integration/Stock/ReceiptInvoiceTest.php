@@ -585,6 +585,27 @@ final class ReceiptInvoiceTest extends StockTestCase
         self::assertSame(0, (int) $links->fetchColumn());
     }
 
+    public function testCardRateMissingInRateListIsRefusedNotZero(): void
+    {
+        $sid = $this->createSupplier();
+        $wh = $this->warehouse($sid);
+        $item = $this->pricedItem($sid, 'RCP-RATE');
+        $receipt = $this->postedReceipt($sid, $wh, [['stock_item_id' => $item, 'qty' => '1.000']]);
+        $missingRate = (int) $this->db->pdo()->query('SELECT COALESCE(MAX(id), 0) + 1000 FROM vat_rates')->fetchColumn();
+        $pdo = $this->db->pdo();
+        $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            $pdo->prepare('UPDATE stock_items SET vat_rate_id = ? WHERE id = ?')->execute([$missingRate, $item]);
+        } finally {
+            $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+        }
+
+        $this->assertError($this->create($sid, $receipt, ['client_id' => $this->client($sid)]), 422, 'stock_item_vat_missing');
+        $count = $pdo->prepare('SELECT COUNT(*) FROM invoices WHERE supplier_id = ?');
+        $count->execute([$sid]);
+        self::assertSame(0, (int) $count->fetchColumn());
+    }
+
     private function foreignClient(int $supplierId, string $iso2, ?string $vatId, bool $reverseCharge): int
     {
         $client = $this->client($supplierId, 'Zahraniční ' . $iso2);

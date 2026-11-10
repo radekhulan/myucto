@@ -7,6 +7,7 @@ import { stockApi, type ReceiptInvoiceCreated, type ReceiptSalesInvoice, type St
 import { apiErrorMessage } from '@/api/errors'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
+import { formInput } from '@/components/ui/formStyles'
 import Modal from '@/components/ui/Modal.vue'
 
 /**
@@ -148,7 +149,7 @@ onMounted(async () => {
         </div>
         <div v-if="priceLevels.length > 0">
           <label for="receipt-invoice-level" class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.receipt_invoice.price_level') }}</label>
-          <select id="receipt-invoice-level" v-model="priceLevelId" class="w-full h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm">
+          <select id="receipt-invoice-level" v-model="priceLevelId" :class="formInput">
             <option :value="null">{{ t('stock.receipt_invoice.price_level_client') }}</option>
             <option v-for="l in priceLevels" :key="l.id" :value="l.id">{{ l.name }}</option>
           </select>

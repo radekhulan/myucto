@@ -105,6 +105,7 @@ final class ReceiptInvoiceService
         $cardRates = $this->cardVatRates($supplierId, array_column($lines, 'stock_item_id'));
         $ratePercents = $this->invoices->vatRateMap();
         $taken = $this->heldByOtherDrafts($supplierId, $documentId);
+        [$lineAllocations, $stock] = $this->receiptStock($supplierId, $lines, (int) $doc['warehouse_id']);
         $items = [];
         $ossNotes = [];
         $foreignDomesticLines = [];
@@ -117,7 +118,10 @@ final class ReceiptInvoiceService
                 if ($cardRate === null) {
                     throw new StockException('stock_item_vat_missing', 'Karta ' . $line['sku'] . ' nemá sazbu DPH, doplňte ji na kartě.', 422, ['line_id' => $line['id']]);
                 }
-                $plan = $this->ossPlanner->planIssuedItem($supplierId, $client, (float) ($ratePercents[$cardRate] ?? 0.0), (string) $line['unit'], $today, $reverseCharge);
+                if (!isset($ratePercents[$cardRate])) {
+                    throw new StockException('stock_item_vat_missing', 'Sazba DPH karty ' . $line['sku'] . ' v číselníku sazeb chybí, opravte ji na kartě.', 422, ['line_id' => $line['id'], 'vat_rate_id' => $cardRate]);
+                }
+                $plan = $this->ossPlanner->planIssuedItem($supplierId, $client, (float) $ratePercents[$cardRate], (string) $line['unit'], $today, $reverseCharge);
                 if ($plan->isRejected()) {
                     throw new StockException('invoice_tax_review_required', $plan->errorMessage() ?? 'Daňové zařazení vyžaduje kontrolu.', 422, ['line_id' => $line['id']]);
                 }
@@ -129,7 +133,7 @@ final class ReceiptInvoiceService
                     $foreignDomesticLines[] = ['line_id' => $line['id'], 'line_no' => $line['line_no'], 'sku' => $line['sku']];
                 }
             }
-            [$identities, $missing] = $this->availableIdentities($supplierId, $line, (int) $doc['warehouse_id'], $taken);
+            [$identities, $missing] = self::availableIdentities($line, $lineAllocations[(int) $line['id']] ?? [], $stock, $taken);
             if ($missing !== []) {
                 $unavailable[] = ['line_id' => $line['id'], 'line_no' => $line['line_no'], 'sku' => $line['sku'], 'units' => $missing];
             }
@@ -293,32 +297,60 @@ final class ReceiptInvoiceService
     }
 
     /**
+     * Kusy sledovaných řádků příjemky a jejich zásoba ve skladu příjemky, pro všechny řádky
+     * najednou.
+     *
+     * @param list<array<string,mixed>> $lines
+     * @return array{0: array<int,list<array<string,mixed>>>, 1: array<int,array<string,int>>} řádek => alokace, karta => klíč kusu (malými písmeny) => zásoba v tisícinách
+     */
+    private function receiptStock(int $supplierId, array $lines, int $warehouseId): array
+    {
+        $tracked = array_values(array_filter($lines, static fn (array $l): bool => $l['tracking_mode'] !== 'none'));
+        if ($tracked === []) {
+            return [[], []];
+        }
+        // Převzatý doklad nese kusy jen v alokacích, ne ve vstupu řádku.
+        $withoutInput = array_map(
+            static fn (array $l): int => (int) $l['id'],
+            array_values(array_filter($tracked, static fn (array $l): bool => !$l['tracking_allocations'])),
+        );
+        $stored = $withoutInput === [] ? [] : $this->tracking->canonicalAllocationsForLines($supplierId, $withoutInput, 'in');
+        $allocations = [];
+        $keysByItem = [];
+        foreach ($tracked as $line) {
+            $lineAllocations = $line['tracking_allocations'] ?: ($stored[(int) $line['id']] ?? []);
+            $allocations[(int) $line['id']] = $lineAllocations;
+            foreach ($lineAllocations as $allocation) {
+                $keysByItem[(int) $line['stock_item_id']][] = self::trackingKey($allocation);
+            }
+        }
+        return [$allocations, $this->trackingUnits->stockByItemKeys($supplierId, $warehouseId, $keysByItem)];
+    }
+
+    /**
      * Sériová čísla a šarže řádku příjemky ve tvaru výběru na faktuře, jen v množství, které
      * je pořád na skladě příjemky. Bez umístění: výdej ho dohledá podle aktuální zásoby kusu
      * ({@see InvoiceItemTracking}).
      *
      * @param array<string,mixed> $line
+     * @param list<array<string,mixed>> $allocations kusy řádku
+     * @param array<int,array<string,int>> $stock karta => klíč kusu (malými písmeny) => zásoba v tisícinách
      * @param array<string,int> $taken množství v tisícinách, které už drží jiné koncepty a dřívější řádky
      * @return array{0: list<array<string,mixed>>, 1: list<array<string,mixed>>} výběr a nedostupné kusy
      */
-    private function availableIdentities(int $supplierId, array $line, int $warehouseId, array &$taken): array
+    private static function availableIdentities(array $line, array $allocations, array $stock, array &$taken): array
     {
         if ($line['tracking_mode'] === 'none') {
             return [[], []];
         }
         $itemId = (int) $line['stock_item_id'];
-        // Převzatý doklad nese kusy jen v alokacích, ne ve vstupu řádku.
-        $allocations = $line['tracking_allocations'] ?: $this->tracking->canonicalAllocationsForLine($supplierId, (int) $line['id'], 'in');
         $identities = [];
         $missing = [];
         foreach ($allocations as $allocation) {
-            $key = self::trackingKey($allocation);
+            $key = mb_strtolower(self::trackingKey($allocation));
             $requestedT = StockValuation::qtyToT((string) $allocation['quantity']);
-            $stockT = array_sum(array_map(
-                static fn (array $row): int => StockValuation::qtyToT($row['quantity']),
-                $this->trackingUnits->stockByKeys($supplierId, $itemId, $warehouseId, [$key]),
-            ));
-            $heldKey = $itemId . '|' . mb_strtolower($key);
+            $stockT = $stock[$itemId][$key] ?? 0;
+            $heldKey = $itemId . '|' . $key;
             $availableT = max(0, $stockT - ($taken[$heldKey] ?? 0));
             $usedT = min($requestedT, $availableT);
             $taken[$heldKey] = ($taken[$heldKey] ?? 0) + $usedT;

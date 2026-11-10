@@ -16192,7 +16192,9 @@
       "title": "Sklad",
       "empty": "Žádné skladové doklady.",
       "issued_hint": "Výdejka byla vytvořena automaticky při vystavení.",
-      "retry": "Zkusit znovu"
+      "retry": "Zkusit znovu",
+      "issues_failed": "Výdejky a vratky se nepodařilo načíst: {error}",
+      "receipts_failed": "Zdrojové příjemky se nepodařilo načíst: {error}"
     },
     "replenishment": {
       "title": "Doplnění zásob",
