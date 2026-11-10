@@ -1684,6 +1684,7 @@ final class RecurringGeneratorTest extends TestCase
             $container->get(\MyInvoice\Service\Oss\OssItemDeriver::class),
             $container->get(\MyInvoice\Repository\ClientRepository::class),
             $container->get(\MyInvoice\Service\Invoice\InvoicePaymentService::class),
+            $container->get(\MyInvoice\Service\Invoice\InvoiceIssueTaxGate::class),
         );
 
         $tplId = $this->createPeriodTemplate(
@@ -1729,6 +1730,7 @@ final class RecurringGeneratorTest extends TestCase
             $container->get(\MyInvoice\Service\Oss\OssItemDeriver::class),
             $container->get(\MyInvoice\Repository\ClientRepository::class),
             $container->get(\MyInvoice\Service\Invoice\InvoicePaymentService::class),
+            $container->get(\MyInvoice\Service\Invoice\InvoiceIssueTaxGate::class),
         );
 
         // auto_issue=true, auto_send_email=false → větev issueOnlyWithoutSend()

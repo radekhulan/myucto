@@ -116,6 +116,7 @@ final class RecurringManualScheduleTest extends TestCase
                 AutoIssueAndSendService::class => $issueAndSend,
                 Connection::class => $db,
                 InvoicePaymentService::class => $payments,
+                \MyInvoice\Service\Invoice\InvoiceIssueTaxGate::class => $services->get(\MyInvoice\Service\Invoice\InvoiceIssueTaxGate::class),
                 RecurringTemplateRepository::class => $repo,
                 InvoiceRepository::class => $invoices,
                 RecurringPriceListService::class => $priceList,

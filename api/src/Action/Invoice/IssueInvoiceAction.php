@@ -195,6 +195,12 @@ final class IssueInvoiceAction
             return Json::error($response, $rejected['code'], $rejected['message'], 422);
         }
 
+        // Drobný zákazník bez adresy (#310): jen zjednodušený doklad a jen do limitu § 30.
+        // Před obecnou kontrolou limitu, ať odmítnutí nabídne doplnění karty.
+        if (($rejected = $this->taxGate->simplifiedOnlyClientRejection($invoice)) !== null) {
+            return Json::error($response, $rejected['code'], $rejected['message'], $rejected['status']);
+        }
+
         // Koncový zákazník bez údajů smí být odběratelem jen zjednodušeného dokladu (§ 30).
         // Běžný daňový doklad musí nést jméno a adresu odběratele (§ 29 odst. 1 písm. c).
         if (($rejected = $this->taxGate->walkInRejection($invoice)) !== null) {
