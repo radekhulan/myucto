@@ -50,15 +50,23 @@ function cancelSearchTimer() {
 const search = ref(''), filterYear = ref(appIsoDate().slice(0,4)), titleKey = ref('')
 const paymentStatus = ref<NonNullable<MembershipListFilters['payment_status']>>('all')
 const appliedFilters = ref<MembershipListFilters>({search:'',year:Number(filterYear.value),title_key:'',payment_status:'all'})
-function applyFilters(syncUrl = true) {
-  cancelSearchTimer()
-  if (batchLocked.value) {pendingFormFilters = true; return}
+/** Filtry z formuláře, nebo null s chybou, když rok a titul neurčují období. */
+function formFilters(): MembershipListFilters | null {
   if (!String(filterYear.value).trim() && paymentStatus.value !== 'all') {
     hydrating = true; filterYear.value = appIsoDate().slice(0,4); hydrating = false
   }
   const year = String(filterYear.value).trim(), title = titleKey.value.trim()
-  if ((!year && !title) || (year && (!/^[0-9]{4}$/.test(year) || Number(year)<1900 || Number(year)>9998))) {error.value=t('nonprofitMembership.listNeedPeriod');return}
-  const next = {search:search.value.trim(),year:year ? Number(year) : null,title_key:title,payment_status:paymentStatus.value}
+  if ((!year && !title) || (year && (!/^[0-9]{4}$/.test(year) || Number(year)<1900 || Number(year)>9998))) {error.value=t('nonprofitMembership.listNeedPeriod');return null}
+  return {search:search.value.trim(),year:year ? Number(year) : null,title_key:title,payment_status:paymentStatus.value}
+}
+function applyFilters(syncUrl = true) {
+  cancelSearchTimer()
+  if (batchLocked.value) {pendingFormFilters = true; return}
+  const next = formFilters()
+  if (!next) return
+  // Tituly závisí na roku; volání bez změny roku je díky deduplikaci v loadTitles levné.
+  void loadTitles()
+  const year = next.year === null ? '' : String(next.year), title = next.title_key
   if (JSON.stringify(next) === JSON.stringify(appliedFilters.value)) {
     // Opakování načtení stejných filtrů musí znovu ověřit výběr, nikoli jej zahodit.
     if (error.value && !loading.value) void load()
@@ -72,7 +80,9 @@ function applyFilters(syncUrl = true) {
 }
 const checkedMembers = ref<number[]>([]), batchOpen = ref(false), batchLocked = ref(false)
 const detailVersion = ref(0)
-function batchChanged() { dataVersion.value++; detailVersion.value++; void load() }
+// Uložená dávka nebo předpis v detailu mohou založit nový titul, proto se obnoví i výběr titulů.
+function batchChanged() { dataVersion.value++; detailVersion.value++; void load(); void loadTitles(true) }
+function memberChanged() { dataVersion.value++; void load(); void loadTitles(true) }
 function checkMember(id: number, event: Event) {
   if (!props.canManage || batchLocked.value || loading.value) return
   selectionNotice.value=''
@@ -152,6 +162,17 @@ async function reloadAll() {
   await Promise.all([load(), loadPeriods(), loadTitles(true)])
 }
 
+/** Obnova nejdřív ověří formulář: neplatný rok nesmí tiše načíst data podle starých filtrů. */
+function reloadMembers() {
+  if (batchLocked.value) { void reloadAll(); return }
+  const next = formFilters()
+  if (!next) return
+  if (JSON.stringify(next) !== JSON.stringify(appliedFilters.value)) {
+    applyFilters(); void loadPeriods(); void loadTitles(true); return
+  }
+  void reloadAll()
+}
+
 function chooseClient(client: Client | null) {
   clientLabel.value = client ? membershipMemberLabel(client) : ''
 }
@@ -205,7 +226,7 @@ onActivated(() => {
 
 const actions = computed<ActionItem[]>(() => [
   { key: 'batch-open', label: t('nonprofitMembership.batchTitle'), icon: 'plus', variant: 'primary', show: props.canManage, disabled: batchLocked.value || loading.value || !!error.value, run: () => { batchOpen.value = true } },
-  { key: 'reload-members', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value, run: () => { void reloadAll() } },
+  { key: 'reload-members', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value, run: reloadMembers },
 ])
 const createActions = computed<ActionItem[]>(() => [
   { key: 'create-member', label: t('nonprofitMembership.createMember'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: creating.value || !clientId.value || !numberValid.value, disabledReason: t('nonprofitMembership.createNeedsInput'), run: () => { void create() } },
@@ -247,7 +268,7 @@ function clearFilter(key?: string) {
   if (!key || key === 'status') paymentStatus.value = 'all'
   if (!key || key === 'year') filterYear.value = titleKey.value ? '' : appIsoDate().slice(0,4)
   hydrating = false
-  applyFilters(); void loadTitles()
+  applyFilters()
 }
 function hydrateFilters() {
   if (!route) return
@@ -272,14 +293,14 @@ watch(search, () => {
 watch(filterYear, () => {
   if (hydrating) return
   cancelSearchTimer()
-  searchTimeout = setTimeout(() => {searchTimeout = null; if (alive) {applyFilters(); void loadTitles()}}, 300)
+  searchTimeout = setTimeout(() => {searchTimeout = null; if (alive) applyFilters()}, 300)
 }, {flush: 'sync'})
 watch([titleKey, paymentStatus], () => {if (!hydrating) applyFilters()}, {flush: 'sync'})
 watch(() => route?.query, () => {
   cancelSearchTimer()
   // Navigace má přednost před rozepsaným hledáním; během dávky ji použijeme až po odemčení.
   if (batchLocked.value) {pendingRouteFilters = true; return}
-  hydrateFilters(); applyFilters(false); void loadTitles()
+  hydrateFilters(); applyFilters(false)
 })
 watch(batchLocked, locked => {
   if (locked) {
@@ -288,7 +309,7 @@ watch(batchLocked, locked => {
   }
   if (pendingRouteFilters) {
     pendingRouteFilters = false; pendingFormFilters = false
-    hydrateFilters(); applyFilters(false); void loadTitles()
+    hydrateFilters(); applyFilters(false)
   } else if (pendingFormFilters) {
     pendingFormFilters = false; applyFilters()
   }
@@ -341,10 +362,10 @@ watch(batchLocked, locked => {
       <MembershipMemberDetail
         :key="selected.id"
         :supplier="supplier" :can-manage="canManage" :member-id="selected.id" :label="selected.label" :periods="periods" :refresh-version="detailVersion"
-        @changed="dataVersion++; load()" @close="closeMember()"
+        @changed="memberChanged" @close="closeMember()"
       />
     </div>
-    <section class="min-w-0 space-y-3" data-section="members">
+    <section class="min-w-0 space-y-3" data-section="members" :aria-busy="loading ? 'true' : 'false'">
       <h2 tabindex="-1" class="font-semibold focus:outline-none" data-focus="members-heading">{{ t('nonprofitMembership.members') }}</h2>
       <FilterBar :active-count="filterChips.length" :chips="filterChips" data-section="member-filters" @clear="clearFilter" @clear-all="clearFilter()">
         <template #primary><label :class="formLabel">{{ t('nonprofitMembership.listSearch') }}<input v-model="search" :class="field" :disabled="batchLocked" maxlength="160" data-field="member-search" /></label></template>
@@ -360,7 +381,7 @@ watch(batchLocked, locked => {
         </button>
       </div>
 
-      <p v-if="loading && !members.length" role="status" class="text-sm text-neutral-500" data-section="members-loading">{{ t('common.loading') }}</p>
+      <p v-if="loading" role="status" class="text-sm text-neutral-500" data-section="members-loading">{{ t('common.loading') }}</p>
       <div v-else-if="!members.length && !loading && !error" class="space-y-2 text-sm text-neutral-500" data-section="members-empty">
         <p>{{ t(appliedFilters.search || appliedFilters.title_key || appliedFilters.payment_status !== 'all' ? 'nonprofitMembership.listNoResults' : 'nonprofitMembership.membersEmpty') }}</p>
         <ol v-if="!appliedFilters.search && !appliedFilters.title_key && appliedFilters.payment_status === 'all'" class="list-decimal space-y-1 pl-5" data-section="members-steps">

@@ -495,7 +495,10 @@ describe('Membership workspace', () => {
     api.members.mockReturnValueOnce(new Promise<MemberPage>(r => {resolve = r}))
     await w.get('[data-action="reload-members"]').trigger('click');await flushPromises()
     expect(w.findAll('[data-section="member-row"]')).toHaveLength(3)
+    expect(w.find('[data-section="members-loading"]').exists()).toBe(true)
+    expect(w.get('[data-section="members"]').attributes('aria-busy')).toBe('true')
     resolve(page([row(1)]));await flushPromises()
+    expect(w.get('[data-section="members"]').attributes('aria-busy')).toBe('false')
     expect(w.findAll('[data-section="member-row"]')).toHaveLength(1)
     w.unmount()
   })
@@ -513,5 +516,62 @@ describe('Membership workspace', () => {
     await retry[0].trigger('click');await flushPromises()
     expect(w.find('[data-section="titles-error"]').exists()).toBe(false)
     w.unmount()
+  })
+
+  it('loads titles for the applied year even when search typing cancels the year timer', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-year"]').setValue('2025')
+      await vi.advanceTimersByTimeAsync(100)
+      await w.get('[data-field="member-search"]').setValue('Synthetic')
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2025,search:'Synthetic'}))
+      expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('loads titles for a year typed before a batch lock once the batch unlocks', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-year"]').setValue('2025')
+      w.findComponent(MembershipBatchFlow).vm.$emit('lock', true);await flushPromises()
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(api.titles).not.toHaveBeenCalledWith(5,2025,undefined)
+      w.findComponent(MembershipBatchFlow).vm.$emit('lock', false);await flushPromises()
+      expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('reloads titles after a saved batch or a change in member detail', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    api.titles.mockResolvedValue({items: ['SYNTHETIC','SYNTHETIC-NEW'], next_after_title_key: null})
+    const before=api.titles.mock.calls.length
+    w.findComponent(MembershipBatchFlow).vm.$emit('changed');await flushPromises()
+    expect(api.titles).toHaveBeenCalledTimes(before+1)
+    expect(w.get('[data-field="member-title"]').findAll('option').map(o => o.text())).toContain('SYNTHETIC-NEW')
+    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
+    w.findComponent(Detail).vm.$emit('changed');await flushPromises()
+    expect(api.titles).toHaveBeenCalledTimes(before+2)
+    w.unmount()
+  })
+
+  it('keeps the year validation error when reloading with an invalid year', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-year"]').setValue('202')
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(w.get('[data-section="workspace-error"]').text()).toBe(cs.nonprofitMembership.listNeedPeriod)
+      const calls=api.members.mock.calls.length
+      await w.get('[data-action="reload-members"]').trigger('click');await flushPromises()
+      expect(api.members).toHaveBeenCalledTimes(calls)
+      expect(w.get('[data-section="workspace-error"]').text()).toBe(cs.nonprofitMembership.listNeedPeriod)
+    } finally { vi.useRealTimers(); w.unmount() }
   })
 })
