@@ -396,6 +396,17 @@ onMounted(async () => {
       stockApi.getItem(itemId).then(item => { salesFilters.item_label = item.sku }).catch(() => {})
     }
   }
+  // Odkaz ze seznamu úloh na pozadí: /stock/reports?tab=trend&trend_job=… (hotový výsledek se jen načte, nepřepočítává)
+  const trendJobId = Number(route.query.trend_job)
+  if (Number.isSafeInteger(trendJobId) && trendJobId > 0) {
+    tab.value = 'trend'
+    trendJobStarted.value = false
+    try {
+      trendJob.value = await catalogJobsApi.getValueTrendStatus(trendJobId)
+      await pollTrend()
+    } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
+    return
+  }
   const jobId = Number(route.query.valuation_job)
   if (Number.isSafeInteger(jobId) && jobId > 0) {
     tab.value = 'valuation'
@@ -753,7 +764,7 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
       <p v-if="trendReport?.computed_at" class="text-xs text-neutral-500 mb-2" data-test="trend-computed">{{ t('stock.reports.trend_computed', { at: formatDateTime(trendReport.computed_at) }) }}</p>
       <div v-if="trendReport" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="overflow-x-auto">
-          <table class="w-full text-sm" data-test="trend-table">
+          <table class="w-full text-sm table-sticky-first" data-test="trend-table">
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
               <tr>
                 <th class="px-3 py-2 text-left font-medium">{{ t('stock.reports.col_category') }}</th>
@@ -762,13 +773,13 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="g in trendReport.groups" :key="`${g.kind}-${g.category_id ?? ''}`">
-                <td class="px-3 py-2" :class="g.kind === 'category' ? '' : 'text-neutral-600'">{{ trendGroupLabel(g) }}</td>
+                <td class="trend-sticky px-3 py-2" :class="g.kind === 'category' ? '' : 'text-neutral-600'">{{ trendGroupLabel(g) }}</td>
                 <td v-for="d in trendReport.dates" :key="d" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(Number(g.values[d])) }}</td>
               </tr>
             </tbody>
             <tfoot class="bg-neutral-50 font-medium">
               <tr>
-                <td class="px-3 py-2">{{ t('stock.reports.total') }}</td>
+                <td class="sticky left-0 z-[1] bg-neutral-50 px-3 py-2">{{ t('stock.reports.total') }}</td>
                 <td v-for="d in trendReport.dates" :key="d" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(Number(trendReport.totals[d].value_total)) }}</td>
               </tr>
             </tfoot>
@@ -846,3 +857,14 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
     </template>
   </div>
 </template>
+
+<style scoped>
+/* Zebra a hover řádku jsou poloprůhledné; zafixovaný první sloupec je proto kreslí přes neprůhlednou plochu,
+   jinak by pod ním při posunu doprava prosvítaly částky. */
+.trend-sticky {
+  --trend-tint: transparent;
+  background: linear-gradient(var(--trend-tint), var(--trend-tint)), var(--color-surface);
+}
+tr:nth-child(even) > .trend-sticky { --trend-tint: color-mix(in oklab, var(--color-neutral-500) 4%, transparent); }
+tr:hover > .trend-sticky { --trend-tint: color-mix(in oklab, var(--color-primary-500) 7%, transparent); }
+</style>

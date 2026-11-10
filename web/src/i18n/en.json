@@ -16583,6 +16583,7 @@
         "missing_purchase_cost": "Missing purchase cost"
       },
       "open_valuation": "Open valuation",
+      "open_value_trend": "Open value trend",
       "run_detail": "Run details",
       "attempts": "Attempts",
       "last_update": "Last update",
@@ -17078,6 +17079,7 @@
       "empty_value": "No value",
       "apply_ready": "Apply ready rows ({count})",
       "no_ready_rows": "The preview contains no changes ready to apply.",
+      "preview_categories": "Categories",
       "fields": {
         "id": "Item ID",
         "external_id": "External ID",

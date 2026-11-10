@@ -16583,6 +16583,7 @@
         "missing_purchase_cost": "Chybí nákupní cena"
       },
       "open_valuation": "Otevřít ocenění",
+      "open_value_trend": "Otevřít vývoj hodnoty",
       "run_detail": "Podrobnosti běhu",
       "attempts": "Počet pokusů",
       "last_update": "Poslední změna",
@@ -17078,6 +17079,7 @@
       "empty_value": "Bez hodnoty",
       "apply_ready": "Použít připravené řádky ({count})",
       "no_ready_rows": "Náhled neobsahuje žádné změny připravené k použití.",
+      "preview_categories": "Kategorie",
       "fields": {
         "id": "ID karty",
         "external_id": "Externí ID",

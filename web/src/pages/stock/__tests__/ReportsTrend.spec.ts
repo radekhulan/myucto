@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
   getValueTrend: vi.fn(),
   cancelValueTrend: vi.fn(),
   canWriteStock: true,
+  query: {} as Record<string, string>,
 }))
 
 vi.mock('@/api/stock', () => ({
@@ -32,7 +33,7 @@ vi.mock('@/composables/useTablePrefs', () => ({
 }))
 vi.mock('@/components/ui/buttonStyles', () => ({ ICONS: new Proxy({}, { get: () => 'M0 0' }), btnFilled: () => '', btnOutline: () => '' }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), RouterLink: { template: '<a><slot /></a>' } }))
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: m.query }), RouterLink: { template: '<a><slot /></a>' } }))
 
 import Reports from '../Reports.vue'
 
@@ -51,12 +52,28 @@ describe('Reports – vývoj hodnoty', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWriteStock = true
+    m.query = {}
     m.reportStatus.mockResolvedValue({ items: [], totals: { value_total: '0', count: 0 } })
     m.listWarehouses.mockResolvedValue([])
     m.listCategories.mockResolvedValue([{ id: 12, name: 'Typ zboží', path: '/12/', depth: 0, archived: false }])
     m.listAttributes.mockResolvedValue([])
     m.getValueTrendStatus.mockImplementation(async (id: number) => ({ id, status: 'completed' }))
     m.cancelValueTrend.mockResolvedValue({})
+  })
+
+  it('odkaz ze seznamu úloh načte hotový výsledek bez nového výpočtu', async () => {
+    m.query = { tab: 'trend', trend_job: '44' }
+    m.getValueTrend.mockImplementation(async (id: number) => report(id, '444'))
+    const wrapper = mount(Reports, { global: { stubs } })
+    await flushPromises()
+    expect(m.getValueTrendStatus).toHaveBeenCalledWith(44)
+    expect(m.getValueTrend).toHaveBeenCalledWith(44)
+    expect(m.createValueTrend).not.toHaveBeenCalled()
+    expect(m.reportStatus).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="trend-table"]').text()).toContain('444')
+    wrapper.unmount()
+    await flushPromises()
+    expect(m.cancelValueTrend).not.toHaveBeenCalled()
   })
 
   it('stará odpověď nepřepíše novější výsledek', async () => {

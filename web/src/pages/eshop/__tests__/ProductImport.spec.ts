@@ -313,6 +313,8 @@ describe('ProductImport', () => {
     expect(wrapper.text()).toContain('A - díly')
     expect(wrapper.text()).toContain('C - oblečení')
     expect(wrapper.text()).not.toContain('category_id')
+    expect(wrapper.text()).toContain('eshop.import2.preview_categories')
+    expect(wrapper.text()).not.toContain('eshop.import2.fields.categories')
 
     wrapper.unmount()
   })

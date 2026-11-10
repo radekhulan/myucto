@@ -346,6 +346,11 @@ function fieldLabel(field: string): string {
   return t(`eshop.import2.fields.${field === 'sale_price_without_vat' ? 'price' : field}`)
 }
 
+/** V náhledu změn se kategorie ukazují názvy, ne jako JSON ze sloupce souboru. */
+function previewFieldLabel(field: string): string {
+  return field === 'categories' ? t('eshop.import2.preview_categories') : fieldLabel(field)
+}
+
 function itemStatusLabel(status: string): string {
   return ITEM_STATUSES.has(status)
     ? t(`eshop.import2.status.${status}`)
@@ -1351,7 +1356,7 @@ onBeforeUnmount(() => {
                 :key="field"
                 class="grid gap-1 rounded-md bg-neutral-50 px-3 py-2 text-xs sm:grid-cols-[minmax(8rem,0.6fr)_minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center"
               >
-                <span class="font-medium text-neutral-700">{{ fieldLabel(field) }}</span>
+                <span class="font-medium text-neutral-700">{{ previewFieldLabel(field) }}</span>
                 <span class="break-all text-neutral-500">{{ displayFieldValue(field, item.before?.[field]) }}</span>
                 <span class="hidden text-neutral-400 sm:inline" aria-hidden="true">→</span>
                 <strong class="break-all text-neutral-900">{{ displayFieldValue(field, item.after?.[field]) }}</strong>
