@@ -166,16 +166,16 @@ const createActions = computed<ActionItem[]>(() => [
     <p v-if="error" role="alert" :class="errorBox" data-section="workspace-error">{{ error }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-600" data-section="workspace-notice">{{ notice }}</p>
     <ActionBar :actions="actions" />
-    <p v-if="canManage" class="text-sm text-neutral-500">{{ t('nonprofitMembership.batchSelectedCount', {count: checkedMembers.length}) }}</p>
+    <p v-if="canManage && members.length" class="text-sm text-neutral-500">{{ t('nonprofitMembership.batchSelectedCount', {count: checkedMembers.length}) }}</p>
     <MembershipBatchFlow v-if="batchOpen" :key="supplier" :supplier="supplier" :can-manage="canManage" :periods="periods" :selected-member-ids="checkedMembers"
       @changed="batchChanged" @lock="batchLocked = $event" @close="batchOpen = false" />
 
-    <details class="rounded-lg border bg-surface p-4" data-section="rates-management">
+    <details class="rounded-lg border border-neutral-200 bg-surface p-4" data-section="rates-management">
       <summary class="cursor-pointer font-semibold">{{ t('nonprofitMembership.ratesTitle') }}</summary>
-      <MembershipRates :key="supplier" :supplier="supplier" :can-manage="!!canManageRates" />
+      <MembershipRates :key="supplier" class="mt-3" :supplier="supplier" :can-manage="!!canManageRates" />
     </details>
 
-    <section v-if="canManage" class="space-y-3 rounded-lg border bg-surface p-4" data-section="create-member">
+    <section v-if="canManage" class="space-y-3 rounded-lg border border-neutral-200 bg-surface p-4" data-section="create-member">
       <h2 class="font-semibold">{{ t('nonprofitMembership.createTitle') }}</h2>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.createHelp') }}</p>
       <fieldset :disabled="creating" class="grid gap-3 sm:grid-cols-2">
@@ -214,7 +214,7 @@ const createActions = computed<ActionItem[]>(() => [
           <li v-for="(step, index) in tm('nonprofitMembership.firstSteps')" :key="index">{{ rt(step) }}</li>
         </ol>
       </div>
-      <div v-for="row in members" :key="row.id" :class="['flex flex-wrap items-center justify-between gap-3 rounded border bg-surface p-3', selected?.id === row.id ? 'border-primary-400 ring-1 ring-primary-300' : '']" data-section="member-row" :data-member="row.id" :aria-current="selected?.id === row.id ? 'true' : undefined">
+      <div v-for="row in members" :key="row.id" :class="['flex flex-wrap items-center justify-between gap-3 rounded border bg-surface p-3', selected?.id === row.id ? 'border-primary-400 ring-1 ring-primary-300' : 'border-neutral-200']" data-section="member-row" :data-member="row.id" :aria-current="selected?.id === row.id ? 'true' : undefined">
         <input v-if="canManage" type="checkbox" :checked="checkedMembers.includes(row.id)" :disabled="batchLocked || (checkedMembers.length >= 500 && !checkedMembers.includes(row.id))" :aria-label="t('nonprofitMembership.batchSelectMember', {name: labelOf(row)})" data-action="batch-check-member" @change="checkMember(row.id, $event)" />
         <div class="min-w-0 flex-1 space-y-1 text-sm">
           <p class="break-words font-medium">{{ row.member_number }} · {{ labelOf(row) }}</p>

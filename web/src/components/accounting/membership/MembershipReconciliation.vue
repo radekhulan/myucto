@@ -55,7 +55,7 @@ const actions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <details class="rounded-lg border bg-surface p-4" data-section="reconciliation">
+  <details class="rounded-lg border border-neutral-200 bg-surface p-4" data-section="reconciliation">
     <summary class="cursor-pointer font-semibold">{{ t('nonprofitMembership.reconcileTitle') }}</summary>
     <div class="mt-3 space-y-3">
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.reconcileHelp') }}</p>

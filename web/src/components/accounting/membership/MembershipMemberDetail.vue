@@ -119,7 +119,7 @@ const actions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <section class="space-y-5 rounded-lg border bg-surface p-4" data-section="member-detail">
+  <section class="space-y-5 rounded-lg border border-neutral-200 bg-surface p-4" data-section="member-detail">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h2 tabindex="-1" class="min-w-0 break-words text-lg font-semibold focus:outline-none" data-focus="member-heading">{{ identity ? `${identity.member_number} · ${label}` : label }}</h2>
       <ActionBar :actions="actions" />
@@ -144,7 +144,7 @@ const actions = computed<ActionItem[]>(() => [
     <div class="space-y-2" data-section="history">
       <h3 class="font-semibold">{{ t('nonprofitMembership.history') }}</h3>
       <p v-if="identity && !history.length" class="text-sm text-neutral-500">{{ t('nonprofitMembership.historyEmpty') }}</p>
-      <div v-for="revision in history" :key="revision.id" class="space-y-1 rounded border p-3 text-sm" data-section="history-row">
+      <div v-for="revision in history" :key="revision.id" class="space-y-1 rounded border border-neutral-200 p-3 text-sm" data-section="history-row">
         <div class="flex flex-wrap items-center gap-2">
           <span class="font-medium">#{{ revision.revision_no }}</span>
           <span :class="memberStatusBadge(revision.status)">{{ t(`nonprofitMembership.status_${revision.status}`) }}</span>
@@ -186,7 +186,7 @@ const actions = computed<ActionItem[]>(() => [
       <p v-if="unproven" class="text-sm text-warning-700" data-section="unproven-note">{{ t('nonprofitMembership.unprovenNote') }}</p>
       <p v-if="nextAfter !== null" class="text-sm text-neutral-500" data-section="partial-note">{{ t('nonprofitMembership.partialSummary') }}</p>
       <p v-if="identity && !claims.length && !loading" class="text-sm text-neutral-500">{{ t('nonprofitMembership.claimsEmpty') }}</p>
-      <div v-for="claim in claims" :key="claim.claim_id" class="grid gap-3 rounded border p-3 sm:grid-cols-[1fr_1fr_auto]" data-section="claim-row" :data-claim="claim.claim_id">
+      <div v-for="claim in claims" :key="claim.claim_id" class="grid gap-3 rounded border border-neutral-200 p-3 sm:grid-cols-[1fr_1fr_auto]" data-section="claim-row" :data-claim="claim.claim_id">
         <div class="min-w-0 space-y-1 text-sm">
           <p class="break-words font-medium">{{ claim.title_key }}</p>
           <p class="text-neutral-500" data-field="claim-period">{{ formatDateRange(claim.period_from, claim.period_to) }}</p>

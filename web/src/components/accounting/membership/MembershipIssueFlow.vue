@@ -393,7 +393,7 @@ const actions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border bg-surface p-4" data-section="issue-flow">
+  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" data-section="issue-flow">
     <h3 v-if="!batchMode" class="break-words font-semibold">{{ t('nonprofitMembership.issueTitle') }} · {{ member.member_number }} · {{ member.label }}</h3>
     <div ref="ratePicker"><MembershipRates :key="supplier" :supplier="supplier" :can-manage="false" selectable :allow-manual="!batchMode" :disabled="inputsLocked || !!pendingRate" @selected="applyRate" /></div>
     <div v-if="pendingRate" :class="warningBox" role="alert" data-section="rate-overwrite">
@@ -478,7 +478,7 @@ const actions = computed<ActionItem[]>(() => [
       </ul>
     </div>
     <ActionBar v-if="canManage && !commit.review.value" :actions="actions" />
-    <div v-if="commit.review.value && frozenRequest" class="space-y-3 rounded border p-3" data-section="issue-preview">
+    <div v-if="commit.review.value && frozenRequest" class="space-y-3 rounded border border-neutral-200 p-3" data-section="issue-preview">
       <h4 class="font-semibold">{{ t('nonprofitMembership.reviewTitle') }}</h4>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.advisory') }}</p>
       <dl class="grid gap-3 sm:grid-cols-3">

@@ -195,8 +195,7 @@ onBeforeUnmount(() => { alive = false; generation++; editorGeneration++; saveGen
 </script>
 
 <template>
-  <section class="space-y-3 rounded-lg border bg-surface p-4" data-section="membership-rates">
-    <h2 v-if="!selectable" class="font-semibold">{{ t('nonprofitMembership.ratesTitle') }}</h2>
+  <section class="space-y-3" data-section="membership-rates">
     <p v-if="!selectable" class="text-sm text-neutral-500">{{ t('nonprofitMembership.ratesHelp') }}</p>
     <p v-if="error" role="alert" :class="errorBox">{{ error }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-700">{{ notice }}</p>
@@ -209,7 +208,7 @@ onBeforeUnmount(() => { alive = false; generation++; editorGeneration++; saveGen
     <label v-if="!selectable" class="flex items-center gap-2 text-sm"><input v-model="includeInactive" type="checkbox" :disabled="saving" />{{ t('nonprofitMembership.rateShowInactive') }}</label>
     <p v-if="!loading && !items.length" class="text-sm text-neutral-500">{{ t(allowManual ? 'nonprofitMembership.ratesEmpty' : 'nonprofitMembership.ratesEmptyRequired') }}</p>
     <ActionBar :actions="actions" />
-    <form v-if="editing" ref="editor" class="space-y-3 border-t pt-3" data-section="rate-editor" @submit.prevent="save">
+    <form v-if="editing" ref="editor" class="space-y-3 border-t border-neutral-200 pt-3" data-section="rate-editor" @submit.prevent="save">
       <p v-if="editorLoading" role="status" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
       <p v-if="editorError" role="alert" :class="errorBox" data-section="rate-editor-error">{{ editorError }}</p>
       <p v-if="reloadEditorAcknowledgement" role="alert" class="text-sm text-warning-700">{{ t('nonprofitMembership.rateReloadWarning') }}</p>

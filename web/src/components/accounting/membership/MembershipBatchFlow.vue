@@ -219,7 +219,7 @@ onBeforeUnmount(() => {alive = false; epoch++; recentTicket++; dimensionsTicket+
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border bg-surface p-4" data-section="membership-batch">
+  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" data-section="membership-batch">
     <h2 class="font-semibold">{{ t('nonprofitMembership.batchTitle') }}</h2>
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.batchHelp') }}</p>
     <p v-if="error" role="alert" :class="errorBox" data-section="batch-error">{{ error }}</p>
@@ -255,7 +255,7 @@ onBeforeUnmount(() => {alive = false; epoch++; recentTicket++; dimensionsTicket+
       <ActionBar v-if="dimensionsError || !classificationVisible" :actions="[{key: 'batch-dimensions', label: t('nonprofitMembership.classificationRetry'), icon: 'cycle', run: () => {void loadDimensions()}}]" />
       <div class="overflow-x-auto"><table class="w-full text-sm" data-section="batch-accounts"><caption class="pb-2 text-left font-medium">{{ t('nonprofitMembership.batchAccountsCaption') }}</caption><thead><tr class="text-left text-neutral-500"><th class="px-3 py-2">{{ t('nonprofitMembership.side') }}</th><th class="px-3 py-2">{{ t('nonprofitMembership.account') }}</th><th class="px-3 py-2 text-right">{{ t('nonprofitMembership.amount') }}</th></tr></thead><tbody><tr v-for="row in detail.accounts" :key="row.side"><td class="px-3 py-2">{{ t(row.side === 'debit' ? 'nonprofitMembership.debit' : 'nonprofitMembership.credit') }}</td><td class="px-3 py-2">{{ row.account }}</td><td class="whitespace-nowrap px-3 py-2 text-right tabular-nums">{{ formatMoneyMinor(Number(row.amount_cents)) }}</td></tr></tbody></table></div>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.batchExistingHelp') }}</p>
-      <div v-for="row in detail.items" :key="row.member_id" class="flex flex-wrap items-start justify-between gap-3 rounded border p-3 text-sm" data-section="batch-member">
+      <div v-for="row in detail.items" :key="row.member_id" class="flex flex-wrap items-start justify-between gap-3 rounded border border-neutral-200 p-3 text-sm" data-section="batch-member">
         <div class="min-w-0"><p class="break-words font-medium">{{ row.member_number }} · {{ membershipMemberLabel(row) }}</p><p :class="row.status === 'rejected' ? 'text-danger-600' : row.status === 'created' ? 'text-success-700' : 'text-neutral-500'">{{ t(`nonprofitMembership.batchStatus_${row.status}`) }}</p><p v-if="row.error_code || row.error_message" class="break-words text-neutral-500">{{ membershipError({t, te}, row.error_code ?? '', row.error_message ?? '') }}</p></div>
         <span class="whitespace-nowrap tabular-nums">{{ formatMoneyMinor(row.amount_cents) }}</span>
       </div>
@@ -275,11 +275,11 @@ onBeforeUnmount(() => {alive = false; epoch++; recentTicket++; dimensionsTicket+
       </div>
     </template>
     <ActionBar :actions="actions" />
-    <details class="space-y-3 rounded border p-3" data-section="batch-recent">
+    <details class="space-y-3 rounded border border-neutral-200 p-3" data-section="batch-recent">
       <summary class="cursor-pointer font-medium">{{ t('nonprofitMembership.batchRecent') }}</summary>
       <p v-if="recentError" role="alert" :class="errorBox">{{ recentError }}</p>
       <ActionBar :actions="recentActions" />
-      <div v-for="row in recent" :key="row.id" class="space-y-1 border-t pt-3 text-sm">
+      <div v-for="row in recent" :key="row.id" class="space-y-1 border-t border-neutral-200 pt-3 text-sm">
         <p>{{ row.title_key }} · {{ formatDateRange(row.period_from, row.period_to) }} · {{ formatDateTime(row.created_at) }}</p>
         <p class="text-neutral-500">{{ t(`nonprofitMembership.batchPhase_${row.phase}`) }} · {{ t('nonprofitMembership.batchMemberCount', {count: row.member_count}) }}</p>
         <ActionBar :actions="[{key: 'batch-open', label: t('nonprofitMembership.batchOpen'), icon: 'eye', variant: 'primary', disabled: busy, run: () => {void open(row.id)}}]" />
