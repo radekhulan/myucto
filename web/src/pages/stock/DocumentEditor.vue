@@ -9,10 +9,10 @@ import {
 } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { formatUnitPrice, statusLabel } from '@/composables/useFormat'
+import { formatUnitPrice, statusBadgeClass, statusLabel } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import { codebooksApi, type Unit } from '@/api/codebooks'
@@ -564,14 +564,20 @@ onMounted(async () => {
               <p v-if="!isReceipt && row.stock_item_id" class="text-xs mt-0.5 text-neutral-400">
                 {{ t('stock.documents.col_available') }}: {{ rowAvailability(row) }}
               </p>
-              <p v-if="row.remember_seller_code && !readOnly" class="text-xs mt-0.5 text-neutral-500">
-                {{ t('stock.receipt.remember_line_note') }}
-                <button type="button" class="underline cursor-pointer hover:text-neutral-700" @click="row.remember_seller_code = false">{{ t('stock.receipt.remember_line_cancel') }}</button>
-              </p>
-              <p v-if="row.fill_intrastat && !readOnly" class="text-xs mt-0.5 text-neutral-500">
-                {{ t('stock.receipt.intrastat_line_note') }}
-                <button type="button" class="underline cursor-pointer hover:text-neutral-700" @click="row.fill_intrastat = false">{{ t('stock.receipt.intrastat_line_cancel') }}</button>
-              </p>
+              <div v-if="row.remember_seller_code && !readOnly" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
+                <span>{{ t('stock.receipt.remember_line_note') }}</span>
+                <button type="button" :class="btnOutlineSm('neutral')" @click="row.remember_seller_code = false">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                  {{ t('stock.receipt.remember_line_cancel') }}
+                </button>
+              </div>
+              <div v-if="row.fill_intrastat && !readOnly" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
+                <span>{{ t('stock.receipt.intrastat_line_note') }}</span>
+                <button type="button" :class="btnOutlineSm('neutral')" @click="row.fill_intrastat = false">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                  {{ t('stock.receipt.intrastat_line_cancel') }}
+                </button>
+              </div>
             </div>
             <div class="sm:col-span-2">
               <label class="block text-xs font-medium text-neutral-500 mb-1 sm:hidden">{{ t('stock.documents.col_qty') }}</label>
@@ -697,7 +703,7 @@ onMounted(async () => {
               <span>{{ i.client_name }}</span>
               <span class="text-xs text-neutral-500">{{ t('stock.receipt_invoice.lines', { lines: i.line_nos.join(', ') }) }}</span>
             </span>
-            <span class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-600">{{ statusLabel(i.status ?? '') }}</span>
+            <span class="text-xs px-2 py-0.5 rounded" :class="statusBadgeClass(i.status ?? '')">{{ statusLabel(i.status ?? '') }}</span>
           </RouterLink>
         </div>
       </div>

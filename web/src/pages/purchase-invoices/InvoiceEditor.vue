@@ -70,6 +70,7 @@ import PaymentCurrencyBlock from '@/components/purchase/PaymentCurrencyBlock.vue
 import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
+import { formControl, formInput } from '@/components/ui/formStyles'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useSupplierSwitch } from '@/composables/useSupplierSwitch'
@@ -1019,6 +1020,7 @@ const headerDiffersFromRozpis = computed(() => headerDiffersFromAllocations(head
 function itemDetailsFilled(it: PurchaseInvoiceItem): boolean {
   return (showItemAccount.value && !!it.expense_account_code) || itemClassDiffers(it) || itemVatConflict(it)
     || (editorPosting.enabled.value && (!!it.counter_account_code || !!it.posting_rule_key))
+    || !!it.seller_item_code?.trim() || !!it.item_ean?.trim()
 }
 
 // ─── ZAÚČTOVÁNÍ UŽ PŘI ZADÁNÍ (předkontace a protiúčet řádku, náhled, Uložit a zaúčtovat) ───
@@ -2453,13 +2455,12 @@ useWindowTitle(
                   <label class="flex items-center gap-2 text-xs text-neutral-500">
                     <span class="shrink-0">{{ t('purchase_invoice.items.seller_item_code') }}</span>
                     <input v-model="it.seller_item_code" type="text" maxlength="80" data-test="item-seller-code"
-                      class="w-44 h-8 px-2 border border-neutral-300 rounded bg-surface text-sm text-neutral-900 font-mono" />
+                      :class="[formControl, 'w-44 h-8! text-neutral-900 font-mono']" />
                   </label>
                   <label class="flex items-center gap-2 text-xs text-neutral-500">
                     <span class="shrink-0">{{ t('purchase_invoice.items.item_ean') }}</span>
                     <input v-model="it.item_ean" type="text" inputmode="numeric" maxlength="14" data-test="item-ean"
-                      class="w-40 h-8 px-2 border rounded bg-surface text-sm text-neutral-900 font-mono"
-                      :class="itemEanInvalid(it) ? 'border-warning-500' : 'border-neutral-300'" />
+                      :class="[formControl, 'w-40 h-8! text-neutral-900 font-mono', { 'border-warning-500!': itemEanInvalid(it) }]" />
                   </label>
                   <span v-if="itemEanInvalid(it)" class="text-xs text-warning-700" data-test="item-ean-invalid">{{ t('purchase_invoice.items.item_ean_invalid') }}</span>
                 </div>
@@ -2621,13 +2622,12 @@ useWindowTitle(
                 <label class="mt-2 block text-xs text-neutral-600">
                   {{ t('purchase_invoice.items.seller_item_code') }}
                   <input v-model="it.seller_item_code" type="text" maxlength="80"
-                    class="mt-1 w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm font-mono" />
+                    :class="[formInput, 'mt-1 h-10! font-mono']" />
                 </label>
                 <label class="mt-2 block text-xs text-neutral-600">
                   {{ t('purchase_invoice.items.item_ean') }}
                   <input v-model="it.item_ean" type="text" inputmode="numeric" maxlength="14"
-                    class="mt-1 w-full h-10 px-2 border rounded bg-surface text-sm font-mono"
-                    :class="itemEanInvalid(it) ? 'border-warning-500' : 'border-neutral-300'" />
+                    :class="[formInput, 'mt-1 h-10! font-mono', { 'border-warning-500!': itemEanInvalid(it) }]" />
                 </label>
                 <p v-if="itemEanInvalid(it)" class="mt-1 text-xs text-warning-700">{{ t('purchase_invoice.items.item_ean_invalid') }}</p>
               </template>

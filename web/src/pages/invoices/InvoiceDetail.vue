@@ -35,6 +35,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { pdfFileName, savePdfToCompanyFolder } from '@/composables/useCompanyPdfSave'
 import { printPdf } from '@/composables/usePrintPdf'
 import InsufficientStockDialog from '@/components/stock/InsufficientStockDialog.vue'
+import InvoiceStockCard from '@/components/stock/InvoiceStockCard.vue'
 import { insufficientStockItems, type InsufficientStockItem } from '@/components/stock/insufficientStock'
 import { useHotkey } from '@/composables/useHotkey'
 import { useToast } from '@/composables/useToast'
@@ -43,7 +44,7 @@ import BillingRecap from '@/components/work-reports/BillingRecap.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { offsetRoute } from '@/components/accounting/offsetLink'
-import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
@@ -399,8 +400,10 @@ async function loadStockDocuments(invoiceId = Number(route.params.id), generatio
     // Výpadek jednoho seznamu nesmí schovat ten druhý.
     stockDocuments.value = docs.status === 'fulfilled' ? docs.value : []
     sourceReceipts.value = receipts.status === 'fulfilled' ? receipts.value : []
-    const failed = [docs, receipts].find(r => r.status === 'rejected') as PromiseRejectedResult | undefined
-    if (failed) stockDocumentsError.value = apiErrorMessage(failed.reason)
+    stockDocumentsError.value = [
+      docs.status === 'rejected' ? t('stock.invoice_card.issues_failed', { error: apiErrorMessage(docs.reason) }) : '',
+      receipts.status === 'rejected' ? t('stock.invoice_card.receipts_failed', { error: apiErrorMessage(receipts.reason) }) : '',
+    ].filter(Boolean).join(' ')
   } catch (e) {
     if (generation !== loadGeneration) return
     stockDocuments.value = []
@@ -3843,41 +3846,9 @@ useWindowRefresh(async () => {
 
 
       <!-- Karta Sklad (Epic SKLAD) — výdejky/vratky vzniklé z této faktury -->
-      <div v-if="invoice && stockIntegrationVisible"
-        class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mt-4">
-        <div class="px-5 py-3 border-b border-neutral-200">
-          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.invoice_card.title') }}</h3>
-        </div>
-        <div v-if="stockDocumentsLoading" class="px-5 py-4 text-sm text-neutral-500">
-          {{ t('common.loading') }}
-        </div>
-        <div v-else-if="stockDocumentsError" class="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-          <span class="text-sm text-danger-600">{{ stockDocumentsError }}</span>
-          <button type="button" :class="btnOutline('neutral')" class="!h-8 !px-2.5 !text-xs"
-            @click="loadStockDocuments()">
-            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" />
-            </svg>
-            {{ t('stock.invoice_card.retry') }}
-          </button>
-        </div>
-        <div v-else-if="stockCardDocuments.length === 0" class="px-5 py-4 text-sm text-neutral-500">
-          {{ t('stock.invoice_card.empty') }}
-        </div>
-        <div v-else class="divide-y divide-neutral-100">
-          <RouterLink v-for="d in stockCardDocuments" :key="d.id" :to="`/stock/documents/${d.id}`"
-            class="flex items-center justify-between gap-2 px-5 py-2.5 text-sm hover:bg-neutral-50">
-            <span class="flex items-center gap-2">
-              <span class="font-mono text-xs text-neutral-500">{{ d.doc_number || '—' }}</span>
-              <span>{{ t(`stock.doc_type.${d.doc_type}`) }}</span>
-            </span>
-            <span class="text-xs px-2 py-0.5 rounded font-medium"
-              :class="d.status === 'posted' ? 'bg-success-50 text-success-600' : d.status === 'reversed' ? 'bg-danger-50 text-danger-500' : 'bg-neutral-100 text-neutral-600'">
-              {{ t(`stock.doc_status.${d.status}`) }}
-            </span>
-          </RouterLink>
-        </div>
-      </div>
+      <InvoiceStockCard v-if="invoice && stockIntegrationVisible"
+        :documents="stockCardDocuments" :loading="stockDocumentsLoading" :error="stockDocumentsError"
+        @retry="loadStockDocuments()" />
 
       <!-- Work report modal (jen pro draft + workflow projekty) -->
       <WorkReportModal v-if="invoice"

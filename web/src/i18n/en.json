@@ -16192,7 +16192,9 @@
       "title": "Stock",
       "empty": "No stock documents.",
       "issued_hint": "The goods issue was created automatically on posting.",
-      "retry": "Try again"
+      "retry": "Try again",
+      "issues_failed": "Could not load goods issues and returns: {error}",
+      "receipts_failed": "Could not load source receipts: {error}"
     },
     "replenishment": {
       "title": "Replenishment",

@@ -243,6 +243,18 @@ describe('InvoiceEditor.vue — návrh časového rozlišení z textu položky',
     expect((selects[1].element as HTMLSelectElement).value).toBe('131')
   })
 
+  it('kód zboží dodavatele nebo EAN označí detail položky jako vyplněný', async () => {
+    const wrapper = await mountEditor([
+      { ...item(1, 'Šroub'), seller_item_code: 'SR-10' },
+      { ...item(2, 'Matice'), item_ean: '4006381333931' },
+      item(3, 'Podložka'),
+    ])
+    const toggles = wrapper.findAll('[data-test="item-details-toggle"]')
+    expect(toggles[0].classes()).toContain('bg-primary-50')
+    expect(toggles[1].classes()).toContain('bg-primary-50')
+    expect(toggles[2].classes()).not.toContain('bg-primary-50')
+  })
+
   it('změní členění DPH jen u vybrané položky (issue #150)', async () => {
     m.vatClassifications.mockResolvedValueOnce([
       { id: 1, code: '23', label: 'Pořízení zboží z EU', supplier_id: null, is_reverse_charge: true, dphdp3_line: 3 },
