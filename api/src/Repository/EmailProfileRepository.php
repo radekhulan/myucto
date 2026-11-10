@@ -81,7 +81,7 @@ final class EmailProfileRepository
             if ($this->secretTargetValue($data[$field]) === $this->secretTargetValue($current[$field] ?? null)) continue;
 
             throw new \InvalidArgumentException(
-                'Měníš server, port nebo přihlašovací jméno — pole ' . $passwordField . ' je proto nutné vyplnit znovu.'
+                'Měníte server, port nebo přihlašovací jméno, pole ' . $passwordField . ' je proto nutné vyplnit znovu.'
             );
         }
     }
