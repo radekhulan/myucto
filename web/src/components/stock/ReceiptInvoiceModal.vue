@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 import { eshopApi, type PriceLevel } from '@/api/eshop'
 import { stockApi, type ReceiptInvoiceCreated, type ReceiptSalesInvoice, type StockDocument } from '@/api/stock'
 import { apiErrorMessage } from '@/api/errors'
-import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import { formInput } from '@/components/ui/formStyles'
 import Modal from '@/components/ui/Modal.vue'
@@ -103,19 +103,6 @@ async function submit() {
   }
 }
 
-const actions = computed<ActionItem[]>(() => created.value
-  ? [{ key: 'open-draft', label: t('stock.receipt_invoice.open_draft'), icon: 'doc', tier: 'primary', variant: 'primary', run: () => { void openDraft(created.value!.id) } }]
-  : [
-      { key: 'cancel', label: t('common.cancel'), tier: 'secondary', variant: 'neutral', run: () => emit('close') },
-      {
-        key: 'create-invoice',
-        label: selectedHasInvoiced.value ? t('stock.receipt_invoice.submit_anyway') : t('stock.receipt_invoice.submit'),
-        icon: 'doc', tier: 'primary', variant: selectedHasInvoiced.value ? 'warning' : 'primary',
-        loading: saving.value, disabled: saving.value || clientId.value === null || selected.value.size === 0,
-        run: () => { void submit() },
-      },
-    ])
-
 onMounted(async () => {
   try { priceLevels.value = (await eshopApi.listPriceLevels()).filter(l => l.is_active) } catch { priceLevels.value = [] }
 })
@@ -177,6 +164,24 @@ onMounted(async () => {
       <div v-if="error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</div>
     </div>
 
-    <template #footer><ActionBar :actions="actions" /></template>
+    <template #footer>
+      <div class="flex flex-wrap justify-end gap-2">
+        <button v-if="created" type="button" data-test="open-draft" :class="btnFilled('primary')" class="whitespace-nowrap" @click="openDraft(created.id)">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+          {{ t('stock.receipt_invoice.open_draft') }}
+        </button>
+        <template v-else>
+          <button type="button" data-test="cancel" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="emit('close')">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button type="button" data-test="create-invoice" :disabled="saving || clientId === null || selected.size === 0"
+            :class="btnFilled(selectedHasInvoiced ? 'warning' : 'primary')" class="whitespace-nowrap" @click="submit">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+            {{ selectedHasInvoiced ? t('stock.receipt_invoice.submit_anyway') : t('stock.receipt_invoice.submit') }}
+          </button>
+        </template>
+      </div>
+    </template>
   </Modal>
 </template>

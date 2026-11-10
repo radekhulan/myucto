@@ -30,10 +30,6 @@ function mountModal(document: StockDocument = baseDoc) {
       plugins: [createI18n({ legacy: false, locale: 'cs', missingWarn: false, fallbackWarn: false, messages: { cs: {} } })],
       stubs: {
         Modal: { props: ['title'], template: '<div><slot /><slot name="footer" /></div>' },
-        ActionBar: {
-          props: ['actions'],
-          template: '<button v-for="a in actions" :key="a.key" :data-test="a.key" :disabled="a.disabled" @click="a.run()">{{ a.label }}</button>',
-        },
         ClientSearchSelect: {
           props: ['modelValue'],
           emits: ['update:modelValue'],
