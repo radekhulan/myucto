@@ -126,7 +126,7 @@ final class AttendancePersonAggregator
             if (AttendanceMeaning::isIdentity($meaning)) {
                 $text = $this->identityText($cell, $meaning);
                 if ($text !== '' && (!isset($identity[$meaning]) || $priority < $identity[$meaning]['priority'])) {
-                    $identity[$meaning] = ['value' => $text, 'priority' => $priority];
+                    $identity[$meaning] = ['value' => $text, 'priority' => $priority, 'source' => $sheet->source($row, $column)];
                 }
                 continue;
             }
@@ -148,6 +148,7 @@ final class AttendancePersonAggregator
             'personal_number' => $personalNumber,
             'identity' => array_map(static fn (array $item): string => $item['value'], $identity),
             'identity_priority' => array_map(static fn (array $item): array => $item['priority'], $identity),
+            'identity_source' => array_map(static fn (array $item): string => $item['source'], $identity),
             'values' => $values,
             'sheet_id' => $sheet->id(),
             'row' => $row,
@@ -166,6 +167,7 @@ final class AttendancePersonAggregator
 
         $identity = [];
         $identityPriority = [];
+        $identitySource = [];
         $sources = [];
         $candidates = [];
         $seenRows = [];
@@ -177,6 +179,7 @@ final class AttendancePersonAggregator
                 if (!isset($identity[$meaning])) {
                     $identity[$meaning] = $value;
                     $identityPriority[$meaning] = $priority;
+                    $identitySource[$meaning] = $observation['identity_source'][$meaning];
                     continue;
                 }
                 if ($meaning === 'birth_number'
@@ -187,6 +190,7 @@ final class AttendancePersonAggregator
                 if ($priority < $identityPriority[$meaning]) {
                     $identity[$meaning] = $value;
                     $identityPriority[$meaning] = $priority;
+                    $identitySource[$meaning] = $observation['identity_source'][$meaning];
                 }
             }
             foreach ($observation['values'] as $value) {
@@ -319,8 +323,21 @@ final class AttendancePersonAggregator
                 <=> array_search($b['meaning'], AttendanceMeaning::HOURS, true),
         );
 
-        $birthNumber = isset($identity['_birth_conflict']) ? null : ($identity['birth_number'] ?? null);
         $birthDate = self::isoDate((string) ($identity['birth_date'] ?? ''));
+        $birthRead = AttendanceBirthNumber::read(
+            isset($identity['_birth_conflict']) ? null : ($identity['birth_number'] ?? null),
+            $birthDate,
+        );
+        $birthNumber = $birthRead['value'];
+        array_push($warnings, ...$birthRead['warnings']);
+        $workedDays = null;
+        $workedDaysText = trim((string) ($identity['worked_days'] ?? ''));
+        if ($workedDaysText !== '') {
+            $workedDays = self::workedDays($workedDaysText);
+            if ($workedDays === null) {
+                $warnings[] = "Odpracované dny „{$workedDaysText}“ nejde přečíst. Zapište celé číslo 0 až 31; počet dnů se nepoužil.";
+            }
+        }
         $insurerCode = trim((string) ($identity['health_insurer_code'] ?? ''));
         $person = [
             'key' => $key,
@@ -364,6 +381,8 @@ final class AttendancePersonAggregator
             }
         }
 
+        $person['worked_days'] = $workedDays;
+
         return $person + [
             'sources' => $sources,
             'match' => null,
@@ -374,6 +393,8 @@ final class AttendancePersonAggregator
             'warnings' => array_values(array_unique($warnings)),
             '_name_key' => $nameKey,
             '_birth_number' => $birthNumber,
+            '_birth_number_error' => $birthRead['error'],
+            '_worked_days_source' => $workedDays === null ? null : ($identitySource['worked_days'] ?? null),
             '_birth_date' => $birthDate,
             '_health_insurer_code' => $insurerCode === '' ? null : $insurerCode,
             '_bank_account' => $bankAccount === '' ? null : $bankAccount,
@@ -513,6 +534,18 @@ final class AttendancePersonAggregator
         }
 
         return trim((string) preg_replace('/\s+/u', ' ', $cell->textValue()));
+    }
+
+    /** Počet odpracovaných dnů v měsíci: celé číslo 0 až 31, jinak null. */
+    public static function workedDays(string $value): ?int
+    {
+        $value = str_replace(',', '.', trim($value));
+        if (preg_match('/^\d{1,2}(?:\.0+)?$/D', $value) !== 1) {
+            return null;
+        }
+        $days = (int) $value;
+
+        return $days <= 31 ? $days : null;
     }
 
     /** Pořadové číslo dne z Excelu (1900 systém) jako YYYY-MM-DD. */

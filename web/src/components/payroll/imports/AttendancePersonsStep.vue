@@ -16,6 +16,7 @@ import { BTN_DISABLED_NOTE, btnFilled, btnIconSm, btnOutlineSm, disabledTitle, I
 import {
   buildPersonsPayload,
   effectiveEmploymentId,
+  existingPersonNeedsConfirmation,
   firstDayOfPeriod,
   personCanBeCreated,
   personCreateDetails,
@@ -50,13 +51,15 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 type Filter = 'all' | 'attention' | AttendanceMatchStatus
-const FILTERS: Filter[] = ['all', 'attention', 'linked', 'matched', 'ambiguous', 'not_found']
+const FILTERS: Filter[] = ['all', 'attention', 'linked', 'matched', 'ambiguous', 'conflict', 'not_found']
 const RELATION_TYPES: RegistrationRelationType[] = ['employment', 'small_scale_employment', 'dpp', 'dpc', 'statutory_body']
 
 const filter = ref<Filter>('all')
 const createKeys = ref<string[]>([])
 const drafts = ref<Record<string, PersonDraft>>({})
 const newAgreementKeys = ref<string[]>([])
+/** Volba u shody jména a data narození: tatáž osoba z evidence, nebo nová karta. */
+const existingChoices = ref<Record<string, 'existing' | 'new'>>({})
 const createForm = ref({
   relation_type: 'employment' as RegistrationRelationType,
   weekly_hours: '40',
@@ -68,7 +71,7 @@ watch(() => props.period, value => { createForm.value.planned_start_on = firstDa
 
 const optionById = computed(() => new Map(props.options.map(option => [option.employment_id, option])))
 const counts = computed(() => {
-  const result: Record<Filter, number> = { all: 0, attention: 0, linked: 0, matched: 0, ambiguous: 0, not_found: 0 }
+  const result: Record<Filter, number> = { all: 0, attention: 0, linked: 0, matched: 0, ambiguous: 0, conflict: 0, not_found: 0 }
   for (const person of props.persons) {
     result.all += 1
     result[person.match.status] += 1
@@ -94,6 +97,10 @@ const createBlockedReason = computed(() => {
   if (createPersons.value.some(person => draftFor(person).last_name.trim() === '' || draftFor(person).first_name.trim() === '')) {
     return t('payroll_imports.attendance.persons.create_names_missing')
   }
+  const unconfirmed = createPersons.value.find(person => existingPersonNeedsConfirmation(person) && !existingChoices.value[person.key])
+  if (unconfirmed?.existing_person) {
+    return t('payroll_imports.attendance.persons.existing_person_confirm.title', { name: unconfirmed.existing_person.employee_name })
+  }
   return ''
 })
 
@@ -105,6 +112,7 @@ watch(() => props.persons, persons => {
 
 function needsAttention(person: AttendancePerson): boolean {
   return effectiveEmploymentId(person, props.manualLinks) === null || person.match.status === 'ambiguous'
+    || person.match.status === 'conflict'
 }
 
 function canBeCreated(person: AttendancePerson): boolean {
@@ -116,6 +124,7 @@ function statusClass(status: AttendanceMatchStatus): string {
     linked: 'bg-success-50 text-success-700',
     matched: 'bg-primary-50 text-primary-700',
     ambiguous: 'bg-warning-50 text-warning-700',
+    conflict: 'bg-danger-100 text-danger-700',
     not_found: 'bg-danger-50 text-danger-600',
   }[status]
 }
@@ -203,7 +212,7 @@ function setNewAgreement(person: AttendancePerson, createNew: boolean) {
 
 function submitCreate() {
   if (createBlockedReason.value !== '') return
-  emit('create', buildPersonsPayload(createPersons.value, drafts.value, createForm.value, undefined, new Set(newAgreementKeys.value)))
+  emit('create', buildPersonsPayload(createPersons.value, drafts.value, createForm.value, undefined, new Set(newAgreementKeys.value), existingChoices.value))
 }
 
 const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 bg-surface px-2 text-sm disabled:bg-neutral-100'
@@ -384,7 +393,19 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
               ? t('payroll_imports.attendance.persons.relation_origin_common')
               : t('payroll_imports.attendance.persons.relation_origin_source') }})</span>
           </p>
-          <p v-if="person.existing_person" class="order-last w-full text-[11px] font-medium text-payroll-700" data-testid="attendance-create-existing">
+          <fieldset v-if="person.existing_person && existingPersonNeedsConfirmation(person)" class="order-last w-full rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs" data-testid="attendance-existing-confirm">
+            <legend class="sr-only">{{ t('payroll_imports.attendance.persons.existing_person_confirm.title', { name: person.existing_person.employee_name }) }}</legend>
+            <p class="font-medium text-warning-700">{{ t('payroll_imports.attendance.persons.existing_person_confirm.title', { name: person.existing_person.employee_name }) }}</p>
+            <p class="mt-0.5 text-neutral-600">{{ t('payroll_imports.attendance.persons.existing_person_confirm.hint') }}</p>
+            <div class="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+              <label v-for="choice in (['existing', 'new'] as const)" :key="choice" class="inline-flex items-center gap-1.5 text-neutral-800">
+                <input type="radio" :name="`existing-person-${person.key}`" :checked="existingChoices[person.key] === choice" :disabled="disabled"
+                  :data-testid="`attendance-existing-confirm-${choice}`" @change="existingChoices = { ...existingChoices, [person.key]: choice }">
+                {{ t(`payroll_imports.attendance.persons.existing_person_confirm.${choice}`) }}
+              </label>
+            </div>
+          </fieldset>
+          <p v-else-if="person.existing_person" class="order-last w-full text-[11px] font-medium text-payroll-700" data-testid="attendance-create-existing">
             {{ t('payroll_imports.attendance.persons.existing_person', { name: person.existing_person.employee_name }) }}
           </p>
           <p v-if="person.registration?.length" class="order-last w-full text-[11px] text-neutral-600" data-testid="attendance-create-registration">

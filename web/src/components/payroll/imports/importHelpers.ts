@@ -385,7 +385,7 @@ export const ATTENDANCE_MEANING_GROUPS: { key: string; meanings: AttendanceMeani
   {
     key: 'work',
     meanings: [
-      'worked_hours', 'overtime_hours', 'night_hours', 'weekend_hours', 'holiday_work_hours',
+      'worked_hours', 'worked_days', 'overtime_hours', 'night_hours', 'weekend_hours', 'holiday_work_hours',
       'afternoon_hours', 'fund_hours',
     ],
   },
@@ -416,7 +416,7 @@ export const AUTO_COMPONENT_CODE = '*'
 const TEXT_MEANINGS = new Set<AttendanceMeaning>([
   'person_name', 'personal_number', 'birth_number', 'birth_date', 'health_insurer_code', 'relation_label',
   'department', 'cost_center', 'position', 'start_end_note', 'start_date', 'monthly_wage',
-  'hourly_rate', 'end_date', 'bank_account', ...REGISTRATION_MEANINGS,
+  'hourly_rate', 'end_date', 'bank_account', 'worked_days', ...REGISTRATION_MEANINGS,
 ])
 const MONEY_MEANINGS = new Set<AttendanceMeaning>([
   'component', 'net_meal_deduction', 'net_other_deduction', 'reference_gross', 'reference_net',
@@ -854,6 +854,11 @@ export function pruneManualLinks(
  * nová osoba by z ní udělala duplicitu, vybírá se proto vztah. Sdílí ji krok
  * Osoby (checkbox u řádku) i krok Souhrn (nabídka založit chybějící osoby).
  */
+/** Osoba z evidence nalezená jen podle jména a data narození — založení čeká na potvrzení. */
+export function existingPersonNeedsConfirmation(person: AttendancePerson): boolean {
+  return person.existing_person?.requires_confirmation === true
+}
+
 export function personCanBeCreated(person: AttendancePerson, manual: ManualLinks): boolean {
   // Chyba řádku (neplatné rodné číslo) založení zastaví: server by osobu odmítl.
   return person.match.status === 'not_found' && effectiveEmploymentId(person, manual) === null
@@ -871,7 +876,8 @@ export function personHasIdentifier(person: AttendancePerson): boolean {
  * karta by byla duplicitou. Takové osoby zůstanou k ruční volbě v kroku Osoby.
  */
 export function autoCreatablePersons(persons: AttendancePerson[], manual: ManualLinks): AttendancePerson[] {
-  const creatable = persons.filter(person => personCanBeCreated(person, manual))
+  // Shodu jména a data narození s osobou z evidence potvrzuje člověk v kroku Osoby.
+  const creatable = persons.filter(person => personCanBeCreated(person, manual) && !existingPersonNeedsConfirmation(person))
   return persons.some(personHasIdentifier) ? creatable.filter(personHasIdentifier) : creatable
 }
 
@@ -986,6 +992,7 @@ export function buildPersonsPayload(
   defaults: PersonCreateDefaults,
   relationTypeFor?: (person: AttendancePerson) => RegistrationRelationType,
   newAgreementKeys: ReadonlySet<string> = new Set(),
+  existingChoices: Readonly<Record<string, 'existing' | 'new'>> = {},
 ): AttendancePersonCreate[] {
   return persons.map(person => {
     const draft = drafts[person.key] ?? splitDisplayName(person.display_name)
@@ -1005,6 +1012,9 @@ export function buildPersonsPayload(
       ...(open === null ? {} : newAgreementKeys.has(person.key)
         ? { create_new_agreement: true }
         : { use_open_agreement: open.employment_id }),
+      ...(!existingPersonNeedsConfirmation(person) || !person.existing_person ? {} : existingChoices[person.key] === 'existing'
+        ? { confirm_existing_person: person.existing_person.employee_id }
+        : existingChoices[person.key] === 'new' ? { create_new_person: true } : {}),
       weekly_hours: weekly === '' ? null : weekly.replace(',', '.'),
       monthly_gross: Number.isFinite(wage) && wage > 0 ? Math.round(wage) : null,
       // Nástup z poznámky v podkladech je přesnější než jednotný den pro celou dávku.

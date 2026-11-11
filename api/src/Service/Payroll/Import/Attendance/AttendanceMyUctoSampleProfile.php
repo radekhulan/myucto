@@ -24,7 +24,7 @@ final class AttendanceMyUctoSampleProfile
 {
     public const KEY = 'myucto';
     public const NAME = 'Vzor MyÚčto';
-    public const VERSION = 4;
+    public const VERSION = 5;
 
     public const SHEET = 'Podklady';
     public const GUIDE_SHEET = 'Návod';
@@ -33,6 +33,7 @@ final class AttendanceMyUctoSampleProfile
     public const FORMAT_DATE = 'date';
     public const FORMAT_HOURS = 'hours';
     public const FORMAT_AMOUNT = 'amount';
+    public const FORMAT_DAYS = 'days';
 
     /**
      * Hodinová mzda podle podkladů je deklarovaná složka (stejná jako ve Vzoru
@@ -163,6 +164,9 @@ final class AttendanceMyUctoSampleProfile
             $column('Odpracováno (hod)', ['odpracováno*'], 'worked_hours', self::FORMAT_HOURS,
                 'Všechny odpracované hodiny v měsíci včetně noci, víkendu, svátku a přesčasu.',
                 [42.5, 60]),
+            $column('Odpracované dny', ['odpracované dny*', 'počet odpracovaných dnů*', 'odpracovaných dnů*'], 'worked_days', self::FORMAT_DAYS,
+                'Počet kalendářních dnů v měsíci, kdy osoba pracovala (celé číslo). Zapíše se do souhrnu pracovního měsíce: rozhoduje o skutečném průměrném výdělku (aspoň 21 dnů za čtvrtletí, § 355 ZP) a vyplní počet odpracovaných dnů v JMHZ.',
+                [6, 8]),
             $column('z toho noc (hod)', ['z toho noc*'], 'night_hours', self::FORMAT_HOURS,
                 'Část odpracovaných hodin v noci (22 až 6 hodin).',
                 [8, null]),

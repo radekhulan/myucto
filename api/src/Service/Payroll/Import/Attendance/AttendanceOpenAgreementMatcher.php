@@ -6,10 +6,7 @@ namespace MyInvoice\Service\Payroll\Import\Attendance;
 
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollImportLinkRepository;
-use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\Employment\PayrollOpenAgreements;
-use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
-use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 
 /**
  * Osoby, které import nenašel mezi vztahy v období a nabídne je založit.
@@ -20,7 +17,11 @@ use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
  * osoba hledá v celé evidenci podle uložené vazby, rodného čísla a osobního
  * čísla (`existing_person`); založení jí pak přidá jen nový vztah. Kdo má
  * otevřenou DPP, dostane i `open_agreement` ({@see PayrollOpenAgreements}),
- * u otevřené dohody se osoba hledá i podle jména.
+ * u otevřené dohody se osoba hledá i podle jména. Rodné číslo z podkladů má
+ * přednost a shoda podle vazby, osobního čísla nebo jména mu nesmí odporovat
+ * ({@see AttendancePersonMatcher::birthNumberDisagreement()}); rozpor
+ * s osobním číslem je `conflict`. Podklady bez rodného čísla dostanou shodu
+ * jména a data narození jen jako návrh k potvrzení (`requires_confirmation`).
  */
 final class AttendanceOpenAgreementMatcher
 {
@@ -28,7 +29,6 @@ final class AttendanceOpenAgreementMatcher
         private readonly PayrollOpenAgreements $openAgreements,
         private readonly PayrollAttendanceImportRepository $imports,
         private readonly PayrollImportLinkRepository $links,
-        private readonly PayrollSensitiveData $sensitive,
     ) {
     }
 
@@ -51,6 +51,14 @@ final class AttendanceOpenAgreementMatcher
         }
 
         $existing = $this->existingEmployees($supplierId, $persons, $wanted);
+        foreach ($existing as $index => $found) {
+            if (isset($found['conflict'])) {
+                $persons[$index]['match'] = ['conflict' => $found['conflict'], 'status' => 'conflict'] + $persons[$index]['match'];
+                $persons[$index]['errors'] = [...($persons[$index]['errors'] ?? []), $found['conflict']];
+                unset($existing[$index]);
+                $wanted = array_values(array_diff($wanted, [$index]));
+            }
+        }
         $summaries = $this->imports->employeeSummaries($supplierId, array_values(array_map(
             static fn (array $found): int => $found['employee_id'],
             $existing,
@@ -69,28 +77,38 @@ final class AttendanceOpenAgreementMatcher
                 $names[$key][$name['employee_id']] = true;
             }
         }
+        $holderFacts = $this->imports->identityFacts($supplierId, array_keys($byEmployee));
 
         foreach ($wanted as $index) {
             $person = $persons[$index];
             $employeeId = $existing[$index]['employee_id'] ?? null;
             if ($employeeId !== null && isset($summaries[$employeeId])) {
+                $confirm = $existing[$index]['matched_by'] === 'name_birth_date';
                 $person['existing_person'] = [
                     'employee_id' => $employeeId,
                     'employee_name' => $summaries[$employeeId]['employee_name'],
                     'matched_by' => $existing[$index]['matched_by'],
                     // Nová dohoda bez druhu v podkladech je stejného druhu jako poslední vztah osoby.
                     'relation_type' => $summaries[$employeeId]['relation_type'] ?? 'dpp',
+                    'requires_confirmation' => $confirm,
                 ];
             }
-            if (self::mayBeDpp($person)) {
+            if (self::mayBeDpp($person) && !($person['existing_person']['requires_confirmation'] ?? false)) {
                 $holder = $employeeId;
                 if ($holder === null) {
                     $byName = array_keys($names[(string) ($person['_name_key'] ?? '')] ?? []);
-                    $holder = count($byName) === 1 ? $byName[0] : null;
+                    $holder = count($byName) === 1
+                        && AttendancePersonMatcher::birthNumberDisagreement($person, (int) $byName[0], $holderFacts) === null
+                        ? $byName[0]
+                        : null;
                 }
                 $person = $this->withOpenAgreement($person, $holder === null ? [] : ($byEmployee[$holder] ?? []), $periodStart);
             }
-            if ($person['existing_person'] !== null && !($person['open_agreement']['reusable'] ?? false)) {
+            if ($person['existing_person']['requires_confirmation'] ?? false) {
+                $person['warnings'][] = "V evidenci je osoba {$person['existing_person']['employee_name']} se stejným jménem a datem narození. "
+                    . 'Potvrďte v kroku Osoby, že jde o ni: založení jí pak přidá novou dohodu a nová karta osoby nevznikne. '
+                    . 'Bez potvrzení ji import nezaloží.';
+            } elseif ($person['existing_person'] !== null && !($person['open_agreement']['reusable'] ?? false)) {
                 $person['warnings'][] = "Osoba {$person['existing_person']['employee_name']} je v evidenci, ale v období nemá platný "
                     . 'pracovní vztah. Založení jí přidá novou dohodu, nová karta osoby nevznikne.';
             }
@@ -132,57 +150,98 @@ final class AttendanceOpenAgreementMatcher
     }
 
     /**
-     * Osoba z evidence podle uložené vazby, rodného čísla a osobního čísla
-     * (v tomto pořadí). Víc kandidátů = žádná: za uživatele se nevybírá.
+     * Osoba z evidence podle rodného čísla, uložené vazby, osobního čísla
+     * (v tomto pořadí) a u podkladů bez rodného čísla podle jména a data
+     * narození. Víc kandidátů = žádná: za uživatele se nevybírá. Osobní číslo,
+     * které vede na osobu s jiným rodným číslem, je rozpor (`conflict`).
      *
      * @param list<array<string,mixed>> $persons
      * @param list<int> $indexes
-     * @return array<int,array{employee_id:int,matched_by:string}>
+     * @return array<int,array{employee_id:int,matched_by:string}|array{conflict:string}>
      */
     private function existingEmployees(int $supplierId, array $persons, array $indexes): array
     {
         $links = $this->links->all($supplierId, AttendanceMeaning::SOURCE_SYSTEM);
-        $hashes = [];
         $codes = [];
+        $birthDates = [];
         foreach ($indexes as $index) {
-            $birthNumber = $persons[$index]['_birth_number'] ?? null;
-            if (is_string($birthNumber) && trim($birthNumber) !== '') {
-                try {
-                    $hashes[$index] = $this->sensitive->lookupHash(
-                        CzechBirthNumber::normalize($birthNumber),
-                        PayrollSensitiveField::PERSONAL_IDENTIFIER,
-                        $supplierId,
-                    );
-                } catch (\InvalidArgumentException) {
-                    // Neplatné rodné číslo hlásí párování osob; tady se jen nepoužije.
-                }
-            }
-            $number = is_string($persons[$index]['personal_number'] ?? null) ? trim($persons[$index]['personal_number']) : '';
-            if ($number !== '') {
+            $person = $persons[$index];
+            $number = is_string($person['personal_number'] ?? null) ? trim($person['personal_number']) : '';
+            if ($number !== '' && !($person['_number_ambiguous'] ?? false)) {
                 $codes[$index] = $number;
             }
+            if (self::withoutBirthNumber($person) && is_string($person['_birth_date'] ?? null)) {
+                $birthDates[$index] = $person['_birth_date'];
+            }
         }
-        $found = $this->imports->employeesByIdentifiers($supplierId, array_values($hashes), array_values($codes));
+        $found = $this->imports->employeesByIdentifiers($supplierId, [], array_values($codes));
+        $byBirthDate = $this->imports->employeesByBirthDates($supplierId, array_values($birthDates));
+        $namesByEmployee = [];
+        foreach ($this->imports->personNames($supplierId, array_merge([], ...array_values($byBirthDate))) as $name) {
+            $namesByEmployee[$name['employee_id']][AttendanceText::personKey($name['name'])] = true;
+        }
+        $targets = [];
+        foreach ($indexes as $index) {
+            foreach ([
+                [PayrollImportLinkRepository::KIND_PERSONAL_NUMBER, (string) ($codes[$index] ?? '')],
+                [PayrollImportLinkRepository::KIND_NAME, (string) ($persons[$index]['_name_key'] ?? '')],
+            ] as [$kind, $key]) {
+                $link = $key === '' ? null : ($links[PayrollImportLinkRepository::key($kind, $key)] ?? null);
+                if ($link !== null) {
+                    $targets[] = (int) $link['employee_id'];
+                }
+            }
+            if (isset($codes[$index])) {
+                array_push($targets, ...($found['by_code'][mb_strtolower($codes[$index], 'UTF-8')] ?? []));
+            }
+        }
+        $facts = $this->imports->identityFacts($supplierId, $targets);
 
         $result = [];
         foreach ($indexes as $index) {
             $person = $persons[$index];
+            $birthEmployees = is_string($person['_birth_hash'] ?? null) ? ($person['_birth_employees'] ?? []) : [];
+            if ($birthEmployees !== []) {
+                if (count($birthEmployees) === 1) {
+                    $result[$index] = ['employee_id' => (int) $birthEmployees[0], 'matched_by' => 'birth_number'];
+                }
+                continue;
+            }
             $candidates = [];
+            $number = (string) ($codes[$index] ?? '');
             foreach ([
-                [PayrollImportLinkRepository::KIND_PERSONAL_NUMBER, (string) ($codes[$index] ?? '')],
+                [PayrollImportLinkRepository::KIND_PERSONAL_NUMBER, $number],
                 [PayrollImportLinkRepository::KIND_NAME, (string) ($person['_name_key'] ?? '')],
             ] as [$kind, $key]) {
                 $link = $key === '' ? null : ($links[PayrollImportLinkRepository::key($kind, $key)] ?? null);
-                if ($link !== null && $candidates === []) {
-                    $candidates = ['link' => [$link['employee_id']]];
+                if ($link === null || $candidates !== []) {
+                    continue;
+                }
+                $disagreement = AttendancePersonMatcher::birthNumberDisagreement($person, (int) $link['employee_id'], $facts);
+                if ($disagreement === null) {
+                    $candidates = ['link' => [(int) $link['employee_id']]];
+                } elseif ($kind === PayrollImportLinkRepository::KIND_PERSONAL_NUMBER) {
+                    $result[$index] = ['conflict' => self::conflictMessage($number, $disagreement)];
+                    continue 2;
                 }
             }
-            if ($candidates === [] && isset($hashes[$index], $found['by_hash'][$hashes[$index]])) {
-                $candidates = ['birth_number' => $found['by_hash'][$hashes[$index]]];
+            if ($candidates === [] && $number !== '' && isset($found['by_code'][mb_strtolower($number, 'UTF-8')])) {
+                $employeeIds = array_values(array_unique($found['by_code'][mb_strtolower($number, 'UTF-8')]));
+                foreach ($employeeIds as $employeeId) {
+                    $disagreement = AttendancePersonMatcher::birthNumberDisagreement($person, (int) $employeeId, $facts);
+                    if ($disagreement !== null) {
+                        $result[$index] = ['conflict' => self::conflictMessage($number, $disagreement)];
+                        continue 2;
+                    }
+                }
+                $candidates = ['employment_code' => $employeeIds];
             }
-            $code = isset($codes[$index]) ? mb_strtolower($codes[$index], 'UTF-8') : null;
-            if ($candidates === [] && $code !== null && isset($found['by_code'][$code])) {
-                $candidates = ['employment_code' => $found['by_code'][$code]];
+            if ($candidates === [] && isset($birthDates[$index])) {
+                $nameKey = (string) ($person['_name_key'] ?? '');
+                $candidates = ['name_birth_date' => array_values(array_filter(
+                    $byBirthDate[$birthDates[$index]] ?? [],
+                    static fn (int $employeeId): bool => $nameKey !== '' && isset($namesByEmployee[$employeeId][$nameKey]),
+                ))];
             }
             foreach ($candidates as $matchedBy => $employeeIds) {
                 $employeeIds = array_values(array_unique($employeeIds));
@@ -193,6 +252,20 @@ final class AttendanceOpenAgreementMatcher
         }
 
         return $result;
+    }
+
+    /** @param array<string,mixed> $person */
+    private static function withoutBirthNumber(array $person): bool
+    {
+        $birthNumber = $person['_birth_number'] ?? null;
+
+        return !is_string($birthNumber) || trim($birthNumber) === '';
+    }
+
+    private static function conflictMessage(string $number, string $disagreement): string
+    {
+        return "Rozpor v podkladech: osobní číslo „{$number}“ vede v evidenci na osobu, která {$disagreement}. "
+            . 'Řádek se nepároval a osoba se nezaloží; opravte osobní nebo rodné číslo v podkladech.';
     }
 
     /** @param array<string,mixed> $person */

@@ -332,9 +332,11 @@ final class AttendanceImportService
                 $skipped[] = [
                     'key' => $person['key'],
                     'display_name' => $person['display_name'],
-                    'reason' => $match['status'] === 'ambiguous'
-                        ? 'Osoba má víc možných pracovních vztahů. Vyberte vztah ručně.'
-                        : 'Osoba nemá v období pracovní vztah. Založte ji nebo vyberte vztah ručně.',
+                    'reason' => match ($match['status']) {
+                        'ambiguous' => 'Osoba má víc možných pracovních vztahů. Vyberte vztah ručně.',
+                        'conflict' => (string) ($match['conflict'] ?? 'Rodné a osobní číslo v podkladech si odporují. Vyberte vztah ručně.'),
+                        default => 'Osoba nemá v období pracovní vztah. Založte ji nebo vyberte vztah ručně.',
+                    },
                 ];
                 continue;
             }
@@ -470,6 +472,18 @@ final class AttendanceImportService
                         'source_ref' => $metric['source'],
                     ];
                 }
+                // Odpracované dny nejsou hodiny: řádek dávky je nese jako
+                // tisíciny (dny × 1000), souhrn měsíce je převezme jako celé dny.
+                if (is_int($item['person']['worked_days'] ?? null)) {
+                    $rows[] = [
+                        'employment_id' => $employmentId,
+                        'meaning' => 'worked_days',
+                        'component_code' => '',
+                        'quantity_millihours' => $item['person']['worked_days'] * 1000,
+                        'amount_minor' => null,
+                        'source_ref' => (string) ($item['person']['_worked_days_source'] ?? ''),
+                    ];
+                }
                 foreach ($item['person']['_components'] as $code => $component) {
                     $rows[] = [
                         'employment_id' => $employmentId,
@@ -511,7 +525,7 @@ final class AttendanceImportService
                 foreach ($assigned as $item) {
                     $linksSaved += $this->saveLinks(
                         $supplierId,
-                        (string) ($item['person']['personal_number'] ?? ''),
+                        ($item['person']['_number_ambiguous'] ?? false) ? '' : (string) ($item['person']['personal_number'] ?? ''),
                         (string) $item['person']['_name_key'],
                         $item['employment']['employee_id'],
                         $item['employment']['employment_id'],
@@ -626,6 +640,15 @@ final class AttendanceImportService
             if (is_array($person['existing_person'] ?? null)) {
                 $data[(string) $person['key']]['_existing_person'] = $person['existing_person'];
             }
+            if ($person['_number_ambiguous'] ?? false) {
+                $data[(string) $person['key']]['_number_ambiguous'] = true;
+            }
+            $blocking = $person['match']['status'] === 'conflict'
+                ? $person['match']['conflict']
+                : ($person['_birth_number_error'] ?? null);
+            if (is_string($blocking)) {
+                $data[(string) $person['key']]['_blocking_error'] = $blocking;
+            }
             if (($person['probable_earning']['source'] ?? null) === 'amount') {
                 $data[(string) $person['key']]['_probable_earning'] = $person['probable_earning'];
             }
@@ -675,9 +698,24 @@ final class AttendanceImportService
                 }
                 $open = $personData[$key]['_open_agreement'] ?? null;
                 $existing = $personData[$key]['_existing_person'] ?? null;
-                unset($personData[$key]['_open_agreement'], $personData[$key]['_existing_person']);
+                $blocking = $personData[$key]['_blocking_error'] ?? null;
+                unset($personData[$key]['_open_agreement'], $personData[$key]['_existing_person'], $personData[$key]['_blocking_error']);
+                if (is_string($blocking)) {
+                    throw new \InvalidArgumentException($blocking);
+                }
                 // Údaje pro registraci bere server jen ze souborů, nikdy z požadavku.
-                unset($item['_registration'], $item['_probable_earning']);
+                unset($item['_registration'], $item['_probable_earning'], $item['_number_ambiguous']);
+                // Shoda jen podle jména a data narození: rozhodne účetní, ne import.
+                if (is_array($existing) && ($existing['requires_confirmation'] ?? false)) {
+                    if (($item['create_new_person'] ?? false) === true) {
+                        $existing = null;
+                    } elseif (($item['confirm_existing_person'] ?? null) !== (int) $existing['employee_id']) {
+                        throw new \InvalidArgumentException(
+                            "V evidenci je osoba {$existing['employee_name']} se stejným jménem a datem narození. "
+                            . 'Potvrďte, že jde o ni (založí se jí jen nový vztah), nebo zvolte založení nové osoby.',
+                        );
+                    }
+                }
                 foreach ($personData[$key] ?? [] as $field => $value) {
                     if (in_array($item[$field] ?? null, [null, ''], true)) {
                         $item[$field] = $value;
@@ -1169,7 +1207,13 @@ final class AttendanceImportService
         );
         $persons = $this->withRateWages($supplierId, $periodStart, $matched['persons']);
         $usedCodes = [];
+        $daysInPeriod = (int) (new \DateTimeImmutable($periodStart))->format('t');
         foreach ($persons as &$person) {
+            if (is_int($person['worked_days'] ?? null) && $person['worked_days'] > $daysInPeriod) {
+                $person['warnings'][] = "Odpracované dny ({$person['worked_days']}) převyšují počet dnů měsíce ({$daysInPeriod}); "
+                    . 'počet dnů se nepoužil. Opravte ho v podkladech.';
+                $person['worked_days'] = null;
+            }
             $birthNumber = $person['_birth_number'];
             if (is_string($birthNumber) && trim($birthNumber) !== '') {
                 try {
@@ -1342,6 +1386,8 @@ final class AttendanceImportService
             'matched' => 0,
             'ambiguous' => 0,
             'not_found' => 0,
+            'conflicts' => 0,
+            'worked_days' => 0,
             'metrics' => 0,
             'components' => 0,
             'amount_minor_total' => 0,
@@ -1370,6 +1416,12 @@ final class AttendanceImportService
                 ++$summary['ambiguous'];
             } else {
                 ++$summary['not_found'];
+                if ($status === 'conflict') {
+                    ++$summary['conflicts'];
+                }
+            }
+            if (is_int($person['worked_days'] ?? null)) {
+                ++$summary['worked_days'];
             }
             $summary['metrics'] += count($person['metrics']);
             $summary['components'] += count($person['components']);
@@ -2016,7 +2068,7 @@ final class AttendanceImportService
         );
         $this->saveLinks(
             $supplierId,
-            is_string($item['personal_number'] ?? null) ? $item['personal_number'] : '',
+            is_string($item['personal_number'] ?? null) && !($item['_number_ambiguous'] ?? false) ? $item['personal_number'] : '',
             AttendanceText::personKey((string) ($item['full_name'] ?? '')),
             $reused['employee_id'],
             $reused['employment_id'],
@@ -2304,7 +2356,7 @@ final class AttendanceImportService
         }
         $this->saveLinks(
             $supplierId,
-            is_string($item['personal_number'] ?? null) ? $item['personal_number'] : '',
+            is_string($item['personal_number'] ?? null) && !($item['_number_ambiguous'] ?? false) ? $item['personal_number'] : '',
             AttendanceText::personKey((string) ($item['full_name'] ?? '')),
             $employeeId,
             $employment['id'],

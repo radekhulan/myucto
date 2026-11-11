@@ -117,6 +117,42 @@ describe('AttendancePersonsStep — náhled zakládání osob', () => {
       .toBe('payroll_imports.attendance.persons.existing_person{"name":"Anna Lednová"}')
   })
 
+  it('shodu jména a data narození nechá potvrdit; bez volby osobu nezaloží', async () => {
+    const eva = person('eva', {
+      display_name: 'Shodná Eva',
+      existing_person: { employee_id: 42, employee_name: 'Eva Shodná', matched_by: 'name_birth_date', relation_type: 'dpp', requires_confirmation: true },
+    })
+    const wrapper = mount(AttendancePersonsStep, {
+      props: { persons: [eva], options: [], manualLinks: {}, period: '2026-04', canCreate: true },
+    })
+    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
+    expect(wrapper.find('[data-testid="attendance-create-existing"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="attendance-existing-confirm"]').text()).toContain('Eva Shodná')
+    const submit = wrapper.get('[data-testid="attendance-create-submit"]')
+    expect(submit.attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-testid="attendance-existing-confirm-existing"]').setValue(true)
+    await wrapper.get('[data-testid="attendance-create-submit"]').trigger('click')
+    const [payload] = wrapper.emitted('create')?.[0] ?? []
+    expect(payload).toMatchObject([{ person_key: 'eva', confirm_existing_person: 42 }])
+  })
+
+  it('rozpor rodného a osobního čísla počítá ve filtru a k založení nenabídne', () => {
+    const rozpor = person('rozpor', {
+      display_name: 'Rozporná Iva',
+      personal_number: '1',
+      match: { status: 'conflict', matched_by: null, employment_id: null, employee_id: null, employee_name: null, employment_code: null, conflict: 'Rozpor v podkladech.', candidates: [] },
+      errors: ['Rozpor v podkladech.'],
+    })
+    const wrapper = mount(AttendancePersonsStep, {
+      props: { persons: [rozpor], options: [], manualLinks: {}, period: '2026-04', canCreate: true },
+    })
+    expect(wrapper.text()).toContain('payroll_imports.attendance.persons.filters.conflict')
+    expect(wrapper.text()).toContain('payroll_imports.attendance.persons.status.conflict')
+    expect(wrapper.get('[data-testid="attendance-person-errors"]').text()).toContain('Rozpor v podkladech.')
+    expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(0)
+  })
+
   it('ukáže údaje pro registraci ČSSZ, které se nové osobě zapíšou', async () => {
     const hana = person('hana', {
       display_name: 'Registrační Hana',

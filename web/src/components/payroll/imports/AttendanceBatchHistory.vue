@@ -259,7 +259,7 @@ defineExpose({ reload })
                 <tr v-for="row in detail[batch.id]" :key="`${row.employment_id}-${row.meaning}`">
                   <td class="px-3 py-1.5"><span class="font-medium">{{ row.employee_name }}</span> <span class="text-xs text-neutral-500">{{ personalNumberLabel(t, row.employment_code) }}</span></td>
                   <td class="px-3 py-1.5">{{ meaningLabel(row.meaning) }}</td>
-                  <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{{ row.hours !== null ? formatHours(row.hours, locale) : formatMoneyMinor(row.amount_minor) }}</td>
+                  <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{{ row.meaning === 'worked_days' && row.hours !== null ? Math.round(Number(row.hours)) : row.hours !== null ? formatHours(row.hours, locale) : formatMoneyMinor(row.amount_minor) }}</td>
                   <td class="max-w-64 truncate px-3 py-1.5 font-mono text-xs text-neutral-500" :title="row.source">{{ row.source }}</td>
                 </tr>
               </tbody>
