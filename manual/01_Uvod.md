@@ -134,7 +134,7 @@ Aplikace běží na vlastním serveru nebo v Dockeru, bez cizího aplikačního
 backendu a bez telemetrie. Data i PDF doklady zůstávají pod vaší správou a
 multi-arch Docker image usnadňuje nasazení na běžnou serverovou infrastrukturu.
 
-Technologický základ tvoří PHP 8.5, Vue 3 a MariaDB 11.8. Systém lze nasadit na
+Technologický základ tvoří PHP 8.5, Vue 3 a MariaDB 11.8 LTS nebo 12.3. Systém lze nasadit na
 vlastní server, VPS i do kontejneru. Konfigurace je soustředěná v `cfg.php` a
 databázové schéma se bezpečně aktualizuje skriptem `migrate.php`; modulární
 architektura usnadňuje dlouhodobý provoz, integrace i licencované úpravy.

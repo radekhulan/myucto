@@ -27,7 +27,7 @@ Kapitolu otevřete, když:
 Pro build ze zdrojových kódů potřebujete:
 
 - **PHP 8.5+** s rozšířeními `pdo`, `pdo_mysql`, `mbstring`, `openssl`, `json`, `iconv`, `gd`,
-- **MariaDB 11.8+**,
+- **MariaDB 11.8+** (minimum 11.8 LTS, podporovaná i 12.3),
 - **Composer 2.x**, **Node.js 22+** (doporučeno 24) a **pnpm 10+**,
 - **Redis** (volitelné, jinak se použije záložní řešení v MariaDB MEMORY),
 - web server **IIS** nebo **Apache** (oba jsou podporované, repozitář má `web.config` i `.htaccess`).

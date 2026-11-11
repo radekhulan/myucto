@@ -220,7 +220,7 @@ Podporované prostředí:
 | Součást | Požadavek |
 |---|---|
 | PHP | 8.5+ s PDO MySQL, mbstring, OpenSSL, JSON, iconv a GD |
-| Databáze | MariaDB 11.8+ |
+| Databáze | MariaDB 11.8 LTS (minimum) nebo 12.3 |
 | Web server | IIS nebo Apache (konfigurace pro oba je součástí distribuce) |
 | Frontend build | Node.js 22+ a pnpm 10+ |
 | Backend build | Composer 2 |
@@ -284,7 +284,7 @@ CRM, BI a automatizačními platformami. OpenAPI specifikace:
 |---|---|
 | Backend | PHP 8.5, Slim 4, PHP-DI, Monolog, Guzzle |
 | Frontend | Vue 3, TypeScript, Vite, Tailwind, Pinia, vue-router, vue-i18n |
-| Databáze | MariaDB 11.8+ |
+| Databáze | MariaDB 11.8 LTS a 12.3 |
 | PDF / e-mail | mPDF + Twig, Symfony Mailer (SMTP, DKIM) |
 | API | REST API v1, OpenAPI 3.1 |
 | Testy | PHPUnit, PHPStan, vue-tsc |
