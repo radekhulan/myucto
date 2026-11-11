@@ -155,11 +155,11 @@ final class PayrollRunPartialStatutoryBlockTest extends TestCase
         self::assertSame('manual_review', $missing['status']);
         self::assertNull($missing['net_payable_minor_units']);
         $reference = "employee:{$this->missingEmployeeId}";
+        // Chybějící záznam o prohlášení je zákonný stav „nepodepsal" a u
+        // nepodepsaného výpočet rezidenci nepotřebuje; daň proto osobu nezastaví.
         self::assertSame(
             [
                 "health_insurance:health_coverage_evidence_missing:{$reference}",
-                "income_tax:tax_declaration_evidence_missing:{$reference}",
-                "income_tax:tax_residence_evidence_missing:{$reference}",
                 "social_insurance:social_jurisdiction_evidence_missing:{$reference}",
             ],
             $missing['net_pay']['issues'],
@@ -173,7 +173,7 @@ final class PayrollRunPartialStatutoryBlockTest extends TestCase
             static fn (array $row): bool =>
                 $row['code'] === 'statutory_calculation_manual_review',
         ));
-        self::assertCount(4, $statutoryRows);
+        self::assertCount(2, $statutoryRows);
         self::assertSame(
             [$this->missingEmployeeId],
             array_values(array_unique(array_column($statutoryRows, 'entity_id'))),

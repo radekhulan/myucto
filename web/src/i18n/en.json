@@ -4188,7 +4188,10 @@
         "employment_without_inputs": "Employment without payroll inputs",
         "dpp_annual_hours_approaching": "Agreement to perform work approaching the 300-hour limit",
         "overtime_wage_from_attendance": "Overtime wage created from attendance",
-        "recurring_component_without_input": "Recurring payroll component without input"
+        "recurring_component_without_input": "Recurring payroll component without input",
+        "employment_social_registration_missing": "Missing ČSSZ registration of an agreement without insurance participation (registered outside the app)",
+        "tax_residence_missing_unsigned_summary": "Unsigned declaration without verified tax residence",
+        "health_coverage_missing_summary": "People without a health insurer"
       }
     },
     "runs": {

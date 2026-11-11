@@ -74,7 +74,10 @@ final class PayrollRunIssueGuidance
         'post_termination_deferred_income_retroactive_participation_unsupported' => ['Odložený příjem po skončení vztahu, jehož účast na pojištění stojí na výši příjmu (dohoda, zaměstnání malého rozsahu, člen orgánu), může spolu s příjmem posledního měsíce výkonu zpětně založit účast na pojištění. Pak je nutné opravit hlášení za poslední měsíc výkonu (doba a vyměřovací základ důchodového pojištění) a opravu kvůli nemocenskému pojištění je třeba zaslat vždy. To aplikace nesestaví: měsíční hlášení i opravu za tento vztah podejte ručně přes ePortál ČSSZ.', 'deferred_income'],
         'post_termination_annual_settlement_agreement_unsupported' => ['Roční zúčtování po skončení (odložený příjem typu 4) aplikace sama vykáže jen u pracovního poměru. U dohody o provedení práce nebo o pracovní činnosti mzdový běh měsíc bez příjmu nespočítá. Potvrzení typu 4 u dohody zrušte a hlášení za ni podejte ručně přes ePortál ČSSZ.', 'deferred_income'],
         'income_month_attribution_unverified' => ['U příjmu po skončení vztahu není ověřeno období, do kterého patří. V měsíčních vstupech doplňte původní období příjmu a ověřte jeho přiřazení.', 'inputs'],
-        'health_coverage_evidence_missing|health_coverage_evidence_invalid|health_coverage_evidence_conflict' => ['Chybí platné zdravotní pojištění nebo se jeho období překrývají. V zákonné evidenci opravte intervaly pojištění tak, aby jednoznačně pokrývaly měsíc mzdy.', 'statutory'],
+        // Chybějící větu doplní hromadné zadání pojišťoven pro všechny osoby
+        // najednou; dialog si dotčené osoby vybere sám.
+        'health_coverage_evidence_missing' => ['Osobě chybí zdravotní pojišťovna a v měsíci jí vzniká účast na zdravotním pojištění (pracovní poměr, nebo dohoda s příjmem od rozhodné částky). Doplňte pojišťovnu hromadně v Mzdy → Zaměstnanci → Další funkce → Zdravotní pojišťovny hromadně; u dohody bez účasti výpočet pojišťovnu nepotřebuje.', 'health_insurer_bulk'],
+        'health_coverage_evidence_invalid|health_coverage_evidence_conflict' => ['Zdravotní pojištění není platné nebo se jeho období překrývají. V zákonné evidenci opravte intervaly pojištění tak, aby jednoznačně pokrývaly měsíc mzdy.', 'statutory'],
         'health_insurer_evidence_unverified|health_insurer_snapshot_unverified' => ['Není ověřena zdravotní pojišťovna zaměstnance. V zákonné evidenci potvrďte pojišťovnu a její platnost pro měsíc mzdy.', 'statutory'],
         'health_jurisdiction_evidence_unverified|health_insurance_jurisdiction_unverified' => ['Není ověřeno, ve kterém státě je zaměstnanec zdravotně pojištěn. V zákonné evidenci doplňte příslušnost k pojištění a doložte ji.', 'statutory'],
         'health_minimum_reduction_invalid|health_minimum_reduction_unverified|health_minimum_reductions_invalid|minimum_reduction_unverified' => ['Snížení minima zdravotního pojištění není platně doložené. V zákonné evidenci opravte důvod a počet dnů snížení minima pro daný měsíc.', 'statutory'],
@@ -133,6 +136,7 @@ final class PayrollRunIssueGuidance
         'tax_residence_evidence_missing|tax_residence_evidence_unverified|tax_residence_unverified' => 'tax_residences',
         'social_jurisdiction_evidence_invalid|social_jurisdiction_evidence_missing|social_jurisdiction_evidence_unverified|social_security_jurisdiction_unverified' => 'social_jurisdictions',
         'working_pensioner_discount_evidence_invalid|working_pensioner_discount_evidence_missing|working_pensioner_discount_evidence_unverified|working_pensioner_discount_unverified' => 'social_discount_claims',
+        'health_coverage_evidence_invalid|health_coverage_evidence_conflict|health_insurer_evidence_unverified|health_insurer_snapshot_unverified|health_jurisdiction_evidence_unverified|health_insurance_jurisdiction_unverified|foreign_regime_requires_non_applicable_czech_insurer_snapshot' => 'health_coverages',
     ];
 
     public static function describe(string $issue, ?int $employeeId = null, ?int $employmentId = null): array
@@ -171,6 +175,7 @@ final class PayrollRunIssueGuidance
             'enforcement' => '/payroll/enforcement',
             'insolvency' => '/payroll/insolvency',
             'agreements' => '/payroll/deduction-agreements',
+            'health_insurer_bulk' => '/payroll/people?bulk=health_insurer',
             default => '/payroll/people',
         };
         if ($path === '/payroll/people') {

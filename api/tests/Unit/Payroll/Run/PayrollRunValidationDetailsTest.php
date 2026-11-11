@@ -43,7 +43,8 @@ final class PayrollRunValidationDetailsTest extends TestCase
         self::assertSame([7, 8], array_column($rows, 'entity_id'));
         self::assertSame(['employee', 'employee'], array_column($rows, 'entity_type'));
         self::assertStringContainsString('zdravotní pojišťovna', $rows[0]['message']);
-        self::assertSame('/payroll/people?person=7&employment=9&panel=statutory_evidence', $rows[0]['remediation_path']);
+        // Proklik doskočí na sekci zdravotního pojištění (audit 12. 11. 2026, ř. 29).
+        self::assertSame('/payroll/people?person=7&employment=9&panel=statutory_evidence&field=statutory.health_coverages', $rows[0]['remediation_path']);
         self::assertStringContainsString('pořadí dítěte', $rows[1]['message']);
         self::assertSame('/payroll/people?person=8&panel=dependants', $rows[1]['remediation_path']);
     }
@@ -209,10 +210,27 @@ final class PayrollRunValidationDetailsTest extends TestCase
             );
         }
 
+        // Chybějící pojišťovnu doplní hromadné zadání pojišťoven pro všechny
+        // dotčené osoby najednou (dřív proklik na kartu každé osoby zvlášť).
+        $missing = PayrollRunIssueGuidance::describe('health_insurance:health_coverage_evidence_missing:employee:7');
+        self::assertSame('/payroll/people?bulk=health_insurer', $missing['remediation_path']);
+        self::assertSame('employee', $missing['entity_type']);
+        self::assertSame(7, $missing['entity_id']);
         self::assertSame(
-            '/payroll/people?person=7&panel=statutory_evidence',
-            PayrollRunIssueGuidance::describe('health_insurance:health_coverage_evidence_missing:employee:7')['remediation_path'],
+            '/payroll/people?bulk=health_insurer',
+            PayrollRunIssueGuidance::describe('person:employee:7:health_coverage_evidence_missing')['remediation_path'],
         );
+        foreach ([
+            'health_insurance:health_insurer_evidence_unverified:employee:7',
+            'person:employee:7:health_insurer_snapshot_unverified',
+            'health_insurance:health_coverage_evidence_conflict:employee:7',
+        ] as $issue) {
+            self::assertSame(
+                '/payroll/people?' . http_build_query(['person' => 7, 'panel' => 'statutory_evidence', 'field' => 'statutory.health_coverages']),
+                PayrollRunIssueGuidance::describe($issue)['remediation_path'],
+                $issue,
+            );
+        }
     }
 
     /**

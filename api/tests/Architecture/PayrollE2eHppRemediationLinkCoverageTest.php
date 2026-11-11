@@ -75,6 +75,7 @@ final class PayrollE2eHppRemediationLinkCoverageTest extends TestCase
         'self::hourlyBlockerLink((string) $blocker[\'code\'], $periodStart, $employmentId, $hourlyLink, (array) ($blocker[\'context\'] ?? []))' => 'testDynamicPathHelpersLeadToExistingPages',
         '$riskySavingsPath' => 'testDynamicPathHelpersLeadToExistingPages',
         'self::dimensionSplitPath($employmentId)' => 'testDynamicPathHelpersLeadToExistingPages',
+        'self::hourlyAverageMinimumLink($periodStart, $employmentId)' => 'testDynamicPathHelpersLeadToExistingPages',
         '$validation->remediationPath' => 'jen předává hotovou cestu validace',
         '$e->remediationPath' => 'jen předává cestu PayrollRunSnapshotFixableException',
         'null' => 'readiness_check_failed: nález bez místa opravy',
@@ -314,6 +315,7 @@ final class PayrollE2eHppRemediationLinkCoverageTest extends TestCase
         $split = new \ReflectionMethod(PayrollRunSnapshotBuilder::class, 'dimensionSplitPath');
         $this->checkLink('dimensionSplitPath', $split->invoke(null, 22), $problems);
         $this->checkLink('dimensionSplitPath(0)', $split->invoke(null, 0), $problems);
+        $this->checkLink('hourlyAverageMinimumLink', PayrollRunSnapshotBuilder::hourlyAverageMinimumLink('2026-05-01', 22), $problems);
 
         self::assertSame([], array_values(array_unique($problems)));
     }

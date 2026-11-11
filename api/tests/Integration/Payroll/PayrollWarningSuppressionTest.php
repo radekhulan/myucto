@@ -154,9 +154,75 @@ final class PayrollWarningSuppressionTest extends TestCase
         self::assertSame('Důvod', $items[0]['reason']);
     }
 
+    /**
+     * Osoba bez záznamu o prohlášení se počítá jako nepodepsaná, takže patří
+     * do téhož souhrnu. Chybějící rezidence u nepodepsaných a chybějící
+     * zdravotní pojišťovna mají vlastní souhrn, který jde skrýt po osobách.
+     */
+    public function testLegalDefaultSummariesCoverPeopleWithoutRecords(): void
+    {
+        $fixture = $this->seedUnsigned(2);
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_person_tax_declarations WHERE supplier_id = ? AND employee_id = ?'
+        )->execute([$this->supplierId, $fixture->employeeIds[1]]);
+        // Sloupec podmínek je jen zrcadlo evidence (migrace 1643): bez záznamu
+        // o prohlášení drží „nepodepsáno".
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms terms
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = terms.supplier_id AND employment.id = terms.employment_id
+                SET terms.tax_declaration_signed = 0
+              WHERE terms.supplier_id = ? AND employment.employee_id = ?'
+        )->execute([$this->supplierId, $fixture->employeeIds[1]]);
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_person_tax_residences WHERE supplier_id = ? AND employee_id = ?'
+        )->execute([$this->supplierId, $fixture->employeeIds[0]]);
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_person_health_coverage_history WHERE supplier_id = ?'
+        )->execute([$this->supplierId]);
+
+        $validations = $this->builder->build(
+            $this->supplierId,
+            PayrollRunScaleFixture::PERIOD_START,
+            PayrollRunScaleFixture::PAYMENT_DATE,
+        )->validations;
+        $byCode = [];
+        foreach ($validations as $validation) {
+            $byCode[$validation->code] = $validation;
+        }
+
+        $expected = $fixture->employeeIds;
+        sort($expected);
+        foreach (['tax_declaration_not_signed_summary', 'health_coverage_missing_summary'] as $code) {
+            self::assertArrayHasKey($code, $byCode);
+            $subjects = $byCode[$code]->subjectIds;
+            sort($subjects);
+            self::assertSame($expected, $subjects, $code);
+            self::assertSame('warning', $byCode[$code]->severity);
+        }
+        self::assertSame('/payroll/people?bulk=health_insurer', $byCode['health_coverage_missing_summary']->remediationPath);
+        self::assertSame([$fixture->employeeIds[0]], $byCode['tax_residence_missing_unsigned_summary']->subjectIds);
+
+        $this->service->hide(
+            $this->supplierId,
+            'health_coverage_missing_summary',
+            [$fixture->employeeIds[0]],
+            null,
+            $this->userId,
+        );
+        $filtered = $this->service->activeSet($this->supplierId)->filterValidations($validations);
+        $health = array_values(array_filter(
+            $filtered,
+            static fn (PayrollRunValidation $validation): bool => $validation->code === 'health_coverage_missing_summary',
+        ));
+        self::assertCount(1, $health);
+        self::assertSame([$fixture->employeeIds[1]], $health[0]->subjectIds);
+        self::assertStringContainsString(': 1.', $health[0]->message);
+    }
+
     public function testBlockingAndUnknownChecksCannotBeHidden(): void
     {
-        foreach (['time_month_not_approved', 'draft_inputs_present', 'employment_social_registration_missing', 'dpp_annual_hours_exceeded', 'nesmysl'] as $code) {
+        foreach (['time_month_not_approved', 'draft_inputs_present', 'employment_health_registration_missing', 'dpp_annual_hours_exceeded', 'nesmysl'] as $code) {
             try {
                 $this->service->hide($this->supplierId, $code, null, null, $this->userId);
                 self::fail('Kontrolu ' . $code . ' nesmí jít skrýt.');

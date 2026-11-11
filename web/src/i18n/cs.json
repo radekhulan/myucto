@@ -4188,7 +4188,10 @@
         "employment_without_inputs": "Pracovní vztah bez mzdových vstupů",
         "dpp_annual_hours_approaching": "Dohoda o provedení práce se blíží limitu 300 hodin",
         "overtime_wage_from_attendance": "Dosažená mzda za přesčas založená z docházky",
-        "recurring_component_without_input": "Pravidelná mzdová složka bez vstupu"
+        "recurring_component_without_input": "Pravidelná mzdová složka bez vstupu",
+        "employment_social_registration_missing": "Chybí registrace ČSSZ u dohody bez účasti na pojištění (registrováno mimo aplikaci)",
+        "tax_residence_missing_unsigned_summary": "Nepodepsané prohlášení bez ověřené daňové rezidence",
+        "health_coverage_missing_summary": "Osoby bez zdravotní pojišťovny"
       }
     },
     "runs": {

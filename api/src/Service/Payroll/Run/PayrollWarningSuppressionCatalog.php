@@ -42,6 +42,12 @@ final class PayrollWarningSuppressionCatalog
         // Jen oznámení, že dosaženou mzdu za přesčas založilo schválení
         // docházky; ruční duplicita je jiný kód s povinným potvrzením.
         'overtime_wage_from_attendance' => self::SUBJECT_EMPLOYMENT,
+        // Registrace podaná mimo aplikaci. Skrýt jde jen varování bez výjimky,
+        // tedy u dohody bez účasti na pojištění; u účasti ji drží výjimka běhu.
+        'employment_social_registration_missing' => self::SUBJECT_EMPLOYMENT,
+        // Zákonné výchozí stavy, se kterými výpočet doběhne.
+        'tax_residence_missing_unsigned_summary' => self::SUBJECT_EMPLOYEE,
+        'health_coverage_missing_summary' => self::SUBJECT_EMPLOYEE,
     ];
 
     /**
@@ -52,6 +58,8 @@ final class PayrollWarningSuppressionCatalog
      */
     private const AGGREGATE = [
         'tax_declaration_not_signed_summary' => true,
+        'tax_residence_missing_unsigned_summary' => true,
+        'health_coverage_missing_summary' => true,
     ];
 
     public static function isHideableCode(string $code): bool
@@ -105,6 +113,10 @@ final class PayrollWarningSuppressionCatalog
         return match ($code) {
             'tax_declaration_not_signed_summary' =>
                 PayrollRunSnapshotBuilder::unsignedDeclarationsMessage($count),
+            'tax_residence_missing_unsigned_summary' =>
+                PayrollRunSnapshotBuilder::unsignedWithoutResidenceMessage($count),
+            'health_coverage_missing_summary' =>
+                PayrollRunSnapshotBuilder::withoutHealthCoverageMessage($count),
             default => null,
         };
     }

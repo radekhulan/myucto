@@ -41,12 +41,22 @@ final readonly class HealthPersonMonthInput
             HealthMinimumTopUpEmployerSelection::Unverified,
         public HealthMinimumTopUpResponsibilitySource $topUpResponsibilitySource =
             HealthMinimumTopUpResponsibilitySource::Declared,
+        public bool $coverageEvidenceMissing = false,
     ) {
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/D', $personId) !== 1) {
             throw new InvalidArgumentException('Health insurance person ID is not canonical.');
         }
         self::assertJurisdiction($jurisdiction, $jurisdictionEvidenceReference);
         self::assertInsurer($insurerStatus, $insurerCode, $insurerEvidenceReference);
+        if ($coverageEvidenceMissing
+            && ($jurisdiction !== HealthJurisdictionEvidence::Unverified
+                || $insurerStatus !== HealthInsurerSnapshotStatus::Unverified
+                || $insurerCode !== null)
+        ) {
+            throw new InvalidArgumentException(
+                'Missing health coverage evidence cannot carry a jurisdiction or an insurer.',
+            );
+        }
         if (!array_is_list($relationships) || $relationships === []) {
             throw new InvalidArgumentException(
                 'Health insurance person relationships must be a non-empty list.',

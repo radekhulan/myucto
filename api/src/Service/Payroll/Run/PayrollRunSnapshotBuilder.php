@@ -530,9 +530,11 @@ final class PayrollRunSnapshotBuilder
                 }
             }
             foreach ($hourlyAverageCheck['invalid'][$employmentId] ?? [] as $invalidInputId) {
+                // Průměr se opravuje v Absence a dovolená → Průměrný výdělek, ne
+                // v podmínkách vztahu; odkaz předvyplní vztah a čtvrtletí měsíce.
                 $validations[] = new PayrollRunValidation('blocker', 'hourly_average_minimum_evidence_missing', 'employment', $employmentId,
                     'Náhrada nebo pohotovost nemá doložený průměr alespoň v účinném hodinovém minimu. Opravte průměr a znovu vytvořte podklad.',
-                    "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms");
+                    self::hourlyAverageMinimumLink($periodStart, $employmentId));
             }
             $riskySavingsEvidence = $this->riskySavingsEvidence($row);
             $riskySavingsPath = self::riskySavingsPath($employeeId, $employmentId);
@@ -921,15 +923,42 @@ final class PayrollRunSnapshotBuilder
         // srážky pod rozhodnou částkou), mění se jen to, co běh hlásí.
         // Osoba, která má vedle funkce i jiný vztah, se počítá dál.
         // Id osob nese souhrn kvůli trvalému skrytí po osobách.
+        //
+        // Osoba bez záznamu o prohlášení se počítá jako nepodepsaná (zákonný
+        // výchozí stav, PayrollRunStatutoryInputAssembler::taxDeclarationIssue()),
+        // proto patří do téhož souhrnu. U nepodepsaných se výpočet neptá ani
+        // na rezidenci; chybějící připomene vlastní souhrn, protože ji bude
+        // potřebovat potvrzení o příjmech i pozdější podpis prohlášení.
         $unsignedDeclarations = [];
+        $unsignedWithoutResidence = [];
+        $withoutHealthCoverage = [];
         foreach ($people as $personId => $person) {
+            $personEvidence = $statutoryEvidence[$personId] ?? null;
+            if (is_array($personEvidence)
+                && $person['employments'] !== []
+                && !is_array($personEvidence['health']['coverage'] ?? null)
+            ) {
+                $withoutHealthCoverage[] = (int) $personId;
+            }
+            $declaration = $personEvidence['income_tax']['declaration'] ?? null;
+            $unsigned = is_array($declaration)
+                ? ($declaration['status'] ?? null) === 'not-signed'
+                : is_array($personEvidence)
+                    && PayrollRunStatutoryInputAssembler::taxDeclarationIssue(
+                        $personEvidence,
+                        $person['employments'],
+                    ) === null;
+            if (!$unsigned) {
+                continue;
+            }
+            $residence = $personEvidence['income_tax']['residence'] ?? null;
+            if (!is_array($residence) || ($residence['residence'] ?? null) === 'unverified') {
+                $unsignedWithoutResidence[] = (int) $personId;
+            }
             if (self::onlyCompanyBodyRelations($person['employments'])) {
                 continue;
             }
-            $declaration = $statutoryEvidence[$personId]['income_tax']['declaration'] ?? null;
-            if (is_array($declaration) && ($declaration['status'] ?? null) === 'not-signed') {
-                $unsignedDeclarations[] = (int) $personId;
-            }
+            $unsignedDeclarations[] = (int) $personId;
         }
         if ($unsignedDeclarations !== []) {
             $validations[] = new PayrollRunValidation(
@@ -940,6 +969,28 @@ final class PayrollRunSnapshotBuilder
                 self::unsignedDeclarationsMessage(count($unsignedDeclarations)),
                 '/payroll/people',
                 subjectIds: $unsignedDeclarations,
+            );
+        }
+        if ($unsignedWithoutResidence !== []) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'tax_residence_missing_unsigned_summary',
+                'run',
+                null,
+                self::unsignedWithoutResidenceMessage(count($unsignedWithoutResidence)),
+                '/payroll/people?bulk=statutory_defaults',
+                subjectIds: $unsignedWithoutResidence,
+            );
+        }
+        if ($withoutHealthCoverage !== []) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'health_coverage_missing_summary',
+                'run',
+                null,
+                self::withoutHealthCoverageMessage(count($withoutHealthCoverage)),
+                '/payroll/people?bulk=health_insurer',
+                subjectIds: $withoutHealthCoverage,
             );
         }
 
@@ -1033,12 +1084,39 @@ final class PayrollRunSnapshotBuilder
     public static function unsignedDeclarationsMessage(int $count): string
     {
         return sprintf(
-            'Počet osob s nepodepsaným prohlášením poplatníka k dani: %d. Záloha'
+            'Počet osob s nepodepsaným prohlášením poplatníka k dani: %d. Osoba'
+            . ' bez záznamu o prohlášení se počítá jako nepodepsaná. Záloha'
             . ' se jim počítá bez slevy na poplatníka a bez daňového zvýhodnění;'
             . ' u dohody o provedení práce a zaměstnání malého rozsahu s příjmem'
             . ' pod rozhodnou částkou se daň počítá zvlášť sazbou 15 %% (§ 6 odst. 4 ZDP;'
             . ' do roku 2026 srážková daň, od roku 2027 samostatný základ zálohy).'
             . ' Ověřte, že to odpovídá skutečnosti.',
+            $count,
+        );
+    }
+
+    public static function unsignedWithoutResidenceMessage(int $count): string
+    {
+        return sprintf(
+            'Počet osob bez podepsaného prohlášení a bez ověřené daňové rezidence: %d.'
+            . ' Výpočet daně ji u nich nepotřebuje (bez prohlášení se slevy'
+            . ' neuplatní a daň se počítá stejně u rezidenta i nerezidenta).'
+            . ' Doplňte ji před vystavením potvrzení o zdanitelných příjmech'
+            . ' nebo před podpisem prohlášení, hromadně v Mzdy → Zaměstnanci'
+            . ' → Další funkce → Doplnit výchozí zákonné údaje.',
+            $count,
+        );
+    }
+
+    public static function withoutHealthCoverageMessage(int $count): string
+    {
+        return sprintf(
+            'Počet osob bez zdravotní pojišťovny v zákonné evidenci: %d. U dohody'
+            . ' bez účasti na zdravotním pojištění (příjem pod rozhodnou částkou)'
+            . ' pojistné nevzniká a výpočet pokračuje; kde účast vznikne, výpočet'
+            . ' osobu zastaví. Pojišťovnu doplňte hromadně v Mzdy → Zaměstnanci'
+            . ' → Další funkce → Zdravotní pojišťovny hromadně. Registrace u ČSSZ'
+            . ' kód pojišťovny vyžaduje; není-li znám, uvede se 999 (ostatní).',
             $count,
         );
     }
@@ -2393,6 +2471,16 @@ final class PayrollRunSnapshotBuilder
      * Blokace hodin a doložení příplatků se opravují v panelu hodin Rychlého
      * měsíčního vstupu, ne v podmínkách vztahu.
      */
+    public static function hourlyAverageMinimumLink(string $periodStart, int $employmentId): string
+    {
+        return PayrollHourlyAverageEarningLink::path(
+            $employmentId,
+            (int) substr($periodStart, 0, 4),
+            intdiv((int) substr($periodStart, 5, 2) - 1, 3) + 1,
+            $periodStart,
+        );
+    }
+
     /** @param array<string,mixed> $context */
     private static function hourlyBlockerLink(string $code, string $periodStart, int $employmentId, string $fallback, array $context = []): string
     {

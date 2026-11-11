@@ -64,8 +64,14 @@ final class MonthlyEmploymentIncomeTaxCalculator
         if ($declaration?->status === TaxDeclarationStatus::Unverified) {
             $issues[] = 'tax-declaration-unverified';
         }
+        // Bez podepsaného prohlášení se slevy neuplatní a záloha i daň podle
+        // § 6 odst. 4 ZDP se počítají stejně u rezidenta i nerezidenta, takže
+        // neověřená rezidence výpočet zastaví jen u podepsaného prohlášení.
+        $residenceMatters = $declaration?->status !== TaxDeclarationStatus::NotSigned;
         if ($input->residence->residence === TaxResidence::Unverified) {
-            $issues[] = 'tax-residence-unverified';
+            if ($residenceMatters) {
+                $issues[] = 'tax-residence-unverified';
+            }
         } elseif (!$input->residence->isEffective($input->calculationDate)) {
             $issues[] = 'tax-residence-evidence-not-effective';
         }

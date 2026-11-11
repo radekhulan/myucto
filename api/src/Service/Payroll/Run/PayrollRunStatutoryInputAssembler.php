@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Service\Payroll\Absence\PayrollObstacleKind;
 use MyInvoice\Service\Payroll\Absence\VacationCompensationReturn;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthEmploymentKind;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthIncomeAttribution;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthInsurerSnapshotStatus;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthInsuranceMonthInput;
@@ -57,6 +58,9 @@ final class PayrollRunStatutoryInputAssembler
     /** @var list<PayrollRunStatutoryInputIssue> */
     private array $issues = [];
 
+    /** @var array<string,true> */
+    private array $deferredHealthCoverage = [];
+
     private readonly PayrollRunStatutoryComponentMapper $components;
     private readonly SocialRelationshipKindMapper $socialKinds;
     private readonly HealthRelationshipKindMapper $healthKinds;
@@ -84,6 +88,7 @@ final class PayrollRunStatutoryInputAssembler
     public function assemble(array $snapshot): PayrollRunStatutoryInputBundle
     {
         $this->issues = [];
+        $this->deferredHealthCoverage = [];
         if (($snapshot['schema_version'] ?? null) !== 'payroll-run-input.v2') {
             return $this->invalidSnapshot('unsupported_snapshot_schema');
         }
@@ -251,6 +256,7 @@ final class PayrollRunStatutoryInputAssembler
                 $this->issue($domain, 'person_missing');
             }
         }
+        $this->reportDeferredHealthCoverageOfBlockedPeople();
 
         /*
          * Osobní problém vyřadí jen svou osobu, a to ze VŠECH tří vstupů:
@@ -1105,13 +1111,29 @@ final class PayrollRunStatutoryInputAssembler
     ): ?HealthPersonMonthInput {
         $healthEvidence = $this->object($evidence['health'] ?? null);
         $coverage = $this->object($healthEvidence['coverage'] ?? null);
-        if ($coverage === null) {
+        /*
+         * Bez věty zdravotního pojištění se nezastaví hned: dohoda pod rozhodným
+         * příjmem účast nezakládá a v cizím režimu české pojistné nevzniká, takže
+         * pojišťovnu nepotřebuje ani jeden z možných výsledků. Rozhodne výpočet
+         * podle účasti (HealthInsuranceMonthCalculator); vznikne-li účast,
+         * vrátí `health_coverage_evidence_missing` sám. Osobu, kterou zastaví jiný
+         * problém, doplní stejný kód na konci sestavení.
+         */
+        $coverageMissing = $coverage === null;
+        if ($coverageMissing && !$this->onlyIncomeDependentHealthParticipation($employments)) {
             $this->issue(
                 'health_insurance',
                 'health_coverage_evidence_missing',
                 $personReference,
             );
             return null;
+        }
+        if ($coverageMissing) {
+            $this->deferredHealthCoverage[$personReference] = true;
+            $coverage = [
+                'jurisdiction' => HealthJurisdictionEvidence::Unverified->value,
+                'insurer_status' => HealthInsurerSnapshotStatus::Unverified->value,
+            ];
         }
         $jurisdiction = $this->enum(
             HealthJurisdictionEvidence::class,
@@ -1131,14 +1153,14 @@ final class PayrollRunStatutoryInputAssembler
             );
             return null;
         }
-        if ($jurisdiction === HealthJurisdictionEvidence::Unverified) {
+        if ($jurisdiction === HealthJurisdictionEvidence::Unverified && !$coverageMissing) {
             $this->issue(
                 'health_insurance',
                 'health_jurisdiction_evidence_unverified',
                 $personReference,
             );
         }
-        if ($insurerStatus === HealthInsurerSnapshotStatus::Unverified) {
+        if ($insurerStatus === HealthInsurerSnapshotStatus::Unverified && !$coverageMissing) {
             $this->issue(
                 'health_insurance',
                 'health_insurer_evidence_unverified',
@@ -1297,6 +1319,7 @@ final class PayrollRunStatutoryInputAssembler
                 ),
                 $selection,
                 $responsibilitySource,
+                $coverageMissing,
             );
         } catch (\InvalidArgumentException) {
             $this->issue(
@@ -1496,32 +1519,63 @@ final class PayrollRunStatutoryInputAssembler
         $taxEvidence = $this->object($evidence['income_tax'] ?? null);
         $declarationRow = $this->object($taxEvidence['declaration'] ?? null);
         $residenceRow = $this->object($taxEvidence['residence'] ?? null);
-        $declarationIssue = self::taxDeclarationIssue($evidence);
+        $declarationIssue = self::taxDeclarationIssue($evidence, $employments);
+        if ($declarationRow === null && $declarationIssue === null) {
+            /*
+             * Bez záznamu o prohlášení poplatník u plátce prohlášení nepodepsal
+             * (§ 38k odst. 4 a 5 ZDP): slevy se neuplatní a u dohody nebo
+             * zaměstnání malého rozsahu pod rozhodnou částkou se daní zvlášť
+             * (§ 6 odst. 4 ZDP). To je zákonný výchozí stav, ne mezera; běh na
+             * něj upozorní souhrnným varováním (PayrollRunSnapshotBuilder).
+             */
+            $declarationRow = [
+                'status' => TaxDeclarationStatus::NotSigned->value,
+                'effective_from' => substr($calculationDate, 0, 7) . '-01',
+                'effective_to' => null,
+                'evidence_reference' => null,
+            ];
+        }
         if ($declarationRow === null) {
             $this->issue(
                 'income_tax',
                 (string) $declarationIssue,
                 $personReference,
             );
-        }
-        if ($residenceRow === null) {
-            $this->issue(
-                'income_tax',
-                'tax_residence_evidence_missing',
-                $personReference,
-            );
-        }
-        if ($declarationRow === null || $residenceRow === null) {
+            if ($residenceRow === null) {
+                $this->issue(
+                    'income_tax',
+                    'tax_residence_evidence_missing',
+                    $personReference,
+                );
+            }
             return null;
         }
         $declarationStatus = $this->enum(
             TaxDeclarationStatus::class,
             $declarationRow['status'] ?? null,
         );
-        $residence = $this->enum(
-            TaxResidence::class,
-            $residenceRow['residence'] ?? null,
-        );
+        /*
+         * Rezidence rozhoduje jen o slevách a zvýhodnění (§ 35ba odst. 2,
+         * § 35c odst. 13 ZDP), a ty se bez podepsaného prohlášení neuplatní.
+         * Záloha i daň podle § 6 odst. 4 ZDP se rezidentovi i nerezidentovi
+         * počítají stejně, takže u nepodepsaného prohlášení výpočet bez ní
+         * doběhne; chybějící údaj připomene souhrnné varování běhu.
+         */
+        $residenceNeeded = $declarationStatus !== TaxDeclarationStatus::NotSigned;
+        if ($residenceRow === null && $residenceNeeded) {
+            $this->issue(
+                'income_tax',
+                'tax_residence_evidence_missing',
+                $personReference,
+            );
+            return null;
+        }
+        $residence = $residenceRow === null
+            ? TaxResidence::Unverified
+            : $this->enum(
+                TaxResidence::class,
+                $residenceRow['residence'] ?? null,
+            );
         if (!$declarationStatus instanceof TaxDeclarationStatus
             || !$residence instanceof TaxResidence
         ) {
@@ -1539,7 +1593,7 @@ final class PayrollRunStatutoryInputAssembler
                 $personReference,
             );
         }
-        if ($residence === TaxResidence::Unverified) {
+        if ($residence === TaxResidence::Unverified && $residenceNeeded) {
             $this->issue(
                 'income_tax',
                 'tax_residence_evidence_unverified',
@@ -1612,16 +1666,18 @@ final class PayrollRunStatutoryInputAssembler
                             $declarationRow['evidence_reference'] ?? null,
                         ),
                 )],
-                new TaxResidenceEvidence(
-                    $residence,
-                    $this->requiredString($residenceRow['effective_from'] ?? null),
-                    $this->nullableString($residenceRow['effective_to'] ?? null),
-                    $residence === TaxResidence::Unverified
-                        ? null
-                        : $this->nullableString(
-                            $residenceRow['evidence_reference'] ?? null,
-                        ),
-                ),
+                $residenceRow === null
+                    ? new TaxResidenceEvidence(TaxResidence::Unverified)
+                    : new TaxResidenceEvidence(
+                        $residence,
+                        $this->requiredString($residenceRow['effective_from'] ?? null),
+                        $this->nullableString($residenceRow['effective_to'] ?? null),
+                        $residence === TaxResidence::Unverified
+                            ? null
+                            : $this->nullableString(
+                                $residenceRow['evidence_reference'] ?? null,
+                            ),
+                    ),
                 $creditClaims,
                 $childClaims,
                 $annual,
@@ -2948,19 +3004,88 @@ final class PayrollRunStatutoryInputAssembler
      *
      * @param array<string,mixed>|null $evidence zákonná evidence osoby ze snímku
      */
-    public static function taxDeclarationIssue(?array $evidence): ?string
+    /**
+     * Chybějící záznam o prohlášení je zákonný výchozí stav „nepodepsal"
+     * (viz incomeTaxPerson()), ne problém. Výjimkou je vztah, jehož podmínky
+     * podpis tvrdí: tam by výchozí stav popřel údaj, který účetní zapsala.
+     *
+     * @param array<string,mixed>|null $evidence
+     * @param list<mixed> $employments
+     */
+    public static function taxDeclarationIssue(?array $evidence, array $employments = []): ?string
     {
         $taxEvidence = $evidence['income_tax'] ?? null;
         $declaration = is_array($taxEvidence) && !array_is_list($taxEvidence)
             ? ($taxEvidence['declaration'] ?? null)
             : null;
         if (!is_array($declaration) || array_is_list($declaration)) {
-            return 'tax_declaration_evidence_missing';
+            foreach ($employments as $employment) {
+                if (is_array($employment)
+                    && is_array($employment['term'] ?? null)
+                    && ($employment['term']['tax_declaration_signed'] ?? null) === true
+                ) {
+                    return 'tax_declaration_evidence_missing';
+                }
+            }
+
+            return null;
         }
 
         return ($declaration['status'] ?? null) === TaxDeclarationStatus::Unverified->value
             ? 'tax_declaration_evidence_unverified'
             : null;
+    }
+
+    /**
+     * Účast na zdravotním pojištění podle výše příjmu mají jen dohody
+     * (§ 5 písm. a) zákona č. 48/1997 Sb.). Kde je jiný vztah, pojistné
+     * vzniká vždy a chybějící pojištění se hlásí hned jako dřív.
+     *
+     * @param list<mixed> $employments
+     */
+    private function onlyIncomeDependentHealthParticipation(array $employments): bool
+    {
+        foreach ($employments as $snapshot) {
+            $employment = is_array($snapshot) ? $this->object($snapshot['employment'] ?? null) : null;
+            $relationType = $this->nonEmptyString($employment['relation_type'] ?? null);
+            if ($relationType === null) {
+                return false;
+            }
+            try {
+                $kind = $this->healthKinds->fromDatabaseRelationType($relationType);
+            } catch (\UnexpectedValueException) {
+                return false;
+            }
+            if ($kind !== HealthEmploymentKind::Dpp && $kind !== HealthEmploymentKind::Dpc) {
+                return false;
+            }
+        }
+
+        return $employments !== [];
+    }
+
+    /**
+     * Osoba zastavená jiným problémem se k výpočtu nedostane, takže by se
+     * o chybějící větě zdravotního pojištění dozvěděla až po jeho opravě.
+     * Nahlásí se rovnou s ostatními, ať jde opravit všechno najednou.
+     */
+    private function reportDeferredHealthCoverageOfBlockedPeople(): void
+    {
+        $blocked = [];
+        foreach ($this->issues as $issue) {
+            if ($issue->personReference !== null) {
+                $blocked[$issue->personReference] = true;
+            }
+        }
+        foreach (array_keys($this->deferredHealthCoverage) as $personReference) {
+            if (isset($blocked[$personReference])) {
+                $this->issue(
+                    'health_insurance',
+                    'health_coverage_evidence_missing',
+                    $personReference,
+                );
+            }
+        }
     }
 
     private function issue(
