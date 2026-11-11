@@ -104,8 +104,8 @@ a již uzavřenou revizi nepřepíše.
    nového roku ještě nejsou vyhlášené. Týká-li se nález víc osob, než se do
    přehledu vejde, odkaz **Zobrazit všech N osob v seznamu zaměstnanců**
    otevře seznam zúžený právě na ně. Nález má v kontrole před zahájením
-   stejnou závažnost jako po výpočtu: chybějící přihláška ČSSZ nebo
-   oznámení zdravotní pojišťovně je mezi nálezy, kvůli kterým běh nepůjde
+   stejnou závažnost jako po výpočtu: chybějící přihláška ČSSZ (u DPP a DPČ
+   i bez účasti na pojištění) nebo oznámení zdravotní pojišťovně je mezi nálezy, kvůli kterým běh nepůjde
    schválit, dokud se nepodá nebo neschválí výjimka (podáno mimo aplikaci).
    Chybějící docházka schválení nezastaví, doplnění po zamknutí vstupů ale
    stojí opravnou revizi.

@@ -1431,9 +1431,12 @@ nebo u pojišťovny, mzdový běh to ohlásí jako **varování**, ne blokaci: m
 práci náleží bez ohledu na přihlášku. Varování je nutné vzít na vědomí. Ozve se,
 jen když platí všechno naráz: položka nástupního checklistu je nesplněná,
 k vztahu není evidovaná odpovídající povinnost podání, vztah není
-**Nenastoupil** ani archivovaný, nástup už nastal a vztah zakládá účast na
-pojištění. Dohoda s automatickým posouzením účasti, vztah bez účasti i cizinec
-s A1 tedy mlčí. Přihlášku podanou mimo aplikaci odškrtněte v checklistu, u víc
+**Nenastoupil** ani archivovaný, nástup už nastal a vztah registraci dluží.
+Registraci u ČSSZ (REGZEC A1) dluží každá DPP a DPČ bez ohledu na účast na
+pojištění, tedy i dohoda pod rozhodným příjmem a cizinec s A1. U ostatních
+vztahů rozhoduje účast na pojištění. Oznámení zdravotní pojišťovně se ozve jen
+u vztahu s účastí na zdravotním pojištění, dohoda bez účasti u něj mlčí.
+Přihlášku podanou mimo aplikaci odškrtněte v checklistu, u víc
 lidí hromadně v panelu **Zákonné termíny**; nástup před 1. 7. 2026 je v sekci
 **Bez termínu**.
 

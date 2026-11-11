@@ -27,6 +27,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
 use MyInvoice\Service\Payroll\HealthInsurance\PayrollExpectedHealthParticipation;
 use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountAgeCondition;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
@@ -2185,10 +2186,9 @@ final class PayrollRunSnapshotBuilder
                     EXISTS (
                       SELECT 1 FROM payroll_obligations obligation
                        WHERE obligation.supplier_id = employment.supplier_id
-                         AND obligation.source_event_type
-                               = \'payroll_employment_registration\'
+                         AND obligation.source_event_type = ?
                          AND obligation.source_event_reference
-                               = CONCAT(\'payroll_employment:\', employment.id)
+                               = CONCAT(?, employment.id)
                          AND obligation.status <> \'cancelled\'
                     ) AS social_submitted,
                     EXISTS (
@@ -2208,7 +2208,12 @@ final class PayrollRunSnapshotBuilder
                 AND employment.is_legacy_projection = 0
                 AND employment.id IN (' . $placeholders . ')'
         );
-        $statement->execute([$supplierId, ...$employmentIds]);
+        $statement->execute([
+            PayrollRegistrationSubmissionService::SOURCE_EVENT_TYPE,
+            PayrollRegistrationSubmissionService::EMPLOYMENT_REFERENCE_PREFIX,
+            $supplierId,
+            ...$employmentIds,
+        ]);
         $gaps = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $gaps[(int) $row['employment_id']] = [
@@ -2227,14 +2232,12 @@ final class PayrollRunSnapshotBuilder
      * ne blokátor. Přihláška se mohla podat mimo aplikaci a mzda se musí dát
      * spočítat i tak; jen ne mlčky.
      *
-     * Koho se to týká, rozhoduje ÚČAST NA POJIŠTĚNÍ, ne druh vztahu sám:
-     * `included` se hlásí vždy, `excluded` a `foreign` (cizinec pod cizí
-     * legislativou s A1) nikdy. `automatic` znamená „rozhodne výpočet podle
-     * prahu příjmu" — u DPP se proto mlčí, protože DPP pod rozhodným
-     * příjmem se u ČSSZ nehlásí a hlásit ji „pro jistotu" by bylo varování
-     * u každé brigády; DPČ a další vztahy malého rozsahu se sjednaným příjmem
-     * nad rozhodným příjmem výpočet pojistí vždy, takže se hlásí. Pravidlo drží
-     * {@see PayrollExpectedParticipation}. Zdravotní pojištění má vlastní
+     * Registraci u ČSSZ (REGZEC) dluží od 2026 každá DPP a DPČ bez ohledu
+     * na účast na pojištění (evidence zaměstnanců podle zákona č. 323/2025
+     * Sb.). U ostatních vztahů rozhoduje ÚČAST NA POJIŠTĚNÍ: `included` se
+     * hlásí vždy, `excluded` a `foreign` nikdy, `automatic` podle druhu vztahu
+     * a sjednaného příjmu. Pravidlo drží
+     * {@see PayrollExpectedParticipation::registrationExpected()}. Zdravotní pojištění má vlastní
      * pravidlo účasti ({@see PayrollExpectedHealthParticipation}) — totéž, ze
      * kterého vzniká oznámení pojišťovně: zaměstnání malého rozsahu a jednatel
      * s odměnou pod rozhodným příjmem jsou zaměstnanci pro ZP, i když pro ČSSZ ne.
@@ -2267,7 +2270,7 @@ final class PayrollRunSnapshotBuilder
         }
         $relationType = (string) $row['relation_type'];
         $validations = [];
-        if ($gap['social'] && $this->participatesInLevy(
+        if ($gap['social'] && $this->owesSocialRegistration(
             $row['social_insurance_participation'],
             $relationType,
             $row,
@@ -2279,8 +2282,9 @@ final class PayrollRunSnapshotBuilder
                 'employment',
                 $employmentId,
                 sprintf(
-                    '%s: k pracovnímu vztahu chybí přihláška u ČSSZ '
-                    . '(nemocenské pojištění). Podejte ji v Mzdy → Podání → '
+                    '%s: k pracovnímu vztahu chybí registrace zaměstnance '
+                    . 'u ČSSZ (JMHZ). Registruje se i každá DPP a DPČ bez '
+                    . 'účasti na pojištění. Podejte ji v Mzdy → Podání → '
                     . 'Registrace zaměstnance, nebo — byla-li podána mimo '
                     . 'aplikaci — odškrtněte v checklistu vztahu položku '
                     . '„Registrace ČSSZ / JMHZ".',
@@ -2341,21 +2345,22 @@ final class PayrollRunSnapshotBuilder
     }
 
     /**
-     * Účast na sociálním pojištění: {@see PayrollExpectedParticipation}.
+     * Registrace u ČSSZ: {@see PayrollExpectedParticipation::registrationExpected()}.
      *
      * @param array<string,mixed> $row
      */
-    private function participatesInLevy(
+    private function owesSocialRegistration(
         mixed $participation,
         string $relationType,
         array $row,
         string $periodEnd,
     ): bool {
-        return PayrollExpectedParticipation::expected(
+        return PayrollExpectedParticipation::registrationExpected(
             is_string($participation) ? $participation : null,
             $relationType,
             ($row['monthly_gross_minor'] ?? null) === null ? null : (int) $row['monthly_gross_minor'],
             PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $periodEnd),
+            $periodEnd,
         );
     }
 
