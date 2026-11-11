@@ -394,6 +394,14 @@ final class PayrollEmploymentValidator
                 fn () => $this->jmhzEvidence->requireWorkplaceCountry($workplaceCountry, $effectiveFrom),
                 $warnings,
             ) && $workplaceVerified;
+            $unpublished = $this->jmhzEvidence->workplaceUnpublishedPeriodNotice($effectiveFrom);
+            if ($workplaceVerified && $unpublished !== null) {
+                $warnings[] = [
+                    'field' => 'jmhz_workplace_municipality_code',
+                    'code' => 'workplace_codebook_not_published',
+                    'message' => $unpublished,
+                ];
+            }
             /*
              * Název obce uložení neblokuje nikdy: `work_place` je volný text
              * smlouvy (mzdový výměr, A1). Do JMHZ ale jde jako název obce
