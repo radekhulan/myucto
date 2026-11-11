@@ -249,7 +249,7 @@ final class PayrollRunReadinessService
         $findings = array_map(
             static function (array $finding): array {
                 $bulkActions = self::bulkActions($finding);
-                unset($finding['gap_totals']);
+                unset($finding['gap_totals'], $finding['bulk_employee_ids']);
 
                 return $finding + [
                     'hideable' => false,
@@ -304,9 +304,22 @@ final class PayrollRunReadinessService
             return $actions;
         }
 
+        /*
+         * Podpis prohlášení je fakt o konkrétních lidech. Bez výčtu otevřel
+         * dialog všechny osoby roku a předvybral i ty, kterým má evidence
+         * výslovně „Nepodepsáno" — tlačítko „(16)" tak zapsalo podpis 47 lidem.
+         */
+        $declarationIds = $code === 'tax_declaration_evidence_missing'
+            ? array_values(array_map('intval', (array) ($finding['bulk_employee_ids'] ?? [])))
+            : array_values(array_map('intval', (array) ($finding['subject_ids'] ?? [])));
+
         return match (true) {
             $code === 'tax_declaration_not_signed_summary',
-            $code === 'tax_declaration_evidence_missing' => [['kind' => 'declaration_signed', 'count' => $count]],
+            $code === 'tax_declaration_evidence_missing' => [[
+                'kind' => 'declaration_signed',
+                'count' => $count,
+                ...($declarationIds === [] ? [] : ['employee_ids' => $declarationIds]),
+            ]],
             $code === 'employments_past_agreed_end' => [['kind' => 'closure', 'count' => $count]],
             // Hromadné „nepožádal" je výběr na stránce Roční zúčtování, ne dialog
             // v seznamu zaměstnanců; klient tam vede s rokem a zúžením.
@@ -369,7 +382,7 @@ final class PayrollRunReadinessService
         $named = array_column(array_slice($affected, 0, self::MAX_ENTITIES), 'full_name');
         $hidden = count($affected) - count($named);
 
-        return self::finding(
+        return [...self::finding(
             'tax_declaration_evidence_missing',
             sprintf(
                 'Chybí ověřený stav daňového prohlášení (%d): %s%s. Bez něj výpočet mzdy '
@@ -391,7 +404,7 @@ final class PayrollRunReadinessService
                 ],
                 array_slice($affected, 0, self::MAX_ENTITIES),
             ),
-        );
+        ), 'bulk_employee_ids' => array_column($affected, 'id')];
     }
 
     /**

@@ -44938,6 +44938,10 @@ components:
             properties:
               kind: { type: string, enum: [statutory_defaults, declaration_signed, health_insurer, workplace, closure, annual_settlement_request] }
               count: { type: integer, minimum: 0 }
+              employee_ids:
+                type: array
+                description: U declaration_signed osoby, kterých se nález týká; hromadný podpis se na ně zúží.
+                items: { type: integer, minimum: 1 }
 
     PayrollRunReadiness:
       type: [object, "null"]

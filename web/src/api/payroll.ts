@@ -7962,7 +7962,7 @@ export interface PayrollRunReadinessFinding {
   subject_type?: PayrollWarningSubjectType | null
   subject_ids?: number[]
   /** Hromadné opravy ze seznamu zaměstnanců (`/payroll/people?bulk=`), které nález nabízí. */
-  bulk_actions?: { kind: PayrollRunReadinessBulkKind, count: number }[]
+  bulk_actions?: { kind: PayrollRunReadinessBulkKind, count: number, employee_ids?: number[] }[]
 }
 
 export type PayrollRunReadinessBulkKind =

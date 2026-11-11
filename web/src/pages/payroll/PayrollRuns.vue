@@ -1225,7 +1225,8 @@ const READINESS_BULK_ICONS: Record<PayrollRunReadinessBulkKind, string> = {
   annual_settlement_request: ICONS.check,
 }
 
-function readinessBulkTarget(kind: PayrollRunReadinessBulkKind) {
+function readinessBulkTarget(action: { kind: PayrollRunReadinessBulkKind, employee_ids?: number[] }) {
+  const kind = action.kind
   const bulkPeriod = readiness.value?.period_start?.slice(0, 7) ?? period.value
   if (kind === 'annual_settlement_request') {
     // Hlášení za leden a únor se ptá na žádost za MINULÝ rok. Hromadné
@@ -1233,7 +1234,9 @@ function readinessBulkTarget(kind: PayrollRunReadinessBulkKind) {
     const taxYear = Number(bulkPeriod.slice(0, 4)) - 1
     return { name: 'payroll-annual-settlement', query: { year: String(taxYear), state: 'request_undecided' } }
   }
-  return { name: 'payroll-people', query: { bulk: kind, period: bulkPeriod } }
+  // Nález nese osoby, kterých se týká — dialog se jimi zúží, ne na celý rok.
+  const employees = action.employee_ids?.length ? { employees: action.employee_ids.join(',') } : {}
+  return { name: 'payroll-people', query: { bulk: kind, period: bulkPeriod, ...employees } }
 }
 
 function readinessEntityKey(entity: ReadinessEntity, index: number): string {
@@ -1933,7 +1936,7 @@ onMounted(load)
                   <RouterLink
                     v-for="action in finding.bulk_actions"
                     :key="action.kind"
-                    :to="readinessBulkTarget(action.kind)"
+                    :to="readinessBulkTarget(action)"
                     :class="[btnOutlineSm(action.kind === 'declaration_signed' ? 'success' : 'warning'), 'whitespace-nowrap']"
                     :data-test="`run-readiness-bulk-action-${action.kind}`"
                   >

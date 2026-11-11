@@ -2151,5 +2151,39 @@ describe('PayrollRuns', () => {
       expect(action.text()).toContain('payroll.runs.readiness.bulk.annual_settlement_request')
       wrapper.unmount()
     })
+
+    it('hromadný podpis prohlášení z nálezu nese jen dotčené osoby', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: false,
+        has_findings: true,
+        findings: [{
+          code: 'tax_declaration_evidence_missing',
+          severity: 'blocker',
+          impact: 'approval',
+          scope: 'monthly',
+          message: 'Chybí ověřený stav daňového prohlášení (2).',
+          remediation_path: '/payroll/people?bulk=declaration_signed',
+          count: 2,
+          entities: [],
+          bulk_actions: [{ kind: 'declaration_signed', count: 2, employee_ids: [14, 15] }],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const action = wrapper.get('[data-test="run-readiness-bulk-action-declaration_signed"]')
+      expect(JSON.parse(action.attributes('data-to')!)).toEqual({
+        name: 'payroll-people',
+        query: { bulk: 'declaration_signed', period: '2026-02', employees: '14,15' },
+      })
+      wrapper.unmount()
+    })
   })
 })

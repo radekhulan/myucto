@@ -108,6 +108,24 @@ describe('PayrollDeclarationSignBulkDialog', () => {
     expect(wrapper.get('[data-test="declaration-sign-bulk-result-6"]').text()).toContain('Syntetická chyba')
   })
 
+  it('bez zúžení na osoby nepředvybere přepis výslovně nepodepsaného prohlášení', async () => {
+    m.declarationSignBulkPreview.mockResolvedValue(preview())
+    const wrapper = mount(PayrollDeclarationSignBulkDialog, MOUNT)
+    await flushPromises()
+
+    expect((wrapper.get('[data-test="declaration-sign-bulk-pick-5"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('[data-test="declaration-sign-bulk-pick-6"]').element as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('zúžení z nálezu kontroly běhu předvybere všechny vyjmenované osoby', async () => {
+    m.declarationSignBulkPreview.mockResolvedValue(preview())
+    const wrapper = mount(PayrollDeclarationSignBulkDialog, { ...MOUNT, props: { employeeIds: [5, 6] } })
+    await flushPromises()
+
+    expect(m.declarationSignBulkPreview.mock.calls[0]![0].employee_ids).toEqual([5, 6])
+    expect((wrapper.get('[data-test="declaration-sign-bulk-pick-6"]').element as HTMLInputElement).checked).toBe(true)
+  })
+
   it('změna roku a data podpisu načte náhled znovu', async () => {
     m.declarationSignBulkPreview.mockResolvedValue(preview())
     const wrapper = mount(PayrollDeclarationSignBulkDialog, { ...MOUNT, props: { employeeIds: [5, 6] } })

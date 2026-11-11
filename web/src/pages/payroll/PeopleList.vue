@@ -215,6 +215,14 @@ const bulkClosureCount = ref<number | null>(null)
 const healthInsurerBulkOpen = ref(false)
 // Z hromadného doplnění evidence (i na této stránce) vede proklik `?bulk=declaration_signed`.
 const declarationSignBulkOpen = ref(false)
+// Nález kontroly běhu posílá i osoby, kterých se týká (`?employees=1,2`);
+// bez nich dialog nabídne všechny osoby roku.
+const declarationSignEmployeeIds = computed<number[] | null>(() => {
+  const raw = route.query.employees
+  if (route.query.bulk !== 'declaration_signed' || typeof raw !== 'string') return null
+  const ids = raw.split(',').map(Number).filter(id => Number.isInteger(id) && id > 0)
+  return ids.length > 0 ? ids : null
+})
 const canWriteEmployment = computed(() => auth.canWrite('payroll.employment.write'))
 const canQuickEditPerson = computed(() =>
   auth.canWrite('payroll.person.write')
@@ -1995,6 +2003,7 @@ onMounted(async () => {
 
     <PayrollDeclarationSignBulkDialog
       v-if="declarationSignBulkOpen"
+      :employee-ids="declarationSignEmployeeIds"
       @close="declarationSignBulkOpen = false"
       @applied="load"
     />

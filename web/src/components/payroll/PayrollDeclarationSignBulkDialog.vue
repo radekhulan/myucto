@@ -104,7 +104,13 @@ async function loadPreview() {
       signed_on: signedOn.value,
       employee_ids: props.employeeIds,
     })
-    selected.value = new Set(preview.value.ready_employee_ids)
+    // Výslovné „Nepodepsáno" je rozhodnutí účetní, ne mezera: bez zúžení na
+    // konkrétní osoby se k přepisu nepředvybírá.
+    const explicitlyUnsigned = new Set(preview.value.people
+      .filter(person => person.change !== 'add' && person.current_status === 'not-signed')
+      .map(person => person.employee_id))
+    selected.value = new Set(preview.value.ready_employee_ids
+      .filter(id => props.employeeIds !== null || !explicitlyUnsigned.has(id)))
   } catch (error) {
     preview.value = null
     loadError.value = apiErrorMessage(error, t('payroll.declaration_sign_bulk.load_failed'))

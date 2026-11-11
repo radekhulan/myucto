@@ -130,7 +130,15 @@ final class PayrollRunReadinessPredictionTest extends TestCase
         sort($predicted);
         self::assertSame($expected, $predicted);
         self::assertSame('blocker', $finding['severity']);
-        self::assertSame([['kind' => 'declaration_signed', 'count' => 3]], $finding['bulk_actions']);
+        self::assertCount(1, $finding['bulk_actions']);
+        self::assertSame('declaration_signed', $finding['bulk_actions'][0]['kind']);
+        self::assertSame(3, $finding['bulk_actions'][0]['count']);
+        // Hromadný podpis se zúží na dotčené osoby; bez výčtu dialog nabídl
+        // všechny osoby roku včetně výslovně nepodepsaných.
+        $bulkIds = $finding['bulk_actions'][0]['employee_ids'] ?? [];
+        sort($bulkIds);
+        self::assertSame($expected, $bulkIds);
+        self::assertArrayNotHasKey('bulk_employee_ids', $finding);
         self::assertStringContainsString('Syntetická Pozdní', $finding['message']);
 
         // Tatáž věc nevisí podruhé v katalogu mezer s jiným počtem.
