@@ -396,6 +396,16 @@ final class PayrollTimeService
             ));
         }
         $total = count($employments);
+        // Otevřené měsíce celého výběru, ne jen stránky: „Schválit měsíc všem"
+        // dřív slibovalo a schvalovalo jen 25 viditelných řádků, kontrola běhu
+        // přitom hlásila desítky dalších na dalších stránkách.
+        $openTotal = 0;
+        foreach ($employments as $employment) {
+            $status = $states[PayrollTimeValue::int($employment['id'] ?? null, 'id')]['status'] ?? 'open';
+            if ($status === 'open') {
+                ++$openTotal;
+            }
+        }
         $employments = array_slice($employments, $offset, $limit);
 
         // § 93 zákoníku práce — stav limitů přesčasu se počítá pro CELOU
@@ -561,6 +571,7 @@ final class PayrollTimeService
             'employment_id' => $employmentId,
             'items' => $items,
             'total' => $total,
+            'open_total' => $openTotal,
             'limit' => $limit,
             'offset' => $offset,
         ];

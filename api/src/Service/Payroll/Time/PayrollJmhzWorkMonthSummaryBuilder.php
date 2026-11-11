@@ -1212,9 +1212,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             throw new PayrollJmhzWorkSummaryConflictException();
         }
         if (($preview['issues'] ?? []) !== []) {
-            throw new \InvalidArgumentException(
-                'Pracovní souhrn obsahuje neúplné nebo nejednoznačné zdroje.',
-            );
+            throw new PayrollJmhzWorkSummaryIncompleteException(array_values((array) $preview['issues']));
         }
         $values = [
             'standard_fund_millihours' => self::scaledDecimal(

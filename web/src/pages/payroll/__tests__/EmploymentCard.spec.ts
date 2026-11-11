@@ -464,6 +464,32 @@ describe('EmploymentCard', () => {
     expect(scrolled).toHaveBeenCalled()
   })
 
+  /*
+   * Ukončení vztahu bere hlavní roli. Brigádník, jehož jediná dohoda skončila,
+   * by bez toho neměl kam uložit počáteční úhrny a odkaz z kontroly běhu
+   * (`panel=opening_balances`) vedl do prázdna.
+   */
+  it('počáteční stavy ukáže i u skončené dohody osoby bez hlavního vztahu', async () => {
+    const ended = { ...employment(), id: 11, relation_type: 'dpp' as const, status: 'ended' as const, is_primary: false, start_date: '2026-02-07', end_date: '2026-02-28' }
+    const older = { ...employment(), id: 9, relation_type: 'dpp' as const, status: 'ended' as const, is_primary: false, start_date: '2026-01-05', end_date: '2026-01-31' }
+    const options = (current: PayrollEmployment) => ({
+      props: { employment: current, canWrite: true, payrollStartPeriod: '2026-01-01', siblingEmployments: [older, ended] },
+      global: { stubs: { PayrollOpeningBalancesPanel: { template: '<div />' } } },
+    })
+    const host = await mountCard(ended, options(ended))
+    const other = await mountCard(older, options(older))
+    Element.prototype.scrollIntoView ??= vi.fn()
+    type Exposed = { focusSection: (panel: string) => Promise<void>, holdsOpeningBalances: boolean }
+    // Skončený vztah je sbalený; doskok z kontroly ho rozbalí.
+    await (host.vm as unknown as Exposed).focusSection('opening_balances')
+    await (other.vm as unknown as Exposed).focusSection('opening_balances')
+    await flushPromises()
+
+    expect(host.find('[data-test="opening-balances-needed"]').exists()).toBe(true)
+    expect((host.vm as unknown as Exposed).holdsOpeningBalances).toBe(true)
+    expect(other.find('[data-test="opening-balances-needed"]').exists()).toBe(false)
+  })
+
   it('u převzatého zaměstnance začíná počáteční stav měsícem nástupu', async () => {
     const wrapper = await mountCard(employment(), {
       props: {

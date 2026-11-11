@@ -3,6 +3,7 @@ import {
   employmentDiffFields,
   employmentDiffValue,
   mergedFromCode,
+  openingBalancesHostId,
   todayIso,
   transitionPresentation,
 } from '@/pages/payroll/employmentLifecycleUi'
@@ -120,5 +121,19 @@ describe('employmentLifecycleUi', () => {
       expect(mergedFromCode(diff)).toBe('DPP-1')
       expect(mergedFromCode({ relation_type: { from: 'a', to: 'b' } })).toBeNull()
     })
+  })
+
+  it('počáteční úhrny nese hlavní vztah, bez něj poslední skončený', () => {
+    const base = { status: 'ended' as const, is_primary: false, start_date: '2026-01-05', end_date: '2026-01-31' }
+    expect(openingBalancesHostId([
+      { ...base, id: 1 },
+      { ...base, id: 2, start_date: '2026-02-07', end_date: '2026-02-28' },
+      { ...base, id: 3, status: 'no_show' as const, start_date: '2026-03-01', end_date: null },
+    ])).toBe(2)
+    expect(openingBalancesHostId([
+      { ...base, id: 1, status: 'active' as const, is_primary: true, end_date: null },
+      { ...base, id: 2, start_date: '2026-02-07', end_date: '2026-02-28' },
+    ])).toBe(1)
+    expect(openingBalancesHostId([])).toBeNull()
   })
 })

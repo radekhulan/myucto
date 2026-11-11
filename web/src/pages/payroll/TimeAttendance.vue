@@ -504,6 +504,32 @@ function openHistoryMonth(monthPeriod: string) {
 const selectableItems = computed(() =>
   visibleItems.value.filter(item => item.month.status === 'open'),
 )
+/*
+ * „Schválit měsíc všem" pracuje s CELÝM výběrem podle filtru, ne se stránkou.
+ * Dřív vzalo 25 viditelných řádků, ač kontrola běhu hlásila desítky vztahů;
+ * zbytek byl na dalších stránkách a tlačítko „všem" lhalo. Počet dává server
+ * (`open_total`), řádky ostatních stránek se načtou až po kliknutí.
+ */
+const openTotal = computed(() => overview.value?.open_total ?? selectableItems.value.length)
+const bulkAllItems = ref<PayrollTimeOverviewItem[] | null>(null)
+const bulkPool = computed(() => bulkAllItems.value ?? selectableItems.value)
+
+async function loadAllOpenItems(): Promise<PayrollTimeOverviewItem[]> {
+  const found: PayrollTimeOverviewItem[] = []
+  for (let cursor = 0, page = 0; page < 20; page += 1) {
+    const result = await payrollApi.timeMonth(
+      period.value,
+      incompleteOnly.value,
+      { limit: 200, offset: cursor },
+      focusEmploymentId.value,
+      ...searchArgs(),
+    )
+    found.push(...result.items.filter(item => item.month.status === 'open'))
+    cursor += result.items.length
+    if (result.items.length === 0 || cursor >= result.total) break
+  }
+  return found
+}
 const allSelectableSelected = computed(() =>
   selectableItems.value.length > 0
   && selectableItems.value.every(item => selectedEmploymentIds.value.includes(item.employment.id)),
@@ -642,7 +668,7 @@ async function load() {
     if (payrollQueryValue(route.query, 'approve') === 'all') {
       const { approve: _approve, ...query } = route.query
       void router.replace({ query })
-      if (canApprove.value && selectableItems.value.length > 0) approveAllOpen()
+      if (canApprove.value && openTotal.value > 0) void approveAllOpen()
     }
     if (payrollQueryValue(route.query, 'confirm_jmhz') === '1' && focusEmploymentId.value !== null) {
       const focusedMonth = overview.value.items.find(item => item.employment.id === focusEmploymentId.value)
@@ -957,7 +983,10 @@ async function saveRecord(keepOpen = false): Promise<boolean> {
 async function createCalendar(item: PayrollTimeOverviewItem) {
   saving.value = true
   try {
-    await payrollApi.saveTimeCalendar(item.employment.id, {
+    // Bez kalendáře ho server složí z týdenní pracovní doby v podmínkách vztahu
+    // od prvního dne vztahu v měsíci; pevný rozvrh 5 × 8 h dával zaměstnání
+    // malého rozsahu fond plného úvazku a nástup uprostřed měsíce nepokryl.
+    await payrollApi.saveTimeCalendar(item.employment.id, item.calendar ? {
       name: t('payroll.time.calendar.default_name'),
       timezone: 'Europe/Prague',
       schedule_type: 'regular',
@@ -967,7 +996,7 @@ async function createCalendar(item: PayrollTimeOverviewItem) {
       month_row_version: item.month.row_version,
       week_pattern: { 1: 480, 2: 480, 3: 480, 4: 480, 5: 480, 6: 0, 7: 0 },
       days: [],
-    })
+    } : { from_terms: true, period: period.value })
     toast.success(t('payroll.time.calendar.saved'))
     await load()
   } catch (error: any) {
@@ -1617,13 +1646,18 @@ const bulkNote = ref('')
 
 type BulkExclusion = { name: string; employmentId: number; reason: string }
 
-const bulkSelectedItems = computed(() => selectableItems.value.filter(item =>
+const bulkSelectedItems = computed(() => bulkPool.value.filter(item =>
   selectedEmploymentIds.value.includes(item.employment.id),
 ))
 
 function bulkExclusionReason(item: PayrollTimeOverviewItem): string | null {
   const preview = item.jmhz_work_summary?.preview
   if (!preview) return t('payroll.time.bulk.excluded.no_preview')
+  // Náhled s nálezy server odmítne; dávka by jen vyrobila 422 za každý řádek.
+  if (preview.issues.length > 0) {
+    return [...new Set(groupWorkSummaryIssues(preview.issues)
+      .map(issue => t(workSummaryRemediation(issue.code, item.employment.id, period.value).problemKey)))].join(' ')
+  }
   if (preview.requires_unworked_hours_followup) {
     return t('payroll.time.bulk.excluded.absences')
   }
@@ -1707,6 +1741,7 @@ function openBulkApproval() {
 
 function closeBulkApproval() {
   bulkApprovalOpen.value = false
+  bulkAllItems.value = null
 }
 
 /**
@@ -1714,8 +1749,20 @@ function closeBulkApproval() {
  * dávkový dialog. Dřív se hromadné schválení objevilo až po zaškrtnutí
  * řádků, takže účetní měsíc schvalovala člověka po člověku.
  */
-function approveAllOpen() {
-  selectedEmploymentIds.value = selectableItems.value.map(item => item.employment.id)
+async function approveAllOpen() {
+  bulkAllItems.value = null
+  if (openTotal.value > selectableItems.value.length) {
+    saving.value = true
+    try {
+      bulkAllItems.value = await loadAllOpenItems()
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error?.message || t('payroll.time.load_failed'))
+      return
+    } finally {
+      saving.value = false
+    }
+  }
+  selectedEmploymentIds.value = bulkPool.value.map(item => item.employment.id)
   openBulkApproval()
 }
 
@@ -1734,7 +1781,7 @@ async function fillUnderFundAndReturn() {
   const ids = new Set(bulkUnderFund.value.map(item => item.employment.id))
   if (ids.size === 0) return
   const selection = [...selectedEmploymentIds.value]
-  bulkApprovalOpen.value = false
+  closeBulkApproval()
   await fillWorkdays(ids)
   if (gridDirtyCount.value > 0) await saveGrid()
   if (gridCellErrorCount.value > 0 || gridSaveError.value) return
@@ -1745,9 +1792,10 @@ async function fillUnderFundAndReturn() {
 
 /** Řádek, který dávka nevezme, se odbaví jednotlivě — rovnou z dialogu. */
 function approveExcludedSingly(employmentId: number) {
-  const item = visibleItems.value.find(candidate => candidate.employment.id === employmentId)
+  const item = bulkPool.value.find(candidate => candidate.employment.id === employmentId)
+    ?? visibleItems.value.find(candidate => candidate.employment.id === employmentId)
   if (!item) return
-  bulkApprovalOpen.value = false
+  closeBulkApproval()
   openApproval(item)
 }
 
@@ -1818,8 +1866,22 @@ async function approveSelected() {
   // Dialog se zavírá jen tehdy, když opravdu všechno prošlo. Když neprošlo nic,
   // zavření vzalo s sebou i ručně přepsaný zákonný fond a poznámku — účetní je
   // po znovuotevření psala celé znovu, aby narazila na tutéž chybu.
-  if (failures.length === 0) bulkApprovalOpen.value = false
+  const wholeSelection = bulkAllItems.value !== null
+  if (failures.length === 0) closeBulkApproval()
   await load()
+  // Načtení výběr vynuluje; neschválené řádky v dialogu zůstanou, ať je vidět,
+  // u koho co chybí, a ne „Schválí se 0 vztahů".
+  const failedIds = new Set(failures.map(failure => failure.employmentId))
+  if (failures.length > 0 && wholeSelection) {
+    try {
+      bulkAllItems.value = await loadAllOpenItems()
+    } catch {
+      bulkAllItems.value = null
+    }
+  }
+  selectedEmploymentIds.value = bulkPool.value
+    .map(row => row.employment.id)
+    .filter(id => failedIds.has(id))
   saving.value = false
 }
 
@@ -2685,14 +2747,14 @@ onMounted(async () => {
             <span>{{ t('payroll.time.guide.approve') }}</span>
           </span>
           <button
-            v-if="canApprove && selectableItems.length > 0"
+            v-if="canApprove && openTotal > 0"
             type="button"
             :class="[btnFilled('success'), 'ml-8 self-start whitespace-nowrap']"
             :disabled="saving"
             data-test="payroll-time-approve-all"
             @click="approveAllOpen"
           >
-            <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.guide.approve_action', { count: selectableItems.length }) }}
+            <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.guide.approve_action', { count: openTotal }) }}
           </button>
           <template v-else-if="visibleItems.length > 0">
             <span class="ml-8 text-xs text-success-700">{{ t('payroll.time.guide.all_approved') }}</span>
@@ -3779,6 +3841,26 @@ onMounted(async () => {
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
                 {{ t('payroll.time.bulk.excluded.approve_single') }}
               </button>
+            </li>
+          </ul>
+        </section>
+
+        <section
+          v-if="approveFailures.length"
+          data-test="bulk-approve-failures"
+          class="rounded-lg border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-700"
+        >
+          <p class="font-medium">{{ t('payroll.time.bulk.failed', { count: approveFailures.length }) }}</p>
+          <ul class="mt-2 space-y-2">
+            <li v-for="failure in approveFailures" :key="failure.employmentId" data-test="bulk-approve-failure-row">
+              <p class="font-medium">{{ failure.name }}</p>
+              <p class="mt-0.5 max-w-prose leading-snug">{{ failure.message }}</p>
+              <RouterLink
+                v-if="approveFailureTarget(failure)"
+                :to="approveFailureTarget(failure)!"
+                class="mt-1 inline-flex text-sm font-medium underline"
+                @click="closeBulkApproval"
+              >{{ t(`payroll.time.approve_errors.link.${failure.code}`) }}</RouterLink>
             </li>
           </ul>
         </section>
