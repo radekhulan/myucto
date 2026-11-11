@@ -36,6 +36,7 @@ final class BankEmailNoticeScanStatusTest extends TestCase
             enabled INTEGER NOT NULL DEFAULT 1, host TEXT DEFAULT 'imap.example.test',
             username TEXT DEFAULT 'notices@example.test', password_enc TEXT DEFAULT 'synthetic-password',
             port INTEGER DEFAULT 993, validate_cert INTEGER DEFAULT 1,
+            auth_mode TEXT DEFAULT 'password', oauth_client_secret_enc TEXT,
             max_messages_per_run INTEGER DEFAULT 50, retry_failed INTEGER DEFAULT 0,
             max_attempts INTEGER DEFAULT 3, distribute_user_id INTEGER,
             last_scan_at TEXT DEFAULT '2026-10-14 12:00:00', last_scan_status TEXT,
@@ -66,6 +67,21 @@ final class BankEmailNoticeScanStatusTest extends TestCase
         self::assertSame('2026-10-21 12:00:00', $this->scanStatus(20)['last_scan_at']);
         self::assertSame('ok', $this->scanStatus(20)['last_scan_status']);
         self::assertSame('2026-10-14 12:00:00', $this->scanStatus(10)['last_scan_at']);
+    }
+
+    public function testCronScansMicrosoft365MailboxWithoutPassword(): void
+    {
+        $this->pdo->exec("UPDATE bank_email_imap_settings SET auth_mode = 'microsoft365',
+            password_enc = NULL, oauth_client_secret_enc = 'synthetic-encrypted-secret' WHERE id = 20");
+        $imap = $this->createMock(ImapMailboxClientInterface::class);
+        $imap->expects(self::once())->method('latest')->with(
+            self::callback(static fn (array $settings): bool => $settings['auth_mode'] === 'microsoft365'
+                && !isset($settings['password']) && isset($settings['oauth_client_secret_enc'])),
+            50,
+        )->willReturn([]);
+
+        self::assertSame(0, $this->scanner($imap)->scanSupplier(2)['errors']);
+        self::assertSame('ok', $this->scanStatus(20)['last_scan_status']);
     }
 
     public function testFailedMailboxIsCountedAsErrorAndNextMailboxStillRuns(): void

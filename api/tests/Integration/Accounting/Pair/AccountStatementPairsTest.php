@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Accounting\Pair;
 
+use MyInvoice\Repository\LedgerReportRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
+use MyInvoice\Service\Accounting\Reports\AccountStatementScope;
 use MyInvoice\Service\Accounting\Reports\AccountStatementService;
 use MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService;
 use MyInvoice\Service\Accounting\Reports\GeneralLedgerService;
@@ -256,6 +259,129 @@ final class AccountStatementPairsTest extends TestCase
             $l['entry_id'], $l['account_code'], $l['counter_accounts'], (float) $l['amount'], $l['balance'],
         ], array_values(array_filter($lines, static fn (array $l): bool => $l['entry_id'] === $entries['bulk'])));
         self::assertSame($keep($derived), $keep($paired));
+    }
+
+    /**
+     * Rozbalený měsíc hlavní knihy s filtrem dimenze u firmy s jednoduchým zápisem: řádky
+     * jdou z dimenzního zdroje (díl rozpadu), dvojice a protiúčet se berou ze základního řádku.
+     */
+    public function testLedgerScopeWithDimensionKeepsPairsOfBaseLine(): void
+    {
+        $entries = $this->postScenario();
+        $this->switchToSingle(self::YEAR . '-01-01');
+        $this->pairAllInPlace($entries);
+        [$type, $values] = $this->dimensionType();
+        $pdo = $this->db->pdo();
+        $line = static function (int $entryId, string $amount) use ($pdo): int {
+            $stmt = $pdo->prepare("SELECT l.id FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+                                    WHERE l.entry_id = ? AND a.account_code = '221' AND l.amount = ?");
+            $stmt->execute([$entryId, $amount]);
+            return (int) $stmt->fetchColumn();
+        };
+        // Hromadná platba po dvojicích: 1 210 rozpad 60 / 40, 605 celé na hodnotě a, 15 bez dimenze.
+        foreach (['a' => '0.6', 'b' => '0.4'] as $value => $share) {
+            $pdo->prepare('INSERT INTO journal_entry_line_dimension_splits (line_id,dimension_type_id,dimension_value_id,supplier_id,share) VALUES (?,?,?,?,?)')
+                ->execute([$line($entries['bulk'], '1210.00'), $type, $values[$value], $this->supplierId, $share]);
+        }
+        $pdo->prepare('INSERT INTO journal_entry_line_dimensions (supplier_id,line_id,dimension_type_id,dimension_value_id) VALUES (?,?,?,?)')
+            ->execute([$this->supplierId, $line($entries['bulk'], '605.00'), $type, $values['a']]);
+
+        $data = $this->buildScoped('221', new AccountStatementScope(
+            ['dimension' => new DimensionFilter($type, $values['a'], [$values['a']])],
+            self::YEAR . '-01-01',
+        ));
+        self::assertSame('pairs', $data['layout']);
+        self::assertSame(2, $data['total']);
+        self::assertNull($data['counter_totals'], 'Součty podle protiúčtu se s filtrem knihy nepočítají.');
+        self::assertSame([726.0, 605.0], array_column($data['items'], 'amount'), 'Díl rozpadu 60 % a celý řádek s hodnotou.');
+        self::assertSame(['321', '321'], array_column($data['items'], 'counter_accounts'));
+        self::assertSame([JournalLineContext::PAIR_STATUS_PAIRED, JournalLineContext::PAIR_STATUS_PAIRED], array_column($data['items'], 'pair_status'));
+        self::assertSame([null, null], array_column($data['items'], 'pair_piece'));
+        self::assertNotContains(null, array_column($data['items'], 'pair_no'));
+        self::assertSame(['md' => 0.0, 'd' => 1331.0], ['md' => $data['turnover_md'], 'd' => $data['turnover_d']]);
+        self::assertSame(-1331.0, $data['closing_balance'] - $data['opening_balance']);
+
+        $repo = $this->container->get(LedgerReportRepository::class);
+        $rows = $repo->accountLines($this->supplierId, $this->accountId('221'), self::YEAR . '-01-01', self::YEAR . '-01-31', 50, 0, true, null, true, new AccountStatementScope(
+            ['dimension' => new DimensionFilter($type, $values['a'], [$values['a']])],
+        ));
+        $pairNos = array_column($rows, 'pair_no');
+        self::assertCount(2, $pairNos);
+        self::assertNotContains(null, $pairNos, 'pair_no ze základního řádku, dimenzní zdroj ho nenese.');
+    }
+
+    /**
+     * Řádek staršího zápisu 1 : N s dílem rozpadu dimenze se na díly dvojic nerozkládá
+     * (díly by nedaly částku dílu rozpadu) a zůstává jedním pohybem.
+     */
+    public function testLedgerScopeWithDimensionShareDoesNotExpandDerivedPieces(): void
+    {
+        $entries = $this->postScenario();
+        $this->switchToSingle(self::YEAR . '-01-01');
+        [$type, $values] = $this->dimensionType();
+        foreach (['a' => '0.5', 'b' => '0.5'] as $value => $share) {
+            $this->db->pdo()->prepare("INSERT INTO journal_entry_line_dimension_splits (line_id,dimension_type_id,dimension_value_id,supplier_id,share)
+                SELECT l.id, ?, ?, l.supplier_id, ? FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+                 WHERE l.entry_id = ? AND a.account_code = '221'")
+                ->execute([$type, $values[$value], $share, $entries['bulk']]);
+        }
+
+        $data = $this->buildScoped('221', new AccountStatementScope(['dimension' => new DimensionFilter($type, $values['a'], [$values['a']])]));
+        self::assertSame([915.0], array_column($data['items'], 'amount'));
+        self::assertSame([null], array_column($data['items'], 'pair_piece'));
+        self::assertSame([JournalLineContext::PAIR_STATUS_DERIVED], array_column($data['items'], 'pair_status'));
+    }
+
+    /**
+     * Den PS a bez analytik (zúžení bez filtrů) jdou s filtrem protiúčtu po dvojicích:
+     * pořadí parametrů technického filtru, zúžení a partnera dvojice musí sedět.
+     */
+    public function testLedgerScopeOpeningDayWithPairCounterFilter(): void
+    {
+        $entries = $this->postScenario();
+        $this->switchToSingle(self::YEAR . '-01-01');
+        $this->pairAllInPlace($entries);
+
+        $filtered = $this->buildScoped('221', new AccountStatementScope([], self::YEAR . '-01-01', false), '568');
+        self::assertSame(1, $filtered['total']);
+        self::assertSame([15.0], array_column($filtered['items'], 'amount'));
+        self::assertSame(['md' => 0.0, 'd' => 15.0], ['md' => $filtered['counter_filter']['md'], 'd' => $filtered['counter_filter']['d']]);
+        self::assertNotNull($filtered['counter_totals'], 'Bez filtrů knihy součty podle protiúčtu zůstávají.');
+
+        $synthetic = $this->buildScoped('343', new AccountStatementScope([], self::YEAR . '-01-01', false));
+        self::assertSame(0, $synthetic['total'], 'Bez analytik: syntetika 343 vlastní pohyby nemá.');
+        self::assertSame([], $synthetic['counter_totals']);
+    }
+
+    /** @return array{0:int, 1:array<string,int>} */
+    private function dimensionType(): array
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id,code,name,kind) VALUES (?,'test_pairs','Synthetic pairs','custom')")->execute([$this->supplierId]);
+        $type = (int) $pdo->lastInsertId();
+        $values = [];
+        foreach (['a', 'b'] as $code) {
+            $pdo->prepare('INSERT INTO dimension_values (type_id,supplier_id,code,name) VALUES (?,?,?,?)')->execute([$type, $this->supplierId, $code, 'Synthetic ' . $code]);
+            $values[$code] = (int) $pdo->lastInsertId();
+        }
+        return [$type, $values];
+    }
+
+    /** @return array<string,mixed> */
+    private function buildScoped(string $code, AccountStatementScope $scope, ?string $counter = null): array
+    {
+        $this->entryForms->forget();
+        return $this->statement->build(
+            $this->supplierId,
+            $this->accountId($code),
+            self::YEAR . '-01-01',
+            self::YEAR . '-01-31',
+            1,
+            200,
+            false,
+            $counter === null ? null : $this->accountId($counter),
+            $scope,
+        );
     }
 
     /** @return list<array<string,mixed>> */

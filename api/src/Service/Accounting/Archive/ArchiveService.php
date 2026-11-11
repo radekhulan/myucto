@@ -37,10 +37,16 @@ final class ArchiveService
     /** Tabulky s přímým supplier_id (pořadí = pořadí exportu, respektuje FK). */
     private const DIRECT_TABLES = [
         'accounting_periods',
+        // Zachovat celou časovou osu rámce, ne jen aktuální hodnotu pro sazby.
+        'supplier_accounting_frameworks',
         'chart_of_accounts',
         'posting_rules',
         'bank_rule_templates',
         'cost_centers',
+        // Sazby obsahují ID dimenzí v JSON; archiv musí obsahovat i jejich rodiče.
+        'dimension_types',
+        'dimension_values',
+        'nonprofit_membership_rates',
         'accounting_supplier_settings',
         'accounting_closing_steps',
         'accounting_receivable_provisions',

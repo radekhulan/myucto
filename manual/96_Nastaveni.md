@@ -246,6 +246,136 @@ Povinná pole jsou ve formuláři označená hvězdičkou. Před uložením i p�
 zobrazené povinné položky (Reply-To, DKIM, SMTP autentizace a IMAP podle zapnutých voleb) a bez jejich vyplnění akci
 nespustí. Podrobnosti viz [§ 96.16.6](#96166-odesilaci-profily-podrobnosti).
 
+### 96.7.1 Připojení schránky Microsoft 365 přes IMAP
+
+Postup platí pro příjem bankovních avíz, PDF faktur a výpisů i pro ukládání kopií odeslaných e-mailů. MyÚčto se k Exchange Online přihlašuje jako aplikace pomocí OAuth 2.0 (`client_credentials`). Příjem může běžet z cronu bez přihlášeného uživatele. Odesílací transport se nastavuje samostatně.
+
+Potřebujete existující běžnou nebo sdílenou schránku Exchange Online, správce s právem udělit souhlas v Microsoft Entra a správce s příslušnými právy v Exchange Online PowerShellu. Ze serveru MyÚčta musí být dostupné `login.microsoftonline.com:443` přes HTTPS a `outlook.office365.com:993` přes IMAP s TLS. Adresu IMAP serveru, port a ověření certifikátu nastaví MyÚčto automaticky. [Vytvoření sdílené schránky v Microsoft 365](https://learn.microsoft.com/en-us/microsoft-365/admin/email/create-a-shared-mailbox)
+
+#### 96.7.1.1 Registrace aplikace v Microsoft Entra
+
+1. V [Centru pro správu Microsoft Entra](https://entra.microsoft.com/) přepněte do adresáře, ve kterém je cílová schránka. Otevřete **Entra ID → App registrations → New registration**.
+2. Zadejte název, například `myÚčto IMAP`. V **Supported account types** zvolte **Accounts in this organizational directory only (Single tenant)**. **Redirect URI** ponechte prázdné a klikněte na **Register**.
+3. V **Overview** nové registrace si zkopírujte **Directory (tenant) ID** a **Application (client) ID**.
+4. V registraci otevřete **API permissions → Add a permission → APIs my organization uses → Office 365 Exchange Online**. Na obrazovce **Request API permissions** klikněte na **Application permissions**, zaškrtněte **IMAP.AccessAsApp** a potvrďte **Add permissions**.
+5. Správce tenantu klikne na **Grant admin consent for …** a potvrdí souhlas. U řádku **Office 365 Exchange Online / IMAP.AccessAsApp** zkontrolujte typ **Application** a stav **Granted for …** pro správný tenant.
+6. Otevřete **Certificates & secrets → Client secrets → New client secret**. Zvolte popis a platnost, klikněte na **Add** a hned si bezpečně uložte obsah sloupce **Value**. Entra jej po opuštění stránky už nezobrazí. Do MyÚčta se zadává **Value**. **Secret ID** je identifikátor položky v Entra.
+7. V **Entra ID → Enterprise applications → All applications** vyhledejte aplikaci podle stejného **Application ID**. Otevřete ji a z jejího **Overview** zkopírujte **Object ID**. Tuto hodnotu použijete v PowerShellu. Stránka **App registrations → Overview** má vlastní **Object ID**, které patří objektu registrace.
+
+| Hodnota | Kde ji vzít | Kam ji zadat |
+|---|---|---|
+| **Directory (tenant) ID** | **App registrations → Overview** | **Tenant ID** v MyÚčtu |
+| **Application (client) ID** | **App registrations → Overview** | **Client ID** v MyÚčtu a `-AppId` v Exchange |
+| **Client Secret** | **App registrations → Certificates & secrets → Client secrets**, sloupec **Value** | **Client Secret** v MyÚčtu |
+| **Object ID podnikové aplikace** | **Enterprise applications → Overview** | `-ObjectId` v `New-ServicePrincipal` |
+| **Primární SMTP adresa schránky** | `PrimarySmtpAddress` v Exchange Online | **Adresa schránky** v MyÚčtu a `$mailbox` v příkazech níže |
+
+[Registrace aplikace v Entra](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app) · [Vytvoření Client Secret](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials#add-a-client-secret) · [Aplikační oprávnění pro IMAP](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth#add-the-pop-imap-or-smtp-permissions-to-your-microsoft-entra-application)
+
+#### 96.7.1.2 Registrace v Exchange Online a přístup ke schránce
+
+Microsoft pro registraci podnikové aplikace v Exchange a přidělení přístupu této identitě používá **Exchange Online PowerShell**. Na počítači správce otevřete nové okno PowerShellu. Pokud modul chybí, nainstalujte ho příkazem `Install-Module ExchangeOnlineManagement -Scope CurrentUser`. V následujících blocích nahraďte příklady vlastními hodnotami a pokračujte ve stejném okně.
+
+```powershell
+$admin = 'spravce@example.com'
+$mailbox = 'doklady@example.com'
+$appId = '<Application (client) ID>'
+$enterpriseObjectId = '<Object ID z Enterprise applications>'
+
+Import-Module ExchangeOnlineManagement
+Connect-ExchangeOnline -UserPrincipalName $admin
+Get-ConnectionInformation | Format-Table UserPrincipalName, TenantID, State
+Get-EXOMailbox -Identity $mailbox -ErrorAction Stop |
+    Format-List PrimarySmtpAddress, RecipientTypeDetails
+Get-CASMailbox -Identity $mailbox -ErrorAction Stop |
+    Format-List ImapEnabled
+```
+
+Přihlaste se účtem správce. `TenantID` musí odpovídat **Directory (tenant) ID** z Entra. Hledejte `RecipientTypeDetails` **UserMailbox** nebo **SharedMailbox** a ve zbytku návodu používejte vrácenou `PrimarySmtpAddress`. Jestliže Exchange schránku nenajde, ověřte tenant, adresu a dokončení vytvoření schránky. U běžné schránky ověřte přiřazení licence zahrnující Exchange Online. Sdílená schránka má vlastní licenční podmínky podle velikosti a použitých funkcí. [Podmínky sdílených schránek](https://learn.microsoft.com/en-us/microsoft-365/admin/email/about-shared-mailboxes?view=o365-worldwide)
+
+Pokud `ImapEnabled` vrátí `False` a pravidla organizace použití IMAP dovolují, povolte ho pro tuto schránku a hodnotu znovu ověřte. [Povolení protokolů u schránky](https://learn.microsoft.com/en-us/troubleshoot/exchange/user-and-shared-mailboxes/pop3-imap-owa-activesync-office-365)
+
+```powershell
+Set-CASMailbox -Identity $mailbox -ImapEnabled $true -ErrorAction Stop
+Get-CASMailbox -Identity $mailbox -ErrorAction Stop | Format-List ImapEnabled
+```
+
+Vyhledejte registraci podle `AppId`. Pro stejnou podnikovou aplikaci ji v Exchange zakládejte pouze jednou.
+
+```powershell
+$sp = @(Get-ServicePrincipal -ErrorAction Stop | Where-Object AppId -eq $appId)
+if ($sp.Count -eq 0) {
+    New-ServicePrincipal -AppId $appId -ObjectId $enterpriseObjectId -DisplayName 'myÚčto IMAP' -ErrorAction Stop
+    $sp = @(Get-ServicePrincipal -ErrorAction Stop | Where-Object AppId -eq $appId)
+}
+$sp | Format-List DisplayName, AppId, ObjectId, Identity
+```
+
+Pokračujte, až příkaz vrátí právě jeden záznam a jeho `AppId` i `ObjectId` souhlasí s hodnotami z Entra. Při nesouladu správce nejdřív prověří existující registraci a její použití. [Registrace aplikační identity v Exchange](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth#register-service-principals-in-exchange)
+
+Přístup přidělte jen schránce, kterou má MyÚčto používat. Pro parametr `-User` použijte `Identity` z právě ověřeného záznamu Exchange. Nejprve zkontrolujte existující oprávnění.
+
+```powershell
+if ($sp.Count -ne 1 -or $sp[0].ObjectId -ne $enterpriseObjectId -or -not $sp[0].Identity) {
+    throw 'Ověřte registraci podnikové aplikace v Exchange.'
+}
+$exoIdentity = $sp[0].Identity
+Get-MailboxPermission -Identity $mailbox -User $exoIdentity -ErrorAction Stop |
+    Format-Table User, AccessRights, Deny, IsInherited
+```
+
+Pokud pro tuto identitu chybí přímé povolení **FullAccess**, přidejte ho a znovu spusťte kontrolu výše. Očekávaný řádek obsahuje `FullAccess`, `Deny = False` a `IsInherited = False`. Pokud vidíte pro tuto identitu zákaz přístupu, správce musí nejprve prověřit jeho původ.
+
+```powershell
+Add-MailboxPermission -Identity $mailbox -User $exoIdentity -AccessRights FullAccess -ErrorAction Stop
+```
+
+Pro další schválenou schránku zopakujte kontrolu schránky, IMAP a přidělení přístupu s její adresou v `$mailbox`. Při dokončení se odhlaste příkazem `Disconnect-ExchangeOnline -Confirm:$false`. [Připojení k Exchange Online PowerShellu](https://learn.microsoft.com/en-us/powershell/exchange/connect-to-exchange-online-powershell?view=exchange-ps) · [Kontrola oprávnění schránky](https://learn.microsoft.com/en-us/powershell/module/exchange/get-mailboxpermission)
+
+#### 96.7.1.3 Příchozí pošta v MyÚčtu
+
+1. Přepněte do správné firmy. Otevřete **Peníze → Bankovní účty → Bankovní avíza a PDF z e-mailu**. Rozbalte nastavení a v části **Vaše nastavení pro načítání bankovních avíz a PDF z e-mailů** klikněte na **Nový IMAP účet** nebo upravte stávající účet.
+2. Zadejte **Název** a v poli **Přihlášení k IMAP** vyberte **Microsoft 365 (OAuth 2.0)**. Vyplňte **Tenant ID**, **Client ID**, **Client Secret** a **Adresu schránky** podle tabulky výše. U sdílené schránky použijte přímo její adresu.
+3. Klikněte na **Procházet** a vyberte složku, kam zprávy chodí, například `INBOX`. Podle potřeby nastavte **Načítat bankovní avíza**, **Načítat PDF faktury z příloh** a **Načítat PDF výpisy z příloh**. Pro [ověření autenticity e-mailů](30_Bankovni_ucty.md#30119-overeni-autenticity-e-mailu-dkimdmarc) vyplňte skutečné **Důvěryhodný authserv-id** ze zprávy přijaté do schránky. Pro první test bez automatického importu vypněte **Povolit zpracování bankovních avíz z tohoto účtu**.
+4. Klikněte na **Uložit IMAP účet** a v seznamu u uloženého účtu klikněte na **Test**. Hláška „IMAP připojení je funkční“ potvrzuje přihlášení a načtení seznamu složek. **Test** ani **Procházet** neimportují zprávy ani nemění jejich stav.
+5. Až chcete začít zpracovávat zprávy, zapněte **Povolit zpracování bankovních avíz z tohoto účtu**, nastavte **Zpracovat od data** a případné akce po zpracování. U avíz nastavte mapování na bankovní účet. Pro ověření importu použijte zprávu s vhodným testovacím obsahem a klikněte na **Spustit scan**. Scan a cron podle nastavení zakládají záznamy v MyÚčtu a mohou měnit stav zpráv ve schránce. Pro pravidelné načítání ověřte, že je naplánovaný cron.
+
+[Mapování a první scan](30_Bankovni_ucty.md#307-krok-za-krokem-nacitani-bankovnich-aviz-z-e-mailu) · [Nastavení cronu](30_Bankovni_ucty.md#301117-cron-pro-e-mailova-aviza)
+
+#### 96.7.1.4 Kopie odeslané pošty v MyÚčtu
+
+1. Jako superadmin otevřete **Systém → E-maily a certifikáty → Odesílací profily**. Uživatel s právem **Odesílací profily firmy** se zápisem najde firemní profily v **Firma → Nastavení firmy**. Zkontrolujte vybranou firmu a otevřete správný profil.
+2. Zapněte **Ukládat kopii do IMAP složky odeslané pošty**. V poli **Přihlášení k IMAP** vyberte **Microsoft 365 (OAuth 2.0)** a vyplňte **Tenant ID**, **Client ID**, **Client Secret** a **Adresu schránky**.
+3. Klikněte na **Procházet** a z nabídky serveru vyberte **Složku odeslané pošty**. Použijte skutečný název složky v této schránce. **Procházet** pouze načítá seznam složek.
+4. Klikněte na **Otestovat zápis**. Test uloží do vybrané složky zprávu s předmětem `MyInvoice IMAP append test` přímo přes IMAP. Po kontrole ji můžete smazat. Tlačítko **Test** celého profilu naopak odešle testovací e-mail zvoleným transportem.
+5. Uložte profil a ověřte, že jej firma používá pro zprávy, které chcete archivovat. Pro živé ověření celého profilu zkontrolujte doručení testovacího e-mailu i uložení kopie v cílové složce.
+
+#### 96.7.1.5 Diagnostika připojení
+
+Začněte tlačítkem **Procházet** nebo **Test** u příchozího účtu. Pro ověření archivace použijte **Otestovat zápis**. Při chybě opište kód z hranatých závorek.
+
+Při ověřování rozsahu oprávnění můžete v novém testovacím formuláři zkusit **Procházet** také proti druhé schránce ve stejném tenantu, u níž je IMAP povolený a aplikace nemá **FullAccess**. Exchange má přihlášení odmítnout. Testovací konfiguraci poté zavřete.
+
+| Chyba nebo kód | Co zkontrolovat |
+|---|---|
+| `ManagementObjectNotFoundException` v PowerShellu | Zkontrolujte `TenantID`, primární SMTP adresu a dostupnost schránky přes `Get-EXOMailbox`. Pokud byla právě vytvořena nebo licencována, počkejte, až ji Exchange vrátí v obou kontrolních příkazech. |
+| `imap_configuration_invalid`, případně chyba povinného pole | Zkontrolujte režim, obě ID, hodnotu Client Secret a primární adresu schránky. Po změně ID nebo adresy zadejte secret znovu. |
+| `oauth_credentials_rejected` | Entra odmítla přihlašovací údaje aplikace. Porovnejte Tenant ID a Client ID s registrací. Zkontrolujte platnost a použijte **Value** z **Client secrets**. |
+| `oauth_secret_unreadable` | MyÚčto nedokázalo načíst uložený secret. Správce instalace ověří šifrovací klíč, zejména po obnově instance. Podle potřeby zadejte secret znovu. |
+| `oauth_token_failed`, `oauth_endpoint_unreachable`, `oauth_rate_limited` | Podle kódu ověřte registraci a souhlas správce, dostupnost `login.microsoftonline.com:443` ze serveru MyÚčta nebo test zopakujte s odstupem po omezení četnosti. |
+| `imap_connection_failed`, `imap_tls_failed`, `imap_timeout` | Ze serveru MyÚčta ověřte DNS, odchozí spojení na `outlook.office365.com:993`, firewall a důvěryhodnost certifikátu. |
+| `imap_auth_rejected` | MyÚčto získalo token a Exchange odmítl přihlášení ke schránce. Zkontrolujte souhlas pro **IMAP.AccessAsApp**, správné **Object ID** z **Enterprise applications**, `ImapEnabled = True`, primární adresu schránky a přímé **FullAccess** s `Deny = False` pro registrovanou aplikační identitu. Po čerstvé změně oprávnění zopakujte test s odstupem. Samotný kód přesnou příčinu odmítnutí neurčuje. |
+| `imap_list_failed`, `imap_folder_failed` | Přihlášení proběhlo. Ověřte, že složka existuje v cílové schránce a že používáte cestu vrácenou serverem. |
+| `imap_read_failed`, `imap_write_failed`, `imap_update_failed` | Přihlášení proběhlo. Podle operace zkontrolujte zdrojovou či cílovou složku, možnost zápisu, volnou kapacitu schránky nebo cílovou složku pro přesun. |
+
+U odmítnutí Exchange může správce při vlastní diagnostice narazit i na odpověď `User is authenticated but not connected`. V MyÚčtu spadá pod `imap_auth_rejected` a platí stejné kontroly. Po chybě `imap_list_failed` při testu zápisu nejdřív zkontrolujte cílovou složku. Test ukládá zprávu před načtením seznamu složek.
+
+Správce instalace najde v provozním logu aplikace událost `imap_oauth_failure`. Výchozí jméno denního souboru je `log/app-RRRR-MM-DD.log` v datovém adresáři instance. Při vlastní konfiguraci se řiďte hodnotou `logging.path`. Pro dohledání použijte čas, `supplier_id` (firma), `connection_id` (IMAP účet nebo odesílací profil, u nového formuláře může chybět), `purpose` (`incoming` pro příjem, `sent` pro archivaci), `operation`, `stage`, `code` a případný `oauth_http_status`. Úspěšný ruční test nebo načtení složek zaznamenává `imap_oauth_probe_succeeded` s `folder_count` na úrovni `info`. Stav automatického příjmu najdete v **Systém → Plánované úlohy** u `cron-bank-email-notices`. Při předání diagnostiky stačí tyto údaje a text chyby z MyÚčta. Client Secret, token ani obsah příkazu `AUTHENTICATE XOAUTH2` nesdílejte.
+
+#### 96.7.1.6 Výměna Client Secret
+
+Před vypršením vytvořte nový secret ve stejné registraci v **Certificates & secrets → Client secrets → New client secret**. Zadejte jeho **Value** do každého příchozího účtu a odesílacího profilu, který používá tuto aplikaci. Nastavení uložte a ověřte **Test** u příchozích účtů a **Otestovat zápis** u odesílacích profilů. Starý secret odstraňte v Entra, až projdou všechny dotčené konfigurace. V MyÚčtu se uložený secret zobrazuje jen jako informace o uložení. Při běžné úpravě formuláře jej zachováte prázdným polem. Při změně tenantu, aplikace nebo schránky jej zadejte znovu.
+
 ## 96.8 Krok za krokem: uložené filtry a zobrazení tabulek
 
 Na seznamech dokladů (Vydané i Přijaté faktury, Klienti, Sklad - položky i doklady, Pokladna, Deník, Hlavní kniha,

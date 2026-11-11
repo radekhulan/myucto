@@ -695,8 +695,18 @@ final class Bootstrap
                 invoiceIsdoc: $c->get(\MyInvoice\Service\Mail\InvoiceIsdocAttachments::class),
                 activity: $c->get(\MyInvoice\Service\ActivityLogger::class),
             ),
+            \MyInvoice\Service\Mail\Imap\ImapAuthentication::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Mail\Imap\ImapAuthentication(
+                new \MyInvoice\Service\OAuth\OAuthTokenClient(new \GuzzleHttp\Client(), $c->get(LoggerInterface::class), 'imap_oauth'),
+                $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                $c->get(ClockInterface::class),
+                $c->get(LoggerInterface::class),
+            ),
+            \MyInvoice\Service\Mail\SentMailImapAppender::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Mail\SentMailImapAppender(
+                authentication: $c->get(\MyInvoice\Service\Mail\Imap\ImapAuthentication::class),
+            ),
             \MyInvoice\Service\Bank\EmailNotice\ImapMailboxClientInterface::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\EmailNotice\WebklexImapMailboxClient(
                 $c->get(\MyInvoice\Service\Bank\EmailNotice\EmailNoticeTextNormalizer::class),
+                authentication: $c->get(\MyInvoice\Service\Mail\Imap\ImapAuthentication::class),
             ),
             \MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeParserRepository::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeParserRepository(
                 $c->get(Connection::class),

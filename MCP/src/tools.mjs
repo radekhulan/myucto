@@ -1185,6 +1185,9 @@ export const TOOLS = [
       + 'KDYŽ ZADÁŠ `ic`, ÚDAJE SE DOTÁHNOU Z ARES — název, adresa, DIČ i registrace '
       + 'k DPH. Cokoli vyplníš ručně má přednost před tím, co vrátí ARES.\n\n'
       + 'Bez IČO je nutné vyplnit `company_name`, `street`, `city` a `zip`.\n\n'
+      + 'Drobný zákazník (`simplified_only: true`, např. stálý zákazník z prodejny) stačí se '
+      + 'jménem a e-mailem nebo telefonem, adresa ani IČO nejsou potřeba. Plátce mu ale smí '
+      + 'vystavit jen zjednodušený daňový doklad (§ 30 ZDPH) do 10 000 Kč s DPH.\n\n'
       + 'Před založením se kontroluje, jestli odběratel se stejným IČO nebo DIČ už '
       + 'neexistuje — pokud ano, nic se nevytvoří a vrátí se odkaz na stávající '
       + 'kartu. Vědomý duplicitní zápis povolíš přes `allow_duplicate`.',
@@ -1203,6 +1206,7 @@ export const TOOLS = [
       is_customer: bool('Je odběratel (výchozí ano).'),
       is_vendor: bool('Je i dodavatel (výchozí ne).'),
       note: str('Interní poznámka.'),
+      simplified_only: bool('Drobný zákazník bez adresy — jen zjednodušené daňové doklady (§ 30 ZDPH).'),
       allow_duplicate: bool('Založit i když už odběratel se stejným IČO/DIČ existuje.'),
     }),
     write: true,
@@ -1251,12 +1255,17 @@ export const TOOLS = [
         is_customer: a.is_customer !== false,
         is_vendor: a.is_vendor === true,
         note: a.note ?? '',
+        simplified_only: a.simplified_only === true,
       };
       if (a.hourly_rate !== undefined) payload.hourly_rate = Number(a.hourly_rate);
       // ARES je pro CZ autoritativní zdroj registrace k DPH.
       if (ares && typeof ares.is_vat_payer === 'boolean') payload.is_vat_payer = ares.is_vat_payer;
 
-      const missing = ['company_name', 'street', 'city', 'zip'].filter((f) => payload[f] === '');
+      if (payload.simplified_only && payload.main_email === '' && !payload.phone) {
+        throw new Error('Drobný zákazník musí mít e-mail nebo telefon.');
+      }
+      const required = payload.simplified_only ? ['company_name'] : ['company_name', 'street', 'city', 'zip'];
+      const missing = required.filter((f) => payload[f] === '');
       if (missing.length > 0) {
         throw new Error(
           `Chybí povinné údaje: ${missing.join(', ')}. `
@@ -1320,6 +1329,7 @@ export const TOOLS = [
       is_customer: bool('Je odběratel.'),
       is_vendor: bool('Je dodavatel.'),
       note: str('Interní poznámka.'),
+      simplified_only: bool('Drobný zákazník bez adresy — jen zjednodušené daňové doklady (§ 30 ZDPH). Vypnutí vyžaduje adresu.'),
     }, ['id']),
     write: true,
     run: async (c, a, tool) => {
@@ -1365,6 +1375,7 @@ export const TOOLS = [
         // (tichá změna flagu by se propsala do nových dokladů; stávající nesou snapshot).
         is_vat_payer: a.is_vat_payer ?? current.is_vat_payer,
         note: a.note ?? current.note ?? '',
+        simplified_only: a.simplified_only ?? current.simplified_only ?? false,
       };
       if (a.hourly_rate !== undefined) payload.hourly_rate = Number(a.hourly_rate);
       else if (current.hourly_rate !== undefined) payload.hourly_rate = current.hourly_rate;
@@ -3290,7 +3301,13 @@ export const TOOLS = [
       from: date('Počátek rozsahu.'),
       to: date('Konec rozsahu.'),
       after_closing: bool('Stav po uzávěrkových operacích.'),
-      counter_account_id: int('Jen řádky s tímto protiúčtem nebo jeho analytikou; zůstatek zůstává za celý účet.'),
+      counter_account_id: int('Jen řádky s tímto protiúčtem nebo jeho analytikou; zůstatek zůstává za celý účet. Nejde kombinovat s filtry dodavatele, odběratele, položky a dimenze.'),
+      client: str('Filtr na odběratele; zúží řádky i počáteční stav.'),
+      vendor: str('Filtr na dodavatele; zúží řádky i počáteční stav.'),
+      item: str('Filtr na text položky; zúží řádky i počáteční stav.'),
+      opening_date: date('Den, jehož otevírací zápis patří do počátečního stavu (začátek rozsahu hlavní knihy).'),
+      include_analytics: bool('false = jen účet sám, bez analytik.'),
+      ...DIMENSION_FILTER,
       ...PAGING,
     }, ['account_id', 'from', 'to']),
     write: false,
@@ -3298,6 +3315,12 @@ export const TOOLS = [
       from: a.from, to: a.to, page: a.page, per_page: a.per_page,
       after_closing: a.after_closing ? 1 : undefined,
       counter_account_id: a.counter_account_id,
+      client: a.client,
+      vendor: a.vendor,
+      item: a.item,
+      opening_date: a.opening_date,
+      include_analytics: a.include_analytics === false ? 0 : undefined,
+      ...dimensionQuery(a),
     }, tool),
   },
   {

@@ -8,6 +8,8 @@ use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
+use MyInvoice\Service\Accounting\Reports\AccountStatementScope;
 use MyInvoice\Service\Accounting\Reports\AccountStatementService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
@@ -29,6 +31,7 @@ final class AccountStatementAction
 {
     use AccountingActionSupport;
     use GuardsAccountingMode;
+    use DimensionFilterParam;
 
     private const MAX_PER_PAGE = 200;
 
@@ -43,6 +46,7 @@ final class AccountStatementAction
         private readonly IpMatcher $ipMatcher,
         private readonly LoggerInterface $log,
         private readonly Connection $db,
+        private readonly DimensionService $dimensions,
     ) {}
 
     public function get(Request $request, Response $response, array $args): Response
@@ -51,9 +55,11 @@ final class AccountStatementAction
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
         $params = $this->validateParams($request, $response, $args, $err);
         if ($params === null) return $err;
+        $scope = $this->ledgerScope($request, $response, $supplierId, $params['from'], $err);
+        if ($scope === null) return $err;
 
         try {
-            $data = $this->statement->build($supplierId, $params['account_id'], $params['from'], $params['to'], $params['page'], $params['per_page'], $params['after_closing'], $params['counter_account_id']);
+            $data = $this->statement->build($supplierId, $params['account_id'], $params['from'], $params['to'], $params['page'], $params['per_page'], $params['after_closing'], $params['counter_account_id'], $scope);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
@@ -74,6 +80,12 @@ final class AccountStatementAction
         $format = strtolower(trim((string) ($request->getQueryParams()['format'] ?? '')));
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             return Json::error($response, 'validation_failed', "format musí být 'pdf' nebo 'xlsx'.", 422);
+        }
+        // Export zúžení v hlavičce neuvádí, zúžený opis by se vydával za celý účet.
+        $scope = $this->ledgerScope($request, $response, $supplierId, $params['from'], $err);
+        if ($scope === null) return $err;
+        if (!$scope->isDefault()) {
+            return Json::error($response, 'validation_failed', 'Export opisu účtu nepodporuje filtr dimenze, dodavatele, odběratele ani položky, opening_date ani include_analytics.', 422);
         }
 
         try {
@@ -155,6 +167,46 @@ final class AccountStatementAction
             'after_closing' => (string) ($q['after_closing'] ?? '') === '1',
             'counter_account_id' => $counterRaw === '' ? null : (int) $counterRaw,
         ];
+    }
+
+    /**
+     * Zúžení opisu podle řádku hlavní knihy ({@see AccountStatementScope}). Filtry čte
+     * stejně jako {@see GeneralLedgerAction}: prázdná hodnota a „0" filtr nezapnou.
+     */
+    private function ledgerScope(Request $request, Response $response, int $supplierId, string $from, ?Response &$err): ?AccountStatementScope
+    {
+        $q = $request->getQueryParams();
+        $filters = [];
+        foreach (['vendor', 'client', 'item'] as $key) {
+            $v = $q[$key] ?? '';
+            if (!is_string($v)) {
+                $err = Json::error($response, 'validation_failed', "{$key} musí být jedna hodnota.", 422);
+                return null;
+            }
+            $v = mb_substr(trim($v), 0, 100);
+            if ($v !== '' && $v !== '0') $filters[$key] = $v;
+        }
+        $dimension = $this->dimensionFilterParam($this->dimensions, $request, $response, $supplierId, $err);
+        if ($dimension === false) return null;
+        if ($dimension !== null) $filters['dimension'] = $dimension;
+
+        $openingDate = $q['opening_date'] ?? '';
+        if (!is_string($openingDate)) {
+            $err = Json::error($response, 'validation_failed', 'opening_date musí být jedna hodnota.', 422);
+            return null;
+        }
+        $openingDate = trim($openingDate);
+        if ($openingDate !== '' && (!$this->isDate($openingDate) || $openingDate > $from)) {
+            $err = Json::error($response, 'validation_failed', 'opening_date musí být datum (YYYY-MM-DD) nejpozději v den from.', 422);
+            return null;
+        }
+        $analytics = $q['include_analytics'] ?? '';
+        if (!is_string($analytics) || !in_array(trim($analytics), ['', '0', '1'], true)) {
+            $err = Json::error($response, 'validation_failed', 'include_analytics musí být 0 nebo 1.', 422);
+            return null;
+        }
+        $err = null;
+        return new AccountStatementScope($filters, $openingDate === '' ? null : $openingDate, trim($analytics) !== '0');
     }
 
     private function isDate(string $v): bool

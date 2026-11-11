@@ -92,7 +92,7 @@ const actions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border bg-surface p-4" data-section="reverse-flow">
+  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" data-section="reverse-flow">
     <h3 class="break-words font-semibold">{{ t('nonprofitMembership.reverseTitle') }} · {{ member.member_number }} · {{ member.label }}</h3>
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.reverseHelp') }}</p>
     <dl class="grid gap-3 sm:grid-cols-4" data-section="reverse-claim">
@@ -116,7 +116,7 @@ const actions = computed<ActionItem[]>(() => [
     </fieldset>
     </form>
     <ActionBar v-if="canManage && !commit.review.value" :actions="actions" />
-    <div v-if="commit.review.value && frozenRequest" class="space-y-3 rounded border p-3" data-section="reverse-preview">
+    <div v-if="commit.review.value && frozenRequest" class="space-y-3 rounded border border-neutral-200 p-3" data-section="reverse-preview">
       <h4 class="font-semibold">{{ t('nonprofitMembership.reviewTitle') }}</h4>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.advisory') }}</p>
       <dl class="grid gap-3 sm:grid-cols-3">

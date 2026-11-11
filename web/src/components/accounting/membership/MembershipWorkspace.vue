@@ -11,12 +11,14 @@ import { membershipApi, type MemberRow } from '@/api/nonprofitMembership'
 import type { Client } from '@/api/clients'
 import { formatDate } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
-import { errorBox, errorMessage, memberStatusBadge } from './membershipFormat'
+import { errorBox, membershipError, memberStatusBadge } from './membershipFormat'
 import MembershipMemberDetail from './MembershipMemberDetail.vue'
 import MembershipReconciliation from './MembershipReconciliation.vue'
+import MembershipRates from './MembershipRates.vue'
+import MembershipBatchFlow from './MembershipBatchFlow.vue'
 
-const props = defineProps<{ supplier: number; canManage: boolean }>()
-const { t, tm, rt } = useI18n()
+const props = defineProps<{ supplier: number; canManage: boolean; canManageRates?: boolean }>()
+const { t, te, tm, rt } = useI18n()
 
 const members = ref<MemberRow[]>([])
 const nextAfter = ref<number | null>(null)
@@ -32,6 +34,15 @@ const creating = ref(false)
 const root = ref<HTMLElement | null>(null)
 const detailPane = ref<HTMLElement | null>(null)
 const dataVersion = ref(0)
+const checkedMembers = ref<number[]>([]), batchOpen = ref(false), batchLocked = ref(false)
+const detailVersion = ref(0)
+function batchChanged() { dataVersion.value++; detailVersion.value++; void load() }
+function checkMember(id: number, event: Event) {
+  if (!props.canManage || batchLocked.value) return
+  const checked = (event.target as HTMLInputElement).checked
+  if (checked && !checkedMembers.value.includes(id) && checkedMembers.value.length < 500) checkedMembers.value.push(id)
+  else if (!checked) checkedMembers.value = checkedMembers.value.filter(x => x !== id)
+}
 let alive = true
 let generation = 0
 let createTicket = 0
@@ -71,7 +82,7 @@ async function load(append = false) {
     members.value = append ? [...members.value, ...page.items] : page.items
     nextAfter.value = page.next_after_id
   } catch (e) {
-    if (alive && ticket === generation) error.value = errorMessage(e) || t('nonprofitMembership.error')
+    if (alive && ticket === generation) error.value = membershipError({t, te}, e)
   } finally {
     if (alive && ticket === generation) loading.value = false
   }
@@ -116,7 +127,7 @@ async function create() {
     clientId.value = null; clientLabel.value = ''; memberNumber.value = ''
     await load()
   } catch (e) {
-    if (alive && ticket === createTicket) error.value = errorMessage(e) || t('nonprofitMembership.error')
+    if (alive && ticket === createTicket) error.value = membershipError({t, te}, e)
   } finally {
     if (alive && ticket === createTicket) creating.value = false
   }
@@ -124,6 +135,7 @@ async function create() {
 
 watch(() => props.supplier, () => {
   generation++; createTicket++
+  checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false
   members.value = []; nextAfter.value = null; periods.value = []; selected.value = null
   clientId.value = null; clientLabel.value = ''; memberNumber.value = ''
   creating.value = false; error.value = ''; notice.value = ''
@@ -138,6 +150,7 @@ onActivated(() => {
 })
 
 const actions = computed<ActionItem[]>(() => [
+  { key: 'batch-open', label: t('nonprofitMembership.batchTitle'), icon: 'plus', variant: 'primary', show: props.canManage, disabled: batchLocked.value, run: () => { batchOpen.value = true } },
   { key: 'reload-members', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value, run: () => { void reloadAll() } },
 ])
 const createActions = computed<ActionItem[]>(() => [
@@ -153,8 +166,16 @@ const createActions = computed<ActionItem[]>(() => [
     <p v-if="error" role="alert" :class="errorBox" data-section="workspace-error">{{ error }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-600" data-section="workspace-notice">{{ notice }}</p>
     <ActionBar :actions="actions" />
+    <p v-if="canManage && members.length" class="text-sm text-neutral-500">{{ t('nonprofitMembership.batchSelectedCount', {count: checkedMembers.length}) }}</p>
+    <MembershipBatchFlow v-if="batchOpen" :key="supplier" :supplier="supplier" :can-manage="canManage" :periods="periods" :selected-member-ids="checkedMembers"
+      @changed="batchChanged" @lock="batchLocked = $event" @close="batchOpen = false" />
 
-    <section v-if="canManage" class="space-y-3 rounded-lg border bg-surface p-4" data-section="create-member">
+    <details class="rounded-lg border border-neutral-200 bg-surface p-4" data-section="rates-management">
+      <summary class="cursor-pointer font-semibold">{{ t('nonprofitMembership.ratesTitle') }}</summary>
+      <MembershipRates :key="supplier" class="mt-3" :supplier="supplier" :can-manage="!!canManageRates" />
+    </details>
+
+    <section v-if="canManage" class="space-y-3 rounded-lg border border-neutral-200 bg-surface p-4" data-section="create-member">
       <h2 class="font-semibold">{{ t('nonprofitMembership.createTitle') }}</h2>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.createHelp') }}</p>
       <fieldset :disabled="creating" class="grid gap-3 sm:grid-cols-2">
@@ -180,7 +201,7 @@ const createActions = computed<ActionItem[]>(() => [
     <div v-if="selected" ref="detailPane" class="min-w-0 scroll-mt-4 self-start lg:sticky lg:top-4 lg:order-last" data-section="member-detail-pane">
       <MembershipMemberDetail
         :key="selected.id"
-        :supplier="supplier" :can-manage="canManage" :member-id="selected.id" :label="selected.label" :periods="periods"
+        :supplier="supplier" :can-manage="canManage" :member-id="selected.id" :label="selected.label" :periods="periods" :refresh-version="detailVersion"
         @changed="dataVersion++; load()" @close="closeMember()"
       />
     </div>
@@ -193,8 +214,9 @@ const createActions = computed<ActionItem[]>(() => [
           <li v-for="(step, index) in tm('nonprofitMembership.firstSteps')" :key="index">{{ rt(step) }}</li>
         </ol>
       </div>
-      <div v-for="row in members" :key="row.id" :class="['flex flex-wrap items-center justify-between gap-3 rounded border bg-surface p-3', selected?.id === row.id ? 'border-primary-400 ring-1 ring-primary-300' : '']" data-section="member-row" :data-member="row.id" :aria-current="selected?.id === row.id ? 'true' : undefined">
-        <div class="min-w-0 space-y-1 text-sm">
+      <div v-for="row in members" :key="row.id" :class="['flex flex-wrap items-center justify-between gap-3 rounded border bg-surface p-3', selected?.id === row.id ? 'border-primary-400 ring-1 ring-primary-300' : 'border-neutral-200']" data-section="member-row" :data-member="row.id" :aria-current="selected?.id === row.id ? 'true' : undefined">
+        <input v-if="canManage" type="checkbox" :checked="checkedMembers.includes(row.id)" :disabled="batchLocked || (checkedMembers.length >= 500 && !checkedMembers.includes(row.id))" :aria-label="t('nonprofitMembership.batchSelectMember', {name: labelOf(row)})" data-action="batch-check-member" @change="checkMember(row.id, $event)" />
+        <div class="min-w-0 flex-1 space-y-1 text-sm">
           <p class="break-words font-medium">{{ row.member_number }} · {{ labelOf(row) }}</p>
           <p v-if="row.revision_no === null || row.effective_from === null || row.status === null" class="text-warning-700" data-field="member-revision">{{ t('nonprofitMembership.noRevision') }}</p>
           <p v-else-if="row.effective_from > today" class="text-warning-700" data-field="member-revision">{{ t('nonprofitMembership.futureRevision', { status: t(`nonprofitMembership.status_${row.status}`), date: formatDate(row.effective_from) }) }}</p>

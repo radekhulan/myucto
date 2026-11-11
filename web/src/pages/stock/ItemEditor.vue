@@ -56,6 +56,7 @@ import ProductRelationsPanel from '@/components/stock/ProductRelationsPanel.vue'
 import ProductVariantInheritance from '@/components/stock/ProductVariantInheritance.vue'
 import ProductPostingDefaults from '@/components/stock/ProductPostingDefaults.vue'
 import { useSupplierStore } from '@/stores/supplier'
+import { useTrackingLots } from '@/composables/useTrackingLots'
 import {
   ALL_CURRENCIES,
   cloneRuleSet,
@@ -946,12 +947,23 @@ function validatePriceLevels(): string | null {
   return null
 }
 
+const trackingLots = useTrackingLots(() => itemId.value ?? 0)
+const lotUid = useId()
+const lotSearch = ref('')
+let lotSearchTimer: ReturnType<typeof setTimeout> | undefined
+/** Hledání v kódech šarží se spouští po chvíli od posledního písmena; změněné šarže zůstávají v paměti. */
+function onLotSearch() {
+  clearTimeout(lotSearchTimer)
+  lotSearchTimer = setTimeout(() => { void trackingLots.load(lotSearch.value) }, 300)
+}
+
 /**
  * Balení a zákaznické ceny mají vlastní endpointy. Když se nenačtou, editor
  * zůstane použitelný, ale tyto sekce se neukládají. Prázdná sada by jinak
  * při uložení smazala data, která uživatel vůbec neviděl.
  */
 async function loadItemExtras(id: number) {
+  if (form.value.tracking_mode === 'lot') void trackingLots.load()
   const [codebook, packaging, customer, levels] = await Promise.all([
     Promise.resolve().then(() => eshopApi.listPackagingUnits()).catch(() => [] as PackagingUnit[]),
     Promise.resolve().then(() => stockApi.getItemPackaging(id)).catch(() => null),
@@ -1026,6 +1038,15 @@ async function saveItemExtras(id: number): Promise<boolean> {
     } catch (e: any) {
       error.value = mapError(e)
       tab.value = 'prices'
+      return false
+    }
+  }
+  if (trackingLots.dirty.value) {
+    // Karta i ostatní části jsou uložené; šarže, kterou server odmítne, zůstane změněná s hláškou u pole.
+    const message = await trackingLots.save()
+    if (message !== null) {
+      error.value = message
+      tab.value = 'general'
       return false
     }
   }
@@ -1280,7 +1301,7 @@ function markSaved(snapshotValue = snapshot()) {
 }
 const isDirty = computed(() => savedSnapshot.value !== ''
   && (snapshot() !== savedSnapshot.value || packagingDirty.value || customerPricesDirty.value || priceLevelsDirty.value
-    || !!postingDefaults.value?.dirty))
+    || !!postingDefaults.value?.dirty || trackingLots.dirty.value))
 function confirmDiscard(): boolean {
   return !isDirty.value || window.confirm(t('stock.items.editor_ux.discard_changes'))
 }
@@ -1298,6 +1319,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
   window.removeEventListener('resize', showActiveTab)
+  clearTimeout(lotSearchTimer)
 })
 
 /**
@@ -1325,6 +1347,11 @@ function validateBeforeSubmit(): boolean {
   const packagingError = packagingLoaded.value ? validatePackaging() : null
   if (packagingError) {
     error.value = packagingError
+    tab.value = 'general'
+    return false
+  }
+  if (!trackingLots.validate()) {
+    error.value = t('stock.tracking.lot_code_required')
     tab.value = 'general'
     return false
   }
@@ -1572,6 +1599,46 @@ function onImgError(e: Event) {
                 <option v-for="r in vatRates" :key="r.id" :value="r.id">{{ r.rate_percent }} %</option>
               </select>
             </div>
+          </div>
+
+          <!-- Šarže karty: kód a datum spotřeby se přepisují v poli, ukládá společné Uložit -->
+          <div v-if="isEdit && form.tracking_mode === 'lot' && (trackingLots.loaded.value || trackingLots.loadError.value !== '')" data-test="lots-section" class="rounded-md border border-neutral-200 p-4 space-y-3">
+            <div>
+              <h3 class="text-sm font-semibold text-neutral-800">{{ t('stock.tracking.lots_title') }}</h3>
+              <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.tracking.lots_hint') }}</p>
+            </div>
+            <div v-if="trackingLots.loadError.value !== ''" class="flex flex-wrap items-center gap-2 text-sm text-danger-600" role="alert" data-test="lots-load-error">
+              <span>{{ t('stock.tracking.lots_load_error', { message: trackingLots.loadError.value }) }}</span>
+              <button type="button" data-test="lots-retry" class="h-8 px-3 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50"
+                @click="trackingLots.load(lotSearch)">{{ t('stock.tracking.lots_retry') }}</button>
+            </div>
+            <input v-if="trackingLots.total.value > 10 || lotSearch !== ''" v-model="lotSearch" type="search" maxlength="100" data-test="lot-search"
+              :placeholder="t('stock.tracking.lots_search')" :aria-label="t('stock.tracking.lots_search')"
+              class="w-full sm:w-72 h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+              @input="onLotSearch" />
+            <p v-if="trackingLots.loaded.value && trackingLots.rows.value.length === 0" class="text-xs text-neutral-500">{{ lotSearch !== '' ? t('stock.tracking.lots_none_found') : t('stock.tracking.lots_empty') }}</p>
+            <div v-for="row in trackingLots.rows.value" :key="`lot-${row.id}`" data-test="lot-row">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label :for="`${lotUid}-code-${row.id}`" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.tracking.lot_code') }}</label>
+                  <input :id="`${lotUid}-code-${row.id}`" v-model="row.lot_code" maxlength="100" data-test="lot-code"
+                    :aria-invalid="row.error ? 'true' : undefined" :aria-describedby="row.error ? `${lotUid}-error-${row.id}` : undefined"
+                    class="w-full h-10 px-3 border rounded-md font-mono focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+                    :class="row.error ? 'border-danger-500' : 'border-neutral-300'" />
+                </div>
+                <div>
+                  <label :for="`${lotUid}-expires-${row.id}`" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.tracking.expires_on') }}</label>
+                  <DateInput v-model="row.expires_on" :input-id="`${lotUid}-expires-${row.id}`" :invalid="row.error !== ''" data-test="lot-expires"
+                    :aria-describedby="row.error ? `${lotUid}-error-${row.id}` : undefined"
+                    class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
+                </div>
+              </div>
+              <p v-if="row.error" :id="`${lotUid}-error-${row.id}`" class="text-xs text-danger-600 mt-1" role="alert" data-test="lot-error">{{ row.error }}</p>
+            </div>
+            <button v-if="trackingLots.hasMore.value" type="button" data-test="lots-more"
+              class="h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50" @click="trackingLots.loadMore()">
+              {{ t('stock.tracking.lots_more', { shown: trackingLots.rows.value.length, total: trackingLots.total.value }) }}
+            </button>
           </div>
 
           <!-- Balení (nadřazené jednotky) u základní jednotky, ukládá se společným Uložit -->

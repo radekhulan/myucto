@@ -723,6 +723,286 @@ final class GeneralLedgerReportTest extends TestCase
         }
     }
 
+    // ── Rozbalený měsíc: opis účtu s filtry hlavní knihy ──────────────────────
+
+    public function testStatementWithDimensionFilterMatchesLedgerMonthAndOpening(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id,code,name,kind) VALUES (?,'test_month','Synthetic month','custom')")->execute([$this->supplierId]);
+        $type = (int) $pdo->lastInsertId();
+        $values = [];
+        foreach (['a', 'b'] as $code) {
+            $pdo->prepare('INSERT INTO dimension_values (type_id,supplier_id,code,name) VALUES (?,?,?,?)')
+                ->execute([$type, $this->supplierId, $code, 'Synthetic ' . $code]);
+            $values[$code] = (int) $pdo->lastInsertId();
+        }
+        $tag = function (int $entry, string $value) use ($pdo, $type, $values): void {
+            $pdo->prepare("INSERT INTO journal_entry_line_dimensions (supplier_id,line_id,dimension_type_id,dimension_value_id)
+                SELECT supplier_id, id, ?, ? FROM journal_entry_lines WHERE entry_id = ? AND side = 'debit'")
+                ->execute([$type, $values[$value], $entry]);
+        };
+        $tag($this->manual([self::l('518', 'debit', 30), self::l('211', 'credit', 30)], '2099-02-10'), 'a');
+        $tag($this->manual([self::l('518', 'debit', 100), self::l('211', 'credit', 100)], '2099-03-05'), 'a');
+        // Řádek bez dimenze: nefiltrovaný opis ho ukázal i v knize filtrované na hodnotu.
+        $this->manual([self::l('518', 'debit', 50), self::l('211', 'credit', 50)], '2099-03-06');
+        $split = $this->manual([self::l('518', 'debit', 200), self::l('211', 'credit', 200)], '2099-03-07');
+        foreach (['a' => 0.6, 'b' => 0.4] as $value => $share) {
+            $pdo->prepare("INSERT INTO journal_entry_line_dimension_splits (line_id,dimension_type_id,dimension_value_id,supplier_id,share)
+                SELECT id, ?, ?, supplier_id, ? FROM journal_entry_lines WHERE entry_id = ? AND side = 'debit'")
+                ->execute([$type, $values[$value], $share, $split]);
+        }
+        $filters = ['dimension' => new \MyInvoice\Service\Accounting\Dimension\DimensionFilter($type, $values['a'], [$values['a']])];
+
+        $ledger = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, false, $filters);
+        $a518 = $this->accountByCode($ledger['accounts'], '518');
+        self::assertNotNull($a518);
+        self::assertSame(self::cents(220), self::cents($a518['months'][self::YEAR . '-03']['md']));
+
+        $statement = $this->statement()->build($this->supplierId, $this->accountId('518'), '2099-03-01', '2099-03-31', 1, 200, false, null, new \MyInvoice\Service\Accounting\Reports\AccountStatementScope($filters));
+        self::assertSame([100.0, 120.0], array_column($statement['items'], 'amount'), 'Jen řádky hodnoty, u rozpadu jen její díl.');
+        self::assertSame(2, $statement['total']);
+        self::assertSame(self::cents(220), self::cents($statement['turnover_md']), 'Řádky měsíce = měsíční obrat knihy.');
+        self::assertSame(self::cents(30), self::cents($statement['opening_balance']), 'PS jen z řádků hodnoty.');
+        self::assertSame(self::cents(250), self::cents($statement['closing_balance']));
+        self::assertSame(self::cents(250), self::cents($statement['items'][1]['balance']));
+        self::assertNull($statement['counter_totals']);
+        self::assertNotNull($statement['dimension']);
+
+        $all = $this->statement()->build($this->supplierId, $this->accountId('518'), '2099-03-01', '2099-03-31', 1, 200);
+        self::assertSame(3, $all['total'], 'Bez filtru se opis nemění.');
+        self::assertSame(self::cents(350), self::cents($all['turnover_md']));
+        self::assertNotNull($all['counter_totals']);
+        self::assertNull($all['dimension']);
+    }
+
+    public function testStatementWithDimensionKeepsRedStornoSign(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id,code,name,kind) VALUES (?,'test_storno','Synthetic storno','custom')")->execute([$this->supplierId]);
+        $type = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO dimension_values (type_id,supplier_id,code,name) VALUES (?,?,?,?)')->execute([$type, $this->supplierId, 'a', 'Synthetic a']);
+        $value = (int) $pdo->lastInsertId();
+        $entry = $this->manual([
+            self::l('518', 'debit', 40) + ['is_red_storno' => true],
+            self::l('211', 'credit', 40) + ['is_red_storno' => true],
+        ], '2099-03-02');
+        $pdo->prepare("INSERT INTO journal_entry_line_dimensions (supplier_id,line_id,dimension_type_id,dimension_value_id)
+            SELECT supplier_id, id, ?, ? FROM journal_entry_lines WHERE entry_id = ? AND side = 'debit'")->execute([$type, $value, $entry]);
+        $this->manual([self::l('518', 'debit', 15), self::l('211', 'credit', 15)], '2099-03-03');
+        $filters = ['dimension' => new \MyInvoice\Service\Accounting\Dimension\DimensionFilter($type, $value, [$value])];
+
+        $statement = $this->statement()->build($this->supplierId, $this->accountId('518'), '2099-03-01', '2099-03-31', 1, 200, false, null, new \MyInvoice\Service\Accounting\Reports\AccountStatementScope($filters));
+        self::assertSame([-40.0], array_column($statement['items'], 'amount'));
+        self::assertTrue($statement['items'][0]['is_red_storno']);
+        self::assertSame(self::cents(-40), self::cents($statement['turnover_md']));
+        self::assertSame(self::cents(-40), self::cents($statement['closing_balance']));
+    }
+
+    public function testStatementWithVendorFilterKeepsOnlyMatchingEntries(): void
+    {
+        $vendorId = $this->insertClient('Beta Dodavatel a.s.');
+        $purchaseId = $this->insertPurchaseWithItem($vendorId, 'Software licence', 700.00, self::YEAR . '-03-05');
+        $this->insertJournalEntry('purchase_invoice', $purchaseId, '518', '321', 700.00, self::YEAR . '-03-05');
+        $this->manual([self::l('518', 'debit', 50), self::l('211', 'credit', 50)], '2099-03-06');
+
+        $statement = $this->statement()->build($this->supplierId, $this->accountId('518'), '2099-03-01', '2099-03-31', 1, 200, false, null, new \MyInvoice\Service\Accounting\Reports\AccountStatementScope(['vendor' => 'beta']));
+        self::assertSame([700.0], array_column($statement['items'], 'amount'));
+        self::assertSame(1, $statement['total']);
+        self::assertSame(self::cents(700), self::cents($statement['turnover_md']));
+        self::assertSame('beta', $statement['vendor']);
+    }
+
+    public function testStatementRejectsCounterAccountWithLedgerFilter(): void
+    {
+        try {
+            $this->statement()->build($this->supplierId, $this->accountId('518'), '2099-03-01', '2099-03-31', 1, 200, false, $this->accountId('211'), new \MyInvoice\Service\Accounting\Reports\AccountStatementScope(['vendor' => 'beta']));
+            self::fail('Kombinace protiúčtu a filtru knihy musí skončit chybou.');
+        } catch (\MyInvoice\Service\Accounting\Reports\ReportException $e) {
+            self::assertSame(422, $e->httpStatus);
+        }
+    }
+
+    /**
+     * Všechna období po uzavření: kniha počítá otevírací zápis dalšího roku do obratu ledna,
+     * do PS jen ten ze začátku knihy. Rozbalený leden musí ten řádek ukázat.
+     */
+    public function testStatementMonthMatchesAllPeriodsLedgerAfterClosing(): void
+    {
+        $this->manual([self::l('211', 'debit', 1000.00), self::l('602', 'credit', 1000.00)], self::YEAR . '-06-10');
+        $this->insertJournalEntry('closing', $this->periodId, '702', '211', 1000.00, self::YEAR . '-12-31');
+        $this->periodId = $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $this->insertJournalEntry('opening', $this->periodId, '211', '701', 1000.00, (self::YEAR + 1) . '-01-01');
+        $this->manual([self::l('211', 'debit', 200.00), self::l('602', 'credit', 200.00)], (self::YEAR + 1) . '-01-15');
+        $january = (self::YEAR + 1) . '-01';
+        foreach ([true, false] as $afterClosing) {
+            $ledger = $this->generalLedger->buildAllPeriods($this->supplierId, null, null, false, [], $afterClosing);
+            $a211 = $this->accountByCode($ledger['accounts'], '211');
+            self::assertNotNull($a211);
+            // Hlavní kniha posílá den PS jen tam, kde nevyřazuje všechny otevírací zápisy.
+            $scope = new \MyInvoice\Service\Accounting\Reports\AccountStatementScope([], $afterClosing ? $ledger['from'] : null);
+            $statement = $this->statement()->build($this->supplierId, $this->accountId('211'), $january . '-01', $january . '-31', 1, 200, $afterClosing, null, $scope);
+            self::assertSame(self::cents($a211['months'][$january]['md']), self::cents($statement['turnover_md']), $afterClosing ? 'po uzavření' : 'před uzavřením');
+            self::assertSame(self::cents($a211['months'][$january]['d']), self::cents($statement['turnover_d']));
+            self::assertCount($afterClosing ? 2 : 1, $statement['items']);
+        }
+        // PS a pohyby se nepřekrývají: otevírací zápis z `from` mimo den PS je jen pohybem.
+        $scope = new \MyInvoice\Service\Accounting\Reports\AccountStatementScope([], self::YEAR . '-01-01');
+        $statement = $this->statement()->build($this->supplierId, $this->accountId('211'), $january . '-01', $january . '-31', 1, 200, true, null, $scope);
+        self::assertSame(0, self::cents($statement['opening_balance']));
+        self::assertSame(self::cents(1200.00), self::cents($statement['closing_balance']));
+        // Protiúčty po řádcích: součet srovnává reconcileCounterTotals vždy, chybějící 701 by schoval.
+        $counter = [];
+        foreach ($statement['counter_totals'] as $row) $counter[$row['account_code']] = self::cents($row['md']);
+        self::assertSame(['602' => self::cents(200.00), '701' => self::cents(1000.00)], $this->sortedByKey(array_filter($counter)));
+    }
+
+    /** Řádek syntetiky v knize s rozpadem nese jen její vlastní pohyby, analytiky mají řádky své. */
+    public function testStatementWithoutAnalyticsMatchesSyntheticRowOfAnalyticLedger(): void
+    {
+        $pdo = $this->db->pdo();
+        $parent = $this->accountId('518');
+        // Vlastní řádek syntetiky zůstal z doby před založením analytiky.
+        $this->manual([self::l('518', 'debit', 70), self::l('211', 'credit', 70)], '2099-03-05');
+        $pdo->prepare("INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active)
+            SELECT supplier_id, '518.900', 'Synthetic analytic', account_type, normal_side, 0, id, 1 FROM chart_of_accounts WHERE id = ?")
+            ->execute([$parent]);
+        // Jiný protiúčet analytiky: v protiúčtech syntetiky se nesmí objevit.
+        $this->manual([self::l('518.900', 'debit', 30), self::l('321', 'credit', 30)], '2099-03-06');
+
+        $ledger = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, true);
+        $row = $this->accountByCode($ledger['accounts'], '518');
+        self::assertNotNull($row, 'Účty knihy: ' . implode(', ', array_column($ledger['accounts'], 'account_code')));
+        self::assertSame(self::cents(70), self::cents($row['months']['2099-03']['md']));
+
+        $scope = new \MyInvoice\Service\Accounting\Reports\AccountStatementScope([], null, false);
+        $own = $this->statement()->build($this->supplierId, $parent, '2099-03-01', '2099-03-31', 1, 200, false, null, $scope);
+        self::assertSame([70.0], array_column($own['items'], 'amount'));
+        self::assertSame(1, $own['total']);
+        self::assertSame(self::cents(70), self::cents($own['turnover_md']));
+        self::assertSame(['211'], array_column($own['counter_totals'], 'account_code'), 'Protiúčty jen vlastních řádků syntetiky.');
+        self::assertSame(self::cents(70), self::cents($own['counter_totals'][0]['md']));
+        $all = $this->statement()->build($this->supplierId, $parent, '2099-03-01', '2099-03-31', 1, 200);
+        self::assertSame(2, $all['total'], 'Výchozí opis syntetiky zahrnuje analytiky.');
+    }
+
+    public function testStatementClientItemFiltersAndOpeningWithVendor(): void
+    {
+        $vendorId = $this->insertClient('Beta Dodavatel a.s.');
+        $clientId = $this->insertClient('Alfa Klient s.r.o.');
+        $feb = $this->insertPurchaseWithItem($vendorId, 'Software licence', 300.00, self::YEAR . '-02-05');
+        $this->insertJournalEntry('purchase_invoice', $feb, '518', '321', 300.00, self::YEAR . '-02-05');
+        $mar = $this->insertPurchaseWithItem($vendorId, 'Hosting', 700.00, self::YEAR . '-03-05');
+        $this->insertJournalEntry('purchase_invoice', $mar, '518', '321', 700.00, self::YEAR . '-03-05');
+        $this->manual([self::l('518', 'debit', 50), self::l('211', 'credit', 50)], '2099-02-06');
+        $invoice = $this->insertInvoiceWithItem($clientId, 'Konzultace Alfa', 1000.00, self::YEAR . '-03-10');
+        $this->insertJournalEntry('invoice', $invoice, '311', '602', 1000.00, self::YEAR . '-03-10');
+        $scope = static fn (array $f): \MyInvoice\Service\Accounting\Reports\AccountStatementScope => new \MyInvoice\Service\Accounting\Reports\AccountStatementScope($f);
+
+        $vendor = $this->statement()->build($this->supplierId, $this->accountId('518'), '2099-03-01', '2099-03-31', 1, 200, false, null, $scope(['vendor' => 'beta']));
+        self::assertSame(self::cents(300), self::cents($vendor['opening_balance']), 'PS jen ze zápisů dodavatele, bez ručního zápisu.');
+        $client = $this->statement()->build($this->supplierId, $this->accountId('602'), '2099-03-01', '2099-03-31', 1, 200, false, null, $scope(['client' => 'alfa']));
+        self::assertSame([1000.0], array_column($client['items'], 'amount'));
+        $noClient = $this->statement()->build($this->supplierId, $this->accountId('518'), '2099-03-01', '2099-03-31', 1, 200, false, null, $scope(['client' => 'alfa']));
+        self::assertSame(0, $noClient['total']);
+        $item = $this->statement()->build($this->supplierId, $this->accountId('518'), '2099-02-01', '2099-03-31', 1, 200, false, null, $scope(['item' => 'host']));
+        self::assertSame([700.0], array_column($item['items'], 'amount'));
+    }
+
+    public function testStatementWithTwoDimensionsAndForeignShare(): void
+    {
+        $pdo = $this->db->pdo();
+        $ids = [];
+        foreach (['test_project' => ['a', 'b'], 'test_centre' => ['x', 'y']] as $typeCode => $values) {
+            $pdo->prepare("INSERT INTO dimension_types (supplier_id,code,name,kind) VALUES (?,?,?,'custom')")
+                ->execute([$this->supplierId, $typeCode, 'Synthetic ' . $typeCode]);
+            $ids[$typeCode] = ['id' => (int) $pdo->lastInsertId()];
+            foreach ($values as $code) {
+                $pdo->prepare('INSERT INTO dimension_values (type_id,supplier_id,code,name) VALUES (?,?,?,?)')
+                    ->execute([$ids[$typeCode]['id'], $this->supplierId, $code, 'Synthetic ' . $code]);
+                $ids[$typeCode][$code] = (int) $pdo->lastInsertId();
+            }
+        }
+        foreach ([[100, 'a', 'x'], [40, 'a', 'y'], [7, 'b', 'x']] as $i => [$amount, $project, $centre]) {
+            $entry = $this->manual([self::l('518', 'debit', $amount), self::l('211', 'credit', $amount)], sprintf('2099-03-%02d', $i + 1));
+            foreach (['test_project' => $project, 'test_centre' => $centre] as $typeCode => $value) {
+                $pdo->prepare("INSERT INTO journal_entry_line_dimensions (supplier_id,line_id,dimension_type_id,dimension_value_id)
+                    SELECT supplier_id, id, ?, ? FROM journal_entry_lines WHERE entry_id = ? AND side = 'debit'")
+                    ->execute([$ids[$typeCode]['id'], $ids[$typeCode][$value], $entry]);
+            }
+        }
+        $filter = \MyInvoice\Service\Accounting\Dimension\DimensionFilter::all([
+            new \MyInvoice\Service\Accounting\Dimension\DimensionFilter($ids['test_project']['id'], $ids['test_project']['a'], [$ids['test_project']['a']]),
+            new \MyInvoice\Service\Accounting\Dimension\DimensionFilter($ids['test_centre']['id'], $ids['test_centre']['x'], [$ids['test_centre']['x']]),
+        ]);
+        $scope = new \MyInvoice\Service\Accounting\Reports\AccountStatementScope(['dimension' => $filter]);
+        $statement = $this->statement()->build($this->supplierId, $this->accountId('518'), '2099-03-01', '2099-03-31', 1, 200, false, null, $scope);
+        self::assertSame([100.0], array_column($statement['items'], 'amount'), 'Jen řádek, který patří do obou hodnot.');
+
+        // Cizoměnová částka dílu rozpadu se krátí stejně jako řádek (60 % z 50 EUR).
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id,code,name,kind) VALUES (?,'test_fx','Synthetic fx','custom')")->execute([$this->supplierId]);
+        $type = (int) $pdo->lastInsertId();
+        $values = [];
+        foreach (['a', 'b'] as $code) {
+            $pdo->prepare('INSERT INTO dimension_values (type_id,supplier_id,code,name) VALUES (?,?,?,?)')->execute([$type, $this->supplierId, $code, 'Synthetic ' . $code]);
+            $values[$code] = (int) $pdo->lastInsertId();
+        }
+        $entry = $this->manual([self::l('518', 'debit', 1250), self::l('211', 'credit', 1250)], '2099-04-02');
+        $pdo->prepare("UPDATE journal_entry_lines SET currency_code = 'EUR', amount_foreign = 50 WHERE entry_id = ? AND side = 'debit'")->execute([$entry]);
+        foreach (['a' => 0.6, 'b' => 0.4] as $value => $share) {
+            $pdo->prepare("INSERT INTO journal_entry_line_dimension_splits (line_id,dimension_type_id,dimension_value_id,supplier_id,share)
+                SELECT id, ?, ?, supplier_id, ? FROM journal_entry_lines WHERE entry_id = ? AND side = 'debit'")
+                ->execute([$type, $values[$value], $share, $entry]);
+        }
+        $scope = new \MyInvoice\Service\Accounting\Reports\AccountStatementScope(['dimension' => new \MyInvoice\Service\Accounting\Dimension\DimensionFilter($type, $values['a'], [$values['a']])]);
+        $fx = $this->statement()->build($this->supplierId, $this->accountId('518'), '2099-04-01', '2099-04-30', 1, 200, false, null, $scope);
+        self::assertSame([750.0], array_column($fx['items'], 'amount'));
+        self::assertEquals(30.0, $fx['items'][0]['amount_foreign']);
+        self::assertSame('EUR', $fx['items'][0]['currency']);
+    }
+
+    /**
+     * Výchozí režim knihy (jedno období, před uzavřením): otevírací zápis uprostřed období
+     * (aktivace účetnictví v průběhu roku, jediný otevírací zápis období) je pohybem měsíce,
+     * uzávěrka se vyřazuje, slotovaný skladový zápis uzávěrky zůstává. Řádky měsíce musí
+     * dát obrat měsíce knihy.
+     */
+    public function testStatementMonthMatchesPeriodLedgerBeforeClosing(): void
+    {
+        $this->insertJournalEntry('opening', $this->periodId, '211', '701', 500.00, self::YEAR . '-03-10');
+        $this->manual([self::l('211', 'debit', 40), self::l('602', 'credit', 40)], self::YEAR . '-03-12');
+        $this->manual([self::l('211', 'debit', 25), self::l('602', 'credit', 25)], self::YEAR . '-12-20');
+        $this->insertJournalEntry('closing', $this->periodId, '702', '211', 565.00, self::YEAR . '-12-31');
+        $this->insertJournalEntry('closing', \MyInvoice\Service\Accounting\Closing\ClosingSourceId::STOCK_SLOT_BASE + 1, '211', '501', 80.00, self::YEAR . '-12-31');
+
+        $ledger = $this->generalLedger->build($this->supplierId, $this->periodId, null, null);
+        $a211 = $this->accountByCode($ledger['accounts'], '211');
+        self::assertNotNull($a211);
+        $scope = new \MyInvoice\Service\Accounting\Reports\AccountStatementScope([], $ledger['from']);
+        foreach (['03' => [2, 540.00], '12' => [2, 105.00]] as $month => [$count, $md]) {
+            $ym = self::YEAR . '-' . $month;
+            $statement = $this->statement()->build($this->supplierId, $this->accountId('211'), $ym . '-01', date('Y-m-t', strtotime($ym . '-01')), 1, 200, false, null, $scope);
+            self::assertSame(self::cents($a211['months'][$ym]['md']), self::cents($statement['turnover_md']), $ym);
+            self::assertSame(self::cents($a211['months'][$ym]['d']), self::cents($statement['turnover_d']), $ym);
+            self::assertSame(self::cents($md), self::cents($statement['turnover_md']), $ym);
+            self::assertSame($count, $statement['total'], $ym);
+        }
+        // Bez dne PS (výchozí opis) se otevírací zápis uprostřed období neukáže: proto ho kniha posílá.
+        $default = $this->statement()->build($this->supplierId, $this->accountId('211'), self::YEAR . '-03-01', self::YEAR . '-03-31', 1, 200);
+        self::assertSame(1, $default['total']);
+    }
+
+    /** @param array<string,int> $a @return array<string,int> */
+    private function sortedByKey(array $a): array
+    {
+        ksort($a);
+        return $a;
+    }
+
+    private function statement(): \MyInvoice\Service\Accounting\Reports\AccountStatementService
+    {
+        return Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\AccountStatementService::class);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /**

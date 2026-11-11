@@ -7,15 +7,15 @@ import type { AccountingPeriod } from '@/api/accounting'
 import { membershipApi, type ClaimRow, type MemberIdentity, type MemberRevision } from '@/api/nonprofitMembership'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
-import { badgeBase, errorBox, errorMessage, formatDateRange, memberStatusBadge, revisionAt } from './membershipFormat'
+import { badgeBase, errorBox, membershipError, formatDateRange, memberStatusBadge, revisionAt } from './membershipFormat'
 import MembershipIssueFlow from './MembershipIssueFlow.vue'
 import MembershipReverseFlow from './MembershipReverseFlow.vue'
 import MembershipRevisionForm from './MembershipRevisionForm.vue'
 import MembershipSettlement from './MembershipSettlement.vue'
 
-const props = defineProps<{ supplier: number; canManage: boolean; memberId: number; label: string; periods: AccountingPeriod[] }>()
+const props = defineProps<{ supplier: number; canManage: boolean; memberId: number; label: string; periods: AccountingPeriod[]; refreshVersion?: number }>()
 const emit = defineEmits<{ changed: []; close: [] }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const identity = ref<MemberIdentity | null>(null)
 const history = ref<MemberRevision[]>([])
@@ -31,6 +31,7 @@ const reverseClaim = ref<ClaimRow | null>(null)
 const locks = ref({ revision: false, issue: false, reverse: false })
 let alive = true
 let generation = 0
+let refreshPending = false
 
 const today = computed(() => appIsoDate())
 const current = computed(() => revisionAt(history.value, today.value))
@@ -40,7 +41,7 @@ const member = computed(() => ({ id: props.memberId, member_number: identity.val
 
 const issued = computed(() => claims.value.filter(c => c.reversal_claim_id === null).reduce((sum, c) => sum + c.amount_cents, 0))
 const provenOpen = computed(() => claims.value.reduce((sum, c) => sum + (c.settlement.open_cents ?? 0), 0))
-const unproven = computed(() => claims.value.filter(c => c.settlement.status === 'unreconciled' || c.settlement.status === 'ambiguous').length)
+const unproven = computed(() => claims.value.filter(c => c.settlement.status === 'ambiguous').length)
 
 async function load(append = false) {
   const ticket = ++generation, supplier = props.supplier, id = props.memberId
@@ -53,7 +54,7 @@ async function load(append = false) {
     claims.value = append ? [...claims.value, ...data.balance.items] : data.balance.items
     nextAfter.value = data.balance.next_after_claim_id
   } catch (e) {
-    if (alive && ticket === generation) error.value = errorMessage(e) || t('nonprofitMembership.error')
+    if (alive && ticket === generation) error.value = membershipError({t, te}, e)
   } finally {
     if (alive && ticket === generation) loading.value = false
   }
@@ -66,7 +67,7 @@ async function refreshClaim(row: ClaimRow) {
     if (!alive || ticket !== generation || supplier !== props.supplier || id !== props.memberId) return
     claims.value = claims.value.map(c => (c.claim_id === fresh.claim_id ? fresh : c))
   } catch (e) {
-    if (alive && ticket === generation) error.value = errorMessage(e) || t('nonprofitMembership.error')
+    if (alive && ticket === generation) error.value = membershipError({t, te}, e)
   }
 }
 
@@ -92,8 +93,15 @@ function startReverse(row: ClaimRow) {
   reverseClaim.value = row
 }
 
-watch(() => props.memberId, () => { generation++; identity.value = null; history.value = []; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; notice.value = ''; void load() })
-watch(() => props.supplier, () => { generation++; loading.value = false; identity.value = null; history.value = []; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; notice.value = '' })
+watch(() => props.refreshVersion, () => {
+  if (anyLocked.value) refreshPending = true
+  else void load()
+})
+watch(anyLocked, locked => {
+  if (!locked && refreshPending) { refreshPending = false; void load() }
+})
+watch(() => props.memberId, () => { generation++; refreshPending = false; identity.value = null; history.value = []; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; notice.value = ''; void load() })
+watch(() => props.supplier, () => { generation++; refreshPending = false; loading.value = false; identity.value = null; history.value = []; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; notice.value = '' })
 onBeforeUnmount(() => { alive = false; generation++ })
 onMounted(() => { void load() })
 let firstActivation = true
@@ -111,7 +119,7 @@ const actions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <section class="space-y-5 rounded-lg border bg-surface p-4" data-section="member-detail">
+  <section class="space-y-5 rounded-lg border border-neutral-200 bg-surface p-4" data-section="member-detail">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h2 tabindex="-1" class="min-w-0 break-words text-lg font-semibold focus:outline-none" data-focus="member-heading">{{ identity ? `${identity.member_number} · ${label}` : label }}</h2>
       <ActionBar :actions="actions" />
@@ -136,7 +144,7 @@ const actions = computed<ActionItem[]>(() => [
     <div class="space-y-2" data-section="history">
       <h3 class="font-semibold">{{ t('nonprofitMembership.history') }}</h3>
       <p v-if="identity && !history.length" class="text-sm text-neutral-500">{{ t('nonprofitMembership.historyEmpty') }}</p>
-      <div v-for="revision in history" :key="revision.id" class="space-y-1 rounded border p-3 text-sm" data-section="history-row">
+      <div v-for="revision in history" :key="revision.id" class="space-y-1 rounded border border-neutral-200 p-3 text-sm" data-section="history-row">
         <div class="flex flex-wrap items-center gap-2">
           <span class="font-medium">#{{ revision.revision_no }}</span>
           <span :class="memberStatusBadge(revision.status)">{{ t(`nonprofitMembership.status_${revision.status}`) }}</span>
@@ -178,7 +186,7 @@ const actions = computed<ActionItem[]>(() => [
       <p v-if="unproven" class="text-sm text-warning-700" data-section="unproven-note">{{ t('nonprofitMembership.unprovenNote') }}</p>
       <p v-if="nextAfter !== null" class="text-sm text-neutral-500" data-section="partial-note">{{ t('nonprofitMembership.partialSummary') }}</p>
       <p v-if="identity && !claims.length && !loading" class="text-sm text-neutral-500">{{ t('nonprofitMembership.claimsEmpty') }}</p>
-      <div v-for="claim in claims" :key="claim.claim_id" class="grid gap-3 rounded border p-3 sm:grid-cols-[1fr_1fr_auto]" data-section="claim-row" :data-claim="claim.claim_id">
+      <div v-for="claim in claims" :key="claim.claim_id" class="grid gap-3 rounded border border-neutral-200 p-3 sm:grid-cols-[1fr_1fr_auto]" data-section="claim-row" :data-claim="claim.claim_id">
         <div class="min-w-0 space-y-1 text-sm">
           <p class="break-words font-medium">{{ claim.title_key }}</p>
           <p class="text-neutral-500" data-field="claim-period">{{ formatDateRange(claim.period_from, claim.period_to) }}</p>

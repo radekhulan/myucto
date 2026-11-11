@@ -244,6 +244,7 @@ final class InvoiceRepository
                     c.ic AS client_ic, c.dic AS client_dic,
                     c.language AS client_language,
                     c.reverse_charge AS client_reverse_charge, c.is_walk_in AS client_is_walk_in,
+                    c.simplified_only AS client_simplified_only,
                     u.name AS created_by_name,
                     p.name AS project_name, p.hourly_rate AS project_hourly_rate,
                     p.billing_template_id AS project_billing_template_id,
@@ -1381,7 +1382,7 @@ final class InvoiceRepository
         $clientId = (int) $data['client_id'];
         $stmt = $pdo->prepare(
             'SELECT c.supplier_id, c.default_branding_profile_id, s.default_branding_profile_id AS supplier_branding_profile_id,
-                    s.branding_profiles_enabled
+                    s.branding_profiles_enabled, c.simplified_only, s.is_vat_payer AS supplier_is_vat_payer
                FROM clients c JOIN supplier s ON s.id = c.supplier_id WHERE c.id = ?'
         );
         $stmt->execute([$clientId]);
@@ -1390,6 +1391,17 @@ final class InvoiceRepository
             throw new \InvalidArgumentException("Client #$clientId nenalezen.");
         }
         $supplierId = (int) $client['supplier_id'];
+        // Drobný zákazník bez adresy (#310) smí od plátce dostat jen zjednodušený daňový
+        // doklad (InvoiceIssueTaxGate::simplifiedOnlyClientRejection), proto ho nový koncept
+        // faktury dostane rovnou: pravidelná fakturace, kopie, objednávky i API ho nemusí
+        // posílat. Výslovně poslaná hodnota má přednost.
+        if (!array_key_exists('is_simplified', $data)
+            && !empty($client['simplified_only'])
+            && !empty($client['supplier_is_vat_payer'])
+            && ($data['invoice_type'] ?? 'invoice') === 'invoice'
+        ) {
+            $data['is_simplified'] = true;
+        }
         $parentInvoiceId = !empty($data['parent_invoice_id']) ? (int) $data['parent_invoice_id'] : null;
         if ($parentInvoiceId !== null) {
             $parent = $pdo->prepare(
@@ -2717,6 +2729,7 @@ final class InvoiceRepository
         }
         if (isset($row['client_reverse_charge'])) $row['client_reverse_charge'] = (bool) $row['client_reverse_charge'];
         if (isset($row['client_is_walk_in'])) $row['client_is_walk_in'] = (bool) $row['client_is_walk_in'];
+        if (isset($row['client_simplified_only'])) $row['client_simplified_only'] = (bool) $row['client_simplified_only'];
         if (array_key_exists('reminder_count', $row)) $row['reminder_count'] = (int) $row['reminder_count'];
         if (array_key_exists('approval_reminder_count', $row)) {
             $row['approval_reminder_count'] = (int) $row['approval_reminder_count'];

@@ -261,7 +261,7 @@ final class GlobalSeedTables
         'accounting_periods', 'entity_category_history',
         'accounting_account_definition_history', 'chart_of_accounts', 'accounting_supplier_settings', 'accounting_document_series',
         // Vlastní druhy ostatních položek nesou vlastní číselné řady, které reset ponechává.
-        'other_item_kinds', 'other_item_posting_profiles', 'other_item_settings',
+        'other_item_kinds', 'other_item_posting_profiles', 'other_item_settings', 'nonprofit_membership_rates',
         'accounting_fixed_exchange_rates',
         'auto_posting_policy', 'expense_classification_rules', 'revenue_classification_rules', 'posting_rules',
         'journal_entry_templates', 'journal_entry_template_lines',
@@ -337,6 +337,7 @@ final class GlobalSeedTables
         ...\MyInvoice\Service\Nonprofit\Capital\CapitalRepository::TABLES,
         ...\MyInvoice\Repository\Nonprofit\FundingRepository::TABLES,
         'nonprofit_tax_assessments',
+        'nonprofit_membership_batch_members', 'nonprofit_membership_batches',
         'nonprofit_tax_assessment_gift_elections', 'nonprofit_tax_assessment_funding_usage', 'nonprofit_tax_assessment_funding_members',
         'nonprofit_tax_snapshot_chunks', 'nonprofit_tax_snapshot_manifests', 'nonprofit_tax_snapshot_manifest_chunks',
         'nonprofit_tax_drafts', 'nonprofit_tax_draft_activities', 'nonprofit_tax_draft_decisions',

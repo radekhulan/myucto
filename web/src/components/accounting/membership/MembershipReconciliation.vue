@@ -6,11 +6,11 @@ import { formInput as field, formLabel } from '@/components/ui/formStyles'
 import type { AccountingPeriod } from '@/api/accounting'
 import { membershipApi, type ReconciliationTotals } from '@/api/nonprofitMembership'
 import { formatMoneyMinor } from '@/composables/useFormat'
-import { errorBox, errorMessage, formatDateRange } from './membershipFormat'
+import { errorBox, membershipError, formatDateRange } from './membershipFormat'
 
 /** `dataVersion` se zvýší po každém zápisu v detailu člena; dřívější výsledek kontroly tím přestane platit. */
 const props = defineProps<{ supplier: number; periods: AccountingPeriod[]; dataVersion?: number }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const period = ref(0)
 const data = ref<ReconciliationTotals | null>(null)
@@ -38,7 +38,7 @@ async function load() {
     if (!alive || mine !== ticket || supplier !== props.supplier || requested !== period.value) return
     data.value = result
   } catch (e) {
-    if (alive && mine === ticket) error.value = errorMessage(e) || t('nonprofitMembership.error')
+    if (alive && mine === ticket) error.value = membershipError({t, te}, e)
   } finally {
     if (alive && mine === ticket) busy.value = false
   }
@@ -55,7 +55,7 @@ const actions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <details class="rounded-lg border bg-surface p-4" data-section="reconciliation">
+  <details class="rounded-lg border border-neutral-200 bg-surface p-4" data-section="reconciliation">
     <summary class="cursor-pointer font-semibold">{{ t('nonprofitMembership.reconcileTitle') }}</summary>
     <div class="mt-3 space-y-3">
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.reconcileHelp') }}</p>

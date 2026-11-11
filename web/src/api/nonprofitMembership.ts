@@ -51,6 +51,7 @@ export interface MembershipClassification { activity_value_id: number; activity_
 
 /** Přesná množina klíčů, kterou přijímá MembershipChargeRequest::issue. */
 export interface MembershipIssueRequest {
+  rate_id?: number
   member_id: number; title_key: string; period_from: string; period_to: string; accounting_date: string; due_date: string
   amount: string; receivable_account: string; revenue_account: string; title_reference: string; evidence: string
   nonreciprocal: true; reason: string; classification: MembershipClassification
@@ -105,7 +106,38 @@ function options(supplier: number) {
 }
 const base = '/accounting/nonprofit-membership'
 
+export interface MembershipRateInput {
+  name: string; amount: string; receivable_account: string; revenue_account: string; title_key: string
+  period_months: number; title_reference: string; evidence: string; classification: MembershipClassification | null
+  is_active: boolean; row_version: number
+}
+export interface MembershipRate extends MembershipRateInput { id: number; supplier_id: number }
+export interface MembershipRatePage { items: MembershipRate[]; next_after_id: number | null; revenue_accounts?: {account_code: string; name: string}[] }
+export type MembershipBatchTemplate = Omit<MembershipIssueRequest, 'member_id'>
+export type MembershipBatchPhase = 'seeding' | 'preparing' | 'ready' | 'posting' | 'finished' | 'cancelled'
+export type MembershipBatchStatus = 'pending' | 'ready' | 'created' | 'existing' | 'rejected'
+export interface MembershipBatchCreate { template: MembershipBatchTemplate; selection_mode: 'active' | 'selected'; member_ids: number[]; idempotency_key: string }
+export interface MembershipBatchSummary { total: number; pending: number; ready: number; created: number; existing: number; rejected: number; planned_cents: string; created_cents: string; deferred_cents: string; deferral_date: string | null }
+export interface MembershipBatchItem { member_id: number; member_number: string; company_name: string; first_name?: string; last_name?: string; status: MembershipBatchStatus; amount_cents: number; operation_id: number | null; error_code: string | null; error_message: string | null }
+export interface MembershipBatchDetail {
+  batch: { id: number; supplier_id: number; phase: MembershipBatchPhase; template: MembershipBatchTemplate; approval_token?: string | null; approval_expires_at?: string | null; member_count: number; selection_mode: 'active' | 'selected' }
+  summary: MembershipBatchSummary; items: MembershipBatchItem[]; next_after_member_id: number | null
+  accounts: { account: string; side: 'debit' | 'credit'; amount_cents: string }[]
+}
+export interface MembershipBatchRecent { id: number; phase: MembershipBatchPhase; member_count: number; created_at: string; title_key: string; period_from: string; period_to: string }
+
 export const membershipApi = {
+  batches: (supplier: number, beforeId?: number) => api.get<{items: MembershipBatchRecent[]; next_before_id: number | null}>(`${base}/batches`, { ...options(supplier), params: { ...(beforeId ? {before_id: beforeId} : {}) } }).then(r => r.data),
+  batch: (supplier: number, id: number, afterMemberId = 0) => api.get<MembershipBatchDetail>(`${base}/batches/${id}`, { ...options(supplier), params: { after_member_id: afterMemberId } }).then(r => r.data),
+  createBatch: (supplier: number, body: MembershipBatchCreate) => api.post<MembershipBatchDetail>(`${base}/batches`, body, options(supplier)).then(r => r.data),
+  prepareBatch: (supplier: number, id: number) => api.post<MembershipBatchDetail>(`${base}/batches/${id}/prepare`, {}, options(supplier)).then(r => r.data),
+  renewBatch: (supplier: number, id: number) => api.post<MembershipBatchDetail>(`${base}/batches/${id}/renew-preview`, {}, options(supplier)).then(r => r.data),
+  cancelBatch: (supplier: number, id: number) => api.post<MembershipBatchDetail>(`${base}/batches/${id}/cancel`, {}, options(supplier)).then(r => r.data),
+  confirmBatch: (supplier: number, id: number, token: string) => api.post<MembershipBatchDetail>(`${base}/batches/${id}/confirm`, {approval_token: token}, options(supplier)).then(r => r.data),
+  rate: (supplier: number, id: number) => api.get<MembershipRate>(`${base}/rates/${id}`, options(supplier)).then(r => r.data),
+  rates: (supplier: number, afterId = 0, activeOnly = true, date?: string) => api.get<MembershipRatePage>(`${base}/rates`, { ...options(supplier), params: { after_id: afterId, active_only: activeOnly ? 1 : 0, ...(date ? {date} : {}) } }).then(r => r.data),
+  createRate: (supplier: number, body: MembershipRateInput) => api.post<MembershipRate>(`${base}/rates`, body, options(supplier)).then(r => r.data),
+  updateRate: (supplier: number, id: number, body: MembershipRateInput) => api.put<MembershipRate>(`${base}/rates/${id}`, body, options(supplier)).then(r => r.data),
   members: (supplier: number, afterId = 0, limit = 50) => api.get<MemberPage>(`${base}/members`, { ...options(supplier), params: { after_id: afterId, limit } }).then(r => r.data),
   member: (supplier: number, id: number, afterClaimId = 0, limit = 50) => api.get<MemberDetail>(`${base}/members/${id}`, { ...options(supplier), params: { after_claim_id: afterClaimId, limit } }).then(r => r.data),
   claim: (supplier: number, id: number) => api.get<ClaimRow>(`${base}/claims/${id}`, options(supplier)).then(r => r.data),

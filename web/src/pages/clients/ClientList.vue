@@ -431,6 +431,9 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
                       :title="t('client.dual_role_tooltip')">K+D</span>
                 <span v-else-if="c.is_vendor === true"
                       class="inline-block px-1.5 py-0 text-[10px] bg-warning-50 text-warning-600 rounded font-medium uppercase tracking-wide">{{ t('client.vendor_badge') }}</span>
+                <span v-if="c.simplified_only === true" data-test="client-simplified-only-badge"
+                      class="inline-block px-1.5 py-0 text-[10px] bg-neutral-100 text-neutral-600 rounded font-medium uppercase tracking-wide"
+                      :title="t('client.simplified_only_hint')">{{ t('client.simplified_only_badge') }}</span>
               </div>
               <div v-if="c.archived_at" class="text-xs text-neutral-400 mt-0.5">{{ t('common.archived') }}</div>
             </td>
@@ -507,6 +510,8 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
             </div>
           </div>
           <div v-if="c.archived_at" class="text-xs text-neutral-400 mt-0.5">{{ t('common.archived') }}</div>
+          <span v-if="c.simplified_only === true"
+                class="inline-block mt-0.5 px-1.5 py-0 text-[10px] bg-neutral-100 text-neutral-600 rounded font-medium uppercase tracking-wide">{{ t('client.simplified_only_badge') }}</span>
           <div class="flex items-baseline justify-between gap-2 mt-1 text-xs text-neutral-500">
             <div class="truncate">
               <span class="font-mono">{{ c.ic || '—' }}</span>

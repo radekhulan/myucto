@@ -280,6 +280,54 @@ final class FulfillmentRepository
         )->execute([self::json($tracking), $supplierId, $shipmentItemId]);
     }
 
+    /**
+     * Rozpracované zásilky (`packing`) otevřených úloh: snapshoty výběru kusů řádků karty,
+     * zamčené k přepisu. Expedované zásilky sem nepatří, jsou historie.
+     *
+     * @return list<array{id:int, json:string}>
+     */
+    public function lockPackingShipmentTracking(int $supplierId, int $itemId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT si.id, si.tracking_snapshot AS json
+               FROM fulfillment_tasks t
+               JOIN fulfillment_shipments s ON s.supplier_id = t.supplier_id AND s.task_id = t.id
+               JOIN fulfillment_shipment_items si ON si.shipment_id = s.id AND si.supplier_id = s.supplier_id
+               JOIN fulfillment_task_lines tl ON tl.id = si.task_line_id
+              WHERE t.supplier_id = ? AND t.status IN ('picking','packing','partially_shipped')
+                AND s.status = 'packing' AND tl.stock_item_id = ?
+                FOR UPDATE"
+        );
+        $stmt->execute([$supplierId, $itemId]);
+        return array_map(static fn (array $row): array => ['id' => (int) $row['id'], 'json' => (string) $row['json']], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Řádky otevřených úloh vychystání pro kartu (snapshot komponenty), zamčené k přepisu.
+     *
+     * @return list<array{id:int, json:string}>
+     */
+    public function lockOpenTaskLineSnapshots(int $supplierId, int $itemId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT tl.id, tl.component_snapshot AS json
+               FROM fulfillment_tasks t
+               JOIN fulfillment_task_lines tl ON tl.task_id = t.id AND tl.supplier_id = t.supplier_id
+              WHERE t.supplier_id = ? AND t.status IN ('picking','packing','partially_shipped')
+                AND tl.stock_item_id = ?
+                FOR UPDATE"
+        );
+        $stmt->execute([$supplierId, $itemId]);
+        return array_map(static fn (array $row): array => ['id' => (int) $row['id'], 'json' => (string) $row['json']], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    public function updateTaskLineComponentSnapshot(int $supplierId, int $taskLineId, array $snapshot): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE fulfillment_task_lines SET component_snapshot = ? WHERE supplier_id = ? AND id = ?'
+        )->execute([self::json($snapshot), $supplierId, $taskLineId]);
+    }
+
     /** @return list<array{quantity:string,tracking_allocations:list<array<string,mixed>>}> */
     public function returnedTrackingSnapshots(int $supplierId, int $shipmentItemId): array
     {

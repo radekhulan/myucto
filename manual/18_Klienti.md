@@ -47,6 +47,29 @@ se v editoru faktury.
 
 Bez IČO (fyzická osoba) zadejte alespoň jméno a adresu ručně.
 
+### 18.3.1 Drobný zákazník bez adresy
+
+Stálého zákazníka, který u vás nakupuje drobně (např. jednou měsíčně ve skladu za
+1 000 Kč) a doklad chce poslat e-mailem, můžete vést jen se jménem a kontaktem.
+
+1. V novém klientovi zaškrtněte **Drobný zákazník (jen pro zjednodušené doklady)**.
+2. Vyplňte **Firma / jméno** a **Hlavní e-mail** nebo **Telefon**. Adresa ani IČO
+   nejsou povinné.
+3. Klikněte na **Vytvořit**.
+
+**Jak poznáte, že je hotovo:** klient má v seznamu odznak **Drobný zákazník**.
+
+Plátce DPH může takovému zákazníkovi vystavit jen zjednodušený daňový doklad
+(§ 30 ZDPH) do 10 000 Kč včetně DPH, viz [§ 15.9.2](15_Faktura_editor.md#1592-hlavicka).
+Běžný daňový doklad musí nést jméno a adresu odběratele (§ 29 ZDPH), proto ho
+aplikace na takovou kartu nevystaví. Potřebujete-li vyšší prodej, běžnou fakturu
+nebo zálohovou fakturu, doplňte na kartě adresu a volbu vypněte. Volba nejde
+kombinovat s přenesenou daňovou povinností.
+
+Neplátce DPH zjednodušené doklady nevystavuje. Jeho faktura není daňový doklad
+a jako označení odběratele jí stačí jméno, takže ji drobnému zákazníkovi vystaví
+bez omezení.
+
 > [!TIP]
 > Slovenského klienta zakládáte stejně, jen se po výběru státu mění popisky
 > polí (viz [§ 18.7.3](#1873-slovensky-klient-a-narodni-danova-cisla)).
@@ -140,6 +163,8 @@ Smazat lze jen klienta bez faktur a zakázek, jinak použijte archivaci.
 | ARES klienta nenašel | ARES funguje jen pro česká IČO | Zadejte údaje ručně |
 | Ověření ve VIES chvíli trvá nebo selže | VIES je pomalý a občas nedostupný | Zkuste to za chvíli |
 | Změna klienta se neprojevila na vystavené faktuře | Vystavené doklady mají vlastní kopii údajů | Je to záměr, vystavené doklady jsou neměnné |
+| Uložení drobného zákazníka hlásí chybějící e-mail | Kartě bez adresy chybí kontakt, kam poslat doklad | Vyplňte hlavní e-mail nebo telefon |
+| Po vypnutí volby **Drobný zákazník** nejde karta uložit | Běžná karta vyžaduje adresu | Doplňte ulici, město a PSČ |
 
 ## 18.7 Podrobnosti a pravidla
 
@@ -184,7 +209,8 @@ zakázky. Jinak by smazání skončilo chybou.
 | IČO | České IČO (8 číslic); slovenské funguje s ARES SK |
 | DIČ | Daňové ID s prefixem země: ČR „CZ12345678“, SK „SK1234567890“, EU různě. U slovenského klienta se pole jmenuje **IČ DPH** (viz [§ 18.7.3](#1873-slovensky-klient-a-narodni-danova-cisla)) |
 | Národní daňové číslo | Zobrazí se jen u zemí, kde existuje vedle VAT ID: SK **DIČ**, DE/AT **Steuernummer**, PL **NIP**, HU **Adószám**. Tiskne se na fakturu mezi IČO a DIČ/IČ DPH |
-| Ulice / Město / PSČ / Země | Adresa pro fakturu |
+| Drobný zákazník (jen pro zjednodušené doklady) | Karta bez adresy jen se jménem a e-mailem nebo telefonem. Plátce jí vystaví jen zjednodušený daňový doklad do 10 000 Kč včetně DPH, viz [§ 18.3.1](#1831-drobny-zakaznik-bez-adresy) |
+| Ulice / Město / PSČ / Země | Adresa pro fakturu, u drobného zákazníka nepovinná |
 | Hlavní e-mail | Volitelný, výchozí adresa pro odesílání faktur a upomínek |
 | Telefon | Volitelný |
 | Jazyk | `cs` nebo `en`, určuje jazyk PDF, e-mailových šablon a formát měny |

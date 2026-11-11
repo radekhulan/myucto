@@ -8,6 +8,7 @@ import {
   type GeneralLedgerReport,
   type GeneralLedgerAccount,
   type AccountStatementItem,
+  type AccountStatementParams,
   type ChartAccount,
 } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
@@ -21,7 +22,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import type { SavedFilter } from '@/api/preferences'
-import { ICONS, btnOutline, btnFilled } from '@/components/ui/buttonStyles'
+import { ICONS, btnOutline, btnOutlineSm, btnFilled } from '@/components/ui/buttonStyles'
 import Modal from '@/components/ui/Modal.vue'
 import { errorResponseData } from '@/utils/downloadFile'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
@@ -270,7 +271,8 @@ const expandedId = ref<number | null>(null)
 function toggleExpand(a: GeneralLedgerAccount) {
   const next = expandedId.value === a.account_id ? null : a.account_id
   expandedId.value = next
-  if (next === null) closeMonth()
+  // Řádky měsíce patří účtu, pod kterým byly otevřené.
+  closeMonth()
 }
 
 /** Karta účtu = rozcestník (kmen, analytiky, odkazy na opis/deník). */
@@ -291,9 +293,11 @@ function statementLink(a: GeneralLedgerAccount, from?: string, to?: string) {
 }
 
 // ── Rozpad měsíce na řádky deníku ──────────────────────────────────────────
-// Data bere existující opis účtu (`account-statement`) zúžený na hranice měsíce —
-// tytéž pohyby, které se sčítají do měsíčního obratu, jen nezagregované. Vlastní
-// endpoint by znamenal druhý výklad toho, co do obratu patří.
+// Data bere existující opis účtu (`account-statement`) zúžený na dny měsíce uvnitř
+// rozsahu knihy a se stejnými filtry jako zobrazená kniha (dimenze, dodavatel,
+// odběratel, položka, stav po uzavření) — tytéž pohyby, které se sčítají do měsíčního
+// obratu, jen nezagregované. Vlastní endpoint by znamenal druhý výklad toho, co do
+// obratu patří.
 const MONTH_LINE_LIMIT = 200
 
 const openMonth = ref<string | null>(null)
@@ -307,7 +311,40 @@ function monthBounds(ym: string): { from: string; to: string } {
   return { from: `${ym}-01`, to: `${ym}-${String(last).padStart(2, '0')}` }
 }
 
+/** Dny měsíce, které kniha opravdu sčítá: obrat měsíce na krajích rozsahu od–do je jen jeho část. */
+function monthLineRange(ym: string): { from: string; to: string } {
+  const { from, to } = monthBounds(ym)
+  const bookFrom = report.value?.from ?? from
+  const bookTo = report.value?.to ?? to
+  return { from: from < bookFrom ? bookFrom : from, to: to > bookTo ? bookTo : to }
+}
+
+/** Zúžení řádků měsíce podle zobrazené knihy; sdílí ho rozpad měsíce i odkaz na opis účtu. */
+function monthScope(): Omit<AccountStatementParams, 'from' | 'to'> {
+  const q = loadedQuery.value
+  const scope: Omit<AccountStatementParams, 'from' | 'to'> = {
+    after_closing: q?.after_closing,
+    // Otevírací zápis začátku knihy patří do PS, další (přelom roku ve všech obdobích
+    // po uzavření) je pohybem měsíce. Všechna období před uzavřením vyřazují všechny,
+    // což je výchozí pravidlo opisu.
+    opening_date: report.value?.all_periods && !q?.after_closing ? undefined : report.value?.from,
+    // S rozpadem je řádek syntetiky jen její vlastní pohyby, analytiky mají řádky své.
+    include_analytics: q?.analytics ? 0 : undefined,
+    vendor: q?.vendor,
+    client: q?.client,
+    item: q?.item,
+    dimension_value_id: q?.dimension_value_id,
+    dimension_descendants: q?.dimension_value_id ? q.dimension_descendants : undefined,
+  }
+  return Object.fromEntries(Object.entries(scope).filter(([, v]) => v !== undefined && v !== null && v !== ''))
+}
+
+// Pořadí požadavků na řádky měsíce: odpověď na zavřený měsíc, jiný účet, starý filtr
+// nebo předchozí stránku po znovuotevření se nesmí přimíchat k aktuálním řádkům.
+let monthSeq = 0
+
 function closeMonth() {
+  monthSeq++
   openMonth.value = null
   monthLines.value = []
   monthTotal.value = 0
@@ -315,24 +352,37 @@ function closeMonth() {
 
 async function toggleMonth(a: GeneralLedgerAccount, ym: string) {
   if (openMonth.value === ym) { closeMonth(); return }
+  monthSeq++
   openMonth.value = ym
   monthLines.value = []
   monthTotal.value = 0
+  await loadMonthLines(a, ym)
+}
+
+/** Další stránka řádků měsíce; opis účtu bez filtrů knihy by ukázal jinou množinu řádků. */
+function loadMoreMonthLines(a: GeneralLedgerAccount, ym: string) {
+  return loadMonthLines(a, ym, Math.floor(monthLines.value.length / MONTH_LINE_LIMIT) + 1)
+}
+
+async function loadMonthLines(a: GeneralLedgerAccount, ym: string, page = 1) {
+  const seq = monthSeq
   monthLoading.value = true
-  const { from, to } = monthBounds(ym)
+  const { from, to } = monthLineRange(ym)
   try {
     const r = await accountingApi.getAccountStatement(a.account_id, {
-      from, to, page: 1, per_page: MONTH_LINE_LIMIT,
+      from, to, page, per_page: MONTH_LINE_LIMIT,
+      ...monthScope(),
     })
-    // Mezitím mohl uživatel měsíc zavřít nebo otevřít jiný — pozdní odpověď zahoď.
-    if (openMonth.value !== ym) return
-    monthLines.value = r.items
+    // Mezitím mohl uživatel měsíc zavřít, otevřít jiný nebo změnit knihu — pozdní odpověď zahoď.
+    if (seq !== monthSeq) return
+    monthLines.value = page === 1 ? r.items : [...monthLines.value, ...r.items]
     monthTotal.value = r.total
   } catch (e: any) {
-    if (openMonth.value === ym) closeMonth()
+    if (seq !== monthSeq) return
+    if (page === 1) closeMonth()
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally {
-    monthLoading.value = false
+    if (seq === monthSeq) monthLoading.value = false
   }
 }
 
@@ -340,9 +390,12 @@ function lineLink(it: AccountStatementItem) {
   return journalSourceLink(it) ?? journalEntryLink(it.entry_id)
 }
 
+/** Opis účtu za dny měsíce se stejným zúžením jako rozbalené řádky (opis ukáže filtry jako štítky). */
 function monthStatementLink(a: GeneralLedgerAccount, ym: string) {
-  const { from, to } = monthBounds(ym)
-  return statementLink(a, from, to)
+  const { from, to } = monthLineRange(ym)
+  const link = statementLink(a, from, to)
+  const scope = Object.fromEntries(Object.entries(monthScope()).map(([k, v]) => [k, String(v)]))
+  return { ...link, query: { ...link.query, ...scope } }
 }
 
 /**
@@ -366,6 +419,7 @@ async function focusAccount(id: number) {
     next.delete(group.key)
     closedGroups.value = next
   }
+  if (expandedId.value !== id) closeMonth()
   expandedId.value = id
   await nextTick()
   paneDom.querySelector(`#gl-account-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
@@ -833,7 +887,7 @@ onMounted(async () => {
                                   {{ t('accounting.account_statement.title') }}
                                 </RouterLink>
                               </div>
-                              <div v-if="monthLoading" class="px-2 py-4 text-center text-xs text-neutral-500">{{ t('common.loading') }}</div>
+                              <div v-if="monthLoading && monthLines.length === 0" class="px-2 py-4 text-center text-xs text-neutral-500">{{ t('common.loading') }}</div>
                               <div v-else-if="monthLines.length === 0" class="px-2 py-4 text-center text-xs text-neutral-500">
                                 {{ t('accounting.general_ledger.month_empty') }}
                               </div>
@@ -875,11 +929,16 @@ onMounted(async () => {
                                   </tbody>
                                 </table>
                               </div>
-                              <div v-if="monthTotal > monthLines.length" class="px-2 py-1.5 border-t border-neutral-100 text-xs text-neutral-500">
+                              <div v-if="monthTotal > monthLines.length" class="px-2 py-1.5 border-t border-neutral-100 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
                                 {{ t('accounting.general_ledger.month_more', { shown: monthLines.length, total: monthTotal }) }}
-                                <RouterLink :to="monthStatementLink(a, m)" class="text-primary-600 hover:underline ml-1">
-                                  {{ t('accounting.account_statement.title') }}
-                                </RouterLink>
+                                <span v-if="monthLoading">{{ t('common.loading') }}</span>
+                                <button v-else type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap"
+                                  @click="loadMoreMonthLines(a, m)">
+                                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                  </svg>
+                                  {{ t('accounting.general_ledger.month_load_more') }}
+                                </button>
                               </div>
                             </div>
                           </td>

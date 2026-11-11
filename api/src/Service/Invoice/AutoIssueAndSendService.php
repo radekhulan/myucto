@@ -49,6 +49,7 @@ final class AutoIssueAndSendService
         private readonly ClientRepository $clients,
         private readonly InvoicePaymentService $payments,
         private readonly \MyInvoice\Service\WorkReport\WorkReportBillingService $billing,
+        private readonly InvoiceIssueTaxGate $taxGate,
     ) {}
 
     /**
@@ -84,6 +85,10 @@ final class AutoIssueAndSendService
                     && $this->repo->refundInvoicesEnabled((int) $invoice['supplier_id']))
             ) {
                 throw new \DomainException(InvoiceAmountPolicy::NON_POSITIVE_DRAFT_MESSAGE);
+            }
+            // Drobný zákazník bez adresy (#310): stejná brána jako vystavení z editoru.
+            if (($rejected = $this->taxGate->simplifiedOnlyClientRejection($invoice)) !== null) {
+                throw new \DomainException($rejected['message']);
             }
             // VS + snapshoty — pokud už nebyly alokované předem (request-approval flow),
             // alokuj teď.

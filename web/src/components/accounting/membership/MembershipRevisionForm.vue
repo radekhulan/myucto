@@ -71,7 +71,7 @@ const actions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border bg-surface p-4" data-section="revision-form">
+  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" data-section="revision-form">
     <h3 class="font-semibold">{{ t('nonprofitMembership.revisionTitle') }}</h3>
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.revisionHelp') }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-600">{{ notice }}</p>
@@ -91,7 +91,7 @@ const actions = computed<ActionItem[]>(() => [
     </form>
     <p v-if="invalid && (form.effectiveFrom || form.reference || form.evidence)" class="text-sm text-warning-700" data-section="rev-invalid">{{ invalid }}</p>
     <ActionBar v-if="canManage && !commit.review.value" :actions="actions" />
-    <div v-if="commit.review.value" class="space-y-3 rounded border p-3" data-section="rev-preview">
+    <div v-if="commit.review.value" class="space-y-3 rounded border border-neutral-200 p-3" data-section="rev-preview">
       <h4 class="font-semibold">{{ t('nonprofitMembership.revisionReview') }}</h4>
       <dl class="grid gap-3 sm:grid-cols-3">
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.revisionStatus') }}</dt><dd>{{ t(`nonprofitMembership.status_${commit.review.value.body.status}`) }}</dd></div>

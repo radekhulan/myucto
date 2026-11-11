@@ -136,6 +136,60 @@ describe('AccountStatement.vue', () => {
     expect(m.exportReport.mock.calls[0][1].counter_account_id).toBe(21)
   })
 
+  it('proklik z měsíce hlavní knihy zúží opis jejími filtry a ukáže je jako štítky', async () => {
+    Object.assign(m.query, {
+      from: '2026-09-10', to: '2026-09-30', vendor: 'Dodavatel A', dimension_value_id: '9', dimension_descendants: '1',
+      after_closing: '1', opening_date: '2026-09-10', include_analytics: '0', counter: '21',
+    })
+    m.getAccountStatement.mockResolvedValue(statement({
+      counter_totals: null,
+      dimension: { type_id: 1, value_id: 9, value_ids: [9], label: 'Středisko Praha' },
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const params = m.getAccountStatement.mock.calls[0][1]
+    expect(params).toMatchObject({
+      from: '2026-09-10', to: '2026-09-30', vendor: 'Dodavatel A', dimension_value_id: '9', dimension_descendants: 1,
+      after_closing: 1, opening_date: '2026-09-10', include_analytics: 0,
+    })
+    // Protiúčet s filtry knihy API odmítne — filtr se nepošle ani nenabídne.
+    expect(params).not.toHaveProperty('counter_account_id')
+    expect(wrapper.find('[data-testid="counter-filter"]').exists()).toBe(false)
+
+    const chips = wrapper.findAll('[data-testid="ledger-scope-chip"]').map(c => c.text())
+    expect(chips).toEqual([
+      'accounting.general_ledger.filter_vendor: Dodavatel A',
+      'accounting.general_ledger.export_dimension: Středisko Praha',
+      'accounting.reports.after_closing',
+      'accounting.account_statement.scope_own_only',
+    ])
+    const exportBtn = wrapper.findAll('button').find(b => b.text() === 'accounting.account_statement.export_pdf')!
+    expect(exportBtn.attributes('disabled')).toBeDefined()
+  })
+
+  it('odebraný štítek zmizí z dotazu i z adresy, zrušení všech vrátí celý opis', async () => {
+    Object.assign(m.query, { from: '2026-09-01', to: '2026-09-30', client: 'Odběratel B', after_closing: '1', opening_date: '2026-09-01' })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.findAll('[data-testid="ledger-scope-chip"] button')[0].trigger('click')
+    await flushPromises()
+    let params = m.getAccountStatement.mock.calls.at(-1)?.[1]
+    expect(params).not.toHaveProperty('client')
+    expect(params).toMatchObject({ after_closing: 1, opening_date: '2026-09-01' })
+    expect(m.replace.mock.calls.at(-1)?.[0].query).toMatchObject({ after_closing: '1', from: '2026-09-01' })
+    expect(m.replace.mock.calls.at(-1)?.[0].query).not.toHaveProperty('client')
+
+    await wrapper.get('[data-testid="ledger-scope-clear"]').trigger('click')
+    await flushPromises()
+    params = m.getAccountStatement.mock.calls.at(-1)?.[1]
+    expect(params).not.toHaveProperty('after_closing')
+    expect(params).not.toHaveProperty('opening_date')
+    expect(wrapper.find('[data-testid="ledger-scope"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="counter-filter"]').exists()).toBe(true)
+  })
+
   it('proklik z výkazů otevře inventuru účtu s řádky analytik', async () => {
     m.query.mode = 'inventory'
     m.query.to = '2099-06-30'

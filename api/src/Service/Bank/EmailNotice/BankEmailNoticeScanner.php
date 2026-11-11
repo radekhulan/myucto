@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Bank\EmailNotice;
 use MyInvoice\Repository\BankEmailNoticeRepository;
 use MyInvoice\Security\CrossSupplierAuthorization;
 use MyInvoice\Service\Bank\StatementMatcher;
+use MyInvoice\Service\Mail\Imap\ImapAuthSettings;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer;
 use MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeProvider;
 use MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeParserRepository;
@@ -142,7 +143,10 @@ final class BankEmailNoticeScanner
     {
         $accountId = (int) ($settings['id'] ?? 0);
         $accountName = (string) ($settings['name'] ?? ('IMAP #' . $accountId));
-        foreach (['host', 'username', 'password'] as $required) {
+        $requiredSettings = ($settings['auth_mode'] ?? null) === ImapAuthSettings::MICROSOFT
+            ? ['host', 'username', 'oauth_client_secret_enc']
+            : ['host', 'username', 'password'];
+        foreach ($requiredSettings as $required) {
             if (trim((string) ($settings[$required] ?? '')) === '') {
                 $msg = "IMAP není nakonfigurován: chybí {$required}.";
                 $this->repo->updateScanStatus($supplierId, $accountId, 'error', $msg);

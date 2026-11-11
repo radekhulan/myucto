@@ -147,6 +147,8 @@ const form = ref<ClientPayload>({
   is_customer: route.query.role !== 'vendor',
   is_vendor: route.query.role === 'vendor',
   is_fuel_station: false,
+  // Drobný zákazník (#310): bez adresy, jen zjednodušené daňové doklady (§ 30 ZDPH).
+  simplified_only: false,
   auto_send_reminders: true,
   payment_due_default: null,
   payment_due_unit: null,
@@ -365,6 +367,12 @@ watch(() => route.query.role, (role) => {
   form.value.is_customer = !vendor
 })
 
+// Drobný zákazník nesmí být v přenesené daňové povinnosti (§ 30 odst. 2 ZDPH), server
+// by kombinaci odmítl.
+function onSimplifiedOnlyToggle() {
+  if (form.value.simplified_only) form.value.reverse_charge = false
+}
+
 function sanitize(c: Client): Partial<ClientPayload> {
   return {
     company_name: c.company_name,
@@ -391,6 +399,7 @@ function sanitize(c: Client): Partial<ClientPayload> {
     is_customer: c.is_customer !== false,
     is_vendor:   c.is_vendor   === true,
     is_fuel_station: c.is_fuel_station === true,
+    simplified_only: c.simplified_only === true,
     auto_send_reminders: c.auto_send_reminders ?? true,
     payment_due_default: c.payment_due_default ?? null,
     payment_due_unit: c.payment_due_unit ?? null,
@@ -716,6 +725,17 @@ if (!props.embedded) {
           </div>
         </div>
 
+        <!-- Drobný zákazník (#310) — karta jen se jménem a kontaktem. Server ji pak pustí
+             jen na zjednodušený daňový doklad do limitu § 30 ZDPH. -->
+        <div v-if="form.is_customer" class="rounded-md border border-neutral-200 p-3" data-test="client-simplified-only">
+          <label class="flex items-center gap-2 text-sm font-medium text-neutral-700 cursor-pointer">
+            <input v-model="form.simplified_only" type="checkbox" class="rounded border-neutral-300 text-primary-600"
+              @change="onSimplifiedOnlyToggle" />
+            <span>{{ t('client.simplified_only_label') }}</span>
+          </label>
+          <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('client.simplified_only_hint') }}</p>
+        </div>
+
         <!-- Základní -->
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.company_name') }} *</label>
@@ -741,7 +761,7 @@ if (!props.embedded) {
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.main_email') }}</label>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.main_email') }}{{ form.simplified_only ? ' *' : '' }}</label>
             <input autocomplete="off" v-model="form.main_email" type="email"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.main_email" class="text-xs text-danger-500 mt-1">{{ errors.main_email[0] }}</p>
@@ -752,6 +772,7 @@ if (!props.embedded) {
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.phone" class="text-xs text-danger-500 mt-1">{{ errors.phone[0] }}</p>
           </div>
+          <p v-if="form.simplified_only" class="sm:col-span-2 text-xs text-neutral-500 -mt-1">{{ t('client.simplified_only_contact_hint') }}</p>
         </div>
 
         <!-- E-mailové kontakty dle účelu (#86) — plný editor i embedded modal (faktura/new) -->
@@ -822,14 +843,14 @@ if (!props.embedded) {
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div class="sm:col-span-2">
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.street') }} *</label>
-            <input autocomplete="off" v-model="form.street" required
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.street') }}{{ form.simplified_only ? '' : ' *' }}</label>
+            <input autocomplete="off" v-model="form.street" :required="!form.simplified_only"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.street" class="text-xs text-danger-500 mt-1">{{ errors.street[0] }}</p>
           </div>
           <div>
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.zip') }} *</label>
-            <input autocomplete="off" v-model="form.zip" required maxlength="10"
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.zip') }}{{ form.simplified_only ? '' : ' *' }}</label>
+            <input autocomplete="off" v-model="form.zip" :required="!form.simplified_only" maxlength="10"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.zip" class="text-xs text-danger-500 mt-1">{{ errors.zip[0] }}</p>
           </div>
@@ -837,8 +858,8 @@ if (!props.embedded) {
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.city') }} *</label>
-            <input autocomplete="off" v-model="form.city" required
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.city') }}{{ form.simplified_only ? '' : ' *' }}</label>
+            <input autocomplete="off" v-model="form.city" :required="!form.simplified_only"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.city" class="text-xs text-danger-500 mt-1">{{ errors.city[0] }}</p>
           </div>
@@ -927,8 +948,9 @@ if (!props.embedded) {
 
         <div class="space-y-2">
           <label class="flex items-center gap-2 text-sm">
-            <input v-model="form.reverse_charge" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
-            <span>{{ t('client.reverse_charge') }}</span>
+            <input v-model="form.reverse_charge" type="checkbox" class="rounded border-neutral-300 text-primary-600"
+              :disabled="form.simplified_only" />
+            <span :class="form.simplified_only ? 'text-neutral-400' : ''">{{ t('client.reverse_charge') }}</span>
           </label>
 
           <!-- § 36a ZDPH / § 23 odst. 7 ZDP — spojená osoba. Typ vztahu se eviduje zvlášť,

@@ -956,7 +956,7 @@ async function issue() {
     toast.error(t('invoice.amount_positive_required'))
     return
   }
-  if (!confirm(t('invoice.issue_confirm'))) return
+  if (!confirm(t(invoice.value.invoice_type === 'credit_note' ? 'invoice.issue_confirm_cn' : 'invoice.issue_confirm'))) return
   busy.value = 'issue'
   try {
     invoice.value = await invoicesApi.issue(invoice.value.id)

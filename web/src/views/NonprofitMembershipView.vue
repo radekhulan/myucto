@@ -6,5 +6,6 @@ import MembershipWorkspace from '@/components/accounting/membership/MembershipWo
 const supplier = useSupplierStore(), auth = useAuthStore()
 const id = computed(() => Number(supplier.currentSupplierId))
 const canManage = computed(() => Boolean(auth.user && auth.csrfToken && auth.can('accounting.journal.post', 'write')))
+const canManageRates = computed(() => Boolean(auth.user && auth.csrfToken && auth.can('accounting.templates', 'write')))
 </script>
-<template><MembershipWorkspace v-if="id" :key="id" :supplier="id" :can-manage="canManage" /></template>
+<template><MembershipWorkspace v-if="id" :key="id" :supplier="id" :can-manage="canManage" :can-manage-rates="canManageRates" /></template>
