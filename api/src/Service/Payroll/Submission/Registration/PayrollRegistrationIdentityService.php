@@ -1738,6 +1738,40 @@ final readonly class PayrollRegistrationIdentityService
                     . 'a skončením vztahu.',
                 );
             }
+            /*
+             * OIČ je číslo osoby, ne vztahu. Dostane-li osoba dohodu za dřívější
+             * měsíc, než od kdy je OIČ v evidenci, karta dřívějšího vztahu ho
+             * k jeho datu nevidí a účetní ho opíše znovu — stejnou hodnotu.
+             * Dřív to skončilo na „stejná hodnota, jiný den" bez cesty ven
+             * (oprava se k vztahu bez čísla nenabízí). Ručně opsané stejné
+             * číslo se proto jen přesune na dřívější den; převzaté z protokolu
+             * ČSSZ se nepřepisuje.
+             */
+            $backdatePerson = false;
+            if (!$replaceExisting && $personIdentifier !== null) {
+                $active = $this->repository->activePersonExternalId(
+                    $supplierId,
+                    $employment['employee_id'],
+                    $environment,
+                    'ik_mpsv',
+                );
+                $backdatePerson = $active !== null
+                    && $active['source_kind'] === 'verified_manual_import'
+                    && $active['valid_from'] > $validFrom
+                    && $this->activePersonExternalIdMatches(
+                        $supplierId,
+                        $employment['employee_id'],
+                        $environment,
+                        $personIdentifier,
+                    ) === true;
+            }
+            if ($backdatePerson) {
+                $this->discardManualPersonIdentifier(
+                    $supplierId,
+                    $employment['employee_id'],
+                    $environment,
+                );
+            }
             if ($replaceExisting) {
                 if ($personIdentifier !== null) {
                     $this->discardManualPersonIdentifier(
