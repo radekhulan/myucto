@@ -110,6 +110,40 @@ final readonly class PayrollRegistrationReceiptIdentityService
         int $receiptId,
         ?int $actorId,
     ): bool {
+        return $this->applyAcceptedEmploymentRegistrationOutcomes(
+            $supplierId,
+            $environment,
+            $submissionId,
+            $receiptId,
+            $actorId,
+        )['changed'];
+    }
+
+    /**
+     * Převezme OIČ a ID PPV z přijaté přihlášky a vrátí i identifikátory,
+     * které převzít nešly, protože nemají předepsaný tvar.
+     *
+     * Tvar OIČ předepisuje Katalog kontrol měsíčního hlášení (kontrola 37
+     * „Formát IK MPSV", nepropustná): deset číslic, desátá je zbytek prvních
+     * devíti po dělení jedenácti. Číslo, které tvar nemá, by neprošlo ani
+     * měsíčním hlášením, proto se do evidence nezapisuje ani z protokolu.
+     * Podepsaný protokol tím ale nepřestává být platným dokladem o přijetí
+     * přihlášky: import nepadá, nepřevzatý identifikátor se vrací volajícímu
+     * a ten ho zapíše jako nález podání. Stejně s takovým číslem zachází
+     * protokol měsíčního hlášení ({@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReceiptIdentityService}).
+     *
+     * @return array{
+     *   changed:bool,
+     *   unusable:list<array{employment_id:int,identifier_type:string}>
+     * }
+     */
+    public function applyAcceptedEmploymentRegistrationOutcomes(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $receiptId,
+        ?int $actorId,
+    ): array {
         $outcomes = $this->submissions->acceptedEmploymentRegistrationOutcomes(
             $supplierId,
             $environment,
@@ -117,33 +151,47 @@ final readonly class PayrollRegistrationReceiptIdentityService
             $receiptId,
             PayrollEmployeeRegistrationDeadlinePolicy::REGISTRATION_RULESET_ID,
         );
-        if ($outcomes === []) {
-            return false;
-        }
         $changed = false;
+        $unusable = [];
         foreach ($outcomes as $outcome) {
             $employeeId = (int) $outcome['employee_id'];
             $employmentId = (int) $outcome['employment_id'];
             $personReference = (string) $outcome['external_person_reference'];
             $employmentReference =
                 (string) $outcome['external_employment_reference'];
-            $personMatches =
-                $this->identityService->activePersonExternalIdMatches(
-                    $supplierId,
-                    $employeeId,
-                    $environment,
-                    $personReference,
-                );
+            try {
+                $personMatches =
+                    $this->identityService->activePersonExternalIdMatches(
+                        $supplierId,
+                        $employeeId,
+                        $environment,
+                        $personReference,
+                    );
+            } catch (\InvalidArgumentException) {
+                $unusable[] = [
+                    'employment_id' => $employmentId,
+                    'identifier_type' => 'ik_mpsv',
+                ];
+                $personMatches = true;
+            }
             if ($personMatches === false) {
                 continue;
             }
-            $employmentMatches =
-                $this->identityService->activeEmploymentExternalIdMatches(
-                    $supplierId,
-                    $employmentId,
-                    $environment,
-                    $employmentReference,
-                );
+            try {
+                $employmentMatches =
+                    $this->identityService->activeEmploymentExternalIdMatches(
+                        $supplierId,
+                        $employmentId,
+                        $environment,
+                        $employmentReference,
+                    );
+            } catch (\InvalidArgumentException) {
+                $unusable[] = [
+                    'employment_id' => $employmentId,
+                    'identifier_type' => 'id_ppv',
+                ];
+                $employmentMatches = true;
+            }
             if ($employmentMatches === false) {
                 continue;
             }
@@ -183,6 +231,6 @@ final readonly class PayrollRegistrationReceiptIdentityService
             }
         }
 
-        return $changed;
+        return ['changed' => $changed, 'unusable' => $unusable];
     }
 }

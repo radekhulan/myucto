@@ -1520,7 +1520,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
                   class="mt-2 text-xs text-neutral-600"
                   data-test="submission-issue-remediation"
                 >
-                  {{ submissionIssueRemediation(issue.validation_stage) }}
+                  {{ submissionIssueRemediation(issue.validation_stage, issue.issue_code) }}
                 </p>
                 <details class="mt-2 text-xs text-neutral-500" data-test="submission-issue-technical">
                   <summary class="cursor-pointer">{{ t('payroll.submissions.overview.issue_technical') }}</summary>

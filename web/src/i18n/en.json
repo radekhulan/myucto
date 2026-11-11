@@ -10044,7 +10044,13 @@
           "regzel_xsd_validation_failed": "The registration submission failed XML schema validation.",
           "registration_xsd_validation_failed": "The registration submission failed XML schema validation.",
           "manual_acceptance_contradicted": "A verified ČSSZ protocol disagrees with the manual confirmation of acceptance. Check the submission in the ČSSZ application.",
+          "registration_receipt_oic_invalid": "ČSSZ accepted the registration, but the personal identification number (OIČ) in its protocol does not have the prescribed format (ten digits, the last one is a check digit). The application therefore did not adopt it.",
+          "registration_receipt_id_ppv_invalid": "ČSSZ accepted the registration, but the employment identifier (ID PPV) in its protocol does not have the prescribed format (1 to 22 digits). The application therefore did not adopt it.",
           "unknown": "The submission needs review. Support details are available below."
+        },
+        "issue_code_remediation": {
+          "registration_receipt_oic_invalid": "Check the OIČ in the List of employees on the ČSSZ ePortal and copy it to the employment card, section \"Identifiers assigned by the social security administration\". If the ePortal shows the same number as the protocol, ask ČSSZ to correct it: a number in the wrong format would not pass the monthly report either.",
+          "registration_receipt_id_ppv_invalid": "Check the ID PPV in the List of employees on the ČSSZ ePortal and copy it to the employment card, section \"Identifiers assigned by the social security administration\". If the ePortal shows the same number as the protocol, ask ČSSZ to correct it."
         },
         "issue_remediation": {
           "source": "Correct or complete the agenda source data, then prepare the submission again.",
