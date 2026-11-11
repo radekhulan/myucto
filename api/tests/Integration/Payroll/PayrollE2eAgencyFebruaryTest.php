@@ -193,6 +193,61 @@ final class PayrollE2eAgencyFebruaryTest extends TestCase
     }
 
     /**
+     * Dohoda s „měsíční mzdou" 180 Kč při 40 h týdně (hodinová sazba v poli
+     * měsíční mzdy) dostala pravděpodobný výdělek 1,03 Kč/h jako Připraveno.
+     * Pod minimální mzdou (§ 357 odst. 1 ZP) to není výdělek, ale chyba
+     * v podmínkách: návrh se nedělá a důvod řekne, co doplnit.
+     */
+    public function testProbableEarningFromAgreedGrossBelowMinimumWageIsNotOffered(): void
+    {
+        $wrong = $this->hireDpp(8, '2026-02-07', null);
+        $fine = $this->hireDpp(9, '2026-02-07', null);
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET monthly_gross_minor = ?, weekly_hours = 40 WHERE supplier_id = ? AND employment_id = ?')
+            ->execute([18_000, $this->supplierId, $wrong['employment_id']]);
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET monthly_gross_minor = ?, weekly_hours = 40 WHERE supplier_id = ? AND employment_id = ?')
+            ->execute([3_000_000, $this->supplierId, $fine['employment_id']]);
+        $derivation = $this->container->get(\MyInvoice\Service\Payroll\Absence\AverageEarningDerivationService::class);
+
+        $suggestion = $derivation->suggest($this->supplierId, $wrong['employment_id'], 2026, 1);
+        self::assertFalse($suggestion['ready'], (string) json_encode($suggestion['probable_hourly_minor']));
+        self::assertNull($suggestion['probable_hourly_minor']);
+        self::assertContains('probable_agreed_gross_below_minimum_wage', $suggestion['blockers']);
+        self::assertSame(['code' => 'agreed_gross_below_minimum_wage', 'monthly_gross_minor' => 18_000, 'hourly_minor' => 103, 'minimum_hourly_minor' => 13_440], $suggestion['probable_unusable']);
+
+        // Rozumná sjednaná mzda se nabídne dál.
+        $ok = $derivation->suggest($this->supplierId, $fine['employment_id'], 2026, 1);
+        self::assertTrue($ok['ready']);
+        self::assertSame(17_249, $ok['probable_hourly_minor']);
+        self::assertNull($ok['below_minimum_wage']);
+    }
+
+    /**
+     * Výdělek pod minimální mzdou z jiného zdroje (zadaný pravděpodobný
+     * výdělek, skutečný průměr) se při schválení zvýší na minimum; návrh to
+     * ale musí říct, protože tak nízké číslo bývá chybou v podkladech.
+     */
+    public function testSuggestionBelowMinimumWageIsFlagged(): void
+    {
+        $rulesets = $this->container->get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class);
+        $floor = \MyInvoice\Service\Payroll\Absence\MinimumWageFloor::forDate($rulesets, '2026-04-01');
+        $derivation = \MyInvoice\Service\Payroll\Absence\AverageEarningDerivationService::class;
+
+        self::assertSame(
+            ['source_kind' => 'probable', 'raw_hourly_minor' => 103, 'minimum_hourly_minor' => 13_440],
+            $derivation::belowMinimumWage(['source_kind' => 'probable', 'probable_source' => 'terms', 'probable_hourly_minor' => 103], $floor),
+        );
+        self::assertNull($derivation::belowMinimumWage(['source_kind' => 'probable', 'probable_source' => 'minimum_wage', 'probable_hourly_minor' => 13_440], $floor));
+        self::assertNull($derivation::belowMinimumWage(['source_kind' => 'probable', 'probable_source' => 'terms', 'probable_hourly_minor' => 13_440], $floor));
+        $units = \MyInvoice\Service\Payroll\Time\PayrollDuration::fromMinutes(100 * 60);
+        self::assertSame(
+            ['source_kind' => 'actual', 'raw_hourly_minor' => 5_000, 'minimum_hourly_minor' => 13_440],
+            $derivation::belowMinimumWage(['source_kind' => 'actual', 'gross_earnings_minor' => 500_000, 'worked_duration_units' => $units], $floor),
+        );
+        self::assertNull($derivation::belowMinimumWage(['source_kind' => 'actual', 'gross_earnings_minor' => 2_000_000, 'worked_duration_units' => $units], $floor));
+        self::assertNull($derivation::belowMinimumWage(['source_kind' => null], $floor));
+    }
+
+    /**
      * @return array{employee_id:int,employment_id:int,name:string}
      */
     private function hireDpp(int $seq, string $start, ?string $end): array

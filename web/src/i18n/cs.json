@@ -32626,6 +32626,8 @@
       "suggestion_sources": "Započitatelná mzda je součet základů průměrného výdělku ze schválených revizí běhů; odpracované hodiny jsou potvrzený pracovní souhrn docházky a odpracované dny jsou dny se směnou z téže evidence.",
       "suggestion_confirm": "Čísla zkontrolujte a potvrďte odesláním - snapshot vznikne až tím.",
       "suggestion_takeover": "Měsíce {periods} vedl předchozí program: mzda i hodiny jsou z převzatých mezd. Převzatá hrubá mzda může obsahovat náhrady mzdy (dovolená, svátek), které do průměrného výdělku nepatří - před potvrzením ji upravte na započitatelnou mzdu.",
+      "below_minimum_wage": "Vyšlo jen {raw}/h, méně než hodinová minimální mzda {minimum}/h. Náhrady se počítají nejméně z minimální mzdy (§ 357 odst. 1 zákoníku práce), tak nízký výdělek ale bývá chybou v podkladech: zkontrolujte sazbu, sjednanou mzdu a odpracované hodiny.",
+      "probable_unusable": "Ze sjednané měsíční mzdy {monthly} vychází jen {hourly}/h, minimální mzda je {minimum}/h.",
       "suggestion_edited": "Některé z předvyplněných čísel jste změnili; údaj o původu už pro ně neplatí.",
       "suggestion_reload": "Načíst znovu z běhů",
       "suggestion_blocked": "Z uzavřených běhů se podklady odvodit nedají, zadejte je ručně. Důvod:",
@@ -32721,7 +32723,8 @@
         "worked_days_not_provided": "Počet odpracovaných dnů se nepodařilo zjistit",
         "probable_earning_required": "V rozhodném období nebyl odpracován zákonný minimální počet dnů; průměr se stanovuje jako pravděpodobný výdělek (§ 355 ZP)",
         "average_already_exists": "Průměr pro toto čtvrtletí už existuje; návrh jej nepřepíše",
-        "probable_earning_not_recorded": "Skutečný průměr z uzavřených běhů odvodit nelze a u pracovního vztahu není zadaný pravděpodobný výdělek (§ 355 zákoníku práce). Otevřete Mzdy → Zaměstnanci, na kartě vztahu vyplňte pravděpodobný hodinový výdělek a jeho odůvodnění a uložte."
+        "probable_earning_not_recorded": "Skutečný průměr z uzavřených běhů odvodit nelze a u pracovního vztahu není zadaný pravděpodobný výdělek (§ 355 zákoníku práce). Otevřete Mzdy → Zaměstnanci, na kartě vztahu vyplňte pravděpodobný hodinový výdělek a jeho odůvodnění a uložte.",
+        "probable_agreed_gross_below_minimum_wage": "Ze sjednané měsíční mzdy vychází hodinový výdělek pod minimální mzdou (§ 357 odst. 1 zákoníku práce). V poli měsíční mzdy je nejspíš hodinová sazba: opravte podmínky vztahu, nebo na kartě vztahu zadejte pravděpodobný výdělek s odůvodněním."
       }
     },
     "average_source": {

@@ -243,6 +243,26 @@ function probableReasonText(reason: AverageEarningProbableReason | null | undefi
   return t('payroll_absence.averages.probable_reason.intro', { reasons: parts.join('; ') })
 }
 
+function belowMinimumWageText(item: Pick<AverageEarningCandidate, 'below_minimum_wage' | 'probable_unusable'> | null | undefined): string {
+  const parts: string[] = []
+  const unusable = item?.probable_unusable
+  if (unusable) {
+    parts.push(t('payroll_absence.averages.probable_unusable', {
+      monthly: money(unusable.monthly_gross_minor),
+      hourly: money(unusable.hourly_minor),
+      minimum: money(unusable.minimum_hourly_minor),
+    }))
+  }
+  const below = item?.below_minimum_wage
+  if (below) {
+    parts.push(t('payroll_absence.averages.below_minimum_wage', {
+      raw: money(below.raw_hourly_minor),
+      minimum: money(below.minimum_hourly_minor),
+    }))
+  }
+  return parts.join(' ')
+}
+
 function averageCandidateSelectable(candidate: AverageEarningCandidate): boolean {
   return candidate.ready || averageRecalculable(candidate) || canSetProbable.value
 }
@@ -2510,6 +2530,11 @@ onMounted(async () => {
               <span v-else class="mt-1 block text-xs text-warning-700">
                 {{ candidate.blockers.map(blocker => t(`payroll_absence.averages.blockers.${blocker}`)).join(' · ') }}
               </span>
+              <span
+                v-if="belowMinimumWageText(candidate)"
+                class="mt-1 block text-xs font-medium text-warning-800"
+                :data-test="`average-candidate-below-minimum-${candidate.employment_id}`"
+              >{{ belowMinimumWageText(candidate) }}</span>
             </span>
             <span
               class="rounded-full px-2 py-1 text-xs font-medium"
@@ -2587,6 +2612,13 @@ onMounted(async () => {
             {{ probableReasonText(averageSuggestion.probable_reason) }}
           </p>
           <p v-else class="mt-1 text-xs text-success-700">{{ t('payroll_absence.averages.suggestion_sources') }}</p>
+          <p
+            v-if="belowMinimumWageText(averageSuggestion)"
+            data-test="average-suggestion-below-minimum"
+            class="mt-2 rounded-md bg-warning-50 px-2 py-1 text-xs font-medium text-warning-800"
+          >
+            {{ belowMinimumWageText(averageSuggestion) }}
+          </p>
           <!--
             Převzatá hrubá mzda není započitatelná mzda § 354 ZP — náhrady mzdy
             (dovolená, svátek) do průměru nepatří. Účetní to musí vidět dřív,
@@ -2629,6 +2661,9 @@ onMounted(async () => {
           <ul class="mt-2 list-disc space-y-1 pl-5 text-xs">
             <li v-for="(reason, index) in averageSuggestionBlockers" :key="index">{{ reason }}</li>
           </ul>
+          <p v-if="belowMinimumWageText(averageSuggestion)" data-test="average-suggestion-blocked-below-minimum" class="mt-2 text-xs font-medium">
+            {{ belowMinimumWageText(averageSuggestion) }}
+          </p>
         </div>
         <form data-test="average-form" class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="createAverage">
           <label><span class="form-label">{{ t('payroll_absence.averages.year') }}</span><input v-model.number="averageForm.applicable_year" data-test="average-year" :min="minimumFormYear" :max="maximumFormYear" type="number" :class="fieldClass"></label>
