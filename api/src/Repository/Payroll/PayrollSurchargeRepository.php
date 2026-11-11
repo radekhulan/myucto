@@ -247,7 +247,6 @@ final class PayrollSurchargeRepository
                 if ($lock->fetchColumn() === false) throw new \InvalidArgumentException('Pracovní vztah nebyl nalezen.');
                 $beforeWrite();
             }
-            $this->assertPolicyRangeUnused($supplierId, $employmentId, $validFrom, null);
             $close = $pdo->prepare(
                 'UPDATE payroll_employment_surcharge_policies
                     SET valid_to = DATE_SUB(?, INTERVAL 1 DAY),
@@ -335,6 +334,17 @@ final class PayrollSurchargeRepository
             : self::policyRow($row);
     }
 
+    /**
+     * Oprava OTEVŘENÉ a zároveň POSLEDNÍ verze zásady.
+     *
+     * Mění se jen obsah sjednání (režimy, sazby, počet vlivů, odkaz, poznámka).
+     * `valid_from` ani `valid_to` sem nepatří — kde přesně vede hranice mezi
+     * opravou a přepisem historie a proč, popisuje
+     * {@see PayrollSurchargePolicyHistoryLockedException}.
+     *
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>
+     */
     public function updatePolicy(
         int $supplierId,
         int $employmentId,
@@ -360,41 +370,11 @@ final class PayrollSurchargeRepository
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollSurchargePolicyConflictException($currentVersion);
             }
-            $validFrom = (string) ($data['valid_from'] ?? $current['valid_from']);
-            $this->assertPolicyRangeUnused($supplierId, $employmentId, min($validFrom, (string) $current['valid_from']), $current['valid_to']);
-            if ($current['valid_to'] !== null && $validFrom > $current['valid_to']) {
-                throw new \InvalidArgumentException('Začátek platnosti nesmí být po konci platnosti zásady.');
-            }
-            if ($validFrom !== $current['valid_from']) {
-                $neighbors = $pdo->prepare('SELECT id, valid_from, valid_to FROM payroll_employment_surcharge_policies
-                    WHERE supplier_id = ? AND employment_id = ? AND id <> ? ORDER BY valid_from FOR UPDATE');
-                $neighbors->execute([$supplierId, $employmentId, $policyId]);
-                $previous = null;
-                foreach ($neighbors->fetchAll(PDO::FETCH_ASSOC) as $neighbor) {
-                    if ($neighbor['valid_from'] < $current['valid_from']) {
-                        $previous = $neighbor;
-                    } elseif ($validFrom >= $neighbor['valid_from']) {
-                        throw new \InvalidArgumentException('Začátek platnosti nesmí překročit následující verzi zásady.');
-                    }
-                }
-                if ($previous !== null) {
-                    if ($validFrom <= $previous['valid_from']) {
-                        throw new \InvalidArgumentException('Začátek platnosti musí následovat po začátku předchozí verze zásady.');
-                    }
-                    $oldBoundary = (new \DateTimeImmutable((string) $current['valid_from']))->modify('-1 day')->format('Y-m-d');
-                    if ($previous['valid_to'] === $oldBoundary || $previous['valid_to'] === null || $previous['valid_to'] >= $validFrom) {
-                        $newBoundary = (new \DateTimeImmutable($validFrom))->modify('-1 day')->format('Y-m-d');
-                        $boundary = $pdo->prepare('UPDATE payroll_employment_surcharge_policies SET valid_to = ?, row_version = row_version + 1
-                            WHERE supplier_id = ? AND employment_id = ? AND id = ?');
-                        $boundary->execute([$newBoundary, $supplierId, $employmentId, $previous['id']]);
-                    }
-                }
-            }
+            $this->assertOpenTail($supplierId, $employmentId, $current);
 
             $stmt = $pdo->prepare(
                 'UPDATE payroll_employment_surcharge_policies
-                    SET valid_from = ?,
-                        overtime_mode = ?,
+                    SET overtime_mode = ?,
                         holiday_mode = ?,
                         difficult_environment_factors = ?,
                         overtime_rate_bp = ?,
@@ -415,7 +395,6 @@ final class PayrollSurchargeRepository
                   WHERE supplier_id = ? AND employment_id = ? AND id = ? AND row_version = ?'
             );
             $stmt->execute([
-                $validFrom,
                 $data['overtime_mode'] ?? 'surcharge',
                 $data['holiday_mode'] ?? 'compensatory_time_off',
                 $data['difficult_environment_factors'] ?? null,
@@ -504,7 +483,6 @@ final class PayrollSurchargeRepository
                     'Konec platnosti nesmí předcházet začátku platnosti zásady.'
                 );
             }
-            $this->assertPolicyRangeUnused($supplierId, $employmentId, (new \DateTimeImmutable($validTo))->modify('+1 day')->format('Y-m-d'), null);
 
             // Díra ani překryv: mezi dvěma verzemi nesmí zbýt den bez zásady ani
             // den se dvěma. Nástupkyně u otevřené verze vzniknout nemá
@@ -573,17 +551,19 @@ final class PayrollSurchargeRepository
         return PayrollTimeValue::row($row, 'payroll_employment_surcharge_policy');
     }
 
-    private function assertPolicyRangeUnused(int $supplierId, int $employmentId, string $from, ?string $through): void
+    /** @param array<string,mixed> $policy */
+    private function assertOpenTail(int $supplierId, int $employmentId, array $policy): void
     {
+        if ($policy['valid_to'] !== null) {
+            throw new PayrollSurchargePolicyHistoryLockedException();
+        }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT 1 FROM payroll_run_employments frozen
-             JOIN payroll_run_revisions revision ON revision.supplier_id = frozen.supplier_id AND revision.id = frozen.revision_id
-             WHERE frozen.supplier_id = ? AND frozen.employment_id = ?
-               AND frozen.period_start >= ? AND (? IS NULL OR frozen.period_start <= ?)
-               AND revision.status <> "abandoned"
-             LIMIT 1'
+            'SELECT 1
+               FROM payroll_employment_surcharge_policies
+              WHERE supplier_id = ? AND employment_id = ? AND valid_from > ?
+              LIMIT 1'
         );
-        $stmt->execute([$supplierId, $employmentId, substr($from, 0, 8) . '01', $through, $through]);
+        $stmt->execute([$supplierId, $employmentId, (string) $policy['valid_from']]);
         if ($stmt->fetchColumn() !== false) {
             throw new PayrollSurchargePolicyHistoryLockedException();
         }

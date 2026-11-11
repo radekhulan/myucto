@@ -256,7 +256,6 @@ describe('EmploymentSurchargePolicyPanel — pevná částka za hodinu', () => {
   it('částku nad podporovaný rozsah zablokuje ještě před odesláním', async () => {
     const wrapper = await mountPanel()
     await wrapper.find('[data-test="surcharge-policy-add"]').trigger('click')
-    await wrapper.find('[data-test="surcharge-policy-valid-from"]').setValue('2026-03-01')
 
     await wrapper.find('[data-test="surcharge-policy-form-night"]').setValue('fixed')
     await wrapper.find('[data-test="surcharge-policy-fixed-night"]').setValue('1001')

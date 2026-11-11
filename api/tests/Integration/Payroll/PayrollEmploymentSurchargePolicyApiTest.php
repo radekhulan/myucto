@@ -105,7 +105,11 @@ final class PayrollEmploymentSurchargePolicyApiTest extends TestCase
         self::assertSame('row_version_conflict', $error['code']);
     }
 
-    public function testUpdateCorrectsUnusedValidFrom(): void
+    /**
+     * Účinnost je hranice proti předchozí verzi, jejíž konec je z ní dopočítaný.
+     * Oprava ji proto nesmí posunout ani tehdy, když ji klient v těle pošle.
+     */
+    public function testUpdateIgnoresValidFromFromRequestBody(): void
     {
         $created = $this->create(['valid_from' => '2026-01-01']);
 
@@ -119,12 +123,12 @@ final class PayrollEmploymentSurchargePolicyApiTest extends TestCase
         );
         self::assertSame(200, $update->getStatusCode());
         self::assertSame(
-            '2026-09-01',
+            '2026-01-01',
             (string) $this->row($this->json($update)['policy'] ?? null)['valid_from'],
         );
     }
 
-    public function testUnusedSupersededVersionCanBeCorrected(): void
+    public function testClosedAndSupersededVersionsRefuseCorrection(): void
     {
         $first = $this->create(['valid_from' => '2026-01-01']);
         // Novou verzí se ta první uzavře; od té chvíle je to historie.
@@ -138,13 +142,15 @@ final class PayrollEmploymentSurchargePolicyApiTest extends TestCase
             new Response(),
             $this->args((int) $first['id']),
         );
-        self::assertSame(200, $locked->getStatusCode());
-        self::assertSame(9000, (int) $this->json($locked)['policy']['overtime_rate_bp']);
+        self::assertSame(409, $locked->getStatusCode());
+        self::assertSame(
+            'surcharge_policy_history_locked',
+            $this->row($this->json($locked)['error'] ?? null)['code'],
+        );
 
         // Poslední, otevřená verze se opravit dá — hranice je právě tady.
         $open = $this->action->update(
             $this->request('PUT')->withParsedBody($this->payload([
-                'valid_from' => '2026-04-01',
                 'overtime_rate_bp' => 3000,
                 'row_version' => 1,
             ])),
@@ -194,26 +200,6 @@ final class PayrollEmploymentSurchargePolicyApiTest extends TestCase
             'surcharge_policy_history_locked',
             $this->row($this->json($again)['error'] ?? null)['code'],
         );
-    }
-
-    public function testMovingUnusedBoundaryKeepsVersionsContiguous(): void
-    {
-        $first = $this->create(['valid_from' => '2026-01-01']);
-        $second = $this->create(['valid_from' => '2026-11-11']);
-        $updated = $this->action->update(
-            $this->request('PUT')->withParsedBody($this->payload(['valid_from' => '2026-04-01', 'row_version' => 1])),
-            new Response(), $this->args((int) $second['id']),
-        );
-        self::assertSame(200, $updated->getStatusCode(), (string) $updated->getBody());
-        $previous = $this->db->pdo()->prepare('SELECT valid_to, row_version FROM payroll_employment_surcharge_policies WHERE supplier_id = ? AND id = ?');
-        $previous->execute([$this->supplierId, $first['id']]);
-        self::assertSame(['valid_to' => '2026-03-31', 'row_version' => 3], $previous->fetch(\PDO::FETCH_ASSOC));
-
-        $crossed = $this->action->update(
-            $this->request('PUT')->withParsedBody($this->payload(['valid_from' => '2026-01-01', 'row_version' => 2])),
-            new Response(), $this->args((int) $second['id']),
-        );
-        self::assertSame(422, $crossed->getStatusCode());
     }
 
     public function testHourlyContractMetadataSurvivesCorrectionWithoutResubmission(): void

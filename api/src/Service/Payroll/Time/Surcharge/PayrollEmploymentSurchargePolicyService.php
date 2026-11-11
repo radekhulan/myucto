@@ -160,6 +160,18 @@ final class PayrollEmploymentSurchargePolicyService
         throw new \RuntimeException('Uloženou zásadu příplatků se nepodařilo načíst.');
     }
 
+    /**
+     * Oprava obsahu existující verze.
+     *
+     * Účinnost (`valid_from`) se z těla požadavku VĚDOMĚ nebere, ani když ji
+     * klient pošle: je to hranice proti předchozí, uzavřené verzi, jejíž
+     * `valid_to` je z ní odvozené. Sada pravidel se proto vybírá podle data,
+     * které verze UŽ MÁ — kogentní podlaha se musí měřit proti zákonu účinnému
+     * v době sjednání, ne v době opravy.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
     public function update(
         int $supplierId,
         int $employmentId,
@@ -168,12 +180,11 @@ final class PayrollEmploymentSurchargePolicyService
     ): array {
         $existing = $this->repository->findPolicy($supplierId, $employmentId, $policyId)
             ?? throw new PayrollSurchargePolicyNotFoundException();
-        $validFrom = self::date($input['valid_from'] ?? $existing['valid_from'] ?? null, 'valid_from');
+        $validFrom = self::date($existing['valid_from'] ?? null, 'valid_from');
         if (!array_key_exists('hourly_terms', $input)) {
             $input['hourly_terms'] = $existing['hourly_terms'] ?? null;
         }
         $data = $this->agreedFields($input, $validFrom);
-        $data['valid_from'] = $validFrom;
 
         return $this->repository->updatePolicy(
             $supplierId,

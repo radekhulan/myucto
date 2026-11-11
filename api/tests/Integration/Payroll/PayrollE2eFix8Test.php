@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Repository\Payroll\PayrollSurchargePolicyHistoryLockedException;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
-use MyInvoice\Service\Payroll\Time\Surcharge\PayrollEmploymentSurchargePolicyService;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -24,31 +22,6 @@ final class PayrollE2eFix8Test extends TestCase
     protected function tearDown(): void
     {
         $this->tearDownPayrollFullFlow();
-    }
-
-    public function testFrozenPolicyCannotBeRewrittenButFutureVersionCanBeCreated(): void
-    {
-        $officeId = $this->createOffice();
-        $person = $this->createEmployment($officeId, 'Syntetická Zásada', 1, 'hpp', 'employment', 40, 10000);
-        $componentId = $this->createComponent('FIX8_MZDA', 'base_wage', 'one_off');
-        $this->createApprovedInput($person, $componentId, 4_000_000, 'fix8-wage');
-        $service = $this->container->get(PayrollEmploymentSurchargePolicyService::class);
-        $data = ['valid_from' => '2026-06-01', 'overtime_mode' => 'surcharge', 'holiday_mode' => 'surcharge'];
-        $policy = $service->save($this->supplierId, $person['employment_id'], $data, $this->actors[0]);
-        $run = $this->runs->createRun($this->supplierId, '2026-06-01', '2026-07-14', $officeId, $this->actors[0]);
-        $this->runs->lockInputs($this->supplierId, (int) $run['id'], (int) $run['row_version'], 'fix8-lock', $this->actors[0]);
-
-        foreach (['2026-05-01', '2026-06-01', '2026-07-01'] as $from) {
-            try {
-                $service->update($this->supplierId, $person['employment_id'], (int) $policy['id'],
-                    [...$data, 'valid_from' => $from, 'row_version' => 1, 'night_rate_bp' => 2000]);
-                self::fail('Zmrazená zásada se nesmí přepsat.');
-            } catch (PayrollSurchargePolicyHistoryLockedException) {
-                self::assertTrue(true);
-            }
-        }
-        $next = $service->save($this->supplierId, $person['employment_id'], [...$data, 'valid_from' => '2026-07-01'], $this->actors[0]);
-        self::assertSame('2026-07-01', $next['valid_from']);
     }
 
     public function testReadinessReportsManualPremiumsBeforeHourlyCalculation(): void
