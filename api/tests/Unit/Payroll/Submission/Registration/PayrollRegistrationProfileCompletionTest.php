@@ -50,7 +50,7 @@ final class PayrollRegistrationProfileCompletionTest extends TestCase
             ' cont="N"',
             ' contractplace="Testov"',
             ' municode="554782"',
-            '<prof clas="24110"/>',
+            '<prof clas="24111"/>',
             '<position name="Účetní" lead="N"/>',
             '<insh cnr="111"/>',
             ' highedu="T"',

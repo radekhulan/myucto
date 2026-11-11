@@ -3296,6 +3296,12 @@ final readonly class PayrollRegistrationIdentityService
                 'musí být dvoupísmenný kód státu, například CZ nebo SK.',
             ));
         }
+        if (!PayrollRegistrationCodebooks::isCountry($value)) {
+            throw new \InvalidArgumentException(self::fieldMessage(
+                $key,
+                'není v číselníku států, teď je „' . $value . '". Vyberte stát z nabídky.',
+            ));
+        }
 
         return $value;
     }

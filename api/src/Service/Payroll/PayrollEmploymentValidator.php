@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll;
 
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationCodebooks;
+
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelationshipDetailPolicy;
 
 /**
@@ -320,7 +322,7 @@ final class PayrollEmploymentValidator
         }
         $country = strtoupper(trim($this->inputString($input['foreign_legislation_country_code'] ?? '')));
         $country = $country === '' ? null : $country;
-        if ($country !== null && !preg_match('/^[A-Z]{2}$/', $country)) {
+        if ($country !== null && !PayrollRegistrationCodebooks::isCountry($country)) {
             throw new PayrollFieldValidationException('Kód státu cizích právních předpisů není platný.', 'foreign_legislation_country_code');
         }
         if ($social === 'foreign' || $health === 'foreign' || $tax === 'foreign') {
@@ -1006,7 +1008,7 @@ final class PayrollEmploymentValidator
             'jmhz_assignment_user_country_code',
             'assignment_user_country_invalid',
             static function () use ($country): void {
-                if (preg_match('/^[A-Z]{2}$/', $country) !== 1 || $country === 'CZ') {
+                if (!PayrollRegistrationCodebooks::isCountry($country) || $country === 'CZ') {
                     throw new \InvalidArgumentException(
                         'Zahraniční uživatel u dočasného přidělení potřebuje dvoupísmenný kód cizího státu.',
                     );
@@ -1139,8 +1141,25 @@ final class PayrollEmploymentValidator
             );
         }
         $status = $this->czIsco->status($value);
-        if ($status === CzIscoCodebook::STATUS_ACTIVE || $status === CzIscoCodebook::STATUS_RETIRED) {
+        if ($status === CzIscoCodebook::STATUS_ACTIVE) {
             return $value;
+        }
+        if ($status === CzIscoCodebook::STATUS_RETIRED) {
+            // Vyřazený kód ČSSZ v přihlášce A1 ani v dohlášení nepřijme. Nově
+            // zadat ho nejde; uložený historický kód uložení podmínek
+            // nezablokuje, jen varuje (přihláška ho odmítne s kotvou na pole).
+            $retired = sprintf(
+                'Kód CZ-ISCO %s je v klasifikaci zaměstnání ČSÚ (verze %s) vyřazený. '
+                    . 'Vyberte platný kód z našeptávače.',
+                $value,
+                CzIscoCodebook::CLASSIFICATION_VERSION,
+            );
+            if ($storedCode !== null && $storedCode === $value) {
+                $warnings[] = ['field' => $key, 'code' => 'cz_isco_code_retired', 'message' => $retired];
+
+                return $value;
+            }
+            throw new PayrollFieldValidationException($retired, $key);
         }
         $message = sprintf(
             'Kód CZ-ISCO %s v klasifikaci zaměstnání ČSÚ (verze %s) neexistuje. '

@@ -18,7 +18,9 @@ use PHPUnit\Framework\TestCase;
 /**
  * REGZEC25 (události do 31. 12. 2026) se zavedením REGZEC27 nesmí změnit ani
  * o bajt. Otisky jsou spočtené serializérem před zavedením verze 2027
- * (feat/mzdy-2027, 14d0473af) nad týmiž syntetickými daty.
+ * (feat/mzdy-2027, 14d0473af) nad týmiž syntetickými daty. Otisky obou A1
+ * jsou přepočtené jen kvůli syntetickému kódu CZ-ISCO: dřívější 24110
+ * v klasifikaci není a přihláška A1 ho odmítne, data teď nesou 24111.
  */
 final class PayrollRegistrationRegzec25RegressionTest extends TestCase
 {
@@ -28,8 +30,8 @@ final class PayrollRegistrationRegzec25RegressionTest extends TestCase
 
     /** @var array<string,string> */
     private const SHA256 = [
-        'A1 občan ČR' => '3c4f6aed7f510cee64527499aae5fae6b9c914e2f06c472ab8eff2b7dd518cb9',
-        'A1 cizinec SK' => '1cf84853f639829c11cbd3378146e1e03cf20175c20303201142adad4c1a1794',
+        'A1 občan ČR' => '55740bf1e041c7e8ebd82fe57908d158d05fde55058c67001b969dc423a5d75a',
+        'A1 cizinec SK' => '7cf7143a4b0d3f9a03189eb1b950a9295c77b288ba8b1a3e5c8f0caa2dd24ab2',
         'A2 odstupné' => 'f18566709b137ac5f2da650b0e1de7e72585825973cbb4d3d64202c227a87cac',
         'A2 služební poměr odchodné' => 'b9dafae9e9ba368b3b6e0815fea34740eef753c0933f992d02a22875d5a2fdfc',
         'A3 změna' => 'f75ae7235271d03a8f4f72dc8678245b4fd1b5fe6cf35b6b0570b0cf525831b6',

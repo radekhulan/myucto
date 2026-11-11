@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll;
 
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationCodebooks;
+
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
@@ -874,8 +876,12 @@ final class PayrollPersonProfileValidator
         if (!is_string($value) || preg_match('/^[A-Za-z]{2}$/', $value) !== 1) {
             throw new \InvalidArgumentException("{$path} musí být dvoupísmenný kód země.");
         }
+        $value = strtoupper($value);
+        if (!PayrollRegistrationCodebooks::isCountry($value)) {
+            throw new \InvalidArgumentException("{$path}: kód státu „{$value}\" není v číselníku států. Vyberte stát z nabídky.");
+        }
 
-        return strtoupper($value);
+        return $value;
     }
 
     /** @param list<string> $allowed */
