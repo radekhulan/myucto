@@ -1105,9 +1105,11 @@ final readonly class PayrollRegistrationIdentityService
                     'jmhz_identity_oic_missing',
                     self::fieldNote(
                         'person_external_identifier',
-                        'k rozhodnému dni chybí, a hlášení JMHZ bez něj ČSSZ '
-                        . 'nepřijme. Číslo najdete v protokolu o přijetí '
-                        . 'registrace zaměstnance.',
+                        $this->missingIdentifierNote(
+                            $supplierId,
+                            $employmentId,
+                            $environment,
+                        ),
                     ),
                 );
             }
@@ -1124,9 +1126,11 @@ final readonly class PayrollRegistrationIdentityService
                     'jmhz_identity_id_ppv_missing',
                     self::fieldNote(
                         'employment_external_identifier',
-                        'k rozhodnému dni chybí, a hlášení JMHZ bez něj ČSSZ '
-                        . 'nepřijme. Číslo najdete v protokolu o přijetí '
-                        . 'registrace zaměstnance.',
+                        $this->missingIdentifierNote(
+                            $supplierId,
+                            $employmentId,
+                            $environment,
+                        ),
                     ),
                 );
             }
@@ -1176,6 +1180,77 @@ final readonly class PayrollRegistrationIdentityService
                 'employment_external_identifier' => $employmentIdentifier,
             ] + ($provenance === null ? [] : ['provenance' => $provenance]);
         });
+    }
+
+    /**
+     * Proč identifikátor chybí a co s tím. Obecná rada „číslo najdete
+     * v protokolu" je slepá, když přihláška teprve čeká ve frontě nebo na
+     * protokol ČSSZ: tehdy číslo nikde není a opsat ho nejde.
+     */
+    private function missingIdentifierNote(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+    ): string {
+        $pending = $this->pendingRegistration(
+            $supplierId,
+            $employmentId,
+            $environment,
+        );
+        if ($pending === null) {
+            return 'k rozhodnému dni chybí, a hlášení JMHZ bez něj ČSSZ '
+                . 'nepřijme. Číslo najdete v protokolu o přijetí '
+                . 'registrace zaměstnance.';
+        }
+        if ($pending['state'] === 'queued') {
+            return "k rozhodnému dni chybí: přihláška zaměstnance (podání č. {$pending['submission_id']}) "
+                . 'je připravená, ale ještě neodešla. Odešlete ji v Mzdy → '
+                . 'Podání → K odeslání; číslo přidělí ČSSZ v protokolu '
+                . 'o přijetí a aplikace ho doplní sama.';
+        }
+
+        return 'k rozhodnému dni chybí: přihláška zaměstnance'
+            . ($pending['submitted_on'] === null
+                ? ''
+                : ' odeslaná ' . (new \DateTimeImmutable($pending['submitted_on']))->format('j. n. Y'))
+            . " (podání č. {$pending['submission_id']}) čeká na protokol ČSSZ. "
+            . 'Výsledek si aplikace stahuje automaticky a číslo se po přijetí '
+            . 'doplní samo. Ručně ho stáhnete na kartě pracovního vztahu '
+            . 'v části „Registrace vztahu na ČSSZ" tlačítkem „Zjistit výsledek".';
+    }
+
+    /**
+     * Přihláška vztahu, která je na cestě: `queued` = připravená ve frontě,
+     * `awaiting_result` = odeslaná, čeká na protokol ČSSZ.
+     *
+     * @return array{submission_id:int,state:string,submitted_on:?string}|null
+     */
+    private function pendingRegistration(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+    ): ?array {
+        $pending = $this->repository->registrationOnItsWay(
+            $supplierId,
+            $employmentId,
+            $environment,
+        );
+        if ($pending === null) {
+            return null;
+        }
+        $awaiting = in_array(
+            $pending['status'],
+            ['submitted', 'processing', 'waiting_for_identity'],
+            true,
+        );
+
+        return [
+            'submission_id' => $pending['submission_id'],
+            'state' => $awaiting ? 'awaiting_result' : 'queued',
+            'submitted_on' => $awaiting && $pending['submitted_at'] !== null
+                ? substr($pending['submitted_at'], 0, 10)
+                : null,
+        ];
     }
 
     /**
@@ -1413,6 +1488,9 @@ final readonly class PayrollRegistrationIdentityService
      *   employment_external_identifier:?array{
      *     id:int,value_masked:string,valid_from:string,valid_to:?string,
      *     source_kind:string,row_version:int
+     *   },
+     *   pending_registration:?array{
+     *     submission_id:int,state:string,submitted_on:?string
      *   }
      * }
      */
@@ -1474,6 +1552,11 @@ final readonly class PayrollRegistrationIdentityService
             'employment_external_identifier' => $employmentExternal === null
                 ? null
                 : $this->maskedExternalIdentifier($employmentExternal),
+            // Chybí-li číslo proto, že přihláška teprve čeká ve frontě nebo
+            // na protokol ČSSZ, karta to řekne místo holého „Chybí".
+            'pending_registration' => $person !== null && $employmentExternal !== null
+                ? null
+                : $this->pendingRegistration($supplierId, $employmentId, $environment),
         ];
     }
 

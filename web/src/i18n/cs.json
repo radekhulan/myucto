@@ -7380,6 +7380,13 @@
         "complete": "Doplněno",
         "incomplete": "Je potřeba doplnit",
         "missing": "Chybí",
+        "pending_queued": "Přihláška zaměstnance (podání č. {id}) je připravená, ale ještě neodešla. Odešlete ji v Mzdy → Podání → K odeslání. OIČ a ID PPV přidělí ČSSZ v protokolu o přijetí a aplikace je doplní sama; opisovat je ručně teď není potřeba.",
+        "pending_awaiting": "Přihláška zaměstnance (podání č. {id}) byla odeslána {date} a čeká na protokol ČSSZ. Výsledek si aplikace stahuje automaticky a OIČ i ID PPV se po přijetí doplní samy. Ručně ho stáhnete na této kartě v části „Registrace vztahu na ČSSZ\" tlačítkem „Zjistit výsledek\". Opisovat čísla ručně teď není potřeba.",
+        "pending_awaiting_undated": "Přihláška zaměstnance (podání č. {id}) byla odeslána a čeká na protokol ČSSZ. Výsledek si aplikace stahuje automaticky a OIČ i ID PPV se po přijetí doplní samy. Ručně ho stáhnete na této kartě v části „Registrace vztahu na ČSSZ\" tlačítkem „Zjistit výsledek\". Opisovat čísla ručně teď není potřeba.",
+        "pending_badge": {
+          "queued": "Přihláška čeká na odeslání",
+          "awaiting_result": "Čeká na protokol ČSSZ"
+        },
         "saved": "Identifikátory JMHZ jsou bezpečně uložené.",
         "load_failed": "Identifikátory JMHZ se nepodařilo načíst.",
         "save_failed": "Identifikátory JMHZ se nepodařilo uložit.",

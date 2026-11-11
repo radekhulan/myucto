@@ -7380,6 +7380,13 @@
         "complete": "Complete",
         "incomplete": "Needs completion",
         "missing": "Missing",
+        "pending_queued": "The employee registration (submission no. {id}) is prepared but has not been sent yet. Send it in Payroll → Submissions → To send. ČSSZ assigns the OIČ and ID PPV in the acceptance protocol and the application fills them in itself; there is no need to copy them manually now.",
+        "pending_awaiting": "The employee registration (submission no. {id}) was sent on {date} and is waiting for the ČSSZ protocol. The application fetches the result automatically and fills in the OIČ and ID PPV once the registration is accepted. To fetch it manually, use the \"Fetch result\" button in the \"ČSSZ relation registration\" section of this card. There is no need to copy the numbers manually now.",
+        "pending_awaiting_undated": "The employee registration (submission no. {id}) has been sent and is waiting for the ČSSZ protocol. The application fetches the result automatically and fills in the OIČ and ID PPV once the registration is accepted. To fetch it manually, use the \"Fetch result\" button in the \"ČSSZ relation registration\" section of this card. There is no need to copy the numbers manually now.",
+        "pending_badge": {
+          "queued": "Registration waiting to be sent",
+          "awaiting_result": "Waiting for the ČSSZ protocol"
+        },
         "saved": "The JMHZ identifiers were stored securely.",
         "load_failed": "The JMHZ identifiers could not be loaded.",
         "save_failed": "The JMHZ identifiers could not be saved.",

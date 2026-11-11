@@ -12,6 +12,7 @@ import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import { btnFilled, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { todayIso } from './employmentLifecycleUi'
+import { formatDate } from '@/composables/useFormat'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
@@ -72,6 +73,24 @@ const complete = computed(() => status.value !== null
   && status.value.person_external_identifier !== null
   && status.value.employment_external_identifier !== null)
 const canWrite = computed(() => props.canWriteEmployment && props.canWritePerson)
+/*
+ * Chybějící číslo neznamená vždy „opište ho": když přihláška teprve čeká ve
+ * frontě nebo na protokol ČSSZ, číslo ještě nikdo nepřidělil a není co opsat.
+ */
+const pendingRegistration = computed(() => status.value?.pending_registration ?? null)
+const pendingRegistrationText = computed(() => {
+  const pending = pendingRegistration.value
+  if (pending === null) return ''
+  if (pending.state === 'queued') {
+    return t('payroll.people.jmhz_identity.pending_queued', { id: pending.submission_id })
+  }
+  return pending.submitted_on === null
+    ? t('payroll.people.jmhz_identity.pending_awaiting_undated', { id: pending.submission_id })
+    : t('payroll.people.jmhz_identity.pending_awaiting', {
+      id: pending.submission_id,
+      date: formatDate(pending.submitted_on),
+    })
+})
 const personEditable = computed(() => status.value !== null
   && (status.value.person_external_identifier === null || correctingPerson.value))
 const employmentEditable = computed(() => status.value !== null
@@ -320,7 +339,9 @@ watch(() => [props.startDate, props.endDate], () => {
       >
         {{ complete
           ? t('payroll.people.jmhz_identity.complete')
-          : t('payroll.people.jmhz_identity.incomplete') }}
+          : pendingRegistration
+            ? t(`payroll.people.jmhz_identity.pending_badge.${pendingRegistration.state}`)
+            : t('payroll.people.jmhz_identity.incomplete') }}
       </span>
     </summary>
 
@@ -372,6 +393,14 @@ watch(() => [props.startDate, props.endDate], () => {
       </p>
 
       <template v-if="status && !loading">
+        <p
+          v-if="pendingRegistration"
+          class="rounded-lg border border-info-500/30 bg-info-50 p-3 text-sm text-info-700"
+          role="status"
+          data-test="jmhz-identity-pending-registration"
+        >
+          {{ pendingRegistrationText }}
+        </p>
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div
             class="scroll-mt-24 rounded-lg border border-neutral-200 bg-neutral-50 p-3"
