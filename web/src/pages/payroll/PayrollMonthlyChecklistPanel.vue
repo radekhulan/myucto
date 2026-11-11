@@ -214,6 +214,17 @@ function isDispatchable(item: PayrollMonthlyChecklistItem): boolean {
 /** Řádky, které „Připravit a odeslat vše" pokryje. */
 const bulkItems = computed(() => items.value.filter(item =>
   (isPreparable(item) && !prepareBlocked(item)) || isDispatchable(item)))
+const bulkNeedsPreparation = computed(() => bulkItems.value.some(isPreparable))
+
+function actionPath(item: PayrollMonthlyChecklistItem): string {
+  const path = item.action.path ?? ''
+  if (item.submission_id === null || item.submission_id === undefined) return path
+  const target = new URL(path, window.location.origin)
+  target.searchParams.set('submission', String(item.submission_id))
+  target.searchParams.set('period', item.period ?? period.value)
+  target.searchParams.set('environment', props.environment)
+  return `${target.pathname}${target.search}${target.hash}`
+}
 
 /** Nepřipravené podání případu dávky; připraví se stejně jako v Nemocenských případech. */
 function isSicknessPreparable(item: PayrollMonthlyChecklistItem): boolean {
@@ -759,7 +770,9 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
             </svg>
             {{ flowKind === 'send'
               ? t('payroll.submissions.monthly_checklist.send.working')
-              : t('payroll.submissions.monthly_checklist.send.all', { count: bulkItems.length }) }}
+              : t(bulkNeedsPreparation
+                ? 'payroll.submissions.monthly_checklist.send.all'
+                : 'payroll.submissions.monthly_checklist.send.send_all', { count: bulkItems.length }) }}
           </button>
           <button
             v-if="prepareAllItems.length"
@@ -994,7 +1007,7 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
                       </button>
                       <RouterLink
                         v-if="!isPreparable(item) && item.action.path"
-                        :to="item.action.path"
+                        :to="actionPath(item)"
                         :class="[isDispatchable(item) ? btnOutlineSm('neutral') : actionClass(item), 'whitespace-nowrap']"
                         data-test="monthly-checklist-action"
                       >
@@ -1163,7 +1176,7 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
                   </button>
                   <RouterLink
                     v-if="!isPreparable(item) && item.action.path"
-                    :to="item.action.path"
+                    :to="actionPath(item)"
                     :class="[isDispatchable(item) ? btnOutlineSm('neutral') : actionClass(item), 'whitespace-nowrap']"
                   >
                     {{ isDispatchable(item) ? t('payroll.submissions.monthly_checklist.send.open') : item.action.label }}

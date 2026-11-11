@@ -9318,6 +9318,7 @@
           "send": "Send",
           "open": "Open",
           "all": "Prepare and send all ({count})",
+          "send_all": "Send all ({count})",
           "prepare_all": "Prepare all only ({count})",
           "prepare_all_summary": "Submissions prepared: {prepared}. Failed: {failed}. Nothing was sent.",
           "working": "Preparing and sending…",

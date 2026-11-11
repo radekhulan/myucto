@@ -9318,6 +9318,7 @@
           "send": "Odeslat",
           "open": "Otevřít",
           "all": "Připravit a odeslat vše ({count})",
+          "send_all": "Odeslat vše ({count})",
           "prepare_all": "Jen připravit vše ({count})",
           "prepare_all_summary": "Připraveno podání: {prepared}. Nepovedlo se: {failed}. Nic se neodeslalo.",
           "working": "Připravuji a odesílám…",
