@@ -120,6 +120,13 @@ final class PayrollRegistrationEmploymentStatusCodebook
         if ($activityCode === '15' || $activityCode === '16') {
             return $fixedTerm ? '1342' : '1341';
         }
+        // Pokyny k vyplnění REGZEC, ID 10249: jednatel nebo člen statutárního
+        // orgánu bez pracovní smlouvy má 2210 (s pracovní smlouvou 1111/1112,
+        // vede se pak jako pracovní poměr). Bez pracovní smlouvy = vztah
+        // statutárního orgánu s druhem činnosti S.
+        if ($relationType === 'statutory_body' && $activityCode === 'S') {
+            return '2210';
+        }
 
         return match ($relationType) {
             'employment', 'small_scale_employment' => $fixedTerm ? '1112' : '1111',

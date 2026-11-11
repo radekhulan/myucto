@@ -77,6 +77,14 @@ final class PayrollRegistrationEmploymentStatusCodebookTest extends TestCase
         self::assertNull(PayrollRegistrationEmploymentStatusCodebook::normalize(null));
     }
 
+    public function testStatutoryBodyWithoutContractIsSuggested2210(): void
+    {
+        self::assertSame('2210', PayrollRegistrationEmploymentStatusCodebook::suggest('statutory_body', 'S', false));
+        self::assertNull(PayrollRegistrationEmploymentStatusCodebook::suggest('statutory_body', '1', false));
+        self::assertSame('1111', PayrollRegistrationEmploymentStatusCodebook::suggest('employment', '1', false));
+        self::assertTrue(PayrollRegistrationEmploymentStatusCodebook::isKnown('2210', JmhzSpecVersion::V2027));
+    }
+
     public function testDecisiveDateSelectsVersion(): void
     {
         self::assertSame(
