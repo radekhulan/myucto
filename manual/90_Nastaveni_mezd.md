@@ -245,8 +245,10 @@ na kartě pracovního vztahu.
 2. Zvolte měsíc mezd a nahrajte všechny soubory (XLSX, CSV) najednou. Profil
    mapování se vybere sám; jinak ho zvolte ručně nebo otevřete **Upravit
    mapování**.
-3. V kroku osob zkontrolujte spárování. Nejasné osoby přiřaďte ručně,
-   chybějící osoby založte tlačítkem.
+3. V kroku osob zkontrolujte spárování. Nejasné osoby a osoby ve stavu
+   **Rozpor** přiřaďte ručně nebo opravte podklady, chybějící osoby založte
+   tlačítkem. U návrhu podle jména a data narození zvolte, zda jde o tutéž
+   osobu.
 4. V souhrnu zkontrolujte hodiny a částky. Rozhodněte **Převzít měsíční mzdu
    z podkladů** a **Založit srážky ze mzdy**.
 5. Potvrďte případný nález o jiném měsíci nebo o dvojích vstupech a klikněte
@@ -819,8 +821,9 @@ s nahranými soubory.
 **Osoby.** Osoby ze všech souborů se sloučí podle jména, osobní a rodné číslo se
 připojí. Tituly (i s překlepem jako „MqA.") a poznámka v závorce jako „(DPP)"
 nebo osobní číslo do jména nepatří, „(ml.)" a „(st.)" ano. Jméno lišící se jen
-dalším jménem navíc se spojí a ohlásí. Párování vztahu jde podle uložené vazby,
-rodného čísla, kódu vztahu nebo jména; nejasnou osobu import nezakládá.
+dalším jménem navíc se spojí a ohlásí. Párování vztahu jde podle rodného čísla,
+uložené vazby, kódu vztahu nebo jména; nejasnou osobu import nezakládá. Pravidla
+bezpečného párování popisuje odstavec **Rodné číslo a osobní číslo** níže.
 Chybějící osoby lze založit tlačítkem; měsíční mzda z mzdového výměru se
 předvyplní jako pravidelná mzda a nástup z poznámky („nový nástup 15. 6. 2026")
 jako den nástupu. Sloupce **Datum narození** a **Zdravotní pojišťovna (kód)**
@@ -853,6 +856,32 @@ Skončila-li předchozí dohoda před nástupem nové, stane se nová dohoda hla
 (primárním) vztahem osoby; předchozí si hlavní roli ponechá v měsících, kdy
 trvala. Stejně to platí při ručním přidání vztahu. Měsíční hlášení navíc bere
 jediný vztah, který osoba v měsíci vykazuje, vždy jako primární.
+
+**Rodné číslo a osobní číslo.** Rodné číslo z podkladů má přednost před
+uloženou vazbou, osobním číslem i kódem vztahu. Páruje se přes otisk (rodná
+čísla jsou v evidenci šifrovaná a nic se kvůli importu nedešifruje). Platí:
+
+- Osobní číslo, které ve firmě nebo v podkladech nese víc osob (například „1"
+  u více brigádníků), se k párování nepoužije a vazba podle něj se neuloží.
+  Řádek na to upozorní; takovou osobu párujte rodným číslem, nebo jí dejte
+  jedinečné osobní číslo.
+- Ukazuje-li rodné číslo na jinou osobu než osobní číslo nebo kód vztahu
+  (třeba nový brigádník, jehož číslo z podkladů je náhodou kódem vztahu
+  někoho jiného), má řádek stav **Rozpor**: nespáruje se, nezaloží se a chyba
+  řádku rozpor popíše. Opravte podklady, nebo osobě vyberte vztah ručně.
+- Shoda podle jména nebo uložené vazby nevede na osobu, která má v evidenci
+  jiné rodné číslo nebo jiné datum narození, než udává rodné číslo z podkladů.
+- Rodné číslo uložené v Excelu jako číslo ztratí úvodní nulu (narození od
+  roku 2000). Číslo bez lomítka se 7 až 9 číslicemi import doplní nulami na
+  10 číslic, jen když doplněné projde kontrolní číslicí a datem; jinak řádek
+  upozorní. Devítimístné rodné číslo platí jen pro narozené před rokem 1954.
+  Je-li v podkladech **Datum narození**, rozhodne mezi oběma čteními; rodné
+  číslo, které datu narození odporuje, se nepoužije a nová osoba se s ním
+  nezaloží. Sloupec s rodným číslem proto v sešitu nastavte jako text.
+- Bez rodného čísla v podkladech nabídne import osobu z evidence se shodným
+  jménem a datem narození jen jako návrh. V kroku Osoby zvolte **Je to tatáž
+  osoba** (založí se jí jen nový pracovní vztah), nebo **Jiná osoba** (nová
+  karta). Bez volby se osoba nezaloží a automatické založení ji vynechá.
 
 **Otevřená DPP osoby.** Osobu, kterou import v měsíci nenašel, hledá také mezi
 neukončenými DPP firmy (uložená vazba, osobní číslo, rodné číslo, jméno). Má-li
@@ -935,12 +964,19 @@ každý sloupec šablony.
 |---|---|
 | Osoba | Osobní číslo, Příjmení a jméno (povinné), Rodné číslo, Datum narození, Zdravotní pojišťovna (kód), Druh vztahu (HPP, DPP, DPČ), Nástup, Týdenní úvazek, Měsíční mzda, Hodinová sazba (Kč/h), Konec dohody, Číslo účtu |
 | Registrace ČSSZ | Ulice, Číslo domu, Obec, PSČ, Stát, Státní občanství, CZ-ISCO, Druh činnosti, Místo výkonu práce, Daňová rezidence, Prohlášení poplatníka, Prohlášení od, Vzdělání, Postavení v zaměstnání |
-| Hodiny | Odpracováno; z toho noc, víkend, svátek, přesčas; Dovolená, Nemoc, Lékař |
+| Hodiny a dny | Odpracováno; Odpracované dny; z toho noc, víkend, svátek, přesčas; Dovolená, Nemoc, Lékař |
 | Peníze (Kč za měsíc) | Hodinová mzda celkem, Odměna, Mimořádná odměna, Srážka z čisté mzdy |
 
 Hodiny se zapisují desetinně (7,5) nebo jako čas v Excelu (7:30), v jednom
 sloupci vždy stejně; noc, víkend, svátek a přesčas jsou část odpracovaných
-hodin. Datum jako datum v Excelu nebo text „1. 6. 2026". **Druh vztahu** určí
+hodin. **Odpracované dny** jsou počet kalendářních dnů měsíce, kdy osoba
+pracovala (celé číslo, nejvýš počet dnů měsíce). Zapíšou se do souhrnu
+pracovního měsíce: z nich průměrný výdělek posoudí, zda osoba v rozhodném
+čtvrtletí odpracovala aspoň 21 dnů (§ 355 odst. 1 ZP, jinak pravděpodobný
+výdělek), a měsíční hlášení JMHZ z nich vyplní počet odpracovaných dnů. Bez
+tohoto sloupce se skutečný průměr z importovaných měsíců nenavrhne a dny je
+nutné zadat u průměru ručně. Ve vlastním mapování má sloupec význam
+**Odpracované dny**. Datum jako datum v Excelu nebo text „1. 6. 2026". **Druh vztahu** určí
 druh vztahu nově zakládané osoby, **Nástup** její den nástupu (bez něj první den
 měsíce), **Hodinová sazba**, **Konec dohody** a **Číslo účtu** se převezmou při
 jejím založení (viz Osoby výše), údaje pro registraci ČSSZ popisuje odstavec níže. **Hodinová mzda celkem** jde na složku **Hodinová mzda podle
