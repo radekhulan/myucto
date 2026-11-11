@@ -1382,11 +1382,38 @@ final class PayrollInputRepository
                     $entitlements,
                 );
             } catch (\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException $e) {
+                /*
+                 * Stravné na nový rok ještě nevyšlo, takže osvobozenou část
+                 * příspěvku na stravování (§ 6 odst. 9 písm. b) ZDP) nelze
+                 * určit. Bezpečná cesta: celé plnění se zdaní a pojistí jako
+                 * mzda (nic se neosvobodí bez doloženého limitu) s poznámkou
+                 * v rozpadu; po vyhlášení se osvobozená část dorovná opravou.
+                 */
+                if ($this->baskets->limitAwaitsPublication($definition->exemptionBasket, $periodStart)) {
+                    $taxed = $this->baskets->splitWithLimit($definition->exemptionBasket, 0, 0, $amountMinor);
+                    $split = new \MyInvoice\Service\Payroll\Component\PayrollBenefitBasketSplit(
+                        basket: $taxed->basket,
+                        limitMinor: null,
+                        usedBeforeMinor: 0,
+                        amountMinor: $taxed->amountMinor,
+                        exemptMinor: 0,
+                        taxableMinor: $taxed->amountMinor,
+                        shiftEntitlements: $entitlement?->count(),
+                        allocation: [
+                            'exemption_deferred' => 'limit_awaits_publication',
+                            'note' => 'Limit osvobození za směnu (stravné MPSV) pro rok '
+                                . substr($periodStart, 0, 4) . ' ještě nebyl vyhlášen. Plnění je celé'
+                                . ' zdaněno a pojištěno jako mzda; osvobozenou část dorovnejte'
+                                . ' opravou po vyhlášení vyhlášky.',
+                        ],
+                    );
+                } else {
                 throw new PayrollInputApprovalException(
                     'benefit_basket_limit_unavailable',
                     'Limit koše osvobození není pro rozhodné období k dispozici, '
                     . 'rozpad plnění proto nelze určit: ' . $e->getMessage(),
                 );
+                }
             }
         }
         $snapshot = [

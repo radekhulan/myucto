@@ -43,6 +43,28 @@ final class PayrollBenefitBasketService
      * strop — to není chyba rulesetu, ale výsledek: bez odpracované směny se
      * podle písm. b) neosvobodí nic.
      */
+    /**
+     * Limit koše za směnu ještě nebyl vyhlášen (ruleset nese „čeká na
+     * vyhlášení"): typicky stravné na nový rok před vyhláškou MPSV.
+     */
+    public function limitAwaitsPublication(PayrollBenefitExemptionBasket $basket, string $periodStart): bool
+    {
+        $key = $basket->rulesetKey();
+        if ($key === null || !$basket->scalesWithShifts()) {
+            return false;
+        }
+        try {
+            $parameter = $this->rulesets
+                ->forCalculation(PayrollRulesetDomain::IncomeTax, $this->effectiveOn($basket, $periodStart))
+                ->parameters[$key] ?? null;
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $parameter instanceof \MyInvoice\Service\Payroll\Ruleset\PayrollRuleValue
+            && $parameter->type === 'manual_review';
+    }
+
     public function limitMinor(
         PayrollBenefitExemptionBasket $basket,
         string $periodStart,

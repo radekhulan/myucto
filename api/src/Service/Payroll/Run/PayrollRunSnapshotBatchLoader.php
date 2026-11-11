@@ -350,6 +350,7 @@ final class PayrollRunSnapshotBatchLoader
                     source_period_start, component_snapshot_json,
                     HEX(component_snapshot_hash) AS component_snapshot_hash,
                     benefit_basket, benefit_exempt_minor, benefit_taxable_minor,
+                    benefit_allocation_json,
                     employment_id AS ' . self::GROUP_KEY . '
                FROM payroll_inputs
               WHERE supplier_id = ?

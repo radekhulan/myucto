@@ -524,6 +524,22 @@ final class PayrollRunSnapshotBuilder
                     'Hodinový nárok nemá platný zmrazený podklad. Obnovte podklady mzdového běhu.');
             }
             foreach ($inputRows[$employmentId] ?? [] as $inputRow) {
+                if (str_contains((string) ($inputRow['benefit_allocation_json'] ?? ''), 'limit_awaits_publication')) {
+                    $validations[] = new PayrollRunValidation(
+                        'warning',
+                        'meal_allowance_exemption_deferred',
+                        'employment',
+                        $employmentId,
+                        sprintf(
+                            '%s: příspěvek na stravování je celý zdaněný a pojištěný jako mzda, protože'
+                            . ' limit osvobození za směnu (stravné MPSV) pro rok %s ještě nebyl vyhlášen.'
+                            . ' Po vyhlášení osvobozenou část dorovnejte opravou vstupu.',
+                            (string) $row['full_name'],
+                            substr($periodStart, 0, 4),
+                        ),
+                        "/payroll/components?tab=inputs&period=" . substr($periodStart, 0, 7),
+                    );
+                }
                 if (($inputRow['source_kind'] ?? null) === 'time' && str_starts_with((string) ($inputRow['external_id'] ?? ''), 'hourly-wage:') && !isset($hourlyFrozen['inputs'][(int) $inputRow['id']])) {
                     $validations[] = new PayrollRunValidation('blocker', 'hourly_claim_provenance_invalid', 'employment', $employmentId,
                         'Hodinový mzdový vstup nemá doloženou vazbu na výpočet. Obnovte podklady mzdového běhu.');
