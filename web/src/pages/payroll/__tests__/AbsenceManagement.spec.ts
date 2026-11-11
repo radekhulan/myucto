@@ -1850,6 +1850,54 @@ describe('AbsenceManagement', () => {
       wrapper.unmount()
     })
 
+    /**
+     * Schválený průměr, který po opravě výpočtu (svátek v odpracované době,
+     * § 353 odst. 2 ZP) neodpovídá podkladům: řádek říká proč, o kolik se
+     * liší, že vyplacené náhrady se nemění, a jde hromadně přepočítat.
+     */
+    it('neaktuální schválený průměr vysvětlí, ukáže rozdíl a nabídne hromadný přepočet', async () => {
+      m.averageCandidates.mockResolvedValue({
+        items: [
+          averageCandidate({
+            employment_id: 12,
+            ready: false,
+            blockers: ['average_already_exists'],
+            source_kind: null,
+            existing: { id: 7, status: 'approved', source_kind: 'actual', average_hourly_minor: 26_190 },
+            existing_outdated: true,
+            existing_outdated_reason: 'holiday_hours',
+            suggested_average_hourly_minor: 25_781,
+          }),
+        ],
+        total: 1,
+        limit: 25,
+        offset: 0,
+      })
+      m.createAveragesBulk.mockResolvedValueOnce({ averages: [{ id: 8 }], skipped: [] })
+
+      const wrapper = await mountAllEmployees()
+      await wrapper.get('[data-test="tab-averages"]').trigger('click')
+      await flushPromises()
+
+      const note = wrapper.get('[data-test="bulk-average-outdated-12"]').text()
+      expect(note).toContain('payroll_absence.averages.bulk_outdated_reason.holiday_hours')
+      expect(note).toContain('payroll_absence.averages.bulk_outdated_difference')
+      expect(note).toContain('payroll_absence.averages.bulk_outdated_action')
+
+      await wrapper.get('[data-test="bulk-average-select-outdated"]').trigger('click')
+      const createButton = wrapper.get('[data-test="bulk-average-create"]')
+      expect(createButton.attributes('disabled')).toBeUndefined()
+      await createButton.trigger('click')
+      await flushPromises()
+
+      expect(m.createAveragesBulk).toHaveBeenCalledWith({
+        year: expect.any(Number),
+        quarter: expect.any(Number),
+        items: [{ employment_id: 12, input_version: 'a'.repeat(64), recalculate_outdated: true }],
+      })
+      wrapper.unmount()
+    })
+
     it('ukáže přeskočené vztahy hromadného schválení jménem a důvodem', async () => {
       m.averageCandidates.mockResolvedValue({ items: [averageCandidate()], total: 1, limit: 25, offset: 0 })
       m.createAveragesBulk.mockResolvedValueOnce({

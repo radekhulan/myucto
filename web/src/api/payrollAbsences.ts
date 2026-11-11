@@ -260,8 +260,16 @@ export interface AverageEarningCandidate {
     /** Odkud byl pravděpodobný výdělek vzat (u skutečného průměru `null`). */
     probable_source?: AverageEarningCandidate['probable_source']
   } | null
-  /** Běh rozhodného období se po schválení průměru opravil a průměr na něj nesedí. */
+  /** Schválený skutečný průměr neodpovídá dnešním podkladům rozhodného období. */
   existing_outdated?: boolean
+  /**
+   * Proč nesedí: `holiday_hours` = do odpracované doby nově patří hodiny svátku
+   * krytého měsíční mzdou (§ 353 odst. 2 ZP), `earnings` = změnila se mzda,
+   * `worked_time` = změnila se odpracovaná doba, `mixed` = obojí.
+   */
+  existing_outdated_reason?: 'holiday_hours' | 'earnings' | 'worked_time' | 'mixed' | null
+  /** Průměr, který by z dnešních podkladů vyšel (haléře za hodinu). */
+  suggested_average_hourly_minor?: number | null
   relation_type?: string
 }
 
@@ -496,7 +504,7 @@ export const payrollAbsenceApi = {
   createAveragesBulk: (payload: {
     year: number
     quarter: number
-    items: Array<{ employment_id: number, input_version: string }>
+    items: Array<{ employment_id: number, input_version: string, recalculate_outdated?: boolean }>
   }) => api.post<{ averages: AverageSnapshot[], skipped?: AverageBulkSkipped[] }>('/payroll/time/averages/bulk', payload)
     .then(response => ({ averages: response.data.averages, skipped: response.data.skipped ?? [] })),
   /**

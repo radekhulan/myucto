@@ -32504,7 +32504,16 @@
       "bulk_inputs_changed": "Podklady se od načtení seznamu změnily. Seznam byl znovu načten, zkontrolujte výběr a odešlete znovu.",
       "bulk_empty": "Pro toto čtvrtletí nejsou žádné pracovní vztahy.",
       "bulk_existing": "Existující průměr: {amount} · {status}",
-      "bulk_existing_outdated": "Mzdový běh rozhodného období se po schválení opravil, průměr na něj nesedí. Založte novou revizi průměru a zkontrolujte náhrady a hlášení JMHZ ve čtvrtletí.",
+      "bulk_outdated_reason": {
+        "holiday_hours": "Schválený průměr je neaktuální: do odpracované doby nově patří i hodiny svátku, za který se měsíční mzda nekrátí (§ 353 odst. 2 zákoníku práce).",
+        "earnings": "Schválený průměr je neaktuální: mzda rozhodného období se po jeho schválení změnila (oprava mzdového běhu).",
+        "worked_time": "Schválený průměr je neaktuální: odpracovaná doba rozhodného období se po jeho schválení změnila (oprava docházky).",
+        "mixed": "Schválený průměr je neaktuální: mzda i odpracovaná doba rozhodného období se po jeho schválení změnily."
+      },
+      "bulk_outdated_difference": "Z dnešních podkladů vychází {suggested}/h místo {existing}/h (rozdíl {difference}/h).",
+      "bulk_outdated_action": "Už vyplacené náhrady se zpětně nemění; nový průměr se použije pro náhrady schválené po jeho založení. Řádek vyberte a tlačítkem „Založit a schválit vybrané“ vznikne nová schválená revize.",
+      "bulk_outdated_manual": "Už vyplacené náhrady se zpětně nemění. Novou revizi průměru založte na kartě vztahu.",
+      "bulk_select_outdated": "Vybrat neaktuální průměry",
       "bulk_actual_summary": "Skutečný průměr · mzda {gross}, odpracováno {hours}, {days} dnů",
       "bulk_probable_summary": "Pravděpodobný výdělek {amount} · {source}",
       "bulk_longer_period_note": "Hromadně založený skutečný průměr nezohledňuje poměrnou část mzdy za období delší než čtvrtletí (§ 358 zákoníku práce). U osob s roční odměnou založte průměr ručně na kartě osoby.",
