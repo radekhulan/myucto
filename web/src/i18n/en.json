@@ -6464,7 +6464,7 @@
       "calendar": {
         "default_name": "Regular working week",
         "create": "Create calendar",
-        "short_hint": "Mon-Fri 8 h working week from the start of the month. Without a calendar the fund is estimated the same way.",
+        "short_hint": "Mon-Fri working week by the weekly working hours in the employment terms, from the first day of the employment in the month.",
         "new_version_hint": "From day 1 of the month sets a Mon-Fri 8 h week and replaces the current schedule. For part-time work this raises the fund.",
         "new_version": "New calendar version",
         "saved": "The historical work-calendar version was saved.",
@@ -14729,7 +14729,7 @@
         "steps": {
           "terms": "Open Weekly working time in this employment’s terms. Compare the effective versions for the month with the contract. Correct missing or wrongly effective terms and refresh attendance. Do not erase a real change of working hours; contact support if the summary cannot handle it.",
           "absence": "The link opens this employment’s absences for the same month. Complete approval or rejection of pending requests and corrections according to the facts. Return to attendance, refresh and reopen month approval.",
-          "calendar": "Check the calendar for this employment. Create calendar / New calendar version currently sets Monday to Friday at 8 hours per day from the month’s start. Use it only if this matches the actual schedule. Ask an administrator to resolve other schedules or overlapping versions; do not change the calendar merely to pass validation.",
+          "calendar": "The employment has no work calendar for some days of the month (typically a start in the middle of the month). In the employment row choose Create calendar: it starts on the first day of the employment in the month and follows the weekly working hours from the employment terms (Monday to Friday). Ask an administrator to resolve other schedules or overlapping versions; do not change the calendar merely to pass validation.",
           "month_boundary": "Check the work interval’s start and end. Split work crossing a month boundary into the actual portions worked in each month without changing the total duration. Contact support if the editor cannot correct it. Refresh the summary afterwards.",
           "overlap": "Compare this employment’s records by date and work category. Remove only an incorrect duplicate or correct the actual time; do not record regular work and overtime twice for the same interval. Contact support if the editor cannot correct it. Refresh the summary afterwards.",
           "break": "Check the start, end and break duration in this employment’s records. Correct the wrongly entered time using actual attendance. Contact support if the editor cannot correct it. Refresh the summary afterwards.",

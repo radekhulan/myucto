@@ -6464,7 +6464,7 @@
       "calendar": {
         "default_name": "Pravidelný pracovní týden",
         "create": "Založit kalendář",
-        "short_hint": "Pracovní týden po-pá 8 h od začátku měsíce. Bez kalendáře se fond odhaduje stejně.",
+        "short_hint": "Pracovní týden po-pá podle týdenní pracovní doby z podmínek vztahu, od prvního dne vztahu v měsíci.",
         "new_version_hint": "Od 1. dne měsíce nastaví týden po-pá 8 h a nahradí dosavadní rozvrh. U zkráceného úvazku tím vzroste fond.",
         "new_version": "Nová verze kalendáře",
         "saved": "Historická verze pracovního kalendáře byla uložena.",
@@ -14729,7 +14729,7 @@
         "steps": {
           "terms": "Otevřete pole Týdenní pracovní doba v podmínkách tohoto vztahu. Porovnejte účinné verze pro uvedený měsíc se smlouvou. Opravte chybějící či chybně účinné podmínky a obnovte souhrn docházky. Skutečnou změnu úvazku nesjednocujte uměle; pokud kontrola změnu neumí zpracovat, kontaktujte podporu.",
           "absence": "Odkaz otevře Absence tohoto vztahu pro stejný měsíc. Dokončete schválení nebo zamítnutí čekajících žádostí a jejich oprav podle skutečnosti. Poté se vraťte do docházky, obnovte ji a znovu otevřete schválení měsíce.",
-          "calendar": "Zkontrolujte kalendář pro uvedený vztah. Tlačítko Vytvořit kalendář / Nová verze kalendáře nyní nastavuje pondělí až pátek po 8 hodinách od začátku měsíce. Použijte je pouze při shodě se skutečným rozvrhem. Jiný rozvrh nebo překryv platných verzí řešte se správcem; kalendář neměňte jen kvůli průchodu kontroly.",
+          "calendar": "Vztah nemá na některé dny měsíce pracovní kalendář (typicky nástup uprostřed měsíce). V řádku vztahu zvolte Založit kalendář: vznikne od prvního dne vztahu v měsíci podle týdenní pracovní doby z podmínek vztahu (pondělí až pátek). Jiný rozvrh nebo překryv platných verzí řešte se správcem; kalendář neměňte jen kvůli průchodu kontroly.",
           "month_boundary": "Zkontrolujte začátek a konec práce u tohoto vztahu. Práci přes hranici měsíců rozdělte na skutečně odpracované části příslušných měsíců, aniž byste změnili celkovou dobu. Pokud ji editor neumí opravit, kontaktujte podporu. Poté obnovte souhrn.",
           "overlap": "Porovnejte záznamy tohoto vztahu po dnech a druzích práce. Odstraňte pouze chybnou duplicitu nebo opravte skutečný čas; běžnou práci a přesčas nezapisujte dvakrát do stejného intervalu. Pokud opravu editor nenabízí, kontaktujte podporu. Poté obnovte souhrn.",
           "break": "Zkontrolujte začátek, konec a délku přestávky u záznamů tohoto vztahu. Opravte nesprávně zadaný čas podle skutečné docházky. Pokud opravu editor nenabízí, kontaktujte podporu. Poté obnovte souhrn.",

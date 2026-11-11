@@ -32,16 +32,6 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
  */
 final class PayrollTimeImportSummaryWriter
 {
-    private const ISSUE_MESSAGES = [
-        PayrollEmploymentCalendarProvisioner::ISSUE_WEEKLY_HOURS_MISSING =>
-            'Pracovní vztah nemá v podmínkách týdenní pracovní dobu, pracovní kalendář se proto nezaložil '
-            . 'a fond za měsíc chybí. Doplňte úvazek na kartě vztahu.',
-        PayrollEmploymentCalendarProvisioner::ISSUE_NOT_IN_PERIOD =>
-            'Pracovní vztah v období netrvá ani den, pracovní kalendář se nezaložil.',
-        PayrollEmploymentCalendarProvisioner::ISSUE_MONTH_APPROVED =>
-            'Pracovní měsíc je schválený, pracovní kalendář se nezaložil.',
-    ];
-
     public function __construct(
         private readonly PayrollAttendanceImportRepository $imports,
         private readonly PayrollTimeRepository $time,
@@ -126,7 +116,7 @@ final class PayrollTimeImportSummaryWriter
                 $result['warnings'][] = [
                     'employment_id' => $employmentId,
                     'code' => $calendar['issue'],
-                    'message' => self::ISSUE_MESSAGES[$calendar['issue']] ?? $calendar['issue'],
+                    'message' => PayrollEmploymentCalendarProvisioner::issueMessage($calendar['issue']),
                 ];
             }
             $saved['status'] === 'replayed' ? ++$result['replayed'] : ++$result['written'];

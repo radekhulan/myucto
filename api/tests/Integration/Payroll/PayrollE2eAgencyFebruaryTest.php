@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Response;
 
 /**
  * Agentura s brigádníky dokončuje únor 2026 (nálezy průchodu nad kopií dat).
@@ -95,6 +96,76 @@ final class PayrollE2eAgencyFebruaryTest extends TestCase
 
         // Jedno pravidlo: založení běhu doplní právě tuto osobu.
         self::assertSame([$seeded['employee_id']], $openings->seedProvableZeroOpenings($this->supplierId, self::PERIOD_START, [], $this->actors[0]));
+    }
+
+    /**
+     * Pracovní poměr s nástupem 20. 2. bez pracovního kalendáře: schválení
+     * docházky dřív odmítlo obecnou větou bez vztahu a bez kroku.
+     */
+    public function testTimeApprovalNamesEmploymentMissingCalendarDaysAndRemedy(): void
+    {
+        // Zaměstnání malého rozsahu na 20 h týdně.
+        $person = $this->createEmployment($this->officeId, 'Syntetický Nástupce Únor', 3, 'hpp', 'employment', 20, 5_000, true, self::PERIOD_START);
+        $this->moveStart($person['employment_id'], '2026-02-20', null);
+        $item = $this->timeMonthItem($person['employment_id'], self::PERIOD);
+        $preview = $item['jmhz_work_summary']['preview'];
+        self::assertContains('calendar_day_not_uniquely_covered', array_column($preview['issues'], 'code'));
+
+        $response = $this->time->approve(
+            $this->request('POST', '/api/payroll/time/months/' . self::PERIOD . '/approve')
+                ->withParsedBody([
+                    'employment_id' => $person['employment_id'],
+                    'row_version' => (int) ($item['month']['row_version'] ?? 0),
+                    'jmhz_work_summary' => [
+                        'source_snapshot_sha256' => $preview['source_snapshot_sha256'],
+                        'standard_fund_hours' => '56',
+                        'agreed_fund_hours' => '56',
+                        'weekly_work_hours' => '40',
+                        'worked_hours' => '0',
+                        'unworked_hours_occurred' => false,
+                        'work_obstacles_occurred' => false,
+                        'confirmation_note' => '',
+                    ],
+                ]),
+            new Response(),
+            ['period' => self::PERIOD],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        $error = $this->json($response)['error'];
+        self::assertSame('payroll_time_summary_incomplete', $error['code']);
+        self::assertStringStartsWith('Syntetický Nástupce Únor (FLOW-3): ', $error['message']);
+        self::assertStringContainsString('dny 20. 2. 2026 až 28. 2. 2026', $error['message']);
+        self::assertStringContainsString('Založit kalendář', $error['message']);
+        self::assertSame(['calendar_day_not_uniquely_covered'], $error['issue_codes']);
+        self::assertSame('/payroll/time?employment=' . $person['employment_id'] . '&period=2026-02', $error['remediation_path']);
+
+        // Krok z hlášky: kalendář podle úvazku z podmínek, od dne nástupu.
+        $calendar = $this->time->calendar(
+            $this->request('PUT', '/api/payroll/time/calendars/' . $person['employment_id'])
+                ->withParsedBody(['from_terms' => true, 'period' => self::PERIOD]),
+            new Response(),
+            ['employmentId' => (string) $person['employment_id']],
+        );
+        self::assertSame(201, $calendar->getStatusCode(), (string) $calendar->getBody());
+        $row = $this->db->pdo()->prepare('SELECT valid_from, weekly_minutes FROM payroll_work_calendars WHERE supplier_id = ? AND employment_id = ?');
+        $row->execute([$this->supplierId, $person['employment_id']]);
+        self::assertSame(['valid_from' => '2026-02-20', 'weekly_minutes' => 1200], array_map(
+            static fn ($value) => is_numeric($value) ? (int) $value : $value,
+            $row->fetch(\PDO::FETCH_ASSOC),
+        ));
+        $after = $this->timeMonthItem($person['employment_id'], self::PERIOD);
+        self::assertSame([], $after['jmhz_work_summary']['preview']['issues']);
+        // Dohoda kalendář nepotřebuje a tlačítko to řekne.
+        $dpp = $this->createEmployment($this->officeId, 'Syntetický Brigádník 04', 4, 'dpp', 'dpp', 10, 2_500, true, self::PERIOD_START);
+        $skipped = $this->time->calendar(
+            $this->request('PUT', '/api/payroll/time/calendars/' . $dpp['employment_id'])
+                ->withParsedBody(['from_terms' => true, 'period' => self::PERIOD]),
+            new Response(),
+            ['employmentId' => (string) $dpp['employment_id']],
+        );
+        self::assertSame(422, $skipped->getStatusCode());
+        self::assertSame('payroll_calendar_not_needed', $this->json($skipped)['error']['code']);
     }
 
     /**

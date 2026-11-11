@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   importTime: vi.fn(),
   approveTimeMonth: vi.fn(),
   reopenTimeMonth: vi.fn(),
+  saveTimeCalendar: vi.fn(),
   canWrite: vi.fn(),
   toastError: vi.fn(),
   revealField: vi.fn(),
@@ -46,6 +47,7 @@ vi.mock('@/api/payroll', () => ({
     importTime: m.importTime,
     approveTimeMonth: m.approveTimeMonth,
     reopenTimeMonth: m.reopenTimeMonth,
+    saveTimeCalendar: m.saveTimeCalendar,
   },
 }))
 
@@ -2242,6 +2244,75 @@ describe('TimeAttendance — měsíční mřížka', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0].text()).toContain('Osoba A')
     expect(rows[1].text()).toContain('Osoba B')
+    wrapper.unmount()
+  })
+
+  /*
+   * Pracovní poměr s nástupem uprostřed měsíce bez kalendáře: náhled má
+   * nález, server by řádek odmítl 422. Dávka ho vyřadí jménem a důvodem.
+   */
+  it('vztah s nálezem pracovního souhrnu z dávky vyřadí a řekne proč', async () => {
+    const page = gridPage(['Osoba A', 'Osoba B'])
+    page.items[1].jmhz_work_summary.preview.issues = [
+      { code: 'calendar_day_not_uniquely_covered', message: 'Datum 2026-02-20 není pokryto právě jedním pracovním kalendářem.' },
+    ] as never[]
+    m.timeMonth.mockResolvedValue(page)
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    const excluded = wrapper.get('[data-test="bulk-approve-excluded"]')
+    expect(excluded.text()).toContain('Osoba B')
+    expect(excluded.text()).toContain('payroll.remediation.work.problems.calendar')
+
+    await wrapper.get('[data-test="bulk-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.approveTimeMonth).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  /*
+   * Chyba dávky se dřív ukázala jen na stránce ZA dialogem, který zůstal
+   * otevřený s „Schválí se 0 vztahů". Teď je v dialogu po řádcích.
+   */
+  it('chybu hromadného schválení ukáže v dialogu po řádcích', async () => {
+    m.timeMonth.mockResolvedValue(gridPage(['Osoba A']))
+    m.approveTimeMonth.mockRejectedValue({
+      response: { data: { error: { code: 'payroll_time_summary_incomplete', message: 'Osoba A (ZAM-1): Pracovní souhrn nejde potvrdit: chybí kalendář.' } } },
+    })
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    await wrapper.get('[data-test="bulk-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+
+    const form = wrapper.get('[data-test="bulk-approve-form"]')
+    const rows = form.findAll('[data-test="bulk-approve-failure-row"]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('Pracovní souhrn nejde potvrdit: chybí kalendář.')
+    expect(form.text()).not.toContain('payroll.time.bulk.blocked_no_candidates')
+    wrapper.unmount()
+  })
+
+  it('kalendář vztahu bez kalendáře založí podle úvazku z podmínek', async () => {
+    m.routeQuery = { period: '2026-02' }
+    const page = gridPage(['Osoba A'])
+    ;(page.items[0] as Record<string, unknown>).calendar = null
+    m.timeMonth.mockResolvedValue(page)
+    m.saveTimeCalendar.mockResolvedValue({ id: 5 })
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.get('[data-work-calendar="12"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveTimeCalendar).toHaveBeenCalledWith(12, { from_terms: true, period: '2026-02' })
+    m.routeQuery = {}
     wrapper.unmount()
   })
 
