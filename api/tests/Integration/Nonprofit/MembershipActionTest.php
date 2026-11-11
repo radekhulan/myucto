@@ -378,16 +378,16 @@ final class MembershipActionTest extends TestCase
 
     public function testSelectionRefreshRequiresReadSessionButNotJournalWrite(): void
     {
-        $body=['member_ids'=>[],'filters'=>['year'=>2026]];
-        [$status,$result]=$this->call('POST','selectionCheck',$body,[],['accounting'=>1]);
-        self::assertSame(200,$status);
-        self::assertSame([],$result['member_ids']);
-        [$status]=$this->call('POST','selectionCheck',$body,[],['accounting'=>1],'bearer');
-        self::assertSame(403,$status);
-        [$status]=$this->call('POST','selectionCheck',$body,[],[]);
-        self::assertSame(403,$status);
-        [$status]=$this->call('GET','titles',null,[],['accounting'=>1]);
-        self::assertSame(200,$status);
+        $body = ['member_ids' => [], 'filters' => ['year' => 2026]];
+        [$status, $result] = $this->call('POST', 'selectionCheck', $body, [], ['accounting' => 1]);
+        self::assertSame(200, $status);
+        self::assertSame([], $result['member_ids']);
+        [$status] = $this->call('POST', 'selectionCheck', $body, [], ['accounting' => 1], 'bearer');
+        self::assertSame(403, $status);
+        [$status] = $this->call('POST', 'selectionCheck', $body, [], []);
+        self::assertSame(403, $status);
+        [$status] = $this->call('GET', 'titles', null, [], ['accounting' => 1]);
+        self::assertSame(200, $status);
     }
 
     private function call(string $httpMethod, string $method, ?array $body, array $args = [], ?array $permissions = null, string $auth = 'session'): array

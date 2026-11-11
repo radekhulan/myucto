@@ -49,15 +49,18 @@ function cancelSearchTimer() {
 }
 const search = ref(''), filterYear = ref(appIsoDate().slice(0,4)), titleKey = ref('')
 const paymentStatus = ref<NonNullable<MembershipListFilters['payment_status']>>('all')
-const appliedFilters = ref<MembershipListFilters>({search:'',year:Number(filterYear.value),title_key:'',payment_status:'all'})
+const appliedFilters = ref<MembershipListFilters>({search: '', year: Number(filterYear.value), title_key: '', payment_status: 'all'})
 /** Filtry z formuláře, nebo null s chybou, když rok a titul neurčují období. */
 function formFilters(): MembershipListFilters | null {
   if (!String(filterYear.value).trim() && paymentStatus.value !== 'all') {
     hydrating = true; filterYear.value = appIsoDate().slice(0,4); hydrating = false
   }
   const year = String(filterYear.value).trim(), title = titleKey.value.trim()
-  if ((!year && !title) || (year && (!/^[0-9]{4}$/.test(year) || Number(year)<1900 || Number(year)>9998))) {error.value=t('nonprofitMembership.listNeedPeriod');return null}
-  return {search:search.value.trim(),year:year ? Number(year) : null,title_key:title,payment_status:paymentStatus.value}
+  if ((!year && !title) || (year && (!/^[0-9]{4}$/.test(year) || Number(year) < 1900 || Number(year) > 9998))) {
+    error.value = t('nonprofitMembership.listNeedPeriod')
+    return null
+  }
+  return {search: search.value.trim(), year: year ? Number(year) : null, title_key: title, payment_status: paymentStatus.value}
 }
 function applyFilters(syncUrl = true, forceTitles = false) {
   cancelSearchTimer()
@@ -75,8 +78,8 @@ function applyFilters(syncUrl = true, forceTitles = false) {
   // Tituly závisí na použitém roku; bez změny roku je volání díky deduplikaci v loadTitles levné.
   void loadTitles(forceTitles)
   if (syncUrl && router) void router.replace({query: {...route?.query, search: next.search || undefined, year: year || '', title_key: title || undefined, payment_status: next.payment_status === 'all' ? undefined : next.payment_status}})
-  if (checkedMembers.value.length) selectionNotice.value=t('nonprofitMembership.listSelectionCleared')
-  checkedMembers.value=[]; members.value=[]; nextAfter.value=null
+  if (checkedMembers.value.length) selectionNotice.value = t('nonprofitMembership.listSelectionCleared')
+  checkedMembers.value = []; members.value = []; nextAfter.value = null
   void load()
 }
 const checkedMembers = ref<number[]>([]), batchOpen = ref(false), batchLocked = ref(false)
@@ -86,7 +89,7 @@ function batchChanged() { dataVersion.value++; detailVersion.value++; void load(
 function memberChanged() { dataVersion.value++; void load(); void loadTitles(true) }
 function checkMember(id: number, event: Event) {
   if (!props.canManage || batchLocked.value || loading.value) return
-  selectionNotice.value=''
+  selectionNotice.value = ''
   const checked = (event.target as HTMLInputElement).checked
   if (checked && !checkedMembers.value.includes(id) && checkedMembers.value.length < 500) checkedMembers.value.push(id)
   else if (!checked) checkedMembers.value = checkedMembers.value.filter(x => x !== id)
@@ -210,9 +213,9 @@ watch(() => props.supplier, () => {
   cancelSearchTimer(); pendingRouteFilters = false; pendingFormFilters = false
   generation++; createTicket++; titlesTicket++; hydrating = true
   checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false
-  search.value=''; filterYear.value=appIsoDate().slice(0,4); titleKey.value=''; paymentStatus.value='all'
-  selectionNotice.value=''
-  appliedFilters.value={search:'',year:Number(filterYear.value),title_key:'',payment_status:'all'}
+  search.value = ''; filterYear.value = appIsoDate().slice(0, 4); titleKey.value = ''; paymentStatus.value = 'all'
+  selectionNotice.value = ''
+  appliedFilters.value = {search: '', year: Number(filterYear.value), title_key: '', payment_status: 'all'}
   hydrating = false; titles.value = []
   members.value = []; nextAfter.value = null; periods.value = []; selected.value = null
   clientId.value = null; clientLabel.value = ''; memberNumber.value = ''
@@ -377,7 +380,7 @@ watch(batchLocked, locked => {
     </div>
     <section class="min-w-0 space-y-3" data-section="members" :aria-busy="loading ? 'true' : 'false'">
       <h2 tabindex="-1" class="font-semibold focus:outline-none" data-focus="members-heading">{{ t('nonprofitMembership.members') }}</h2>
-      <FilterBar :active-count="filterChips.length" :chips="filterChips" data-section="member-filters" @clear="clearFilter" @clear-all="clearFilter()">
+      <FilterBar :active-count="filterChips.length" collapsible :chips="filterChips" data-section="member-filters" @clear="clearFilter" @clear-all="clearFilter()">
         <template #primary><label :class="formLabel">{{ t('nonprofitMembership.listSearch') }}<input v-model="search" :class="field" :disabled="batchLocked" maxlength="160" data-field="member-search" /></label></template>
         <label :class="formLabel">{{ t('nonprofitMembership.listYear') }}<input v-model="filterYear" :class="field" :disabled="batchLocked" type="number" min="1900" max="9998" step="1" data-field="member-year" /></label>
         <label :class="formLabel">{{ t('nonprofitMembership.titleKey') }}<SearchableSelect :model-value="titleKey || null" :options="titleOptions" :disabled="batchLocked" :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" data-field="member-title" @update:model-value="titleKey = typeof $event === 'string' ? $event : ''" /></label>

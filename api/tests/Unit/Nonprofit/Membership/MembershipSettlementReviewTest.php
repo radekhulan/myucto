@@ -16,7 +16,7 @@ final class MembershipSettlementReviewTest extends TestCase
         $service = new MembershipReconciliationService($balances);
         return (new \ReflectionMethod($service, 'settlement'))->invoke($service, $changes + [
             'reversal_claim_id' => null, 'posted_at' => '2026-01-01 00:00:00', 'reversed_by' => null,
-            'amount_cents' => 50000, 'line_no' => 1, 'account_id' => 1, 'receipt_valid'=>1,
+            'amount_cents' => 50000, 'line_no' => 1, 'account_id' => 1, 'receipt_valid' => 1,
         ], null);
     }
 
@@ -38,15 +38,15 @@ final class MembershipSettlementReviewTest extends TestCase
 
     public function testZeroIsAValidJournalLineNumber(): void
     {
-        $result=$this->settlement(['line_no'=>0]);
-        self::assertSame('unreconciled',$result['status']);
-        self::assertSame(50000,$result['open_cents']);
+        $result = $this->settlement(['line_no' => 0]);
+        self::assertSame('unreconciled', $result['status']);
+        self::assertSame(50000, $result['open_cents']);
     }
 
     public function testExistingButMismatchedReceiptCannotBecomeOrdinaryUnpaidClaim(): void
     {
-        $result=$this->settlement(['receipt_valid'=>0]);
-        self::assertSame('ambiguous',$result['status']);
+        $result = $this->settlement(['receipt_valid' => 0]);
+        self::assertSame('ambiguous', $result['status']);
         self::assertNull($result['paid_cents']);
         self::assertNull($result['open_cents']);
     }

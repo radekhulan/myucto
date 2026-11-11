@@ -40520,7 +40520,7 @@
     "rateMonths3": "Čtvrtletí",
     "rateMonths6": "Pololetí",
     "rateMonths12": "Rok",
-    "ratePeriodHelp": "Kalendářní období začíná prvním dnem měsíce a končí posledním dnem zvolené délky. U jednotlivého předpisu lze hodnoty upravit, u dávky určuje délku sazba. Stav členství se tím nemění.",
+    "ratePeriodHelp": "Kalendářní období začíná prvním dnem měsíce a končí posledním dnem zvolené délky. U jednotlivého předpisu lze hodnoty upravit. Stav členství se tím nemění.",
     "rateDimensions": "Předvyplňovat výslovně nastavené účetní dimenze",
     "rateActive": "Nabízet pro nové předpisy",
     "rateInactive": "Vyřazená",
@@ -40766,7 +40766,7 @@
       "nonprofit_membership_batch_technical": "Technická chyba člena. Ostatní výsledky zůstávají zachovány.",
       "nonprofit_membership_batch_cancelled": "Dávka byla zrušena dříve, než byl člen zpracován."
     },
-    "ratesEmptyRequired": "Zatím tu není žádná sazba. Pro hromadný předpis nejdřív založte sazbu.",
+    "ratesEmptyRequired": "Zatím tu není žádná sazba. Nejprve založte sazbu v číselníku.",
     "batchTitle": "Hromadný předpis příspěvků",
     "batchHelp": "Vyberte členy a sazbu, připravte náhled celé dávky a potom jej potvrďte. Každý člen se účtuje samostatně. Rozpracovanou dávku lze znovu otevřít a dokončit.",
     "batchNeedRate": "Pro hromadný předpis nejdřív použijte sazbu.",

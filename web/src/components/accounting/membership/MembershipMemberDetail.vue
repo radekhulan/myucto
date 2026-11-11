@@ -40,8 +40,9 @@ const anyLocked = computed(() => locks.value.revision || locks.value.issue || lo
 const member = computed(() => ({ id: props.memberId, member_number: identity.value?.member_number ?? '', label: props.label }))
 
 const issued = computed(() => claims.value.filter(c => c.reversal_claim_id === null).reduce((sum, c) => sum + c.amount_cents, 0))
-const openTotal = computed(() => claims.value.reduce((sum, c) => sum + (c.settlement.open_cents ?? 0), 0))
 const needsReview = computed(() => claims.value.filter(c => c.settlement.status === 'ambiguous').length)
+// Stejně jako řádek seznamu: s předpisem k prověření je zůstatek neurčený.
+const openTotal = computed(() => needsReview.value ? null : claims.value.reduce((sum, c) => sum + (c.settlement.open_cents ?? 0), 0))
 
 async function load(append = false) {
   const ticket = ++generation, supplier = props.supplier, id = props.memberId

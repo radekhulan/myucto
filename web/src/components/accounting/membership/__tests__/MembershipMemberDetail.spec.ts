@@ -116,6 +116,15 @@ describe('Membership member detail', () => {
     w.unmount()
   })
 
+  it('sums the balance due of unpaired and partial charges when nothing needs review', async () => {
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], mixed.filter(c => c.settlement.status !== 'ambiguous')))
+    const w = mounted()
+    await flushPromises()
+    expect(w.get('[data-field="sum-open"]').text()).toBe(formatMoneyMinor(130000))
+    expect(w.get('[data-field="sum-needs-review"]').text()).toBe('0')
+    w.unmount()
+  })
+
   it('shows only ambiguous payments as needing review and unmatched charges as unpaid and never mixes the issued total with a debt', async () => {
     const w = mounted()
     await flushPromises()
@@ -130,7 +139,8 @@ describe('Membership member detail', () => {
     expect(rows[2]!.get('[data-field="settlement-amounts"]').text()).toContain(formatMoneyMinor(30000))
     expect(rows[3]!.get('[data-field="settlement-status"]').text()).toBe(cs.nonprofitMembership.settlement_reversed)
     expect(w.get('[data-field="sum-issued"]').text()).toBe(formatMoneyMinor(100000 + 80000 + 120050))
-    expect(w.get('[data-field="sum-open"]').text()).toBe(formatMoneyMinor(130000))
+    // Stejně jako řádek seznamu: s předpisem k prověření je zůstatek neurčený, ne součet známých částí.
+    expect(w.get('[data-field="sum-open"]').text()).toBe(formatMoneyMinor(null))
     expect(w.get('[data-field="sum-needs-review"]').text()).toBe('1')
     expect(w.get('[data-section="unproven-note"]').text()).toContain(cs.nonprofitMembership.unprovenNote)
     expect(w.get('[data-section="claims-summary"]').text()).not.toMatch(/neuhrazen|dluh:/i)

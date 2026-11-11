@@ -25,14 +25,19 @@ final class MembershipReconciliationService
             $settlement = $this->settlement($claim, $evidence[$claim['claim_id']] ?? null);
             if ($claim['reversal_claim_id'] === null) $activeClaimCents += $claim['amount_cents'];
             // Nespárovaný předpis je neuhrazený celou částkou; neurčený zůstatek mají jen předpisy k prověření.
-            if ($settlement['open_cents'] !== null) $openCents += $settlement['open_cents'];
-            if ($settlement['status'] === 'ambiguous') $needsReview++;
+            if ($settlement['open_cents'] !== null) {
+                $openCents += $settlement['open_cents'];
+            }
+            if ($settlement['status'] === 'ambiguous') {
+                $needsReview++;
+            }
             $rows[] = $claim + ['settlement' => $settlement];
         }
         return [
             'member_id' => $member,
             'page_active_claim_cents' => $activeClaimCents,
-            'page_open_cents' => $openCents,
+            // Stejně jako seznam: s předpisem k prověření je zůstatek neurčený, ne součet jen známých částí.
+            'page_open_cents' => $needsReview > 0 ? null : $openCents,
             'page_needs_review_count' => $needsReview,
             'items' => $rows,
             'next_after_claim_id' => $more ? $claims[array_key_last($claims)]['claim_id'] : null,

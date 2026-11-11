@@ -40835,7 +40835,7 @@
     "rateMonths3": "Quarter",
     "rateMonths6": "Half year",
     "rateMonths12": "Year",
-    "ratePeriodHelp": "Calendar periods start on the first day of a month and end on the last day of the chosen length. Individual charges allow overrides; batch length is set by the rate. Membership status is unaffected.",
+    "ratePeriodHelp": "A calendar period starts on the first day of a month and ends on the last day of the selected length. You can adjust the values for an individual charge. This does not change membership status.",
     "rateDimensions": "Fill in explicitly configured accounting dimensions",
     "rateActive": "Offer for new charges",
     "rateInactive": "Inactive",
@@ -41081,7 +41081,7 @@
       "nonprofit_membership_batch_technical": "Technical failure for this member. Other results are retained.",
       "nonprofit_membership_batch_cancelled": "The batch was cancelled before this member was processed."
     },
-    "ratesEmptyRequired": "There are no rates yet. Create a rate before preparing a batch.",
+    "ratesEmptyRequired": "There are no rates yet. Create a rate in the catalog first.",
     "batchTitle": "Batch membership charges",
     "batchHelp": "Choose members and a rate, prepare the entire batch preview, then confirm it. Each member is posted separately. Saved batches can be reopened and completed.",
     "batchNeedRate": "Apply a rate before preparing batch charges.",
