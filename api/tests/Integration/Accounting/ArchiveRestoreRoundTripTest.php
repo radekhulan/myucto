@@ -346,6 +346,36 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         self::assertSame(2, $report['counts']['document_dimensions']);
     }
 
+    public function testUnmatchedBankTransactionOfOwnStatementSurvivesWithDimensions(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id, code, name, kind) VALUES (?, 'STR', 'Středisko', 'cost_center')")->execute([$this->supplierId]);
+        $type = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name) VALUES (?, ?, 'S1', 'Jedna')")->execute([$type, $this->supplierId]);
+        $value = (int) $pdo->lastInsertId();
+        $statementId = $this->bankStatement(bin2hex(random_bytes(16)));
+        // Pohyb bez párování na fakturu (např. poplatek zaúčtovaný přímo do nákladů).
+        $pdo->prepare('INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, variable_symbol) VALUES (?, ?, -250, "CZK", "97300")')
+            ->execute([$statementId, self::YEAR . '-06-18']);
+        $txId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO document_dimensions (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id) VALUES (?, 'bank_transaction', ?, 0, ?, ?)")
+            ->execute([$this->supplierId, $txId, $type, $value]);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $path = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $path;
+        $report = $this->restore->restore($path);
+        $newSid = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+
+        $q = $pdo->prepare("SELECT bt.variable_symbol, bt.amount, v.code FROM document_dimensions d
+            JOIN bank_transactions bt ON bt.id = d.doc_id JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = d.supplier_id
+            JOIN dimension_values v ON v.id = d.dimension_value_id
+            WHERE d.supplier_id = ? AND d.doc_type = 'bank_transaction'");
+        $q->execute([$newSid]);
+        self::assertSame([['variable_symbol' => '97300', 'amount' => '-250.00', 'code' => 'S1']], $q->fetchAll(PDO::FETCH_ASSOC));
+    }
+
     public function testRestoreFailsWhenSharedDimensionValueDiffersInTargetInstance(): void
     {
         $pdo = $this->db->pdo();

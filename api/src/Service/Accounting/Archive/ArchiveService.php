@@ -487,7 +487,11 @@ final class ArchiveService
             'pk' => 'id',
             'order' => 'id',
         ];
-        $txWhere = '(id IN (SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = ?)'
+        // Pohyby výpisů firmy se exportují všechny, i nespárované (poplatky, pohyby zaúčtované
+        // přímo, přiřazené dimenze) — jinak by obnovené zápisy deníku ztratily zdrojový pohyb.
+        // Ostatní větve kryjí starší výpisy bez supplier_id (vlastnictví přes párování).
+        $txWhere = '(statement_id IN (SELECT id FROM bank_statements WHERE supplier_id = ?)'
+            . ' OR id IN (SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = ?)'
             . ' OR id IN (SELECT bank_transaction_id FROM other_item_allocations'
             . ' WHERE supplier_id = ? AND bank_transaction_id IS NOT NULL)'
             . ' OR matched_invoice_id IN (SELECT id FROM invoices WHERE supplier_id = ?)'
@@ -495,13 +499,13 @@ final class ArchiveService
             . ' WHERE supplier_id = ? AND last_bank_transaction_id IS NOT NULL))';
         $specs['bank_transactions'] = [
             'where' => $txWhere,
-            'params' => [$supplierId, $supplierId, $supplierId, $supplierId],
+            'params' => [$supplierId, $supplierId, $supplierId, $supplierId, $supplierId],
             'pk' => 'id',
             'order' => 'id',
         ];
         $specs['bank_statements'] = [
             'where' => 'id IN (SELECT statement_id FROM bank_transactions WHERE statement_id IS NOT NULL AND ' . $txWhere . ')',
-            'params' => [$supplierId, $supplierId, $supplierId, $supplierId],
+            'params' => [$supplierId, $supplierId, $supplierId, $supplierId, $supplierId],
             'pk' => 'id',
             'order' => 'id',
         ];
