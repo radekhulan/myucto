@@ -11,6 +11,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Component\PayrollWholeCrowns;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMyUctoTemplate;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendancePamicaTemplate;
@@ -60,6 +61,7 @@ final class PayrollAttendanceImportAction
                 $body['rules'] ?? null,
                 $this->profileId($body),
                 $body['components'] ?? null,
+                $this->roundWholeCrowns($body),
             );
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -109,6 +111,7 @@ final class PayrollAttendanceImportAction
                 ($body['confirm_source_checks'] ?? false) === true,
                 ($body['fill_registration_data'] ?? false) === true,
                 ($body['adopt_probable_earnings'] ?? false) === true,
+                $this->roundWholeCrowns($body),
             );
         } catch (AttendanceSourceConfirmationRequired $e) {
             return Json::error($response, 'source_confirmation_required', $e->getMessage(), 409, ['source_checks' => $e->checks]);
@@ -491,6 +494,25 @@ final class PayrollAttendanceImportAction
         }
 
         return $profileId;
+    }
+
+    /**
+     * Zaokrouhlení částek na celé koruny: výslovná volba, jinak zapnuté za
+     * měsíce vykazované přes JMHZ ({@see PayrollWholeCrowns::jmhzPeriod()}).
+     *
+     * @param array<string,mixed> $body
+     */
+    private function roundWholeCrowns(array $body): bool
+    {
+        $value = $body['round_whole_crowns'] ?? null;
+        if (is_bool($value)) {
+            return $value;
+        }
+        $period = $body['period'] ?? null;
+
+        return is_string($period)
+            && preg_match('/^\d{4}-\d{2}$/D', $period) === 1
+            && PayrollWholeCrowns::jmhzPeriod($period . '-01');
     }
 
     /** @return array<string,mixed> */

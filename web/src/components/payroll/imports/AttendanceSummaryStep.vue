@@ -221,6 +221,7 @@ function checkClass(check: AttendanceComponentCheck): string {
                 :title="component(person, code) ? conflictTitle(component(person, code)!.source, component(person, code)!.conflicts) : undefined">
                 {{ component(person, code) ? formatMoneyMinor(component(person, code)!.amount_minor) : '' }}
                 <span v-if="component(person, code)?.conflicts.length" aria-hidden="true">⚠</span>
+                <span v-if="component(person, code)?.rounded_from_minor !== undefined" class="block text-[11px] text-neutral-500" data-testid="attendance-rounded-from">{{ t('payroll_imports.attendance.summary.rounded_from', { amount: formatMoneyMinor(component(person, code)!.rounded_from_minor!) }) }}</span>
               </td>
               <td v-for="meaning in deductionMeanings" :key="`d-${meaning}`" class="whitespace-nowrap border-b border-neutral-100 px-3 py-2 text-right tabular-nums"
                 :class="deduction(person, meaning)?.conflicts.length ? 'bg-warning-50 font-medium text-warning-700' : 'text-neutral-800'"
@@ -250,7 +251,7 @@ function checkClass(check: AttendanceComponentCheck): string {
             </template>
             <template v-for="item in person.components" :key="`c-${item.component_code}`">
               <dt class="font-mono text-neutral-500">{{ item.component_code }}</dt>
-              <dd class="text-right tabular-nums" :class="item.conflicts.length ? 'font-medium text-warning-700' : 'text-neutral-800'">{{ formatMoneyMinor(item.amount_minor) }}<span v-if="item.conflicts.length"> ⚠</span></dd>
+              <dd class="text-right tabular-nums" :class="item.conflicts.length ? 'font-medium text-warning-700' : 'text-neutral-800'">{{ formatMoneyMinor(item.amount_minor) }}<span v-if="item.conflicts.length"> ⚠</span><span v-if="item.rounded_from_minor !== undefined" class="block text-[11px] text-neutral-500">{{ t('payroll_imports.attendance.summary.rounded_from', { amount: formatMoneyMinor(item.rounded_from_minor) }) }}</span></dd>
             </template>
             <template v-for="item in person.deductions ?? []" :key="`d-${item.meaning}`">
               <dt class="text-neutral-500">{{ meaningLabel(item.meaning) }}</dt>

@@ -15,6 +15,15 @@ final class PayrollStatutoryAgendaCatalog
         'not_supported',
     ];
 
+    /** První měsíc, za který se podává jednotné měsíční hlášení zaměstnavatele. */
+    public const JMHZ_FROM = '2026-04-01';
+
+    /** Vykazuje se měsíc začínající `$periodStart` (RRRR-MM-DD) přes JMHZ? */
+    public static function jmhzApplies(string $periodStart): bool
+    {
+        return substr($periodStart, 0, 10) >= self::JMHZ_FROM;
+    }
+
     /**
      * @return array{
      *   version:string,sha256:string,period:string,
@@ -24,7 +33,7 @@ final class PayrollStatutoryAgendaCatalog
     public function forPeriod(string $period): array
     {
         $start = self::periodStart($period);
-        $fromJmhz = $start >= new \DateTimeImmutable('2026-04-01');
+        $fromJmhz = self::jmhzApplies($start->format('Y-m-d'));
         $legacyNempri = $start < new \DateTimeImmutable('2025-01-01');
         $historicEldp = $start < new \DateTimeImmutable('2026-01-01');
 

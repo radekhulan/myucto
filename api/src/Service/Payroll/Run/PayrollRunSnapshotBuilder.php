@@ -233,6 +233,10 @@ final class PayrollRunSnapshotBuilder
             $periodEnd,
         );
         $inputRows = $this->batch->inputs($supplierId, $employmentIds, $periodStart);
+        // Haléře ve výdělku hlášení JMHZ se dřív ukázaly až po schválení mzdy.
+        foreach (PayrollRunWholeCrownInputs::validations($employments, $inputRows, $periodStart) as $validation) {
+            $validations[] = $validation;
+        }
         $hourlyFrozen = $this->batch->hourlyFrozenClaims($supplierId, array_keys($evidenceTerms), $periodStart);
         $hourlyPreviews = $evidenceTerms === [] ? [] : (new \MyInvoice\Service\Payroll\PayrollHourlyWagePreview($this->db))->fromSources(
             $supplierId, $periodStart, $employments, $evidenceTerms, $hourlyTerms, $workedTimeEvidence, $hourlyContexts, $monthlyParts);

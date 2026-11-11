@@ -128,6 +128,18 @@ const fillRegistrationData = ref(true)
 // Pravděpodobný výdělek k potvrzení: ze sazby, jinak z odměny za odpracované hodiny.
 const adoptProbableEarnings = ref(true)
 const probableChanges = computed(() => preview.value?.probable_earning_changes ?? [])
+// Haléře u složek vykazovaných v JMHZ: `null` = výchozí podle období (server,
+// za měsíce JMHZ zapnuto). Náhled ukazuje zaokrouhlené částky, použití bere
+// přesně volbu, se kterou náhled vznikl.
+const roundWholeCrowns = ref<boolean | null>(null)
+const halereComponents = computed(() => preview.value?.summary.halere_components ?? 0)
+const roundWholeCrownsChecked = computed({
+  get: () => preview.value?.round_whole_crowns === true,
+  set: (value: boolean) => {
+    roundWholeCrowns.value = value
+    void reloadPreview()
+  },
+})
 const registrationGapPersons = computed(() => (preview.value?.persons ?? [])
   .filter(person => (person.match.status === 'linked' || person.match.status === 'matched') && (person.registration?.length ?? 0) > 0))
 function registrationText(person: AttendancePerson): string {
@@ -242,6 +254,7 @@ async function requestPreview(): Promise<boolean> {
     const response = await payrollImportsApi.previewAttendance({
       period: period.value,
       ...await previewSource(),
+      ...(roundWholeCrowns.value === null ? {} : { round_whole_crowns: roundWholeCrowns.value }),
     })
     preview.value = response
     // Pravidla nové verze vzoru chodí jen s náhledem; Mapování je potřebuje k aktualizaci.
@@ -262,6 +275,7 @@ async function loadPreview() {
   result.value = null
   createResults.value = null
   manualLinks.value = {}
+  roundWholeCrowns.value = null
   try {
     if (await requestPreview()) step.value = 2
   } finally {
@@ -366,6 +380,7 @@ async function apply() {
       confirm_source_checks: confirmSourceChecks.value,
       fill_registration_data: props.canCreatePersons && fillRegistrationData.value && registrationGapPersons.value.length > 0,
       adopt_probable_earnings: adoptProbableEarnings.value && probableChanges.value.length > 0,
+      round_whole_crowns: preview.value.round_whole_crowns === true,
     })
     result.value = response
     if (response.replayed) toast.warning(t('payroll_imports.attendance.summary.replayed_toast', { id: response.batch.id }))
@@ -595,6 +610,10 @@ async function approveTimeMonths() {
             <label v-if="adoptableWages.length" class="flex items-start gap-2 text-sm text-neutral-800">
               <input v-model="adoptMonthlyWage" type="checkbox" data-testid="attendance-adopt-monthly-wage" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
               <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.adopt_monthly_wage', { count: adoptableWages.length }) }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.adopt_monthly_wage_hint') }}</span></span>
+            </label>
+            <label v-if="halereComponents > 0" class="flex items-start gap-2 text-sm text-neutral-800">
+              <input v-model="roundWholeCrownsChecked" type="checkbox" data-testid="attendance-round-whole-crowns" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
+              <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.round_whole_crowns', { count: halereComponents }) }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.round_whole_crowns_hint') }}</span></span>
             </label>
             <div v-if="probableChanges.length" class="text-sm text-neutral-800">
               <label class="flex items-start gap-2">

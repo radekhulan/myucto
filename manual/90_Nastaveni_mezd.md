@@ -904,6 +904,15 @@ by kontrola souběhu zdrojů odmítla, takže by import měsíce neprošel. Hodi
 odměňování proto nastavte na kartě vztahu jen tehdy, když mzdu nemá počítat
 docházkový systém.
 
+**Částky s haléři.** Měsíční hlášení (JMHZ) vykazuje výdělek v celých korunách.
+Má-li částka složky zařazené do hlášení haléře (provize, příplatek za víkend),
+nabídne souhrn volbu **Zaokrouhlit částky s haléři nahoru na celé koruny**
+s jejich počtem. Za měsíce vykazované přes JMHZ je zapnutá. Tabulka pak ukazuje
+zaokrouhlenou částku a pod ní původní hodnotu a vstupy vzniknou už
+zaokrouhlené. Zaokrouhluje se vždy nahoru, ve prospěch zaměstnance (§ 142
+odst. 2 zákoníku práce). Bez volby by takové vstupy zablokovaly mzdový běh
+kontrolou celých korun, viz [Mzdové složky a vstupy](91_Mzdove_slozky_a_vstupy.md).
+
 **Srážky ze mzdy.** Sloupce **Obědy – srážka ze mzdy** a **Srážka ze mzdy** (ve
 vzoru GIRITON dotovaná cena obědů a srážky z hlavního seznamu) se k hrubé mzdě
 nepřičítají. **Založit srážky ze mzdy** z nich založí dohody o srážce jen pro

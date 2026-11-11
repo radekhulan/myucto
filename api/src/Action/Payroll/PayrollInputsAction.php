@@ -300,6 +300,60 @@ final class PayrollInputsAction
     }
 
     /**
+     * Hromadné zaokrouhlení haléřových vstupů období nahoru na celé koruny,
+     * aby je přijalo měsíční hlášení (viz kontrola běhu `inputs_not_whole_crowns`).
+     * Schválené vstupy zaokrouhlí jen uživatel s právem schvalovat; uzamčené
+     * a vypočtené vstupy se vrátí v `skipped` s důvodem. Do auditu jde každá
+     * změněná částka.
+     */
+    public function roundWholeCrowns(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $supplierId = $this->currentSupplierId($request);
+        $userId = $this->userId($request);
+        try {
+            $periodStart = $this->period($body['period'] ?? null);
+            $employmentId = self::narrowingId($body, 'employment_id');
+            $result = $this->inputs->roundUpToWholeCrowns(
+                $supplierId,
+                $periodStart,
+                $employmentId,
+                RequestAuthorization::allows($request, 'payroll.approve', AccessLevel::WRITE),
+                $userId,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+        $this->logger->log(
+            'payroll.inputs.rounded_whole_crowns',
+            $userId,
+            'payroll_input',
+            null,
+            [
+                'period_start' => $periodStart,
+                'employment_id' => $employmentId,
+                'rounded' => array_map(
+                    static fn (array $row): array => [
+                        'id' => $row['id'],
+                        'from_minor' => $row['from_minor'],
+                        'to_minor' => $row['to_minor'],
+                    ],
+                    $result['rounded'],
+                ),
+                'skipped_count' => count($result['skipped']),
+            ],
+            $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return Json::ok($response, $result);
+    }
+
+    /**
      * Filtr hromadné akce: `period` + volitelné `filter` (tytéž klíče jako
      * výpis). Starší tvar `{period, employment_id}` platí dál.
      *
