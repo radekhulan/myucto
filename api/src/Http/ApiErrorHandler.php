@@ -125,7 +125,7 @@ final class ApiErrorHandler extends ErrorHandler
         return $path === '/api' || str_starts_with($path, '/api/');
     }
 
-    private static function isEncryptionKeyUnavailable(Throwable $exception): bool
+    public static function isEncryptionKeyUnavailable(Throwable $exception): bool
     {
         for ($current = $exception; $current !== null; $current = $current->getPrevious()) {
             if ($current instanceof EncryptionKeyUnavailableException) {

@@ -62,6 +62,16 @@ const periodSplit = computed(() => {
   return { before, later: expired.length - before }
 })
 
+/*
+ * Otevřeno z mzdového běhu: počet skončených dohod je ten, který hlásí jeho
+ * kontrola (konec před obdobím). Dřív dlaždice ukazovala všechny konce
+ * k dnešku a kontrola za únor „20" stála proti dialogu „44".
+ */
+function groupCount(group: PayrollBulkClosureGroup): number {
+  if (group === 'expired' && runPeriod.value) return periodSplit.value.before
+  return preview.value?.summary[group] ?? 0
+}
+
 const itemsByGroup = computed(() => {
   const groups: Record<PayrollBulkClosureGroup, PayrollBulkClosureItem[]> = { expired: [], inactive: [], archive: [] }
   for (const item of preview.value?.items ?? []) groups[item.group].push(item)
@@ -234,7 +244,7 @@ onMounted(loadPreview)
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <article v-for="group in GROUPS" :key="group" class="rounded-lg bg-neutral-50 p-3">
             <p class="text-xs text-neutral-500">{{ t(`payroll.bulk_closure.groups.${group}.summary`) }}</p>
-            <p class="mt-1 text-lg font-semibold" :data-test="`bulk-closure-count-${group}`">{{ preview.summary[group] }}</p>
+            <p class="mt-1 text-lg font-semibold" :data-test="`bulk-closure-count-${group}`">{{ groupCount(group) }}</p>
           </article>
           <article class="rounded-lg p-3" :class="preview.summary.blocked ? 'bg-warning-50' : 'bg-neutral-50'">
             <p class="text-xs" :class="preview.summary.blocked ? 'text-warning-700' : 'text-neutral-500'">{{ t('payroll.bulk_closure.summary_blocked') }}</p>

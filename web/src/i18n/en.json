@@ -3822,6 +3822,7 @@
       "open_runs": "Open payroll runs"
     },
     "health_insurer_bulk": {
+      "known_later": "The insurer is recorded for this person only from {period}; prefilled for confirmation.",
       "title": "Health insurers in bulk",
       "open": "Health insurers in bulk",
       "intro": "People whose employment lasts in {period} and who have no health insurer in their statutory records. Neither JMHZ reports nor the ČSSZ export carry it; without it the health insurance calculation fails.",
@@ -4337,6 +4338,9 @@
         "inputs_action": "Approve all payroll inputs",
         "components": "Enter pay (the base component) for those who have none this month. If there really was no income, enter 0.",
         "components_action": "Open monthly inputs",
+        "statutory": "Fill in the statutory records the calculation reports for these people (for example the health insurer, tax residence or insurance jurisdiction). The link at each person in the run checks opens the place to fix it.",
+        "statutory_action": "Show what is missing",
+        "statutory_people_action": "Open people with missing data",
         "refresh": "When done, load the corrected inputs into the run. Payroll is recalculated right away.",
         "refresh_action": "Refresh inputs and recalculate",
         "restart_action": "Start again and calculate"
@@ -4888,7 +4892,7 @@
         "open_all": "Open the agenda for all affected ({count})",
         "fill_probable_average": "Fill in probable earnings from the rate",
         "bulk": {
-          "statutory_defaults": "Fill in default statutory data ({count})",
+          "statutory_defaults": "Fill in default statutory data from {period} ({count})",
           "declaration_signed": "Signed declarations in bulk",
           "health_insurer": "Health insurers in bulk ({count})",
           "workplace": "Fill in place of work ({count})",

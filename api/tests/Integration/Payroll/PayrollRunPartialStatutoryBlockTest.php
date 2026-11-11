@@ -32,6 +32,7 @@ final class PayrollRunPartialStatutoryBlockTest extends TestCase
     private const WAGE_MINOR = 4_500_000;
 
     private Connection $db;
+    private \Psr\Container\ContainerInterface $container;
     private PayrollRunCommandService $runs;
     private PayrollRunRepository $repository;
     private PayrollStatutoryAccumulatorRepository $accumulators;
@@ -61,6 +62,7 @@ final class PayrollRunPartialStatutoryBlockTest extends TestCase
         ) {
             throw new \RuntimeException('Služby mzdového běhu nejsou dostupné.');
         }
+        $this->container = $container;
         $this->db = $db;
         $this->runs = $runs;
         $this->repository = $repository;
@@ -269,6 +271,51 @@ final class PayrollRunPartialStatutoryBlockTest extends TestCase
                 $this->completeEmployeeId,
             )),
         );
+    }
+
+    /**
+     * Agentura s DPP: pojišťovna zapsaná až s pozdějším vztahem (od září)
+     * nepokrývá červen. Kontrola před během i validace výpočtu řeknou, od kdy
+     * je zapsaná, a hromadný dialog ji nabídne předvyplněnou.
+     */
+    public function testLaterHealthCoverageIsNamedInFindingsAndOfferedInBulkDialog(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_health_coverage_history
+                (supplier_id, employee_id, jurisdiction, insurer_status,
+                 insurer_code, insurer_evidence_reference, effective_from)
+             VALUES (?, ?, "czech_regime_verified", "verified", "211",
+                     "document:health-insurer-later", "2026-09-01")'
+        )->execute([$this->supplierId, $this->missingEmployeeId]);
+        $hint = 'Zdravotní pojišťovna 211 je u osoby zapsaná až od 09/2026';
+
+        $readiness = $this->container->get(\MyInvoice\Service\Payroll\Run\PayrollRunReadinessService::class);
+        self::assertInstanceOf(\MyInvoice\Service\Payroll\Run\PayrollRunReadinessService::class, $readiness);
+        $finding = null;
+        foreach ($readiness->inspect($this->supplierId, '2026-06-01', '2026-07-15', null)['findings'] as $candidate) {
+            if ($candidate['code'] === 'statutory_calculation_manual_review') {
+                $finding = $candidate;
+            }
+        }
+        self::assertIsArray($finding);
+        $messages = implode("\n", array_column($finding['entities'], 'message'));
+        self::assertStringContainsString($hint, $messages);
+
+        $calculated = $this->calculateNewRun('later-coverage');
+        $rows = array_values(array_filter(
+            $this->repository->validations($this->supplierId, (int) $calculated->revision['id']),
+            static fn (array $row): bool => $row['code'] === 'statutory_calculation_manual_review'
+                && str_contains((string) $row['message'], 'zdravotní pojištění'),
+        ));
+        self::assertCount(1, $rows);
+        self::assertStringContainsString($hint, (string) $rows[0]['message']);
+
+        $bulk = $this->container->get(\MyInvoice\Service\Payroll\PayrollHealthInsurerBulkAssignment::class);
+        self::assertInstanceOf(\MyInvoice\Service\Payroll\PayrollHealthInsurerBulkAssignment::class, $bulk);
+        $preview = $bulk->preview($this->supplierId, '2026-06-01');
+        $people = array_column($preview['people'], null, 'employee_id');
+        self::assertSame('211', $people[$this->missingEmployeeId]['known_insurer_code']);
+        self::assertSame('2026-09-01', $people[$this->missingEmployeeId]['known_from']);
     }
 
     private function calculateNewRun(string $key): \MyInvoice\Service\Payroll\Run\PayrollRunCommandResult

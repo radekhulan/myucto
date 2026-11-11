@@ -1233,6 +1233,56 @@ describe('PayrollRuns', () => {
     wrapper.unmount()
   })
 
+  /*
+   * Agentura s DPP: jediný blokátor byla chybějící zdravotní pojišťovna a „Jak
+   * pokračovat" radilo „doplňte mzdu, zadejte 0 Kč". Krok se bere z místa
+   * opravy nálezu, ne jen z kódu ruční kontroly.
+   */
+  it('radí u chybějící zákonné evidence doplnit evidenci, ne zadat mzdu 0 Kč', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'approve', 'cancel'],
+      validations: [
+        validation({
+          id: 93, code: 'statutory_calculation_manual_review', severity: 'blocker', requires_override: false,
+          entity_type: 'employee', entity_id: 17,
+          remediation_path: '/payroll/people?person=17&panel=statutory_evidence',
+        }),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-statutory"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-components"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll.runs.continue_steps.statutory')
+    expect(wrapper.text()).not.toContain('payroll.runs.continue_steps.components_action')
+    wrapper.unmount()
+  })
+
+  it('u chybějící mzdové složky v ruční kontrole dál radí doplnit mzdu', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'approve', 'cancel'],
+      validations: [
+        validation({
+          id: 94, code: 'statutory_calculation_manual_review', severity: 'blocker', requires_override: false,
+          remediation_path: '/payroll/quick-inputs',
+        }),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-components"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-statutory"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('keeps distinct readable enforcement findings instead of calling all of them net-pay errors', async () => {
     m.runs.mockResolvedValue([run({
       status: 'calculated',

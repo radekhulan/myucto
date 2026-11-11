@@ -284,6 +284,7 @@ final class PayrollRunCancelReversibilityTest extends TestCase
         self::assertNotNull($decision);
         self::assertFalse($decision->canDelete);
         self::assertSame('payroll_run_has_revision', $decision->blockerCode);
+        self::assertStringContainsString('„Vyžádat opravu“', (string) $decision->blockerMessage);
     }
 
     /**

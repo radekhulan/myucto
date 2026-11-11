@@ -1644,7 +1644,7 @@ onMounted(loadVariableSymbols)
 // Podání odeslané v jiném okně (měsíční přehled, fronta, datová schránka)
 // patří do Odesláno; rozepsané storno, oprava ani výmaz se nepřepisují.
 useWindowRefresh(() => load(true), () => !busy.value && cancellingId.value === null
-  && correctingId.value === null && correctionPreparationId.value === null && deletingId.value === null)
+  && correctingId.value === null && correctionPreparationId.value === null && deletingId.value === null, { partial: true })
 </script>
 
 <template>

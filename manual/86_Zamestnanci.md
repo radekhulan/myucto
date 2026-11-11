@@ -545,9 +545,12 @@ dohod** níže se nic neděje samo, rozhodujete vy.
      jehož sjednaný konec už uplynul. Sjednaný konec je datum konce vztahu,
      a není-li vyplněné, konec na dobu určitou z platných podmínek. Navržené
      datum ukončení je sjednaný konec. Jen tato skupina je předvybraná.
-     Otevřete-li náhled z kontroly mzdového běhu, předvyberou se jen vztahy
-     se sjednaným koncem před obdobím běhu, tedy ty, které kontrola hlásí;
-     pozdější konce zůstanou v nabídce nezaškrtnuté.
+     Náhled se vztahuje k mzdovému běhu: otevřený z kontroly běhu k jeho
+     období, ze Zaměstnanců k nejstaršímu neschválenému běhu. Předvyberou se
+     a do počtu na tlačítku i v souhrnu se započtou jen vztahy se sjednaným
+     koncem před obdobím běhu, tedy ty, které kontrola hlásí; pozdější konce
+     zůstanou v nabídce nezaškrtnuté. Bez neschváleného běhu se počítají
+     všechny konce k dnešku.
    - **Dohody bez aktivity**: aktivní DPP nebo DPČ bez sjednaného konce, která
      za zvolený počet měsíců (výchozí 3) do posledního zpracovaného mzdového
      měsíce (měsíc poslední schválené mzdy, bez schválené mzdy do běžného

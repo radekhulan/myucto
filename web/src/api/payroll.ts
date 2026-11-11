@@ -1039,7 +1039,17 @@ export interface PayrollStatutoryBulkResult {
 
 export interface PayrollHealthInsurerBulkPreview {
   period_start: string
-  people: Array<{ employee_id: number, full_name: string, suggested_from: string }>
+  /**
+   * `known_*` = pojišťovna, kterou má osoba zapsanou až od pozdějšího měsíce;
+   * dialog ji předvyplní.
+   */
+  people: Array<{
+    employee_id: number
+    full_name: string
+    suggested_from: string
+    known_insurer_code?: string | null
+    known_from?: string | null
+  }>
 }
 
 export interface PayrollHealthInsurerAssignment {
