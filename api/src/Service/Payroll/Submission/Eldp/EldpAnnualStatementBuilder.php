@@ -318,6 +318,7 @@ final class EldpAnnualStatementBuilder
         $employmentFromTakeover = false;
         $continuationEvidence = [];
         $usedContinuation = null;
+        $blockersBeforeEmployment = count($blockers);
         $employment = $this->resolveEmployment(
             $months,
             $employmentId,
@@ -329,6 +330,29 @@ final class EldpAnnualStatementBuilder
         );
         if ($usedContinuation !== null) {
             $continuationEvidence[$employmentId] = $usedContinuation;
+        }
+        /*
+         * Přípustnost samostatného listu se rozhoduje dřív než úplnost měsíců.
+         * Trvající vztah bez výzvy za rok 2026 by jinak dostal výčet „chybí
+         * schválená revize“ za všechny zbývající měsíce roku a proklik do běhů
+         * budoucích měsíců, přestože list za něj zaměstnavatel nevyhotovuje
+         * vůbec (§ 38 odst. 1 a 2 zákona č. 582/1991 Sb. ve znění zák.
+         * č. 360/2025 Sb.). Navazující vztahy řetězu končí až po tomto vztahu,
+         * takže když přechodné ustanovení nedopadá na něj, nedopadne ani na
+         * celý list; konečné rozhodnutí podle konce řetězu padá níž.
+         */
+        if (!$requestedByAuthority && count($blockers) === $blockersBeforeEmployment) {
+            $earlyEnd = $employment['end'] !== null
+                && $employment['end'] <= sprintf('%04d-12-31', $year)
+                    ? $employment['end']
+                    : null;
+            $early = EldpDeadlinePolicy::standaloneStatementAllowed($year, $earlyEnd, false);
+            if (!$early['allowed']) {
+                throw new EldpValidationException(
+                    'eldp_standalone_statement_not_applicable',
+                    $early['reason'],
+                );
+            }
         }
         $employeeEmployments = self::employeeEmployments($allMonths, $employment['employee_id']);
         $this->assertNotContinuationOfEarlierEmployment(
