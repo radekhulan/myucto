@@ -213,7 +213,7 @@ e-mailem. Odkaz předejte jen majiteli účtu.
 | Pozvánka | Platí 3 dny, jednou; přijme ji jen účet se stejnou e-mailovou adresou jako pozvaný uživatel |
 | Neznámá identita | Přihlášení se odmítne, účet se nezakládá |
 | Hosté B2B | Smí se přihlásit jen s `allow_guests = true` (ENV `MYINVOICE_OIDC_ENTRA_ALLOW_GUESTS=1`) a přiřazením k aplikaci |
-| Platnost sezení | `auth.oidc.session_lifetime_hours`, výchozí 12 hodin od posledního přihlášení přes Entra ID, i při `skip_mfa = false`; po vypršení se aplikace sama znovu přihlásí přes Microsoft a vrátí vás na stejnou stránku, pokud jste tam zůstali přihlášení |
+| Platnost sezení | `auth.oidc.session_lifetime_hours`, výchozí 12 hodin od posledního přihlášení přes Entra ID, i při `skip_mfa = false`. Při vynuceném přihlášení přes Entra ID (`required_provider = 'entra'`) se po vypršení aplikace sama znovu přihlásí přes Microsoft a vrátí vás na stejnou stránku, pokud jste tam zůstali přihlášení. Když je Entra ID jen jednou z možností přihlášení, vede vypršení sezení na přihlašovací stránku a způsob přihlášení si vyberete |
 | API tokeny a MCP připojení z přihlášení přes Entra ID | S `tokens_follow_identity = true` (ENV `MYINVOICE_OIDC_TOKENS_FOLLOW_IDENTITY=1`) platí, jen dokud se vlastník přes Entra ID přihlásil v posledních `session_lifetime_hours`. Výchozí je `false`: platí do své vlastní expirace |
 | Zablokovaný uživatel v Entra ID | Znovu se nepřihlásí, otevřené sezení přestane platit nejpozději po `session_lifetime_hours` od jeho posledního přihlášení přes Entra ID, API tokeny a MCP připojení také, je-li zapnuté `tokens_follow_identity` |
 | Instalace vyžaduje Microsoft | Heslo, přístupový klíč ani záložní kód nepustí nikoho, ani správce instance |

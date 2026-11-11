@@ -9,9 +9,10 @@
  * ho ověří bez dotazu (`prompt=none`) a backend ho vrátí na stejnou stránku. Když
  * to bez uživatele nejde, backend pokračuje běžným přihlášením s výběrem účtu.
  *
- * Obnovuje se, když instalace přihlášení přes silného poskytovatele vynucuje, nebo
- * když se uživatel v tomto prohlížeči naposledy přihlásil přes něj. Po ručním
- * odhlášení se tiše neobnovuje. Proti smyčce chrání čas posledního pokusu
+ * Obnovuje se jen tehdy, když instalace přihlášení přes silného poskytovatele
+ * vynucuje. Kde se dá přihlásit i heslem, přístupovým klíčem nebo jiným
+ * poskytovatelem, vede vypršení sezení na přihlašovací stránku a způsob vybírá
+ * uživatel. Po ručním odhlášení se tiše neobnovuje. Proti smyčce chrání čas posledního pokusu
  * v sessionStorage: další tiché obnovení nejdřív po několika minutách, mezitím
  * běžné přihlášení.
  */
@@ -88,8 +89,7 @@ export function forgetSsoSession(): void {
 export function ssoRenewalProvider(): string | null {
   const remembered = readStorage(() => localStorage, REMEMBER_KEY)
   if (remembered === LOGGED_OUT) return null
-  if (requiredProvider !== null) return requiredProvider
-  return remembered !== null && strongProviders.includes(remembered) ? remembered : null
+  return requiredProvider
 }
 
 export function ssoRenewalUrl(provider: string, returnTo: string | null | undefined): string {

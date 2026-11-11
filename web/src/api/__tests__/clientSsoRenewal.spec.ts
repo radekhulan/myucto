@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AxiosError, type AxiosAdapter } from 'axios'
 import { api } from '../client'
-import { resetSsoRenewal, setSsoRenewalPolicy } from '@/security/ssoRenewal'
+import { rememberSsoSession, resetSsoRenewal, setSsoRenewalPolicy } from '@/security/ssoRenewal'
 
 const unauthorized = (code: string): AxiosAdapter => async (config) => {
   throw new AxiosError('unauthorized', 'ERR_BAD_REQUEST', config, null, {
@@ -39,6 +39,13 @@ describe('401 po vypršení sezení z Entra ID', () => {
 
   it('bez Entra beze změny na přihlašovací formulář', async () => {
     setSsoRenewalPolicy({ sso_providers: [] })
+    await expect(api.get('/invoices', { adapter: unauthorized('unauthenticated') })).rejects.toBeInstanceOf(AxiosError)
+    expect(location.href).toBe('/login?return_to=%2Finvoices%3Fstatus%3Dunpaid')
+  })
+
+  it('Entra jen jako možnost vede na přihlašovací formulář', async () => {
+    setSsoRenewalPolicy({ sso_providers: [{ id: 'entra', strong: true }] })
+    rememberSsoSession({ provider: 'entra', expires_at: '2026-11-09T20:00:00Z' })
     await expect(api.get('/invoices', { adapter: unauthorized('unauthenticated') })).rejects.toBeInstanceOf(AxiosError)
     expect(location.href).toBe('/login?return_to=%2Finvoices%3Fstatus%3Dunpaid')
   })
