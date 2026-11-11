@@ -2176,8 +2176,14 @@ const simplifiedOnlyClientWarning = computed<string | null>(() => {
     invoiceType: form.value.invoice_type,
     isSimplified: form.value.is_simplified,
     totalWithVat: total,
+    hasOriginal: !!form.value.parent_invoice_id,
   })
-  if (problem === 'requires_simplified') return t('invoice.simplified_only_client_requires')
+  if (problem === 'credit_note_requires_original') return t('invoice.simplified_only_client_credit_note_requires_original')
+  if (problem === 'requires_simplified') {
+    return t(form.value.invoice_type === 'credit_note'
+      ? 'invoice.simplified_only_client_credit_note_requires'
+      : 'invoice.simplified_only_client_requires')
+  }
   if (problem === 'over_limit') {
     return t('invoice.simplified_only_client_over_limit', {
       limit: formatMoney(SIMPLIFIED_LIMIT_WITH_VAT, form.value.currency),
@@ -3439,7 +3445,9 @@ useWindowTitle(
                  class="text-xs text-warning-600 mt-1 ml-6">{{ simplifiedOnlyClientWarning }}</p>
               <p v-else-if="clientSimplifiedOnly && form.client_id" data-test="simplified-only-client-hint"
                  class="text-xs text-neutral-500 mt-1 ml-6">
-                {{ t('invoice.simplified_only_client_hint', { limit: formatMoney(SIMPLIFIED_LIMIT_WITH_VAT, form.currency) }) }}
+                {{ form.invoice_type === 'credit_note'
+                  ? t('invoice.simplified_only_client_credit_note_hint')
+                  : t('invoice.simplified_only_client_hint', { limit: formatMoney(SIMPLIFIED_LIMIT_WITH_VAT, form.currency) }) }}
               </p>
               <p v-else-if="form.is_simplified && simplifiedBlockedReason"
                  class="text-xs text-warning-600 mt-1 ml-6">{{ simplifiedBlockedReason }}</p>
