@@ -1074,6 +1074,44 @@ final class JmhzPreparationSnapshotBuilder
         return $this->averageRequiredForScenario(is_string($scenarioKey) ? $scenarioKey : null);
     }
 
+    /**
+     * Nálezy podmínek vztahu (pracoviště 10229 až 10231, tristavy, APZ,
+     * dočasné přidělení, kategorizace rizika), které by zastavily zmrazení
+     * hlášení. Předběžná kontrola před během je bere odsud, aby předpověď
+     * šla týmž pravidlem jako příprava ({@see self::inspectTerm()}); dřív
+     * chybějící pracoviště zastavilo až přípravu JMHZ po schválení běhu.
+     *
+     * @param array<string,mixed> $entry vztah ze snímku vstupů
+     * @return list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}>
+     */
+    public function termIssues(array $entry, string $periodStart): array
+    {
+        $term = $entry['term'] ?? null;
+        $employment = $entry['employment'] ?? null;
+        $employmentId = is_array($employment) && is_int($employment['id'] ?? null) ? $employment['id'] : 0;
+        if ($employmentId <= 0 || !is_array($term) || array_is_list($term)) {
+            return [];
+        }
+        $selection = $this->scenarioSelector()->resolve(
+            is_string($term['activity_code'] ?? null) ? $term['activity_code'] : null,
+            is_string($term['jmhz_relationship_detail_code'] ?? null)
+                ? $term['jmhz_relationship_detail_code']
+                : null,
+            self::deferredIncomeType($entry, $employment, $periodStart) === null ? null : 'scenario_8',
+        );
+        $issues = [];
+        $this->inspectTerm(
+            $term,
+            $employmentId,
+            $issues,
+            is_string($selection['evidence']['scenario_key'] ?? null)
+                ? $selection['evidence']['scenario_key']
+                : null,
+        );
+
+        return $issues;
+    }
+
     private function averageRequiredForScenario(?string $scenarioKey): bool
     {
         return $scenarioKey === null || $this->scenarioRequiresAttribute($scenarioKey, '10345');
