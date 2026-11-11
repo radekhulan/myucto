@@ -181,6 +181,19 @@ export interface PayrollAbsencesPage {
  * `longer_period_allocated_minor` je vždy `null`: poměrnou část mzdy za období
  * delší než čtvrtletí (§ 358 ZP) aplikace v datech nerozlišuje.
  */
+/**
+ * Proč návrh použil pravděpodobný výdělek místo skutečného průměru (§ 355
+ * odst. 1 ZP). `codes` jsou důvody ze serveru, `missing_run_periods` měsíce
+ * rozhodného období (`RRRR-MM`) bez schváleného běhu, `worked_days` dny
+ * doložené uzavřenými běhy.
+ */
+export interface AverageEarningProbableReason {
+  codes: Array<'run_missing' | 'probable_earning_required' | 'worked_time_missing'>
+  missing_run_periods: string[]
+  worked_days: number
+  minimum_worked_days: number
+}
+
 export interface AverageEarningSuggestion {
   employment_id: number
   applicable_year: number
@@ -200,6 +213,8 @@ export interface AverageEarningSuggestion {
   source_kind: 'actual' | 'probable' | null
   /** Proč skutečný průměr nevyšel; u `source_kind: 'actual'` prázdné. */
   actual_blockers: string[]
+  /** Důvod pravděpodobného výdělku; `null` u skutečného průměru a u vadné evidence. */
+  probable_reason?: AverageEarningProbableReason | null
   probable_hourly_minor: number | null
   probable_rationale: string | null
   probable_source?: AverageEarningCandidate['probable_source']
@@ -247,6 +262,7 @@ export interface AverageEarningCandidate {
   probable_source: 'terms' | 'achieved_wage' | 'agreed_hourly_rate' | 'agreed_monthly_gross' | 'minimum_wage' | null
   probable_hourly_minor: number | null
   probable_rationale: string | null
+  probable_reason?: AverageEarningProbableReason | null
   gross_earnings_minor: number | null
   worked_minutes: number | null
   worked_duration_units?: number | null

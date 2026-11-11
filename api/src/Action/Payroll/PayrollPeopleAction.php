@@ -45,6 +45,9 @@ final class PayrollPeopleAction
         private readonly PayrollAgreementAnnualHours $agreementHours,
         private readonly CzIscoCodebook $czIsco,
         private readonly PayrollPeopleContactColumns $contactColumns,
+        // Osoby nálezu kontroly před během pro zúžení `?filter=run_finding`.
+        private readonly \MyInvoice\Service\Payroll\Run\PayrollRunReadinessService $readiness,
+        private readonly \MyInvoice\Service\Payroll\Payment\PayrollPaydayResolver $payday,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -121,15 +124,44 @@ final class PayrollPeopleAction
         }
 
         $year = (int) date('Y');
+        $narrowedIds = [];
+        if ($filter === PayrollPeopleRepository::FILTER_DPP_HOURS_LIMIT) {
+            $narrowedIds = $this->agreementHours->employeesNearLimit($supplierId, $year);
+        } elseif ($filter === PayrollPeopleRepository::FILTER_RUN_FINDING) {
+            /*
+             * Osoby jednoho nálezu kontroly před během. Odkaz z přehledu nálezů
+             * nese kód, období a datum výplaty, se kterým kontrola počítala;
+             * bez data platí návrh ze mzdové politiky, stejně jako v seznamu běhů.
+             */
+            $finding = $query['finding'] ?? '';
+            $period = $query['period'] ?? '';
+            $paymentDate = $query['payment_date'] ?? '';
+            if (!is_string($finding) || preg_match('/^[a-z0-9_]{1,100}$/', $finding) !== 1
+                || !is_string($period) || preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) !== 1
+                || !is_string($paymentDate)
+                || ($paymentDate !== '' && !\MyInvoice\Http\IsoDate::isValid($paymentDate))
+            ) {
+                return Json::error(
+                    $response,
+                    'validation_failed',
+                    'Zúžení na osoby nálezu potřebuje kód nálezu (finding) a období (period=RRRR-MM); datum výplaty musí být platné datum.',
+                    422,
+                );
+            }
+            $narrowedIds = $this->readiness->findingEmployeeIds(
+                $supplierId,
+                "{$period}-01",
+                $paymentDate !== '' ? $paymentDate : $this->payday->suggest($supplierId, "{$period}-01"),
+                $finding,
+            );
+        }
         $page = $this->people->listForTenant(
             $supplierId,
             $limit,
             $offset,
             $filter,
             $search,
-            $filter === PayrollPeopleRepository::FILTER_DPP_HOURS_LIMIT
-                ? $this->agreementHours->employeesNearLimit($supplierId, $year)
-                : [],
+            $narrowedIds,
             $sortKey,
             $sortDir === 'desc',
         );

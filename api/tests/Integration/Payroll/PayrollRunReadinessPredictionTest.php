@@ -28,6 +28,7 @@ final class PayrollRunReadinessPredictionTest extends TestCase
     private Connection $db;
     private PayrollRunSnapshotBuilder $builder;
     private PayrollRunReadinessService $readiness;
+    private \MyInvoice\Action\Payroll\PayrollPeopleAction $peopleAction;
     private int $supplierId;
     private int $actorId;
     private int $officeId;
@@ -38,6 +39,7 @@ final class PayrollRunReadinessPredictionTest extends TestCase
         $this->db = $container->get(Connection::class);
         $this->builder = $container->get(PayrollRunSnapshotBuilder::class);
         $this->readiness = $container->get(PayrollRunReadinessService::class);
+        $this->peopleAction = $container->get(\MyInvoice\Action\Payroll\PayrollPeopleAction::class);
         $pdo = $this->db->pdo();
         $sourceSupplierId = (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
         if ($sourceSupplierId <= 0) {
@@ -145,6 +147,95 @@ final class PayrollRunReadinessPredictionTest extends TestCase
         $gaps = self::finding($result['findings'], 'person_data_gap');
         foreach ($gaps['entities'] ?? [] as $entity) {
             self::assertNotContains('tax_declaration', $entity['gaps'] ?? []);
+        }
+    }
+
+    /**
+     * U 150 nálezů bylo dosažitelných jen 25: „dalších 125 se do přehledu
+     * nevešlo" a zbytek nebylo kde najít. Nález teď vede na seznam zaměstnanců
+     * zúžený týmž snímkem a výběrem validací a počty sedí.
+     */
+    public function testTruncatedFindingLinksToPeopleListWithEveryAffectedPerson(): void
+    {
+        $employeeIds = [];
+        for ($index = 1; $index <= 30; $index++) {
+            [$employeeIds[]] = $this->employment(sprintf('Syntetický Hromadný %02d', $index));
+        }
+        sort($employeeIds);
+
+        $result = $this->readiness->inspect($this->supplierId, '2026-02-01', '2026-03-10');
+        $time = self::finding($result['findings'], 'time_month_missing');
+        $inputs = self::finding($result['findings'], 'employment_without_inputs');
+        self::assertNotNull($time, json_encode(array_column($result['findings'], 'code')));
+        self::assertNotNull($inputs, json_encode(array_column($result['findings'], 'code')));
+
+        foreach ([$time, $inputs] as $finding) {
+            self::assertSame(30, $finding['entity_total']);
+            self::assertCount(25, $finding['entities']);
+            self::assertSame(30, $finding['people_total']);
+            parse_str((string) parse_url((string) $finding['people_list_path'], PHP_URL_QUERY), $query);
+            self::assertSame('/payroll/people', parse_url((string) $finding['people_list_path'], PHP_URL_PATH));
+            self::assertSame(
+                ['filter' => 'run_finding', 'finding' => $finding['code'], 'period' => '2026-02', 'payment_date' => '2026-03-10'],
+                $query,
+            );
+            self::assertSame(
+                $employeeIds,
+                $this->readiness->findingEmployeeIds($this->supplierId, '2026-02-01', '2026-03-10', $finding['code']),
+            );
+
+            // Seznam zaměstnanců zúžený odkazem vrátí všech 30 osob, ne 25.
+            $request = (new \Slim\Psr7\Factory\ServerRequestFactory())
+                ->createServerRequest('GET', '/api/payroll/people')
+                ->withQueryParams($query + ['limit' => '100'])
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->actorId, 'role' => 'admin'])
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session');
+            $response = $this->peopleAction->list($request, new \Slim\Psr7\Response());
+            self::assertSame(200, $response->getStatusCode());
+            $response->getBody()->rewind();
+            $page = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+            self::assertSame(30, $page['total']);
+            $listed = array_map('intval', array_column($page['items'], 'id'));
+            sort($listed);
+            self::assertSame($employeeIds, $listed);
+        }
+
+        // Dvě různé skupiny nesmí mít totožný obecný nadpis.
+        self::assertNotSame($time['message'], $inputs['message']);
+        self::assertStringNotContainsString('je třeba doplnit podklady', $time['message']);
+        self::assertStringNotContainsString('je třeba doplnit podklady', $inputs['message']);
+        self::assertStringContainsString('pracovní dobu', $time['message']);
+        self::assertStringContainsString('mzdovou složku', $inputs['message']);
+        // Nadpis nejmenuje jednu z osob, ty jsou ve výčtu.
+        self::assertStringNotContainsString('Syntetický Hromadný', $time['message']);
+        self::assertStringNotContainsString('Syntetický Hromadný', $inputs['message']);
+
+        // Nález, který se vešel celý, odkaz na seznam nepotřebuje.
+        $whole = $this->readiness->inspect($this->supplierId, '2026-02-01', '2026-03-10');
+        foreach ($whole['findings'] as $finding) {
+            if ($finding['entity_total'] <= count($finding['entities'])) {
+                self::assertArrayNotHasKey('people_list_path', $finding, $finding['code']);
+            }
+        }
+    }
+
+    public function testPeopleListRejectsRunFindingFilterWithoutFindingOrPeriod(): void
+    {
+        foreach ([
+            ['filter' => 'run_finding'],
+            ['filter' => 'run_finding', 'finding' => 'time_month_missing'],
+            ['filter' => 'run_finding', 'finding' => 'Time Month', 'period' => '2026-02'],
+            ['filter' => 'run_finding', 'finding' => 'time_month_missing', 'period' => '2026-02', 'payment_date' => '2026-02-31'],
+        ] as $query) {
+            $request = (new \Slim\Psr7\Factory\ServerRequestFactory())
+                ->createServerRequest('GET', '/api/payroll/people')
+                ->withQueryParams($query)
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->actorId, 'role' => 'admin'])
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session');
+
+            self::assertSame(422, $this->peopleAction->list($request, new \Slim\Psr7\Response())->getStatusCode(), json_encode($query));
         }
     }
 

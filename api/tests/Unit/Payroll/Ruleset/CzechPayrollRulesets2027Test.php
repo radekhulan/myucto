@@ -273,9 +273,47 @@ final class CzechPayrollRulesets2027Test extends TestCase
         $outlook = PayrollRulesetYearOutlook::forProvider($provider, new \DateTimeImmutable('2026-10-28'));
         self::assertSame(2027, $outlook[0]['year']);
         self::assertTrue($outlook[0]['covered']);
-        self::assertSame('ok', $outlook[0]['severity']);
+        self::assertSame([], $outlook[0]['missing_domains']);
         self::assertSame(2028, $outlook[1]['year']);
         self::assertFalse($outlook[1]['covered']);
+    }
+
+    /**
+     * „Rok 2027 pokryto" neplatilo pro všechno: exekuční srážky a cestovní
+     * náhrady sadu na rok 2027 nemají (nezabavitelné částky a stravné ještě
+     * nevyšly) a stravenkový paušál čeká na vyhlášku. Výhled to u pokrytého
+     * roku říká jmenovitě, jako informaci, ne jako závoru.
+     */
+    public function testCoveredYear2027NamesAgendasAndValuesThatAreNotPublishedYet(): void
+    {
+        $provider = CzechPayrollRulesets::provider();
+        $outlook = PayrollRulesetYearOutlook::forProvider($provider, new \DateTimeImmutable('2026-11-11'));
+
+        self::assertTrue($outlook[0]['covered']);
+        self::assertSame('info', $outlook[0]['severity']);
+        self::assertSame('year_covered_values_pending', $outlook[0]['code']);
+        self::assertContains('enforcement_deductions', $outlook[0]['missing_agenda_domains']);
+        self::assertContains('travel_allowances', $outlook[0]['missing_agenda_domains']);
+        // Jádro výpočtu mezi chybějícími agendami není.
+        foreach (PayrollRulesetYearCoverage::CALCULATION_CRITICAL_DOMAINS as $domain) {
+            self::assertNotContains($domain->value, $outlook[0]['missing_agenda_domains']);
+        }
+        $pendingKeys = array_map(
+            static fn (array $item): string => $item['domain'] . '.' . $item['key'],
+            $outlook[0]['pending_parameters'],
+        );
+        self::assertContains('income_tax.benefit_exemption.meal.per_shift', $pendingKeys);
+        // Posuzované jinde ani trvale ruční parametry na vyhlášení nečekají.
+        self::assertNotContains('income_tax.credit.spouse.eligibility', $pendingKeys);
+        self::assertNotContains('social_insurance.employee.discount.agriculture_dpp', $pendingKeys);
+        self::assertStringContainsString('neodhadují', $outlook[0]['message']);
+
+        // Rok 2026 má všechny agendy i hodnoty: žádná mezera.
+        self::assertSame([], PayrollRulesetYearOutlook::agendaGaps($provider, 2026));
+        self::assertSame([], PayrollRulesetYearOutlook::pendingParameters($provider, 2026));
+        // Nepokrytý rok 2028 mezery agend nehlásí, chybí mu celá sada.
+        self::assertSame([], $outlook[1]['missing_agenda_domains']);
+        self::assertSame([], $outlook[1]['pending_parameters']);
     }
 
     /**

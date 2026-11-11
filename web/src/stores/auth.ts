@@ -11,6 +11,7 @@ import { rememberTotpEnrollment } from '@/security/totpEnrollment'
 import { setOverdueIncludesToday } from '@/utils/invoiceOverdue'
 import { getWindowSupplierScope } from '@/workspace/supplierContext'
 import { clearVatReportPeriodSession } from '@/utils/vatReportPeriodSession'
+import { clearPayrollPeriodSession } from '@/utils/payrollPeriodSession'
 import { useSupplierStore } from './supplier'
 import { accessLevelValue, type AccessLevel, type PermissionKey, type PermissionValue } from '@/security/permissions'
 import { ssoEnforcementPolicy } from '@/security/oidc'
@@ -254,6 +255,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   function clearPrivateState() {
     clearVatReportPeriodSession()
+    clearPayrollPeriodSession()
     ++refreshGeneration
     permissionsLoading.value = false
     rememberTotpEnrollment(null)

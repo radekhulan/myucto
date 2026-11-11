@@ -987,6 +987,46 @@ describe('AbsenceManagement', () => {
     wrapper.unmount()
   })
 
+  /*
+   * Hláška „skutečný průměr odvodit nelze" neřekla proč. Důvod posílá server:
+   * chybějící běhy rozhodného období, nebo méně než 21 odpracovaných dnů.
+   */
+  it('u pravděpodobného výdělku řekne, proč skutečný průměr nevyšel', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({
+      ready: true,
+      blockers: [],
+      source_kind: 'probable',
+      probable_source: 'terms',
+      probable_hourly_minor: 28000,
+      probable_rationale: 'Syntetické odůvodnění',
+      actual_blockers: ['run_missing'],
+      probable_reason: {
+        codes: ['run_missing'],
+        missing_run_periods: ['2026-10', '2026-11'],
+        worked_days: 21,
+        minimum_worked_days: 21,
+      },
+    }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.get('[data-test="tab-averages"]').trigger('click')
+
+    expect(wrapper.get('[data-test="average-suggestion-probable"]').text()).toContain('suggestion_probable')
+    expect(wrapper.get('[data-test="average-suggestion-probable-reason"]').text())
+      .toContain('payroll_absence.averages.probable_reason.intro')
+    wrapper.unmount()
+  })
+
+  it('bez důvodu ze serveru větu o důvodu neukáže', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({ ready: true, blockers: [], source_kind: 'probable', probable_source: 'terms', probable_hourly_minor: 28000, probable_rationale: 'Syntetické odůvodnění', probable_reason: null }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.get('[data-test="tab-averages"]').trigger('click')
+
+    expect(wrapper.find('[data-test="average-suggestion-probable-reason"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('leaves unknown suggested hours and days empty', async () => {
     m.averageSuggestion.mockResolvedValue(averageSuggestion({ worked_minutes: null, worked_duration_units: null, worked_days: null }))
     const wrapper = mount(AbsenceManagement)

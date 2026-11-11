@@ -85,6 +85,15 @@ export interface PayrollCapabilitiesResponse {
   onboarding?: {
     has_settled_payroll: boolean
   }
+  /**
+   * Na kterém měsíci firma pracuje (`RRRR-MM`): první měsíc od začátku vedení
+   * mezd bez schválené mzdy a poslední zpracovaný. Výchozí období mzdových
+   * obrazovek; `null` u firmy bez začátku vedení mezd. Volitelné kvůli starší odpovědi.
+   */
+  periods?: {
+    first_open: string | null
+    last_processed: string | null
+  }
 }
 
 export type PayrollRelationType = 'employment' | 'small_scale_employment' | 'dpp' | 'dpc' | 'partner_dependent' | 'statutory_body'
@@ -313,8 +322,21 @@ export interface PayrollEmployment {
    * a od kdy nejdřív smí začít nová verze. Volitelné kvůli starší odpovědi.
    */
   settled_through?: string | null
+  /**
+   * Uzavřené mzdové běhy, do jejichž období vztah patří, ale v jejich revizi
+   * chybí (založení nebo posun nástupu až po schválení měsíce). Schválený běh
+   * se sám nezmění, pomůže jen jeho oprava. Volitelné kvůli starší odpovědi.
+   */
+  locked_run_gaps?: PayrollLockedRunGap[]
   checklist: PayrollEmploymentChecklistItem[]
   timeline: PayrollEmploymentEvent[]
+}
+
+export interface PayrollLockedRunGap {
+  run_id: number
+  /** Období běhu `RRRR-MM`. */
+  period: string
+  status: PayrollRunStatus
 }
 
 export interface PayrollEmploymentHealthInsurer {
@@ -604,7 +626,8 @@ export interface PayrollPeopleResponse {
  * `needs_setup` je starší, užší pohled (pětice podmínek uložení profilu);
  * server ho pořád přijímá kvůli odkazům zvenčí, ale nabídka na obrazovce ho
  * už neukazuje. `needs_data` = cokoli z katalogu chybí, `blocking_data` =
- * chybí něco, bez čeho měsíc neprojde.
+ * chybí něco, bez čeho měsíc neprojde. `run_finding` = osoby jednoho nálezu
+ * kontroly před během; zapíná ho jen odkaz nálezu (`finding`, `period`).
  */
 export type PayrollPeopleFilter =
   | 'all'
@@ -613,6 +636,7 @@ export type PayrollPeopleFilter =
   | 'needs_data'
   | 'blocking_data'
   | 'dpp_hours_limit'
+  | 'run_finding'
 
 /** Osoba v rozbalovací nabídce — jen to, čím se dá vybrat. */
 export interface PayrollPersonOption {
@@ -1031,6 +1055,23 @@ export interface PayrollHealthInsurerBulkResult {
   failed: Array<{ employee_id: number, message: string }>
 }
 
+/**
+ * Od kterého měsíce platí prohlášení podepsané dne `signed_on` (§ 38k ZDP).
+ * `legal_from` je měsíc podle zákona, `open_from` první měsíc od něj, který
+ * není uzavřený schválenou mzdou; liší-li se, je `frozen` true.
+ */
+export interface PayrollTaxDeclarationStart {
+  signed_on: string
+  tax_year: number
+  legal_from: string
+  basis: 'employment_start' | 'year_start' | 'following_month' | 'after_frozen_period'
+  /** Nástup, ke kterému se podpis vztahuje (lhůta 30 dnů), jinak `null`. */
+  entry: string | null
+  open_from: string
+  frozen: boolean
+  frozen_through: string | null
+}
+
 export interface PayrollTaxDeclarationCheck {
   id: number
   /** Zákonný první měsíc; `null` = prohlášení platí až od dalšího roku. */
@@ -1233,10 +1274,17 @@ export interface PayrollBulkClosureItem {
   proposed_on: string
   blocked_reason: 'activity_after_end' | 'settled_after_end' | null
   blocked_period: string | null
+  /**
+   * Sjednaný konec uplynul před mzdovým obdobím, ze kterého se dialog otevřel.
+   * Právě tyto vztahy hlásí kontrola před během; bez období vždy `false`.
+   */
+  before_period?: boolean
 }
 
 export interface PayrollBulkClosurePreview {
   as_of: string
+  /** První den mzdového období, kterým je náhled zúžený (`null` = bez období). */
+  period_start?: string | null
   /** Do kdy se měří nečinnost: konec posledního schváleného mzdového měsíce, jinak dnešek. */
   activity_reference_on: string
   inactivity_months: number
@@ -7864,6 +7912,21 @@ export interface PayrollRun {
    * u běhu, kde podklady obnovit nejde (koncept, schválený, uzavřený…).
    */
   source_drift?: PayrollRunSourceDrift | null
+  /**
+   * Vztahy, které do období uzavřeného běhu patří, ale schválená revize je
+   * nezná (zaměstnanec založený po schválení, nástup posunutý dozadu). Do běhu
+   * je dostane jen jeho oprava. Volitelné kvůli starší odpovědi.
+   */
+  missing_employments?: PayrollRunMissingEmployment[]
+}
+
+export interface PayrollRunMissingEmployment {
+  employment_id: number
+  employee_id: number
+  full_name: string
+  employment_code: string
+  relation_type: PayrollRelationType
+  start_date: string | null
 }
 
 /**
@@ -7965,6 +8028,12 @@ export interface PayrollRunReadinessFinding {
   count: number
   /** Skutečný počet dotčených záznamů; `entities` je na serveru oříznutý. */
   entity_total?: number
+  /**
+   * Jen u nálezu s oříznutým výčtem: odkaz na seznam zaměstnanců zúžený na
+   * VŠECHNY osoby nálezu a jejich počet (osoba s více vztahy je tam jednou).
+   */
+  people_total?: number
+  people_list_path?: string
   /** `label` je lidský název konkrétní věci — nález MUSÍ jmenovat, čeho se týká. */
   /** `gaps` = klíče chybějících údajů osoby (`PayrollPersonDataGapKey`) u nálezu `person_data_gap`. */
   entities: { entity_type: string, entity_id: number | null, label: string | null, message?: string, remediation_path?: string | null, gaps?: string[] }[]
@@ -8838,12 +8907,19 @@ export const payrollApi = {
     sort_key?: string
     sort_dir?: 'asc' | 'desc'
     include_contacts?: boolean
+    /** Jen s `filter: 'run_finding'`: kód nálezu, období a datum výplaty z odkazu nálezu. */
+    finding?: string
+    period?: string
+    payment_date?: string
   }) =>
     api.get<PayrollPeopleResponse>('/payroll/people', {
       params: {
         limit: params.limit,
         offset: params.offset,
         filter: params.filter,
+        finding: params.finding,
+        period: params.period,
+        payment_date: params.payment_date,
         q: params.q === '' ? undefined : params.q,
         sort_key: params.sort_key,
         sort_dir: params.sort_dir,
@@ -8872,6 +8948,16 @@ export const payrollApi = {
       `/payroll/people/${employeeId}/statutory-evidence`,
       { params: { effective_on: effectiveOn } },
     ).then(response => response.data.evidence),
+  /**
+   * První měsíc prohlášení poplatníka podepsaného daného dne (§ 38k ZDP).
+   * Pravidlo drží server (nástupy osoby, lhůty, hranice schválené mzdy);
+   * formulář se jen ptá a nic neodvozuje sám.
+   */
+  taxDeclarationStart: (employeeId: number, signedOn: string) =>
+    api.get<{ start: PayrollTaxDeclarationStart }>(
+      `/payroll/people/${employeeId}/statutory-evidence/tax-declaration-start`,
+      { params: { signed_on: signedOn } },
+    ).then(response => response.data.start),
   saveStatutoryEvidence: (
     employeeId: number,
     payload: PayrollStatutoryEvidencePayload,
@@ -8950,7 +9036,7 @@ export const payrollApi = {
       payload,
     ).then(response => response.data.result),
   /** Náhled hromadného ukončení skončených dohod a archivace; nic nezapisuje. */
-  bulkClosurePreview: (payload: { inactivity_months?: number, archive_after_months?: number } = {}) =>
+  bulkClosurePreview: (payload: { inactivity_months?: number, archive_after_months?: number, period?: string } = {}) =>
     api.post<{ preview: PayrollBulkClosurePreview }>(
       '/payroll/employments/bulk-closure/preview',
       payload,

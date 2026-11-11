@@ -26,6 +26,9 @@ final class PayrollCapabilitiesAction
         private readonly PayrollModuleActivationService $activation,
         private readonly PayrollCompanyCapabilityService $companyCapability,
         private readonly PayrollOnboardingStatusService $onboarding,
+        // Rozpracovaný mzdový měsíc firmy jako výchozí období mzdových obrazovek.
+        private readonly \MyInvoice\Service\Payroll\PayrollWorkingPeriodResolver $workingPeriods,
+        private readonly \Psr\Clock\ClockInterface $clock,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -59,6 +62,16 @@ final class PayrollCapabilitiesAction
             'onboarding' => [
                 'has_settled_payroll' => $this->onboarding->hasSettledPayroll($supplierId),
             ],
+            /*
+             * Na kterém měsíci firma pracuje: první nezpracovaný (neschválený)
+             * měsíc od začátku vedení mezd a poslední zpracovaný. Mzdové
+             * obrazovky se podle toho otevírají z menu, dokud si uživatel
+             * v sezení nezvolí období sám.
+             */
+            'periods' => $this->workingPeriods->resolve(
+                $supplierId,
+                $this->clock->now()->format('Y-m-d'),
+            ),
         ]);
     }
 }

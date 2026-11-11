@@ -515,6 +515,43 @@ describe('PayrollRulesets', () => {
       .toContain('payroll.rulesets.domain.income_tax')
   })
 
+  /*
+   * Stránka hlásila „Rok 2027 pokryto", přestože exekuční srážky a cestovní
+   * náhrady sadu neměly a stravenkový paušál čekal na vyhlášku.
+   */
+  it('pokrytý rok s nevyhlášenými hodnotami netvrdí, že je hotový, a řekne, co chybí', async () => {
+    const wrapper = await mountPage([group()], null, {
+      year_outlook_severity: 'info',
+      year_outlook: [
+        {
+          year: 2027,
+          covered: true,
+          severity: 'info',
+          missing_domains: [],
+          missing_agenda_domains: ['enforcement_deductions', 'travel_allowances'],
+          pending_parameters: [{
+            domain: 'income_tax',
+            key: 'benefit_exemption.meal.per_shift',
+            label: 'Osvobozený příspěvek na stravování za jednu směnu',
+            expected: '2026-12',
+          }],
+          code: 'year_covered_values_pending',
+          message: 'x',
+        },
+      ],
+    })
+
+    expect(wrapper.get('[data-test="ruleset-year-outlook-message-2027"]').text())
+      .toBe('payroll.rulesets.outlook.covered_pending:{"year":2027}')
+    expect(wrapper.get('[data-test="ruleset-year-outlook-severity-2027"]').text())
+      .toBe('payroll.rulesets.outlook.severity.info')
+    const pending = wrapper.get('[data-test="ruleset-year-outlook-pending-2027"]').text()
+    expect(pending).toContain('payroll.rulesets.outlook.missing_agenda_domains')
+    expect(pending).toContain('payroll.rulesets.domain.enforcement_deductions')
+    expect(pending).toContain('payroll.rulesets.outlook.pending_parameter_expected')
+    expect(pending).toContain('Osvobozený příspěvek na stravování za jednu směnu')
+  })
+
   it('derives the worst severity itself when the API omits the summary', async () => {
     const wrapper = await mountPage([group()], null, {
       year_outlook: [

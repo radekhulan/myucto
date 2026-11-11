@@ -111,6 +111,56 @@ final class TaxDeclarationEffectiveMonth
     }
 
     /**
+     * První měsíc prohlášení jen ze dne podpisu, pro formulář zákonné evidence.
+     *
+     * Formulář dřív předvyplnil „Platí od" prvním neuzavřeným měsícem a datum
+     * podpisu ho nezměnilo, takže prohlášení podepsané v lednu do 30 dnů po
+     * prosincovém nástupu začínalo až v únoru. Tady se zdaňovací rok určí sám:
+     * podpis ve lhůtě po nástupu patří roku nástupu (odst. 1 a 4), jinak roku
+     * podpisu; podpis po roční lhůtě, který už do svého roku nezasáhne (odst. 7,
+     * prosinec), platí od ledna roku následujícího. Pravidlo samo zůstává
+     * v {@see self::resolve()}, nic se tu neopisuje.
+     *
+     * `legal_from` je měsíc podle zákona bez ohledu na schválené mzdy,
+     * `open_from` první měsíc od něj, který ještě není uzavřený schválenou
+     * mzdou (shodný, není-li co uzavřeného). Liší-li se, je `frozen` true:
+     * za uzavřené měsíce slevu dorovná oprava běhu nebo roční zúčtování
+     * (§ 38k odst. 7 věta druhá).
+     *
+     * @param list<string> $employmentStarts skutečné dny nástupu vztahů osoby
+     * @return array{
+     *     tax_year:int,
+     *     legal_from:string,
+     *     basis:string,
+     *     entry:?string,
+     *     open_from:string,
+     *     frozen:bool
+     * }
+     */
+    public static function forSignature(
+        string $signedOn,
+        array $employmentStarts,
+        ?string $frozenThrough = null,
+    ): array {
+        $taxYear = (int) substr(self::entry($employmentStarts, $signedOn) ?? $signedOn, 0, 4);
+        $resolved = self::resolve($taxYear, $signedOn, $employmentStarts);
+        if ($resolved['legal_from'] === null) {
+            $resolved = self::resolve(++$taxYear, $signedOn, $employmentStarts);
+        }
+        $legal = (string) $resolved['legal_from'];
+        $open = PayrollApprovedPeriodFreeze::firstOpenMonth($legal, $frozenThrough);
+
+        return [
+            'tax_year' => $taxYear,
+            'legal_from' => $legal,
+            'basis' => $resolved['basis'],
+            'entry' => $resolved['entry'],
+            'open_from' => $open,
+            'frozen' => $open !== $legal,
+        ];
+    }
+
+    /**
      * Nástup, ke kterému se podpis vztahuje, je-li podpis v lhůtě 30 dnů.
      *
      * Rozhoduje poslední nástup nejpozději v den podpisu: osoba, která u plátce

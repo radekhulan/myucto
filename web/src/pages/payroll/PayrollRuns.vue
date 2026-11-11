@@ -10,6 +10,7 @@ import {
   type PayrollRunHistoryEvent,
   type PayrollRunHistoryTotalDiff,
   type PayrollRunHistoryTotalKey,
+  type PayrollRunMissingEmployment,
   type PayrollRunReadiness,
   type PayrollRunReadinessBulkKind,
   type PayrollRunReadinessFinding,
@@ -24,15 +25,16 @@ import PayrollPayslipHourlyBreakdown from '@/components/payroll/PayrollPayslipHo
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
 import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
-import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, btnOutlineSmWrap, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
+import { formatDate, formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ExpandableList from '@/components/ui/ExpandableList.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { appIsoDate } from '@/utils/date'
 import { payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 import { runPayrollInputBatch } from '@/pages/payroll/payrollInputFilters'
 import PayrollMonthlyChecklistPanel from '@/pages/payroll/PayrollMonthlyChecklistPanel.vue'
@@ -138,6 +140,8 @@ const offset = ref(0)
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const pendingCommand = ref<{ run: PayrollRun, command: PayrollRunCommand } | null>(null)
 const pendingDelete = ref<PayrollRun | null>(null)
+/** Běh čekající na potvrzení schválení: je to závazný krok, zpět vede jen oprava běhu. */
+const pendingApprove = ref<PayrollRun | null>(null)
 const commandReason = ref('')
 const commandError = ref('')
 const commandBlockers = ref<Record<number, string>>({})
@@ -597,6 +601,20 @@ function showsNextSteps(run: PayrollRun): boolean {
   return NEXT_STEP_STATUSES.includes(run.status)
 }
 
+/**
+ * Schválený běh a vše za ním: čísla jsou závazná, takže odkazy na pásky,
+ * výplaty a podání za TOTÉŽ období mají smysl. Dřív schválený běh nabídl jen
+ * „Zaúčtovat" a „Vyžádat opravu" a o páskách ani podáních mlčel.
+ */
+const AFTER_APPROVAL_STATUSES: PayrollRun['status'][] = [
+  'approved',
+  ...NEXT_STEP_STATUSES,
+]
+
+function showsAfterApprovalLinks(run: PayrollRun): boolean {
+  return run.run_kind !== 'takeover' && AFTER_APPROVAL_STATUSES.includes(run.status)
+}
+
 /** Varování, na které se čeká: bez rozhodnutí člověka běh dál nepostoupí. */
 function awaitsOverride(validation: PayrollRunValidation): boolean {
   return validation.requires_override && validation.overridden_at === null
@@ -710,6 +728,14 @@ function commandLabel(command: PayrollRunCommand, run?: PayrollRun): string {
  */
 function hasSourceDrift(run: PayrollRun): boolean {
   return (run.source_drift?.total ?? 0) > 0
+}
+
+function missingEmploymentKey(item: PayrollRunMissingEmployment): number {
+  return item.employment_id
+}
+
+function missingEmploymentSearchText(item: PayrollRunMissingEmployment): string {
+  return `${item.full_name} ${item.employment_code}`
 }
 
 function primaryCommand(run: PayrollRun): PayrollRunCommand | undefined {
@@ -1160,7 +1186,42 @@ async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
     pendingStart.value = { run, command }
     return
   }
+  /*
+   * Schválení je závazné a nevratné jedním kliknutím: uzamkne výsledek, založí
+   * pásky a uzavře historii evidence. Dialog řekne, co se uzamkne, dřív než
+   * se to stane; zpět pak vede jen oprava běhu.
+   */
+  if (command === 'approve') {
+    pendingApprove.value = run
+    return
+  }
   await submitCommand(run, command)
+}
+
+/** Co schválení uzamkne; pořadí je pořadí vět v potvrzení. */
+const APPROVE_LOCK_KEYS = ['result', 'evidence', 'changes', 'followup'] as const
+
+async function confirmApprove() {
+  const run = pendingApprove.value
+  if (run === null) return
+  pendingApprove.value = null
+  await submitCommand(run, 'approve')
+}
+
+/**
+ * Stojí období běhu vůči dnešku: `upcoming` ještě nezačalo, `running` běží.
+ * Jen kalendář pro text potvrzení; nález s důsledky posílá kontrola před během.
+ */
+function periodTiming(run: PayrollRun): 'upcoming' | 'running' | 'finished' {
+  const today = appIsoDate()
+  if (run.period_start > today) return 'upcoming'
+  return periodEndDate(run) >= today ? 'running' : 'finished'
+}
+
+function periodEndDate(run: PayrollRun): string {
+  const [year, month] = run.period_start.split('-').map(Number)
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return `${run.period_start.slice(0, 8)}${String(lastDay).padStart(2, '0')}`
 }
 
 /** Kroky, po kterých se snímek vstupů zmrazí — jen před nimi má kontrola smysl. */
@@ -1234,7 +1295,7 @@ function readinessBulkTarget(action: { kind: PayrollRunReadinessBulkKind, employ
     // Hlášení za leden a únor se ptá na žádost za MINULÝ rok. Hromadné
     // „nepožádal" je výběr na stránce Ročního zúčtování, zúžený na nerozhodnuté.
     const taxYear = Number(bulkPeriod.slice(0, 4)) - 1
-    return { name: 'payroll-annual-settlement', query: { year: String(taxYear), state: 'request_undecided' } }
+    return { name: 'payroll-annual-settlement', query: { year: String(taxYear), state: 'request_undecided', select: 'all' } }
   }
   // Nález nese osoby, kterých se týká — dialog se jimi zúží, ne na celý rok.
   const employees = action.employee_ids?.length ? { employees: action.employee_ids.join(',') } : {}
@@ -1903,12 +1964,22 @@ onMounted(load)
                 >
                   <template #item="{ item: entity }">
                     <p v-if="entity.message && entity.message !== finding.message" class="text-sm">{{ entity.message }}</p>
-                    <a v-if="entity.remediation_path" :href="readinessHref(entity.remediation_path)" :class="[btnOutlineSm('neutral'), 'mt-1 inline-flex']">
-                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+                    <a v-if="entity.remediation_path" :href="readinessHref(entity.remediation_path)" :class="[btnOutlineSmWrap('neutral'), 'mt-1 max-w-full text-left']" data-test="run-readiness-entity-link">
+                      <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
                       {{ t('payroll.runs.validation.open_remediation') }}<span v-if="entity.label">: {{ entity.label }}</span>
                     </a>
                   </template>
                 </ExpandableList>
+                <!-- Výčet je oříznutý: zbytek osob nálezu ukáže seznam zaměstnanců zúžený týmž pravidlem. -->
+                <a
+                  v-if="finding.people_list_path"
+                  :href="finding.people_list_path"
+                  :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+                  :data-test="`run-readiness-people-list-${finding.code}`"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+                  {{ t('payroll.runs.readiness.people_list', { count: finding.people_total ?? 0 }, finding.people_total ?? 0) }}
+                </a>
                 <a
                   v-if="finding.remediation_path && !finding.entities.some(entity => entity.remediation_path)"
                   :href="readinessHref(finding.remediation_path)"
@@ -1918,6 +1989,22 @@ onMounted(load)
                     <path :d="ICONS.link" />
                   </svg>
                   {{ t('payroll.runs.validation.open_remediation') }}
+                </a>
+                <!--
+                  Víc dotčených vztahů: odkazy u záznamů otevřou vždy jednu osobu.
+                  Společný odkaz vede na tutéž agendu bez zúžení, kde je hromadná
+                  akce (průměry za čtvrtletí, schválení docházky, zaokrouhlení).
+                -->
+                <a
+                  v-else-if="finding.remediation_path && findingCount(finding) > 1"
+                  :href="readinessHref(finding.remediation_path)"
+                  :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+                  :data-test="`run-readiness-open-all-${finding.code}`"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.link" />
+                  </svg>
+                  {{ t('payroll.runs.readiness.open_all', { count: findingCount(finding) }) }}
                 </a>
                 <button
                   v-if="PROBABLE_AVERAGE_CODES.includes(finding.code) && canFillAverages"
@@ -2109,7 +2196,7 @@ onMounted(load)
               </span>
             </div>
             <p class="mt-1 text-sm text-neutral-500">
-              {{ t('payroll.runs.payment_date_value', { date: run.payment_date }) }}
+              {{ t('payroll.runs.payment_date_value', { date: formatDate(run.payment_date) }) }}
               · {{ t('payroll.runs.revision', { revision: run.revision_no ?? 0 }) }}
             </p>
           </div>
@@ -2208,6 +2295,57 @@ onMounted(load)
           </div>
         </div>
         <!--
+          Schválený běh nezná vztah, který do jeho období patří (zaměstnanec
+          založený po schválení, nástup posunutý dozadu). Bez tohohle výčtu
+          osoba tiše zůstala bez mzdy i bez měsíčního hlášení za měsíc nástupu.
+        -->
+        <div
+          v-if="(run.missing_employments ?? []).length > 0"
+          :data-testid="`payroll-run-${run.id}-missing-employments`"
+          class="mt-3 flex max-w-3xl items-start gap-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
+          role="alert"
+        >
+          <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.bell" />
+          </svg>
+          <div class="min-w-0 flex-1 space-y-2">
+            <p class="font-medium">
+              {{ t('payroll.runs.missing_employments.title', { count: (run.missing_employments ?? []).length }, (run.missing_employments ?? []).length) }}
+            </p>
+            <ExpandableList
+              :items="run.missing_employments ?? []"
+              :item-key="missingEmploymentKey"
+              :search-text="missingEmploymentSearchText"
+              :test-id="`payroll-run-${run.id}-missing-employments-list`"
+              list-class="list-disc space-y-0.5 pl-5"
+            >
+              <template #item="{ item }">
+                <RouterLink
+                  :to="{ name: 'payroll-people', query: { person: String(item.employee_id), employment: String(item.employment_id) } }"
+                  class="font-medium text-primary-600 hover:underline"
+                >{{ item.full_name }}</RouterLink>
+                <span v-if="item.start_date"> · {{ t('payroll.runs.missing_employments.start', { date: formatDate(item.start_date) }) }}</span>
+              </template>
+            </ExpandableList>
+            <p>{{ t('payroll.runs.missing_employments.body') }}</p>
+            <button
+              v-if="visibleCommands(run).includes('request_correction')"
+              type="button"
+              class="cursor-pointer"
+              :class="btnOutlineSm('warning')"
+              :disabled="saving"
+              :data-testid="`payroll-run-${run.id}-missing-employments-correct`"
+              @click="runCommand(run, 'request_correction')"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.uturn" /></svg>
+              {{ commandLabel('request_correction', run) }}
+            </button>
+            <p v-else data-test="payroll-run-missing-employments-forbidden">
+              {{ t('payroll.runs.missing_employments.action_forbidden') }}
+            </p>
+          </div>
+        </div>
+        <!--
           Stav úhrady, ne úkol. Účetní tu nemá co potvrzovat — příkaz do banky
           poslala a výpis dorazí, až dorazí. Vidí jen, kolik závazků je
           doložených a kolik ještě čeká, s prokliknutím do plateb.
@@ -2296,6 +2434,45 @@ onMounted(load)
           z evidence, po lhůtě zvýrazní a u každé položky vede odkazem tam,
           kde se to reálně dělá; co je hotové, se kreslí jako hotové.
         -->
+        <div
+          v-if="showsAfterApprovalLinks(run)"
+          class="mt-5"
+          :data-test="`payroll-run-${run.id}-after-approval`"
+        >
+          <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+            {{ t('payroll.runs.after_approval.title') }}
+          </h4>
+          <p class="mb-3 max-w-3xl text-sm text-neutral-600">
+            {{ t(run.status === 'approved' ? 'payroll.runs.after_approval.subtitle_approved' : 'payroll.runs.after_approval.subtitle') }}
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <RouterLink
+              :to="{ name: 'payroll-documents', query: { period: run.period_start.slice(0, 7) } }"
+              :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+              :data-test="`payroll-run-${run.id}-after-approval-documents`"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.doc" /></svg>
+              {{ t('payroll.runs.after_approval.documents') }}
+            </RouterLink>
+            <RouterLink
+              :to="{ name: 'payroll-payments', query: { period: run.period_start.slice(0, 7), run: String(run.id) } }"
+              :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+              :data-test="`payroll-run-${run.id}-after-approval-payments`"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
+              {{ t('payroll.runs.after_approval.payments') }}
+            </RouterLink>
+            <RouterLink
+              :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' }, query: { period: run.period_start.slice(0, 7) } }"
+              :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+              :data-test="`payroll-run-${run.id}-after-approval-submissions`"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+              {{ t('payroll.runs.after_approval.submissions') }}
+            </RouterLink>
+          </div>
+        </div>
+
         <div v-if="showsNextSteps(run)" class="mt-5" :data-test="`payroll-run-${run.id}-next-steps`">
           <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
             {{ t('payroll.runs.next_steps.title') }}
@@ -3095,8 +3272,8 @@ onMounted(load)
               >
                 <template #item="{ item: entity }">
                   <p v-if="entity.message && entity.message !== finding.message">{{ entity.message }}</p>
-                  <a v-if="entity.remediation_path" :href="readinessHref(entity.remediation_path)" :class="[btnOutlineSm('neutral'), 'mt-1 inline-flex']">
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+                  <a v-if="entity.remediation_path" :href="readinessHref(entity.remediation_path)" :class="[btnOutlineSmWrap('neutral'), 'mt-1 max-w-full text-left']" data-test="run-readiness-entity-link">
+                    <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
                     {{ t('payroll.runs.validation.open_remediation') }}<span v-if="entity.label">: {{ entity.label }}</span>
                   </a>
                 </template>
@@ -3298,6 +3475,47 @@ onMounted(load)
         </div>
       </template>
     </PayrollStatutoryBulkDefaultsDialog>
+
+    <Modal
+      v-if="pendingApprove"
+      :title="t('payroll.runs.approve_confirm.title', { period: formatPeriod(pendingApprove.period_start.slice(0, 7)) })"
+      width-class="max-w-xl"
+      @close="pendingApprove = null"
+    >
+      <div class="space-y-3 text-sm text-neutral-700" data-test="run-approve-dialog">
+        <p>{{ t('payroll.runs.approve_confirm.intro') }}</p>
+        <ul class="list-disc space-y-1 pl-5" data-test="run-approve-locks">
+          <li v-for="key in APPROVE_LOCK_KEYS" :key="key">{{ t(`payroll.runs.approve_confirm.locks.${key}`) }}</li>
+        </ul>
+        <p
+          v-if="periodTiming(pendingApprove) !== 'finished'"
+          class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-warning-800"
+          data-test="run-approve-period-timing"
+        >
+          {{ t(`payroll.runs.approve_confirm.period_${periodTiming(pendingApprove)}`, {
+            start: formatDate(pendingApprove.period_start),
+            end: formatDate(periodEndDate(pendingApprove)),
+          }) }}
+        </p>
+        <p class="text-xs text-neutral-500">{{ t('payroll.runs.approve_confirm.undo') }}</p>
+      </div>
+      <div class="mt-5 flex flex-wrap justify-end gap-2">
+        <button type="button" :class="btnOutline('neutral')" @click="pendingApprove = null">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.cancel') }}
+        </button>
+        <button
+          type="button"
+          :class="btnFilled('success')"
+          :disabled="saving"
+          data-test="confirm-run-approve"
+          @click="confirmApprove"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+          {{ commandLabel('approve', pendingApprove) }}
+        </button>
+      </div>
+    </Modal>
 
     <Modal
       v-if="pendingDelete"

@@ -229,6 +229,13 @@ export interface PayrollRulesetYearOutlook {
   code: string
   /** Vysvětlení ze serveru (česky). UI si skládá vlastní přeložený text. */
   message: string
+  /**
+   * Jen u pokrytého roku: agendy mimo jádro výpočtu (exekuční srážky,
+   * cestovní náhrady, číselníky, verze podání), které na rok sadu ještě nemají.
+   */
+  missing_agenda_domains?: string[]
+  /** Jen u pokrytého roku: parametry, které čekají na vyhlášení ve Sbírce. */
+  pending_parameters?: { domain: string, key: string, label: string | null, expected: string | null }[]
 }
 
 export interface PayrollRulesetOverview {

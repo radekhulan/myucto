@@ -82,18 +82,123 @@ final class PayrollRulesetYearOutlook
             $missing = self::missingDomains($rulesets, $year);
             $covered = $missing === [];
             $severity = self::severity($covered, $offset, $today);
+            /*
+             * „Pokryto" znamená jen jádro výpočtu mzdy. Rok 2027 svítil jako
+             * pokrytý, přestože exekuční srážky a cestovní náhrady sadu neměly
+             * a stravenkový paušál čekal na vyhlášku. Pokrytý rok proto nese
+             * i to, co mu ještě chybí; je to informace, ne závora.
+             */
+            $agendaGaps = $covered ? self::agendaGaps($rulesets, $year) : [];
+            $pending = $covered ? self::pendingParameters($rulesets, $year) : [];
+            $incomplete = $agendaGaps !== [] || $pending !== [];
+            if ($incomplete) {
+                $severity = 'info';
+            }
 
             $outlook[] = [
                 'year' => $year,
                 'covered' => $covered,
                 'severity' => $severity,
                 'missing_domains' => $missing,
-                'code' => $covered ? 'year_covered' : 'year_ruleset_missing',
-                'message' => self::message($year, $covered, $severity, $missing, $currentYear),
+                'missing_agenda_domains' => $agendaGaps,
+                'pending_parameters' => $pending,
+                'code' => match (true) {
+                    !$covered => 'year_ruleset_missing',
+                    $incomplete => 'year_covered_values_pending',
+                    default => 'year_covered',
+                },
+                'message' => $incomplete
+                    ? self::pendingMessage($year, $agendaGaps, $pending)
+                    : self::message($year, $covered, $severity, $missing, $currentYear),
             ];
         }
 
         return $outlook;
+    }
+
+    /**
+     * Agendy mimo jádro výpočtu mzdy (cestovní náhrady, exekuční srážky,
+     * číselníky, verze podání), které na daný rok sadu nemají, ačkoli ji rok
+     * předtím měly. Jejich hodnoty vycházejí později než jádro (nezabavitelné
+     * částky a stravné v prosinci) a nevyhlášené se neodhadují.
+     *
+     * @return list<string> hodnoty {@see PayrollRulesetDomain}
+     */
+    public static function agendaGaps(PayrollRulesetProvider $rulesets, int $year): array
+    {
+        $gaps = [];
+        foreach (PayrollRulesetDomain::cases() as $domain) {
+            if (in_array($domain, PayrollRulesetYearCoverage::CALCULATION_CRITICAL_DOMAINS, true)) {
+                continue;
+            }
+            if (PayrollRulesetYearCoverage::coversDate($rulesets, $domain, sprintf('%04d-12-31', $year - 1))
+                && !PayrollRulesetYearCoverage::coversYear($rulesets, $domain, $year)
+            ) {
+                $gaps[] = $domain->value;
+            }
+        }
+        sort($gaps, SORT_STRING);
+
+        return $gaps;
+    }
+
+    /**
+     * Parametry sady účinné k 1. lednu roku, které čekají na vyhlášení ve
+     * Sbírce ({@see PayrollRuleParameterCatalog::REVIEW_PENDING_PUBLICATION}).
+     *
+     * @return list<array{domain:string,key:string,label:string,expected:?string}>
+     */
+    public static function pendingParameters(PayrollRulesetProvider $rulesets, int $year): array
+    {
+        $date = sprintf('%04d-01-01', $year);
+        $pending = [];
+        foreach (PayrollRulesetDomain::cases() as $domain) {
+            if (!PayrollRulesetYearCoverage::coversDate($rulesets, $domain, $date)) {
+                continue;
+            }
+            try {
+                $version = $rulesets->forDate($domain, $date);
+            } catch (\Throwable) {
+                continue;
+            }
+            foreach ($version->parameters as $key => $parameter) {
+                if ($parameter->capability !== PayrollRulesetCapability::ManualReview
+                    || PayrollRuleParameterCatalog::reviewCategory($domain->value, (string) $key)
+                        !== PayrollRuleParameterCatalog::REVIEW_PENDING_PUBLICATION
+                ) {
+                    continue;
+                }
+                $pending[] = [
+                    'domain' => $domain->value,
+                    'key' => (string) $key,
+                    'label' => PayrollRuleParameterCatalog::label($domain->value, (string) $key),
+                    'expected' => PayrollRuleParameterCatalog::manualReview($domain->value, (string) $key)['expected'] ?? null,
+                ];
+            }
+        }
+
+        return $pending;
+    }
+
+    /**
+     * @param list<string> $agendaGaps
+     * @param list<array{domain:string,key:string,label:string,expected:?string}> $pending
+     */
+    private static function pendingMessage(int $year, array $agendaGaps, array $pending): string
+    {
+        $parts = [];
+        if ($agendaGaps !== []) {
+            $parts[] = 'bez sady jsou zatím domény: ' . implode(', ', $agendaGaps);
+        }
+        if ($pending !== []) {
+            $parts[] = 'na vyhlášení čekají parametry: ' . implode(', ', array_map(
+                static fn (array $item): string => $item['domain'] . '.' . $item['key'],
+                $pending,
+            ));
+        }
+
+        return "Mzdový rok {$year} je pokrytý pro výpočet mezd; " . implode('; ', $parts)
+            . '. Nevyhlášené hodnoty se neodhadují a doplní se aktualizací aplikace.';
     }
 
     /**

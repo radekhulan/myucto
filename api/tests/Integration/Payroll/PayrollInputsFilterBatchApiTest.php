@@ -516,6 +516,12 @@ final class PayrollInputsFilterBatchApiTest extends TestCase
         self::assertSame([$free], $result['cancelled']);
         self::assertSame([$frozen], array_column($result['failed'], 'id'));
         self::assertSame('input_has_movement', $result['failed'][0]['code']);
+        // Zábranu sdílí zrušení, oprava i zaokrouhlení: hláška proto neříká jen
+        // „zrušit ho nelze" a vede na mzdový běh, který vstup drží.
+        $message = (string) $result['failed'][0]['message'];
+        self::assertStringContainsString('nelze změnit ani zrušit', $message);
+        self::assertStringContainsString('Mzdové běhy', $message);
+        self::assertStringNotContainsString('zrušit ho nelze', $message);
     }
 
     /**

@@ -136,6 +136,7 @@ final class PayrollEmploymentRepository
         private readonly ActivityLogger $activityLogger,
         private readonly PayrollEmploymentDeletionRepository $deletion,
         private readonly PayrollEmployerSettingsRepository $employerSettings,
+        private readonly PayrollRunMissingEmploymentRepository $missingInRuns,
     ) {}
 
     /**
@@ -220,8 +221,19 @@ final class PayrollEmploymentRepository
          */
         $statutoryByDate = [];
 
+        $fetchedRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        /*
+         * Uzavřené běhy, do jejichž období vztah patří, ale v revizi chybí
+         * (založení nebo posun nástupu až po schválení měsíce). Karta podle
+         * toho řekne „otevřete opravu běhu"; jedním dotazem za osobu.
+         */
+        $lockedRunGaps = $this->missingInRuns->forEmployments(
+            $supplierId,
+            array_map(static fn (array $row): int => (int) $row['id'], $fetchedRows),
+        );
+
         $result = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $fetched) {
+        foreach ($fetchedRows as $fetched) {
             $row = $this->row($fetched);
             $employmentId = (int) $row['id'];
             $relationType = (string) $row['relation_type'];
@@ -276,6 +288,7 @@ final class PayrollEmploymentRepository
                 'health_insurer' => $healthInsurer,
                 'terms' => $this->terms($supplierId, $employmentId),
                 'settled_through' => $this->settledThrough($supplierId, $employmentId),
+                'locked_run_gaps' => $lockedRunGaps[$employmentId] ?? [],
                 'checklist' => $this->checklist($supplierId, $employmentId),
                 'timeline' => $this->events($supplierId, $employmentId),
             ];

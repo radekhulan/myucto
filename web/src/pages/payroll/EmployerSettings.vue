@@ -13,6 +13,7 @@ import {
   type PayrollOfficeRegistration,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
+import { formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { btnFilled, btnIconSm, btnOutline, btnOutlineSm, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
@@ -432,7 +433,13 @@ async function saveRegistration() {
       source_reference: registrationForm.source_reference.trim(),
     })
     registrationHistory.value = [saved, ...registrationHistory.value]
-    toast.success(t('payroll.employer.registration_saved'))
+    toast.success(t('payroll.employer.registration_saved_detail', {
+      symbol: saved.social_security_variable_symbol,
+      date: formatDate(saved.effective_from),
+    }))
+    // Uloženo: dialog se zavře sám. Dřív zůstal otevřený s prázdným formulářem
+    // a nebylo poznat, jestli se registrace zapsala.
+    closeRegistration()
   } catch (error: unknown) {
     const vsError = csszVariableSymbolError(error)
     if (vsError !== null) {
@@ -1175,7 +1182,7 @@ onMounted(async () => {
         <ul v-else class="divide-y divide-neutral-200 rounded-md border border-neutral-200 text-sm">
           <li v-for="(version, index) in registrationHistory" :key="version.id" class="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
             <span>
-              <span class="font-mono">{{ version.effective_from }} · {{ version.social_security_variable_symbol }}</span>
+              <span class="font-mono">{{ formatDate(version.effective_from) }} · {{ version.social_security_variable_symbol }}</span>
               <span class="ml-2 text-neutral-500">{{ version.source_reference }}</span>
             </span>
             <!--

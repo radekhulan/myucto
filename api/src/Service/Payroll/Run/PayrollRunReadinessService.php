@@ -11,12 +11,15 @@ use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementStatute;
 use MyInvoice\Repository\Payroll\PayrollRulesetRepository;
 use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
+use MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearOutlook;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog;
 use PDO;
+use Psr\Clock\ClockInterface;
 
 /**
  * KONTROLA PŘED ZAHÁJENÍM mzdového běhu.
@@ -119,6 +122,10 @@ final class PayrollRunReadinessService
         // Žádosti o roční zúčtování, které čekají na provedení — tentýž dotaz
         // jako termín „provést roční zúčtování" v přehledu lhůt.
         private readonly PayrollDeadlineOverviewRepository $deadlines,
+        // Dnešek pro upozornění, že období běhu ještě neskončilo nebo nezačalo.
+        private readonly ClockInterface $clock,
+        // Skončené dohody: stejné pravidlo sjednaného konce jako hromadné ukončení.
+        private readonly PayrollEmploymentBulkClosure $bulkClosure,
     ) {}
 
     /**
@@ -190,6 +197,11 @@ final class PayrollRunReadinessService
             ];
         }
 
+        $timingFinding = $this->periodTimingFinding($periodStart);
+        if ($timingFinding !== null) {
+            $findings[] = $timingFinding;
+        }
+
         // Zaměstnavatelská politika se ověřuje PRVNÍ a zvlášť: bez ní snapshot
         // vůbec nevznikne (builder hodí výjimku), takže by se všechny ostatní
         // nálezy schovaly za jednu hlášku o politice.
@@ -237,13 +249,7 @@ final class PayrollRunReadinessService
         if ($snapshot !== null) {
             // Jméno u každého záznamu: 25× „Otevřít místo k opravě" bez jména
             // neříkalo, koho proklik otevře.
-            $validations = array_values(array_filter(
-                $this->warningSuppressions
-                    ->activeSet($supplierId)
-                    ->filterValidations($snapshot->validations),
-                static fn (PayrollRunValidation $validation): bool =>
-                    !in_array($validation->code, self::RESOLVED_BY_LOCKING, true),
-            ));
+            $validations = $this->reportedValidations($supplierId, $snapshot->validations);
             $employmentIds = [];
             foreach ($validations as $validation) {
                 if ($validation->entityType === 'employment' && $validation->entityId !== null) {
@@ -254,7 +260,12 @@ final class PayrollRunReadinessService
                 $validations,
                 $this->jmhzProbe->employmentLabels($supplierId, array_values($employmentIds)),
             ) as $finding) {
-                $findings[] = $finding;
+                $findings[] = self::withPeopleList(
+                    $finding,
+                    $this->validationEmployeeIds($supplierId, $validations, $finding['code']),
+                    $periodStart,
+                    $paymentDate,
+                );
             }
             foreach ($this->institutionAccountFindings(
                 $supplierId,
@@ -317,6 +328,10 @@ final class PayrollRunReadinessService
         if ($minimumWageFinding !== null) {
             $findings[] = $minimumWageFinding;
         }
+        $pendingValuesFinding = $this->pendingYearValuesFinding($periodStart);
+        if ($pendingValuesFinding !== null) {
+            $findings[] = $pendingValuesFinding;
+        }
         // Jednotný tvar nálezu: co nepochází z katalogu skrytí, skrýt nejde.
         $findings = array_map(
             static function (array $finding): array {
@@ -344,6 +359,71 @@ final class PayrollRunReadinessService
             'has_findings' => $findings !== [],
             'findings' => $findings,
         ];
+    }
+
+    /**
+     * Období běhu ještě neskončilo, nebo ani nezačalo.
+     *
+     * ── Co bylo špatně ──────────────────────────────────────────────────────
+     * Běh šel bez jediné zmínky založit, spočítat i schválit za měsíc, který
+     * teprve přijde. Zastavila se až příprava měsíčního hlášení, a to hláškou
+     * katalogu kontrol, ze které účetní nepoznala, že jen předběhla kalendář.
+     *
+     * Není to závora: výplata před koncem měsíce je legitimní (prosincové
+     * mzdy před svátky, zálohová výplata). Kontrola jen říká, s čím počítat:
+     * podklady se do konce měsíce ještě mohou změnit a měsíční hlášení se
+     * podává až za uplynulý kalendářní měsíc. U měsíce, který ani nezačal, je
+     * výpočet celý z plánu, proto silnější zařazení (oprava přes revizi).
+     *
+     * @return array<string,mixed>|null
+     */
+    private function periodTimingFinding(string $periodStart): ?array
+    {
+        $start = \DateTimeImmutable::createFromFormat('!Y-m-d', $periodStart);
+        if ($start === false) {
+            return null;
+        }
+        $today = $this->clock->now()->format('Y-m-d');
+        $end = $start->modify('last day of this month');
+        if ($end->format('Y-m-d') < $today) {
+            return null;
+        }
+        $period = $start->format('m/Y');
+        $reportsFrom = $end->modify('+1 day')->format('j. n. Y');
+        if ($periodStart > $today) {
+            return self::finding(
+                'period_not_started',
+                sprintf(
+                    'Období %s ještě nezačalo (začíná %s). Mzdy se spočítají jen z plánu: docházka,'
+                    . ' nepřítomnosti, mzdové vstupy i pracovní vztahy se do konce měsíce ještě změní'
+                    . ' a každá změna po schválení běhu znamená opravnou revizi. Měsíční hlášení'
+                    . ' a přehledy pojistného půjde připravit až po skončení měsíce, nejdříve %s.'
+                    . ' Jde-li o výplatu předem, pokračujte; jinak s během počkejte.',
+                    $period,
+                    $start->format('j. n. Y'),
+                    $reportsFrom,
+                ),
+                null,
+                1,
+                [],
+            );
+        }
+
+        return self::finding(
+            'period_not_finished',
+            sprintf(
+                'Období %s ještě neskončilo (končí %s). Výplata před koncem měsíce je v pořádku,'
+                . ' jen počítejte s tím, že docházka, nepřítomnosti a mzdové vstupy se do konce měsíce'
+                . ' mohou změnit; změna po schválení běhu znamená opravnou revizi. Měsíční hlášení'
+                . ' a přehledy pojistného půjde připravit až po skončení měsíce, nejdříve %s.',
+                $period,
+                $end->format('j. n. Y'),
+                $reportsFrom,
+            ),
+            null,
+            1,
+            [],
+        );
     }
 
     /**
@@ -719,20 +799,13 @@ final class PayrollRunReadinessService
     private function pastAgreedEndFinding(int $supplierId, string $periodStart): ?array
     {
         try {
-            $statement = $this->db->pdo()->prepare(
-                "SELECT employment.id, employee.full_name
-                   FROM payroll_employments employment
-                   JOIN payroll_employees employee
-                     ON employee.supplier_id = employment.supplier_id
-                    AND employee.id = employment.employee_id
-                  WHERE employment.supplier_id = ?
-                    AND employment.status IN ('active', 'suspended')
-                    AND employment.end_date IS NOT NULL
-                    AND employment.end_date < ?
-                  ORDER BY employee.full_name, employment.id"
+            // Totéž pravidlo jako dialog hromadného ukončení, aby počet v nálezu
+            // a počet předvybraných vztahů v dialogu byly jedno číslo.
+            $rows = $this->bulkClosure->expiredBeforePeriod(
+                $supplierId,
+                $periodStart,
+                $this->clock->now()->format('Y-m-d'),
             );
-            $statement->execute([$supplierId, $periodStart]);
-            $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
         } catch (\Throwable) {
             return null;
         }
@@ -745,15 +818,15 @@ final class PayrollRunReadinessService
             sprintf(
                 'Pracovní vztahy se sjednaným koncem před obdobím %s jsou pořád aktivní (%d). '
                 . 'Ukončete je hromadně v Mzdy → Zaměstnanci → Další funkce → Ukončit skončené dohody.',
-                substr($periodStart, 0, 7),
+                substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4),
                 count($rows),
             ),
-            '/payroll/people?bulk=closure',
+            '/payroll/people?bulk=closure&period=' . substr($periodStart, 0, 7),
             count($rows),
             array_map(
                 static fn (array $row): array => [
                     'entity_type' => 'employment',
-                    'entity_id' => (int) $row['id'],
+                    'entity_id' => $row['employment_id'],
                     'label' => (string) $row['full_name'],
                 ],
                 array_slice($rows, 0, self::MAX_ENTITIES),
@@ -845,7 +918,7 @@ final class PayrollRunReadinessService
                 . ' nesmí být nižší než minimální mzda (§ 111 zákoníku práce) a výpočet měsíční'
                 . ' mzdy doplatek do minima nedopočítává. Upravte mzdu v podmínkách vztahu,'
                 . ' nebo zadejte doplatek do minimální mzdy jako mzdový vstup.',
-                substr($periodStart, 0, 7),
+                substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4),
                 number_format(intdiv($minimum, 100), 0, ',', ' '),
                 count($below),
             ),
@@ -862,6 +935,66 @@ final class PayrollRunReadinessService
                 array_slice(array_keys($below), 0, self::MAX_ENTITIES),
                 array_slice(array_values($below), 0, self::MAX_ENTITIES),
             ),
+        );
+    }
+
+    /** Agendy bez sady na rok, o kterých má mzdová účetní vědět už před během. */
+    private const PENDING_AGENDA_LABELS = [
+        'enforcement_deductions' => 'exekuční srážky (nezabavitelné částky)',
+        'travel_allowances' => 'cestovní náhrady',
+    ];
+
+    /**
+     * Hodnoty roku, které ještě nevyšly ve Sbírce a aplikace je neodhaduje.
+     *
+     * Kontrola za leden nového roku o nich mlčela: jádro výpočtu sadu mělo,
+     * takže vše vypadalo hotové, a na nezabavitelné částky nebo stravenkový
+     * paušál se narazilo až u konkrétní osoby. Čte se tentýž výhled jako na
+     * stránce legislativních pravidel ({@see PayrollRulesetYearOutlook}).
+     * Jen informace: mzdy se spočítají, zastaví se jen to, co na chybějící
+     * hodnotě stojí.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function pendingYearValuesFinding(string $periodStart): ?array
+    {
+        try {
+            $provider = (new PayrollRulesetRegistry(new PayrollRulesetRepository($this->db)))->provider();
+            $year = (int) substr($periodStart, 0, 4);
+            $agendas = array_values(array_intersect(
+                array_keys(self::PENDING_AGENDA_LABELS),
+                PayrollRulesetYearOutlook::agendaGaps($provider, $year),
+            ));
+            $parameters = PayrollRulesetYearOutlook::pendingParameters($provider, $year);
+        } catch (\Throwable) {
+            return null;
+        }
+        if ($agendas === [] && $parameters === []) {
+            return null;
+        }
+        $names = [
+            ...array_map(static fn (string $domain): string => self::PENDING_AGENDA_LABELS[$domain], $agendas),
+            ...array_map(
+                static fn (array $parameter): string => mb_strtolower(mb_substr((string) ($parameter['label'] ?? $parameter['key']), 0, 1))
+                    . mb_substr((string) ($parameter['label'] ?? $parameter['key']), 1),
+                $parameters,
+            ),
+        ];
+
+        return self::finding(
+            'ruleset_year_values_pending',
+            sprintf(
+                'Pro rok %d ještě nejsou vyhlášené všechny hodnoty: %s. Aplikace je neodhaduje.'
+                . ' Mzdy se spočítají, jen to, co na chybějící hodnotě stojí (například srážka z exekuce,'
+                . ' cestovní náhrada nebo osvobození příspěvku na stravování), výpočet u dotčené osoby'
+                . ' zastaví a řekne to. Hodnoty přijdou aktualizací aplikace po vyhlášení ve Sbírce zákonů;'
+                . ' stav najdete v Mzdy → Legislativní pravidla mezd.',
+                $year,
+                implode(', ', $names),
+            ),
+            '/payroll/rulesets',
+            1,
+            [],
         );
     }
 
@@ -1102,6 +1235,126 @@ final class PayrollRunReadinessService
     }
 
     /**
+     * Validace snímku, které kontrola hlásí: bez trvale skrytých a bez těch,
+     * které odstraní samo zamknutí. Jediný výběr pro přehled nálezů i pro
+     * zúžení seznamu zaměstnanců na osoby nálezu.
+     *
+     * @param list<PayrollRunValidation> $validations
+     * @return list<PayrollRunValidation>
+     */
+    private function reportedValidations(int $supplierId, array $validations): array
+    {
+        return array_values(array_filter(
+            $this->warningSuppressions
+                ->activeSet($supplierId)
+                ->filterValidations($validations),
+            static fn (PayrollRunValidation $validation): bool =>
+                $validation->severity !== 'info'
+                && !in_array($validation->code, self::RESOLVED_BY_LOCKING, true),
+        ));
+    }
+
+    /**
+     * Osoby nálezu kontroly před během, všechny, ne jen prvních pár.
+     *
+     * ── Co bylo špatně ──────────────────────────────────────────────────────
+     * Přehled vypíše u nálezu nejvýš {@see self::MAX_ENTITIES} záznamů. U firmy
+     * se 150 lidmi tak 125 z nich nebylo kde najít: „dalších 125 se do přehledu
+     * nevešlo" a nic dalšího. Seznam zaměstnanců se proto umí zúžit na osoby
+     * nálezu (`?filter=run_finding`) a ptá se TÉTO metody, tedy téhož snímku
+     * a téhož výběru validací jako přehled. Dvě pravidla by se rozešla v počtu.
+     *
+     * Jen pro nálezy z validací snímku (docházka, mzdové složky, podmínky
+     * vztahu …); ostatní nálezy mají vlastní hromadnou akci. Neznámý kód
+     * i chyba snímku vrací prázdný výčet.
+     *
+     * @return list<int> id osob (`payroll_employees.id`)
+     */
+    public function findingEmployeeIds(
+        int $supplierId,
+        string $periodStart,
+        string $paymentDate,
+        string $code,
+    ): array {
+        try {
+            $this->snapshotBuilder->assertRulesetCoverage($periodStart);
+            $snapshot = $this->snapshotBuilder->build($supplierId, $periodStart, $paymentDate, null);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        return $this->validationEmployeeIds(
+            $supplierId,
+            $this->reportedValidations($supplierId, $snapshot->validations),
+            $code,
+        );
+    }
+
+    /**
+     * @param list<PayrollRunValidation> $validations
+     * @return list<int>
+     */
+    private function validationEmployeeIds(int $supplierId, array $validations, string $code): array
+    {
+        $employeeIds = [];
+        $employmentIds = [];
+        foreach ($validations as $validation) {
+            if ($validation->code !== $code || $validation->entityId === null) {
+                continue;
+            }
+            if ($validation->entityType === 'employee') {
+                $employeeIds[$validation->entityId] = true;
+            } elseif ($validation->entityType === 'employment') {
+                $employmentIds[$validation->entityId] = true;
+            }
+        }
+        if ($employmentIds !== []) {
+            $ids = array_keys($employmentIds);
+            $statement = $this->db->pdo()->prepare(
+                'SELECT DISTINCT employee_id FROM payroll_employments
+                  WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')'
+            );
+            $statement->execute([$supplierId, ...$ids]);
+            foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $employeeId) {
+                $employeeIds[(int) $employeeId] = true;
+            }
+        }
+        $result = array_keys($employeeIds);
+        sort($result);
+
+        return $result;
+    }
+
+    /**
+     * Nález s oříznutým výčtem dostane odkaz na seznam zaměstnanců zúžený na
+     * VŠECHNY své osoby a jejich počet (osoba se dvěma vztahy je v seznamu
+     * jednou, proto se počet osob posílá zvlášť).
+     *
+     * @param array<string,mixed> $finding
+     * @param list<int> $employeeIds
+     * @return array<string,mixed>
+     */
+    private static function withPeopleList(
+        array $finding,
+        array $employeeIds,
+        string $periodStart,
+        string $paymentDate,
+    ): array {
+        if ($employeeIds === [] || (int) $finding['entity_total'] <= count($finding['entities'])) {
+            return $finding;
+        }
+        $finding['people_total'] = count($employeeIds);
+        $finding['people_list_path'] = '/payroll/people?' . http_build_query([
+            'filter' => PayrollPeopleRepository::FILTER_RUN_FINDING,
+            'finding' => $finding['code'],
+            'period' => substr($periodStart, 0, 7),
+            'payment_date' => $paymentDate,
+        ]);
+
+        return $finding;
+    }
+
+    /**
      * Nálezy ze snímku sloučené po kódu.
      *
      * Účetní nepotřebuje dvacet řádků „pracovní vztah nemá schválenou
@@ -1117,6 +1370,10 @@ final class PayrollRunReadinessService
     private function groupValidations(array $validations, array $labels = []): array
     {
         $groups = [];
+        /** @var array<string,?string> $tails společná věta skupiny bez osoby, null = věty se liší */
+        $tails = [];
+        /** @var array<string,true> $differs skupiny, jejichž záznamy nemají stejnou větu */
+        $differs = [];
         foreach ($validations as $validation) {
             if ($validation->severity === 'info') {
                 continue;
@@ -1180,8 +1437,14 @@ final class PayrollRunReadinessService
                     $validation->remediationPath,
                 );
             }
+            $tail = self::messageWithoutSubject($validation->message);
+            if (!array_key_exists($code, $tails)) {
+                $tails[$code] = $tail;
+            } elseif ($tails[$code] !== $tail) {
+                $tails[$code] = null;
+            }
             if ($groups[$code]['message'] !== $validation->message) {
-                $groups[$code]['message'] = 'U uvedených osob nebo pracovních vztahů je třeba doplnit podklady. Konkrétní důvod a odkaz k opravě najdete u každého záznamu.';
+                $differs[$code] = true;
             }
             ++$groups[$code]['count'];
             if (count($groups[$code]['entities']) < self::MAX_ENTITIES) {
@@ -1196,8 +1459,33 @@ final class PayrollRunReadinessService
                 ];
             }
         }
+        /*
+         * Nadpis skupiny, jejíž záznamy se liší jen jménem na začátku věty.
+         * Dřív dostala každá taková skupina TUTÉŽ obecnou větu „je třeba doplnit
+         * podklady", takže chybějící docházka a chybějící mzdová složka vypadaly
+         * jako dva stejné nálezy. Shodují-li se věty až na osobu, je nadpisem
+         * společná věta; obecný text zůstává jen pro opravdu různé důvody.
+         */
+        foreach (array_keys($differs) as $code) {
+            $groups[$code]['message'] = ($tails[$code] ?? null) !== null
+                ? self::sentenceCase((string) $tails[$code])
+                : 'U uvedených osob nebo pracovních vztahů je třeba doplnit podklady. Konkrétní důvod a odkaz k opravě najdete u každého záznamu.';
+        }
 
         return array_values($groups);
+    }
+
+    /** Věta validace bez úvodního „Jméno Příjmení: "; bez dvojtečky celá. */
+    private static function messageWithoutSubject(string $message): string
+    {
+        $position = mb_strpos($message, ': ');
+
+        return $position === false ? $message : mb_substr($message, $position + 2);
+    }
+
+    private static function sentenceCase(string $text): string
+    {
+        return mb_strtoupper(mb_substr($text, 0, 1)) . mb_substr($text, 1);
     }
 
     /**

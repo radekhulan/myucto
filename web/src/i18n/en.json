@@ -2853,7 +2853,11 @@
         "description": "A ruleset must be ready before the year it is meant to calculate — otherwise the module cannot compute a single payslip from 1 January.",
         "year": "Year {year}",
         "covered": "Year {year} is covered by a legislative ruleset.",
+        "covered_pending": "The year {year} is covered for payroll calculation, but some agendas and values still await publication. The application does not estimate unpublished values; they arrive with an update.",
         "missing_domains": "Missing domains: {domains}",
+        "missing_agenda_domains": "No rule set for this year yet: {domains}. What depends on them is not calculated for this year until the set arrives.",
+        "pending_parameter": "Awaiting publication: {label}.",
+        "pending_parameter_expected": "Awaiting publication (expected {month}): {label}.",
         "severity": {
           "ok": "Covered",
           "info": "Information",
@@ -4098,6 +4102,8 @@
       "open_count": "End finished agreements ({count})",
       "title": "End finished agreements",
       "intro": "Preview of relationships that are no longer running according to their agreed end or to payroll. Each selected relationship is ended exactly as with the button on its card, including the exit checklist (deregistration, exit documents). Nothing changes until you confirm the selection.",
+      "period_note": "Opened from the payroll run check for {period}: no agreement has its agreed end before this period, so nothing is preselected. | Opened from the payroll run check for {period}: {count} agreement with an agreed end before this period is preselected, the one the check reports. | Opened from the payroll run check for {period}: {count} agreements with an agreed end before this period are preselected, the ones the check reports.",
+      "period_later": " | Another {count} ended only after the period started; it still belongs to the run and is not preselected, but you can end it as well. | Another {count} ended only after the period started; they still belong to the run and are not preselected, but you can end them as well.",
       "inactivity_months": "Without activity (months)",
       "archive_after_months": "Archive after (months)",
       "reload": "Load preview",
@@ -4790,12 +4796,41 @@
         "action": "Click “Refresh inputs”, then recalculate the run.",
         "action_forbidden": "Inputs can be refreshed by a user allowed to calculate payroll and write payroll inputs."
       },
+      "missing_employments": {
+        "title": "No relationship is missing from the run | The run is missing {count} employment relationship that belongs to the period | The run is missing {count} employment relationships that belong to the period",
+        "start": "start {date}",
+        "body": "The relationship was created, or its start was moved earlier, after the run had been approved. An approved run does not change by itself, so these people have no pay, payslip or monthly report for the month. Request a correction of the run and open it: the new revision picks the relationships up and recalculates the pay.",
+        "action_forbidden": "A correction of the run can be requested by a user with the right to review payroll."
+      },
       "next_steps": {
         "title": "What comes next",
         "subtitle": "Payroll is calculated and posted — filing comes next. Each obligation shows its deadline, its status and a link to where it is filed; anything already done is marked as done."
       },
+      "after_approval": {
+        "title": "Payslips, payouts and filings for this period",
+        "subtitle_approved": "The payroll is approved and the figures are binding. The run continues with posting and payment preparation (buttons above); open the payslips, payouts and filings for this period from here.",
+        "subtitle": "Payslips, payouts and filings for the period of this run.",
+        "documents": "Payslips and documents",
+        "payments": "Payouts and payments",
+        "submissions": "Monthly overview of filings and reports"
+      },
+      "approve_confirm": {
+        "title": "Approve the payroll for {period}?",
+        "intro": "Approval is a binding step. Before you confirm it, this is what it locks:",
+        "locks": {
+          "result": "The calculated pay is saved as the binding result and the payslips are created from it.",
+          "evidence": "The history of the people's statutory evidence is closed up to the end of the period (tax declaration, credits, children, health insurer). A later change is saved from the next month on.",
+          "changes": "Inputs, attendance, absences or a new employee starting in this month no longer reach the payroll by themselves.",
+          "followup": "Posting, payments, the monthly report and the insurance overviews are all based on the approved result."
+        },
+        "period_running": "The period has not ended yet (it ends on {end}). Anything that changes before the end of the month reaches the payroll only through a correction of the run, and the monthly report can be prepared only after the month ends.",
+        "period_upcoming": "The period has not even started (it starts on {start}). You are approving pay calculated from the plan only: every change of attendance, inputs or relationships will mean a correction of the run, and the monthly report can be prepared only after the month ends.",
+        "undo": "The only way back is a correction of the run: \"Request correction\" and \"Open correction\" create a new revision, the original stays in the history."
+      },
       "readiness": {
         "affected": "Affects: {names}",
+        "people_list": "Show in the employee list | Show this person in the employee list | Show all {count} people in the employee list",
+        "open_all": "Open the agenda for all affected ({count})",
         "fill_probable_average": "Fill in probable earnings from the rate",
         "bulk": {
           "statutory_defaults": "Fill in default statutory data ({count})",
@@ -5746,12 +5781,14 @@
       "reload": "Reload",
       "bulk_request": {
         "select_page": "Select all on page",
+        "select_matching": "Select all matching | Select the one matching | Select all {count} matching",
         "select_person": "Select {name}",
         "selected": "Selected: {count}",
         "clear": "Clear selection",
         "set_not_requested": "Set: did not request",
         "set_requested": "Set: requested",
         "confirm": "Set the request status to \"{status}\" for {year} for the selected employees ({count})? Only the request status changes, other records stay as they are.",
+        "confirm_title": "Set the request status in bulk",
         "done": "Request status set. Created: {created}, updated: {updated}.",
         "failed": "Bulk update of the request status failed."
       },
@@ -5781,6 +5818,11 @@
       "empty_description": "Once an employee asks, record the request and the documents they provided. Without them the settlement is not performed.",
       "no_employees_title": "This company has no employees yet",
       "no_employees_description": "The annual settlement is computed from approved payroll, so people and monthly payroll runs come first.",
+      "no_match_title": "No employee matches the narrowing",
+      "no_match_description": "The company has employees, but none matches the chosen state or search for {year}. Clear the narrowing or choose another state.",
+      "no_undecided_title": "Every request is decided",
+      "no_undecided_description": "For every employee it is recorded whether they requested the annual settlement for {year}. Nothing is left to fill in.",
+      "show_all": "Show all employees",
       "employee": "Employee",
       "state": "Request state",
       "result": "Result",
@@ -6535,7 +6577,8 @@
         "needs_setup": "Setup required",
         "needs_data": "Data to add",
         "blocking_data": "Blocks filing",
-        "dpp_hours_limit": "DPP near the 300 h limit"
+        "dpp_hours_limit": "DPP near the 300 h limit",
+        "run_finding": "People from a pre-run check finding"
       },
       "dpp_hours": {
         "label_manual_review_required": "DPP — total unverified",
@@ -6568,7 +6611,7 @@
         "failed": "The employee could not be added.",
         "permission_required": "You do not have permission to add an employee.",
         "next_steps": "The employee and employment relationship were created. You can now complete the personal profile.",
-        "next_steps_hint": "The new employee detail is open below; no duplicate payroll person was created.",
+        "next_steps_hint": "The new employee's detail is open below. The person was created only once, even with several employment relationships.",
         "required_hint": "Only fields you must fill in now are marked with an asterisk. Birth number, date of birth and pay can be added later.",
         "advanced_title": "More details",
         "advanced_hint": "Optional — you can add all of it later on the employee card.",
@@ -7111,6 +7154,18 @@
       "add_employment": "Add relationship",
       "employment_created": "The employment relationship has been created.",
       "employment_created_with_warnings": "The employment relationship has been created. Check on the employment card: {messages}",
+      "locked_run_gap": {
+        "title": "The relationship belongs to a month whose payroll run is already approved | The relationship belongs to months whose payroll runs are already approved",
+        "title_with_start": "The start on {date} falls into a month whose payroll run is already approved | The start on {date} falls into months whose payroll runs are already approved",
+        "body": "The approved run does not contain this relationship, so it has no pay, payslip or monthly report for that month. An approved run does not change by itself: open the run, request its correction and open it, the new revision picks the relationship up.",
+        "open_run": "Open the run for {period}",
+        "toast": "The start falls into a month with an approved payroll run ({periods}). Open a correction of the run, otherwise the person gets no pay and no monthly report for that month. | The start falls into months with approved payroll runs ({periods}). Open corrections of those runs, otherwise the person gets no pay and no monthly report for those months."
+      },
+      "run_finding": {
+        "hint": "The list is narrowed to the people from a pre-run check finding for {period}; the finding no longer includes anyone. | The list is narrowed to {count} person from a pre-run check finding for {period}. | The list is narrowed to {count} people from a pre-run check finding for {period}.",
+        "back": "Back to the payroll run",
+        "clear": "Clear the narrowing"
+      },
       "open_agreement": {
         "title": "The person already has an open agreement to perform work (DPP).",
         "item": "DPP {code} from {start} to {end}",
@@ -7584,6 +7639,13 @@
           "earlier_than_allowed": "Based on the signing date the declaration applies only from {month} (§ 38k of the Income Tax Act). The credit is not due for earlier months, move the start of the record.",
           "later_than_entitled": "Based on the signing date the credit is due already from {month} (§ 38k of the Income Tax Act). The annual tax settlement makes it up for months closed by an approved payroll.",
           "next_year": "A declaration signed after the deadline applies only from the next year (§ 38k(7) of the Income Tax Act)."
+        },
+        "declaration_start": {
+          "employment_start": "The signature on {signed} is within 30 days of the start on {entry}, so the declaration applies from the month of the start: {month} (Section 38k(1) and (4) of the Income Tax Act).",
+          "year_start": "The signature on {signed} is within the annual deadline of 15 February, so the declaration applies from January: {month} (Section 38k(4) of the Income Tax Act).",
+          "following_month": "The signature on {signed} is after the 30 days from the start and after the annual deadline of 15 February, so the declaration applies from the month after the signature: {month} (Section 38k(7) of the Income Tax Act).",
+          "frozen": "The payroll up to {day} is approved and is not recalculated by itself, so {open} is prefilled. The credit for the closed months is settled by the annual settlement. To apply it right away, set \"Valid from\" to {month} and open a correction of the payroll run for the affected months.",
+          "closed_period": "The record starts in a period closed by approved payroll (up to {day}). Approved payroll is not recalculated by itself: for the declaration to take effect in those months, open a correction of the payroll run. Without a correction the credit is settled only by the annual settlement."
         },
         "current_from": "valid from {day}",
         "current_none": "nothing applies to the selected month",
@@ -10607,6 +10669,7 @@
       "registration_history_empty": "This payroll office has no evidenced registration history; new preparations will be blocked until one is created.",
       "registration_history_failed": "Social security registration history could not be loaded.",
       "registration_saved": "The new effective social security registration was saved.",
+      "registration_saved_detail": "Registration saved: variable symbol {symbol} is valid from {date}.",
       "registration_save_failed": "The social security registration could not be saved.",
       "office_status": "Status",
       "office_active": "Active office",
@@ -32524,6 +32587,12 @@
         "agreed_hourly_rate": "proposal from the agreed hourly rate, requiring individual review",
         "agreed_monthly_gross": "from the agreed monthly wage (§ 355(2) of the Labour Code)",
         "minimum_wage": "lower limit, the minimum wage (§ 357(1) of the Labour Code) — enter a higher one in the employment terms"
+      },
+      "probable_reason": {
+        "intro": "Why probable earnings: {reasons}.",
+        "run_missing": "an approved payroll run is missing in the decisive period | there is no approved payroll run or taken-over pay in MyÚčto for {months}, so the decisive period is not fully documented and 21 days worked (Section 355(1) of the Labour Code) cannot be proven; if the previous program processed that month, take it over and the average is offered from the actual figures | there is no approved payroll run or taken-over pay in MyÚčto for {months}, so the decisive period is not fully documented and 21 days worked (Section 355(1) of the Labour Code) cannot be proven; if the previous program processed those months, take them over and the average is offered from the actual figures",
+        "probable_earning_required": "no day worked is documented in the decisive period, the statutory minimum is {minimum} days (Section 355(1) of the Labour Code) | only {days} day worked is documented in the decisive period, the statutory minimum is {minimum} days (Section 355(1) of the Labour Code) | only {days} days worked are documented in the decisive period, the statutory minimum is {minimum} days (Section 355(1) of the Labour Code)",
+        "worked_time_missing": "no time worked or eligible pay is documented in the decisive period"
       },
       "blockers": {
         "run_missing": "One month of the decisive period has no payroll run; for a new starter the average is set as probable earnings (§ 355 of the Labour Code)",

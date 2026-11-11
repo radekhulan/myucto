@@ -1701,6 +1701,11 @@ final class Routes
                 '/people/{id:[0-9]+}/statutory-evidence',
                 [PayrollPersonStatutoryEvidenceAction::class, 'save'],
             );
+            // První měsíc prohlášení poplatníka podle dne podpisu (§ 38k ZDP).
+            $g->get(
+                '/people/{id:[0-9]+}/statutory-evidence/tax-declaration-start',
+                [PayrollPersonStatutoryEvidenceAction::class, 'taxDeclarationStart'],
+            );
             // Sdělení zdravotní pojišťovny zaměstnancem a písemné potvrzení
             // zaměstnavatele (§ 12 písm. b) zákona č. 48/1997 Sb.).
             $g->get(

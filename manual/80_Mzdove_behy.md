@@ -78,7 +78,10 @@ a již uzavřenou revizi nepřepíše.
 
 ## 80.3 Krok za krokem: spočítat a schválit mzdy
 
-1. Otevřete `Mzdy → Mzdové běhy`.
+1. Otevřete `Mzdy → Mzdové běhy`. Stránka se otevře na rozpracovaném měsíci,
+   tedy na prvním měsíci, který ještě nemá schválenou mzdu. Jakmile období
+   změníte, drží se zvolený měsíc i na ostatních stránkách mezd (měsíční
+   vstupy, docházka, dokumenty, platby, podání), dokud se neodhlásíte.
 2. Vyplňte **Mzdové období** a **Datum výplaty** a klikněte na **Nový mzdový
    běh**. Datum výplaty nesmí být později než poslední den následujícího
    měsíce.
@@ -92,7 +95,12 @@ a již uzavřenou revizi nepřepíše.
    účinnost podmínek. Chybí-li hodinově odměňovaným vztahům průměrný
    výdělek, doplníte ho tlačítkem **Doplnit pravděpodobný výdělek ze
    sazby**. Nezmrazený hodinový výpočet se tu nehlásí, zmrazí se sám
-   uzamčením vstupů.
+   uzamčením vstupů. Kontrola také řekne, když období ještě neskončilo nebo
+   ani nezačalo (mzdy spočítat jde, podklady se ale ještě mohou změnit
+   a měsíční hlášení půjde připravit až po skončení měsíce), a které hodnoty
+   nového roku ještě nejsou vyhlášené. Týká-li se nález víc osob, než se do
+   přehledu vejde, odkaz **Zobrazit všech N osob v seznamu zaměstnanců**
+   otevře seznam zúžený právě na ně.
 5. Zůstal-li některý vstup v konceptu, běh to ohlásí jako blokaci. Klikněte
    přímo u ní na **Schválit vše**. Na jinou obrazovku nemusíte. Tentýž
    problém se neopakuje jako vztah bez mzdových vstupů ani jako chybějící
@@ -107,10 +115,14 @@ a již uzavřenou revizi nepřepíše.
    U daně pomůže **Rozpad daně ze závislé činnosti**.
 8. Po opravě zdroje klikněte na **Přepočítat**. Vypočtený výsledek nikdy
    neupravujte bez podkladu.
-9. Klikněte na **Schválit**.
+9. Klikněte na **Schválit** a potvrďte dialog. Schválení je závazné: uloží
+   výsledek, založí výplatní pásky a uzavře historii zákonné evidence osob do
+   konce období. Zpět vede jen oprava běhu
+   ([§ 80.5](#805-krok-za-krokem-oprava-schvaleneho-mesice)).
 
-**Jak poznáte, že je hotovo:** Běh má stav **Schváleno** a hlavní tlačítko
-nabízí **Zaúčtovat**. Výplatní pásky zaměstnanců se generují na pozadí
+**Jak poznáte, že je hotovo:** Běh má stav **Schváleno**, hlavní tlačítko
+nabízí **Zaúčtovat** a pod souhrnem jsou odkazy na výplatní pásky a dokumenty,
+výplaty a měsíční přehled podání za období běhu. Výplatní pásky zaměstnanců se generují na pozadí
 (viz [§ 83.3](83_Dokumenty_a_vystupy.md#833-krok-za-krokem-mesicni-dokumenty))
 a v podvojném
 účetnictví vznikl mzdový deník.
@@ -159,6 +171,13 @@ schválená revize je **Nahrazeno**. Za běh je vždy jen jedna platná schvále
 revize.
 
 Zrušený běh znovu otevřete tlačítkem **Začít z opravených vstupů**.
+
+> [!IMPORTANT]
+> Zaměstnanec založený až po schválení měsíce, nebo vztah, kterému jste
+> posunuli nástup do už schváleného měsíce, se do schváleného běhu sám
+> nedostane. Karta běhu takové vztahy jmenuje („V běhu chybí pracovní vztah,
+> který do období patří") a karta vztahu na to upozorní s odkazem na běh.
+> Vyžádejte opravu běhu: nová revize vztah převezme a mzdy přepočítá.
 
 ## 80.6 Krok za krokem: obnovení podkladů rozpracovaného běhu
 

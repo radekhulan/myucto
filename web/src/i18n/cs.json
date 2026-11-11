@@ -2853,7 +2853,11 @@
         "description": "Sada musí být hotová dřív, než začne rok, který má počítat - jinak modul od 1. ledna nespočítá ani jednu výplatu.",
         "year": "Rok {year}",
         "covered": "Rok {year} je pokrytý legislativní sadou.",
+        "covered_pending": "Rok {year} je pokrytý pro výpočet mezd, některé agendy a hodnoty ale ještě čekají na vyhlášení. Nevyhlášené hodnoty aplikace neodhaduje; doplní se aktualizací.",
         "missing_domains": "Chybí domény: {domains}",
+        "missing_agenda_domains": "Zatím bez sady na tento rok: {domains}. Co na nich stojí, se za tento rok nespočítá, dokud sada nepřibude.",
+        "pending_parameter": "Čeká na vyhlášení: {label}.",
+        "pending_parameter_expected": "Čeká na vyhlášení (očekáváno {month}): {label}.",
         "severity": {
           "ok": "Pokryto",
           "info": "Informace",
@@ -4098,6 +4102,8 @@
       "open_count": "Ukončit skončené dohody ({count})",
       "title": "Ukončit skončené dohody",
       "intro": "Náhled vztahů, které už podle sjednaného konce nebo podle mezd neběží. Každý vybraný vztah se ukončí stejně jako tlačítkem na jeho kartě, včetně kontrolního seznamu odchodu (odhláška, výstupní doklady). Nic se nemění, dokud výběr nepotvrdíte.",
+      "period_note": "Otevřeno z kontroly mzdového běhu za {period}: žádná dohoda nemá sjednaný konec před tímto obdobím, proto není nic předvybráno. | Otevřeno z kontroly mzdového běhu za {period}: předvybrána je {count} dohoda se sjednaným koncem před tímto obdobím, tedy ta, kterou hlásí kontrola. | Otevřeno z kontroly mzdového běhu za {period}: předvybrány jsou {count} dohody se sjednaným koncem před tímto obdobím, tedy ty, které hlásí kontrola. | Otevřeno z kontroly mzdového běhu za {period}: předvybráno je {count} dohod se sjednaným koncem před tímto obdobím, tedy ty, které hlásí kontrola.",
+      "period_later": " | Další {count} skončila až po začátku období; do běhu ještě patří a předvybraná není, ukončit ji ale můžete také. | Další {count} skončily až po začátku období; do běhu ještě patří a předvybrané nejsou, ukončit je ale můžete také. | Dalších {count} skončilo až po začátku období; do běhu ještě patří a předvybrané nejsou, ukončit je ale můžete také.",
       "inactivity_months": "Bez aktivity (měsíců)",
       "archive_after_months": "Archivovat po (měsících)",
       "reload": "Načíst náhled",
@@ -4165,7 +4171,7 @@
       "subject_unknown": "Osoba č. {id}",
       "hidden_by": "Skryl(a) {name}, {date}",
       "hide_type": "Skrýt tento typ ve firmě",
-      "hide_people": "Skrýt pro všech {count} osob | Skrýt u této osoby | Skrýt pro všech {count} osob",
+      "hide_people": "Skrýt pro všech {count} osob | Skrýt u této osoby | Skrýt pro všechny {count} osoby | Skrýt pro všech {count} osob",
       "hide_selected": "Skrýt u vybraných ({count})",
       "hide_failed": "Varování se nepodařilo skrýt.",
       "type_scope_hint": "Varování tohoto typu se přestane ukazovat u všech osob ve firmě, i u nových, a to ve všech dalších mzdových bězích.",
@@ -4790,12 +4796,41 @@
         "action": "Klikněte na „Obnovit podklady“ a potom běh přepočítejte.",
         "action_forbidden": "Obnovit podklady může uživatel s právem počítat mzdy a zapisovat mzdové vstupy."
       },
+      "missing_employments": {
+        "title": "V běhu nechybí žádný vztah | V běhu chybí {count} pracovní vztah, který do období patří | V běhu chybí {count} pracovní vztahy, které do období patří | V běhu chybí {count} pracovních vztahů, které do období patří",
+        "start": "nástup {date}",
+        "body": "Vztah vznikl nebo dostal dřívější nástup až po schválení běhu. Schválený běh se sám nezmění, takže tyto osoby za měsíc nemají mzdu, výplatní pásku ani měsíční hlášení. Vyžádejte opravu běhu a otevřete ji: nová revize vztahy převezme a mzdy přepočítá.",
+        "action_forbidden": "Opravu běhu může vyžádat uživatel s právem kontrolovat mzdy."
+      },
       "next_steps": {
         "title": "Co následuje",
         "subtitle": "Mzdy jsou spočítané a zaúčtované - teď se podává. U každé povinnosti je vidět lhůta, stav a odkaz tam, kde se podává; co je hotové, je označené jako hotové."
       },
+      "after_approval": {
+        "title": "Pásky, výplaty a podání za toto období",
+        "subtitle_approved": "Mzdy jsou schválené a čísla závazná. Běh pokračuje zaúčtováním a přípravou plateb (tlačítka nahoře); výplatní pásky, výplaty a podání za tohle období otevřete odsud.",
+        "subtitle": "Výplatní pásky, výplaty a podání za období tohoto běhu.",
+        "documents": "Výplatní pásky a dokumenty",
+        "payments": "Výplaty a platby",
+        "submissions": "Měsíční přehled podání a hlášení"
+      },
+      "approve_confirm": {
+        "title": "Schválit mzdy za {period}?",
+        "intro": "Schválení je závazný krok. Než ho potvrdíte, tohle se jím uzamkne:",
+        "locks": {
+          "result": "Spočítané mzdy se uloží jako závazný výsledek a založí se z nich výplatní pásky.",
+          "evidence": "Uzavře se historie zákonné evidence osob do konce období (prohlášení k dani, slevy, děti, pojišťovna). Pozdější změna se uloží až od dalšího měsíce.",
+          "changes": "Vstupy, docházka, nepřítomnosti ani nový zaměstnanec s nástupem v tomto měsíci se už do mezd samy nedostanou.",
+          "followup": "Ze schváleného výsledku vychází zaúčtování, platby, měsíční hlášení i přehledy pojistného."
+        },
+        "period_running": "Období ještě neskončilo (končí {end}). Co se do konce měsíce změní, dostane se do mezd jen opravou běhu, a měsíční hlášení půjde připravit až po skončení měsíce.",
+        "period_upcoming": "Období ještě ani nezačalo (začíná {start}). Schvalujete mzdy spočítané jen z plánu: každá změna docházky, vstupů nebo vztahů bude znamenat opravu běhu a měsíční hlášení půjde připravit až po skončení měsíce.",
+        "undo": "Zpět vede jen oprava běhu: „Vyžádat opravu“ a „Otevřít opravu“ založí novou revizi, původní zůstane v historii."
+      },
       "readiness": {
         "affected": "Týká se: {names}",
+        "people_list": "Zobrazit v seznamu zaměstnanců | Zobrazit tuto osobu v seznamu zaměstnanců | Zobrazit všechny {count} osoby v seznamu zaměstnanců | Zobrazit všech {count} osob v seznamu zaměstnanců",
+        "open_all": "Otevřít agendu pro všechny dotčené ({count})",
         "fill_probable_average": "Doplnit pravděpodobný výdělek ze sazby",
         "bulk": {
           "statutory_defaults": "Doplnit výchozí zákonné údaje ({count})",
@@ -5746,12 +5781,14 @@
       "reload": "Obnovit",
       "bulk_request": {
         "select_page": "Vybrat vše na stránce",
+        "select_matching": "Vybrat všechny odpovídající | Vybrat toho jednoho odpovídajícího | Vybrat všechny {count} odpovídající | Vybrat všech {count} odpovídajících",
         "select_person": "Vybrat osobu {name}",
         "selected": "Vybráno: {count}",
         "clear": "Zrušit výběr",
         "set_not_requested": "Nastavit: nepožádal",
         "set_requested": "Nastavit: požádal",
         "confirm": "Nastavit stav žádosti „{status}“ za rok {year} vybraným zaměstnancům ({count})? Změní se jen stav žádosti, ostatní evidence zůstane.",
+        "confirm_title": "Hromadně nastavit stav žádosti",
         "done": "Stav žádosti nastaven. Založeno: {created}, změněno: {updated}.",
         "failed": "Hromadné nastavení stavu žádosti se nepodařilo."
       },
@@ -5781,6 +5818,11 @@
       "empty_description": "Až zaměstnanec požádá, zapište jeho žádost a doložené podklady. Bez nich se zúčtování neprovádí.",
       "no_employees_title": "Firma zatím nemá žádné zaměstnance",
       "no_employees_description": "Roční zúčtování se počítá ze schválených mezd, takže se nejdřív založí lidé a odvedou měsíční mzdy.",
+      "no_match_title": "Zúžení neodpovídá žádný zaměstnanec",
+      "no_match_description": "Zaměstnanci ve firmě jsou, jen žádný neodpovídá zvolenému stavu nebo hledání za rok {year}. Zrušte zúžení, nebo zvolte jiný stav.",
+      "no_undecided_title": "Všechny žádosti jsou rozhodnuté",
+      "no_undecided_description": "U každého zaměstnance je za rok {year} zapsáno, zda o roční zúčtování požádal. Není co doplnit.",
+      "show_all": "Zobrazit všechny zaměstnance",
       "employee": "Zaměstnanec",
       "state": "Stav žádosti",
       "result": "Výsledek",
@@ -6535,7 +6577,8 @@
         "needs_setup": "K doplnění",
         "needs_data": "Mám doplnit údaje",
         "blocking_data": "Brání podání",
-        "dpp_hours_limit": "DPP u limitu 300 h"
+        "dpp_hours_limit": "DPP u limitu 300 h",
+        "run_finding": "Osoby z nálezu kontroly před během"
       },
       "dpp_hours": {
         "label_manual_review_required": "DPP — součet neověřen",
@@ -6568,7 +6611,7 @@
         "failed": "Zaměstnance se nepodařilo přidat.",
         "permission_required": "Pro založení zaměstnance nemáte oprávnění.",
         "next_steps": "Zaměstnanec i pracovní vztah jsou založeni. Nyní můžete doplnit osobní profil.",
-        "next_steps_hint": "Detail nového zaměstnance je otevřený níže; nevznikla žádná duplicitní payroll osoba.",
+        "next_steps_hint": "Detail nového zaměstnance je otevřený níže. Osoba se založila jen jednou, i když má víc pracovních vztahů.",
         "required_hint": "Hvězdičkou je označené jen to, co musíte vyplnit teď. Rodné číslo, datum narození i mzdu jde doplnit kdykoli později.",
         "advanced_title": "Další údaje",
         "advanced_hint": "Nepovinné - jde doplnit i později na kartě zaměstnance.",
@@ -7111,6 +7154,18 @@
       "add_employment": "Přidat pracovní vztah",
       "employment_created": "Pracovní vztah byl založen.",
       "employment_created_with_warnings": "Pracovní vztah byl založen. Zkontrolujte na kartě vztahu: {messages}",
+      "locked_run_gap": {
+        "title": "Vztah patří do měsíce, který má už schválený mzdový běh | Vztah patří do měsíce, který má už schválený mzdový běh | Vztah patří do měsíců, které mají už schválený mzdový běh",
+        "title_with_start": "Nástup {date} spadá do měsíce, který má už schválený mzdový běh | Nástup {date} spadá do měsíce, který má už schválený mzdový běh | Nástup {date} spadá do měsíců, které mají už schválený mzdový běh",
+        "body": "Ve schváleném běhu tento vztah chybí, takže za ten měsíc nemá mzdu, výplatní pásku ani měsíční hlášení. Schválený běh se sám nezmění: otevřete běh, vyžádejte jeho opravu a otevřete ji, nová revize vztah převezme.",
+        "open_run": "Otevřít běh {period}",
+        "toast": "Nástup spadá do měsíce se schváleným mzdovým během ({periods}). Otevřete opravu běhu, jinak osoba za ten měsíc nedostane mzdu ani měsíční hlášení. | Nástup spadá do měsíce se schváleným mzdovým během ({periods}). Otevřete opravu běhu, jinak osoba za ten měsíc nedostane mzdu ani měsíční hlášení. | Nástup spadá do měsíců se schváleným mzdovým během ({periods}). Otevřete opravu těchto běhů, jinak osoba za ty měsíce nedostane mzdu ani měsíční hlášení."
+      },
+      "run_finding": {
+        "hint": "Seznam je zúžený na osoby z nálezu kontroly před během za {period}; nález už nikoho nezahrnuje. | Seznam je zúžený na {count} osobu z nálezu kontroly před během za {period}. | Seznam je zúžený na {count} osoby z nálezu kontroly před během za {period}. | Seznam je zúžený na {count} osob z nálezu kontroly před během za {period}.",
+        "back": "Zpět na mzdový běh",
+        "clear": "Zrušit zúžení"
+      },
       "open_agreement": {
         "title": "Osoba už má otevřenou dohodu o provedení práce.",
         "item": "DPP {code} od {start} do {end}",
@@ -7584,6 +7639,13 @@
           "earlier_than_allowed": "Podle dne podpisu platí prohlášení až od {month} (§ 38k ZDP). Za dřívější měsíce sleva nenáleží, posuňte začátek záznamu.",
           "later_than_entitled": "Podle dne podpisu náleží sleva už od {month} (§ 38k ZDP). Za měsíce uzavřené schválenou mzdou ji dorovná roční zúčtování.",
           "next_year": "Prohlášení podepsané po lhůtě platí až od dalšího roku (§ 38k odst. 7 ZDP)."
+        },
+        "declaration_start": {
+          "employment_start": "Podpis {signed} je do 30 dnů po nástupu {entry}, prohlášení proto platí už od měsíce nástupu: {month} (§ 38k odst. 1 a 4 ZDP).",
+          "year_start": "Podpis {signed} je v roční lhůtě do 15. února, prohlášení proto platí od ledna: {month} (§ 38k odst. 4 ZDP).",
+          "following_month": "Podpis {signed} je po lhůtě 30 dnů od nástupu i po roční lhůtě do 15. února, prohlášení proto platí až od měsíce po podpisu: {month} (§ 38k odst. 7 ZDP).",
+          "frozen": "Mzdy do {day} jsou ale schválené a samy se nepřepočítají, proto je předvyplněno {open}. Slevu za uzavřené měsíce dorovná roční zúčtování. Chcete-li ji promítnout hned, nastavte „Platí od“ na {month} a otevřete opravu běhu za dotčené měsíce.",
+          "closed_period": "Začátek záznamu leží v období uzavřeném schválenou mzdou (do {day}). Schválená mzda se sama nepřepočítá: aby se prohlášení za tyto měsíce projevilo, otevřete opravu mzdového běhu. Bez opravy slevu dorovná až roční zúčtování."
         },
         "current_from": "platí od {day}",
         "current_none": "k vybranému měsíci nic neplatí",
@@ -10607,6 +10669,7 @@
       "registration_history_empty": "Pro tuto účtárnu není doložená historie registrace; nové přípravy budou blokované, dokud ji nezaložíte.",
       "registration_history_failed": "Historii registrací ČSSZ se nepodařilo načíst.",
       "registration_saved": "Nová účinná registrace ČSSZ byla uložena.",
+      "registration_saved_detail": "Registrace uložena: variabilní symbol {symbol} platí od {date}.",
       "registration_save_failed": "Registraci ČSSZ se nepodařilo uložit.",
       "office_status": "Stav",
       "office_active": "Aktivní účtárna",
@@ -32524,6 +32587,12 @@
         "agreed_hourly_rate": "návrh ze sjednané hodinové sazby, vyžaduje individuální posouzení",
         "agreed_monthly_gross": "ze sjednané měsíční mzdy (§ 355 odst. 2 ZP)",
         "minimum_wage": "spodní mez, minimální mzda (§ 357 odst. 1 ZP) - vyšší zadejte v podmínkách vztahu"
+      },
+      "probable_reason": {
+        "intro": "Proč pravděpodobný výdělek: {reasons}.",
+        "run_missing": "v rozhodném období chybí schválený mzdový běh | za {months} není v MyÚčtu schválený mzdový běh ani převzatá mzda, takže rozhodné období není doložené celé a 21 odpracovaných dnů (§ 355 odst. 1 zákoníku práce) nejde prokázat; zpracoval-li ten měsíc předchozí program, převezměte ho a průměr se nabídne ze skutečných čísel | za {months} není v MyÚčtu schválený mzdový běh ani převzatá mzda, takže rozhodné období není doložené celé a 21 odpracovaných dnů (§ 355 odst. 1 zákoníku práce) nejde prokázat; zpracoval-li ty měsíce předchozí program, převezměte je a průměr se nabídne ze skutečných čísel",
+        "probable_earning_required": "v rozhodném období není doložen žádný odpracovaný den, zákonné minimum je {minimum} dnů (§ 355 odst. 1 zákoníku práce) | v rozhodném období je doložen jen {days} odpracovaný den, zákonné minimum je {minimum} dnů (§ 355 odst. 1 zákoníku práce) | v rozhodném období jsou doloženy jen {days} odpracované dny, zákonné minimum je {minimum} dnů (§ 355 odst. 1 zákoníku práce) | v rozhodném období je doloženo jen {days} odpracovaných dnů, zákonné minimum je {minimum} dnů (§ 355 odst. 1 zákoníku práce)",
+        "worked_time_missing": "v rozhodném období není doložená odpracovaná doba ani započitatelná mzda"
       },
       "blockers": {
         "run_missing": "Za některý měsíc rozhodného období není mzdový běh; u nově nastoupivšího se průměr stanovuje jako pravděpodobný výdělek (§ 355 ZP)",

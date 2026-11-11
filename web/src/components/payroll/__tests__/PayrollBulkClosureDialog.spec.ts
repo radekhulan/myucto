@@ -70,6 +70,47 @@ const MOUNT = { global: { stubs: { teleport: true } } }
 describe('PayrollBulkClosureDialog', () => {
   beforeEach(() => vi.clearAllMocks())
 
+  /*
+   * Kontrola před během za únor hlásila 20 skončených dohod, dialog otevřený
+   * z jejího tlačítka jich ale předvybral 42: období běhu ignoroval.
+   */
+  it('otevřený z mzdového běhu pošle období a předvybere jen konce před ním', async () => {
+    m.bulkClosurePreview.mockResolvedValue({
+      ...preview(),
+      period_start: '2026-02-01',
+      items: [
+        item({ employment_id: 21, full_name: 'Konec v lednu', agreed_end_on: '2026-01-31', proposed_on: '2026-01-31', before_period: true }),
+        item({ employment_id: 22, full_name: 'Konec v únoru', agreed_end_on: '2026-02-28', proposed_on: '2026-02-28', before_period: false }),
+        item({ employment_id: 23, full_name: 'Konec v březnu', agreed_end_on: '2026-03-28', proposed_on: '2026-03-28', before_period: false }),
+      ],
+    })
+
+    const wrapper = mount(PayrollBulkClosureDialog, { ...MOUNT, props: { period: '2026-02' } })
+    await flushPromises()
+
+    expect(m.bulkClosurePreview).toHaveBeenCalledWith({ inactivity_months: 3, archive_after_months: 12, period: '2026-02' })
+    expect((wrapper.get('[data-test="bulk-closure-select-21"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('[data-test="bulk-closure-select-22"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.get('[data-test="bulk-closure-select-23"]').element as HTMLInputElement).checked).toBe(false)
+    const note = wrapper.get('[data-test="bulk-closure-period-note"]').text()
+    expect(note).toContain('payroll.bulk_closure.period_note')
+    expect(note).toContain('payroll.bulk_closure.period_later')
+
+    // Pozdější konce zůstávají v nabídce: účetní je může ukončit také.
+    await wrapper.get('[data-test="bulk-closure-select-22"]').setValue(true)
+    expect((wrapper.get('[data-test="bulk-closure-select-22"]').element as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('bez období předvybírá všechny uplynulé konce a o období mlčí', async () => {
+    m.bulkClosurePreview.mockResolvedValue(preview())
+
+    const wrapper = mount(PayrollBulkClosureDialog, MOUNT)
+    await flushPromises()
+
+    expect((wrapper.get('[data-test="bulk-closure-select-11"]').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.find('[data-test="bulk-closure-period-note"]').exists()).toBe(false)
+  })
+
   it('předvybere jen uplynulé dohody bez konfliktu a po potvrzení pošle přechody s daty z náhledu', async () => {
     m.bulkClosurePreview.mockResolvedValue(preview())
     m.bulkClosureApply.mockResolvedValue({

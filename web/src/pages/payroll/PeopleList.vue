@@ -38,7 +38,7 @@ import { useToast } from '@/composables/useToast'
 import { healthInsurerOptions } from '@/utils/healthInsurers'
 import { czechBirthNumberFacts } from '@/utils/czechBirthNumber'
 import { fieldSelector, revealField } from '@/utils/revealField'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import EmploymentCard from './EmploymentCard.vue'
@@ -57,6 +57,7 @@ import { employmentCodeLabel, isValidPersonalNumber, personalNumberLabel, todayI
 import {
   payrollAgendaLabelKey,
   payrollAgendas,
+  payrollQueryValue,
   type PayrollAgendaDefinition,
 } from './payrollAgendaLinks'
 import { payrollPeopleFilterFromQuery } from './payrollRemediationQuery'
@@ -65,7 +66,7 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import ColumnDragHandle from '@/components/ui/ColumnDragHandle.vue'
 import { useColumnDrag } from '@/composables/useColumnDrag'
-import { formatDate } from '@/composables/useFormat'
+import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -112,6 +113,19 @@ const searchQuery = ref('')
 // Odkaz z nálezu (kontrola před během → `?filter=blocking_data`) otevře
 // seznam rovnou zúžený.
 const peopleFilter = ref<PayrollPeopleFilter>(payrollPeopleFilterFromQuery(route.query))
+/*
+ * Zúžení na osoby jednoho nálezu kontroly před během (`?filter=run_finding`).
+ * Kód nálezu, období a datum výplaty nese odkaz z přehledu nálezů; server podle
+ * nich vybere osoby týmž snímkem, jakým nález vznikl. Bez nich zúžení nedává
+ * smysl, proto se v nabídce filtru ukazuje jen tehdy, když je zapnuté odkazem.
+ */
+const runFinding = (() => {
+  const finding = payrollQueryValue(route.query, 'finding')
+  const period = payrollQueryValue(route.query, 'period')
+  if (peopleFilter.value !== 'run_finding' || finding === null || period === null) return null
+  return { finding, period, payment_date: payrollQueryValue(route.query, 'payment_date') ?? undefined }
+})()
+if (peopleFilter.value === 'run_finding' && runFinding === null) peopleFilter.value = 'active'
 const narrowed = computed(
   () => peopleFilter.value !== 'all' || searchQuery.value.trim() !== '',
 )
@@ -212,6 +226,12 @@ const statutoryBulkEffectiveOn = `${bulkQueryPeriod ?? payrollWorkingPeriod()}-0
 const workplaceBulkOpen = ref(false)
 const termsBulkOpen = ref(false)
 const bulkClosureOpen = ref(false)
+/**
+ * Období mzdového běhu, ze kterého se hromadné ukončení otevřelo odkazem
+ * (`?bulk=closure&period=RRRR-MM`). Z nabídky „Další funkce" se dialog otevírá
+ * bez období a předvybírá všechny uplynulé konce jako dosud.
+ */
+const bulkClosurePeriod = ref<string | null>(null)
 // Počet vztahů k ukončení na tlačítku; výpadek náhledu tlačítko neschová.
 const bulkClosureCount = ref<number | null>(null)
 // Po importu hlášení JMHZ (nenese pojišťovnu) sem vede proklik `?bulk=health_insurer`.
@@ -248,6 +268,8 @@ function openBulkFromQuery(bulk: unknown) {
   } else if (bulk === 'workplace' && canWriteEmployment.value) {
     workplaceBulkOpen.value = true
   } else if (bulk === 'closure' && canWriteEmployment.value) {
+    const linked = payrollQueryValue(route.query, 'period')
+    bulkClosurePeriod.value = linked !== null && /^\d{4}-(0[1-9]|1[0-2])$/.test(linked) ? linked : null
     bulkClosureOpen.value = true
   }
 }
@@ -276,6 +298,9 @@ const filterOptions = computed(() => [
   { value: 'needs_data' as const, label: t('payroll.people.filters.needs_data') },
   { value: 'blocking_data' as const, label: t('payroll.people.filters.blocking_data') },
   { value: 'dpp_hours_limit' as const, label: t('payroll.people.filters.dpp_hours_limit') },
+  ...(peopleFilter.value === 'run_finding'
+    ? [{ value: 'run_finding' as const, label: t('payroll.people.filters.run_finding') }]
+    : []),
 ])
 const relationOptions = computed(() => relationTypes.map(type => ({
   value: type,
@@ -630,7 +655,10 @@ const peopleBulkActions = computed<ActionItem[]>(() => [
     tier: bulkClosureCount.value ? 'secondary' : 'overflow',
     variant: 'warning',
     show: canWriteEmployment.value,
-    run: () => { bulkClosureOpen.value = true },
+    run: () => {
+      bulkClosurePeriod.value = null
+      bulkClosureOpen.value = true
+    },
   },
   {
     key: 'statutory-bulk',
@@ -974,6 +1002,7 @@ async function load() {
       sort_key: activeSort.value?.key,
       sort_dir: activeSort.value?.dir,
       include_contacts: contactsShown.value || undefined,
+      ...(peopleFilter.value === 'run_finding' && runFinding !== null ? runFinding : {}),
     })
     people.value = page.items
     total.value = page.total
@@ -1224,6 +1253,7 @@ async function saveNew(personId: number, choice: { use_open_agreement?: number; 
     } else {
       toast.success(t('payroll.people.employment_created'))
     }
+    warnLockedRunGaps([employment])
   } catch (error) {
     const openAgreements = openAgreementsFromError(error)
     if (openAgreements !== null) {
@@ -1309,6 +1339,7 @@ async function createEmployee() {
     details.value[created.id] = created
     expandedId.value = created.id
     toast.success(t('payroll.people.create.created'))
+    warnLockedRunGaps(created.employments)
   } catch (error) {
     employeeError.value = apiErrorMessage(
       error,
@@ -1318,6 +1349,17 @@ async function createEmployee() {
   } finally {
     savingEmployee.value = false
   }
+}
+
+/**
+ * Nástup nového vztahu spadá do měsíce, který už má schválený běh: řekne se to
+ * hned při založení, ne až když někdo zjistí, že osobě chybí mzda. Trvalé
+ * upozornění s odkazem na běh drží karta vztahu.
+ */
+function warnLockedRunGaps(employments: PayrollEmployment[]) {
+  const periods = [...new Set(employments.flatMap(item => (item.locked_run_gaps ?? []).map(gap => gap.period)))].sort()
+  if (periods.length === 0) return
+  toast.warning(t('payroll.people.locked_run_gap.toast', { periods: periods.map(period => formatPeriod(period)).join(', ') }, periods.length))
 }
 
 /**
@@ -1995,6 +2037,34 @@ onMounted(async () => {
       </div>
     </section>
 
+    <!-- Seznam zúžený odkazem z nálezu kontroly před během: řekne proč a nabídne cestu zpět. -->
+    <div
+      v-if="peopleFilter === 'run_finding' && runFinding !== null && !editing && !showEmployeeForm"
+      class="flex flex-wrap items-center gap-3 rounded-lg border border-primary-500/30 bg-primary-50 p-3 text-sm text-primary-800"
+      data-test="people-run-finding"
+    >
+      <p class="min-w-0 flex-1">
+        {{ t('payroll.people.run_finding.hint', { period: formatPeriod(runFinding.period), count: total }, total) }}
+      </p>
+      <RouterLink
+        :to="{ name: 'payroll-runs', query: { period: runFinding.period } }"
+        :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+        data-test="people-run-finding-back"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevronLeft" /></svg>
+        {{ t('payroll.people.run_finding.back') }}
+      </RouterLink>
+      <button
+        type="button"
+        :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+        data-test="people-run-finding-clear"
+        @click="peopleFilter = 'active'"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+        {{ t('payroll.people.run_finding.clear') }}
+      </button>
+    </div>
+
     <PayrollStatutoryBulkDefaultsDialog
       v-if="statutoryBulkOpen"
       :effective-on="statutoryBulkEffectiveOn"
@@ -2035,6 +2105,7 @@ onMounted(async () => {
 
     <PayrollBulkClosureDialog
       v-if="bulkClosureOpen"
+      :period="bulkClosurePeriod"
       @close="bulkClosureOpen = false"
       @applied="onBulkClosureApplied"
     />

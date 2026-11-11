@@ -153,6 +153,14 @@ export function btnFilledSmWrap(variant: ActionVariant = 'primary'): string {
   return `${BTN_SM_WRAP_BASE} ${FILLED[variant]}`
 }
 
+/**
+ * Obrysová obdoba pro odkaz s proměnlivě dlouhým popiskem (jméno osoby, název
+ * složky): na úzkém displeji se text zalomí uvnitř tlačítka a nepřeteče kartu.
+ */
+export function btnOutlineSmWrap(variant: ActionVariant = 'neutral'): string {
+  return `${BTN_SM_WRAP_BASE} ${OUTLINE[variant]}`
+}
+
 // Čtvercová ikona bez popisku pro akce ve sloupci tabulky. Textová varianta
 // (`btnOutlineSm`) je v úzkém sloupci širší než zbytek řádku a akce se zalomí
 // pod sebe — řádek pak přeroste ostatní. Popisek nese `title`/`aria-label`,

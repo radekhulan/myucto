@@ -42,6 +42,7 @@ final class PayrollPeopleRepository
         'needs_data',
         'blocking_data',
         self::FILTER_DPP_HOURS_LIMIT,
+        self::FILTER_RUN_FINDING,
     ];
 
     /**
@@ -51,6 +52,14 @@ final class PayrollPeopleRepository
      * {@see \MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours::employeesNearLimit()}.
      */
     public const FILTER_DPP_HOURS_LIMIT = 'dpp_hours_limit';
+
+    /**
+     * Osoby jednoho nálezu kontroly před během (`?finding=<kód>&period=RRRR-MM`).
+     * Množinu dodává volající z téhož snímku a výběru validací, jakým nález
+     * vznikl ({@see \MyInvoice\Service\Payroll\Run\PayrollRunReadinessService::findingEmployeeIds()}),
+     * aby seznam ukázal přesně ty osoby, které přehled nálezů jen spočítal.
+     */
+    public const FILTER_RUN_FINDING = 'run_finding';
 
     public const LIST_DEFAULT_FILTER = 'all';
 
@@ -181,7 +190,7 @@ final class PayrollPeopleRepository
             $sql .= ' AND ' . PayrollPersonDataGapCatalog::gapExpression(
                 PayrollPersonDataGapCatalog::SEVERITY_BLOCKING,
             );
-        } elseif ($filter === self::FILTER_DPP_HOURS_LIMIT) {
+        } elseif ($filter === self::FILTER_DPP_HOURS_LIMIT || $filter === self::FILTER_RUN_FINDING) {
             if ($employeeIds === []) {
                 $sql .= ' AND 1 = 0';
             } else {

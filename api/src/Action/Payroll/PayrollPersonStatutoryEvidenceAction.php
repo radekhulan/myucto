@@ -64,6 +64,40 @@ final class PayrollPersonStatutoryEvidenceAction
         return Json::ok($response, ['evidence' => $view]);
     }
 
+    /**
+     * Od kterého měsíce platí prohlášení poplatníka podepsané daného dne
+     * (§ 38k ZDP). Formulář se ptá při zadání dne podpisu, aby „Platí od"
+     * neodvozoval sám; nic neukládá.
+     *
+     * @param array{id:string} $args
+     */
+    public function taxDeclarationStart(Request $request, Response $response, array $args): Response
+    {
+        $error = null;
+        if (!$this->guard($request, $response, AccessLevel::READ, $error)) {
+            return $this->errorResponse($error);
+        }
+        $signedOn = $request->getQueryParams()['signed_on'] ?? null;
+        if (!is_string($signedOn) || !\MyInvoice\Http\IsoDate::isValid($signedOn)) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Den podpisu prohlášení musí být platné datum (signed_on=RRRR-MM-DD).',
+                422,
+            );
+        }
+        $start = $this->evidence->taxDeclarationStart(
+            $this->currentSupplierId($request),
+            (int) $args['id'],
+            $signedOn,
+        );
+        if ($start === null) {
+            return Json::error($response, 'not_found', 'Zaměstnanec nenalezen.', 404);
+        }
+
+        return Json::ok($response, ['start' => $start]);
+    }
+
     /** @param array{id:string} $args */
     public function save(Request $request, Response $response, array $args): Response
     {

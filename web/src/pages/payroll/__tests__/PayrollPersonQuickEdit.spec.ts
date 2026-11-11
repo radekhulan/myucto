@@ -41,7 +41,10 @@ vi.mock('@/composables/useToast', () => ({
   }),
 }))
 
-vi.mock('vue-i18n', () => ({
+// Sdílené formátování (`useFormat`) táhne @/i18n se skutečným `createI18n`,
+// proto továrna původní modul rozprostírá a přepisuje jen `useI18n`.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     // Parametry se promítnou do výstupu, aby šlo ověřit, KTERÉ osobní číslo karta ukazuje.
     t: (key: string, params?: Record<string, unknown>) =>
@@ -259,6 +262,17 @@ describe('PayrollPersonQuickEdit', () => {
       profile: profile(),
       employment: employment(),
     })
+  })
+
+  /* Čtecí souhrn vztahu ukazoval „40.00 h/týden · 42000 Kč" bez českého formátu. */
+  it('úvazek a mzdu ve čtecím souhrnu vztahu píše v českém formátu', async () => {
+    const wrapper = await mountedReader()
+
+    const summary = wrapper.get('[data-test="read-employment"]').text().replace(/\s+/g, ' ')
+    expect(summary).toContain('40 payroll.people.quick_edit.hours_unit')
+    expect(summary).not.toContain('40.00')
+    expect(summary).toMatch(/42 000,00 Kč/)
+    expect(summary).not.toContain('42000 Kč')
   })
 
   it('ukáže běžné údaje v jediném formuláři bez záložek a citlivé hodnoty jen maskovaně', async () => {

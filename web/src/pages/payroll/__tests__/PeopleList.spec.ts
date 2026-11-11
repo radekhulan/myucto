@@ -324,6 +324,47 @@ describe('PeopleList toolbar and shared employee creation', () => {
   })
 
   /*
+   * U 150 nálezů kontroly před během bylo dosažitelných jen 25. Odkaz nálezu
+   * teď otevře seznam zúžený na všechny jeho osoby; kód, období a datum výplaty
+   * jdou na server, který osoby vybere týmž pravidlem jako nález.
+   */
+  it('odkaz z nálezu kontroly před během zúží seznam na osoby nálezu a nabídne cestu zpět', async () => {
+    Object.assign(m.routeQuery, {
+      filter: 'run_finding',
+      finding: 'time_month_missing',
+      period: '2026-10',
+      payment_date: '2026-11-10',
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.peoplePage).toHaveBeenCalledWith(expect.objectContaining({
+      filter: 'run_finding',
+      finding: 'time_month_missing',
+      period: '2026-10',
+      payment_date: '2026-11-10',
+    }))
+    const banner = wrapper.get('[data-test="people-run-finding"]')
+    expect(banner.text()).toContain('payroll.people.run_finding.hint')
+
+    await banner.get('[data-test="people-run-finding-clear"]').trigger('click')
+    await flushPromises()
+
+    expect(m.peoplePage).toHaveBeenLastCalledWith(expect.objectContaining({ filter: 'active' }))
+    expect(m.peoplePage).not.toHaveBeenLastCalledWith(expect.objectContaining({ finding: 'time_month_missing' }))
+    expect(wrapper.find('[data-test="people-run-finding"]').exists()).toBe(false)
+  })
+
+  it('zúžení na nález bez kódu nebo období se neuplatní', async () => {
+    m.routeQuery.filter = 'run_finding'
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.peoplePage).toHaveBeenLastCalledWith(expect.objectContaining({ filter: 'active' }))
+    expect(wrapper.find('[data-test="people-run-finding"]').exists()).toBe(false)
+  })
+
+  /*
    * Zúžení nesmí zůstat v prohlížeči: kdyby hledal jen v načtené stránce,
    * o člověku ze třetí stránky by obrazovka tvrdila, že neexistuje.
    */

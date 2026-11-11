@@ -140,10 +140,38 @@ const outlookSeverityClass: Record<PayrollRulesetOutlookSeverity, string> = {
   critical: 'bg-danger-50 text-danger-700',
 }
 
+/** Pokrytý rok, kterému ještě chybí agenda mimo jádro výpočtu nebo vyhlášená hodnota. */
+function outlookIncomplete(entry: PayrollRulesetYearOutlook): boolean {
+  return entry.covered
+    && ((entry.missing_agenda_domains ?? []).length > 0 || (entry.pending_parameters ?? []).length > 0)
+}
+
 function outlookMessage(entry: PayrollRulesetYearOutlook): string {
+  if (outlookIncomplete(entry)) return t('payroll.rulesets.outlook.covered_pending', { year: entry.year })
   if (entry.covered) return t('payroll.rulesets.outlook.covered', { year: entry.year })
   const severity = entry.severity === 'ok' ? 'info' : entry.severity
   return t(`payroll.rulesets.outlook.message.${severity}`, { year: entry.year })
+}
+
+/** Co pokrytému roku ještě chybí: agendy bez sady a parametry čekající na vyhlášení. */
+function outlookPending(entry: PayrollRulesetYearOutlook): string[] {
+  if (!outlookIncomplete(entry)) return []
+  const lines: string[] = []
+  const agendas = entry.missing_agenda_domains ?? []
+  if (agendas.length > 0) {
+    lines.push(t('payroll.rulesets.outlook.missing_agenda_domains', {
+      domains: agendas.map(domain => t(`payroll.rulesets.domain.${domain}`)).join(', '),
+    }))
+  }
+  for (const parameter of entry.pending_parameters ?? []) {
+    lines.push(parameter.expected
+      ? t('payroll.rulesets.outlook.pending_parameter_expected', {
+        label: parameter.label ?? parameter.key,
+        month: expectedMonth(parameter.expected),
+      })
+      : t('payroll.rulesets.outlook.pending_parameter', { label: parameter.label ?? parameter.key }))
+  }
+  return lines
 }
 
 function outlookDomains(entry: PayrollRulesetYearOutlook): string {
@@ -673,6 +701,13 @@ onMounted(load)
           >
             {{ outlookDomains(entry) }}
           </p>
+          <ul
+            v-if="outlookPending(entry).length"
+            class="mt-1 list-disc space-y-0.5 pl-5 text-xs text-neutral-600"
+            :data-test="`ruleset-year-outlook-pending-${entry.year}`"
+          >
+            <li v-for="line in outlookPending(entry)" :key="line">{{ line }}</li>
+          </ul>
           <details v-if="entry.message" class="mt-2 text-xs text-neutral-500">
             <summary class="cursor-pointer">{{ t('payroll.rulesets.outlook.technical') }}</summary>
             <p class="mt-1">{{ entry.message }}</p>

@@ -1828,6 +1828,32 @@ final class PayrollPersonStatutoryEvidenceRepository
     }
 
     /**
+     * První měsíc prohlášení poplatníka podepsaného k danému dni (§ 38k ZDP)
+     * pro formulář zákonné evidence: nástupy osoby a hranici schválené mzdy
+     * dodá evidence, pravidlo drží {@see TaxDeclarationEffectiveMonth}.
+     *
+     * @return array{
+     *     signed_on:string,tax_year:int,legal_from:string,basis:string,entry:?string,
+     *     open_from:string,frozen:bool,frozen_through:?string
+     * }|null null = osoba firmě nepatří
+     */
+    public function taxDeclarationStart(int $supplierId, int $employeeId, string $signedOn): ?array
+    {
+        if (!$this->employeeExists($supplierId, $employeeId)) {
+            return null;
+        }
+        $frozenThrough = $this->freeze->frozenThrough($supplierId);
+
+        return ['signed_on' => $signedOn]
+            + TaxDeclarationEffectiveMonth::forSignature(
+                $signedOn,
+                $this->employmentStarts($supplierId, [$employeeId])[$employeeId] ?? [],
+                $frozenThrough,
+            )
+            + ['frozen_through' => $frozenThrough];
+    }
+
+    /**
      * Rozpor podepsaných vět prohlášení se zákonným prvním měsícem
      * (§ 38k ZDP). Jen upozornění pro editor: větu uloží účetní, jak ji
      * zadala, protože může mít doklad, který server nezná.

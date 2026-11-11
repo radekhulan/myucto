@@ -42,6 +42,7 @@ import EmploymentRegistrationPanel from './EmploymentRegistrationPanel.vue'
 import EmploymentJmhzPost20Panel from './EmploymentJmhzPost20Panel.vue'
 import EmploymentTerminationPanel from './EmploymentTerminationPanel.vue'
 import PayrollOpeningBalancesPanel from './PayrollOpeningBalancesPanel.vue'
+import PayrollLockedRunGapNotice from '@/components/payroll/PayrollLockedRunGapNotice.vue'
 import {
   employmentCodeLabel,
   employmentDiffFields,
@@ -1882,6 +1883,12 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         >{{ expanded ? t('payroll.people.hide_detail') : t('payroll.people.show_detail') }}</button>
       </div>
     </div>
+
+    <!-- Vztah patří do měsíce se schváleným během, ale v běhu chybí: bez opravy běhu zůstane bez mzdy. -->
+    <PayrollLockedRunGapNotice
+      :gaps="employment.locked_run_gaps ?? []"
+      :start-date="employment.actual_start_date ?? employment.start_date"
+    />
 
     <template v-if="expanded">
     <!--
