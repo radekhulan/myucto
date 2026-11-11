@@ -570,8 +570,12 @@ final class PayrollEmploymentValidatorTest extends TestCase
         }
     }
 
-    /** Kód, který platil ve starším vydání CZ-ISCO, je legitimní historická hodnota. */
-    public function testCzIscoAcceptsRetiredCodeFromOlderClassificationVersion(): void
+    /**
+     * Kód, který platil ve starším vydání CZ-ISCO, zůstane jako uložená
+     * historická hodnota. Nově zadat ho nejde: ČSSZ ho v přihlášce A1 ani
+     * v dohlášení nepřijme.
+     */
+    public function testCzIscoKeepsStoredRetiredCodeButRejectsNewlyEnteredOne(): void
     {
         $codebook = new CzIscoCodebook();
         self::assertSame(CzIscoCodebook::STATUS_RETIRED, $codebook->status('32114'));
@@ -579,7 +583,14 @@ final class PayrollEmploymentValidatorTest extends TestCase
         $terms = $this->terms();
         $terms['cz_isco_code'] = '32114';
 
-        self::assertSame('32114', $this->validator()->terms($terms)['cz_isco_code']);
+        self::assertSame('32114', $this->validator()->terms($terms, '32114')['cz_isco_code']);
+        try {
+            $this->validator()->terms($terms);
+            self::fail('Nově zadaný vyřazený kód měl být odmítnut.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('vyřazený', $e->getMessage());
+            self::assertStringContainsString('našeptávače', $e->getMessage());
+        }
     }
 
     /**
