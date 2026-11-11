@@ -30,13 +30,17 @@ final class PayrollE2ePodaniEnforcementYearTest extends TestCase
     }
 
     /**
-     * Prosinec 2026 vyplacený 12. 1. 2027 u zaměstnance bez potvrzené
-     * evidence exekucí za měsíc: sada exekučních srážek 2027 chybí (normativní
-     * nájemné pro rok 2027 nevyhlášeno), běh se zastaví blokací, která říká
-     * proč a kam (Legislativní pravidla mezd), a nikdy nepočítá podle 2026.
+     * Prosinec 2026 vyplacený 12. 1. 2027 u zaměstnance s exekuční srážkou:
+     * sada exekučních srážek 2027 chybí (normativní nájemné pro rok 2027
+     * nevyhlášeno), běh se zastaví blokací, která říká proč a kam
+     * (Legislativní pravidla mezd), a nikdy nepočítá podle 2026.
      */
     public function testDecemberPaidInJanuaryStopsOnMissingEnforcementRuleset2027(): void
     {
+        $this->seedDecemberWage();
+        $this->seedRunClaim($this->seedRunCase('withhold_and_hold'));
+        $this->seedRunMonthEvidence('2026-12-01');
+
         $run = $this->calculateEnforcementRun('2026-12-01', '2027-01-12');
 
         self::assertSame('manual_review', $run['enforcement']['status']);
@@ -52,9 +56,32 @@ final class PayrollE2ePodaniEnforcementYearTest extends TestCase
         self::assertStringContainsString('Datum výplaty kvůli tomu neměňte', $ruleset[0]['message']);
     }
 
+    /**
+     * Zaměstnanec, kterému se nic nesráží, sadu srážek roku výplaty
+     * nepotřebuje: prosincová mzda vyplacená v lednu 2027 se spočítá a běh
+     * chybějící sada 2027 nezastaví.
+     */
+    public function testDecemberPaidInJanuaryWithoutDeductionsIsNotStopped(): void
+    {
+        $this->seedDecemberWage();
+
+        $run = $this->calculateEnforcementRun('2026-12-01', '2027-01-12');
+
+        self::assertSame('calculated', $run['person']['statutory']['status']);
+        self::assertSame([], $run['enforcement']['issues']);
+        self::assertSame([], array_values(array_filter(
+            $run['validations'],
+            static fn (array $validation): bool => $validation['remediation_path'] === '/payroll/rulesets',
+        )), CanonicalJson::encode($run['validations']));
+    }
+
     /** Tentýž měsíc vyplacený ještě v prosinci 2026 sadu 2026 má. */
     public function testDecemberPaidInDecemberUsesEnforcementRuleset2026(): void
     {
+        $this->seedDecemberWage();
+        $this->seedRunClaim($this->seedRunCase('withhold_and_hold'));
+        $this->seedRunMonthEvidence('2026-12-01');
+
         $run = $this->calculateEnforcementRun('2026-12-01', '2026-12-30');
 
         self::assertNotContains('payment_date_outside_ruleset_2026', $run['enforcement']['issues']);
@@ -63,5 +90,11 @@ final class PayrollE2ePodaniEnforcementYearTest extends TestCase
             $run['validations'],
             static fn (array $validation): bool => $validation['remediation_path'] === '/payroll/rulesets',
         )));
+    }
+
+    /** Výchozí vstup přípravku je za červen; prosincový běh potřebuje vlastní. */
+    private function seedDecemberWage(): void
+    {
+        $this->seedRunInput($this->componentIds['MZDA_MESICNI'], 3_500_000, '2026-12-01');
     }
 }
