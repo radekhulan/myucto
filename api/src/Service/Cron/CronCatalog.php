@@ -429,6 +429,20 @@ final class CronCatalog
                 'requires_feature' => CronJobGate::FEATURE_PAYROLL,
             ],
             [
+                // Ukončení DPP a DPČ, kterým uplynul sjednaný konec. Běží krátce
+                // po půlnoci, aby ranní kontroly a mzdový běh už viděly dohodu
+                // ukončenou. Výpadek nic nepokazí natrvalo: další běh dožene
+                // všechny uplynulé dohody naráz.
+                'script' => 'cron-payroll-end-agreements',
+                'recommended' => 'daily_0030',
+                'linux_cron' => '30 0 * * *',
+                'windows_schtasks' => '/sc daily /st 00:30',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => false,
+                'requires_feature' => CronJobGate::FEATURE_PAYROLL,
+            ],
+            [
                 // Jediná měsíční úloha v katalogu. Účtuje předchozí měsíc, takže musí běžet
                 // až po jeho konci; 04:00 prvního dne je po nočních zálohách a před ranním
                 // provozem. `max_age_hours` = 33 dní: měsíční úloha nesmí hlásit „nejede"

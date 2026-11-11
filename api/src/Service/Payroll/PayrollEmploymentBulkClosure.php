@@ -38,6 +38,9 @@ use PDO;
  * (odhláška, výstupní doklady) a auditní stopou. Navíc se odmítne ukončení,
  * po jehož datu má vztah ještě mzdový vstup, docházku nebo zúčtovaný běh:
  * takový vztah zjevně trval dál a datum konce musí posoudit člověk.
+ *
+ * Uplynulé dohody ukončuje každou noc i úloha `cron-payroll-end-agreements`
+ * ({@see self::endExpiredAgreements()}) se stejnými kandidáty a pojistkami.
  */
 final class PayrollEmploymentBulkClosure
 {
@@ -49,8 +52,18 @@ final class PayrollEmploymentBulkClosure
 
     private const SETTLED_RUN_STATUSES = "'posted', 'payment_ready', 'paid', 'closed'";
 
+    /**
+     * Druhy vztahů, které noční úloha ukončí sama ({@see self::endExpiredAgreements()}).
+     * Dohoda sjednaná na dobu určitou uplynutím doby zaniká; pracovní poměr
+     * na dobu určitou se při pokračování v práci mění na neurčitou dobu
+     * (§ 65 odst. 2 ZP), takže o jeho konci rozhoduje člověk.
+     */
+    public const AUTO_END_RELATION_TYPES = ['dpp', 'dpc'];
+
     private const NOTE_END = 'Hromadné ukončení skončených dohod.';
+    private const NOTE_AUTO_END = 'Automatické ukončení dohody po uplynutí sjednaného konce.';
     private const NOTE_ARCHIVE = 'Hromadná archivace ukončených vztahů.';
+    private const SYSTEM_ACTOR = 'system';
 
     public function __construct(
         private readonly Connection $db,
@@ -213,6 +226,126 @@ final class PayrollEmploymentBulkClosure
         foreach ($this->preview($supplierId, $inactivityMonths, $archiveAfterMonths, $today)['items'] as $candidate) {
             $candidates[(int) $candidate['employment_id']] = (string) $candidate['action'];
         }
+        [$applied, $failed] = $this->applyCommands($supplierId, $commands, $candidates, $userId, $ip, $userAgent, self::NOTE_END);
+
+        $this->activityLogger->log(
+            'payroll.employment.bulk_closure',
+            $userId,
+            null,
+            null,
+            $this->logContext($applied, $failed),
+            $ip,
+            $userAgent,
+            $supplierId,
+        );
+
+        return [
+            'counts' => ['applied' => count($applied), 'failed' => count($failed)],
+            'applied' => $applied,
+            'failed' => $failed,
+        ];
+    }
+
+    /**
+     * Noční ukončení dohod, jejichž sjednaný konec už uplynul.
+     *
+     * Bere tytéž kandidáty jako náhled ruční akce (skupina `expired`), jen
+     * DPP a DPČ ({@see self::AUTO_END_RELATION_TYPES}), a zapisuje stejnou
+     * cestou jako {@see self::apply()}: přechod stavu s kontrolním seznamem
+     * odchodu a auditem, ke dni sjednaného konce. Vztah, kterému ruční akce
+     * ukončení odmítne (mzdový vstup, docházka nebo zúčtovaný běh po konci),
+     * se nechá být a jen se započítá jako `blocked`: datum skutečného konce
+     * musí posoudit člověk. Opakovaný běh nic nezmění, ukončený vztah už
+     * kandidátem není. Aktérem je systém (bez uživatele).
+     *
+     * @return array{ended:list<int>,blocked:list<int>,failed:list<array{employment_id:int,code:string,message:string}>}
+     */
+    public function endExpiredAgreements(int $supplierId, ?string $today = null): array
+    {
+        $today = $this->today($today);
+        $commands = [];
+        $blocked = [];
+        foreach ($this->preview($supplierId, 3, 12, $today)['items'] as $candidate) {
+            if ($candidate['group'] !== 'expired'
+                || !in_array($candidate['relation_type'], self::AUTO_END_RELATION_TYPES, true)
+            ) {
+                continue;
+            }
+            $employmentId = (int) $candidate['employment_id'];
+            if ($candidate['blocked_reason'] !== null) {
+                $blocked[] = $employmentId;
+                continue;
+            }
+            $commands[] = [
+                'employment_id' => $employmentId,
+                'action' => 'end',
+                'effective_on' => (string) $candidate['proposed_on'],
+                'row_version' => (int) $candidate['row_version'],
+            ];
+        }
+        if ($commands === []) {
+            return ['ended' => [], 'blocked' => $blocked, 'failed' => []];
+        }
+
+        $applied = [];
+        $failed = [];
+        foreach (array_chunk($commands, self::MAX_ITEMS) as $chunk) {
+            $candidates = array_fill_keys(array_column($chunk, 'employment_id'), 'end');
+            [$chunkApplied, $chunkFailed] = $this->applyCommands(
+                $supplierId,
+                $chunk,
+                $candidates,
+                null,
+                null,
+                self::SYSTEM_ACTOR,
+                self::NOTE_AUTO_END,
+            );
+            array_push($applied, ...$chunkApplied);
+            array_push($failed, ...$chunkFailed);
+        }
+
+        $this->activityLogger->log(
+            'payroll.employment.auto_closure',
+            null,
+            null,
+            null,
+            ['actor' => self::SYSTEM_ACTOR, 'as_of' => $today, 'blocked_employment_ids' => $blocked]
+                + $this->logContext($applied, $failed),
+            null,
+            self::SYSTEM_ACTOR,
+            $supplierId,
+        );
+
+        return [
+            'ended' => array_values(array_map(
+                static fn (array $item): int => $item['employment_id'],
+                array_filter($applied, static fn (array $item): bool => $item['status'] === 'ended'),
+            )),
+            'blocked' => $blocked,
+            'failed' => $failed,
+        ];
+    }
+
+    /**
+     * Zápis vybraných položek, každá vlastním přechodem stavu. Chyba jedné
+     * položky ostatní nezastaví.
+     *
+     * @param list<array{employment_id:int,action:'end'|'archive',effective_on:string,row_version:int}> $commands
+     * @param array<int,string> $candidates akce, kterou vztahu povoluje náhled
+     * @return array{
+     *   list<array{employment_id:int,status:string,effective_on:string}>,
+     *   list<array{employment_id:int,code:string,message:string}>
+     * }
+     */
+    private function applyCommands(
+        int $supplierId,
+        array $commands,
+        array $candidates,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+        string $endNote,
+    ): array {
         $activity = $this->activityFor(
             $supplierId,
             array_values(array_map(
@@ -251,7 +384,7 @@ final class PayrollEmploymentBulkClosure
                     $command['action'] === 'end' ? 'ended' : 'archived',
                     $command['row_version'],
                     $command['effective_on'],
-                    $command['action'] === 'end' ? self::NOTE_END : self::NOTE_ARCHIVE,
+                    $command['action'] === 'end' ? $endNote : self::NOTE_ARCHIVE,
                     $userId,
                     $ip,
                     $userAgent,
@@ -287,31 +420,26 @@ final class PayrollEmploymentBulkClosure
             }
         }
 
-        $this->activityLogger->log(
-            'payroll.employment.bulk_closure',
-            $userId,
-            null,
-            null,
-            [
-                'ended_employment_ids' => array_values(array_map(
-                    static fn (array $item): int => $item['employment_id'],
-                    array_filter($applied, static fn (array $item): bool => $item['status'] === 'ended'),
-                )),
-                'archived_employment_ids' => array_values(array_map(
-                    static fn (array $item): int => $item['employment_id'],
-                    array_filter($applied, static fn (array $item): bool => $item['status'] === 'archived'),
-                )),
-                'failed_employment_ids' => array_column($failed, 'employment_id'),
-            ],
-            $ip,
-            $userAgent,
-            $supplierId,
-        );
+        return [$applied, $failed];
+    }
 
+    /**
+     * @param list<array{employment_id:int,status:string,effective_on:string}> $applied
+     * @param list<array{employment_id:int,code:string,message:string}> $failed
+     * @return array<string,list<int>>
+     */
+    private function logContext(array $applied, array $failed): array
+    {
         return [
-            'counts' => ['applied' => count($applied), 'failed' => count($failed)],
-            'applied' => $applied,
-            'failed' => $failed,
+            'ended_employment_ids' => array_values(array_map(
+                static fn (array $item): int => $item['employment_id'],
+                array_filter($applied, static fn (array $item): bool => $item['status'] === 'ended'),
+            )),
+            'archived_employment_ids' => array_values(array_map(
+                static fn (array $item): int => $item['employment_id'],
+                array_filter($applied, static fn (array $item): bool => $item['status'] === 'archived'),
+            )),
+            'failed_employment_ids' => array_column($failed, 'employment_id'),
         ];
     }
 

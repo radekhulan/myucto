@@ -427,7 +427,8 @@ Brigádníci na DPP a DPČ mívají krátké dohody. Aby seznam nezůstal plný 
 kteří už nepracují, ukončíte skončené vztahy najednou tlačítkem **Ukončit
 skončené dohody** nad seznamem zaměstnanců. Číslo v závorce je počet vztahů,
 které aplikace navrhuje ukončit. Tlačítko vidí jen uživatel s právem měnit
-pracovní vztahy. Nic se neděje samo, vždy rozhodujete vy.
+pracovní vztahy. Až na dohody popsané v odstavci **Automatické ukončení
+dohod** níže se nic neděje samo, rozhodujete vy.
 
 1. Klikněte na **Ukončit skončené dohody** (nad seznamem, nebo v **Další funkce**). Otevře se náhled ve třech skupinách:
    - **Uplynul sjednaný konec**: aktivní nebo přerušený vztah (jakéhokoli druhu),
@@ -458,6 +459,24 @@ Každý vztah se ukončí stejně jako tlačítkem **Ukončit** na jeho kartě: 
 stejnými kontrolami, zapíše se do časové osy a založí výstupní checklist.
 Odhlášku (A2, HOZ) a další kroky podle § 86.9 je potřeba vyřídit i u hromadně
 ukončených vztahů.
+
+**Automatické ukončení dohod.** DPP a DPČ, které jsou aktivní nebo přerušené
+a jejichž sjednaný konec už uplynul, ukončí aplikace sama každou noc
+(plánovaná úloha `cron-payroll-end-agreements`, viz
+[§ 5](05_Po_instalaci.md)). Ukončí je ke dni sjednaného konce stejnou cestou
+jako tlačítko **Ukončit skončené dohody**: se stejnými kontrolami, záznamem
+v časové ose, výstupním checklistem a auditní stopou, kde je jako autor
+uvedený systém. Dohodu, která má po sjednaném konci ještě mzdový vstup,
+docházku nebo zúčtovanou mzdu, nechá aktivní. Ta zůstane ve skupině
+**Uplynul sjednaný konec** označená **Vyžaduje kontrolu** a datum konce
+posoudíte vy. Pracovní poměr na dobu určitou se sám neukončuje, protože
+pokračováním v práci se mění na dobu neurčitou; ten ukončíte ručně.
+
+Má-li ukončený vztah mzdový vstup za měsíc po svém konci, dostane se do
+mzdového běhu toho měsíce jen kvůli tomuto vstupu. Kontrola běhu pak hlásí
+„vstup za MM/RRRR je na vztahu ukončeném DD. MM. RRRR" s odkazem na vstupy
+vztahu. Jde-li o doplatek po skončení, potvrďte na kartě vztahu odložený
+příjem; jinak vstup zrušte nebo ho zadejte na trvající vztah.
 
 ## 86.10 Krok za krokem: personální spis
 
