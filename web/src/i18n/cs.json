@@ -36593,6 +36593,8 @@
         "first_name": "Jméno",
         "last_name": "Příjmení",
         "swap_names": "Prohodit jméno a příjmení",
+        "error_row_next": "Bez opravy se řádek při použití přeskočí a osoba nedostane vstupy ani docházku. Opravte údaj v podkladech a načtěte náhled znovu, nebo osobu založte ručně se správným rodným číslem (cizinec bez rodného čísla s EČP) a osobním číslem {number}: náhled ji pak podle osobního čísla propojí sám, případně ji vyberte ve sloupci Pracovní vztah.",
+        "create_manually": "Založit osobu ručně",
         "remove_from_create": "Nezakládat",
         "registration_label": "Pro registraci ČSSZ",
         "existing_person": "Osoba {name} už v evidenci je, založí se jí jen nový pracovní vztah (nová karta osoby nevznikne).",

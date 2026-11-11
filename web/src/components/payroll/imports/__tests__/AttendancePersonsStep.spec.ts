@@ -187,4 +187,20 @@ describe('AttendancePersonsStep — náhled zakládání osob', () => {
       ['b001', 'dpp'], ['b002', 'dpc'], ['b003', 'employment'], ['b004', 'dpp'],
     ])
   })
+
+  it('řádek s neplatným rodným číslem řekne, že se přeskočí, a nabídne ruční založení', async () => {
+    const invalid = person('b040', {
+      display_name: 'Chybný Bohdan', personal_number: 'B040',
+      errors: ['Rodné číslo: v podkladech není platné (nesedí kontrolní číslice), novou osobu s ním aplikace nezaloží.'],
+    })
+    const wrapper = mount(AttendancePersonsStep, {
+      props: { persons: [invalid], options: [], manualLinks: {}, period: '2026-04', canCreate: true },
+    })
+    const next = wrapper.get('[data-testid="attendance-person-error-next"]')
+    expect(next.text()).toContain('payroll_imports.attendance.persons.error_row_next{"number":"B040"}')
+    expect(next.find('[data-testid="attendance-person-create-manually"]').exists()).toBe(true)
+
+    await wrapper.setProps({ manualLinks: { b040: 7 } })
+    expect(wrapper.find('[data-testid="attendance-person-error-next"]').exists()).toBe(false)
+  })
 })

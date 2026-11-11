@@ -36593,6 +36593,8 @@
         "first_name": "First name",
         "last_name": "Last name",
         "swap_names": "Swap first and last name",
+        "error_row_next": "Without a fix the row is skipped when applied and the person gets no inputs or attendance. Correct the value in the data and load the preview again, or create the person manually with the correct birth number (a foreigner without one with an EČP) and personal number {number}: the preview then links them by the personal number, or select them in the Employment column.",
+        "create_manually": "Create person manually",
         "remove_from_create": "Do not create",
         "registration_label": "For social security registration",
         "existing_person": "{name} is already in the records; only a new employment relationship is created (no new person record).",

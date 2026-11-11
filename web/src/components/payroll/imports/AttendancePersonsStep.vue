@@ -257,6 +257,14 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
                 <ul v-if="person.errors?.length" class="mt-1 space-y-0.5 text-xs font-medium text-danger-600" data-testid="attendance-person-errors">
                   <li v-for="error in person.errors" :key="error">{{ error }}</li>
                 </ul>
+                <!-- Řádek s chybou (neplatné RČ) import nezaloží; bez cesty dál by tiše zůstal „Nenalezeno". -->
+                <div v-if="person.errors?.length && effectiveEmploymentId(person, manualLinks) === null" class="mt-1 max-w-sm space-y-1 text-xs text-neutral-600" data-testid="attendance-person-error-next">
+                  <p>{{ t('payroll_imports.attendance.persons.error_row_next', { number: person.personal_number ?? '—' }) }}</p>
+                  <RouterLink :to="{ path: '/payroll/people', query: { new: '1' } }" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']" data-testid="attendance-person-create-manually">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
+                    {{ t('payroll_imports.attendance.persons.create_manually') }}
+                  </RouterLink>
+                </div>
                 <ul v-if="person.warnings.length" class="mt-1 space-y-0.5 text-xs text-warning-700">
                   <li v-for="warning in person.warnings" :key="warning">{{ warning }}</li>
                 </ul>
@@ -312,6 +320,13 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
           <ul v-if="person.errors?.length" class="mt-2 space-y-0.5 text-xs font-medium text-danger-600">
             <li v-for="error in person.errors" :key="error">{{ error }}</li>
           </ul>
+          <div v-if="person.errors?.length && effectiveEmploymentId(person, manualLinks) === null" class="mt-1 space-y-1 text-xs text-neutral-600">
+            <p>{{ t('payroll_imports.attendance.persons.error_row_next', { number: person.personal_number ?? '—' }) }}</p>
+            <RouterLink :to="{ path: '/payroll/people', query: { new: '1' } }" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']">
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
+              {{ t('payroll_imports.attendance.persons.create_manually') }}
+            </RouterLink>
+          </div>
           <ul v-if="person.warnings.length" class="mt-2 space-y-0.5 text-xs text-warning-700">
             <li v-for="warning in person.warnings" :key="warning">{{ warning }}</li>
           </ul>
