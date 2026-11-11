@@ -5047,6 +5047,9 @@ async function copyXml(): Promise<void> {
     </div>
 
     <div v-if="preview && !submission" class="mt-3">
+      <p v-if="preview.schema_validation?.valid" class="mb-2 text-sm font-medium text-success-700" data-test="registration-preview-xsd-valid">
+        {{ t('payroll.people.registration.xml_schema_valid', { schema: preview.schema_validation.schema_version }) }}
+      </p>
       <div class="flex flex-wrap gap-2">
         <button
           type="button"

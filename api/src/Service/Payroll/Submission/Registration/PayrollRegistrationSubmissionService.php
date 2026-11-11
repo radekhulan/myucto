@@ -109,6 +109,7 @@ final readonly class PayrollRegistrationSubmissionService
      * @return array{
      *   employment_id:int,agenda_code:string,interaction:string,
      *   action_code:int,xml:string,xml_sha256:string,
+     *   schema_validation:array{valid:bool,schema_version:string},
      *   deadline:array{earliest_registration_on:string,due_on:string,
      *     calendar_basis:string,ruleset_id:string},
      *   employer_registration:?array<string,string>,
@@ -146,6 +147,17 @@ final readonly class PayrollRegistrationSubmissionService
             'before_start_choice' => $resolved['before_start_choice'],
             'xml' => $resolved['xml'],
             'xml_sha256' => hash('sha256', $resolved['xml']),
+            /*
+             * Test XML před odesláním: {@see self::resolve()} každé XML ověří
+             * proti připnutému XSD ČSSZ a hranicím agendy (nevalidní skončí
+             * 422 dřív, než se sem dojde). Náhled to účetní řekne, ať XML
+             * neověřuje ručně (průchod agentury). Připravené podání pak nese
+             * totéž ověřené XML beze změny.
+             */
+            'schema_validation' => [
+                'valid' => true,
+                'schema_version' => $resolved['schema_version'],
+            ],
             'deadline' => $this->describeDeadline($resolved['deadline']),
             'employer_registration' => $resolved['employer_deadline'],
             // Neblokuje, jen upozorní: náhled je poslední místo, kde účetní

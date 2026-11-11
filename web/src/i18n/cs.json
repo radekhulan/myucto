@@ -8632,6 +8632,7 @@
         "show_xml": "Zobrazit XML",
         "hide_xml": "Skrýt XML",
         "copy_xml": "Kopírovat XML",
+        "xml_schema_valid": "Test XML prošel: datová věta odpovídá schématu ČSSZ {schema}. Připravené podání ponese totéž XML.",
         "failed": "Přihlášku se nepodařilo připravit.",
         "a1": {
           "title": "Autoritativní profil REGZEC A1",

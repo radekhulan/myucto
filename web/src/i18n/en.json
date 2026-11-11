@@ -8632,6 +8632,7 @@
         "show_xml": "Show XML",
         "hide_xml": "Hide XML",
         "copy_xml": "Copy XML",
+        "xml_schema_valid": "XML test passed: the record matches the ČSSZ schema {schema}. The prepared submission will carry the same XML.",
         "failed": "The registration could not be prepared.",
         "a1": {
           "title": "Authoritative REGZEC A1 profile",

@@ -5171,6 +5171,8 @@ export interface PayrollRegistrationPreview {
   action_code: number
   xml: string
   xml_sha256: string
+  /** Test XML: náhled ověřil XML proti připnutému XSD ČSSZ (nevalidní XML náhled odmítne). */
+  schema_validation?: { valid: boolean; schema_version: string }
   deadline: PayrollRegistrationDeadline
   employer_registration: PayrollRegistrationEmployerDeadline | null
   /** Neblokující upozornění (zástupný variabilní symbol zaměstnavatele…). */

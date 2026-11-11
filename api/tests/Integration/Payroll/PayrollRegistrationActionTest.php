@@ -3791,6 +3791,8 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
         $body = $this->json($response);
         self::assertStringContainsString('vs="12345678"', $body['xml']);
+        // Náhled je test XML: prošlo připnutým XSD ČSSZ, účetní ho neověřuje ručně.
+        self::assertSame(['valid' => true, 'schema_version' => 'PREZEC26'], $body['schema_validation']);
         self::assertSame('employer_variable_symbol_placeholder', $body['warnings'][0]['code']);
         self::assertSame('employer_settings', $body['warnings'][0]['target']);
 

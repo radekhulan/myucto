@@ -2313,6 +2313,18 @@ describe('EmploymentRegistrationPanel', () => {
       .toMatchObject({ name: 'payroll-settings', query: { tab: 'employer' } })
   })
 
+  /** Průchod agentury: XML přihlášky se ověřovalo ručně, náhled teď řekne, že prošlo XSD. */
+  it('řekne, že XML náhledu prošlo schématem ČSSZ', async () => {
+    m.preview.mockResolvedValue({ ...preview, schema_validation: { valid: true, schema_version: 'REGZEC25' } })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-preview-xsd-valid"]').text())
+      .toContain('payroll.people.registration.xml_schema_valid')
+  })
+
   /** UI-21: obec pracoviště se doplní z kódu obce, který přišel ze vztahu. */
   it('fills the workplace city from the municipality code of the relationship', async () => {
     m.searchMunicipalities.mockResolvedValue([
