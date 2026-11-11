@@ -1195,6 +1195,15 @@ plátcovství včetně historie a význam klasifikací DPH. Její nastavení, p�
 ani přihlašovací údaje se nepřepisují. Cíl nesmí obsahovat vlastní obchodní data;
 přítomné výchozí číselníky se mohou použít při shodném významu.
 
+Účtová osnova exportované firmy je pro její deník závazná. Účty, které prázdná
+cílová firma už má (výchozí osnova nové firmy), se párují podle čísla účtu
+a při první obnově převezmou význam a název zdroje: druh účtu, stranu,
+syntetiku, daňovou uznatelnost, zúčtovací povahu a aktivitu. Protokol je vypíše
+v `adopted_chart`. Prázdná je firma, která nemá žádný zápis deníku ani doklad;
+firmu s vlastními daty obnova odmítne celou. Při opakované obnově do firmy, která
+už převzatá data má, se osnova nemění: liší-li se význam některého účtu, obnova
+skončí bez zápisu a vypíše účty s rozdíly.
+
 Nejprve spusťte zkoušku nanečisto:
 
 ```bash

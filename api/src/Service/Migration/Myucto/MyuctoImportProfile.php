@@ -291,6 +291,14 @@ final class MyuctoImportProfile
         'documents' => ['thumb_path'],
     ];
     public const DOCUMENT_TYPES = ['invoice' => 'invoices', 'purchase_invoice' => 'purchase_invoices'];
+    /**
+     * Význam účtu v osnově: obnova ho porovnává u účtů, které cíl už má. Do prázdné firmy
+     * (první obnova, bez zápisů a dokladů) převezme význam i název zdroje, protože osnova
+     * exportované firmy je pro její deník závazná; do firmy s převzatými daty rozdíl obnovu zastaví.
+     */
+    public const CHART_SEMANTIC_COLUMNS = ['account_type', 'normal_side', 'is_synthetic', 'tax_deductibility', 'is_clearing'];
+    /** Popisné údaje účtu, které první obnova převezme spolu s významem. */
+    public const CHART_ADOPTED_COLUMNS = ['name', 'is_active'];
 
     /**
      * Firma obnovená starším profilem ze shodných dat. Otisk dat zahrnuje i seznam

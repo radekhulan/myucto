@@ -252,6 +252,7 @@ final class MyuctoImporter
             if ($previous === false) {
                 $this->adoptSetupRows($pdo, $reused, $prepared, $map, $schema);
             }
+            $report['adopted_chart'] = $this->reconcileChart($pdo, $reused, $prepared, $map, $previous === false);
             while ($pending !== []) {
                 $progress = false;
                 foreach ($pending as $table => $rows) {
@@ -1448,6 +1449,77 @@ final class MyuctoImporter
         }
     }
 
+    /**
+     * Účty osnovy, které cílová firma už má, se párují podle kódu. Osnova exportované firmy
+     * je pro její deník závazná: při první obnově (cíl prošel kontrolou prázdné firmy, nemá
+     * tedy žádný zápis deníku ani doklad) převezmou spárované účty význam a název zdroje,
+     * jinak by obnova výchozí osnovy nové firmy odmítla kvůli jiné daňové uznatelnosti
+     * nebo druhu účtu. Při opakované obnově (firma už převzatá data má a mohla na nich
+     * účtovat) se osnova nemění; rozdíl obnovu zastaví s výpisem účtů dřív, než cokoli zapíše.
+     *
+     * @param array<string,array<int|string,true>> $reused
+     * @param array<string,array<int|string,array<string,mixed>>> $prepared
+     * @param array<string,array<int|string,int>> $map
+     * @return list<string> převzaté účty (kód: změněné sloupce)
+     */
+    private function reconcileChart(PDO $pdo, array $reused, array $prepared, array $map, bool $adopt): array
+    {
+        $ids = array_keys($reused['chart_of_accounts'] ?? []);
+        if ($ids === []) {
+            return [];
+        }
+        $actual = [];
+        foreach (array_chunk(array_map(static fn (int|string $id): int => $map['chart_of_accounts'][$id], $ids), 500) as $chunk) {
+            $stmt = $pdo->prepare('SELECT * FROM chart_of_accounts WHERE id IN (' . implode(', ', array_fill(0, count($chunk), '?')) . ') FOR UPDATE');
+            $stmt->execute($chunk);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $actual[(int) $row['id']] = $row;
+            }
+        }
+        $columns = $adopt ? [...MyuctoImportProfile::CHART_SEMANTIC_COLUMNS, ...MyuctoImportProfile::CHART_ADOPTED_COLUMNS]
+            : MyuctoImportProfile::CHART_SEMANTIC_COLUMNS;
+        $changes = [];
+        foreach ($ids as $id) {
+            $expected = $prepared['chart_of_accounts'][$id];
+            $current = $actual[$map['chart_of_accounts'][$id]] ?? throw new RuntimeException('Rekonciliace: cílový řádek chybí.');
+            $diff = [];
+            foreach ($columns as $column) {
+                if (array_key_exists($column, $expected) && (string) $expected[$column] !== (string) ($current[$column] ?? null)) {
+                    $diff[$column] = $expected[$column];
+                }
+            }
+            if ($diff !== []) {
+                $changes[(string) $expected['account_code']] = [$map['chart_of_accounts'][$id], $diff, $current];
+            }
+        }
+        ksort($changes, SORT_STRING);
+        if (!$adopt) {
+            $conflicts = [];
+            foreach ($changes as $code => [, $diff, $current]) {
+                $conflicts[] = $code . ' (' . implode(', ', array_map(
+                    static fn (string $c): string => $c . ': export ' . ($diff[$c] ?? 'NULL') . ', cílová firma ' . ($current[$c] ?? 'NULL'),
+                    array_keys($diff),
+                )) . ')';
+            }
+            if ($conflicts !== []) {
+                $count = count($conflicts);
+                throw new RuntimeException('Účtová osnova cílové firmy má u ' . $count . ' účtů jiný význam než export: '
+                    . implode('; ', array_slice($conflicts, 0, 20)) . ($count > 20 ? '; …' : '')
+                    . '. Firma už převzatá data má, proto obnova osnovu nemění. Sjednoťte účty v cílové firmě, nebo obnovte do nové prázdné firmy. Obnova nic nezměnila.');
+            }
+            return [];
+        }
+        $adopted = [];
+        foreach ($changes as $code => [$targetId, $diff]) {
+            $set = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = ?', array_keys($diff)));
+            $pdo->prepare('UPDATE chart_of_accounts SET ' . $set . ' WHERE id = ?')->execute([...array_values($diff), $targetId]);
+            $keys = array_keys($diff);
+            sort($keys);
+            $adopted[] = $code . ': ' . implode(', ', $keys);
+        }
+        return $adopted;
+    }
+
     private function assertEmptyTarget(PDO $pdo, array $tables, int $supplierId, bool $unusedPeriods): void
     {
         $scopes = $this->scopes->resolveAll($supplierId);
@@ -1521,7 +1593,7 @@ final class MyuctoImporter
     private function assertReusable(string $table, array $expected, array $actual): void
     {
         $fields = match ($table) {
-            'currencies' => ['code', 'decimals'], 'chart_of_accounts' => ['account_code', 'account_type', 'normal_side', 'is_synthetic', 'tax_deductibility', 'is_clearing'],
+            'currencies' => ['code', 'decimals'], 'chart_of_accounts' => ['account_code', ...MyuctoImportProfile::CHART_SEMANTIC_COLUMNS],
             'vat_classifications' => ['code', 'direction', 'dphdp3_line', 'dphdp3_line_secondary', 'kh_section', 'vat_rate', 'is_reverse_charge', 'kod_pred_pl', 'kh_regime_code', 'kh_bad_debt', 'archived'],
             'cash_registers' => ['currency_code', 'account_code'], 'supplier_bank_accounts' => ['account_number', 'bank_code', 'currency'],
             'posting_rules' => ['rule_key', 'priority', 'description', 'debit_account_code', 'credit_account_code', 'is_active'],
