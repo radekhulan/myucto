@@ -13,6 +13,7 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use MyInvoice\Tests\Support\JmhzFrozenSubmissionFixture;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -1125,25 +1126,114 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertSame(['field' => 'activity_code'], $this->json($response)['error']['details']);
     }
 
-    /** Ukončený vztah je archiv — opravovat se v něm nedá stejně jako verzovat. */
-    public function testCorrectionIsRefusedOnAClosedEmployment(): void
+    /**
+     * Ukončený vztah jde opravit v údajích pro JMHZ (CZ-ISCO, pracoviště),
+     * dokud z hlášení za jeho měsíc nevzniklo podání: „Ukončit skončené
+     * dohody“ běží často dřív, než je hlášení za poslední měsíc hotové.
+     * Jiná změna podmínek (úvazek) patří k vrácení ukončení. Jakmile je
+     * hlášení za měsíc vztahu zmrazené, oprava skončí 409 a hláška řekne,
+     * za který měsíc a co dál.
+     */
+    public function testEndedEmploymentIsCorrectableForJmhzUntilSubmissionExists(): void
     {
         $employment = $this->create($this->employeeId, 'OPRAVA-4', 'employment', true);
         $employment = $this->transition($employment, 'active', '2026-01-01');
         $employment = $this->transition($employment, 'ended', '2026-02-28');
+        $path = "/api/payroll/employments/{$employment['id']}/terms/current";
+        $args = ['id' => (string) $employment['id']];
 
-        $response = $this->action->correctTerms(
-            $this->request(
-                'PATCH',
-                "/api/payroll/employments/{$employment['id']}/terms/current",
-                ['row_version' => $employment['row_version']]
-                    + $this->termsPayload(true, '2026-01-01'),
-            ),
+        $corrected = $this->action->correctTerms(
+            $this->request('PATCH', $path, ['row_version' => $employment['row_version'], 'cz_isco_code' => '93291']
+                + $this->termsPayload(true, '2026-01-01')),
             new Response(),
-            ['id' => (string) $employment['id']],
+            $args,
         );
+        self::assertSame(200, $corrected->getStatusCode(), (string) $corrected->getBody());
+        $employment = $this->json($corrected)['employment'];
+        self::assertSame('ended', $employment['status']);
+        self::assertSame('93291', $employment['terms'][0]['cz_isco_code']);
 
-        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        $contract = $this->action->correctTerms(
+            $this->request('PATCH', $path, [
+                'row_version' => $employment['row_version'],
+                'cz_isco_code' => '93291',
+                'weekly_hours' => '20',
+                'workload_basis_points' => 5000,
+            ] + $this->termsPayload(true, '2026-01-01')),
+            new Response(),
+            $args,
+        );
+        self::assertSame(409, $contract->getStatusCode(), (string) $contract->getBody());
+        $message = (string) $this->json($contract)['error']['message'];
+        self::assertStringContainsString('je ukončený', $message);
+        self::assertStringContainsString('po vrácení ukončení', $message);
+
+        $this->freezeJmhzReport((int) $employment['id'], '2026-02-01');
+        $reported = $this->action->correctTerms(
+            $this->request('PATCH', $path, ['row_version' => $employment['row_version'], 'cz_isco_code' => '43111']
+                + $this->termsPayload(true, '2026-01-01')),
+            new Response(),
+            $args,
+        );
+        self::assertSame(409, $reported->getStatusCode(), (string) $reported->getBody());
+        $message = (string) $this->json($reported)['error']['message'];
+        self::assertStringContainsString('hlášení JMHZ za 2/2026', $message);
+        self::assertStringContainsString('Vraťte ukončení vztahu', $message);
+        self::assertStringContainsString('opravné hlášení JMHZ', $message);
+    }
+
+    /**
+     * Schválený běh se vztahem a z něj ostré zmrazené podání JMHZ za měsíc
+     * (příprava + podání se stejným otiskem, jak ho zakládá „Zmrazit“).
+     */
+    private function freezeJmhzReport(int $employmentId, string $periodStart): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO payroll_runs
+                 (supplier_id, period_start, payment_date, status, current_revision_no, row_version)
+             VALUES (?, ?, ?, 'approved', 1, 1)",
+        )->execute([
+            $this->supplierId,
+            $periodStart,
+            (new \DateTimeImmutable($periodStart))->modify('+1 month +14 days')->format('Y-m-d'),
+        ]);
+        $runId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payroll_run_revisions
+                 (supplier_id, run_id, revision_no, status, schema_version,
+                  ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash,
+                  idempotency_key_hash)
+             VALUES (?, ?, 1, 'approved', 'test', ?, '{}', ?, ?)",
+        )->execute([$this->supplierId, $runId, str_repeat('a', 64), str_repeat('b', 64), random_bytes(32)]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payroll_run_employments
+                 (supplier_id, revision_id, employee_id, employment_id, input_json, input_hash)
+             VALUES (?, ?, ?, ?, '{}', ?)",
+        )->execute([$this->supplierId, $revisionId, $this->employeeId, $employmentId, str_repeat('c', 64)]);
+        $fingerprint = hash('sha256', 'snapshot' . $revisionId);
+        $pdo->prepare(
+            "INSERT INTO payroll_jmhz_preparation_snapshots
+                (supplier_id, environment, run_id, source_revision_id, period_start, scenario_key,
+                 builder_version, readiness_status, issue_count, source_manifest_json,
+                 source_manifest_sha256, readiness_json, readiness_sha256, snapshot_ciphertext,
+                 snapshot_fingerprint, request_fingerprint, idempotency_key_hash, created_by)
+             VALUES (?, 'production', ?, ?, ?, 'scenario_1', 'jmhz-preparation-source.v1',
+                     'source_ready', 0, '{}', ?, '{}', ?, 'enc:v2:synteticky', ?, ?, ?, ?)",
+        )->execute([
+            $this->supplierId,
+            $runId,
+            $revisionId,
+            $periodStart,
+            hash('sha256', 'manifest'),
+            hash('sha256', 'readiness'),
+            $fingerprint,
+            hash('sha256', 'request' . $revisionId),
+            hash('sha256', 'idempotency' . $revisionId, true),
+            $this->userId,
+        ]);
+        JmhzFrozenSubmissionFixture::freeze($pdo, $this->supplierId, $periodStart, $fingerprint, $this->userId);
     }
 
     /**

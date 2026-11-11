@@ -720,6 +720,14 @@ describe('osoby a vazby', () => {
     expect(creatablePersonKeys([matched, missing, ambiguous], {})).toEqual(['petr'])
   })
 
+  it('osobu s chybou řádku (neplatné rodné číslo) k založení nenabídne, přiřadit ke vztahu ji jde', () => {
+    const invalid = person('ivana', { errors: ['Rodné číslo: v podkladech není platné.'] })
+    expect(personCanBeCreated(invalid, {})).toBe(false)
+    expect(creatablePersonKeys([missing, invalid], {})).toEqual(['petr'])
+    expect(autoCreatablePersons([missing, invalid], {}).map(item => item.key)).toEqual(['petr'])
+    expect(effectiveEmploymentId(invalid, { ivana: 7 })).toBe(7)
+  })
+
   it('automaticky zakládá jen osoby s číslem, nesou-li podklady čísla', () => {
     const numbered = person('karel', { personal_number: 'Z010' })
     const masked = person('jitka', { birth_number_masked: '••••••/1234' })

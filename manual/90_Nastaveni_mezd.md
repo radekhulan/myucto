@@ -957,8 +957,11 @@ a slouží k tomu, aby šlo osobu přihlásit k ČSSZ bez dopisování karet:
 - **Státní občanství** a **Daňová rezidence** jako dvoupísmenný kód státu.
   Bez sloupce rezidence dostane osoba s českou adresou rezidenci CZ;
 - **CZ-ISCO**, **Druh činnosti** (prázdný doplní aplikace podle druhu vztahu)
-  a **Místo výkonu práce** (šest číslic = kód obce, jinak název) jdou do
-  podmínek vztahu;
+  a **Místo výkonu práce** jdou do podmínek vztahu. Šest číslic je kód obce;
+  název obce se dohledá v číselníku obcí ČSSZ a zapíše se s kódem a úředním
+  názvem („Praha" = 554782 Hlavní město Praha). Název, který v číselníku
+  jednoznačný není (stejnojmenné obce), zůstane jen textem a pro měsíční
+  hlášení JMHZ je potřeba doplnit kód obce;
 - **Prohlášení poplatníka** ano zapíše podepsané prohlášení s dnem podpisu
   **Prohlášení od** (bez něj ke dni nástupu). První měsíc slevy určí stejně
   jako hromadný zápis prohlášení podle § 38k ZDP;
@@ -969,8 +972,18 @@ Nové osobě se všechno zapíše při založení a náhled zakládání to u n�
 U osoby, která už v evidenci je, ukáže souhrn jen chybějící údaje a volba
 **Doplnit chybějící údaje pro registraci ČSSZ** je při použití zapíše; nic, co
 už evidence vede, se nepřepisuje. Volba vyžaduje oprávnění k zápisu osob.
-Nečitelná hodnota osobu nezastaví: u osoby se objeví upozornění a hodnota se
-nezapíše. Co se zapsat nepodařilo, vypíše výsledek importu s důvodem.
+Nečitelná hodnota osobu nezastaví: u osoby se objeví upozornění s názvem sloupce
+a hodnota se nezapíše. Stejně dopadne kód se správným tvarem, který v číselníku
+není: CZ-ISCO mimo klasifikaci ČSÚ, druh činnosti mimo číselník JMHZ, kód obce
+mimo číselník obcí ČSSZ nebo kód státu mimo číselník států. Co se zapsat nepodařilo, vypíše výsledek importu s důvodem.
+
+Jinak je to s **rodným číslem**: neprojde-li kontrolní číslicí, osobu s ním
+aplikace nezaloží. U osoby, kterou import v evidenci nenašel, je to proto
+v náhledu červená chyba řádku a osoba se k založení nenabídne. Opravte rodné
+číslo v podkladech a nahrajte je znovu, nebo osobu přiřaďte ke vztahu, který
+v evidenci už je. Nástup uprostřed měsíce nevadí: daňová rezidence se osobě
+zapíše od prvního dne měsíce nástupu, protože zákonná evidence se vede po
+celých měsících.
 
 Totéž funguje i s vlastním sešitem firmy. V **Mapování sloupců** je pro tyto
 údaje (a pro hodinovou sazbu, konec dohody a číslo účtu) skupina významů

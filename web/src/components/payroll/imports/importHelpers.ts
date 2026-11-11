@@ -855,7 +855,9 @@ export function pruneManualLinks(
  * Osoby (checkbox u řádku) i krok Souhrn (nabídka založit chybějící osoby).
  */
 export function personCanBeCreated(person: AttendancePerson, manual: ManualLinks): boolean {
+  // Chyba řádku (neplatné rodné číslo) založení zastaví: server by osobu odmítl.
   return person.match.status === 'not_found' && effectiveEmploymentId(person, manual) === null
+    && (person.errors?.length ?? 0) === 0
 }
 
 export function personHasIdentifier(person: AttendancePerson): boolean {

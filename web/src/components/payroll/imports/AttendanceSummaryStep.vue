@@ -56,7 +56,7 @@ function currentWage(minor: number | null): string {
 }
 
 const visiblePersons = computed(() => onlyIssues.value
-  ? props.preview.persons.filter(person => personHasConflicts(person) || person.warnings.length > 0 || employmentOf(person) === null)
+  ? props.preview.persons.filter(person => personHasConflicts(person) || person.warnings.length > 0 || (person.errors?.length ?? 0) > 0 || employmentOf(person) === null)
   : props.preview.persons)
 
 function employmentOf(person: AttendancePerson): AttendanceEmploymentOption | null {
@@ -206,6 +206,9 @@ function checkClass(check: AttendanceComponentCheck): string {
                 <p class="font-medium text-neutral-900">{{ person.display_name }}</p>
                 <p v-if="employmentOf(person)" class="text-xs text-neutral-500">{{ employmentOf(person)?.label }}</p>
                 <span v-else class="mt-0.5 inline-block rounded-full bg-warning-50 px-2 py-0.5 text-[11px] font-medium text-warning-700">{{ t('payroll_imports.attendance.summary.will_skip') }}</span>
+                <ul v-if="person.errors?.length" class="mt-1 max-w-xs space-y-0.5 text-[11px] font-medium text-danger-600">
+                  <li v-for="error in person.errors" :key="error">{{ error }}</li>
+                </ul>
                 <ul v-if="person.warnings.length" class="mt-1 max-w-xs space-y-0.5 text-[11px] text-warning-700">
                   <li v-for="warning in person.warnings" :key="warning">{{ warning }}</li>
                 </ul>
@@ -258,6 +261,9 @@ function checkClass(check: AttendanceComponentCheck): string {
               <dd class="text-right tabular-nums" :class="item.conflicts.length ? 'font-medium text-warning-700' : 'text-neutral-800'">−{{ formatMoneyMinor(item.amount_minor) }}<span v-if="item.conflicts.length"> ⚠</span></dd>
             </template>
           </dl>
+          <ul v-if="person.errors?.length" class="mt-2 space-y-0.5 text-xs font-medium text-danger-600">
+            <li v-for="error in person.errors" :key="error">{{ error }}</li>
+          </ul>
           <ul v-if="person.warnings.length" class="mt-2 space-y-0.5 text-xs text-warning-700">
             <li v-for="warning in person.warnings" :key="warning">{{ warning }}</li>
           </ul>
