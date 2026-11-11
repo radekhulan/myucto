@@ -85,6 +85,29 @@ final class JmhzComponentSourceRuleTest extends TestCase
     }
 
     /**
+     * Zdaněná (nadlimitní) cestovní náhrada a soukromé užití služebního vozu:
+     * do 10286 a základu daně patří, do mzdy za práci 10328 ne (pokyny MPSV
+     * cestovní náhrady jmenují výslovně). Nezdaněná část zařazení dál nemá
+     * jen proto, že se do hlášení nezahrnuje.
+     */
+    public function testTaxedTravelExcessAndCompanyCarNeedNoWageBreakdownMapping(): void
+    {
+        foreach (['travel_reimbursement', 'benefit_vehicle'] as $kind) {
+            self::assertNull(JmhzComponentSourceRule::issueCode('included', null, 'included', $kind), $kind);
+            self::assertTrue(JmhzComponentSourceRule::belongsOutsideWageBreakdown('included', 'included', $kind), $kind);
+            self::assertSame(
+                'component_jmhz_manual_review',
+                JmhzComponentSourceRule::issueCode('manual_review', null, 'manual_review', $kind),
+                $kind,
+            );
+        }
+        self::assertSame(
+            'component_jmhz_mapping_missing',
+            JmhzComponentSourceRule::issueCode('included', null, 'included', 'non_cash'),
+        );
+    }
+
+    /**
      * Vyřazená složka nemá co mapovat — chybějící zařazení u ní není nález,
      * je to správný stav.
      */

@@ -45,9 +45,19 @@ final class JmhzComponentSourceRule
      * Dřív chybějící zařazení hlásilo `component_jmhz_mapping_missing` a každé
      * skončení s odstupným zablokovalo hlášení za poslední měsíc, přičemž
      * katalog cílů správný atribut ani nenabízel.
+     *
+     * Totéž platí pro zdaněnou (nadlimitní) cestovní náhradu, kterou pokyny
+     * k 10328 jmenují výslovně, a pro bezplatné užívání služebního vozidla
+     * k soukromým účelům: § 6 odst. 6 ZDP ho oceňuje jako příjem zaměstnance,
+     * mzdou za práci podle § 109 odst. 2 ZP ale není (pokyny uvádějí mezi
+     * plněními bez charakteru mzdy i příspěvek na dopravu). Katalog cílů pro
+     * ně nenabízí nic než kolonky mzdy, příplatků a náhrad mzdy, takže účetní
+     * musela vybrat kolonku, do které plnění nepatří.
      */
     private const TAXED_KINDS_OUTSIDE_WAGE_BREAKDOWN = [
         'severance',
+        'travel_reimbursement',
+        'benefit_vehicle',
     ];
 
     /**
