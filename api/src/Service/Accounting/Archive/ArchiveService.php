@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Archive;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
+use MyInvoice\Service\Accounting\Dimension\SharedDimensionReferences;
 use MyInvoice\Service\Backup\BackupZipPermissions;
 use MyInvoice\Service\Document\JournalAttachmentStorage;
 use PDO;
@@ -646,41 +647,18 @@ final class ArchiveService
     private function collectSharedDimensions(int $supplierId): array
     {
         $pdo = $this->db->pdo();
-        $exists = [];
-        foreach ([
-            'journal_entry_line_dimensions' => 'dimension_value_id',
-            'journal_entry_line_dimension_splits' => 'dimension_value_id',
-            'document_dimensions' => 'dimension_value_id',
-            'document_dimension_splits' => 'dimension_value_id',
-            'dimension_defaults' => 'dimension_value_id',
-            'dimension_account_map' => 'dimension_value_id',
-            'dimension_account_rules' => 'default_value_id',
-            'dimension_values' => 'parent_id',
-        ] as $table => $column) {
-            $exists[] = "EXISTS (SELECT 1 FROM {$table} x WHERE x.supplier_id = ? AND x.{$column} = v.id)";
-        }
-        $stmt = $pdo->prepare(
-            'SELECT v.id, v.type_id, v.code, v.supplier_group_id FROM dimension_values v
-              WHERE v.supplier_id IS NULL AND (' . implode(' OR ', $exists) . ') ORDER BY v.id'
-        );
-        $stmt->execute(array_fill(0, count($exists), $supplierId));
+        $refs = SharedDimensionReferences::collect($pdo, $supplierId);
         $values = [];
-        $typeIds = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $values[] = ['id' => (int) $row['id'], 'type_id' => (int) $row['type_id'], 'code' => (string) $row['code'],
-                'supplier_group_id' => $row['supplier_group_id'] === null ? null : (int) $row['supplier_group_id']];
-            $typeIds[(int) $row['type_id']] = true;
+        foreach (array_chunk($refs['value_ids'], 500) as $chunk) {
+            $stmt = $pdo->prepare('SELECT id, type_id, code, supplier_group_id FROM dimension_values WHERE id IN ('
+                . implode(', ', array_fill(0, count($chunk), '?')) . ') ORDER BY id');
+            $stmt->execute($chunk);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $values[] = ['id' => (int) $row['id'], 'type_id' => (int) $row['type_id'], 'code' => (string) $row['code'],
+                    'supplier_group_id' => $row['supplier_group_id'] === null ? null : (int) $row['supplier_group_id']];
+            }
         }
-        $stmt = $pdo->prepare(
-            'SELECT t.id FROM dimension_types t
-              WHERE t.supplier_id IS NULL
-                AND (EXISTS (SELECT 1 FROM dimension_account_rules r WHERE r.supplier_id = ? AND r.dimension_type_id = t.id)
-                  OR EXISTS (SELECT 1 FROM dimension_values v WHERE v.supplier_id = ? AND v.type_id = t.id))'
-        );
-        $stmt->execute([$supplierId, $supplierId]);
-        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
-            $typeIds[(int) $id] = true;
-        }
+        $typeIds = array_fill_keys($refs['type_ids'], true);
         $types = [];
         if ($typeIds !== []) {
             $ids = array_keys($typeIds);

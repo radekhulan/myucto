@@ -73,6 +73,10 @@ final class MyuctoImporter
         $stored = $package['stored_files'] ?? [];
         $sourceKey = 'myucto:' . hash('sha256', $source . ':' . $sourceSupplier);
         $digestParts = [$tables, $package['assets'] ?? []];
+        $shared = $package['shared_dimensions'] ?? [];
+        if ($shared !== []) {
+            $digestParts['shared_dimensions'] = $shared;
+        }
         if ($stored !== []) {
             $digestParts[] = array_map(static fn (array $file): array => [$file['area'], $file['path'], $file['sha256']], $stored);
         }
@@ -167,6 +171,13 @@ final class MyuctoImporter
                         ?? throw new RuntimeException('Chybí shodný globální číselník: ' . $table . ':' . $id . '.');
                 }
             }
+            $sharedMap = $this->mapSharedDimensions($pdo, $shared, $target['supplier_group_id'] === null ? null : (int) $target['supplier_group_id']);
+            foreach ($sharedMap as $table => $ids) {
+                foreach ($ids as $sourceId => $targetId) {
+                    $map[$table][$sourceId] = $targetId;
+                }
+                $report['shared_dimensions'][$table] = count($ids);
+            }
             $previousMap = [];
             if ($previous !== false) {
                 // Mapování celé předchozí obnovy jedním dotazem, ne po řádcích.
@@ -219,6 +230,9 @@ final class MyuctoImporter
                 foreach ($group as $table => $ids) {
                     $ready[$table] = ($ready[$table] ?? []) + $ids;
                 }
+            }
+            foreach ($sharedMap as $table => $ids) {
+                $ready[$table] = ($ready[$table] ?? []) + array_fill_keys(array_keys($ids), true);
             }
             $pending = [];
             $prepared = [];
@@ -641,6 +655,74 @@ final class MyuctoImporter
     }
 
     /**
+     * Sdílené dimenze skupiny firem, na které data firmy odkazují. Obnova je nezakládá
+     * (patří skupině, ne firmě, a druhá kopie by rozdělila přehledy skupiny), ale dohledá
+     * je ve skupině cílové firmy podle kódu typu a kódu hodnoty. Ve stejné instanci a skupině
+     * tak zůstanou původní ID, v jiné instanci se přemapují na dimenze, které skupina vede.
+     * Chybí-li cílové firmě skupina, typ nebo hodnota, obnova skončí s výpisem rozdílů dřív,
+     * než cokoli zapíše: přiřazení by jinak tiše zmizela nebo mířila na cizí hodnotu.
+     *
+     * @param array<string,array<int,array<string,mixed>>> $shared
+     * @return array<string,array<int,int>> tabulka => zdrojové ID => cílové ID
+     */
+    private function mapSharedDimensions(PDO $pdo, array $shared, ?int $group): array
+    {
+        $types = $shared['dimension_types'] ?? [];
+        if ($types === []) {
+            return [];
+        }
+        $problems = [];
+        $out = ['dimension_types' => [], 'dimension_values' => []];
+        $targetTypes = [];
+        if ($group !== null) {
+            $stmt = $pdo->prepare('SELECT id, code, kind FROM dimension_types WHERE supplier_id IS NULL AND supplier_group_id = ?');
+            $stmt->execute([$group]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $targetTypes[mb_strtolower((string) $row['code'])] = $row;
+            }
+        }
+        foreach ($types as $id => $row) {
+            $match = $targetTypes[mb_strtolower((string) $row['code'])] ?? null;
+            if ($match === null) {
+                $problems[] = 'typ „' . $row['code'] . '" (' . $row['name'] . ')';
+            } elseif ((string) $match['kind'] !== (string) ($row['kind'] ?? $match['kind'])) {
+                $problems[] = 'typ „' . $row['code'] . '" má ve skupině jiný druh (' . $match['kind'] . ')';
+            } else {
+                $out['dimension_types'][$id] = (int) $match['id'];
+            }
+        }
+        $values = $shared['dimension_values'] ?? [];
+        $targetValues = [];
+        if ($values !== [] && $out['dimension_types'] !== []) {
+            $typeIds = array_values(array_unique($out['dimension_types']));
+            $stmt = $pdo->prepare('SELECT id, type_id, code FROM dimension_values WHERE supplier_id IS NULL AND supplier_group_id = ? AND type_id IN ('
+                . implode(', ', array_fill(0, count($typeIds), '?')) . ')');
+            $stmt->execute([$group, ...$typeIds]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $targetValues[(int) $row['type_id'] . "\x1f" . mb_strtolower((string) $row['code'])] = (int) $row['id'];
+            }
+        }
+        foreach ($values as $id => $row) {
+            $type = $out['dimension_types'][MyuctoExportReader::id($row['type_id'] ?? null)] ?? null;
+            $match = $type === null ? null : ($targetValues[$type . "\x1f" . mb_strtolower((string) $row['code'])] ?? null);
+            if ($match === null) {
+                $problems[] = 'hodnota „' . $row['code'] . '" (' . $row['name'] . ') typu „' . $types[MyuctoExportReader::id($row['type_id'])]['code'] . '"';
+            } else {
+                $out['dimension_values'][$id] = $match;
+            }
+        }
+        if ($problems !== []) {
+            $count = count($problems);
+            throw new RuntimeException(($group === null
+                ? 'Data firmy používají sdílené dimenze skupiny firem, ale cílová firma do žádné skupiny nepatří.'
+                : 'Skupina cílové firmy nemá sdílené dimenze, na které data firmy odkazují.')
+                . ' Chybí (' . $count . '): ' . implode('; ', array_slice($problems, 0, 20)) . ($count > 20 ? '; …' : '')
+                . '. Zařaďte cílovou firmu do skupiny firem, která tyto typy a hodnoty dimenzí vede (párují se podle kódu), a obnovu opakujte. Obnova nic nezměnila.');
+        }
+        return array_filter($out);
+    }
+
+    /**
      * Řádky bez vlastního `id` mimo deník ({@see MyuctoImportProfile::KEYLESS_TABLES}).
      * Cíl se načte po tabulkách jedním dotazem a porovná v paměti; při první obnově se
      * chybějící řádky vloží, při opakované musí všechny sedět. Počítadlo číselné řady,
@@ -675,6 +757,7 @@ final class MyuctoImporter
             };
             $actual = $load();
             $expected = [];
+            $inserts = [];
             foreach ($rows as $row) {
                 $out = $this->remapKeyless($table, $definition, $row, $map, $supplierId, $columns, $report);
                 if ($out === null) {
@@ -689,9 +772,8 @@ final class MyuctoImporter
                     if (!$firstRestore) {
                         throw new RuntimeException('Rekonciliace: cílový řádek chybí (' . $table . ').');
                     }
-                    $names = array_keys($out);
-                    $pdo->prepare('INSERT INTO `' . $table . '` (`' . implode('`, `', $names) . '`) VALUES (' . implode(', ', array_fill(0, count($names), '?')) . ')')
-                        ->execute(array_values($out));
+                    // Přiřazení dimenzí jdou do statisíců řádků: vkládá se po dávkách, ne po řádku.
+                    $inserts[implode("\x1f", array_keys($out))][] = $out;
                     $report['created'][$table] = ($report['created'][$table] ?? 0) + 1;
                 } elseif ($firstRestore && $counters === []) {
                     throw new RuntimeException('Cílová firma už obsahuje vlastní data: ' . $table . '.');
@@ -705,6 +787,14 @@ final class MyuctoImporter
                     $report['existing'][$table] = ($report['existing'][$table] ?? 0) + 1;
                 } else {
                     $report['existing'][$table] = ($report['existing'][$table] ?? 0) + 1;
+                }
+            }
+            foreach ($inserts as $batch) {
+                $names = array_keys($batch[0]);
+                $tuple = '(' . implode(', ', array_fill(0, count($names), '?')) . ')';
+                foreach (array_chunk($batch, 500) as $chunk) {
+                    $pdo->prepare('INSERT INTO `' . $table . '` (`' . implode('`, `', $names) . '`) VALUES ' . implode(', ', array_fill(0, count($chunk), $tuple)))
+                        ->execute(array_merge(...array_map('array_values', $chunk)));
                 }
             }
             $actual = $load();
@@ -919,6 +1009,17 @@ final class MyuctoImporter
                     if ($value !== null && !isset($tables[$target][MyuctoExportReader::id($value)])) {
                         $tables[$table][$id][$column] = null;
                         $detached[$table . '.' . $column] = ($detached[$table . '.' . $column] ?? 0) + 1;
+                    }
+                }
+            }
+        }
+        foreach (MyuctoImportProfile::OUTSIDE_GRAPH_OWNERS as $table => $columns) {
+            foreach ($tables[$table] ?? [] as $id => $row) {
+                foreach ($columns as $column) {
+                    if (($row[$column] ?? null) !== null) {
+                        unset($tables[$table][$id]);
+                        $dropped[$table . '.' . $column] = ($dropped[$table . '.' . $column] ?? 0) + 1;
+                        continue 2;
                     }
                 }
             }
@@ -1170,6 +1271,8 @@ final class MyuctoImporter
                     if ($fk['COLUMN_NAME'] === 'supplier_id') continue;
                     // Odpojená vazba míří mimo převáděný graf a remap() ji vynuluje.
                     if (in_array($fk['COLUMN_NAME'], MyuctoImportProfile::DETACHED_REFERENCES[$table] ?? [], true)) continue;
+                    // Složený FK (type_id, id) na hodnotu dimenze: typ mapuje vlastní FK nebo EXTRA_REFERENCES.
+                    if ($fk['REFERENCED_TABLE_NAME'] === 'dimension_values' && $fk['REFERENCED_COLUMN_NAME'] === 'type_id') continue;
                     if ($fk['REFERENCED_COLUMN_NAME'] !== 'id') {
                         throw new RuntimeException('Nepodporovaná reference schématu.');
                     }
