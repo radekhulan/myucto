@@ -418,9 +418,18 @@ final class PayrollRunGarnishmentProcessor
          * tedy doložené číslo, ne odhad. Kontrola pod tím zůstává: skutečný
          * rozpor (základ větší než peněžní výplata i po odečtení naturálií) se
          * pořád pozná a pořád zastaví běh.
+         *
+         * Odečítá se jen ta nepeněžní část, která v základu srážek OPRAVDU JE.
+         * Nepeněžní plnění zařazené mimo základ srážek (výchozí přechodné
+         * ubytování, příspěvek na spoření u rizikové práce, osvobozený benefit)
+         * v něm není, a kdyby se odečetlo také, snížil by se základ podruhé:
+         * srážky by se počítaly z nižší než vyplácené čisté mzdy (§ 277 odst. 1
+         * o. s. ř.) a u benefitu vyššího než výplata by běh skončil ručním
+         * posouzením.
          */
         $sourceAmount = self::intOrNull($totals, 'source_amount_minor');
-        $nonCash = $sourceAmount === null ? 0 : max(0, $sourceAmount - $grossCashPayable);
+        $nonCash = self::nonCashInEnforcementBase($person)
+            ?? ($sourceAmount === null ? 0 : max(0, $sourceAmount - $grossCashPayable));
         if ($nonCash > 0) {
             $grossEnforcementBase = max(0, $grossEnforcementBase - $nonCash);
         }
@@ -559,6 +568,47 @@ final class PayrollRunGarnishmentProcessor
         }
 
         return [$input, $result, $income, $cashReduction];
+    }
+
+    /**
+     * Nepeněžní příjem, který je součástí základu srážek, z rozpadu po vstupech:
+     * u vstupu s částkou vyšší než výplata (naturálie) nejvýš to, čím do základu
+     * srážek skutečně vstoupil. Snímek bez rozpadu vrací null a volající počítá
+     * jako dřív z úhrnů osoby.
+     *
+     * @param array<string,mixed> $person
+     */
+    private static function nonCashInEnforcementBase(array $person): ?int
+    {
+        $employments = $person['employments'] ?? null;
+        if (!is_array($employments) || !array_is_list($employments)) {
+            return null;
+        }
+        $nonCash = 0;
+        $rows = 0;
+        foreach ($employments as $employment) {
+            $inputs = is_array($employment) ? ($employment['inputs'] ?? null) : null;
+            if (!is_array($inputs) || !array_is_list($inputs)) {
+                return null;
+            }
+            foreach ($inputs as $input) {
+                $totals = is_array($input) && is_array($input['totals'] ?? null)
+                    ? $input['totals']
+                    : [];
+                $source = self::intOrNull($totals, 'source_amount_minor');
+                $cash = self::intOrNull($totals, 'cash_payable_minor');
+                $base = self::intOrNull($totals, 'enforcement_base_minor');
+                if ($source === null || $cash === null || $base === null) {
+                    return null;
+                }
+                ++$rows;
+                if ($source > $cash && $base > 0) {
+                    $nonCash = self::add($nonCash, min($base, $source - $cash));
+                }
+            }
+        }
+
+        return $rows === 0 ? null : $nonCash;
     }
 
     /**
