@@ -10,7 +10,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Migrace 2284: příspěvek zaměstnavatele na penzijní a životní produkty a na
+ * Migrace 2286: příspěvek zaměstnavatele na penzijní a životní produkty a na
  * pojištění dlouhodobé péče se u už založených výchozích složek mění na
  * nepeněžní plnění (§ 6 odst. 9 písm. m) ZDP, platí se instituci).
  *
@@ -24,7 +24,7 @@ final class PayrollE2eFix4ContributionMigrationTest extends TestCase
 {
     use PayrollFullFlowTrait;
 
-    private const MIGRATION = '2284_payroll_component_employer_contribution_non_monetary.sql';
+    private const MIGRATION = '2286_payroll_component_employer_contribution_non_monetary.sql';
 
     protected function setUp(): void
     {
