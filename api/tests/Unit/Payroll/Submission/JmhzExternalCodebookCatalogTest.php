@@ -192,11 +192,8 @@ final class JmhzExternalCodebookCatalogTest extends TestCase
         self::assertStringContainsString('opravte na „Hlavní město Praha"', $message);
         self::assertStringContainsString('Kód obce pracoviště 999999', (string) $catalog->workplaceMismatchMessage('999999', 'Praha', '2026-10-01'));
         self::assertNull($catalog->workplaceMismatchMessage('554782', 'Hlavní město Praha', '2026-10-01'));
-        // Měsíc mimo pokrytí číselníku: příčina je mezera číselníku, ne název,
-        // a věta to řekne místo rady opravovat kartu vztahu.
-        $gap = (string) $catalog->workplaceMismatchMessage('554782', 'Praha', '2027-01-01');
-        self::assertStringContainsString('pro 1/2027 tato verze aplikace ještě nemá', $gap);
-        self::assertStringNotContainsString('opravte na', $gap);
+        // Měsíc mimo pokrytí číselníku: příčina je mezera číselníku, ne název.
+        self::assertNull($catalog->workplaceMismatchMessage('554782', 'Praha', '2027-01-01'));
         self::assertNull($catalog->workplaceMismatchMessage(null, 'Praha', '2026-10-01'));
     }
 

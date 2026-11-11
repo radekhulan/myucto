@@ -275,12 +275,12 @@ final class PayrollE2eDppCalculationTest extends TestCase
         $preparation = $this->prepareJmhz($january, 'dpp-january-2027');
         self::assertSame(201, $preparation['status'], CanonicalJson::encode($preparation['body']));
         self::assertSame('blocked', $preparation['body']['readiness_status']);
-        // Kód nálezu se mezi větvemi liší (obecný „neověřeno“ s větou o měsíci,
-        // nebo samostatný „číselník nevyhlášen“); účetní musí v obou případech
-        // číst, že jde o číselník a že údaje pracoviště měnit nemá.
-        $codebookCodes = ['jmhz_workplace_codebooks_unverified', 'jmhz_workplace_codebooks_not_published'];
+        // Nevyhlášený číselník obcí a států má vlastní nález, ne obecné
+        // „pracoviště neověřeno“: údaje na kartě vztahu jsou v pořádku
+        // a účetní má číst, že jde o číselník a že je měnit nemá.
         $codes = array_column($preparation['body']['issues'], 'code');
-        self::assertNotSame([], array_intersect($codebookCodes, $codes), CanonicalJson::encode($codes));
+        self::assertContains('jmhz_workplace_codebooks_not_published', $codes, CanonicalJson::encode($codes));
+        self::assertNotContains('jmhz_workplace_codebooks_unverified', $codes, CanonicalJson::encode($codes));
         self::assertNotContains('jmhz_primary_employment_unresolved', $codes, 'Navazující dohoda přes přelom roku nemá být sporná.');
         $dry = $this->dryRunJmhz((int) $preparation['body']['id'], $this->officeId);
         self::assertSame('blocked', $dry['body']['status']);
@@ -293,7 +293,7 @@ final class PayrollE2eDppCalculationTest extends TestCase
         }
         $workplace = array_values(array_filter(
             $dry['body']['blockers'],
-            static fn (array $b): bool => in_array($b['code'], $codebookCodes, true),
+            static fn (array $b): bool => $b['code'] === 'jmhz_workplace_codebooks_not_published',
         ));
         self::assertNotSame([], $workplace);
         $said = mb_strtolower(
