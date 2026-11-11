@@ -802,6 +802,37 @@ final readonly class PayrollRegistrationIdentityService
     }
 
     /**
+     * Vady naposledy uloženého profilu A1 tak, jak by je ukázalo tlačítko
+     * „Kontrola" na kartě vztahu. `null`, když profil uložený není.
+     * Podklad pro hromadný přehled přihlášek, který vady ukazuje u každého
+     * vztahu bez otevírání formuláře.
+     *
+     * @return list<array{field:?string,code:string,message:string}>|null
+     */
+    public function storedA1ProfileProblems(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+    ): ?array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $stored = $this->repository->latestA1Profile(
+            $supplierId,
+            $employeeId,
+            $employmentId,
+        );
+        if ($stored === null) {
+            return null;
+        }
+
+        return $this->checkA1Profile(
+            $supplierId,
+            $employmentId,
+            $this->decodeA1Profile($stored),
+        )['problems'];
+    }
+
+    /**
      * Interní citlivý zdroj pro neměnný submission snapshot.
      *
      * @return array{

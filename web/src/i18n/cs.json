@@ -8974,6 +8974,7 @@
         "queue": "K odeslání",
         "transport": "Odesláno",
         "regzel": "Registrace zaměstnavatele",
+        "registration_a1": "Přihlášky k podání (A1)",
         "registration_completion": "Dohlášení údajů (A3)",
         "jmhz": "JMHZ",
         "discount_intents": "Záměr slevy",
@@ -12567,6 +12568,58 @@
         "program": "Předchozí program",
         "open": "Zobrazit podání",
         "deadline": "Lhůta dohlášení (30. 4. 2026) uplynula před začátkem vedení mezd v MyÚčtu, dohlášení tedy vyřídil předchozí program. Když ho ČSSZ nemá, dohlaste ho ručně."
+      }
+    },
+    "registrationA1": {
+      "title": "Přihlášky zaměstnanců k podání (REGZEC A1)",
+      "intro": "Vztahy, které ve zvoleném období trvají nebo začnou a u ČSSZ ještě nejsou přihlášené: nemají ID PPV, nemají připravenou ani odeslanou přihlášku a nepřihlásil je předchozí program. Přihlášku vybraným připravíte jedním tlačítkem stejně jako na kartě vztahu. Připravená podání pak odešlete ve frontě K odeslání.",
+      "legal": "Připraví se plná přihláška A1, i před nástupem. Připravují se jen vztahy s úplným profilem registrace; u neúplných řádek ukáže, co chybí, a odkaz na kartu vztahu.",
+      "from": "Období od",
+      "to": "Období do",
+      "submit": "Připravit vybrané ({count})",
+      "reload": "Načíst znovu",
+      "select_all": "Vybrat všechny úplné",
+      "select_one": "Vybrat {name}",
+      "open_profile": "Otevřít kartu vztahu",
+      "open_queue": "Otevřít frontu K odeslání",
+      "open_ended": "trvá",
+      "empty": "Ve zvoleném období žádný vztah přihlášku nepotřebuje.",
+      "load_failed": "Seznam přihlášek k podání se nepodařilo načíst.",
+      "submit_failed": "Přihlášky se nepodařilo připravit.",
+      "done": "Připraveno: {prepared}, přeskočeno: {skipped}. U přeskočených je důvod v řádku.",
+      "more_problems": "a další vady ({count}), celý seznam ukáže Kontrola na kartě vztahu",
+      "col": {
+        "person": "Zaměstnanec",
+        "period": "Trvání vztahu",
+        "profile": "Profil registrace (A1)",
+        "deadline": "Lhůta přihlášky"
+      },
+      "profile": {
+        "verified": "Úplný",
+        "draft": "Neúplný",
+        "missing": "Chybí"
+      },
+      "deadline": {
+        "due": "do {date}",
+        "overdue": "po lhůtě (do {date})",
+        "not_derived": "lhůtu aplikace neodvozuje, podejte bez odkladu",
+        "unknown": "bez data nástupu",
+        "after_p1": "po přijatém částečném přihlášení (P1)"
+      },
+      "warning": {
+        "duplicate_dpp": "Osoba má jinou otevřenou DPP ({code}), která už má ID PPV. Nejspíš jde o tentýž vztah založený dvakrát - zvažte sloučení vztahů místo nové přihlášky."
+      },
+      "result": {
+        "prepared": "Připraveno, podání č. {id}.",
+        "existing": "Přihláška už existuje, podání č. {id}.",
+        "open": "K odeslání"
+      },
+      "skip": {
+        "id_ppv": "Vztah už má ID PPV, přihláška se nepodává.",
+        "live_registration": "Přihláška už je připravená nebo odeslaná.",
+        "predecessor": "Přihlášku podal předchozí program.",
+        "profile_incomplete": "Profil registrace není úplný, přihláška se nepřipravila.",
+        "not_found": "Vztah nebyl nalezen nebo už skončil."
       }
     },
     "healthInsurerNotice": {

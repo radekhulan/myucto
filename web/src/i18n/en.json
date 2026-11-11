@@ -8974,6 +8974,7 @@
         "queue": "To send",
         "transport": "Sent",
         "regzel": "Employer registration",
+        "registration_a1": "Registrations to file (A1)",
         "registration_completion": "Data supplement (A3)",
         "jmhz": "JMHZ",
         "discount_intents": "Discount intent",
@@ -12567,6 +12568,58 @@
         "program": "The previous program",
         "open": "Show filing",
         "deadline": "The completion deadline (30 April 2026) passed before payroll started in MyÚčto, so the previous program handled it. If ČSSZ does not have it, file it manually."
+      }
+    },
+    "registrationA1": {
+      "title": "Employee registrations to file (REGZEC A1)",
+      "intro": "Employments that last or start in the selected period and are not yet registered with ČSSZ: they have no ID PPV, no prepared or sent registration, and the previous program did not register them. Prepare the registration for the selected ones with one button, exactly as on the employment card. Then send the prepared filings from the To send queue.",
+      "legal": "A full A1 registration is prepared, even before the start date. Only employments with a complete registration profile are prepared; for incomplete ones the row shows what is missing and links to the employment card.",
+      "from": "Period from",
+      "to": "Period to",
+      "submit": "Prepare selected ({count})",
+      "reload": "Reload",
+      "select_all": "Select all complete",
+      "select_one": "Select {name}",
+      "open_profile": "Open employment card",
+      "open_queue": "Open the To send queue",
+      "open_ended": "ongoing",
+      "empty": "No employment in the selected period needs a registration.",
+      "load_failed": "The list of registrations to file could not be loaded.",
+      "submit_failed": "The registrations could not be prepared.",
+      "done": "Prepared: {prepared}, skipped: {skipped}. Skipped rows show the reason.",
+      "more_problems": "and more issues ({count}); Check on the employment card shows the full list",
+      "col": {
+        "person": "Employee",
+        "period": "Employment period",
+        "profile": "Registration profile (A1)",
+        "deadline": "Registration deadline"
+      },
+      "profile": {
+        "verified": "Complete",
+        "draft": "Incomplete",
+        "missing": "Missing"
+      },
+      "deadline": {
+        "due": "by {date}",
+        "overdue": "overdue (by {date})",
+        "not_derived": "deadline not derived by the app, file without delay",
+        "unknown": "no start date",
+        "after_p1": "after an accepted limited registration (P1)"
+      },
+      "warning": {
+        "duplicate_dpp": "The person has another open DPP ({code}) that already has an ID PPV. It is probably the same employment created twice - consider merging the employments instead of filing a new registration."
+      },
+      "result": {
+        "prepared": "Prepared, filing no. {id}.",
+        "existing": "The registration already exists, filing no. {id}.",
+        "open": "To send"
+      },
+      "skip": {
+        "id_ppv": "The employment already has an ID PPV, no registration is filed.",
+        "live_registration": "A registration is already prepared or sent.",
+        "predecessor": "The previous program filed the registration.",
+        "profile_incomplete": "The registration profile is incomplete, the registration was not prepared.",
+        "not_found": "The employment was not found or has already ended."
       }
     },
     "healthInsurerNotice": {

@@ -5430,6 +5430,53 @@ export interface PayrollRegistrationCompletionResult {
   }>
 }
 
+/** Vztah, který potřebuje přihlášku REGZEC A1 (hromadná příprava). */
+export interface PayrollRegistrationA1Candidate {
+  employment_id: number
+  employee_id: number
+  employee_name: string
+  code: string
+  relation_type: string
+  status: string
+  start_date: string | null
+  end_date: string | null
+  profile_status: 'verified' | 'draft' | 'missing'
+  complete: boolean
+  problems: Array<{ field: string | null, code: string, message: string }>
+  after_pre_registration: boolean
+  deadline: {
+    earliest_registration_on: string
+    due_on: string
+    derived: boolean
+    overdue: boolean
+  } | null
+  warnings: Array<{
+    code: string
+    employment_id: number
+    employment_code: string
+    message: string
+  }>
+}
+
+export interface PayrollRegistrationA1Candidates {
+  items: PayrollRegistrationA1Candidate[]
+  from: string
+  to: string
+  today: string
+}
+
+export interface PayrollRegistrationA1BatchResult {
+  results: Array<{
+    employment_id: number
+    status: 'prepared' | 'skipped'
+    submission_id: number | null
+    agenda_code: string | null
+    created: boolean
+    code: string | null
+    message: string | null
+  }>
+}
+
 /** Varování před podáním, které podání neblokuje (překryv 603/604). */
 export interface PayrollRegistrationWarning {
   code: string
@@ -9822,6 +9869,20 @@ export const payrollApi = {
     effective_on?: string
   }) => api.post<PayrollRegistrationCompletionResult>(
     '/payroll/submissions/registration-completion',
+    payload,
+  ).then(response => response.data),
+  registrationA1Candidates: (
+    environment: PayrollJmhzTransportEnvironment,
+    period: { from?: string, to?: string } = {},
+  ) => api.get<PayrollRegistrationA1Candidates>(
+    '/payroll/submissions/registration-a1',
+    { params: { environment, ...period } },
+  ).then(response => response.data),
+  prepareRegistrationA1Batch: (payload: {
+    environment: PayrollJmhzTransportEnvironment
+    employment_ids: number[]
+  }) => api.post<PayrollRegistrationA1BatchResult>(
+    '/payroll/submissions/registration-a1',
     payload,
   ).then(response => response.data),
   sendEmploymentRegistrationTransport: (
