@@ -168,6 +168,34 @@ final class PayrollQuickInputComponentsTest extends TestCase
         self::assertArrayNotHasKey(self::PROJECT, $this->item('A')['components']);
     }
 
+    /**
+     * Schválený a uzamčený vstup mají jiný další krok. Hláška je dřív slévala
+     * do „schválený nebo uzamčený" a neříkala, který běh vstup drží ani co dál.
+     */
+    public function testRefusedOverwriteSaysWhetherTheInputIsApprovedOrLockedAndWhatNext(): void
+    {
+        self::assertSame([], $this->save('A', [self::PROJECT => ['amount_minor' => 123_456, 'row_version' => null]]));
+        $cell = $this->item('A')['components'][self::PROJECT];
+
+        $approved = $this->save('A', [self::PROJECT => ['amount_minor' => 99_000, 'row_version' => $cell['row_version']]], autoApprove: false);
+        self::assertCount(1, $approved);
+        self::assertStringContainsString('06/2026 je už schválený', $approved[0]['message']);
+        self::assertStringContainsString('do konceptu', $approved[0]['message']);
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_inputs SET status = "locked" WHERE supplier_id = ? AND employment_id = ? AND external_id = ?')
+            ->execute([$this->supplierId, $this->employments['A'], 'quick-monthly:' . self::PROJECT]);
+        $pdo->prepare('INSERT INTO payroll_runs (supplier_id, period_start, payment_date, status) VALUES (?, ?, "2026-07-15", "calculated")')
+            ->execute([$this->supplierId, self::PERIOD_START]);
+        $runId = (int) $pdo->lastInsertId();
+
+        $locked = $this->save('A', [self::PROJECT => ['amount_minor' => 99_000, 'row_version' => $cell['row_version']]]);
+        self::assertCount(1, $locked);
+        self::assertStringContainsString("uzamčený v mzdovém běhu č. {$runId} (stav: Spočítáno)", $locked[0]['message']);
+        self::assertStringContainsString('Zrušit běh', $locked[0]['message']);
+        self::assertSame(123_456, (int) $this->activeInput('A', 'quick-monthly:' . self::PROJECT)['amount_minor']);
+    }
+
     public function testComponentThatCannotBeEnteredIsRefusedPerField(): void
     {
         $failures = $this->save('A', ['STRAVNE_PAUSAL' => ['amount_minor' => 10_000, 'row_version' => null]]);

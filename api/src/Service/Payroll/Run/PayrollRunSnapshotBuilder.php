@@ -454,7 +454,8 @@ final class PayrollRunSnapshotBuilder
                     $employmentId,
                     sprintf(
                         '%s: pracovní vztah nemá schválenou docházku. Zamknutím vstupů se '
-                        . 'stav zmrazí a měsíční hlášení ČSSZ by ji už nevidělo.',
+                        . 'stav zmrazí a měsíční hlášení ČSSZ by ji už nevidělo. Schvalte '
+                        . 'docházku v Mzdy → Docházka (odkaz otevře tento vztah a měsíc).',
                         (string) $row['full_name'],
                     ),
                     "/payroll/time?employment={$employmentId}&period=" . substr($periodStart, 0, 7),
@@ -517,6 +518,7 @@ final class PayrollRunSnapshotBuilder
                     "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms");
             }
             $riskySavingsEvidence = $this->riskySavingsEvidence($row);
+            $riskySavingsPath = self::riskySavingsPath($employeeId, $employmentId);
             if ($riskySavingsEvidence !== null) {
                 foreach ($this->riskySavingsPolicy->issues(
                     $riskySavingsEvidence,
@@ -528,7 +530,7 @@ final class PayrollRunSnapshotBuilder
                         'employment',
                         $employmentId,
                         $this->riskySavingsValidationMessage($issue),
-                        '/payroll/components',
+                        $riskySavingsPath,
                     );
                 }
                 foreach ($this->riskySavingsPolicy->warnings(
@@ -541,7 +543,7 @@ final class PayrollRunSnapshotBuilder
                         'employment',
                         $employmentId,
                         $this->riskySavingsValidationMessage($warning),
-                        '/payroll/components',
+                        $riskySavingsPath,
                     );
                 }
             }
@@ -1380,8 +1382,16 @@ final class PayrollRunSnapshotBuilder
             || $rowVersion <= 0
             || !is_bool($automaticPosting)
         ) {
-            throw new \UnexpectedValueException(
-                'Účinná zaměstnavatelská politika nemá platná data pro mzdový snapshot.',
+            throw new PayrollRunSnapshotFixableException(
+                'employer_policy_invalid',
+                sprintf(
+                    'Zaměstnavatelská mzdová politika účinná za období %s nemá úplná data. '
+                        . 'Otevřete Mzdy → Nastavení mezd → Politiky a připravenost, politiku '
+                        . 'zkontrolujte (včetně volby automatického účtování) a uložte ji znovu. '
+                        . 'Pokud se hláška opakuje, předejte ji správci aplikace.',
+                    self::formatPeriod($periodStart),
+                ),
+                '/payroll/settings?tab=policies',
             );
         }
 
@@ -1390,6 +1400,19 @@ final class PayrollRunSnapshotBuilder
             'row_version' => $rowVersion,
             'automatic_posting_enabled' => $automaticPosting,
         ];
+    }
+
+    /**
+     * Rovnou na záložku Rizikové spoření zúženou na vztah. Bez `tab` stránka
+     * otevře Mzdové vstupy, kde se evidence rizikové práce opravit nedá.
+     */
+    private static function riskySavingsPath(int $employeeId, int $employmentId): string
+    {
+        return '/payroll/components?' . http_build_query([
+            'tab' => 'risky_savings',
+            'person' => $employeeId,
+            'employment' => $employmentId,
+        ]);
     }
 
     private static function formatPeriod(string $periodStart): string
@@ -2420,8 +2443,11 @@ final class PayrollRunSnapshotBuilder
             || !is_string($row['ic'] ?? null)
             || trim($row['ic']) === ''
         ) {
-            throw new \DomainException(
-                'Firma nemá úplnou identitu zaměstnavatele pro výplatní pásky.',
+            throw new PayrollRunSnapshotFixableException(
+                'employer_identity_incomplete',
+                'Firma nemá úplnou identitu zaměstnavatele pro výplatní pásky: chybí '
+                    . 'název firmy nebo IČO. Doplňte je v Nastavení firmy a kontrolu spusťte znovu.',
+                '/admin/settings',
             );
         }
         $settings = ($this->employerSettings
@@ -2429,8 +2455,11 @@ final class PayrollRunSnapshotBuilder
             ->get($supplierId);
         $accounts = $settings['accounts'] ?? null;
         if (!is_array($accounts) || array_is_list($accounts)) {
-            throw new \DomainException(
-                'Firma nemá úplné účetní předkontace pro výplatní pásky.',
+            throw new PayrollRunSnapshotFixableException(
+                'employer_accounts_incomplete',
+                'Firma nemá úplné účetní předkontace pro výplatní pásky. Otevřete Mzdy → '
+                    . 'Nastavení mezd → Automatické účtování, předkontace doplňte a uložte.',
+                '/payroll/settings?tab=accounting',
             );
         }
         $accountSnapshot = [];
@@ -2447,8 +2476,15 @@ final class PayrollRunSnapshotBuilder
                 || !is_string($account)
                 || preg_match('/^[0-9]{3}[.A-Z0-9]{0,13}$/D', $account) !== 1
             ) {
-                throw new \DomainException(
-                    'Firma nemá platné účetní předkontace pro výplatní pásky.',
+                throw new PayrollRunSnapshotFixableException(
+                    'employer_accounts_invalid',
+                    sprintf(
+                        'Firma nemá platné účetní předkontace pro výplatní pásky: %s není '
+                            . 'platné číslo účtu. Otevřete Mzdy → Nastavení mezd → Automatické '
+                            . 'účtování a předkontaci opravte.',
+                        is_string($account) && $account !== '' ? '„' . $account . '“' : 'jedna z nich',
+                    ),
+                    '/payroll/settings?tab=accounting',
                 );
             }
             $accountSnapshot[$key] = $account;
@@ -2728,7 +2764,7 @@ final class PayrollRunSnapshotBuilder
             // Podíl a vazba na firemní dimenzi vstupují jen tam, kde jsou
             // nastavené. Vztah se 100 % a bez vazby tak má otisk shodný
             // s dosavadním snapshotem a zaúčtuje se bajtově stejně.
-            $shareBp = self::shareBasisPoints($row['share_percent'] ?? null);
+            $shareBp = self::shareBasisPoints($row['share_percent'] ?? null, $employmentId, $dimension['code']);
             if ($shareBp !== 10_000) {
                 $dimension['share_bp'] = $shareBp;
             }
@@ -2748,34 +2784,61 @@ final class PayrollRunSnapshotBuilder
         // schválení běhu. Zastaví se tady, kdy se dá ještě opravit.
         foreach ($shares as $type => $share) {
             if ($share['total'] !== 10_000) {
-                throw new \DomainException(sprintf(
-                    'Procentní rozpad mzdových dimenzí typu %s u pracovního vztahu %d dává k začátku '
-                    . 'období %s %% místo 100 %%. Upravte rozpad na kartě pracovního vztahu.',
-                    $type,
-                    $employmentId,
-                    number_format($share['total'] / 100, 2, ',', ' '),
-                ));
+                throw new PayrollRunSnapshotFixableException(
+                    'employment_dimension_split_invalid',
+                    sprintf(
+                        'Procentní rozpad mzdových dimenzí typu %s u pracovního vztahu %d dává k začátku '
+                        . 'období %s %% místo 100 %%. Upravte rozpad na kartě pracovního vztahu.',
+                        $type,
+                        $employmentId,
+                        number_format($share['total'] / 100, 2, ',', ' '),
+                    ),
+                    self::dimensionSplitPath($employmentId),
+                );
             }
         }
         return $result;
     }
 
-    /** Podíl v setinách procenta (10 000 = 100 %); chybějící sloupec = 100 %. */
-    private static function shareBasisPoints(mixed $share): int
+    /**
+     * Podíl v setinách procenta (10 000 = 100 %); chybějící sloupec = 100 %.
+     *
+     * Neplatný podíl opraví účetní v rozpadu na kartě vztahu, proto je to
+     * opravitelný nález s odkazem, ne interní chyba (dřív končil jako 500).
+     */
+    private static function shareBasisPoints(mixed $share, int $employmentId = 0, string $dimensionCode = ''): int
     {
         if ($share === null) {
             return 10_000;
         }
         $text = is_string($share) ? $share : (string) $share;
-        if (preg_match('/^(\d{1,3})(?:\.(\d{1,2}))?$/', $text, $match) !== 1) {
-            throw new \UnexpectedValueException("Podíl dimenze {$text} není platné procento.");
-        }
-        $bp = (int) $match[1] * 100 + (int) str_pad($match[2] ?? '0', 2, '0');
-        if ($bp <= 0 || $bp > 10_000) {
-            throw new \UnexpectedValueException("Podíl dimenze {$text} je mimo rozsah 0–100 %.");
+        $bp = preg_match('/^(\d{1,3})(?:\.(\d{1,2}))?$/', $text, $match) === 1
+            ? (int) $match[1] * 100 + (int) str_pad($match[2] ?? '0', 2, '0')
+            : null;
+        if ($bp === null || $bp <= 0 || $bp > 10_000) {
+            throw new PayrollRunSnapshotFixableException(
+                'employment_dimension_share_invalid',
+                sprintf(
+                    'Podíl %s %% u mzdové dimenze %s pracovního vztahu %d %s. Na kartě pracovního '
+                        . 'vztahu v rozpadu dimenzí zadejte podíl větší než 0 a nejvýš 100 %% '
+                        . 's nejvýš dvěma desetinnými místy.',
+                    $text,
+                    $dimensionCode !== '' ? $dimensionCode : '(bez kódu)',
+                    $employmentId,
+                    $bp === null ? 'není platné procento' : 'je mimo rozsah 0–100 %',
+                ),
+                self::dimensionSplitPath($employmentId),
+            );
         }
 
         return $bp;
+    }
+
+    private static function dimensionSplitPath(int $employmentId): string
+    {
+        return $employmentId > 0
+            ? '/payroll/people?' . http_build_query(['employment' => $employmentId, 'panel' => 'employment_terms'])
+            : '/payroll/people';
     }
 
     /**

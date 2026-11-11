@@ -2049,5 +2049,52 @@ describe('PayrollRuns', () => {
 
       wrapper.unmount()
     })
+
+    it('nález s hromadnou opravou otevře dialog ze seznamu zaměstnanců na období běhu', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: true,
+        has_findings: true,
+        findings: [{
+          code: 'person_data_gap',
+          severity: 'info',
+          impact: 'anytime',
+          scope: 'setup',
+          message: 'Za období 2026-02 chybí zákonné údaje.',
+          remediation_path: '/payroll/people?filter=blocking_data',
+          count: 3,
+          entities: [{
+            entity_type: 'employee',
+            entity_id: 7,
+            label: 'Syntetická Osoba',
+            message: 'Syntetická Osoba: chybí daňová rezidence.',
+            gaps: ['tax_residence'],
+            remediation_path: '/payroll/people?person=7&panel=statutory_evidence',
+          }],
+          bulk_actions: [
+            { kind: 'statutory_defaults', count: 3 },
+            { kind: 'health_insurer', count: 1 },
+          ],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const statutory = wrapper.get('[data-test="run-readiness-bulk-action-statutory_defaults"]')
+      expect(JSON.parse(statutory.attributes('data-to')!)).toEqual({
+        name: 'payroll-people',
+        query: { bulk: 'statutory_defaults', period: '2026-02' },
+      })
+      expect(statutory.text()).toContain('payroll.runs.readiness.bulk.statutory_defaults')
+      expect(wrapper.find('[data-test="run-readiness-bulk-action-health_insurer"]').exists()).toBe(true)
+      expect(wrapper.text()).toContain('Syntetická Osoba: chybí daňová rezidence.')
+      wrapper.unmount()
+    })
   })
 })

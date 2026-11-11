@@ -368,12 +368,14 @@ final class PayrollTakeoverRunService
             throw new \OutOfBoundsException('Firma nebyla nalezena.');
         }
         if (!(bool) $row['payroll_enabled']) {
-            throw new \DomainException('Firma nemá vedení mezd zapnuté.');
+            throw new \DomainException(PayrollModuleAvailabilityMessage::PAYROLL_DISABLED);
         }
         if ($row['module_status'] === null
             || in_array($row['module_status'], ['disabled', 'suspended'], true)
         ) {
-            throw new \DomainException('Plný mzdový modul firmy není aktivní.');
+            throw new \DomainException(PayrollModuleAvailabilityMessage::moduleInactive(
+                $row['module_status'] === null ? null : (string) $row['module_status'],
+            ));
         }
     }
 }

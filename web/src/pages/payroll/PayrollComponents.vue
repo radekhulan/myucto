@@ -863,10 +863,11 @@ async function load() {
     if (activeTab.value === 'catalog') {
       // Nečekáme na volitelný katalog JMHZ: běžná správa složek musí zůstat
       // použitelná i při dočasně nedostupném podkladu pro mapování.
-      void loadJmhzConfiguration()
+      const jmhzLoaded = loadJmhzConfiguration()
       const catalog = await payrollApi.componentCatalog()
       components.value = catalog.components
       minimumClassificationRules.value = catalog.minimum_wage_classification ?? null
+      void openRequestedComponent(jmhzLoaded)
     } else if (activeTab.value === 'recurring') {
       const [catalog] = await Promise.all([
         payrollApi.components(),
@@ -893,6 +894,35 @@ async function load() {
     loading.value = false
   }
 }
+
+/*
+ * Odkaz z kontroly běhu nebo z blokace JMHZ (`?tab=catalog&component=ID`)
+ * otevře rovnou editor složky, s `panel=jmhz` její zařazení do hlášení.
+ * Zařazení čeká na katalog JMHZ, jinak by editor ukázal prázdný cíl.
+ */
+const requestedComponentId = ref<number | null>(payrollQueryId(route.query, 'component'))
+
+async function openRequestedComponent(jmhzLoaded: Promise<void>) {
+  const id = requestedComponentId.value
+  if (id === null) return
+  requestedComponentId.value = null
+  const component = components.value.find(item => item.id === id)
+  if (!component) return
+  if (payrollQueryValue(route.query, 'panel') === 'jmhz') {
+    await jmhzLoaded
+    openJmhzMapping(component)
+  } else {
+    await editComponent(component)
+  }
+}
+
+watch(() => route.query.component, () => {
+  const id = payrollQueryId(route.query, 'component')
+  if (id === null) return
+  requestedComponentId.value = id
+  if (activeTab.value !== 'catalog') activeTab.value = 'catalog'
+  else void load()
+})
 
 function setJmhzMappings(states: PayrollComponentJmhzMappingState[]) {
   jmhzMappings.value = Object.fromEntries(states.map(state => [state.component_id, state]))
@@ -1784,7 +1814,11 @@ async function cancelInput(input: PayrollInput) {
 
 async function reverseBenefitInput(input: PayrollInput) {
   const reason = window.prompt(t('payroll.components.inputs.reverse_benefit_reason'))
-  if (reason === null || reason.trim() === '') return
+  if (reason === null) return
+  if (reason.trim() === '') {
+    inputError.value = t('payroll.components.inputs.reverse_benefit_reason_required')
+    return
+  }
   inputError.value = ''
   saving.value = true
   try {

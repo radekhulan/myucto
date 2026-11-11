@@ -4716,6 +4716,13 @@
       "readiness": {
         "affected": "Týká se: {names}",
         "fill_probable_average": "Doplnit pravděpodobný výdělek ze sazby",
+        "bulk": {
+          "statutory_defaults": "Doplnit výchozí zákonné údaje ({count})",
+          "declaration_signed": "Podepsaná prohlášení hromadně",
+          "health_insurer": "Zdravotní pojišťovny hromadně ({count})",
+          "workplace": "Doplnit místo výkonu práce ({count})",
+          "closure": "Ukončit skončené dohody ({count})"
+        },
         "fill_probable_average_done": "Doplněno automaticky ze sjednané hodinové sazby: {count}. Průměr jde opravit novou revizí v Absence a dovolená → Průměrný výdělek.",
         "fill_probable_average_failed": "Pravděpodobný výdělek se nepodařilo doplnit.",
         "impact": {
@@ -5164,6 +5171,7 @@
         "cancel_failed": "Měsíční vstup se nepodařilo zrušit.",
         "reverse_benefit": "Stornovat benefit",
         "reverse_benefit_reason": "Důvod storna benefitu - proč se uvolňuje roční koš osvobození (§ 6 odst. 9 ZDP)?",
+        "reverse_benefit_reason_required": "Benefit se nestornoval: bez důvodu storno nejde uložit. Klikněte znovu na „Stornovat benefit“ a důvod vyplňte.",
         "benefit_reversed": "Benefit byl stornován a roční koš osvobození se uvolnil.",
         "reverse_benefit_failed": "Benefit se nepodařilo stornovat.",
         "empty": "V tomto období nejsou mzdové vstupy",

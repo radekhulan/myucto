@@ -140,7 +140,12 @@ final class PayrollRunJmhzReadinessProbe
                     'entity_id' => $issue['entity_id'],
                     'label' => $label,
                     'message' => self::message($issue['code'], $label === null ? [] : [$label], 1),
-                    'remediation_path' => self::remediationPath($issue['code'], $issue['entity_id'], $periodStart),
+                    'remediation_path' => self::remediationPath(
+                        $issue['code'],
+                        $issue['entity_id'],
+                        $periodStart,
+                        $issue['entity_type'],
+                    ),
                 ];
                 if ($label !== null && !in_array($label, $groups[$code]['labels'], true)) {
                     $groups[$code]['labels'][] = $label;
@@ -336,14 +341,21 @@ final class PayrollRunJmhzReadinessProbe
             ),
             default => JmhzBlockerExplainer::guidance($code)
                 . ($named === '' ? '' : ' Týká se: ' . $named . '.')
-                . ' Otevřete Mzdová podání → JMHZ a spusťte test hlášení. Mzdový běh tím není omezený.',
+                . ' Odkaz vede na místo opravy; potom ověřte stav testem hlášení v Mzdová podání → JMHZ.'
+                . ' Mzdový běh tím není omezený.',
         };
     }
 
-    private static function remediationPath(string $code, ?int $entityId = null, ?string $periodStart = null): ?string
-    {
+    private static function remediationPath(
+        string $code,
+        ?int $entityId = null,
+        ?string $periodStart = null,
+        string $entityType = '',
+    ): ?string {
         // Cestu skládá jediné místo, stejné jako u blokace zmrazení hlášení.
-        return JmhzBlockerRemediationPath::forReadinessCode($code, $entityId, $periodStart)
+        // Obecná stránka JMHZ zbývá jen kódům, u kterých katalog místo opravy
+        // nezná (zopakovat test, ruční podání, správce).
+        return JmhzBlockerRemediationPath::forReadinessCode($code, $entityId, $periodStart, $entityType)
             ?? '/payroll/submissions/jmhz';
     }
 

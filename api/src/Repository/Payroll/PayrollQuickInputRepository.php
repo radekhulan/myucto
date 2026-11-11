@@ -3718,9 +3718,13 @@ final class PayrollQuickInputRepository
                 $expectedVersion = $currentVersion;
             }
             if ($status !== 'draft') {
-                throw new \DomainException(
-                    'Schválený nebo uzamčený mzdový vstup nelze rychlým formulářem přepsat.'
-                );
+                throw new \DomainException(PayrollInputLockGuidance::message(
+                    $this->db->pdo(),
+                    $supplierId,
+                    $status,
+                    $periodStart,
+                    'rychlým formulářem zrušit',
+                ));
             }
             if ($expectedVersion === null || $expectedVersion !== $currentVersion) {
                 throw new PayrollInputConflictException($currentVersion);
@@ -3747,9 +3751,13 @@ final class PayrollQuickInputRepository
         // S právem schvalovat jde i vlastní dosud nezamčený schválený vstup —
         // jinak by si uživatel první uloženou částkou zabetonoval svůj řádek.
         if ($status !== 'draft' && !($autoApprove && $status === 'approved')) {
-            throw new \DomainException(
-                'Schválený nebo uzamčený mzdový vstup nelze rychlým formulářem přepsat.'
-            );
+            throw new \DomainException(PayrollInputLockGuidance::message(
+                $this->db->pdo(),
+                $supplierId,
+                $status,
+                $periodStart,
+                'rychlým formulářem přepsat',
+            ));
         }
         if ($expectedVersion === null || $expectedVersion !== $currentVersion) {
             throw new PayrollInputConflictException($currentVersion);

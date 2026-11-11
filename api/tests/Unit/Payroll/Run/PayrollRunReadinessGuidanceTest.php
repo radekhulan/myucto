@@ -5,10 +5,15 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Run;
 
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use MyInvoice\Service\Payroll\Run\PayrollRunIssueGuidance;
 use MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe;
+use MyInvoice\Service\Payroll\Run\PayrollRunReadinessImpact;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
+use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotFixableException;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
 use MyInvoice\Service\Payroll\Run\PayrollRunValidation;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerRemediationPath;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Blocker;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollRunReadinessGuidanceTest extends TestCase
@@ -66,6 +71,79 @@ final class PayrollRunReadinessGuidanceTest extends TestCase
         self::assertStringNotContainsString($code, $message);
         self::assertStringContainsString('JMHZ', $message);
         self::assertSame('/payroll/submissions/jmhz', self::invoke(PayrollRunJmhzReadinessProbe::class, 'remediationPath', [$code]));
+    }
+
+    /**
+     * Kód, který katalog JMHZ zná, nevede na obecnou stránku podání, ale na
+     * místo opravy, a to na zpracovávaný měsíc.
+     */
+    public function testCatalogKnownJmhzIssueLinksToItsFixWithThePeriod(): void
+    {
+        self::assertSame(
+            '/payroll/absences?employment=22&tab=absences&period=2026-08',
+            self::invoke(PayrollRunJmhzReadinessProbe::class, 'remediationPath', [
+                'jmhz_xml_eldp_deducted_days_sum_mismatch', 22, '2026-08-01', 'employment',
+            ]),
+        );
+        self::assertSame(
+            '/payroll/time?employment=22&period=2026-08',
+            self::invoke(PayrollRunJmhzReadinessProbe::class, 'remediationPath', [
+                'jmhz_eldp_interval_invalid', 22, '2026-08-01', 'employment',
+            ]),
+        );
+    }
+
+    /** Odkazy ze zmrazení hlášení nesou vykazované období, ne dnešní měsíc. */
+    public function testFreezeBlockerLinksCarryTheReportedPeriod(): void
+    {
+        $path = static fn (string $code, string $type, ?int $id): ?string => JmhzBlockerRemediationPath::forBlocker(
+            new JmhzScenario1Blocker($code, $type, $id),
+            '2026-08-01',
+        );
+        self::assertSame('/payroll/runs?period=2026-08', $path('eldp_assessment_base_missing', 'run', null));
+        self::assertSame(
+            '/payroll/absences?employment=22&tab=averages&year=2026&quarter=3',
+            $path('jmhz_average_hourly_earning_missing', 'employment', 22),
+        );
+        self::assertSame('/payroll/time?employment=22&period=2026-08', $path('jmhz_eldp_interval_invalid', 'employment', 22));
+        // Bez známého období zůstává odkaz po staru.
+        self::assertSame('/payroll/runs', JmhzBlockerRemediationPath::forBlocker(
+            new JmhzScenario1Blocker('eldp_assessment_base_missing', 'run', null),
+        ));
+    }
+
+    /** Nález zařazení složky vede do číselníku, ne na výchozí záložku Mzdové vstupy. */
+    public function testComponentFindingsOpenTheCatalogTab(): void
+    {
+        self::assertSame(
+            '/payroll/components?tab=catalog',
+            PayrollRunIssueGuidance::describe('component_treatment_unverified', 7, 9)['remediation_path'],
+        );
+        self::assertSame(
+            '/payroll/components?tab=risky_savings&person=11&employment=22',
+            self::invoke(PayrollRunSnapshotBuilder::class, 'riskySavingsPath', [11, 22]),
+        );
+    }
+
+    /**
+     * Neplatný podíl dimenze opraví účetní na kartě vztahu. Dřív padal jako
+     * UnexpectedValueException, tedy 500 bez odkazu, kam jít.
+     */
+    public function testInvalidDimensionShareIsAFixableFindingWithTheEmploymentLink(): void
+    {
+        foreach (['150.00', 'abc'] as $share) {
+            try {
+                self::invoke(PayrollRunSnapshotBuilder::class, 'shareBasisPoints', [$share, 22, 'STR-01']);
+                self::fail('Neplatný podíl dimenze musí zastavit snímek.');
+            } catch (PayrollRunSnapshotFixableException $e) {
+                self::assertSame('employment_dimension_share_invalid', $e->findingCode);
+                self::assertSame('/payroll/people?employment=22&panel=employment_terms', $e->remediationPath);
+                self::assertStringContainsString('STR-01', $e->getMessage());
+                self::assertStringContainsString('kartě pracovního vztahu', $e->getMessage());
+            }
+        }
+        self::assertSame(2550, self::invoke(PayrollRunSnapshotBuilder::class, 'shareBasisPoints', ['25.5', 22, 'STR-01']));
+        self::assertSame('blocker', PayrollRunReadinessImpact::describe('employment_dimension_share_invalid')['severity']);
     }
 
     public function testDiscountWarningLinksToAnExistingEmployeePage(): void

@@ -11,6 +11,7 @@ import {
   type PayrollRunHistoryTotalDiff,
   type PayrollRunHistoryTotalKey,
   type PayrollRunReadiness,
+  type PayrollRunReadinessBulkKind,
   type PayrollRunReadinessFinding,
   type PayrollRunRevisionHistory,
   type PayrollRunResultPerson,
@@ -1209,6 +1210,24 @@ function findingEntityLabels(finding: PayrollRunReadinessFinding): string[] {
 
 type ReadinessEntity = PayrollRunReadinessFinding['entities'][number]
 
+/*
+ * Hromadná oprava z nálezu otevře TENTÝŽ dialog jako Mzdy → Zaměstnanci →
+ * Další funkce (`?bulk=`), s obdobím kontrolovaného běhu. Nic se tu
+ * nepřepočítává ani nezapisuje.
+ */
+const READINESS_BULK_ICONS: Record<PayrollRunReadinessBulkKind, string> = {
+  statutory_defaults: ICONS.clipboardCheck,
+  declaration_signed: ICONS.check,
+  health_insurer: ICONS.clipboardCheck,
+  workplace: ICONS.pin,
+  closure: ICONS.archive,
+}
+
+function readinessBulkTarget(kind: PayrollRunReadinessBulkKind) {
+  const bulkPeriod = readiness.value?.period_start?.slice(0, 7) ?? period.value
+  return { name: 'payroll-people', query: { bulk: kind, period: bulkPeriod } }
+}
+
 function readinessEntityKey(entity: ReadinessEntity, index: number): string {
   return `${entity.entity_type}-${entity.entity_id}-${index}`
 }
@@ -1898,6 +1917,22 @@ onMounted(load)
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
                   {{ t('payroll.runs.readiness.fill_probable_average') }}
                 </button>
+                <div
+                  v-if="finding.bulk_actions?.length"
+                  class="mt-2 flex flex-wrap gap-2"
+                  :data-test="`run-readiness-bulk-${finding.code}`"
+                >
+                  <RouterLink
+                    v-for="action in finding.bulk_actions"
+                    :key="action.kind"
+                    :to="readinessBulkTarget(action.kind)"
+                    :class="[btnOutlineSm(action.kind === 'declaration_signed' ? 'success' : 'warning'), 'whitespace-nowrap']"
+                    :data-test="`run-readiness-bulk-action-${action.kind}`"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="READINESS_BULK_ICONS[action.kind]" /></svg>
+                    {{ t(`payroll.runs.readiness.bulk.${action.kind}`, { count: action.count }) }}
+                  </RouterLink>
+                </div>
                 <div
                   v-if="finding.hideable && canHideWarnings"
                   class="mt-2 flex flex-wrap gap-2"

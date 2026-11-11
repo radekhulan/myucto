@@ -4716,6 +4716,13 @@
       "readiness": {
         "affected": "Affects: {names}",
         "fill_probable_average": "Fill in probable earnings from the rate",
+        "bulk": {
+          "statutory_defaults": "Fill in default statutory data ({count})",
+          "declaration_signed": "Signed declarations in bulk",
+          "health_insurer": "Health insurers in bulk ({count})",
+          "workplace": "Fill in place of work ({count})",
+          "closure": "End finished agreements ({count})"
+        },
         "fill_probable_average_done": "Filled in automatically from the agreed hourly rate: {count}. The average can be corrected with a new revision in Absences and leave → Average earnings.",
         "fill_probable_average_failed": "Probable earnings could not be filled in.",
         "impact": {
@@ -5164,6 +5171,7 @@
         "cancel_failed": "The monthly input could not be cancelled.",
         "reverse_benefit": "Reverse benefit",
         "reverse_benefit_reason": "Reason for reversing the benefit — why is the annual exemption basket being released (§ 6(9) of the Income Tax Act)?",
+        "reverse_benefit_reason_required": "The benefit was not reversed: a reversal cannot be saved without a reason. Click “Reverse benefit” again and fill in the reason.",
         "benefit_reversed": "The benefit was reversed and the annual exemption basket was released.",
         "reverse_benefit_failed": "The benefit could not be reversed.",
         "empty": "There are no payroll inputs in this period",
