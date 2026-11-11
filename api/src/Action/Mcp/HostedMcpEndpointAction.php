@@ -29,6 +29,7 @@ final class HostedMcpEndpointAction
         private readonly Connection $db,
         private readonly UserSupplierRepository $memberships,
         private readonly ?\MyInvoice\Service\Mcp\ClientMcpToolPolicy $clientTools = null,
+        private readonly ?\MyInvoice\Service\Mcp\StaffMcpToolPolicy $staffTools = null,
     ) {}
 
     public function handle(Request $request, Response $response): Response
@@ -77,7 +78,10 @@ final class HostedMcpEndpointAction
         $input = [
             'scope' => $scope,
             'mcpResource' => $token['mcp_resource'] ?? null,
-            'allowedTools' => !empty($token['mcp_client_surface']) ? ($this->clientTools?->allowed($request) ?? []) : null,
+            // Interní role dostane v nabídce jen nástroje použitelné aspoň v jedné její firmě;
+            // přímé volání posoudí call() pro jediný nástroj.
+            'allowedTools' => !empty($token['mcp_client_surface']) ? ($this->clientTools?->allowed($request) ?? [])
+                : ($method === 'tools/list' ? $this->staffTools?->allowed($request) : null),
             'token' => substr($request->getHeaderLine('Authorization'), 7),
             'boundSupplierId' => ($token['supplier_id'] ?? null) !== null ? (int) $token['supplier_id'] : null,
             'lockedSupplierId' => $domain instanceof TenantDomainContext && $domain->locksSupplier()
@@ -140,7 +144,8 @@ final class HostedMcpEndpointAction
             throw new \InvalidArgumentException('Neplatné argumenty nástroje.');
         }
         // Lokální obsluha list_suppliers musí projít stejnou politikou jako nástroje volané přes Node.
-        if ($input['allowedTools'] !== null && !in_array($params['name'], $input['allowedTools'], true)) {
+        if ($input['allowedTools'] !== null ? !in_array($params['name'], $input['allowedTools'], true)
+            : $this->staffTools !== null && !$this->staffTools->allows($request, $params['name'])) {
             return ['content' => [['type' => 'text', 'text' => 'Pro tento nástroj nemáte oprávnění.']], 'isError' => true];
         }
         if ($params['name'] === 'list_suppliers') {
