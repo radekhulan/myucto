@@ -170,7 +170,14 @@ final class PayrollRunReadinessImpact
         // kdykoli před přípravou, mzdový běh na něj nečeká.
         'jmhz_annual_request_status_unresolved' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
 
+        // Měsíc, který ani nezačal: běh se počítá celý z plánu a každá pozdější
+        // změna podkladů po schválení je opravná revize.
+        'period_not_started' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+
         // ── Skupina 1: doplní se kdykoli, na výpočet to nemá vliv ────────────
+        // Měsíc běží: výplata před koncem měsíce je legitimní, jen informace
+        // o tom, co se ještě může změnit a odkdy půjde měsíční hlášení.
+        'period_not_finished' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'run_without_employments' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'readiness_check_failed' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'person_data_gap' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],

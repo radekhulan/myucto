@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog;
 use PDO;
+use Psr\Clock\ClockInterface;
 
 /**
  * KONTROLA PŘED ZAHÁJENÍM mzdového běhu.
@@ -119,6 +120,8 @@ final class PayrollRunReadinessService
         // Žádosti o roční zúčtování, které čekají na provedení — tentýž dotaz
         // jako termín „provést roční zúčtování" v přehledu lhůt.
         private readonly PayrollDeadlineOverviewRepository $deadlines,
+        // Dnešek pro upozornění, že období běhu ještě neskončilo nebo nezačalo.
+        private readonly ClockInterface $clock,
     ) {}
 
     /**
@@ -188,6 +191,11 @@ final class PayrollRunReadinessService
                 'has_findings' => true,
                 'findings' => [self::finding('ruleset_year_unavailable', $e->getMessage(), '/payroll/rulesets', 1, [])],
             ];
+        }
+
+        $timingFinding = $this->periodTimingFinding($periodStart);
+        if ($timingFinding !== null) {
+            $findings[] = $timingFinding;
         }
 
         // Zaměstnavatelská politika se ověřuje PRVNÍ a zvlášť: bez ní snapshot
@@ -344,6 +352,71 @@ final class PayrollRunReadinessService
             'has_findings' => $findings !== [],
             'findings' => $findings,
         ];
+    }
+
+    /**
+     * Období běhu ještě neskončilo, nebo ani nezačalo.
+     *
+     * ── Co bylo špatně ──────────────────────────────────────────────────────
+     * Běh šel bez jediné zmínky založit, spočítat i schválit za měsíc, který
+     * teprve přijde. Zastavila se až příprava měsíčního hlášení, a to hláškou
+     * katalogu kontrol, ze které účetní nepoznala, že jen předběhla kalendář.
+     *
+     * Není to závora: výplata před koncem měsíce je legitimní (prosincové
+     * mzdy před svátky, zálohová výplata). Kontrola jen říká, s čím počítat:
+     * podklady se do konce měsíce ještě mohou změnit a měsíční hlášení se
+     * podává až za uplynulý kalendářní měsíc. U měsíce, který ani nezačal, je
+     * výpočet celý z plánu, proto silnější zařazení (oprava přes revizi).
+     *
+     * @return array<string,mixed>|null
+     */
+    private function periodTimingFinding(string $periodStart): ?array
+    {
+        $start = \DateTimeImmutable::createFromFormat('!Y-m-d', $periodStart);
+        if ($start === false) {
+            return null;
+        }
+        $today = $this->clock->now()->format('Y-m-d');
+        $end = $start->modify('last day of this month');
+        if ($end->format('Y-m-d') < $today) {
+            return null;
+        }
+        $period = $start->format('m/Y');
+        $reportsFrom = $end->modify('+1 day')->format('j. n. Y');
+        if ($periodStart > $today) {
+            return self::finding(
+                'period_not_started',
+                sprintf(
+                    'Období %s ještě nezačalo (začíná %s). Mzdy se spočítají jen z plánu: docházka,'
+                    . ' nepřítomnosti, mzdové vstupy i pracovní vztahy se do konce měsíce ještě změní'
+                    . ' a každá změna po schválení běhu znamená opravnou revizi. Měsíční hlášení'
+                    . ' a přehledy pojistného půjde připravit až po skončení měsíce, nejdříve %s.'
+                    . ' Jde-li o výplatu předem, pokračujte; jinak s během počkejte.',
+                    $period,
+                    $start->format('j. n. Y'),
+                    $reportsFrom,
+                ),
+                null,
+                1,
+                [],
+            );
+        }
+
+        return self::finding(
+            'period_not_finished',
+            sprintf(
+                'Období %s ještě neskončilo (končí %s). Výplata před koncem měsíce je v pořádku,'
+                . ' jen počítejte s tím, že docházka, nepřítomnosti a mzdové vstupy se do konce měsíce'
+                . ' mohou změnit; změna po schválení běhu znamená opravnou revizi. Měsíční hlášení'
+                . ' a přehledy pojistného půjde připravit až po skončení měsíce, nejdříve %s.',
+                $period,
+                $end->format('j. n. Y'),
+                $reportsFrom,
+            ),
+            null,
+            1,
+            [],
+        );
     }
 
     /**
