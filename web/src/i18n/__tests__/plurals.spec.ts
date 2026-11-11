@@ -44,3 +44,26 @@ describe('české plurály', () => {
     expect(i18n.global.t('__plural_probe', { count, period: '1/2027' }, count)).toContain(expected)
   })
 })
+
+/**
+ * Prázdná větev plurálu („ | Další {count}…") shodí kompilaci zprávy
+ * (vue-i18n SyntaxError 11) a s ní celý dialog, který ji vykresluje.
+ */
+describe('plurálové zprávy', () => {
+  function emptyBranches(source: unknown, path: string, found: string[]): void {
+    if (typeof source === 'string') {
+      if (source.includes(' | ') && source.split('|').some(branch => branch.trim() === '')) found.push(path)
+      return
+    }
+    if (source !== null && typeof source === 'object') {
+      for (const [key, value] of Object.entries(source)) emptyBranches(value, path === '' ? key : `${path}.${key}`, found)
+    }
+  }
+
+  it.each(['cs', 'en'] as const)('v %s nemají prázdnou větev', async (locale) => {
+    const messages = (await import(`@/i18n/${locale}.json`)).default
+    const found: string[] = []
+    emptyBranches(messages, '', found)
+    expect(found).toEqual([])
+  })
+})
