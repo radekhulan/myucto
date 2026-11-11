@@ -2343,7 +2343,8 @@ final class PayrollInputRepository
                     input.period_start, input.source_period_start, input.quantity_milliunits,
                     input.source_kind, input.external_id,
                     input.source_snapshot_json IS NOT NULL AS has_source_snapshot,
-                    component.jmhz_treatment,
+                    input.benefit_taxable_minor,
+                    component.jmhz_treatment, component.tax_treatment, component.exemption_basket,
                     employee.full_name AS employee_name, component.name AS component_name
                FROM payroll_inputs input
                JOIN payroll_component_definitions component
@@ -2361,7 +2362,13 @@ final class PayrollInputRepository
         $stmt->execute([$supplierId, $periodStart, $employmentId, $employmentId]);
         $rows = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            if (PayrollWholeCrowns::reportedInJmhz($row['jmhz_treatment'])) {
+            // Osvobozený benefit v koši (stravenkový paušál na zákonném limitu)
+            // haléře nést smí; zaokrouhlení nahoru by z něj udělalo přebytek
+            // nad limit.
+            if (PayrollWholeCrowns::required(
+                $row,
+                $row['benefit_taxable_minor'] === null ? null : (int) $row['benefit_taxable_minor'],
+            )) {
                 $rows[] = $row + [
                     'group' => $row['employment_id'] . ':' . $row['component_id'],
                     'amount_minor' => (int) $row['amount_minor'],

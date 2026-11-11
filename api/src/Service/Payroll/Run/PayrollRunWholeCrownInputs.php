@@ -18,6 +18,9 @@ use MyInvoice\Service\Payroll\Component\PayrollWholeCrowns;
  * Výdělek se v hlášení sčítá po složkách do atributů, takže stačí, aby
  * součet každé složky vztahu vyšel na celé koruny: dva vstupy po 0,50 Kč
  * téže složky nevadí. Do kanonického snímku se nepíše, otisk vstupu zůstává.
+ *
+ * Osvobozený benefit v koši § 6 odst. 9 ZDP (stravenkový paušál 129,50 Kč za
+ * směnu) haléře nést smí, viz {@see PayrollWholeCrowns::required()}.
  */
 final class PayrollRunWholeCrownInputs
 {
@@ -42,7 +45,12 @@ final class PayrollRunWholeCrownInputs
                     ? json_decode($input['component_snapshot_json'], true)
                     : null;
                 if (!is_numeric($amount) || !is_array($component)
-                    || !PayrollWholeCrowns::reportedInJmhz($component['jmhz_treatment'] ?? null)
+                    || !PayrollWholeCrowns::required(
+                        $component,
+                        is_numeric($input['benefit_taxable_minor'] ?? null)
+                            ? (int) $input['benefit_taxable_minor']
+                            : null,
+                    )
                 ) {
                     continue;
                 }
