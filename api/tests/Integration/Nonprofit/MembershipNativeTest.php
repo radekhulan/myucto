@@ -370,6 +370,10 @@ final class MembershipNativeTest extends TestCase
         $member = $this->member('SYN-SUMMARY', 'summary');
         $open = $this->issueTitle($member['id'], 'CLENSTVI', 'summary-open');
         $damaged = $this->issueTitle($member['id'], 'VSTUP', 'summary-damaged');
+        $intact = (new MembershipReconciliationService($this->balances))->memberBalance($this->supplier, $member['id']);
+        $claimed = array_sum(array_column($intact['items'], 'amount_cents'));
+        self::assertGreaterThan(0, $claimed);
+        self::assertSame($claimed, $intact['page_open_cents'], 'Nespárované předpisy jsou otevřené celou částkou.');
         // Úmyslně poškozené syntetické úložiště, nikoli podporovaná cesta účetní opravy.
         $this->pdo->prepare('UPDATE journal_entry_lines SET amount=19999 WHERE supplier_id=? AND id=?')->execute([$this->supplier, $damaged['operation']['receivable_line_id']]);
         $detail = (new MembershipReconciliationService($this->balances))->memberBalance($this->supplier, $member['id']);

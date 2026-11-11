@@ -622,6 +622,34 @@ describe('Membership workspace', () => {
     w.unmount()
   })
 
+  it('applies a filter chip removed during a batch once the batch unlocks', async () => {
+    navigation.route.query = {year: '2026', payment_status: 'unpaid'}
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    w.findComponent(MembershipBatchFlow).vm.$emit('lock', true);await flushPromises()
+    const calls=api.members.mock.calls.length
+    w.findComponent(FilterBar).vm.$emit('clear', 'status');await flushPromises()
+    expect(api.members).toHaveBeenCalledTimes(calls)
+    w.findComponent(MembershipBatchFlow).vm.$emit('lock', false);await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2026,payment_status:'all'}))
+    w.unmount()
+  })
+
+  it('applies clearing all filters during a batch once the batch unlocks', async () => {
+    navigation.route.query = {year: '', title_key: 'SYNTHETIC', search: 'Synthetic'}
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    w.findComponent(MembershipBatchFlow).vm.$emit('lock', true);await flushPromises()
+    const calls=api.members.mock.calls.length
+    w.findComponent(FilterBar).vm.$emit('clear-all');await flushPromises()
+    expect(api.members).toHaveBeenCalledTimes(calls)
+    w.findComponent(MembershipBatchFlow).vm.$emit('lock', false);await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({search:'',year:Number(appIsoDate().slice(0,4)),title_key:'',payment_status:'all'}))
+    w.unmount()
+  })
+
   it('requests titles once when reloading a changed year', async () => {
     const w=mounted();await flushPromises()
     vi.useFakeTimers()
