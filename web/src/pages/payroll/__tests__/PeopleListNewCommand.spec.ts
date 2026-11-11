@@ -130,6 +130,8 @@ async function mountPage(people: PayrollPersonListItem[]) {
         ColumnPicker: true,
         DensityToggle: true,
         PaginationBar: true,
+        PayrollHealthInsurerBulkDialog: true,
+        PayrollStatutoryBulkDefaultsDialog: true,
       },
     },
   })
@@ -289,5 +291,49 @@ describe('PeopleList — rozlišení jmenovců a klikací řádek', () => {
     expect(actionsCell?.className).toContain('z-10')
     expect(wrapper.find('[data-test="person-name-link-1"]').element.closest('span')?.className)
       .toContain('z-10')
+  })
+})
+
+describe('PeopleList — povel ?bulk= z kontroly běhu', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetPayrollOffices()
+    resetDefaultHealthInsurerCode()
+    m.routeQuery = reactive<Record<string, string>>({})
+    m.routerPush.mockImplementation(applyNavigation)
+    m.routerReplace.mockImplementation(applyNavigation)
+    m.capabilities.mockResolvedValue({ state: { start_period: null } })
+    m.employerSettings.mockResolvedValue({ offices: [], default_health_insurer_code: null })
+  })
+
+  it('po zavření dialogu povel z adresy uklidí, takže druhý proklik dialog zase otevře', async () => {
+    m.routeQuery.bulk = 'health_insurer'
+    m.routeQuery.period = '2026-02'
+    const wrapper = await mountPage([person(1, 'Jan Novák')])
+    const dialog = () => wrapper.findComponent({ name: 'PayrollHealthInsurerBulkDialog' })
+    expect(dialog().exists()).toBe(true)
+
+    dialog().vm.$emit('close')
+    await flushPromises()
+    expect(dialog().exists()).toBe(false)
+    expect(m.routerReplace).toHaveBeenCalledWith({ query: { period: '2026-02' } })
+    expect(m.routeQuery.bulk).toBeUndefined()
+
+    m.routeQuery.bulk = 'health_insurer'
+    await flushPromises()
+    expect(dialog().exists()).toBe(true)
+  })
+
+  it('dialog výchozích údajů z nálezu dostane tytéž osoby jako tlačítko', async () => {
+    m.routeQuery.bulk = 'statutory_defaults'
+    m.routeQuery.period = '2026-02'
+    m.routeQuery.employees = '3,4'
+    const wrapper = await mountPage([person(1, 'Jan Novák')])
+    const dialog = wrapper.findComponent({ name: 'PayrollStatutoryBulkDefaultsDialog' })
+
+    expect(dialog.props('employeeIds')).toEqual([3, 4])
+    dialog.vm.$emit('close')
+    await flushPromises()
+    expect(m.routerReplace).toHaveBeenCalledWith({ query: { period: '2026-02' } })
   })
 })

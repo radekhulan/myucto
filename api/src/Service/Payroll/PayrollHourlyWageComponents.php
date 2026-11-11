@@ -17,6 +17,11 @@ final class PayrollHourlyWageComponents
         'PRIPLATEK_NOCNI', 'PRIPLATEK_VIKEND', 'PRIPLATEK_ZTIZENE_PROSTREDI',
     ];
 
+    public static function componentConflictMessage(string $code): string
+    {
+        return sprintf('Hodinový nárok koliduje s existující složkou %s. V Rychlém měsíčním vstupu zrušte ruční vstup této složky; u příplatku vymažte hodiny a uložte změnu. Hodinový výpočet složku doplní z docházky. Pokud už je vstup zamčený během, nejdřív zrušte neschválený běh a po opravě začněte z opravených vstupů.', $code);
+    }
+
     /**
      * Nové rezervované kódy nesmějí převzít odlišné peněžní zacházení vlastní
      * stejnojmenné složky. Klasifikaci neopravujeme; účetní musí střet vyřešit.

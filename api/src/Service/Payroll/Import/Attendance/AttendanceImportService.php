@@ -1257,9 +1257,8 @@ final class AttendanceImportService
                 foreach ([$binding, ...$binding['conditions']] as $candidate) {
                     if ($candidate['meaning'] === AttendanceMeaning::COMPONENT
                         && $candidate['component_code'] !== null
-                        // Složka „podle hlavičky" se hlásí jen tehdy, když opravdu nese částku.
-                        && (!isset($mapped['auto_components'][$candidate['component_code']])
-                            || isset($usedCodes[$candidate['component_code']]))) {
+                        // Složka se hlásí jen tehdy, když sloupec opravdu nese částku.
+                        && isset($usedCodes[$candidate['component_code']])) {
                         $codes[$candidate['component_code']] = true;
                     }
                 }
@@ -2517,7 +2516,9 @@ final class AttendanceImportService
         $adopted = 0;
         $conflicts = [];
         foreach ($assigned as $item) {
-            $number = self::personalNumber($item['person']['personal_number'] ?? null);
+            $number = ($item['person']['_number_ambiguous'] ?? false)
+                ? null
+                : self::personalNumber($item['person']['personal_number'] ?? null);
             $code = (string) $item['employment']['code'];
             if ($number === null || $code === $number) {
                 continue;
@@ -3354,7 +3355,7 @@ final class AttendanceImportService
                 $person,
                 static fn (string $key): bool => !str_starts_with($key, '_'),
                 ARRAY_FILTER_USE_KEY,
-            ),
+            ) + (($person['_number_ambiguous'] ?? false) ? ['number_ambiguous' => true] : []),
             $computed['persons'],
         );
 

@@ -20,6 +20,7 @@ use MyInvoice\Repository\Payroll\PayrollRunConflictException;
 use MyInvoice\Repository\Payroll\PayrollRunDeletionException;
 use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
+use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\PayrollHourlyWageMaterializer;
@@ -1359,6 +1360,15 @@ final class PayrollRunCommandService
                     (int) $revision['id'],
                 );
                 if ($superseded > 0) {
+                    $cancelledSubmissions = (new PayrollSubmissionRepository($this->db))
+                        ->cancelUnsentPreviousRunSubmissions($supplierId, $runId, (int) $revision['id']);
+                    if ($cancelledSubmissions !== []) {
+                        $this->runs->insertEvent(
+                            $supplierId, $runId, (int) $revision['id'], 'unsent_submissions_cancelled',
+                            null, null, $actorUserId, 'Schválení opravné revize mzdového běhu.',
+                            ['submission_ids' => $cancelledSubmissions],
+                        );
+                    }
                     // Rozpracovaná dávka nad odsunutou revizí by dál tiskla
                     // předkorekční pásky, a `claimNext()` ji nově přeskakuje,
                     // takže by položky ve frontě zůstaly viset. Uzavírá se to

@@ -41,7 +41,7 @@ final class PayrollMonthlyAgendaDutyRepository
      * Zrušený běh se nevrací: povinnost z něj nevzniká.
      *
      * @return list<array{
-     *   run_id:int,revision_id:int,person_count:int,insurer_codes:list<string>
+     *   run_id:int,revision_id:int,person_count:int,insurer_codes:list<string>,insured_codes:?list<string>
      * }>
      */
     public function approvedRunsForPeriod(
@@ -81,11 +81,19 @@ final class PayrollMonthlyAgendaDutyRepository
                     JSON_LENGTH(snapshot.input_snapshot_json, "$.people")
                         AS person_count,
                     JSON_EXTRACT(snapshot.input_snapshot_json, ?)
-                        AS insurer_codes
+                        AS insurer_codes,
+                    health.id AS health_result_id,
+                    JSON_EXTRACT(health.result_snapshot_json, "$.insurer_liabilities[*].insurer_code")
+                        AS insured_codes
                FROM approved
       STRAIGHT_JOIN payroll_run_revisions snapshot
                  ON snapshot.supplier_id = ?
                 AND snapshot.id = approved.revision_id
+          LEFT JOIN payroll_statutory_results health
+                 ON health.supplier_id = snapshot.supplier_id
+                AND health.revision_id = snapshot.id
+                AND health.calculation_kind = "health_insurance"
+                AND health.result_status = "calculated"
               WHERE approved.row_rank = 1
               ORDER BY approved.run_id',
         );
@@ -105,6 +113,11 @@ final class PayrollMonthlyAgendaDutyRepository
                 'insurer_codes' => PayrollSnapshotHealthInsurers::normalize(
                     self::decodeCodes($row['insurer_codes']),
                 ),
+                // Pojišťovny se závazkem ve vypočteném zdravotním výsledku;
+                // `null` = výsledek chybí a platí kódy ze snímku.
+                'insured_codes' => $row['health_result_id'] === null
+                    ? null
+                    : PayrollSnapshotHealthInsurers::normalize(self::decodeCodes($row['insured_codes'])),
             ];
         }
 

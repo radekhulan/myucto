@@ -84,6 +84,29 @@ final class PayrollMonthlyAgendaDutyRepositoryTest extends TestCase
         self::assertSame(['111', '201'], $runs[0]['insurer_codes']);
     }
 
+    /**
+     * Pojišťovny se závazkem čte z vypočteného zdravotního výsledku revize;
+     * bez výsledku je `insured_codes` null (agentura s DPP: nikdo pojištěný).
+     */
+    public function testInsuredCodesComeFromCalculatedHealthResult(): void
+    {
+        $runId = $this->createRun('closed');
+        $revisionId = $this->revision($runId, 1, 'approved', ['111', '201']);
+        self::assertNull($this->repository->approvedRunsForPeriod($this->supplierId, self::PERIOD_START)[0]['insured_codes']);
+
+        $result = json_encode(['insurer_liabilities' => [['insurer_code' => '201']]], JSON_THROW_ON_ERROR);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_statutory_results
+                (supplier_id, revision_id, calculation_kind, schema_version, result_status, ruleset_id, ruleset_hash,
+                 input_snapshot_json, input_snapshot_hash, result_snapshot_json, result_snapshot_hash, result_set_hash)
+             VALUES (?, ?, "health_insurance", "payroll-health-result.v1", "calculated", "test", ?, "{}", ?, ?, ?, ?)',
+        )->execute([$this->supplierId, $revisionId, str_repeat('a', 64), str_repeat('b', 64), $result, str_repeat('c', 64), str_repeat('d', 64)]);
+
+        $runs = $this->repository->approvedRunsForPeriod($this->supplierId, self::PERIOD_START);
+        self::assertSame(['111', '201'], $runs[0]['insurer_codes']);
+        self::assertSame(['201'], $runs[0]['insured_codes']);
+    }
+
     /** Neschválená revize povinnost nezakládá — není z čeho hlášení sestavit. */
     public function testRunWithoutApprovedRevisionIsNotReported(): void
     {

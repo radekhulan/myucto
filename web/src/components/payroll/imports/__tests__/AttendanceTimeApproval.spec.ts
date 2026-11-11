@@ -333,7 +333,7 @@ describe('AttendanceImportPanel — souhrn a schválení pracovních měsíců',
     m.apply.mockResolvedValue(applyResult())
   })
 
-  it('výchozí stav drží backend: bez voleb se souhrn nezapisuje ani neschvaluje', async () => {
+  it('podklady bez hodin a dnů souhrn nezapisují ani neschvalují', async () => {
     const wrapper = mountPanel(true)
     await loadToSummary(wrapper)
     await wrapper.get('[data-testid="attendance-apply"]').trigger('click')
@@ -343,6 +343,32 @@ describe('AttendanceImportPanel — souhrn a schválení pracovních měsíců',
       write_time_summary: false,
       approve_clean_time_months: false,
     }))
+  })
+
+  it('podklady s hodinami zapisují souhrn výchozí a vypnutí jasně varuje', async () => {
+    m.preview.mockResolvedValue({ ...preview, summary: { ...preview.summary, metrics: 1, worked_days: 1 } })
+    const wrapper = mountPanel(true)
+    await loadToSummary(wrapper)
+    const toggle = wrapper.get('[data-testid="attendance-write-time-summary"]')
+    expect((toggle.element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.find('[data-testid="attendance-write-time-summary-off"]').exists()).toBe(false)
+    await toggle.setValue(false)
+    expect(wrapper.get('[data-testid="attendance-write-time-summary-off"]').text())
+      .toBe('payroll_imports.attendance_time.options.write_summary_off')
+    await toggle.setValue(true)
+    await wrapper.get('[data-testid="attendance-apply"]').trigger('click')
+    await flushPromises()
+
+    expect(m.apply).toHaveBeenCalledWith(expect.objectContaining({ write_time_summary: true, approve_clean_time_months: false }))
+  })
+
+  it('převzetí osobních čísel neslibuje číslo, které náhled k párování nepoužil', async () => {
+    const shared = { ...preview.persons[0], personal_number: '1', number_ambiguous: true }
+    m.preview.mockResolvedValue({ ...preview, persons: [shared, { ...shared, key: 'p2' }] })
+    const wrapper = mountPanel(true)
+    await loadToSummary(wrapper)
+    expect(wrapper.get('[data-testid="attendance-adopt-ambiguous"]').text())
+      .toBe('payroll_imports.attendance.summary.adopt_personal_numbers_ambiguous{"numbers":"1"}')
   })
 
   it('pošle obě volby a ukáže výsledek schválení i počty vstupů', async () => {

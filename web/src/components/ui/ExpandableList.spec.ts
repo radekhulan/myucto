@@ -96,7 +96,11 @@ describe('ExpandableList', () => {
   it('u ořezaného výčtu přizná, kolik dalších se nevešlo', () => {
     const wrapper = mountList({ items: people.slice(0, 25), total: 225 })
 
-    expect(wrapper.get('[data-test="list-toggle"]').text()).toContain('25')
+    // „Zobrazit všech 25" by lhalo, když nález má 225 osob.
+    const toggle = wrapper.get('[data-test="list-toggle"]').text()
+    expect(toggle).toContain('common.expandable_list.show_listed')
+    expect(toggle).toContain('"count":25')
+    expect(toggle).toContain('"total":225')
     const note = wrapper.get('[data-test="list-not-listed"]').text()
     expect(note).toContain('225')
     expect(note).toContain('200')
