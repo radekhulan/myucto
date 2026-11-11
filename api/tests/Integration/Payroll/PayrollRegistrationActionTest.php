@@ -2165,6 +2165,90 @@ final class PayrollRegistrationActionTest extends TestCase
     }
 
     /**
+     * ČSSZ, Otázky a odpovědi k NV2027, odpověď 5: u A1 bez data skončení
+     * rozhoduje nástup 10223. Pozdní přihláška vyhotovená 5. 1. 2027
+     * s nástupem 15. 12. 2026 jde jako REGZEC25 a ostrá brána REGZEC27 ji
+     * nezastaví.
+     */
+    public function testLateA1InJanuary2027ForDecemberStartIsRegzec25(): void
+    {
+        self::$todayOverride = '2027-01-05';
+        $this->action = $this->buildAction($this->container, true);
+        $this->startExistingEmployment('2026-12-15', '1', '1', null, false);
+        $this->saveA1ProfileFor('2026-12-15', '1', '1');
+
+        $response = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'production',
+                'registration_mode' => 'full',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $xml = $this->storedArtifactXml((int) $this->json($response)['submission_id']);
+        self::assertStringContainsString('xmlns="' . PayrollRegistrationSchemaCatalog::NS_REGZEC_2026 . '"', $xml);
+        self::assertStringContainsString(' act="1"', $xml);
+        self::assertStringContainsString(' fro="2026-12-15"', $xml);
+    }
+
+    /**
+     * Odpověď 4 k NV2027 u dohody: DPP skončená 31. 12. 2026 (odhlášená
+     * mimo aplikaci) a změna vyhotovená v lednu 2027 nese 10224 a jde jako
+     * REGZEC25.
+     */
+    public function testA3OfDppEnded2026PreparedInJanuary2027CarriesEndDateAndIsRegzec25(): void
+    {
+        $xml = $this->preparedDppA3Xml('2026-12-10', '2027-01-08', 'synthetic-dpp-a3-ended', '2026-12-31');
+
+        self::assertStringContainsString('xmlns="' . PayrollRegistrationSchemaCatalog::NS_REGZEC_2026 . '"', $xml);
+        self::assertStringContainsString(' act="3"', $xml);
+        self::assertMatchesRegularExpression('/<job [^>]*to="2026-12-31"/', $xml);
+    }
+
+    /** Trvající DPP z roku 2026: změna v lednu 2027 bez 10224 je REGZEC27. */
+    public function testA3OfActiveDppFrom2026PreparedInJanuary2027IsRegzec27(): void
+    {
+        $xml = $this->preparedDppA3Xml('2026-12-10', '2027-01-08', 'synthetic-dpp-a3-active');
+
+        self::assertStringContainsString('xmlns="' . PayrollRegistrationSchemaCatalog::NS_REGZEC_2027 . '"', $xml);
+        self::assertStringContainsString(' fro="2026-12-10"', $xml);
+        self::assertStringNotContainsString(' to="', $xml);
+    }
+
+    private function preparedDppA3Xml(
+        string $effectiveOn,
+        string $today,
+        string $reference,
+        ?string $endOn = null,
+    ): string {
+        self::$todayOverride = $today;
+        $this->action = $this->buildAction($this->container, true);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-09-01", actual_start_date = "2026-09-01",
+                    end_date = ?, status = ?, relation_type = "dpp"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$endOn, $endOn === null ? 'active' : 'ended', $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('T', null, '2026-09-01');
+        $approved = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'change',
+                'effective_on' => $effectiveOn,
+                'source_reference' => $reference,
+                'changes' => ['title_prefix' => 'Mgr.'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+
+        return $this->preparedEventXml((int) $this->json($approved)['id']);
+    }
+
+    /**
      * Bez odhlášky v aplikaci (vztah odhlášený jinde) podklady pro podporu
      * nejsou: oprava A4-OST skončeného vztahu se odmítne srozumitelnou
      * hláškou, ne chybou serveru.
