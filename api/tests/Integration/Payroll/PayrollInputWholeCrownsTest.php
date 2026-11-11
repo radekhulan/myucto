@@ -141,6 +141,24 @@ final class PayrollInputWholeCrownsTest extends TestCase
     }
 
     /**
+     * Firma připravuje a mrazí hlášení i za únor 2026, tedy před zákonným
+     * startem JMHZ, a příprava tam haléře odmítla. Kontrola běhu se proto řídí
+     * stejným pravidlem jako příprava, ne datem 1. 4. 2026.
+     */
+    public function testFebruary2026IsCheckedBecauseJmhzCanBePreparedForIt(): void
+    {
+        $agency = $this->employment('Syntetická Brigádnice');
+        $provision = $this->component('PROVIZE', 'Provize', 'included');
+        $this->input($agency, $provision, 123_450, 'approved', '2026-02-01');
+
+        $found = self::byCode($this->builder->build($this->supplierId, '2026-02-01', '2026-03-10')->validations);
+
+        self::assertCount(1, $found);
+        self::assertSame('blocker', $found[0]->severity);
+        self::assertSame("/payroll/components?tab=inputs&period=2026-02&employment={$agency}", $found[0]->remediationPath);
+    }
+
+    /**
      * @param list<PayrollRunValidation> $validations
      * @return list<PayrollRunValidation>
      */
@@ -229,7 +247,7 @@ final class PayrollInputWholeCrownsTest extends TestCase
     }
 
     /** @param array{id:int,json:string} $component */
-    private function input(int $employmentId, array $component, int $amountMinor, string $status): int
+    private function input(int $employmentId, array $component, int $amountMinor, string $status, string $period = self::PERIOD): int
     {
         $pdo = $this->db->pdo();
         $employeeId = (int) $pdo->query('SELECT employee_id FROM payroll_employments WHERE id = ' . $employmentId)->fetchColumn();
@@ -240,7 +258,7 @@ final class PayrollInputWholeCrownsTest extends TestCase
                  component_snapshot_json, component_snapshot_hash, approved_by, approved_at)
              VALUES (?, ?, ?, ?, ?, ?, "manual", ?, ?, ?, ?, ?)'
         )->execute([
-            $this->supplierId, $employeeId, $employmentId, $component['id'], self::PERIOD, $amountMinor, $status,
+            $this->supplierId, $employeeId, $employmentId, $component['id'], $period, $amountMinor, $status,
             $draft ? null : $component['json'],
             $draft ? null : hash('sha256', $component['json'], true),
             $draft ? null : $this->actorId,

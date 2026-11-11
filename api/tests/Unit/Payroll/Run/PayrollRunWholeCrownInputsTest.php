@@ -36,7 +36,7 @@ final class PayrollRunWholeCrownInputsTest extends TestCase
         self::assertSame('/payroll/components?tab=inputs&period=2026-05&employment=7', $validations[0]->remediationPath);
     }
 
-    public function testWholeComponentSumExcludedComponentsAndPreJmhzPeriodsPass(): void
+    public function testWholeComponentSumAndExcludedComponentsPass(): void
     {
         $rows = [7 => [
             self::input(10_050, 11, 'Provize', 'included'),
@@ -45,11 +45,21 @@ final class PayrollRunWholeCrownInputsTest extends TestCase
         ]];
 
         self::assertSame([], PayrollRunWholeCrownInputs::validations([self::EMPLOYMENT], $rows, '2026-05-01'));
-        self::assertSame([], PayrollRunWholeCrownInputs::validations(
-            [self::EMPLOYMENT],
-            [7 => [self::input(123_450, 11, 'Provize', 'included')]],
-            '2026-03-01',
-        ));
+    }
+
+    /**
+     * Hlášení za 01/2026 a 02/2026 se připravuje a mrazí stejně jako od
+     * dubna (příprava nemá dolní mez období), takže haléře blokují i tam.
+     */
+    public function testPeriodsBeforeLegalJmhzStartAreCheckedLikePreparation(): void
+    {
+        $rows = [7 => [self::input(123_450, 11, 'Provize', 'included')]];
+
+        foreach (['2026-01-01', '2026-02-01', '2026-03-01'] as $period) {
+            self::assertCount(1, PayrollRunWholeCrownInputs::validations([self::EMPLOYMENT], $rows, $period), $period);
+        }
+        self::assertTrue(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion::monthlyReportPreparable('2026-02-01'));
+        self::assertFalse(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion::monthlyReportPreparable('2026-13-01'));
     }
 
     public function testRoundingIsUpwardInWholeHalere(): void
