@@ -82,6 +82,24 @@ final class PayrollAwaitingRunDutyServiceTest extends TestCase
         self::assertSame([], $this->service->missing($this->supplierId, '2026-08'), 'Převzatý měsíc hlídá jiná služba.');
     }
 
+    /**
+     * Výslovně zvolený měsíc, který teprve nastane: přehled podání před
+     * založením běhu říká, že z jeho schválení vznikne hlášení a do kdy.
+     * Dřív byl u budoucího měsíce prázdný. Souhrn bez zvoleného měsíce
+     * budoucí měsíce dál nehlídá.
+     */
+    public function testExplicitlyChosenFutureMonthIsReportedToo(): void
+    {
+        $this->seedEmployment('2026-01-01');
+
+        $future = $this->service->missing($this->supplierId, '2026-12');
+
+        self::assertSame(['2026-12'], array_column($future, 'period'));
+        self::assertSame('2027-01-20', $future[0]['due_on']);
+        self::assertSame('not_open', $future[0]['phase']);
+        self::assertNotContains('2026-12', array_column($this->service->missing($this->supplierId), 'period'));
+    }
+
     public function testCoveredOrEmptyMonthIsNotReported(): void
     {
         self::assertSame([], $this->service->missing($this->supplierId), 'Firma bez lidí nemá co hlásit.');
