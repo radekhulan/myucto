@@ -1770,6 +1770,43 @@ async function cancelMatchingInputs() {
   await runInputBatch('cancel', null)
 }
 
+/**
+ * Haléřové vstupy období nahoru na celé koruny (kontrola běhu
+ * `inputs_not_whole_crowns`). Server bere jen vstupy, které by měsíční
+ * hlášení odmítlo; co nezměnil, zůstane pod lištou s důvodem.
+ */
+async function roundInputsWholeCrowns() {
+  if (batchDisabledInRange.value) return
+  if (!window.confirm(t('payroll.components.inputs.round_whole_crowns_confirm'))) return
+  inputError.value = ''
+  inputBatchFailures.value = []
+  saving.value = true
+  try {
+    const result = await payrollApi.roundInputsWholeCrowns({
+      period: period.value,
+      employment_id: focusEmploymentId.value,
+    })
+    await loadInputsPage()
+    inputBatchFailures.value = groupPayrollInputFailures(result.skipped.map(row => ({
+      id: row.id,
+      code: 'not_rounded',
+      message: `${row.employee_name} · ${row.component_name}: ${row.reason}`,
+    })))
+    if (result.rounded.length === 0 && result.skipped.length === 0) {
+      toast.success(t('payroll.components.inputs.round_whole_crowns_none'))
+    } else {
+      toast.success(t('payroll.components.inputs.round_whole_crowns_done', {
+        count: result.rounded.length,
+        skipped: result.skipped.length,
+      }))
+    }
+  } catch (error: any) {
+    inputError.value = apiErrorMessage(error, t('payroll.components.inputs.round_whole_crowns_failed'))
+  } finally {
+    saving.value = false
+  }
+}
+
 async function approveSelectedInputs() {
   await runInputBatch('approve', [...selectedInputIds.value])
 }
@@ -2407,6 +2444,10 @@ onMounted(load)
                 {{ t('payroll.components.inputs.export_pdf') }}
               </button>
               <span v-if="batchProgress !== null" role="status" class="text-xs text-neutral-500">{{ t('payroll.components.inputs.batch_progress', { done: batchProgress }) }}</span>
+              <button v-if="canWrite && summaryTotal > 0 && !batchDisabledInRange" type="button" data-testid="payroll-inputs-round-whole-crowns" :class="[btnOutline('warning'), 'whitespace-nowrap']" :disabled="saving" :title="t('payroll.components.inputs.round_whole_crowns_hint')" @click="roundInputsWholeCrowns">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.coin" /></svg>
+                {{ t('payroll.components.inputs.round_whole_crowns') }}
+              </button>
               <button v-if="canWrite && matchingDraftCount > 0 && !batchDisabledInRange" type="button" data-testid="payroll-inputs-cancel-matching" :class="[btnOutline('danger'), 'whitespace-nowrap']" :disabled="saving" @click="cancelMatchingInputs">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>
                 {{ t('payroll.components.inputs.cancel_matching', { count: matchingDraftCount }) }}

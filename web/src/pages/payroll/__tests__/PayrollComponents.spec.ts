@@ -5,6 +5,7 @@ type SelectInstance = ComponentPublicInstance<{ modelValue: unknown }>
 
 const m = vi.hoisted(() => ({
   approveInputsBatch: vi.fn(),
+  roundInputsWholeCrowns: vi.fn(),
   exportInputs: vi.fn(),
   routeQuery: {} as Record<string, string | string[]>,
   routerReplace: vi.fn(),
@@ -73,6 +74,7 @@ vi.mock('@/api/payroll', () => ({
     updateInput: vi.fn(),
     approveInput: vi.fn(),
     approveInputsBatch: m.approveInputsBatch,
+    roundInputsWholeCrowns: m.roundInputsWholeCrowns,
     exportInputs: m.exportInputs,
     riskySavings: m.riskySavings,
     institutionAccounts: m.institutionAccounts,
@@ -635,6 +637,32 @@ describe('PayrollComponents', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="payroll-inputs-approve-all"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="payroll-inputs-batch-range-note"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  /**
+   * Kontrola běhu `inputs_not_whole_crowns` vede sem: jedním kliknutím se
+   * haléřové vstupy období (zúžené na vztah z odkazu) zaokrouhlí nahoru
+   * a co server nezměnil, zůstane pod lištou s důvodem.
+   */
+  it('rounds inputs of the period up to whole crowns and lists what stayed', async () => {
+    m.routeQuery = { employment: '12', period: '2026-05' }
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    m.roundInputsWholeCrowns.mockResolvedValue({
+      rounded: [{ id: 9, employee_name: 'Syntetická osoba', component_name: 'Provize', from_minor: 123450, to_minor: 123500 }],
+      skipped: [{ id: 10, employee_name: 'Syntetická osoba', component_name: 'Provize', amount_minor: 50050, reason: 'Uzamčeno během.' }],
+    })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="payroll-inputs-round-whole-crowns"]').trigger('click')
+    await flushPromises()
+
+    expect(m.roundInputsWholeCrowns).toHaveBeenCalledWith({ period: '2026-05', employment_id: 12 })
+    expect(wrapper.get('[data-testid="payroll-inputs-batch-failures"]').text())
+      .toContain('Syntetická osoba · Provize: Uzamčeno během.')
+    expect(m.toastSuccess).toHaveBeenCalledWith('payroll.components.inputs.round_whole_crowns_done')
+    confirm.mockRestore()
     wrapper.unmount()
   })
 

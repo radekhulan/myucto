@@ -305,6 +305,20 @@ filtr**. **Schválit … odpovídajících filtru** schválí všechny koncepty 
 a schválené přeskočí; každý vstup prochází stejnými kontrolami jako jednotlivě
 (roční limit benefitu, podklad docházky u stravného, složka k ručnímu
 posouzení). Stejně funguje **Zrušit … konceptů**, vždy s potvrzením.
+
+**Zaokrouhlit vstupy na celé koruny nahoru.** Měsíční hlášení (JMHZ) vykazuje
+výdělek v celých korunách a mzda se podle § 142 odst. 2 zákoníku práce
+zaokrouhluje nahoru. Vstup s haléři u složky zařazené do hlášení (typicky
+provize nebo příplatek z importu docházky) proto mzdový běh hlásí jako blokující
+kontrolu ještě před schválením, s výčtem vstupů a odkazem sem. Tlačítko
+zaokrouhlí haléřové vstupy období (případně jen zúženého vztahu) nahoru, a to
+koncepty i schválené vstupy; schválené jen uživatel s právem schvalovat vstupy.
+Dva vstupy téže složky, jejichž součet vyjde na celé koruny, nemění. Vstupy
+uzamčené během, vypočtené vstupy (hodinová mzda, pravidelná složka, náhrada)
+a vstupy navázané na vyúčtování cesty zůstanou beze změny a pod lištou je
+uvedený důvod. Uzamčené vstupy uvolní zrušení běhu, vstupy ani docházka se tím
+nesmažou. Každá změna částky se zapisuje do auditu.
+
 [Rychlý měsíční vstup](79_Rychly_mesicni_vstup.md) uloží řádky rovnou jako
 schválené, má-li uživatel oprávnění.
 

@@ -495,6 +495,8 @@ export interface AttendanceComponentValue {
   component_code: string
   amount: string
   amount_minor: number
+  /** Původní částka s haléři, když ji import zaokrouhlil nahoru na celé koruny. */
+  rounded_from_minor?: number
   source: string
   conflicts: AttendanceConflict[]
 }
@@ -681,6 +683,10 @@ export interface AttendancePreview {
   /** Pravděpodobné výdělky k potvrzení u vztahů, které žádný nemají. */
   probable_earning_changes?: AttendanceProbableEarningChange[]
   upgrade_available: AttendanceSampleUpgrade | null
+  /** Náhled i použití zaokrouhlují složky vykazované v JMHZ nahoru na celé koruny. Starší server klíč nemá. */
+  round_whole_crowns?: boolean
+  /** Výchozí stav volby: zapnuto za měsíce vykazované přes JMHZ. */
+  whole_crowns_default?: boolean
   summary: {
     persons: number
     matched: number
@@ -693,6 +699,8 @@ export interface AttendancePreview {
     deduction_minor_total?: number
     /** Přiřazené osoby, kterým v evidenci chybí údaje pro registraci z podkladů. */
     registration_gaps?: number
+    /** Složky vykazované v JMHZ, jejichž částka má haléře. */
+    halere_components?: number
   }
 }
 
@@ -702,6 +710,8 @@ export interface AttendancePreviewPayload {
   rules: AttendanceRule[] | null
   profile_id: number | null
   components?: AttendanceProfileComponent[] | null
+  /** Bez klíče rozhodne server podle období (JMHZ = zapnuto). */
+  round_whole_crowns?: boolean
 }
 
 export interface AttendanceLink {
@@ -729,6 +739,8 @@ export interface AttendanceApplyPayload {
   fill_registration_data?: boolean
   /** Zapsat navržené pravděpodobné výdělky vztahům, které žádný nemají. */
   adopt_probable_earnings?: boolean
+  /** Zaokrouhlit složky vykazované v JMHZ nahoru na celé koruny; bez klíče rozhodne server podle období. */
+  round_whole_crowns?: boolean
 }
 
 /** Výsledek zápisu srážek z podkladů (dohody o srážce na měsíc). */

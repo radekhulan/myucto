@@ -196,7 +196,9 @@ final class JmhzPreparationSnapshotBuilder
             $employmentResults = $this->indexResultEmployments($personResult);
             $normalizedEmployments = [];
             $primaryEmploymentCount = 0;
-            foreach ($this->rows($person['employments'] ?? null, "input.people.{$personIndex}.employments") as $employmentIndex => $entry) {
+            $employmentRows = $this->rows($person['employments'] ?? null, "input.people.{$personIndex}.employments");
+            $primaryFlags = JmhzPrimaryEmployment::flags($employmentRows);
+            foreach ($employmentRows as $employmentIndex => $entry) {
                 $employment = $this->object(
                     $entry['employment'] ?? null,
                     "input.people.{$personIndex}.employments.{$employmentIndex}.employment",
@@ -206,7 +208,7 @@ final class JmhzPreparationSnapshotBuilder
                     $this->invalid('jmhz_employment_scope_mismatch', 'Zmrazeny vztah nema jednoznacneho vlastnika.');
                 }
                 $seenEmployments[$employmentId] = true;
-                $isPrimary = $employment['is_primary'] ?? null;
+                $isPrimary = $primaryFlags[$employmentIndex] ?? null;
                 if ($isPrimary === true) {
                     $primaryEmploymentCount++;
                 } elseif ($isPrimary !== false) {

@@ -1080,7 +1080,10 @@ function startCreate(personId: number) {
     'employment',
     start,
     null,
-    details.value[personId]?.employments.every(item => !item.is_primary) ?? true,
+    // Stejně jako server (hasOverlappingPrimary): primární vztah skončený před
+    // nástupem nového hlavní roli neblokuje.
+    details.value[personId]?.employments.every(item => !item.is_primary
+      || (item.end_date !== null && item.end_date < start)) ?? true,
   )
 }
 

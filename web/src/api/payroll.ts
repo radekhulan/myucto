@@ -3144,6 +3144,11 @@ export interface PayrollInputCancelBatchResult extends PayrollInputBatchProgress
   cancelled: number[]
 }
 
+export interface PayrollInputWholeCrownsResult {
+  rounded: Array<{ id: number, employee_name: string, component_name: string, from_minor: number, to_minor: number }>
+  skipped: Array<{ id: number, employee_name: string, component_name: string, amount_minor: number, reason: string }>
+}
+
 export interface PayrollInputBatchPayload {
   ids?: number[]
   period?: string
@@ -11332,6 +11337,13 @@ export const payrollApi = {
   /** Hromadné zrušení konceptů — výčtem `ids` nebo podle `filter`. */
   cancelInputsBatch: (payload: PayrollInputBatchPayload) =>
     api.post<PayrollInputCancelBatchResult>('/payroll/inputs/cancel-batch', payload)
+      .then(response => response.data),
+  /**
+   * Haléřové vstupy období zaokrouhlí nahoru na celé koruny, aby je přijalo
+   * měsíční hlášení. Uzamčené a vypočtené vstupy vrátí v `skipped` s důvodem.
+   */
+  roundInputsWholeCrowns: (payload: { period: string, employment_id?: number | null }) =>
+    api.post<PayrollInputWholeCrownsResult>('/payroll/inputs/round-whole-crowns', payload)
       .then(response => response.data),
   cancelInput: (id: number, rowVersion: number) =>
     api.post<{ input: PayrollInput }>(`/payroll/inputs/${id}/cancel`, {

@@ -24,6 +24,7 @@ use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\Payroll\Absence\ImportAbsenceCompensationRates;
 use MyInvoice\Service\Payroll\Absence\PayrollImportAbsenceCompensationMaterializer;
 use MyInvoice\Service\Payroll\Component\PayrollInputImportService;
+use MyInvoice\Service\Payroll\Component\PayrollWholeCrowns;
 use MyInvoice\Service\Payroll\Employment\PayrollOpenAgreements;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportWriter;
 use MyInvoice\Service\Payroll\Net\DeductionAgreementStatus;
@@ -142,6 +143,7 @@ final class AttendanceImportService
         mixed $rules,
         ?int $profileId,
         mixed $components = null,
+        bool $roundWholeCrowns = false,
     ): array {
         $periodStart = $this->period($period);
         $modifiedSamples = $this->ensureSampleProfile($supplierId);
@@ -154,7 +156,7 @@ final class AttendanceImportService
             $components,
         );
 
-        return self::public($this->compute($supplierId, $periodStart, $files, $read, $validated, $profileComponents, $profileMeta))
+        return self::public($this->compute($supplierId, $periodStart, $files, $read, $validated, $profileComponents, $profileMeta, $roundWholeCrowns))
             + [
                 'upgrade_available' => self::sampleUpgrade($modifiedSamples, $profileMeta['id']),
                 'source_checks' => $this->sourceChecks($supplierId, $periodStart, $files, $read['sheets']),
@@ -261,6 +263,12 @@ final class AttendanceImportService
          * už zapsaný výdělek nenavrhne znovu.
          */
         bool $adoptProbableEarnings = false,
+        /*
+         * Zaokrouhlit částky složek vykazovaných v JMHZ nahoru na celé koruny
+         * ({@see PayrollWholeCrowns}). Volající, který volbu neřeší (převody,
+         * skripty), dostane částky beze změny; obrazovka ji u měsíců JMHZ zapíná.
+         */
+        bool $roundWholeCrowns = false,
     ): array {
         if ($approveCleanTimeMonths && !$writeTimeSummary) {
             throw new \InvalidArgumentException(
@@ -287,7 +295,7 @@ final class AttendanceImportService
             $profileId,
             $components,
         );
-        $computed = $this->compute($supplierId, $periodStart, $files, $read, $validated, $profileComponents, $profileMeta);
+        $computed = $this->compute($supplierId, $periodStart, $files, $read, $validated, $profileComponents, $profileMeta, $roundWholeCrowns);
         $linkMap = self::linkMap($links);
 
         $options = [];
@@ -359,7 +367,8 @@ final class AttendanceImportService
             'adopt_personal_numbers' => $adoptPersonalNumbers,
         // Klíče jen při zapnutí, ať otisky dávek bez těchto voleb zůstanou stejné.
         ] + ($adoptMonthlyWage ? ['adopt_monthly_wage' => true] : [])
-            + ($createDeductions ? ['create_deductions' => true] : []), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), true);
+            + ($createDeductions ? ['create_deductions' => true] : [])
+            + ($roundWholeCrowns ? ['round_whole_crowns' => true] : []), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), true);
 
         /*
          * Mzda se zapisuje až po dávce, vztah po vztahu, a to i při opakování
@@ -1146,6 +1155,7 @@ final class AttendanceImportService
         array $rules,
         array $profileComponents,
         array $profileMeta,
+        bool $roundWholeCrowns = false,
     ): array {
         $warnings = $read['warnings'];
         $mapped = $this->mapper->map($read['sheets'], $rules);
@@ -1228,10 +1238,18 @@ final class AttendanceImportService
             $this->components->ensureDefaults($supplierId);
         }
         $checks = [];
+        $wholeCrownCodes = [];
         foreach (array_keys($codes) as $code) {
             $code = (string) $code;
             $component = $this->inputRepository->resolveComponent($supplierId, $code, $periodStart);
             $definition = $definitions[$code] ?? null;
+            // Složku, kterou import teprve založí, posuzuje podle definice, se kterou ji založí.
+            $treatment = $component === null
+                ? ($definition === null ? null : AttendanceProfileComponents::definition($definition, $periodStart)['jmhz_treatment'] ?? null)
+                : ($component['jmhz_treatment'] ?? null);
+            if (PayrollWholeCrowns::reportedInJmhz($treatment)) {
+                $wholeCrownCodes[$code] = true;
+            }
             $checks[] = match (true) {
                 $component === null && $definition !== null => [
                     'component_code' => $code,
@@ -1284,6 +1302,34 @@ final class AttendanceImportService
             }
         }
 
+        /*
+         * Částky složek vykazovaných v JMHZ s haléři by měsíční hlášení odmítlo
+         * až po schválení mzdy. Volbou se zaokrouhlí nahoru už tady, aby náhled
+         * i vzniklé vstupy nesly totéž; náhled u složky ukáže původní částku.
+         */
+        $halereComponents = 0;
+        foreach ($persons as &$person) {
+            foreach ($person['components'] as &$component) {
+                $code = (string) $component['component_code'];
+                if (!isset($wholeCrownCodes[$code]) || !PayrollWholeCrowns::hasHalere((int) $component['amount_minor'])) {
+                    continue;
+                }
+                ++$halereComponents;
+                if (!$roundWholeCrowns) {
+                    continue;
+                }
+                $rounded = PayrollWholeCrowns::roundUpMinor((int) $component['amount_minor']);
+                $component['rounded_from_minor'] = (int) $component['amount_minor'];
+                $component['amount_minor'] = $rounded;
+                $component['amount'] = AttendanceDecimal::formatMinor($rounded);
+                if (isset($person['_components'][$code])) {
+                    $person['_components'][$code]['amount_minor'] = $rounded;
+                }
+            }
+            unset($component);
+        }
+        unset($person);
+
         $summary = [
             'persons' => count($persons),
             'matched' => 0,
@@ -1295,6 +1341,7 @@ final class AttendanceImportService
             'deductions' => 0,
             'deduction_minor_total' => 0,
             'registration_gaps' => 0,
+            'halere_components' => $halereComponents,
         ];
         foreach ($persons as $person) {
             $status = $person['match']['status'];
@@ -1375,6 +1422,8 @@ final class AttendanceImportService
             'wage_changes' => $wageChanges,
             'probable_earning_changes' => $probableChanges,
             'unrecognized_columns' => $unrecognized,
+            'round_whole_crowns' => $roundWholeCrowns,
+            'whole_crowns_default' => PayrollWholeCrowns::jmhzPeriod($periodStart),
             'summary' => $summary,
             'warnings' => array_values(array_unique($warnings)),
         ];
@@ -2097,12 +2146,12 @@ final class AttendanceImportService
             : (string) ($existing['relation_type'] ?? 'dpp');
         $item['relation_type'] = $relationType;
         $terms = self::employmentTerms($item, $plannedStart);
-        $hasPrimary = false;
-        foreach ($this->employments->listForEmployee($supplierId, $employeeId) as $row) {
-            if ((bool) $row['is_primary'] && in_array($row['status'], ['planned', 'preregistered', 'active', 'suspended'], true)) {
-                $hasPrimary = true;
-            }
-        }
+        // Předchozí dohoda skončená před nástupem nové hlavní vztah neblokuje.
+        $hasPrimary = $this->employments->hasOverlappingPrimary(
+            $supplierId,
+            $employeeId,
+            $plannedStart === '' ? null : $plannedStart,
+        );
         $weekly = $terms['weekly_hours'] ?? '40.00';
         $created = $this->employments->create(
             $supplierId,

@@ -308,7 +308,8 @@ final class PayrollEmploymentRepository
                 $supplierId,
                 $data['terms']['office_id'],
             );
-            $this->assertPrimaryAvailable($supplierId, $employeeId, $data['terms']['is_primary'], null);
+            $primaryFrom = (string) ($data['terms']['planned_start_on'] ?? $data['terms']['effective_from']);
+            $this->assertPrimaryAvailable($supplierId, $employeeId, $data['terms']['is_primary'], null, $primaryFrom);
             /*
              * Druh činnosti pro ČSSZ se u nového vztahu PŘEDVYPLNÍ podle druhu
              * a pořadí: první pracovní poměr „1", druhý souběžný u téhož
@@ -342,6 +343,9 @@ final class PayrollEmploymentRepository
                 $data['code'] = $this->nextEmploymentCode($supplierId, $employeeId);
             }
 
+            $releasedPrimaries = $data['terms']['is_primary']
+                ? $this->releaseEndedPrimaries($supplierId, $employeeId, $primaryFrom)
+                : [];
             $stmt = $this->db->pdo()->prepare(
                 "INSERT INTO payroll_employments
                     (supplier_id, employee_id, office_id, code, relation_type,
@@ -364,6 +368,7 @@ final class PayrollEmploymentRepository
                 $data['monthly_gross_minor'],
             ]);
             $employmentId = (int) $this->db->pdo()->lastInsertId();
+            $this->logReleasedPrimaries($supplierId, $employeeId, $releasedPrimaries, $employmentId, $primaryFrom, $userId);
             $this->insertTerms($supplierId, $employmentId, $data['terms'], $userId);
             $this->insertEvent(
                 $supplierId,
@@ -3252,15 +3257,32 @@ final class PayrollEmploymentRepository
         return $value === false || $value === null ? null : (int) $value;
     }
 
-    private function assertPrimaryAvailable(
+    /**
+     * Má osoba primární vztah, který ke dni `$startOn` ještě běží?
+     *
+     * Jediné místo, kde se rozhoduje, zda nový vztah osoby bude hlavní (JMHZ
+     * 10495): ruční založení, import docházky, import registrace i převod.
+     * Primární vztah, jehož konec (`end_date`) leží před nástupem nového, se
+     * s ním nepřekrývá: navazující DPP agentury pak nevznikne jako vedlejší jen
+     * proto, že předchozí dohoda ještě nebyla formálně ukončená. Bez data
+     * nástupu rozhoduje každý živý primární vztah jako dřív.
+     */
+    public function hasOverlappingPrimary(
         int $supplierId,
         int $employeeId,
-        bool $isPrimary,
+        ?string $startOn,
+        ?int $exceptEmploymentId = null,
+    ): bool {
+        return $this->overlappingPrimary($supplierId, $employeeId, $startOn, $exceptEmploymentId) !== null;
+    }
+
+    /** @return array<string,mixed>|null */
+    private function overlappingPrimary(
+        int $supplierId,
+        int $employeeId,
+        ?string $startOn,
         ?int $exceptEmploymentId,
-    ): void {
-        if (!$isPrimary) {
-            return;
-        }
+    ): ?array {
         $stmt = $this->db->pdo()->prepare(
             "SELECT code, relation_type,
                     COALESCE(actual_start_date, start_date) AS start_on, end_date
@@ -3268,12 +3290,35 @@ final class PayrollEmploymentRepository
               WHERE supplier_id = ? AND employee_id = ? AND is_primary = 1
                 AND status IN ('planned', 'preregistered', 'active', 'suspended')
                 AND (? IS NULL OR id <> ?)
+                AND (? IS NULL OR end_date IS NULL OR end_date >= ?)
               ORDER BY id
               LIMIT 1"
         );
-        $stmt->execute([$supplierId, $employeeId, $exceptEmploymentId, $exceptEmploymentId]);
+        $stmt->execute([
+            $supplierId,
+            $employeeId,
+            $exceptEmploymentId,
+            $exceptEmploymentId,
+            $startOn,
+            $startOn,
+        ]);
         $other = $stmt->fetch(PDO::FETCH_ASSOC);
-        if ($other !== false) {
+
+        return $other === false ? null : $other;
+    }
+
+    private function assertPrimaryAvailable(
+        int $supplierId,
+        int $employeeId,
+        bool $isPrimary,
+        ?int $exceptEmploymentId,
+        ?string $startOn = null,
+    ): void {
+        if (!$isPrimary) {
+            return;
+        }
+        $other = $this->overlappingPrimary($supplierId, $employeeId, $startOn, $exceptEmploymentId);
+        if ($other !== null) {
             throw new \DomainException(self::primaryTakenMessage($other));
         }
     }
@@ -3310,6 +3355,63 @@ final class PayrollEmploymentRepository
             $period,
             $code,
         );
+    }
+
+    /**
+     * Nový primární vztah přebírá roli hlavního vztahu po těch, které skončily
+     * před jeho nástupem. Mění se jen aktuální příznak vztahu stejně jako při
+     * ukončení ({@see transition()}); verze podmínek zůstávají, takže měsíce,
+     * kdy byl hlavní ten předchozí, se vykazují beze změny.
+     *
+     * Volá se před vložením nového vztahu: unikátní `uq_payroll_employment_primary`
+     * dva živé primární vztahy osoby nedovolí ani na okamžik.
+     *
+     * @return list<int> vztahy, které hlavní roli předaly
+     */
+    private function releaseEndedPrimaries(int $supplierId, int $employeeId, string $startOn): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id
+               FROM payroll_employments
+              WHERE supplier_id = ? AND employee_id = ? AND is_primary = 1
+                AND end_date IS NOT NULL AND end_date < ?
+              FOR UPDATE"
+        );
+        $stmt->execute([$supplierId, $employeeId, $startOn]);
+        $released = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        if ($released !== []) {
+            $placeholders = implode(', ', array_fill(0, count($released), '?'));
+            $this->db->pdo()->prepare(
+                "UPDATE payroll_employments
+                    SET is_primary = 0, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id IN ({$placeholders})"
+            )->execute([$supplierId, ...$released]);
+        }
+
+        return $released;
+    }
+
+    /** @param list<int> $released */
+    private function logReleasedPrimaries(
+        int $supplierId,
+        int $employeeId,
+        array $released,
+        int $newEmploymentId,
+        string $startOn,
+        ?int $userId,
+    ): void {
+        foreach ($released as $employmentId) {
+            $this->activityLogger->log(
+                'payroll.employment.primary_released',
+                $userId,
+                'payroll_employment',
+                $employmentId,
+                ['employee_id' => $employeeId, 'primary_employment_id' => $newEmploymentId, 'from' => $startOn],
+                null,
+                null,
+                $supplierId,
+            );
+        }
     }
 
     /**

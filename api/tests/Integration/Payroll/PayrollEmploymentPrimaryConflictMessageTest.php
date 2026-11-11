@@ -79,7 +79,8 @@ final class PayrollEmploymentPrimaryConflictMessageTest extends TestCase
         $this->create('SYN-BREZEN', '2026-03-01', '2026-03-31');
 
         try {
-            $this->create('SYN-DUBEN', '2026-04-01', '2026-04-30');
+            // Překrývá se s březnovým vztahem; navazující by hlavní roli převzal.
+            $this->create('SYN-DUBEN', '2026-03-15', '2026-04-30');
             self::fail('Druhý primární vztah se nesměl založit.');
         } catch (\DomainException $exception) {
             $message = $exception->getMessage();

@@ -345,7 +345,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
         self::assertIsArray($input);
         unset($input['people'][0]['employments'][0]['average_earning']);
-        $input['people'][0]['employments'][0]['employment']['is_primary'] = false;
+        $input['people'][0]['employments'][0]['employment']['is_primary'] = null;
         $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
         $source['revision']['input_snapshot_hash'] = hash(
             'sha256',
@@ -377,6 +377,48 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
             $snapshot->payload['readiness_issue_codes'],
         );
         self::assertContains(
+            'jmhz_primary_employment_unresolved',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+    }
+
+    /**
+     * Navazující DPP agentury: nová dohoda vznikla jako vedlejší, protože ta
+     * předchozí byla v evidenci ještě primární. V měsíci je ale jediným
+     * vykázaným vztahem osoby, takže je primární (10495, kontroly 255 a 260).
+     */
+    public function testSoleReportedSecondaryEmploymentIsPrimary(): void
+    {
+        $source = $this->source();
+        $input = json_decode(
+            $source['revision']['input_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($input);
+        self::assertCount(1, $input['people'][0]['employments']);
+        $input['people'][0]['employments'][0]['employment']['is_primary'] = false;
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['input_snapshot_json'],
+        );
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($result);
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(7, 'test', $source, [], []);
+
+        self::assertNotContains(
             'jmhz_primary_employment_unresolved',
             $snapshot->payload['readiness_issue_codes'],
         );

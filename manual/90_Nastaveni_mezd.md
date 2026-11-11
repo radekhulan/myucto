@@ -849,6 +849,10 @@ napíše a založení jí přidá jen nový pracovní vztah, druhá karta osoby 
 rodným číslem nevznikne. Druh vztahu je z podkladů, bez něj stejný jako poslední
 vztah osoby, nástup ze sloupce Nástup, jinak první den měsíce. Výplatní účet ani
 pojišťovnu import u takové osoby nemění a údaje pro registraci jen doplní.
+Skončila-li předchozí dohoda před nástupem nové, stane se nová dohoda hlavním
+(primárním) vztahem osoby; předchozí si hlavní roli ponechá v měsících, kdy
+trvala. Stejně to platí při ručním přidání vztahu. Měsíční hlášení navíc bere
+jediný vztah, který osoba v měsíci vykazuje, vždy jako primární.
 
 **Otevřená DPP osoby.** Osobu, kterou import v měsíci nenašel, hledá také mezi
 neukončenými DPP firmy (uložená vazba, osobní číslo, rodné číslo, jméno). Má-li
@@ -899,6 +903,15 @@ odměňováním počítá mzdu sám z doložených hodin a importovanou hodinovo
 by kontrola souběhu zdrojů odmítla, takže by import měsíce neprošel. Hodinové
 odměňování proto nastavte na kartě vztahu jen tehdy, když mzdu nemá počítat
 docházkový systém.
+
+**Částky s haléři.** Měsíční hlášení (JMHZ) vykazuje výdělek v celých korunách.
+Má-li částka složky zařazené do hlášení haléře (provize, příplatek za víkend),
+nabídne souhrn volbu **Zaokrouhlit částky s haléři nahoru na celé koruny**
+s jejich počtem. Za měsíce vykazované přes JMHZ je zapnutá. Tabulka pak ukazuje
+zaokrouhlenou částku a pod ní původní hodnotu a vstupy vzniknou už
+zaokrouhlené. Zaokrouhluje se vždy nahoru, ve prospěch zaměstnance (§ 142
+odst. 2 zákoníku práce). Bez volby by takové vstupy zablokovaly mzdový běh
+kontrolou celých korun, viz [Mzdové složky a vstupy](91_Mzdove_slozky_a_vstupy.md).
 
 **Srážky ze mzdy.** Sloupce **Obědy – srážka ze mzdy** a **Srážka ze mzdy** (ve
 vzoru GIRITON dotovaná cena obědů a srážky z hlavního seznamu) se k hrubé mzdě

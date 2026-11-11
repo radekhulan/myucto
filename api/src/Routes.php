@@ -1113,6 +1113,7 @@ final class Routes
             // do vzoru s číselným id a skončilo jako 404.
             $g->post('/inputs/approve-batch', [PayrollInputsAction::class, 'approveBatch']);
             $g->post('/inputs/cancel-batch', [PayrollInputsAction::class, 'cancelBatch']);
+            $g->post('/inputs/round-whole-crowns', [PayrollInputsAction::class, 'roundWholeCrowns']);
             $g->post('/inputs/{id:[0-9]+}/approve', [PayrollInputsAction::class, 'approve']);
             $g->post('/inputs/{id:[0-9]+}/cancel', [PayrollInputsAction::class, 'cancel']);
             $g->post(
