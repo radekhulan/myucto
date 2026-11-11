@@ -8293,6 +8293,12 @@
       },
       "termination": {
         "title": "Skončení vztahu",
+        "follow_up": {
+          "title": "Navazující úkony po skončení",
+          "eldp": "Evidenční list důchodového pojištění (ELDP)",
+          "certificates": "Potvrzení o zaměstnání a pro Úřad práce",
+          "tax_certificate": "Potvrzení o zdanitelných příjmech"
+        },
         "subtitle": "Způsob a důvod skončení se zadává jen tady. Odsud se předvyplní odhláška A2 i potvrzení pro Úřad práce a založí se proplacení dovolené a odstupné do posledního běhu.",
         "load_failed": "Skončení vztahu se nepodařilo načíst.",
         "action_failed": "Akci se nepodařilo provést.",

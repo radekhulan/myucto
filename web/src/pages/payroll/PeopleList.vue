@@ -1563,6 +1563,7 @@ const FOCUSABLE_PANELS = [
   'deferred_income',
   // Karta Skončení vztahu (srážky z odstupného podle § 299 odst. 4 o. s. ř.).
   'termination',
+  'exit_documents',
   // Počáteční roční úhrny, na kartě hlavního (bez něj posledního) pracovního vztahu.
   'opening_balances',
 ] as const
@@ -1592,7 +1593,7 @@ async function focusPanel(panel: string) {
   delete query.panel
   delete query.field
   await router.replace({ query })
-  if (['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income', 'termination', 'opening_balances'].includes(panel)) {
+  if (['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income', 'termination', 'exit_documents', 'opening_balances'].includes(panel)) {
     await nextTick()
     const cards = employmentCards.value
     const target = Number.isInteger(employmentId) && employmentId > 0

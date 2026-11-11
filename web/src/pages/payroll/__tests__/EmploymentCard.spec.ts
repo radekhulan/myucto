@@ -326,6 +326,23 @@ describe('ukončení zapsané dopředu', () => {
 })
 
 describe('doskok na podklady JMHZ', () => {
+  it('otevře dokumenty skončeného vztahu a předá oprávnění k navazujícím úkonům', async () => {
+    HTMLElement.prototype.scrollIntoView = vi.fn()
+    const ended = { ...employment(), status: 'ended' as const, end_date: '2025-12-31' }
+    const wrapper = await mountCard(ended, {
+      props: { employment: ended, canWrite: false, canReadDocuments: true },
+      attachTo: document.body,
+    })
+    expect(wrapper.find('[data-test="employment-exit-documents"]').exists()).toBe(false)
+
+    await (wrapper.vm as unknown as { focusSection: (panel: string) => Promise<void> }).focusSection('exit_documents')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="employment-exit-documents"]').classes()).toContain('field-flash')
+    expect(wrapper.findComponent({ name: 'EmploymentTerminationPanel' }).attributes('can-read-documents')).toBe('true')
+    wrapper.unmount()
+  })
+
   it.each(['office_id', 'weekly_hours', 'social_employer_rate_category', 'social_part_time_discount_reason'])('zvýrazní konkrétní podmínku %s v uzavřeném vztahu', async field => {
     HTMLElement.prototype.scrollIntoView = vi.fn()
     const wrapper = await mountCard({ ...employment(), status: 'ended', relation_type: 'dpc' }, { attachTo: document.body })

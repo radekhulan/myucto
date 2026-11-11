@@ -8293,6 +8293,12 @@
       },
       "termination": {
         "title": "Termination",
+        "follow_up": {
+          "title": "Follow-up actions after termination",
+          "eldp": "Pension insurance record (ELDP)",
+          "certificates": "Employment and Labour Office certificates",
+          "tax_certificate": "Taxable income certificate"
+        },
         "subtitle": "How and why the employment ended is entered only here. The A2 deregistration and the Labour Office certificate are prefilled from it, and leave settlement and severance pay are created for the last payroll run.",
         "load_failed": "The termination could not be loaded.",
         "action_failed": "The action failed.",

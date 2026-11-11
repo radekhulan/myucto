@@ -314,6 +314,36 @@ final class PayrollDeadlineOverviewTest extends TestCase
         self::assertSame(1, $overview['summary']['overdue']);
     }
 
+    public function testChecklistKeepsEmploymentEndDateWithAndWithoutDeadline(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2025-01-01", end_date = "2025-12-31", status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->checklistItem('eldp_submission', '2026-08-03');
+        $this->checklistItem('termination_document', null);
+
+        $overview = $this->service->overview($this->supplierId, 'production');
+        $dated = $this->itemsOfSource($overview, 'checklist');
+        $undated = $this->service->groupItems(
+            $this->supplierId,
+            'production',
+            90,
+            PayrollDeadlineOverviewService::UNDATED_PHASE,
+            'checklist',
+            'termination_document',
+        );
+
+        self::assertCount(1, $dated);
+        self::assertSame(1, $undated['total']);
+        foreach ([...$dated, ...$undated['items']] as $item) {
+            self::assertSame('2025-12-31', $item['employment_end_date']);
+            self::assertSame($this->employmentId, $item['employment_id']);
+            self::assertSame($this->employeeId, $item['employee_id']);
+        }
+    }
+
     /**
      * Katalog termínů dosud jen PŘIPOMÍNAL a neměl vazbu na službu, která
      * povinnost splní: změnu údaje nikdo nesledoval, takže osmidenní lhůta

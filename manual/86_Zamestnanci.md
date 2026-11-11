@@ -1508,6 +1508,15 @@ proplacení dovolené a odstupné jako vstupy posledního běhu. Schválení A2
 i vydání potvrzení odmítne údaj, který záznamu odporuje. Bez záznamu se obě
 místa vyplňují ručně.
 
+Blok **Navazující úkony po skončení** nabízí odkazy na **Podání > ELDP**
+s předvybranou osobou, vztahem a rokem skončení, na **Dokumenty při skončení
+vztahu** s potvrzením o zaměstnání a pro Úřad práce a na roční **Dokumenty**
+s potvrzením o zdanitelných příjmech. Odkazy samy dokumenty nevytvářejí.
+U sbaleného skončeného vztahu nejprve otevřete jeho detail. Pokud daňové
+potvrzení hlásí nedoloženou úhradu mzdy, v **Mzdy > Platby > Spárování úhrad**
+spárujte skutečnou úhradu s bankovním pohybem nebo zaúčtovaným pokladním
+dokladem a pak potvrzení vytvořte znovu. Export plateb úhradu nedokládá.
+
 #### Způsob a důvod skončení
 
 **Způsob skončení** (výpověď zaměstnavatele, dohoda, výpověď zaměstnance,

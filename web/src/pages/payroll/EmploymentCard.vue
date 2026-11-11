@@ -332,7 +332,7 @@ const expanded = ref(!isClosed.value)
 const cardRoot = ref<HTMLElement | null>(null)
 
 async function focusSection(panel: string, field?: string): Promise<void> {
-  if (!['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income', 'termination', 'opening_balances'].includes(panel)) return
+  if (!['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income', 'termination', 'exit_documents', 'opening_balances'].includes(panel)) return
   expanded.value = true
   await nextTick()
   const root = cardRoot.value
@@ -342,6 +342,7 @@ async function focusSection(panel: string, field?: string): Promise<void> {
     : panel === 'opening_balances' ? '[data-test="opening-balances-needed"]'
     : panel === 'deferred_income' ? '[data-test="deferred-income"]'
     : panel === 'termination' ? '[data-test="employment-termination"]'
+    : panel === 'exit_documents' ? '[data-test="employment-exit-documents"]'
     : panel === 'employment_terms' ? '[data-test="terms-office"]'
     : panel === 'jmhz_profile' ? '[data-test="jmhz-ordinary-profile"]'
     : panel === 'registration' ? '[data-test="employment-registration"]'
@@ -3141,6 +3142,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       v-if="employment.end_date && (employment.status === 'ended' || employment.status === 'archived')"
       :employment-id="employment.id"
       :can-write="canWrite"
+      :can-read-documents="canReadDocuments === true"
       @loaded="terminationOverview = $event"
     />
     <EmploymentRegistrationPanel
@@ -3189,6 +3191,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
 
     <EmploymentExitDocumentsPanel
       v-if="employment.end_date && canReadDocuments"
+      data-test="employment-exit-documents"
       :employment="employment"
       :can-write="canWriteDocuments === true"
       :termination-reason-kind="terminationOverview?.derived?.unemployment_office_kind ?? null"
