@@ -898,6 +898,7 @@ každý sloupec šablony.
 | Skupina | Sloupce |
 |---|---|
 | Osoba | Osobní číslo, Příjmení a jméno (povinné), Rodné číslo, Datum narození, Zdravotní pojišťovna (kód), Druh vztahu (HPP, DPP, DPČ), Nástup, Týdenní úvazek, Měsíční mzda, Hodinová sazba (Kč/h), Konec dohody, Číslo účtu |
+| Registrace ČSSZ | Ulice, Číslo domu, Obec, PSČ, Stát, Státní občanství, CZ-ISCO, Druh činnosti, Místo výkonu práce, Daňová rezidence, Prohlášení poplatníka, Prohlášení od, Vzdělání, Postavení v zaměstnání |
 | Hodiny | Odpracováno; z toho noc, víkend, svátek, přesčas; Dovolená, Nemoc, Lékař |
 | Peníze (Kč za měsíc) | Hodinová mzda celkem, Odměna, Mimořádná odměna, Srážka z čisté mzdy |
 
@@ -906,11 +907,33 @@ sloupci vždy stejně; noc, víkend, svátek a přesčas jsou část odpracovan�
 hodin. Datum jako datum v Excelu nebo text „1. 6. 2026". **Druh vztahu** určí
 druh vztahu nově zakládané osoby, **Nástup** její den nástupu (bez něj první den
 měsíce), **Hodinová sazba**, **Konec dohody** a **Číslo účtu** se převezmou při
-jejím založení (viz Osoby výše). **Hodinová mzda celkem** jde na složku **Hodinová mzda podle
+jejím založení (viz Osoby výše), údaje pro registraci ČSSZ popisuje odstavec níže. **Hodinová mzda celkem** jde na složku **Hodinová mzda podle
 docházky** (zařazení JMHZ 10329), **Odměna** na **Odměnu** z číselníku,
 **Mimořádná odměna** na vlastní složku vzoru (pravidelnost odměny pro JMHZ
 zařadí účetní jednou za firmu) a **Srážka z čisté mzdy** založí dohodu o srážce
 na daný měsíc. Sloupce, které vzor nezná, i ostatní listy sešitu se ignorují.
+
+**Údaje pro registraci ČSSZ.** Sloupce skupiny Registrace ČSSZ jsou nepovinné
+a slouží k tomu, aby šlo osobu přihlásit k ČSSZ bez dopisování karet:
+
+- adresa trvalého pobytu (Ulice, Číslo domu, Obec, PSČ, Stát jako kód, prázdný
+  znamená CZ) se zapíše, jen když je vyplněná ulice, obec i PSČ;
+- **Státní občanství** a **Daňová rezidence** jako dvoupísmenný kód státu.
+  Bez sloupce rezidence dostane osoba s českou adresou rezidenci CZ;
+- **CZ-ISCO**, **Druh činnosti** (prázdný doplní aplikace podle druhu vztahu)
+  a **Místo výkonu práce** (šest číslic = kód obce, jinak název) jdou do
+  podmínek vztahu;
+- **Prohlášení poplatníka** ano zapíše podepsané prohlášení od dne
+  **Prohlášení od** (bez něj od nástupu), stejně jako hromadný zápis prohlášení;
+- **Vzdělání** (kód KKOV, např. M) a **Postavení v zaměstnání** (čtyřmístný kód
+  NKPZ) jdou do profilu registrace.
+
+Nové osobě se všechno zapíše při založení a náhled zakládání to u ní ukáže.
+U osoby, která už v evidenci je, ukáže souhrn jen chybějící údaje a volba
+**Doplnit chybějící údaje pro registraci ČSSZ** je při použití zapíše; nic, co
+už evidence vede, se nepřepisuje. Volba vyžaduje oprávnění k zápisu osob.
+Nečitelná hodnota osobu nezastaví: u osoby se objeví upozornění a hodnota se
+nezapíše. Co se zapsat nepodařilo, vypíše výsledek importu s důvodem.
 
 **Správa profilů mapování.** Seznam profilů firmy v záložce **Mapování
 sloupců** nabízí **Nový profil** a **Import JSON**. Profil uložený jako

@@ -26,6 +26,7 @@ import {
   type ManualLinks,
   type PersonDraft,
 } from './importHelpers'
+import { registrationSummary } from './attendanceRegistration'
 
 const props = withDefaults(defineProps<{
   persons: AttendancePerson[]
@@ -344,6 +345,9 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
               <dd :class="detail.invalid ? 'text-warning-700' : 'text-neutral-800'">{{ detailValue(detail.key, detail.value, detail.invalid) }}</dd>
             </div>
           </dl>
+          <p v-if="person.registration?.length" class="order-last w-full text-[11px] text-neutral-600" data-testid="attendance-create-registration">
+            <span class="text-neutral-500">{{ t('payroll_imports.attendance.persons.registration_label') }}:</span> {{ registrationSummary(person, t) }}
+          </p>
           <fieldset v-if="openAgreementFor(person)" class="order-last w-full rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs" data-testid="attendance-open-agreement">
             <legend class="sr-only">{{ t('payroll_imports.attendance.persons.open_agreement.legend', { name: person.display_name }) }}</legend>
             <p class="font-medium text-warning-700">

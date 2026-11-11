@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import {
   payrollImportsApi,
+  type AttendancePerson,
   type AttendancePersonCreate,
   type AttendancePersonsResult,
   type AttendancePreview,
@@ -45,6 +46,7 @@ import {
   pruneManualLinks,
   type ManualLinks,
 } from './importHelpers'
+import { registrationSummary } from './attendanceRegistration'
 
 const props = defineProps<{
   canWrite: boolean
@@ -121,6 +123,13 @@ watch(() => adoptableWages.value.length, (count, previous) => {
   if (count === 0) adoptMonthlyWage.value = false
   else if (!previous) adoptMonthlyWage.value = true
 })
+// Údaje pro registraci ČSSZ, které podklady nesou a přiřazeným osobám chybí.
+const fillRegistrationData = ref(true)
+const registrationGapPersons = computed(() => (preview.value?.persons ?? [])
+  .filter(person => (person.match.status === 'linked' || person.match.status === 'matched') && (person.registration?.length ?? 0) > 0))
+function registrationText(person: AttendancePerson): string {
+  return registrationSummary(person, t)
+}
 const usedSampleUpgrade = computed(() => {
   const upgrade = preview.value?.upgrade_available ?? null
   return upgradeMatchesProfile(upgrade, preview.value?.profile?.id) ? upgrade : null
@@ -349,6 +358,7 @@ async function apply() {
       approve_clean_time_months: writeTimeSummary.value && approveCleanTimeMonths.value && props.canApproveTime === true,
       materialize_absence_compensations: writeTimeSummary.value && materializeAbsenceCompensations.value,
       confirm_source_checks: confirmSourceChecks.value,
+      fill_registration_data: props.canCreatePersons && fillRegistrationData.value && registrationGapPersons.value.length > 0,
     })
     result.value = response
     if (response.replayed) toast.warning(t('payroll_imports.attendance.summary.replayed_toast', { id: response.batch.id }))
@@ -579,6 +589,15 @@ async function approveTimeMonths() {
               <input v-model="adoptMonthlyWage" type="checkbox" data-testid="attendance-adopt-monthly-wage" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
               <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.adopt_monthly_wage', { count: adoptableWages.length }) }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.adopt_monthly_wage_hint') }}</span></span>
             </label>
+            <div v-if="canCreatePersons && registrationGapPersons.length" class="text-sm text-neutral-800">
+              <label class="flex items-start gap-2">
+                <input v-model="fillRegistrationData" type="checkbox" data-testid="attendance-fill-registration" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
+                <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.fill_registration', { count: registrationGapPersons.length }) }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.fill_registration_hint') }}</span></span>
+              </label>
+              <ul class="ml-6 mt-1 max-h-40 space-y-0.5 overflow-auto text-xs text-neutral-600" data-testid="attendance-registration-gaps">
+                <li v-for="person in registrationGapPersons" :key="person.key"><span class="font-medium text-neutral-800">{{ personLabel(person.key) }}:</span> {{ registrationText(person) }}</li>
+              </ul>
+            </div>
             <label class="flex items-start gap-2 text-sm text-neutral-800">
               <input v-model="createInputs" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
               <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.create_inputs') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.create_inputs_hint') }}</span></span>
@@ -670,6 +689,12 @@ async function approveTimeMonths() {
             <p class="font-medium text-warning-700">{{ t('payroll_imports.attendance.result.wage_conflicts_title', { count: result.wage_conflicts.length }) }}</p>
             <ul class="mt-1 space-y-0.5 text-xs text-warning-700">
               <li v-for="item in result.wage_conflicts" :key="item.key">{{ item.display_name }}: {{ item.reason }}</li>
+            </ul>
+          </div>
+          <div v-if="result.registration" class="mt-3 rounded-lg border p-3" :class="result.registration.notes.length ? 'border-warning-500/30 bg-warning-50' : 'border-neutral-200 bg-surface'" data-testid="attendance-registration-result">
+            <p class="font-medium" :class="result.registration.notes.length ? 'text-warning-700' : 'text-neutral-800'">{{ t('payroll_imports.attendance.result.registration_filled', { count: result.registration.filled }) }}</p>
+            <ul v-if="result.registration.notes.length" class="mt-1 space-y-0.5 text-xs text-warning-700">
+              <li v-for="(item, index) in result.registration.notes" :key="`${item.key}-${index}`">{{ item.display_name }}: {{ item.reason }}</li>
             </ul>
           </div>
           <div v-if="refreshRuns.length" class="mt-3 rounded-lg border border-primary-500/30 bg-surface p-3" data-testid="attendance-runs-refresh">

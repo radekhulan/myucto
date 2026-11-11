@@ -361,6 +361,13 @@ export function minutesToHours(minutes: number): string {
 
 // ─── Docházka: číselníky mapování ─────────────────────────────────────────────
 
+/** Údaje pro registraci ČSSZ, viz AttendanceMeaning::REGISTRATION na serveru. */
+export const REGISTRATION_MEANINGS: readonly AttendanceMeaning[] = [
+  'address_street', 'address_house_number', 'address_city', 'address_postal_code', 'address_country',
+  'citizenship', 'cz_isco_code', 'activity_code', 'workplace', 'tax_residence', 'tax_declaration',
+  'tax_declaration_from', 'education_code', 'employment_status_code',
+]
+
 export const ATTENDANCE_MEANING_GROUPS: { key: string; meanings: AttendanceMeaning[] }[] = [
   { key: 'other', meanings: ['ignore'] },
   {
@@ -370,6 +377,10 @@ export const ATTENDANCE_MEANING_GROUPS: { key: string; meanings: AttendanceMeani
       'relation_label', 'department', 'cost_center', 'position', 'weekly_hours', 'start_end_note',
       'start_date', 'monthly_wage', 'hourly_rate', 'end_date', 'bank_account',
     ],
+  },
+  {
+    key: 'registration',
+    meanings: [...REGISTRATION_MEANINGS],
   },
   {
     key: 'work',
@@ -405,7 +416,7 @@ export const AUTO_COMPONENT_CODE = '*'
 const TEXT_MEANINGS = new Set<AttendanceMeaning>([
   'person_name', 'personal_number', 'birth_number', 'birth_date', 'health_insurer_code', 'relation_label',
   'department', 'cost_center', 'position', 'start_end_note', 'start_date', 'monthly_wage',
-  'hourly_rate', 'end_date', 'bank_account',
+  'hourly_rate', 'end_date', 'bank_account', ...REGISTRATION_MEANINGS,
 ])
 const MONEY_MEANINGS = new Set<AttendanceMeaning>([
   'component', 'net_meal_deduction', 'net_other_deduction', 'reference_gross', 'reference_net',

@@ -90,6 +90,21 @@ describe('AttendancePersonsStep — náhled zakládání osob', () => {
     ])
   })
 
+  it('ukáže údaje pro registraci ČSSZ, které se nové osobě zapíšou', async () => {
+    const hana = person('hana', {
+      display_name: 'Registrační Hana',
+      registration: [{ key: 'address', value: 'Praha (CZ)' }, { key: 'cz_isco_code', value: '43111' }],
+    })
+    const wrapper = mount(AttendancePersonsStep, {
+      props: { persons: [hana], options: [], manualLinks: {}, period: '2026-06', canCreate: true },
+    })
+    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
+    const text = wrapper.get('[data-testid="attendance-create-registration"]').text()
+    expect(text).toContain('payroll_imports.attendance.persons.registration_label')
+    expect(text).toContain('payroll_imports.attendance.registration.address Praha (CZ)')
+    expect(text).toContain('payroll_imports.attendance.registration.cz_isco_code 43111')
+  })
+
   it('u osoby s otevřenou DPP nabídne použít ji a jako výchozí pošle její použití', async () => {
     const eva = person('eva', {
       display_name: 'Ukázková Eva',

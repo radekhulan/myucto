@@ -31,6 +31,7 @@ use MyInvoice\Service\Payroll\Net\DeductionAgreementTerms;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 use MyInvoice\Service\Payroll\PayrollPersonProfileValidator;
+use MyInvoice\Service\Payroll\PayrollTaxDeclarationBulkSign;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -125,6 +126,8 @@ final class AttendanceImportService
         private readonly DemoMode $demo,
         private readonly AttendanceOpenAgreementMatcher $openAgreementMatcher,
         private readonly PayrollOpenAgreements $openAgreements,
+        private readonly RegistrationImportWriter $registrationWriter,
+        private readonly PayrollTaxDeclarationBulkSign $declarations,
     ) {
     }
 
@@ -245,6 +248,13 @@ final class AttendanceImportService
          * dávku s nálezem nepoužít a vrátit nález, `true` = účetní nález potvrdila.
          */
         ?bool $sourceChecksConfirmed = null,
+        /*
+         * Doplnit přiřazeným osobám údaje pro registraci ČSSZ, které jim
+         * v evidenci chybí ({@see AttendanceRegistrationData}). Jako souhrn
+         * docházky se zapisuje až po dávce a i při jejím opakování; zapisuje se
+         * jen chybějící, takže opakování nic nepřepíše.
+         */
+        bool $fillRegistrationData = false,
     ): array {
         if ($approveCleanTimeMonths && !$writeTimeSummary) {
             throw new \InvalidArgumentException(
@@ -390,9 +400,15 @@ final class AttendanceImportService
             ];
         };
 
+        $registration = fn (): array => [
+            'registration' => $fillRegistrationData
+                ? $this->fillRegistration($supplierId, $periodStart, $assigned, $userId)
+                : null,
+        ];
+
         $existing = $this->imports->findBatchByHash($supplierId, $periodStart, $fingerprint);
         if ($existing !== null) {
-            return self::replay($existing, $skipped, $adoptWages()) + $timeSteps((int) $existing['id']);
+            return self::replay($existing, $skipped, $adoptWages()) + $timeSteps((int) $existing['id']) + $registration();
         }
 
         $result = $this->transactional(function () use (
@@ -509,10 +525,10 @@ final class AttendanceImportService
             $winner = $this->imports->findBatchByHash($supplierId, $periodStart, $fingerprint)
                 ?? throw new \RuntimeException('Souběžně založenou dávku importu nelze načíst.');
 
-            return self::replay($winner, $skipped, $adoptWages()) + $timeSteps((int) $winner['id']);
+            return self::replay($winner, $skipped, $adoptWages()) + $timeSteps((int) $winner['id']) + $registration();
         }
         $wages = $adoptWages();
-        $time = $timeSteps((int) $result['import_id']);
+        $time = $timeSteps((int) $result['import_id']) + $registration();
 
         return [
             'replayed' => false,
@@ -573,6 +589,9 @@ final class AttendanceImportService
             if (is_array($person['open_agreement'] ?? null)) {
                 $data[(string) $person['key']]['_open_agreement'] = $person['open_agreement'];
             }
+            if (($person['_registration'] ?? []) !== []) {
+                $data[(string) $person['key']]['_registration'] = $person['_registration'];
+            }
         }
 
         return $data;
@@ -619,6 +638,8 @@ final class AttendanceImportService
                 }
                 $open = $personData[$key]['_open_agreement'] ?? null;
                 unset($personData[$key]['_open_agreement']);
+                // Údaje pro registraci bere server jen ze souborů, nikdy z požadavku.
+                unset($item['_registration']);
                 foreach ($personData[$key] ?? [] as $field => $value) {
                     if (in_array($item[$field] ?? null, [null, ''], true)) {
                         $item[$field] = $value;
@@ -1136,6 +1157,7 @@ final class AttendanceImportService
         unset($person);
         $persons = $this->withAgreementHours($supplierId, $periodStart, $persons, $matched['options']);
         $persons = $this->openAgreementMatcher->annotate($supplierId, $periodStart, $persons);
+        $persons = $this->withRegistration($supplierId, $periodStart, $persons);
 
         $codes = [];
         foreach ($mapped['sheets'] as $sheet) {
@@ -1235,11 +1257,15 @@ final class AttendanceImportService
             'amount_minor_total' => 0,
             'deductions' => 0,
             'deduction_minor_total' => 0,
+            'registration_gaps' => 0,
         ];
         foreach ($persons as $person) {
             $status = $person['match']['status'];
             if ($status === 'linked' || $status === 'matched') {
                 ++$summary['matched'];
+                if (($person['registration'] ?? []) !== []) {
+                    ++$summary['registration_gaps'];
+                }
             } elseif ($status === 'ambiguous') {
                 ++$summary['ambiguous'];
             } else {
@@ -1675,6 +1701,159 @@ final class AttendanceImportService
     }
 
     /**
+     * Údaje pro registraci ČSSZ z podkladů ({@see AttendanceRegistrationData}).
+     * Osobě k založení se ukáže všechno, co se při založení zapíše; osobě
+     * s vztahem v období jen to, co jí v evidenci chybí. Stav evidence se čte
+     * jedním během dotazů pro všechny osoby.
+     *
+     * @param list<array<string,mixed>> $persons
+     * @return list<array<string,mixed>>
+     */
+    private function withRegistration(int $supplierId, string $periodStart, array $persons): array
+    {
+        $pairs = [];
+        foreach ($persons as $index => $person) {
+            $persons[$index]['registration'] = [];
+            $persons[$index]['_registration_plan'] = null;
+            if (($person['_registration'] ?? []) === []) {
+                continue;
+            }
+            $start = is_string($person['start_on'] ?? null) ? $person['start_on'] : $periodStart;
+            $plan = AttendanceRegistrationData::plan($person['_registration'], $start);
+            $persons[$index]['_registration_plan'] = $plan;
+            array_push($persons[$index]['warnings'], ...$plan['warnings']);
+            if (in_array($person['match']['status'], ['linked', 'matched'], true)
+                && is_int($person['match']['employment_id']) && is_int($person['match']['employee_id'])) {
+                $pairs[$index] = ['employee_id' => $person['match']['employee_id'], 'employment_id' => $person['match']['employment_id']];
+            }
+        }
+        $state = $this->imports->registrationState(
+            $supplierId,
+            array_values($pairs),
+            $periodStart,
+            (int) substr($periodStart, 0, 4),
+        );
+        foreach ($persons as $index => $person) {
+            $plan = $person['_registration_plan'];
+            if ($plan === null) {
+                continue;
+            }
+            if (isset($pairs[$index])) {
+                $plan = isset($state[$pairs[$index]['employment_id']])
+                    ? AttendanceRegistrationData::gaps($plan, $state[$pairs[$index]['employment_id']])
+                    : null;
+                $persons[$index]['_registration_plan'] = $plan;
+            }
+            $persons[$index]['registration'] = $plan === null ? [] : AttendanceRegistrationData::display($plan);
+        }
+
+        return $persons;
+    }
+
+    /**
+     * Zapíše údaje pro registraci jedné osobě: skupiny věty registrace stejnou
+     * cestou jako import registrace ČSSZ a podepsané prohlášení přes hromadný
+     * zápis prohlášení (ten osobu s podepsaným prohlášením přeskočí).
+     *
+     * @param array<string,mixed> $plan {@see AttendanceRegistrationData::plan()}
+     * @return list<string> co se nezapsalo a proč
+     */
+    private function writeRegistration(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $decisive,
+        array $plan,
+        int $taxYear,
+        ?int $userId,
+    ): array {
+        $notes = [];
+        if ($plan['steps'] !== []) {
+            $notes = $this->registrationWriter->supplement(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                $decisive,
+                $plan['steps'],
+                'attendance-import:' . substr($decisive, 0, 7),
+                $userId,
+                null,
+                null,
+            )['notes'];
+        }
+        if (is_array($plan['declaration'])) {
+            try {
+                $result = $this->declarations->apply(
+                    $supplierId,
+                    $taxYear,
+                    $plan['declaration']['signed_on'],
+                    [$employeeId],
+                    $userId,
+                    null,
+                    null,
+                );
+                $reasons = array_merge(...array_map(
+                    static fn (array $item): array => array_map('strval', (array) ($item['reasons'] ?? [$item['message'] ?? ''])),
+                    [...$result['skipped'], ...$result['failed']],
+                ));
+                if ($result['counts']['applied'] === 0 && !in_array('already_signed', $reasons, true)) {
+                    $notes[] = 'Prohlášení poplatníka se nezapsalo (' . implode(', ', array_filter($reasons)) . '), doplňte ho na kartě osoby.';
+                }
+            } catch (\InvalidArgumentException|\DomainException $e) {
+                $notes[] = 'Prohlášení poplatníka: ' . $e->getMessage();
+            }
+        }
+
+        return $notes;
+    }
+
+    /**
+     * Doplní údaje pro registraci přiřazeným osobám, kterým v evidenci chybí.
+     * Každá osoba zvlášť; chyba jedné ostatní nezastaví.
+     *
+     * @param list<array{person:array<string,mixed>,employment:array<string,mixed>}> $assigned
+     * @return array{filled:int,notes:list<array{key:string,display_name:string,reason:string}>}
+     */
+    private function fillRegistration(int $supplierId, string $periodStart, array $assigned, ?int $userId): array
+    {
+        $filled = 0;
+        $notes = [];
+        $wanted = array_values(array_filter(
+            $assigned,
+            static fn (array $item): bool => is_array($item['person']['_registration_plan'] ?? null)
+                && !AttendanceRegistrationData::isEmpty($item['person']['_registration_plan']),
+        ));
+        $starts = $this->imports->employmentStarts(
+            $supplierId,
+            array_map(static fn (array $item): int => (int) $item['employment']['employment_id'], $wanted),
+        );
+        foreach ($wanted as $item) {
+            $plan = $item['person']['_registration_plan'];
+            $employmentId = (int) $item['employment']['employment_id'];
+            // Údaj chyběl od začátku vztahu, doplňuje se proto k jeho nástupu.
+            $reasons = $this->writeRegistration(
+                $supplierId,
+                (int) $item['employment']['employee_id'],
+                $employmentId,
+                $starts[$employmentId] ?? $periodStart,
+                $plan,
+                (int) substr($periodStart, 0, 4),
+                $userId,
+            );
+            ++$filled;
+            foreach ($reasons as $reason) {
+                $notes[] = [
+                    'key' => (string) $item['person']['key'],
+                    'display_name' => (string) $item['person']['display_name'],
+                    'reason' => $reason,
+                ];
+            }
+        }
+
+        return ['filled' => $filled, 'notes' => $notes];
+    }
+
+    /**
      * Otevřená DPP místo nové ({@see PayrollOpenAgreements}). Volba
      * `use_open_agreement` nese id dohody, `create_new_agreement` výslovné
      * založení nové. Když náhled u osoby otevřenou dohodu našel a volba chybí,
@@ -1839,6 +2018,25 @@ final class AttendanceImportService
             $renameError = $this->renameEmployment($supplierId, $employeeId, $employment['id'], $number, $userId);
             if ($renameError !== null) {
                 $message = trim(($message ?? '') . ' ' . $renameError);
+            }
+        }
+        // Údaje pro registraci ČSSZ ze šablony: nové osobě se zapíšou všechny.
+        if (is_array($item['_registration'] ?? null) && $item['_registration'] !== [] && $plannedStart !== '') {
+            $plan = AttendanceRegistrationData::plan($item['_registration'], $plannedStart);
+            $reasons = [
+                ...$plan['warnings'],
+                ...$this->writeRegistration(
+                    $supplierId,
+                    $employeeId,
+                    $employment['id'],
+                    $plannedStart,
+                    $plan,
+                    (int) substr($plannedStart, 0, 4),
+                    $userId,
+                ),
+            ];
+            if ($reasons !== []) {
+                $message = trim(($message ?? '') . ' ' . implode(' ', $reasons));
             }
         }
         $this->saveLinks(
