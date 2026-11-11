@@ -4790,6 +4790,12 @@
         "action": "Click “Refresh inputs”, then recalculate the run.",
         "action_forbidden": "Inputs can be refreshed by a user allowed to calculate payroll and write payroll inputs."
       },
+      "missing_employments": {
+        "title": "No relationship is missing from the run | The run is missing {count} employment relationship that belongs to the period | The run is missing {count} employment relationships that belong to the period",
+        "start": "start {date}",
+        "body": "The relationship was created, or its start was moved earlier, after the run had been approved. An approved run does not change by itself, so these people have no pay, payslip or monthly report for the month. Request a correction of the run and open it: the new revision picks the relationships up and recalculates the pay.",
+        "action_forbidden": "A correction of the run can be requested by a user with the right to review payroll."
+      },
       "next_steps": {
         "title": "What comes next",
         "subtitle": "Payroll is calculated and posted — filing comes next. Each obligation shows its deadline, its status and a link to where it is filed; anything already done is marked as done."
@@ -7111,6 +7117,13 @@
       "add_employment": "Add relationship",
       "employment_created": "The employment relationship has been created.",
       "employment_created_with_warnings": "The employment relationship has been created. Check on the employment card: {messages}",
+      "locked_run_gap": {
+        "title": "The relationship belongs to a month whose payroll run is already approved | The relationship belongs to months whose payroll runs are already approved",
+        "title_with_start": "The start on {date} falls into a month whose payroll run is already approved | The start on {date} falls into months whose payroll runs are already approved",
+        "body": "The approved run does not contain this relationship, so it has no pay, payslip or monthly report for that month. An approved run does not change by itself: open the run, request its correction and open it, the new revision picks the relationship up.",
+        "open_run": "Open the run for {period}",
+        "toast": "The start falls into a month with an approved payroll run ({periods}). Open a correction of the run, otherwise the person gets no pay and no monthly report for that month. | The start falls into months with approved payroll runs ({periods}). Open corrections of those runs, otherwise the person gets no pay and no monthly report for those months."
+      },
       "open_agreement": {
         "title": "The person already has an open agreement to perform work (DPP).",
         "item": "DPP {code} from {start} to {end}",

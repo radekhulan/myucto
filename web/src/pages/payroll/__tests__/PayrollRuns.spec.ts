@@ -1729,6 +1729,66 @@ describe('PayrollRuns', () => {
     wrapper.unmount()
   })
 
+  /*
+   * Zaměstnanec založený až po schválení měsíce v běhu tiše chyběl: stránka
+   * běhu se nezměnila a osoba zůstala bez mzdy i bez měsíčního hlášení.
+   */
+  it('schválený běh jmenuje vztahy, které do období patří a v revizi chybí, a nabídne opravu', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'approved',
+      can_delete: false,
+      revision_id: 40,
+      revision_no: 1,
+      revision_kind: 'regular',
+      available_commands: ['post', 'request_correction'],
+      missing_employments: [{
+        employment_id: 71,
+        employee_id: 31,
+        full_name: 'Syntetická Pozdní',
+        employment_code: 'HPP-LATE',
+        relation_type: 'employment',
+        start_date: '2026-08-15',
+      }],
+    })])
+
+    const wrapper = mount(PayrollRuns, {
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    const box = wrapper.get('[data-testid="payroll-run-15-missing-employments"]')
+    expect(box.text()).toContain('payroll.runs.missing_employments.title')
+    expect(box.text()).toContain('Syntetická Pozdní')
+    expect(box.text()).toContain('payroll.runs.missing_employments.body')
+    expect(JSON.parse(box.get('a').attributes('data-to')!)).toEqual({
+      name: 'payroll-people',
+      query: { person: '31', employment: '71' },
+    })
+
+    await box.get('[data-testid="payroll-run-15-missing-employments-correct"]').trigger('click')
+    await flushPromises()
+
+    // Oprava schváleného běhu se ptá na důvod, sama se neodešle.
+    expect(document.body.querySelector('[data-test="run-command-dialog"]')).not.toBeNull()
+    expect(m.commandRun).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('běh, kterému žádný vztah nechybí, o chybějících vztazích mlčí', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'approved',
+      can_delete: false,
+      available_commands: ['post', 'request_correction'],
+      missing_employments: [],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-run-15-missing-employments"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('změněné podmínky vztahu vypíše a jako hlavní krok nabídne obnovu podkladů místo přepočtu', async () => {
     m.runs.mockResolvedValue([run({
       status: 'calculated',

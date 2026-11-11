@@ -65,7 +65,7 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import ColumnDragHandle from '@/components/ui/ColumnDragHandle.vue'
 import { useColumnDrag } from '@/composables/useColumnDrag'
-import { formatDate } from '@/composables/useFormat'
+import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -1224,6 +1224,7 @@ async function saveNew(personId: number, choice: { use_open_agreement?: number; 
     } else {
       toast.success(t('payroll.people.employment_created'))
     }
+    warnLockedRunGaps([employment])
   } catch (error) {
     const openAgreements = openAgreementsFromError(error)
     if (openAgreements !== null) {
@@ -1309,6 +1310,7 @@ async function createEmployee() {
     details.value[created.id] = created
     expandedId.value = created.id
     toast.success(t('payroll.people.create.created'))
+    warnLockedRunGaps(created.employments)
   } catch (error) {
     employeeError.value = apiErrorMessage(
       error,
@@ -1318,6 +1320,17 @@ async function createEmployee() {
   } finally {
     savingEmployee.value = false
   }
+}
+
+/**
+ * Nástup nového vztahu spadá do měsíce, který už má schválený běh: řekne se to
+ * hned při založení, ne až když někdo zjistí, že osobě chybí mzda. Trvalé
+ * upozornění s odkazem na běh drží karta vztahu.
+ */
+function warnLockedRunGaps(employments: PayrollEmployment[]) {
+  const periods = [...new Set(employments.flatMap(item => (item.locked_run_gaps ?? []).map(gap => gap.period)))].sort()
+  if (periods.length === 0) return
+  toast.warning(t('payroll.people.locked_run_gap.toast', { periods: periods.map(period => formatPeriod(period)).join(', ') }, periods.length))
 }
 
 /**

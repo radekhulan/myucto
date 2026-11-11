@@ -10,6 +10,7 @@ import {
   type PayrollRunHistoryEvent,
   type PayrollRunHistoryTotalDiff,
   type PayrollRunHistoryTotalKey,
+  type PayrollRunMissingEmployment,
   type PayrollRunReadiness,
   type PayrollRunReadinessBulkKind,
   type PayrollRunReadinessFinding,
@@ -26,7 +27,7 @@ import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBrea
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
 import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
+import { formatDate, formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -710,6 +711,14 @@ function commandLabel(command: PayrollRunCommand, run?: PayrollRun): string {
  */
 function hasSourceDrift(run: PayrollRun): boolean {
   return (run.source_drift?.total ?? 0) > 0
+}
+
+function missingEmploymentKey(item: PayrollRunMissingEmployment): number {
+  return item.employment_id
+}
+
+function missingEmploymentSearchText(item: PayrollRunMissingEmployment): string {
+  return `${item.full_name} ${item.employment_code}`
 }
 
 function primaryCommand(run: PayrollRun): PayrollRunCommand | undefined {
@@ -2204,6 +2213,57 @@ onMounted(load)
             </ul>
             <p>
               {{ t(visibleCommands(run).includes('refresh_inputs') ? 'payroll.runs.source_drift.action' : 'payroll.runs.source_drift.action_forbidden') }}
+            </p>
+          </div>
+        </div>
+        <!--
+          Schválený běh nezná vztah, který do jeho období patří (zaměstnanec
+          založený po schválení, nástup posunutý dozadu). Bez tohohle výčtu
+          osoba tiše zůstala bez mzdy i bez měsíčního hlášení za měsíc nástupu.
+        -->
+        <div
+          v-if="(run.missing_employments ?? []).length > 0"
+          :data-testid="`payroll-run-${run.id}-missing-employments`"
+          class="mt-3 flex max-w-3xl items-start gap-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
+          role="alert"
+        >
+          <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.bell" />
+          </svg>
+          <div class="min-w-0 flex-1 space-y-2">
+            <p class="font-medium">
+              {{ t('payroll.runs.missing_employments.title', { count: (run.missing_employments ?? []).length }, (run.missing_employments ?? []).length) }}
+            </p>
+            <ExpandableList
+              :items="run.missing_employments ?? []"
+              :item-key="missingEmploymentKey"
+              :search-text="missingEmploymentSearchText"
+              :test-id="`payroll-run-${run.id}-missing-employments-list`"
+              list-class="list-disc space-y-0.5 pl-5"
+            >
+              <template #item="{ item }">
+                <RouterLink
+                  :to="{ name: 'payroll-people', query: { person: String(item.employee_id), employment: String(item.employment_id) } }"
+                  class="font-medium text-primary-600 hover:underline"
+                >{{ item.full_name }}</RouterLink>
+                <span v-if="item.start_date"> · {{ t('payroll.runs.missing_employments.start', { date: formatDate(item.start_date) }) }}</span>
+              </template>
+            </ExpandableList>
+            <p>{{ t('payroll.runs.missing_employments.body') }}</p>
+            <button
+              v-if="visibleCommands(run).includes('request_correction')"
+              type="button"
+              class="cursor-pointer"
+              :class="btnOutlineSm('warning')"
+              :disabled="saving"
+              :data-testid="`payroll-run-${run.id}-missing-employments-correct`"
+              @click="runCommand(run, 'request_correction')"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.uturn" /></svg>
+              {{ commandLabel('request_correction', run) }}
+            </button>
+            <p v-else data-test="payroll-run-missing-employments-forbidden">
+              {{ t('payroll.runs.missing_employments.action_forbidden') }}
             </p>
           </div>
         </div>

@@ -44583,6 +44583,16 @@ components:
           type: [integer, "null"]
           description: Sjednaná měsíční hrubá mzda v haléřích.
         row_version: { type: integer, minimum: 1 }
+        locked_run_gaps:
+          type: array
+          description: Uzavřené mzdové běhy (schválené a dál), do jejichž období vztah patří, ale v jejich aktuální revizi chybí. Typicky vztah založený nebo s nástupem posunutým dozadu až po schválení měsíce; do běhu ho dostane jen oprava běhu.
+          items:
+            type: object
+            required: [run_id, period, status]
+            properties:
+              run_id: { type: integer, format: int64 }
+              period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+              status: { type: string }
         terms:
           type: array
           items: { $ref: '#/components/schemas/PayrollEmploymentTerm' }
@@ -44774,6 +44784,19 @@ components:
         row_version: { type: integer, minimum: 1 }
         result_snapshot: { $ref: '#/components/schemas/PayrollRunResultSnapshot' }
         source_drift: { $ref: '#/components/schemas/PayrollRunSourceDrift' }
+        missing_employments:
+          type: array
+          description: Jen v seznamu běhů. Pracovní vztahy, které do období uzavřeného běhu (schválený a dál) patří podle téhož pravidla jako snímek běhu, ale v jeho aktuální revizi nejsou. Prázdné u otevřených a převzatých běhů.
+          items:
+            type: object
+            required: [employment_id, employee_id, full_name, employment_code, relation_type, start_date]
+            properties:
+              employment_id: { type: integer, format: int64 }
+              employee_id: { type: integer, format: int64 }
+              full_name: { type: string }
+              employment_code: { type: string }
+              relation_type: { type: string }
+              start_date: { type: [string, "null"], format: date }
         validations:
           type: array
           items: { $ref: '#/components/schemas/PayrollRunValidation' }

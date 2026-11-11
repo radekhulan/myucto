@@ -313,8 +313,21 @@ export interface PayrollEmployment {
    * a od kdy nejdřív smí začít nová verze. Volitelné kvůli starší odpovědi.
    */
   settled_through?: string | null
+  /**
+   * Uzavřené mzdové běhy, do jejichž období vztah patří, ale v jejich revizi
+   * chybí (založení nebo posun nástupu až po schválení měsíce). Schválený běh
+   * se sám nezmění, pomůže jen jeho oprava. Volitelné kvůli starší odpovědi.
+   */
+  locked_run_gaps?: PayrollLockedRunGap[]
   checklist: PayrollEmploymentChecklistItem[]
   timeline: PayrollEmploymentEvent[]
+}
+
+export interface PayrollLockedRunGap {
+  run_id: number
+  /** Období běhu `RRRR-MM`. */
+  period: string
+  status: PayrollRunStatus
 }
 
 export interface PayrollEmploymentHealthInsurer {
@@ -7853,6 +7866,21 @@ export interface PayrollRun {
    * u běhu, kde podklady obnovit nejde (koncept, schválený, uzavřený…).
    */
   source_drift?: PayrollRunSourceDrift | null
+  /**
+   * Vztahy, které do období uzavřeného běhu patří, ale schválená revize je
+   * nezná (zaměstnanec založený po schválení, nástup posunutý dozadu). Do běhu
+   * je dostane jen jeho oprava. Volitelné kvůli starší odpovědi.
+   */
+  missing_employments?: PayrollRunMissingEmployment[]
+}
+
+export interface PayrollRunMissingEmployment {
+  employment_id: number
+  employee_id: number
+  full_name: string
+  employment_code: string
+  relation_type: PayrollRelationType
+  start_date: string | null
 }
 
 /**

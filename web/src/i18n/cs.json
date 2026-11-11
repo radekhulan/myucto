@@ -4790,6 +4790,12 @@
         "action": "Klikněte na „Obnovit podklady“ a potom běh přepočítejte.",
         "action_forbidden": "Obnovit podklady může uživatel s právem počítat mzdy a zapisovat mzdové vstupy."
       },
+      "missing_employments": {
+        "title": "V běhu nechybí žádný vztah | V běhu chybí {count} pracovní vztah, který do období patří | V běhu chybí {count} pracovní vztahy, které do období patří | V běhu chybí {count} pracovních vztahů, které do období patří",
+        "start": "nástup {date}",
+        "body": "Vztah vznikl nebo dostal dřívější nástup až po schválení běhu. Schválený běh se sám nezmění, takže tyto osoby za měsíc nemají mzdu, výplatní pásku ani měsíční hlášení. Vyžádejte opravu běhu a otevřete ji: nová revize vztahy převezme a mzdy přepočítá.",
+        "action_forbidden": "Opravu běhu může vyžádat uživatel s právem kontrolovat mzdy."
+      },
       "next_steps": {
         "title": "Co následuje",
         "subtitle": "Mzdy jsou spočítané a zaúčtované - teď se podává. U každé povinnosti je vidět lhůta, stav a odkaz tam, kde se podává; co je hotové, je označené jako hotové."
@@ -7111,6 +7117,13 @@
       "add_employment": "Přidat pracovní vztah",
       "employment_created": "Pracovní vztah byl založen.",
       "employment_created_with_warnings": "Pracovní vztah byl založen. Zkontrolujte na kartě vztahu: {messages}",
+      "locked_run_gap": {
+        "title": "Vztah patří do měsíce, který má už schválený mzdový běh | Vztah patří do měsíce, který má už schválený mzdový běh | Vztah patří do měsíců, které mají už schválený mzdový běh",
+        "title_with_start": "Nástup {date} spadá do měsíce, který má už schválený mzdový běh | Nástup {date} spadá do měsíce, který má už schválený mzdový běh | Nástup {date} spadá do měsíců, které mají už schválený mzdový běh",
+        "body": "Ve schváleném běhu tento vztah chybí, takže za ten měsíc nemá mzdu, výplatní pásku ani měsíční hlášení. Schválený běh se sám nezmění: otevřete běh, vyžádejte jeho opravu a otevřete ji, nová revize vztah převezme.",
+        "open_run": "Otevřít běh {period}",
+        "toast": "Nástup spadá do měsíce se schváleným mzdovým během ({periods}). Otevřete opravu běhu, jinak osoba za ten měsíc nedostane mzdu ani měsíční hlášení. | Nástup spadá do měsíce se schváleným mzdovým během ({periods}). Otevřete opravu běhu, jinak osoba za ten měsíc nedostane mzdu ani měsíční hlášení. | Nástup spadá do měsíců se schváleným mzdovým během ({periods}). Otevřete opravu těchto běhů, jinak osoba za ty měsíce nedostane mzdu ani měsíční hlášení."
+      },
       "open_agreement": {
         "title": "Osoba už má otevřenou dohodu o provedení práce.",
         "item": "DPP {code} od {start} do {end}",

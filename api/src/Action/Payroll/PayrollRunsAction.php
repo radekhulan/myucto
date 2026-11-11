@@ -70,6 +70,9 @@ final class PayrollRunsAction
         private readonly \MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup $migrationSetup,
         // Trvale skrytá varování se do kontrol běhu ani do jejich počtů nepočítají.
         private readonly \MyInvoice\Service\Payroll\Run\PayrollWarningSuppressionService $warningSuppressions,
+        // Vztahy, které do období uzavřeného běhu patří, ale v jeho revizi
+        // nejsou (zaměstnanec založený až po schválení měsíce).
+        private readonly \MyInvoice\Repository\Payroll\PayrollRunMissingEmploymentRepository $missingEmployments,
     ) {}
 
     /**
@@ -421,6 +424,11 @@ final class PayrollRunsAction
         // Součet exekučních srážek běhu je u malého zaměstnavatele srážka
         // jednoho člověka; bez práva na agendu se nevrací.
         $canSeeEnforcement = PayrollEnforcementDisclosure::canSeeEnforcement($request);
+        // Jedním dotazem za celou stránku; uzavřené běhy si vybere dotaz sám.
+        $missingEmployments = $this->missingEmployments->forRuns(
+            $this->currentSupplierId($request),
+            array_map(static fn (array $row): int => (int) ($row['id'] ?? 0), $items),
+        );
         foreach ($items as &$item) {
             $status = PayrollTimeValue::string(
                 $item['status'] ?? null,
@@ -464,6 +472,13 @@ final class PayrollRunsAction
                 PayrollRunStatus::from($status),
                 PayrollTimeValue::int($item['id'] ?? null, 'run.id'),
             );
+            /*
+             * Vztahy, které do období patří, ale schválená revize je nezná:
+             * zaměstnanec založený po schválení, nástup posunutý dozadu. Běh je
+             * neměnný, takže jediná cesta je oprava běhu; bez tohohle výčtu
+             * osoba tiše zůstala bez mzdy i bez měsíčního hlášení.
+             */
+            $item['missing_employments'] = $missingEmployments[(int) ($item['id'] ?? 0)] ?? [];
             $deletion = $this->runs->canDelete(
                 $this->currentSupplierId($request),
                 PayrollTimeValue::int($item['id'] ?? null, 'run.id'),

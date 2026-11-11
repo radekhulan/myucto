@@ -8,6 +8,15 @@ final class PayrollEmploymentLifecycleSql
 {
     public static function effectiveStatusAtPlaceholder(): string
     {
+        return self::effectiveStatusAt('?');
+    }
+
+    /**
+     * Stav vztahu k danému dni; `$effectiveOnSql` je zástupný znak nebo SQL výraz
+     * (sloupec období připojeného běhu).
+     */
+    public static function effectiveStatusAt(string $effectiveOnSql): string
+    {
         return 'COALESCE(
                     (
                         SELECT lifecycle.to_status
@@ -16,7 +25,7 @@ final class PayrollEmploymentLifecycleSql
                            AND lifecycle.employment_id = employment.id
                            AND lifecycle.event_type IN ("created", "status_changed")
                            AND lifecycle.to_status IS NOT NULL
-                           AND lifecycle.effective_on <= ?
+                           AND lifecycle.effective_on <= ' . $effectiveOnSql . '
                          ORDER BY lifecycle.effective_on DESC, lifecycle.id DESC
                          LIMIT 1
                     ),
@@ -40,19 +49,26 @@ final class PayrollEmploymentLifecycleSql
      * Očekává alias `employment` se sloupcem `effective_status` (stav k období,
      * {@see effectiveStatusAtPlaceholder()}). Parametry v pořadí
      * {@see payrollPeriodMembershipParams()}.
+     *
+     * Místo zástupných znaků jde předat SQL výrazy prvního a posledního dne
+     * období (sloupce připojeného běhu); pak dotaz žádné parametry členství
+     * nenese. Takhle se totéž pravidlo ptá „které vztahy schválenému běhu
+     * chybí" ({@see PayrollRunMissingEmploymentRepository}).
      */
-    public static function payrollPeriodMembershipSql(): string
-    {
+    public static function payrollPeriodMembershipSql(
+        string $periodStartSql = '?',
+        string $periodEndSql = '?',
+    ): string {
         return 'employment.effective_status IS NOT NULL
                 AND employment.effective_status NOT IN ("archived", "no_show")
                 AND COALESCE(
                     employment.actual_start_date,
                     employment.start_date,
                     "1900-01-01"
-                ) <= ?
+                ) <= ' . $periodEndSql . '
                 AND (
                     employment.end_date IS NULL
-                    OR employment.end_date >= ?
+                    OR employment.end_date >= ' . $periodStartSql . '
                     OR EXISTS (
                         SELECT 1
                           FROM payroll_inputs post_termination_input
@@ -60,7 +76,7 @@ final class PayrollEmploymentLifecycleSql
                                employment.supplier_id
                            AND post_termination_input.employment_id =
                                employment.id
-                           AND post_termination_input.period_start = ?
+                           AND post_termination_input.period_start = ' . $periodStartSql . '
                            AND post_termination_input.status <> "cancelled"
                     )
                     OR EXISTS (
@@ -70,7 +86,7 @@ final class PayrollEmploymentLifecycleSql
                                employment.supplier_id
                            AND deferred_without_income.employment_id =
                                employment.id
-                           AND deferred_without_income.period_start = ?
+                           AND deferred_without_income.period_start = ' . $periodStartSql . '
                            AND deferred_without_income.deferred_type IN (' . implode(', ', array_map(
                                static fn (string $type): string => '"' . $type . '"',
                                PayrollDeferredIncomeRepository::TYPES_WITHOUT_INCOME,
