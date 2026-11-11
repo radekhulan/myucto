@@ -68,7 +68,7 @@ final class JmhzBlockerRemediationPath
     /** @param ?string $periodStart první den vykazovaného měsíce (`YYYY-MM-DD`) */
     public static function forBlocker(JmhzScenario1Blocker $blocker, ?string $periodStart = null): ?string
     {
-        $remediation = JmhzBlockerCatalog::remediation($blocker->code, $blocker->entityType);
+        $remediation = JmhzBlockerCatalog::remediationFor($blocker->code, $blocker->entityType, $blocker->attributeIds);
 
         return self::resolve(
             $blocker->code,

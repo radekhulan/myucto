@@ -68,6 +68,8 @@ final class JmhzBlockerExplainer
         'jmhz_verified_boolean_missing' => 'Údaj o příspěvku APZ, funkčních požitcích nebo dočasném přidělení má v evidenci neplatnou hodnotu.',
         'jmhz_work_month_not_approved' => 'Pracovní doba za vykazovaný měsíc není schválená.',
         'jmhz_workplace_codebooks_unverified' => 'Chybí ověřené číselníkové údaje pracoviště.',
+        'jmhz_workplace_codebooks_not_published' => 'Číselník obcí a států pro vykazovaný rok ještě nebyl vyhlášen, '
+            . 'proto nejde ověřit místo výkonu práce (obec, kód obce a stát) ani u správně vyplněného pracoviště.',
         'jmhz_preparation_not_ready' => 'Zdroje měsíčního hlášení nejsou úplné.',
         'jmhz_ordinary_evidence_missing' => 'Chybí potvrzení běžných právních skutečností.',
         'jmhz_attribute_10116_unresolved' => 'Není potvrzeno, zda se ze mzdy vykazují srážky.',
@@ -221,6 +223,11 @@ final class JmhzBlockerExplainer
             . 'výdělek" s odůvodněním) a má přednost.',
         'jmhz_verified_boolean_missing' => 'Otevřete Mzdy → Zaměstnanci, na kartě pracovního vztahu v části Evidence pro ČSSZ zvolte u všech tří otázek Ano nebo Ne a uložte.',
         'jmhz_work_month_not_approved' => 'Otevřete Mzdy → Pracovní doba a měsíc schvalte.',
+        'jmhz_workplace_codebooks_not_published' => 'Údaje pracoviště neměňte, oprava na kartě vztahu ani hromadné '
+            . 'doplnění pracoviště nepomůže. Číselník obcí a států vydává Ministerstvo financí vyhláškou zpravidla '
+            . 'v prosinci předchozího roku. Hlášení za tento měsíc připravíte po jeho vyhlášení a aktualizaci aplikace '
+            . '(běh za měsíc spočítaný dřív pak otevřete k opravě a spočítáte znovu, částky se nezmění); mzdy za měsíc '
+            . 'můžete spočítat a schválit už teď. Hlášení, opravy i storna za období do 12/2026 podáte jako dosud.',
         'jmhz_work_summary_v2_missing' => 'Otevřete Mzdy → Pracovní doba a měsíc schvalte.',
         'jmhz_scenario1_earnings_vector_incomplete' => 'Otevřete Mzdy → Mzdové složky a doplňte zařazení.',
         'jmhz_negative_or_deferred_income_unsupported' => 'Otevřete Mzdy → Mzdové běhy a doplňte částku dotčené mzdové složky za měsíc.',
@@ -399,9 +406,34 @@ final class JmhzBlockerExplainer
         return 'Chybí zákonný údaj potřebný pro měsíční hlášení.';
     }
 
-    /** Krok nápravy; bez konkrétního se odvodí z druhu dotčeného záznamu. */
-    public static function action(string $code, string $entityType = ''): string
+    /**
+     * Krok nápravy; bez konkrétního se odvodí z druhu dotčeného záznamu.
+     *
+     * @param list<string> $attributeIds dotčené atributy; u nálezu s rozpadem
+     *        podle atributu ({@see JmhzBlockerCatalog::remediationFor()}) určí krok
+     */
+    public static function action(string $code, string $entityType = '', array $attributeIds = []): string
     {
+        if ($code === 'jmhz_2027_source_missing') {
+            $kind = JmhzBlockerCatalog::remediationFor($code, $entityType, $attributeIds);
+            $specific = match ($kind['field'] ?? $kind['kind']) {
+                'jmhz_workplace_street', 'jmhz_workplace_house_number', 'jmhz_workplace_orientation_number',
+                'jmhz_workplace_postal_code', 'jmhz_workplace_address_point_code'
+                    => 'Hlášení od ledna 2027 vyžaduje plnou adresu místa výkonu práce. Otevřete Mzdy → Zaměstnanci, '
+                        . 'na kartě pracovního vztahu v podmínkách doplňte ulici, číslo popisné a PSČ pracoviště, '
+                        . 'uložte a obnovte podklady mzdového běhu.',
+                'jmhz_state_prosecutor' => 'Otevřete Mzdy → Zaměstnanci a na kartě pracovního vztahu v podmínkách '
+                    . 'vyplňte, zda jde o státního zástupce; uložte a obnovte podklady mzdového běhu.',
+                'statutory_evidence' => 'Hlášení od ledna 2027 vyžaduje den podpisu prohlášení poplatníka. '
+                    . 'Otevřete Mzdy → Zaměstnanci, v zákonné evidenci osoby doplňte u prohlášení datum podpisu, '
+                    . 'uložte a obnovte podklady mzdového běhu.',
+                default => null,
+            };
+            if ($specific !== null) {
+                return $specific;
+            }
+        }
+
         return self::ACTIONS[$code] ?? self::fallbackAction($entityType);
     }
 

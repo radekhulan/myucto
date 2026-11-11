@@ -9835,6 +9835,7 @@
           "jmhz_verified_boolean_missing": "A mandatory yes/no choice has not been confirmed.",
           "jmhz_work_month_not_approved": "The month's working time has not been approved.",
           "jmhz_workplace_codebooks_unverified": "Verified workplace code-list data is missing.",
+          "jmhz_workplace_codebooks_not_published": "The municipality and country code list for the reported year has not been published yet, so the place of work cannot be verified.",
           "jmhz_preparation_not_ready": "The report sources are incomplete.",
           "jmhz_ordinary_evidence_missing": "The ordinary-profile legal facts are not confirmed.",
           "jmhz_attribute_10116_unresolved": "It has not been confirmed whether statutory or contractual wage deductions are reported.",
@@ -13299,6 +13300,9 @@
         "manual": "Handle manually",
         "support": "Contact support"
       },
+      "code_steps": {
+        "jmhz_workplace_codebooks_not_published": "Do not change the workplace data; neither editing the employment card nor bulk-filling the place of work helps. The Ministry of Finance publishes the municipality and country code list by decree, usually in December of the previous year. Prepare the report for this month once it is published and the application is updated (reopen a payroll run calculated before that for correction and recalculate it, the amounts do not change); you can calculate and approve the payroll for the month now."
+      },
       "steps": {
         "employment_terms": "Correct the value in the employment terms on the employee card. A value frozen in the payroll run takes effect only after the run is recalculated; then prepare the report again.",
         "employment_profile": "On the employment card, in the ČSSZ evidence section, fill in the answer and prepare the report again.",
@@ -13956,7 +13960,7 @@
         "jmhz_snapshot_hash_mismatch": "The frozen JMHZ preparation's fingerprint does not match the stored data. Prepare the report again.",
         "jmhz_spec_version_mismatch": "The report's data message uses a different specification year than the one that applies to its reporting period. ČSSZ would reject it; contact support.",
         "jmhz_spec_version_period_invalid": "The reporting period or event date of the submission is not a valid date, so the specification year cannot be determined. Check the period and prepare the submission again.",
-        "jmhz_spec_version_unavailable": "Submissions for periods from 01/2027 (registrations with an event from 1 January 2027) follow the JMHZ 2027 specification, which this version of the application cannot build yet. Reports, corrections and cancellations for periods up to 12/2026 work as before.",
+        "jmhz_spec_version_unavailable": "Reports for periods from 01/2027 follow the JMHZ 2027 specification. The municipality and country code list for 2027 has not been published yet, so the place of work cannot be verified and the report cannot be frozen or sent. Prepare it once the code list is published and the application is updated. Reports, corrections and cancellations for periods up to 12/2026 work as before; employee registrations (REGZEC) are not blocked by this.",
         "jmhz_spec_version_unknown": "The frozen submission carries an unknown JMHZ specification year, so it will not be built or sent. Contact support.",
         "jmhz_snapshot_invalid": "The saved JMHZ preparation has an invalid format and cannot be read. Prepare the report again.",
         "jmhz_snapshot_missing": "The saved JMHZ preparation needed for this report is missing. Prepare the report again.",
@@ -14014,6 +14018,7 @@
         "jmhz_work_month_not_approved": "The month's working time has not been approved.",
         "jmhz_work_summary_v2_missing": "The approved monthly work summary is missing.",
         "jmhz_workplace_codebooks_unverified": "Verified workplace code-list data is missing.",
+        "jmhz_workplace_codebooks_not_published": "The municipality and country code list for the reported year has not been published yet, so the place of work cannot be verified.",
         "jmhz_xml_2027_attribute_missing": "Reports for periods from January 2027 need data the preparation does not carry yet (the attributes are listed in the message). Prepare the report again; contact support if the problem persists.",
         "jmhz_xml_2027_value_inconsistent": "The payroll data does not meet the 2027 report rules (for example the annual settlement result, or both the advance income and the income under section 6(4) being positive). Check the payroll run and prepare the report again.",
         "jmhz_xml_attribute_unresolved": "The frozen JMHZ document does not have evidence for a required attribute, and it must not be auto-filled with zero or false. Prepare and freeze the report again; contact support if the problem persists.",

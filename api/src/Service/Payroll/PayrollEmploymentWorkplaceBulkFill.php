@@ -170,6 +170,11 @@ final class PayrollEmploymentWorkplaceBulkFill
         if (preg_match('/^[A-Z]{2}$/D', $country) !== 1) {
             throw new \InvalidArgumentException('Kód státu pracoviště JMHZ musí mít dvě velká písmena.');
         }
+        // Číselník pro měsíc vůbec není (01/2027 do vyhlášení): „obec neplatí"
+        // by u správného kódu radilo opravu, která nepomůže.
+        if (!JmhzExternalCodebookCatalog::publishedForPeriod($monthStart, $monthEnd)) {
+            throw new \InvalidArgumentException(JmhzExternalCodebookCatalog::unpublishedPeriodMessage($monthStart));
+        }
         $entry = $this->codebooks->findMunicipality($code, $monthStart);
         $name = is_array($entry) && is_string($entry['label'] ?? null) ? $entry['label'] : null;
         if ($name === null

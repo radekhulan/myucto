@@ -40,9 +40,9 @@ final readonly class JmhzScenario1Blocker
             'entity_id' => $this->entityId,
             'attribute_ids' => $this->attributeIds,
             'reason' => JmhzBlockerExplainer::reason($this->code, $this->message),
-            'action' => JmhzBlockerExplainer::action($this->code, $this->entityType),
+            'action' => JmhzBlockerExplainer::action($this->code, $this->entityType, $this->attributeIds),
             'message' => $this->message,
-            'remediation' => JmhzBlockerCatalog::remediation($this->code, $this->entityType),
+            'remediation' => JmhzBlockerCatalog::remediationFor($this->code, $this->entityType, $this->attributeIds),
             'deferrable' => $this->deferrable(),
         ];
     }

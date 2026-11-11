@@ -331,8 +331,12 @@ final class JmhzExternalCodebookCatalog
      * neznáme konkrétně (chybí kód, číselník měsíc nepokrývá) a stačí obecné
      * vysvětlení nálezu `jmhz_workplace_codebooks_unverified`.
      */
-    public function workplaceMismatchMessage(?string $municipalityCode, ?string $workPlace, string $periodStart): ?string
-    {
+    public function workplaceMismatchMessage(
+        ?string $municipalityCode,
+        ?string $workPlace,
+        string $periodStart,
+        ?string $countryCode = null,
+    ): ?string {
         $periodEnd = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
         if ($municipalityCode === null || $municipalityCode === ''
             || !$this->coversDate($periodStart) || !$this->coversDate($periodEnd)
@@ -356,6 +360,28 @@ final class JmhzExternalCodebookCatalog
                 $municipalityCode,
                 $official,
             );
+        }
+        /*
+         * Obec, název i stát dnes za celý měsíc platí, a přesto snímek běhu
+         * nese „neověřeno": běh se spočítal dřív, než aplikace číselník pro
+         * období měla (typicky leden po vyhlášení číselníku na nový rok).
+         * Oprava na kartě nic nezmění, potřeba je nový snímek běhu.
+         */
+        if ($countryCode !== null
+            && $this->workplaceProvenanceForPeriod(
+                $municipalityCode,
+                $workPlace ?? $official,
+                $countryCode,
+                null,
+                null,
+                $periodStart,
+                $periodEnd,
+            ) !== null
+        ) {
+            return 'Obec i stát pracoviště v číselníku za celý měsíc platí, ale mzdový běh se spočítal dřív, '
+                . 'než aplikace číselník pro toto období měla. Údaje pracoviště neměňte: otevřete Mzdy → Mzdové '
+                . 'běhy, u běhu za tento měsíc zvolte „Otevřít opravu", spočítejte a schvalte ho znovu (částky '
+                . 'se nezmění) a hlášení připravte znovu.';
         }
 
         return null;
@@ -492,6 +518,69 @@ final class JmhzExternalCodebookCatalog
             }
         }
         return $this->loaded[$overlayKey] = ['manifest' => $decoded, 'entries' => $entries];
+    }
+
+    /**
+     * Má aplikace pro CELÝ měsíc připnutý číselník obcí a států vůbec?
+     *
+     * Rozlišuje dvě příčiny neověřeného pracoviště, které účetní řeší úplně
+     * jinak: „kód obce či státu u vztahu chybí nebo v číselníku neplatí"
+     * (opraví ho na kartě vztahu, hromadné doplnění pomůže) a „číselník pro
+     * období ještě nevyšel" (pro období od 01/2027 do vyhlášení vyhlášky
+     * podle zákona o rozpočtovém určení daní a aktualizace aplikace se nedá
+     * udělat nic). Rozhoduje jen o připnutých balících, nečte soubory, takže
+     * se na ni smí ptát i místo, které katalog jako závislost nemá.
+     */
+    public static function publishedForPeriod(string $periodStart, string $periodEnd): bool
+    {
+        if (!self::date($periodStart) || !self::date($periodEnd) || $periodEnd < $periodStart) {
+            return false;
+        }
+        foreach ([$periodStart, $periodEnd] as $validOn) {
+            $covered = false;
+            foreach (self::PACKAGES as $descriptor) {
+                if ($descriptor['selectable']
+                    && $validOn >= $descriptor['effective_from']
+                    && ($descriptor['effective_to'] === null || $validOn <= $descriptor['effective_to'])
+                    && $validOn <= $descriptor['verified_through']
+                ) {
+                    $covered = true;
+                    break;
+                }
+            }
+            if (!$covered) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Věta pro účetní, když se pracoviště má ověřit za měsíc, pro který
+     * číselník v aplikaci ještě není ({@see publishedForPeriod()}).
+     */
+    public static function unpublishedPeriodMessage(string $periodStart): string
+    {
+        return sprintf(
+            'Číselník obcí a států pro období %s ještě nebyl vyhlášen, pracoviště proto za tento měsíc '
+                . 'nejde ověřit ani hromadně doplnit (týká se i správně vyplněné obce). Údaje pracoviště '
+                . 'neměňte; ověří se samy po vyhlášení číselníku a aktualizaci aplikace.',
+            substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4),
+        );
+    }
+
+    /** Poslední den, do kterého připnuté číselníky obcí a států sahají. */
+    public static function publishedThrough(): string
+    {
+        $through = '0000-00-00';
+        foreach (self::PACKAGES as $descriptor) {
+            if ($descriptor['selectable'] && $descriptor['verified_through'] > $through) {
+                $through = $descriptor['verified_through'];
+            }
+        }
+
+        return $through;
     }
 
     /**

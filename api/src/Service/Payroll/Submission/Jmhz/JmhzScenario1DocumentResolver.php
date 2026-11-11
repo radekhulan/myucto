@@ -1417,6 +1417,7 @@ final class JmhzScenario1DocumentResolver
                     is_string($term['jmhz_workplace_municipality_code'] ?? null) ? $term['jmhz_workplace_municipality_code'] : null,
                     is_string($term['work_place'] ?? null) ? $term['work_place'] : null,
                     $periodStart,
+                    is_string($term['jmhz_workplace_country_code'] ?? null) ? $term['jmhz_workplace_country_code'] : null,
                 );
             }
         }

@@ -198,6 +198,10 @@ function blockerLabel(blocker: PayrollJmhzXmlDryRunBlocker): string {
  */
 function blockerStep(blocker: PayrollJmhzXmlDryRunBlocker): string {
   if (locale.value === 'cs' && blocker.action) return blocker.action
+  // Nález, u kterého obecný krok druhu nápravy radí špatně (např. nevyhlášený
+  // číselník obcí: „podejte ručně přes ePortál" by bylo zavádějící).
+  const codeStep = `payroll.jmhz_gate.code_steps.${blocker.code}`
+  if (te(codeStep)) return t(codeStep)
   return t(`payroll.jmhz_gate.steps.${jmhzRemediationKind(blocker)}`)
 }
 

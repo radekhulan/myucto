@@ -677,6 +677,8 @@ final class JmhzBlockerCatalog
         'jmhz_work_month_not_approved' => 'time',
         'jmhz_work_summary_v2_missing' => 'time',
         'jmhz_workplace_codebooks_unverified' => 'workplace',
+        // Číselník obcí a států pro období ještě nevyšel: nic opravovat, počkat na aktualizaci.
+        'jmhz_workplace_codebooks_not_published' => 'manual',
         'jmhz_xml_attribute_unresolved' => 'retry',
         // Normalizovaný dokument zatím nenese klíče kontraktu 2027 (doplní je příprava).
         'jmhz_xml_2027_attribute_missing' => 'retry',
@@ -757,6 +759,50 @@ final class JmhzBlockerCatalog
         }
 
         return ['kind' => self::fallbackKind($entityType), 'field' => null];
+    }
+
+    /**
+     * Nález `jmhz_2027_source_missing` nese jeden kód pro údaje z různých
+     * míst aplikace; kam jít, rozhoduje dotčený atribut. Bez toho měl druh
+     * „manual" (bez odkazu) i chybějící adresa pracoviště, kterou účetní
+     * doplní na kartě vztahu.
+     *
+     * @var array<string,array{0:string,1:?string}>
+     */
+    private const SOURCE_MISSING_2027_BY_ATTRIBUTE = [
+        // Adresa místa výkonu práce (10550 až 10554): karta vztahu, podmínky.
+        // Nález nese celou adresu; povinné je číslo popisné a PSČ, ulice ne,
+        // proto skok na číslo popisné.
+        '10550' => ['employment_terms', 'jmhz_workplace_house_number'],
+        '10551' => ['employment_terms', 'jmhz_workplace_house_number'],
+        '10552' => ['employment_terms', 'jmhz_workplace_orientation_number'],
+        '10553' => ['employment_terms', 'jmhz_workplace_postal_code'],
+        '10554' => ['employment_terms', 'jmhz_workplace_address_point_code'],
+        // Příznak státního zástupce (10587): karta vztahu, podmínky.
+        '10587' => ['employment_terms', 'jmhz_state_prosecutor'],
+        // Den podpisu prohlášení poplatníka (10575): zákonná evidence osoby.
+        '10575' => ['statutory_evidence', null],
+    ];
+
+    /**
+     * Druh nápravy s ohledem na dotčené atributy. Pro kódy bez rozpadu podle
+     * atributu je totéž co {@see remediation()}.
+     *
+     * @param list<string> $attributeIds
+     * @return array{kind:string,field:?string}
+     */
+    public static function remediationFor(string $code, string $entityType, array $attributeIds): array
+    {
+        if ($code === 'jmhz_2027_source_missing') {
+            foreach ($attributeIds as $attributeId) {
+                $entry = self::SOURCE_MISSING_2027_BY_ATTRIBUTE[$attributeId] ?? null;
+                if ($entry !== null) {
+                    return ['kind' => $entry[0], 'field' => $entry[1]];
+                }
+            }
+        }
+
+        return self::remediation($code, $entityType);
     }
 
     public static function knows(string $code): bool

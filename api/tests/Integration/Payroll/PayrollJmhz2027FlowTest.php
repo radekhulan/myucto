@@ -134,7 +134,7 @@ final class PayrollJmhz2027FlowTest extends TestCase
          */
         self::assertSame('blocked', $preparation['body']['readiness_status']);
         self::assertSame(
-            ['jmhz_workplace_codebooks_unverified'],
+            ['jmhz_workplace_codebooks_not_published'],
             array_values(array_unique(array_column($preparation['body']['issues'] ?? [], 'code'))),
             CanonicalJson::encode($preparation['body']['issues'] ?? []),
         );
@@ -145,7 +145,7 @@ final class PayrollJmhz2027FlowTest extends TestCase
         self::assertInstanceOf(JmhzScenario1DocumentService::class, $documents);
         $resolution = $documents->resolve($this->supplierId, 'test', (int) $preparation['body']['id'], $this->officeId);
         self::assertSame(
-            ['jmhz_workplace_codebooks_unverified'],
+            ['jmhz_workplace_codebooks_not_published'],
             array_values(array_unique(array_map(
                 static fn ($blocker): string => $blocker->code,
                 $resolution->blockers,
@@ -328,7 +328,7 @@ final class PayrollJmhz2027FlowTest extends TestCase
         self::assertInstanceOf(JmhzScenario1DocumentService::class, $documents);
         $resolution = $documents->resolve($this->supplierId, 'test', (int) $preparation['body']['id'], $this->officeId);
         self::assertSame(
-            ['jmhz_workplace_codebooks_unverified'],
+            ['jmhz_workplace_codebooks_not_published'],
             array_values(array_unique(array_map(
                 static fn ($blocker): string => $blocker->code,
                 $resolution->blockers,

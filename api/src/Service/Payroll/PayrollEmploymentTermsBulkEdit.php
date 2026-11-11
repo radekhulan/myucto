@@ -481,6 +481,11 @@ final class PayrollEmploymentTermsBulkEdit
             if (preg_match('/^[A-Z]{2}$/D', $country) !== 1) {
                 throw new \InvalidArgumentException('Kód státu pracoviště JMHZ musí mít dvě velká písmena.');
             }
+            if (!\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog::publishedForPeriod($monthStart, $monthEnd)) {
+                throw new \InvalidArgumentException(
+                    \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog::unpublishedPeriodMessage($monthStart),
+                );
+            }
             $name = $this->jmhzEvidence->officialMunicipalityName($municipality, $monthStart);
             if ($name === null
                 || $this->codebooks->workplaceProvenanceForPeriod(

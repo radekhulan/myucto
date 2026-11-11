@@ -10,6 +10,8 @@ use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerExplainer;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerRemediationPath;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
+use MyInvoice\Service\Payroll\Submission\PayrollStatutoryAgendaCatalog;
 use PDO;
 
 /**
@@ -101,6 +103,22 @@ final class PayrollRunJmhzReadinessProbe
         }
 
         $issues = [...$issues, ...$this->bonusRegularityIssues($supplierId, $snapshotData)];
+        /*
+         * Číselník obcí a států pro období ještě nevyšel (01/2027 do vyhlášení
+         * vyhlášky a aktualizace aplikace): hlášení za měsíc se nezmrazí u nikoho.
+         * Účetní to má vědět už při mzdovém běhu, ne až u testu hlášení, a jako
+         * jednu větu za firmu, ne nález u každého vztahu.
+         */
+        if (PayrollStatutoryAgendaCatalog::jmhzApplies($periodStart)
+            && !JmhzExternalCodebookCatalog::publishedForPeriod($periodStart, $periodEnd)
+        ) {
+            $issues[] = [
+                'code' => 'jmhz_workplace_codebooks_not_published',
+                'entity_type' => 'supplier',
+                'entity_id' => null,
+                'attribute_ids' => ['10229', '10230', '10231'],
+            ];
+        }
         if ($issues === []) {
             return [];
         }
@@ -374,6 +392,9 @@ final class PayrollRunJmhzReadinessProbe
                 . 'zapište žádost. Mzdový běh tím omezený není.',
                 $named !== '' ? $named : $count . '× osoba',
             ),
+            'jmhz_workplace_codebooks_not_published' => JmhzBlockerExplainer::reason($code) . ' '
+                . JmhzBlockerExplainer::action($code)
+                . ' Hlášení za tento měsíc se proto zatím nezmrazí ani neodešle u žádného zaměstnance.',
             default => JmhzBlockerExplainer::guidance($code)
                 . ($named === '' ? '' : ' Týká se: ' . $named . '.')
                 . ' Odkaz vede na místo opravy; potom ověřte stav testem hlášení v Mzdová podání → JMHZ.'

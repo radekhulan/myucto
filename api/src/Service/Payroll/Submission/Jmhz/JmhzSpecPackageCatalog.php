@@ -148,10 +148,12 @@ final class JmhzSpecPackageCatalog
         if (!in_array($version, self::SERIALIZABLE_VERSIONS, true)) {
             throw new JmhzXmlException(
                 self::UNAVAILABLE_CODE,
-                'Hlášení se řídí specifikací ' . $version->label() . '. Její schéma je'
-                    . ' připnuté, ale sestavení datové věty v tomto tvaru tahle verze'
-                    . ' aplikace ještě neumí. Podání se proto nepřipraví. Hlášení, opravy'
-                    . ' i storna za období do 12/2026 připravíte jako dosud.',
+                'Hlášení se řídí specifikací ' . $version->label() . '. Číselník obcí'
+                    . ' a států pro tento rok ještě nebyl vyhlášen, takže místo výkonu práce'
+                    . ' nejde ověřit a hlášení se nezmrazí ani neodešle. Připravíte ho po'
+                    . ' vyhlášení číselníku a aktualizaci aplikace. Hlášení, opravy i storna'
+                    . ' za období do 12/2026 podáte jako dosud; registrace zaměstnanců'
+                    . ' (REGZEC) se tím neblokují.',
             );
         }
     }
