@@ -196,6 +196,33 @@ async function mountPanel() {
 }
 
 describe('PayrollSicknessCasesPanel', () => {
+  it('posune chybu náhledu NEMPRI do zobrazení', async () => {
+    m.preview.mockRejectedValue({
+      isAxiosError: true,
+      response: { data: { error: {
+        code: 'sickness_variable_symbol_missing',
+        message: 'Firma nemá vyplněný variabilní symbol ČSSZ.',
+      } } },
+    })
+    const wrapper = await mountPanel()
+    const original = HTMLElement.prototype.scrollIntoView
+    const scrollIntoView = vi.fn()
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    try {
+      await wrapper.findAll('button')
+        .find(button => button.text().includes('actions.previewNempri'))!.trigger('click')
+      await flushPromises()
+      const error = wrapper.get('[data-test="sickness-case-error-box"]')
+      expect(error.text()).toContain('Firma nemá vyplněný variabilní symbol ČSSZ.')
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+      expect(scrollIntoView.mock.contexts[0]).toBe(error.element)
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+      wrapper.unmount()
+    }
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     m.list.mockResolvedValue(listResponse([sicknessCase()]))

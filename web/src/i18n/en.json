@@ -5079,6 +5079,7 @@
       "search_placeholder": "Name or personal number",
       "search_empty": "No employment in this month matches “{q}”.",
       "search_clear": "Clear search",
+      "blocker_unknown": "Payroll evidence requires review.",
       "blockers": {
         "hourly_remuneration_calculation_unsupported": "This saved revision contains an hourly processing blocker. Check its specific evidence and prepare a new payroll revision.",
         "hourly_preview_unavailable": "The hourly wage preview could not be built from the saved evidence. Check the hours and premium evidence; other rows are not affected.",

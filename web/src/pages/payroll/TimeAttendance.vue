@@ -117,6 +117,7 @@ const total = ref(0)
 const offset = ref(0)
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const editorOpen = ref(false)
+const editorSection = ref<HTMLElement | null>(null)
 const importOpen = ref(false)
 const recordType = ref<'entry' | 'shift'>('entry')
 const employmentId = ref<number | null>(null)
@@ -742,6 +743,7 @@ function openEditor(item?: PayrollTimeOverviewItem) {
   editingRecord.value = null
   setDefaultTimes()
   editorOpen.value = true
+  void nextTick(() => editorSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }))
 }
 
 /**
@@ -2864,7 +2866,7 @@ onMounted(async () => {
       </ul>
     </section>
 
-    <section v-if="editorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 shadow-sm sm:p-6">
+    <section v-if="editorOpen" ref="editorSection" class="scroll-mt-24 rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 shadow-sm sm:p-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <h2 class="text-lg font-semibold text-neutral-900">{{ editingRecord ? t('payroll.time.records.editing_title') : t('payroll.time.editor.title') }}</h2>
         <button :class="btnOutline('neutral')" @click="editorOpen = false">

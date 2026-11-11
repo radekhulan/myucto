@@ -618,7 +618,7 @@ async function confirmDefer() {
   draft.error = ''
   try {
     await payrollApi.deferJmhzEmployment({
-      environment: props.environment,
+      environment: 'test',
       preparationId: result.preparation_id,
       employmentId: draft.employmentId,
       officeId: selectedOffice.value[draft.revision] ?? null,

@@ -128,6 +128,29 @@ function mountWithActions() {
 }
 
 describe('PayrollPersonDependantsPanel', () => {
+  it('posune úpravu nároku do zobrazení i při přepnutí otevřeného editoru', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    const original = HTMLElement.prototype.scrollIntoView
+    const scrollIntoView = vi.fn()
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    try {
+      await wrapper.find('tbody [aria-expanded]').trigger('click')
+      await wrapper.get('[data-test="edit-dependant-7"]').trigger('click')
+      await flushPromises()
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+      await wrapper.findAll('tbody button')
+        .find(button => button.text() === 'payroll.people.dependants.edit_claim')!.trigger('click')
+      await flushPromises()
+      expect(scrollIntoView).toHaveBeenCalledTimes(2)
+      expect((scrollIntoView.mock.contexts[1] as HTMLElement).getAttribute('data-test')).toBe('dependant-editor')
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: 'smooth', block: 'start' })
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+      wrapper.unmount()
+    }
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.personDependants.mockResolvedValue(response())

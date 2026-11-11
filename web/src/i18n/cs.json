@@ -5079,6 +5079,7 @@
       "search_placeholder": "Jméno nebo osobní číslo",
       "search_empty": "V tomto měsíci žádný pracovní vztah neodpovídá hledání „{q}“.",
       "search_clear": "Zrušit hledání",
+      "blocker_unknown": "Mzdové podklady vyžadují kontrolu.",
       "blockers": {
         "hourly_remuneration_calculation_unsupported": "Tato uložená revize obsahuje blokaci hodinového zpracování. Zkontrolujte její konkrétní podklady a připravte novou revizi běhu.",
         "hourly_preview_unavailable": "Náhled hodinové mzdy se z uložených podkladů nepodařilo sestavit. Zkontrolujte podklady hodin a příplatků; ostatní řádky to neovlivňuje.",
