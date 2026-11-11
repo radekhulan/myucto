@@ -66,6 +66,20 @@ final class PayrollEmploymentDeletionRepository
                 . 'Ten úkon už proběhl navenek, takže vztah smazat nelze. '
                 . 'Pokud člověk nakonec nenastoupil, použijte Označit nenástup.',
         ],
+        // Přihláška P1/A1 ve frontě podání: připravená (zmrazená XML čeká na
+        // odeslání), odeslaná nebo přijatá. Součást podání nemá `employment_id`,
+        // váže se k vztahu jen přes `subject_reference`, proto se blokátor
+        // navěšuje na podmínky vztahu (vztah má vždy aspoň jednu verzi).
+        // Odmítnutá, nahrazená nebo včas zrušená přihláška u ČSSZ nic nezaložila
+        // a mazání nedrží. Bez toho šel smazat vztah s odeslanou přihláškou
+        // a připravená přihláška zůstala odesílatelná ve frontě bez vztahu.
+        'registration_submission' => [
+            'tables' => ['payroll_employment_terms'],
+            'where' => self::LIVE_REGISTRATION_SUBMISSION,
+            'code' => 'payroll_employment_registered',
+            'message' => 'K pracovnímu vztahu je přihláška ČSSZ, která se odeslala nebo čeká na odeslání. '
+                . 'Vztah proto smazat nelze. Pokud člověk nenastoupil, použijte Označit nenástup.',
+        ],
         // Souhrn pracovního měsíce (`payroll_jmhz_work_month_revisions`) tu není:
         // vzniká každým schválením docházky a podání to není. Hlášení JMHZ drží
         // snímky níže; souhrn otevřeného měsíce zmizí se vztahem stejně jako při
@@ -165,6 +179,21 @@ final class PayrollEmploymentDeletionRepository
                 . 'pojištění a použijte Označit nenástup nebo Ukončit.',
         ],
     ];
+
+    /**
+     * Živá přihláška P1/A1 vztahu ve frontě podání (připravená, odeslaná,
+     * přijatá). `{t}` = řádek s `supplier_id` a `employment_id` vztahu. Sdílí
+     * ji mazání vztahu i sloučení ({@see \MyInvoice\Service\Payroll\PayrollEmploymentMergeService}).
+     */
+    public const LIVE_REGISTRATION_SUBMISSION = 'EXISTS (SELECT 1 FROM payroll_submission_parts registration_part'
+        . ' JOIN payroll_submissions registration_submission'
+        . ' ON registration_submission.supplier_id = registration_part.supplier_id'
+        . ' AND registration_submission.id = registration_part.submission_id'
+        . ' WHERE registration_part.supplier_id = {t}.supplier_id'
+        . " AND registration_part.environment IN ('production', 'test')"
+        . " AND registration_part.subject_reference = CONCAT('payroll_employment:', {t}.employment_id)"
+        . " AND registration_part.agenda_code IN ('PREZEC26', 'REGZEC25')"
+        . " AND registration_submission.status NOT IN ('rejected', 'superseded', 'cancelled_in_time'))";
 
     /**
      * Případ dávky, o kterém už ví ČSSZ: má navázané podání, nebo stav, který
@@ -550,6 +579,23 @@ final class PayrollEmploymentDeletionRepository
                     ),
                 };
             }
+        } elseif ($alias === 'registration' || $alias === 'registration_submission') {
+            $unsent = $this->unsentRegistration($supplierId, $employmentId);
+            if ($unsent !== null) {
+                $described['message'] = $unsent['status'] === 'cancelled_in_time'
+                    ? sprintf(
+                        'K vztahu byla připravená přihláška ČSSZ (podání č. %d), která se zrušila a neodešla. '
+                        . 'Její zmrazený podklad zůstává k vztahu vázaný, proto vztah smazat nelze. '
+                        . 'Pokud člověk nenastoupil, použijte Označit nenástup, jinak vztah ukončete.',
+                        $unsent['submission_id'],
+                    )
+                    : sprintf(
+                        'K vztahu je připravená přihláška ČSSZ (podání č. %d), zatím neodeslaná. '
+                        . 'Dokud čeká na odeslání, vztah smazat nelze. Pokud vztah vznikl omylem, '
+                        . 'přihlášku v Podání a hlášení zrušte (neodesílejte ji), pak vztah půjde smazat.',
+                        $unsent['submission_id'],
+                    );
+            }
         } elseif ($alias === 'approved_time') {
             $stmt = $this->db->pdo()->prepare(
                 "SELECT MIN(period_start) FROM payroll_time_months
@@ -568,6 +614,56 @@ final class PayrollEmploymentDeletionRepository
         }
 
         return $described;
+    }
+
+    /**
+     * Registrace vztahu, která navenek neodešla: žádné ID PPV a nejnovější
+     * základní přihláška (A1/P1) jen připravená nebo včas zrušená, bez
+     * události A2 až A8. Jinak `null` (platí obecná hláška o úkonu u ČSSZ).
+     *
+     * @return array{submission_id:int,status:string}|null
+     */
+    private function unsentRegistration(int $supplierId, int $employmentId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT submission.id, submission.status,
+                    EXISTS (SELECT 1 FROM payroll_employment_external_ids external_id
+                             WHERE external_id.supplier_id = ? AND external_id.employment_id = ?) AS has_external,
+                    EXISTS (SELECT 1 FROM payroll_registration_event_snapshots event_snapshot
+                             WHERE event_snapshot.supplier_id = ? AND event_snapshot.employment_id = ?) AS has_event,
+                    EXISTS (SELECT 1 FROM payroll_submission_parts sent_part
+                              JOIN payroll_submissions sent
+                                ON sent.supplier_id = sent_part.supplier_id
+                               AND sent.id = sent_part.submission_id
+                             WHERE sent_part.supplier_id = ? AND sent_part.subject_reference = ?
+                               AND sent.status NOT IN ('draft', 'validated', 'ready', 'cancelled_in_time')) AS has_sent
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.id = part.submission_id
+              WHERE part.supplier_id = ? AND part.subject_reference = ?
+                AND part.agenda_code IN ('PREZEC26', 'REGZEC25')
+              ORDER BY submission.id DESC
+              LIMIT 1"
+        );
+        $reference = PayrollRegistrationSubmissionRepository::employmentReference($employmentId);
+        $stmt->execute([
+            $supplierId, $employmentId,
+            $supplierId, $employmentId,
+            $supplierId, $reference,
+            $supplierId, $reference,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)
+            || (int) $row['has_external'] > 0
+            || (int) $row['has_event'] > 0
+            || (int) $row['has_sent'] > 0
+            || !in_array((string) $row['status'], ['draft', 'validated', 'ready', 'cancelled_in_time'], true)
+        ) {
+            return null;
+        }
+
+        return ['submission_id' => (int) $row['id'], 'status' => (string) $row['status']];
     }
 
     private static function monthLabel(string $period): string
