@@ -68,6 +68,12 @@ final class JmhzBlockerExplainer
         'jmhz_verified_boolean_missing' => 'Údaj o příspěvku APZ, funkčních požitcích nebo dočasném přidělení má v evidenci neplatnou hodnotu.',
         'jmhz_work_month_not_approved' => 'Pracovní doba za vykazovaný měsíc není schválená.',
         'jmhz_workplace_codebooks_unverified' => 'Chybí ověřené číselníkové údaje pracoviště.',
+        'jmhz_employer_annual_collective_agreement_missing' => 'Chybí roční údaje zaměstnavatele pro měsíční '
+            . 'hlášení: typy kolektivních smluv (10214). Hlášení je nese za prosinec, od roku 2027 každý měsíc.',
+        'jmhz_employer_annual_ownership_missing' => 'Chybí roční údaje zaměstnavatele pro prosincové '
+            . 'hlášení: forma vlastnictví (10220).',
+        'jmhz_employer_annual_ozp_summary_missing' => 'Chybí roční údaje zaměstnavatele pro prosincové '
+            . 'hlášení: průměrný přepočtený počet zaměstnanců a zaměstnanců se zdravotním postižením (OZP).',
         'jmhz_preparation_not_ready' => 'Zdroje měsíčního hlášení nejsou úplné.',
         'jmhz_ordinary_evidence_missing' => 'Chybí potvrzení běžných právních skutečností.',
         'jmhz_attribute_10116_unresolved' => 'Není potvrzeno, zda se ze mzdy vykazují srážky.',
@@ -184,6 +190,15 @@ final class JmhzBlockerExplainer
 
     /** @var array<string,string> */
     private const ACTIONS = [
+        'jmhz_employer_annual_collective_agreement_missing' => 'Otevřete Nastavení mezd → Podání → Roční údaje '
+            . 'zaměstnavatele pro JMHZ, vyplňte je za rok hlášení a hlášení připravte znovu. Mzdový běh se neopravuje.',
+        'jmhz_employer_annual_ownership_missing' => 'Otevřete Nastavení mezd → Podání → Roční údaje '
+            . 'zaměstnavatele pro JMHZ, vyplňte je za rok hlášení a hlášení připravte znovu. Mzdový běh se neopravuje.',
+        'jmhz_employer_annual_ozp_summary_missing' => 'Otevřete Nastavení mezd → Podání → Roční údaje '
+            . 'zaměstnavatele pro JMHZ, vyplňte je za rok hlášení a hlášení připravte znovu. Mzdový běh se neopravuje.',
+        'jmhz_workplace_codebooks_unverified' => 'Na kartě pracovního vztahu vyberte obec pracoviště '
+            . 'našeptávačem (kód obce a stát), uložte a obnovte podklady mzdového běhu. Říká-li věta výše, '
+            . 'že číselníky pro měsíc aplikace ještě nemá, nic neměňte a počkejte na aktualizaci.',
         'jmhz_scenario1_scope_unsupported' => 'Zkontrolujte druhy činnosti v přípravě a nepodporované vztahy zpracujte individuálně.',
         'jmhz_scenario2_evidence_gap' => 'Tento scénář zatím zpracujte individuálně podle podkladů ČSSZ; hodnoty nelze bezpečně doplnit odhadem.',
         'component_jmhz_mapping_missing' => 'Otevřete Mzdy → Mzdové složky a doplňte zařazení. '

@@ -718,37 +718,11 @@ final class JmhzPreparationSnapshotBuilder
             ];
         }
         $employerAnnualVersion = null;
-        $isDecember = substr($periodStart, 5, 2) === '12';
-        if ($isDecember && $employerAnnualEvidence === null) {
-            $issues[] = $this->issue(
-                'jmhz_employer_annual_collective_agreement_missing',
-                'supplier',
-                $supplierId,
-                ['10214'],
-            );
-            $issues[] = $this->issue(
-                'jmhz_employer_annual_ownership_missing',
-                'supplier',
-                $supplierId,
-                ['10220'],
-            );
-            $issues[] = $this->issue(
-                'jmhz_employer_annual_ozp_summary_missing',
-                'supplier',
-                $supplierId,
-                ['10038', '10039', '10452'],
-            );
-        } elseif ($employerAnnualEvidence === null
-            && JmhzSpecVersion::forPeriodStart($periodStart) === JmhzSpecVersion::V2027
-        ) {
-            // Verze 2027: typy kolektivních smluv (10214) v souhrnu každý měsíc.
-            $issues[] = $this->issue(
-                'jmhz_employer_annual_collective_agreement_missing',
-                'supplier',
-                $supplierId,
-                ['10214'],
-            );
-        } elseif ($employerAnnualEvidence !== null) {
+        if ($employerAnnualEvidence === null) {
+            foreach (JmhzEmployerAnnualEvidenceService::missingIssues($periodStart) as $missing) {
+                $issues[] = $this->issue($missing['code'], 'supplier', $supplierId, $missing['attribute_ids']);
+            }
+        } else {
             if (($employerAnnualEvidence['schema_reference'] ?? null)
                     !== JmhzEmployerAnnualEvidenceService::SCHEMA_REFERENCE
                 || ($employerAnnualEvidence['report_year'] ?? null)

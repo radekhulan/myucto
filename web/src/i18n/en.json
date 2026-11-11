@@ -13310,7 +13310,7 @@
         "runs": "Open the payroll run of the period, correct the result and approve the current revision; then prepare the report again.",
         "components": "In Payroll components, complete or confirm how the component maps to the monthly report.",
         "ordinary_evidence": "In Payroll submissions, confirm the ordinary legal facts of the employment and prepare the report again.",
-        "employer_annual": "In Payroll settings, on the Submissions tab, complete the employer annual data for the December report.",
+        "employer_annual": "In Payroll settings, on the Submissions tab, complete the employer annual data for the December report (from 2027 for every monthly report).",
         "office": "In Payroll settings, complete or correct the OSSZ registration and variable symbol of the payroll office.",
         "annual_settlement": "In Annual settlement, record the request or the result of the settlement.",
         "deferred_income": "On the card of the ended employment, in the Deferred income section, correct the confirmation type for the reported month, recalculate the run and prepare the report again.",

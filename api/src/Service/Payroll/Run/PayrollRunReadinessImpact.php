@@ -133,6 +133,11 @@ final class PayrollRunReadinessImpact
         // Schválený průměr vstupuje do zmrazeného snímku vstupů běhu. Schválený
         // po výpočtu revize ho hlášení nevidí a oprava stojí opravnou revizi.
         'jmhz_average_hourly_earning_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // Roční údaje zaměstnavatele pro JMHZ (prosinec, od 2027 každý měsíc)
+        // nejsou ve snímku běhu: doplní se kdykoli před přípravou hlášení.
+        'jmhz_employer_annual_collective_agreement_missing' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
+        'jmhz_employer_annual_ownership_missing' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
+        'jmhz_employer_annual_ozp_summary_missing' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
 
         // ── Skupina 1: doplní se kdykoli, na výpočet to nemá vliv ────────────
         'run_without_employments' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],

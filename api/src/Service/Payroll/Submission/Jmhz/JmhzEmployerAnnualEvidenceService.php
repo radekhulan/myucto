@@ -132,22 +132,48 @@ final readonly class JmhzEmployerAnnualEvidenceService
         int $supplierId,
         string $periodStart,
     ): ?array {
-        // Do 12/2026 se roční údaje vykazují jen v prosinci. Od verze 2027
-        // nese souhrn typy kolektivních smluv (10214) každý měsíc, takže se
-        // evidence roku zmrazí do přípravy v každém měsíci.
-        if (preg_match('/^(\d{4})-(\d{2})-01$/D', $periodStart, $match) !== 1
-            || ($match[2] !== '12'
-                && JmhzSpecVersion::forPeriodStart($periodStart) === JmhzSpecVersion::V2026)
-        ) {
+        if (self::missingIssues($periodStart) === []) {
             return null;
         }
-        $evidence = $this->repository->latest($supplierId, (int) $match[1], true);
+        $evidence = $this->repository->latest($supplierId, (int) substr($periodStart, 0, 4), true);
         if ($evidence === null) {
             return null;
         }
         unset($evidence['supplier_id'], $evidence['created_by']);
 
         return $evidence;
+    }
+
+    /**
+     * Nálezy přípravy hlášení, když roční údaje zaměstnavatele za rok období
+     * chybí; prázdný seznam = hlášení za tohle období je nenese.
+     *
+     * Do 12/2026 se roční údaje vykazují jen v prosinci (10214 typy
+     * kolektivních smluv, 10220 forma vlastnictví, souhrn OZP 10038, 10039,
+     * 10452). Od verze 2027 nese souhrn typy kolektivních smluv (10214) každý
+     * měsíc. Jediné místo pravidla pro přípravu hlášení
+     * ({@see JmhzPreparationSnapshotBuilder}) i pro kontrolu před mzdovým
+     * během, která je ohlásí dřív, než účetní běh schválí.
+     *
+     * @return list<array{code:string,attribute_ids:list<string>}>
+     */
+    public static function missingIssues(string $periodStart): array
+    {
+        if (preg_match('/^(\d{4})-(\d{2})-01$/D', $periodStart, $match) !== 1) {
+            return [];
+        }
+        if ($match[2] === '12' && JmhzSpecVersion::forPeriodStart($periodStart) === JmhzSpecVersion::V2026) {
+            return [
+                ['code' => 'jmhz_employer_annual_collective_agreement_missing', 'attribute_ids' => ['10214']],
+                ['code' => 'jmhz_employer_annual_ownership_missing', 'attribute_ids' => ['10220']],
+                ['code' => 'jmhz_employer_annual_ozp_summary_missing', 'attribute_ids' => ['10038', '10039', '10452']],
+            ];
+        }
+        if (JmhzSpecVersion::forPeriodStart($periodStart) === JmhzSpecVersion::V2027) {
+            return [['code' => 'jmhz_employer_annual_collective_agreement_missing', 'attribute_ids' => ['10214']]];
+        }
+
+        return [];
     }
 
     private function assertYear(int $year): void

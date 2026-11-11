@@ -682,6 +682,24 @@ final readonly class JmhzPreparationSnapshotService
                 'attribute_ids' => ['10319'],
             ];
         }
+        /*
+         * Roční údaje zaměstnavatele (prosinec, od 2027 každý měsíc). Bez nich
+         * se příprava zastaví až po schválení běhu; kontrola před během je
+         * ohlásí předem se stejným kódem a odkazem do nastavení.
+         */
+        $periodStart = substr($periodEnd, 0, 8) . '01';
+        if (JmhzEmployerAnnualEvidenceService::missingIssues($periodStart) !== []
+            && $this->employerAnnualEvidence->snapshotForPreparation($supplierId, $periodStart) === null
+        ) {
+            foreach (JmhzEmployerAnnualEvidenceService::missingIssues($periodStart) as $missing) {
+                $issues[] = [
+                    'code' => $missing['code'],
+                    'entity_type' => 'supplier',
+                    'entity_id' => $supplierId,
+                    'attribute_ids' => $missing['attribute_ids'],
+                ];
+            }
+        }
 
         return $issues;
     }
