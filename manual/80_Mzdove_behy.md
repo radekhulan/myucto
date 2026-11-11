@@ -92,7 +92,10 @@ a již uzavřenou revizi nepřepíše.
    období nezrušené mzdové vstupy, ale do běhu nevstoupí (nepotvrzený
    nástup, podmínky účinné až po období). Takové vstupy by se nevyplatily;
    na kartě vztahu potvrďte nástup (**Potvrdit nástup**), případně opravte
-   účinnost podmínek. Chybí-li hodinově odměňovaným vztahům průměrný
+   účinnost podmínek. Má-li osoba v období jiný platný vztah (typicky
+   únorová dohoda a vstup zadaný na březnovou), hláška ho jmenuje a odkaz
+   vede na vstupy vztahu, kde vstup přesunete (**Upravit**, pracovní vztah)
+   nebo zrušíte. Chybí-li hodinově odměňovaným vztahům průměrný
    výdělek, doplníte ho tlačítkem **Doplnit pravděpodobný výdělek ze
    sazby**. Nezmrazený hodinový výpočet se tu nehlásí, zmrazí se sám
    uzamčením vstupů. Kontrola také řekne, když období ještě neskončilo nebo

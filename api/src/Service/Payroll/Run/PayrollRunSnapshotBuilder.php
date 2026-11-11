@@ -143,6 +143,7 @@ final class PayrollRunSnapshotBuilder
             $periodStart,
             $periodEnd,
             $officeId,
+            $employments,
         ) as $validation) {
             $validations[] = $validation;
         }
@@ -1006,6 +1007,15 @@ final class PayrollRunSnapshotBuilder
     }
 
     /** @var array<string,string> */
+    private const RELATION_LABELS = [
+        'employment' => 'pracovní poměr',
+        'small_scale_employment' => 'zaměstnání malého rozsahu',
+        'dpp' => 'DPP',
+        'dpc' => 'DPČ',
+        'partner_dependent' => 'příjem společníka',
+        'statutory_body' => 'statutární orgán',
+    ];
+
     private const RULESET_DOMAIN_LABELS = [
         'income_tax' => 'daň z příjmů',
         'social_insurance' => 'sociální pojištění',
@@ -1671,6 +1681,7 @@ final class PayrollRunSnapshotBuilder
         string $periodStart,
         string $periodEnd,
         ?int $officeId,
+        array $periodEmployments = [],
     ): array {
         $officeSql = $officeId === null ? '1 = 1' : 'employment.office_id = ?';
         $stmt = $this->db->pdo()->prepare(
@@ -1752,6 +1763,7 @@ final class PayrollRunSnapshotBuilder
             if ($reasons === []) {
                 $reasons[] = 'vztah do období nepatří';
             }
+            $alternatives = self::validEmploymentsOfPerson($periodEmployments, $employeeId, $employmentId, $periodStart);
             $validations[] = new PayrollRunValidation(
                 'blocker',
                 'inputs_on_unstarted_employment',
@@ -1759,15 +1771,26 @@ final class PayrollRunSnapshotBuilder
                 $employmentId,
                 sprintf(
                     '%s: pracovní vztah má za období %d nezrušených mzdových vstupů (%s Kč), '
-                    . 'ale do mzdového běhu nevstoupí, protože %s. Bez opravy se vstupy nevyplatí. '
-                    . 'Na kartě vztahu potvrďte nástup (Potvrdit nástup), případně opravte účinnost '
-                    . 'podmínek, a pak obnovte podklady běhu.',
+                    . 'ale do mzdového běhu nevstoupí, protože %s. Bez opravy se vstupy nevyplatí. %s',
                     (string) $row['full_name'],
                     (int) $row['input_count'],
                     number_format(((int) $row['input_amount_minor']) / 100, 2, ',', ' '),
                     implode(', ', $reasons),
+                    $alternatives === null
+                        ? 'Patří-li vstupy k tomuto vztahu, potvrďte na kartě vztahu nástup (Potvrdit nástup), '
+                            . 'případně opravte účinnost podmínek, a pak obnovte podklady běhu. Jsou-li zadané '
+                            . 'omylem, v měsíčních vstupech je zrušte.'
+                        : sprintf(
+                            'Osoba má v období platný vztah %s: patří-li vstupy k němu, v měsíčních vstupech '
+                                . 'je přesuňte (Upravit, Pracovní vztah), jsou-li zadané omylem, zrušte je. '
+                                . 'Patří-li k tomuto vztahu, potvrďte na kartě nástup nebo opravte účinnost '
+                                . 'podmínek. Pak obnovte podklady běhu.',
+                            $alternatives,
+                        ),
                 ),
-                "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms",
+                $alternatives === null
+                    ? "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms"
+                    : '/payroll/components?tab=inputs&period=' . substr($periodStart, 0, 7) . '&employment=' . $employmentId,
             );
         }
 
@@ -1804,6 +1827,12 @@ final class PayrollRunSnapshotBuilder
                 continue;
             }
             $end = new \DateTimeImmutable($endDate);
+            $alternatives = self::validEmploymentsOfPerson(
+                $employments,
+                (int) ($row['employee_id'] ?? 0),
+                $employmentId,
+                $periodStart,
+            );
             $validations[] = new PayrollRunValidation(
                 'blocker',
                 'input_after_employment_end',
@@ -1811,17 +1840,54 @@ final class PayrollRunSnapshotBuilder
                 $employmentId,
                 sprintf(
                     '%s: vstup za %s je na vztahu ukončeném %s. Jde-li o doplatek po skončení, '
-                    . 'potvrďte na kartě vztahu odložený příjem; jinak vstup zrušte nebo ho zadejte '
-                    . 'na trvající vztah.',
+                    . 'potvrďte na kartě vztahu odložený příjem; jinak vstup zrušte nebo ho %s.',
                     (string) ($row['full_name'] ?? ''),
                     substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4),
                     $end->format('j. n. Y'),
+                    $alternatives === null
+                        ? 'zadejte na trvající vztah'
+                        : 'přesuňte (Upravit, Pracovní vztah) na platný vztah téže osoby ' . $alternatives,
                 ),
                 '/payroll/components?tab=inputs&period=' . $period . '&employment=' . $employmentId,
             );
         }
 
         return $validations;
+    }
+
+    /**
+     * Vztahy téže osoby, které v období platí: kam se dá přesunout vstup
+     * zadaný na vztah mimo jeho trvání.
+     *
+     * @param list<array<string,mixed>> $employments řádky {@see self::employmentRows()}
+     */
+    public static function validEmploymentsOfPerson(
+        array $employments,
+        int $employeeId,
+        int $excludeEmploymentId,
+        string $periodStart,
+    ): ?string {
+        if ($employeeId <= 0) {
+            return null;
+        }
+        $labels = [];
+        foreach ($employments as $row) {
+            $endDate = $row['end_date'] ?? null;
+            if ((int) ($row['employee_id'] ?? 0) !== $employeeId
+                || (int) ($row['employment_id'] ?? 0) === $excludeEmploymentId
+                || (is_string($endDate) && $endDate !== '' && $endDate < $periodStart)
+            ) {
+                continue;
+            }
+            $start = $row['actual_start_date'] ?? $row['start_date'] ?? null;
+            $relation = self::RELATION_LABELS[(string) ($row['relation_type'] ?? '')] ?? (string) ($row['relation_type'] ?? '');
+            $code = trim((string) ($row['employment_code'] ?? ''));
+            $labels[] = trim($relation . ($code === '' ? '' : ' ' . $code))
+                . (is_string($start) && $start !== '' ? ' od ' . (new \DateTimeImmutable($start))->format('j. n. Y') : '')
+                . (is_string($endDate) && $endDate !== '' ? ' do ' . (new \DateTimeImmutable($endDate))->format('j. n. Y') : '');
+        }
+
+        return $labels === [] ? null : implode(', ', $labels);
     }
 
     /** @return list<array<string,mixed>> */

@@ -120,6 +120,30 @@ final class PayrollRunUnstartedEmploymentInputsTest extends TestCase
         self::assertContains('inputs_on_unstarted_employment', $codes);
     }
 
+    /**
+     * Vstup za únor zadaný na březnovou dohodu osoby, která má i únorovou
+     * dohodu: hláška nabídne přesun na platný vztah nebo zrušení a vede na
+     * vstupy vztahu, ne jen na potvrzení nástupu.
+     */
+    public function testInputOnWrongAgreementOffersMoveToValidEmploymentOfThePerson(): void
+    {
+        [$employeeId, $februaryId] = $this->employment('Syntetická Dvojí', 'active', '2026-02-07', '2026-02-07', null, '1', '2026-02-28');
+        $this->input($februaryId, 100_000, 'approved');
+        [, $marchId] = $this->employment('Syntetická Dvojí', 'active', '2026-03-18', '2026-03-18', $employeeId, '2');
+        $this->input($marchId, 29_250, 'approved');
+
+        $snapshot = $this->builder->build($this->supplierId, '2026-02-01', '2026-03-10');
+
+        $found = self::byCode($snapshot->validations, 'inputs_on_unstarted_employment');
+        self::assertCount(1, $found, json_encode(array_map(static fn ($v): string => $v->code, $snapshot->validations)));
+        self::assertSame($marchId, $found[0]->entityId);
+        self::assertStringContainsString('nástup je evidovaný až od 2026-03-18', $found[0]->message);
+        self::assertStringContainsString('platný vztah DPP 1 od 7. 2. 2026 do 28. 2. 2026', $found[0]->message);
+        self::assertStringContainsString('přesuňte', $found[0]->message);
+        self::assertStringContainsString('zrušte', $found[0]->message);
+        self::assertSame("/payroll/components?tab=inputs&period=2026-02&employment={$marchId}", $found[0]->remediationPath);
+    }
+
     public function testCancelledInputsOfUnstartedEmploymentAreNotReported(): void
     {
         [, $activeEmploymentId] = $this->employment('Syntetická Aktivní', 'active', '2026-01-01', '2026-01-01');
@@ -164,19 +188,21 @@ final class PayrollRunUnstartedEmploymentInputsTest extends TestCase
     }
 
     /** @return array{int,int} */
-    private function employment(string $name, string $status, string $startDate, string $createdOn): array
+    private function employment(string $name, string $status, string $startDate, string $createdOn, ?int $employeeId = null, string $code = '1', ?string $endDate = null): array
     {
         $pdo = $this->db->pdo();
-        $pdo->prepare('INSERT INTO payroll_employees (supplier_id, full_name, taxpayer_type, is_active) VALUES (?, ?, "employee", 1)')
-            ->execute([$this->supplierId, $name]);
-        $employeeId = (int) $pdo->lastInsertId();
-        $pdo->prepare('INSERT INTO payroll_employee_profiles (supplier_id, employee_id, profile_status) VALUES (?, ?, "ready")')
-            ->execute([$this->supplierId, $employeeId]);
+        if ($employeeId === null) {
+            $pdo->prepare('INSERT INTO payroll_employees (supplier_id, full_name, taxpayer_type, is_active) VALUES (?, ?, "employee", 1)')
+                ->execute([$this->supplierId, $name]);
+            $employeeId = (int) $pdo->lastInsertId();
+            $pdo->prepare('INSERT INTO payroll_employee_profiles (supplier_id, employee_id, profile_status) VALUES (?, ?, "ready")')
+                ->execute([$this->supplierId, $employeeId]);
+        }
         $pdo->prepare(
             'INSERT INTO payroll_employments
-                (supplier_id, employee_id, office_id, code, relation_type, status, start_date, actual_start_date, is_primary)
-             VALUES (?, ?, ?, "1", "dpp", ?, ?, ?, 1)'
-        )->execute([$this->supplierId, $employeeId, $this->officeId, $status, $startDate, $status === 'active' ? $startDate : null]);
+                (supplier_id, employee_id, office_id, code, relation_type, status, start_date, actual_start_date, end_date, is_primary)
+             VALUES (?, ?, ?, ?, "dpp", ?, ?, ?, ?, ?)'
+        )->execute([$this->supplierId, $employeeId, $this->officeId, $code, $status, $startDate, $status === 'active' ? $startDate : null, $endDate, $code === '1' ? 1 : 0]);
         $employmentId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO payroll_employment_events
