@@ -85,6 +85,15 @@ export interface PayrollCapabilitiesResponse {
   onboarding?: {
     has_settled_payroll: boolean
   }
+  /**
+   * Na kterém měsíci firma pracuje (`RRRR-MM`): první měsíc od začátku vedení
+   * mezd bez schválené mzdy a poslední zpracovaný. Výchozí období mzdových
+   * obrazovek; `null` u firmy bez začátku vedení mezd. Volitelné kvůli starší odpovědi.
+   */
+  periods?: {
+    first_open: string | null
+    last_processed: string | null
+  }
 }
 
 export type PayrollRelationType = 'employment' | 'small_scale_employment' | 'dpp' | 'dpc' | 'partner_dependent' | 'statutory_body'
