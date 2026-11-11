@@ -1536,6 +1536,14 @@ final class PayrollRunRepository
      * i když je jediným důvodem chybějící čistá mzda: srážka na ni čeká
      * a účetní to má vidět.
      *
+     * Bez čisté mzdy se osoba bez srážek nedostane do výsledku „nic se
+     * nesráží", a tak jí kalkulačka připíše i ostatní nálezy, které se srážek
+     * jen týkají (např. pravidla exekučních srážek pro rok výplaty). U osoby,
+     * která nic srážet nemá, jsou stejnou ozvěnou: po doplnění zákonného
+     * výpočtu skončí „nic se nesráží" bez nich. Hlásit je znamenalo poslat
+     * účetní ke správci pro pravidla srážek, zatímco skutečně chyběly
+     * počáteční roční úhrny (leden nového roku).
+     *
      * @param array<string,mixed> $person
      */
     private static function enforcementOnlyAwaitsStatutoryResult(array $person): bool
@@ -1552,7 +1560,7 @@ final class PayrollRunRepository
         $issues = is_array($enforcement['result'] ?? null)
             ? ($enforcement['result']['issues'] ?? null)
             : null;
-        if ($issues !== [PayrollRunValidationMessageFormatter::NET_PAY_ISSUE]) {
+        if (!is_array($issues) || !in_array(PayrollRunValidationMessageFormatter::NET_PAY_ISSUE, $issues, true)) {
             return false;
         }
         $input = is_array($enforcement['input'] ?? null) ? $enforcement['input'] : null;
