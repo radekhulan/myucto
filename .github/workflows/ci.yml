@@ -73,7 +73,10 @@ jobs:
 
   backend-tests:
     name: Backend (PHP 8.5 + PHPUnit, shard ${{ matrix.shard }}/4)
-    runs-on: ubuntu-latest
+    # Na ubuntu-26.04 se imagick ze setup-php sestaví proti ImageMagick 6, který
+    # s Ghostscriptem 10.06 rasterizaci PDF neumí (/undefinedfilename). Produkční
+    # image má ImageMagick 7, proto zatím zůstáváme na 24.04.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
