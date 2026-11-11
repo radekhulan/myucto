@@ -1372,6 +1372,33 @@ final class PayrollQuickInputsApiTest extends TestCase
         self::assertSame(['unpaid' => 4_800], $proration['replaced_minutes_by_title']);
     }
 
+    /**
+     * Hodinová mzda vzniká výpočtem z docházky, pole základní mzdy je u ní
+     * zakázané. Nástup v průběhu měsíce proto nesmí radit „zadejte základní
+     * mzdu ručně" (slepá ulička z průchodu agentury: rada a zakázané pole).
+     */
+    public function testPartialMonthOfHourlyEmploymentDoesNotAskForManualBase(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-06-15", actual_start_date = "2026-06-15"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on,
+                 remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis)
+             VALUES (?, ?, "2026-01-01", "2026-01-01", "hourly", 20000, "agreement", "Syntetická dohoda")'
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $row = $this->firstRow('2026-06');
+
+        self::assertTrue($row['partial_month']);
+        self::assertTrue($row['hourly_remuneration_in_period']);
+        self::assertNotContains('partial_month_base_required', $row['blockers']);
+        self::assertFalse($row['base_requires_entry']);
+    }
+
     /** Měsíc bez absence se nezměnil a nestojí ani dotaz navíc. */
     public function testMonthWithoutAbsenceKeepsTheAgreedAmount(): void
     {

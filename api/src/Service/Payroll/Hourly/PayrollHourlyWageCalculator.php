@@ -100,7 +100,7 @@ final class PayrollHourlyWageCalculator
     {
         $source = $context->workedTimeEvidence;
         if ($source === null) throw new PayrollHourlyCalculationException('hourly_time_missing', 'Doložte skutečně odpracovanou dobu; plánovaný fond ji nenahrazuje.');
-        if (($source['work_source'] ?? null) === 'import_summary') throw new PayrollHourlyCalculationException('hourly_import_source_unsupported', 'Automatický hodinový výpočet z importovaného souhrnu zatím není podporován; převzaté částky zůstávají beze změny.');
+        if (($source['work_source'] ?? null) === 'import_summary') throw new PayrollHourlyCalculationException('hourly_import_source_unsupported', 'Hodinovou mzdu z importovaného souhrnu hodin mzdový běh nepočítá. Na kartě vztahu přepněte způsob odměňování na měsíční (u dohody stačí 0 Kč) a docházku importujte znovu: mzdu ze sazby a hodin dopočte import. Jinak ji zadejte v rychlém měsíčním vstupu.');
         if (!in_array($source['work_source'] ?? null, ['entries', 'manual_summary'], true)) throw new PayrollHourlyCalculationException('hourly_time_evidence_invalid', 'Zdroj pracovní doby není podporovaný nebo není jednoznačný.');
         if (($source['status'] ?? null) !== 'approved') throw new PayrollHourlyCalculationException('hourly_time_not_approved', 'Nejprve schvalte podklady pracovní doby.');
         $storedHash = $source['source_sha256'] ?? null;

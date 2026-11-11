@@ -20,8 +20,15 @@ final class PayrollHourlyWageCollisionGuard
 
     /**
      * Vztahy, které by přechod na hodinové podmínky účinné od `$effectiveFrom`
-     * odřízl od importu mzdy: mají externí základní mzdu v měsíci účinnosti,
-     * ve třech měsících před ním nebo kdykoli později.
+     * odřízl od importu mzdy: mají externí základní mzdu, nebo pracovní dobu
+     * z importovaného souhrnu docházky, v měsíci účinnosti, ve třech měsících
+     * před ním nebo kdykoli později.
+     *
+     * Importovaný souhrn hodin hodinový výpočet neumí
+     * (`hourly_import_source_unsupported` v {@see \MyInvoice\Service\Payroll\Hourly\PayrollHourlyWageCalculator}):
+     * agentuře, která hromadně nastavila sazbu vztahům s hodinami z importu,
+     * pak běh mzdu nespočítal a schválit nešel. Mzdu z hodin a sazby dopočte
+     * import docházky, vztah má zůstat bez hodinového odměňování.
      *
      * Jediné místo, kde se okno určuje — sdílí ho karta vztahu i hromadná úprava.
      *
@@ -31,13 +38,32 @@ final class PayrollHourlyWageCollisionGuard
     public function employmentsBlockingHourlySwitch(int $supplierId, array $employmentIds, string $effectiveFrom): array
     {
         $month = new \DateTimeImmutable(substr($effectiveFrom, 0, 8) . '01');
+        $from = $month->modify('-' . self::IMPORTED_WAGE_LOOKBACK_MONTHS . ' months')->format('Y-m-d');
+        $blocking = [
+            ...$this->employmentsWithExternalBaseWage($supplierId, $employmentIds, $from, '9999-12-01'),
+            ...$this->employmentsWithImportedTimeSummary($supplierId, $employmentIds, $from),
+        ];
 
-        return $this->employmentsWithExternalBaseWage(
-            $supplierId,
-            $employmentIds,
-            $month->modify('-' . self::IMPORTED_WAGE_LOOKBACK_MONTHS . ' months')->format('Y-m-d'),
-            '9999-12-01',
-        );
+        return array_values(array_unique($blocking));
+    }
+
+    /**
+     * Vztahy s pracovním měsícem z importovaného souhrnu docházky od `$fromPeriod`.
+     *
+     * @param list<int> $employmentIds
+     * @return list<int>
+     */
+    private function employmentsWithImportedTimeSummary(int $supplierId, array $employmentIds, string $fromPeriod): array
+    {
+        if ($employmentIds === []) return [];
+        $in = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare("SELECT DISTINCT employment_id
+            FROM payroll_time_months
+            WHERE supplier_id = ? AND employment_id IN ($in)
+              AND period_start >= ? AND work_source = 'import_summary'");
+        $stmt->execute([$supplierId, ...$employmentIds, $fromPeriod]);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
     /**

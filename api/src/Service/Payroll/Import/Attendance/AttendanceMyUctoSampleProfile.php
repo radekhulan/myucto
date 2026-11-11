@@ -108,7 +108,7 @@ final class AttendanceMyUctoSampleProfile
                 'Sjednaná měsíční mzda v Kč jen u zaměstnance s měsíční mzdou. Při založení osoby se předvyplní do podmínek, u existující osoby ji import nabídne ke změně podmínek.',
                 [null, null]),
             $column('Hodinová sazba (Kč/h)', ['hodinová sazba*'], 'hourly_rate', self::FORMAT_AMOUNT,
-                'Sjednaná hodinová sazba v Kč za hodinu (např. 180). Při založení osoby se uloží do podmínek vztahu jako pravděpodobný výdělek pro náhrady, než vznikne skutečný průměr.',
+                'Sjednaná hodinová sazba v Kč za hodinu (např. 180). Při založení osoby se uloží do podmínek vztahu jako pravděpodobný výdělek pro náhrady, než vznikne skutečný průměr. Když řádek nemá žádnou částku mzdy, import z ní dopočte mzdu: sazba × odpracované hodiny.',
                 [180, 180]),
             $column('Konec dohody', ['konec dohody*', 'sjednaný konec*'], 'end_date', self::FORMAT_DATE,
                 'Sjednaný konec dohody nebo pracovního poměru na dobu určitou. Při založení osoby se uloží do podmínek vztahu; po tomto dni ji nabídne hromadné ukončení dohod.',

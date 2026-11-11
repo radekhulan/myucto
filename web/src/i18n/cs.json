@@ -2562,7 +2562,7 @@
         "hourly_segment_crosses_terms": "Rozdělte doloženou pracovní dobu podle účinných sazeb a způsobu odměňování.",
         "hourly_terms_missing": "V období nejsou doložené hodinové podmínky.",
         "hourly_rate_missing": "Účinná hodinová sazba chybí nebo není kladná.",
-        "hourly_import_source_unsupported": "Automatický hodinový výpočet z importovaného souhrnu zatím není podporován; převzaté částky zůstávají beze změny.",
+        "hourly_import_source_unsupported": "Hodinovou mzdu z importovaného souhrnu hodin mzdový běh nepočítá. Na kartě vztahu přepněte způsob odměňování na měsíční (u dohody stačí 0 Kč) a docházku importujte znovu: mzdu ze sazby a hodin dopočte import. Jinak ji zadejte v rychlém měsíčním vstupu.",
         "hourly_overtime_not_provided": "Doplňte přesčasovou část pracovní doby nebo výslovně potvrďte nulu.",
         "hourly_premium_partition_missing": "Doložte příplatkové vrstvy ke každému úseku pracovní doby.",
         "hourly_premium_evidence_missing": "Doložte příplatkové hodiny a vypořádání dalších nároků, včetně výslovných nul.",
@@ -4047,7 +4047,7 @@
         "report_prepared": "měsíční hlášení JMHZ za {period} je připravené, nejdřív otevřete mzdu k opravě",
         "run_locked": "mzda za {period} je schválená nebo zamčená, nejdřív ji otevřete k opravě",
         "hourly_not_supported": "u tohoto druhu vztahu hodinové odměňování nejde",
-        "hourly_rate_imported_wage": "sazba nenastavena: mzda se k vztahu importuje jako částka, hodinový výpočet by import zablokoval, nastavte pravděpodobný výdělek",
+        "hourly_rate_imported_wage": "sazba nenastavena: mzda nebo hodiny se k vztahu importují z docházky, hodinový výpočet z importu aplikace nepočítá; sazba zůstává pravděpodobným výdělkem a mzdu ze sazby a hodin dopočte import",
         "activity_code_relation_mismatch": "druh činnosti neodpovídá druhu vztahu",
         "nothing_to_change": "údaje už jsou vyplněné, nic se neměnilo"
       }
@@ -6480,7 +6480,7 @@
         "end_recurring_base_hint": "Vztah má aktivní předpis základní mzdy. Hodinová mzda se z něj nepočítá, a aby se mzda nevyplatila dvakrát, musí předpis skončit den před účinností nové verze.",
         "end_recurring_base_named": "Ukončit předpis {name} k {date} a uložit",
         "end_recurring_base": "Ukončit předpis základní mzdy k {date} a uložit",
-        "imported_wage_hint": "Mzda se k vztahu importuje jako částka (například z docházky). Hodinový výpočet ze směn by další import zablokoval. Místo sazby nastavte pravděpodobný výdělek, nebo potvrďte, že mzdu budete nově počítat ze směn a import hodinové mzdy ukončíte.",
+        "imported_wage_hint": "Mzda nebo hodiny se k vztahu importují z docházky. Z importovaného souhrnu hodin hodinový výpočet aplikace nepočítá a výpočet ze směn by další import zablokoval. Místo sazby nastavte pravděpodobný výdělek (mzdu ze sazby a hodin dopočte import), nebo potvrďte, že mzdu budete nově počítat ze směn a import hodinové mzdy ukončíte.",
         "imported_wage_keep": "Nastavit jen pravděpodobný výdělek",
         "imported_wage_switch": "Přesto přepnout na hodinový výpočet",
         "basis_kinds": {
@@ -36662,6 +36662,11 @@
         "round_whole_crowns": "Zaokrouhlit částky s haléři nahoru na celé koruny ({count})",
         "round_whole_crowns_hint": "Měsíční hlášení vykazuje výdělek v celých korunách a mzda se zaokrouhluje nahoru, ve prospěch zaměstnance. Tabulka ukazuje zaokrouhlené částky i původní hodnotu.",
         "rounded_from": "z {amount}",
+        "rate_wage_formula": "{hours} h × {rate}",
+        "rate_wages_title": "Mzda ze sazby a odpracovaných hodin",
+        "rate_wages_computed": "Podklady u části osob nemají částku mzdy, jen hodiny a hodinovou sazbu. Import mzdu dopočte jako sazba × odpracované hodiny a vytvoří z ní mzdový vstup (složka Hodinová mzda podle docházky). Osob: {count}, celkem {amount}.",
+        "rate_wages_no_hours": "Mzda nevznikne u osob, které mají sazbu, ale v podkladech ne odpracované hodiny (počet: {count}). Důvod je u osoby v tabulce níže.",
+        "rate_wages_hourly_terms": "Mzda nevznikne u osob, jejichž vztah má na kartě hodinové odměňování (počet: {count}): z importovaného souhrnu hodin ho mzdový běh nespočítá. Postup je u osoby v tabulce níže.",
         "probable_from_amount": "{rate}/h (odměna {amount} za {hours} h)",
         "probable_from_rate": "{rate}/h (sazba z podkladů)",
         "wages_title": "Měsíční mzda z podkladů",

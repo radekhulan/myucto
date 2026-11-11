@@ -2562,7 +2562,7 @@
         "hourly_segment_crosses_terms": "Split the documented working time by the effective rates and remuneration method.",
         "hourly_terms_missing": "No hourly terms are documented for the period.",
         "hourly_rate_missing": "The effective hourly rate is missing or not positive.",
-        "hourly_import_source_unsupported": "Automatic hourly calculation from an imported summary is not supported yet; imported amounts stay unchanged.",
+        "hourly_import_source_unsupported": "The payroll run does not calculate hourly pay from an imported hours summary. On the employment card switch the remuneration to monthly (0 CZK is enough for an agreement) and import the attendance again: the import calculates the wage from rate and hours. Otherwise enter it in the quick monthly input.",
         "hourly_overtime_not_provided": "Enter the overtime part of the working time or explicitly confirm zero.",
         "hourly_premium_partition_missing": "Provide premium layers for every segment of the working time.",
         "hourly_premium_evidence_missing": "Provide the premium hours and the settlement of other entitlements, including explicit zeros.",
@@ -4047,7 +4047,7 @@
         "report_prepared": "the JMHZ monthly report for {period} is prepared, reopen the payroll for correction first",
         "run_locked": "payroll for {period} is approved or locked, reopen it for correction first",
         "hourly_not_supported": "hourly remuneration is not available for this relation type",
-        "hourly_rate_imported_wage": "rate not set: the wage is imported as an amount and hourly calculation would block the import, set the probable earnings instead",
+        "hourly_rate_imported_wage": "rate not set: the wage or hours for this employment are imported from attendance and the app does not calculate hourly pay from an import; the rate stays as probable earnings and the import calculates the wage from rate and hours",
         "activity_code_relation_mismatch": "the activity type does not match the relation type",
         "nothing_to_change": "the values are already filled in, nothing changed"
       }
@@ -6480,7 +6480,7 @@
         "end_recurring_base_hint": "The employment has an active base wage recurring item. Hourly pay does not use it, so the item must end the day before the new version takes effect to avoid paying the wage twice.",
         "end_recurring_base_named": "End recurring item {name} on {date} and save",
         "end_recurring_base": "End the base wage recurring item on {date} and save",
-        "imported_wage_hint": "The wage for this employment is imported as an amount (for example from attendance). Hourly calculation from shifts would block the next import. Set the probable earnings instead of the rate, or confirm that the wage will now be calculated from shifts and the hourly wage import ends.",
+        "imported_wage_hint": "The wage or hours for this employment are imported from attendance. The app does not calculate hourly pay from an imported hours summary, and calculation from shifts would block the next import. Set the probable earnings instead of the rate (the import calculates the wage from rate and hours), or confirm that the wage will now be calculated from shifts and the hourly wage import ends.",
         "imported_wage_keep": "Set probable earnings only",
         "imported_wage_switch": "Switch to hourly calculation anyway",
         "basis_kinds": {
@@ -36662,6 +36662,11 @@
         "round_whole_crowns": "Round amounts with hellers up to whole crowns ({count})",
         "round_whole_crowns_hint": "The monthly employer report states earnings in whole crowns and wages are rounded up, in the employee's favour. The table shows the rounded amounts with the original value.",
         "rounded_from": "from {amount}",
+        "rate_wage_formula": "{hours} h × {rate}",
+        "rate_wages_title": "Wage from the rate and hours worked",
+        "rate_wages_computed": "For some people the data has no wage amount, only hours and an hourly rate. The import calculates the wage as rate × hours worked and creates a payroll input from it (component Hourly wage from attendance). People: {count}, total {amount}.",
+        "rate_wages_no_hours": "No wage is created for people who have a rate but no hours worked in the data (count: {count}). The reason is shown next to the person in the table below.",
+        "rate_wages_hourly_terms": "No wage is created for people whose employment has hourly remuneration on the card (count: {count}): the payroll run cannot calculate it from an imported hours summary. The steps are shown next to the person in the table below.",
         "probable_from_amount": "{rate}/h (pay {amount} for {hours} h)",
         "probable_from_rate": "{rate}/h (rate from the source files)",
         "wages_title": "Monthly wage from source files",

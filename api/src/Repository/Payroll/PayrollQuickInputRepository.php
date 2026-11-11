@@ -2102,8 +2102,11 @@ final class PayrollQuickInputRepository
         $partialProrated = $partialMonth && $proration !== null && $proration['supported'] === true;
         $prorationUnsupported = $proration !== null && $proration['supported'] === false;
 
+        // Hodinovou mzdu počítá výpočet z docházky a pole základu je u ní
+        // zakázané; rada „zadejte základní mzdu ručně" by vedla do slepé uličky.
         $baseRequiresEntry = (($partialMonth && !$partialProrated) || $suspendedInMonth || $prorationUnsupported)
             && !$managed['base']
+            && !$hourlyRemuneration
             && $quick['base'] === null;
         if ($baseRequiresEntry) {
             $blockers[] = match (true) {

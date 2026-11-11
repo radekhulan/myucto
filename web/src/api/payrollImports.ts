@@ -558,8 +558,18 @@ export interface AttendancePerson {
   existing_person?: AttendanceExistingPerson | null
   /** Otevřená DPP osoby, která v období nemá vztah (jen u osob k založení). */
   open_agreement?: PayrollOpenAgreement | null
+  /**
+   * Mzda ze sazby a hodin (podklady bez částky): `computed` = dopočtená
+   * (sazba × hodiny), `amount_in_source` = podklady nesou částku, `no_hours` =
+   * chybí hodiny, `hourly_terms` = vztah má hodinové odměňování na kartě.
+   */
+  rate_wage?: AttendanceRateWage | null
   warnings: string[]
 }
+
+export type AttendanceRateWage =
+  | { status: 'computed'; component_code: string; hours: string; hourly_rate_minor: number; amount_minor: number }
+  | { status: 'amount_in_source' | 'no_hours' | 'hourly_terms' }
 
 export interface AttendanceExistingPerson {
   employee_id: number
@@ -703,6 +713,8 @@ export interface AttendancePreview {
     registration_gaps?: number
     /** Složky vykazované v JMHZ, jejichž částka má haléře. */
     halere_components?: number
+    /** Mzda ze sazby a hodin: komu vznikne (a kolik celkem) a komu ne. */
+    rate_wages?: { computed: number; amount_minor: number; no_hours: number; hourly_terms: number }
   }
 }
 
