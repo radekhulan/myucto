@@ -14,8 +14,9 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
  * i normalizaci jako `build()`). Nic nepočítá ani neukládá.
  *
  * Záměrně jen podklady, které se po zámku mění běžnou prací účetní: mzdové
- * vstupy, nepřítomnosti, množina vztahů v období, hodinové podmínky, zákonná evidence osob
- * a podmínky vztahu (hlavní vztah, místo výkonu, účtárna, úvazek).
+ * vstupy, nepřítomnosti, množina vztahů v období, hodinové podmínky, zákonná evidence osob,
+ * podmínky vztahu (hlavní vztah, místo výkonu, účtárna, úvazek) a schválený průměrný
+ * výdělek čtvrtletí.
  * Obnova podkladů sama bere VŠECHNO — tohle je jen detektor, který má
  * účetní upozornit a schválení zastavit.
  */
@@ -34,6 +35,7 @@ final readonly class PayrollRunSourceDrift
         public int $remunerationChanged = 0,
         public int $workedTimeChanged = 0,
         public int $employmentTermsChanged = 0,
+        public int $averageEarningsChanged = 0,
     ) {}
 
     /**
@@ -46,7 +48,8 @@ final readonly class PayrollRunSourceDrift
      *   worked_time_evidence?:array<int,array<string,mixed>>,
      *   manual_time_month_state?:array<int,array<string,mixed>>,
      *   hourly_remuneration_terms?:array<int,list<array<string,mixed>>>,
-     *   statutory_evidence:array<int,mixed>|null
+     *   statutory_evidence:array<int,mixed>|null,
+     *   average_earnings?:array<int,array{id:int,average_hourly_minor:int}|null>
      * } $current
      */
     public static function between(array $frozenSnapshot, array $current): self
@@ -62,6 +65,7 @@ final readonly class PayrollRunSourceDrift
         $frozenHourlyClaims = [];
         $frozenTimeMonths = [];
         $frozenFacts = [];
+        $frozenAverages = [];
         $people = is_array($frozenSnapshot['people'] ?? null) ? $frozenSnapshot['people'] : [];
         foreach ($people as $person) {
             if (!is_array($person) || !is_array($person['employee'] ?? null)) {
@@ -77,6 +81,10 @@ final readonly class PayrollRunSourceDrift
                 $frozenEmployments[(int) ($employment['employment']['id'] ?? 0)] = true;
                 $frozenFacts[(int) ($employment['employment']['id'] ?? 0)] =
                     PayrollRunSnapshotBuilder::employmentDriftFactsFromSnapshot($employment);
+                if (array_key_exists('average_earning', $employment)) {
+                    $frozenAverages[(int) ($employment['employment']['id'] ?? 0)] =
+                        self::averageKey($employment['average_earning']);
+                }
                 $frozenHourlyTerms[(int) ($employment['employment']['id'] ?? 0)] =
                     $employment['hourly_remuneration_terms'] ?? [];
                 if (array_key_exists('hourly_settlement_terms', $employment)) {
@@ -209,6 +217,23 @@ final readonly class PayrollRunSourceDrift
             }
         }
 
+        /*
+         * Schválený průměr čtvrtletí (náhrady, příplatky z průměru a JMHZ 10345).
+         * Snímek ho zmrazí při zámku vstupů; nová revize průměru (například
+         * hromadně nastavený pravděpodobný výdělek) do revize bez obnovy
+         * podkladů nepronikla a schválený běh i hlášení nesly starou částku.
+         */
+        $averageEarningsChanged = 0;
+        if (isset($current['average_earnings'])) {
+            foreach ($frozenAverages as $employmentId => $average) {
+                if (isset($eligible[$employmentId])
+                    && $average !== self::averageKey($current['average_earnings'][$employmentId] ?? null)
+                ) {
+                    ++$averageEarningsChanged;
+                }
+            }
+        }
+
         return new self(
             inputsAdded: $inputsAdded,
             inputsChanged: $inputsChanged,
@@ -222,6 +247,7 @@ final readonly class PayrollRunSourceDrift
             remunerationChanged: $remunerationChanged,
             workedTimeChanged: $workedTimeChanged,
             employmentTermsChanged: $employmentTermsChanged,
+            averageEarningsChanged: $averageEarningsChanged,
         );
     }
 
@@ -238,7 +264,8 @@ final readonly class PayrollRunSourceDrift
             + $this->statutoryEvidenceChanged
             + $this->remunerationChanged
             + $this->workedTimeChanged
-            + $this->employmentTermsChanged;
+            + $this->employmentTermsChanged
+            + $this->averageEarningsChanged;
     }
 
     public function hasChanges(): bool
@@ -263,7 +290,18 @@ final readonly class PayrollRunSourceDrift
             'remuneration_changed' => $this->remunerationChanged,
             'worked_time_changed' => $this->workedTimeChanged,
             'employment_terms_changed' => $this->employmentTermsChanged,
+            'average_earnings_changed' => $this->averageEarningsChanged,
         ];
+    }
+
+    /** Totožnost schváleného průměru: revize a částka; `null` = průměr chybí. */
+    private static function averageKey(mixed $average): ?string
+    {
+        if (!is_array($average) || !isset($average['id'])) {
+            return null;
+        }
+
+        return (int) $average['id'] . ':' . (int) ($average['average_hourly_minor'] ?? 0);
     }
 
     /**
