@@ -74,6 +74,7 @@ final class PayrollAbsenceAction
         private readonly SicknessCaseFromAbsenceService $sicknessCases,
         private readonly PayrollAbsenceApprovalWarnings $approvalWarnings,
         private readonly \MyInvoice\Service\Payroll\Absence\ProbableAverageFromRateFiller $probableFromRate,
+        private readonly \MyInvoice\Service\Payroll\Absence\ProbableEarningBulkService $probableBulk,
     ) {}
 
     /**
@@ -1126,7 +1127,7 @@ final class PayrollAbsenceAction
             if (!is_array($items) || !array_is_list($items)) {
                 throw new \InvalidArgumentException('Výběr pracovních vztahů není platný.');
             }
-            $averages = $this->averageBatch->createBatch(
+            $batch = $this->averageBatch->createBatch(
                 $this->currentSupplierId($request),
                 $this->requiredPositiveInt($body['year'] ?? null, 'year'),
                 $this->requiredPositiveInt($body['quarter'] ?? null, 'quarter'),
@@ -1145,7 +1146,50 @@ final class PayrollAbsenceAction
             return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
         }
 
-        return Json::ok($response, ['averages' => $averages], 201);
+        return Json::ok($response, ['averages' => $batch['approved'], 'skipped' => $batch['skipped']], 201);
+    }
+
+    /**
+     * „Nastavit pravděpodobný výdělek vybraným" ({@see ProbableEarningBulkService}).
+     *
+     * Zapisuje podmínky vztahu i průměr, proto chce obě práva. Rozhoduje
+     * {@see RequestAuthorization::canSetProbableEarningInBulk()}.
+     */
+    public function setProbableEarningBulk(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        if (!RequestAuthorization::canSetProbableEarningInBulk($request)) {
+            return Json::error(
+                $response,
+                'forbidden',
+                'Pravděpodobný výdělek se ukládá i do podmínek pracovního vztahu; chybí vám právo spravovat pracovní vztahy.',
+                403,
+            );
+        }
+        try {
+            $body = $this->body($request);
+            $ids = $body['employment_ids'] ?? null;
+            if (!is_array($ids) || !array_is_list($ids)) {
+                throw new \InvalidArgumentException('Výběr pracovních vztahů není platný.');
+            }
+            $result = $this->probableBulk->apply(
+                $this->currentSupplierId($request),
+                $this->requiredPositiveInt($body['year'] ?? null, 'year'),
+                $this->requiredPositiveInt($body['quarter'] ?? null, 'quarter'),
+                $this->requiredPositiveInt($body['probable_hourly_minor'] ?? null, 'probable_hourly_minor'),
+                is_string($body['rationale'] ?? null) ? $body['rationale'] : '',
+                $ids,
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+
+        return Json::ok($response, $result);
     }
 
     /**

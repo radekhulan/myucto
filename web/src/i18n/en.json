@@ -32272,6 +32272,32 @@
       "bulk_hint": "Creates and immediately approves the average earning for the selected employments in the chosen quarter.",
       "bulk_create": "Create and approve selected ({count})",
       "bulk_created": "The average earning was created and approved for {count} employments.",
+      "bulk_skipped": "{count} employments were not approved because their proposal is not ready. Open the person and complete what is missing, or set a probable earning for them:",
+      "probable_bulk": {
+        "title": "Set probable earning for selected",
+        "hint": "Set the probable earning (Section 355(2) of the Labour Code) as one amount for all selected employments. It is stored in the employment terms and a new approved revision of the average is created for the chosen quarter; an existing approved average with a different amount is replaced.",
+        "quick_select": "Quick select:",
+        "select_dpp": "Agreements to perform work (DPP)",
+        "select_minimum_wage": "Average from minimum wage",
+        "clear_selection": "Clear selection",
+        "amount": "Hourly earning (CZK)",
+        "rationale": "Rationale",
+        "rationale_placeholder": "For example: agreed reward of CZK 180 per hour under the agreements",
+        "rationale_required": "Enter the rationale for the probable earning; the law requires it.",
+        "apply": "Set for selected ({count})",
+        "done": "Probable earning set for {applied} employments, {unchanged} unchanged.",
+        "summary": "Set: {applied} · unchanged: {unchanged} · not done: {failed}",
+        "failure": {
+          "employment_not_found": "The employment was not found.",
+          "average_pending_review": "Another revision of the average is waiting for approval in this quarter. Approve it or delete it in the person's detail, then repeat the action.",
+          "average_used_by_closed_run": "The approved average for Q{quarter} was already used by the closed payroll run for {period}. Reopen the run for correction and repeat the action.",
+          "average_reported_in_jmhz": "The approved average for Q{quarter} was already used by the closed payroll run for {period}, which produced a JMHZ report. Reopen the run for correction, repeat the action and after approving the correction file a corrective JMHZ report.",
+          "row_version_conflict": "Someone else changed the employment or its average in the meantime. Repeat the action."
+        },
+        "warning": {
+          "corrective_report_needed": "A JMHZ report with the original average was already filed for {period}. After approving the run correction, file a corrective report."
+        }
+      },
       "bulk_load_failed": "Could not load candidates for the bulk average calculation.",
       "bulk_inputs_changed": "The underlying data changed since the list was loaded. The list has been reloaded, please check your selection and submit again.",
       "bulk_empty": "There are no employments for this quarter.",

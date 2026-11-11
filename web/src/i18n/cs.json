@@ -32272,6 +32272,32 @@
       "bulk_hint": "Založí a rovnou schválí průměrný výdělek u vybraných pracovních vztahů za zvolené čtvrtletí.",
       "bulk_create": "Založit a schválit vybrané ({count})",
       "bulk_created": "Průměrný výdělek byl založen a schválen u {count} pracovních vztahů.",
+      "bulk_skipped": "Bez schválení zůstalo {count} vztahů, jejich návrh není připravený. Otevřete osobu a doplňte, co chybí, nebo jim nastavte pravděpodobný výdělek:",
+      "probable_bulk": {
+        "title": "Nastavit pravděpodobný výdělek vybraným",
+        "hint": "Pravděpodobný výdělek (§ 355 odst. 2 zákoníku práce) stanovíte jednou částkou pro všechny vybrané vztahy. Uloží se do podmínek vztahu a za zvolené čtvrtletí vznikne nová schválená revize průměru; dosavadní schválený průměr s jinou částkou se tím nahradí.",
+        "quick_select": "Rychlý výběr:",
+        "select_dpp": "Dohody o provedení práce",
+        "select_minimum_wage": "Průměr z minimální mzdy",
+        "clear_selection": "Zrušit výběr",
+        "amount": "Hodinový výdělek (Kč)",
+        "rationale": "Odůvodnění",
+        "rationale_placeholder": "Například: sjednaná odměna 180 Kč za hodinu podle dohod",
+        "rationale_required": "Doplňte odůvodnění pravděpodobného výdělku, zákon ho vyžaduje.",
+        "apply": "Nastavit vybraným ({count})",
+        "done": "Pravděpodobný výdělek nastaven u {applied} vztahů, beze změny {unchanged}.",
+        "summary": "Nastaveno: {applied} · beze změny: {unchanged} · neprovedeno: {failed}",
+        "failure": {
+          "employment_not_found": "Pracovní vztah nebyl nalezen.",
+          "average_pending_review": "Za čtvrtletí čeká ke schválení jiná revize průměru. Schvalte ji, nebo ji smažte v detailu osoby, a nastavení zopakujte.",
+          "average_used_by_closed_run": "Schválený průměr za Q{quarter} už použil uzavřený mzdový běh za {period}. Otevřete běh k opravě a nastavení zopakujte.",
+          "average_reported_in_jmhz": "Schválený průměr za Q{quarter} už použil uzavřený mzdový běh za {period} a z něj vzniklo hlášení JMHZ. Otevřete běh k opravě, nastavení zopakujte a po schválení opravy podejte opravné hlášení JMHZ.",
+          "row_version_conflict": "Vztah nebo jeho průměr mezitím upravil někdo jiný. Akci zopakujte."
+        },
+        "warning": {
+          "corrective_report_needed": "Za {period} už bylo podané hlášení JMHZ s původním průměrem. Po schválení opravy běhu podejte opravné hlášení."
+        }
+      },
       "bulk_load_failed": "Kandidáty na hromadný výpočet průměru se nepodařilo načíst.",
       "bulk_inputs_changed": "Podklady se od načtení seznamu změnily. Seznam byl znovu načten, zkontrolujte výběr a odešlete znovu.",
       "bulk_empty": "Pro toto čtvrtletí nejsou žádné pracovní vztahy.",
