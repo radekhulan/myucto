@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEmployerAnnualEvidenceService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
@@ -233,6 +234,61 @@ final class PayrollJmhz2027FlowTest extends TestCase
             ['base' => 5_000, 'withheld' => 750],
             $document['people'][0]['summary'][Jmhz2027DocumentContract::SUMMARY_PARAGRAPH6_TAX],
         );
+    }
+
+    /**
+     * Minimální mzda 2027 je 24 900 Kč (nařízení vlády č. 164/2026 Sb.,
+     * sdělení MPSV č. 171/2026 Sb.). Sjednaná mzda 22 400 Kč (minimum roku
+     * 2026) při plném úvazku je od ledna pod minimem (§ 111 odst. 2 ZP):
+     * kontrola před během na to upozorní a zdravotní pojištění se dopočte
+     * z minimálního vyměřovacího základu 2027.
+     */
+    public function testMonthlyWageBelowMinimumWage2027IsWarnedAndHealthReachesMinimum(): void
+    {
+        $person = $this->hire('Syntetický Minimální', 7, 'employment', 40, 10_000, '1980-02-02', 'male');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET monthly_gross_minor = 2240000
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $person['employment_id']]);
+        $partTime = $this->hire('Syntetická Poloviční', 8, 'employment', 20, 5_000, '1982-03-03', 'female');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET monthly_gross_minor = 1300000
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $partTime['employment_id']]);
+
+        $readiness = $this->container->get(PayrollRunReadinessService::class);
+        self::assertInstanceOf(PayrollRunReadinessService::class, $readiness);
+        $findings = $readiness->inspect($this->supplierId, self::PERIOD_START, self::PAYDAY, $this->officeId)['findings'];
+        $below = array_values(array_filter(
+            $findings,
+            static fn (array $finding): bool => $finding['code'] === 'monthly_wage_below_minimum',
+        ));
+        self::assertCount(1, $below, CanonicalJson::encode(array_column($findings, 'code')));
+        self::assertSame('warning', $below[0]['severity']);
+        self::assertSame(1, $below[0]['count']);
+        self::assertSame($person['employment_id'], $below[0]['entities'][0]['entity_id']);
+        self::assertStringContainsString('24 900 Kč', $below[0]['message']);
+
+        $this->createApprovedInput($person, $this->baseComponentId, 2_240_000, 'minimum-2027', self::PERIOD_START);
+        $this->createApprovedInput($partTime, $this->baseComponentId, 1_300_000, 'minimum-2027-pul', self::PERIOD_START);
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, 'minimum-2027');
+        self::assertSame([], $run['blockers'], CanonicalJson::encode($run['blockers']));
+        self::assertNotNull($run['approved']);
+        $statement = $this->db->pdo()->prepare(
+            'SELECT result_snapshot_json FROM payroll_statutory_person_results
+              WHERE supplier_id = ? AND revision_id = ? AND employee_id = ?
+                AND calculation_kind = "health_insurance"',
+        );
+        $statement->execute([$this->supplierId, (int) $run['approved']->revision['id'], $person['employee_id']]);
+        $health = json_decode((string) $statement->fetchColumn(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($health);
+        // § 3 odst. 6 zák. č. 592/1992 Sb.: minimální vyměřovací základ 2027 je
+        // minimální mzda 24 900 Kč; 13,5 % = 3 361,50, nahoru 3 362 Kč. Běžné
+        // pojistné z 22 400 Kč je 3 024 Kč, doplatek 338 Kč (fixture vede
+        // doplatek na zaměstnavatele, překážka na jeho straně).
+        self::assertSame(2_490_000, $health['effective_minimum_minor_units'], CanonicalJson::encode($health));
+        self::assertSame(336_200, $health['total_contribution_minor_units']);
+        self::assertSame(33_800, $health['employer_minimum_top_up_minor_units']);
     }
 
     /**

@@ -139,6 +139,9 @@ final class PayrollRunReadinessImpact
         // zúčtování vyplatí. Zúčtování provedené po schválení vyplatí jen
         // opravná revize běhu.
         'annual_settlement_pending_last_payout' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // § 111 odst. 2 ZP — sjednaná měsíční mzda pod minimální mzdou období.
+        // Mzda vstupuje do zmrazeného snímku, oprava po zamknutí je revize.
+        'monthly_wage_below_minimum' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
 
         // ── Skupina 1: doplní se kdykoli, na výpočet to nemá vliv ────────────
         'run_without_employments' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
