@@ -659,37 +659,10 @@ final class JmhzPreparationSnapshotBuilder
             ];
         }
         $employerAnnualVersion = null;
-        $isDecember = substr($periodStart, 5, 2) === '12';
-        if ($isDecember && $employerAnnualEvidence === null) {
-            $issues[] = $this->issue(
-                'jmhz_employer_annual_collective_agreement_missing',
-                'supplier',
-                $supplierId,
-                ['10214'],
-            );
-            $issues[] = $this->issue(
-                'jmhz_employer_annual_ownership_missing',
-                'supplier',
-                $supplierId,
-                ['10220'],
-            );
-            $issues[] = $this->issue(
-                'jmhz_employer_annual_ozp_summary_missing',
-                'supplier',
-                $supplierId,
-                ['10038', '10039', '10452'],
-            );
-        } elseif ($employerAnnualEvidence === null
-            && JmhzSpecVersion::forPeriodStart($periodStart) === JmhzSpecVersion::V2027
-        ) {
-            // Verze 2027: typy kolektivních smluv (10214) v souhrnu každý měsíc.
-            $issues[] = $this->issue(
-                'jmhz_employer_annual_collective_agreement_missing',
-                'supplier',
-                $supplierId,
-                ['10214'],
-            );
-        } elseif ($employerAnnualEvidence !== null) {
+        foreach (self::employerAnnualIssues($supplierId, $periodStart, $employerAnnualEvidence) as $annualIssue) {
+            $issues[] = $annualIssue;
+        }
+        if ($employerAnnualEvidence !== null) {
             if (($employerAnnualEvidence['schema_reference'] ?? null)
                     !== JmhzEmployerAnnualEvidenceService::SCHEMA_REFERENCE
                 || ($employerAnnualEvidence['report_year'] ?? null)
@@ -984,6 +957,40 @@ final class JmhzPreparationSnapshotBuilder
         }
 
         return $average;
+    }
+
+    /**
+     * Chybějící roční údaje zaměstnavatele: do 12/2026 v prosinci typy
+     * kolektivních smluv (10214), forma vlastnictví (10220) a průměrné počty
+     * zaměstnanců (10038, 10039, 10452); od verze 2027 typy kolektivních
+     * smluv v každém měsíci. Jediné pravidlo pro přípravu hlášení i kontrolu
+     * před během, aby se prosincová blokace neozvala až po schválení mzdy.
+     *
+     * @param array<string,mixed>|null $employerAnnualEvidence
+     * @return list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}>
+     */
+    public static function employerAnnualIssues(int $supplierId, string $periodStart, ?array $employerAnnualEvidence): array
+    {
+        if ($employerAnnualEvidence !== null) {
+            return [];
+        }
+        $issue = static function (string $code, array $attributeIds) use ($supplierId): array {
+            sort($attributeIds, SORT_STRING);
+
+            return ['code' => $code, 'entity_type' => 'supplier', 'entity_id' => $supplierId, 'attribute_ids' => $attributeIds];
+        };
+        if (substr($periodStart, 5, 2) === '12') {
+            return [
+                $issue('jmhz_employer_annual_collective_agreement_missing', ['10214']),
+                $issue('jmhz_employer_annual_ownership_missing', ['10220']),
+                $issue('jmhz_employer_annual_ozp_summary_missing', ['10038', '10039', '10452']),
+            ];
+        }
+        if (JmhzSpecVersion::forPeriodStart($periodStart) === JmhzSpecVersion::V2027) {
+            return [$issue('jmhz_employer_annual_collective_agreement_missing', ['10214'])];
+        }
+
+        return [];
     }
 
     /**

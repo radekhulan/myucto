@@ -412,9 +412,9 @@ final class PayrollRunReadinessService
     }
 
     /**
-     * Osoby, které zákonný výpočet vyřadí do ruční kontroly kvůli chybějící
-     * zákonné evidenci (pojišťovna, daňová rezidence, příslušnost
-     * k pojištění).
+     * Osoby, které zákonný výpočet vyřadí do ruční kontroly kvůli chybějícímu
+     * podkladu (pojišťovna, daňová rezidence, příslušnost k pojištění,
+     * počáteční stavy roku a další důvody sestavení zákonných vstupů).
      *
      * ── Co bylo špatně ──────────────────────────────────────────────────────
      * Kontrola znala tyhle díry jen z katalogu mezer jako informaci
@@ -501,9 +501,10 @@ final class PayrollRunReadinessService
             'statutory_evidence_incomplete',
             sprintf(
                 'Zákonný výpočet vyřadí do ruční kontroly tyto osoby (%d): %s%s. Chybí jim '
-                . 'zákonná evidence (zdravotní pojišťovna, daňová rezidence nebo příslušnost '
-                . 'k pojištění); bez ní se pojistné ani daň nespočítají a běh nepůjde schválit. '
-                . 'Odkaz u osoby otevře místo, kde se údaj doplňuje.',
+                . 'podklad pro pojistné nebo daň (například zdravotní pojišťovna, daňová '
+                . 'rezidence, příslušnost k pojištění nebo počáteční stavy roku); bez něj se pojistné '
+                . 'ani daň nespočítají a běh nepůjde schválit. Důvod a odkaz na místo opravy jsou '
+                . 'u každé osoby.',
                 count($affected),
                 implode(', ', array_column($shown, 'label')),
                 $hidden > 0 ? sprintf(' a dalších %d', $hidden) : '',
