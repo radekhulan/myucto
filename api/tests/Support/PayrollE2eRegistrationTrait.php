@@ -412,7 +412,17 @@ trait PayrollE2eRegistrationTrait
         $submissions = $this->container->get(PayrollSubmissionService::class);
         self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
 
-        return $submissions->artifactBytes($this->supplierId, (int) $statement->fetchColumn());
+        $xml = $submissions->artifactBytes($this->supplierId, (int) $statement->fetchColumn());
+        // Ruční kontrola vět: MYUCTO_REG_DUMP=<adresář mimo repo> uloží XML.
+        $dump = getenv('MYUCTO_REG_DUMP');
+        if (is_string($dump) && $dump !== '' && is_dir($dump)) {
+            file_put_contents(
+                $dump . '/' . (new \ReflectionClass($this))->getShortName() . '-' . $this->name() . '-' . $submissionId . '.xml',
+                $xml,
+            );
+        }
+
+        return $xml;
     }
 
     /**

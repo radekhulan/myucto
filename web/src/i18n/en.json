@@ -12693,7 +12693,7 @@
     },
     "registrationA1": {
       "title": "Employee registrations to file (REGZEC A1)",
-      "intro": "Employments that last or start in the selected period and are not yet registered with ČSSZ: they have no ID PPV, no prepared or sent registration, and the previous program did not register them. Prepare the registration for the selected ones with one button, exactly as on the employment card. Then send the prepared filings from the To send queue.",
+      "intro": "Employments that last, start or ended in the selected period and are not yet registered with ČSSZ: they have no ID PPV, no prepared or sent registration, and the previous program did not register them. An agreement that ended before it was registered is registered late, and the end is then reported by the A2 deregistration. Prepare the registration for the selected ones with one button, exactly as on the employment card. Then send the prepared filings from the To send queue.",
       "legal": "A full A1 registration is prepared, even before the start date. Only employments with a complete registration profile are prepared; for incomplete ones the row shows what is missing and links to the employment card.",
       "from": "Period from",
       "to": "Period to",
