@@ -44,6 +44,7 @@ import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStat
 import PayrollHideWarningDialog from '@/components/payroll/PayrollHideWarningDialog.vue'
 import {
   evidenceRefreshCommand,
+  firstHealthCoverageReviewId,
   firstStatutoryReviewId,
   statutoryReviewEmployeeIds,
 } from '@/components/payroll/statutoryBulkDefaults'
@@ -3179,6 +3180,18 @@ onMounted(() => { void load() })
               </svg>
               {{ bulkDefaultsLabel(run) }}
             </button>
+            <RouterLink
+              v-if="canBulkDefaults && validation.id === firstHealthCoverageReviewId(run.validations)"
+              :to="{ name: 'payroll-people', query: { bulk: 'health_insurer' } }"
+              :data-testid="`payroll-run-${run.id}-health-insurer-bulk`"
+              class="whitespace-nowrap"
+              :class="[btnOutlineSm('warning'), 'mt-2 mr-2 inline-flex']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.clipboardCheck" />
+              </svg>
+              {{ t('payroll.health_insurer_bulk.open') }}
+            </RouterLink>
             <!--
               Co dávka neschválila, zůstává na obrazovce. V toastu se to ztratilo
               dřív, než se podle toho dalo jednat, a znal se jen první důvod.

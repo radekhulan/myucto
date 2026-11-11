@@ -120,28 +120,30 @@ final class PayrollRunReadinessPredictionTest extends TestCase
             }
         }
         sort($blocked);
-        $expected = [$endedId, $missingId, $unverifiedId];
-        sort($expected);
+        // Bez účinného záznamu o prohlášení je osoba „nepodepsaná" (zákonný
+        // výchozí stav, audit 12. 11. 2026 ř. 9); zastaví jen výslovné „neověřeno".
+        $expected = [$unverifiedId];
         self::assertSame($expected, $blocked, 'Výpočet zastaví právě tyhle osoby.');
 
         $result = $this->readiness->inspect($this->supplierId, '2026-02-01', '2026-03-10');
         $finding = self::finding($result['findings'], 'tax_declaration_evidence_missing');
         self::assertNotNull($finding, json_encode(array_column($result['findings'], 'code')));
-        self::assertSame(3, $finding['entity_total']);
+        self::assertSame(1, $finding['entity_total']);
         $predicted = array_column($finding['entities'], 'entity_id');
         sort($predicted);
         self::assertSame($expected, $predicted);
         self::assertSame('blocker', $finding['severity']);
         self::assertCount(1, $finding['bulk_actions']);
         self::assertSame('declaration_signed', $finding['bulk_actions'][0]['kind']);
-        self::assertSame(3, $finding['bulk_actions'][0]['count']);
+        self::assertSame(1, $finding['bulk_actions'][0]['count']);
         // Hromadný podpis se zúží na dotčené osoby; bez výčtu dialog nabídl
         // všechny osoby roku včetně výslovně nepodepsaných.
         $bulkIds = $finding['bulk_actions'][0]['employee_ids'] ?? [];
         sort($bulkIds);
         self::assertSame($expected, $bulkIds);
         self::assertArrayNotHasKey('bulk_employee_ids', $finding);
-        self::assertStringContainsString('Syntetická Pozdní', $finding['message']);
+        self::assertStringContainsString('Syntetický Neověřený', $finding['message']);
+        self::assertStringNotContainsString('Syntetická Pozdní', $finding['message']);
 
         // Tatáž věc nevisí podruhé v katalogu mezer s jiným počtem.
         $gaps = self::finding($result['findings'], 'person_data_gap');

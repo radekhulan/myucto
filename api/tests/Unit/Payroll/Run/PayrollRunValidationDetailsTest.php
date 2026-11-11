@@ -210,20 +210,14 @@ final class PayrollRunValidationDetailsTest extends TestCase
             );
         }
 
-        // Chybějící pojišťovnu doplní hromadné zadání pojišťoven pro všechny
-        // dotčené osoby najednou (dřív proklik na kartu každé osoby zvlášť).
-        $missing = PayrollRunIssueGuidance::describe('health_insurance:health_coverage_evidence_missing:employee:7');
-        self::assertSame('/payroll/people?bulk=health_insurer', $missing['remediation_path']);
-        self::assertSame('employee', $missing['entity_type']);
-        self::assertSame(7, $missing['entity_id']);
-        self::assertSame(
-            '/payroll/people?bulk=health_insurer',
-            PayrollRunIssueGuidance::describe('person:employee:7:health_coverage_evidence_missing')['remediation_path'],
-        );
+        // Nálezy zdravotního pojištění doskočí na jeho sekci (audit ř. 29);
+        // hromadné zadání pojišťoven nabízí karta běhu u nálezu.
         foreach ([
             'health_insurance:health_insurer_evidence_unverified:employee:7',
             'person:employee:7:health_insurer_snapshot_unverified',
             'health_insurance:health_coverage_evidence_conflict:employee:7',
+            'health_insurance:health_coverage_evidence_missing:employee:7',
+            'person:employee:7:health_coverage_evidence_missing',
         ] as $issue) {
             self::assertSame(
                 '/payroll/people?' . http_build_query(['person' => 7, 'panel' => 'statutory_evidence', 'field' => 'statutory.health_coverages']),

@@ -314,7 +314,7 @@ final class SocialInsuranceMonthCalculator
         );
 
         if ($input->jurisdiction !== SocialJurisdictionEvidence::CzechRegimeVerified) {
-            return $this->nonCzechPersonResult($input, $facts);
+            return $this->nonCzechPersonResult($input, $facts, $smallScaleThreshold, $dppThreshold);
         }
 
         $decisions = $this->participationResolver->resolve(
@@ -801,13 +801,38 @@ final class SocialInsuranceMonthCalculator
     private function nonCzechPersonResult(
         SocialPersonMonthInput $input,
         array $facts,
+        int $smallScaleThreshold,
+        int $dppThreshold,
     ): SocialPersonMonthResult {
-        $manual = $input->jurisdiction === SocialJurisdictionEvidence::Unverified;
+        /*
+         * Neznámá příslušnost nevadí tam, kde pojistné nevznikne v žádném
+         * režimu: v cizím se české neplatí a v českém dohoda pod rozhodným
+         * příjmem účast nezakládá (§ 7 zákona č. 187/2006 Sb.). Typicky
+         * dohoda bez práce v měsíci (0 Kč) nebo brigádník pod limitem.
+         */
+        $czechDecisions = $input->jurisdiction === SocialJurisdictionEvidence::Unverified
+            ? $this->participationResolver->resolve($facts, $smallScaleThreshold, $dppThreshold)
+            : null;
+        $noLiabilityInAnyRegime = $czechDecisions !== null
+            && array_filter(
+                $czechDecisions,
+                static fn (SocialParticipationDecision $decision): bool =>
+                    $decision->status !== SocialParticipationStatus::DoesNotParticipate,
+            ) === [];
+        $manual = $input->jurisdiction === SocialJurisdictionEvidence::Unverified
+            && !$noLiabilityInAnyRegime;
         $reason = $manual
-            ? 'social_security_jurisdiction_unverified'
+            ? ($input->jurisdictionEvidenceMissing
+                ? 'social_jurisdiction_evidence_missing'
+                : 'social_security_jurisdiction_unverified')
             : 'foreign_social_security_regime_verified';
         $decisions = [];
         foreach ($facts as $fact) {
+            if ($noLiabilityInAnyRegime) {
+                $decisions[$fact->relationship->relationshipId] =
+                    $czechDecisions[$fact->relationship->relationshipId];
+                continue;
+            }
             $decisions[$fact->relationship->relationshipId] =
                 new SocialParticipationDecision(
                     $fact->relationship->relationshipId,

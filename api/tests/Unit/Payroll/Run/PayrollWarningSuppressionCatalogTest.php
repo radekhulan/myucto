@@ -30,6 +30,7 @@ final class PayrollWarningSuppressionCatalogTest extends TestCase
         foreach ([
             'tax_residence_missing_unsigned_summary' => PayrollRunSnapshotBuilder::unsignedWithoutResidenceMessage(3),
             'health_coverage_missing_summary' => PayrollRunSnapshotBuilder::withoutHealthCoverageMessage(3),
+            'social_jurisdiction_missing_summary' => PayrollRunSnapshotBuilder::withoutSocialJurisdictionMessage(3),
         ] as $code => $message) {
             self::assertTrue(PayrollWarningSuppressionCatalog::isHideable($code, 'warning', false));
             self::assertTrue(PayrollWarningSuppressionCatalog::isAggregate($code));

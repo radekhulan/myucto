@@ -932,8 +932,15 @@ final class PayrollRunSnapshotBuilder
         $unsignedDeclarations = [];
         $unsignedWithoutResidence = [];
         $withoutHealthCoverage = [];
+        $withoutSocialJurisdiction = [];
         foreach ($people as $personId => $person) {
             $personEvidence = $statutoryEvidence[$personId] ?? null;
+            if (is_array($personEvidence)
+                && $person['employments'] !== []
+                && !is_array($personEvidence['social']['jurisdiction'] ?? null)
+            ) {
+                $withoutSocialJurisdiction[] = (int) $personId;
+            }
             if (is_array($personEvidence)
                 && $person['employments'] !== []
                 && !is_array($personEvidence['health']['coverage'] ?? null)
@@ -980,6 +987,17 @@ final class PayrollRunSnapshotBuilder
                 self::unsignedWithoutResidenceMessage(count($unsignedWithoutResidence)),
                 '/payroll/people?bulk=statutory_defaults',
                 subjectIds: $unsignedWithoutResidence,
+            );
+        }
+        if ($withoutSocialJurisdiction !== []) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'social_jurisdiction_missing_summary',
+                'run',
+                null,
+                self::withoutSocialJurisdictionMessage(count($withoutSocialJurisdiction)),
+                '/payroll/people?bulk=statutory_defaults',
+                subjectIds: $withoutSocialJurisdiction,
             );
         }
         if ($withoutHealthCoverage !== []) {
@@ -1104,6 +1122,19 @@ final class PayrollRunSnapshotBuilder
             . ' Doplňte ji před vystavením potvrzení o zdanitelných příjmech'
             . ' nebo před podpisem prohlášení, hromadně v Mzdy → Zaměstnanci'
             . ' → Další funkce → Doplnit výchozí zákonné údaje.',
+            $count,
+        );
+    }
+
+    public static function withoutSocialJurisdictionMessage(int $count): string
+    {
+        return sprintf(
+            'Počet osob bez příslušnosti k sociálnímu pojištění v zákonné evidenci: %d.'
+            . ' U dohody, která v měsíci nezaloží účast na pojištění (bez příjmu nebo'
+            . ' pod rozhodnou částkou), pojistné nevzniká a výpočet pokračuje; kde'
+            . ' účast vznikne, výpočet osobu zastaví. Příslušnost potřebuje i měsíční'
+            . ' hlášení JMHZ. Doplňte ji hromadně v Mzdy → Zaměstnanci → Další funkce'
+            . ' → Doplnit výchozí zákonné údaje.',
             $count,
         );
     }
@@ -1376,8 +1407,8 @@ final class PayrollRunSnapshotBuilder
      * odstranit jinak než novou verzí smluvních podmínek.
      *
      * Sloupec zůstává záložním zdrojem jen tam, kde evidence není k dispozici
-     * (volitelná závislost, osoba bez evidence). Chybějící evidenci ohlásí
-     * assembler vlastním blokátorem `tax_declaration_evidence_missing`.
+     * (volitelná závislost). Osoba s evidencí bez záznamu o prohlášení je
+     * nepodepsaná, stejně jako ve výpočtu.
      *
      * @param array<string,mixed> $row
      */
@@ -1387,9 +1418,10 @@ final class PayrollRunSnapshotBuilder
             $incomeTax = $evidence['income_tax'] ?? null;
             $declaration = is_array($incomeTax) ? ($incomeTax['declaration'] ?? null) : null;
             $status = is_array($declaration) ? ($declaration['status'] ?? null) : null;
-            if (is_string($status)) {
-                return $status === 'signed';
-            }
+
+            // Bez účinného záznamu v evidenci prohlášení podepsané není
+            // (migrace 1643, § 38k ZDP); výpočet i hlášení tak říkají totéž.
+            return $status === 'signed';
         }
 
         return (bool) $row['tax_declaration_signed'];

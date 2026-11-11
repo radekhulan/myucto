@@ -61,6 +61,9 @@ final class PayrollRunStatutoryInputAssembler
     /** @var array<string,true> */
     private array $deferredHealthCoverage = [];
 
+    /** @var array<string,true> */
+    private array $deferredSocialJurisdiction = [];
+
     private readonly PayrollRunStatutoryComponentMapper $components;
     private readonly SocialRelationshipKindMapper $socialKinds;
     private readonly HealthRelationshipKindMapper $healthKinds;
@@ -89,6 +92,7 @@ final class PayrollRunStatutoryInputAssembler
     {
         $this->issues = [];
         $this->deferredHealthCoverage = [];
+        $this->deferredSocialJurisdiction = [];
         if (($snapshot['schema_version'] ?? null) !== 'payroll-run-input.v2') {
             return $this->invalidSnapshot('unsupported_snapshot_schema');
         }
@@ -367,7 +371,17 @@ final class PayrollRunStatutoryInputAssembler
         $socialEvidence = $this->object($evidence['social'] ?? null);
         $jurisdictionRow = $this->object($socialEvidence['jurisdiction'] ?? null);
         $jurisdiction = null;
-        if ($jurisdictionRow === null) {
+        $jurisdictionMissing = false;
+        if ($jurisdictionRow === null && $this->onlyIncomeDependentHealthParticipation($employments)) {
+            /*
+             * Dohoda bez příslušnosti: pojistné nevznikne, když dohoda účast
+             * nezaloží (v cizím režimu se české neplatí vůbec). Rozhodne výpočet
+             * (SocialInsuranceMonthCalculator); při účasti vrátí týž kód.
+             */
+            $jurisdictionMissing = true;
+            $jurisdiction = SocialJurisdictionEvidence::Unverified;
+            $this->deferredSocialJurisdiction[$personReference] = true;
+        } elseif ($jurisdictionRow === null) {
             $this->issue(
                 'social_insurance',
                 'social_jurisdiction_evidence_missing',
@@ -387,7 +401,7 @@ final class PayrollRunStatutoryInputAssembler
                 $jurisdiction = null;
             }
         }
-        if ($jurisdiction === SocialJurisdictionEvidence::Unverified) {
+        if ($jurisdiction === SocialJurisdictionEvidence::Unverified && !$jurisdictionMissing) {
             $this->issue(
                 'social_insurance',
                 'social_jurisdiction_evidence_unverified',
@@ -508,6 +522,7 @@ final class PayrollRunStatutoryInputAssembler
                         $discountRow['evidence_reference'] ?? null,
                     )
                     : null,
+                $jurisdictionMissing,
             );
         } catch (\InvalidArgumentException) {
             $this->issue(
@@ -3037,9 +3052,9 @@ final class PayrollRunStatutoryInputAssembler
     }
 
     /**
-     * Účast na zdravotním pojištění podle výše příjmu mají jen dohody
-     * (§ 5 písm. a) zákona č. 48/1997 Sb.). Kde je jiný vztah, pojistné
-     * vzniká vždy a chybějící pojištění se hlásí hned jako dřív.
+     * Účast podle výše příjmu mají jen dohody (§ 5 písm. a) zákona
+     * č. 48/1997 Sb., § 7 zákona č. 187/2006 Sb.). Kde je jiný vztah,
+     * pojistné vzniká vždy a chybějící evidence se hlásí hned jako dřív.
      *
      * @param list<mixed> $employments
      */
@@ -3077,13 +3092,14 @@ final class PayrollRunStatutoryInputAssembler
                 $blocked[$issue->personReference] = true;
             }
         }
-        foreach (array_keys($this->deferredHealthCoverage) as $personReference) {
-            if (isset($blocked[$personReference])) {
-                $this->issue(
-                    'health_insurance',
-                    'health_coverage_evidence_missing',
-                    $personReference,
-                );
+        foreach ([
+            ['health_insurance', 'health_coverage_evidence_missing', $this->deferredHealthCoverage],
+            ['social_insurance', 'social_jurisdiction_evidence_missing', $this->deferredSocialJurisdiction],
+        ] as [$domain, $code, $deferred]) {
+            foreach (array_keys($deferred) as $personReference) {
+                if (isset($blocked[$personReference])) {
+                    $this->issue($domain, $code, $personReference);
+                }
             }
         }
     }

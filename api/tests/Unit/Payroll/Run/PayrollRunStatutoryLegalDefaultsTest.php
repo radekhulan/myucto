@@ -19,6 +19,8 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputBundle;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialCalculationStatus;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthCalculator;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -84,13 +86,70 @@ final class PayrollRunStatutoryLegalDefaultsTest extends TestCase
             $snapshot['people'][0]['statutory_evidence']['health']['coverage'],
             $snapshot['people'][0]['statutory_evidence']['social']['jurisdiction'],
         );
+        $snapshot['people'][0]['statutory_evidence']['social']['working_pensioner_discount'] = [
+            'id' => 7,
+            'effective_from' => '2026-01-01',
+            'effective_to' => null,
+            'row_version' => 1,
+            'status' => 'unverified',
+            'evidence_reference' => null,
+        ];
 
         $bundle = $this->assemble($snapshot);
 
         self::assertSame([
             'health_insurance|health_coverage_evidence_missing|employee:42|',
             'social_insurance|social_jurisdiction_evidence_missing|employee:42|',
+            'social_insurance|working_pensioner_discount_evidence_unverified|employee:42|',
         ], self::issueKeys($bundle));
+    }
+
+    /**
+     * Dohoda bez práce v měsíci (0 Kč) i dohoda pod limitem se spočítá bez
+     * příslušnosti k sociálnímu pojištění: pojistné nevznikne v žádném režimu.
+     */
+    public function testZeroIncomeAgreementWithoutAnyStatutoryEvidenceIsCalculated(): void
+    {
+        $snapshot = $this->agreementSnapshot(0);
+        $evidence = &$snapshot['people'][0]['statutory_evidence'];
+        unset(
+            $evidence['health']['coverage'],
+            $evidence['income_tax']['declaration'],
+            $evidence['income_tax']['residence'],
+            $evidence['social']['jurisdiction'],
+        );
+        unset($evidence);
+
+        $bundle = $this->assemble($snapshot);
+        self::assertSame([], $bundle->issues);
+        $social = $this->social($bundle);
+        self::assertSame(SocialCalculationStatus::Calculated, $social->status, implode(',', $social->issues));
+        self::assertSame(0, $social->employeeContributionMinorUnits);
+        self::assertSame(HealthCalculationStatus::Calculated, $this->health($bundle)->status);
+        self::assertSame(TaxCalculationStatus::Calculated, $this->tax($bundle)->status);
+    }
+
+    public function testAgreementAboveThresholdWithoutSocialJurisdictionStops(): void
+    {
+        $snapshot = $this->agreementSnapshot(1_500_000);
+        unset($snapshot['people'][0]['statutory_evidence']['social']['jurisdiction']);
+
+        $bundle = $this->assemble($snapshot);
+        self::assertSame([], $bundle->issues);
+        $social = $this->social($bundle);
+        self::assertSame(SocialCalculationStatus::ManualReview, $social->status);
+        self::assertContains('person:employee:42:social_jurisdiction_evidence_missing', $social->issues);
+    }
+
+    public function testEmploymentWithoutSocialJurisdictionStillBlocksImmediately(): void
+    {
+        $snapshot = $this->agreementSnapshot(800_000, 'employment');
+        unset($snapshot['people'][0]['statutory_evidence']['social']['jurisdiction']);
+
+        self::assertSame(
+            ['social_insurance|social_jurisdiction_evidence_missing|employee:42|'],
+            self::issueKeys($this->assemble($snapshot)),
+        );
     }
 
     public function testMissingDeclarationRecordMeansNotSignedAndWithholdsTax(): void
@@ -169,6 +228,15 @@ final class PayrollRunStatutoryLegalDefaultsTest extends TestCase
         return (new HealthInsuranceMonthCalculator(new PayrollRulesetProvider([
             CzechPayrollRulesets2026::provider()->forDate(PayrollRulesetDomain::HealthInsurance, '2026-06-30'),
         ])))->calculate($bundle->healthInsurance);
+    }
+
+    private function social(PayrollRunStatutoryInputBundle $bundle): \MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthResult
+    {
+        self::assertNotNull($bundle->socialInsurance);
+
+        return (new SocialInsuranceMonthCalculator(new PayrollRulesetProvider([
+            CzechPayrollRulesets2026::provider()->forDate(PayrollRulesetDomain::SocialInsurance, '2026-06-30'),
+        ])))->calculate($bundle->socialInsurance);
     }
 
     private function tax(PayrollRunStatutoryInputBundle $bundle): \MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxResult

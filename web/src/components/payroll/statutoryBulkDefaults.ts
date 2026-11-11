@@ -128,6 +128,23 @@ export function statutoryReviewEmployeeIds(validations: PayrollRunValidation[]):
   return [...ids]
 }
 
+/*
+ * Nález zdravotního pojištění (proklik na sekci `statutory.health_coverages`).
+ * Chybějící pojišťovnu doplní hromadné zadání pojišťoven pro všechny osoby
+ * najednou, ne karta po kartě.
+ */
+function isHealthCoverageReview(validation: PayrollRunValidation): boolean {
+  if (validation.code !== STATUTORY_REVIEW_CODE) return false
+  const path = validation.remediation_path ?? ''
+  const query = path.includes('?') ? path.slice(path.indexOf('?') + 1) : ''
+  return new URLSearchParams(query).get('field') === 'statutory.health_coverages'
+}
+
+/** První nález zdravotního pojištění: odkaz na hromadné zadání se kreslí jednou. */
+export function firstHealthCoverageReviewId(validations: PayrollRunValidation[]): number | null {
+  return validations.find(isHealthCoverageReview)?.id ?? null
+}
+
 /** První validace skupiny: akce se u běhu kreslí jednou, ne u každé osoby. */
 export function firstStatutoryReviewId(validations: PayrollRunValidation[]): number | null {
   return validations.find(isStatutoryEvidenceReview)?.id ?? null

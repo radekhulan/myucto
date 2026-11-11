@@ -6,6 +6,7 @@ import {
   discountObstacleCounts,
   effectiveBasisCounts,
   evidenceRefreshCommand,
+  firstHealthCoverageReviewId,
   firstStatutoryReviewId,
   statutoryReviewEmployeeIds,
 } from '../statutoryBulkDefaults'
@@ -162,6 +163,17 @@ describe('validace běhu', () => {
     ]
     expect(statutoryReviewEmployeeIds(fixable)).toEqual([42, 43, 44])
     expect(firstStatutoryReviewId(fixable)).toBe(32)
+  })
+
+  it('u nálezu zdravotního pojištění nabízí hromadné zadání pojišťoven, ne výchozí údaje', () => {
+    const health = [
+      validation({ id: 50, entity_id: 60, remediation_path: '/payroll/people?person=60&panel=statutory_evidence&field=statutory.tax_residences' }),
+      validation({ id: 51, entity_id: 61, remediation_path: '/payroll/people?person=61&panel=statutory_evidence&field=statutory.health_coverages' }),
+      validation({ id: 52, entity_id: 62, remediation_path: '/payroll/people?person=62&panel=statutory_evidence&field=statutory.health_coverages' }),
+    ]
+    expect(firstHealthCoverageReviewId(health)).toBe(51)
+    expect(statutoryReviewEmployeeIds(health)).toEqual([60])
+    expect(firstHealthCoverageReviewId(health.slice(0, 1))).toBeNull()
   })
 })
 

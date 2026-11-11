@@ -48,6 +48,7 @@ final class PayrollWarningSuppressionCatalog
         // Zákonné výchozí stavy, se kterými výpočet doběhne.
         'tax_residence_missing_unsigned_summary' => self::SUBJECT_EMPLOYEE,
         'health_coverage_missing_summary' => self::SUBJECT_EMPLOYEE,
+        'social_jurisdiction_missing_summary' => self::SUBJECT_EMPLOYEE,
     ];
 
     /**
@@ -60,6 +61,7 @@ final class PayrollWarningSuppressionCatalog
         'tax_declaration_not_signed_summary' => true,
         'tax_residence_missing_unsigned_summary' => true,
         'health_coverage_missing_summary' => true,
+        'social_jurisdiction_missing_summary' => true,
     ];
 
     public static function isHideableCode(string $code): bool
@@ -117,6 +119,8 @@ final class PayrollWarningSuppressionCatalog
                 PayrollRunSnapshotBuilder::unsignedWithoutResidenceMessage($count),
             'health_coverage_missing_summary' =>
                 PayrollRunSnapshotBuilder::withoutHealthCoverageMessage($count),
+            'social_jurisdiction_missing_summary' =>
+                PayrollRunSnapshotBuilder::withoutSocialJurisdictionMessage($count),
             default => null,
         };
     }

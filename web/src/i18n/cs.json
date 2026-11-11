@@ -4191,7 +4191,8 @@
         "recurring_component_without_input": "Pravidelná mzdová složka bez vstupu",
         "employment_social_registration_missing": "Chybí registrace ČSSZ u dohody bez účasti na pojištění (registrováno mimo aplikaci)",
         "tax_residence_missing_unsigned_summary": "Nepodepsané prohlášení bez ověřené daňové rezidence",
-        "health_coverage_missing_summary": "Osoby bez zdravotní pojišťovny"
+        "health_coverage_missing_summary": "Osoby bez zdravotní pojišťovny",
+        "social_jurisdiction_missing_summary": "Osoby bez příslušnosti k sociálnímu pojištění"
       }
     },
     "runs": {
