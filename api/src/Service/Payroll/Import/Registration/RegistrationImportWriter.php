@@ -468,12 +468,11 @@ final class RegistrationImportWriter
         ?string $ip,
         ?string $userAgent,
     ): int {
-        $hasPrimary = false;
-        foreach ($this->lookup->employments($supplierId, $employeeId) as $row) {
-            if ($row['is_primary'] && in_array($row['status'], ['planned', 'preregistered', 'active', 'suspended'], true)) {
-                $hasPrimary = true;
-            }
-        }
+        $hasPrimary = $this->employments->hasOverlappingPrimary(
+            $supplierId,
+            $employeeId,
+            $input['planned_start_on'],
+        );
         [$activityCode, $detailCode] = PayrollEmploymentJmhzActivityFamily::firstRelationDefaults($input['relation_type']);
         $created = $this->employments->create(
             $supplierId,

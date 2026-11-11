@@ -335,6 +335,7 @@ final class JmhzScenario1DocumentResolver
                 ? $person['employee_id']
                 : null;
             $employments = $this->rows($person['employments'] ?? null);
+            $primaryFlags = JmhzPrimaryEmployment::flags($employments);
             /*
              * Ordinary evidence se zmrazuje per pracovní vztah a úplná musí být
              * u KAŽDÉHO vztahu osoby, protože každý vztah je samostatný
@@ -346,7 +347,7 @@ final class JmhzScenario1DocumentResolver
              */
             $personEvidence = [];
             $ozpWageEmployments = [];
-            foreach ($employments as $employmentRow) {
+            foreach ($employments as $employmentIndex => $employmentRow) {
                 $employmentKey = $employmentRow['employment_id'] ?? null;
                 $evidence = is_int($employmentKey)
                     ? ($ordinaryEvidence[$employmentKey] ?? null)
@@ -359,7 +360,7 @@ final class JmhzScenario1DocumentResolver
                     $ozpWageEmployments[] = $employmentKey;
                 }
                 if ($personEvidence === []
-                    || ($this->object($employmentRow['employment'] ?? null)['is_primary'] ?? null) === true
+                    || ($primaryFlags[$employmentIndex] ?? null) === true
                 ) {
                     $personEvidence = $evidence;
                 }
@@ -377,7 +378,7 @@ final class JmhzScenario1DocumentResolver
             if ($employments === []) {
                 $ordinaryEvidenceComplete = false;
             } else {
-                $this->inspectPrimaryEmployment($employments, $employeeId, $blockers);
+                $this->inspectPrimaryEmployment($primaryFlags, $employeeId, $blockers);
             }
             $personSummary = $this->object($person['person_summary'] ?? null);
             $annual = $this->annualSummary(
@@ -462,7 +463,7 @@ final class JmhzScenario1DocumentResolver
             // než odvozování osvobozených příjmů ho nemá a element se vynechá.
             $exemptIncomeMinor = null;
             $employerContributions = [];
-            foreach ($employments as $employment) {
+            foreach ($employments as $employmentIndex => $employment) {
                 if (is_int($employment['exempt_income_minor'] ?? null)) {
                     $exemptIncomeMinor = ($exemptIncomeMinor ?? 0)
                         + $employment['exempt_income_minor'];
@@ -493,7 +494,7 @@ final class JmhzScenario1DocumentResolver
                         ['10239', '10502'],
                     );
                 }
-                if (($employmentSource['is_primary'] ?? null) === true) {
+                if (($primaryFlags[$employmentIndex] ?? null) === true) {
                     // 10419 nese SDZ, a ta se vyplňuje jednou za zaměstnance na
                     // primárním PPV. Proto se prohlášení čte z účinného termu
                     // právě toho vztahu, ne z prvního v pořadí.
@@ -628,7 +629,7 @@ final class JmhzScenario1DocumentResolver
                                 && ($this->object($row['insurance'] ?? null)['kind'] ?? null) === 'employment',
                         )),
                     ),
-                    'primary' => $employmentSource['is_primary'] ?? null,
+                    'primary' => $primaryFlags[$employmentIndex] ?? null,
                     // 10535 za TENTO vztah; viz relationshipTaxableIncomeCzk().
                     'taxable_income_czk' => is_int($employmentId)
                         ? ($taxableIncomeCzk[$employmentId] ?? null)
@@ -1640,20 +1641,20 @@ final class JmhzScenario1DocumentResolver
      * Souhrnná data zaměstnance se vyplňují jednou za osobu, a to právě na
      * formuláři primárního vztahu (kontrola 248). Osoba proto musí mít PRÁVĚ
      * JEDEN vztah s `true`. Vedlejší vztah (`false`) je legitimní souběh;
-     * blokuje jen nerozhodnutý údaj nebo jiný počet primárních vztahů.
+     * blokuje jen nerozhodnutý údaj nebo jiný počet primárních vztahů. Účinný
+     * příznak (jediný vykázaný vztah je primární) určuje JmhzPrimaryEmployment.
      *
-     * @param list<array<string,mixed>> $employments
+     * @param array<array-key,?bool> $primaryFlags
      * @param list<JmhzScenario1Blocker> $blockers
      */
     private function inspectPrimaryEmployment(
-        array $employments,
+        array $primaryFlags,
         ?int $employeeId,
         array &$blockers,
     ): void {
         $primaryCount = 0;
         $resolved = true;
-        foreach ($employments as $employment) {
-            $flag = $this->object($employment['employment'] ?? null)['is_primary'] ?? null;
+        foreach ($primaryFlags as $flag) {
             if (!is_bool($flag)) {
                 $resolved = false;
             } elseif ($flag) {

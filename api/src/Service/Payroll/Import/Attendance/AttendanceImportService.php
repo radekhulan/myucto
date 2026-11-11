@@ -2097,12 +2097,12 @@ final class AttendanceImportService
             : (string) ($existing['relation_type'] ?? 'dpp');
         $item['relation_type'] = $relationType;
         $terms = self::employmentTerms($item, $plannedStart);
-        $hasPrimary = false;
-        foreach ($this->employments->listForEmployee($supplierId, $employeeId) as $row) {
-            if ((bool) $row['is_primary'] && in_array($row['status'], ['planned', 'preregistered', 'active', 'suspended'], true)) {
-                $hasPrimary = true;
-            }
-        }
+        // Předchozí dohoda skončená před nástupem nové hlavní vztah neblokuje.
+        $hasPrimary = $this->employments->hasOverlappingPrimary(
+            $supplierId,
+            $employeeId,
+            $plannedStart === '' ? null : $plannedStart,
+        );
         $weekly = $terms['weekly_hours'] ?? '40.00';
         $created = $this->employments->create(
             $supplierId,

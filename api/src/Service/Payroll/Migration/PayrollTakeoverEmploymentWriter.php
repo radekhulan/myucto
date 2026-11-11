@@ -77,7 +77,7 @@ final class PayrollTakeoverEmploymentWriter
             'employment_code' => $this->employmentCodeAvailable($supplierId, $code) ? $code : null,
         ]);
         $employment = $validated['employment'];
-        $employment['terms']['is_primary'] = !$this->hasActivePrimary($supplierId, $employeeId);
+        $employment['terms']['is_primary'] = !$this->employments->hasOverlappingPrimary($supplierId, $employeeId, $start);
         $employment['code'] = $validated['employment_code'] ?? '';
         $created = $this->employments->create($supplierId, $employeeId, $employment, $userId, null, null);
 
@@ -112,16 +112,6 @@ final class PayrollTakeoverEmploymentWriter
         $stmt->execute([$supplierId, $code]);
 
         return $stmt->fetchColumn() === false;
-    }
-
-    private function hasActivePrimary(int $supplierId, int $employeeId): bool
-    {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT 1 FROM payroll_employments WHERE supplier_id = ? AND employee_id = ? AND is_primary = 1 AND status IN ('planned', 'active', 'suspended')"
-        );
-        $stmt->execute([$supplierId, $employeeId]);
-
-        return $stmt->fetchColumn() !== false;
     }
 
     /** Důvod verze podmínek, kterou zapisuje převod ze sjednané mzdy zdroje. */

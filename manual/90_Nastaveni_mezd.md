@@ -849,6 +849,10 @@ napíše a založení jí přidá jen nový pracovní vztah, druhá karta osoby 
 rodným číslem nevznikne. Druh vztahu je z podkladů, bez něj stejný jako poslední
 vztah osoby, nástup ze sloupce Nástup, jinak první den měsíce. Výplatní účet ani
 pojišťovnu import u takové osoby nemění a údaje pro registraci jen doplní.
+Skončila-li předchozí dohoda před nástupem nové, stane se nová dohoda hlavním
+(primárním) vztahem osoby; předchozí si hlavní roli ponechá v měsících, kdy
+trvala. Stejně to platí při ručním přidání vztahu. Měsíční hlášení navíc bere
+jediný vztah, který osoba v měsíci vykazuje, vždy jako primární.
 
 **Otevřená DPP osoby.** Osobu, kterou import v měsíci nenašel, hledá také mezi
 neukončenými DPP firmy (uložená vazba, osobní číslo, rodné číslo, jméno). Má-li

@@ -126,6 +126,14 @@ final class AttendanceExistingPersonTest extends TestCase
             $this->employments($anna),
         );
         self::assertSame([['dpp', '2026-01-05'], ['dpp', '2026-02-01']], $this->employments($bara));
+        // Lednová dohoda skončila před nástupem únorové, takže se nepřekrývají:
+        // hlavním vztahem (JMHZ 10495) je nová DPP, lednová podmínky nemění.
+        foreach ([$anna, $bara] as $employeeId) {
+            self::assertSame(
+                [['2026-01-05', 0, 1], ['2026-02-01', 1, 1]],
+                $this->primaryFlags($employeeId),
+            );
+        }
 
         $again = $this->service->preview($this->supplierId, self::PERIOD, [$file], null, $this->profileId);
         self::assertSame(2, $again['summary']['matched']);
@@ -161,6 +169,26 @@ final class AttendanceExistingPersonTest extends TestCase
         $stmt->execute([$this->supplierId, $employeeId]);
 
         return array_map(static fn (array $row): array => [(string) $row['relation_type'], (string) $row['start_date']], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** @return list<array{0:string,1:int,2:int}> nástup, příznak vztahu, příznak v podmínkách */
+    private function primaryFlags(int $employeeId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employment.start_date, employment.is_primary, MAX(terms.is_primary) AS terms_primary
+               FROM payroll_employments employment
+               JOIN payroll_employment_terms terms
+                 ON terms.supplier_id = employment.supplier_id AND terms.employment_id = employment.id
+              WHERE employment.supplier_id = ? AND employment.employee_id = ?
+              GROUP BY employment.id, employment.start_date, employment.is_primary
+              ORDER BY employment.start_date',
+        );
+        $stmt->execute([$this->supplierId, $employeeId]);
+
+        return array_map(
+            static fn (array $row): array => [(string) $row['start_date'], (int) $row['is_primary'], (int) $row['terms_primary']],
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        );
     }
 
     private function scalar(string $sql): int
