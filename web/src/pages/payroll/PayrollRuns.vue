@@ -796,6 +796,7 @@ const SOURCE_DRIFT_KEYS = [
   'employments_added',
   'employments_removed',
   'statutory_evidence_changed',
+  'employment_terms_changed',
 ] as const
 
 /** Jen nenulové druhy změn — u 500 lidí nechceme číst sloupec nul. */

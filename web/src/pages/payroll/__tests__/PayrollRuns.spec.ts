@@ -1698,6 +1698,26 @@ describe('PayrollRuns', () => {
     wrapper.unmount()
   })
 
+  it('změněné podmínky vztahu vypíše a jako hlavní krok nabídne obnovu podkladů místo přepočtu', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'review', 'approve', 'cancel'],
+      source_drift: { ...drift, total: 1, inputs_added: 0, statutory_evidence_changed: 0, employment_terms_changed: 1 },
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const box = wrapper.get('[data-testid="payroll-run-15-source-drift"]')
+    expect(box.find('[data-test="payroll-run-source-drift-employment_terms_changed"]').text())
+      .toContain('payroll.runs.source_drift.employment_terms_changed')
+    const buttons = wrapper.findAll('button[data-testid^="payroll-run-15-"]')
+    expect(buttons[0]!.attributes('data-testid')).toBe('payroll-run-15-refresh_inputs')
+
+    wrapper.unmount()
+  })
+
   it('bez změn podkladů nevaruje a hlavním krokem zůstává schválení', async () => {
     m.runs.mockResolvedValue([run({
       status: 'calculated',

@@ -14,7 +14,8 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
  * i normalizaci jako `build()`). Nic nepočítá ani neukládá.
  *
  * Záměrně jen podklady, které se po zámku mění běžnou prací účetní: mzdové
- * vstupy, nepřítomnosti, množina vztahů v období, hodinové podmínky a zákonná evidence osob.
+ * vstupy, nepřítomnosti, množina vztahů v období, hodinové podmínky, zákonná evidence osob
+ * a podmínky vztahu (hlavní vztah, místo výkonu, účtárna, úvazek).
  * Obnova podkladů sama bere VŠECHNO — tohle je jen detektor, který má
  * účetní upozornit a schválení zastavit.
  */
@@ -32,12 +33,14 @@ final readonly class PayrollRunSourceDrift
         public int $statutoryEvidenceChanged = 0,
         public int $remunerationChanged = 0,
         public int $workedTimeChanged = 0,
+        public int $employmentTermsChanged = 0,
     ) {}
 
     /**
      * @param array<string,mixed> $frozenSnapshot vstupní snímek revize
      * @param array{
      *   eligible_employment_ids:list<int>,
+     *   employment_facts?:array<int,array<string,mixed>>,
      *   inputs:array<int,list<array<string,mixed>>>,
      *   absences:array<int,list<array<string,mixed>>>,
      *   worked_time_evidence?:array<int,array<string,mixed>>,
@@ -58,6 +61,7 @@ final readonly class PayrollRunSourceDrift
         $frozenAverageSources = [];
         $frozenHourlyClaims = [];
         $frozenTimeMonths = [];
+        $frozenFacts = [];
         $people = is_array($frozenSnapshot['people'] ?? null) ? $frozenSnapshot['people'] : [];
         foreach ($people as $person) {
             if (!is_array($person) || !is_array($person['employee'] ?? null)) {
@@ -71,6 +75,8 @@ final readonly class PayrollRunSourceDrift
                     continue;
                 }
                 $frozenEmployments[(int) ($employment['employment']['id'] ?? 0)] = true;
+                $frozenFacts[(int) ($employment['employment']['id'] ?? 0)] =
+                    PayrollRunSnapshotBuilder::employmentDriftFactsFromSnapshot($employment);
                 $frozenHourlyTerms[(int) ($employment['employment']['id'] ?? 0)] =
                     $employment['hourly_remuneration_terms'] ?? [];
                 if (array_key_exists('hourly_settlement_terms', $employment)) {
@@ -186,6 +192,23 @@ final readonly class PayrollRunSourceDrift
             }
         }
 
+        /*
+         * Podmínky vztahu, které snímek nese (hlavní vztah, místo
+         * výkonu, účtárna, úvazek…). Bez nich přepočet po změně podmínek tiše
+         * počítal ze starého snímku a seznam běhů tvrdil, že se nic nezměnilo.
+         * Porovnávají se jen klíče, které zmrazený snímek opravdu nese.
+         */
+        $employmentTermsChanged = 0;
+        foreach ($current['employment_facts'] ?? [] as $employmentId => $facts) {
+            if (!isset($frozenFacts[$employmentId])) {
+                continue;
+            }
+            $comparable = array_intersect_key($facts, $frozenFacts[$employmentId]);
+            if (self::fingerprint($comparable) !== self::fingerprint($frozenFacts[$employmentId])) {
+                ++$employmentTermsChanged;
+            }
+        }
+
         return new self(
             inputsAdded: $inputsAdded,
             inputsChanged: $inputsChanged,
@@ -198,6 +221,7 @@ final readonly class PayrollRunSourceDrift
             statutoryEvidenceChanged: $statutoryChanged,
             remunerationChanged: $remunerationChanged,
             workedTimeChanged: $workedTimeChanged,
+            employmentTermsChanged: $employmentTermsChanged,
         );
     }
 
@@ -213,7 +237,8 @@ final readonly class PayrollRunSourceDrift
             + $this->employmentsRemoved
             + $this->statutoryEvidenceChanged
             + $this->remunerationChanged
-            + $this->workedTimeChanged;
+            + $this->workedTimeChanged
+            + $this->employmentTermsChanged;
     }
 
     public function hasChanges(): bool
@@ -237,6 +262,7 @@ final readonly class PayrollRunSourceDrift
             'statutory_evidence_changed' => $this->statutoryEvidenceChanged,
             'remuneration_changed' => $this->remunerationChanged,
             'worked_time_changed' => $this->workedTimeChanged,
+            'employment_terms_changed' => $this->employmentTermsChanged,
         ];
     }
 

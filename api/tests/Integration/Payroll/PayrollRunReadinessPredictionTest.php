@@ -185,6 +185,35 @@ final class PayrollRunReadinessPredictionTest extends TestCase
         self::assertNull(self::finding($march['findings'], 'jmhz_annual_request_status_unresolved'));
     }
 
+    public function testChangedEmploymentTermsMarkOpenRevisionAsStale(): void
+    {
+        // Změna hlavního vztahu a místa výkonu po zamknutí: přepočet počítal
+        // ze starého snímku a seznam běhů tvrdil, že se podklady nezměnily.
+        [, $employmentId] = $this->employment('Syntetický Přeřazený');
+        [$colleagueId] = $this->employment('Syntetická Beze změny');
+        $snapshot = $this->builder->build($this->supplierId, '2026-02-01', '2026-03-10');
+        $frozen = json_decode($snapshot->json, true, flags: JSON_THROW_ON_ERROR);
+        $detector = new \MyInvoice\Service\Payroll\Run\PayrollRunSourceDriftDetector($this->builder);
+
+        self::assertSame(0, $detector->detect($this->supplierId, $frozen)->total(), 'Bez změny žádný posun.');
+
+        // Zápis jako u hromadného doplnění místa výkonu: bez zvýšení row_version.
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET work_place = "Syntetické místo", is_primary = 0
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([$this->supplierId, $employmentId]);
+
+        $drift = $detector->detect($this->supplierId, $frozen);
+        self::assertSame(1, $drift->employmentTermsChanged);
+        self::assertSame(1, $drift->total());
+        self::assertSame(1, $drift->toArray()['employment_terms_changed']);
+
+        // Oprava jména výpočet nemění a schválení kvůli ní stát nemá.
+        $this->db->pdo()->prepare('UPDATE payroll_employees SET full_name = "Syntetický Přejmenovaný" WHERE id = ?')
+            ->execute([$colleagueId]);
+        self::assertSame(1, $detector->detect($this->supplierId, $frozen)->total());
+    }
+
     /**
      * @param list<array<string,mixed>> $findings
      * @return array<string,mixed>|null
