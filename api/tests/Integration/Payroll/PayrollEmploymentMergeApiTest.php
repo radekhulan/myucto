@@ -335,7 +335,88 @@ final class PayrollEmploymentMergeApiTest extends TestCase
         $response = $this->merge($manual, $registered, false);
 
         self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
-        self::assertSame('payroll_merge_source_in_run', $this->json($response)['error']['code']);
+        $error = $this->json($response)['error'];
+        self::assertSame('payroll_merge_source_in_run', $error['code']);
+        self::assertStringContainsString('mzdovém běhu za 02/2026 (stav: rozpracovaný)', $error['message']);
+    }
+
+    /**
+     * Import registrací založil oběma vztahům převzatý profil A1 (a detekce
+     * k němu návrh hlášení změny). Dřív to blokovalo sloučení oběma směry
+     * a hláška „Slučujte opačně" vedla do kruhu.
+     */
+    public function testImportedRegistrationOnBothSidesDoesNotBlockMerge(): void
+    {
+        $registered = $this->employment('REG-A1', 'employment', '2026-02-20', true, null);
+        $this->importedRegistration((int) $registered['id']);
+        $manual = $this->employment('DPP-A1', 'dpp', '2026-02-07', false, null);
+        $this->importedRegistration((int) $manual['id']);
+        $this->changeProposal((int) $manual['id']);
+        $this->input((int) $manual['id'], 'draft', null);
+
+        $response = $this->merge($manual, $registered, false);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(0, $this->countRows('payroll_employments', 'id', (int) $manual['id']));
+        self::assertSame(0, $this->countRows('payroll_registration_a1_profiles', 'employment_id', (int) $manual['id']));
+        self::assertSame(0, $this->countRows('payroll_registration_change_proposals', 'employment_id', (int) $manual['id']));
+        self::assertSame(1, $this->countRows('payroll_registration_a1_profiles', 'employment_id', (int) $registered['id']));
+    }
+
+    /** Identifikátor vztahu od ČSSZ je skutečný úkon a sloučení dál blokuje. */
+    public function testRegistrationIdentifierStillBlocksMerge(): void
+    {
+        $registered = $this->employment('REG-ID', 'employment', '2026-02-20', true, null);
+        $manual = $this->employment('DPP-ID', 'dpp', '2026-02-07', false, null);
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_employment_external_ids
+                (supplier_id, employee_id, employment_id, environment,
+                 identifier_type, value_ciphertext, value_hash, value_masked,
+                 valid_from, source_kind, source_reference_hash)
+             VALUES (?, ?, ?, 'test', 'id_ppv', 'enc:v2:test', UNHEX(SHA2(?, 256)),
+                     '***123', '2026-01-01', 'verified_manual_import', ?)"
+        )->execute([$this->supplierId, $this->employeeId, $manual['id'], "id-ppv-{$manual['id']}", str_repeat('a', 64)]);
+
+        $response = $this->merge($manual, $registered, false);
+
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('payroll_merge_source_registered', $this->json($response)['error']['code']);
+    }
+
+    /**
+     * Schválený průměrný výdělek zdroje je výpočet nad vztahem, který se smazáním
+     * vztahu zmizí stejně jako při mazání. Sloučení dřív blokoval bez cesty ven.
+     */
+    public function testApprovedAverageEarningOfSourceDoesNotBlockMerge(): void
+    {
+        $registered = $this->employment('REG-AV', 'employment', '2026-02-20', true, null);
+        $manual = $this->employment('DPP-AV', 'dpp', '2026-02-07', false, null);
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_average_earning_snapshots
+                (supplier_id, employment_id, applicable_year, applicable_quarter, source_kind,
+                 decisive_from, decisive_to, gross_earnings_minor, worked_minutes, worked_days,
+                 average_hourly_minor, rationale, status, ruleset_id, ruleset_hash, input_hash, input_trace,
+                 approved_by, approved_at)
+             VALUES (?, ?, 2026, 1, 'probable', '2026-02-07', '2026-02-28', 0, 0, 0, 15000,
+                     'Pravděpodobný výdělek', 'approved', 'cz-2026', ?, UNHEX(SHA2('vstup', 256)), '{}', ?, NOW())"
+        )->execute([$this->supplierId, $manual['id'], str_repeat('d', 64), $this->userId]);
+
+        $response = $this->merge($manual, $registered, false);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(0, $this->countRows('payroll_average_earning_snapshots', 'employment_id', (int) $manual['id']));
+    }
+
+    private function changeProposal(int $employmentId): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_registration_change_proposals
+                (supplier_id, employee_id, employment_id, environment, duty_kind, action_code,
+                 baseline_fingerprint, current_fingerprint, detected_on, due_on,
+                 deadline_ruleset_id, deadline_source, findings_json)
+             VALUES (?, ?, ?, 'production', 'regzec_change', 3, ?, ?, '2026-02-21', '2026-03-01',
+                     'cz-regzec-2026', 'syntetický zdroj', '{}')"
+        )->execute([$this->supplierId, $this->employeeId, $employmentId, str_repeat('e', 64), str_repeat('f', 64)]);
     }
 
     public function testEmploymentOfAnotherPersonCannotBeMerged(): void

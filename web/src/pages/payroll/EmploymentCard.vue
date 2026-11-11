@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { fieldSelector, revealField } from '@/utils/revealField'
 import { useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollChecklistStatus,
@@ -1598,6 +1598,27 @@ const deleteBlockerMessage = computed<string>(
   () => props.employment.delete_blocker?.message ?? '',
 )
 
+const router = useRouter()
+
+/**
+ * Blokují-li smazání mzdové vstupy, hláška nabídne rovnou jejich seznam
+ * zúžený na tenhle vztah a období, kterého se týká.
+ */
+function deleteBlockerAction() {
+  const blocker = props.employment.delete_blocker
+  if (blocker?.code !== 'payroll_employment_has_inputs') return undefined
+  const period = blocker.period ? blocker.period.slice(0, 7) : null
+  return {
+    label: t('payroll.people.delete.show_inputs'),
+    handler: () => {
+      void router.push({
+        name: 'payroll-components',
+        query: { tab: 'inputs', employment: String(props.employment.id), ...(period ? { period } : {}) },
+      })
+    },
+  }
+}
+
 /**
  * Smazání vztahu se potvrzuje dál — vratné to není. Server maže i navázané
  * záznamy (proto `delete_cascade`) a znovu je založit ručně nejde. Dialog už
@@ -1724,7 +1745,10 @@ const actions = computed<ActionItem[]>(() => [
     show: props.canWrite,
     run: () => {
       if (!props.employment.can_delete) {
-        toast.error(deleteBlockerMessage.value || t('payroll.people.delete.blocked_title'))
+        const message = deleteBlockerMessage.value || t('payroll.people.delete.blocked_title')
+        const action = deleteBlockerAction()
+        if (action) toast.error(message, action)
+        else toast.error(message)
         return
       }
       void removeEmployment()

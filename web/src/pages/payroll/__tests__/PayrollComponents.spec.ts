@@ -1125,6 +1125,40 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
+  it('posune editor mapování JMHZ i úpravy složky do zorného pole nad dlouhým katalogem', async () => {
+    const scrollIntoView = vi.fn()
+    const original = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    try {
+      const wrapper = mount(PayrollComponents)
+      await flushPromises()
+      await wrapper.findAll('button')
+        .find(button => button.text() === 'payroll.components.tabs.catalog')!
+        .trigger('click')
+      await flushPromises()
+
+      await wrapper.findAll('button')
+        .find(button => button.text() === 'payroll.components.jmhz.configure')!
+        .trigger('click')
+      await flushPromises()
+      const jmhzEditor = wrapper.get('[data-testid="payroll-jmhz-mapping-editor"]')
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+      expect(scrollIntoView.mock.contexts[0]).toBe(jmhzEditor.element)
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: 'smooth', block: 'start' })
+
+      await wrapper.findAll('button')
+        .find(button => button.text() === 'common.edit')!
+        .trigger('click')
+      await flushPromises()
+      const componentEditor = wrapper.get('[data-testid="payroll-component-editor"]')
+      expect(scrollIntoView).toHaveBeenCalledTimes(2)
+      expect(scrollIntoView.mock.contexts[1]).toBe(componentEditor.element)
+      wrapper.unmount()
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+    }
+  })
+
   it('smaže dosud nepoužitou mzdovou složku po potvrzení', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const wrapper = mount(PayrollComponents)

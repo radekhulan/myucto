@@ -6603,8 +6603,11 @@
           "components": "žádná pravidelná složka | 1 pravidelná složka mzdy | {count} pravidelné složky mzdy | {count} pravidelných složek mzdy",
           "time": "žádný záznam docházky | 1 záznam docházky a kalendáře | {count} záznamy docházky a kalendáře | {count} záznamů docházky a kalendáře",
           "absences": "žádná absence | 1 záznam absence a dovolené | {count} záznamy absencí a dovolené | {count} záznamů absencí a dovolené",
-          "sickness": "žádný případ dávky | 1 nepodaný případ dávky nemocenského pojištění | {count} nepodané případy dávek nemocenského pojištění | {count} nepodaných případů dávek nemocenského pojištění"
+          "sickness": "žádný případ dávky | 1 nepodaný případ dávky nemocenského pojištění | {count} nepodané případy dávek nemocenského pojištění | {count} nepodaných případů dávek nemocenského pojištění",
+          "registration_profile": "žádný profil registrace | 1 nepodaný profil registrace ČSSZ | {count} nepodané profily registrace ČSSZ | {count} nepodaných profilů registrace ČSSZ",
+          "registration_changes": "žádný návrh hlášení změny | 1 návrh hlášení změny registrace | {count} návrhy hlášení změn registrace | {count} návrhů hlášení změn registrace"
         },
+        "show_inputs": "Zobrazit mzdové vstupy",
         "person_cascade": {
           "employments": "žádný pracovní vztah | 1 pracovní vztah | {count} pracovní vztahy | {count} pracovních vztahů",
           "profile": "žádný údaj profilu | 1 údaj profilu a osobních dat | {count} údaje profilu a osobních dat | {count} údajů profilu a osobních dat",

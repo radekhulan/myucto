@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { personalNumberLabel, todayIso } from './employmentLifecycleUi'
 import { useRoute, useRouter } from 'vue-router'
@@ -415,7 +415,17 @@ const inputError = ref('')
 const importApiError = ref('')
 
 const componentEditorOpen = ref(false)
+const componentEditorSection = ref<HTMLElement | null>(null)
 const jmhzEditorOpen = ref(false)
+const jmhzEditorSection = ref<HTMLElement | null>(null)
+
+/**
+ * Editory katalogu se vykreslují nad dlouhou tabulkou složek. Otevřený z řádku
+ * níž v tabulce by zůstal mimo zobrazení a klik by vypadal, že nic neudělal.
+ */
+function scrollEditorIntoView(section: Ref<HTMLElement | null>): void {
+  void nextTick(() => section.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }))
+}
 const editingComponent = ref<PayrollComponent | null>(null)
 const editingJmhzComponent = ref<PayrollComponent | null>(null)
 const jmhzTargets = ref<PayrollComponentJmhzTarget[]>([])
@@ -916,6 +926,7 @@ function openJmhzMapping(component: PayrollComponent) {
     : null
   jmhzError.value = ''
   jmhzEditorOpen.value = true
+  scrollEditorIntoView(jmhzEditorSection)
 }
 
 async function saveJmhzMapping() {
@@ -1037,6 +1048,7 @@ async function editComponent(component: PayrollComponent) {
   })
   componentError.value = ''
   componentEditorOpen.value = true
+  scrollEditorIntoView(componentEditorSection)
 }
 
 /**
@@ -2018,7 +2030,7 @@ onMounted(load)
           </button>
         </div>
 
-        <section v-if="componentEditorOpen" data-testid="payroll-component-editor" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
+        <section v-if="componentEditorOpen" ref="componentEditorSection" data-testid="payroll-component-editor" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <h3 class="font-semibold text-neutral-900">{{ t(editingComponent ? 'payroll.components.catalog.edit' : 'payroll.components.catalog.new') }}</h3>
             <button :class="btnOutline('neutral')" @click="componentEditorOpen = false">
@@ -2078,7 +2090,7 @@ onMounted(load)
           </div>
         </section>
 
-        <section v-if="jmhzEditorOpen && editingJmhzComponent" data-testid="payroll-jmhz-mapping-editor" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
+        <section v-if="jmhzEditorOpen && editingJmhzComponent" ref="jmhzEditorSection" data-testid="payroll-jmhz-mapping-editor" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 class="font-semibold text-neutral-900">{{ t('payroll.components.jmhz.title') }}</h3>
