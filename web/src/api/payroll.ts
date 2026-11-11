@@ -3322,6 +3322,14 @@ export interface PayrollInputPreview {
   annual_limit_exceeded: boolean
   exemption_basket: PayrollBenefitBasketUsage | null
   meal_entitlement?: PayrollMealShiftEntitlement | null
+  /** Vztah v měsíci vstupu neplatí (skončil / ještě nezačal); uložit jde, běh vstup zastaví. */
+  employment_warning?: {
+    code: 'employment_ended_before_period' | 'employment_starts_after_period'
+    message: string
+    start_date: string | null
+    end_date: string | null
+    status: string
+  } | null
 }
 
 export interface PayrollRecurringMaterialization {
@@ -5211,6 +5219,8 @@ export interface PayrollRegistrationPreview {
   action_code: number
   xml: string
   xml_sha256: string
+  /** Test XML: náhled ověřil XML proti připnutému XSD ČSSZ (nevalidní XML náhled odmítne). */
+  schema_validation?: { valid: boolean; schema_version: string }
   deadline: PayrollRegistrationDeadline
   employer_registration: PayrollRegistrationEmployerDeadline | null
   /** Neblokující upozornění (zástupný variabilní symbol zaměstnavatele…). */

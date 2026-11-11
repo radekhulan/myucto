@@ -205,7 +205,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // nedalo odkázat ani je uložit do záložek a po refreshi spadl uživatel zpět
       // na Transport. Neznámý `:tab` stránka překlopí zpět na výchozí záložku,
       // takže zastaralý odkaz nekončí prázdnem.
-      { path: 'payroll/submissions/:tab([a-z_]+)', name: 'payroll-submissions-tab', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/submissions/:tab([a-z0-9_]+)', name: 'payroll-submissions-tab', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Agenda přechodu z jiného mzdového programu se přestěhovala do Importů
       // jako záložky: je jednorázová a tři samostatné položky menu svítily i
       // firmě, která nikdy nic nepřevzala. Staré adresy vedou na svou záložku,

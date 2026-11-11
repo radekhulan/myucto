@@ -896,6 +896,22 @@ export function guessRelationType(label: string | null): RegistrationRelationTyp
 }
 
 /**
+ * Druh vztahu, který k osobě uvádějí podklady (sloupec druhu vztahu ve
+ * šabloně i ve vlastním mapování), u osoby z evidence bez údaje v podkladech
+ * druh jejího posledního vztahu. Null = podklady ani evidence nic neříkají;
+ * teprve pak platí společná volba pro celou dávku.
+ */
+export function sourceRelationType(person: AttendancePerson): RegistrationRelationType | null {
+  if ((person.relation_label ?? '').trim() !== '') return guessRelationType(person.relation_label)
+  return person.existing_person?.relation_type ?? null
+}
+
+/** Druh zakládaného vztahu: z podkladů, jinak společná volba dávky. */
+export function relationTypeForCreate(person: AttendancePerson, fallback: RegistrationRelationType): RegistrationRelationType {
+  return sourceRelationType(person) ?? fallback
+}
+
+/**
  * Docházkové exporty mají jméno obvykle ve tvaru „Příjmení Jméno". Je to jen
  * návrh do formuláře — uživatel ho vidí a může pořadí prohodit.
  */
@@ -918,11 +934,6 @@ export interface PersonCreateDefaults {
   activate: boolean
 }
 
-/**
- * `relationTypeFor` volitelně určí druh vztahu za osobu (odhad z podkladů);
- * bez něj se použije jednotný `defaults.relation_type` jako dosud (ruční
- * založení v kroku Osoby, kde druh vybírá uživatel jednou pro celou dávku).
- */
 export type PersonCreateDetailKey = 'start_on' | 'agreed_end_on' | 'hourly_rate' | 'probable_earning' | 'monthly_wage' | 'bank_account'
 
 /**
@@ -963,6 +974,12 @@ export function reusableOpenAgreement(person: AttendancePerson, relationType: Re
   return relationType === 'dpp' && person.open_agreement?.reusable ? person.open_agreement : null
 }
 
+/**
+ * `relationTypeFor` volitelně určí druh vztahu za osobu; bez něj platí druh
+ * z podkladů ({@see relationTypeForCreate}) a společný `defaults.relation_type`
+ * jen u osob, u kterých podklady druh neuvádějí. Hromadná volba tak druh ze
+ * souboru nikdy nepřepíše.
+ */
 export function buildPersonsPayload(
   persons: AttendancePerson[],
   drafts: Record<string, PersonDraft>,
@@ -976,7 +993,7 @@ export function buildPersonsPayload(
     const lastName = draft.last_name.trim()
     const weekly = (person.weekly_hours ?? '').trim() || defaults.weekly_hours.trim()
     const wage = parseLocaleNumber(person.monthly_wage) ?? NaN
-    const relationType = relationTypeFor ? relationTypeFor(person) : defaults.relation_type
+    const relationType = relationTypeFor ? relationTypeFor(person) : relationTypeForCreate(person, defaults.relation_type)
     const open = reusableOpenAgreement(person, relationType)
     return {
       person_key: person.key,

@@ -53,6 +53,7 @@ function input(overrides: Partial<PayrollInput> = {}): PayrollInput {
 function actions(row: PayrollInput, canWrite: boolean, canApprove: boolean) {
   const wrapper = mount(PayrollInputRowActions, {
     props: { input: row, canWrite, canApprove, saving: false },
+    global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
   })
   return {
     wrapper,
@@ -88,5 +89,20 @@ describe('PayrollInputRowActions: zrušení vstupu z výpisu', () => {
     const { has } = actions(input({ benefit_basket: 'leisure' }), true, true)
     expect(has('cancel')).toBe(false)
     expect(has('reverse-benefit')).toBe(true)
+  })
+})
+
+describe('PayrollInputRowActions: vstup uzamčený během', () => {
+  it('místo prázdného sloupce Akce vysvětlí, že vstup drží běh, a odkáže na běh téhož období', () => {
+    const { wrapper, has } = actions(input({ status: 'locked', period_start: '2026-05-01' }), true, true)
+    expect(has('cancel')).toBe(false)
+    expect(has('edit')).toBe(false)
+    expect(wrapper.get('[data-testid="payroll-input-locked-hint"]').text()).toContain('payroll.components.inputs.locked_hint')
+    const link = wrapper.get('[data-testid="payroll-input-locked-run"]')
+    expect(JSON.parse(link.attributes('data-to') ?? '{}')).toEqual({ name: 'payroll-runs', query: { period: '2026-05' } })
+  })
+
+  it('schválený vstup mimo běh vysvětlení zámku neukazuje', () => {
+    expect(actions(input(), true, true).has('locked-hint')).toBe(false)
   })
 })

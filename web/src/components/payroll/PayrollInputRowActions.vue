@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import type { PayrollInput } from '@/api/payroll'
 import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { payrollInputListEditable } from '@/pages/payroll/payrollInputFilters'
@@ -23,6 +24,11 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+/** Období vstupu pro odkaz na mzdový běh, který ho drží. */
+function runPeriod(input: PayrollInput): string {
+  return input.period_start.slice(0, 7)
+}
 </script>
 
 <template>
@@ -39,5 +45,13 @@ const { t } = useI18n()
     <button v-if="canApprove && input.status === 'approved' && !!input.benefit_basket" type="button" data-testid="payroll-input-reverse-benefit" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" :disabled="saving" @click="emit('reverseBenefit', input)">
       <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.components.inputs.reverse_benefit') }}
     </button>
+    <!-- Uzamčený vstup drží mzdový běh; bez vysvětlení byl sloupec Akce prázdný a účetní nevěděla, kudy dál. -->
+    <div v-if="input.status === 'locked'" class="flex max-w-xs flex-col items-end gap-1 text-right" data-testid="payroll-input-locked-hint">
+      <p class="text-[11px] text-neutral-500">{{ t('payroll.components.inputs.locked_hint') }}</p>
+      <RouterLink :to="{ name: 'payroll-runs', query: { period: runPeriod(input) } }" data-testid="payroll-input-locked-run"
+        :class="[btnOutlineSm('primary'), 'whitespace-nowrap']">
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.lock" /></svg>{{ t('payroll.components.inputs.locked_open_run') }}
+      </RouterLink>
+    </div>
   </div>
 </template>

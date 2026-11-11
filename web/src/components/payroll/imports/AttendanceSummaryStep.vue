@@ -38,6 +38,17 @@ const hasReference = computed(() => props.preview.persons.some(person =>
 const skippedCount = computed(() => props.preview.persons.filter(person => employmentOf(person) === null).length)
 const conflictCount = computed(() => props.preview.persons.filter(personHasConflicts).length)
 const wageChanges = computed(() => props.preview.wage_changes ?? [])
+const rateWages = computed(() => props.preview.summary.rate_wages ?? { computed: 0, amount_minor: 0, no_hours: 0, hourly_terms: 0 })
+
+/** „30,50 h × 200,00 Kč" u mzdy dopočtené ze sazby a hodin. */
+function rateWageFormula(person: AttendancePerson, code: string): string | null {
+  const wage = person.rate_wage
+  if (!wage || wage.status !== 'computed' || wage.component_code !== code) return null
+  return t('payroll_imports.attendance.summary.rate_wage_formula', {
+    hours: formatHours(wage.hours, locale.value),
+    rate: formatMoneyMinor(wage.hourly_rate_minor),
+  })
+}
 const wageRefreshPeriods = computed(() => previewRefreshRuns(wageChanges.value).map(run => formatPeriod(run.period)).join(', '))
 
 function wageBadgeClass(change: { reason: string | null, mode: string }): string {
@@ -118,6 +129,22 @@ function checkClass(check: AttendanceComponentCheck): string {
       <article class="rounded-lg bg-neutral-50 p-3"><p class="text-xs text-neutral-500">{{ t('payroll_imports.attendance.summary.metrics') }}</p><p class="mt-1 text-lg font-semibold">{{ preview.summary.metrics }}</p></article>
       <article class="rounded-lg bg-neutral-50 p-3"><p class="text-xs text-neutral-500">{{ t('payroll_imports.attendance.summary.amount_total') }}</p><p class="mt-1 text-lg font-semibold">{{ formatMoneyMinor(preview.summary.amount_minor_total) }}</p></article>
     </div>
+
+    <!-- Podklady jen s hodinami a sazbou: bez tohohle by souhrn ukázal 0 Kč mezd a nikdo by nevěděl proč. -->
+    <section v-if="rateWages.computed || rateWages.no_hours || rateWages.hourly_terms" class="rounded-xl border p-4 text-sm shadow-sm"
+      :class="rateWages.no_hours || rateWages.hourly_terms ? 'border-warning-500/40 bg-warning-50' : 'border-primary-500/30 bg-primary-50'"
+      data-testid="attendance-rate-wages">
+      <h3 class="font-semibold text-neutral-900">{{ t('payroll_imports.attendance.summary.rate_wages_title') }}</h3>
+      <p v-if="rateWages.computed" class="mt-1 text-neutral-700" data-testid="attendance-rate-wages-computed">
+        {{ t('payroll_imports.attendance.summary.rate_wages_computed', { count: rateWages.computed, amount: formatMoneyMinor(rateWages.amount_minor) }) }}
+      </p>
+      <p v-if="rateWages.no_hours" class="mt-1 font-medium text-warning-700" data-testid="attendance-rate-wages-no-hours">
+        {{ t('payroll_imports.attendance.summary.rate_wages_no_hours', { count: rateWages.no_hours }) }}
+      </p>
+      <p v-if="rateWages.hourly_terms" class="mt-1 font-medium text-warning-700" data-testid="attendance-rate-wages-hourly-terms">
+        {{ t('payroll_imports.attendance.summary.rate_wages_hourly_terms', { count: rateWages.hourly_terms }) }}
+      </p>
+    </section>
 
     <section v-if="preview.component_checks.length" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
       <h3 class="text-sm font-semibold text-neutral-900">{{ t('payroll_imports.attendance.summary.component_checks') }}</h3>
@@ -224,6 +251,7 @@ function checkClass(check: AttendanceComponentCheck): string {
                 :title="component(person, code) ? conflictTitle(component(person, code)!.source, component(person, code)!.conflicts) : undefined">
                 {{ component(person, code) ? formatMoneyMinor(component(person, code)!.amount_minor) : '' }}
                 <span v-if="component(person, code)?.conflicts.length" aria-hidden="true">⚠</span>
+                <span v-if="rateWageFormula(person, code)" class="block text-[11px] text-neutral-500" data-testid="attendance-rate-wage-formula">{{ rateWageFormula(person, code) }}</span>
                 <span v-if="component(person, code)?.rounded_from_minor !== undefined" class="block text-[11px] text-neutral-500" data-testid="attendance-rounded-from">{{ t('payroll_imports.attendance.summary.rounded_from', { amount: formatMoneyMinor(component(person, code)!.rounded_from_minor!) }) }}</span>
               </td>
               <td v-for="meaning in deductionMeanings" :key="`d-${meaning}`" class="whitespace-nowrap border-b border-neutral-100 px-3 py-2 text-right tabular-nums"
@@ -254,7 +282,7 @@ function checkClass(check: AttendanceComponentCheck): string {
             </template>
             <template v-for="item in person.components" :key="`c-${item.component_code}`">
               <dt class="font-mono text-neutral-500">{{ item.component_code }}</dt>
-              <dd class="text-right tabular-nums" :class="item.conflicts.length ? 'font-medium text-warning-700' : 'text-neutral-800'">{{ formatMoneyMinor(item.amount_minor) }}<span v-if="item.conflicts.length"> ⚠</span><span v-if="item.rounded_from_minor !== undefined" class="block text-[11px] text-neutral-500">{{ t('payroll_imports.attendance.summary.rounded_from', { amount: formatMoneyMinor(item.rounded_from_minor) }) }}</span></dd>
+              <dd class="text-right tabular-nums" :class="item.conflicts.length ? 'font-medium text-warning-700' : 'text-neutral-800'">{{ formatMoneyMinor(item.amount_minor) }}<span v-if="item.conflicts.length"> ⚠</span><span v-if="rateWageFormula(person, item.component_code)" class="block text-[11px] text-neutral-500">{{ rateWageFormula(person, item.component_code) }}</span><span v-if="item.rounded_from_minor !== undefined" class="block text-[11px] text-neutral-500">{{ t('payroll_imports.attendance.summary.rounded_from', { amount: formatMoneyMinor(item.rounded_from_minor) }) }}</span></dd>
             </template>
             <template v-for="item in person.deductions ?? []" :key="`d-${item.meaning}`">
               <dt class="text-neutral-500">{{ meaningLabel(item.meaning) }}</dt>

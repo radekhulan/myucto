@@ -32,6 +32,8 @@ final class PayrollAbsenceRepository
         $stmt = $this->db->pdo()->prepare(
             "SELECT employment.id, employment.employee_id, employment.code,
                     employment.relation_type, employment.status,
+                    COALESCE(employment.actual_start_date, employment.start_date) AS start_date,
+                    employment.end_date,
                     employee.full_name
                FROM payroll_employments employment
                JOIN payroll_employees employee

@@ -1167,7 +1167,7 @@ final class AttendanceImportService
             $periodEnd,
             $this->aggregator->aggregate($mapped['sheets']),
         );
-        $persons = $matched['persons'];
+        $persons = $this->withRateWages($supplierId, $periodStart, $matched['persons']);
         $usedCodes = [];
         foreach ($persons as &$person) {
             $birthNumber = $person['_birth_number'];
@@ -1228,6 +1228,12 @@ final class AttendanceImportService
         }
         foreach ($mapped['auto_components'] as $code => $name) {
             $definitions[$code] ??= ['code' => $code, 'name' => $name, 'kind' => 'other'];
+        }
+        // Mzda dopočtená ze sazby a hodin ({@see self::withRateWages()}) nemá
+        // sloupec v mapování; složka se hlásí a zakládá jako ostatní.
+        if (isset($usedCodes[self::RATE_WAGE_COMPONENT['code']])) {
+            $codes[self::RATE_WAGE_COMPONENT['code']] = true;
+            $definitions[self::RATE_WAGE_COMPONENT['code']] ??= self::RATE_WAGE_COMPONENT;
         }
 
         /*
@@ -1343,8 +1349,17 @@ final class AttendanceImportService
             'deduction_minor_total' => 0,
             'registration_gaps' => 0,
             'halere_components' => $halereComponents,
+            // Mzda ze sazby a hodin: kolik osob ji dostane (a za kolik), kolik ne a proč.
+            'rate_wages' => ['computed' => 0, 'amount_minor' => 0, 'no_hours' => 0, 'hourly_terms' => 0],
         ];
         foreach ($persons as $person) {
+            $rateWage = $person['rate_wage']['status'] ?? null;
+            if ($rateWage === 'computed') {
+                ++$summary['rate_wages']['computed'];
+                $summary['rate_wages']['amount_minor'] += (int) $person['_components'][self::RATE_WAGE_COMPONENT['code']]['amount_minor'];
+            } elseif ($rateWage === 'no_hours' || $rateWage === 'hourly_terms') {
+                ++$summary['rate_wages'][$rateWage];
+            }
             $status = $person['match']['status'];
             if ($status === 'linked' || $status === 'matched') {
                 ++$summary['matched'];
@@ -2793,6 +2808,118 @@ final class AttendanceImportService
         }
 
         return [$persons, $changes];
+    }
+
+    /** Složka mzdy dopočtené ze sazby a hodin; tatáž jako hodinová mzda šablony Vzor MyÚčto. */
+    private const RATE_WAGE_COMPONENT = ['code' => 'MZDA_HODINOVA_DOCH', 'name' => 'Hodinová mzda podle docházky', 'kind' => 'hourly_wage'];
+
+    /**
+     * Mzda ze sjednané hodinové sazby a odpracovaných hodin podkladů.
+     *
+     * Podklady agentury často nesou jen hodiny a sazbu, ne částku. Import ze
+     * sazby dřív dělal jen pravděpodobný výdělek a mzda nevznikla vůbec, bez
+     * upozornění (souhrn „Složky celkem 0,00 Kč"). Odměna z dohody nebo mzda
+     * sjednaná hodinovou sazbou je součin sazby a odpracovaných hodin
+     * (§ 138 ZP u dohod, § 109 ZP u mzdy), zaokrouhlený na haléř (polovina
+     * nahoru, celočíselně). Dopočte se jen tam, kde podklady žádnou částku
+     * mzdy nenesou; nesou-li ji, sazba zůstává jen pravděpodobným výdělkem.
+     *
+     * Vztah s hodinovým odměňováním na kartě mzdu z importu nedostane: tu
+     * počítá mzdový běh ze schválené docházky a hotová částka by se s ním
+     * srazila. Z importovaného souhrnu hodin ji ale běh nespočítá, proto
+     * osoba dostane vysvětlení, jak se vrátit k mzdě z importu (návrat do
+     * neurčeného režimu karta záměrně nedovolí, cesta vede přes měsíční).
+     *
+     * Každá osoba se sazbou nese `rate_wage` se stavem, aby náhled i výsledek
+     * importu řekly, jaká mzda vznikne, nebo proč nevznikne.
+     *
+     * @param list<array<string,mixed>> $persons
+     * @return list<array<string,mixed>>
+     */
+    private function withRateWages(int $supplierId, string $periodStart, array $persons): array
+    {
+        $employmentIds = [];
+        foreach ($persons as $person) {
+            if (in_array($person['match']['status'] ?? null, ['linked', 'matched'], true) && is_int($person['match']['employment_id'] ?? null)) {
+                $employmentIds[] = $person['match']['employment_id'];
+            }
+        }
+        $hourly = $this->hourlyRemunerated($supplierId, $periodStart, $employmentIds);
+        foreach ($persons as &$person) {
+            $rawRate = $person['hourly_rate'] ?? null;
+            if (!is_string($rawRate) || trim($rawRate) === '') {
+                continue;
+            }
+            [$rate] = self::hourlyRateMinor($rawRate);
+            if ($rate === null) {
+                continue;
+            }
+            if (array_filter($person['_components'], static fn (array $component): bool => (int) $component['amount_minor'] !== 0) !== []) {
+                $person['rate_wage'] = ['status' => 'amount_in_source'];
+                continue;
+            }
+            $millihours = $person['_metrics']['worked_hours']['millihours'] ?? null;
+            if (!is_int($millihours) || $millihours <= 0) {
+                $person['rate_wage'] = ['status' => 'no_hours'];
+                $person['warnings'][] = 'Podklady uvádějí hodinovou sazbu, ale ne odpracované hodiny, takže mzda ze sazby nevznikne. '
+                    . 'Doplňte hodiny do podkladů, nebo mzdu zadejte v Mzdy → Rychlý měsíční vstup.';
+                continue;
+            }
+            $employmentId = $person['match']['employment_id'] ?? null;
+            if (in_array($person['match']['status'] ?? null, ['linked', 'matched'], true) && isset($hourly[$employmentId])) {
+                $person['rate_wage'] = ['status' => 'hourly_terms'];
+                $person['warnings'][] = 'Vztah má na kartě hodinové odměňování, mzdu z importovaného souhrnu hodin proto import nevytvoří '
+                    . 'a mzdový běh ji z něj nespočítá. Na kartě vztahu přepněte způsob odměňování na měsíční '
+                    . '(u dohody stačí 0 Kč) a načtěte náhled znovu; import pak mzdu dopočte ze sazby a hodin.';
+                continue;
+            }
+            $amount = intdiv(2 * $rate * $millihours + 1000, 2000);
+            $code = self::RATE_WAGE_COMPONENT['code'];
+            $source = (string) ($person['_metrics']['worked_hours']['source'] ?? '');
+            $person['_components'][$code] = ['amount_minor' => $amount, 'source' => $source];
+            $person['components'][] = [
+                'component_code' => $code,
+                'amount' => AttendanceDecimal::formatMinor($amount),
+                'amount_minor' => $amount,
+                'source' => $source,
+                'conflicts' => [],
+            ];
+            $person['rate_wage'] = [
+                'status' => 'computed',
+                'component_code' => $code,
+                'hours' => AttendanceDecimal::formatMillihours($millihours),
+                'hourly_rate_minor' => $rate,
+                'amount_minor' => $amount,
+            ];
+        }
+        unset($person);
+
+        return $persons;
+    }
+
+    /**
+     * Vztahy s hodinovým odměňováním účinným v měsíci (jedním dotazem).
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,true>
+     */
+    private function hourlyRemunerated(int $supplierId, string $periodStart, array $employmentIds): array
+    {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $periodEnd = (new \DateTimeImmutable($periodStart))->format('Y-m-t');
+        $in = implode(',', array_fill(0, count($employmentIds), '?'));
+        $statement = $this->db->pdo()->prepare(
+            "SELECT DISTINCT employment_id
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id IN ({$in})
+                AND remuneration_type = 'hourly'
+                AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)"
+        );
+        $statement->execute([$supplierId, ...$employmentIds, $periodEnd, $periodStart]);
+
+        return array_fill_keys(array_map('intval', $statement->fetchAll(\PDO::FETCH_COLUMN)), true);
     }
 
     /**

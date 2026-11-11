@@ -36,11 +36,9 @@ import { payrollWorkingPeriod } from './payrollComponentsUi'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { PAYROLL_SUBMISSION_TABS, type PayrollSubmissionTab } from './payrollSubmissionTabs'
 
-type SubmissionTab =
-  'monthly' | 'queue' | 'transport' | 'regzel' | 'registration_a1' | 'registration_completion' | 'jmhz'
-  | 'discount_intents' | 'sickness' | 'eldp'
-  | 'health' | 'tax_statements' | 'statutory' | 'other' | 'inbox' | 'certificate'
+type SubmissionTab = PayrollSubmissionTab
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -89,11 +87,7 @@ const activeTab = ref<SubmissionTab>('monthly')
 // se ta odpověď skládala z pěti různých obrazovek.
 // Přihlášky (A1) a dohlášení údajů (A3) stojí hned za registrací
 // zaměstnavatele: všechno je registrační agenda ČSSZ mimo měsíční hlášení.
-const tabs: SubmissionTab[] = [
-  'monthly', 'queue', 'transport', 'regzel', 'registration_a1', 'registration_completion', 'jmhz',
-  'discount_intents', 'sickness', 'eldp',
-  'health', 'tax_statements', 'statutory', 'other', 'inbox', 'certificate',
-]
+const tabs: readonly SubmissionTab[] = PAYROLL_SUBMISSION_TABS
 /*
  * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
  * Číslo 0 tu dřív zastupovalo obojí, takže po výpadku odznak tiše zmizel

@@ -374,7 +374,7 @@ final class PayrollEmploymentTermsBulkEditTest extends TestCase
             $error = json_decode($body, true)['error'];
             self::assertSame('hourly_rate_imported_wage', $error['details']['code'], $body);
             self::assertSame('remuneration_type', $error['details']['field']);
-            self::assertStringContainsString('importuje jako částka', $error['message']);
+            self::assertStringContainsString('importují z docházky', $error['message']);
             self::assertNull($this->term($employment)['remuneration_type']);
         }
 

@@ -49,6 +49,16 @@ od docházky a průměrného výdělku. Samotná sazba není mzdovou částkou:
 potřebuje také přesně doložené a schválené hodiny. Sazba nenahrazuje
 schválený průměr pro příplatky. Pole **Hodinová sazba**
 v importu docházky znamená pravděpodobný výdělek, nikoli sjednanou sazbu.
+Nemá-li řádek podkladů žádnou částku mzdy, jen odpracované hodiny a sazbu,
+import z nich mzdu dopočte (sazba × odpracované hodiny, na haléře) a vytvoří
+mzdový vstup složky **Hodinová mzda podle docházky**. Souhrn importu ukáže,
+komu a za kolik mzda vznikne a komu ne: bez hodin v podkladech mzda nevznikne
+a vztahu s hodinovým odměňováním na kartě ji import nevytvoří, protože
+z importovaného souhrnu hodin ho mzdový běh nespočítá. Takovému vztahu
+přepněte na kartě způsob odměňování na měsíční (u dohody stačí 0 Kč)
+a načtěte náhled znovu. Proto karta i hromadná úprava podmínek nedovolí
+přepnout vztah s hodinami z importu na hodinové odměňování bez výslovného
+potvrzení.
 Podrobnosti jsou v [Zaměstnancích](86_Zamestnanci.md#866-krok-za-krokem-zmena-mzdy-uvazku-nebo-podminek-vztahu).
 
 Nahoře na stránce je průvodce **Jak zpracovat měsíc** se třemi kroky:

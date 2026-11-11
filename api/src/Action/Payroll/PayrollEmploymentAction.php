@@ -797,8 +797,9 @@ final class PayrollEmploymentAction
             return;
         }
         throw new PayrollFieldValidationException(
-            'Mzda se k vztahu importuje jako částka; hodinový výpočet ze směn by další import zablokoval. '
-                . 'Nastavte místo sazby pravděpodobný výdělek, nebo potvrďte, že mzdu budete nově počítat '
+            'Mzda nebo hodiny se k vztahu importují z docházky; hodinový výpočet z importovaného souhrnu '
+                . 'aplikace nepočítá a ze směn by další import zablokoval. Nastavte místo sazby pravděpodobný '
+                . 'výdělek (mzdu ze sazby a hodin dopočte import), nebo potvrďte, že mzdu budete nově počítat '
                 . 'z odpracovaných směn a import hodinové mzdy ukončíte.',
             'remuneration_type',
             'hourly_rate_imported_wage',

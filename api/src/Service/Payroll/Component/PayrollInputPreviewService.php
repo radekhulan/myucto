@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Component;
 
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
+use MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Calculation\Money;
@@ -17,6 +19,8 @@ final class PayrollInputPreviewService
         private readonly PayrollInputRepository $inputs,
         private readonly PayrollComponentDefinitionFactory $factory,
         private readonly PayrollMealShiftEvidenceService $mealEvidence,
+        private readonly Connection $db,
+        private readonly PayrollDeferredIncomeRepository $deferredIncomes,
     ) {}
 
     /**
@@ -116,6 +120,80 @@ final class PayrollInputPreviewService
             'annual_limit_exceeded' => $limit !== null && $after > $limit,
             'exemption_basket' => $basket,
             'meal_entitlement' => $mealEntitlement?->jsonSerialize(),
+            'employment_warning' => $this->employmentPeriodWarning($supplierId, $input),
+        ];
+    }
+
+    /**
+     * Varování, že vztah v měsíci vstupu neplatí (skončil před ním nebo
+     * začne až po něm).
+     *
+     * Případ z podpory: účetní zadala květnový vstup na dubnovou, už skončenou
+     * dohodu (výběr vztahu ji nerozlišil od nové) a náhled hlásil „lze
+     * bezpečně zpracovat". Kontrola běhu to pak zastavila nálezem
+     * `input_after_employment_end` ({@see \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder::inputsAfterEmploymentEndValidations()}),
+     * a kdyby běh vstup mezitím uzamkl, cesta zpět byla dlouhá. Uložení se
+     * nezakazuje: doplatek po skončení je legitimní, s potvrzeným odloženým
+     * příjmem za měsíc se varování neukáže (stejné pravidlo jako v kontrole).
+     *
+     * @param array{employment_id:int, period_start:string, ...} $input
+     * @return array{code:string,message:string,start_date:?string,end_date:?string,status:string}|null
+     */
+    private function employmentPeriodWarning(int $supplierId, array $input): ?array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT code, status, start_date, actual_start_date, end_date
+               FROM payroll_employments
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $statement->execute([$supplierId, $input['employment_id']]);
+        $row = $statement->fetch(\PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        $periodStart = substr($input['period_start'], 0, 10);
+        $periodEnd = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+        $start = $row['actual_start_date'] ?? $row['start_date'];
+        $end = $row['end_date'];
+        $period = substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4);
+        $code = (string) $row['code'];
+        $describe = static fn (?string $date): string => $date === null
+            ? '?'
+            : (new \DateTimeImmutable($date))->format('j. n. Y');
+        $warning = null;
+        if (is_string($end) && $end < $periodStart) {
+            if (isset($this->deferredIncomes->forPeriod($supplierId, $periodStart)[$input['employment_id']])) {
+                return null;
+            }
+            $warning = [
+                'code' => 'employment_ended_before_period',
+                'message' => sprintf(
+                    'Pracovní vztah %s skončil %s, v %s už neplatí. Mzdový běh vstup zastaví. '
+                        . 'Zadejte vstup na trvající vztah; jde-li o doplatek po skončení, potvrďte '
+                        . 'nejdřív na kartě vztahu odložený příjem.',
+                    $code,
+                    $describe($end),
+                    $period,
+                ),
+            ];
+        } elseif (is_string($start) && $start > $periodEnd) {
+            $warning = [
+                'code' => 'employment_starts_after_period',
+                'message' => sprintf(
+                    'Pracovní vztah %s začíná až %s, v %s ještě neplatí. Do mzdového běhu za %s '
+                        . 'nevstoupí; zadejte vstup za měsíc, kdy vztah trvá.',
+                    $code,
+                    $describe($start),
+                    $period,
+                    $period,
+                ),
+            ];
+        }
+
+        return $warning === null ? null : $warning + [
+            'start_date' => is_string($start) ? $start : null,
+            'end_date' => is_string($end) ? $end : null,
+            'status' => (string) $row['status'],
         ];
     }
 
