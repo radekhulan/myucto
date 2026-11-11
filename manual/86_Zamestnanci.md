@@ -1348,6 +1348,22 @@ a nezakládejte kvůli tomu druhou kartu osoby. Zobrazení stačí oprávnění 
 mzdy, uložení potřebuje současně oprávnění spravovat zaměstnance i pracovní
 vztahy (nejde o pravidlo čtyř očí).
 
+OIČ má osoba jediné a nemění se. Má-li brigádník dohody po měsících a OIČ
+přišlo v protokolu ČSSZ až k pozdější dohodě, opište totéž OIČ i k dřívější
+dohodě spolu s jejím ID PPV: aplikace jen posune začátek platnosti OIČ na den
+dřívější dohody a posun zapíše do auditní stopy. Jiné číslo, než přidělil
+protokol, neuloží. Už odeslaná hlášení se tím nemění, nově připravené hlášení
+za dřívější měsíc čísla nese.
+
+Chybí-li čísla proto, že přihláška teprve čeká, sekce to řekne: přihláška je
+připravená a neodešla (odešlete ji v **K odeslání**), nebo byla odeslána a čeká
+na protokol ČSSZ. Výsledek si aplikace stahuje sama a čísla doplní; ručně ho
+stáhnete tlačítkem **Zjistit výsledek** v části **Registrace vztahu na ČSSZ**.
+Čísla v té chvíli ručně neopisujte. Přidělí-li protokol číslo v nesprávném
+tvaru (OIČ nesplní kontrolní číslici), aplikace přihlášku uzavře jako přijatou,
+číslo nepřevezme a u podání zobrazí nález s postupem: ověřit číslo v Seznamu
+zaměstnanců na ePortálu ČSSZ a opsat ho sem.
+
 ### 86.12.13 Výzvy a žádosti v důchodovém pojištění
 
 Část povinností vzniká až výzvou nebo žádostí a lhůta běží od doručení.
