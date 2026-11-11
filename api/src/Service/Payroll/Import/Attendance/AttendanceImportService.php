@@ -129,6 +129,7 @@ final class AttendanceImportService
         private readonly PayrollOpenAgreements $openAgreements,
         private readonly RegistrationImportWriter $registrationWriter,
         private readonly PayrollTaxDeclarationBulkSign $declarations,
+        private readonly AttendanceRegistrationCodebooks $registrationCodebooks,
     ) {
     }
 
@@ -1812,7 +1813,7 @@ final class AttendanceImportService
                 continue;
             }
             $start = is_string($person['start_on'] ?? null) ? $person['start_on'] : $periodStart;
-            $plan = AttendanceRegistrationData::plan($person['_registration'], $start);
+            $plan = AttendanceRegistrationData::plan($person['_registration'], $start, $this->registrationCodebooks);
             $persons[$index]['_registration_plan'] = $plan;
             array_push($persons[$index]['warnings'], ...$plan['warnings']);
             if (in_array($person['match']['status'], ['linked', 'matched'], true)
@@ -2113,7 +2114,7 @@ final class AttendanceImportService
             }
         }
         $plan = is_array($item['_registration'] ?? null) && $item['_registration'] !== [] && $plannedStart !== ''
-            ? AttendanceRegistrationData::plan($item['_registration'], $plannedStart)
+            ? AttendanceRegistrationData::plan($item['_registration'], $plannedStart, $this->registrationCodebooks)
             : null;
 
         return $this->finishEmployment($supplierId, $employeeId, $employment, $item, $plannedStart, $today, $plan, $notes, $userId, $ip, $userAgent);
@@ -2208,7 +2209,7 @@ final class AttendanceImportService
                 (int) substr($plannedStart, 0, 4),
             );
             $plan = AttendanceRegistrationData::gaps(
-                AttendanceRegistrationData::plan($item['_registration'], $plannedStart),
+                AttendanceRegistrationData::plan($item['_registration'], $plannedStart, $this->registrationCodebooks),
                 $state[$employment['id']],
             );
         }

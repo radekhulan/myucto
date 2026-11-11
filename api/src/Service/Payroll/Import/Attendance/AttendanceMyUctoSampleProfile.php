@@ -143,7 +143,7 @@ final class AttendanceMyUctoSampleProfile
                 'Kód druhu činnosti pro ČSSZ (např. T u první DPP). Prázdný doplní aplikace podle druhu vztahu.',
                 [null, null]),
             $column('Místo výkonu práce', ['místo výkonu práce*'], 'workplace', self::FORMAT_TEXT,
-                'Obec, kde osoba převážně pracuje. Šest číslic se bere jako kód obce (554782 = Praha), jinak jako název.',
+                'Obec, kde osoba převážně pracuje. Šest číslic se bere jako kód obce (554782 = Praha); název se dohledá v číselníku obcí ČSSZ, a když není jednoznačný, uloží se jen jako text a hlášení JMHZ bude chtít kód.',
                 ['Praha', null]),
             $column('Daňová rezidence', ['daňová rezidence*'], 'tax_residence', self::FORMAT_TEXT,
                 'Dvoupísmenný kód státu daňové rezidence. Prázdný u osoby s českou adresou z podkladů znamená CZ.',

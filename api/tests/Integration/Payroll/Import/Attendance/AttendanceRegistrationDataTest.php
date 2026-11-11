@@ -112,7 +112,7 @@ final class AttendanceRegistrationDataTest extends TestCase
                 'address' => 'Ukázková 12|Praha|11000|CZ',
                 'citizenship' => 'CZ',
                 'cz_isco_code' => '43111',
-                'work_place' => 'Praha',
+                'work_place' => 'Hlavní město Praha',
                 'tax_residence' => 'czech-resident',
                 'declaration' => 'signed',
                 'a1_profile' => 1,
@@ -166,7 +166,7 @@ final class AttendanceRegistrationDataTest extends TestCase
         $state = $this->state($employeeId, $employmentId);
         self::assertSame('43111', $state['cz_isco_code'], 'Import přepsal CZ-ISCO, které už v evidenci bylo.');
         self::assertSame('Ukázková 12|Praha|11000|CZ', $state['address']);
-        self::assertSame('Praha', $state['work_place']);
+        self::assertSame('Hlavní město Praha', $state['work_place']);
         self::assertSame('czech-resident', $state['tax_residence']);
 
         // Opakované použití už nemá co doplnit.

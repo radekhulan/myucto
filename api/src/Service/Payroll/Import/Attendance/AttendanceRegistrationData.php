@@ -47,9 +47,11 @@ final class AttendanceRegistrationData
     /**
      * @param array<string,string> $raw význam => text z podkladů
      * @param string $start den nástupu, od kterého údaje platí
+     * @param AttendanceRegistrationCodebooks|null $codebooks ověření CZ-ISCO, druhu činnosti
+     *        a obce proti číselníkům; bez nich se kontroluje jen tvar
      * @return RegistrationPlan
      */
-    public static function plan(array $raw, string $start): array
+    public static function plan(array $raw, string $start, ?AttendanceRegistrationCodebooks $codebooks = null): array
     {
         $steps = [];
         $warnings = [];
@@ -57,7 +59,7 @@ final class AttendanceRegistrationData
 
         $country = self::country($text('address_country'));
         if ($text('address_country') !== '' && $country === null) {
-            $warnings[] = "Stát adresy „{$text('address_country')}“ není dvoupísmenný kód státu (CZ, SK…); adresa se nezapíše.";
+            $warnings[] = self::countryWarning('Stát', $text('address_country'), 'adresa se nezapíše');
         }
         $street = trim($text('address_street') . ' ' . $text('address_house_number'));
         $city = $text('address_city');
@@ -80,7 +82,7 @@ final class AttendanceRegistrationData
         if ($text('citizenship') !== '') {
             $citizenship = self::country($text('citizenship'));
             if ($citizenship === null) {
-                $warnings[] = "Státní občanství „{$text('citizenship')}“ není dvoupísmenný kód státu; nezapíše se.";
+                $warnings[] = self::countryWarning('Státní občanství', $text('citizenship'), 'nezapíše se');
             } else {
                 $steps['identity_facts'] = ['citizenship_country_code' => $citizenship];
             }
@@ -89,27 +91,54 @@ final class AttendanceRegistrationData
         $terms = [];
         if ($text('cz_isco_code') !== '') {
             $isco = preg_replace('/\D+/', '', $text('cz_isco_code')) ?? '';
-            if (preg_match('/^\d{4,5}$/', $isco) === 1) {
-                $terms['cz_isco_code'] = $isco;
+            if (preg_match('/^\d{4,5}$/', $isco) !== 1) {
+                $warnings[] = "CZ-ISCO: kód „{$text('cz_isco_code')}“ nemá čtyři nebo pět číslic; nezapíše se.";
+            } elseif ($codebooks !== null && !$codebooks->czIscoKnown($isco)) {
+                $warnings[] = "CZ-ISCO: kód {$isco} v klasifikaci zaměstnání ČSÚ neexistuje; nezapíše se. "
+                    . 'Opravte ho v podkladech, nebo ho po importu vyberte z našeptávače na kartě vztahu.';
             } else {
-                $warnings[] = "Kód CZ-ISCO „{$text('cz_isco_code')}“ nemá čtyři nebo pět číslic; nezapíše se.";
+                $terms['cz_isco_code'] = $isco;
             }
         }
         if ($text('activity_code') !== '') {
             $activity = mb_strtoupper($text('activity_code'));
-            if (preg_match('/^[0-9A-Z]{1,2}$/', $activity) === 1) {
-                $terms['activity_code'] = $activity;
+            if (preg_match('/^[0-9A-Z]{1,2}$/', $activity) !== 1) {
+                $warnings[] = "Druh činnosti: „{$text('activity_code')}“ není kód ČSSZ (např. T u DPP); nezapíše se.";
+            } elseif ($codebooks !== null && !$codebooks->activityKnown($activity)) {
+                $warnings[] = "Druh činnosti: kód {$activity} není v číselníku druhů činnosti JMHZ; nezapíše se "
+                    . 'a aplikace doplní výchozí kód podle druhu vztahu.';
             } else {
-                $warnings[] = "Druh činnosti „{$text('activity_code')}“ není kód ČSSZ (např. T u DPP); nezapíše se.";
+                $terms['activity_code'] = $activity;
             }
         }
         if ($text('workplace') !== '') {
             $workplace = $text('workplace');
             if (preg_match('/^\d{6}$/', $workplace) === 1) {
-                $terms['jmhz_workplace_municipality_code'] = $workplace;
-                $terms['jmhz_workplace_country_code'] = 'CZ';
+                $problem = $codebooks?->municipalityProblem($workplace, $start);
+                if ($problem === null) {
+                    $terms['jmhz_workplace_municipality_code'] = $workplace;
+                    $terms['jmhz_workplace_country_code'] = 'CZ';
+                } else {
+                    $warnings[] = "Místo výkonu práce: kód obce {$workplace} k datu nástupu v číselníku obcí ČSSZ (CISOB) "
+                        . 'neplatí; nezapíše se. Zadejte šestimístný kód obce, např. 554782 = Praha.';
+                }
             } else {
-                $terms['work_place'] = mb_substr($workplace, 0, 255);
+                // Název obce z podkladů: jednoznačná shoda v CISOB doplní kód
+                // obce i úřední název, jinak by měsíční hlášení JMHZ skončilo
+                // na neověřeném pracovišti (10229, 10230).
+                $municipality = $codebooks?->municipalityByName($workplace, $start);
+                if ($municipality !== null) {
+                    $terms['work_place'] = $municipality['label'];
+                    $terms['jmhz_workplace_municipality_code'] = $municipality['code'];
+                    $terms['jmhz_workplace_country_code'] = 'CZ';
+                } else {
+                    $terms['work_place'] = mb_substr($workplace, 0, 255);
+                    if ($codebooks !== null && $codebooks->municipalitiesCover($start)) {
+                        $warnings[] = "Místo výkonu práce: „{$workplace}“ nejde jednoznačně najít v číselníku obcí ČSSZ; "
+                            . 'zapíše se jen jako název. Pro měsíční hlášení JMHZ zadejte šestimístný kód obce '
+                            . '(např. 554782 = Praha), v podkladech nebo na kartě vztahu.';
+                    }
+                }
             }
         }
         if ($terms !== []) {
@@ -122,7 +151,7 @@ final class AttendanceRegistrationData
             ? (($steps['addresses']['residence']['country_code'] ?? null) === 'CZ' ? 'CZ' : null)
             : self::country($residence);
         if ($residence !== '' && $residenceCountry === null) {
-            $warnings[] = "Daňová rezidence „{$residence}“ není dvoupísmenný kód státu; nezapíše se.";
+            $warnings[] = self::countryWarning('Daňová rezidence', $residence, 'nezapíše se');
         }
         if ($residenceCountry !== null) {
             $steps['tax_residence'] = [
@@ -273,6 +302,17 @@ final class AttendanceRegistrationData
             return null;
         }
 
-        return preg_match('/^[A-Z]{2}$/', $code) === 1 ? $code : null;
+        return preg_match('/^[A-Z]{2}$/', $code) === 1 && in_array($code, PayrollRegistrationCodebooks::COUNTRY, true)
+            ? $code
+            : null;
+    }
+
+    private static function countryWarning(string $column, string $value, string $consequence): string
+    {
+        $code = mb_strtoupper(trim($value));
+
+        return preg_match('/^[A-Z]{2}$/', $code) === 1
+            ? "{$column}: kód „{$code}“ není v číselníku států ČSÚ (CZEM); {$consequence}."
+            : "{$column}: „{$value}“ není dvoupísmenný kód státu (CZ, SK, UA…); {$consequence}.";
     }
 }
