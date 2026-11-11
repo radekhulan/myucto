@@ -2853,7 +2853,11 @@
         "description": "Sada musí být hotová dřív, než začne rok, který má počítat - jinak modul od 1. ledna nespočítá ani jednu výplatu.",
         "year": "Rok {year}",
         "covered": "Rok {year} je pokrytý legislativní sadou.",
+        "covered_pending": "Rok {year} je pokrytý pro výpočet mezd, některé agendy a hodnoty ale ještě čekají na vyhlášení. Nevyhlášené hodnoty aplikace neodhaduje; doplní se aktualizací.",
         "missing_domains": "Chybí domény: {domains}",
+        "missing_agenda_domains": "Zatím bez sady na tento rok: {domains}. Co na nich stojí, se za tento rok nespočítá, dokud sada nepřibude.",
+        "pending_parameter": "Čeká na vyhlášení: {label}.",
+        "pending_parameter_expected": "Čeká na vyhlášení (očekáváno {month}): {label}.",
         "severity": {
           "ok": "Pokryto",
           "info": "Informace",

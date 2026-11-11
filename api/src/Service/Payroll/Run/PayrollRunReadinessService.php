@@ -15,6 +15,7 @@ use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearOutlook;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog;
 use PDO;
 use Psr\Clock\ClockInterface;
@@ -323,6 +324,10 @@ final class PayrollRunReadinessService
         $minimumWageFinding = $this->minimumWageFinding($supplierId, $periodStart);
         if ($minimumWageFinding !== null) {
             $findings[] = $minimumWageFinding;
+        }
+        $pendingValuesFinding = $this->pendingYearValuesFinding($periodStart);
+        if ($pendingValuesFinding !== null) {
+            $findings[] = $pendingValuesFinding;
         }
         // Jednotný tvar nálezu: co nepochází z katalogu skrytí, skrýt nejde.
         $findings = array_map(
@@ -934,6 +939,66 @@ final class PayrollRunReadinessService
                 array_slice(array_keys($below), 0, self::MAX_ENTITIES),
                 array_slice(array_values($below), 0, self::MAX_ENTITIES),
             ),
+        );
+    }
+
+    /** Agendy bez sady na rok, o kterých má mzdová účetní vědět už před během. */
+    private const PENDING_AGENDA_LABELS = [
+        'enforcement_deductions' => 'exekuční srážky (nezabavitelné částky)',
+        'travel_allowances' => 'cestovní náhrady',
+    ];
+
+    /**
+     * Hodnoty roku, které ještě nevyšly ve Sbírce a aplikace je neodhaduje.
+     *
+     * Kontrola za leden nového roku o nich mlčela: jádro výpočtu sadu mělo,
+     * takže vše vypadalo hotové, a na nezabavitelné částky nebo stravenkový
+     * paušál se narazilo až u konkrétní osoby. Čte se tentýž výhled jako na
+     * stránce legislativních pravidel ({@see PayrollRulesetYearOutlook}).
+     * Jen informace: mzdy se spočítají, zastaví se jen to, co na chybějící
+     * hodnotě stojí.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function pendingYearValuesFinding(string $periodStart): ?array
+    {
+        try {
+            $provider = (new PayrollRulesetRegistry(new PayrollRulesetRepository($this->db)))->provider();
+            $year = (int) substr($periodStart, 0, 4);
+            $agendas = array_values(array_intersect(
+                array_keys(self::PENDING_AGENDA_LABELS),
+                PayrollRulesetYearOutlook::agendaGaps($provider, $year),
+            ));
+            $parameters = PayrollRulesetYearOutlook::pendingParameters($provider, $year);
+        } catch (\Throwable) {
+            return null;
+        }
+        if ($agendas === [] && $parameters === []) {
+            return null;
+        }
+        $names = [
+            ...array_map(static fn (string $domain): string => self::PENDING_AGENDA_LABELS[$domain], $agendas),
+            ...array_map(
+                static fn (array $parameter): string => mb_strtolower(mb_substr((string) ($parameter['label'] ?? $parameter['key']), 0, 1))
+                    . mb_substr((string) ($parameter['label'] ?? $parameter['key']), 1),
+                $parameters,
+            ),
+        ];
+
+        return self::finding(
+            'ruleset_year_values_pending',
+            sprintf(
+                'Pro rok %d ještě nejsou vyhlášené všechny hodnoty: %s. Aplikace je neodhaduje.'
+                . ' Mzdy se spočítají, jen to, co na chybějící hodnotě stojí (například srážka z exekuce,'
+                . ' cestovní náhrada nebo osvobození příspěvku na stravování), výpočet u dotčené osoby'
+                . ' zastaví a řekne to. Hodnoty přijdou aktualizací aplikace po vyhlášení ve Sbírce zákonů;'
+                . ' stav najdete v Mzdy → Legislativní pravidla mezd.',
+                $year,
+                implode(', ', $names),
+            ),
+            '/payroll/rulesets',
+            1,
+            [],
         );
     }
 

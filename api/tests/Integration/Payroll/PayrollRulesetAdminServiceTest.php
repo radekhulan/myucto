@@ -219,8 +219,17 @@ final class PayrollRulesetAdminServiceTest extends TestCase
             self::assertIsBool($entry['covered']);
             self::assertIsArray($entry['missing_domains']);
             self::assertNotSame('', $entry['message']);
+            self::assertIsArray($entry['missing_agenda_domains']);
+            self::assertIsArray($entry['pending_parameters']);
+            // Pokrytý rok, kterému ještě chybí agenda nebo vyhlášená hodnota,
+            // se nesmí tvářit jako úplně hotový.
+            $incomplete = $entry['missing_agenda_domains'] !== [] || $entry['pending_parameters'] !== [];
             self::assertSame(
-                $entry['covered'] ? 'year_covered' : 'year_ruleset_missing',
+                match (true) {
+                    !$entry['covered'] => 'year_ruleset_missing',
+                    $incomplete => 'year_covered_values_pending',
+                    default => 'year_covered',
+                },
                 $entry['code'],
             );
         }

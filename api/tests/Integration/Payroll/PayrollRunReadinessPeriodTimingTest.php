@@ -130,6 +130,29 @@ final class PayrollRunReadinessPeriodTimingTest extends TestCase
         }
     }
 
+    /**
+     * Kontrola za leden 2027 mlčela o hodnotách roku, které ještě nevyšly
+     * (nezabavitelné částky, cestovní náhrady, stravenkový paušál).
+     */
+    public function testJanuaryOfTheNewYearNamesValuesThatAreNotPublishedYet(): void
+    {
+        $result = $this->readiness->inspect($this->supplierId, '2027-01-01', '2027-02-10');
+
+        $finding = self::finding($result['findings'], 'ruleset_year_values_pending');
+        self::assertNotNull($finding, json_encode(array_column($result['findings'], 'code')));
+        self::assertSame('anytime', $finding['impact']);
+        self::assertSame('info', $finding['severity']);
+        self::assertSame('/payroll/rulesets', $finding['remediation_path']);
+        self::assertStringContainsString('Pro rok 2027', $finding['message']);
+        self::assertStringContainsString('exekuční srážky (nezabavitelné částky)', $finding['message']);
+        self::assertStringContainsString('cestovní náhrady', $finding['message']);
+        self::assertStringContainsString('neodhaduje', $finding['message']);
+
+        // Rok 2026 má všechny hodnoty vyhlášené: nález se neukáže.
+        $complete = $this->readiness->inspect($this->supplierId, '2026-10-01', '2026-11-10');
+        self::assertNull(self::finding($complete['findings'], 'ruleset_year_values_pending'));
+    }
+
     public function testLastDayOfMonthStillCountsAsRunning(): void
     {
         // Období, které končí dnes, ještě neskončilo; hlášení jde až zítra.

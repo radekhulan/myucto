@@ -180,6 +180,8 @@ final class PayrollRunReadinessImpact
         'period_not_finished' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'run_without_employments' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'readiness_check_failed' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
+        // Hodnoty roku, které ještě nevyšly ve Sbírce: informace, přijdou aktualizací.
+        'ruleset_year_values_pending' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
         'person_data_gap' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
         // Aktivní vztah po sjednaném konci: běh ho vezme jako trvající, ale
         // ukončit se dá kdykoli a hromadně.

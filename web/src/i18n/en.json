@@ -2853,7 +2853,11 @@
         "description": "A ruleset must be ready before the year it is meant to calculate — otherwise the module cannot compute a single payslip from 1 January.",
         "year": "Year {year}",
         "covered": "Year {year} is covered by a legislative ruleset.",
+        "covered_pending": "The year {year} is covered for payroll calculation, but some agendas and values still await publication. The application does not estimate unpublished values; they arrive with an update.",
         "missing_domains": "Missing domains: {domains}",
+        "missing_agenda_domains": "No rule set for this year yet: {domains}. What depends on them is not calculated for this year until the set arrives.",
+        "pending_parameter": "Awaiting publication: {label}.",
+        "pending_parameter_expected": "Awaiting publication (expected {month}): {label}.",
         "severity": {
           "ok": "Covered",
           "info": "Information",
