@@ -32474,7 +32474,8 @@
           "row_version_conflict": "Someone else changed the employment or its average in the meantime. Repeat the action."
         },
         "warning": {
-          "corrective_report_needed": "A JMHZ report with the original average was already filed for {period}. After approving the run correction, file a corrective report."
+          "corrective_report_needed": "A JMHZ report with the original average was already filed for {period}. After approving the run correction, file a corrective report.",
+          "raised_to_minimum_wage": "The entered earning of CZK {requested}/h is below the minimum wage. Under Section 357(1) of the Labour Code the average was raised to CZK {applied}/h, which compensations and the JMHZ report use."
         }
       },
       "bulk_load_failed": "Could not load candidates for the bulk average calculation.",

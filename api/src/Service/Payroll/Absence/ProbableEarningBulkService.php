@@ -249,6 +249,10 @@ final class ProbableEarningBulkService
                     );
                     $outcome['state'] = 'applied';
                     $outcome['snapshot_id'] = (int) $snapshot['id'];
+                    $floorWarning = self::minimumWageWarning($hourlyMinor, (int) ($snapshot['average_hourly_minor'] ?? $hourlyMinor));
+                    if ($floorWarning !== null) {
+                        $outcome['warnings'][] = $floorWarning;
+                    }
                 }
             }
             if ($owns) {
@@ -283,7 +287,7 @@ final class ProbableEarningBulkService
     private function decide(int $supplierId, int $employmentId, int $year, int $quarter, int $hourlyMinor, ?array $usage): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT status, source_kind, average_hourly_minor
+            "SELECT status, source_kind, average_hourly_minor, input_trace
                FROM payroll_average_earning_snapshots
               WHERE supplier_id = ? AND employment_id = ?
                 AND applicable_year = ? AND applicable_quarter = ?
@@ -311,11 +315,21 @@ final class ProbableEarningBulkService
             $approved ??= $snapshot;
         }
         $label = sprintf('%d/%d', $quarter, $year);
+        /*
+         * Zadaný výdělek pod minimální mzdou se při výpočtu zvýší na ni
+         * (§ 357 odst. 1 zákoníku práce), takže uložený průměr se od zadané
+         * částky liší. Beze změny je proto i průměr, který vznikl z TÉŽE
+         * zadané částky; jinak každé opakované odeslání založilo novou revizi.
+         */
+        $approvedTrace = $approved === null ? [] : json_decode((string) ($approved['input_trace'] ?? ''), true);
         if ($approved !== null
             && $approved['source_kind'] === 'probable'
-            && (int) $approved['average_hourly_minor'] === $hourlyMinor
+            && ((int) $approved['average_hourly_minor'] === $hourlyMinor
+                || (is_array($approvedTrace) && ($approvedTrace['probable_hourly_minor'] ?? null) === $hourlyMinor))
         ) {
-            return ['state' => 'unchanged', 'warnings' => [], 'superseded' => null];
+            $floorWarning = self::minimumWageWarning($hourlyMinor, (int) $approved['average_hourly_minor']);
+
+            return ['state' => 'unchanged', 'warnings' => $floorWarning === null ? [] : [$floorWarning], 'superseded' => null];
         }
         $warnings = [];
         if ($approved !== null && $usage !== null) {
@@ -549,6 +563,32 @@ final class ProbableEarningBulkService
      * @param array<string,mixed>|null $row
      * @return array{employment_id:int,employee_id:?int,employee_name:?string,employment_code:?string}
      */
+    /**
+     * Upozornění, že průměr je vyšší než zadaný výdělek, protože ho zákon
+     * zvedl na minimální mzdu (§ 357 odst. 1 zákoníku práce). Bez něj
+     * účetní viděla „nastaveno" a myslela si, že platí zadaná částka.
+     *
+     * @return array{code:string,params:array<string,string>,message:string}|null
+     */
+    private static function minimumWageWarning(int $requestedMinor, int $appliedMinor): ?array
+    {
+        if ($appliedMinor <= $requestedMinor) {
+            return null;
+        }
+        $format = static fn (int $minor): string => number_format($minor / 100, 2, ',', ' ');
+
+        return [
+            'code' => 'raised_to_minimum_wage',
+            'params' => ['requested' => $format($requestedMinor), 'applied' => $format($appliedMinor)],
+            'message' => sprintf(
+                'Zadaný výdělek %s Kč/h je nižší než minimální mzda. Průměr se podle § 357 odst. 1 '
+                . 'zákoníku práce zvýšil na %s Kč/h a s touto částkou počítají náhrady i hlášení JMHZ.',
+                $format($requestedMinor),
+                $format($appliedMinor),
+            ),
+        ];
+    }
+
     private function person(int $employmentId, ?array $row): array
     {
         return [

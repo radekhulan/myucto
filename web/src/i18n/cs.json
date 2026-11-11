@@ -32474,7 +32474,8 @@
           "row_version_conflict": "Vztah nebo jeho průměr mezitím upravil někdo jiný. Akci zopakujte."
         },
         "warning": {
-          "corrective_report_needed": "Za {period} už bylo podané hlášení JMHZ s původním průměrem. Po schválení opravy běhu podejte opravné hlášení."
+          "corrective_report_needed": "Za {period} už bylo podané hlášení JMHZ s původním průměrem. Po schválení opravy běhu podejte opravné hlášení.",
+          "raised_to_minimum_wage": "Zadaný výdělek {requested} Kč/h je nižší než minimální mzda. Průměr se podle § 357 odst. 1 zákoníku práce zvýšil na {applied} Kč/h a s touto částkou počítají náhrady i hlášení JMHZ."
         }
       },
       "bulk_load_failed": "Kandidáty na hromadný výpočet průměru se nepodařilo načíst.",
