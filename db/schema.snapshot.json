@@ -1186,7 +1186,8 @@
         "2280_membership_batches.sql",
         "2281_microsoft365_imap_oauth.sql",
         "2282_clients_simplified_only.sql",
-        "2283_payroll_submission_parts_subject_index.sql"
+        "2283_payroll_submission_parts_subject_index.sql",
+        "2284_payroll_statutory_entry_successor_index.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -20126,6 +20127,7 @@
                 "fk_payroll_statutory_entry_previous": "BTREE (supplier_id, employee_id, tax_year, period_start, calculation_kind, replaces_entry_id)",
                 "fk_payroll_statutory_entry_user": "BTREE (created_by)",
                 "idx_payroll_statutory_entry_read_model": "BTREE (supplier_id, employee_id, tax_year, calculation_kind, period_start)",
+                "idx_payroll_statutory_entry_successor": "BTREE (supplier_id, replaces_entry_id)",
                 "uq_payroll_statutory_entry_replacement": "UNIQUE BTREE (supplier_id, employee_id, tax_year, period_start, calculation_kind, predecessor_scope_id)",
                 "uq_payroll_statutory_entry_revision": "UNIQUE BTREE (supplier_id, revision_id, employee_id, calculation_kind)",
                 "uq_payroll_statutory_entry_scope_id": "UNIQUE BTREE (supplier_id, employee_id, tax_year, period_start, calculation_kind, id)",
