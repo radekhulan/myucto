@@ -220,74 +220,15 @@ final class JmhzPreparationSnapshotBuilder
                     );
                 }
                 $term = $entry['term'] ?? null;
-                $scenarioResolution = null;
-                $scenarioKey = null;
-                $defaultInterpretations = [];
                 $deferredType = self::deferredIncomeType($entry, $employment, $periodStart);
-                if (!is_array($term) || array_is_list($term)) {
-                    $issues[] = $this->issue('effective_term_missing', 'employment', $employmentId);
-                } else {
-                    /*
-                     * Odložený příjem (scénář 8) se vybírá ručně: podle druhu
-                     * činnosti by vztah spadl do běžného formuláře, jenže ten
-                     * za měsíc po skončení vztahu podat nejde (kontrola 348,
-                     * PPV mimo vykazované období).
-                     */
-                    $selection = $this->scenarioSelector()->resolve(
-                        is_string($term['activity_code'] ?? null)
-                            ? $term['activity_code']
-                            : null,
-                        is_string($term['jmhz_relationship_detail_code'] ?? null)
-                            ? $term['jmhz_relationship_detail_code']
-                            : null,
-                        $deferredType === null ? null : 'scenario_8',
-                    );
-                    $defaultInterpretations = $this->inspectTerm(
-                        $term,
-                        $employmentId,
-                        $issues,
-                        is_string($selection['evidence']['scenario_key'] ?? null)
-                            ? $selection['evidence']['scenario_key']
-                            : null,
-                    );
-                    if (in_array(
-                        $deferredType,
-                        \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::SUPPORTED_TYPES,
-                        true,
-                    ) && $selection['supported']) {
-                        $selection['preparation_supported'] = true;
-                    }
-                    if (!$selection['supported']) {
-                        $issueCode = $selection['issue_code'];
-                        if (!is_string($issueCode)) {
-                            throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil blocker.');
-                        }
-                        $issues[] = $this->issue(
-                            $issueCode,
-                            'employment',
-                            $employmentId,
-                            $selection['attribute_ids'],
-                        );
-                    } else {
-                        $scenarioResolution = $selection['evidence'];
-                        $scenarioKey = $scenarioResolution['scenario_key'] ?? null;
-                        if (!is_string($scenarioKey)) {
-                            throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil klíč scénáře.');
-                        }
-                        $scenarioSet[$scenarioKey] = true;
-                        if (!$selection['preparation_supported']) {
-                            $issueCode = $selection['readiness_issue_code'];
-                            if (!is_string($issueCode)) {
-                                throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil readiness blocker.');
-                            }
-                            $issues[] = $this->issue(
-                                $issueCode,
-                                'employment',
-                                $employmentId,
-                                $selection['readiness_attribute_ids'],
-                            );
-                        }
-                    }
+                [$scenarioResolution, $scenarioKey, $defaultInterpretations] = $this->resolveTermScenario(
+                    $term,
+                    $employmentId,
+                    $deferredType,
+                    $issues,
+                );
+                if ($scenarioKey !== null) {
+                    $scenarioSet[$scenarioKey] = true;
                 }
                 // Formulář odloženého příjmu nemá průběh zaměstnání: vztah
                 // v měsíci netrvá a pracovní doba neexistuje.
@@ -1043,6 +984,112 @@ final class JmhzPreparationSnapshotBuilder
         }
 
         return $average;
+    }
+
+    /**
+     * Nálezy podmínek vztahu (pracoviště 10229 až 10231, druh činnosti
+     * a scénář formuláře), jak je zjistí příprava hlášení, nad vztahem ze
+     * snímku vstupů mzdového běhu. Kontrola před během se ptá touto cestou,
+     * aby chybějící místo výkonu práce nebo činnost ohlásila už před
+     * výpočtem, ne až příprava hlášení po schválení mzdy.
+     *
+     * @param array<string,mixed> $entry vztah ze snímku vstupů
+     * @return list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}>
+     */
+    public function termReadinessIssues(array $entry, int $employmentId, string $periodStart): array
+    {
+        $employment = is_array($entry['employment'] ?? null) ? $entry['employment'] : [];
+        $issues = [];
+        $this->resolveTermScenario(
+            $entry['term'] ?? null,
+            $employmentId,
+            self::deferredIncomeType($entry, $employment, $periodStart),
+            $issues,
+        );
+
+        return $issues;
+    }
+
+    /**
+     * Výběr scénáře formuláře a kontrola podmínek vztahu; jediné místo pro
+     * přípravu hlášení i kontrolu před během.
+     *
+     * @param list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $issues
+     * @param-out list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $issues
+     * @return array{0:?array<string,mixed>,1:?string,2:list<array<string,string>>}
+     *         [rozhodnutí scénáře, klíč scénáře, výklady výchozího stavu]
+     */
+    private function resolveTermScenario(mixed $term, int $employmentId, ?string $deferredType, array &$issues): array
+    {
+        $scenarioResolution = null;
+        $scenarioKey = null;
+        $defaultInterpretations = [];
+        if (!is_array($term) || array_is_list($term)) {
+            $issues[] = $this->issue('effective_term_missing', 'employment', $employmentId);
+        } else {
+            /*
+             * Odložený příjem (scénář 8) se vybírá ručně: podle druhu
+             * činnosti by vztah spadl do běžného formuláře, jenže ten
+             * za měsíc po skončení vztahu podat nejde (kontrola 348,
+             * PPV mimo vykazované období).
+             */
+            $selection = $this->scenarioSelector()->resolve(
+                is_string($term['activity_code'] ?? null)
+                    ? $term['activity_code']
+                    : null,
+                is_string($term['jmhz_relationship_detail_code'] ?? null)
+                    ? $term['jmhz_relationship_detail_code']
+                    : null,
+                $deferredType === null ? null : 'scenario_8',
+            );
+            $defaultInterpretations = $this->inspectTerm(
+                $term,
+                $employmentId,
+                $issues,
+                is_string($selection['evidence']['scenario_key'] ?? null)
+                    ? $selection['evidence']['scenario_key']
+                    : null,
+            );
+            if (in_array(
+                $deferredType,
+                \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::SUPPORTED_TYPES,
+                true,
+            ) && $selection['supported']) {
+                $selection['preparation_supported'] = true;
+            }
+            if (!$selection['supported']) {
+                $issueCode = $selection['issue_code'];
+                if (!is_string($issueCode)) {
+                    throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil blocker.');
+                }
+                $issues[] = $this->issue(
+                    $issueCode,
+                    'employment',
+                    $employmentId,
+                    $selection['attribute_ids'],
+                );
+            } else {
+                $scenarioResolution = $selection['evidence'];
+                $scenarioKey = $scenarioResolution['scenario_key'] ?? null;
+                if (!is_string($scenarioKey)) {
+                    throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil klíč scénáře.');
+                }
+                if (!$selection['preparation_supported']) {
+                    $issueCode = $selection['readiness_issue_code'];
+                    if (!is_string($issueCode)) {
+                        throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil readiness blocker.');
+                    }
+                    $issues[] = $this->issue(
+                        $issueCode,
+                        'employment',
+                        $employmentId,
+                        $selection['readiness_attribute_ids'],
+                    );
+                }
+            }
+        }
+
+        return [$scenarioResolution, $scenarioKey, $defaultInterpretations];
     }
 
     /**

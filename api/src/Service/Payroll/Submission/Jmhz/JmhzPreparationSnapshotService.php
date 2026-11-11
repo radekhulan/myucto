@@ -564,6 +564,8 @@ final readonly class JmhzPreparationSnapshotService
     ): array {
         $issues = [];
         $checkedComponents = [];
+        $periodStart = substr($periodEnd, 0, 8) . '01';
+        $termsChecked = self::monthlyReportBuildable($periodStart);
         $people = $input['people'] ?? [];
         if (!is_array($people) || !array_is_list($people)) {
             return [];
@@ -598,6 +600,19 @@ final readonly class JmhzPreparationSnapshotService
                     );
                     if (is_string($identity)) {
                         $issues[] = self::identityIssue($employmentId, $identity);
+                    }
+                }
+                /*
+                 * Místo výkonu práce, druh činnosti a scénář formuláře: příprava
+                 * hlášení je hlídá a dřív se ozvaly až po schválení mzdy, kdy
+                 * náprava stojí přípravu znovu. Kontrolují se touž cestou jako
+                 * v přípravě. U ročníku, jehož hlášení aplikace ještě sestavit
+                 * neumí (01/2027), je blokací samotná verze specifikace;
+                 * pracoviště by tam svádělo k doplňování, které nic nevyřeší.
+                 */
+                if ($termsChecked && $employmentId > 0) {
+                    foreach ($this->builder->termReadinessIssues($entry, $employmentId, $periodStart) as $issue) {
+                        $issues[] = $issue;
                     }
                 }
                 $inputRows = $entry['inputs'] ?? [];
@@ -684,6 +699,17 @@ final readonly class JmhzPreparationSnapshotService
         }
 
         return $issues;
+    }
+
+    private static function monthlyReportBuildable(string $periodStart): bool
+    {
+        try {
+            JmhzSpecPackageCatalog::requireBuildable(JmhzSpecVersion::forPeriodStart($periodStart));
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return true;
     }
 
     /**

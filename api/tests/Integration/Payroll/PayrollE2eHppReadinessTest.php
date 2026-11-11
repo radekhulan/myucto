@@ -161,6 +161,43 @@ final class PayrollE2eHppReadinessTest extends TestCase
     }
 
     /**
+     * Vztah bez místa výkonu práce a druhu činnosti: příprava hlášení ho
+     * zastaví, kontrola před během to musí ohlásit dřív (s hromadným
+     * doplněním pracoviště), ne až po schválení mzdy.
+     */
+    public function testMissingWorkplaceAndActivityArePredictedBeforeTheRun(): void
+    {
+        $sequence = ++$this->sequence;
+        $person = $this->createEmployment($this->officeId, 'Syntetický Bezmístný', $sequence, 'hpp', 'employment', 40, 10_000, true, self::PERIOD_START);
+        $this->assignJmhzIdentity($person, self::syntheticOic($sequence), sprintf('2%020d', $sequence));
+        $this->publishShifts($person['employment_id'], self::workdays(self::PERIOD));
+        $this->createApprovedAverage($person['employment_id'], 2);
+        $this->approveTimeMonth($person['employment_id'], self::PERIOD, self::workdays(self::PERIOD));
+        $this->createApprovedInput($person, $this->baseComponentId, 4_000_000, 'base-' . $person['employment_id'], self::PERIOD_START);
+
+        $readiness = $this->readiness()->inspect($this->supplierId, self::PERIOD_START, self::PAYDAY);
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, 'no-workplace');
+        self::assertNotNull($run['approved'], CanonicalJson::encode($run['blockers']));
+        $preparation = $this->prepareJmhz((int) $run['approved']->revision['id'], 'no-workplace');
+
+        self::assertSame('blocked', $preparation['body']['readiness_status']);
+        $predicted = array_column($readiness['findings'], null, 'code');
+        foreach (['jmhz_workplace_codebooks_unverified', 'jmhz_scenario_activity_code_missing'] as $code) {
+            self::assertContains($code, array_column($preparation['body']['issues'], 'code'));
+            self::assertArrayHasKey($code, $predicted, 'Příprava hlášení zastaví ' . $code . ', kontrola před během mlčela. ' . CanonicalJson::encode($readiness['findings']));
+            $this->assertActionable($predicted[$code], $code);
+        }
+        self::assertContains(
+            ['kind' => 'workplace', 'count' => 1],
+            $predicted['jmhz_workplace_codebooks_unverified']['bulk_actions'],
+        );
+        self::assertSame(
+            [$person['employment_id']],
+            array_column($predicted['jmhz_workplace_codebooks_unverified']['entities'], 'entity_id'),
+        );
+    }
+
+    /**
      * Před 1. 4. 2026 se měsíční hlášení JMHZ nepodává
      * (PayrollStatutoryAgendaCatalog::JMHZ_FROM): kontrola únorového běhu
      * nesmí účetní posílat doplňovat podklady hlášení, které neexistuje.
