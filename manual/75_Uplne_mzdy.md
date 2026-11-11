@@ -422,9 +422,10 @@ znamená opravnou revizi**, nebo **Doplní se kdykoli, běh to nezdrží**. U
 a schválit měsíc**, **Schválit všechny mzdové vstupy** a **Otevřít měsíční
 vstupy**.
 
-**Běh nejde schválit.** Drží-li spočítaný běh neschválená docházka nebo
-rozpracované vstupy, karta běhu ukáže panel **Jak pokračovat** s očíslovanými
-kroky a tlačítkem u každého z nich. Běh nerušte: po opravě podkladů stačí
+**Běh nejde schválit.** Drží-li spočítaný běh neschválená docházka,
+rozpracované vstupy, chybějící mzda nebo chybějící údaje v zákonné evidenci
+(například zdravotní pojišťovna), karta běhu ukáže panel **Jak pokračovat**
+s očíslovanými kroky a tlačítkem u každého z nich. Běh nerušte: po opravě podkladů stačí
 kliknout na **Obnovit podklady a přepočítat**.
 
 **Uzamčení vstupů** vytvoří neměnný snímek zaměstnanců, vztahů, složek, data

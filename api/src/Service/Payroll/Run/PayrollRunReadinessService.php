@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Run;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Repository\Payroll\PayrollHealthCoverageLaterRecord;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementStatute;
 use MyInvoice\Repository\Payroll\PayrollRulesetRepository;
@@ -289,7 +290,9 @@ final class PayrollRunReadinessService
             if ($settlementFinding !== null) {
                 $findings[] = $settlementFinding;
             }
-            $statutoryFinding = self::statutoryInputFinding(
+            $statutoryFinding = $this->statutoryInputFinding(
+                $supplierId,
+                $periodStart,
                 $snapshot->data,
                 $this->statutoryIssuesBeforeRun($supplierId, $periodStart, $snapshot->data),
             );
@@ -749,7 +752,7 @@ final class PayrollRunReadinessService
      * @param array<string,mixed> $snapshotData
      * @return array<string,mixed>|null
      */
-    private static function statutoryInputFinding(array $snapshotData, ?array $issues): ?array
+    private function statutoryInputFinding(int $supplierId, string $periodStart, array $snapshotData, ?array $issues): ?array
     {
         if ($issues === null) {
             return null;
@@ -790,7 +793,8 @@ final class PayrollRunReadinessService
         if ($details === []) {
             return null;
         }
-        $details = array_values($details);
+        // Pojišťovna zapsaná až od pozdějšího měsíce: hláška řekne od kdy.
+        $details = array_values((new PayrollHealthCoverageLaterRecord($this->db))->annotate($supplierId, $periodStart, $details));
         usort(
             $details,
             static fn (array $left, array $right): int =>

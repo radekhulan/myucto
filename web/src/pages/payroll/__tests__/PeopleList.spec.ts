@@ -21,6 +21,7 @@ const m = vi.hoisted(() => ({
   employerSettings: vi.fn(),
   saveStatutoryEvidence: vi.fn(),
   employmentAgendaSummary: vi.fn(),
+  runsPage: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -49,6 +50,7 @@ vi.mock('@/api/payroll', () => ({
     employerSettings: m.employerSettings,
     saveStatutoryEvidence: m.saveStatutoryEvidence,
     employmentAgendaSummary: m.employmentAgendaSummary,
+    runsPage: m.runsPage,
   },
 }))
 
@@ -296,6 +298,49 @@ describe('PeopleList toolbar and shared employee creation', () => {
     const buttons = wrapper.get('[data-test="quick-inputs-link"]').element.parentElement!
     expect(buttons.classList.contains('flex-wrap')).toBe(true)
     expect(buttons.classList.contains('min-w-0')).toBe(true)
+  })
+
+  /*
+   * Agentura s DPP dohání v listopadu únor. Dialog výchozích zákonných údajů
+   * otevřený ze Zaměstnanců předvyplnil říjen; kdo jen potvrdil, zapsal údaje
+   * od října a únor zůstal blokovaný. Platí nejstarší neschválený běh.
+   */
+  it('hromadné doplnění zákonných údajů předvyplní měsíc nejstaršího neschváleného běhu', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-11T12:00:00'))
+    m.runsPage.mockResolvedValue({
+      runs: [
+        { id: 3, period_start: '2026-03-01', status: 'draft' },
+        { id: 2, period_start: '2026-02-01', status: 'calculated' },
+        { id: 1, period_start: '2026-01-01', status: 'approved' },
+      ],
+    })
+    const wrapper = mount(PeopleList, {
+      global: {
+        stubs: {
+          ActionBar: {
+            props: ['actions'],
+            template: '<div><button v-for="action in actions" :key="action.key" type="button" :data-test="`action-${action.key}`" @click="action.run && action.run()">{{ action.label }}</button></div>',
+          },
+          RouterLink: true,
+          EmploymentCard: true,
+          PayrollPersonQuickEdit: true,
+          PayrollPersonProfilePanel: true,
+          PayrollPersonStatutoryEvidencePanel: true,
+          PayrollStatutoryBulkDefaultsDialog: {
+            props: ['effectiveOn'],
+            template: '<div data-test="statutory-bulk-dialog">{{ effectiveOn }}</div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="action-statutory-bulk"]').trigger('click')
+    await flushPromises()
+
+    expect(m.runsPage).toHaveBeenCalledWith(undefined, { limit: 50 })
+    expect(wrapper.get('[data-test="statutory-bulk-dialog"]').text()).toBe('2026-02-01')
+    wrapper.unmount()
   })
 
   it('hromadné úpravy schová do Další funkce a na liště nechá měsíční zadání', async () => {

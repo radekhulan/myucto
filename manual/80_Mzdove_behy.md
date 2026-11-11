@@ -229,7 +229,8 @@ pro JMHZ. Aplikace nabízí tři hromadné akce.
 
 1. U blokace na kartě běhu klikněte na **Doplnit výchozí údaje (N osob)**.
    Totéž je v `Mzdy → Zaměstnanci → Další funkce` pod **Doplnit výchozí zákonné údaje**;
-   tam zvolíte měsíc, od kterého údaje platí.
+   tam zvolíte měsíc, od kterého údaje platí. Předvyplněný je měsíc nejstaršího
+   mzdového běhu, který ještě není schválený (z kontroly běhu měsíc běhu).
 2. Projděte náhled: komu se údaje doplní, kdo je vyřazený a proč, kdo nemá
    zdravotní pojišťovnu a kdo nemá prohlášení poplatníka. Náhled nic
    nezapisuje.
@@ -250,7 +251,10 @@ konce první dohody), doplní se za něj navazující údaj od měsíce doplněn
 1. V `Mzdy → Zaměstnanci → Další funkce` klikněte na **Zdravotní pojišťovny hromadně**
    (výsledek importu hlášení na akci odkáže sám).
 2. U každé osoby vyberte pojišťovnu a měsíc, od kterého platí. **Doplnit
-   prázdné** vyplní stejnou pojišťovnu všem, kdo ji zatím nemají.
+   prázdné** vyplní stejnou pojišťovnu všem, kdo ji zatím nemají. Má-li osoba
+   pojišťovnu zapsanou až od pozdějšího měsíce (například s pozdějším vztahem),
+   dialog ji předvyplní a pod jménem napíše, od kdy je zapsaná; kontrola běhu
+   to u nálezu řekne také.
 3. Uložte. Osoby bez vybrané pojišťovny se přeskočí.
 
 **Místo výkonu práce pro JMHZ:**

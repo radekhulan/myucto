@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Payroll;
 
+use MyInvoice\Http\ApiErrorHandler;
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
@@ -73,7 +74,7 @@ final class PayrollMonthlyChecklistPrepareAction
             || !is_string($agendaCode)
             || ($insurerCode !== null && !is_string($insurerCode))
         ) {
-            return $this->invalid(
+            return self::invalid(
                 $response,
                 'Prostředí, období a kód agendy musí být řetězce.',
             );
@@ -81,7 +82,7 @@ final class PayrollMonthlyChecklistPrepareAction
         if ($insurerCode !== null
             && preg_match('/^[0-9]{3}$/D', $insurerCode) !== 1
         ) {
-            return $this->invalid(
+            return self::invalid(
                 $response,
                 'Kód zdravotní pojišťovny musí být trojmístné číslo.',
             );
@@ -97,23 +98,8 @@ final class PayrollMonthlyChecklistPrepareAction
                 $this->userId($request),
                 ($body['confirm_late_discount'] ?? false) === true,
             );
-        } catch (JmhzXmlException $exception) {
-            return Json::error(
-                $response,
-                JmhzSubmissionBridgeService::clientErrorCode($exception),
-                $exception->getMessage(),
-                409,
-                $exception->blockers === [] ? [] : ['details' => ['blockers' => $exception->blockers]],
-            );
-        } catch (\DomainException $exception) {
-            return Json::error($response, 'conflict', $exception->getMessage(), 409);
-        } catch (\InvalidArgumentException $exception) {
-            return $this->invalid($response, $exception->getMessage());
-        } catch (\RuntimeException $exception) {
-            // Doménové výjimky agend (JMHZ, zdravotní) nesou vlastní kód
-            // v `getMessage()`; přehled je jen předává, protože jsou psané
-            // pro účetní, ne pro vývojáře.
-            return $this->invalid($response, $exception->getMessage());
+        } catch (\RuntimeException|\DomainException|\InvalidArgumentException $exception) {
+            return self::failureResponse($response, $exception);
         }
 
         return Json::ok($response, $result, 201)
@@ -121,7 +107,38 @@ final class PayrollMonthlyChecklistPrepareAction
             ->withHeader('Pragma', 'no-cache');
     }
 
-    private function invalid(Response $response, string $message): Response
+    /**
+     * Odpověď na selhání přípravy. Chybějící šifrovací klíč instalace není
+     * vada vstupu: převezme ho obecný handler API (503 s českou hláškou jako
+     * „Otestovat XML“). Dřív tu skončil jako 422 s technickým anglickým textem.
+     */
+    public static function failureResponse(
+        Response $response,
+        \RuntimeException|\DomainException|\InvalidArgumentException $exception,
+    ): Response {
+        if (ApiErrorHandler::isEncryptionKeyUnavailable($exception)) {
+            throw $exception;
+        }
+        if ($exception instanceof JmhzXmlException) {
+            return Json::error(
+                $response,
+                JmhzSubmissionBridgeService::clientErrorCode($exception),
+                $exception->getMessage(),
+                409,
+                $exception->blockers === [] ? [] : ['details' => ['blockers' => $exception->blockers]],
+            );
+        }
+        if ($exception instanceof \DomainException) {
+            return Json::error($response, 'conflict', $exception->getMessage(), 409);
+        }
+
+        // Doménové výjimky agend (JMHZ, zdravotní) nesou vlastní kód
+        // v `getMessage()`; přehled je jen předává, protože jsou psané
+        // pro účetní, ne pro vývojáře.
+        return self::invalid($response, $exception->getMessage());
+    }
+
+    private static function invalid(Response $response, string $message): Response
     {
         return Json::error($response, 'validation_failed', $message, 422)
             ->withHeader('Cache-Control', 'private, no-store')

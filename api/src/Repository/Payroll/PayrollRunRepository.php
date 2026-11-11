@@ -667,7 +667,7 @@ final class PayrollRunRepository
                 'payroll_run_has_revision',
                 'Mzdový běh má schválenou revizi, podle které se už mohlo '
                     . 'účtovat a podávat — smazat ho nelze. Opravu proveďte '
-                    . 'přes „Otevřít k opravě“.',
+                    . 'přes „Vyžádat opravu“ a „Otevřít opravu“.',
             ],
         ] as [$field, $code, $message]) {
             if ((int) $row[$field] > 0) {
@@ -1748,7 +1748,11 @@ final class PayrollRunRepository
         foreach ($drafts->fetchAll(PDO::FETCH_COLUMN) as $employmentId) {
             $draftInputEmployments[(int) $employmentId] = true;
         }
-        foreach (PayrollRunValidationMessageFormatter::statutoryDetails($statutory, $draftInputEmployments) as $detail) {
+        $details = PayrollRunValidationMessageFormatter::statutoryDetails($statutory, $draftInputEmployments);
+        if (PayrollHealthCoverageLaterRecord::concerns($details)) {
+            $details = $this->withLaterHealthCoverage($supplierId, $revisionId, $details);
+        }
+        foreach ($details as $detail) {
             $insert->execute([
                 $supplierId,
                 $revisionId,
@@ -1758,6 +1762,31 @@ final class PayrollRunRepository
                 $detail['remediation_path'],
             ]);
         }
+    }
+
+    /**
+     * Chybějící zdravotní pojištění: hláška řekne, od kdy je pojišťovna u osoby
+     * zapsaná, pokud ji má až od pozdějšího měsíce než běh.
+     *
+     * @param list<array<string,mixed>> $details
+     * @return list<array<string,mixed>>
+     */
+    private function withLaterHealthCoverage(int $supplierId, int $revisionId, array $details): array
+    {
+        $period = $this->db->pdo()->prepare(
+            'SELECT run.period_start
+               FROM payroll_run_revisions revision
+               JOIN payroll_runs run ON run.supplier_id = revision.supplier_id AND run.id = revision.run_id
+              WHERE revision.supplier_id = ? AND revision.id = ?'
+        );
+        $period->execute([$supplierId, $revisionId]);
+        $periodStart = $period->fetchColumn();
+        if (!is_string($periodStart)) {
+            return $details;
+        }
+
+        return array_values((new PayrollHealthCoverageLaterRecord($this->db))
+            ->annotate($supplierId, substr($periodStart, 0, 10), $details));
     }
 
     /** @return array<string,mixed>|null */

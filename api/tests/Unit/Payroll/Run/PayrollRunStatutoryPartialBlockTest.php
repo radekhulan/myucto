@@ -188,6 +188,9 @@ final class PayrollRunStatutoryPartialBlockTest extends TestCase
             entity_type TEXT, entity_id INTEGER, message TEXT, remediation_path TEXT,
             requires_override INTEGER
         )');
+        // Období běhu pro hlášku o pojišťovně zapsané až později; tady žádné není.
+        $pdo->exec('CREATE TABLE payroll_runs (supplier_id INTEGER, id INTEGER, period_start TEXT)');
+        $pdo->exec('CREATE TABLE payroll_run_revisions (supplier_id INTEGER, id INTEGER, run_id INTEGER)');
         $connection = $this->createStub(Connection::class);
         $connection->method('pdo')->willReturn($pdo);
 

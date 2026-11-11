@@ -32,6 +32,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ExpandableList from '@/components/ui/ExpandableList.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { appIsoDate } from '@/utils/date'
 import { payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 import { runPayrollInputBatch } from '@/pages/payroll/payrollInputFilters'
@@ -930,12 +931,37 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
  * zrušila, znovu otevřela (dvakrát psala důvod) a stála tam, kde předtím.
  * Každý krok tu má proto vlastní tlačítko a poslední krok běh přepočítá.
  */
-type SourceStep = 'time' | 'inputs' | 'components'
+type SourceStep = 'time' | 'inputs' | 'components' | 'statutory'
 
-const SOURCE_STEP_CODES: Record<SourceStep, string[]> = {
-  time: ['time_month_not_approved', 'time_month_missing'],
-  inputs: ['draft_inputs_present'],
-  components: ['employment_without_inputs', 'statutory_calculation_manual_review'],
+const SOURCE_STEP_ORDER: SourceStep[] = ['time', 'inputs', 'components', 'statutory']
+
+const SOURCE_STEP_CODES: Record<string, SourceStep> = {
+  time_month_not_approved: 'time',
+  time_month_missing: 'time',
+  draft_inputs_present: 'inputs',
+  employment_without_inputs: 'components',
+}
+
+/*
+ * Ruční kontrolu zákonného výpočtu způsobí chybějící mzdová složka i chybějící
+ * zákonná evidence (pojišťovna, rezidence). Krok se proto bere z místa opravy
+ * nálezu: mzdové vstupy vedou na „Doplňte mzdu", ostatní na zákonnou evidenci.
+ * Dřív radila karta „zadejte 0 Kč" i lidem, kterým chyběla jen pojišťovna.
+ */
+function sourceStepFor(code: string, remediationPaths: Array<string | null | undefined>): SourceStep[] {
+  if (code !== 'statutory_calculation_manual_review') {
+    const step = SOURCE_STEP_CODES[code]
+    return step ? [step] : []
+  }
+  const steps = new Set<SourceStep>()
+  for (const path of remediationPaths) {
+    steps.add(path?.startsWith('/payroll/quick-inputs') ? 'components' : 'statutory')
+  }
+  return steps.size === 0 ? ['statutory'] : [...steps]
+}
+
+function orderedSourceSteps(steps: Set<SourceStep>): SourceStep[] {
+  return SOURCE_STEP_ORDER.filter(step => steps.has(step))
 }
 
 const SOURCE_STEP_STATUSES = new Set<PayrollRun['status']>([
@@ -948,11 +974,12 @@ const SOURCE_STEP_STATUSES = new Set<PayrollRun['status']>([
 
 function sourceBlockerSteps(run: PayrollRun): SourceStep[] {
   if (!SOURCE_STEP_STATUSES.has(run.status)) return []
-  const blocking = new Set(run.validations
-    .filter(validation => validation.severity === 'blocker')
-    .map(validation => validation.code))
-  return (Object.keys(SOURCE_STEP_CODES) as SourceStep[])
-    .filter(step => SOURCE_STEP_CODES[step].some(code => blocking.has(code)))
+  const steps = new Set<SourceStep>()
+  for (const validation of run.validations) {
+    if (validation.severity !== 'blocker') continue
+    for (const step of sourceStepFor(validation.code, [validation.remediation_path])) steps.add(step)
+  }
+  return orderedSourceSteps(steps)
 }
 
 /** Krok, který opravené podklady do běhu přenese — a hned přepočítá. */
@@ -1051,14 +1078,38 @@ watch(periodRun, (run) => {
   if (run !== null) paymentDate.value = run.payment_date
 })
 
-async function load() {
-  loading.value = true
-  loadFailed.value = false
+/*
+ * Pořadí načtení. Kontrola před během počítá u větší firmy desítky sekund,
+ * takže odpověď za dříve zvolené období (výchozí měsíc při otevření stránky)
+ * mohla dorazit až po přepnutí měsíce a po příkazu nad během a přepsat ho:
+ * pod lednem pak visela kontrola a karta února a chybělo „Otevřít opravu".
+ * Odpověď, kterou předběhlo novější načtení, se proto zahodí.
+ */
+let loadSequence = 0
+
+/**
+ * `silent` = tichá obnova okna po změně jinde (hromadná akce v jiném okně):
+ * bez skeletonu a bez toastu, rozbalené osoby a historie zůstanou otevřené.
+ * Chyba se vyhodí, obnova pak počká na další příležitost.
+ */
+async function load(options?: { silent?: boolean }) {
+  const silent = options?.silent === true
+  const sequence = ++loadSequence
+  const requestedPeriod = period.value
+  if (!silent) {
+    loading.value = true
+    loadFailed.value = false
+  }
+  const openHistories = silent
+    ? Object.keys(historyOpen.value).map(Number).filter(id => historyOpen.value[id])
+    : []
   try {
     const [page, people] = await Promise.all([
-      payrollApi.runsPage(period.value, { limit: pageSize, offset: offset.value }),
+      payrollApi.runsPage(requestedPeriod, { limit: pageSize, offset: offset.value }),
       personNamesLoaded ? Promise.resolve(null) : payrollApi.peopleOptions().catch(() => null),
     ])
+    if (sequence !== loadSequence || requestedPeriod !== period.value) return
+    loadFailed.value = false
     runs.value = page.runs
     total.value = page.total
     suggestedPaymentDate.value = page.suggested_payment_date ?? null
@@ -1098,14 +1149,21 @@ async function load() {
     ) {
       personNamesLoaded = false
     }
-  } catch {
+    const reopened = openHistories.filter(id => page.runs.some(item => item.id === id))
+    if (reopened.length > 0) {
+      historyOpen.value = Object.fromEntries(reopened.map(id => [id, true]))
+      await Promise.all(reopened.map(id => loadHistory(id)))
+    }
+  } catch (error) {
+    if (silent) throw error
+    if (sequence !== loadSequence) return
     // Seznam běhů se nechává být: „za období nebyl spuštěn žádný běh" je
     // závěr, na který po výpadku sítě nemáme právo.
     readiness.value = null
     loadFailed.value = true
     toast.error(t('payroll.runs.load_failed'))
   } finally {
-    loading.value = false
+    if (!silent && sequence === loadSequence) loading.value = false
   }
 }
 
@@ -1346,9 +1404,13 @@ const READINESS_BULK_ICONS: Record<PayrollRunReadinessBulkKind, string> = {
   annual_settlement_request: ICONS.check,
 }
 
+function readinessBulkPeriod(): string {
+  return readiness.value?.period_start?.slice(0, 7) ?? period.value
+}
+
 function readinessBulkTarget(action: { kind: PayrollRunReadinessBulkKind, employee_ids?: number[] }) {
   const kind = action.kind
-  const bulkPeriod = readiness.value?.period_start?.slice(0, 7) ?? period.value
+  const bulkPeriod = readinessBulkPeriod()
   if (kind === 'annual_settlement_request') {
     // Hlášení za leden a únor se ptá na žádost za MINULÝ rok. Hromadné
     // „nepožádal" je výběr na stránce Ročního zúčtování, zúžený na nerozhodnuté.
@@ -1411,11 +1473,15 @@ const readinessGroups = computed(() => ([
  * obnova podkladů i přepočet.
  */
 const readinessSourceSteps = computed<SourceStep[]>(() => {
-  const codes = new Set(readinessFindings.value
-    .filter(finding => finding.impact === 'approval')
-    .map(finding => finding.code))
-  return (Object.keys(SOURCE_STEP_CODES) as SourceStep[])
-    .filter(step => SOURCE_STEP_CODES[step].some(code => codes.has(code)))
+  const steps = new Set<SourceStep>()
+  for (const finding of readinessFindings.value) {
+    if (finding.impact !== 'approval') continue
+    const paths = finding.entities.length > 0
+      ? finding.entities.map(entity => entity.remediation_path)
+      : [finding.remediation_path]
+    for (const step of sourceStepFor(finding.code, paths)) steps.add(step)
+  }
+  return orderedSourceSteps(steps)
 })
 
 async function approveDraftInputsBeforeStart(run: PayrollRun) {
@@ -1781,7 +1847,20 @@ function changePeriod() {
   void load()
 }
 
-onMounted(load)
+/*
+ * Kontrola před během se mění akcemi jinde (hromadné ukončení dohod
+ * v Zaměstnancích, schválení docházky, roční zúčtování). Okno v pozadí se po
+ * změně mezd tiše obnoví, jakmile je vidět a nic rozpracovaného (dialog,
+ * rozepsaný důvod, běžící příkaz) tomu nebrání. Vlastní obnova zároveň brání
+ * tomu, aby okno stránku po vlastním příkazu vytvořilo znovu.
+ */
+useWindowRefresh(() => load({ silent: true }), () => !loading.value && !saving.value
+  && !advancingStart.value && !fillingAverages.value
+  && pendingCommand.value === null && pendingDelete.value === null && pendingApprove.value === null
+  && pendingOverride.value === null && pendingStart.value === null && pendingHide.value === null
+  && bulkDefaultsRun.value === null)
+
+onMounted(() => { void load() })
 </script>
 
 <template>
@@ -1985,6 +2064,15 @@ onMounted(load)
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
               {{ t('payroll.runs.continue_steps.components_action') }}
             </RouterLink>
+            <RouterLink
+              v-if="readinessSourceSteps.includes('statutory')"
+              :to="{ name: 'payroll-people', query: { filter: 'blocking_data', period } }"
+              :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+              data-test="run-readiness-step-statutory"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
+              {{ t('payroll.runs.continue_steps.statutory_people_action') }}
+            </RouterLink>
           </div>
           <div
             v-for="group in readinessGroups"
@@ -2101,7 +2189,7 @@ onMounted(load)
                     :data-test="`run-readiness-bulk-action-${action.kind}`"
                   >
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="READINESS_BULK_ICONS[action.kind]" /></svg>
-                    {{ t(`payroll.runs.readiness.bulk.${action.kind}`, { count: action.count }) }}
+                    {{ t(`payroll.runs.readiness.bulk.${action.kind}`, { count: action.count, period: formatPeriod(readinessBulkPeriod()) }) }}
                   </RouterLink>
                 </div>
                 <div
@@ -2206,7 +2294,7 @@ onMounted(load)
       :key="takeoverPanelKey"
       :year="takeoverYear"
       :can-write="canWrite"
-      @changed="load"
+      @changed="load()"
     />
 
     <div v-if="loading" class="space-y-3">
@@ -2219,7 +2307,7 @@ onMounted(load)
       boxed
       data-test="load-failed"
       :message="t('payroll.runs.load_failed_hint')"
-      @action="load"
+      @action="load()"
     />
 
     <section
@@ -2882,6 +2970,16 @@ onMounted(load)
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
                 {{ t('payroll.runs.continue_steps.components_action') }}
               </RouterLink>
+              <button
+                v-else-if="step === 'statutory'"
+                type="button"
+                :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+                :data-testid="`payroll-run-${run.id}-next-step-statutory-action`"
+                @click="showValidations(run)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
+                {{ t('payroll.runs.continue_steps.statutory_action') }}
+              </button>
             </li>
             <li
               v-if="sourceRefreshCommand(run)"
@@ -3352,6 +3450,14 @@ onMounted(load)
             >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
               {{ t('payroll.runs.continue_steps.components_action') }}
+            </RouterLink>
+            <RouterLink
+              v-if="readinessSourceSteps.includes('statutory')"
+              :to="{ name: 'payroll-people', query: { filter: 'blocking_data', period: runPeriod(pendingStart.run) } }"
+              :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
+              {{ t('payroll.runs.continue_steps.statutory_people_action') }}
             </RouterLink>
           </div>
         </div>

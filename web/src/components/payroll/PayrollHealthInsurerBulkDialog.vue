@@ -34,6 +34,7 @@ interface Row {
   full_name: string
   insurer_code: string
   from_month: string
+  known_from: string | null
 }
 
 const { t } = useI18n()
@@ -66,8 +67,9 @@ async function load() {
     rows.value = preview.people.map(person => ({
       employee_id: person.employee_id,
       full_name: person.full_name,
-      insurer_code: '',
+      insurer_code: person.known_insurer_code ?? '',
       from_month: person.suggested_from.slice(0, 7),
+      known_from: person.known_insurer_code ? (person.known_from ?? null) : null,
     }))
   } catch (error) {
     loadError.value = apiErrorMessage(error, t('payroll.health_insurer_bulk.load_failed'))
@@ -146,7 +148,14 @@ onMounted(load)
             class="flex flex-wrap items-center gap-2 px-3 py-2 text-sm"
             :data-test="`health-insurer-bulk-row-${row.employee_id}`"
           >
-            <span class="min-w-40 flex-1 font-medium text-neutral-900">{{ row.full_name }}</span>
+            <span class="min-w-40 flex-1">
+              <span class="block font-medium text-neutral-900">{{ row.full_name }}</span>
+              <span
+                v-if="row.known_from"
+                class="block text-xs text-neutral-500"
+                :data-test="`health-insurer-bulk-known-${row.employee_id}`"
+              >{{ t('payroll.health_insurer_bulk.known_later', { period: formatPeriod(row.known_from.slice(0, 7)) }) }}</span>
+            </span>
             <select
               v-model="row.insurer_code"
               class="h-9 min-w-0 rounded-md border border-neutral-300 bg-surface px-2 text-sm"

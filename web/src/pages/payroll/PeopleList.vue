@@ -77,6 +77,7 @@ import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplac
 import PayrollTermsBulkEditDialog from '@/components/payroll/PayrollTermsBulkEditDialog.vue'
 import PayrollBulkClosureDialog from '@/components/payroll/PayrollBulkClosureDialog.vue'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
+import { oldestUnapprovedRunPeriod } from './payrollOpenRunPeriod'
 import { providePersonCardSave } from './personCardSave'
 
 const { t } = useI18n()
@@ -222,14 +223,32 @@ const statutoryBulkOpen = ref(false)
 const bulkQueryPeriod = typeof route.query.period === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(route.query.period)
   ? route.query.period
   : null
-const statutoryBulkEffectiveOn = `${bulkQueryPeriod ?? payrollWorkingPeriod()}-01`
+const bulkPeriod = ref(bulkQueryPeriod ?? payrollWorkingPeriod())
+const statutoryBulkEffectiveOn = computed(() => `${bulkPeriod.value}-01`)
+/** Období mzdového běhu, ke kterému se hromadné opravy vztahují; `null` = žádný neschválený běh. */
+const bulkRunPeriod = ref<string | null>(bulkQueryPeriod)
+// Bez období v odkazu platí nejstarší měsíc, který ještě čeká na schválení
+// mzdového běhu, ne měsíc podle dneška.
+const bulkPeriodResolved: Promise<void> = bulkQueryPeriod !== null
+  ? Promise.resolve()
+  : oldestUnapprovedRunPeriod()
+    .then((found) => {
+      if (found === null) return
+      bulkPeriod.value = found
+      bulkRunPeriod.value = found
+    })
+    .catch(() => {})
+
+function openWithBulkPeriod(open: () => void): void {
+  void bulkPeriodResolved.then(open)
+}
 const workplaceBulkOpen = ref(false)
 const termsBulkOpen = ref(false)
 const bulkClosureOpen = ref(false)
 /**
- * Období mzdového běhu, ze kterého se hromadné ukončení otevřelo odkazem
- * (`?bulk=closure&period=RRRR-MM`). Z nabídky „Další funkce" se dialog otevírá
- * bez období a předvybírá všechny uplynulé konce jako dosud.
+ * Období mzdového běhu, ke kterému se hromadné ukončení vztahuje: z odkazu
+ * (`?bulk=closure&period=RRRR-MM`), z nabídky „Další funkce" nejstarší
+ * neschválený běh. Bez neschváleného běhu předvybírá všechny uplynulé konce.
  */
 const bulkClosurePeriod = ref<string | null>(null)
 // Počet vztahů k ukončení na tlačítku; výpadek náhledu tlačítko neschová.
@@ -262,11 +281,11 @@ function openBulkFromQuery(bulk: unknown) {
     statutoryBulkOpen.value = false
     declarationSignBulkOpen.value = true
   } else if (bulk === 'statutory_defaults' && canCreatePerson.value) {
-    statutoryBulkOpen.value = true
+    openWithBulkPeriod(() => { statutoryBulkOpen.value = true })
   } else if (bulk === 'health_insurer' && canQuickEditPerson.value) {
-    healthInsurerBulkOpen.value = true
+    openWithBulkPeriod(() => { healthInsurerBulkOpen.value = true })
   } else if (bulk === 'workplace' && canWriteEmployment.value) {
-    workplaceBulkOpen.value = true
+    openWithBulkPeriod(() => { workplaceBulkOpen.value = true })
   } else if (bulk === 'closure' && canWriteEmployment.value) {
     const linked = payrollQueryValue(route.query, 'period')
     bulkClosurePeriod.value = linked !== null && /^\d{4}-(0[1-9]|1[0-2])$/.test(linked) ? linked : null
@@ -655,10 +674,10 @@ const peopleBulkActions = computed<ActionItem[]>(() => [
     tier: bulkClosureCount.value ? 'secondary' : 'overflow',
     variant: 'warning',
     show: canWriteEmployment.value,
-    run: () => {
-      bulkClosurePeriod.value = null
+    run: () => openWithBulkPeriod(() => {
+      bulkClosurePeriod.value = bulkRunPeriod.value
       bulkClosureOpen.value = true
-    },
+    }),
   },
   {
     key: 'statutory-bulk',
@@ -667,7 +686,7 @@ const peopleBulkActions = computed<ActionItem[]>(() => [
     tier: 'overflow',
     variant: 'warning',
     show: canCreatePerson.value,
-    run: () => { statutoryBulkOpen.value = true },
+    run: () => openWithBulkPeriod(() => { statutoryBulkOpen.value = true }),
   },
   {
     key: 'declaration-sign-bulk',
@@ -685,7 +704,7 @@ const peopleBulkActions = computed<ActionItem[]>(() => [
     tier: 'overflow',
     variant: 'warning',
     show: canQuickEditPerson.value,
-    run: () => { healthInsurerBulkOpen.value = true },
+    run: () => openWithBulkPeriod(() => { healthInsurerBulkOpen.value = true }),
   },
   {
     key: 'workplace-bulk',
@@ -694,7 +713,7 @@ const peopleBulkActions = computed<ActionItem[]>(() => [
     tier: 'overflow',
     variant: 'warning',
     show: canWriteEmployment.value,
-    run: () => { workplaceBulkOpen.value = true },
+    run: () => openWithBulkPeriod(() => { workplaceBulkOpen.value = true }),
   },
   {
     key: 'terms-bulk',
@@ -703,7 +722,7 @@ const peopleBulkActions = computed<ActionItem[]>(() => [
     tier: 'overflow',
     variant: 'warning',
     show: canWriteEmployment.value,
-    run: () => { termsBulkOpen.value = true },
+    run: () => openWithBulkPeriod(() => { termsBulkOpen.value = true }),
   },
 ])
 
@@ -1742,8 +1761,14 @@ const payrollStartPeriod = ref<string | null>(null)
 async function loadBulkClosureCount() {
   if (!canWriteEmployment.value) return
   try {
-    const preview = await payrollApi.bulkClosurePreview()
-    bulkClosureCount.value = preview.summary.expired + preview.summary.inactive - preview.summary.blocked
+    await bulkPeriodResolved
+    const period = bulkRunPeriod.value
+    const preview = await payrollApi.bulkClosurePreview(period === null ? {} : { period })
+    // S obdobím běhu tlačítko slibuje totéž, co hlásí kontrola před během
+    // a co dialog předvybere: dohody skončené před tímto měsícem.
+    bulkClosureCount.value = period === null
+      ? preview.summary.expired + preview.summary.inactive - preview.summary.blocked
+      : preview.items.filter(item => item.before_period === true && item.blocked_reason === null).length
   } catch {
     bulkClosureCount.value = null
   }

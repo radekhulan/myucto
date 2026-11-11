@@ -78,6 +78,7 @@ describe('PayrollBulkClosureDialog', () => {
     m.bulkClosurePreview.mockResolvedValue({
       ...preview(),
       period_start: '2026-02-01',
+      summary: { expired: 3, inactive: 0, archive: 0, blocked: 0 },
       items: [
         item({ employment_id: 21, full_name: 'Konec v lednu', agreed_end_on: '2026-01-31', proposed_on: '2026-01-31', before_period: true }),
         item({ employment_id: 22, full_name: 'Konec v únoru', agreed_end_on: '2026-02-28', proposed_on: '2026-02-28', before_period: false }),
@@ -92,6 +93,8 @@ describe('PayrollBulkClosureDialog', () => {
     expect((wrapper.get('[data-test="bulk-closure-select-21"]').element as HTMLInputElement).checked).toBe(true)
     expect((wrapper.get('[data-test="bulk-closure-select-22"]').element as HTMLInputElement).checked).toBe(false)
     expect((wrapper.get('[data-test="bulk-closure-select-23"]').element as HTMLInputElement).checked).toBe(false)
+    // Dlaždice počítá totéž co kontrola běhu za únor, ne všechny konce k dnešku.
+    expect(wrapper.get('[data-test="bulk-closure-count-expired"]').text()).toBe('1')
     const note = wrapper.get('[data-test="bulk-closure-period-note"]').text()
     expect(note).toContain('payroll.bulk_closure.period_note')
     expect(note).toContain('payroll.bulk_closure.period_later')

@@ -3822,6 +3822,7 @@
       "open_runs": "Otevřít mzdové běhy"
     },
     "health_insurer_bulk": {
+      "known_later": "Pojišťovna je u osoby zapsaná až od {period}, předvyplněno k potvrzení.",
       "title": "Zdravotní pojišťovny hromadně",
       "open": "Zdravotní pojišťovny hromadně",
       "intro": "Osoby, kterým v období {period} trvá pracovní vztah a v zákonné evidenci nemají zdravotní pojišťovnu. Hlášení JMHZ ani export ČSSZ ji nenesou; bez ní výpočet zdravotního pojištění skončí chybou.",
@@ -4337,6 +4338,9 @@
         "inputs_action": "Schválit všechny mzdové vstupy",
         "components": "Doplňte mzdu (základní složku) těm, kdo ji v měsíci nemají. Pokud příjem opravdu nevznikl, zadejte 0 Kč.",
         "components_action": "Otevřít měsíční vstupy",
+        "statutory": "Doplňte údaje v zákonné evidenci, které výpočet u osob hlásí (například zdravotní pojišťovnu, daňovou rezidenci nebo příslušnost k pojištění). Odkaz u každé osoby v kontrolách běhu otevře místo opravy.",
+        "statutory_action": "Zobrazit, co chybí",
+        "statutory_people_action": "Otevřít osoby s chybějícími údaji",
         "refresh": "Až bude hotovo, načtěte opravené podklady do běhu. Mzdy se rovnou přepočítají.",
         "refresh_action": "Obnovit podklady a přepočítat",
         "restart_action": "Začít znovu a spočítat"
@@ -4906,7 +4910,7 @@
         "open_all": "Otevřít agendu pro všechny dotčené ({count})",
         "fill_probable_average": "Doplnit pravděpodobný výdělek ze sazby",
         "bulk": {
-          "statutory_defaults": "Doplnit výchozí zákonné údaje ({count})",
+          "statutory_defaults": "Doplnit výchozí zákonné údaje od {period} ({count})",
           "declaration_signed": "Podepsaná prohlášení hromadně",
           "health_insurer": "Zdravotní pojišťovny hromadně ({count})",
           "workplace": "Doplnit místo výkonu práce ({count})",

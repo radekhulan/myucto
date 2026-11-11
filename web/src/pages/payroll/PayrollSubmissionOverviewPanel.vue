@@ -783,7 +783,7 @@ onMounted(load)
 // a přepíše; rozbalený detail ani rozdělaná akce se nezavírají.
 useWindowRefresh(load, () => !loading.value && expandedId.value === null && settlingId.value === null
   && sendingHealthKey.value === null && !healthBatchBusy.value && externalFilingItem.value === null
-  && healthBatchTransport.value === null)
+  && healthBatchTransport.value === null, { partial: true })
 </script>
 
 <template>
