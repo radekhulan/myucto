@@ -75,6 +75,9 @@ final class PayrollStatutoryEvidenceBulkDefaultsAction
         // Jen doslovné `true`: nepodepsané prohlášení je tvrzení, které
         // nesmí vzniknout z „1", „ano" ani z chybějícího klíče.
         $recordUnsigned = ($body['record_unsigned_declaration'] ?? false) === true;
+        // Cizinec s pobytem a prací v Česku: českou rezidenci a příslušnost
+        // potvrzuje účetní výslovně, opět jen doslovné `true`.
+        $confirmForeign = ($body['confirm_foreign_citizens'] ?? false) === true;
 
         try {
             $result = $this->bulk->apply(
@@ -86,6 +89,7 @@ final class PayrollStatutoryEvidenceBulkDefaultsAction
                 $this->userId($request),
                 $this->clientIp($request),
                 $request->getHeaderLine('User-Agent'),
+                $confirmForeign,
             );
         } catch (\InvalidArgumentException $exception) {
             return $this->invalid($response, $exception->getMessage());

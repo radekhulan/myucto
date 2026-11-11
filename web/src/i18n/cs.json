@@ -3908,6 +3908,8 @@
       "retry": "Zkusit znovu"
     },
     "statutory_bulk": {
+      "foreign_label": "Potvrzuji, že {count} cizinců s občanstvím nebo povolením k pobytu tu žije a pracuje bez formuláře A1: doplnit jim českou daňovou rezidenci a českou příslušnost k pojištění",
+      "foreign_hint": "Daňovým rezidentem je, kdo má v Česku bydliště nebo se tu zdržuje přes 183 dní (§ 2 odst. 2 ZDP); bez A1 podléhá pojištění státu, kde pracuje (čl. 11 nařízení 883/2004). Osoby s adresou v cizině, A1 nebo cizím režimem zůstávají vyloučené. Potvrzení se zapíše do poznámky věty.",
       "title": "Doplnit výchozí zákonné údaje",
       "intro": "Osobám bez cizího prvku doplní chybějící údaje, které plynou z toho, že s cizinou nemají nic společného: daňovou rezidenci v Česku, českou příslušnost k pojištění bez formuláře A1 a u osob mladších 60 let neuplatňování slevy pracujícího důchodce. Existující záznam se nikdy nepřepíše. Zdravotní pojišťovnu hromadně nedoplníme, zná ji jen registrace nebo zaměstnanec.",
       "period": "Údaje platí od měsíce",

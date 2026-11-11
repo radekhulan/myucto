@@ -49,12 +49,19 @@ export function bulkCodeKey(group: BulkCodeGroup, code: string): string | null {
  * Pořadí drží náhled, duplicity se vynechají.
  */
 export function bulkApplyEmployeeIds(
-  preview: Pick<PayrollStatutoryBulkPreview, 'ready_employee_ids' | 'declaration_missing_employee_ids'>,
+  preview: Pick<PayrollStatutoryBulkPreview, 'ready_employee_ids' | 'declaration_missing_employee_ids'>
+    & Partial<Pick<PayrollStatutoryBulkPreview, 'excluded'>>,
   recordUnsignedDeclaration: boolean,
+  confirmForeignCitizens = false,
 ): number[] {
   const ids = new Set(preview.ready_employee_ids)
   if (recordUnsignedDeclaration) {
     for (const id of preview.declaration_missing_employee_ids) ids.add(id)
+  }
+  if (confirmForeignCitizens) {
+    for (const person of preview.excluded ?? []) {
+      if (person.foreign_confirmable) ids.add(person.employee_id)
+    }
   }
   return [...ids]
 }

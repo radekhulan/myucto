@@ -3908,6 +3908,8 @@
       "retry": "Try again"
     },
     "statutory_bulk": {
+      "foreign_label": "I confirm that {count} foreign nationals with citizenship or a residence permit live and work here without an A1 form: record Czech tax residence and Czech insurance jurisdiction",
+      "foreign_hint": "A tax resident has a home in Czechia or stays here over 183 days (§ 2(2) Income Tax Act); without A1 the insurance of the state of work applies (Art. 11 Reg. 883/2004). People with an address abroad, A1 or a foreign regime stay excluded. The confirmation is recorded in the note.",
       "title": "Fill in default statutory data",
       "intro": "For people without a foreign element, fills in the missing data that follows from having no ties abroad: Czech tax residence, Czech insurance jurisdiction without an A1 form and, for people under 60, the working pensioner discount not claimed. An existing record is never overwritten. The health insurer is never filled in bulk; only the registration or the employee knows it.",
       "period": "Data valid from month",

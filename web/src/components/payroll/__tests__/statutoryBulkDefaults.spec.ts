@@ -60,6 +60,18 @@ describe('bulkApplyEmployeeIds', () => {
   it('s potvrzením přidá osoby bez prohlášení, každou jednou', () => {
     expect(bulkApplyEmployeeIds(preview, true)).toEqual([3, 1, 7])
   })
+
+  it('cizince s pobytem bez A1 přidá jen s výslovným potvrzením', () => {
+    const withForeign = {
+      ...preview,
+      excluded: [
+        { employee_id: 9, full_name: 'UA', reasons: ['foreign_element'], foreign_elements: ['foreign_permit'], foreign_confirmable: true },
+        { employee_id: 10, full_name: 'SK', reasons: ['foreign_element'], foreign_elements: ['address_abroad'], foreign_confirmable: false },
+      ],
+    }
+    expect(bulkApplyEmployeeIds(withForeign, false)).toEqual([3, 1])
+    expect(bulkApplyEmployeeIds(withForeign, false, true)).toEqual([3, 1, 9])
+  })
 })
 
 describe('bulkCodeKey', () => {

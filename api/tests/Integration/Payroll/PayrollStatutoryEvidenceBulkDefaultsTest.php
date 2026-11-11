@@ -189,6 +189,54 @@ final class PayrollStatutoryEvidenceBulkDefaultsTest extends TestCase
         }
     }
 
+    /**
+     * Agentura s občany UA a SK, kteří tu žijí a pracují bez A1: cizí občanství
+     * výchozí stav nevylučuje, jen ho musí účetní výslovně potvrdit. Adresa
+     * v cizině ani A1 se potvrzením nepřebíjí.
+     */
+    public function testForeignCitizenWithoutA1GetsDefaultsOnlyOnExplicitConfirmation(): void
+    {
+        $citizen = $this->person(citizenship: 'UA');
+        $addressAbroad = $this->person(citizenship: 'SK');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_addresses
+                (supplier_id, employee_id, address_type, street_line, city,
+                 postal_code, country_code, effective_from)
+             VALUES (?, ?, "residence", "Syntetická 1", "Bratislava", "81101", "SK", "2025-01-01")'
+        )->execute([$this->supplierId, $addressAbroad]);
+
+        $preview = $this->bulk->preview($this->supplierId, self::EFFECTIVE_ON, [$citizen, $addressAbroad]);
+        $people = $this->byEmployee($preview['people']);
+        self::assertSame('excluded', $people[$citizen]['status']);
+        self::assertTrue($people[$citizen]['foreign_confirmable']);
+        self::assertFalse($people[$addressAbroad]['foreign_confirmable']);
+        self::assertSame(1, $preview['summary']['foreign_confirmable']);
+
+        $unconfirmed = $this->apply([$citizen]);
+        self::assertSame(0, $unconfirmed['counts']['applied']);
+
+        $result = $this->bulk->apply(
+            $this->supplierId,
+            self::EFFECTIVE_ON,
+            [$citizen, $addressAbroad],
+            PayrollStatutoryEvidenceBulkDefaults::DEFAULT_SECTIONS,
+            false,
+            $this->userId,
+            null,
+            null,
+            true,
+        );
+        self::assertSame([$citizen], array_column($result['applied'], 'employee_id'));
+        self::assertTrue($result['applied'][0]['foreign_confirmed']);
+        self::assertSame([$addressAbroad], array_column($result['skipped'], 'employee_id'));
+
+        $view = $this->view($citizen);
+        self::assertSame('czech-resident', $view['sections']['tax_residences'][0]['residence']);
+        self::assertSame('czech_regime_verified', $view['sections']['social_jurisdictions'][0]['jurisdiction']);
+        self::assertStringContainsString('cizinec s pobytem a prací v Česku bez A1', (string) $view['sections']['tax_residences'][0]['evidence_note']);
+        self::assertSame(0, $this->rowCount('payroll_person_tax_residences', $addressAbroad));
+    }
+
     public function testExistingSentenceIsNeverRewritten(): void
     {
         $employeeId = $this->person();
@@ -555,7 +603,12 @@ final class PayrollStatutoryEvidenceBulkDefaultsTest extends TestCase
         // Osoba s indexem 0 prohlášení nemá, osoba s indexem 1 má podepsané.
         $fixture->seed(3);
 
-        self::assertSame([], $this->summaryWarnings());
+        // Osoba bez záznamu o prohlášení je zákonem „nepodepsaná" (audit
+        // 12. 11. 2026 ř. 9), takže souhrn ji počítá už teď.
+        $missing = $this->summaryWarnings();
+        self::assertCount(1, $missing);
+        self::assertStringContainsString('prohlášením poplatníka k dani: 2.', $missing[0]->message);
+        self::assertStringContainsString('bez záznamu o prohlášení se počítá jako nepodepsaná', $missing[0]->message);
 
         foreach ([$fixture->employeeIds[0], $fixture->employeeIds[2]] as $employeeId) {
             $this->db->pdo()->prepare(

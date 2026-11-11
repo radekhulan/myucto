@@ -57,12 +57,13 @@ const preview = ref<PayrollStatutoryBulkPreview | null>(null)
 const loading = ref(false)
 const loadError = ref('')
 const recordUnsigned = ref(false)
+const confirmForeign = ref(false)
 const applying = ref(false)
 const applyError = ref('')
 const result = ref<PayrollStatutoryBulkResult | null>(null)
 
 const effectiveOn = computed(() => `${period.value}-01`)
-const applyIds = computed(() => preview.value ? bulkApplyEmployeeIds(preview.value, recordUnsigned.value) : [])
+const applyIds = computed(() => preview.value ? bulkApplyEmployeeIds(preview.value, recordUnsigned.value, confirmForeign.value) : [])
 const names = computed(() => new Map((preview.value?.people ?? []).map(person => [person.employee_id, person.full_name])))
 const discountObstacles = computed(() => preview.value ? discountObstacleCounts(preview.value) : [])
 const basisCounts = computed(() => preview.value ? effectiveBasisCounts(preview.value) : [])
@@ -103,6 +104,7 @@ async function loadPreview() {
   result.value = null
   applyError.value = ''
   recordUnsigned.value = false
+  confirmForeign.value = false
   try {
     preview.value = await payrollApi.statutoryBulkDefaultsPreview({
       effective_on: effectiveOn.value,
@@ -125,6 +127,7 @@ async function apply() {
       effective_on: effectiveOn.value,
       employee_ids: applyIds.value,
       ...(recordUnsigned.value ? { record_unsigned_declaration: true } : {}),
+      ...(confirmForeign.value ? { confirm_foreign_citizens: true } : {}),
     })
     result.value = response
     toast.success(t('payroll.statutory_bulk.applied_toast', { count: response.counts.applied }))
@@ -254,6 +257,30 @@ onMounted(loadPreview)
             </li>
           </ul>
         </details>
+
+        <!--
+          Cizinci (UA, SK) s pobytem a prací v Česku bez A1: občanství nebo
+          povolení k pobytu českou rezidenci ani příslušnost nevylučuje, ale
+          hromadně se doplní jen na výslovné potvrzení.
+        -->
+        <label
+          v-if="preview.summary.foreign_confirmable"
+          class="flex items-start gap-2 rounded-lg border p-3 text-sm"
+          :class="confirmForeign ? 'border-danger-500/40 bg-danger-50 text-danger-800' : 'border-warning-200 bg-warning-50 text-warning-800'"
+          data-test="statutory-bulk-foreign"
+        >
+          <input
+            v-model="confirmForeign"
+            type="checkbox"
+            class="mt-0.5 rounded border-neutral-300 text-danger-600"
+            data-test="statutory-bulk-confirm-foreign"
+            :disabled="applying"
+          >
+          <span>
+            <span class="font-medium">{{ t('payroll.statutory_bulk.foreign_label', { count: preview.summary.foreign_confirmable }) }}</span>
+            <span class="mt-0.5 block text-xs">{{ t('payroll.statutory_bulk.foreign_hint') }}</span>
+          </span>
+        </label>
 
         <section
           v-if="preview.health_insurer_missing.length"

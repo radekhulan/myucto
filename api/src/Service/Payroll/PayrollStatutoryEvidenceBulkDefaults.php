@@ -70,6 +70,20 @@ final class PayrollStatutoryEvidenceBulkDefaults
 
     private const NOTE_DEFAULTS = 'Doplněno hromadně účetní %s: výchozí stav bez cizího prvku';
 
+    /**
+     * Cizí prvky, které českou rezidenci ani příslušnost nevylučují: cizinec
+     * s povolením k pobytu, který tu žije a pracuje bez A1 (agentura s občany
+     * UA a SK), je daňový rezident (§ 2 odst. 2 ZDP, bydliště nebo 183 dní)
+     * a podle místa výkonu práce podléhá českým předpisům (čl. 11 odst. 3
+     * písm. a) nařízení 883/2004). Hromadně se doplní jen na výslovné
+     * potvrzení účetní; adresa v cizině, A1 nebo cizí režim zůstávají
+     * vyloučením, protože tam výchozí stav platit nemusí.
+     */
+    public const CONFIRMABLE_FOREIGN_ELEMENTS = ['foreign_citizenship', 'foreign_permit'];
+
+    private const NOTE_FOREIGN = 'Doplněno hromadně účetní %s: cizinec s pobytem a prací v Česku bez A1,'
+        . ' česká rezidence a příslušnost potvrzeny při hromadném doplnění';
+
     private const NOTE_DECLARATION = 'Doplněno hromadně účetní %s: prohlášení poplatníka nepodepsáno'
         . ' (potvrzeno při hromadném doplnění)';
 
@@ -108,6 +122,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
             'declaration_missing' => 0,
             'unsigned_declaration_withholding_risk' => 0,
             'health_insurer_missing' => 0,
+            'foreign_confirmable' => 0,
         ];
         $ready = [];
         $declarationMissing = [];
@@ -127,7 +142,11 @@ final class PayrollStatutoryEvidenceBulkDefaults
                 $excluded[] = $person + [
                     'reasons' => $row['reasons'],
                     'foreign_elements' => $row['foreign_elements'],
+                    'foreign_confirmable' => $row['foreign_confirmable'],
                 ];
+                if ($row['foreign_confirmable']) {
+                    $summary['foreign_confirmable']++;
+                }
                 continue;
             }
             if ($row['status'] === 'ready') {
@@ -189,6 +208,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
         ?int $userId,
         ?string $ip,
         ?string $userAgent,
+        bool $confirmForeignCitizens = false,
     ): array {
         $monthStart = $this->monthStart($effectiveOn);
         $ids = $this->normalizeIds($employeeIds);
@@ -211,6 +231,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
                 $userId,
                 $ip,
                 $userAgent,
+                $confirmForeignCitizens,
             );
             if ($outcome['status'] === 'applied') {
                 $applied[] = ['employee_id' => $employeeId] + $outcome['detail'];
@@ -230,6 +251,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
                 'effective_on' => $effectiveOn,
                 'sections' => $targets,
                 'record_unsigned_declaration' => $recordUnsignedDeclaration,
+                'confirm_foreign_citizens' => $confirmForeignCitizens,
                 'applied_employee_ids' => array_column($applied, 'employee_id'),
                 'skipped_employee_ids' => array_column($skipped, 'employee_id'),
                 'failed_employee_ids' => array_column($failed, 'employee_id'),
@@ -266,6 +288,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
         ?int $userId,
         ?string $ip,
         ?string $userAgent,
+        bool $confirmForeignCitizens = false,
     ): array {
         $pdo = $this->db->pdo();
         $owns = !$pdo->inTransaction();
@@ -285,6 +308,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
                 $monthStart,
                 $this->freeze->frozenThrough($supplierId),
                 [$employeeId],
+                $confirmForeignCitizens,
             )[$employeeId] ?? null;
             if ($assessment === null) {
                 $this->rollback($owns);
@@ -307,7 +331,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
             $this->evidence->save(
                 $supplierId,
                 $employeeId,
-                $this->payload($view, $additions, $effectiveFrom, $today),
+                $this->payload($view, $additions, $effectiveFrom, $today, $assessment['foreign_confirmed']),
                 $effectiveFrom,
                 $userId,
                 $ip,
@@ -318,6 +342,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
             return ['status' => 'applied', 'detail' => [
                 'sections' => $additions,
                 'effective_from' => $effectiveFrom,
+                'foreign_confirmed' => $assessment['foreign_confirmed'],
             ]];
         } catch (\Exception $exception) {
             // Odvolaná transakce (1020/1213) savepoint nemá. Vlastní transakce osoby je tím
@@ -366,7 +391,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
      * @param list<string> $additions
      * @return array<string,mixed>
      */
-    private function payload(array $view, array $additions, string $effectiveFrom, string $today): array
+    private function payload(array $view, array $additions, string $effectiveFrom, string $today, bool $foreignConfirmed = false): array
     {
         $sections = [];
         foreach (PayrollPersonStatutoryEvidenceRepository::EDITABLE_SECTIONS as $key) {
@@ -394,7 +419,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
             $from = $lastEnd !== null && PayrollPersonStatutoryEvidenceRepository::isContiguous($key)
                 ? (new DateTimeImmutable($lastEnd))->modify('+1 day')->format('Y-m-d')
                 : $effectiveFrom;
-            $sections[$key][] = $this->defaultRow($key, $from, $today);
+            $sections[$key][] = $this->defaultRow($key, $from, $today, $foreignConfirmed);
         }
 
         return ['sections' => $sections];
@@ -423,7 +448,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
     }
 
     /** @return array<string,?string> */
-    private function defaultRow(string $key, string $effectiveFrom, string $today): array
+    private function defaultRow(string $key, string $effectiveFrom, string $today, bool $foreignConfirmed = false): array
     {
         $values = match ($key) {
             'tax_residences' => [
@@ -457,7 +482,11 @@ final class PayrollStatutoryEvidenceBulkDefaults
             'effective_from' => $effectiveFrom,
             'effective_to' => null,
             'evidence_note' => sprintf(
-                $key === self::DECLARATION_SECTION ? self::NOTE_DECLARATION : self::NOTE_DEFAULTS,
+                match (true) {
+                    $key === self::DECLARATION_SECTION => self::NOTE_DECLARATION,
+                    $foreignConfirmed => self::NOTE_FOREIGN,
+                    default => self::NOTE_DEFAULTS,
+                },
                 $today,
             ),
         ];
@@ -482,6 +511,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
                 'status' => 'excluded',
                 'reasons' => ['employee_not_found'],
                 'foreign_elements' => [],
+                'foreign_confirmable' => false,
                 'effective_from' => null,
                 'effective_from_basis' => null,
                 'sections' => $sections,
@@ -509,6 +539,8 @@ final class PayrollStatutoryEvidenceBulkDefaults
             'status' => $status,
             'reasons' => $assessment['excluded'],
             'foreign_elements' => $assessment['foreign_elements'],
+            'foreign_confirmable' => $assessment['foreign_confirmable']
+                && $assessment['excluded'] === ['foreign_element'],
             'effective_from' => $assessment['effective_from'],
             'effective_from_basis' => $assessment['effective_from_basis'],
             'sections' => $assessment['sections'],
@@ -533,6 +565,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
         string $monthStart,
         ?string $frozenThrough,
         array $employeeIds,
+        bool $confirmForeignCitizens = false,
     ): array {
         if ($employeeIds === []) {
             return [];
@@ -613,6 +646,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
                 $coveredThrough,
                 $monthStart,
                 $frozenThrough,
+                $confirmForeignCitizens,
             );
         }
 
@@ -720,8 +754,12 @@ final class PayrollStatutoryEvidenceBulkDefaults
         array $coveredThrough,
         string $monthStart,
         ?string $frozenThrough,
+        bool $confirmForeignCitizens = false,
     ): array {
         sort($foreignElements);
+        $blockingForeign = $confirmForeignCitizens
+            ? array_values(array_diff($foreignElements, self::CONFIRMABLE_FOREIGN_ELEMENTS))
+            : $foreignElements;
         $excluded = [];
         $effectiveFrom = null;
         $basis = null;
@@ -741,7 +779,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
                 $excluded[] = 'period_frozen';
             }
         }
-        if ($foreignElements !== []) {
+        if ($blockingForeign !== []) {
             $excluded[] = 'foreign_element';
         }
 
@@ -784,6 +822,9 @@ final class PayrollStatutoryEvidenceBulkDefaults
             'effective_from_basis' => $basis,
             'excluded' => $excluded,
             'foreign_elements' => $foreignElements,
+            'foreign_confirmable' => $foreignElements !== []
+                && array_diff($foreignElements, self::CONFIRMABLE_FOREIGN_ELEMENTS) === [],
+            'foreign_confirmed' => $foreignElements !== [] && $blockingForeign === [],
             'sections' => $sections,
             'health_insurer_missing' => ($counts['health_coverages'][$employeeId] ?? 0) === 0,
             'withholding_employment_ids' => $declarationMissing && $excluded === []

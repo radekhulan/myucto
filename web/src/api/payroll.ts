@@ -975,6 +975,8 @@ export interface PayrollStatutoryBulkExcluded extends PayrollStatutoryBulkPerson
   reasons: string[]
   /** Kódy cizího prvku: address_abroad, foreign_citizenship, foreign_permit, … */
   foreign_elements: string[]
+  /** Jen občanství nebo povolení k pobytu: výchozí stav jde doplnit s potvrzením. */
+  foreign_confirmable?: boolean
 }
 
 export interface PayrollStatutoryBulkSectionState {
@@ -1011,6 +1013,7 @@ export interface PayrollStatutoryBulkPreview {
     declaration_missing: number
     unsigned_declaration_withholding_risk: number
     health_insurer_missing: number
+    foreign_confirmable?: number
   }
   ready_employee_ids: number[]
   declaration_missing_employee_ids: number[]
@@ -1026,6 +1029,8 @@ export interface PayrollStatutoryBulkApplyPayload {
   sections?: string[]
   /** Server bere jen doslovné `true`. */
   record_unsigned_declaration?: boolean
+  /** Cizinci s pobytem a prací v Česku bez A1: česká rezidence a příslušnost. Jen doslovné `true`. */
+  confirm_foreign_citizens?: boolean
 }
 
 export interface PayrollStatutoryBulkResult {
