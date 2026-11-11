@@ -4782,6 +4782,7 @@
         "employments_added": "Employments that now belong to the period: {count}",
         "employments_removed": "Employments that no longer belong to the period: {count}",
         "statutory_evidence_changed": "People with changed statutory records: {count}",
+        "employment_terms_changed": "Relationships with changed terms (primary relationship, place of work, payroll office, working time): {count}",
         "action": "Click “Refresh inputs”, then recalculate the run.",
         "action_forbidden": "Inputs can be refreshed by a user allowed to calculate payroll and write payroll inputs."
       },
@@ -4797,7 +4798,8 @@
           "declaration_signed": "Signed declarations in bulk",
           "health_insurer": "Health insurers in bulk ({count})",
           "workplace": "Fill in place of work ({count})",
-          "closure": "End finished agreements ({count})"
+          "closure": "End finished agreements ({count})",
+          "annual_settlement_request": "Mark annual settlement as not requested ({count})"
         },
         "fill_probable_average_done": "Filled in automatically from the agreed hourly rate: {count}. The average can be corrected with a new revision in Absences and leave → Average earnings.",
         "fill_probable_average_failed": "Probable earnings could not be filled in.",
@@ -5774,7 +5776,8 @@
         "all": "All",
         "requested": "Requested, not settled",
         "unsettled": "Not settled",
-        "settled": "Settled"
+        "settled": "Settled",
+        "request_undecided": "Request undecided"
       },
       "not_settled": "Not performed",
       "detail": "Details",

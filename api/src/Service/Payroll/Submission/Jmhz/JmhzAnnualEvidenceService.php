@@ -165,6 +165,96 @@ final readonly class JmhzAnnualEvidenceService
     }
 
     /**
+     * Hlášení za leden a únor nese odpověď, zda zaměstnanec požádal o roční
+     * zúčtování za minulý rok (10319). Jindy se stav žádosti nehlásí.
+     */
+    public static function requestStatusReported(string $periodStart): bool
+    {
+        $month = (int) substr($periodStart, 5, 2);
+
+        return $month >= 1 && $month <= 2;
+    }
+
+    /**
+     * Kód blokace stavu žádosti o roční zúčtování (10319), nebo null.
+     *
+     * Jediné místo pravidla. Volá ho zmrazení hlášení
+     * ({@see JmhzScenario1DocumentResolver}) i kontrola před zahájením běhu
+     * ({@see self::requestIssuesForProbe()}): účetní se o osobách bez
+     * rozhodnutí dřív dozvěděla až u zmrazení hlášení po schválení běhu.
+     *
+     * @param bool $requestPresent existuje řádek žádosti za zdaňovací rok
+     * @param ?string $verifiedStatus stav ověřeného řádku, jinak null
+     * @param bool $requestImpossible osoba v roce u firmy nepracovala a rok mzdy pokrývají celý
+     */
+    public static function requestIssueCode(
+        bool $requestPresent,
+        ?string $verifiedStatus,
+        bool $requestImpossible,
+    ): ?string {
+        if ($requestPresent) {
+            return in_array($verifiedStatus, ['requested', 'not_requested'], true)
+                ? null
+                : 'jmhz_annual_request_status_unresolved';
+        }
+
+        return $requestImpossible ? null : 'jmhz_annual_request_source_missing';
+    }
+
+    /**
+     * Osoby, u kterých zmrazení hlášení za období zastaví nerozhodnutý stav
+     * žádosti o roční zúčtování — nasucho, bez zámků a bez zápisu.
+     *
+     * Tytéž zdroje jako {@see self::snapshotsForPreparation()} (řádek žádosti,
+     * pokrytí roku a vztahy v roce), jen jedním dotazem přes všechny osoby
+     * místo zamykaného čtení po jedné. Rozhoduje {@see self::requestIssueCode()}.
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,string> employee_id => kód blokace
+     */
+    public function requestIssuesForProbe(int $supplierId, array $employeeIds, string $periodStart): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $employeeIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($ids === [] || !self::requestStatusReported($periodStart)) {
+            return [];
+        }
+        $taxYear = (int) substr($periodStart, 0, 4) - 1;
+        $statuses = [];
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT employee_id, request_status
+                   FROM payroll_annual_settlement_requests
+                  WHERE supplier_id = ? AND tax_year = ?
+                    AND employee_id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')',
+            );
+            $stmt->execute([$supplierId, $taxYear, ...$chunk]);
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                $statuses[(int) $row['employee_id']] = (string) $row['request_status'];
+            }
+        }
+        $withoutTaxYearEmployment = $this->yearCoveredByPayroll($supplierId, $taxYear)
+            ? array_diff($ids, $this->employeesEmployedInYear($supplierId, $ids, $taxYear))
+            : [];
+
+        $issues = [];
+        foreach ($ids as $employeeId) {
+            $code = self::requestIssueCode(
+                array_key_exists($employeeId, $statuses),
+                $statuses[$employeeId] ?? null,
+                in_array($employeeId, $withoutTaxYearEmployment, true),
+            );
+            if ($code !== null) {
+                $issues[$employeeId] = $code;
+            }
+        }
+
+        return $issues;
+    }
+
+    /**
      * Úhrn měsíčních daňových bonusů za zdaňovací rok (JMHZ 10577, jen leden
      * verze 2027) z roční zákonné kumulace daně: počáteční stav (převzatá část
      * roku) plus schválené měsíce. Je to týž úhrn, který roční zúčtování bere

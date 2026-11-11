@@ -978,6 +978,7 @@ final class PayrollRunSnapshotBuilder
      * @param list<int> $employeeIds osoby zmrazeného snímku
      * @return array{
      *   eligible_employment_ids:list<int>,
+     *   employment_facts:array<int,array<string,mixed>>,
      *   inputs:array<int,list<array<string,mixed>>>,
      *   absences:array<int,list<array<string,mixed>>>,
      *   worked_time_evidence:array<int,array<string,mixed>>,
@@ -1048,8 +1049,13 @@ final class PayrollRunSnapshotBuilder
         $monthlyParts = (new PayrollHourlyMonthlyParts($this->db))->forMany($supplierId, $periodStart, $eligibleRows, $hourlyTerms, false, \MyInvoice\Service\Payroll\PayrollHourlyWagePreview::minimumFundIds($hourlyContexts));
         foreach ($monthlyParts as $id => $part) $hourlyContexts[$id]['monthly_fund_source'] = $part['source'];
         $hourlyAverageCheck = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageInputGuard($this->db))->invalidInputs($supplierId, $periodStart, $inputRows, $hourlyContexts);
+        $employmentFacts = [];
+        foreach ($eligibleRows as $row) {
+            $employmentFacts[(int) $row['employment_id']] = self::employmentDriftFactsFromRow($row);
+        }
         return [
             'eligible_employment_ids' => $eligible,
+            'employment_facts' => $employmentFacts,
             'worked_time_evidence' => $hourlySources,
             'hourly_entitlement_context' => $hourlyContexts,
             'hourly_average_input_sources' => $hourlyAverageCheck['source'],
@@ -1063,6 +1069,125 @@ final class PayrollRunSnapshotBuilder
             'absences' => $absences,
             'statutory_evidence' => $statutoryEvidence,
         ];
+    }
+
+    /**
+     * Údaje vztahu, které snímek nese a které účetní mění běžnou prací (hlavní
+     * vztah, místo výkonu, účtárna, úvazek, druh činnosti, mzda). Jméno osoby
+     * záměrně ne: výpočet nemění a oprava překlepu nemá zastavit schválení.
+     *
+     * Dřív je detektor zastaralé revize nesledoval: po změně podmínek přepočet
+     * počítal ze starého snímku a jako „beze změny" se tvářil i seznam běhů,
+     * takže pomohlo jen ruční „Obnovit podklady". Hodnoty jdou z TÉHOŽ řádku
+     * `employmentRows()`, ze kterého je `build()` zapisuje do snímku; druhá
+     * strana ({@see self::employmentDriftFactsFromSnapshot()}) je čte ze
+     * zmrazeného snímku a obě prochází stejnou normalizací.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    public static function employmentDriftFactsFromRow(array $row): array
+    {
+        $hasTerm = $row['term_id'] !== null;
+
+        return self::normalizeDriftFacts([
+            'office_id' => $row['office_id'],
+            'relation_type' => $row['relation_type'],
+            'status' => $row['employment_status'],
+            'start_date' => $row['start_date'],
+            'actual_start_date' => $row['actual_start_date'],
+            'end_date' => $row['end_date'],
+            'monthly_gross_minor' => $row['monthly_gross_minor'],
+            'is_primary' => $row['term_is_primary'],
+            'term_id' => $row['term_id'],
+            ...array_combine(
+                array_map(static fn (string $key): string => 'term.' . $key, self::DRIFT_TERM_KEYS),
+                array_map(static fn (string $key): mixed => $hasTerm ? ($row[$key] ?? null) : null, self::DRIFT_TERM_KEYS),
+            ),
+        ]);
+    }
+
+    /**
+     * Protějšek {@see self::employmentDriftFactsFromRow()} ze zmrazeného snímku.
+     * Klíč, který starší snímek nenese, se vynechá, aby revize ze starší verze
+     * nehlásila změnu jen proto, že ho tehdy snímek nezapisoval.
+     *
+     * @param array<string,mixed> $entry vztah ze snímku (`people[].employments[]`)
+     * @return array<string,mixed>
+     */
+    public static function employmentDriftFactsFromSnapshot(array $entry): array
+    {
+        $employment = is_array($entry['employment'] ?? null) ? $entry['employment'] : [];
+        $term = is_array($entry['term'] ?? null) ? $entry['term'] : null;
+        $facts = [];
+        foreach ([
+            'office_id' => [$employment, 'office_id'],
+            'relation_type' => [$employment, 'relation_type'],
+            'status' => [$employment, 'status'],
+            'start_date' => [$employment, 'start_date'],
+            'actual_start_date' => [$employment, 'actual_start_date'],
+            'end_date' => [$employment, 'end_date'],
+            'monthly_gross_minor' => [$employment, 'monthly_gross_minor'],
+            'is_primary' => [$employment, 'is_primary'],
+        ] as $key => [$source, $field]) {
+            if (array_key_exists($field, $source)) {
+                $facts[$key] = $source[$field];
+            }
+        }
+        $facts['term_id'] = $term['id'] ?? null;
+        foreach (self::DRIFT_TERM_KEYS as $key) {
+            if ($term === null) {
+                $facts['term.' . $key] = null;
+            } elseif (array_key_exists($key, $term)) {
+                $facts['term.' . $key] = $term[$key];
+            }
+        }
+
+        return self::normalizeDriftFacts($facts);
+    }
+
+    /**
+     * Sloupce podmínek, které snímek přebírá beze změny pod stejným klíčem.
+     *
+     * @var list<string>
+     */
+    private const DRIFT_TERM_KEYS = [
+        'weekly_hours',
+        'workload_basis_points',
+        'activity_code',
+        'jmhz_relationship_detail_code',
+        'work_place',
+        'jmhz_workplace_municipality_code',
+        'jmhz_workplace_country_code',
+        'social_insurance_participation',
+        'health_insurance_participation',
+        'tax_regime',
+        'risky_work',
+        'social_employer_rate_category',
+    ];
+
+    /**
+     * Jednotné typy pro porovnání: čísla jako int, příznaky jako bool, zbytek
+     * jako text. PDO vrací z řádku texty, snímek nese už přetypované hodnoty.
+     *
+     * @param array<string,mixed> $facts
+     * @return array<string,mixed>
+     */
+    private static function normalizeDriftFacts(array $facts): array
+    {
+        $normalized = [];
+        foreach ($facts as $key => $value) {
+            $normalized[$key] = match (true) {
+                $value === null => null,
+                in_array($key, ['is_primary', 'term.risky_work'], true) => (bool) $value,
+                in_array($key, ['office_id', 'monthly_gross_minor', 'term_id', 'term.workload_basis_points'], true) => (int) $value,
+                $key === 'term.weekly_hours' => number_format((float) $value, 2, '.', ''),
+                default => (string) $value,
+            };
+        }
+        ksort($normalized);
+
+        return $normalized;
     }
 
     /** @param list<array<string,mixed>> $employments */

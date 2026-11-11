@@ -796,6 +796,7 @@ const SOURCE_DRIFT_KEYS = [
   'employments_added',
   'employments_removed',
   'statutory_evidence_changed',
+  'employment_terms_changed',
 ] as const
 
 /** Jen nenulové druhy změn — u 500 lidí nechceme číst sloupec nul. */
@@ -1221,10 +1222,17 @@ const READINESS_BULK_ICONS: Record<PayrollRunReadinessBulkKind, string> = {
   health_insurer: ICONS.clipboardCheck,
   workplace: ICONS.pin,
   closure: ICONS.archive,
+  annual_settlement_request: ICONS.check,
 }
 
 function readinessBulkTarget(kind: PayrollRunReadinessBulkKind) {
   const bulkPeriod = readiness.value?.period_start?.slice(0, 7) ?? period.value
+  if (kind === 'annual_settlement_request') {
+    // Hlášení za leden a únor se ptá na žádost za MINULÝ rok. Hromadné
+    // „nepožádal" je výběr na stránce Ročního zúčtování, zúžený na nerozhodnuté.
+    const taxYear = Number(bulkPeriod.slice(0, 4)) - 1
+    return { name: 'payroll-annual-settlement', query: { year: String(taxYear), state: 'request_undecided' } }
+  }
   return { name: 'payroll-people', query: { bulk: kind, period: bulkPeriod } }
 }
 

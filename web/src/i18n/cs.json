@@ -4782,6 +4782,7 @@
         "employments_added": "Pracovní vztahy, které do období nově patří: {count}",
         "employments_removed": "Pracovní vztahy, které do období už nepatří: {count}",
         "statutory_evidence_changed": "Osoby se změněnou zákonnou evidencí: {count}",
+        "employment_terms_changed": "Vztahy se změněnými podmínkami (hlavní vztah, místo výkonu, účtárna, úvazek): {count}",
         "action": "Klikněte na „Obnovit podklady“ a potom běh přepočítejte.",
         "action_forbidden": "Obnovit podklady může uživatel s právem počítat mzdy a zapisovat mzdové vstupy."
       },
@@ -4797,7 +4798,8 @@
           "declaration_signed": "Podepsaná prohlášení hromadně",
           "health_insurer": "Zdravotní pojišťovny hromadně ({count})",
           "workplace": "Doplnit místo výkonu práce ({count})",
-          "closure": "Ukončit skončené dohody ({count})"
+          "closure": "Ukončit skončené dohody ({count})",
+          "annual_settlement_request": "Nastavit „nepožádal“ o roční zúčtování ({count})"
         },
         "fill_probable_average_done": "Doplněno automaticky ze sjednané hodinové sazby: {count}. Průměr jde opravit novou revizí v Absence a dovolená → Průměrný výdělek.",
         "fill_probable_average_failed": "Pravděpodobný výdělek se nepodařilo doplnit.",
@@ -5774,7 +5776,8 @@
         "all": "Vše",
         "requested": "Požádali, nezúčtováno",
         "unsettled": "Bez zúčtování",
-        "settled": "Zúčtováno"
+        "settled": "Zúčtováno",
+        "request_undecided": "Žádost nerozhodnuta"
       },
       "not_settled": "Neprovedeno",
       "detail": "Podrobnosti",

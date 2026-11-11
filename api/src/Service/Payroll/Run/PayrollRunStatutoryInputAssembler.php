@@ -1496,10 +1496,11 @@ final class PayrollRunStatutoryInputAssembler
         $taxEvidence = $this->object($evidence['income_tax'] ?? null);
         $declarationRow = $this->object($taxEvidence['declaration'] ?? null);
         $residenceRow = $this->object($taxEvidence['residence'] ?? null);
+        $declarationIssue = self::taxDeclarationIssue($evidence);
         if ($declarationRow === null) {
             $this->issue(
                 'income_tax',
-                'tax_declaration_evidence_missing',
+                (string) $declarationIssue,
                 $personReference,
             );
         }
@@ -1531,10 +1532,10 @@ final class PayrollRunStatutoryInputAssembler
             );
             return null;
         }
-        if ($declarationStatus === TaxDeclarationStatus::Unverified) {
+        if ($declarationIssue !== null) {
             $this->issue(
                 'income_tax',
-                'tax_declaration_evidence_unverified',
+                $declarationIssue,
                 $personReference,
             );
         }
@@ -2932,6 +2933,34 @@ final class PayrollRunStatutoryInputAssembler
             return null;
         }
         return [$from, is_string($to) ? $to : null];
+    }
+
+    /**
+     * Blokátor daňového prohlášení ve zmrazené zákonné evidenci osoby, nebo null.
+     *
+     * Jediné místo pravidla „chybí ověřený stav daňového prohlášení". Volá ho
+     * výpočet běhu i kontrola před zahájením
+     * ({@see PayrollRunReadinessService}) nad týmž snímkem; dřív kontrola četla
+     * živé tabulky s překryvem intervalů v období, zatímco výpočet hodnotí
+     * evidenci k datu výpočtu daně, a předpověď se s blokací rozcházela.
+     * Neplatná hodnota stavu tu nález není: hlásí ji výpočet jako
+     * `tax_evidence_invalid`.
+     *
+     * @param array<string,mixed>|null $evidence zákonná evidence osoby ze snímku
+     */
+    public static function taxDeclarationIssue(?array $evidence): ?string
+    {
+        $taxEvidence = $evidence['income_tax'] ?? null;
+        $declaration = is_array($taxEvidence) && !array_is_list($taxEvidence)
+            ? ($taxEvidence['declaration'] ?? null)
+            : null;
+        if (!is_array($declaration) || array_is_list($declaration)) {
+            return 'tax_declaration_evidence_missing';
+        }
+
+        return ($declaration['status'] ?? null) === TaxDeclarationStatus::Unverified->value
+            ? 'tax_declaration_evidence_unverified'
+            : null;
     }
 
     private function issue(

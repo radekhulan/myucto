@@ -22,7 +22,7 @@ final class PayrollAnnualSettlementRepository
     // Strop se klampuje i tady, ne jen na HTTP hranici: repozitář volá i jiný
     // kód než akce a „vypiš všechny lidi firmy" nesmí jít objednat nikudy.
     public const LIST_MAX_LIMIT = 200;
-    public const LIST_STATES = ['all', 'requested', 'settled', 'unsettled'];
+    public const LIST_STATES = ['all', 'requested', 'settled', 'unsettled', 'request_undecided'];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -535,6 +535,8 @@ final class PayrollAnnualSettlementRepository
      *  - `requested`   — požádal podle § 38ch odst. 1 a nemá výsledek
      *  - `settled`     — zúčtování je provedené (existuje výsledek)
      *  - `unsettled`   — výsledek neexistuje, ať už požádal, nebo ne
+     *  - `request_undecided` — o žádosti není rozhodnuto (řádek chybí nebo
+     *    má stav `unknown`) a osoba měla v roce nebo má teď pracovní vztah
      *
      * @return array{items:list<array<string,mixed>>,total:int}
      */
@@ -562,8 +564,22 @@ final class PayrollAnnualSettlementRepository
             'requested' => ' AND request.request_status = "requested" AND outcome.id IS NULL',
             'settled' => ' AND outcome.id IS NOT NULL',
             'unsettled' => ' AND outcome.id IS NULL',
+            // Lidé, za které hlášení za leden a únor potřebuje odpověď
+            // a nemá ji. Bývalé zaměstnance skončené před rokem vynechá —
+            // u firmy s historií by jich byly stovky a hlášení za ně nejde.
+            'request_undecided' => ' AND (request.id IS NULL
+                    OR request.request_status NOT IN ("requested", "not_requested"))
+                AND EXISTS (
+                    SELECT 1 FROM payroll_employments undecided_employment
+                     WHERE undecided_employment.supplier_id = employee.supplier_id
+                       AND undecided_employment.employee_id = employee.id
+                       AND (undecided_employment.end_date IS NULL
+                            OR undecided_employment.end_date >= ?))',
             default => '',
         };
+        if ($state === 'request_undecided') {
+            $filterParams[] = sprintf('%04d-01-01', $taxYear);
+        }
 
         $joins =
             '  FROM payroll_employees employee

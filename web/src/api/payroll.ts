@@ -6916,6 +6916,7 @@ export type PayrollAnnualSettlementListState =
   | 'requested'
   | 'settled'
   | 'unsettled'
+  | 'request_undecided'
 
 export interface PayrollAnnualSettlementCreditRow {
   label: string
@@ -7828,6 +7829,7 @@ export interface PayrollRun {
  */
 export interface PayrollRunSourceDrift {
   worked_time_changed?: number
+  employment_terms_changed?: number
   remuneration_changed: number
   total: number
   inputs_added: number
@@ -7937,6 +7939,7 @@ export type PayrollRunReadinessBulkKind =
   | 'health_insurer'
   | 'workplace'
   | 'closure'
+  | 'annual_settlement_request'
 
 /**
  * Kontrola před zahájením mzdového běhu. Čtecí, nic neukládá — stejný vzor

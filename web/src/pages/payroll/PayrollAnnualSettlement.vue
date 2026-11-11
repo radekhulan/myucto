@@ -59,8 +59,12 @@ const toast = useToast()
  * loňský — ne letošní, který ještě neskončil.
  */
 // Rok z odkazu (hlídač termínů vede rovnou na zúčtování konkrétního roku).
-const queryYear = Number(useRoute().query.year)
+const routeQuery = useRoute().query
+const queryYear = Number(routeQuery.year)
 const hasQueryYear = Number.isInteger(queryYear) && queryYear >= 2000 && queryYear <= 2199
+// Zúžení z odkazu: kontrola mzdového běhu sem vede na nerozhodnuté žádosti.
+const LIST_STATES: PayrollAnnualSettlementListState[] = ['all', 'requested', 'unsettled', 'settled', 'request_undecided']
+const queryState = LIST_STATES.find(item => item === routeQuery.state) ?? null
 const year = ref(hasQueryYear ? queryYear : new Date().getFullYear() - 1)
 /** Rok z odkazu se respektuje; výchozí se jednou srovná na začátek vedení mezd. */
 let defaultYearResolved = hasQueryYear
@@ -86,7 +90,7 @@ const pageSize = 25
 const total = ref(0)
 const offset = ref(0)
 const search = ref('')
-const state = ref<PayrollAnnualSettlementListState>('all')
+const state = ref<PayrollAnnualSettlementListState>(queryState ?? 'all')
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const previewLoading = ref(false)
 const saving = ref(false)
@@ -1256,7 +1260,8 @@ const saved = useSavedFilters('payroll-annual-settlement', {
 })
 
 onMounted(async () => {
-  if (await saved.applyDefaultIfAny()) return
+  // Zúžení z odkazu má přednost před uloženým výchozím pohledem.
+  if (queryState === null && await saved.applyDefaultIfAny()) return
   await load()
 })
 </script>
@@ -1435,6 +1440,7 @@ onMounted(async () => {
             <option value="requested">{{ t('payroll.annual_settlement.states.requested') }}</option>
             <option value="unsettled">{{ t('payroll.annual_settlement.states.unsettled') }}</option>
             <option value="settled">{{ t('payroll.annual_settlement.states.settled') }}</option>
+            <option value="request_undecided">{{ t('payroll.annual_settlement.states.request_undecided') }}</option>
           </select>
         </label>
         <div class="flex flex-wrap items-center gap-2 pb-0.5">

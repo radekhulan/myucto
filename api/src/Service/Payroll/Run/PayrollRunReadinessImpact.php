@@ -98,6 +98,9 @@ final class PayrollRunReadinessImpact
         // Vstupy vztahu, který do běhu nevstoupí (nepotvrzený nástup, podmínky
         // účinné až po období). Bez opravy se tiše nevyplatí.
         'inputs_on_unstarted_employment' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
+        // Výpočet daně osobu bez ověřeného stavu prohlášení zastaví (ruční
+        // kontrola), takže běh se spočítá jen zčásti a schválit nepůjde.
+        'tax_declaration_evidence_missing' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
 
         // ── Skupina 2: opraví se, ale po zamknutí přes opravnou revizi ───────
         // Rozhodnutí nepřítomnosti mění snímek vstupů (schválené nepřítomnosti).
