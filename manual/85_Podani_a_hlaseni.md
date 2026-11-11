@@ -1830,7 +1830,9 @@ cizinec pojištěný v jiném státě s A1). Za každý měsíc, kdy přihláše
 trvá a nebyl zúčtován příjem, se podává řádný formulář s nulovými hodnotami:
 pojištění od 1. do posledního dne měsíce, počet dnů důchodového pojištění 0,
 vyměřovací základ 0 a bez kódu ELDP. Chybějící registraci dohody ohlásí mzdový
-běh i kontrola před během jako varování s povinnou výjimkou (viz
+běh i kontrola před během jako varování. Povinnou výjimku před schválením
+vyžaduje jen u vztahu s účastí na pojištění; dohoda bez účasti schválení
+nezastaví (viz
 [§ 86.12.14](86_Zamestnanci.md#861214-checklist-a-casova-osa)).
 
 **Zdroj osobních údajů.** Test registrace zaměstnance čte identitu z osobní

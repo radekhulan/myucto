@@ -1437,7 +1437,8 @@ k vztahu není evidovaná odpovídající povinnost podání, vztah není
 **Nenastoupil** ani archivovaný, nástup už nastal a vztah registraci dluží.
 Registraci u ČSSZ (REGZEC A1) dluží každá DPP a DPČ bez ohledu na účast na
 pojištění, tedy i dohoda pod rozhodným příjmem a cizinec s A1. U ostatních
-vztahů rozhoduje účast na pojištění. Oznámení zdravotní pojišťovně se ozve jen
+vztahů rozhoduje účast na pojištění. U dohody bez účasti je to jen
+připomínka, schválení běhu na výjimku nečeká. Oznámení zdravotní pojišťovně se ozve jen
 u vztahu s účastí na zdravotním pojištění, dohoda bez účasti u něj mlčí.
 Přihlášku podanou mimo aplikaci odškrtněte v checklistu, u víc
 lidí hromadně v panelu **Zákonné termíny**; nástup před 1. 7. 2026 je v sekci

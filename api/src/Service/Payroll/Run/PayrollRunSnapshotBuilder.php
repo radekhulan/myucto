@@ -2291,7 +2291,12 @@ final class PayrollRunSnapshotBuilder
                     (string) $row['full_name'],
                 ),
                 "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_checklist&field=social_jmhz_registration",
-                true,
+                $this->participatesInSocialInsurance(
+                    $row['social_insurance_participation'],
+                    $relationType,
+                    $row,
+                    $periodEnd,
+                ),
             );
         }
         if ($gap['health'] && $this->participatesInHealthInsurance(
@@ -2361,6 +2366,26 @@ final class PayrollRunSnapshotBuilder
             ($row['monthly_gross_minor'] ?? null) === null ? null : (int) $row['monthly_gross_minor'],
             PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $periodEnd),
             $periodEnd,
+        );
+    }
+
+    /**
+     * Dohoda bez účasti na pojištění registraci dluží také, ale výpočet ani
+     * pojistné na ní nezávisí: varování ji připomene, schválení nezastaví.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function participatesInSocialInsurance(
+        mixed $participation,
+        string $relationType,
+        array $row,
+        string $periodEnd,
+    ): bool {
+        return PayrollExpectedParticipation::expected(
+            is_string($participation) ? $participation : null,
+            $relationType,
+            ($row['monthly_gross_minor'] ?? null) === null ? null : (int) $row['monthly_gross_minor'],
+            PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $periodEnd),
         );
     }
 

@@ -287,16 +287,17 @@ final class PayrollRunValidationOverrideTest extends TestCase
         )->execute([$this->supplierId, $employmentId]);
         $locked = $this->lockedRun();
 
-        $codes = array_column(
-            array_filter(
-                $this->requiresOverrideValidations((int) $locked['revision_id']),
-                static fn (array $row): bool => (int) $row['entity_id'] === $employmentId,
-            ),
-            'code',
-        );
+        $rows = array_values(array_filter(
+            $this->runs->validations($this->supplierId, (int) $locked['revision_id']),
+            static fn (array $row): bool => (int) $row['entity_id'] === $employmentId
+                && in_array($row['code'], ['employment_social_registration_missing', 'employment_health_registration_missing'], true),
+        ));
 
-        self::assertContains('employment_social_registration_missing', $codes);
-        self::assertNotContains('employment_health_registration_missing', $codes);
+        // Účast DPP rozhodne až skutečný příjem: varování připomene registraci,
+        // schválení mezd ale nezastaví (u agentury by jinak čekalo na výjimku
+        // každé brigády).
+        self::assertSame(['employment_social_registration_missing'], array_column($rows, 'code'));
+        self::assertFalse($rows[0]['requires_override']);
     }
 
     /** DPČ s vyloučenou účastí registraci u ČSSZ dluží také, oznámení pojišťovně ne. */
@@ -317,16 +318,15 @@ final class PayrollRunValidationOverrideTest extends TestCase
         )->execute([$this->supplierId, $employmentId]);
         $locked = $this->lockedRun();
 
-        $codes = array_column(
-            array_filter(
-                $this->requiresOverrideValidations((int) $locked['revision_id']),
-                static fn (array $row): bool => (int) $row['entity_id'] === $employmentId,
-            ),
-            'code',
-        );
+        $rows = array_values(array_filter(
+            $this->runs->validations($this->supplierId, (int) $locked['revision_id']),
+            static fn (array $row): bool => (int) $row['entity_id'] === $employmentId
+                && in_array($row['code'], ['employment_social_registration_missing', 'employment_health_registration_missing'], true),
+        ));
 
-        self::assertContains('employment_social_registration_missing', $codes);
-        self::assertNotContains('employment_health_registration_missing', $codes);
+        // Dohoda bez účasti registraci dluží, ale schválení mezd nezastaví.
+        self::assertSame(['employment_social_registration_missing'], array_column($rows, 'code'));
+        self::assertFalse($rows[0]['requires_override']);
     }
 
     /**
