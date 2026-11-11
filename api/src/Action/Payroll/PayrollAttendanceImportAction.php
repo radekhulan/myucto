@@ -108,6 +108,7 @@ final class PayrollAttendanceImportAction
                 ($body['create_deductions'] ?? false) === true,
                 ($body['confirm_source_checks'] ?? false) === true,
                 ($body['fill_registration_data'] ?? false) === true,
+                ($body['adopt_probable_earnings'] ?? false) === true,
             );
         } catch (AttendanceSourceConfirmationRequired $e) {
             return Json::error($response, 'source_confirmation_required', $e->getMessage(), 409, ['source_checks' => $e->checks]);

@@ -90,6 +90,20 @@ describe('AttendancePersonsStep — náhled zakládání osob', () => {
     ])
   })
 
+  it('bez sazby ukáže pravděpodobný výdělek z odměny za odpracované hodiny', async () => {
+    const iva = person('iva', {
+      display_name: 'Výdělková Iva',
+      probable_earning: { source: 'amount', hourly_minor: 3_333, amount_minor: 10_000, hours: '3.00' },
+    })
+    const wrapper = mount(AttendancePersonsStep, {
+      props: { persons: [iva], options: [], manualLinks: {}, period: '2026-06', canCreate: true },
+    })
+    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
+    const details = wrapper.get('[data-testid="attendance-create-details"]').text()
+    expect(details).toContain('payroll_imports.attendance.persons.details.probable_earning')
+    expect(details).toMatch(/33,33/)
+  })
+
   it('ukáže údaje pro registraci ČSSZ, které se nové osobě zapíšou', async () => {
     const hana = person('hana', {
       display_name: 'Registrační Hana',

@@ -179,7 +179,7 @@ function selectAllCreatable() {
 function detailValue(key: PersonCreateDetailKey, value: string, invalid: boolean): string {
   if (invalid) return t('payroll_imports.attendance.persons.details.unreadable', { value })
   if (key === 'start_on' || key === 'agreed_end_on') return formatDate(value)
-  if (key === 'hourly_rate' || key === 'monthly_wage') return formatMoneyMinor(Math.round(Number(value) * 100))
+  if (key === 'hourly_rate' || key === 'probable_earning' || key === 'monthly_wage') return formatMoneyMinor(Math.round(Number(value) * 100))
   return value
 }
 

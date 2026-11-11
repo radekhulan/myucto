@@ -382,6 +382,38 @@ final class PayrollAttendanceImportRepository
     }
 
     /**
+     * Vztahy, které už pravděpodobný výdělek mají (v poslední verzi podmínek),
+     * nebo mají schválený průměrný výdělek pro čtvrtletí. Těm import
+     * pravděpodobný výdělek nenavrhuje. Dva dotazy přes IN.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,true>
+     */
+    public function employmentsWithEarningBasis(int $supplierId, array $employmentIds, int $year, int $quarter): array
+    {
+        $employmentIds = array_values(array_unique(array_filter($employmentIds, static fn (int $id): bool => $id > 0)));
+        if ($employmentIds === []) {
+            return [];
+        }
+        $in = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT employment_id FROM (
+                SELECT employment_id, probable_hourly_earning_minor,
+                       ROW_NUMBER() OVER (PARTITION BY employment_id ORDER BY effective_from DESC, id DESC) AS position
+                  FROM payroll_employment_terms
+                 WHERE supplier_id = ? AND employment_id IN ({$in})
+             ) terms WHERE position = 1 AND probable_hourly_earning_minor IS NOT NULL
+             UNION
+             SELECT employment_id FROM payroll_average_earning_snapshots
+              WHERE supplier_id = ? AND employment_id IN ({$in})
+                AND applicable_year = ? AND applicable_quarter = ? AND status = 'approved'"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds, $supplierId, ...$employmentIds, $year, $quarter]);
+
+        return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
+    }
+
+    /**
      * Mzdové běhy, jejichž některá revize počítá s vztahem v měsících od
      * `$from` (do `$to`, je-li zadané). Stornované běhy se nevracejí.
      *

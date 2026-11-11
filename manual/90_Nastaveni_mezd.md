@@ -826,7 +826,10 @@ předvyplní jako pravidelná mzda a nástup z poznámky („nový nástup 15. 6
 jako den nástupu. Sloupce **Datum narození** a **Zdravotní pojišťovna (kód)**
 (třímístný, např. 111) se zapíšou rovnou. **Hodinová sazba** se uloží do
 podmínek vztahu jako pravděpodobný hodinový výdělek s odůvodněním (§ 355 ZP),
-ze kterého se počítají náhrady, než vznikne skutečný průměr. **Konec dohody**
+ze kterého se počítají náhrady, než vznikne skutečný průměr. Bez sloupce sazby
+navrhne import pravděpodobný výdělek z odměny za odpracované hodiny (částka
+hodinové mzdy podle docházky dělená odpracovanými hodinami, na haléře) a náhled
+ho u zakládané osoby ukáže. **Konec dohody**
 se uloží jako sjednaný konec vztahu, takže ho po uplynutí nabídne hromadné
 ukončení dohod. **Číslo účtu** (předčíslí-číslo/kód banky nebo IBAN) projde
 stejnou kontrolou jako na kartě osoby a uloží se jako výplatní účet
@@ -877,6 +880,17 @@ schválený, zaúčtovaný nebo vyplacený běh. Důvod je vidět u osoby v tabu
 takové osobě upravte mzdu na kartě vztahu. Výsledek vypíše převzaté
 a nepřevzaté mzdy a běhy k přepočtu s odkazem na ně; běh vezme novou mzdu až
 z nového snímku vstupů (viz [Mzdové běhy](80_Mzdove_behy.md)).
+
+**Pravděpodobný výdělek z podkladů.** Vztahu, který nemá pravděpodobný výdělek
+ani schválený průměrný výdělek pro čtvrtletí, nabídne souhrn volbu **Doplnit
+pravděpodobný výdělek z podkladů** se seznamem navržených částek (ze sazby, jinak
+z odměny za odpracované hodiny). Zapíše se do platné verze podmínek, zasahuje-li
+do zúčtovaného měsíce, jako nová verze od prvního dne období. Sazba z podkladů se
+záměrně neukládá jako sjednané hodinové odměňování: vztah s hodinovým
+odměňováním počítá mzdu sám z doložených hodin a importovanou hodinovou mzdu
+by kontrola souběhu zdrojů odmítla, takže by import měsíce neprošel. Hodinové
+odměňování proto nastavte na kartě vztahu jen tehdy, když mzdu nemá počítat
+docházkový systém.
 
 **Srážky ze mzdy.** Sloupce **Obědy – srážka ze mzdy** a **Srážka ze mzdy** (ve
 vzoru GIRITON dotovaná cena obědů a srážky z hlavního seznamu) se k hrubé mzdě

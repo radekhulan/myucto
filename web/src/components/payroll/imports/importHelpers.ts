@@ -921,7 +921,7 @@ export interface PersonCreateDefaults {
  * bez něj se použije jednotný `defaults.relation_type` jako dosud (ruční
  * založení v kroku Osoby, kde druh vybírá uživatel jednou pro celou dávku).
  */
-export type PersonCreateDetailKey = 'start_on' | 'agreed_end_on' | 'hourly_rate' | 'monthly_wage' | 'bank_account'
+export type PersonCreateDetailKey = 'start_on' | 'agreed_end_on' | 'hourly_rate' | 'probable_earning' | 'monthly_wage' | 'bank_account'
 
 /**
  * Údaje z podkladů, které se nové osobě převezmou — pro náhled zakládání.
@@ -940,6 +940,9 @@ export function personCreateDetails(
   if (rate !== '') {
     const parsed = parseLocaleNumber(rate)
     details.push({ key: 'hourly_rate', value: parsed !== null && parsed > 0 ? String(parsed) : rate, invalid: parsed === null || parsed <= 0 })
+  } else if (person.probable_earning?.source === 'amount') {
+    // Bez sazby navrhne server pravděpodobný výdělek z odměny za odpracované hodiny.
+    details.push({ key: 'probable_earning', value: String(person.probable_earning.hourly_minor / 100), invalid: false })
   }
   const wage = person.monthly_wage?.trim() ?? ''
   if (wage !== '') {

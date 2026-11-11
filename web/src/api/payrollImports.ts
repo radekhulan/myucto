@@ -548,9 +548,25 @@ export interface AttendancePerson {
   dpp_annual_hours?: PayrollAgreementAnnualHours & { imported_minutes: number }
   /** Údaje pro registraci ČSSZ, které se zapíšou (nové osobě všechny, existující jen chybějící). */
   registration?: AttendanceRegistrationItem[]
+  /** Návrh pravděpodobného výdělku ze sazby nebo z odměny za odpracované hodiny. */
+  probable_earning?: AttendanceProbableEarning | null
   /** Otevřená DPP osoby, která v období nemá vztah (jen u osob k založení). */
   open_agreement?: PayrollOpenAgreement | null
   warnings: string[]
+}
+
+/** Pravděpodobný výdělek z podkladů, viz AttendanceImportService::probableEarnings(). */
+export interface AttendanceProbableEarning {
+  source: 'rate' | 'amount'
+  hourly_minor: number
+  amount_minor: number | null
+  hours: string | null
+}
+
+export interface AttendanceProbableEarningChange extends AttendanceProbableEarning {
+  key: string
+  display_name: string
+  employment_id: number
 }
 
 /** Údaj pro registraci ČSSZ v náhledu, viz AttendanceRegistrationData::display() na serveru. */
@@ -652,6 +668,8 @@ export interface AttendancePreview {
   persons: AttendancePerson[]
   component_checks: AttendanceComponentCheck[]
   wage_changes: AttendanceWageChange[]
+  /** Pravděpodobné výdělky k potvrzení u vztahů, které žádný nemají. */
+  probable_earning_changes?: AttendanceProbableEarningChange[]
   upgrade_available: AttendanceSampleUpgrade | null
   summary: {
     persons: number
@@ -699,6 +717,8 @@ export interface AttendanceApplyPayload {
   confirm_source_checks?: boolean
   /** Doplnit přiřazeným osobám chybějící údaje pro registraci ČSSZ z podkladů. */
   fill_registration_data?: boolean
+  /** Zapsat navržené pravděpodobné výdělky vztahům, které žádný nemají. */
+  adopt_probable_earnings?: boolean
 }
 
 /** Výsledek zápisu srážek z podkladů (dohody o srážce na měsíc). */
@@ -746,6 +766,8 @@ export interface AttendanceApplyResult {
   deductions?: AttendanceDeductionReport | null
   /** Doplnění údajů pro registraci ČSSZ; null = volba vypnutá. */
   registration?: { filled: number; notes: { key: string; display_name: string; reason: string }[] } | null
+  /** Zápis pravděpodobných výdělků; null = volba vypnutá. */
+  probable_earnings?: { adopted: number; conflicts: { key: string; display_name: string; reason: string }[] } | null
 }
 
 /** Hrubá a čistá mzda z mzdového exportu v dávce proti výpočtu mzdového běhu období. */
