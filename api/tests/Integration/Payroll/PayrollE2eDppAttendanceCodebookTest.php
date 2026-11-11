@@ -32,7 +32,7 @@ final class PayrollE2eDppAttendanceCodebookTest extends TestCase
         'A' => 'Osobní číslo', 'B' => 'Příjmení a jméno', 'C' => 'Druh vztahu', 'D' => 'Nástup',
         'E' => 'Ulice', 'F' => 'Číslo domu', 'G' => 'Obec', 'H' => 'PSČ', 'I' => 'Stát',
         'J' => 'Státní občanství', 'K' => 'CZ-ISCO', 'L' => 'Místo výkonu práce', 'M' => 'Daňová rezidence',
-        'N' => 'Prohlášení poplatníka', 'O' => 'Prohlášení od', 'P' => 'Druh činnosti', 'Q' => 'Odpracováno (hod)',
+        'N' => 'Prohlášení poplatníka', 'O' => 'Prohlášení od', 'P' => 'Druh činnosti', 'Q' => 'Odpracováno (hod)', 'R' => 'Zdravotní pojišťovna',
     ];
 
     private Connection $db;
@@ -148,6 +148,25 @@ final class PayrollE2eDppAttendanceCodebookTest extends TestCase
         self::assertStringContainsString('kód obce', $warnings);
     }
 
+    /**
+     * Neexistující kód pojišťovny (123) osobu nezaloží a výsledek řekne proč
+     * a jaké kódy platí. Do evidence se nic nezapíše, takže kód neprojde
+     * až do podání.
+     */
+    public function testUnknownHealthInsurerStopsCreationWithGuidance(): void
+    {
+        $file = $this->file(['R' => '123']);
+        $preview = $this->service->preview($this->supplierId, self::PERIOD, [$file], null, $this->profileId);
+        $result = $this->create($preview['persons'][0]['key'], $file);
+        self::assertSame('failed', $result['status']);
+        self::assertStringContainsString('Kód zdravotní pojišťovny 123 neexistuje', (string) $result['message']);
+        self::assertStringContainsString('111 VZP', (string) $result['message']);
+        self::assertSame(0, (int) $this->one(
+            'SELECT COUNT(*) FROM payroll_person_health_coverage_history WHERE supplier_id = ?',
+            [$this->supplierId],
+        ));
+    }
+
     /** @param array<string,string> $overrides */
     private function file(array $overrides): array
     {
@@ -158,7 +177,7 @@ final class PayrollE2eDppAttendanceCodebookTest extends TestCase
                     'A' => 'C001', 'B' => 'Číselníková Jana', 'C' => 'DPP', 'D' => '1. 6. 2026',
                     'E' => 'Ukázková', 'F' => '12', 'G' => 'Praha', 'H' => '110 00', 'I' => 'CZ',
                     'J' => 'CZ', 'K' => '43111', 'L' => '554782', 'M' => 'CZ',
-                    'N' => 'ano', 'O' => '1. 6. 2026', 'P' => '', 'Q' => 10,
+                    'N' => 'ano', 'O' => '1. 6. 2026', 'P' => '', 'Q' => 10, 'R' => '111',
                 ],
             ]],
         ]));
