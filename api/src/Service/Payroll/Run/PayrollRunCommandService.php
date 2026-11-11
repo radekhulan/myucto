@@ -88,6 +88,7 @@ final class PayrollRunCommandService
         }
         try {
             $this->assertModuleAvailable($supplierId, $periodStart);
+            $this->snapshotBuilder->assertRulesetCoverage($periodStart);
             // Nový běh je placená operace mzdového doplňku. Opravy, uzavření,
             // platby ani podání už založených běhů tuhle kontrolu nevolají.
             if (!$this->environment->allowsPayroll()) {

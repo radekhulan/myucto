@@ -78,6 +78,8 @@ final class PayrollRunReadinessImpact
          * podkladů by účetní poslalo opravovat data, která se nikdy počítat nebudou.
          */
         'period_before_module_start' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        // Rok bez legislativní sady: běh nejde ani založit (PayrollRunSnapshotBuilder::assertRulesetCoverage).
+        'ruleset_year_unavailable' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
         // Snímek běhu bez nich nevznikne
         // ({@see PayrollRunSnapshotFixableException}), běh tedy nejde zahájit.
         'employer_policy_invalid' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],

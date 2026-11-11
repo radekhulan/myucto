@@ -136,6 +136,21 @@ final class PayrollRunReadinessService
             ];
         }
 
+        // Rok bez legislativní sady: běh nejde založit a jiné nálezy nemají
+        // smysl (snímek by se nepostavil a skončil obecným „obnovte stránku").
+        try {
+            $this->snapshotBuilder->assertRulesetCoverage($periodStart);
+        } catch (\DomainException $e) {
+            return [
+                'period_start' => $periodStart,
+                'payment_date' => $paymentDate,
+                'office_id' => $officeId,
+                'ready' => false,
+                'has_findings' => true,
+                'findings' => [self::finding('ruleset_year_unavailable', $e->getMessage(), '/payroll/rulesets', 1, [])],
+            ];
+        }
+
         // Zaměstnavatelská politika se ověřuje PRVNÍ a zvlášť: bez ní snapshot
         // vůbec nevznikne (builder hodí výjimku), takže by se všechny ostatní
         // nálezy schovaly za jednu hlášku o politice.
@@ -317,7 +332,9 @@ final class PayrollRunReadinessService
             $code === 'tax_declaration_not_signed_summary',
             $code === 'tax_declaration_evidence_missing' => [[
                 'kind' => 'declaration_signed',
-                'count' => $count,
+                // Souhrnné varování je JEDNA validace za všechny osoby; počet na
+                // tlačítku musí odpovídat tomu, komu dialog podpis zapíše.
+                'count' => $declarationIds === [] ? $count : count($declarationIds),
                 ...($declarationIds === [] ? [] : ['employee_ids' => $declarationIds]),
             ]],
             $code === 'employments_past_agreed_end' => [['kind' => 'closure', 'count' => $count]],

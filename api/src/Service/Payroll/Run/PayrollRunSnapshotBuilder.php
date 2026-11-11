@@ -24,6 +24,7 @@ use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
 use MyInvoice\Service\Payroll\HealthInsurance\PayrollExpectedHealthParticipation;
 use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountAgeCondition;
@@ -105,6 +106,7 @@ final class PayrollRunSnapshotBuilder
             );
         }
         $periodEnd = $period->modify('last day of this month')->format('Y-m-d');
+        $this->assertRulesetCoverage($periodStart);
         $statutoryPeriod = ($this->periods ?? new PayrollStatutoryPeriodResolver())
             ->resolve($periodStart, $paymentDate);
         $manifest = $this->rulesets->canonicalManifest();
@@ -953,6 +955,54 @@ final class PayrollRunSnapshotBuilder
     }
 
     /**
+     * Mzdový rok bez legislativní sady se nespočítá a účetní se to má dozvědět
+     * srozumitelně a hned při založení běhu, ne jako technickou chybu
+     * „Expected exactly one inspectable social_insurance ruleset" z hloubi
+     * výpočtu. Rozhoduje totéž pravidlo jako podporované roky
+     * ({@see PayrollRulesetYearCoverage::CALCULATION_CRITICAL_DOMAINS}); sada
+     * přidaná v administraci rok zpřístupní bez nové verze aplikace.
+     *
+     * @throws \DomainException rok nepokrývá některá výpočtově kritická doména
+     */
+    public function assertRulesetCoverage(string $periodStart): void
+    {
+        $period = \DateTimeImmutable::createFromFormat('!Y-m-d', $periodStart);
+        if ($period === false || $period->format('Y-m-d') !== $periodStart) {
+            throw new \InvalidArgumentException('Mzdové období není platné.');
+        }
+        $periodEnd = $period->modify('last day of this month')->format('Y-m-d');
+        $missing = [];
+        foreach (PayrollRulesetYearCoverage::CALCULATION_CRITICAL_DOMAINS as $domain) {
+            if (!PayrollRulesetYearCoverage::coversDate($this->rulesets, $domain, $periodStart)
+                || !PayrollRulesetYearCoverage::coversDate($this->rulesets, $domain, $periodEnd)
+            ) {
+                $missing[] = self::RULESET_DOMAIN_LABELS[$domain->value] ?? $domain->value;
+            }
+        }
+        if ($missing === []) {
+            return;
+        }
+        throw new \DomainException(sprintf(
+            'Mzdy za %s zatím nejde spočítat: aplikace pro rok %s nemá legislativní sadu (%s). '
+                . 'Sazby a částky pro nový rok se do aplikace doplňují aktualizací po jejich vyhlášení '
+                . 've Sbírce zákonů; dostupné sady najdete v Mzdy → Legislativní pravidla mezd. '
+                . 'Měsíce předchozího roku zpracujete beze změny.',
+            $period->format('m/Y'),
+            $period->format('Y'),
+            implode(', ', $missing),
+        ));
+    }
+
+    /** @var array<string,string> */
+    private const RULESET_DOMAIN_LABELS = [
+        'income_tax' => 'daň z příjmů',
+        'social_insurance' => 'sociální pojištění',
+        'health_insurance' => 'zdravotní pojištění',
+        'employment_thresholds' => 'minimální mzda a rozhodné příjmy',
+        'compensation_averages' => 'náhrady a průměrný výdělek',
+    ];
+
+    /**
      * Věta souhrnného varování o nepodepsaných prohlášeních. Veřejná, protože
      * po skrytí části osob ji se sníženým počtem skládá i
      * {@see PayrollWarningSuppressionSet}.
@@ -963,7 +1013,8 @@ final class PayrollRunSnapshotBuilder
             'Počet osob s nepodepsaným prohlášením poplatníka k dani: %d. Záloha'
             . ' se jim počítá bez slevy na poplatníka a bez daňového zvýhodnění;'
             . ' u dohody o provedení práce a zaměstnání malého rozsahu s příjmem'
-            . ' pod rozhodnou částkou se daň sráží zvláštní sazbou (§ 6 odst. 4 ZDP).'
+            . ' pod rozhodnou částkou se daň počítá zvlášť sazbou 15 %% (§ 6 odst. 4 ZDP;'
+            . ' do roku 2026 srážková daň, od roku 2027 samostatný základ zálohy).'
             . ' Ověřte, že to odpovídá skutečnosti.',
             $count,
         );
