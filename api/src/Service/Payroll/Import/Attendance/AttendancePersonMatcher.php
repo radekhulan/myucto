@@ -60,6 +60,7 @@ final class AttendancePersonMatcher
 
         foreach ($persons as &$person) {
             $warnings = [];
+            $invalidBirthNumber = false;
             $person['match'] = $this->matchOne(
                 $supplierId,
                 $person,
@@ -69,7 +70,19 @@ final class AttendancePersonMatcher
                 $links,
                 $period,
                 $warnings,
+                $invalidBirthNumber,
             );
+            // Neplatné RČ zastaví založení osoby (kontrola modulo 11). U osoby,
+            // kterou import nenašel a musel by ji založit, je to chyba řádku,
+            // ne jen upozornění: účetní ji má vidět v náhledu, ne až ve výsledku.
+            $person['errors'] = [];
+            if ($invalidBirthNumber && $person['match']['status'] === 'not_found') {
+                $person['errors'][] = 'Rodné číslo: v podkladech není platné (nesedí kontrolní číslice), '
+                    . 'novou osobu s ním aplikace nezaloží. Opravte ho v podkladech a nahrajte je znovu, '
+                    . 'nebo osobu přiřaďte ke vztahu v evidenci.';
+            } elseif ($invalidBirthNumber) {
+                $warnings[] = 'Rodné číslo osoby v podkladech není platné, k párování se nepoužilo.';
+            }
             $person['warnings'] = array_values(array_unique([...$person['warnings'], ...$warnings]));
         }
         unset($person);
@@ -105,6 +118,7 @@ final class AttendancePersonMatcher
         array $links,
         string $period,
         array &$warnings,
+        bool &$invalidBirthNumber,
     ): array {
         $personalNumber = is_string($person['personal_number'] ?? null) ? trim($person['personal_number']) : '';
         $nameKey = (string) ($person['_name_key'] ?? '');
@@ -143,7 +157,7 @@ final class AttendancePersonMatcher
                     $warnings[] = "Osoba s tímto rodným číslem je v evidenci, ale nemá pracovní vztah platný v období {$period}.";
                 }
             } catch (\InvalidArgumentException) {
-                $warnings[] = 'Rodné číslo osoby v podkladech není platné, k párování se nepoužilo.';
+                $invalidBirthNumber = true;
             }
         }
 

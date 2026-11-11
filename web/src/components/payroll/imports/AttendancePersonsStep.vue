@@ -247,6 +247,9 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
                   <span v-if="person.birth_number_masked" class="font-mono">{{ person.birth_number_masked }}</span>
                 </p>
                 <p v-if="person.relation_label || person.department" class="text-xs text-neutral-500">{{ [person.relation_label, person.department].filter(Boolean).join(' · ') }}</p>
+                <ul v-if="person.errors?.length" class="mt-1 space-y-0.5 text-xs font-medium text-danger-600" data-testid="attendance-person-errors">
+                  <li v-for="error in person.errors" :key="error">{{ error }}</li>
+                </ul>
                 <ul v-if="person.warnings.length" class="mt-1 space-y-0.5 text-xs text-warning-700">
                   <li v-for="warning in person.warnings" :key="warning">{{ warning }}</li>
                 </ul>
@@ -299,6 +302,9 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
             <option value="">{{ noEmploymentLabel(person) }}</option>
             <option v-for="option in options" :key="option.employment_id" :value="String(option.employment_id)">{{ option.label }}</option>
           </select>
+          <ul v-if="person.errors?.length" class="mt-2 space-y-0.5 text-xs font-medium text-danger-600">
+            <li v-for="error in person.errors" :key="error">{{ error }}</li>
+          </ul>
           <ul v-if="person.warnings.length" class="mt-2 space-y-0.5 text-xs text-warning-700">
             <li v-for="warning in person.warnings" :key="warning">{{ warning }}</li>
           </ul>

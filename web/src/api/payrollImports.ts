@@ -546,6 +546,8 @@ export interface AttendancePerson {
   components: AttendanceComponentValue[]
   deductions?: AttendanceDeductionValue[]
   reference: { gross_minor: number | null; net_minor: number | null; hours: string | null }
+  /** Chyby řádku, kvůli kterým import osobu nezaloží (neplatné rodné číslo); ke vztahu v evidenci ji přiřadit jde. */
+  errors?: string[]
   /** Roční hodiny na DPP po započtení importované docházky; jen u osob přiřazených na DPP. */
   dpp_annual_hours?: PayrollAgreementAnnualHours & { imported_minutes: number }
   /** Údaje pro registraci ČSSZ, které se zapíšou (nové osobě všechny, existující jen chybějící). */

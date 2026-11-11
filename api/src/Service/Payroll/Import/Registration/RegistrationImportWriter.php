@@ -671,11 +671,17 @@ final class RegistrationImportWriter
                 $from = $start;
             }
         }
+        // Zákonná evidence se zadává po celých měsících (daň se čte k prvnímu
+        // dni měsíce, PayrollPersonStatutoryEvidenceRepository::save() jiný
+        // začátek odmítne). Brigádník s nástupem 6. 4. tak má rezidenci od
+        // 1. 4.: před nástupem od téhož plátce nic nepobírá, takže to nic
+        // nemění, a bez ní by duben neměl rezidenci vůbec.
+        $from = substr($from ?? $today, 0, 8) . '01';
         $sections['tax_residences'] = [[
             'residence' => $residence['residence'],
             'country_code' => $residence['country_code'],
             'evidence_reference' => $reference,
-            'effective_from' => $from ?? $today,
+            'effective_from' => $from,
             'effective_to' => null,
             'evidence_note' => null,
         ]];

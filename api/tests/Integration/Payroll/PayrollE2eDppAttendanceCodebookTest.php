@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMyUctoSampleProfile;
+use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use MyInvoice\Tests\Support\PayrollTestContainer;
 use MyInvoice\Tests\Unit\Payroll\Import\Attendance\AttendanceFixture;
@@ -32,11 +33,12 @@ final class PayrollE2eDppAttendanceCodebookTest extends TestCase
         'A' => 'Osobní číslo', 'B' => 'Příjmení a jméno', 'C' => 'Druh vztahu', 'D' => 'Nástup',
         'E' => 'Ulice', 'F' => 'Číslo domu', 'G' => 'Obec', 'H' => 'PSČ', 'I' => 'Stát',
         'J' => 'Státní občanství', 'K' => 'CZ-ISCO', 'L' => 'Místo výkonu práce', 'M' => 'Daňová rezidence',
-        'N' => 'Prohlášení poplatníka', 'O' => 'Prohlášení od', 'P' => 'Druh činnosti', 'Q' => 'Odpracováno (hod)', 'R' => 'Zdravotní pojišťovna',
+        'N' => 'Prohlášení poplatníka', 'O' => 'Prohlášení od', 'P' => 'Druh činnosti', 'Q' => 'Odpracováno (hod)', 'R' => 'Zdravotní pojišťovna', 'S' => 'Rodné číslo',
     ];
 
     private Connection $db;
     private AttendanceImportService $service;
+    private PayrollRunReadinessService $readiness;
     private int $supplierId;
     private int $userId;
     private int $profileId;
@@ -46,6 +48,7 @@ final class PayrollE2eDppAttendanceCodebookTest extends TestCase
         $container = PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->service = $container->get(AttendanceImportService::class);
+        $this->readiness = $container->get(PayrollRunReadinessService::class);
         $pdo = $this->db->pdo();
         $sourceSupplierId = (int) ($pdo->query('SELECT MIN(id) FROM supplier')?->fetchColumn() ?: 0);
         $this->userId = (int) ($pdo->query('SELECT MIN(id) FROM users')?->fetchColumn() ?: 0);
@@ -167,6 +170,88 @@ final class PayrollE2eDppAttendanceCodebookTest extends TestCase
         ));
     }
 
+    /**
+     * Brigádník s nástupem 6. 6. dostane z importu všechny údaje vedené po
+     * celých měsících od 1. 6.: daňovou rezidenci, prohlášení, pojišťovnu
+     * i jurisdikci. Dřív se rezidence nezapsala („se zadává po celých
+     * měsících“) a osoba zůstala bez rezidence.
+     */
+    public function testMidMonthStartWritesMonthlyStatutoryEvidence(): void
+    {
+        $file = $this->file(['D' => '6. 6. 2026']);
+        $preview = $this->service->preview($this->supplierId, self::PERIOD, [$file], null, $this->profileId);
+        $result = $this->create($preview['persons'][0]['key'], $file, '2026-06-06');
+        self::assertSame('created', $result['status'], (string) $result['message']);
+        $said = (string) $result['message'] . ' ' . json_encode($result['notes'] ?? [], JSON_UNESCAPED_UNICODE);
+        self::assertStringNotContainsString('po celých měsících', $said);
+        $employeeId = (int) $result['employee_id'];
+        self::assertSame(
+            ['czech-resident', '2026-06-01'],
+            array_values((array) $this->db->pdo()->query(
+                "SELECT residence, effective_from FROM payroll_person_tax_residences WHERE supplier_id = {$this->supplierId} AND employee_id = {$employeeId}",
+            )->fetch(PDO::FETCH_NUM)),
+        );
+        self::assertSame('signed', $this->one(
+            'SELECT status FROM payroll_person_tax_declarations WHERE supplier_id = ? AND employee_id = ? ORDER BY effective_from DESC LIMIT 1',
+            [$this->supplierId, $employeeId],
+        ));
+        self::assertSame('111', $this->one(
+            'SELECT insurer_code FROM payroll_person_health_coverage_history WHERE supplier_id = ? AND employee_id = ? ORDER BY effective_from DESC LIMIT 1',
+            [$this->supplierId, $employeeId],
+        ));
+        // Kontrola před během za červen: osobě nesmí chybět daňová rezidence
+        // ani jiný údaj vedený po měsících (bez rezidence se daň nespočítá).
+        $gaps = [];
+        foreach ($this->readiness->inspect($this->supplierId, '2026-06-01', '2026-07-14')['findings'] as $finding) {
+            foreach ($finding['code'] === 'person_data_gap' ? $finding['entities'] : [] as $entity) {
+                if ((int) $entity['entity_id'] === $employeeId) {
+                    $gaps = $entity['gaps'];
+                }
+            }
+        }
+        self::assertSame(['identifier'], $gaps);
+    }
+
+    /**
+     * Neznámý CZ-ISCO (tvarově platný 12345) se ohlásí v náhledu a nezapíše,
+     * ale nesmí s sebou vzít ostatní správné podmínky (pracoviště 554782).
+     */
+    public function testUnknownCzIscoDoesNotDropTheValidWorkplace(): void
+    {
+        $file = $this->file(['K' => '12345', 'L' => '554782']);
+        $preview = $this->service->preview($this->supplierId, self::PERIOD, [$file], null, $this->profileId);
+        $person = $preview['persons'][0];
+        self::assertStringContainsString('CZ-ISCO: kód 12345', implode("\n", $person['warnings']));
+        self::assertContains('workplace', array_column($person['registration'], 'key'));
+        $result = $this->create($person['key'], $file);
+        self::assertSame('created', $result['status'], (string) $result['message']);
+        $terms = $this->terms((int) $result['employment_id']);
+        self::assertNull($terms['cz_isco_code']);
+        self::assertSame('554782', $terms['jmhz_workplace_municipality_code']);
+    }
+
+    /**
+     * Neplatné rodné číslo (kontrolní číslice) osobu nezaloží; náhled to
+     * musí říct předem jako chybu řádku, ne jen upozorněním „k párování
+     * se nepoužilo“. Platné rodné číslo chybu nenese.
+     */
+    public function testInvalidBirthNumberIsAnErrorOfThePreviewRow(): void
+    {
+        $file = $this->file(['S' => '9001011235']);
+        $preview = $this->service->preview($this->supplierId, self::PERIOD, [$file], null, $this->profileId);
+        $person = $preview['persons'][0];
+        self::assertCount(1, $person['errors']);
+        self::assertStringContainsString('Rodné číslo', $person['errors'][0]);
+        self::assertStringContainsString('aplikace nezaloží', $person['errors'][0]);
+        self::assertStringNotContainsString('Rodné číslo', implode("\n", $person['warnings']));
+        $result = $this->create($person['key'], $file);
+        self::assertSame('failed', $result['status']);
+
+        $valid = $this->file(['S' => AttendanceFixture::birthNumber('1990-01-01', 'female', 1)]);
+        $preview = $this->service->preview($this->supplierId, self::PERIOD, [$valid], null, $this->profileId);
+        self::assertSame([], $preview['persons'][0]['errors']);
+    }
+
     /** @param array<string,string> $overrides */
     private function file(array $overrides): array
     {
@@ -184,7 +269,7 @@ final class PayrollE2eDppAttendanceCodebookTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function create(string $personKey, array $file): array
+    private function create(string $personKey, array $file, string $startOn = '2026-06-01'): array
     {
         return $this->service->persons($this->supplierId, self::PERIOD, [[
             'person_key' => $personKey,
@@ -192,7 +277,7 @@ final class PayrollE2eDppAttendanceCodebookTest extends TestCase
             'first_name' => 'Jana',
             'last_name' => 'Číselníková',
             'relation_type' => 'dpp',
-            'planned_start_on' => '2026-06-01',
+            'planned_start_on' => $startOn,
             'personal_number' => 'C001',
             'activate' => true,
         ]], $this->userId, null, null, [$file], null, $this->profileId)['results'][0];

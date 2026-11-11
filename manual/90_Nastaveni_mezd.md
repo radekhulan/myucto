@@ -977,6 +977,14 @@ a hodnota se nezapíše. Stejně dopadne kód se správným tvarem, který v č�
 není: CZ-ISCO mimo klasifikaci ČSÚ, druh činnosti mimo číselník JMHZ, kód obce
 mimo číselník obcí ČSSZ nebo kód státu mimo číselník států. Co se zapsat nepodařilo, vypíše výsledek importu s důvodem.
 
+Jinak je to s **rodným číslem**: neprojde-li kontrolní číslicí, osobu s ním
+aplikace nezaloží. U osoby, kterou import v evidenci nenašel, je to proto
+v náhledu červená chyba řádku a osoba se k založení nenabídne. Opravte rodné
+číslo v podkladech a nahrajte je znovu, nebo osobu přiřaďte ke vztahu, který
+v evidenci už je. Nástup uprostřed měsíce nevadí: daňová rezidence se osobě
+zapíše od prvního dne měsíce nástupu, protože zákonná evidence se vede po
+celých měsících.
+
 Totéž funguje i s vlastním sešitem firmy. V **Mapování sloupců** je pro tyto
 údaje (a pro hodinovou sazbu, konec dohody a číslo účtu) skupina významů
 **Registrace ČSSZ**, kterou přiřadíte vlastním sloupcům profilu. Sloupec
