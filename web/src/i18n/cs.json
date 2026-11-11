@@ -3847,10 +3847,13 @@
       "reload": "Načíst náhled",
       "effective_from": "Platí od {date}",
       "basis": {
-        "year_start": "od začátku roku, prohlášení je podepsané před rokem nebo v lednu",
-        "signing_month": "od měsíce podpisu, za dřívější měsíce se sleva neuplatní",
-        "after_frozen_period": "až po období uzavřeném schválenou mzdou (do {date})"
+        "employment_start": "od měsíce nástupu, prohlášení je podepsané do 30 dnů po nástupu (§ 38k odst. 4 ZDP)",
+        "year_start": "od ledna, prohlášení je podepsané nejpozději 15. února (§ 38k odst. 4 ZDP)",
+        "following_month": "od měsíce po podpisu, prohlášení je podepsané po lhůtě (§ 38k odst. 7 ZDP); nově nastoupivší do 30 dnů po nástupu mají první měsíc od nástupu",
+        "after_frozen_period": "až po období uzavřeném schválenou mzdou (do {date}), slevu za uzavřené měsíce dorovná roční zúčtování"
       },
+      "annual_settlement": "slevu za uzavřené měsíce dorovná roční zúčtování",
+      "person_effective": "od {date}",
       "year_frozen": "Celý rok {year} je uzavřený schválenou mzdou (do {date}). Do uzavřeného výpočtu se zpětně nezapisuje.",
       "recalculate_title": "Rozpracované mzdy k přepočtu",
       "recalculate_hint": "Tyto mzdy se počítaly bez podpisu. Po zápisu je přepočítejte.",
@@ -3864,6 +3867,7 @@
         "ready": "Zapíše se",
         "already_signed": "Na rok už podepsáno, přeskočí se",
         "period_frozen": "Období uzavřené schválenou mzdou",
+        "after_year_end": "Prohlášení platí až od dalšího roku",
         "timeline_gap": "Předchozí záznam končí dřív, zapište na kartě osoby",
         "employee_not_found": "Osoba nenalezena"
       },
@@ -7562,6 +7566,11 @@
         "current_ended": "Zadáno jen do {day}, k {month} chybí. Trvá-li vztah dál, nechte Platí do prázdné.",
         "current_none_claimed": "Žádná sleva",
         "derived_taxpayer_credit": "Sleva na poplatníka (z podepsaného prohlášení)",
+        "declaration_check": {
+          "earlier_than_allowed": "Podle dne podpisu platí prohlášení až od {month} (§ 38k ZDP). Za dřívější měsíce sleva nenáleží, posuňte začátek záznamu.",
+          "later_than_entitled": "Podle dne podpisu náleží sleva už od {month} (§ 38k ZDP). Za měsíce uzavřené schválenou mzdou ji dorovná roční zúčtování.",
+          "next_year": "Prohlášení podepsané po lhůtě platí až od dalšího roku (§ 38k odst. 7 ZDP)."
+        },
         "current_from": "platí od {day}",
         "current_none": "k vybranému měsíci nic neplatí",
         "history": "Historie a záznamy - zatím žádný | Historie a záznamy (1) | Historie a záznamy ({count}) | Historie a záznamy ({count})",
@@ -7605,7 +7614,7 @@
           "social_pensions": "Pobíraný důchod"
         },
         "section_hint": {
-          "tax_declarations": "Rozhoduje o tom, zda se uplatní měsíční slevy a zvýhodnění, nebo se sráží daň bez nich.",
+          "tax_declarations": "Rozhoduje o tom, zda se uplatní měsíční slevy a zvýhodnění, nebo se sráží daň bez nich. Začátek záznamu je první měsíc slevy: při podpisu do 30 dnů po nástupu měsíc nástupu, při podpisu do 15. února leden, jinak měsíc po podpisu (§ 38k ZDP). Den podpisu zapište k podepsanému prohlášení.",
           "tax_residences": "Nerezident se zdaňuje jinak než rezident; odkaz na podklad lze uložit nepovinně.",
           "tax_credit_claims": "Měsíční slevy na dani na poplatníka, na invaliditu a na držitele ZTP/P. Uplatní se jen s podepsaným prohlášením; bez záznamu se sleva neodečte a záloha na daň je o ni vyšší. Každý druh slevy se vede jako vlastní řada, takže mohou platit souběžně.",
           "social_jurisdictions": "Zda osoba podléhá českému sociálnímu pojištění. U cizího režimu je nutná země; odkaz na podklad je nepovinný.",

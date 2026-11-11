@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\IncomeTax\StudentTaxCredit;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
+use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationEffectiveMonth;
 use MyInvoice\Service\Payroll\IncomeTax\TaxpayerCreditEntitlement;
 use MyInvoice\Service\Payroll\PayrollApprovedPeriodFreeze;
 use MyInvoice\Service\Payroll\Pension\PayrollPensionAgeTable;
@@ -520,6 +521,11 @@ final class PayrollPersonStatutoryEvidenceRepository
                 ),
                 // Jen nabídka pro formulář: zapisuje ji účetní, ne server.
                 'pension_age_suggestion' => $this->pensionAgeSuggestion($supplierId, $employeeId),
+                'tax_declaration_checks' => $this->taxDeclarationChecks(
+                    $supplierId,
+                    $employeeId,
+                    $sections['tax_declarations'],
+                ),
             ],
             // Bez tohohle editor ví, že je historie zamčená, ale ne ČÍM —
             // uživatel by musel sám najít mzdový běh, který hranici drží,
@@ -1780,6 +1786,68 @@ final class PayrollPersonStatutoryEvidenceRepository
             (string) $identity['birth_date'],
             $identity['sex'] === null ? null : (string) $identity['sex'],
         );
+    }
+
+    /**
+     * Skutečné dny nástupu vztahů osob u plátce (bez nenastoupených), vstup
+     * pro lhůtu 30 dnů po nástupu ({@see TaxDeclarationEffectiveMonth}).
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,list<string>> klíčováno ID osoby
+     */
+    public function employmentStarts(int $supplierId, array $employeeIds): array
+    {
+        $starts = [];
+        foreach (array_chunk($employeeIds, self::CHUNK_SIZE) as $chunk) {
+            $in = implode(', ', array_fill(0, count($chunk), '?'));
+            foreach ($this->rows(
+                "SELECT employee_id, COALESCE(actual_start_date, start_date) AS started_on
+                   FROM payroll_employments
+                  WHERE supplier_id = ? AND employee_id IN ({$in})
+                    AND status <> 'no_show'
+                    AND COALESCE(actual_start_date, start_date) IS NOT NULL",
+                [$supplierId, ...$chunk],
+            ) as $row) {
+                $starts[(int) $row['employee_id']][] = (string) $row['started_on'];
+            }
+        }
+
+        return $starts;
+    }
+
+    /**
+     * Rozpor podepsaných vět prohlášení se zákonným prvním měsícem
+     * (§ 38k ZDP). Jen upozornění pro editor: větu uloží účetní, jak ji
+     * zadala, protože může mít doklad, který server nezná.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array{id:int,legal_from:?string,basis:string,warning:string}>
+     */
+    private function taxDeclarationChecks(int $supplierId, int $employeeId, array $rows): array
+    {
+        $signed = array_filter(
+            $rows,
+            static fn (array $row): bool => ($row['status'] ?? null) === 'signed'
+                && is_string($row['signed_on'] ?? null)
+                && $row['signed_on'] !== '',
+        );
+        if ($signed === []) {
+            return [];
+        }
+        $starts = $this->employmentStarts($supplierId, [$employeeId])[$employeeId] ?? [];
+        $checks = [];
+        foreach ($signed as $row) {
+            $check = TaxDeclarationEffectiveMonth::check(
+                (string) $row['effective_from'],
+                (string) $row['signed_on'],
+                $starts,
+            );
+            if ($check['warning'] !== null) {
+                $checks[] = ['id' => (int) $row['id']] + $check;
+            }
+        }
+
+        return $checks;
     }
 
     private function employeeExists(int $supplierId, int $employeeId): bool

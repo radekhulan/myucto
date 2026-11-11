@@ -907,7 +907,12 @@ export interface PayrollStatutoryEvidence {
    * prohlášení) a nabídka dne dosažení důchodového věku z data narození
    * (`null`, když výpočet jednoznačný není).
    */
-  derived?: { taxpayer_credit: boolean, pension_age_suggestion?: string | null }
+  derived?: {
+    taxpayer_credit: boolean
+    pension_age_suggestion?: string | null
+    /** Podepsané věty prohlášení, jejichž začátek neodpovídá § 38k ZDP (jen upozornění). */
+    tax_declaration_checks?: PayrollTaxDeclarationCheck[]
+  }
   /**
    * Důvody, proč by mzdový běh k datu snímku skončil v ručním posouzení.
    * Klíče jsou tytéž, jaké hlásí `PayrollRunStatutoryInputAssembler`.
@@ -1026,9 +1031,20 @@ export interface PayrollHealthInsurerBulkResult {
   failed: Array<{ employee_id: number, message: string }>
 }
 
-export type PayrollDeclarationSignState = 'ready' | 'already_signed' | 'period_frozen' | 'timeline_gap' | 'employee_not_found'
+export interface PayrollTaxDeclarationCheck {
+  id: number
+  /** Zákonný první měsíc; `null` = prohlášení platí až od dalšího roku. */
+  legal_from: string | null
+  basis: PayrollDeclarationEffectiveBasis
+  warning: 'earlier_than_allowed' | 'later_than_entitled'
+}
+
+export type PayrollDeclarationSignState = 'ready' | 'already_signed' | 'period_frozen' | 'after_year_end' | 'timeline_gap' | 'employee_not_found'
 
 export type PayrollDeclarationSignChange = 'add' | 'close_previous' | 'replace'
+
+/** Proč prohlášení platí od daného měsíce (§ 38k ZDP, TaxDeclarationEffectiveMonth). */
+export type PayrollDeclarationEffectiveBasis = 'employment_start' | 'year_start' | 'following_month' | 'after_frozen_period'
 
 export interface PayrollDeclarationSignPerson {
   employee_id: number
@@ -1038,15 +1054,19 @@ export interface PayrollDeclarationSignPerson {
   /** Stav prohlášení, které se podpisem ukončí nebo nahradí (`not-signed`, `unverified`, `signed`). */
   current_status: string | null
   effective_from: string | null
+  effective_from_basis: PayrollDeclarationEffectiveBasis | null
+  /** Slevu za měsíce uzavřené schválenou mzdou dorovná roční zúčtování. */
+  annual_settlement: boolean
   effective_to: string | null
 }
 
 export interface PayrollDeclarationSignPreview {
   year: number
   signed_on: string
-  /** `null` = celý rok je uzavřený schválenou mzdou. */
+  /** První měsíc pro stávající zaměstnance; `null` = do roku nepatří žádný měsíc. */
   effective_from: string | null
-  effective_from_basis: 'year_start' | 'signing_month' | 'after_frozen_period'
+  effective_from_basis: PayrollDeclarationEffectiveBasis
+  annual_settlement: boolean
   frozen_through: string | null
   summary: Record<'people' | PayrollDeclarationSignState, number>
   ready_employee_ids: number[]
@@ -1058,7 +1078,14 @@ export interface PayrollDeclarationSignResult {
   year: number
   signed_on: string
   counts: { applied: number, skipped: number, failed: number }
-  applied: Array<{ employee_id: number, change: PayrollDeclarationSignChange, effective_from: string, effective_to: string | null }>
+  applied: Array<{
+    employee_id: number
+    change: PayrollDeclarationSignChange
+    effective_from: string
+    effective_from_basis: PayrollDeclarationEffectiveBasis
+    annual_settlement: boolean
+    effective_to: string | null
+  }>
   skipped: Array<{ employee_id: number, reasons: string[] }>
   failed: Array<{ employee_id: number, message: string }>
 }

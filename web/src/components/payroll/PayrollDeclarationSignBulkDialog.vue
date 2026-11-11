@@ -72,7 +72,12 @@ function personDetail(person: PayrollDeclarationSignPerson): string {
   if (person.state !== 'ready' || person.change === null) {
     return t(`payroll.declaration_sign_bulk.state.${person.state}`)
   }
-  return t(`payroll.declaration_sign_bulk.change.${person.change}`, { status: statusLabel(person.current_status) })
+  const parts = [t(`payroll.declaration_sign_bulk.change.${person.change}`, { status: statusLabel(person.current_status) })]
+  if (person.effective_from) {
+    parts.push(t('payroll.declaration_sign_bulk.person_effective', { date: formatPeriod(person.effective_from.slice(0, 7)) }))
+  }
+  if (person.annual_settlement) parts.push(t('payroll.declaration_sign_bulk.annual_settlement'))
+  return parts.join(' · ')
 }
 
 function toggle(id: number, on: boolean) {
@@ -195,7 +200,9 @@ onMounted(loadPreview)
           class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
           data-test="declaration-sign-bulk-year-frozen"
         >
-          {{ t('payroll.declaration_sign_bulk.year_frozen', { year: preview.year, date: formatDate(preview.frozen_through) }) }}
+          {{ preview.effective_from_basis === 'after_frozen_period'
+            ? t('payroll.declaration_sign_bulk.year_frozen', { year: preview.year, date: formatDate(preview.frozen_through) })
+            : t('payroll.declaration_sign_bulk.state.after_year_end') }}
         </p>
         <p v-else class="text-sm text-neutral-700" data-test="declaration-sign-bulk-effective">
           <span class="font-medium">{{ t('payroll.declaration_sign_bulk.effective_from', { date: formatPeriod(preview.effective_from.slice(0, 7)) }) }}</span>
@@ -323,7 +330,7 @@ onMounted(loadPreview)
         <ul class="max-h-80 divide-y divide-neutral-100 overflow-y-auto rounded-lg border border-neutral-200 text-sm">
           <li v-for="item in result.applied" :key="`a-${item.employee_id}`" class="flex flex-wrap gap-2 px-3 py-1.5" :data-test="`declaration-sign-bulk-result-${item.employee_id}`">
             <span class="flex-1 font-medium text-neutral-900">{{ personName(item.employee_id) }}</span>
-            <span class="text-success-700">{{ t('payroll.declaration_sign_bulk.result.applied') }} · {{ t('payroll.declaration_sign_bulk.applied_item', { date: formatPeriod(item.effective_from.slice(0, 7)) }) }}</span>
+            <span class="text-success-700">{{ t('payroll.declaration_sign_bulk.result.applied') }} · {{ t('payroll.declaration_sign_bulk.applied_item', { date: formatPeriod(item.effective_from.slice(0, 7)) }) }}<template v-if="item.annual_settlement"> · {{ t('payroll.declaration_sign_bulk.annual_settlement') }}</template></span>
           </li>
           <li v-for="item in result.skipped" :key="`s-${item.employee_id}`" class="flex flex-wrap gap-2 px-3 py-1.5" :data-test="`declaration-sign-bulk-result-${item.employee_id}`">
             <span class="flex-1 font-medium text-neutral-900">{{ personName(item.employee_id) }}</span>
