@@ -4884,6 +4884,7 @@
       },
       "readiness": {
         "affected": "Affects: {names}",
+        "payout_rule_missing": "A net wage payout rule is missing. Calculation and approval can proceed, but payment preparation will be blocked. Add a payout rule in the employee card under Payout / accounts. Fixing this after approval requires a correction revision and recalculation of the run.",
         "people_list": "Show in the employee list | Show this person in the employee list | Show all {count} people in the employee list",
         "open_all": "Open the agenda for all affected ({count})",
         "fill_probable_average": "Fill in probable earnings from the rate",

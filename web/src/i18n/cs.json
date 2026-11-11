@@ -4884,6 +4884,7 @@
       },
       "readiness": {
         "affected": "Týká se: {names}",
+        "payout_rule_missing": "Chybí výplatní pravidlo pro čistou mzdu. Výpočet ani schválení to nezastaví, ale zablokuje přípravu plateb. Na kartě zaměstnance v části Výplata / účty doplňte výplatní pravidlo. Oprava po schválení znamená opravnou revizi a nový výpočet běhu.",
         "people_list": "Zobrazit v seznamu zaměstnanců | Zobrazit tuto osobu v seznamu zaměstnanců | Zobrazit všechny {count} osoby v seznamu zaměstnanců | Zobrazit všech {count} osob v seznamu zaměstnanců",
         "open_all": "Otevřít agendu pro všechny dotčené ({count})",
         "fill_probable_average": "Doplnit pravděpodobný výdělek ze sazby",

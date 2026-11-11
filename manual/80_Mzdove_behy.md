@@ -101,6 +101,12 @@ a již uzavřenou revizi nepřepíše.
    nového roku ještě nejsou vyhlášené. Týká-li se nález víc osob, než se do
    přehledu vejde, odkaz **Zobrazit všech N osob v seznamu zaměstnanců**
    otevře seznam zúžený právě na ně.
+   U osob s částkou k výplatě kontrola hlásí také chybějící výplatní
+   pravidlo a odkáže na výplatní údaje v kartě zaměstnance. Výpočet ani
+   schválení tím nejsou omezené, bez pravidla ale nepůjdou připravit platby.
+   Doplnění po schválení vyžaduje opravnou revizi a nový výpočet běhu.
+   Nulová nebo záporná výplata pravidlo nepotřebuje; existující pravidlo
+   pro hotovost nebo jiný způsob výplaty se jako chybějící nehlásí.
 5. Zůstal-li některý vstup v konceptu, běh to ohlásí jako blokaci. Klikněte
    přímo u ní na **Schválit vše**. Na jinou obrazovku nemusíte. Tentýž
    problém se neopakuje jako vztah bez mzdových vstupů ani jako chybějící

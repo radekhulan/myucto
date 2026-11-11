@@ -724,6 +724,23 @@ describe('PayrollRuns', () => {
     expect(finding.findAll('a').map(link => link.attributes('href'))).toEqual(['/payroll/time?employment=3&period=2026-08', '/payroll/time?employment=4&period=2026-08'])
   })
 
+  it('chybějící výplatní pravidlo ukáže jako přeložené varování s odkazem na výplatní údaje', async () => {
+    m.runs.mockResolvedValue([run({ status: 'draft' })])
+    m.readiness.mockReturnValue({ period_start: '2026-08-01', payment_date: '2026-09-15', office_id: null, ready: true, has_findings: true, findings: [{
+      code: 'payout_rule_missing', severity: 'warning', impact: 'revision', scope: 'setup',
+      message: 'Serverová zpráva.', remediation_path: null, count: 1,
+      entities: [{ entity_type: 'employee', entity_id: 3, label: 'Syntetická Bez pravidla', remediation_path: '/payroll/people?person=3&panel=accounts' }],
+    }] })
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    const finding = wrapper.get('[data-testid="run-readiness-payout_rule_missing"]')
+    expect(finding.text()).toContain('payroll.runs.readiness.payout_rule_missing')
+    expect(finding.text()).not.toContain('Serverová zpráva.')
+    expect(finding.text()).toContain('Syntetická Bez pravidla')
+    expect(finding.find('a').attributes('href')).toBe('/payroll/people?person=3&panel=accounts')
+    expect(wrapper.get('[data-test="run-readiness-group-revision"]').text()).toContain('payroll.runs.readiness.payout_rule_missing')
+  })
+
   /**
    * Nález kontroly před během bez období (přesčasy → `/payroll/time`, test
    * JMHZ → `/payroll/submissions/jmhz`) otevřel agendu na zpracovávaném

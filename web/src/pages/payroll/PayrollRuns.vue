@@ -1321,6 +1321,12 @@ function readinessEntitySearchText(entity: ReadinessEntity): string {
   return [entity.label ?? '', name, entity.message ?? ''].join(' ')
 }
 
+function readinessFindingMessage(finding: PayrollRunReadinessFinding): string {
+  return finding.code === 'payout_rule_missing'
+    ? t('payroll.runs.readiness.payout_rule_missing')
+    : finding.message
+}
+
 /** Skutečný počet dotčených — `entities` server ořezává, `entity_total` ne. */
 function findingCount(finding: PayrollRunReadinessFinding): number {
   return Math.max(finding.count, finding.entity_total ?? 0)
@@ -1949,7 +1955,7 @@ onMounted(load)
                 :data-testid="`run-readiness-${finding.code}`"
               >
                 <p>
-                  <span v-if="findingCount(finding) > 1" class="font-semibold" :data-test="`run-readiness-count-${finding.code}`">{{ findingCount(finding) }}× </span>{{ finding.message }}
+                  <span v-if="findingCount(finding) > 1" class="font-semibold" :data-test="`run-readiness-count-${finding.code}`">{{ findingCount(finding) }}× </span>{{ readinessFindingMessage(finding) }}
                 </p>
                 <p
                   v-if="findingEntityLabels(finding).length"
@@ -3257,7 +3263,7 @@ onMounted(load)
               :class="findingClass(finding)"
             >
               <p>
-                <span v-if="findingCount(finding) > 1" class="font-semibold">{{ findingCount(finding) }}× </span>{{ finding.message }}
+                <span v-if="findingCount(finding) > 1" class="font-semibold">{{ findingCount(finding) }}× </span>{{ readinessFindingMessage(finding) }}
               </p>
               <p v-if="findingEntityLabels(finding).length" class="mt-1 text-xs font-semibold">
                 {{ t('payroll.runs.readiness.affected', {
