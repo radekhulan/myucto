@@ -47,17 +47,20 @@ final class JmhzComponentSourceRule
      * katalog cílů správný atribut ani nenabízel.
      *
      * Totéž platí pro zdaněnou (nadlimitní) cestovní náhradu, kterou pokyny
-     * k 10328 jmenují výslovně, a pro bezplatné užívání služebního vozidla
-     * k soukromým účelům: § 6 odst. 6 ZDP ho oceňuje jako příjem zaměstnance,
-     * mzdou za práci podle § 109 odst. 2 ZP ale není (pokyny uvádějí mezi
-     * plněními bez charakteru mzdy i příspěvek na dopravu). Katalog cílů pro
-     * ně nenabízí nic než kolonky mzdy, příplatků a náhrad mzdy, takže účetní
-     * musela vybrat kolonku, do které plnění nepatří.
+     * k 10328 jmenují výslovně („Nezahrnují se … cestovní náhrady“). Katalog
+     * cílů pro ni nenabízí nic než kolonky mzdy, příplatků a náhrad mzdy,
+     * takže účetní musela vybrat kolonku, do které plnění nepatří.
+     *
+     * Bezplatné užívání služebního vozidla k soukromým účelům (§ 6 odst. 6
+     * ZDP) sem NEPATŘÍ: pokyny ho mezi vyloučenými plněními nejmenují
+     * a 10328 zahrnuje i „plnění peněžité hodnoty (naturální mzda)“. Zda jde
+     * o naturální mzdu, nebo o plnění bez charakteru mzdy, je výklad, který
+     * aplikace za účetní neudělá: složka proto zařazení vyžaduje jako každá
+     * jiná a účetní ji zařadí (typicky přímo na úhrn 10328).
      */
     private const TAXED_KINDS_OUTSIDE_WAGE_BREAKDOWN = [
         'severance',
         'travel_reimbursement',
-        'benefit_vehicle',
     ];
 
     /**
