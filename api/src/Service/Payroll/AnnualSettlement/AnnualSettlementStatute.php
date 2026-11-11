@@ -138,6 +138,29 @@ final class AnnualSettlementStatute
     }
 
     /**
+     * Zdaňovací období, jehož přeplatek ze zúčtování smí vyplatit mzdový běh
+     * za dané období, nebo null.
+     *
+     * § 38ch odst. 1 a 4 ZDP: zúčtování se dělá po uplynutí roku, nejpozději
+     * do 31. března; § 38ch odst. 5: přeplatek se vrací „nejpozději při
+     * zúčtování mzdy za březen". Okno jsou tedy běhy za leden až březen
+     * následujícího roku — totéž okno, ve kterém výplatu páruje
+     * {@see \MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository::payableOutcomesForPeriod()}.
+     */
+    public static function payoutWindowTaxYear(string $periodStart): ?int
+    {
+        if (preg_match('/^(\d{4})-(\d{2})-01$/D', $periodStart, $match) !== 1) {
+            return null;
+        }
+        $month = (int) $match[2];
+        if ($month < 1 || $month > self::SETTLEMENT_DEADLINE_MONTH) {
+            return null;
+        }
+
+        return (int) $match[1] - 1;
+    }
+
+    /**
      * Přeplatek se vyplácí, jen když je VÍCE než práh (§ 38ch odst. 5:
      * „činí-li úhrnná výše tohoto přeplatku více než 50 Kč"). Nerovnost je
      * OSTRÁ — to je zákonná vlastnost pravidla a v kódu zůstává; SAMOTNÝ práh
