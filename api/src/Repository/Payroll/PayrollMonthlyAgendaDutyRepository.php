@@ -22,6 +22,9 @@ use PDO;
  * pak výsledek proženou týmž {@see PayrollSnapshotHealthInsurers::normalize()},
  * aby se pravidlo „kód je trojmístný řetězec" nedalo obejít ani z jedné.
  *
+ * Čte se jen snímek JEDNÉ revize každého běhu dotázaného období. Historie
+ * firmy do dotazu nevstupuje: přehled podání ho volá při každém otevření.
+ *
  * Revize se bere NEJVYŠŠÍ SCHVÁLENÁ (`approved`/`superseded`) — tatáž volba
  * jako {@see PayrollRunRepository::latestApprovedRevision()}: opravná revize
  * odsune předchozí do `superseded`, ale ta pořád jednou schválená byla, takže
@@ -48,42 +51,47 @@ final class PayrollMonthlyAgendaDutyRepository
         if (!$this->db->hasTable('payroll_run_revisions')) {
             return [];
         }
+        // Nejdřív jen ÚZKÉ sloupce: běhy období (index firmy a období) a pořadí
+        // jejich schválených revizí (index firmy, běhu a čísla revize). Megabajtový
+        // snímek se čte až v druhém kroku, a to jedině u vybrané revize každého
+        // běhu. Dřív CTE počítala JSON funkce nad schválenými revizemi CELÉ
+        // historie firmy a období filtrovala až potom, takže přehled podání
+        // zpomaloval s každým dalším měsícem.
         $statement = $this->db->pdo()->prepare(
             'WITH approved AS (
-                 SELECT revision.supplier_id,
-                        revision.run_id,
-                        revision.id,
-                        JSON_LENGTH(revision.input_snapshot_json, "$.people")
-                            AS person_count,
-                        JSON_EXTRACT(revision.input_snapshot_json, ?)
-                            AS insurer_codes,
+                 SELECT run.id AS run_id,
+                        revision.id AS revision_id,
                         ROW_NUMBER() OVER (
-                            PARTITION BY revision.supplier_id, revision.run_id
+                            PARTITION BY run.id
                             ORDER BY revision.revision_no DESC
                         ) AS row_rank
-                   FROM payroll_run_revisions revision
-                  WHERE revision.supplier_id = ?
+                   FROM payroll_runs run
+                   JOIN payroll_run_revisions revision
+                     ON revision.supplier_id = run.supplier_id
+                    AND revision.run_id = run.id
+                  WHERE run.supplier_id = ?
+                    AND run.period_start = ?
+                    AND run.status <> "cancelled"
                     AND revision.status IN ("approved", "superseded")
              )
-             SELECT run.id AS run_id,
-                    approved.id AS revision_id,
-                    approved.person_count,
-                    approved.insurer_codes
-               FROM payroll_runs run
-               JOIN approved
-                 ON approved.supplier_id = run.supplier_id
-                AND approved.run_id = run.id
-                AND approved.row_rank = 1
-              WHERE run.supplier_id = ?
-                AND run.period_start = ?
-                AND run.status <> "cancelled"
-              ORDER BY run.id',
+             SELECT approved.run_id,
+                    approved.revision_id,
+                    JSON_LENGTH(snapshot.input_snapshot_json, "$.people")
+                        AS person_count,
+                    JSON_EXTRACT(snapshot.input_snapshot_json, ?)
+                        AS insurer_codes
+               FROM approved
+               JOIN payroll_run_revisions snapshot
+                 ON snapshot.supplier_id = ?
+                AND snapshot.id = approved.revision_id
+              WHERE approved.row_rank = 1
+              ORDER BY approved.run_id',
         );
         $statement->execute([
-            PayrollSnapshotHealthInsurers::SNAPSHOT_JSON_PATH,
-            $supplierId,
             $supplierId,
             $periodStart,
+            PayrollSnapshotHealthInsurers::SNAPSHOT_JSON_PATH,
+            $supplierId,
         ]);
 
         $rows = [];
