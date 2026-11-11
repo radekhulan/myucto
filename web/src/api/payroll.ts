@@ -9474,6 +9474,22 @@ export const payrollApi = {
       { environment, row_version: rowVersion, reason },
     ).then(response => response.data),
   /**
+   * „Zrušit přípravu" u zmrazeného, ale neodeslaného řádného měsíčního hlášení:
+   * po opravě mzdy jde hlášení připravit znovu z opravené revize. Server
+   * odmítne podání, které se už odesílalo. `confirm_not_sent` potvrzuje, že
+   * hlášení neodešlo ani ručně přes ePortál; `reason` jde do auditní stopy.
+   */
+  withdrawUnsentSubmissionInQueue: (
+    environment: PayrollRegzelEnvironment,
+    submissionId: number,
+    rowVersion: number,
+    reason: string,
+  ) =>
+    api.post<{ submission: { id: number; status: string; row_version: number } }>(
+      `/payroll/submissions/queue/${submissionId}/withdraw`,
+      { environment, row_version: rowVersion, reason, confirm_not_sent: true },
+    ).then(response => response.data),
+  /**
    * Výslovné potvrzení opakování u podání „možná doručeno" (požadavek odešel,
    * odpověď nedorazila). Samo nic neodesílá, jen uvolní odeslání se stejným
    * GUID. Server ho odmítne, pokud je k podání načtený protokol se stejným

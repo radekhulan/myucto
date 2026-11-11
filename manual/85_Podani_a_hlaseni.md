@@ -1024,6 +1024,15 @@ Jsou na to tři cesty a liší se tím, co po nich zůstane:
 | **Smazat pokus** | u pokusu v historii na záložce **Odesláno** | Řádek z historie zmizí úplně. Zůstane po něm jen záznam v auditním logu. |
 | **Potvrdit opakování** | u pokusu „Možná doručeno“ (fronta i **Odesláno**) | Po dohledání protokolu uvolní odeslání téhož dokumentu se stejným GUID. Pokus zůstane v historii i s důvodem. |
 
+**Zrušit přípravu.** Připravené řádné měsíční hlášení, které se ještě neodesílalo,
+má na záložce **K odeslání** tlačítko **Zrušit přípravu**. Použijte ho po opravě
+mzdy: za jedno období smí existovat jen jedno řádné hlášení, takže nové hlášení
+z opravené mzdy jde připravit až po zrušení původního. Aplikace se zeptá na důvod
+a zrušením potvrzujete, že hlášení neodešlo ani ručně přes ePortál ČSSZ ze
+staženého souboru (druhé řádné hlášení za totéž období by úřad odmítl). Zrušené
+hlášení i s důvodem zůstane v historii. Odeslané hlášení zrušit nejde; změny se
+pak posílají opravným hlášením.
+
 Zahození je běžná cesta; historie pokusů je záměrně úplná, aby šlo dohledat,
 co se kdy komu odeslalo. Smazání je pro záznam, který **nic nedokládá**
 a jen mate: typicky první nepovedený pokus u podání, které nakonec odešlo
