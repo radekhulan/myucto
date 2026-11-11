@@ -51,7 +51,7 @@ final class PayrollEmployeeDeletionRepository
                 . 'deaktivujte.',
         ],
         'run' => [
-            'tables' => ['payroll_run_persons'],
+            'tables' => ['payroll_run_persons', 'payroll_run_exclusions'],
             'code' => 'payroll_employee_in_run',
             'message' => 'Zaměstnanec je zahrnutý v revizi mzdového běhu. '
                 . 'Nejdřív smažte nebo zrušte ten mzdový běh, teprve pak půjde osobu smazat.',

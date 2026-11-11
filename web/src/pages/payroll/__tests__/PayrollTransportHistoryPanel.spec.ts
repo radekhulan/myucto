@@ -1617,7 +1617,7 @@ describe('PayrollTransportHistoryPanel', () => {
     await flushPromises()
     await wrapper.get('[data-test="transport-correct-70"]').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[data-test="transport-correct-preparation-empty"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="transport-correct-preparation-empty"]').exists()).toBe(true)
 
     await wrapper.get('[data-test="transport-correct-prepare-current"]').trigger('click')
     await flushPromises()
