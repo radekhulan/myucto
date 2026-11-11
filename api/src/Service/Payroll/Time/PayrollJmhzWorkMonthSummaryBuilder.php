@@ -519,6 +519,10 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         ];
         $sourceJson = CanonicalJson::encode($source);
         [$durationFrom, $durationTo] = self::employmentInterval($employment, $period, $periodEnd);
+        $roundedSuggestions = array_keys(array_filter(
+            ['agreed_fund_hours' => $agreedMinutes, 'worked_hours' => $worked['minutes']],
+            static fn (int $minutes): bool => self::minutesToMillihours($minutes) === null,
+        ));
 
         return [
             'derivation_version' => $version,
@@ -528,12 +532,12 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'source_snapshot_sha256' => hash('sha256', $sourceJson),
             'suggestions' => [
                 'standard_fund_hours' => $this->standardFundSuggestion($periodStart, $employment['relation_type'], $employment['stated_weekly_hours'], $durationFrom, $durationTo),
-                'agreed_fund_hours' => self::minutesSuggestion($agreedMinutes),
+                'agreed_fund_hours' => self::roundedMinutesSuggestion($agreedMinutes),
                 'weekly_work_hours' => self::weeklyWorkMissingValue($employment['relation_type'])
                     ? self::WEEKLY_WORK_MISSING_VALUE
                     : $employment['stated_weekly_hours'],
                 'evidence_days' => $evidenceDays,
-                'worked_hours' => self::minutesSuggestion($worked['minutes']),
+                'worked_hours' => self::roundedMinutesSuggestion($worked['minutes']),
                 'worked_days' => $worked['days'],
                 'overtime_hours' => self::minutesSuggestion($worked['overtime_minutes']),
             ] + self::conditionalSuggestions($derivedAbsences, $withHolidayTimeOff),
@@ -550,6 +554,9 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             // Svátek uvnitř nepřítomnosti, za kterou se mzda krátí: do 10275 ano
             // (pokyny k 10275 svátky počítají), do 10276 ne (viz UNPAID_HOLIDAY_FIELDS).
             'holiday_unpaid_millihours' => self::minutesToMillihours($unpaidHolidayMinutes),
+            // Návrhy zaokrouhlené na tisíciny hodiny ({@see roundedMinutesSuggestion()});
+            // potvrzení to zapíše do provenience, aby souhrn netvrdil přesnou hodnotu.
+            'rounded_suggestions' => $roundedSuggestions,
             'requires_unworked_hours_followup' => $absences !== [],
             /*
              * Druhy nepřítomnosti, které v měsíci opravdu jsou.
@@ -1497,6 +1504,13 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         if (in_array($version, self::VERSIONS_WITH_UNPAID_HOLIDAYS, true)) {
             $provenance['holidays_unpaid'] = $unpaidHoliday > 0 ? 'work_calendar_added_to_10275' : 'none';
         }
+        $roundedSuggestions = $preview['rounded_suggestions'] ?? [];
+        if (!$summarySource && is_array($roundedSuggestions) && $roundedSuggestions !== []) {
+            $provenance['suggestions_rounding'] = [
+                'policy' => 'time_entry_minutes_half_up_to_millihour',
+                'fields' => array_values($roundedSuggestions),
+            ];
+        }
         if ($withHolidayTimeOff) {
             $provenance['local_evidence']['holiday_time_off_millihours'] = $unworkedHoursOccurred
                 ? 'explicit_confirmation' : 'not_applicable_by_IN07';
@@ -2049,6 +2063,25 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $start->modify('-1 day')->format('Y-m-d H:i:s'),
             $end->modify('+1 day')->format('Y-m-d H:i:s'),
         ];
+    }
+
+    /**
+     * Návrh odpracovaných hodin (10268) a sjednaného fondu (10260) z minut evidence.
+     *
+     * Oba atributy jsou povinné a uvádějí se „jako desetinné číslo s maximálně
+     * 3 desetinnými místy" (Pokyny MH 1.4.14, kap. 3.2.7 k 10260 a kap. 3.3.3
+     * k 10268; datový slovník 1.4.1.6: desetinné číslo (3)). Doba v minutách,
+     * které nejsou násobkem tří (32 h 25 min = 32,41666… h), proto přesně
+     * vyjádřit nejde. Dřív návrh zůstal prázdný: dohoda s takovou docházkou
+     * nešla schválit hromadně a dialog chtěl po účetní, aby hodiny i fond
+     * zaokrouhlila sama. Hodnota se zaokrouhlí na nejbližší tisícinu hodiny
+     * (polovina nahoru) stejně jako u ručního souhrnu
+     * ({@see PayrollDuration::roundedMillihours()}); odchylka je pod dvě sekundy.
+     * Nepovinný přesčas 10269 zůstává bez zaokrouhlení neuvedený (viz confirm()).
+     */
+    private static function roundedMinutesSuggestion(int $minutes): string
+    {
+        return self::millihoursSuggestion(PayrollDuration::roundedMillihours(PayrollDuration::fromMinutes($minutes)));
     }
 
     private static function minutesSuggestion(int $minutes): ?string

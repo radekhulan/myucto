@@ -1158,11 +1158,14 @@ final class AverageEarningDerivationService
         // Kontrola, že odpracované DNY stojí na téže evidenci jako odpracované
         // HODINY: minuty přepočtené ze zmrazených směn se musí do poslední
         // milihodiny shodovat s hodnotou, kterou účetní potvrdila do hlášení.
-        // Porovnává se v celých číslech (minuty × 1000 proti milihodinám × 60),
-        // takže se nikde nezaokrouhluje. Rozejít se můžou tehdy, když účetní
-        // navrženou hodinu přepsala — pak jsou dny odjinud než hodiny a návrh
-        // by tvrdil souvislost, která tam není.
-        if ((int) $worked['worked_minutes'] * 1000 !== $confirmedMillihours * 60) {
+        // Minuty nedělitelné třemi nejdou v tisícinách hodiny vyjádřit přesně;
+        // souhrn je navrhuje zaokrouhlené na tisícinu (polovina nahoru, viz
+        // PayrollJmhzWorkMonthSummaryBuilder::roundedMinutesSuggestion()), takže
+        // se porovnává s touž projekcí. U přesně vyjádřitelných minut je to
+        // shoda do poslední tisíciny jako dřív. Rozejít se můžou tehdy, když
+        // účetní navrženou hodinu přepsala — pak jsou dny odjinud než hodiny
+        // a návrh by tvrdil souvislost, která tam není.
+        if (PayrollDuration::roundedMillihours(PayrollDuration::fromMinutes((int) $worked['worked_minutes'])) !== $confirmedMillihours) {
             return ['blockers' => ['work_summary_hours_mismatch']] + $context;
         }
 

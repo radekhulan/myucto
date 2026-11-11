@@ -958,6 +958,77 @@ describe('TimeAttendance', () => {
     }
   })
 
+  /*
+   * DPP s nástupem uprostřed měsíce: 10261 je u dohody kód 99, ne týdenní
+   * úvazek 99 h, a 10265 je podle pokynů 0. Dialog to musí říct slovy a návrh
+   * (zaokrouhlené hodiny ze zápisů) odeslat beze změny.
+   */
+  it('u dohody neukáže kód 99 jako týdenní úvazek a vysvětlí nulové dny v evidenci', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 12, full_name: 'Syntetická osoba', code: 'SYN-DPP', relation_type: 'dpp' },
+        month: { status: 'open', row_version: 3 },
+        calendar: null,
+        summary: {
+          fund_minutes: 0,
+          planned_minutes: 0,
+          actual_minutes: 1_945,
+          difference_minutes: 1_945,
+          category_minutes: {},
+          incomplete: false,
+        },
+        jmhz_work_summary: {
+          preview: {
+            derivation_version: 'jmhz-work-month.v9',
+            source_snapshot_sha256: 'a'.repeat(64),
+            suggestions: {
+              standard_fund_hours: '120',
+              agreed_fund_hours: '32.417',
+              weekly_work_hours: '99',
+              evidence_days: 0,
+              worked_hours: '32.417',
+            },
+            issues: [],
+            rounded_suggestions: ['agreed_fund_hours', 'worked_hours'],
+            requires_unworked_hours_followup: false,
+          },
+          current_revision: null,
+        },
+        shifts: [],
+        entries: [],
+      }],
+    })
+    const wrapper = mount(TimeAttendance, {
+      global: { stubs: { teleport: true } },
+    })
+    await flushPromises()
+
+    const approve = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.approve')
+    await approve!.trigger('click')
+
+    expect(wrapper.find('[data-test="jmhz-weekly-work"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="jmhz-weekly-work-not-stated"]').text())
+      .toContain('payroll.time.jmhz.weekly_work_not_stated')
+    expect(wrapper.get('[data-test="jmhz-evidence-days"]').text())
+      .toContain('payroll.time.jmhz.evidence_days_agreement')
+    expect(wrapper.find('[data-test="jmhz-worked-rounded"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="jmhz-work-summary-form"] button[type="submit"]')
+      .attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.approveTimeMonth).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      jmhz_work_summary: expect.objectContaining({
+        standard_fund_hours: '120',
+        agreed_fund_hours: '32.417',
+        weekly_work_hours: '99',
+        worked_hours: '32.417',
+      }),
+    }))
+    wrapper.unmount()
+  })
+
   it('freezes exact JMHZ core values together with month approval', async () => {
     m.timeMonth.mockResolvedValue({
       items: [{
