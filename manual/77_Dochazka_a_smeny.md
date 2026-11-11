@@ -243,8 +243,16 @@ Nepřítomnosti patří do [absencí](76_Absence_a_dovolena.md). Schválené
 absence předvyplní neodpracované hodiny v pracovním souhrnu JMHZ podle druhu.
 Hodiny neplaceného volna, výkonu veřejné funkce, neplacené překážky na straně
 zaměstnance a trvání vztahu po neplatném skončení se navrhnou v bloku
-**Neplacené volno**. Čísla aplikace sama nezaokrouhluje ani nedopočítává,
-potvrzujete je vy.
+**Neplacené volno**. Čísla aplikace sama nedopočítává, potvrzujete je vy.
+Hlášení přijímá hodiny nejvýše na tři desetinná místa, takže odpracovanou dobu
+ze zápisů v minutách (například 32 h 25 min) navrhne zaokrouhlenou na tisícinu
+hodiny (32,417 h) a u pole to uvede.
+
+U dohody (DPP, DPČ) se týdenní úvazek do hlášení neuvádí: dialog místo pole
+ukáže „Neuvádí se (do hlášení jde kód 99)", jak to chtějí pokyny MPSV
+k atributu 10261. Dní v evidenčním stavu je u dohody vždy 0. Sjednaný úvazek
+za měsíc se u dohody bez rozvrhu navrhne jako odpracovaná doba včetně
+dovolené (předpokládaný rozsah podle pokynů k atributu 10260).
 
 #### Historie po měsících
 

@@ -1351,7 +1351,10 @@ final class PayrollTimeApiTest extends TestCase
             new Response(),
         );
         $preview = $this->json($overview)['items'][0]['jmhz_work_summary']['preview'];
-        self::assertNull($preview['suggestions']['worked_hours']);
+        // Jedna minuta nejde v tisícinách hodiny vyjádřit přesně; návrh je
+        // zaokrouhlený na tisícinu a souhrn to zapíše do provenience.
+        self::assertSame('0.017', $preview['suggestions']['worked_hours']);
+        self::assertContains('worked_hours', $preview['rounded_suggestions']);
 
         $invalidShape = $this->action->approve(
             $this->request('POST', '/api/payroll/time/months/2026-05/approve')

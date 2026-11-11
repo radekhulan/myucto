@@ -548,6 +548,24 @@ const APPROVAL_REQUIRED_FIELDS = [
   ['worked', () => approvalWorked.value],
 ] as const
 
+/*
+ * Dohoda, člen orgánu a společník se do povinného podílu OZP nezapočítávají;
+ * stanovenou týdenní dobu (10261) mají podle pokynů MPSV „missingovou hodnotu
+ * 99" a server jinou nepřijme. Pole s číslem 99 vypadalo jako týdenní úvazek
+ * 99 h, proto se místo něj ukáže vysvětlení a hodnota se jen odešle.
+ */
+const WEEKLY_WORK_NOT_STATED_RELATIONS = ['dpp', 'dpc', 'partner_dependent', 'statutory_body']
+
+const approvalWeeklyWorkNotStated = computed(() =>
+  WEEKLY_WORK_NOT_STATED_RELATIONS.includes(approvalItem.value?.employment.relation_type ?? '')
+  && approvalItem.value?.jmhz_work_summary.preview?.suggestions.weekly_work_hours === '99')
+
+const approvalIsAgreement = computed(() =>
+  ['dpp', 'dpc'].includes(approvalItem.value?.employment.relation_type ?? ''))
+
+const approvalRoundedHours = computed(() =>
+  approvalItem.value?.jmhz_work_summary.preview?.rounded_suggestions?.includes('worked_hours') ?? false)
+
 const approvalMissingField = computed(
   () => APPROVAL_REQUIRED_FIELDS.find(([, read]) => read().trim() === '')?.[0] ?? null,
 )
@@ -3581,17 +3599,24 @@ onMounted(async () => {
             <input v-model="approvalAgreedFund" data-test="jmhz-agreed-fund" inputmode="decimal" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
             <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.time.jmhz.agreed_fund_hint') }}</span>
           </label>
-          <label class="block">
+          <div v-if="approvalWeeklyWorkNotStated" class="block" data-test="jmhz-weekly-work-not-stated">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.weekly_work') }}</span>
+            <p class="flex h-9 items-center text-sm text-neutral-700">{{ t('payroll.time.jmhz.weekly_work_not_stated') }}</p>
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.time.jmhz.weekly_work_not_stated_hint') }}</span>
+          </div>
+          <label v-else class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.weekly_work') }}</span>
             <input v-model="approvalWeeklyWork" data-test="jmhz-weekly-work" inputmode="decimal" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.worked') }}</span>
             <input v-model="approvalWorked" data-test="jmhz-worked" inputmode="decimal" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+            <span v-if="approvalRoundedHours" data-test="jmhz-worked-rounded" class="mt-1 block text-xs text-neutral-500">{{ t('payroll.time.jmhz.worked_rounded_hint') }}</span>
           </label>
         </div>
-        <p class="text-sm text-neutral-600">
+        <p class="text-sm text-neutral-600" data-test="jmhz-evidence-days">
           {{ t('payroll.time.jmhz.evidence_days', { count: approvalItem.jmhz_work_summary.preview?.suggestions.evidence_days ?? 0 }) }}
+          <span v-if="approvalIsAgreement">{{ t('payroll.time.jmhz.evidence_days_agreement') }}</span>
         </p>
         <p
           v-if="approvalHolidayHours !== null"

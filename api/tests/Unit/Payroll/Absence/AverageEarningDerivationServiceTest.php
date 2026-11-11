@@ -245,6 +245,34 @@ final class AverageEarningDerivationServiceTest extends TestCase
         );
     }
 
+    /**
+     * Směny s minutami nedělitelnými třemi (8 h 25 min) nejdou v tisícinách
+     * hodiny vyjádřit přesně; souhrn je navrhne zaokrouhlené (8,417 h)
+     * a průměr pak potvrzené hodiny nesmí odmítnout jako přepsané.
+     */
+    public function testConfirmedHoursRoundedToMillihourMatchTheShifts(): void
+    {
+        $summary = self::summary([self::entry('2026-01-05T06:00:00Z', '2026-01-05T14:25:00Z', 0)]);
+        $summary['values']['worked_millihours'] = 8_417;
+
+        $month = Derivation::monthFromRow(
+            $this->row(['input_json' => self::inputJson(['jmhz_work_summary' => $summary])]),
+            '2026-01-01',
+        );
+
+        self::assertSame([], $month['blockers']);
+        self::assertSame(505, $month['worked_minutes']);
+
+        $summary['values']['worked_millihours'] = 8_416;
+        self::assertSame(
+            ['work_summary_hours_mismatch'],
+            Derivation::monthFromRow(
+                $this->row(['input_json' => self::inputJson(['jmhz_work_summary' => $summary])]),
+                '2026-01-01',
+            )['blockers'],
+        );
+    }
+
     public function testUnderivableShiftsBlock(): void
     {
         $summary = self::summary([
