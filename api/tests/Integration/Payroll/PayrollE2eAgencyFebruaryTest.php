@@ -77,22 +77,17 @@ final class PayrollE2eAgencyFebruaryTest extends TestCase
         $readiness = $this->container->get(PayrollRunReadinessService::class);
         self::assertInstanceOf(PayrollRunReadinessService::class, $readiness);
         $findings = $readiness->inspect($this->supplierId, self::PERIOD_START, self::PAYDAY, $this->officeId)['findings'];
+        // Chybějící počáteční úhrny výpočet nezastaví (daň je měsíční, dohoda
+        // má k ročnímu maximu SP daleko; audit 12. 11. 2026, ř. 12). Kontrola
+        // na ně upozorní varováním s odkazem na import, ne blokací.
         $statutory = self::finding($findings, 'statutory_calculation_manual_review');
-        self::assertNotNull($statutory, 'Ruční úhrny lednového nástupu musí kontrola dál hlásit.');
-        $messages = array_column($statutory['entities'], 'message', 'entity_id');
-        self::assertArrayHasKey($manual['employee_id'], $messages);
-        self::assertStringContainsString('počáteční roční úhrny', $messages[$manual['employee_id']]);
-        self::assertStringContainsString('posledního vztahu', $messages[$manual['employee_id']]);
-        self::assertStringNotContainsString(
-            'počáteční roční úhrny',
-            (string) ($messages[$seeded['employee_id']] ?? ''),
-            'Úhrny, které doplní založení běhu, nejsou práce pro účetní.',
-        );
-        foreach ($statutory['entities'] as $entity) {
-            if ((int) $entity['entity_id'] === $manual['employee_id']) {
-                self::assertStringContainsString('panel=opening_balances', (string) $entity['remediation_path']);
-            }
+        foreach ($statutory['entities'] ?? [] as $entity) {
+            self::assertStringNotContainsString('počáteční roční úhrny', (string) $entity['message']);
         }
+        $openingsWarning = self::finding($findings, 'annual_accumulator_missing_summary');
+        self::assertNotNull($openingsWarning, 'Ruční úhrny lednového nástupu musí kontrola dál připomenout.');
+        self::assertStringContainsString('počátečních ročních úhrnů', $openingsWarning['message']);
+        self::assertNotContains($openingsWarning['impact'], ['blocking', 'approval']);
 
         // Jedno pravidlo: založení běhu doplní právě tuto osobu.
         self::assertSame([$seeded['employee_id']], $openings->seedProvableZeroOpenings($this->supplierId, self::PERIOD_START, [], $this->actors[0]));
