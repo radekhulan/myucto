@@ -4800,6 +4800,27 @@
         "title": "What comes next",
         "subtitle": "Payroll is calculated and posted — filing comes next. Each obligation shows its deadline, its status and a link to where it is filed; anything already done is marked as done."
       },
+      "after_approval": {
+        "title": "Payslips, payouts and filings for this period",
+        "subtitle_approved": "The payroll is approved and the figures are binding. The run continues with posting and payment preparation (buttons above); open the payslips, payouts and filings for this period from here.",
+        "subtitle": "Payslips, payouts and filings for the period of this run.",
+        "documents": "Payslips and documents",
+        "payments": "Payouts and payments",
+        "submissions": "Monthly overview of filings and reports"
+      },
+      "approve_confirm": {
+        "title": "Approve the payroll for {period}?",
+        "intro": "Approval is a binding step. Before you confirm it, this is what it locks:",
+        "locks": {
+          "result": "The calculated pay is saved as the binding result and the payslips are created from it.",
+          "evidence": "The history of the people's statutory evidence is closed up to the end of the period (tax declaration, credits, children, health insurer). A later change is saved from the next month on.",
+          "changes": "Inputs, attendance, absences or a new employee starting in this month no longer reach the payroll by themselves.",
+          "followup": "Posting, payments, the monthly report and the insurance overviews are all based on the approved result."
+        },
+        "period_running": "The period has not ended yet (it ends on {end}). Anything that changes before the end of the month reaches the payroll only through a correction of the run, and the monthly report can be prepared only after the month ends.",
+        "period_upcoming": "The period has not even started (it starts on {start}). You are approving pay calculated from the plan only: every change of attendance, inputs or relationships will mean a correction of the run, and the monthly report can be prepared only after the month ends.",
+        "undo": "The only way back is a correction of the run: \"Request correction\" and \"Open correction\" create a new revision, the original stays in the history."
+      },
       "readiness": {
         "affected": "Affects: {names}",
         "fill_probable_average": "Fill in probable earnings from the rate",

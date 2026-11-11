@@ -4800,6 +4800,27 @@
         "title": "Co následuje",
         "subtitle": "Mzdy jsou spočítané a zaúčtované - teď se podává. U každé povinnosti je vidět lhůta, stav a odkaz tam, kde se podává; co je hotové, je označené jako hotové."
       },
+      "after_approval": {
+        "title": "Pásky, výplaty a podání za toto období",
+        "subtitle_approved": "Mzdy jsou schválené a čísla závazná. Běh pokračuje zaúčtováním a přípravou plateb (tlačítka nahoře); výplatní pásky, výplaty a podání za tohle období otevřete odsud.",
+        "subtitle": "Výplatní pásky, výplaty a podání za období tohoto běhu.",
+        "documents": "Výplatní pásky a dokumenty",
+        "payments": "Výplaty a platby",
+        "submissions": "Měsíční přehled podání a hlášení"
+      },
+      "approve_confirm": {
+        "title": "Schválit mzdy za {period}?",
+        "intro": "Schválení je závazný krok. Než ho potvrdíte, tohle se jím uzamkne:",
+        "locks": {
+          "result": "Spočítané mzdy se uloží jako závazný výsledek a založí se z nich výplatní pásky.",
+          "evidence": "Uzavře se historie zákonné evidence osob do konce období (prohlášení k dani, slevy, děti, pojišťovna). Pozdější změna se uloží až od dalšího měsíce.",
+          "changes": "Vstupy, docházka, nepřítomnosti ani nový zaměstnanec s nástupem v tomto měsíci se už do mezd samy nedostanou.",
+          "followup": "Ze schváleného výsledku vychází zaúčtování, platby, měsíční hlášení i přehledy pojistného."
+        },
+        "period_running": "Období ještě neskončilo (končí {end}). Co se do konce měsíce změní, dostane se do mezd jen opravou běhu, a měsíční hlášení půjde připravit až po skončení měsíce.",
+        "period_upcoming": "Období ještě ani nezačalo (začíná {start}). Schvalujete mzdy spočítané jen z plánu: každá změna docházky, vstupů nebo vztahů bude znamenat opravu běhu a měsíční hlášení půjde připravit až po skončení měsíce.",
+        "undo": "Zpět vede jen oprava běhu: „Vyžádat opravu“ a „Otevřít opravu“ založí novou revizi, původní zůstane v historii."
+      },
       "readiness": {
         "affected": "Týká se: {names}",
         "fill_probable_average": "Doplnit pravděpodobný výdělek ze sazby",

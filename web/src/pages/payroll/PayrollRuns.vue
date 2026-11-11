@@ -34,6 +34,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ExpandableList from '@/components/ui/ExpandableList.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { appIsoDate } from '@/utils/date'
 import { payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 import { runPayrollInputBatch } from '@/pages/payroll/payrollInputFilters'
 import PayrollMonthlyChecklistPanel from '@/pages/payroll/PayrollMonthlyChecklistPanel.vue'
@@ -139,6 +140,8 @@ const offset = ref(0)
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const pendingCommand = ref<{ run: PayrollRun, command: PayrollRunCommand } | null>(null)
 const pendingDelete = ref<PayrollRun | null>(null)
+/** Běh čekající na potvrzení schválení: je to závazný krok, zpět vede jen oprava běhu. */
+const pendingApprove = ref<PayrollRun | null>(null)
 const commandReason = ref('')
 const commandError = ref('')
 const commandBlockers = ref<Record<number, string>>({})
@@ -596,6 +599,20 @@ const NEXT_STEP_STATUSES: PayrollRun['status'][] = [
 
 function showsNextSteps(run: PayrollRun): boolean {
   return NEXT_STEP_STATUSES.includes(run.status)
+}
+
+/**
+ * Schválený běh a vše za ním: čísla jsou závazná, takže odkazy na pásky,
+ * výplaty a podání za TOTÉŽ období mají smysl. Dřív schválený běh nabídl jen
+ * „Zaúčtovat" a „Vyžádat opravu" a o páskách ani podáních mlčel.
+ */
+const AFTER_APPROVAL_STATUSES: PayrollRun['status'][] = [
+  'approved',
+  ...NEXT_STEP_STATUSES,
+]
+
+function showsAfterApprovalLinks(run: PayrollRun): boolean {
+  return run.run_kind !== 'takeover' && AFTER_APPROVAL_STATUSES.includes(run.status)
 }
 
 /** Varování, na které se čeká: bez rozhodnutí člověka běh dál nepostoupí. */
@@ -1169,7 +1186,42 @@ async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
     pendingStart.value = { run, command }
     return
   }
+  /*
+   * Schválení je závazné a nevratné jedním kliknutím: uzamkne výsledek, založí
+   * pásky a uzavře historii evidence. Dialog řekne, co se uzamkne, dřív než
+   * se to stane; zpět pak vede jen oprava běhu.
+   */
+  if (command === 'approve') {
+    pendingApprove.value = run
+    return
+  }
   await submitCommand(run, command)
+}
+
+/** Co schválení uzamkne; pořadí je pořadí vět v potvrzení. */
+const APPROVE_LOCK_KEYS = ['result', 'evidence', 'changes', 'followup'] as const
+
+async function confirmApprove() {
+  const run = pendingApprove.value
+  if (run === null) return
+  pendingApprove.value = null
+  await submitCommand(run, 'approve')
+}
+
+/**
+ * Stojí období běhu vůči dnešku: `upcoming` ještě nezačalo, `running` běží.
+ * Jen kalendář pro text potvrzení; nález s důsledky posílá kontrola před během.
+ */
+function periodTiming(run: PayrollRun): 'upcoming' | 'running' | 'finished' {
+  const today = appIsoDate()
+  if (run.period_start > today) return 'upcoming'
+  return periodEndDate(run) >= today ? 'running' : 'finished'
+}
+
+function periodEndDate(run: PayrollRun): string {
+  const [year, month] = run.period_start.split('-').map(Number)
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return `${run.period_start.slice(0, 8)}${String(lastDay).padStart(2, '0')}`
 }
 
 /** Kroky, po kterých se snímek vstupů zmrazí — jen před nimi má kontrola smysl. */
@@ -2356,6 +2408,45 @@ onMounted(load)
           z evidence, po lhůtě zvýrazní a u každé položky vede odkazem tam,
           kde se to reálně dělá; co je hotové, se kreslí jako hotové.
         -->
+        <div
+          v-if="showsAfterApprovalLinks(run)"
+          class="mt-5"
+          :data-test="`payroll-run-${run.id}-after-approval`"
+        >
+          <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+            {{ t('payroll.runs.after_approval.title') }}
+          </h4>
+          <p class="mb-3 max-w-3xl text-sm text-neutral-600">
+            {{ t(run.status === 'approved' ? 'payroll.runs.after_approval.subtitle_approved' : 'payroll.runs.after_approval.subtitle') }}
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <RouterLink
+              :to="{ name: 'payroll-documents', query: { period: run.period_start.slice(0, 7) } }"
+              :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+              :data-test="`payroll-run-${run.id}-after-approval-documents`"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.doc" /></svg>
+              {{ t('payroll.runs.after_approval.documents') }}
+            </RouterLink>
+            <RouterLink
+              :to="{ name: 'payroll-payments', query: { period: run.period_start.slice(0, 7), run: String(run.id) } }"
+              :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+              :data-test="`payroll-run-${run.id}-after-approval-payments`"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
+              {{ t('payroll.runs.after_approval.payments') }}
+            </RouterLink>
+            <RouterLink
+              :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' }, query: { period: run.period_start.slice(0, 7) } }"
+              :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+              :data-test="`payroll-run-${run.id}-after-approval-submissions`"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+              {{ t('payroll.runs.after_approval.submissions') }}
+            </RouterLink>
+          </div>
+        </div>
+
         <div v-if="showsNextSteps(run)" class="mt-5" :data-test="`payroll-run-${run.id}-next-steps`">
           <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
             {{ t('payroll.runs.next_steps.title') }}
@@ -3358,6 +3449,47 @@ onMounted(load)
         </div>
       </template>
     </PayrollStatutoryBulkDefaultsDialog>
+
+    <Modal
+      v-if="pendingApprove"
+      :title="t('payroll.runs.approve_confirm.title', { period: formatPeriod(pendingApprove.period_start.slice(0, 7)) })"
+      width-class="max-w-xl"
+      @close="pendingApprove = null"
+    >
+      <div class="space-y-3 text-sm text-neutral-700" data-test="run-approve-dialog">
+        <p>{{ t('payroll.runs.approve_confirm.intro') }}</p>
+        <ul class="list-disc space-y-1 pl-5" data-test="run-approve-locks">
+          <li v-for="key in APPROVE_LOCK_KEYS" :key="key">{{ t(`payroll.runs.approve_confirm.locks.${key}`) }}</li>
+        </ul>
+        <p
+          v-if="periodTiming(pendingApprove) !== 'finished'"
+          class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-warning-800"
+          data-test="run-approve-period-timing"
+        >
+          {{ t(`payroll.runs.approve_confirm.period_${periodTiming(pendingApprove)}`, {
+            start: formatDate(pendingApprove.period_start),
+            end: formatDate(periodEndDate(pendingApprove)),
+          }) }}
+        </p>
+        <p class="text-xs text-neutral-500">{{ t('payroll.runs.approve_confirm.undo') }}</p>
+      </div>
+      <div class="mt-5 flex flex-wrap justify-end gap-2">
+        <button type="button" :class="btnOutline('neutral')" @click="pendingApprove = null">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.cancel') }}
+        </button>
+        <button
+          type="button"
+          :class="btnFilled('success')"
+          :disabled="saving"
+          data-test="confirm-run-approve"
+          @click="confirmApprove"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+          {{ commandLabel('approve', pendingApprove) }}
+        </button>
+      </div>
+    </Modal>
 
     <Modal
       v-if="pendingDelete"

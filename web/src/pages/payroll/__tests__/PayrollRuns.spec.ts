@@ -1612,6 +1612,123 @@ describe('PayrollRuns', () => {
     wrapper.unmount()
   })
 
+  /*
+   * Schválení je závazné a dřív proběhlo jedním kliknutím bez potvrzení.
+   * Dialog řekne, co se uzamkne, a teprve potvrzení příkaz odešle.
+   */
+  it('schválení se nejdřív zeptá, řekne, co uzamkne, a odešle se až po potvrzení', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'review', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-approve"]').trigger('click')
+    await flushPromises()
+
+    expect(m.commandRun).not.toHaveBeenCalled()
+    const dialog = document.body.querySelector('[data-test="run-approve-dialog"]')
+    expect(dialog).not.toBeNull()
+    expect(dialog!.textContent).toContain('payroll.runs.approve_confirm.intro')
+    expect(dialog!.querySelectorAll('[data-test="run-approve-locks"] li')).toHaveLength(4)
+    expect(dialog!.textContent).toContain('payroll.runs.approve_confirm.locks.result')
+    expect(dialog!.textContent).toContain('payroll.runs.approve_confirm.locks.evidence')
+    expect(dialog!.textContent).toContain('payroll.runs.approve_confirm.undo')
+    // Srpen je 15. 9. už uzavřený měsíc: o kalendáři není co říkat.
+    expect(dialog!.querySelector('[data-test="run-approve-period-timing"]')).toBeNull()
+
+    document.body.querySelector<HTMLButtonElement>('[data-test="confirm-run-approve"]')!.click()
+    await flushPromises()
+
+    expect(m.commandRun).toHaveBeenCalledWith(15, 'approve', { row_version: 2 }, expect.any(String))
+    expect(document.body.querySelector('[data-test="run-approve-dialog"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('zavření potvrzení běh neschválí', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-approve"]').trigger('click')
+    await flushPromises()
+    const cancel = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent?.includes('common.cancel'))
+    cancel!.click()
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-test="run-approve-dialog"]')).toBeNull()
+    expect(m.commandRun).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['2026-09-01', 'payroll.runs.approve_confirm.period_running'],
+    ['2026-10-01', 'payroll.runs.approve_confirm.period_upcoming'],
+  ])('potvrzení schválení upozorní, že období %s ještě neskončilo', async (periodStart, key) => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      period_start: periodStart,
+      can_delete: false,
+      available_commands: ['calculate', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-approve"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-test="run-approve-period-timing"]')?.textContent).toContain(key)
+    wrapper.unmount()
+  })
+
+  /*
+   * Po schválení UI nabídlo jen „Zaúčtovat" a „Vyžádat opravu"; o páskách,
+   * výplatách ani podáních mlčelo.
+   */
+  it('schválený běh vede na pásky, výplaty a měsíční přehled podání téhož období', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'approved',
+      can_delete: false,
+      available_commands: ['post', 'request_correction'],
+    })])
+
+    const wrapper = mount(PayrollRuns, {
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    const box = wrapper.get('[data-test="payroll-run-15-after-approval"]')
+    expect(box.text()).toContain('payroll.runs.after_approval.subtitle_approved')
+    expect(JSON.parse(box.get('[data-test="payroll-run-15-after-approval-documents"]').attributes('data-to')!))
+      .toEqual({ name: 'payroll-documents', query: { period: '2026-08' } })
+    expect(JSON.parse(box.get('[data-test="payroll-run-15-after-approval-payments"]').attributes('data-to')!))
+      .toEqual({ name: 'payroll-payments', query: { period: '2026-08', run: '15' } })
+    expect(JSON.parse(box.get('[data-test="payroll-run-15-after-approval-submissions"]').attributes('data-to')!))
+      .toEqual({ name: 'payroll-submissions-tab', params: { tab: 'monthly' }, query: { period: '2026-08' } })
+    wrapper.unmount()
+  })
+
+  it('rozpracovaný běh odkazy po schválení nenabízí', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="payroll-run-15-after-approval"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('ukáže chybějící běhy před obdobím a nabídne posun začátku za měsíce předchozího programu', async () => {
     m.missing.mockReturnValue(['2026-06', '2026-07', '2026-08'])
     m.advanceTo.mockReturnValue('2026-09')
