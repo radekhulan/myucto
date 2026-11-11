@@ -22,6 +22,24 @@ final class TransactionFailure
         return in_array((int) ($failure->errorInfo[1] ?? 0), [1020, 1213], true);
     }
 
+    /**
+     * Souběh dvou požadavků nad týmiž řádky: vypršení zámku (1205), deadlock (1213)
+     * nebo odvolaný snapshot (1020). Pro uživatele to není chyba aplikace, ale
+     * „probíhá jiný požadavek, zkuste znovu".
+     */
+    public static function lockConflict(\Throwable $failure): bool
+    {
+        for ($cause = $failure; $cause !== null; $cause = $cause->getPrevious()) {
+            if ($cause instanceof PDOException
+                && in_array((int) ($cause->errorInfo[1] ?? 0), [1020, 1205, 1213], true)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static function rollbackIfAborted(PDO $pdo, \Throwable $failure): bool
     {
         if (!self::aborted($failure)) {

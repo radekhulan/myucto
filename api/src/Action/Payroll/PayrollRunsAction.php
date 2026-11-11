@@ -27,6 +27,7 @@ use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Service\Payroll\Run\PayrollRunPaymentsUnsettledException;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
+use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotFixableException;
 use MyInvoice\Service\Payroll\Run\PayrollRunSourceDriftDetector;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatus;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
@@ -485,6 +486,10 @@ final class PayrollRunsAction
              * osoba tiše zůstala bez mzdy i bez měsíčního hlášení.
              */
             $item['missing_employments'] = $missingEmployments[(int) ($item['id'] ?? 0)] ?? [];
+            $item['exclusions'] = $this->runs->exclusions(
+                $this->currentSupplierId($request),
+                PayrollTimeValue::int($item['id'] ?? null, 'run.id'),
+            );
             $item['average_change'] = $averageChanges[(int) ($item['id'] ?? 0)] ?? null;
             $deletion = $this->runs->canDelete(
                 $this->currentSupplierId($request),
@@ -597,7 +602,11 @@ final class PayrollRunsAction
 
             return [
                 ...$this->sourceDrift
-                    ->detect($supplierId, $revision['input_snapshot'])
+                    ->detect(
+                        $supplierId,
+                        $revision['input_snapshot'],
+                        $this->runs->excludedEmploymentIds($supplierId, $runId),
+                    )
                     ->toArray(),
                 'snapshot_created_at' => $revision['created_at'],
             ];
@@ -939,6 +948,8 @@ final class PayrollRunsAction
             return Json::error($response, 'payroll_period_owned', $e->getMessage(), 409);
         } catch (\InvalidArgumentException|\DomainException|\OutOfBoundsException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (\PDOException $e) {
+            return PayrollRunBusyResponse::from($response, $e) ?? throw $e;
         }
         /*
          * Nulové počáteční stavy kumulací tam, kde je nula prokazatelná.
@@ -1022,6 +1033,8 @@ final class PayrollRunsAction
                 $e->getMessage(),
                 422,
             );
+        } catch (\PDOException $e) {
+            return PayrollRunBusyResponse::from($response, $e) ?? throw $e;
         }
 
         return Json::ok($response, [
@@ -1046,7 +1059,14 @@ final class PayrollRunsAction
             // sloučený krok zamyká nově schválené vstupy, takže i ona projde
             // oběma branami.
             'refresh_inputs' => 'payroll.calculate',
-            'review', 'request_correction' => 'payroll.review',
+            // Změna data výplaty u běhu se snímkem založí novou revizi stejnou
+            // cestou jako obnova podkladů, proto tytéž dvě brány.
+            'change_payment_date' => 'payroll.calculate',
+            'review', 'request_correction', 'withdraw_correction' => 'payroll.review',
+            // Vyřazení osoby je rozhodnutí „tuhle osobu teď nevyplácím" — stejná
+            // váha jako výjimka u kontroly, kterou smí schválit jen `payroll.approve`.
+            // Nová revize navíc zamyká vstupy, takže i `payroll.inputs.write`.
+            'exclude_employee', 'include_employee' => 'payroll.approve',
             'approve' => 'payroll.approve',
             'reopen' => 'payroll.reopen',
             // `post` vytváří účetní zápis v hlavní knize — patří pod stejné
@@ -1074,7 +1094,13 @@ final class PayrollRunsAction
         )) !== null) {
             return $error;
         }
-        if (in_array($command, ['lock_and_calculate', 'refresh_inputs'], true)
+        if (in_array($command, [
+            'lock_and_calculate',
+            'refresh_inputs',
+            'change_payment_date',
+            'exclude_employee',
+            'include_employee',
+        ], true)
             && ($error = $this->authorize(
                 $request,
                 $response,
@@ -1112,6 +1138,7 @@ final class PayrollRunsAction
                 $idempotencyKey,
                 $this->requiredUserId($request),
                 $reason,
+                $body,
             );
         } catch (PayrollYearClosedException $e) {
             return self::yearClosedError($response, $e);
@@ -1153,8 +1180,15 @@ final class PayrollRunsAction
             );
         } catch (\OutOfBoundsException $e) {
             return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (PayrollRunSnapshotFixableException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422, [
+                'finding_code' => $e->findingCode,
+                'remediation_path' => $e->remediationPath,
+            ]);
         } catch (\InvalidArgumentException|\DomainException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (\PDOException $e) {
+            return PayrollRunBusyResponse::from($response, $e) ?? throw $e;
         }
         $payload = $this->serialize($result, $request);
         if ($command === PayrollRunCommand::PREPARE_PAYMENTS->value) {
@@ -1176,6 +1210,7 @@ final class PayrollRunsAction
         return Json::ok($response, $payload);
     }
 
+    /** @param array<string,mixed> $body */
     private function dispatch(
         string $command,
         int $supplierId,
@@ -1184,6 +1219,7 @@ final class PayrollRunsAction
         string $idempotencyKey,
         int $userId,
         string $reason,
+        array $body,
     ): PayrollRunCommandResult {
         return match ($command) {
             'lock_inputs' => $this->commands->lockInputs(
@@ -1243,10 +1279,63 @@ final class PayrollRunsAction
             'close' => $this->commands->close(
                 $supplierId, $runId, $version, $idempotencyKey, $userId,
             ),
+            'withdraw_correction' => $this->commands->withdrawCorrection(
+                $supplierId, $runId, $version, $idempotencyKey, $userId, $reason,
+            ),
+            'change_payment_date' => $this->commands->changePaymentDate(
+                $supplierId,
+                $runId,
+                $version,
+                $idempotencyKey,
+                $userId,
+                $this->requiredString($body, 'payment_date'),
+            ),
+            'exclude_employee' => $this->commands->excludeEmployee(
+                $supplierId,
+                $runId,
+                $version,
+                $idempotencyKey,
+                $userId,
+                $this->targetEmployee($supplierId, $body),
+                $reason,
+            ),
+            'include_employee' => $this->commands->includeEmployee(
+                $supplierId,
+                $runId,
+                $version,
+                $idempotencyKey,
+                $userId,
+                $this->targetEmployee($supplierId, $body),
+            ),
             default => throw new \InvalidArgumentException(
                 'Nepodporovaný příkaz mzdového běhu.',
             ),
         };
+    }
+
+    /**
+     * Osoba, které se vyřazení týká. Nález zákonného výpočtu nese buď osobu,
+     * nebo pracovní vztah; vztah se převede na osobu.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function targetEmployee(int $supplierId, array $body): int
+    {
+        $employeeId = filter_var($body['employee_id'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        if (is_int($employeeId)) {
+            return $employeeId;
+        }
+        $employmentId = filter_var($body['employment_id'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        if (is_int($employmentId)) {
+            return $this->runs->employeeOfEmployment($supplierId, $employmentId)
+                ?? throw new \OutOfBoundsException('Pracovní vztah neexistuje.');
+        }
+
+        throw new \InvalidArgumentException('Vyberte osobu (employee_id nebo employment_id).');
     }
 
     /** @return array<string,mixed> */

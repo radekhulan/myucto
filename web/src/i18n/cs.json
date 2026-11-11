@@ -4420,7 +4420,12 @@
           "refresh_inputs": "Podklady obnoveny",
           "validation_override": "Schválena výjimka kontroly",
           "validation_override_revoked": "Výjimka kontroly odvolána",
-          "unknown": "Další auditní krok"
+          "unknown": "Další auditní krok",
+          "withdraw_correction": "Žádost o opravu vzata zpět",
+          "change_payment_date": "Změněno datum výplaty",
+          "exclude_employee": "Osoba vyřazena z běhu",
+          "include_employee": "Osoba vrácena do běhu",
+          "validation_overrides_carried": "Výjimky převzaté z předchozí revize"
         }
       },
       "validation": {
@@ -4774,7 +4779,11 @@
         "cancel": "Zrušit běh",
         "close": "Uzavřít",
         "lock_and_calculate": "Spočítat mzdy",
-        "refresh_inputs": "Obnovit podklady"
+        "refresh_inputs": "Obnovit podklady",
+        "withdraw_correction": "Vzít žádost o opravu zpět",
+        "change_payment_date": "Změnit datum výplaty",
+        "exclude_employee": "Vyřadit osobu z běhu",
+        "include_employee": "Vrátit osobu do běhu"
       },
       "outcome": {
         "posted": "Mzdy jsou zaúčtované.",
@@ -4946,6 +4955,30 @@
         "confirm_note": "Zahájením se zamknou vstupy a rovnou se spočítají mzdy. Co zapíšete potom, se do výpočtu nedostane, dokud běh znovu neotevřete.",
         "recheck": "Zkontrolovat znovu",
         "start_anyway": "Přesto zahájit"
+      },
+      "withdraw_correction_hint": "Běh se vrátí do stavu, ve kterém byl před vyžádáním opravy. Schválená revize, zaúčtování, platby ani podání se nemění. Změny podkladů zadané mezitím se do běhu nedostanou; pokud je potřebujete, opravu nevracejte a pokračujte „Otevřít opravu“.",
+      "forbidden_command": "Krok „{commands}“ nevidíte, protože nemáte právo „{permission}“. Požádejte správce firmy o jeho přidělení.",
+      "change_payment_date": {
+        "hint_draft": "Změní se jen datum výplaty běhu. Snímek vstupů ještě nevznikl, takže se nic nepřepočítává.",
+        "hint_locked": "Běh dostane novou revizi s novým datem výplaty a hned se přepočítá: na datu výplaty závisí zákonný výpočet i lhůty odvodů a hlášení. Výjimky se stejným textem se převezmou."
+      },
+      "exclusion": {
+        "exclude": "Vyřadit osobu z běhu",
+        "hint": "{name} se z tohoto běhu vyřadí: běh dostane novou revizi bez této osoby a ostatním se mzda spočítá a schválí jako obvykle. Osoba nedostane výplatní pásku ani mzdu v tomto běhu a nebude ve schválené revizi. Mzdu jí doplatíte opravou běhu za stejné období (Vyžádat opravu, Otevřít opravu), až doplníte chybějící údaje. Do měsíčního hlášení JMHZ se pak dostane opravným hlášením. Uveďte, co chybí a kdy se doplní.",
+        "active_title": "Z běhu vyřazeno: {count}",
+        "active_hint": "Tyto osoby revize nepočítá. Až údaje doplníte, vraťte je do běhu, nebo je doplaťte opravou po schválení.",
+        "include": "Vrátit do běhu",
+        "settled_title": "Bez mzdy v tomto běhu: {count}",
+        "settled_hint": "Schválená revize šla bez těchto osob. Doplatek: doplňte chybějící údaje, klikněte na „Vyžádat opravu“ a „Otevřít opravu“; opravná revize je už obsahuje. Měsíční hlášení za ně podejte opravným hlášením JMHZ."
+      },
+      "permission_names": {
+        "payroll_reopen": "Odemknout schválený mzdový běh",
+        "payroll_approve": "Schválit mzdový běh",
+        "payroll_review": "Zkontrolovat mzdový běh",
+        "payroll_calculate": "Vypočítat mzdy",
+        "payroll_inputs_write": "Spravovat mzdové vstupy",
+        "payroll_post": "Zaúčtovat mzdy",
+        "payroll_payments": "Spravovat výplaty a odvody"
       }
     },
     "quick_inputs": {
@@ -6485,7 +6518,7 @@
         "holiday_arrangement_missing": "Měsíc obsahuje práci ve svátek, ale u vztahu {name} není sjednaná zásada (náhradní volno, nebo příplatek). Bez ní se z evidence nedá spočítat mzda, takže ji schválení nepustí dál.",
         "difficulty_factors_missing": "Měsíc obsahuje práci ve ztíženém prostředí, ale u vztahu {name} chybí počet ztěžujících vlivů podle § 117.",
         "average_earning_missing": "Příplatek se u vztahu {name} počítá z průměrného výdělku a ten pro toto období není zjištěný.",
-        "inputs_locked": "Mzdový běh za tento měsíc už má zamčené vstupy, takže schválení docházky do nich nemůže zapsat příplatky. V mzdovém běhu klikněte na „Zrušit běh“ (docházka ani vstupy se nesmažou), vraťte se sem a měsíc schvalte. Potom v běhu klikněte na „Začít znovu a spočítat“.",
+        "inputs_locked": "Mzdový běh za tento měsíc už má zamčené vstupy, takže schválení docházky do nich nemůže zapsat příplatky. V mzdovém běhu klikněte na „Zrušit běh“ (docházka ani vstupy se nesmažou; potřebujete právo „Odemknout schválený mzdový běh“), vraťte se sem a měsíc schvalte. Potom v běhu klikněte na „Začít znovu a spočítat“.",
         "overtime_conflict": "Přesčas je u vztahu {name} zadaný dvakrát - v docházce i v rychlých vstupech. Nechte jen jednu evidenci.",
         "link": {
           "holiday_arrangement_missing": "Otevřít kartu zaměstnance a doplnit zásadu příplatků",

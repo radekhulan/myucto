@@ -414,7 +414,8 @@ final class PayrollRunRepository
             $find = $pdo->prepare(
                 'SELECT id FROM payroll_runs
                   WHERE supplier_id = ? AND period_start = ?
-                    AND office_scope_id = COALESCE(?, 0)'
+                    AND office_scope_id = COALESCE(?, 0)
+                    AND period_slot IS NOT NULL'
             );
             $find->execute([$supplierId, $periodStart, $officeId]);
             $id = (int) $find->fetchColumn();
@@ -422,9 +423,14 @@ final class PayrollRunRepository
         $run = $this->find($supplierId, $id)
             ?? throw new \RuntimeException('Mzdový běh se nepodařilo načíst.');
         if ((string) $run['payment_date'] !== $paymentDate) {
-            throw new \DomainException(
-                'Mzdový běh pro období už existuje s jiným datem výplaty.',
-            );
+            throw new \DomainException(sprintf(
+                'Mzdový běh č. %d za toto období už existuje s datem výplaty %s. Nový běh se '
+                    . 'nezakládá: v Mzdy → Mzdové běhy otevřete běh č. %d a klikněte na „Změnit datum '
+                    . 'výplaty“ (jde to až do schválení, i u zrušeného běhu).',
+                $id,
+                (new \DateTimeImmutable((string) $run['payment_date']))->format('j. n. Y'),
+                $id,
+            ));
         }
         if ($stmt->rowCount() === 1) {
             $this->insertEvent(
@@ -525,6 +531,7 @@ final class PayrollRunRepository
                          WHERE sibling.supplier_id = run.supplier_id
                            AND sibling.period_start = run.period_start
                            AND sibling.id <> run.id
+                           AND sibling.period_slot IS NOT NULL
                     ) AS replacement_owner_run_id,
                     (
                         SELECT COUNT(*)
@@ -689,9 +696,11 @@ final class PayrollRunRepository
             return PayrollRunDeletionDecision::blocked(
                 'payroll_run_has_working_revision',
                 'Mzdový běh má rozpracovanou revizi, protože už proběhlo '
-                    . '„Uzamknout vstupy“. Smazat ho zatím nejde — použijte '
-                    . '„Zrušit běh“; zrušený běh nic neblokuje a období se '
-                    . 'uvolní.',
+                    . '„Uzamknout vstupy“. Smazat ho nejde — použijte '
+                    . '„Zrušit běh“: zrušený běh nedrží vstupy ani uzávěrku '
+                    . 'roku, za období ale zůstává a pokračuje se v něm přes '
+                    . '„Začít znovu“. Špatné datum výplaty opravíte tlačítkem '
+                    . '„Změnit datum výplaty“.',
             );
         }
         $status = (string) $row['status'];
@@ -2165,6 +2174,356 @@ final class PayrollRunRepository
     }
 
     /**
+     * Převezme do nové revize výjimky, které účetní schválila v předchozí.
+     *
+     * Každá obnova podkladů i oprava zakládá novou revizi s vlastní sadou
+     * kontrol, takže výjimky se musely zadávat znovu, s důvodem aspoň dvacet
+     * znaků, po každé obnově. Převezme se jen výjimka u kontroly se STEJNÝM
+     * kódem, vztahem (entitou), seznamem dotčených osob a doslova stejným
+     * textem: jakmile se situace změní, text se změní taky a rozhodnutí se
+     * dělá znovu. Původní autor, čas i důvod zůstávají; převzetí zapíše
+     * volající do historie běhu jako „převzato z revize N".
+     *
+     * @return list<array{validation_id:int,source_validation_id:int,code:string}>
+     */
+    public function carryOverOverrides(int $supplierId, int $revisionId, int $sourceRevisionId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT target.id AS validation_id,
+                    source.id AS source_validation_id,
+                    target.code,
+                    source.override_reason,
+                    source.overridden_by,
+                    source.overridden_at
+               FROM payroll_run_validations target
+               JOIN payroll_run_validations source
+                 ON source.supplier_id = target.supplier_id
+                AND source.revision_id = ?
+                AND source.code = target.code
+                AND source.entity_type = target.entity_type
+                AND source.entity_id <=> target.entity_id
+                AND source.message = target.message
+                AND source.subject_ids_json <=> target.subject_ids_json
+                AND source.requires_override = 1
+                AND source.overridden_at IS NOT NULL
+              WHERE target.supplier_id = ?
+                AND target.revision_id = ?
+                AND target.requires_override = 1
+                AND target.overridden_at IS NULL
+              ORDER BY target.id, source.id'
+        );
+        $stmt->execute([$sourceRevisionId, $supplierId, $revisionId]);
+        $update = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_validations
+                SET override_reason = ?, overridden_by = ?, overridden_at = ?
+              WHERE supplier_id = ? AND id = ?
+                AND requires_override = 1
+                AND overridden_at IS NULL'
+        );
+        $carried = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $update->execute([
+                (string) $row['override_reason'],
+                $row['overridden_by'] === null ? null : (int) $row['overridden_by'],
+                (string) $row['overridden_at'],
+                $supplierId,
+                (int) $row['validation_id'],
+            ]);
+            if ($update->rowCount() === 1) {
+                $carried[] = [
+                    'validation_id' => (int) $row['validation_id'],
+                    'source_validation_id' => (int) $row['source_validation_id'],
+                    'code' => (string) $row['code'],
+                ];
+            }
+        }
+
+        return $carried;
+    }
+
+    /** Stav, ze kterého byla vyžádaná poslední oprava běhu. */
+    public function correctionRequestedFrom(int $supplierId, int $runId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT from_status
+               FROM payroll_run_events
+              WHERE supplier_id = ? AND run_id = ?
+                AND event_type = "request_correction"
+                AND to_status = "correction_pending"
+              ORDER BY id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $runId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /**
+     * Nové datum výplaty běhu, který ještě nemá schválenou revizi. Verzi řádku
+     * posune až následný {@see updateRun()} v téže transakci; trigger z migrace
+     * 1632 datum schváleného běhu nepustí ani tak.
+     */
+    public function setPaymentDate(int $supplierId, int $runId, int $expectedVersion, string $paymentDate): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_runs
+                SET payment_date = ?
+              WHERE supplier_id = ? AND id = ? AND row_version = ?'
+        );
+        $stmt->execute([$paymentDate, $supplierId, $runId, $expectedVersion]);
+        if ($stmt->rowCount() !== 1) {
+            $current = $this->find($supplierId, $runId);
+            throw new PayrollRunConflictException(
+                $current === null ? 0 : (int) $current['row_version'],
+            );
+        }
+    }
+
+    public function revisionHasEmployee(int $supplierId, int $revisionId, int $employeeId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payroll_run_persons
+              WHERE supplier_id = ? AND revision_id = ? AND employee_id = ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $revisionId, $employeeId]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    public function employeeOfEmployment(int $supplierId, int $employmentId): ?int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee_id FROM payroll_employments WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+
+        return $value === false ? null : (int) $value;
+    }
+
+    /** @return list<int> */
+    public function activeExclusionEmployeeIds(int $supplierId, int $runId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee_id
+               FROM payroll_run_exclusions
+              WHERE supplier_id = ? AND run_id = ? AND active_key = 1
+              ORDER BY employee_id'
+        );
+        $stmt->execute([$supplierId, $runId]);
+
+        return array_values(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    /**
+     * Všechny vztahy aktivně vyřazených osob — i ty, které vznikly až po
+     * vyřazení. Kontrola zastaralých podkladů je nesmí počítat jako nové.
+     *
+     * @return list<int>
+     */
+    public function excludedEmploymentIds(int $supplierId, int $runId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employment.id
+               FROM payroll_run_exclusions exclusion
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = exclusion.supplier_id
+                AND employment.employee_id = exclusion.employee_id
+              WHERE exclusion.supplier_id = ? AND exclusion.run_id = ?
+                AND exclusion.active_key = 1
+              ORDER BY employment.id'
+        );
+        $stmt->execute([$supplierId, $runId]);
+
+        return array_values(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    public function insertExclusion(
+        int $supplierId,
+        int $runId,
+        int $employeeId,
+        string $reason,
+        int $actorUserId,
+        int $revisionNo,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_run_exclusions
+                (supplier_id, run_id, employee_id, reason, excluded_by, excluded_revision_no)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([$supplierId, $runId, $employeeId, mb_substr($reason, 0, 500), $actorUserId, $revisionNo]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    public function liftExclusions(
+        int $supplierId,
+        int $runId,
+        ?int $employeeId,
+        int $actorUserId,
+        string $liftReason,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_exclusions
+                SET lifted_at = NOW(), lifted_by = ?, lift_reason = ?
+              WHERE supplier_id = ? AND run_id = ? AND active_key = 1'
+            . ($employeeId === null ? '' : ' AND employee_id = ?')
+        );
+        $stmt->execute([
+            $actorUserId,
+            $liftReason,
+            $supplierId,
+            $runId,
+            ...($employeeId === null ? [] : [$employeeId]),
+        ]);
+
+        return $stmt->rowCount();
+    }
+
+    /** Schválená revize šla bez vyřazených osob; vyřazení tím končí. */
+    public function settleExclusions(int $supplierId, int $runId, int $revisionId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_exclusions
+                SET settled_revision_id = ?
+              WHERE supplier_id = ? AND run_id = ? AND active_key = 1'
+        );
+        $stmt->execute([$revisionId, $supplierId, $runId]);
+
+        return $stmt->rowCount();
+    }
+
+    /**
+     * Vyřazení osob z běhu pro obrazovku: aktivní a ta, se kterými odešla
+     * schválená revize, jež je pořád platná (osoba čeká na doplatek opravou).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function exclusions(int $supplierId, int $runId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT exclusion.id, exclusion.employee_id, employee.full_name,
+                    exclusion.reason, exclusion.excluded_at, exclusion.excluded_by,
+                    actor.name AS excluded_by_name, exclusion.excluded_revision_no,
+                    exclusion.settled_revision_id, settled.revision_no AS settled_revision_no
+               FROM payroll_run_exclusions exclusion
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = exclusion.supplier_id
+                AND employee.id = exclusion.employee_id
+          LEFT JOIN users actor ON actor.id = exclusion.excluded_by
+          LEFT JOIN payroll_run_revisions settled
+                 ON settled.supplier_id = exclusion.supplier_id
+                AND settled.id = exclusion.settled_revision_id
+              WHERE exclusion.supplier_id = ? AND exclusion.run_id = ?
+                AND exclusion.lifted_at IS NULL
+                AND (exclusion.settled_revision_id IS NULL OR settled.status = "approved")
+              ORDER BY employee.full_name, exclusion.id'
+        );
+        $stmt->execute([$supplierId, $runId]);
+
+        return array_values(array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'employee_id' => (int) $row['employee_id'],
+            'full_name' => (string) $row['full_name'],
+            'reason' => (string) $row['reason'],
+            'excluded_at' => (string) $row['excluded_at'],
+            'excluded_by' => $row['excluded_by'] === null ? null : (int) $row['excluded_by'],
+            'excluded_by_name' => $row['excluded_by_name'] === null ? null : (string) $row['excluded_by_name'],
+            'excluded_revision_no' => (int) $row['excluded_revision_no'],
+            'active' => $row['settled_revision_id'] === null,
+            'settled_revision_no' => $row['settled_revision_no'] === null ? null : (int) $row['settled_revision_no'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC)));
+    }
+
+    /**
+     * Po obnově podkladů odemkne vstupy vztahů, které nová revize už nezná.
+     *
+     * Vztah, který po zámku z běhu vypadl (nenastoupil, ukončený, přesunutý),
+     * měl vstupy zamčené předchozí revizí a nová revize je nepustila: hláška
+     * „vstupy zrušte" nešla provést a pomohlo až zrušení běhu a nové zadání
+     * výjimek. Odemyká se jen to, co zamkla některá revize tohoto běhu,
+     * a nic, co drží jiný běh téhož období (stejná podmínka jako
+     * {@see unlockInputsForCorrection()}).
+     */
+    public function unlockInputsOutsideRevision(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        string $periodStart,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_inputs input
+                SET input.status = "approved",
+                    input.row_version = input.row_version + 1
+              WHERE input.supplier_id = ?
+                AND input.period_start = ?
+                AND input.status = "locked"
+                AND EXISTS (
+                      SELECT 1
+                        FROM payroll_run_revisions own
+                        JOIN payroll_run_employments frozen
+                          ON frozen.supplier_id = own.supplier_id
+                         AND frozen.revision_id = own.id
+                       WHERE own.supplier_id = input.supplier_id
+                         AND own.run_id = ?
+                         AND own.id <> ?
+                         AND frozen.employment_id = input.employment_id
+                         AND frozen.period_start = input.period_start
+                    )
+                AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_run_employments current_frozen
+                       WHERE current_frozen.supplier_id = input.supplier_id
+                         AND current_frozen.revision_id = ?
+                         AND current_frozen.employment_id = input.employment_id
+                    )
+                AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_run_revisions approved
+                        JOIN payroll_run_employments frozen
+                          ON frozen.supplier_id = approved.supplier_id
+                         AND frozen.revision_id = approved.id
+                       WHERE approved.supplier_id = input.supplier_id
+                         AND approved.run_id = ?
+                         AND approved.status = "approved"
+                         AND frozen.employment_id = input.employment_id
+                         AND frozen.period_start = input.period_start
+                    )
+                AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_runs other
+                        JOIN payroll_run_revisions held
+                          ON held.supplier_id = other.supplier_id
+                         AND held.run_id = other.id
+                        JOIN payroll_run_employments frozen
+                          ON frozen.supplier_id = held.supplier_id
+                         AND frozen.revision_id = held.id
+                       WHERE other.supplier_id = input.supplier_id
+                         AND other.period_start = input.period_start
+                         AND other.id <> ?
+                         AND frozen.employment_id = input.employment_id
+                         AND frozen.period_start = input.period_start
+                         AND (held.status = "approved"
+                              OR (other.status <> "cancelled"
+                                  AND held.status IN ("snapshot", "calculated", "reviewed")))
+                    )'
+        );
+        $stmt->execute([
+            $supplierId,
+            $periodStart,
+            $runId,
+            $revisionId,
+            $revisionId,
+            $runId,
+            $runId,
+        ]);
+
+        return $stmt->rowCount();
+    }
+
+    /**
      * @param array<string,mixed> $result
      */
     public function saveCalculation(
@@ -2529,6 +2888,7 @@ final class PayrollRunRepository
         foreach (self::SUMMARY_COLUMNS as $field) {
             unset($row[$field]);
         }
+        unset($row['period_slot']);
         return $row;
     }
 

@@ -515,7 +515,7 @@ final class GlobalSeedTables
         'payroll_registration_change_scans', 'payroll_registration_event_snapshots',
         'payroll_registration_identity_snapshots', 'payroll_regzel_payload_snapshots',
         'payroll_risky_savings_contributions', 'payroll_risky_savings_evidence', 'payroll_run_commands',
-        'payroll_run_employments', 'payroll_run_events', 'payroll_run_persons', 'payroll_run_revisions',
+        'payroll_run_employments', 'payroll_run_events', 'payroll_run_exclusions', 'payroll_run_persons', 'payroll_run_revisions',
         'payroll_run_validations', 'payroll_runs', 'payroll_shifts', 'payroll_sickness_case_decisive_months',
         'payroll_sickness_case_work_days', 'payroll_sickness_cases',
         'payroll_sickness_compensation_segments', 'payroll_sickness_events',

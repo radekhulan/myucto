@@ -396,7 +396,13 @@ final class RoutePermissionMap
         // Obnova podkladů otevřené revize — přepočet nad novým snímkem. Akce
         // vynucuje navíc `payroll.inputs.write` (zamyká nově schválené vstupy).
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/refresh_inputs$#', 'payroll.calculate', AccessLevel::WRITE],
-        ['POST', '#^/api/payroll/runs/[0-9]+/commands/(review|request_correction)$#', 'payroll.review', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/runs/[0-9]+/commands/(review|request_correction|withdraw_correction)$#', 'payroll.review', AccessLevel::WRITE],
+        // Změna data výplaty u běhu se snímkem je nová revize jako obnova
+        // podkladů; akce vynucuje navíc `payroll.inputs.write`.
+        ['POST', '#^/api/payroll/runs/[0-9]+/commands/change_payment_date$#', 'payroll.calculate', AccessLevel::WRITE],
+        // Vyřazení osoby z běhu má váhu výjimky u kontroly; akce vynucuje
+        // navíc `payroll.inputs.write` (nová revize zamyká vstupy).
+        ['POST', '#^/api/payroll/runs/[0-9]+/commands/(exclude_employee|include_employee)$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/approve$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
         // Zaúčtování a platební příkazy běhu nesmí spadnout pod catch-all

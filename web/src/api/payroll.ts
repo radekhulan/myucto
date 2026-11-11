@@ -7650,6 +7650,10 @@ export type PayrollRunCommand =
   | 'prepare_payments'
   | 'mark_paid'
   | 'request_correction'
+  | 'withdraw_correction'
+  | 'change_payment_date'
+  | 'exclude_employee'
+  | 'include_employee'
   | 'reopen'
   | 'cancel'
   | 'close'
@@ -8014,6 +8018,19 @@ export interface PayrollRunAutoSettlement {
   reason?: string
 }
 
+export interface PayrollRunExclusion {
+  id: number
+  employee_id: number
+  full_name: string
+  reason: string
+  excluded_at: string
+  excluded_by: number | null
+  excluded_by_name: string | null
+  excluded_revision_no: number
+  active: boolean
+  settled_revision_no: number | null
+}
+
 export interface PayrollRun {
   id: number
   supplier_id: number
@@ -8054,6 +8071,11 @@ export interface PayrollRun {
    * je dostane jen jeho oprava. Volitelné kvůli starší odpovědi.
    */
   missing_employments?: PayrollRunMissingEmployment[]
+  /**
+   * Osoby vědomě vyřazené z běhu: `active` = vyřazené z otevřené revize,
+   * jinak odešly bez nich schválená revize a čekají na doplatek opravou.
+   */
+  exclusions?: PayrollRunExclusion[]
   average_change?: PayrollRunAverageChange | null
 }
 
@@ -11161,7 +11183,13 @@ export const payrollApi = {
   commandRun: (
     runId: number,
     command: PayrollRunCommand,
-    payload: { row_version: number; reason?: string },
+    payload: {
+      row_version: number
+      reason?: string
+      payment_date?: string
+      employee_id?: number
+      employment_id?: number
+    },
     idempotencyKey: string,
   ) =>
     api.post<PayrollRunCommandResponse>(
