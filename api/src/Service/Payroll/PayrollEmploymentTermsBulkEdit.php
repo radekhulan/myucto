@@ -12,6 +12,7 @@ use MyInvoice\Repository\Payroll\PayrollHourlyWageCollisionGuard;
 use MyInvoice\Repository\Payroll\PayrollTermsSettledException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReportedEmploymentPeriods;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelationshipDetailPolicy;
 use PDO;
 
@@ -106,8 +107,9 @@ final class PayrollEmploymentTermsBulkEdit
         $items = [];
         $editable = [];
         $summary = ['employments' => 0, 'editable' => 0, 'excluded' => 0];
+        $reported = $this->reported($supplierId, $rows);
         foreach ($rows as $row) {
-            $reason = $this->exclusion($row, $monthEnd);
+            $reason = $this->exclusion($row, $monthEnd, $reported[(int) $row['id']] ?? []);
             $summary['employments']++;
             $summary[$reason === null ? 'editable' : 'excluded']++;
             if ($reason === null) {
@@ -190,13 +192,14 @@ final class PayrollEmploymentTermsBulkEdit
         $applied = [];
         $skipped = [];
         $failed = [];
+        $reported = $this->reported($supplierId, array_values($rows));
         foreach ($ids as $employmentId) {
             $row = $rows[$employmentId] ?? null;
             if ($row === null) {
                 $skipped[] = $this->outcome($employmentId, null, 'employment_not_in_period');
                 continue;
             }
-            $reason = $this->exclusion($row, $monthEnd);
+            $reason = $this->exclusion($row, $monthEnd, $reported[$employmentId] ?? []);
             if ($reason !== null) {
                 $skipped[] = $this->outcome($employmentId, $row, $reason);
                 continue;
@@ -317,6 +320,11 @@ final class PayrollEmploymentTermsBulkEdit
         $body['effective_from'] = (string) $current['effective_from'];
         $fields = [];
 
+        if (isset($requested['hourly_rate']) && (string) $row['status'] === 'ended') {
+            // Sazba je sjednání mzdy, ne údaj pro JMHZ; u ukončeného vztahu
+            // ji repozitář neopraví (viz ENDED_CORRECTABLE_FIELDS).
+            return [$body, [], 'employment_closed'];
+        }
         if (isset($requested['hourly_rate']) && $importedWage) {
             // Mzda se k vztahu importuje jako hotová částka. Hodinové podmínky
             // by ji PayrollHourlyWageCollisionGuard při dalším importu odmítl
@@ -510,8 +518,9 @@ final class PayrollEmploymentTermsBulkEdit
      * nejdřív otevřít mzdu k opravě.
      *
      * @param array<string,mixed> $row
+     * @param list<string> $reported vykázané měsíce vztahu ({@see JmhzReportedEmploymentPeriods})
      */
-    private function exclusion(array $row, string $monthEnd): ?string
+    private function exclusion(array $row, string $monthEnd, array $reported = []): ?string
     {
         if ($row['term_id'] === null) {
             return 'terms_missing';
@@ -522,7 +531,23 @@ final class PayrollEmploymentTermsBulkEdit
             return 'later_terms';
         }
         if ((string) $row['status'] === 'ended') {
-            return 'employment_closed';
+            // Ukončený vztah jde opravit jen v údajích pro JMHZ a jen opravou
+            // platné verze (repozitář to ověří znovu pod zámkem): nová verze
+            // po zúčtovaném měsíci by začínala po konci vztahu.
+            if ($this->newVersionFrom($row) !== null) {
+                return 'employment_closed';
+            }
+            $end = array_filter(
+                [$row['effective_to'], $row['end_date']],
+                static fn (mixed $value): bool => is_string($value) && $value !== '',
+            );
+            if (JmhzReportedEmploymentPeriods::firstWithin(
+                $reported,
+                (string) $row['effective_from'],
+                $end === [] ? null : min($end),
+            ) !== null) {
+                return 'employment_reported';
+            }
         }
         if ($row['report_prepared_from'] !== null) {
             return 'report_prepared';
@@ -532,6 +557,24 @@ final class PayrollEmploymentTermsBulkEdit
         }
 
         return null;
+    }
+
+    /**
+     * Vykázané měsíce JMHZ ukončených vztahů výběru, jedním dotazem.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return array<int,list<string>>
+     */
+    private function reported(int $supplierId, array $rows): array
+    {
+        $ended = [];
+        foreach ($rows as $row) {
+            if ((string) $row['status'] === 'ended') {
+                $ended[] = (int) $row['id'];
+            }
+        }
+
+        return JmhzReportedEmploymentPeriods::forEmployments($this->db->pdo(), $supplierId, $ended);
     }
 
     /**
@@ -644,7 +687,7 @@ final class PayrollEmploymentTermsBulkEdit
         );
         $stmt = $this->db->pdo()->prepare(
             "SELECT employment.id, employment.employee_id, employment.code, employment.status,
-                    employment.relation_type, employment.row_version, employee.full_name,
+                    employment.end_date, employment.relation_type, employment.row_version, employee.full_name,
                     term.id AS term_id, term.effective_from, term.effective_to,
                     term.remuneration_type, term.hourly_rate_minor,
                     term.probable_hourly_earning_minor, term.cz_isco_code, term.activity_code,

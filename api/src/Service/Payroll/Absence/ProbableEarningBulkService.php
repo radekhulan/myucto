@@ -13,7 +13,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\PayrollClosedRunGuard;
 use MyInvoice\Service\Payroll\PayrollEmploymentTermsBody;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReportedEmploymentPeriods;
 use PDO;
 
 /**
@@ -48,8 +48,6 @@ final class ProbableEarningBulkService
     /** Horní mez proti překlepu v řádu (100 000 Kč za hodinu). */
     private const MAX_HOURLY_MINOR = 10_000_000;
     private const SAVEPOINT = 'payroll_probable_bulk_row';
-    /** Stavy podání, ve kterých hlášení už odešlo úřadu. */
-    private const NOT_SUBMITTED_STATUSES = ['draft', 'validated', 'prepared', 'ready', 'cancelled_in_time'];
 
     public function __construct(
         private readonly Connection $db,
@@ -466,36 +464,11 @@ final class ProbableEarningBulkService
      */
     private function usage(int $supplierId, array $employmentIds, array $months): array
     {
-        $agendas = ['JMHZ', ...JmhzSpecVersion::MONTHLY_AGENDA_CODES];
         $in = implode(', ', array_fill(0, count($employmentIds), '?'));
         $stmt = $this->db->pdo()->prepare(
             'SELECT run_employment.employment_id, run.period_start, run.status,
                     revision.revision_no = run.current_revision_no AS is_current,
-                    (
-                        EXISTS (
-                            SELECT 1
-                              FROM payroll_jmhz_preparation_snapshots preparation
-                             WHERE preparation.supplier_id = revision.supplier_id
-                               AND preparation.run_id = revision.run_id
-                               AND preparation.source_revision_id = revision.id
-                               AND preparation.environment = "production"
-                        )
-                        OR EXISTS (
-                            SELECT 1
-                              FROM payroll_submissions submission
-                              JOIN payroll_obligations obligation
-                                ON obligation.supplier_id = submission.supplier_id
-                               AND obligation.environment = submission.environment
-                               AND obligation.id = submission.obligation_id
-                             WHERE submission.supplier_id = revision.supplier_id
-                               AND submission.source_revision_id = revision.id
-                               AND submission.environment = "production"
-                               AND submission.status NOT IN ('
-                . implode(', ', array_fill(0, count(self::NOT_SUBMITTED_STATUSES), '?')) . ')
-                               AND obligation.agenda_code IN ('
-                . implode(', ', array_fill(0, count($agendas), '?')) . ')
-                        )
-                    ) AS reported_in_jmhz
+                    ' . JmhzReportedEmploymentPeriods::revisionReportedSql('revision') . ' AS reported_in_jmhz
                FROM payroll_runs run
                JOIN payroll_run_revisions revision
                  ON revision.supplier_id = run.supplier_id
@@ -509,8 +482,7 @@ final class ProbableEarningBulkService
               ORDER BY run.period_start, run.id, revision.revision_no',
         );
         $stmt->execute([
-            ...self::NOT_SUBMITTED_STATUSES,
-            ...$agendas,
+            ...JmhzReportedEmploymentPeriods::revisionReportedParams(),
             $supplierId,
             ...$months,
             ...$employmentIds,

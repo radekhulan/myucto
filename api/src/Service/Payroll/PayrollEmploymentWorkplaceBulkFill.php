@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Repository\Payroll\PayrollTermsSettledException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReportedEmploymentPeriods;
 use PDO;
 
 /**
@@ -64,8 +65,9 @@ final class PayrollEmploymentWorkplaceBulkFill
         $suggestions = [];
         $missing = [];
         $items = [];
+        $reported = $this->reported($supplierId, $rows);
         foreach ($rows as $row) {
-            $assessment = $this->assess($supplierId, $row, $monthStart, $monthEnd);
+            $assessment = $this->assess($supplierId, $row, $monthStart, $monthEnd, $reported[(int) $row['id']] ?? []);
             $summary['employments']++;
             $summary[$assessment['state']]++;
             if ($assessment['state'] === 'missing') {
@@ -170,7 +172,13 @@ final class PayrollEmploymentWorkplaceBulkFill
                 $skipped[] = ['employment_id' => $employmentId, 'reason' => 'employment_not_in_period'];
                 continue;
             }
-            $assessment = $this->assess($supplierId, $row, $monthStart, $monthEnd);
+            $assessment = $this->assess(
+                $supplierId,
+                $row,
+                $monthStart,
+                $monthEnd,
+                $this->reported($supplierId, [$row])[$employmentId] ?? [],
+            );
             if ($assessment['state'] !== 'missing') {
                 $skipped[] = [
                     'employment_id' => $employmentId,
@@ -245,9 +253,10 @@ final class PayrollEmploymentWorkplaceBulkFill
 
     /**
      * @param array<string,mixed> $row
+     * @param list<string> $reported vykázané měsíce vztahu ({@see JmhzReportedEmploymentPeriods})
      * @return array{state:'missing'|'verified'|'invalid'|'excluded',reason:?string}
      */
-    private function assess(int $supplierId, array $row, string $monthStart, string $monthEnd): array
+    private function assess(int $supplierId, array $row, string $monthStart, string $monthEnd, array $reported): array
     {
         if ($row['term_id'] === null
             || ($row['effective_to'] !== null && (string) $row['effective_to'] < $monthStart)
@@ -274,8 +283,17 @@ final class PayrollEmploymentWorkplaceBulkFill
         if ($row['jmhz_workplace_municipality_code'] !== null) {
             return ['state' => 'invalid', 'reason' => 'workplace_not_verified'];
         }
-        if ((string) $row['status'] === 'ended') {
-            return ['state' => 'excluded', 'reason' => 'employment_closed'];
+        // Ukončený vztah jde doplnit stejně jako na kartě, dokud za jeho
+        // měsíce není hlášení JMHZ zmrazené ani podané (repozitář to při
+        // zápisu ověří znovu pod zámkem).
+        if ((string) $row['status'] === 'ended'
+            && JmhzReportedEmploymentPeriods::firstWithin(
+                $reported,
+                (string) $row['effective_from'],
+                self::termsEnd($row),
+            ) !== null
+        ) {
+            return ['state' => 'excluded', 'reason' => 'employment_reported'];
         }
         try {
             $this->employments->assertTermsOpenFrom(
@@ -289,6 +307,39 @@ final class PayrollEmploymentWorkplaceBulkFill
         }
 
         return ['state' => 'missing', 'reason' => null];
+    }
+
+    /**
+     * Vykázané měsíce JMHZ ukončených vztahů výběru, jedním dotazem.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return array<int,list<string>>
+     */
+    private function reported(int $supplierId, array $rows): array
+    {
+        $ended = [];
+        foreach ($rows as $row) {
+            if ((string) $row['status'] === 'ended') {
+                $ended[] = (int) $row['id'];
+            }
+        }
+
+        return JmhzReportedEmploymentPeriods::forEmployments($this->db->pdo(), $supplierId, $ended);
+    }
+
+    /**
+     * Poslední den opravované verze podmínek: její konec, nejpozději konec vztahu.
+     *
+     * @param array<string,mixed> $row
+     */
+    private static function termsEnd(array $row): ?string
+    {
+        $ends = array_filter(
+            [$row['effective_to'], $row['end_date']],
+            static fn (mixed $value): bool => is_string($value) && $value !== '',
+        );
+
+        return $ends === [] ? null : min($ends);
     }
 
     /**
@@ -311,7 +362,7 @@ final class PayrollEmploymentWorkplaceBulkFill
         }
         $stmt = $this->db->pdo()->prepare(
             "SELECT employment.id, employment.employee_id, employment.code, employment.status,
-                    employment.row_version, employee.full_name,
+                    employment.end_date, employment.row_version, employee.full_name,
                     term.id AS term_id, term.effective_from, term.effective_to, term.work_place,
                     term.jmhz_workplace_municipality_code, term.jmhz_workplace_country_code,
                     term.jmhz_external_codebook_overlay_key,

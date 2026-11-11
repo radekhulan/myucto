@@ -307,6 +307,22 @@ describe('ukončení zapsané dopředu', () => {
     expect(wrapper.find('[data-test="employment-toggle"]').exists()).toBe(true)
     wrapper.unmount()
   })
+
+  /* Ukončený vztah jde opravit jen v údajích pro JMHZ a jen opravou platné verze. */
+  it('u ukončeného vztahu pustí opravu údajů pro JMHZ, ne mzdy', async () => {
+    const wrapper = await mountCard({ ...employment(), status: 'ended', end_date: '2020-01-31' })
+    await wrapper.get('[data-test="employment-toggle"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="terms-weekly-hours"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="terms-is-primary"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-test="terms-regular-workplace"]').setValue('Syntetické pracoviště')
+
+    expect(wrapper.find('[data-test="terms-save-bar"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="terms-ended-jmhz-only"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="save-mode-version"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })
 
 describe('doskok na podklady JMHZ', () => {

@@ -565,6 +565,17 @@ docházku nebo zúčtovanou mzdu, nechá aktivní. Ta zůstane ve skupině
 posoudíte vy. Pracovní poměr na dobu určitou se sám neukončuje, protože
 pokračováním v práci se mění na dobu neurčitou; ten ukončíte ručně.
 
+**Oprava ukončeného vztahu pro JMHZ.** U ukončeného vztahu jde dál opravit
+údaje, které popisují vztah pro JMHZ: místo výkonu práce (včetně obce
+a adresy pracoviště), CZ-ISCO, druh činnosti, primární vztah a pravděpodobný
+výdělek. Opravíte je na kartě vztahu, akcí **Doplnit místo výkonu práce**
+i hromadnou úpravou podmínek; ukládá se vždy jako oprava platné verze
+a datum konce vztahu se nemění. Platí to, dokud za měsíce opravované verze
+není hlášení JMHZ zmrazené ani podané. Pak aplikace opravu odmítne a řekne,
+o které hlášení jde: vraťte ukončení vztahu, údaje opravte, vztah znovu
+ukončete a podejte opravné hlášení. Mzdu, úvazek ani data u ukončeného
+vztahu takto neopravíte, k tomu je potřeba vrátit ukončení.
+
 Má-li ukončený vztah mzdový vstup za měsíc po svém konci, dostane se do
 mzdového běhu toho měsíce jen kvůli tomuto vstupu. Kontrola běhu pak hlásí
 „vstup za MM/RRRR je na vztahu ukončeném DD. MM. RRRR" s odkazem na vstupy
