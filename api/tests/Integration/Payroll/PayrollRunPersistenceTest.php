@@ -3935,6 +3935,8 @@ final class PayrollRunPersistenceTest extends TestCase
                 'hideable',
                 'subject_type',
                 'subject_ids',
+                // Varování, které v běhu čeká na výjimku (schválit do té doby nejde).
+                'requires_override',
                 // Hromadná oprava ze seznamu zaměstnanců, kterou nález nabízí.
                 'bulk_actions',
             ], array_keys($finding));
