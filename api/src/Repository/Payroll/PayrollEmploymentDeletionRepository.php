@@ -485,185 +485,315 @@ final class PayrollEmploymentDeletionRepository
      */
     public function runInvolvement(int $supplierId, int $employmentId): ?array
     {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT run.period_start, run.status
-               FROM payroll_run_employments run_employment
-               JOIN payroll_run_revisions revision
-                 ON revision.supplier_id = run_employment.supplier_id
-                AND revision.id = run_employment.revision_id
-               JOIN payroll_runs run
-                 ON run.supplier_id = revision.supplier_id
-                AND run.id = revision.run_id
-              WHERE run_employment.supplier_id = ? AND run_employment.employment_id = ?
-              ORDER BY run.status = 'cancelled', run.period_start DESC, run.id DESC
-              LIMIT 1"
-        );
-        $stmt->execute([$supplierId, $employmentId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!is_array($row)) {
-            return null;
-        }
-        $period = (string) $row['period_start'];
-        $status = (string) $row['status'];
-        $label = $status === 'cancelled'
-            ? sprintf('zrušeném mzdovém běhu za %s', self::monthLabel($period))
-            : sprintf(
-                'mzdovém běhu za %s (stav: %s)',
-                self::monthLabel($period),
-                self::RUN_STATUS_LABELS[$status] ?? $status,
-            );
+        return $this->runInvolvements($supplierId, [$employmentId])[$employmentId] ?? null;
+    }
 
-        return ['period_start' => $period, 'status' => $status, 'label' => $label];
+    /**
+     * {@see self::runInvolvement()} pro víc vztahů jedním dotazem (seznam
+     * zaměstnanců rozhoduje o smazatelnosti celé stránky najednou).
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,array{period_start:string,status:string,label:string}>
+     */
+    public function runInvolvements(int $supplierId, array $employmentIds): array
+    {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "WITH ranked AS (
+                 SELECT run_employment.employment_id, run.period_start, run.status,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY run_employment.employment_id
+                            ORDER BY run.status = 'cancelled', run.period_start DESC, run.id DESC
+                        ) AS row_rank
+                   FROM payroll_run_employments run_employment
+                   JOIN payroll_run_revisions revision
+                     ON revision.supplier_id = run_employment.supplier_id
+                    AND revision.id = run_employment.revision_id
+                   JOIN payroll_runs run
+                     ON run.supplier_id = revision.supplier_id
+                    AND run.id = revision.run_id
+                  WHERE run_employment.supplier_id = ?
+                    AND run_employment.employment_id IN (" . self::placeholders($employmentIds) . ")
+             )
+             SELECT employment_id, period_start, status FROM ranked WHERE row_rank = 1"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $period = (string) $row['period_start'];
+            $status = (string) $row['status'];
+            $result[(int) $row['employment_id']] = [
+                'period_start' => $period,
+                'status' => $status,
+                'label' => $status === 'cancelled'
+                    ? sprintf('zrušeném mzdovém běhu za %s', self::monthLabel($period))
+                    : sprintf(
+                        'mzdovém běhu za %s (stav: %s)',
+                        self::monthLabel($period),
+                        self::RUN_STATUS_LABELS[$status] ?? $status,
+                    ),
+            ];
+        }
+
+        return $result;
     }
 
     /**
      * Hláška blokátoru s konkrétním obdobím a dalším krokem. Volá se jen pro
-     * blokátor, který opravdu platí, takže stojí nejvýš jeden dotaz navíc.
+     * blokátor, který opravdu platí.
      *
      * @return array{code:string,message:string,period:?string}
      */
     private function describe(string $alias, int $supplierId, int $employmentId): array
     {
-        $blocker = self::BLOCKERS[$alias];
-        $described = ['code' => $blocker['code'], 'message' => $blocker['message'], 'period' => null];
+        return $this->describeMany($supplierId, [$employmentId => $alias])[$employmentId];
+    }
 
-        if ($alias === 'run') {
-            $run = $this->runInvolvement($supplierId, $employmentId);
-            if ($run !== null) {
-                $described['period'] = $run['period_start'];
-                $described['message'] = $run['status'] === 'cancelled'
-                    ? sprintf(
-                        'Pracovní vztah je zahrnutý ve %s. Zrušený běh si nechává svou revizi i s tímto '
-                        . 'vztahem, proto vztah smazat nelze. Použijte Označit nenástup nebo Ukončit.',
-                        $run['label'],
-                    )
-                    : sprintf(
-                        'Pracovní vztah je zahrnutý v %s. Výpočet běhu se váže k tomuto vztahu, proto '
-                        . 'vztah smazat nelze. Použijte Označit nenástup nebo Ukončit.',
-                        $run['label'],
-                    );
-            }
-        } elseif ($alias === 'input') {
-            $stmt = $this->db->pdo()->prepare(
-                "SELECT status, MIN(period_start) AS period_start
-                   FROM payroll_inputs
-                  WHERE supplier_id = ? AND employment_id = ?
-                  GROUP BY status
-                  ORDER BY FIELD(status, 'locked', 'approved', 'draft', 'cancelled')
-                  LIMIT 1"
-            );
-            $stmt->execute([$supplierId, $employmentId]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            if (is_array($row)) {
-                $period = (string) $row['period_start'];
-                $described['period'] = $period;
-                $month = self::monthLabel($period);
-                $described['message'] = match ((string) $row['status']) {
-                    'locked' => sprintf(
-                        'Mzdové vstupy za %s už zamkl a zpracoval mzdový běh. Vztah proto smazat nelze. '
-                        . 'Použijte Označit nenástup nebo Ukončit.',
-                        $month,
-                    ),
-                    'approved' => sprintf(
-                        'Pracovní vztah má schválené mzdové vstupy za %s. Mzdový vstup se nemaže, jen ruší, '
-                        . 'a zrušený zůstává u vztahu, proto vztah smazat nelze. Patří-li vstupy jinému vztahu '
-                        . 'téže osoby, přesuňte je přes Další akce vztahu, Sloučit do jiného vztahu (schválení '
-                        . 'sloučení samo vrátí do konceptu). Jinak vztah ukončete.',
-                        $month,
-                    ),
-                    default => sprintf(
-                        'Pracovní vztah má mzdové vstupy za %s. Mzdový vstup se nemaže, jen ruší, a zrušený '
-                        . 'zůstává u vztahu, proto vztah smazat nelze. Patří-li vstupy jinému vztahu téže osoby, '
-                        . 'přesuňte je přes Další akce vztahu, Sloučit do jiného vztahu. Jinak vztah ukončete.',
-                        $month,
-                    ),
-                };
-            }
-        } elseif ($alias === 'registration' || $alias === 'registration_submission') {
-            $unsent = $this->unsentRegistration($supplierId, $employmentId);
-            if ($unsent !== null) {
-                $described['message'] = $unsent['status'] === 'cancelled_in_time'
-                    ? sprintf(
-                        'K vztahu byla připravená přihláška ČSSZ (podání č. %d), která se zrušila a neodešla. '
-                        . 'Její zmrazený podklad zůstává k vztahu vázaný, proto vztah smazat nelze. '
-                        . 'Pokud člověk nenastoupil, použijte Označit nenástup, jinak vztah ukončete.',
-                        $unsent['submission_id'],
-                    )
-                    : sprintf(
-                        'K vztahu je připravená přihláška ČSSZ (podání č. %d), zatím neodeslaná. '
-                        . 'Dokud čeká na odeslání, vztah smazat nelze. Pokud vztah vznikl omylem, '
-                        . 'přihlášku v Podání a hlášení zrušte (neodesílejte ji), pak vztah půjde smazat.',
-                        $unsent['submission_id'],
-                    );
-            }
-        } elseif ($alias === 'approved_time') {
-            $stmt = $this->db->pdo()->prepare(
-                "SELECT MIN(period_start) FROM payroll_time_months
-                  WHERE supplier_id = ? AND employment_id = ? AND status = 'approved'"
-            );
-            $stmt->execute([$supplierId, $employmentId]);
-            $period = $stmt->fetchColumn();
-            if (is_string($period) && $period !== '') {
-                $described['period'] = $period;
-                $described['message'] = sprintf(
-                    'Docházka za %s je schválená. Nejdřív ji v Docházce znovu otevřete, teprve pak půjde '
-                    . 'vztah smazat.',
-                    self::monthLabel($period),
+    /**
+     * Hlášky blokátorů pro víc vztahů najednou. Podklady (běh, vstupy,
+     * docházka, přihláška) se čtou jedním dotazem na DRUH blokátoru, ne na
+     * vztah: seznam zaměstnanců rozhoduje o smazatelnosti celé stránky a dotaz
+     * na každý vztah by z něj dělal N+1.
+     *
+     * @param array<int,string> $aliasByEmployment employment_id => alias z BLOCKERS
+     * @return array<int,array{code:string,message:string,period:?string}>
+     */
+    private function describeMany(int $supplierId, array $aliasByEmployment): array
+    {
+        $described = [];
+        $byAlias = [];
+        foreach ($aliasByEmployment as $employmentId => $alias) {
+            $blocker = self::BLOCKERS[$alias];
+            $described[$employmentId] = [
+                'code' => $blocker['code'],
+                'message' => $blocker['message'],
+                'period' => null,
+            ];
+            $byAlias[$alias][] = $employmentId;
+        }
+
+        foreach ($this->runInvolvements($supplierId, $byAlias['run'] ?? []) as $employmentId => $run) {
+            $described[$employmentId]['period'] = $run['period_start'];
+            $described[$employmentId]['message'] = $run['status'] === 'cancelled'
+                ? sprintf(
+                    'Pracovní vztah je zahrnutý ve %s. Zrušený běh si nechává svou revizi i s tímto '
+                    . 'vztahem, proto vztah smazat nelze. Použijte Označit nenástup nebo Ukončit.',
+                    $run['label'],
+                )
+                : sprintf(
+                    'Pracovní vztah je zahrnutý v %s. Výpočet běhu se váže k tomuto vztahu, proto '
+                    . 'vztah smazat nelze. Použijte Označit nenástup nebo Ukončit.',
+                    $run['label'],
                 );
-            }
+        }
+
+        foreach ($this->firstInputs($supplierId, $byAlias['input'] ?? []) as $employmentId => $input) {
+            $described[$employmentId]['period'] = $input['period_start'];
+            $month = self::monthLabel($input['period_start']);
+            $described[$employmentId]['message'] = match ($input['status']) {
+                'locked' => sprintf(
+                    'Mzdové vstupy za %s už zamkl a zpracoval mzdový běh. Vztah proto smazat nelze. '
+                    . 'Použijte Označit nenástup nebo Ukončit.',
+                    $month,
+                ),
+                'approved' => sprintf(
+                    'Pracovní vztah má schválené mzdové vstupy za %s. Mzdový vstup se nemaže, jen ruší, '
+                    . 'a zrušený zůstává u vztahu, proto vztah smazat nelze. Patří-li vstupy jinému vztahu '
+                    . 'téže osoby, přesuňte je přes Další akce vztahu, Sloučit do jiného vztahu (schválení '
+                    . 'sloučení samo vrátí do konceptu). Jinak vztah ukončete.',
+                    $month,
+                ),
+                default => sprintf(
+                    'Pracovní vztah má mzdové vstupy za %s. Mzdový vstup se nemaže, jen ruší, a zrušený '
+                    . 'zůstává u vztahu, proto vztah smazat nelze. Patří-li vstupy jinému vztahu téže osoby, '
+                    . 'přesuňte je přes Další akce vztahu, Sloučit do jiného vztahu. Jinak vztah ukončete.',
+                    $month,
+                ),
+            };
+        }
+
+        $registered = array_merge($byAlias['registration'] ?? [], $byAlias['registration_submission'] ?? []);
+        foreach ($this->unsentRegistrations($supplierId, $registered) as $employmentId => $unsent) {
+            $described[$employmentId]['message'] = $unsent['status'] === 'cancelled_in_time'
+                ? sprintf(
+                    'K vztahu byla připravená přihláška ČSSZ (podání č. %d), která se zrušila a neodešla. '
+                    . 'Její zmrazený podklad zůstává k vztahu vázaný, proto vztah smazat nelze. '
+                    . 'Pokud člověk nenastoupil, použijte Označit nenástup, jinak vztah ukončete.',
+                    $unsent['submission_id'],
+                )
+                : sprintf(
+                    'K vztahu je připravená přihláška ČSSZ (podání č. %d), zatím neodeslaná. '
+                    . 'Dokud čeká na odeslání, vztah smazat nelze. Pokud vztah vznikl omylem, '
+                    . 'přihlášku v Podání a hlášení zrušte (neodesílejte ji), pak vztah půjde smazat.',
+                    $unsent['submission_id'],
+                );
+        }
+
+        foreach ($this->firstApprovedTimeMonths($supplierId, $byAlias['approved_time'] ?? []) as $employmentId => $period) {
+            $described[$employmentId]['period'] = $period;
+            $described[$employmentId]['message'] = sprintf(
+                'Docházka za %s je schválená. Nejdřív ji v Docházce znovu otevřete, teprve pak půjde '
+                . 'vztah smazat.',
+                self::monthLabel($period),
+            );
         }
 
         return $described;
     }
 
     /**
-     * Registrace vztahu, která navenek neodešla: žádné ID PPV a nejnovější
-     * základní přihláška (A1/P1) jen připravená nebo včas zrušená, bez
-     * události A2 až A8. Jinak `null` (platí obecná hláška o úkonu u ČSSZ).
+     * Vstup, podle kterého se blokace vztahu pojmenuje: nejzávaznější stav
+     * (zamčený, schválený, koncept, zrušený) a jeho první měsíc.
      *
-     * @return array{submission_id:int,status:string}|null
+     * @param list<int> $employmentIds
+     * @return array<int,array{status:string,period_start:string}>
      */
-    private function unsentRegistration(int $supplierId, int $employmentId): ?array
+    private function firstInputs(int $supplierId, array $employmentIds): array
     {
+        if ($employmentIds === []) {
+            return [];
+        }
         $stmt = $this->db->pdo()->prepare(
-            "SELECT submission.id, submission.status,
-                    EXISTS (SELECT 1 FROM payroll_employment_external_ids external_id
-                             WHERE external_id.supplier_id = ? AND external_id.employment_id = ?) AS has_external,
-                    EXISTS (SELECT 1 FROM payroll_registration_event_snapshots event_snapshot
-                             WHERE event_snapshot.supplier_id = ? AND event_snapshot.employment_id = ?) AS has_event,
-                    EXISTS (SELECT 1 FROM payroll_submission_parts sent_part
-                              JOIN payroll_submissions sent
-                                ON sent.supplier_id = sent_part.supplier_id
-                               AND sent.id = sent_part.submission_id
-                             WHERE sent_part.supplier_id = ? AND sent_part.subject_reference = ?
-                               AND sent.status NOT IN ('draft', 'validated', 'ready', 'cancelled_in_time')) AS has_sent
-               FROM payroll_submission_parts part
-               JOIN payroll_submissions submission
-                 ON submission.supplier_id = part.supplier_id
-                AND submission.id = part.submission_id
-              WHERE part.supplier_id = ? AND part.subject_reference = ?
-                AND part.agenda_code IN ('PREZEC26', 'REGZEC25')
-              ORDER BY submission.id DESC
-              LIMIT 1"
+            'SELECT employment_id, status, MIN(period_start) AS period_start
+               FROM payroll_inputs
+              WHERE supplier_id = ? AND employment_id IN (' . self::placeholders($employmentIds) . ')
+              GROUP BY employment_id, status'
         );
-        $reference = PayrollRegistrationSubmissionRepository::employmentReference($employmentId);
-        $stmt->execute([
-            $supplierId, $employmentId,
-            $supplierId, $employmentId,
-            $supplierId, $reference,
-            $supplierId, $reference,
-        ]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!is_array($row)
-            || (int) $row['has_external'] > 0
-            || (int) $row['has_event'] > 0
-            || (int) $row['has_sent'] > 0
-            || !in_array((string) $row['status'], ['draft', 'validated', 'ready', 'cancelled_in_time'], true)
-        ) {
-            return null;
+        $stmt->execute([$supplierId, ...$employmentIds]);
+        // Stejné pořadí jako dřívější `ORDER BY FIELD(status, …)`: stav mimo
+        // výčet má pořadí 0 a jde první.
+        $order = ['locked' => 1, 'approved' => 2, 'draft' => 3, 'cancelled' => 4];
+        $result = [];
+        $rank = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $employmentId = (int) $row['employment_id'];
+            $status = (string) $row['status'];
+            $current = $order[$status] ?? 0;
+            if (!isset($rank[$employmentId]) || $current < $rank[$employmentId]) {
+                $rank[$employmentId] = $current;
+                $result[$employmentId] = ['status' => $status, 'period_start' => (string) $row['period_start']];
+            }
         }
 
-        return ['submission_id' => (int) $row['id'], 'status' => (string) $row['status']];
+        return $result;
+    }
+
+    /**
+     * První schválený měsíc docházky každého vztahu.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,string>
+     */
+    private function firstApprovedTimeMonths(int $supplierId, array $employmentIds): array
+    {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT employment_id, MIN(period_start) AS period_start
+               FROM payroll_time_months
+              WHERE supplier_id = ? AND employment_id IN (" . self::placeholders($employmentIds) . ")
+                AND status = 'approved'
+              GROUP BY employment_id"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (is_string($row['period_start']) && $row['period_start'] !== '') {
+                $result[(int) $row['employment_id']] = $row['period_start'];
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Registrace vztahů, která navenek neodešla: žádné ID PPV a nejnovější
+     * základní přihláška (A1/P1) jen připravená nebo včas zrušená, bez
+     * události A2 až A8. Vztah, pro který to neplatí, ve výsledku chybí (platí
+     * obecná hláška o úkonu u ČSSZ). Čtyři dotazy bez ohledu na počet vztahů.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,array{submission_id:int,status:string}>
+     */
+    private function unsentRegistrations(int $supplierId, array $employmentIds): array
+    {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $pdo = $this->db->pdo();
+        $ids = self::placeholders($employmentIds);
+        $references = [];
+        foreach ($employmentIds as $employmentId) {
+            $references[PayrollRegistrationSubmissionRepository::employmentReference($employmentId)] = $employmentId;
+        }
+        $refs = self::placeholders(array_keys($references));
+
+        $latest = $pdo->prepare(
+            "WITH ranked AS (
+                 SELECT part.subject_reference, submission.id, submission.status,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY part.subject_reference ORDER BY submission.id DESC
+                        ) AS row_rank
+                   FROM payroll_submission_parts part
+                   JOIN payroll_submissions submission
+                     ON submission.supplier_id = part.supplier_id
+                    AND submission.id = part.submission_id
+                  WHERE part.supplier_id = ? AND part.subject_reference IN ({$refs})
+                    AND part.agenda_code IN ('PREZEC26', 'REGZEC25')
+             )
+             SELECT subject_reference, id, status FROM ranked WHERE row_rank = 1"
+        );
+        $latest->execute([$supplierId, ...array_keys($references)]);
+        $candidates = [];
+        foreach ($latest->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (in_array((string) $row['status'], ['draft', 'validated', 'ready', 'cancelled_in_time'], true)) {
+                $candidates[$references[(string) $row['subject_reference']]] = [
+                    'submission_id' => (int) $row['id'],
+                    'status' => (string) $row['status'],
+                ];
+            }
+        }
+        if ($candidates === []) {
+            return [];
+        }
+
+        // Cokoli z toho znamená, že registrace navenek odešla nebo pokračuje.
+        foreach ([
+            "SELECT DISTINCT employment_id FROM payroll_employment_external_ids
+              WHERE supplier_id = ? AND employment_id IN ({$ids})",
+            "SELECT DISTINCT employment_id FROM payroll_registration_event_snapshots
+              WHERE supplier_id = ? AND employment_id IN ({$ids})",
+        ] as $sql) {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$supplierId, ...$employmentIds]);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $employmentId) {
+                unset($candidates[(int) $employmentId]);
+            }
+        }
+        $sent = $pdo->prepare(
+            "SELECT DISTINCT sent_part.subject_reference
+               FROM payroll_submission_parts sent_part
+               JOIN payroll_submissions sent
+                 ON sent.supplier_id = sent_part.supplier_id
+                AND sent.id = sent_part.submission_id
+              WHERE sent_part.supplier_id = ? AND sent_part.subject_reference IN ({$refs})
+                AND sent.status NOT IN ('draft', 'validated', 'ready', 'cancelled_in_time')"
+        );
+        $sent->execute([$supplierId, ...array_keys($references)]);
+        foreach ($sent->fetchAll(PDO::FETCH_COLUMN) as $reference) {
+            unset($candidates[$references[(string) $reference]]);
+        }
+
+        return $candidates;
+    }
+
+    /** @param array<array-key,mixed> $values */
+    private static function placeholders(array $values): string
+    {
+        return implode(', ', array_fill(0, count($values), '?'));
     }
 
     private static function monthLabel(string $period): string
@@ -824,45 +954,69 @@ final class PayrollEmploymentDeletionRepository
     }
 
     /**
-     * První vztah osoby, který blokuje mazání — jedním dotazem, ne dotazem na
-     * vztah. Seznam zaměstnanců počítá `can_delete` pro každý řádek, takže
-     * rekurze „dotaz na vztah" by z něj udělala N+1.
+     * První vztah osoby, který blokuje mazání.
      *
      * @return array{id:int,code:string,code_key:string,message:string}|null
      */
     public function firstBlockingEmployment(int $supplierId, int $employeeId): ?array
     {
+        return $this->firstBlockingEmployments($supplierId, [$employeeId])[$employeeId] ?? null;
+    }
+
+    /**
+     * První blokující vztah každé z osob: jeden dotaz na blokátory všech jejich
+     * vztahů a po jednom dotazu na druh blokátoru kvůli hlášce
+     * ({@see self::describeMany()}). Seznam zaměstnanců počítá `can_delete`
+     * pro celou stránku, dotaz na osobu nebo vztah by z něj udělal N+1.
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,array{id:int,code:string,code_key:string,message:string}>
+     */
+    public function firstBlockingEmployments(int $supplierId, array $employeeIds): array
+    {
+        if ($employeeIds === []) {
+            return [];
+        }
         $branches = [];
         foreach (self::BLOCKERS as $alias => $blocker) {
             $branches[] = 'WHEN ' . self::existsExpression($blocker['tables'], $blocker['where'] ?? null)
                 . " THEN '{$alias}'";
         }
-        $sql = 'SELECT employment.id, employment.code, CASE '
+        $sql = 'SELECT employment.employee_id, employment.id, employment.code, CASE '
             . implode(' ', $branches)
             . ' END AS blocker'
             . ' FROM payroll_employments employment'
-            . ' WHERE employment.supplier_id = ? AND employment.employee_id = ?'
+            . ' WHERE employment.supplier_id = ?'
+            . ' AND employment.employee_id IN (' . self::placeholders($employeeIds) . ')'
             . ' HAVING blocker IS NOT NULL'
-            . ' ORDER BY employment.id ASC LIMIT 1';
+            . ' ORDER BY employment.employee_id ASC, employment.id ASC';
 
         $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$supplierId, $employeeId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!is_array($row)) {
-            return null;
+        $stmt->execute([$supplierId, ...$employeeIds]);
+        $first = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $employeeId = (int) $row['employee_id'];
+            if (isset($first[$employeeId])) {
+                continue;
+            }
+            $alias = (string) $row['blocker'];
+            if (!isset(self::BLOCKERS[$alias])) {
+                throw new \LogicException('Neznámý blokátor pracovního vztahu.');
+            }
+            $first[$employeeId] = ['id' => (int) $row['id'], 'code' => (string) $row['code'], 'alias' => $alias];
         }
-        $alias = (string) $row['blocker'];
-        if (!isset(self::BLOCKERS[$alias])) {
-            throw new \LogicException('Neznámý blokátor pracovního vztahu.');
+        $described = $this->describeMany($supplierId, array_column($first, 'alias', 'id'));
+        $result = [];
+        foreach ($first as $employeeId => $employment) {
+            $result[$employeeId] = [
+                'id' => $employment['id'],
+                'code' => $employment['code'],
+                'code_key' => $described[$employment['id']]['code'],
+                'message' => $described[$employment['id']]['message'],
+            ];
         }
-        $described = $this->describe($alias, $supplierId, (int) $row['id']);
 
-        return [
-            'id' => (int) $row['id'],
-            'code' => (string) $row['code'],
-            'code_key' => $described['code'],
-            'message' => $described['message'],
-        ];
+        return $result;
     }
 
     /** @return array<string,string|int|null>|null */

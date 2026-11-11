@@ -600,6 +600,54 @@ final class PayrollDeletionApiTest extends TestCase
         self::assertSame(1, $this->rowCount('payroll_employees', 'id', $this->employeeId));
     }
 
+    /**
+     * Seznam zaměstnanců rozhoduje o smazatelnosti celé stránky jedním voláním
+     * (dřív dotaz na každý řádek). Dávka musí každé osobě dát totéž rozhodnutí
+     * i hlášku jako dotaz na ni samotnou, a blokátory se mezi osobami nesmí
+     * pomíchat.
+     */
+    public function testBatchDecisionEqualsSingleDecisionForEveryPersonOfThePage(): void
+    {
+        $inRun = $this->employeeId;
+        $runEmployment = $this->create('HPP-B1', 'employment', true);
+        $this->linkToRunRevision((int) $runEmployment['id']);
+
+        $withInput = $this->employeeId = $this->employee($this->supplierId, 'Syntetická Vstupová');
+        $inputEmployment = $this->create('HPP-B2', 'employment', true);
+        $this->insertInput((int) $inputEmployment['id'], 'draft', '2026-02-01');
+        $this->insertInput((int) $inputEmployment['id'], 'approved', '2026-03-01');
+
+        $withDocument = $this->employeeId = $this->employee($this->supplierId, 'Syntetický Dokladový');
+        $this->insertGeneratedDocument($withDocument);
+
+        $free = $this->employeeId = $this->employee($this->supplierId, 'Syntetická Volná');
+        $this->create('HPP-B4', 'employment', true);
+        $this->employeeId = $inRun;
+
+        $ids = [$inRun, $withInput, $withDocument, $free];
+        $many = $this->employeeDeletion->canDeleteMany($this->supplierId, [...$ids, 999_999_999]);
+
+        $keys = array_keys($many);
+        sort($keys);
+        self::assertSame($ids, $keys, 'Osoba mimo firmu ve výsledku není.');
+        foreach ($ids as $id) {
+            self::assertEquals(
+                $this->employeeDeletion->canDelete($this->supplierId, $id),
+                $many[$id],
+                "Dávkové rozhodnutí osoby {$id} se liší od jednotlivého.",
+            );
+        }
+        self::assertSame('HPP-B1', $many[$inRun]->blockedEmploymentCode);
+        self::assertStringContainsString('mzdovém běhu za 01/2026', (string) $many[$inRun]->blockerMessage);
+        self::assertSame('HPP-B2', $many[$withInput]->blockedEmploymentCode);
+        self::assertSame((int) $inputEmployment['id'], $many[$withInput]->blockedEmploymentId);
+        self::assertStringContainsString('schválené mzdové vstupy za 03/2026', (string) $many[$withInput]->blockerMessage);
+        self::assertSame('payroll_employee_has_documents', $many[$withDocument]->blockerCode);
+        self::assertTrue($many[$free]->canDelete);
+        self::assertSame([], $this->employeeDeletion->canDeleteMany($this->otherSupplierId, $ids));
+        self::assertSame([], $this->employeeDeletion->canDeleteMany($this->supplierId, []));
+    }
+
     public function testEmployeeWithIssuedDocumentIsBlocked(): void
     {
         $this->insertGeneratedDocument($this->employeeId);
