@@ -1316,6 +1316,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
         expose({
           employmentId: computed(() => props.employment.id),
           isPrimary: computed(() => props.employment.is_primary === true),
+          holdsOpeningBalances: computed(() => props.employment.is_primary === true && props.payrollStartPeriod !== null),
           focusSection: (panel: string) => focus(props.employment.id, panel, props.payrollStartPeriod),
         })
         return () => null
