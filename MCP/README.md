@@ -222,9 +222,17 @@ každou operaci. Chybějící nebo poškozený manifest znamená prázdný katal
 Rozsah tokenu dále omezí nabídku v serverovém MCP. Při běhu se všechna práva
 a vazba na firmu ověřují znovu v API.
 
+Týž příkaz vytvoří i `src/tool-routes.generated.json` s routami **všech**
+nástrojů. Nástroje s deklarací `api` ji přebírají, u nástrojů s `api: false`
+se operace zaznamenají ze syntetických scénářů v `tool-recording.mjs`. Podle
+něj serverový MCP nabídne interní roli (mimo správce firmy a superadmina) jen
+nástroje, jejichž každou routu role smí aspoň v jedné z jejích firem. Nástroj
+mimo klientský katalog, jehož scénář k API nedojde, generátor odmítne; doplňte
+pro něj vzorové argumenty v `tool-recording.mjs`.
+
 `npm test` kontroluje shodu manifestu s deklaracemi i skutečná volání nástrojů
 nad zaznamenávajícím klientem. Pro každou novou větev doplňte syntetický scénář
-v `test/api-contracts.test.mjs`. Scénáře musí dojít i k podmíněným operacím a
+v `tool-recording.mjs`. Scénáře musí dojít i k podmíněným operacím a
 zápisům za potvrzovacími guardy. V klientském katalogu jsou deklarované dosavadní
 klientské nástroje, výkazy práce, sazby DPH, měny, nacenění ceníku, úpravy
 přijatých konceptů a nahrávání příloh faktur, PDF přijatých faktur a jejich
