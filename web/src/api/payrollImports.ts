@@ -550,9 +550,19 @@ export interface AttendancePerson {
   registration?: AttendanceRegistrationItem[]
   /** Návrh pravděpodobného výdělku ze sazby nebo z odměny za odpracované hodiny. */
   probable_earning?: AttendanceProbableEarning | null
+  /** Osoba je v evidenci (vazba, rodné nebo osobní číslo), jen nemá vztah v období: založí se jí nový vztah. */
+  existing_person?: AttendanceExistingPerson | null
   /** Otevřená DPP osoby, která v období nemá vztah (jen u osob k založení). */
   open_agreement?: PayrollOpenAgreement | null
   warnings: string[]
+}
+
+export interface AttendanceExistingPerson {
+  employee_id: number
+  employee_name: string
+  matched_by: 'link' | 'birth_number' | 'employment_code'
+  /** Druh posledního vztahu osoby, výchozí druh nové dohody. */
+  relation_type: RegistrationRelationType
 }
 
 /** Pravděpodobný výdělek z podkladů, viz AttendanceImportService::probableEarnings(). */
@@ -818,7 +828,7 @@ export interface AttendancePersonCreate {
 export interface AttendancePersonsResult {
   results: {
     person_key: string
-    status: 'created' | 'reused' | 'failed'
+    status: 'created' | 'employment_created' | 'reused' | 'failed'
     employee_id: number | null
     employment_id: number | null
     message: string | null

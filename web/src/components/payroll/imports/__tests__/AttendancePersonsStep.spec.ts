@@ -104,6 +104,19 @@ describe('AttendancePersonsStep — náhled zakládání osob', () => {
     expect(details).toMatch(/33,33/)
   })
 
+  it('u osoby z evidence řekne, že vznikne jen nový vztah', async () => {
+    const anna = person('anna', {
+      display_name: 'Lednová Anna',
+      existing_person: { employee_id: 5, employee_name: 'Anna Lednová', matched_by: 'employment_code', relation_type: 'dpp' },
+    })
+    const wrapper = mount(AttendancePersonsStep, {
+      props: { persons: [anna], options: [], manualLinks: {}, period: '2026-02', canCreate: true },
+    })
+    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
+    expect(wrapper.get('[data-testid="attendance-create-existing"]').text())
+      .toBe('payroll_imports.attendance.persons.existing_person{"name":"Anna Lednová"}')
+  })
+
   it('ukáže údaje pro registraci ČSSZ, které se nové osobě zapíšou', async () => {
     const hana = person('hana', {
       display_name: 'Registrační Hana',

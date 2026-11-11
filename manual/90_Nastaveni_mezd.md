@@ -842,6 +842,14 @@ týká jen osob s osobním nebo rodným číslem; osoba bez čísel bývá jinak
 jméno někoho z evidence. Uvádějí-li podklady ukončení, osoba dostane upozornění;
 import vztah neukončuje.
 
+**Osoba, která už v evidenci je.** Osobu, kterou import v měsíci nenašel, hledá
+v celé evidenci podle uložené vazby, rodného čísla a osobního čísla. Najde-li
+ji (typicky brigádník, jehož dohoda minulý měsíc skončila), náhled to u ní
+napíše a založení jí přidá jen nový pracovní vztah, druhá karta osoby se stejným
+rodným číslem nevznikne. Druh vztahu je z podkladů, bez něj stejný jako poslední
+vztah osoby, nástup ze sloupce Nástup, jinak první den měsíce. Výplatní účet ani
+pojišťovnu import u takové osoby nemění a údaje pro registraci jen doplní.
+
 **Otevřená DPP osoby.** Osobu, kterou import v měsíci nenašel, hledá také mezi
 neukončenými DPP firmy (uložená vazba, osobní číslo, rodné číslo, jméno). Má-li
 otevřenou DPP (bez konce nebo s koncem v den nástupu či později), náhled to

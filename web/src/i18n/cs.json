@@ -36355,6 +36355,7 @@
         "swap_names": "Prohodit jméno a příjmení",
         "remove_from_create": "Nezakládat",
         "registration_label": "Pro registraci ČSSZ",
+        "existing_person": "Osoba {name} už v evidenci je, založí se jí jen nový pracovní vztah (nová karta osoby nevznikne).",
         "open_agreement": {
           "legend": "Otevřená dohoda osoby {name}",
           "title": "Osoba má otevřenou DPP {code} od {start} do {end}.",

@@ -231,6 +231,81 @@ final class PayrollAttendanceImportRepository
     }
 
     /**
+     * Osoby podle otisků rodných čísel a podle kódů vztahů (osobních čísel),
+     * bez ohledu na to, jestli mají vztah v období. Dva dotazy přes IN.
+     *
+     * @param list<string> $hashes
+     * @param list<string> $codes
+     * @return array{by_hash:array<string,list<int>>,by_code:array<string,list<int>>}
+     */
+    public function employeesByIdentifiers(int $supplierId, array $hashes, array $codes): array
+    {
+        $result = ['by_hash' => [], 'by_code' => []];
+        $hashes = array_values(array_unique(array_filter($hashes, static fn (string $hash): bool => $hash !== '')));
+        if ($hashes !== []) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT employee_id, value_hash FROM payroll_person_identifiers
+                  WHERE supplier_id = ? AND identifier_type = "birth_number"
+                    AND value_hash IN (' . implode(',', array_fill(0, count($hashes), '?')) . ')'
+            );
+            $stmt->execute([$supplierId, ...$hashes]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $result['by_hash'][(string) $row['value_hash']][] = (int) $row['employee_id'];
+            }
+        }
+        $codes = array_values(array_unique(array_filter(
+            array_map(static fn (string $code): string => mb_strtolower(trim($code), 'UTF-8'), $codes),
+            static fn (string $code): bool => $code !== '',
+        )));
+        if ($codes !== []) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT DISTINCT employee_id, LOWER(code) AS code FROM payroll_employments
+                  WHERE supplier_id = ? AND is_legacy_projection = 0
+                    AND code IN (' . implode(',', array_fill(0, count($codes), '?')) . ')'
+            );
+            $stmt->execute([$supplierId, ...$codes]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $result['by_code'][(string) $row['code']][] = (int) $row['employee_id'];
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Jméno osob a druh jejich posledního vztahu (výchozí druh nové dohody).
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,array{employee_name:string,relation_type:?string}>
+     */
+    public function employeeSummaries(int $supplierId, array $employeeIds): array
+    {
+        $employeeIds = array_values(array_unique(array_filter($employeeIds, static fn (int $id): bool => $id > 0)));
+        if ($employeeIds === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee.id, ' . PayrollPeopleRepository::fullNameExpression('employee') . ' AS employee_name,
+                    (SELECT employment.relation_type FROM payroll_employments employment
+                      WHERE employment.supplier_id = employee.supplier_id AND employment.employee_id = employee.id
+                        AND employment.is_legacy_projection = 0
+                      ORDER BY employment.id DESC LIMIT 1) AS relation_type
+               FROM payroll_employees employee
+              WHERE employee.supplier_id = ? AND employee.id IN (' . implode(',', array_fill(0, count($employeeIds), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, ...$employeeIds]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[(int) $row['id']] = [
+                'employee_name' => (string) $row['employee_name'],
+                'relation_type' => is_string($row['relation_type']) ? $row['relation_type'] : null,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * Nástup vztahů (skutečný, jinak plánovaný) jedním dotazem.
      *
      * @param list<int> $employmentIds
@@ -252,35 +327,6 @@ final class PayrollAttendanceImportRepository
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             if (is_string($row['start_on'] ?? null)) {
                 $result[(int) $row['id']] = $row['start_on'];
-            }
-        }
-
-        return $result;
-    }
-
-    /**
-     * Blind-index rodných čísel vybraných osob jedním dotazem.
-     *
-     * @param list<int> $employeeIds
-     * @return array<string,list<int>> otisk => osoby
-     */
-    public function birthNumberHashes(int $supplierId, array $employeeIds): array
-    {
-        $employeeIds = array_values(array_unique(array_filter($employeeIds, static fn (int $id): bool => $id > 0)));
-        if ($employeeIds === []) {
-            return [];
-        }
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT employee_id, value_hash
-               FROM payroll_person_identifiers
-              WHERE supplier_id = ? AND identifier_type = "birth_number"
-                AND employee_id IN (' . implode(',', array_fill(0, count($employeeIds), '?')) . ')'
-        );
-        $stmt->execute([$supplierId, ...$employeeIds]);
-        $result = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            if (is_string($row['value_hash'] ?? null) && $row['value_hash'] !== '') {
-                $result[$row['value_hash']][] = PayrollTimeValue::int($row['employee_id'] ?? null, 'employee_id');
             }
         }
 

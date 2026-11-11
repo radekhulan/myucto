@@ -327,7 +327,10 @@ async function apply() {
         creatableMissingPersons.value,
         {},
         autoPersonCreateDefaults(period.value),
-        person => guessRelationType(person.relation_label),
+        // Osoba z evidence bez druhu v podkladech dostane druh svého posledního vztahu.
+        person => person.relation_label || !person.existing_person
+          ? guessRelationType(person.relation_label)
+          : person.existing_person.relation_type,
       )
       try {
         autoCreateResult.value = await createPersonsInChunks(payload)

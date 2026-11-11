@@ -345,6 +345,9 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
               <dd :class="detail.invalid ? 'text-warning-700' : 'text-neutral-800'">{{ detailValue(detail.key, detail.value, detail.invalid) }}</dd>
             </div>
           </dl>
+          <p v-if="person.existing_person" class="order-last w-full text-[11px] font-medium text-payroll-700" data-testid="attendance-create-existing">
+            {{ t('payroll_imports.attendance.persons.existing_person', { name: person.existing_person.employee_name }) }}
+          </p>
           <p v-if="person.registration?.length" class="order-last w-full text-[11px] text-neutral-600" data-testid="attendance-create-registration">
             <span class="text-neutral-500">{{ t('payroll_imports.attendance.persons.registration_label') }}:</span> {{ registrationSummary(person, t) }}
           </p>

@@ -36355,6 +36355,7 @@
         "swap_names": "Swap first and last name",
         "remove_from_create": "Do not create",
         "registration_label": "For social security registration",
+        "existing_person": "{name} is already in the records; only a new employment relationship is created (no new person record).",
         "open_agreement": {
           "legend": "Open agreement of {name}",
           "title": "The person has an open agreement to perform work (DPP) {code} from {start} to {end}.",
