@@ -4108,7 +4108,7 @@
         "inactive": {
           "summary": "Dohody bez aktivity",
           "title": "Dohody bez aktivity",
-          "hint": "DPP a DPČ bez sjednaného konce, které za posledních {months} měsíců nemají mzdový vstup ani docházku. Ukončí se k poslednímu dni měsíce poslední aktivity."
+          "hint": "DPP a DPČ bez sjednaného konce, které za {months} měsíců do {date} (poslední zpracovaný mzdový měsíc, bez schválené mzdy dnešek) nemají mzdový vstup ani docházku. Ukončí se k poslednímu dni měsíce poslední aktivity. Nejsou předvybrané, zkontrolujte je."
         },
         "archive": {
           "summary": "K archivaci",

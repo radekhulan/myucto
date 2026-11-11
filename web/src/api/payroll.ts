@@ -1198,6 +1198,8 @@ export interface PayrollBulkClosureItem {
 
 export interface PayrollBulkClosurePreview {
   as_of: string
+  /** Do kdy se měří nečinnost: konec posledního schváleného mzdového měsíce, jinak dnešek. */
+  activity_reference_on: string
   inactivity_months: number
   archive_after_months: number
   activity_since: string

@@ -4108,7 +4108,7 @@
         "inactive": {
           "summary": "Agreements without activity",
           "title": "Agreements without activity",
-          "hint": "DPP and DPČ agreements without an agreed end that have no payroll input or attendance in the last {months} months. They will be ended as of the last day of the month of their last activity."
+          "hint": "DPP and DPČ agreements without an agreed end that have no payroll input or attendance in the {months} months up to {date} (the last processed payroll month, or today without an approved payroll). They will be ended as of the last day of the month of their last activity. They are not preselected, please review them."
         },
         "archive": {
           "summary": "To archive",

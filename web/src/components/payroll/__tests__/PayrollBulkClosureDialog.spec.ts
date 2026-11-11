@@ -49,6 +49,7 @@ function item(overrides: Record<string, unknown>) {
 function preview() {
   return {
     as_of: '2026-10-15',
+    activity_reference_on: '2026-10-15',
     inactivity_months: 3,
     archive_after_months: 12,
     activity_since: '2026-08-01',
@@ -69,7 +70,7 @@ const MOUNT = { global: { stubs: { teleport: true } } }
 describe('PayrollBulkClosureDialog', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('předvybere jen položky bez konfliktu a po potvrzení pošle přechody s daty z náhledu', async () => {
+  it('předvybere jen uplynulé dohody bez konfliktu a po potvrzení pošle přechody s daty z náhledu', async () => {
     m.bulkClosurePreview.mockResolvedValue(preview())
     m.bulkClosureApply.mockResolvedValue({
       counts: { applied: 2, failed: 1 },
@@ -87,6 +88,12 @@ describe('PayrollBulkClosureDialog', () => {
     expect((wrapper.get('[data-test="bulk-closure-select-11"]').element as HTMLInputElement).checked).toBe(true)
     expect((wrapper.get('[data-test="bulk-closure-select-12"]').element as HTMLInputElement).checked).toBe(false)
     expect(wrapper.get('[data-test="bulk-closure-blocked-12"]').text()).toContain('payroll.bulk_closure.blocked.activity_after_end')
+    // Nečinnost ani archivace se nepředvybírají: vstupy za nezpracované
+    // měsíce ještě nemusí být v mzdách. Vybere je účetní sama.
+    expect((wrapper.get('[data-test="bulk-closure-select-13"]').element as HTMLInputElement).checked).toBe(false)
+    expect((wrapper.get('[data-test="bulk-closure-select-14"]').element as HTMLInputElement).checked).toBe(false)
+    await wrapper.get('[data-test="bulk-closure-select-13"]').setValue(true)
+    await wrapper.get('[data-test="bulk-closure-select-14"]').setValue(true)
 
     // Akce se provede až po potvrzení.
     await wrapper.get('[data-test="bulk-closure-apply"]').trigger('click')

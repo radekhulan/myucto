@@ -20,11 +20,12 @@ use PDO;
  * nepracují. Náhled nabízí tři skupiny:
  *
  * - `expired`: aktivní (nebo přerušený) vztah, jehož sjednaný konec
- *   (`payroll_employments.end_date`, při založení převzatý z
- *   `fixed_term_end_on` podmínek) už uplynul → ukončit k tomu dni;
+ *   ({@see self::agreedEndSql()}) už uplynul → ukončit k tomu dni;
  * - `inactive`: aktivní DPP/DPČ bez sjednaného konce, u které za posledních
- *   N měsíců (včetně běžného) není nenulový mzdový vstup ani docházka →
- *   ukončit k poslednímu dni měsíce poslední aktivity;
+ *   N měsíců do posledního schváleného mzdového měsíce (bez schválené mzdy
+ *   do běžného) není nenulový mzdový vstup ani docházka → ukončit
+ *   k poslednímu dni měsíce poslední aktivity. Klient ji nepředvybírá:
+ *   nečinnost je jen návrh, kdežto uplynulý konec je skutečnost;
  * - `archive`: ukončený vztah s koncem starším než X měsíců → archivovat.
  *
  * Aktivitou je nezrušený mzdový vstup s nenulovou částkou nebo množstvím
@@ -69,7 +70,27 @@ final class PayrollEmploymentBulkClosure
         private readonly Connection $db,
         private readonly PayrollEmploymentRepository $employments,
         private readonly ActivityLogger $activityLogger,
+        private readonly PayrollApprovedPeriodFreeze $freeze,
     ) {}
+
+    /**
+     * Sjednaný konec vztahu: `payroll_employments.end_date`, a není-li
+     * vyplněný, konec na dobu určitou z poslední verze podmínek. Některé
+     * zápisy (sloučení vztahů, převzetí) mění jen podmínky; dohoda s koncem
+     * jen v nich by jinak „uplynulou" nikdy nebyla a ruční akce ani noční
+     * úloha by ji neukončily. Jedno pravidlo pro náhled, zápis i cron.
+     */
+    private static function agreedEndSql(string $alias): string
+    {
+        return "COALESCE({$alias}.end_date, (
+                    SELECT latest.fixed_term_end_on
+                      FROM payroll_employment_terms latest
+                     WHERE latest.supplier_id = {$alias}.supplier_id
+                       AND latest.employment_id = {$alias}.id
+                     ORDER BY latest.effective_from DESC, latest.id DESC
+                     LIMIT 1
+                ))";
+    }
 
     /**
      * Kandidáti na ukončení a archivaci. Nic nezapisuje.
@@ -90,9 +111,15 @@ final class PayrollEmploymentBulkClosure
             throw new \InvalidArgumentException('Počet měsíců před archivací musí být 1 až 120.');
         }
         $todayDate = new \DateTimeImmutable($today);
-        // Běžný měsíc je jedním z N sledovaných: při N = 3 a dnešku v říjnu
-        // se hledá aktivita od 1. srpna.
-        $activitySince = $todayDate->modify('first day of this month')
+        // Nečinnost se měří k poslednímu zpracovanému mzdovému měsíci, ne
+        // k dnešku. Agentura, která má schválené mzdy za únor a v listopadu
+        // teprve zpracovává jaro, by jinak ukončila dohody s prací v březnu
+        // až srpnu, jen protože jejich vstupy ještě nikdo nezadal do mezd.
+        // Bez schválené mzdy se měří k dnešku. Měsíc reference je jedním z N
+        // sledovaných: při N = 3 a referenci v říjnu se hledá aktivita od srpna.
+        $frozenThrough = $this->freeze->frozenThrough($supplierId);
+        $reference = $frozenThrough !== null && $frozenThrough < $today ? $frozenThrough : $today;
+        $activitySince = (new \DateTimeImmutable($reference))->modify('first day of this month')
             ->modify('-' . ($inactivityMonths - 1) . ' months')
             ->format('Y-m-d');
         $archiveBefore = $todayDate->modify('-' . $archiveAfterMonths . ' months')->format('Y-m-d');
@@ -100,32 +127,36 @@ final class PayrollEmploymentBulkClosure
         $stmt = $this->db->pdo()->prepare(
             "SELECT candidate.*
                FROM (
-                    SELECT employment.id, employment.employee_id, employment.code,
-                           employment.relation_type, employment.status, employment.row_version,
-                           COALESCE(employment.actual_start_date, employment.start_date) AS start_on,
-                           employment.end_date, employee.full_name,
+                    SELECT dated.*,
                            CASE
-                               WHEN employment.status IN ('active', 'suspended')
-                                AND employment.end_date IS NOT NULL
-                                AND employment.end_date < ?
+                               WHEN dated.status IN ('active', 'suspended')
+                                AND dated.agreed_end_on IS NOT NULL
+                                AND dated.agreed_end_on < ?
                                THEN 'expired'
-                               WHEN employment.status IN ('active')
-                                AND employment.end_date IS NULL
-                                AND employment.relation_type IN ('dpp', 'dpc')
-                                AND COALESCE(employment.actual_start_date, employment.start_date) < ?
+                               WHEN dated.status IN ('active')
+                                AND dated.agreed_end_on IS NULL
+                                AND dated.relation_type IN ('dpp', 'dpc')
+                                AND dated.start_on < ?
                                THEN 'inactive'
-                               WHEN employment.status IN ('ended')
-                                AND employment.end_date IS NOT NULL
-                                AND employment.end_date < ?
+                               WHEN dated.status IN ('ended')
+                                AND dated.end_date IS NOT NULL
+                                AND dated.end_date < ?
                                THEN 'archive'
-                           END AS candidate_group,
-                           " . $this->activityColumns('employment') . "
-                      FROM payroll_employments employment
-                      JOIN payroll_employees employee
-                        ON employee.supplier_id = employment.supplier_id
-                       AND employee.id = employment.employee_id
-                     WHERE employment.supplier_id = ?
-                       AND employment.status IN ('active', 'suspended', 'ended')
+                           END AS candidate_group
+                      FROM (
+                            SELECT employment.id, employment.employee_id, employment.code,
+                                   employment.relation_type, employment.status, employment.row_version,
+                                   COALESCE(employment.actual_start_date, employment.start_date) AS start_on,
+                                   employment.end_date, employee.full_name,
+                                   " . self::agreedEndSql('employment') . " AS agreed_end_on,
+                                   " . $this->activityColumns('employment') . "
+                              FROM payroll_employments employment
+                              JOIN payroll_employees employee
+                                ON employee.supplier_id = employment.supplier_id
+                               AND employee.id = employment.employee_id
+                             WHERE employment.supplier_id = ?
+                               AND employment.status IN ('active', 'suspended', 'ended')
+                      ) dated
                ) candidate
               WHERE candidate.candidate_group IS NOT NULL
                 AND (
@@ -156,7 +187,7 @@ final class PayrollEmploymentBulkClosure
                 ? substr($row['last_settled_period'], 0, 7)
                 : null;
             $proposedOn = match ($group) {
-                'expired' => (string) $row['end_date'],
+                'expired' => (string) $row['agreed_end_on'],
                 'inactive' => min($today, $this->inactiveEndDate(
                     $lastActivity,
                     $lastSettled,
@@ -180,7 +211,9 @@ final class PayrollEmploymentBulkClosure
                 'group' => $group,
                 'action' => $group === 'archive' ? 'archive' : 'end',
                 'start_on' => $row['start_on'] === null ? null : (string) $row['start_on'],
-                'agreed_end_on' => $row['end_date'] === null ? null : (string) $row['end_date'],
+                'agreed_end_on' => $group === 'archive'
+                    ? ($row['end_date'] === null ? null : (string) $row['end_date'])
+                    : ($row['agreed_end_on'] === null ? null : (string) $row['agreed_end_on']),
                 'last_activity_period' => $lastActivity,
                 'last_settled_period' => $lastSettled,
                 'proposed_on' => $proposedOn,
@@ -191,6 +224,7 @@ final class PayrollEmploymentBulkClosure
 
         return [
             'as_of' => $today,
+            'activity_reference_on' => $reference,
             'inactivity_months' => $inactivityMonths,
             'archive_after_months' => $archiveAfterMonths,
             'activity_since' => $activitySince,
