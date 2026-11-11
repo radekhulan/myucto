@@ -78,6 +78,14 @@ final class PayrollRunReadinessImpact
          * podkladů by účetní poslalo opravovat data, která se nikdy počítat nebudou.
          */
         'period_before_module_start' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        // Snímek běhu bez nich nevznikne
+        // ({@see PayrollRunSnapshotFixableException}), běh tedy nejde zahájit.
+        'employer_policy_invalid' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        'employer_identity_incomplete' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        'employer_accounts_incomplete' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        'employer_accounts_invalid' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        'employment_dimension_split_invalid' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        'employment_dimension_share_invalid' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
 
         // ── Spočítat jde, schválit ne: v běhu jsou to blokující validace ─────
         'draft_inputs_present' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],

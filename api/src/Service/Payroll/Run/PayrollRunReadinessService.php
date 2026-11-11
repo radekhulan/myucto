@@ -139,6 +139,17 @@ final class PayrollRunReadinessService
                 $paymentDate,
                 $officeId,
             );
+        } catch (PayrollRunSnapshotFixableException $e) {
+            // Chybějící identita firmy, předkontace nebo rozpad dimenzí: věc,
+            // kterou účetní opraví sama. Hláška to říká i s místem opravy;
+            // obecné „obnovte stránku" by ji poslalo jinam.
+            $findings[] = self::finding(
+                $e->findingCode,
+                $e->getMessage(),
+                $e->remediationPath,
+                1,
+                [],
+            );
         } catch (\Throwable $e) {
             // Nasucho postavený snímek se zahazuje, takže výjimka tady nic
             // nerozbila — jen se z ní stane nález. Duplicitní hlášku o politice

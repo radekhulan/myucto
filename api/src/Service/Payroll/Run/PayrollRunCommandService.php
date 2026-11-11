@@ -91,7 +91,10 @@ final class PayrollRunCommandService
             // Nový běh je placená operace mzdového doplňku. Opravy, uzavření,
             // platby ani podání už založených běhů tuhle kontrolu nevolají.
             if (!$this->environment->allowsPayroll()) {
-                throw new \DomainException('Nový mzdový běh vyžaduje aktivní mzdový doplněk.');
+                throw new \DomainException(
+                    'Nový mzdový běh vyžaduje aktivní mzdový doplněk. Aktivujte ho na obrazovce '
+                    . 'Licence a hosting; už založené běhy dokončíte i bez něj.',
+                );
             }
             $this->assertYearOpen($supplierId, $periodStart);
             $run = $this->runs->createOrGet(
@@ -1481,17 +1484,22 @@ final class PayrollRunCommandService
             throw new \OutOfBoundsException('Firma nebyla nalezena.');
         }
         if (!(bool) $row['payroll_enabled']) {
-            throw new \DomainException('Firma nemá vedení mezd zapnuté.');
+            throw new \DomainException(PayrollModuleAvailabilityMessage::PAYROLL_DISABLED);
         }
         if ($row['module_status'] === null
             || in_array($row['module_status'], ['disabled', 'suspended'], true)
         ) {
-            throw new \DomainException('Plný mzdový modul firmy není aktivní.');
+            throw new \DomainException(PayrollModuleAvailabilityMessage::moduleInactive(
+                $row['module_status'] === null ? null : (string) $row['module_status'],
+            ));
         }
         if ($row['start_period'] !== null
             && (string) $row['start_period'] > $periodStart
         ) {
-            throw new \DomainException('Období předchází aktivaci plného mzdového modulu.');
+            throw new \DomainException(PayrollModuleAvailabilityMessage::periodBeforeStart(
+                $periodStart,
+                (string) $row['start_period'],
+            ));
         }
     }
 
