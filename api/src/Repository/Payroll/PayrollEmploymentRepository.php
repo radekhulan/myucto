@@ -563,11 +563,13 @@ final class PayrollEmploymentRepository
             }
             $this->assertRemunerationChange($supplierId, $employmentId, $previous, $data, $employment, (int) $previous['id'], $storedTo, $endRecurringBase, $userId);
             $movedFrom = (string) $data['effective_from'];
-            $data['tax_declaration_signed'] = $this->taxDeclarationSigned(
-                $supplierId,
-                $employeeId,
-                $movedFrom,
-            );
+            // Zrcadlo prohlášení se přepočte jen s posunem účinnosti. Oprava
+            // jiného údaje (pravděpodobný výdělek, pracoviště) nesmí zrcadlo
+            // tiše přepsat: mzdový běh bere prohlášení z evidence, ale změna
+            // v historii vztahu by tvrdila, že ji účetní udělala.
+            $data['tax_declaration_signed'] = $movedFrom === $storedFrom
+                ? (bool) ($previous['tax_declaration_signed'] ?? false)
+                : $this->taxDeclarationSigned($supplierId, $employeeId, $movedFrom);
             $this->assertTermsOpenFrom($supplierId, $employmentId, $storedFrom, $storedTo);
             $predecessor = null;
             if ($movedFrom !== $storedFrom) {
