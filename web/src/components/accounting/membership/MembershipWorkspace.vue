@@ -267,8 +267,8 @@ const filterChips = computed<FilterChip[]>(() => [
   ...(appliedFilters.value.title_key ? [{key: 'title', label: t('nonprofitMembership.titleKey'), value: appliedFilters.value.title_key}] : []),
   ...(appliedFilters.value.payment_status !== 'all' ? [{key: 'status', label: t('nonprofitMembership.listPaymentStatus'), value: t(`nonprofitMembership.listStatus_${appliedFilters.value.payment_status}`)}] : []),
 ])
+// Během dávky změní jen formulář; seznam se podle něj načte po odemčení (applyFilters ho odloží).
 function clearFilter(key?: string) {
-  if (batchLocked.value) return
   hydrating = true
   if (!key || key === 'search') search.value = ''
   if (!key || key === 'title') {titleKey.value = ''; if (!filterYear.value) filterYear.value = appIsoDate().slice(0,4)}
