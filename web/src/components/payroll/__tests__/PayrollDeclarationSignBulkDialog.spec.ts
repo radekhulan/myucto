@@ -117,13 +117,17 @@ describe('PayrollDeclarationSignBulkDialog', () => {
     expect((wrapper.get('[data-test="declaration-sign-bulk-pick-6"]').element as HTMLInputElement).checked).toBe(false)
   })
 
-  it('zúžení z nálezu kontroly běhu předvybere všechny vyjmenované osoby', async () => {
+  it('zúžení z nálezu kontroly běhu vypíše vyjmenované osoby, výslovné „Nepodepsáno" ale nepředvybere', async () => {
     m.declarationSignBulkPreview.mockResolvedValue(preview())
     const wrapper = mount(PayrollDeclarationSignBulkDialog, { ...MOUNT, props: { employeeIds: [5, 6] } })
     await flushPromises()
 
     expect(m.declarationSignBulkPreview.mock.calls[0]![0].employee_ids).toEqual([5, 6])
-    expect((wrapper.get('[data-test="declaration-sign-bulk-pick-6"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('[data-test="declaration-sign-bulk-pick-5"]').element as HTMLInputElement).checked).toBe(true)
+    // Souhrn nepodepsaných prohlášení posílá právě tyhle osoby; jedno kliknutí
+    // by jim zapsalo podpis, který nedaly.
+    expect((wrapper.get('[data-test="declaration-sign-bulk-pick-6"]').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.get('[data-test="declaration-sign-bulk-pick-6"]').attributes('disabled')).toBeUndefined()
   })
 
   it('změna roku a data podpisu načte náhled znovu', async () => {
