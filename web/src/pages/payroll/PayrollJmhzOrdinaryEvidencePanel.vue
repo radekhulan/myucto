@@ -133,6 +133,8 @@ function scopeLabel(scope: PayrollJmhzOrdinaryEvidenceScope): string {
       })
 }
 
+const SERVER_EXPLAINED_FAILURES = ['encryption_key_unavailable']
+
 function loadFailureGuidance(code: string, run: PayrollRun) {
   const guidance = jmhzEvidenceGuidance({
     employee_id: 0, employment_id: 0, employee_name: '', confirmed: false,
@@ -280,10 +282,15 @@ async function loadRun(run: PayrollRun) {
     }
   } catch (exception) {
     const code = apiErrorCode(exception)
-    states.value[id].failure = { code, technical: apiErrorMessage(exception) }
-    states.value[id].error = code
-      ? t(loadFailureGuidance(code, run).problemKey)
-      : t('payroll.submissions.overview.jmhz_evidence_load_failed')
+    // Stav instalace (chybějící šifrovací klíč) vysvětluje server sám, kdo ho
+    // opraví; obecný návod k podkladům hlášení by poslal účetní jinam.
+    const serverExplains = SERVER_EXPLAINED_FAILURES.includes(code)
+    states.value[id].failure = { code: serverExplains ? '' : code, technical: apiErrorMessage(exception) }
+    states.value[id].error = serverExplains
+      ? apiErrorMessage(exception, t('payroll.submissions.overview.jmhz_evidence_load_failed'))
+      : code
+        ? t(loadFailureGuidance(code, run).problemKey)
+        : t('payroll.submissions.overview.jmhz_evidence_load_failed')
   } finally {
     states.value[id].loading = false
   }
@@ -534,18 +541,21 @@ watch(
               </template>
             </ExpandableList>
           </div>
-          <p
-            v-if="state(run)?.scopes.length === 0"
-            class="mt-3 text-sm text-neutral-500"
-          >
-            {{ t('payroll.submissions.overview.jmhz_evidence_no_scopes') }}
-          </p>
-          <p
-            v-else-if="view(run)!.attention === 0"
-            class="mt-3 text-sm font-medium text-success-700"
-          >
-            {{ t('payroll.submissions.overview.jmhz_evidence_all_resolved') }}
-          </p>
+          <!-- Selhané načtení není prázdná revize: hlášku ukáže chybový panel níže. -->
+          <template v-if="!state(run)?.error">
+            <p
+              v-if="state(run)?.scopes.length === 0"
+              class="mt-3 text-sm text-neutral-500"
+            >
+              {{ t('payroll.submissions.overview.jmhz_evidence_no_scopes') }}
+            </p>
+            <p
+              v-else-if="view(run)!.attention === 0"
+              class="mt-3 text-sm font-medium text-success-700"
+            >
+              {{ t('payroll.submissions.overview.jmhz_evidence_all_resolved') }}
+            </p>
+          </template>
         </template>
         <!--
           Chyba načtení bez tlačítka byla slepá ulička: karta se načítá sama

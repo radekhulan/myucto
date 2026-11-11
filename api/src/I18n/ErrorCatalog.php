@@ -602,6 +602,7 @@ final class ErrorCatalog
         'Měnu nelze smazat — je výchozí měnou firmy.' => 'The currency cannot be deleted because it is the company default currency.',
         'Měnu nelze smazat — je na ni napojené bankovní spojení.' => 'The currency cannot be deleted because a bank connection is linked to it.',
         'Měnu nelze smazat — je použita v jiných záznamech.' => 'The currency cannot be deleted because other records use it.',
+        'Šifrované osobní údaje nejde přečíst, protože tato instalace nemá šifrovací klíč, kterým byly uložené. Nejde o chybu v datech, ale o nastavení instalace: správce instalace musí do její konfigurace vrátit původní šifrovací klíč. Do té doby nejde připravit podání ani zobrazit údaje, které šifrované osobní údaje potřebují.' => 'Encrypted personal data cannot be read because this installation does not have the encryption key it was stored with. This is not a data error but an installation setting: the installation administrator must restore the original encryption key in its configuration. Until then, filings and data that need the encrypted personal data cannot be prepared or shown.',
     ];
 
     /**

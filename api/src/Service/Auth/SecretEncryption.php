@@ -112,7 +112,7 @@ final class SecretEncryption
         }
         $key = $this->keyRing()[$keyId] ?? null;
         if ($key === null) {
-            throw new \RuntimeException('Encryption key is unavailable');
+            throw new EncryptionKeyUnavailableException('Encryption key is unavailable');
         }
         $nonce = substr($blob, 0, self::NONCE_LEN);
         $tag = substr($blob, -16);
@@ -231,14 +231,14 @@ final class SecretEncryption
         if ($b64 !== '') {
             $key = base64_decode($b64, true);
             if ($key === false || strlen($key) !== 32) {
-                throw new \RuntimeException('cfg.app.secret_encryption_key musí být base64 klíč o délce 32B po dekódování.');
+                throw new EncryptionKeyUnavailableException('cfg.app.secret_encryption_key musí být base64 klíč o délce 32B po dekódování.');
             }
             return $key;
         }
         // Fallback: HKDF z pepperu — méně bezpečné než dedikovaný klíč, ale funkční
         $pepper = (string) $this->config->get('app.pepper', '');
         if ($pepper === '') {
-            throw new \RuntimeException('Ani secret_encryption_key, ani app.pepper nejsou nastaveny.');
+            throw new EncryptionKeyUnavailableException('Ani secret_encryption_key, ani app.pepper nejsou nastaveny.');
         }
         // Zástupná hodnota ze vzorové konfigurace je veřejná a klíč z ní nic nechrání.
         // Produkce s ní nenastartuje ({@see PepperPolicy::productionProblem()}); ve vývoji
