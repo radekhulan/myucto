@@ -7778,7 +7778,16 @@ export interface PayrollRunReadinessFinding {
   hideable?: boolean
   subject_type?: PayrollWarningSubjectType | null
   subject_ids?: number[]
+  /** Hromadné opravy ze seznamu zaměstnanců (`/payroll/people?bulk=`), které nález nabízí. */
+  bulk_actions?: { kind: PayrollRunReadinessBulkKind, count: number }[]
 }
+
+export type PayrollRunReadinessBulkKind =
+  | 'statutory_defaults'
+  | 'declaration_signed'
+  | 'health_insurer'
+  | 'workplace'
+  | 'closure'
 
 /**
  * Kontrola před zahájením mzdového běhu. Čtecí, nic neukládá — stejný vzor

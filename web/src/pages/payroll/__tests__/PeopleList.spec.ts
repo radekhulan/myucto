@@ -1089,6 +1089,33 @@ describe('PeopleList toolbar and shared employee creation', () => {
    * neaktivní člověk ve výchozím filtru chybí a listovat kvůli odkazu celý
    * seznam by stálo tolik požadavků, kolik má firma stránek.
    */
+  it('proklik z kontroly běhu otevře hromadnou opravu na období běhu', async () => {
+    m.routeQuery.bulk = 'workplace'
+    m.routeQuery.period = '2026-02'
+    const wrapper = mount(PeopleList, {
+      global: {
+        stubs: {
+          ActionBar: true,
+          RouterLink: true,
+          EmploymentCard: true,
+          PayrollPersonQuickEdit: true,
+          PayrollPersonProfilePanel: true,
+          PayrollPersonStatutoryEvidencePanel: true,
+          PayrollWorkplaceBulkFillDialog: {
+            props: ['periodStart', 'employmentIds'],
+            template: '<div data-test="workplace-bulk-stub">{{ periodStart }}</div>',
+          },
+          PayrollBulkClosureDialog: { template: '<div data-test="closure-bulk-stub" />' },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="workplace-bulk-stub"]').text()).toBe('2026-02-01')
+    expect(wrapper.find('[data-test="closure-bulk-stub"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('opens a person missing from the page by fetching that single detail', async () => {
     m.routeQuery.person = '2'
     m.person.mockResolvedValue({

@@ -44921,6 +44921,18 @@ components:
               label: { type: [string, "null"] }
               message: { type: string, description: Konkrétní důvod této entity, pokud se liší od souhrnu. }
               remediation_path: { type: [string, "null"], description: Cíl nápravy této entity; má přednost před společným odkazem skupiny. }
+              gaps:
+                type: array
+                description: U nálezu person_data_gap klíče chybějících údajů osoby za období běhu.
+                items: { type: string }
+        bulk_actions:
+          type: array
+          description: Hromadné opravy ze seznamu zaměstnanců (/payroll/people?bulk=kind), které nález nabízí.
+          items:
+            type: object
+            properties:
+              kind: { type: string, enum: [statutory_defaults, declaration_signed, health_insurer, workplace, closure] }
+              count: { type: integer, minimum: 0 }
 
     PayrollRunReadiness:
       type: [object, "null"]

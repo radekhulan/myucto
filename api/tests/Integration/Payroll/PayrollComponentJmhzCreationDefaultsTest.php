@@ -326,6 +326,47 @@ final class PayrollComponentJmhzCreationDefaultsTest extends TestCase
         self::assertNull($this->entityFor($this->personDataGapFinding(self::PERIOD), $employeeId));
     }
 
+    /**
+     * Nález nabízí hromadnou opravu ze seznamu zaměstnanců se skutečným
+     * počtem dotčených, ne jen s počtem vypsaných jmen.
+     */
+    public function testFindingsOfferTheExistingBulkFixWithTheRealCount(): void
+    {
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, employment_type,
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, ?, "employee", "hpp", 1, 1, 0, 42000, 0, 1)',
+        );
+        for ($i = 1; $i <= 30; ++$i) {
+            $insert->execute([$this->supplierId, sprintf('Syntetická Hromadná %02d', $i)]);
+            $this->employmentFor((int) $this->db->pdo()->lastInsertId(), sprintf('SYN-BULK-%02d', $i), '2026-01-01', null, 'active');
+        }
+        $service = $this->container->get(PayrollRunReadinessService::class);
+        self::assertInstanceOf(PayrollRunReadinessService::class, $service);
+        $bulkActions = static fn (array $finding): array => (new \ReflectionMethod(PayrollRunReadinessService::class, 'bulkActions'))->invoke(null, $finding);
+
+        $gapActions = $bulkActions($this->personDataGapFinding(self::PERIOD));
+        self::assertContains(['kind' => 'statutory_defaults', 'count' => 30], $gapActions);
+        self::assertContains(['kind' => 'health_insurer', 'count' => 30], $gapActions);
+
+        // Dohoda se sjednaným koncem v březnu, pořád aktivní: červnový běh nabídne hromadné ukončení.
+        $insert->execute([$this->supplierId, 'Syntetická Prošlá Dohoda']);
+        $this->employmentFor((int) $this->db->pdo()->lastInsertId(), 'SYN-PAST-END', '2026-01-01', '2026-03-31', 'active');
+        $pastEnd = (new \ReflectionMethod($service, 'pastAgreedEndFinding'))->invoke($service, $this->supplierId, self::PERIOD);
+        self::assertIsArray($pastEnd);
+        self::assertSame('employments_past_agreed_end', $pastEnd['code']);
+        self::assertSame(1, $pastEnd['count']);
+        self::assertSame([['kind' => 'closure', 'count' => 1]], $bulkActions($pastEnd));
+        self::assertNull((new \ReflectionMethod($service, 'pastAgreedEndFinding'))->invoke($service, $this->supplierId, '2026-03-01'));
+
+        self::assertSame(
+            [['kind' => 'declaration_signed', 'count' => 4]],
+            $bulkActions(['code' => 'tax_declaration_not_signed_summary', 'count' => 4]),
+        );
+    }
+
     /** @return array<string,mixed>|null */
     private function personDataGapFinding(string $periodStart): ?array
     {

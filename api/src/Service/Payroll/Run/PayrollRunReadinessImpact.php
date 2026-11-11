@@ -135,6 +135,9 @@ final class PayrollRunReadinessImpact
         'run_without_employments' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'readiness_check_failed' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'person_data_gap' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
+        // Aktivní vztah po sjednaném konci: běh ho vezme jako trvající, ale
+        // ukončit se dá kdykoli a hromadně.
+        'employments_past_agreed_end' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'institution_account_unverified' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
         'employment_without_office' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
         'employment_social_registration_missing' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],

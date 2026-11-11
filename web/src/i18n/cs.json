@@ -4716,6 +4716,13 @@
       "readiness": {
         "affected": "Týká se: {names}",
         "fill_probable_average": "Doplnit pravděpodobný výdělek ze sazby",
+        "bulk": {
+          "statutory_defaults": "Doplnit výchozí zákonné údaje ({count})",
+          "declaration_signed": "Podepsaná prohlášení hromadně",
+          "health_insurer": "Zdravotní pojišťovny hromadně ({count})",
+          "workplace": "Doplnit místo výkonu práce ({count})",
+          "closure": "Ukončit skončené dohody ({count})"
+        },
         "fill_probable_average_done": "Doplněno automaticky ze sjednané hodinové sazby: {count}. Průměr jde opravit novou revizí v Absence a dovolená → Průměrný výdělek.",
         "fill_probable_average_failed": "Pravděpodobný výdělek se nepodařilo doplnit.",
         "impact": {

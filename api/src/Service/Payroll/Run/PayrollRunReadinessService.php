@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog;
 use PDO;
 
 /**
@@ -218,13 +219,23 @@ final class PayrollRunReadinessService
         if ($peopleFinding !== null) {
             $findings[] = $peopleFinding;
         }
+        $pastEndFinding = $this->pastAgreedEndFinding($supplierId, $periodStart);
+        if ($pastEndFinding !== null) {
+            $findings[] = $pastEndFinding;
+        }
         // Jednotný tvar nálezu: co nepochází z katalogu skrytí, skrýt nejde.
         $findings = array_map(
-            static fn (array $finding): array => $finding + [
-                'hideable' => false,
-                'subject_type' => null,
-                'subject_ids' => [],
-            ],
+            static function (array $finding): array {
+                $bulkActions = self::bulkActions($finding);
+                unset($finding['gap_totals']);
+
+                return $finding + [
+                    'hideable' => false,
+                    'subject_type' => null,
+                    'subject_ids' => [],
+                    'bulk_actions' => $bulkActions,
+                ];
+            },
             $findings,
         );
 
@@ -239,6 +250,99 @@ final class PayrollRunReadinessService
             'has_findings' => $findings !== [],
             'findings' => $findings,
         ];
+    }
+
+    /**
+     * Hromadné opravy, které nález nabízí.
+     *
+     * Nic se tu nepočítá znovu: každá vede na existující dialog v Mzdy →
+     * Zaměstnanci → Další funkce (`/payroll/people?bulk=<kind>`), který si
+     * kandidáty vybere sám. `count` je jen odhad na tlačítko z nálezu.
+     * Schválení vstupů a docházky nabízí karta běhu zvlášť (kroky schválení).
+     *
+     * @param array<string,mixed> $finding
+     * @return list<array{kind:string,count:int}>
+     */
+    private static function bulkActions(array $finding): array
+    {
+        $code = (string) ($finding['code'] ?? '');
+        $count = max((int) ($finding['count'] ?? 0), (int) ($finding['entity_total'] ?? 0));
+        if ($code === 'person_data_gap') {
+            /** @var array<string,int> $totals */
+            $totals = $finding['gap_totals'] ?? [];
+            $actions = [];
+            $statutory = max($totals['tax_residence'] ?? 0, $totals['tax_declaration'] ?? 0);
+            if ($statutory > 0) {
+                $actions[] = ['kind' => 'statutory_defaults', 'count' => $statutory];
+            }
+            if (($totals['health_insurance'] ?? 0) > 0) {
+                $actions[] = ['kind' => 'health_insurer', 'count' => $totals['health_insurance']];
+            }
+
+            return $actions;
+        }
+
+        return match (true) {
+            $code === 'tax_declaration_not_signed_summary' => [['kind' => 'declaration_signed', 'count' => $count]],
+            $code === 'employments_past_agreed_end' => [['kind' => 'closure', 'count' => $count]],
+            str_starts_with($code, 'jmhz_')
+                && JmhzBlockerCatalog::remediation($code)['kind'] === 'workplace'
+                => [['kind' => 'workplace', 'count' => $count]],
+            default => [],
+        };
+    }
+
+    /**
+     * Vztahy, které podle sjednaného konce skončily před obdobím běhu, ale
+     * pořád jsou aktivní. Do běhu vstoupí jako trvající (nulové hlášení,
+     * výzva k mzdě) a z běhu je nikdo neukončí. Ukončení po jednom nikdo
+     * nestíhá, proto nález nabízí hromadné ukončení skončených dohod.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function pastAgreedEndFinding(int $supplierId, string $periodStart): ?array
+    {
+        try {
+            $statement = $this->db->pdo()->prepare(
+                "SELECT employment.id, employee.full_name
+                   FROM payroll_employments employment
+                   JOIN payroll_employees employee
+                     ON employee.supplier_id = employment.supplier_id
+                    AND employee.id = employment.employee_id
+                  WHERE employment.supplier_id = ?
+                    AND employment.status IN ('active', 'suspended')
+                    AND employment.end_date IS NOT NULL
+                    AND employment.end_date < ?
+                  ORDER BY employee.full_name, employment.id"
+            );
+            $statement->execute([$supplierId, $periodStart]);
+            $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        } catch (\Throwable) {
+            return null;
+        }
+        if ($rows === []) {
+            return null;
+        }
+
+        return self::finding(
+            'employments_past_agreed_end',
+            sprintf(
+                'Pracovní vztahy se sjednaným koncem před obdobím %s jsou pořád aktivní (%d). '
+                . 'Ukončete je hromadně v Mzdy → Zaměstnanci → Další funkce → Ukončit skončené dohody.',
+                substr($periodStart, 0, 7),
+                count($rows),
+            ),
+            '/payroll/people?bulk=closure',
+            count($rows),
+            array_map(
+                static fn (array $row): array => [
+                    'entity_type' => 'employment',
+                    'entity_id' => (int) $row['id'],
+                    'label' => (string) $row['full_name'],
+                ],
+                array_slice($rows, 0, self::MAX_ENTITIES),
+            ),
+        );
     }
 
     /**
@@ -339,7 +443,8 @@ final class PayrollRunReadinessService
         // kde údaje chybí dvěma stům lidí, by účetní poslalo špatným směrem.
         $hidden = $gaps['total'] - count($people);
 
-        return self::finding(
+        // `gap_totals` čte jen výběr hromadných oprav; do odpovědi nejde.
+        return ['gap_totals' => $gaps['gap_totals'] ?? []] + self::finding(
             'person_data_gap',
             sprintf(
                 'Za období %s chybí zákonné údaje u těchto zaměstnanců: %s%s. Bez nich se '

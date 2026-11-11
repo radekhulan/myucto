@@ -189,25 +189,47 @@ const canCreatePerson = computed(() => auth.canWrite('payroll.person.write'))
  * a nevhodné sám vyřadí s důvodem.
  */
 const statutoryBulkOpen = ref(false)
-const statutoryBulkEffectiveOn = `${payrollWorkingPeriod()}-01`
+// Proklik z kontroly běhu nese `period` běhu; dialogy pak pracují s ním,
+// ne se zpracovávaným měsícem.
+const bulkQueryPeriod = typeof route.query.period === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(route.query.period)
+  ? route.query.period
+  : null
+const statutoryBulkEffectiveOn = `${bulkQueryPeriod ?? payrollWorkingPeriod()}-01`
 const workplaceBulkOpen = ref(false)
 const bulkClosureOpen = ref(false)
 // Počet vztahů k ukončení na tlačítku; výpadek náhledu tlačítko neschová.
 const bulkClosureCount = ref<number | null>(null)
 // Po importu hlášení JMHZ (nenese pojišťovnu) sem vede proklik `?bulk=health_insurer`.
-const healthInsurerBulkOpen = ref(route.query.bulk === 'health_insurer')
+const healthInsurerBulkOpen = ref(false)
 // Z hromadného doplnění evidence (i na této stránce) vede proklik `?bulk=declaration_signed`.
-const declarationSignBulkOpen = ref(canCreatePerson.value && route.query.bulk === 'declaration_signed')
-watch(() => route.query.bulk, (bulk) => {
-  if (bulk !== 'declaration_signed' || !canCreatePerson.value) return
-  statutoryBulkOpen.value = false
-  declarationSignBulkOpen.value = true
-})
+const declarationSignBulkOpen = ref(false)
 const canWriteEmployment = computed(() => auth.canWrite('payroll.employment.write'))
 const canQuickEditPerson = computed(() =>
   auth.canWrite('payroll.person.write')
   && auth.canWrite('payroll.employment.write'),
 )
+
+/*
+ * `?bulk=<druh>` otevře hromadnou opravu z „Další funkce" — vedou sem
+ * proklik po importu JMHZ, z doplnění evidence i z nálezu kontroly běhu.
+ * Každý dialog se otevře jen s tím právem, se kterým ho nabízí i nabídka.
+ */
+function openBulkFromQuery(bulk: unknown) {
+  if (bulk === 'declaration_signed' && canCreatePerson.value) {
+    statutoryBulkOpen.value = false
+    declarationSignBulkOpen.value = true
+  } else if (bulk === 'statutory_defaults' && canCreatePerson.value) {
+    statutoryBulkOpen.value = true
+  } else if (bulk === 'health_insurer' && canQuickEditPerson.value) {
+    healthInsurerBulkOpen.value = true
+  } else if (bulk === 'workplace' && canWriteEmployment.value) {
+    workplaceBulkOpen.value = true
+  } else if (bulk === 'closure' && canWriteEmployment.value) {
+    bulkClosureOpen.value = true
+  }
+}
+openBulkFromQuery(route.query.bulk)
+watch(() => route.query.bulk, openBulkFromQuery)
 const relationTypes: PayrollRelationType[] = [
   'employment',
   'small_scale_employment',

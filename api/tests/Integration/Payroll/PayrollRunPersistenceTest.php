@@ -3934,7 +3934,10 @@ final class PayrollRunPersistenceTest extends TestCase
                 'hideable',
                 'subject_type',
                 'subject_ids',
+                // Hromadná oprava ze seznamu zaměstnanců, kterou nález nabízí.
+                'bulk_actions',
             ], array_keys($finding));
+            self::assertIsList($finding['bulk_actions']);
             self::assertIsInt($finding['entity_total']);
             self::assertGreaterThanOrEqual(count($finding['entities']), $finding['entity_total']);
             self::assertContains($finding['severity'], ['blocker', 'warning', 'info']);
