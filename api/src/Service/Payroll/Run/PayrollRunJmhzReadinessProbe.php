@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerExplainer;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerRemediationPath;
+use MyInvoice\Service\Payroll\Submission\PayrollStatutoryAgendaCatalog;
 use PDO;
 
 /**
@@ -70,6 +71,12 @@ final class PayrollRunJmhzReadinessProbe
      */
     public function inspect(int $supplierId, string $periodStart, array $snapshotData): array
     {
+        // Měsíc před prvním měsícem JMHZ (1. 4. 2026) se nehlásí vůbec: nález
+        // by účetní posílal doplňovat podklady hlášení, které se nepodává
+        // (identita, průměr 10345, žádost o roční zúčtování 10319).
+        if (!PayrollStatutoryAgendaCatalog::jmhzApplies($periodStart)) {
+            return [];
+        }
         $periodEnd = (new \DateTimeImmutable($periodStart))
             ->modify('last day of this month')
             ->format('Y-m-d');
