@@ -5004,6 +5004,15 @@
       "mode_amount_short": "Kč",
       "managed_summary": "Řádky, u kterých hodnotu spravuje jiný vstup (import docházky nebo pravidelná složka): {count}. Pole jsou tu jen ke čtení, upravíte je v Mzdových vstupech.",
       "managed_summary_link": "Otevřít mzdové vstupy",
+      "zero_income": {
+        "hint": "Dohody, které v měsíci nepracovaly: běh u nich chce základní složku 0 Kč (za vztah se podá nulové hlášení). Jednotlivě stačí zadat 0 do základní mzdy, tady to jde vybraným dohodám najednou.",
+        "open": "Dohody bez příjmu v měsíci",
+        "empty": "Žádná dohoda bez zadané odměny, docházky a příplatků v měsíci není.",
+        "list_hint": "Dohody bez vstupů, odpracované doby a příplatků za měsíc. Odškrtněte ty, které v měsíci příjem mají.",
+        "save_approve": "Uložit a schválit 0 Kč ({count})",
+        "save_draft": "Uložit 0 Kč ({count})",
+        "saved": "Uloženo 0 Kč u {count} dohod."
+      },
       "unsaved": {
         "title": "Navrženo, neuloženo: {count} vztahů ({amount})",
         "hint_approve": "Základní mzda v přerušovaně orámovaných polích je jen návrh ze sjednaných podmínek. Mzdový běh ji nevidí, dokud ji neuložíte. Tlačítko uloží a schválí měsíční podklady za všechny stránky najednou.",

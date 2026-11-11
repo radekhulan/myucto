@@ -5004,6 +5004,15 @@
       "mode_amount_short": "CZK",
       "managed_summary": "Rows whose value is managed by another input (attendance import or a recurring component): {count}. These fields are read-only here; edit them in Payroll inputs.",
       "managed_summary_link": "Open payroll inputs",
+      "zero_income": {
+        "hint": "Agreements with no work in the month: the run needs a base component of 0 CZK for them (a zero report is filed for the employment). One by one, enter 0 as the base wage; here it can be done for selected agreements at once.",
+        "open": "Agreements without income this month",
+        "empty": "There is no agreement without remuneration, attendance or surcharges in this month.",
+        "list_hint": "Agreements with no inputs, worked time or surcharges for the month. Untick those that do have income this month.",
+        "save_approve": "Save and approve 0 CZK ({count})",
+        "save_draft": "Save 0 CZK ({count})",
+        "saved": "0 CZK saved for {count} agreements."
+      },
       "unsaved": {
         "title": "Suggested, not saved: {count} employments ({amount})",
         "hint_approve": "The base wage in the dashed fields is only a suggestion from the agreed terms. The payroll run does not see it until you save it. The button saves and approves the monthly inputs for all pages at once.",

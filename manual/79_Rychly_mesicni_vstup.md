@@ -56,7 +56,10 @@ se zpracovávají jako dosud.
    a doplňte **Bonus / odměna**.
 5. Pokud složka v měsíci není, zadejte **0**. Prázdné pole neznamená nulu.
    Trvající vztah bez příjmu zadejte s 0 Kč u základní mzdy; podá se za něj
-   nulové hlášení JMHZ.
+   nulové hlášení JMHZ. U agentury s mnoha dohodami použijte **Dohody bez
+   příjmu v měsíci**: aplikace vypíše dohody bez vstupů, odpracované doby
+   a příplatků za měsíc (ze všech stránek), odškrtněte ty, které příjem
+   mají, a **Uložit a schválit 0 Kč (N)** uloží nulu všem vybraným najednou.
 6. Porovnejte **Součet za období** pod tabulkou se zdrojovým podkladem.
 7. Klikněte na **Uložit měsíční podklady** (nebo v pruhu nahoře na **Uložit
    a schválit vše (N)**, bez práva schvalovat **Uložit vše (N)**). Uloží se
