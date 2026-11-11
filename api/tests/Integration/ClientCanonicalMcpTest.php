@@ -192,8 +192,10 @@ final class ClientCanonicalMcpTest extends TestCase
         $this->pdo->prepare("INSERT INTO roles (name, role_type, is_active) VALUES (?, 'staff', 1)")->execute(['MCP interní ' . $suffix]);
         $staffRole = (int) $this->pdo->lastInsertId();
         $this->extraRoles[] = $staffRole;
-        $this->pdo->prepare("INSERT INTO role_permissions VALUES (?, 'profile', 1), (?, 'profile.tokens', 1), (?, 'invoices', 1)")
-            ->execute([$staffRole, $staffRole, $staffRole]);
+        // Předvaha (`accounting`) není v klientském katalogu: u zaměstnance prokazuje
+        // zaměstnanecký povrch. Bez práva by ji filtr podle role správně skryl.
+        $this->pdo->prepare("INSERT INTO role_permissions VALUES (?, 'profile', 1), (?, 'profile.tokens', 1), (?, 'invoices', 1), (?, 'accounting', 1)")
+            ->execute([$staffRole, $staffRole, $staffRole, $staffRole]);
         $staff = $this->createUser('mcp-staff-' . $suffix . '@example.test', 'MCP interní', $staffRole);
         $this->extraUsers[] = $staff;
         $this->pdo->prepare('INSERT INTO user_suppliers (user_id, supplier_id) VALUES (?, ?)')->execute([$staff, $this->supplier]);
@@ -209,6 +211,7 @@ final class ClientCanonicalMcpTest extends TestCase
         self::assertNull($row['supplier_id']);
         $names = array_column(self::json($this->rpc($token['access_token'], 'tools/list'))['result']['tools'], 'name');
         self::assertContains('trial_balance', $names);
+        self::assertNotContains('aging_receivables', $names);
         self::assertIsArray(Bootstrap::buildContainer()->get(McpOAuth::class)->refresh($token['refresh_token'], $this->client));
     }
 
