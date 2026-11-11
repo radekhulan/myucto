@@ -11,7 +11,7 @@ import {
 } from '@/api/payroll'
 import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import CountrySelect from '@/components/ui/CountrySelect.vue'
-import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
+import { formatDate, formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { loadDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultInsurer'
 import { useAuthStore } from '@/stores/auth'
@@ -309,6 +309,21 @@ function derivedTaxpayerCredit(section: StatutorySectionSpec): boolean {
   return section.key === 'tax_credit_claims'
     && evidence.value?.derived?.taxpayer_credit === true
     && !effectiveRows(section).some(row => statutoryText(row, 'credit_kind') === 'taxpayer')
+}
+
+/**
+ * Upozornění k uložené větě prohlášení, jejíž začátek neodpovídá dni podpisu
+ * podle § 38k ZDP. Posuzuje server (TaxDeclarationEffectiveMonth); uložení
+ * neblokuje, účetní může mít doklad, který server nezná.
+ */
+function declarationCheckText(section: StatutorySectionSpec, row: PayrollStatutoryEvidenceRow): string {
+  if (section.key !== 'tax_declarations' || typeof row.id !== 'number') return ''
+  const check = evidence.value?.derived?.tax_declaration_checks?.find(item => item.id === row.id)
+  if (!check) return ''
+  if (check.legal_from === null) return t('payroll.people.statutory_evidence.declaration_check.next_year')
+  return t(`payroll.people.statutory_evidence.declaration_check.${check.warning}`, {
+    month: formatPeriod(check.legal_from.slice(0, 7)),
+  })
 }
 
 function summaryLabel(section: StatutorySectionSpec): string {
@@ -1411,6 +1426,11 @@ onMounted(() => {
                           {{ issueText(issue) }}
                         </li>
                       </ul>
+                      <p
+                        v-if="declarationCheckText(section, row)"
+                        class="mt-2 rounded-md border border-warning-500/30 bg-warning-50 px-2 py-1.5 text-xs text-warning-800"
+                        :data-test="`declaration-check-${index}`"
+                      >{{ declarationCheckText(section, row) }}</p>
 
                       <!--
                         Zamčený řádek dostane AKCI, ne jen konstatování. Bez ní si

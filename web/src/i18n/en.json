@@ -3847,10 +3847,13 @@
       "reload": "Load preview",
       "effective_from": "Valid from {date}",
       "basis": {
-        "year_start": "from the start of the year, the declaration was signed before the year or in January",
-        "signing_month": "from the month of signature, the credit does not apply to earlier months",
-        "after_frozen_period": "only after the period closed by an approved payroll (until {date})"
+        "employment_start": "from the month of starting work, the declaration was signed within 30 days of the start (§ 38k(4) of the Income Tax Act)",
+        "year_start": "from January, the declaration was signed by 15 February (§ 38k(4) of the Income Tax Act)",
+        "following_month": "from the month after the signature, the declaration was signed after the deadline (§ 38k(7) of the Income Tax Act); new starters signing within 30 days of the start get the month of the start",
+        "after_frozen_period": "only after the period closed by an approved payroll (until {date}), the annual tax settlement makes up the credit for closed months"
       },
+      "annual_settlement": "the annual tax settlement makes up the credit for closed months",
+      "person_effective": "from {date}",
       "year_frozen": "The whole year {year} is closed by an approved payroll (until {date}). Nothing is written retroactively into a closed calculation.",
       "recalculate_title": "Payrolls in progress to recalculate",
       "recalculate_hint": "These payrolls were calculated without the signature. Recalculate them after recording.",
@@ -3864,6 +3867,7 @@
         "ready": "Will be recorded",
         "already_signed": "Already signed for the year, skipped",
         "period_frozen": "Period closed by an approved payroll",
+        "after_year_end": "The declaration applies only from the next year",
         "timeline_gap": "The previous record ends earlier, record it on the person card",
         "employee_not_found": "Person not found"
       },
@@ -7547,6 +7551,11 @@
         "current_ended": "Recorded only until {day}, missing for {month}. If the relationship continues, leave Valid to empty.",
         "current_none_claimed": "No credit",
         "derived_taxpayer_credit": "Basic taxpayer credit (from the signed declaration)",
+        "declaration_check": {
+          "earlier_than_allowed": "Based on the signing date the declaration applies only from {month} (§ 38k of the Income Tax Act). The credit is not due for earlier months, move the start of the record.",
+          "later_than_entitled": "Based on the signing date the credit is due already from {month} (§ 38k of the Income Tax Act). The annual tax settlement makes it up for months closed by an approved payroll.",
+          "next_year": "A declaration signed after the deadline applies only from the next year (§ 38k(7) of the Income Tax Act)."
+        },
         "current_from": "valid from {day}",
         "current_none": "nothing applies to the selected month",
         "history": "History and records — none yet | History and records (1) | History and records ({count}) | History and records ({count})",
@@ -7590,7 +7599,7 @@
           "social_pensions": "Pension received"
         },
         "section_hint": {
-          "tax_declarations": "Decides whether monthly credits and allowances apply, or tax is withheld without them.",
+          "tax_declarations": "Decides whether monthly credits and allowances apply, or tax is withheld without them. The start of the record is the first month of the credit: the month of starting work when signed within 30 days of the start, January when signed by 15 February, otherwise the month after the signature (§ 38k of the Income Tax Act). Record the signing date with a signed declaration.",
           "tax_residences": "A non-resident is taxed differently than a resident; a supporting reference can be stored optionally.",
           "tax_credit_claims": "Monthly tax credits for the taxpayer, disability and ZTP/P card holders. They apply only with a signed declaration; without a record the credit is not deducted and the tax advance is higher by its amount. Each kind of credit is its own series, so they may apply concurrently.",
           "social_jurisdictions": "Whether the person is subject to Czech social insurance. A foreign regime needs a country; a supporting reference is optional.",

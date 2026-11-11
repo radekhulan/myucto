@@ -143,6 +143,11 @@ a pojistného. Vede se po celých měsících.
    **Uložit vše** dole na kartě.
 6. Prohlášení poplatníka zapište v sekci **Prohlášení poplatníka k dani** jako
    **Podepsáno** nebo **Nepodepsáno**. Doplnit běžné údaje ho nezapíše.
+   U podepsaného prohlášení vyplňte den podpisu a jako **Platí od** první
+   měsíc slevy podle § 38k ZDP: měsíc nástupu při podpisu do 30 dnů po
+   nástupu, leden při podpisu do 15. února, jinak měsíc po podpisu. Když
+   začátek záznamu dni podpisu neodpovídá, karta to po uložení u záznamu
+   napíše. Uložení to neblokuje.
    Podepsaná prohlášení více lidí zapíšete najednou podle
    [§ 86.4.1](#8641-podepsana-prohlaseni-hromadne).
 
@@ -174,16 +179,24 @@ nemusíte je zapisovat po jednom.
 1. V seznamu zaměstnanců klikněte na **Podepsaná prohlášení hromadně**. Ze
    souhrnu **Doplnit výchozí zákonné údaje** vede na tentýž dialog odkaz
    u chybějícího prohlášení.
-2. Vyplňte **Zdaňovací rok** a **Datum podpisu** (výchozí je dnešek). Náhled
-   ukáže, od kterého měsíce se podpis zapíše:
-   - od ledna, je-li prohlášení podepsané před začátkem roku nebo v lednu,
-   - jinak od měsíce podpisu, za dřívější měsíce se sleva neuplatní,
+2. Vyplňte **Zdaňovací rok** a **Datum podpisu** (výchozí je dnešek). První
+   měsíc slevy určuje § 38k ZDP a náhled ho ukáže u každé osoby:
+   - **od měsíce nástupu**, podepsal-li zaměstnanec prohlášení nejpozději
+     30\. den po nástupu, i když podpis spadne do dalšího měsíce (brigádník
+     nastoupí 25. 6. a podepíše 2. 7., sleva i záloha místo srážkové daně
+     platí už za červen),
+   - **od ledna**, podepsal-li stávající zaměstnanec prohlášení nejpozději
+     15\. února zdaňovacího roku (nebo už v předchozím roce),
+   - jinak **od měsíce následujícího po podpisu** (podpis 10. 3. platí od
+     dubna),
    - nikdy do měsíců uzavřených schválenou mzdou; v tom případě až od
-     prvního měsíce po nich. Je-li uzavřený celý rok, nezapíše se nic.
+     prvního měsíce po nich a slevu za uzavřené měsíce dorovná roční
+     zúčtování. Náhled to u osoby napíše. Je-li uzavřený celý rok, nebo
+     prohlášení platí až od dalšího roku, nezapíše se nic.
 3. Projděte seznam osob. Nabízí ty, kterým v roce trvá pracovní vztah:
-   - **Zapíše se** - u osoby vznikne záznam **Podepsáno**; předchozí
-     **Nepodepsáno** nebo **Neověřeno** se dnem před podpisem ukončí, případně
-     se nahradí;
+   - **Zapíše se** - u osoby vznikne záznam **Podepsáno** od jejího prvního
+     měsíce; předchozí **Nepodepsáno** nebo **Neověřeno** se dnem před ním
+     ukončí, případně se nahradí;
    - **Na rok už podepsáno** - osoba se přeskočí, záznam se nepřepíše;
    - **Předchozí záznam končí dřív** - řada by nenavazovala, zapište na kartě
      osoby.

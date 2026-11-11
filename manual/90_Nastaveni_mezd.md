@@ -945,8 +945,9 @@ a slouží k tomu, aby šlo osobu přihlásit k ČSSZ bez dopisování karet:
 - **CZ-ISCO**, **Druh činnosti** (prázdný doplní aplikace podle druhu vztahu)
   a **Místo výkonu práce** (šest číslic = kód obce, jinak název) jdou do
   podmínek vztahu;
-- **Prohlášení poplatníka** ano zapíše podepsané prohlášení od dne
-  **Prohlášení od** (bez něj od nástupu), stejně jako hromadný zápis prohlášení;
+- **Prohlášení poplatníka** ano zapíše podepsané prohlášení s dnem podpisu
+  **Prohlášení od** (bez něj ke dni nástupu). První měsíc slevy určí stejně
+  jako hromadný zápis prohlášení podle § 38k ZDP;
 - **Vzdělání** (kód KKOV, např. M) a **Postavení v zaměstnání** (čtyřmístný kód
   NKPZ) jdou do profilu registrace.
 

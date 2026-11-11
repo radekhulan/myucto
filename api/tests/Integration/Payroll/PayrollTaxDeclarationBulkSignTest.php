@@ -14,6 +14,7 @@ use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipTaxInput;
 use MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponent;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator;
 use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxInput;
+use MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxResult;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCalculationStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationEvidence;
 use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
@@ -96,15 +97,20 @@ final class PayrollTaxDeclarationBulkSignTest extends TestCase
         }
     }
 
-    public function testPersonWithoutDeclarationGetsSignedFromSigningMonth(): void
+    /**
+     * § 38k odst. 7 ZDP: stávající zaměstnanec, který podepíše po 15. 2.,
+     * má slevu až od měsíce následujícího po podpisu.
+     */
+    public function testContinuingEmployeeSigningDuringTheYearStartsTheFollowingMonth(): void
     {
         $employeeId = $this->person();
 
         $preview = $this->bulk->preview($this->supplierId, self::YEAR, self::SIGNED_ON, [$employeeId]);
-        self::assertSame('2026-04-01', $preview['effective_from']);
-        self::assertSame('signing_month', $preview['effective_from_basis']);
+        self::assertSame('2026-05-01', $preview['effective_from']);
+        self::assertSame('following_month', $preview['effective_from_basis']);
         self::assertSame([$employeeId], $preview['ready_employee_ids']);
         self::assertSame('add', $preview['people'][0]['change']);
+        self::assertSame('2026-05-01', $preview['people'][0]['effective_from']);
 
         $result = $this->apply([$employeeId]);
 
@@ -112,7 +118,7 @@ final class PayrollTaxDeclarationBulkSignTest extends TestCase
         $rows = $this->declarations($employeeId);
         self::assertCount(1, $rows);
         self::assertSame('signed', $rows[0]['status']);
-        self::assertSame('2026-04-01', $rows[0]['effective_from']);
+        self::assertSame('2026-05-01', $rows[0]['effective_from']);
         self::assertNull($rows[0]['effective_to']);
         self::assertSame('declaration:38k-signed', $rows[0]['evidence_reference']);
         self::assertStringStartsWith('Prohlášení poplatníka podepsáno 10. 4. 2026', (string) $rows[0]['evidence_note']);
@@ -136,12 +142,95 @@ final class PayrollTaxDeclarationBulkSignTest extends TestCase
         self::assertSame('year_start', $preview['effective_from_basis']);
     }
 
+    /**
+     * § 38k odst. 1 a 4 ZDP: brigádník na DPP nastoupí 25. 6. a prohlášení
+     * podepíše 2. 7., tedy do 30 dnů po nástupu. Za červen se proto daní
+     * zálohou se slevou, ne srážkou.
+     */
+    public function testDppStarterSigningWithinThirtyDaysGetsTheStartMonth(): void
+    {
+        $employeeId = $this->person(relationType: 'dpp', start: '2026-06-25');
+
+        $result = $this->apply([$employeeId], '2026-07-02');
+
+        self::assertSame(1, $result['counts']['applied']);
+        self::assertSame('2026-06-01', $result['applied'][0]['effective_from']);
+        self::assertSame('employment_start', $result['applied'][0]['effective_from_basis']);
+        self::assertFalse($result['applied'][0]['annual_settlement']);
+        $result = $this->dppResult($employeeId, '2026-06-30');
+        self::assertSame(TaxRegime::Advance, $result->relationships[0]->regime);
+        self::assertSame(0, $result->withholdingTaxMinorUnits);
+        $view = $this->repository->editorView($this->supplierId, $employeeId, '2026-06-01');
+        self::assertNotNull($view);
+        self::assertTrue($view['derived']['taxpayer_credit']);
+    }
+
+    public function testStarterSigningAfterThirtyDaysStartsTheFollowingMonth(): void
+    {
+        $employeeId = $this->person(relationType: 'dpp', start: '2026-06-25');
+
+        $result = $this->apply([$employeeId], '2026-07-27');
+
+        self::assertSame('2026-08-01', $result['applied'][0]['effective_from']);
+        self::assertSame('following_month', $result['applied'][0]['effective_from_basis']);
+        self::assertNull($this->repository->snapshot($this->supplierId, $employeeId, '2026-07-01')['income_tax']['declaration'] ?? null);
+    }
+
+    /** Karta osoby větu uloží, ale upozorní, že začíná dřív, než zákon dovoluje. */
+    public function testEditorWarnsAboutRowStartingBeforeTheLegalMonth(): void
+    {
+        $employeeId = $this->person(relationType: 'dpp', start: '2026-06-25');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_tax_declarations
+                (supplier_id, employee_id, status, signed_on, effective_from, evidence_reference)
+             VALUES (?, ?, "signed", "2026-07-27", "2026-06-01", "declaration:38k-signed")'
+        )->execute([$this->supplierId, $employeeId]);
+
+        $view = $this->repository->editorView($this->supplierId, $employeeId, '2026-06-01');
+
+        self::assertNotNull($view);
+        $checks = $view['derived']['tax_declaration_checks'];
+        self::assertCount(1, $checks);
+        self::assertSame('earlier_than_allowed', $checks[0]['warning']);
+        self::assertSame('2026-08-01', $checks[0]['legal_from']);
+    }
+
+    /** § 38k odst. 4 ZDP: podpis do 15. 2. platí od ledna, dokud leden není uzavřený. */
+    public function testSignatureBeforeTheAnnualDeadlineStartsInJanuary(): void
+    {
+        $employeeId = $this->person();
+
+        $result = $this->apply([$employeeId], '2026-02-10');
+
+        self::assertSame('2026-01-01', $result['applied'][0]['effective_from']);
+        self::assertSame('year_start', $result['applied'][0]['effective_from_basis']);
+        self::assertFalse($result['applied'][0]['annual_settlement']);
+    }
+
+    /** Uzavřený leden se nepřepočítává: od února a leden dorovná roční zúčtování. */
+    public function testClosedJanuaryMovesTheSignatureToFebruaryWithSettlementWarning(): void
+    {
+        $employeeId = $this->person();
+        $this->approveRun('2026-01-01');
+
+        $preview = $this->bulk->preview($this->supplierId, self::YEAR, '2026-02-10', [$employeeId]);
+        self::assertSame('2026-02-01', $preview['people'][0]['effective_from']);
+        self::assertSame('after_frozen_period', $preview['people'][0]['effective_from_basis']);
+        self::assertTrue($preview['people'][0]['annual_settlement']);
+
+        $result = $this->apply([$employeeId], '2026-02-10');
+
+        self::assertSame('2026-02-01', $result['applied'][0]['effective_from']);
+        self::assertTrue($result['applied'][0]['annual_settlement']);
+        self::assertSame('2026-02-01', $this->declarations($employeeId)[0]['effective_from']);
+    }
+
     public function testUnsignedDeclarationIsClosedBeforeTheSignature(): void
     {
         $closed = $this->person();
         $this->declaration($closed, 'not-signed', '2025-01-01');
         $replaced = $this->person();
-        $replacedId = $this->declaration($replaced, 'unverified', '2026-04-01');
+        $replacedId = $this->declaration($replaced, 'unverified', '2026-05-01');
 
         $result = $this->apply([$closed, $replaced]);
 
@@ -149,7 +238,7 @@ final class PayrollTaxDeclarationBulkSignTest extends TestCase
         self::assertSame(['close_previous', 'replace'], array_column($result['applied'], 'change'));
         $rows = $this->declarations($closed);
         self::assertSame(
-            [['not-signed', '2025-01-01', '2026-03-31'], ['signed', '2026-04-01', null]],
+            [['not-signed', '2025-01-01', '2026-04-30'], ['signed', '2026-05-01', null]],
             array_map(static fn (array $row): array => [$row['status'], $row['effective_from'], $row['effective_to']], $rows),
         );
         $rows = $this->declarations($replaced);
@@ -263,11 +352,11 @@ final class PayrollTaxDeclarationBulkSignTest extends TestCase
         $view = $this->repository->editorView($this->supplierId, $cardPerson, '2026-04-01');
         self::assertNotNull($view);
         $sections = $view['sections'];
-        $sections['tax_declarations'][0]['effective_to'] = '2026-03-31';
+        $sections['tax_declarations'][0]['effective_to'] = '2026-04-30';
         $sections['tax_declarations'][] = [
             'status' => 'signed',
             'evidence_reference' => 'declaration:38k-signed',
-            'effective_from' => '2026-04-01',
+            'effective_from' => '2026-05-01',
             'effective_to' => null,
             'evidence_note' => null,
         ];
@@ -282,7 +371,7 @@ final class PayrollTaxDeclarationBulkSignTest extends TestCase
         );
 
         foreach ([$bulkPerson, $cardPerson] as $employeeId) {
-            self::assertSame(TaxRegime::Withholding, $this->dppRegime($employeeId, '2026-03-31'));
+            self::assertSame(TaxRegime::Withholding, $this->dppRegime($employeeId, '2026-04-30'));
             self::assertSame(TaxRegime::Advance, $this->dppRegime($employeeId, '2026-05-31'));
         }
         $withoutId = static fn (array $row): array => array_diff_key($row, ['id' => true]);
@@ -323,6 +412,11 @@ final class PayrollTaxDeclarationBulkSignTest extends TestCase
 
     private function dppRegime(int $employeeId, string $calculationDate): TaxRegime
     {
+        return $this->dppResult($employeeId, $calculationDate)->relationships[0]->regime;
+    }
+
+    private function dppResult(int $employeeId, string $calculationDate): MonthlyEmploymentIncomeTaxResult
+    {
         $declaration = $this->snapshotDeclaration($employeeId, substr($calculationDate, 0, 8) . '01');
         $result = (new MonthlyEmploymentIncomeTaxCalculator(
             new PayrollRulesetProvider([
@@ -347,7 +441,7 @@ final class PayrollTaxDeclarationBulkSignTest extends TestCase
         ));
         self::assertSame(TaxCalculationStatus::Calculated, $result->status, implode(',', $result->issues));
 
-        return $result->relationships[0]->regime;
+        return $result;
     }
 
     /** @return array<string,mixed> */
@@ -365,12 +459,12 @@ final class PayrollTaxDeclarationBulkSignTest extends TestCase
      * @param list<int> $employeeIds
      * @return array<string,mixed>
      */
-    private function apply(array $employeeIds): array
+    private function apply(array $employeeIds, string $signedOn = self::SIGNED_ON): array
     {
         return $this->bulk->apply(
             $this->supplierId,
             self::YEAR,
-            self::SIGNED_ON,
+            $signedOn,
             $employeeIds,
             $this->userId,
             null,

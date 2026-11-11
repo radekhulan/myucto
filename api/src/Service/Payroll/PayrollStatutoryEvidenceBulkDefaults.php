@@ -429,6 +429,9 @@ final class PayrollStatutoryEvidenceBulkDefaults
                 'status' => 'not_claimed',
                 'evidence_reference' => null,
             ],
+            // Zapisuje jen „Nepodepsáno" bez dne podpisu, takže první měsíc
+            // podepsaného prohlášení podle § 38k ZDP
+            // (TaxDeclarationEffectiveMonth) se tu neodvozuje.
             self::DECLARATION_SECTION => [
                 'status' => 'not-signed',
                 'evidence_reference' => null,

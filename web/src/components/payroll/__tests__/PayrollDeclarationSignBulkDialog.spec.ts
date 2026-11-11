@@ -33,17 +33,18 @@ function preview(overrides: Partial<PayrollDeclarationSignPreview> = {}): Payrol
   return {
     year: 2026,
     signed_on: '2026-04-10',
-    effective_from: '2026-04-01',
-    effective_from_basis: 'signing_month',
+    effective_from: '2026-05-01',
+    effective_from_basis: 'following_month',
+    annual_settlement: false,
     frozen_through: null,
-    summary: { people: 4, ready: 2, already_signed: 1, period_frozen: 0, timeline_gap: 1, employee_not_found: 0 },
+    summary: { people: 4, ready: 2, already_signed: 1, period_frozen: 0, after_year_end: 0, timeline_gap: 1, employee_not_found: 0 },
     ready_employee_ids: [5, 6],
     runs_to_recalculate: [],
     people: [
-      { employee_id: 5, full_name: 'Syntetický brigádník', state: 'ready', change: 'add', current_status: null, effective_from: '2026-04-01', effective_to: null },
-      { employee_id: 6, full_name: 'Druhý brigádník', state: 'ready', change: 'close_previous', current_status: 'not-signed', effective_from: '2026-04-01', effective_to: null },
-      { employee_id: 7, full_name: 'Podepsaný brigádník', state: 'already_signed', change: null, current_status: 'signed', effective_from: null, effective_to: null },
-      { employee_id: 8, full_name: 'Brigádník s mezerou', state: 'timeline_gap', change: null, current_status: null, effective_from: null, effective_to: null },
+      { employee_id: 5, full_name: 'Syntetický brigádník', state: 'ready', change: 'add', current_status: null, effective_from: '2026-05-01', effective_from_basis: 'following_month', annual_settlement: false, effective_to: null },
+      { employee_id: 6, full_name: 'Druhý brigádník', state: 'ready', change: 'close_previous', current_status: 'not-signed', effective_from: '2026-05-01', effective_from_basis: 'following_month', annual_settlement: false, effective_to: null },
+      { employee_id: 7, full_name: 'Podepsaný brigádník', state: 'already_signed', change: null, current_status: 'signed', effective_from: null, effective_from_basis: null, annual_settlement: false, effective_to: null },
+      { employee_id: 8, full_name: 'Brigádník s mezerou', state: 'timeline_gap', change: null, current_status: null, effective_from: null, effective_from_basis: null, annual_settlement: false, effective_to: null },
     ],
     ...overrides,
   }
@@ -61,7 +62,7 @@ describe('PayrollDeclarationSignBulkDialog', () => {
       year: 2026,
       signed_on: '2026-04-10',
       counts: { applied: 1, skipped: 0, failed: 1 },
-      applied: [{ employee_id: 5, change: 'add', effective_from: '2026-04-01', effective_to: null }],
+      applied: [{ employee_id: 5, change: 'add', effective_from: '2026-05-01', effective_from_basis: 'following_month', annual_settlement: false, effective_to: null }],
       skipped: [],
       failed: [{ employee_id: 6, message: 'Syntetická chyba' }],
     })
@@ -131,11 +132,11 @@ describe('PayrollDeclarationSignBulkDialog', () => {
       effective_from: null,
       effective_from_basis: 'after_frozen_period',
       frozen_through: '2026-12-31',
-      summary: { people: 1, ready: 0, already_signed: 0, period_frozen: 1, timeline_gap: 0, employee_not_found: 0 },
+      summary: { people: 1, ready: 0, already_signed: 0, period_frozen: 1, after_year_end: 0, timeline_gap: 0, employee_not_found: 0 },
       ready_employee_ids: [],
       runs_to_recalculate: [],
       people: [
-        { employee_id: 5, full_name: 'Syntetický brigádník', state: 'period_frozen', change: null, current_status: null, effective_from: null, effective_to: null },
+        { employee_id: 5, full_name: 'Syntetický brigádník', state: 'period_frozen', change: null, current_status: null, effective_from: null, effective_from_basis: null, annual_settlement: false, effective_to: null },
       ],
     }))
     const wrapper = mount(PayrollDeclarationSignBulkDialog, MOUNT)
@@ -145,6 +146,25 @@ describe('PayrollDeclarationSignBulkDialog', () => {
     expect(wrapper.get('[data-test="declaration-sign-bulk-apply"]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('payroll.declaration_sign_bulk.nothing_selected')
     expect(wrapper.find('[data-test="declaration-sign-bulk-confirm"]').exists()).toBe(false)
+  })
+
+  it('u osoby ukáže její první měsíc a dorovnání v ročním zúčtování', async () => {
+    const base = preview()
+    m.declarationSignBulkPreview.mockResolvedValue(preview({
+      people: [
+        { ...base.people[0]!, effective_from: '2026-06-01', effective_from_basis: 'employment_start' },
+        { ...base.people[1]!, effective_from: '2026-02-01', effective_from_basis: 'after_frozen_period', annual_settlement: true },
+      ],
+    }))
+    const wrapper = mount(PayrollDeclarationSignBulkDialog, MOUNT)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="declaration-sign-bulk-state-5"]').text())
+      .toContain('payroll.declaration_sign_bulk.person_effective')
+    expect(wrapper.get('[data-test="declaration-sign-bulk-state-5"]').text())
+      .not.toContain('payroll.declaration_sign_bulk.annual_settlement')
+    expect(wrapper.get('[data-test="declaration-sign-bulk-state-6"]').text())
+      .toContain('payroll.declaration_sign_bulk.annual_settlement')
   })
 
   it('vyjmenuje rozpracované mzdy k přepočtu', async () => {
