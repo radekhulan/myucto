@@ -407,7 +407,13 @@ dovolenou nebo svátek do průměru nepatří).
 **Spodní hranice.** Je-li průměr nižší než příslušná minimální mzda,
 použije se podle § 357 odst. 1 zákoníku práce minimální mzda. Hranice
 platí pro skutečný i pravděpodobný výdělek; ve stopě je vidět její
-uplatnění a výchozí hodnota.
+uplatnění a výchozí hodnota. Vyjde-li návrh pod minimální mzdou, aplikace
+na to upozorní už v návrhu: tak nízký výdělek bývá chybou v podkladech
+(sazba, sjednaná mzda, odpracované hodiny). Sjednanou měsíční mzdu, ze
+které vychází méně než minimální mzda za hodinu (typicky hodinová sazba
+zapsaná do pole měsíční mzdy), aplikace jako pravděpodobný výdělek
+nenabídne; opravte podmínky vztahu, nebo pravděpodobný výdělek zadejte
+s odůvodněním na kartě vztahu.
 
 U výslovně hodinově odměňovaného vztahu používají náhrady schválený
 průměr povýšený alespoň na aktuální minimum příslušného účinného úseku.

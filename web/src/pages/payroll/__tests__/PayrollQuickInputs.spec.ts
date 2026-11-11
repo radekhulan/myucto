@@ -220,6 +220,47 @@ describe('PayrollQuickInputs', () => {
     }))
   })
 
+  it('uloží vybraným dohodám bez příjmu 0 Kč jednou akcí', async () => {
+    const dpp = (id: number, overrides: Partial<PayrollQuickInputRow> = {}) => fixture({
+      employment_id: id,
+      employment_code: `DPP-${id}`,
+      relation_type: 'dpp',
+      base_amount_minor: 0,
+      base_requires_entry: true,
+      overtime_amount_minor: 0,
+      bonus_amount_minor: 0,
+      gross_preview_minor: 0,
+      ...overrides,
+    })
+    m.load.mockImplementation(async period => ({
+      period,
+      total: 4,
+      items: [
+        fixture(),
+        dpp(21),
+        dpp(22),
+        dpp(23, { inputs: { base: inputRef('approved'), overtime: null, bonus: null } }),
+      ],
+    }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-testid="quick-zero-income-open"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="quick-zero-income-row-12"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="quick-zero-income-row-23"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="quick-zero-income-row-22"]').setValue(false)
+    await wrapper.get('[data-testid="quick-zero-income-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.save).toHaveBeenCalledTimes(1)
+    const payload = m.save.mock.calls[0][0]
+    expect(payload.rows.map((row: { employment_id: number }) => row.employment_id)).toEqual([21])
+    expect(payload.rows[0].base_amount_minor).toBe(0)
+    expect(m.success).toHaveBeenCalledWith('payroll.quick_inputs.zero_income.saved')
+  })
+
   it('keeps two employments of one person separate and labels statutory income correctly', async () => {
     m.load.mockImplementation(async period => ({
       period,

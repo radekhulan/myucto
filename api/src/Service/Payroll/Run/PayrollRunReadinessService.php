@@ -342,12 +342,14 @@ final class PayrollRunReadinessService
         $findings = array_map(
             static function (array $finding): array {
                 $bulkActions = self::bulkActions($finding);
-                unset($finding['gap_totals'], $finding['bulk_employee_ids'], $finding['bulk_totals']);
+                $requiresOverride = ($finding['requires_override'] ?? false) === true;
+                unset($finding['gap_totals'], $finding['bulk_employee_ids'], $finding['bulk_totals'], $finding['requires_override']);
 
                 return $finding + [
                     'hideable' => false,
                     'subject_type' => null,
                     'subject_ids' => [],
+                    'requires_override' => $requiresOverride,
                     'bulk_actions' => $bulkActions,
                 ];
             },
@@ -1497,6 +1499,7 @@ final class PayrollRunReadinessService
                 $classification = PayrollRunReadinessImpact::describeValidation(
                     $code,
                     $validation->severity,
+                    $validation->requiresOverride,
                 );
                 $groups[$code] = [
                     'code' => $code,
@@ -1508,6 +1511,7 @@ final class PayrollRunReadinessService
                     'count' => 0,
                     'entity_total' => 0,
                     'entities' => [],
+                    'requires_override' => $validation->requiresOverride,
                     // Trvalé skrytí: kód z katalogu a VŠECHNY dotčené subjekty
                     // (`entities` je oříznutý, „skrýt pro všech N" potřebuje celek).
                     'hideable' => PayrollWarningSuppressionCatalog::isHideable(
@@ -1526,6 +1530,13 @@ final class PayrollRunReadinessService
                 $upgraded = PayrollRunReadinessImpact::describeValidation($code, 'blocker');
                 $groups[$code]['impact'] = $upgraded['impact'];
                 $groups[$code]['severity'] = $upgraded['severity'];
+            } elseif ($validation->requiresOverride && !$groups[$code]['requires_override']) {
+                $groups[$code]['requires_override'] = true;
+                if ($groups[$code]['severity'] !== 'blocker') {
+                    $upgraded = PayrollRunReadinessImpact::describeValidation($code, 'warning', true);
+                    $groups[$code]['impact'] = $upgraded['impact'];
+                    $groups[$code]['severity'] = $upgraded['severity'];
+                }
             }
             if ($groups[$code]['hideable']) {
                 foreach (PayrollWarningSuppressionCatalog::subjects(

@@ -60,6 +60,17 @@ final class PayrollRunReadinessGuidanceTest extends TestCase
         self::assertNull($findings[0]['entities'][1]['label']);
     }
 
+    public function testOverrideWarningGroupBlocksApprovalAsInRun(): void
+    {
+        $plain = new PayrollRunValidation('warning', 'employment_social_registration_missing', 'employment', 11, 'Přihláška chybí.', '/payroll/people?person=1');
+        $override = new PayrollRunValidation('warning', 'employment_social_registration_missing', 'employment', 22, 'Přihláška chybí.', '/payroll/people?person=2', true);
+        $groups = self::invoke(PayrollRunReadinessService::class, 'groupValidations', [[$plain, $override]]);
+        self::assertCount(1, $groups);
+        self::assertSame('approval', $groups[0]['impact']);
+        self::assertSame('warning', $groups[0]['severity']);
+        self::assertTrue($groups[0]['requires_override']);
+    }
+
     public function testSingleFindingKeepsItsDirectDestination(): void
     {
         $finding = new PayrollRunValidation('warning', 'time_month_missing', 'employment', 11, 'Docházka chybí.', '/payroll/time?employment=11');

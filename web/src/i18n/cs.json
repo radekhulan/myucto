@@ -5022,6 +5022,15 @@
       "mode_amount_short": "Kč",
       "managed_summary": "Řádky, u kterých hodnotu spravuje jiný vstup (import docházky nebo pravidelná složka): {count}. Pole jsou tu jen ke čtení, upravíte je v Mzdových vstupech.",
       "managed_summary_link": "Otevřít mzdové vstupy",
+      "zero_income": {
+        "hint": "Dohody, které v měsíci nepracovaly: běh u nich chce základní složku 0 Kč (za vztah se podá nulové hlášení). Jednotlivě stačí zadat 0 do základní mzdy, tady to jde vybraným dohodám najednou.",
+        "open": "Dohody bez příjmu v měsíci",
+        "empty": "Žádná dohoda bez zadané odměny, docházky a příplatků v měsíci není.",
+        "list_hint": "Dohody bez vstupů, odpracované doby a příplatků za měsíc. Odškrtněte ty, které v měsíci příjem mají.",
+        "save_approve": "Uložit a schválit 0 Kč ({count})",
+        "save_draft": "Uložit 0 Kč ({count})",
+        "saved": "Uloženo 0 Kč u {count} dohod."
+      },
       "unsaved": {
         "title": "Navrženo, neuloženo: {count} vztahů ({amount})",
         "hint_approve": "Základní mzda v přerušovaně orámovaných polích je jen návrh ze sjednaných podmínek. Mzdový běh ji nevidí, dokud ji neuložíte. Tlačítko uloží a schválí měsíční podklady za všechny stránky najednou.",
@@ -6286,7 +6295,7 @@
         "worked": "Skutečně odpracováno",
         "worked_rounded_hint": "Doba ze zápisů je zaokrouhlená na tisíciny hodiny, víc desetinných míst hlášení nedovolí.",
         "evidence_days": "Dní v evidenčním stavu: {count}",
-        "evidence_days_agreement": "(u dohody se podle pokynů MPSV uvádí 0)",
+        "evidence_days_agreement": "Dny v evidenčním stavu se u dohody nevedou; do hlášení jde podle pokynů MPSV 0.",
         "note": "Poznámka k ověření (volitelné)",
         "confirm": "Potvrdit a schválit měsíc",
         "unworked_evidence_hint": "Zdroj obsahuje absenci. Berte ji jako podklad pro kontrolu; hodnoty podmíněných bloků potvrďte výslovně.",
@@ -6317,6 +6326,7 @@
         "hours_unit": "hodin",
         "standard_fund_hint": "Kolik hodin má měsíc na plný úvazek: 8 hodin za každý pracovní den včetně svátků v jinak pracovní den (pokyny MPSV). Předvyplněno ze zákonné týdenní doby (40 h) - přepište, pokud u vás platí kratší. U jednatele, společníka a člena orgánu (druh činnosti K a N až S) je podle pokynů MPSV 0.",
         "agreed_fund_hint": "Kolik hodin má za měsíc odpracovat tenhle člověk podle smlouvy.",
+        "agreed_fund_hint_agreement": "U dohody předpokládaný rozsah práce v měsíci včetně plánované dovolené. Bez rozvrhu směn se navrhuje odpracovaná doba, ne týdenní úvazek z karty.",
         "holiday_hours_hint": "Svátky v jinak pracovní dny: {hours} h. Nezadávejte je do neodpracovaných hodin níže - aplikace je při schválení přičte k celkovým i placeným neodpracovaným hodinám sama (pokyny MPSV k 10275 a 10276)."
       },
       "bulk": {
@@ -32644,6 +32654,8 @@
       "suggestion_sources": "Započitatelná mzda je součet základů průměrného výdělku ze schválených revizí běhů; odpracované hodiny jsou potvrzený pracovní souhrn docházky a odpracované dny jsou dny se směnou z téže evidence.",
       "suggestion_confirm": "Čísla zkontrolujte a potvrďte odesláním - snapshot vznikne až tím.",
       "suggestion_takeover": "Měsíce {periods} vedl předchozí program: mzda i hodiny jsou z převzatých mezd. Převzatá hrubá mzda může obsahovat náhrady mzdy (dovolená, svátek), které do průměrného výdělku nepatří - před potvrzením ji upravte na započitatelnou mzdu.",
+      "below_minimum_wage": "Vyšlo jen {raw}/h, méně než hodinová minimální mzda {minimum}/h. Náhrady se počítají nejméně z minimální mzdy (§ 357 odst. 1 zákoníku práce), tak nízký výdělek ale bývá chybou v podkladech: zkontrolujte sazbu, sjednanou mzdu a odpracované hodiny.",
+      "probable_unusable": "Ze sjednané měsíční mzdy {monthly} vychází jen {hourly}/h, minimální mzda je {minimum}/h.",
       "suggestion_edited": "Některé z předvyplněných čísel jste změnili; údaj o původu už pro ně neplatí.",
       "suggestion_reload": "Načíst znovu z běhů",
       "suggestion_blocked": "Z uzavřených běhů se podklady odvodit nedají, zadejte je ručně. Důvod:",
@@ -32739,7 +32751,8 @@
         "worked_days_not_provided": "Počet odpracovaných dnů se nepodařilo zjistit",
         "probable_earning_required": "V rozhodném období nebyl odpracován zákonný minimální počet dnů; průměr se stanovuje jako pravděpodobný výdělek (§ 355 ZP)",
         "average_already_exists": "Průměr pro toto čtvrtletí už existuje; návrh jej nepřepíše",
-        "probable_earning_not_recorded": "Skutečný průměr z uzavřených běhů odvodit nelze a u pracovního vztahu není zadaný pravděpodobný výdělek (§ 355 zákoníku práce). Otevřete Mzdy → Zaměstnanci, na kartě vztahu vyplňte pravděpodobný hodinový výdělek a jeho odůvodnění a uložte."
+        "probable_earning_not_recorded": "Skutečný průměr z uzavřených běhů odvodit nelze a u pracovního vztahu není zadaný pravděpodobný výdělek (§ 355 zákoníku práce). Otevřete Mzdy → Zaměstnanci, na kartě vztahu vyplňte pravděpodobný hodinový výdělek a jeho odůvodnění a uložte.",
+        "probable_agreed_gross_below_minimum_wage": "Ze sjednané měsíční mzdy vychází hodinový výdělek pod minimální mzdou (§ 357 odst. 1 zákoníku práce). V poli měsíční mzdy je nejspíš hodinová sazba: opravte podmínky vztahu, nebo na kartě vztahu zadejte pravděpodobný výdělek s odůvodněním."
       }
     },
     "average_source": {

@@ -8194,6 +8194,8 @@ export interface PayrollRunReadinessFinding {
   /** `label` je lidský název konkrétní věci — nález MUSÍ jmenovat, čeho se týká. */
   /** `gaps` = klíče chybějících údajů osoby (`PayrollPersonDataGapKey`) u nálezu `person_data_gap`. */
   entities: { entity_type: string, entity_id: number | null, label: string | null, message?: string, remediation_path?: string | null, gaps?: string[] }[]
+  /** Varování, které v běhu čeká na výjimku; do té doby běh nejde schválit. */
+  requires_override?: boolean
   /** Jde nález trvale skrýt; `subject_ids` jsou VŠECHNY dotčené osoby (vztahy). */
   hideable?: boolean
   subject_type?: PayrollWarningSubjectType | null

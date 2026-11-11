@@ -197,6 +197,19 @@ export interface AverageEarningProbableReason {
   minimum_worked_days: number
 }
 
+export interface AverageEarningBelowMinimumWage {
+  source_kind: 'actual' | 'probable'
+  raw_hourly_minor: number
+  minimum_hourly_minor: number
+}
+
+export interface AverageEarningProbableUnusable {
+  code: 'agreed_gross_below_minimum_wage'
+  monthly_gross_minor: number
+  hourly_minor: number
+  minimum_hourly_minor: number
+}
+
 export interface AverageEarningSuggestion {
   employment_id: number
   applicable_year: number
@@ -218,6 +231,8 @@ export interface AverageEarningSuggestion {
   actual_blockers: string[]
   /** Důvod pravděpodobného výdělku; `null` u skutečného průměru a u vadné evidence. */
   probable_reason?: AverageEarningProbableReason | null
+  below_minimum_wage?: AverageEarningBelowMinimumWage | null
+  probable_unusable?: AverageEarningProbableUnusable | null
   probable_hourly_minor: number | null
   probable_rationale: string | null
   probable_source?: AverageEarningCandidate['probable_source']
@@ -266,6 +281,8 @@ export interface AverageEarningCandidate {
   probable_hourly_minor: number | null
   probable_rationale: string | null
   probable_reason?: AverageEarningProbableReason | null
+  below_minimum_wage?: AverageEarningBelowMinimumWage | null
+  probable_unusable?: AverageEarningProbableUnusable | null
   gross_earnings_minor: number | null
   worked_minutes: number | null
   worked_duration_units?: number | null

@@ -1027,6 +1027,43 @@ describe('AbsenceManagement', () => {
     wrapper.unmount()
   })
 
+  it('upozorní na výdělek pod minimální mzdou', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({
+      ready: true,
+      blockers: [],
+      source_kind: 'probable',
+      probable_source: 'terms',
+      probable_hourly_minor: 103,
+      probable_rationale: 'Syntetické odůvodnění',
+      below_minimum_wage: { source_kind: 'probable', raw_hourly_minor: 103, minimum_hourly_minor: 13440 },
+    }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.get('[data-test="tab-averages"]').trigger('click')
+
+    expect(wrapper.get('[data-test="average-suggestion-below-minimum"]').text())
+      .toContain('payroll_absence.averages.below_minimum_wage')
+    wrapper.unmount()
+  })
+
+  it('u sjednané mzdy pod minimem řekne, co opravit', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({
+      ready: false,
+      blockers: ['probable_earning_not_recorded', 'probable_agreed_gross_below_minimum_wage'],
+      source_kind: null,
+      probable_unusable: { code: 'agreed_gross_below_minimum_wage', monthly_gross_minor: 18000, hourly_minor: 103, minimum_hourly_minor: 13440 },
+    }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.get('[data-test="tab-averages"]').trigger('click')
+
+    expect(wrapper.get('[data-test="average-suggestion-blocked"]').text())
+      .toContain('payroll_absence.averages.blockers.probable_agreed_gross_below_minimum_wage')
+    expect(wrapper.get('[data-test="average-suggestion-blocked-below-minimum"]').text())
+      .toContain('payroll_absence.averages.probable_unusable')
+    wrapper.unmount()
+  })
+
   it('leaves unknown suggested hours and days empty', async () => {
     m.averageSuggestion.mockResolvedValue(averageSuggestion({ worked_minutes: null, worked_duration_units: null, worked_days: null }))
     const wrapper = mount(AbsenceManagement)

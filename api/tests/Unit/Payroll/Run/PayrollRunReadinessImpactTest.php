@@ -72,7 +72,7 @@ final class PayrollRunReadinessImpactTest extends TestCase
      */
     public function testUnapprovedSourcesBlockApprovalNotStart(): void
     {
-        foreach (['draft_inputs_present', 'time_month_not_approved', 'time_month_missing', 'employment_without_inputs'] as $code) {
+        foreach (['draft_inputs_present', 'time_month_not_approved', 'employment_without_inputs'] as $code) {
             $described = PayrollRunReadinessImpact::describe($code);
             self::assertSame(
                 PayrollRunReadinessImpact::IMPACT_APPROVAL,
@@ -100,6 +100,26 @@ final class PayrollRunReadinessImpactTest extends TestCase
 
         $stop = PayrollRunReadinessImpact::describeValidation('employer_policy_missing', 'blocker');
         self::assertSame(PayrollRunReadinessImpact::IMPACT_BLOCKING, $stop['impact']);
+    }
+
+    /**
+     * Stejná příčina má před během i po výpočtu stejnou závažnost. Chybějící
+     * přihláška ČSSZ a oznámení ZP jsou v běhu varování s povinnou výjimkou,
+     * která zastaví schválení; před během nesmí vypadat jako „neomezuje".
+     * Chybějící docházka je v běhu varování bez výjimky; před během proto
+     * nesmí tvrdit, že běh nepůjde schválit.
+     */
+    public function testPreflightSeverityMatchesRunValidation(): void
+    {
+        foreach (['employment_social_registration_missing', 'employment_health_registration_missing'] as $code) {
+            $described = PayrollRunReadinessImpact::describeValidation($code, 'warning', true);
+            self::assertSame(PayrollRunReadinessImpact::IMPACT_APPROVAL, $described['impact'], $code);
+            self::assertSame('warning', $described['severity'], $code);
+            self::assertSame(PayrollRunReadinessImpact::SCOPE_SETUP, $described['scope'], $code);
+        }
+        $missing = PayrollRunReadinessImpact::describeValidation('time_month_missing', 'warning');
+        self::assertSame(PayrollRunReadinessImpact::IMPACT_REVISION, $missing['impact']);
+        self::assertSame('warning', $missing['severity']);
     }
 
     /**

@@ -94,7 +94,9 @@ final class PayrollRunReadinessImpact
         // ── Spočítat jde, schválit ne: v běhu jsou to blokující validace ─────
         'draft_inputs_present' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
         'time_month_not_approved' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
-        'time_month_missing' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
+        // V běhu je to varování bez povinné výjimky: schválit jde, ale
+        // doplnění po zamknutí vstupů stojí opravnou revizi.
+        'time_month_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         // Vztah bez schválené složky výpočet neprojde (zákonný výpočet skončí
         // ruční kontrolou „chybí schválená mzdová složka"), i když snímek sám
         // to hlásí jen jako varování. Cesta ven: zadat složku, případně 0 Kč.
@@ -285,9 +287,19 @@ final class PayrollRunReadinessImpact
      *
      * @return array{impact:string,scope:string,severity:string}
      */
-    public static function describeValidation(string $code, string $validationSeverity): array
+    public static function describeValidation(string $code, string $validationSeverity, bool $requiresOverride = false): array
     {
         $classification = self::describe($code);
+        if ($requiresOverride
+            && $validationSeverity === 'warning'
+            && in_array($classification['impact'], [self::IMPACT_ANYTIME, self::IMPACT_REVISION], true)
+        ) {
+            return [
+                'impact' => self::IMPACT_APPROVAL,
+                'scope' => $classification['scope'],
+                'severity' => 'warning',
+            ];
+        }
         if ($validationSeverity === 'blocker'
             && in_array($classification['impact'], [self::IMPACT_ANYTIME, self::IMPACT_REVISION], true)
         ) {

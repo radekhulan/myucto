@@ -252,11 +252,15 @@ final class AverageEarningDerivationService
 
         $terms = $this->terms($supplierId, $employmentId);
         $probable = self::probableFromTerms($terms, $applicationStart->format('Y-m-d'));
+        $agreedGrossBelowMinimum = null;
         if ($probable !== null) {
             $probable['source'] = self::PROBABLE_SOURCE_TERMS;
         } elseif (self::needsProbable(self::combine($months, $minimumWorkedDays, false))
             && self::derivedProbableAllowed($months, $employmentStart)
         ) {
+            $floor = MinimumWageFloor::forDate($this->rulesets, $applicationStart->format('Y-m-d'));
+            $agreedGross = self::probableFromAgreedGross($terms, $applicationStart->format('Y-m-d'));
+            $agreedGrossBelowMinimum = self::agreedGrossBelowMinimumWage($agreedGross, $floor);
             $probable = self::probableFromAchievedWage([
                 ...self::monthsSinceStart($months, (string) $employmentStart),
                 ...$this->applicationMonths(
@@ -266,10 +270,9 @@ final class AverageEarningDerivationService
                     (string) $employmentStart,
                 ),
             ]) ?? self::probableFromAgreedHourlyRate($terms, $applicationStart->format('Y-m-d'))
-                ?? self::probableFromAgreedGross($terms, $applicationStart->format('Y-m-d'))
-                ?? self::probableFromMinimumWage(
-                    MinimumWageFloor::forDate($this->rulesets, $applicationStart->format('Y-m-d')),
-                );
+                ?? ($agreedGrossBelowMinimum === null
+                    ? ($agreedGross ?? self::probableFromMinimumWage($floor))
+                    : null);
         }
 
         $suggestion = [
@@ -294,8 +297,85 @@ final class AverageEarningDerivationService
             ->forMany($supplierId, [$employmentId], $date, $date)[$employmentId] ?? [];
         $suggestion = \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver::applyToSuggestion($suggestion, $hourlyFloorIntervals, $date);
         $suggestion['probable_reason'] = self::probableReason($suggestion);
+        if ($agreedGrossBelowMinimum !== null && $probable === null) {
+            $suggestion['blockers'][] = 'probable_agreed_gross_below_minimum_wage';
+            $suggestion['probable_unusable'] = $agreedGrossBelowMinimum;
+        }
+        $suggestion['below_minimum_wage'] = self::belowMinimumWage(
+            $suggestion,
+            MinimumWageFloor::forDate($this->rulesets, $date),
+        );
 
         return $suggestion;
+    }
+
+    /**
+     * Návrh, ze kterého vychází hodinový výdělek pod minimální mzdou
+     * (§ 357 odst. 1 zákoníku práce). Průměr se při schválení na minimum
+     * zvýší ({@see AverageEarningCalculator}); tak nízké číslo ale obvykle
+     * znamená chybu v podkladech, a proto ho účetní uvidí dřív.
+     *
+     * @param array<string,mixed> $suggestion
+     * @return array{source_kind:string,raw_hourly_minor:int,minimum_hourly_minor:int}|null
+     */
+    public static function belowMinimumWage(array $suggestion, MinimumWageFloor $floor): ?array
+    {
+        $raw = null;
+        $kind = $suggestion['source_kind'] ?? null;
+        if ($kind === 'probable'
+            && ($suggestion['probable_source'] ?? null) !== self::PROBABLE_SOURCE_MINIMUM_WAGE
+            && is_int($suggestion['probable_hourly_minor'] ?? null)
+        ) {
+            $raw = $suggestion['probable_hourly_minor'];
+        } elseif ($kind === 'actual'
+            && is_int($suggestion['gross_earnings_minor'] ?? null)
+            && is_int($suggestion['worked_duration_units'] ?? null)
+            && $suggestion['worked_duration_units'] > 0
+            && $suggestion['gross_earnings_minor'] <= intdiv(PHP_INT_MAX, PayrollDuration::UNITS_PER_HOUR)
+        ) {
+            $raw = RoundingMode::HalfUp->roundFraction(
+                $suggestion['gross_earnings_minor'] * PayrollDuration::UNITS_PER_HOUR,
+                $suggestion['worked_duration_units'],
+            );
+        }
+        if ($raw === null || $raw >= $floor->hourlyMinor) {
+            return null;
+        }
+
+        return [
+            'source_kind' => (string) $kind,
+            'raw_hourly_minor' => $raw,
+            'minimum_hourly_minor' => $floor->hourlyMinor,
+        ];
+    }
+
+    /**
+     * Sjednaná měsíční mzda, ze které vychází hodinový výdělek pod minimální
+     * mzdou (§ 357 odst. 1 zákoníku práce, {@see MinimumWageFloor}).
+     *
+     * Takové číslo není pravděpodobný výdělek, ale chyba v podmínkách: dohoda
+     * s „měsíční mzdou" 180 Kč při 40 h týdně dala 1,03 Kč/h a nabídla se jako
+     * Připraveno. Typicky je v poli měsíční mzdy hodinová sazba. Návrh se proto
+     * nedělá a účetní dostane důvod, co doplnit; náhradní spodní mez by chybu
+     * v podmínkách zakryla.
+     *
+     * @param array<string,mixed>|null $agreedGross výstup {@see probableFromAgreedGross()}
+     * @return array{code:string,monthly_gross_minor:int,hourly_minor:int,minimum_hourly_minor:int}|null
+     */
+    public static function agreedGrossBelowMinimumWage(?array $agreedGross, MinimumWageFloor $floor): ?array
+    {
+        if ($agreedGross === null || !is_int($agreedGross['hourly_minor'] ?? null)
+            || $agreedGross['hourly_minor'] >= $floor->hourlyMinor
+        ) {
+            return null;
+        }
+
+        return [
+            'code' => 'agreed_gross_below_minimum_wage',
+            'monthly_gross_minor' => (int) ($agreedGross['monthly_gross_minor'] ?? 0),
+            'hourly_minor' => $agreedGross['hourly_minor'],
+            'minimum_hourly_minor' => $floor->hourlyMinor,
+        ];
     }
 
     /**
@@ -512,6 +592,7 @@ final class AverageEarningDerivationService
             'term_id' => self::nullableInt($chosen['id'] ?? null),
             'effective_from' => (string) $chosen['effective_from'],
             'source' => self::PROBABLE_SOURCE_AGREED_MONTHLY_GROSS,
+            'monthly_gross_minor' => $monthlyGross,
         ];
     }
 

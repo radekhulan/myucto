@@ -1530,6 +1530,89 @@ async function otherPageRows(requestedPeriod: string): Promise<UiRow[]> {
 /** Strop jedné stránky seznamu na serveru (PayrollQuickInputRepository::LIST_MAX_LIMIT). */
 const FULL_MONTH_PAGE = 200
 
+/*
+ * Dohody bez příjmu v měsíci: běh u nich chce základní složku 0 Kč, aby se za
+ * vztah podalo nulové hlášení. Jednotlivě to jde nulou v poli základní mzdy;
+ * tady se totéž uloží vybraným dohodám jednou akcí za všechny stránky.
+ */
+const zeroIncomeOpen = ref(false)
+const zeroIncomeLoading = ref(false)
+const zeroIncomeRows = ref<UiRow[]>([])
+const zeroIncomeSelected = ref<number[]>([])
+
+function zeroIncomeEligible(row: UiRow): boolean {
+  return (row.relation_type === 'dpp' || row.relation_type === 'dpc')
+    && row.inputs.base === null && row.inputs.overtime === null && row.inputs.bonus === null
+    && !row.base_managed_elsewhere && !rowClosed(row) && !hasHourlyEvidence(row)
+    && (row.base_requires_entry || row.base_amount_minor === 0)
+    && (row.worked_time?.worked_duration_units ?? 0) === 0
+    && !Object.values(row.components ?? {}).some(cell => (cell.amount_minor ?? 0) !== 0)
+    && !SURCHARGE_KINDS.some(kind => (row.surcharges?.[kind]?.hours_milli ?? 0) > 0)
+    && !pending.value.has(row.employment_id)
+}
+
+async function openZeroIncome(): Promise<void> {
+  if (loadedPeriod.value !== period.value) return
+  zeroIncomeOpen.value = true
+  zeroIncomeLoading.value = true
+  try {
+    const all = [...rows.value, ...await otherPageRows(period.value)]
+    zeroIncomeRows.value = all.filter(zeroIncomeEligible)
+    zeroIncomeSelected.value = zeroIncomeRows.value.map(row => row.employment_id)
+  } catch (error) {
+    zeroIncomeOpen.value = false
+    toast.error(apiErrorMessage(error, t('payroll.quick_inputs.load_failed')))
+  } finally {
+    zeroIncomeLoading.value = false
+  }
+}
+
+function toggleZeroIncome(employmentId: number, checked: boolean): void {
+  zeroIncomeSelected.value = checked
+    ? [...new Set([...zeroIncomeSelected.value, employmentId])]
+    : zeroIncomeSelected.value.filter(id => id !== employmentId)
+}
+
+async function saveZeroIncome(): Promise<void> {
+  const requestedPeriod = period.value
+  const selected = new Set(zeroIncomeSelected.value)
+  const batch = zeroIncomeRows.value
+    .filter(row => selected.has(row.employment_id))
+    .map(row => ({ ...row, baseAmount: '0,00' }))
+  if (batch.length === 0) return
+  saving.value = true
+  try {
+    const failures: PayrollQuickInputFailure[] = []
+    let last: Awaited<ReturnType<typeof payrollApi.saveQuickInputs>> | null = null
+    for (let from = 0; from < batch.length; from += SAVE_CHUNK) {
+      last = await payrollApi.saveQuickInputs(
+        payload(batch.slice(from, from + SAVE_CHUNK)),
+        { limit: pageSize, offset: offset.value },
+        focusEmploymentId.value ?? undefined,
+        appliedSearch.value || undefined,
+      )
+      failures.push(...last.failures)
+    }
+    zeroIncomeOpen.value = false
+    if (last !== null && period.value === requestedPeriod && last.month.period === requestedPeriod) {
+      rows.value = last.month.items.map(applyPending)
+      total.value = last.month.total
+      periodTotals.value = last.month.totals ?? null
+      unsavedSuggestions.value = last.month.unsaved_suggestions ?? { employments: 0, amount_minor: 0 }
+    }
+    const failed = new Set(failures.map(failure => failure.employment_id)).size
+    if (failed === 0) {
+      toast.success(t('payroll.quick_inputs.zero_income.saved', { count: batch.length }))
+    } else {
+      toast.error(t('payroll.quick_inputs.saved_partially', { saved: batch.length - failed, failed }))
+    }
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.quick_inputs.save_failed')))
+  } finally {
+    saving.value = false
+  }
+}
+
 async function save(): Promise<void> {
   if (loadedPeriod.value !== period.value || rows.value.length === 0) {
     return
@@ -1796,6 +1879,62 @@ onMounted(() => {
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
           {{ t(canApprove ? 'payroll.quick_inputs.unsaved.action_approve' : 'payroll.quick_inputs.unsaved.action_draft', { count: unsavedSuggestions.employments }) }}
         </button>
+      </div>
+    </div>
+
+    <div
+      v-if="!historyMode && !historicalMonth && canWrite && loadedPeriod === period && rows.length > 0 && (total > rows.length || rows.some(row => row.relation_type === 'dpp' || row.relation_type === 'dpc'))"
+      data-testid="quick-zero-income"
+      class="rounded-xl border border-neutral-200 bg-surface p-4 text-sm text-neutral-700"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p>{{ t('payroll.quick_inputs.zero_income.hint') }}</p>
+        <button
+          v-if="!zeroIncomeOpen"
+          type="button"
+          :class="[btnOutline('primary'), 'whitespace-nowrap']"
+          :disabled="loading || saving"
+          data-testid="quick-zero-income-open"
+          @click="openZeroIncome"
+        >
+          {{ t('payroll.quick_inputs.zero_income.open') }}
+        </button>
+      </div>
+      <div v-if="zeroIncomeOpen" class="mt-3">
+        <p v-if="zeroIncomeLoading">{{ t('common.loading') }}</p>
+        <p v-else-if="zeroIncomeRows.length === 0" data-testid="quick-zero-income-empty">{{ t('payroll.quick_inputs.zero_income.empty') }}</p>
+        <template v-else>
+          <p class="text-xs text-neutral-500">{{ t('payroll.quick_inputs.zero_income.list_hint') }}</p>
+          <ul class="mt-2 max-h-64 space-y-1 overflow-y-auto">
+            <li v-for="row in zeroIncomeRows" :key="row.employment_id">
+              <label class="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  :checked="zeroIncomeSelected.includes(row.employment_id)"
+                  :data-testid="`quick-zero-income-row-${row.employment_id}`"
+                  @change="toggleZeroIncome(row.employment_id, ($event.target as HTMLInputElement).checked)"
+                >
+                {{ row.full_name }} <span class="text-neutral-500">· {{ relationLabel(row) }} {{ row.employment_code }}</span>
+              </label>
+            </li>
+          </ul>
+        </template>
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            v-if="zeroIncomeRows.length > 0"
+            type="button"
+            :class="[btnFilled('success'), 'whitespace-nowrap']"
+            :disabled="saving || zeroIncomeSelected.length === 0"
+            data-testid="quick-zero-income-save"
+            @click="saveZeroIncome"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+            {{ t(canApprove ? 'payroll.quick_inputs.zero_income.save_approve' : 'payroll.quick_inputs.zero_income.save_draft', { count: zeroIncomeSelected.length }) }}
+          </button>
+          <button type="button" :class="btnOutline('neutral')" data-testid="quick-zero-income-cancel" @click="zeroIncomeOpen = false">
+            {{ t('common.cancel') }}
+          </button>
+        </div>
       </div>
     </div>
 
