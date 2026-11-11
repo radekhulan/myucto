@@ -404,6 +404,48 @@ final class PayrollRegistrationSubmissionRepository
     ];
 
     /**
+     * Nejnovější UZAVŘENÉ základní registrační podání vztahu (P1/A1
+     * odmítnuté, nahrazené nebo včas zrušené), po kterém přichází nové řádné
+     * podání. `null` = žádné takové není.
+     *
+     * Nová přihláška po odmítnutí potřebuje vlastní povinnost i vlastní
+     * idempotenční klíč: na jednu povinnost připadá jediné řádné podání
+     * (uq_payroll_submissions_regular) a stejný klíč by vrátil odmítnuté
+     * podání místo nového.
+     */
+    public function latestClosedBaseRegistrationId(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+    ): ?int {
+        $closed = self::BASE_REGISTRATION_CLOSED_STATUSES;
+        $statement = $this->db->pdo()->prepare(
+            'SELECT MAX(submission.id)
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+              WHERE part.supplier_id = ?
+                AND part.environment = ?
+                AND part.subject_reference = ?
+                AND part.source_entity_type = \'payroll_employment\'
+                AND part.agenda_code IN (\'PREZEC26\', \'REGZEC25\')
+                AND submission.status IN ('
+                . implode(',', array_fill(0, count($closed), '?')) . ')',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            self::employmentReference($employmentId),
+            ...$closed,
+        ]);
+        $value = $statement->fetchColumn();
+
+        return $value === false || $value === null ? null : (int) $value;
+    }
+
+    /**
      * Nejnovější ŽIVÉ základní registrační podání vztahu (bez podání z událostí
      * A2–A8): připravené ve frontě, odeslané nebo přijaté. Podklad pro kartu
      * vztahu po načtení i pro zákaz druhé přihlášky téhož vztahu.

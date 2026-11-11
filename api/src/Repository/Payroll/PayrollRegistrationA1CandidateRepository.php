@@ -23,8 +23,16 @@ use PDO;
  */
 final class PayrollRegistrationA1CandidateRepository
 {
-    /** Stavy vztahu, za které se přihláška nepodává. */
+    /** Stavy vztahu, které se jako souběžná otevřená DPP nepočítají. */
     public const CLOSED_EMPLOYMENT_STATUSES = ['ended', 'archived', 'no_show'];
+
+    /**
+     * Stavy vztahu, za které se přihláška nepodává. Skončený vztah mezi nimi
+     * není: když skončil dřív, než byl přihlášen (typicky brigáda na DPP,
+     * kterou noční úloha po sjednaném konci ukončila), A1 se podává i tak,
+     * s datem skončení. Přihlášený vztah (ID PPV) vyřadí exclusionReason().
+     */
+    public const NOT_REGISTERABLE_EMPLOYMENT_STATUSES = ['archived', 'no_show'];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -52,6 +60,7 @@ final class PayrollRegistrationA1CandidateRepository
         $closed = PayrollRegistrationSubmissionRepository::BASE_REGISTRATION_CLOSED_STATUSES;
         $closedPlaceholders = implode(',', array_fill(0, count($closed), '?'));
         $statusPlaceholders = implode(',', array_fill(0, count(self::CLOSED_EMPLOYMENT_STATUSES), '?'));
+        $baseStatusPlaceholders = implode(',', array_fill(0, count(self::NOT_REGISTERABLE_EMPLOYMENT_STATUSES), '?'));
         $where = '';
         $filter = [];
         if ($employmentIds !== null) {
@@ -154,7 +163,7 @@ final class PayrollRegistrationA1CandidateRepository
                     ON employee.supplier_id = employment.supplier_id
                    AND employee.id = employment.employee_id
                  WHERE employment.supplier_id = ?
-                   AND employment.status NOT IN (' . $statusPlaceholders . ')'
+                   AND employment.status NOT IN (' . $baseStatusPlaceholders . ')'
                    . $where . '
             )
             SELECT base.*,
@@ -194,7 +203,7 @@ final class PayrollRegistrationA1CandidateRepository
             $environment,
             ...self::CLOSED_EMPLOYMENT_STATUSES,
             $supplierId,
-            ...self::CLOSED_EMPLOYMENT_STATUSES,
+            ...self::NOT_REGISTERABLE_EMPLOYMENT_STATUSES,
             ...$filter,
             $supplierId,
             $environment,

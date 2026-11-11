@@ -228,9 +228,11 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(0, $this->countSubmissions());
     }
 
-    /** Skončený vztah bez schváleného A2 zdroje nesmí znovu vytvořit A1. */
+    /** Skončený přihlášený vztah (ID PPV) bez schváleného A2 zdroje nesmí znovu vytvořit A1. */
     public function testTerminatedEmploymentCannotFallBackToA1(): void
     {
+        $this->seedTrustedReceipt();
+        $submissions = $this->countSubmissions();
         $this->db->pdo()->prepare(
             'UPDATE payroll_employments
                 SET actual_start_date = ?, end_date = "2026-08-31",
@@ -244,6 +246,31 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(422, $response->getStatusCode());
         self::assertSame(
             'registration_regzec_a2_source_missing',
+            $body['error']['code'],
+        );
+        self::assertSame($submissions, $this->countSubmissions());
+    }
+
+    /**
+     * Skončený vztah, který přihlášený NENÍ (bez ID PPV), se přihlašuje
+     * dodatečnou A1; chybí-li profil A1, řekne to hláška místo odkazu na A2,
+     * kterou bez přihlášky podat nejde.
+     */
+    public function testTerminatedUnregisteredEmploymentAsksForA1Profile(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-31",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+
+        $response = $this->post();
+        $body = $this->json($response);
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'registration_regzec_a1_profile_missing',
             $body['error']['code'],
         );
         self::assertSame(0, $this->countSubmissions());

@@ -315,6 +315,17 @@ final readonly class PayrollRegistrationSubmissionService
                 $replacedEvent,
             );
         }
+        // Po odmítnuté (nahrazené, včas zrušené) přihlášce A1/P1 přichází nové
+        // řádné podání s vlastní povinností a klíčem; bez toho by příprava
+        // vrátila odmítnuté podání, nebo narazila na jediné řádné podání
+        // povinnosti. Živou přihlášku dál hlídá assertNoOtherLiveBaseRegistration().
+        $retriesSubmissionId = $eventId === null
+            ? $this->registrations->latestClosedBaseRegistrationId(
+                $supplierId,
+                $environment,
+                $employmentId,
+            )
+            : null;
         $obligation = $this->registerObligation(
             $supplierId,
             $environment,
@@ -322,6 +333,7 @@ final readonly class PayrollRegistrationSubmissionService
             $probe,
             $createdBy,
             $replacesSubmissionId,
+            $retriesSubmissionId,
         );
 
         $result = $this->submissionRepository->transaction(function () use (
@@ -331,6 +343,7 @@ final readonly class PayrollRegistrationSubmissionService
             $createdBy,
             $probe,
             $obligation,
+            $retriesSubmissionId,
             $eventId,
             $problems,
             $fullRegistrationRequested,
@@ -390,6 +403,7 @@ final readonly class PayrollRegistrationSubmissionService
                 $employmentId,
                 $sourceHash,
                 $replacesSubmissionId,
+                $retriesSubmissionId,
             );
             $submission = $this->submissions->prepare(
                 $supplierId,
@@ -1335,11 +1349,16 @@ final readonly class PayrollRegistrationSubmissionService
                     self::AGENDA_PREZEC,
                 ),
             'did_not_start' => $context['status'] === 'no_show',
+            // Sjednaný konec dohody nebo pracovního poměru na dobu určitou je
+            // v `end_date` od založení vztahu. Skončil ale vztah až tím dnem:
+            // dokud konec nenastal, je to trvající vztah a přihláška A1 se za
+            // něj podává normálně (bez data skončení, EDV ID 10224: „nesmí
+            // být > Datum vyplnění").
             'employment_ended' => in_array(
                 $context['status'],
                 ['ended', 'archived'],
                 true,
-            ) || $context['end_date'] !== null,
+            ) || ($context['end_date'] !== null && $context['end_date'] < $this->today()),
             'event_interaction' => is_string($event['interaction'] ?? null)
                 ? $event['interaction']
                 : null,
@@ -1454,6 +1473,7 @@ final readonly class PayrollRegistrationSubmissionService
         array $resolved,
         ?int $createdBy,
         ?int $replacesSubmissionId = null,
+        ?int $retriesSubmissionId = null,
     ): array {
         $interaction = $resolved['interaction'];
         $window = $resolved['deadline'];
@@ -1477,7 +1497,10 @@ final readonly class PayrollRegistrationSubmissionService
             : ['deadline_basis' => $resolved['deadline_basis']])
           + ($replacesSubmissionId === null
             ? []
-            : ['replaces_submission_id' => $replacesSubmissionId])));
+            : ['replaces_submission_id' => $replacesSubmissionId])
+          + ($retriesSubmissionId === null
+            ? []
+            : ['retries_submission_id' => $retriesSubmissionId])));
 
         return $this->obligations->register(
             $supplierId,
@@ -1947,6 +1970,7 @@ final readonly class PayrollRegistrationSubmissionService
         int $employmentId,
         string $sourceHash,
         ?int $replacesSubmissionId = null,
+        ?int $retriesSubmissionId = null,
     ): array {
         $base = CanonicalJson::encode([
             'schema_reference' => 'payroll-registration-submission.v1',
@@ -1956,7 +1980,10 @@ final readonly class PayrollRegistrationSubmissionService
             'source_hash' => $sourceHash,
         ] + ($replacesSubmissionId === null
             ? []
-            : ['replaces_submission_id' => $replacesSubmissionId]));
+            : ['replaces_submission_id' => $replacesSubmissionId])
+          + ($retriesSubmissionId === null
+            ? []
+            : ['retries_submission_id' => $retriesSubmissionId]));
 
         return [
             'submission' => 'registration-submission:'
