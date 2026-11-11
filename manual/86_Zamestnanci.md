@@ -143,11 +143,14 @@ a pojistného. Vede se po celých měsících.
    **Uložit vše** dole na kartě.
 6. Prohlášení poplatníka zapište v sekci **Prohlášení poplatníka k dani** jako
    **Podepsáno** nebo **Nepodepsáno**. Doplnit běžné údaje ho nezapíše.
-   U podepsaného prohlášení vyplňte den podpisu a jako **Platí od** první
-   měsíc slevy podle § 38k ZDP: měsíc nástupu při podpisu do 30 dnů po
-   nástupu, leden při podpisu do 15. února, jinak měsíc po podpisu. Když
-   začátek záznamu dni podpisu neodpovídá, karta to po uložení u záznamu
-   napíše. Uložení to neblokuje.
+   U podepsaného prohlášení vyplňte den podpisu. **Platí od** se u nového
+   záznamu doplní samo podle § 38k ZDP (měsíc nástupu při podpisu do 30 dnů
+   po nástupu, leden při podpisu do 15. února, jinak měsíc po podpisu)
+   a karta napíše, proč vyšel daný měsíc. Je-li ten měsíc uzavřený schválenou
+   mzdou, doplní se první otevřený měsíc; slevu za uzavřené měsíce dorovná
+   roční zúčtování, nebo otevřete opravu mzdového běhu. Začátek můžete
+   přepsat. Když dni podpisu neodpovídá nebo leží v uzavřeném období, karta
+   to u záznamu napíše. Uložení to neblokuje.
    Podepsaná prohlášení více lidí zapíšete najednou podle
    [§ 86.4.1](#8641-podepsana-prohlaseni-hromadne).
 
@@ -541,6 +544,9 @@ dohod** níže se nic neděje samo, rozhodujete vy.
      jehož sjednaný konec už uplynul. Sjednaný konec je datum konce vztahu,
      a není-li vyplněné, konec na dobu určitou z platných podmínek. Navržené
      datum ukončení je sjednaný konec. Jen tato skupina je předvybraná.
+     Otevřete-li náhled z kontroly mzdového běhu, předvyberou se jen vztahy
+     se sjednaným koncem před obdobím běhu, tedy ty, které kontrola hlásí;
+     pozdější konce zůstanou v nabídce nezaškrtnuté.
    - **Dohody bez aktivity**: aktivní DPP nebo DPČ bez sjednaného konce, která
      za zvolený počet měsíců (výchozí 3) do posledního zpracovaného mzdového
      měsíce (měsíc poslední schválené mzdy, bez schválené mzdy do běžného

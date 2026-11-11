@@ -85,7 +85,10 @@ zúčtování nepožádali, nemusíte otevírat každého zvlášť.
 
 1. V `Mzdy → Roční zúčtování` zvolte rok a případně zúžte seznam hledáním nebo stavem.
 2. Zaškrtněte zaměstnance, nebo použijte **Vybrat vše na stránce**. Výběr zůstane
-   zachovaný i při listování na další stránky.
+   zachovaný i při listování na další stránky. Tlačítko **Vybrat všechny
+   odpovídající** vybere najednou všechny, kdo zúžení odpovídají, i z dalších
+   stránek. Odkaz z kontroly mzdového běhu otevře stránku zúženou na
+   nerozhodnuté žádosti a rovnou je všechny vybere.
 3. Klikněte na **Nastavit: nepožádal** (nebo **Nastavit: požádal**) a potvrďte.
 
 Změní se jen stav žádosti. Lidem, kteří žádost zatím nemají, se založí s ostatními
