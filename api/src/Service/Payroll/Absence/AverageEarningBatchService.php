@@ -428,6 +428,8 @@ final class AverageEarningBatchService
             'probable_source' => $suggestion['probable_source'],
             'probable_hourly_minor' => $suggestion['probable_hourly_minor'],
             'probable_rationale' => $suggestion['probable_rationale'],
+            // Proč pravděpodobný výdělek a ne skutečný průměr (§ 355 odst. 1 ZP).
+            'probable_reason' => AverageEarningDerivationService::probableReason($suggestion),
             'gross_earnings_minor' => $suggestion['gross_earnings_minor'],
             'worked_minutes' => $suggestion['worked_minutes'],
             'worked_duration_units' => $suggestion['worked_duration_units'] ?? null,

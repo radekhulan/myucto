@@ -9,7 +9,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatDate, formatMoneyMinor as money } from '@/composables/useFormat'
+import { formatDate, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -24,6 +24,7 @@ import {
   type AbsenceType,
   type AverageBulkSkipped,
   type AverageEarningCandidate,
+  type AverageEarningProbableReason,
   type AverageEarningSuggestion,
   type ProbableBulkResult,
   type ProbableBulkRow,
@@ -217,6 +218,20 @@ const probableForm = reactive({ amount_czk: '' as string | number, rationale: ''
 const probableError = ref('')
 const probableResult = ref<ProbableBulkResult | null>(null)
 const averageSkipped = ref<AverageBulkSkipped[]>([])
+
+/**
+ * Věta „proč pravděpodobný výdělek" z důvodů, které poslal server (§ 355
+ * odst. 1 ZP). Hláška dřív řekla jen, že skutečný průměr odvodit nelze.
+ */
+function probableReasonText(reason: AverageEarningProbableReason | null | undefined): string {
+  if (!reason || reason.codes.length === 0) return ''
+  const parts = reason.codes.map(code => t(`payroll_absence.averages.probable_reason.${code}`, {
+    months: reason.missing_run_periods.map(period => formatPeriod(period)).join(', '),
+    days: reason.worked_days,
+    minimum: reason.minimum_worked_days,
+  }, code === 'run_missing' ? reason.missing_run_periods.length : reason.worked_days))
+  return t('payroll_absence.averages.probable_reason.intro', { reasons: parts.join('; ') })
+}
 
 function averageCandidateSelectable(candidate: AverageEarningCandidate): boolean {
   return candidate.ready || canSetProbable.value
@@ -2445,6 +2460,11 @@ onMounted(async () => {
                   amount: money(candidate.probable_hourly_minor ?? 0),
                   source: t(`payroll_absence.averages.probable_source.${candidate.probable_source}`),
                 }) }}
+                <span
+                  v-if="probableReasonText(candidate.probable_reason)"
+                  class="block"
+                  :data-test="`average-candidate-probable-reason-${candidate.employment_id}`"
+                >{{ probableReasonText(candidate.probable_reason) }}</span>
               </span>
               <span v-else class="mt-1 block text-xs text-warning-700">
                 {{ candidate.blockers.map(blocker => t(`payroll_absence.averages.blockers.${blocker}`)).join(' · ') }}
@@ -2506,8 +2526,8 @@ onMounted(async () => {
         >
           <p>
             {{ t('payroll_absence.averages.suggestion_ready', {
-              from: averageSuggestion.decisive_from,
-              to: averageSuggestion.decisive_to,
+              from: formatDate(averageSuggestion.decisive_from),
+              to: formatDate(averageSuggestion.decisive_to),
             }) }}
           </p>
           <p
@@ -2516,6 +2536,14 @@ onMounted(async () => {
             class="mt-1 text-xs text-success-700"
           >
             {{ t(averageSuggestion.probable_source === 'agreed_hourly_rate' ? 'payroll_absence.averages.hourly_rate_review' : 'payroll_absence.averages.suggestion_probable') }}
+          </p>
+          <!-- Proč pravděpodobný výdělek: chybějící běhy rozhodného období, nebo méně než 21 odpracovaných dnů. -->
+          <p
+            v-if="averageSuggestion.source_kind === 'probable' && probableReasonText(averageSuggestion.probable_reason)"
+            data-test="average-suggestion-probable-reason"
+            class="mt-1 text-xs text-success-700"
+          >
+            {{ probableReasonText(averageSuggestion.probable_reason) }}
           </p>
           <p v-else class="mt-1 text-xs text-success-700">{{ t('payroll_absence.averages.suggestion_sources') }}</p>
           <!--

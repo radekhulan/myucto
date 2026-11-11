@@ -1990,6 +1990,22 @@ onMounted(load)
                   </svg>
                   {{ t('payroll.runs.validation.open_remediation') }}
                 </a>
+                <!--
+                  Víc dotčených vztahů: odkazy u záznamů otevřou vždy jednu osobu.
+                  Společný odkaz vede na tutéž agendu bez zúžení, kde je hromadná
+                  akce (průměry za čtvrtletí, schválení docházky, zaokrouhlení).
+                -->
+                <a
+                  v-else-if="finding.remediation_path && findingCount(finding) > 1"
+                  :href="readinessHref(finding.remediation_path)"
+                  :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+                  :data-test="`run-readiness-open-all-${finding.code}`"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.link" />
+                  </svg>
+                  {{ t('payroll.runs.readiness.open_all', { count: findingCount(finding) }) }}
+                </a>
                 <button
                   v-if="PROBABLE_AVERAGE_CODES.includes(finding.code) && canFillAverages"
                   type="button"

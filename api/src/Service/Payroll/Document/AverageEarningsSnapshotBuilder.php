@@ -117,7 +117,7 @@ final class AverageEarningsSnapshotBuilder
                 sprintf(
                     'Pro rozhodné období %d/Q%d chybí schválený snapshot '
                         . 'průměrného výdělku. Nejprve ho založte a schvalte '
-                        . 'v modulu Absence a průměry.',
+                        . 'v Mzdy → Absence a dovolená, záložka Průměrný výdělek.',
                     $decisiveYear,
                     $decisiveQuarter,
                 ),

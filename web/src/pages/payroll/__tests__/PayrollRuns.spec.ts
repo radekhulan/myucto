@@ -1847,6 +1847,60 @@ describe('PayrollRuns', () => {
   })
 
   /*
+   * „5× Chybí průměr pro JMHZ": odkazy u záznamů otevřely formulář jedné
+   * osoby, hromadné vypočtení průměrů bylo až po dalším kliknutí.
+   */
+  it('nález s více vztahy nabídne vedle odkazů na osoby i agendu pro všechny najednou', async () => {
+    m.runs.mockResolvedValue([])
+    const entity = (id: number) => ({
+      entity_type: 'employment',
+      entity_id: id,
+      label: `Syntetická osoba ${id}`,
+      message: `Chybí průměr pro JMHZ: Syntetická osoba ${id}.`,
+      remediation_path: `/payroll/absences?employment=${id}&tab=averages&year=2027&quarter=1`,
+    })
+    m.readiness.mockReturnValue({
+      period_start: '2027-01-01',
+      payment_date: '2027-02-10',
+      office_id: null,
+      ready: true,
+      has_findings: true,
+      findings: [{
+        code: 'jmhz_average_hourly_earning_missing',
+        severity: 'warning',
+        impact: 'revision',
+        scope: 'monthly',
+        message: 'Chybí průměr pro JMHZ: Syntetická osoba 1, Syntetická osoba 2.',
+        remediation_path: '/payroll/absences?tab=averages&year=2027&quarter=1',
+        count: 2,
+        entity_total: 2,
+        entities: [entity(1), entity(2)],
+        bulk_actions: [],
+      }, {
+        code: 'monthly_wage_below_minimum',
+        severity: 'warning',
+        impact: 'revision',
+        scope: 'monthly',
+        message: 'Sjednaná měsíční mzda je nižší než minimální mzda u 1 vztahu.',
+        remediation_path: '/payroll/people?employment=1&panel=employment_terms&field=monthly_gross_minor',
+        count: 1,
+        entity_total: 1,
+        entities: [{ ...entity(1), remediation_path: '/payroll/people?employment=1&panel=employment_terms' }],
+        bulk_actions: [],
+      }],
+    } satisfies PayrollRunReadiness)
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="run-readiness-open-all-jmhz_average_hourly_earning_missing"]').attributes('href'))
+      .toBe('/payroll/absences?tab=averages&year=2027&quarter=1')
+    // Jediný dotčený vztah má odkaz u záznamu; druhý stejný by byl šum.
+    expect(wrapper.find('[data-test="run-readiness-open-all-monthly_wage_below_minimum"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  /*
    * U 150 nálezů bylo dosažitelných jen 25 („dalších 125 se do přehledu
    * nevešlo") a zbytek nebylo kde najít.
    */

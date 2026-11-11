@@ -4824,6 +4824,7 @@
       "readiness": {
         "affected": "Týká se: {names}",
         "people_list": "Zobrazit v seznamu zaměstnanců | Zobrazit tuto osobu v seznamu zaměstnanců | Zobrazit všechny {count} osoby v seznamu zaměstnanců | Zobrazit všech {count} osob v seznamu zaměstnanců",
+        "open_all": "Otevřít agendu pro všechny dotčené ({count})",
         "fill_probable_average": "Doplnit pravděpodobný výdělek ze sazby",
         "bulk": {
           "statutory_defaults": "Doplnit výchozí zákonné údaje ({count})",
@@ -32563,6 +32564,12 @@
         "agreed_hourly_rate": "návrh ze sjednané hodinové sazby, vyžaduje individuální posouzení",
         "agreed_monthly_gross": "ze sjednané měsíční mzdy (§ 355 odst. 2 ZP)",
         "minimum_wage": "spodní mez, minimální mzda (§ 357 odst. 1 ZP) - vyšší zadejte v podmínkách vztahu"
+      },
+      "probable_reason": {
+        "intro": "Proč pravděpodobný výdělek: {reasons}.",
+        "run_missing": "v rozhodném období chybí schválený mzdový běh | za {months} není v MyÚčtu schválený mzdový běh ani převzatá mzda, takže rozhodné období není doložené celé a 21 odpracovaných dnů (§ 355 odst. 1 zákoníku práce) nejde prokázat; zpracoval-li ten měsíc předchozí program, převezměte ho a průměr se nabídne ze skutečných čísel | za {months} není v MyÚčtu schválený mzdový běh ani převzatá mzda, takže rozhodné období není doložené celé a 21 odpracovaných dnů (§ 355 odst. 1 zákoníku práce) nejde prokázat; zpracoval-li ty měsíce předchozí program, převezměte je a průměr se nabídne ze skutečných čísel",
+        "probable_earning_required": "v rozhodném období není doložen žádný odpracovaný den, zákonné minimum je {minimum} dnů (§ 355 odst. 1 zákoníku práce) | v rozhodném období je doložen jen {days} odpracovaný den, zákonné minimum je {minimum} dnů (§ 355 odst. 1 zákoníku práce) | v rozhodném období jsou doloženy jen {days} odpracované dny, zákonné minimum je {minimum} dnů (§ 355 odst. 1 zákoníku práce) | v rozhodném období je doloženo jen {days} odpracovaných dnů, zákonné minimum je {minimum} dnů (§ 355 odst. 1 zákoníku práce)",
+        "worked_time_missing": "v rozhodném období není doložená odpracovaná doba ani započitatelná mzda"
       },
       "blockers": {
         "run_missing": "Za některý měsíc rozhodného období není mzdový běh; u nově nastoupivšího se průměr stanovuje jako pravděpodobný výdělek (§ 355 ZP)",

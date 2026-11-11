@@ -395,7 +395,7 @@ final class PayrollRunJmhzReadinessProbe
             'jmhz_average_hourly_earning_missing' => sprintf(
                 'Chybí průměr pro JMHZ: %s. Měsíční hlášení v poli 10345 požaduje '
                 . 'schválený průměrný hodinový výdělek za čtvrtletí období. Otevřete '
-                . 'Mzdy → Absence a průměry → Průměrný výdělek a v části „Hromadné '
+                . 'Mzdy → Absence a dovolená → Průměrný výdělek a v části „Hromadné '
                 . 'vypočtení průměrů za čtvrtletí" průměry vypočtěte a schvalte, '
                 . 'a to PŘED zamknutím vstupů a výpočtem. Schválený později se do '
                 . 'zmrazených vstupů revize nedostane a oprava stojí opravnou revizi. '

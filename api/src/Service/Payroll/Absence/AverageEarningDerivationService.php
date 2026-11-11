@@ -285,7 +285,60 @@ final class AverageEarningDerivationService
         $date = $applicationStart->format('Y-m-d');
         $hourlyFloorIntervals ??= (new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db))
             ->forMany($supplierId, [$employmentId], $date, $date)[$employmentId] ?? [];
-        return \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver::applyToSuggestion($suggestion, $hourlyFloorIntervals, $date);
+        $suggestion = \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver::applyToSuggestion($suggestion, $hourlyFloorIntervals, $date);
+        $suggestion['probable_reason'] = self::probableReason($suggestion);
+
+        return $suggestion;
+    }
+
+    /**
+     * Proč návrh sáhl po pravděpodobném výdělku místo skutečného průměru.
+     *
+     * Hláška dřív řekla jen „skutečný průměr odvodit nelze" a účetní nepoznala,
+     * jestli jde o zákonný důvod, nebo o díru v evidenci (typicky první
+     * čtvrtletí po začátku vedení mezd, kdy za předchozí měsíce v aplikaci
+     * žádný běh není). Nic se tu nerozhoduje znovu: čte se výsledek
+     * {@see combine()}, tedy kódy v `actual_blockers` a rozpad po měsících.
+     *
+     * § 355 odst. 1 ZP: pravděpodobný výdělek se použije, jestliže zaměstnanec
+     * v rozhodném období neodpracoval alespoň 21 dnů. `worked_days` je počet
+     * dnů doložených uzavřenými běhy; s chybějícím během (`missing_run_periods`)
+     * rozhodné období doložené celé není a minimum nejde prokázat.
+     *
+     * @param array<string,mixed> $suggestion výstup {@see suggest()}
+     * @return array{
+     *   codes:list<string>,missing_run_periods:list<string>,
+     *   worked_days:int,minimum_worked_days:int
+     * }|null null = návrh je ze skutečného průměru, nebo ho blokuje vadná evidence
+     */
+    public static function probableReason(array $suggestion): ?array
+    {
+        $actualBlockers = array_values(array_map('strval', (array) ($suggestion['actual_blockers'] ?? [])));
+        if ($actualBlockers === []
+            || array_diff($actualBlockers, self::PROBABLE_ELIGIBLE_BLOCKERS) !== []
+        ) {
+            return null;
+        }
+        $missing = [];
+        $workedDays = 0;
+        foreach ((array) ($suggestion['months'] ?? []) as $month) {
+            if (!is_array($month)) {
+                continue;
+            }
+            $blockers = (array) ($month['blockers'] ?? []);
+            if (in_array('run_missing', $blockers, true)) {
+                $missing[] = substr((string) ($month['period_start'] ?? ''), 0, 7);
+            } elseif ($blockers === [] && is_int($month['worked_days'] ?? null)) {
+                $workedDays += $month['worked_days'];
+            }
+        }
+
+        return [
+            'codes' => array_values(array_intersect(self::PROBABLE_ELIGIBLE_BLOCKERS, $actualBlockers)),
+            'missing_run_periods' => $missing,
+            'worked_days' => $workedDays,
+            'minimum_worked_days' => (int) ($suggestion['minimum_worked_days'] ?? 0),
+        ];
     }
 
     /**

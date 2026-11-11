@@ -152,6 +152,71 @@ final class AverageEarningProbableDerivationTest extends TestCase
     }
 
     /** @return list<array<string,mixed>> */
+    /**
+     * Hláška „skutečný průměr odvodit nelze" neříkala proč. Důvod se čte
+     * z výsledku návrhu: chybějící běhy rozhodného období, nebo méně než
+     * 21 odpracovaných dnů (§ 355 odst. 1 ZP).
+     */
+    public function testProbableReasonNamesMissingRunsOfTheDecisivePeriod(): void
+    {
+        // První čtvrtletí po začátku vedení mezd: říjen a listopad bez běhu,
+        // prosinec uzavřený s 21 odpracovanými dny.
+        $december = ['worked_days' => 21] + $this->closedMonth('2026-12-01', 5_000_000, 10_080);
+        $months = [
+            ['period_start' => '2026-10-01'] + Derivation::monthFromRow(null, '2026-10-01'),
+            ['period_start' => '2026-11-01'] + Derivation::monthFromRow(null, '2026-11-01'),
+            $december,
+        ];
+        $probable = ['hourly_minor' => 29_762, 'rationale' => 'Syntetické odůvodnění.', 'term_id' => 3, 'effective_from' => '2026-12-01'];
+        $suggestion = Derivation::combine($months, 21, false, $probable);
+        self::assertSame('probable', $suggestion['source_kind']);
+
+        self::assertSame(
+            [
+                'codes' => ['run_missing'],
+                'missing_run_periods' => ['2026-10', '2026-11'],
+                'worked_days' => 21,
+                'minimum_worked_days' => 21,
+            ],
+            Derivation::probableReason($suggestion),
+        );
+    }
+
+    public function testProbableReasonStatesWorkedDaysBelowTheLegalMinimum(): void
+    {
+        $months = [];
+        foreach (['2026-10-01' => 6, '2026-11-01' => 7, '2026-12-01' => 7] as $periodStart => $days) {
+            $months[] = ['worked_days' => $days] + $this->closedMonth($periodStart, 1_000_000, 2_880);
+        }
+        $probable = ['hourly_minor' => 20_000, 'rationale' => 'Syntetické odůvodnění.', 'term_id' => 3, 'effective_from' => '2026-10-01'];
+
+        // 20 dnů: pod zákonným minimem 21 dnů se použije pravděpodobný výdělek.
+        $below = Derivation::combine($months, 21, false, $probable);
+        self::assertSame('probable', $below['source_kind']);
+        self::assertSame(
+            ['codes' => ['probable_earning_required'], 'missing_run_periods' => [], 'worked_days' => 20, 'minimum_worked_days' => 21],
+            Derivation::probableReason($below),
+        );
+
+        // 21 dnů je už skutečný průměr: žádný důvod pro pravděpodobný výdělek.
+        $months[2]['worked_days'] = 8;
+        $actual = Derivation::combine($months, 21, false, $probable);
+        self::assertSame('actual', $actual['source_kind']);
+        self::assertNull(Derivation::probableReason($actual));
+    }
+
+    public function testProbableReasonIsNotOfferedForFaultyEvidence(): void
+    {
+        $months = [
+            ['blockers' => ['time_month_not_approved']] + $this->closedMonth('2026-10-01', 1_000_000, 2_880),
+            ['worked_days' => 20] + $this->closedMonth('2026-11-01', 1_000_000, 2_880),
+            ['worked_days' => 20] + $this->closedMonth('2026-12-01', 1_000_000, 2_880),
+        ];
+
+        // Neschválená docházka je vadná evidence, ne důvod podle § 355.
+        self::assertNull(Derivation::probableReason(Derivation::combine($months, 21, false, null)));
+    }
+
     private function decisiveMonthsWithoutRuns(): array
     {
         $months = [];

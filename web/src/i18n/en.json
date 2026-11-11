@@ -4824,6 +4824,7 @@
       "readiness": {
         "affected": "Affects: {names}",
         "people_list": "Show in the employee list | Show this person in the employee list | Show all {count} people in the employee list",
+        "open_all": "Open the agenda for all affected ({count})",
         "fill_probable_average": "Fill in probable earnings from the rate",
         "bulk": {
           "statutory_defaults": "Fill in default statutory data ({count})",
@@ -32563,6 +32564,12 @@
         "agreed_hourly_rate": "proposal from the agreed hourly rate, requiring individual review",
         "agreed_monthly_gross": "from the agreed monthly wage (§ 355(2) of the Labour Code)",
         "minimum_wage": "lower limit, the minimum wage (§ 357(1) of the Labour Code) — enter a higher one in the employment terms"
+      },
+      "probable_reason": {
+        "intro": "Why probable earnings: {reasons}.",
+        "run_missing": "an approved payroll run is missing in the decisive period | there is no approved payroll run or taken-over pay in MyÚčto for {months}, so the decisive period is not fully documented and 21 days worked (Section 355(1) of the Labour Code) cannot be proven; if the previous program processed that month, take it over and the average is offered from the actual figures | there is no approved payroll run or taken-over pay in MyÚčto for {months}, so the decisive period is not fully documented and 21 days worked (Section 355(1) of the Labour Code) cannot be proven; if the previous program processed those months, take them over and the average is offered from the actual figures",
+        "probable_earning_required": "no day worked is documented in the decisive period, the statutory minimum is {minimum} days (Section 355(1) of the Labour Code) | only {days} day worked is documented in the decisive period, the statutory minimum is {minimum} days (Section 355(1) of the Labour Code) | only {days} days worked are documented in the decisive period, the statutory minimum is {minimum} days (Section 355(1) of the Labour Code)",
+        "worked_time_missing": "no time worked or eligible pay is documented in the decisive period"
       },
       "blockers": {
         "run_missing": "One month of the decisive period has no payroll run; for a new starter the average is set as probable earnings (§ 355 of the Labour Code)",
