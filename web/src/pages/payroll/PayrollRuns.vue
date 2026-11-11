@@ -10,6 +10,8 @@ import {
   type PayrollRunHistoryEvent,
   type PayrollRunHistoryTotalDiff,
   type PayrollRunHistoryTotalKey,
+  type PayrollRunAverageChangeCompensation,
+  type PayrollRunAverageChangeEmployment,
   type PayrollRunMissingEmployment,
   type PayrollRunReadiness,
   type PayrollRunReadinessBulkKind,
@@ -152,6 +154,7 @@ const pendingDelete = ref<PayrollRun | null>(null)
 /** Běh čekající na potvrzení schválení: je to závazný krok, zpět vede jen oprava běhu. */
 const pendingApprove = ref<PayrollRun | null>(null)
 const commandReason = ref('')
+const averageCorrectionRunId = ref<number | null>(null)
 const commandError = ref('')
 const commandBlockers = ref<Record<number, string>>({})
 /** Proč se koncepty vstupů nepodařilo schválit — seskupené po větě, u běhu. */
@@ -747,6 +750,52 @@ function missingEmploymentSearchText(item: PayrollRunMissingEmployment): string 
   return `${item.full_name} ${item.employment_code}`
 }
 
+function averageChangeKey(item: PayrollRunAverageChangeEmployment): number {
+  return item.employment_id
+}
+
+function averageChangeSearchText(item: PayrollRunAverageChangeEmployment): string {
+  return item.full_name
+}
+
+function averageChangeAverage(item: PayrollRunAverageChangeEmployment): string {
+  if (!item.average_changed) return ''
+  return item.current_average_hourly_minor === null
+    ? t('payroll.runs.average_change.average_removed', { from: money(item.frozen_average_hourly_minor) })
+    : t('payroll.runs.average_change.average', {
+      from: money(item.frozen_average_hourly_minor),
+      to: money(item.current_average_hourly_minor),
+    })
+}
+
+function averageChangeCompensation(item: PayrollRunAverageChangeCompensation): string {
+  return item.expected_amount_minor === null
+    ? t('payroll.runs.average_change.compensation_unknown', { component: item.component_name, amount: money(item.amount_minor) })
+    : t('payroll.runs.average_change.compensation', {
+      component: item.component_name,
+      amount: money(item.amount_minor),
+      expected: money(item.expected_amount_minor),
+    })
+}
+
+function averageChangeCommand(run: PayrollRun): PayrollRunCommand | null {
+  const action = run.average_change?.action ?? null
+  return action !== null && visibleCommands(run).includes(action) ? action : null
+}
+
+async function fixAverageChange(run: PayrollRun) {
+  const command = averageChangeCommand(run)
+  if (command === null) return
+  if (command === 'request_correction') {
+    pendingCommand.value = { run, command }
+    commandReason.value = t('payroll.runs.average_change.reason')
+    commandError.value = ''
+    averageCorrectionRunId.value = run.id
+    return
+  }
+  await submitCommand(run, command)
+}
+
 function primaryCommand(run: PayrollRun): PayrollRunCommand | undefined {
   if ((hasSourceDrift(run) || sourceBlockerSteps(run).length > 0)
     && run.available_commands.includes('refresh_inputs')
@@ -1177,6 +1226,7 @@ function commandNeedsReason(run: PayrollRun, command: PayrollRunCommand): boolea
 }
 
 async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
+  averageCorrectionRunId.value = null
   if (command === 'request_correction' || command === 'cancel') {
     pendingCommand.value = { run, command }
     commandReason.value = ''
@@ -1398,6 +1448,14 @@ async function submitCommand(
     commandReason.value = ''
     commandError.value = ''
     await load()
+    if (command === 'request_correction' && averageCorrectionRunId.value === run.id) {
+      averageCorrectionRunId.value = null
+      const fresh = reloadedRun(run)
+      if (fresh !== null && fresh.available_commands.includes('reopen') && auth.canWrite('payroll.reopen')) {
+        await submitCommand(fresh, 'reopen')
+        return
+      }
+    }
     /*
      * Obnovené podklady nebo nová revize nemají výsledek a jediný smysluplný
      * další krok je přepočet. Udělá se rovnou, ať účetní nemačká dvě tlačítka
@@ -2301,6 +2359,60 @@ onMounted(load)
             </ul>
             <p>
               {{ t(visibleCommands(run).includes('refresh_inputs') ? 'payroll.runs.source_drift.action' : 'payroll.runs.source_drift.action_forbidden') }}
+            </p>
+          </div>
+        </div>
+        <div
+          v-if="run.average_change"
+          :data-testid="`payroll-run-${run.id}-average-change`"
+          class="mt-3 flex max-w-3xl items-start gap-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
+          role="alert"
+        >
+          <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.bell" />
+          </svg>
+          <div class="min-w-0 flex-1 space-y-2">
+            <p class="font-medium">
+              {{ t(run.average_change.approved ? 'payroll.runs.average_change.title_approved' : 'payroll.runs.average_change.title_open') }}
+            </p>
+            <ExpandableList
+              :items="run.average_change.employments"
+              :item-key="averageChangeKey"
+              :search-text="averageChangeSearchText"
+              :test-id="`payroll-run-${run.id}-average-change-list`"
+              list-class="list-disc space-y-0.5 pl-5"
+            >
+              <template #item="{ item }">
+                <RouterLink
+                  :to="{ name: 'payroll-people', query: { person: String(item.employee_id), employment: String(item.employment_id) } }"
+                  class="font-medium text-primary-600 hover:underline"
+                >{{ item.full_name }}</RouterLink>
+                <span v-if="item.average_changed"> · {{ averageChangeAverage(item) }}</span>
+                <span
+                  v-for="compensation in item.compensations"
+                  :key="compensation.input_id"
+                  data-test="payroll-run-average-change-compensation"
+                > · {{ averageChangeCompensation(compensation) }}</span>
+              </template>
+            </ExpandableList>
+            <p v-if="run.average_change.compensation_count > 0">
+              {{ t('payroll.runs.average_change.compensation_body', { difference: money(run.average_change.compensation_difference_minor) }) }}
+            </p>
+            <p>{{ t(`payroll.runs.average_change.body_${run.average_change.action ?? 'none'}`) }}</p>
+            <button
+              v-if="averageChangeCommand(run)"
+              type="button"
+              class="cursor-pointer whitespace-nowrap"
+              :class="btnOutlineSm('warning')"
+              :disabled="saving"
+              :data-testid="`payroll-run-${run.id}-average-change-fix`"
+              @click="fixAverageChange(run)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="run.average_change.action === 'refresh_inputs' ? ICONS.lock : ICONS.uturn" /></svg>
+              {{ t(`payroll.runs.average_change.action_${run.average_change.action}`) }}
+            </button>
+            <p v-else-if="run.average_change.action !== null" data-test="payroll-run-average-change-forbidden">
+              {{ t('payroll.runs.average_change.action_forbidden') }}
             </p>
           </div>
         </div>

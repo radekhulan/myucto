@@ -4851,6 +4851,24 @@
         "action": "Click “Refresh inputs”, then recalculate the run.",
         "action_forbidden": "Inputs can be refreshed by a user allowed to calculate payroll and write payroll inputs."
       },
+      "average_change": {
+        "title_approved": "The average for compensations changed after approval",
+        "title_open": "The average for compensations changed after calculation",
+        "average": "average {from}/h → {to}/h",
+        "average_removed": "average {from}/h, none approved now",
+        "compensation": "{component} {amount}, from the new average {expected}",
+        "compensation_unknown": "{component} {amount}, recalculate manually",
+        "compensation_body": "Compensations carry a fixed amount from the original average and are not recalculated by themselves (difference {difference}). In the open correction cancel the compensation input and enter it again (approve the leave again, apply the source import again), then recalculate the run.",
+        "body_request_correction": "The approved run carries compensations and the average for the monthly report (10345) from the old average. Open a correction: the new revision picks up the current sources and the run is recalculated. Approval stays with you. Then fix a filed report with a corrective report.",
+        "body_reopen": "A correction has been requested. Open it: the new revision picks up the current sources and the run is recalculated.",
+        "body_refresh_inputs": "The run was calculated from the old average and cannot be approved without refreshing the sources. Refresh the sources and the run is recalculated.",
+        "body_none": "The run snapshot already carries the current average; only the compensations remain to be corrected.",
+        "action_request_correction": "Open correction and refresh sources",
+        "action_reopen": "Open correction and refresh sources",
+        "action_refresh_inputs": "Refresh sources and recalculate",
+        "action_forbidden": "A user with the rights to review, unlock and calculate payroll can correct the run and refresh the sources.",
+        "reason": "The average for compensations changed after approval"
+      },
       "missing_employments": {
         "title": "No relationship is missing from the run | The run is missing {count} employment relationship that belongs to the period | The run is missing {count} employment relationships that belong to the period",
         "start": "start {date}",

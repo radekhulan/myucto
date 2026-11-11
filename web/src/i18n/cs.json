@@ -4851,6 +4851,24 @@
         "action": "Klikněte na „Obnovit podklady“ a potom běh přepočítejte.",
         "action_forbidden": "Obnovit podklady může uživatel s právem počítat mzdy a zapisovat mzdové vstupy."
       },
+      "average_change": {
+        "title_approved": "Průměr pro náhrady se změnil po schválení",
+        "title_open": "Průměr pro náhrady se změnil po výpočtu",
+        "average": "průměr {from}/h → {to}/h",
+        "average_removed": "průměr {from}/h, dnes žádný schválený",
+        "compensation": "{component} {amount}, z nového průměru {expected}",
+        "compensation_unknown": "{component} {amount}, přepočítejte ručně",
+        "compensation_body": "Náhrady mají pevnou částku z původního průměru a samy se nepřepočítají (rozdíl {difference}). V otevřené opravě zrušte vstup náhrady a zadejte ho znovu (dovolenou znovu schvalte, import podkladů použijte znovu), pak běh přepočítejte.",
+        "body_request_correction": "Schválený běh nese náhrady a průměr pro měsíční hlášení (10345) ze starého průměru. Otevřete opravu: nová revize převezme aktuální podklady a běh se přepočítá. Schválení zůstává na vás. Podané hlášení pak opravte opravným hlášením.",
+        "body_reopen": "Oprava je vyžádaná. Otevřete ji: nová revize převezme aktuální podklady a běh se přepočítá.",
+        "body_refresh_inputs": "Běh je spočítaný ze starého průměru a bez obnovy podkladů ho schválit nejde. Obnovte podklady a běh se přepočítá.",
+        "body_none": "Snímek běhu už nese aktuální průměr, zbývá opravit náhrady.",
+        "action_request_correction": "Otevřít opravu a obnovit podklady",
+        "action_reopen": "Otevřít opravu a obnovit podklady",
+        "action_refresh_inputs": "Obnovit podklady a přepočítat",
+        "action_forbidden": "Opravu běhu a obnovu podkladů může udělat uživatel s právy kontrolovat, odemknout a vypočítat mzdy.",
+        "reason": "Průměr pro náhrady se změnil po schválení"
+      },
       "missing_employments": {
         "title": "V běhu nechybí žádný vztah | V běhu chybí {count} pracovní vztah, který do období patří | V běhu chybí {count} pracovní vztahy, které do období patří | V běhu chybí {count} pracovních vztahů, které do období patří",
         "start": "nástup {date}",

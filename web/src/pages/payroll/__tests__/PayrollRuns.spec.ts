@@ -2084,6 +2084,108 @@ describe('PayrollRuns', () => {
     wrapper.unmount()
   })
 
+  const averageChange = (action: 'request_correction' | 'reopen' | 'refresh_inputs' | null, approved: boolean) => ({
+    approved,
+    action,
+    average_changed_count: 1,
+    compensation_count: 1,
+    compensation_difference_minor: 22_800,
+    compensation_unknown_count: 0,
+    employments: [{
+      employment_id: 71,
+      employee_id: 31,
+      full_name: 'Syntetická Brigádnice',
+      average_changed: true,
+      frozen_average_hourly_minor: 13_440,
+      current_average_hourly_minor: 18_000,
+      compensations: [{
+        input_id: 501,
+        component_name: 'Náhrada za dovolenou',
+        quantity_milliunits: 5_000,
+        amount_minor: 67_200,
+        average_hourly_minor: 13_440,
+        expected_amount_minor: 90_000,
+      }],
+    }],
+  })
+
+  it('schválený běh se změněným průměrem pro náhrady nabídne otevřít opravu a po vyžádání ji rovnou otevře', async () => {
+    const approved = run({
+      status: 'approved',
+      can_delete: false,
+      revision_id: 40,
+      revision_no: 1,
+      revision_kind: 'regular',
+      available_commands: ['post', 'request_correction'],
+      average_change: averageChange('request_correction', true),
+    })
+    const pending = run({
+      status: 'correction_pending',
+      row_version: 3,
+      can_delete: false,
+      available_commands: ['reopen'],
+      average_change: averageChange('reopen', false),
+    })
+    m.runs.mockResolvedValueOnce([approved]).mockResolvedValueOnce([pending]).mockResolvedValue([pending])
+
+    const wrapper = mount(PayrollRuns, {
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    const box = wrapper.get('[data-testid="payroll-run-15-average-change"]')
+    expect(box.text()).toContain('payroll.runs.average_change.title_approved')
+    expect(box.text()).toContain('Syntetická Brigádnice')
+    expect(box.text()).toContain('payroll.runs.average_change.compensation')
+    expect(box.text()).toContain('payroll.runs.average_change.body_request_correction')
+
+    await box.get('[data-testid="payroll-run-15-average-change-fix"]').trigger('click')
+    await flushPromises()
+    expect(m.commandRun).not.toHaveBeenCalled()
+    const textarea = document.body.querySelector<HTMLTextAreaElement>('[data-test="run-command-reason"]')!
+    expect(textarea.value).toBe('payroll.runs.average_change.reason')
+    document.body.querySelector<HTMLFormElement>('[data-test="run-command-dialog"]')
+      ?.dispatchEvent(new Event('submit'))
+    await flushPromises()
+
+    expect(m.commandRun).toHaveBeenNthCalledWith(
+      1,
+      15,
+      'request_correction',
+      { row_version: 2, reason: 'payroll.runs.average_change.reason' },
+      expect.any(String),
+    )
+    expect(m.commandRun).toHaveBeenNthCalledWith(2, 15, 'reopen', { row_version: 3 }, expect.any(String))
+    expect(m.commandRun.mock.calls.map(call => call[1])).not.toContain('approve')
+    wrapper.unmount()
+  })
+
+  it('spočítaný běh se změněným průměrem nabídne obnovu podkladů, bez práva jen vysvětlí', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'review', 'approve', 'cancel'],
+      average_change: averageChange('refresh_inputs', false),
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    const box = wrapper.get('[data-testid="payroll-run-15-average-change"]')
+    expect(box.text()).toContain('payroll.runs.average_change.title_open')
+    await box.get('[data-testid="payroll-run-15-average-change-fix"]').trigger('click')
+    await flushPromises()
+    expect(m.commandRun).toHaveBeenCalledWith(15, 'refresh_inputs', { row_version: 2 }, expect.any(String))
+    wrapper.unmount()
+
+    m.canWrite.mockImplementation((permission: string) => permission !== 'payroll.calculate')
+    const readonly = mount(PayrollRuns)
+    await flushPromises()
+    const readonlyBox = readonly.get('[data-testid="payroll-run-15-average-change"]')
+    expect(readonlyBox.find('[data-testid="payroll-run-15-average-change-fix"]').exists()).toBe(false)
+    expect(readonlyBox.find('[data-test="payroll-run-average-change-forbidden"]').exists()).toBe(true)
+    readonly.unmount()
+  })
+
   it('změněný schválený průměr čtvrtletí vypíše jako samostatný řádek změn podkladů', async () => {
     m.runs.mockResolvedValue([run({
       status: 'calculated',

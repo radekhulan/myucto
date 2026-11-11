@@ -44868,6 +44868,7 @@ components:
               employment_code: { type: string }
               relation_type: { type: string }
               start_date: { type: [string, "null"], format: date }
+        average_change: { $ref: '#/components/schemas/PayrollRunAverageChange' }
         validations:
           type: array
           items: { $ref: '#/components/schemas/PayrollRunValidation' }
@@ -45062,7 +45063,44 @@ components:
         remuneration_changed: { type: integer, minimum: 0, description: Počet vztahů se změnou hodinových podmínek účinných ve zpracovávaném měsíci. }
         worked_time_changed: { type: integer, minimum: 0, description: Počet vztahů se změnou vybraného zdroje hodin nebo jeho obsahu či schválení. }
         employment_terms_changed: { type: integer, minimum: 0, description: Počet vztahů se změnou podmínek, které snímek nese (hlavní vztah, místo výkonu, účtárna, úvazek, druh činnosti, mzda). }
+        average_earnings_changed: { type: integer, minimum: 0, description: Počet vztahů se změněným schváleným průměrným výdělkem čtvrtletí proti snímku. }
         snapshot_created_at: { type: string }
+
+    PayrollRunAverageChange:
+      type: [object, "null"]
+      description: Jen v seznamu běhů. Schválený průměrný výdělek čtvrtletí se po výpočtu nebo schválení běhu změnil, nebo v období leží schválená náhrada spočítaná z jiné revize průměru, než je dnes schválená. null = beze změny nebo běh v konceptu či zrušený.
+      required: [approved, action, average_changed_count, compensation_count, compensation_difference_minor, compensation_unknown_count, employments]
+      properties:
+        approved: { type: boolean, description: Běh je schválený nebo dál. }
+        action: { type: [string, "null"], enum: [request_correction, reopen, refresh_inputs, null], description: Další krok běhu; null, když je zastaralá jen náhrada a příkaz běhu ji neopraví. }
+        average_changed_count: { type: integer, minimum: 0 }
+        compensation_count: { type: integer, minimum: 0 }
+        compensation_difference_minor: { type: integer, description: Rozdíl náhrad z nového a původního průměru (bez náhrad, které nejde spočítat). }
+        compensation_unknown_count: { type: integer, minimum: 0 }
+        employments:
+          type: array
+          items:
+            type: object
+            required: [employment_id, employee_id, full_name, average_changed, frozen_average_hourly_minor, current_average_hourly_minor, compensations]
+            properties:
+              employment_id: { type: integer, format: int64 }
+              employee_id: { type: integer, format: int64 }
+              full_name: { type: string }
+              average_changed: { type: boolean }
+              frozen_average_hourly_minor: { type: [integer, "null"] }
+              current_average_hourly_minor: { type: [integer, "null"] }
+              compensations:
+                type: array
+                items:
+                  type: object
+                  required: [input_id, component_name, quantity_milliunits, amount_minor, average_hourly_minor, expected_amount_minor]
+                  properties:
+                    input_id: { type: integer, format: int64 }
+                    component_name: { type: string }
+                    quantity_milliunits: { type: [integer, "null"] }
+                    amount_minor: { type: integer }
+                    average_hourly_minor: { type: [integer, "null"] }
+                    expected_amount_minor: { type: [integer, "null"] }
 
     PayrollRunValidation:
       type: object

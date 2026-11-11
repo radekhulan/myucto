@@ -179,6 +179,20 @@ Zrušený běh znovu otevřete tlačítkem **Začít z opravených vstupů**.
 > který do období patří") a karta vztahu na to upozorní s odkazem na běh.
 > Vyžádejte opravu běhu: nová revize vztah převezme a mzdy přepočítá.
 
+> [!IMPORTANT]
+> Když se po schválení běhu změní schválený průměrný nebo pravděpodobný
+> výdělek čtvrtletí (nová revize průměru na kartě vztahu, hromadné nastavení
+> pravděpodobného výdělku), karta běhu ukáže **Průměr pro náhrady se změnil po
+> schválení**: u každé osoby původní a nový průměr a náhrady spočítané ze
+> starého průměru s částkou z nového průměru. Tlačítko **Otevřít opravu
+> a obnovit podklady** vyžádá opravu (důvod je předvyplněný), otevře ji
+> a běh přepočítá. Schválení zůstává na vás. Náhrady mají pevnou částku, proto
+> je v otevřené opravě zadejte znovu (dovolenou znovu schvalte, import podkladů
+> použijte znovu) a běh přepočítejte; upozornění zmizí, až žádná náhrada
+> nepochází ze starého průměru. U spočítaného neschváleného běhu se ukáže
+> **Průměr pro náhrady se změnil po výpočtu** s tlačítkem **Obnovit podklady
+> a přepočítat**.
+
 ## 80.6 Krok za krokem: obnovení podkladů rozpracovaného běhu
 
 Použijte, když jste po spočítání schválili další vstup, nepřítomnost nebo

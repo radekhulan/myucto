@@ -73,6 +73,7 @@ final class PayrollRunsAction
         // Vztahy, které do období uzavřeného běhu patří, ale v jeho revizi
         // nejsou (zaměstnanec založený až po schválení měsíce).
         private readonly \MyInvoice\Repository\Payroll\PayrollRunMissingEmploymentRepository $missingEmployments,
+        private readonly \MyInvoice\Service\Payroll\Run\PayrollRunAverageChangeService $averageChanges,
     ) {}
 
     /**
@@ -429,6 +430,11 @@ final class PayrollRunsAction
             $this->currentSupplierId($request),
             array_map(static fn (array $row): int => (int) ($row['id'] ?? 0), $items),
         );
+        try {
+            $averageChanges = $this->averageChanges->forRuns($this->currentSupplierId($request), $items);
+        } catch (\Throwable) {
+            $averageChanges = [];
+        }
         foreach ($items as &$item) {
             $status = PayrollTimeValue::string(
                 $item['status'] ?? null,
@@ -479,6 +485,7 @@ final class PayrollRunsAction
              * osoba tiše zůstala bez mzdy i bez měsíčního hlášení.
              */
             $item['missing_employments'] = $missingEmployments[(int) ($item['id'] ?? 0)] ?? [];
+            $item['average_change'] = $averageChanges[(int) ($item['id'] ?? 0)] ?? null;
             $deletion = $this->runs->canDelete(
                 $this->currentSupplierId($request),
                 PayrollTimeValue::int($item['id'] ?? null, 'run.id'),

@@ -8044,6 +8044,36 @@ export interface PayrollRun {
    * je dostane jen jeho oprava. Volitelné kvůli starší odpovědi.
    */
   missing_employments?: PayrollRunMissingEmployment[]
+  average_change?: PayrollRunAverageChange | null
+}
+
+export interface PayrollRunAverageChangeCompensation {
+  input_id: number
+  component_name: string
+  quantity_milliunits: number | null
+  amount_minor: number
+  average_hourly_minor: number | null
+  expected_amount_minor: number | null
+}
+
+export interface PayrollRunAverageChangeEmployment {
+  employment_id: number
+  employee_id: number
+  full_name: string
+  average_changed: boolean
+  frozen_average_hourly_minor: number | null
+  current_average_hourly_minor: number | null
+  compensations: PayrollRunAverageChangeCompensation[]
+}
+
+export interface PayrollRunAverageChange {
+  approved: boolean
+  action: 'request_correction' | 'reopen' | 'refresh_inputs' | null
+  average_changed_count: number
+  compensation_count: number
+  compensation_difference_minor: number
+  compensation_unknown_count: number
+  employments: PayrollRunAverageChangeEmployment[]
 }
 
 export interface PayrollRunMissingEmployment {
