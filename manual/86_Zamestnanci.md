@@ -323,11 +323,17 @@ nemusíte otevírat kartu každého vztahu.
 5. Klikněte na **Upravit … vztahů**. Výsledek ukáže po řádcích, co se upravilo,
    co se vynechalo a proč. Jméno osoby vede na kartu vztahu.
 
-Úprava se zapíše jako oprava platné verze podmínek, stejně jako **Opravit
-platné podmínky** na kartě. Nová verze nevznikne. Vztah se vynechá, když:
+Úprava se zapíše stejně, jak by ji uložila karta vztahu:
 
-- je z platné verze už zúčtovaná nebo vyplacená mzda. Změnu zapište na kartě
-  jako novou verzi podmínek od prvního nezúčtovaného měsíce,
+- **oprava** platné verze podmínek, dokud z ní není zúčtovaná žádná mzda,
+- **nová verze** od prvního dne prvního nezúčtovaného měsíce, je-li z platné
+  verze už zúčtovaná nebo vyplacená mzda. Zúčtované měsíce zůstanou beze
+  změny a nová verze převezme ostatní údaje z té předchozí.
+
+Seznam vztahů tyto vztahy označí štítkem **nová verze od MM/RRRR** a výsledek
+u každého řádku uvede, zda šlo o opravu, nebo o novou verzi. Vztah se vynechá,
+když:
+
 - jeho mzdu za některý měsíc platné verze drží schválený nebo zamčený běh,
   nebo je za něj připravené měsíční hlášení JMHZ. Nejdřív mzdu otevřete
   k opravě,

@@ -225,14 +225,28 @@ final class PayrollEmploymentTermsBulkEditTest extends TestCase
         self::assertNull($this->term($employment)['hourly_rate_minor']);
     }
 
-    public function testSettledRunNeedsNewVersionOnCard(): void
+    /**
+     * Vyplacený leden: karta by chtěla novou verzi od prvního nezúčtovaného
+     * měsíce, a totéž udělá hromadná úprava. Lednová verze zůstane netknutá,
+     * nová od února přenese uložené údaje a nese změněné pole.
+     */
+    public function testSettledMonthCreatesNewVersionFromFirstUnsettledMonth(): void
     {
-        $employment = $this->createDpp('Syntetická Vyplacená', 'DPP-PAID', []);
-        $this->approvedRun($employment, 'paid');
+        $employment = $this->createDpp('Syntetická Vyplacená', 'DPP-PAID', [
+            'effective_from' => '2026-01-01',
+            'contract_signed_on' => '2025-12-20',
+            'planned_start_on' => '2026-01-01',
+            'cz_isco_code' => '43111',
+        ]);
+        $this->approvedRun($employment, 'paid', '2026-01-01');
+
+        $preview = $this->bulk->preview($this->supplierId, '2026-02-01', 'dpp', null);
+        self::assertSame('editable', $preview['items'][0]['state']);
+        self::assertSame('2026-02-01', $preview['items'][0]['new_version_from']);
 
         $result = $this->bulk->apply(
             $this->supplierId,
-            self::PERIOD,
+            '2026-02-01',
             PayrollEmploymentTermsBulkEdit::MODE_FILL,
             ['hourly_rate_minor' => 25000],
             [$employment],
@@ -241,8 +255,50 @@ final class PayrollEmploymentTermsBulkEditTest extends TestCase
             null,
         );
 
-        self::assertSame('period_settled', $result['skipped'][0]['reason']);
-        self::assertNull($this->term($employment)['hourly_rate_minor']);
+        self::assertSame(['applied' => 1, 'skipped' => 0, 'failed' => 0], $result['counts'], json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame('new_version', $result['applied'][0]['kind']);
+        self::assertSame('2026-02-01', $result['applied'][0]['effective_from']);
+        self::assertSame(2, $this->termCount($employment));
+
+        $latest = $this->term($employment);
+        self::assertSame('2026-02-01', $latest['effective_from']);
+        self::assertSame(25000, (int) $latest['hourly_rate_minor']);
+        self::assertSame('43111', $latest['cz_isco_code']);
+        self::assertSame('T', $latest['activity_code']);
+
+        $january = $this->db->pdo()->prepare(
+            'SELECT effective_to, hourly_rate_minor FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ? AND effective_from = ?',
+        );
+        $january->execute([$this->supplierId, $employment, '2026-01-01']);
+        $old = $january->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame('2026-01-31', $old['effective_to']);
+        self::assertNull($old['hourly_rate_minor']);
+    }
+
+    public function testApprovedRunAfterSettledMonthStillLocks(): void
+    {
+        $employment = $this->createDpp('Syntetická Schválená', 'DPP-APPR', [
+            'effective_from' => '2026-01-01',
+            'contract_signed_on' => '2025-12-20',
+            'planned_start_on' => '2026-01-01',
+        ]);
+        $this->approvedRun($employment, 'paid', '2026-01-01');
+        $this->approvedRun($employment, 'approved', '2026-02-01');
+
+        $result = $this->bulk->apply(
+            $this->supplierId,
+            '2026-02-01',
+            PayrollEmploymentTermsBulkEdit::MODE_FILL,
+            ['hourly_rate_minor' => 25000],
+            [$employment],
+            $this->userId,
+            null,
+            null,
+        );
+
+        self::assertSame('run_locked', $result['skipped'][0]['reason']);
+        self::assertSame(1, $this->termCount($employment));
     }
 
     public function testWritePermissionAndSessionAreRequired(): void
@@ -286,14 +342,19 @@ final class PayrollEmploymentTermsBulkEditTest extends TestCase
         return (string) $response->getBody();
     }
 
-    private function approvedRun(int $employmentId, string $status): void
+    private function approvedRun(int $employmentId, string $status, string $period = self::PERIOD): void
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO payroll_runs
                  (supplier_id, period_start, payment_date, status, current_revision_no, row_version)
              VALUES (?, ?, ?, ?, 1, 1)',
-        )->execute([$this->supplierId, self::PERIOD, '2026-07-15', $status]);
+        )->execute([
+            $this->supplierId,
+            $period,
+            (new \DateTimeImmutable($period))->modify('+1 month +14 days')->format('Y-m-d'),
+            $status,
+        ]);
         $runId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             "INSERT INTO payroll_run_revisions
@@ -381,7 +442,7 @@ final class PayrollEmploymentTermsBulkEditTest extends TestCase
     private function term(int $employmentId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis,
+            'SELECT effective_from, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis,
                     probable_hourly_earning_minor, probable_earning_rationale, cz_isco_code, activity_code
                FROM payroll_employment_terms
               WHERE supplier_id = ? AND employment_id = ?

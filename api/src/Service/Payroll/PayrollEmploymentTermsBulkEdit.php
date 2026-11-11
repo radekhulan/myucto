@@ -27,8 +27,9 @@ use PDO;
  *
  * Zápis je OPRAVA platné verze ({@see PayrollEmploymentRepository::correctTerms()})
  * se stejným validátorem jako karta, ne nová verze od dneška. Kde by karta
- * opravu nedovolila a chtěla novou verzi (zúčtované období), vztah se vynechá
- * s důvodem. Stejně tak vztah, jehož verzi zasahuje schválený nebo zamčený běh
+ * opravu nedovolila (z verze je zúčtovaná mzda), vznikne stejně jako na kartě
+ * nová verze ({@see PayrollEmploymentRepository::addTerms()}) od prvního
+ * nezúčtovaného měsíce. Vynechá se vztah, jehož verzi zasahuje schválený nebo zamčený běh
  * či připravené hlášení JMHZ: hromadné akce do historie schválené mzdy nesahají
  * (viz {@see PayrollApprovedPeriodFreeze}).
  */
@@ -113,6 +114,7 @@ final class PayrollEmploymentTermsBulkEdit
                 'state' => $reason === null ? 'editable' : 'excluded',
                 'reason' => $reason,
                 'locked_period' => $this->lockedPeriod($row),
+                'new_version_from' => $reason === null ? $this->newVersionFrom($row) : null,
                 'effective_from' => $row['effective_from'],
                 'remuneration_type' => $row['remuneration_type'],
                 'hourly_rate_minor' => $row['hourly_rate_minor'] === null ? null : (int) $row['hourly_rate_minor'],
@@ -194,26 +196,49 @@ final class PayrollEmploymentTermsBulkEdit
                     $skipped[] = $this->outcome($employmentId, $row, $refusal ?? 'nothing_to_change');
                     continue;
                 }
-                $this->employments->correctTerms(
-                    $supplierId,
-                    $employmentId,
-                    $this->validator->terms(
-                        $body,
-                        is_string($current['cz_isco_code'] ?? null) ? $current['cz_isco_code'] : null,
-                        is_string($current['other_withholding_eligibility'] ?? null)
-                            ? $current['other_withholding_eligibility']
-                            : null,
-                        (string) $row['relation_type'],
-                        // Nezměněná uložená pole nesmí úpravu zablokovat
-                        // číselníkovou kontrolou — stejně jako na kartě.
-                        $current,
-                    ),
-                    (int) $row['row_version'],
-                    $userId,
-                    $ip,
-                    $userAgent,
+                $newVersionFrom = $this->newVersionFrom($row);
+                if ($newVersionFrom !== null) {
+                    $body['effective_from'] = $newVersionFrom;
+                }
+                $terms = $this->validator->terms(
+                    $body,
+                    is_string($current['cz_isco_code'] ?? null) ? $current['cz_isco_code'] : null,
+                    is_string($current['other_withholding_eligibility'] ?? null)
+                        ? $current['other_withholding_eligibility']
+                        : null,
+                    (string) $row['relation_type'],
+                    // Nezměněná uložená pole nesmí úpravu zablokovat
+                    // číselníkovou kontrolou — stejně jako na kartě.
+                    $current,
                 );
-                $applied[] = [...$this->outcome($employmentId, $row, null), 'fields' => $fields];
+                if ($newVersionFrom === null) {
+                    $this->employments->correctTerms(
+                        $supplierId,
+                        $employmentId,
+                        $terms,
+                        (int) $row['row_version'],
+                        $userId,
+                        $ip,
+                        $userAgent,
+                    );
+                } else {
+                    // Tatáž cesta jako „Od data platí nové podmínky" na kartě.
+                    $this->employments->addTerms(
+                        $supplierId,
+                        $employmentId,
+                        $terms,
+                        (int) $row['row_version'],
+                        $userId,
+                        $ip,
+                        $userAgent,
+                    );
+                }
+                $applied[] = [
+                    ...$this->outcome($employmentId, $row, null),
+                    'fields' => $fields,
+                    'kind' => $newVersionFrom === null ? 'correction' : 'new_version',
+                    'effective_from' => (string) $terms['effective_from'],
+                ];
             } catch (PayrollTermsSettledException) {
                 $skipped[] = $this->outcome($employmentId, $row, 'period_settled');
             } catch (\InvalidArgumentException|\DomainException|PayrollEmploymentConflictException|PayrollEmploymentNotFoundException $exception) {
@@ -452,9 +477,9 @@ final class PayrollEmploymentTermsBulkEdit
     /**
      * Proč vztah nejde hromadně upravit; `null` = jde.
      *
-     * Pořadí odpovídá tomu, co by uživatel na kartě musel udělat: zúčtované
-     * období chce novou verzi, zamčený běh nebo připravené JMHZ chce nejdřív
-     * otevřít mzdu k opravě.
+     * Zúčtované období vztah nevyřadí — vede na novou verzi
+     * ({@see newVersionFrom()}). Zamčený běh nebo připravené JMHZ chce
+     * nejdřív otevřít mzdu k opravě.
      *
      * @param array<string,mixed> $row
      */
@@ -471,9 +496,6 @@ final class PayrollEmploymentTermsBulkEdit
         if ((string) $row['status'] === 'ended') {
             return 'employment_closed';
         }
-        if ($row['settled_from'] !== null) {
-            return 'period_settled';
-        }
         if ($row['report_prepared_from'] !== null) {
             return 'report_prepared';
         }
@@ -484,10 +506,31 @@ final class PayrollEmploymentTermsBulkEdit
         return null;
     }
 
+    /**
+     * Od kdy začne nová verze, když z platné verze už je zúčtovaná mzda;
+     * `null` = platnou verzi jde opravit.
+     *
+     * Totéž rozhodnutí dělá karta vztahu: opravit jde jen verzi, ze které
+     * nikdo nic nevyplatil, jinak nová verze od prvního dne prvního
+     * nezúčtovaného měsíce ({@see PayrollEmploymentRepository::settledThrough()}).
+     *
+     * @param array<string,mixed> $row
+     */
+    private function newVersionFrom(array $row): ?string
+    {
+        if ($row['settled_from'] === null || $row['settled_through'] === null) {
+            return null;
+        }
+
+        return (new \DateTimeImmutable((string) $row['settled_through']))
+            ->modify('first day of next month')
+            ->format('Y-m-d');
+    }
+
     /** @param array<string,mixed> $row */
     private function lockedPeriod(array $row): ?string
     {
-        foreach (['settled_from', 'report_prepared_from', 'locked_from'] as $key) {
+        foreach (['report_prepared_from', 'locked_from'] as $key) {
             if ($row[$key] !== null) {
                 return (string) $row[$key];
             }
@@ -526,8 +569,8 @@ final class PayrollEmploymentTermsBulkEdit
             $filter .= ' AND employment.id IN (' . implode(', ', array_fill(0, count($employmentIds), '?')) . ')';
             $params = [...$params, ...$employmentIds];
         }
-        $lock = static fn (string $condition): string =>
-            "(SELECT MIN(run_employment.period_start)
+        $lock = static fn (string $condition, string $aggregate = 'MIN'): string =>
+            "(SELECT {$aggregate}(run_employment.period_start)
                 FROM payroll_run_employments run_employment
                 JOIN payroll_run_revisions revision
                   ON revision.supplier_id = run_employment.supplier_id
@@ -540,9 +583,14 @@ final class PayrollEmploymentTermsBulkEdit
                  AND run_employment.period_start >= DATE_FORMAT(term.effective_from, '%Y-%m-01')
                  AND (term.effective_to IS NULL OR run_employment.period_start <= term.effective_to)
                  AND {$condition})";
-        $settled = $lock("run.status IN ('posted', 'payment_ready', 'paid', 'closed')");
+        // Zúčtované stavy jsou tytéž jako v PayrollEmploymentRepository::assertTermsOpenFrom()
+        // a settledThrough(); zápis je tam pod zámkem ověří znovu. Zúčtovaný běh
+        // vede na novou verzi, ne na vynechání — proto ho zámky níže nepočítají.
+        $settledStatuses = "'posted', 'payment_ready', 'paid', 'closed'";
+        $settled = $lock("run.status IN ({$settledStatuses})");
+        $settledThrough = $lock("run.status IN ({$settledStatuses})", 'MAX');
         $reportPrepared = $lock(
-            "run.status NOT IN ('correction_pending', 'reopened', 'cancelled')
+            "run.status NOT IN ('correction_pending', 'reopened', 'cancelled', {$settledStatuses})
                  AND EXISTS (
                      SELECT 1
                        FROM payroll_jmhz_preparation_snapshots snapshot
@@ -551,7 +599,7 @@ final class PayrollEmploymentTermsBulkEdit
                  )",
         );
         $locked = $lock(
-            "run.status NOT IN ('correction_pending', 'reopened', 'cancelled')
+            "run.status NOT IN ('correction_pending', 'reopened', 'cancelled', {$settledStatuses})
                  AND (run.status IN ('inputs_locked', 'approved') OR revision.status = 'approved')",
         );
         $stmt = $this->db->pdo()->prepare(
@@ -566,6 +614,7 @@ final class PayrollEmploymentTermsBulkEdit
                              OR COALESCE(term.monthly_gross_minor, employment.monthly_gross_minor) IS NULL)
                     ) AS rate_empty,
                     {$settled} AS settled_from,
+                    {$settledThrough} AS settled_through,
                     {$reportPrepared} AS report_prepared_from,
                     {$locked} AS locked_from
                FROM payroll_employments employment

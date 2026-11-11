@@ -3978,7 +3978,8 @@
     },
     "terms_bulk": {
       "title": "Edit terms of selected employments",
-      "intro": "The chosen values are written into the current version of the selected employments' terms as a correction, exactly as on the employment card. No new terms version is created. Employments for which the card would require a new version, or which are held by approved payroll, are skipped with a reason.",
+      "intro": "The chosen values are written exactly as on the employment card: as a correction of the current terms version or, when payroll from it is already posted, as a new version from the first unsettled month. Employments held by approved or locked payroll are skipped with a reason.",
+      "new_version_badge": "new version from {month}",
       "period": "Employments lasting in month",
       "relation_type": "Relation type",
       "relation_all": "All types",
@@ -4028,13 +4029,14 @@
         "skipped": "Skipped",
         "failed": "Failed"
       },
-      "row_ok": "updated",
+      "row_correction": "correction",
+      "row_new_version": "new version from {month}",
       "reason": {
         "terms_missing": "the employment has no terms version",
         "later_terms": "the current terms version starts after the selected month",
         "employment_closed": "the employment has ended",
         "employment_not_in_period": "the employment does not last in the selected month",
-        "period_settled": "payroll for the version's period is posted or paid, record the change on the card as a new terms version",
+        "period_settled": "payroll was posted in the meantime, run the edit again",
         "report_prepared": "the JMHZ monthly report for {period} is prepared, reopen the payroll for correction first",
         "run_locked": "payroll for {period} is approved or locked, reopen it for correction first",
         "hourly_not_supported": "hourly remuneration is not available for this relation type",

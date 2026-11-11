@@ -207,6 +207,11 @@ function cardLink(employmentId: number) {
   return { name: 'payroll-people', query: { employment: String(employmentId), panel: 'employment_terms' } }
 }
 
+/** „2026-02-01" → „02/2026". */
+function monthLabel(date: string): string {
+  return `${date.slice(5, 7)}/${date.slice(0, 4)}`
+}
+
 function personName(item: { employment_id: number, full_name: string | null }): string {
   return item.full_name ?? String(item.employment_id)
 }
@@ -307,6 +312,11 @@ onMounted(async () => {
                 <span class="truncate font-medium">{{ item.full_name }}</span>
                 <span class="text-xs text-neutral-500">{{ item.employment_code }} · {{ t(`payroll.people.relations.${item.relation_type}`) }}</span>
               </label>
+              <span
+                v-if="item.new_version_from"
+                class="rounded-full bg-warning-50 px-2 py-0.5 text-xs text-warning-700"
+                :data-test="`terms-bulk-new-version-${item.employment_id}`"
+              >{{ t('payroll.terms_bulk.new_version_badge', { month: monthLabel(item.new_version_from) }) }}</span>
               <span class="ml-auto text-xs text-neutral-500">
                 {{ t('payroll.terms_bulk.current', {
                   rate: formatMinor(item.hourly_rate_minor),
@@ -508,7 +518,10 @@ onMounted(async () => {
         </div>
         <ul class="max-h-64 space-y-1 overflow-y-auto text-xs" data-test="terms-bulk-rows">
           <li v-for="item in result.applied" :key="`a${item.employment_id}`" class="text-success-700">
-            <span class="font-medium">{{ personName(item) }}</span>: {{ t('payroll.terms_bulk.row_ok') }}
+            <span class="font-medium">{{ personName(item) }}</span>:
+            {{ item.kind === 'new_version'
+              ? t('payroll.terms_bulk.row_new_version', { month: monthLabel(item.effective_from) })
+              : t('payroll.terms_bulk.row_correction') }}
           </li>
           <li v-for="item in result.skipped" :key="`s${item.employment_id}`" class="text-warning-800">
             <RouterLink :to="cardLink(item.employment_id)" class="font-medium underline" @click="emit('close')">{{ personName(item) }}</RouterLink>:

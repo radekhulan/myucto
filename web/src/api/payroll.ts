@@ -1097,6 +1097,8 @@ export interface PayrollTermsBulkPreviewItem {
   state: 'editable' | 'excluded'
   reason: string | null
   locked_period: string | null
+  /** Z platné verze je zúčtovaná mzda: vznikne nová verze od tohoto dne. */
+  new_version_from: string | null
   effective_from: string | null
   remuneration_type: 'monthly' | 'hourly' | null
   hourly_rate_minor: number | null
@@ -1138,7 +1140,11 @@ export interface PayrollTermsBulkResult {
   period_start: string
   mode: PayrollTermsBulkMode
   counts: { applied: number, skipped: number, failed: number }
-  applied: Array<PayrollTermsBulkOutcome & { fields: string[] }>
+  applied: Array<PayrollTermsBulkOutcome & {
+    fields: string[]
+    kind: 'correction' | 'new_version'
+    effective_from: string
+  }>
   skipped: Array<PayrollTermsBulkOutcome & { reason: string }>
   failed: Array<PayrollTermsBulkOutcome & { message: string }>
 }

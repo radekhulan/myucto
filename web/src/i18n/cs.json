@@ -3978,7 +3978,8 @@
     },
     "terms_bulk": {
       "title": "Upravit podmínky vybraných vztahů",
-      "intro": "Zvolené údaje se zapíší do platné verze podmínek vybraných vztahů jako oprava, stejně jako na kartě vztahu. Nová verze podmínek nevzniká. Vztahy, u kterých by karta chtěla novou verzi nebo které drží schválená mzda, se vynechají s důvodem.",
+      "intro": "Zvolené údaje se zapíší stejně jako na kartě vztahu: jako oprava platné verze podmínek, nebo, je-li z ní už zúčtovaná mzda, jako nová verze od prvního nezúčtovaného měsíce. Vztahy, které drží schválená nebo zamčená mzda, se vynechají s důvodem.",
+      "new_version_badge": "nová verze od {month}",
       "period": "Vztahy trvající v měsíci",
       "relation_type": "Druh vztahu",
       "relation_all": "Všechny druhy",
@@ -4028,13 +4029,14 @@
         "skipped": "Vynecháno",
         "failed": "Chyba"
       },
-      "row_ok": "upraveno",
+      "row_correction": "oprava",
+      "row_new_version": "nová verze od {month}",
       "reason": {
         "terms_missing": "vztah nemá žádnou verzi podmínek",
         "later_terms": "platná verze podmínek začíná až po zvoleném měsíci",
         "employment_closed": "vztah je ukončený",
         "employment_not_in_period": "vztah ve zvoleném měsíci netrvá",
-        "period_settled": "mzda je za období verze zaúčtovaná nebo vyplacená, změnu zapište na kartě jako novou verzi podmínek",
+        "period_settled": "mzda se mezitím zaúčtovala, spusťte úpravu znovu",
         "report_prepared": "měsíční hlášení JMHZ za {period} je připravené, nejdřív otevřete mzdu k opravě",
         "run_locked": "mzda za {period} je schválená nebo zamčená, nejdřív ji otevřete k opravě",
         "hourly_not_supported": "u tohoto druhu vztahu hodinové odměňování nejde",

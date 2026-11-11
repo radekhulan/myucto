@@ -39,6 +39,7 @@ function item(id: number, name: string, overrides: Record<string, unknown> = {})
     state: 'editable',
     reason: null,
     locked_period: null,
+    new_version_from: null,
     effective_from: '2026-06-01',
     remuneration_type: null,
     hourly_rate_minor: null,
@@ -77,7 +78,7 @@ describe('PayrollTermsBulkEditDialog', () => {
       period_start: '2026-08-01',
       mode: 'fill',
       counts: { applied: 1, skipped: 0, failed: 0 },
-      applied: [{ employment_id: 12, employee_id: 112, full_name: 'Syntetická osoba', fields: ['hourly_rate'] }],
+      applied: [{ employment_id: 12, employee_id: 112, full_name: 'Syntetická osoba', fields: ['hourly_rate'], kind: 'correction', effective_from: '2026-06-01' }],
       skipped: [],
       failed: [],
     })
@@ -102,6 +103,36 @@ describe('PayrollTermsBulkEditDialog', () => {
       employment_ids: [12],
     })
     expect(wrapper.get('[data-test="terms-bulk-applied"]').text()).toBe('1')
+  })
+
+  it('u zúčtované verze ohlásí novou verzi od měsíce a výsledek ji odliší od opravy', async () => {
+    const data = preview()
+    data.items[0] = item(12, 'Syntetická osoba', { new_version_from: '2026-09-01' })
+    m.termsBulkPreview.mockResolvedValue(data)
+    m.termsBulkApply.mockResolvedValue({
+      period_start: '2026-08-01',
+      mode: 'fill',
+      counts: { applied: 2, skipped: 0, failed: 0 },
+      applied: [
+        { employment_id: 12, employee_id: 112, full_name: 'Syntetická osoba', fields: ['hourly_rate'], kind: 'new_version', effective_from: '2026-09-01' },
+        { employment_id: 13, employee_id: 113, full_name: 'Druhá syntetická osoba', fields: ['hourly_rate'], kind: 'correction', effective_from: '2026-06-01' },
+      ],
+      skipped: [],
+      failed: [],
+    })
+
+    const wrapper = mount(PayrollTermsBulkEditDialog, { ...MOUNT, props: { periodStart: '2026-08-01' } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="terms-bulk-new-version-12"]').text()).toContain('09/2026')
+    expect(wrapper.find('[data-test="terms-bulk-new-version-13"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="terms-bulk-hourly-rate"]').setValue('250')
+    await wrapper.get('[data-test="terms-bulk-apply"]').trigger('click')
+    await flushPromises()
+
+    const rows = wrapper.get('[data-test="terms-bulk-rows"]').text()
+    expect(rows).toContain('payroll.terms_bulk.row_new_version 09/2026')
+    expect(rows).toContain('payroll.terms_bulk.row_correction')
   })
 
   it('pravděpodobný výdělek bez odůvodnění neodešle', async () => {
