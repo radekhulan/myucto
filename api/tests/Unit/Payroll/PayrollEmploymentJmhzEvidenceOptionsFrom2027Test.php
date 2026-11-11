@@ -41,9 +41,10 @@ final class PayrollEmploymentJmhzEvidenceOptionsFrom2027Test extends TestCase
         self::assertSame(['2', '3', '4'], $types['5']);
         self::assertStringContainsString('§ 98', $from['free_access_reason_codes'][0]['label']);
 
-        // Postavení v zaměstnání 2027 z číselníku ČSÚ, 2026 ze slovníku 1.4.1.6.
-        self::assertContains('2219', $codes($from['employment_status_codes']));
-        self::assertNotContains('2119', $codes($from['employment_status_codes']));
+        // Postavení v zaměstnání 2027 = výčet EDV REGZEC27 1.5.0.3 (2119), shodný s 2026;
+        // 2219 z iSMS ČSÚ je tisková chyba sdělení č. 401/2024 Sb.
+        self::assertContains('2119', $codes($from['employment_status_codes']));
+        self::assertNotContains('2219', $codes($from['employment_status_codes']));
         self::assertContains('2119', $codes($options['employment_status_codes']));
         self::assertCount(34, $from['employment_status_codes']);
     }

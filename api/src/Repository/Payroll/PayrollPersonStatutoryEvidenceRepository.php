@@ -368,6 +368,18 @@ final class PayrollPersonStatutoryEvidenceRepository
     ) {}
 
     /**
+     * Musí řada sekce navazovat den po dni (bez děr)? Hromadná doplnění podle
+     * toho volí začátek věty za skončenou poslední větou.
+     */
+    public static function isContiguous(string $section): bool
+    {
+        $spec = self::EDITABLE[$section]
+            ?? throw new InvalidArgumentException("Neznámá sekce zákonné evidence {$section}.");
+
+        return ($spec['timeline'] ?? 'contiguous') === 'contiguous';
+    }
+
+    /**
      * Tabulka editovatelné sekce — pro dotazy nad celou množinou osob
      * (hromadné doplnění evidence), aby jméno tabulky nežilo na dvou místech.
      */

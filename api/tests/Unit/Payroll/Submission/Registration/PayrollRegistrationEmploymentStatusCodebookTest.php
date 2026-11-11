@@ -14,8 +14,8 @@ use PHPUnit\Framework\TestCase;
  * Kód z ní musí být řetězec, jinak formulář uložený kód „1111" v nabídce
  * nenajde a ukáže ho jako „kód mimo číselník" vedle téže platné volby.
  *
- * Pro REGZEC 2027 je zdrojem číselník ČSÚ 80145, protože slovník 1.5.0.3 NKPZ
- * nevkládá. Od vložené verze 1.4.1.6 se liší jediným listem (2119 → 2219).
+ * REGZEC 2025 i 2027 berou týž výčet EDV (list 2119). Export ČSÚ 80145 nese
+ * místo něj 2219, tiskovou chybu sdělení č. 401/2024 Sb.; jinak se shoduje.
  */
 final class PayrollRegistrationEmploymentStatusCodebookTest extends TestCase
 {
@@ -37,9 +37,14 @@ final class PayrollRegistrationEmploymentStatusCodebookTest extends TestCase
         }
     }
 
-    public function testOptions2027AreExactlyCsuLeaves(): void
+    /**
+     * Nabídka 2027 = nabídka 2026 (EDV REGZEC27 1.5.0.3, list „CIS Klasif.
+     * postavení v zaměst", řádek 41: 2119). Od exportu ČSÚ se liší jen
+     * tiskovou chybou 2219 za 2119.
+     */
+    public function testOptions2027EqualEdvListAndDifferFromCsuOnlyByTypo(): void
     {
-        $expected = [];
+        $csu = [];
         $handle = fopen(self::CSU_EXPORT, 'rb');
         self::assertIsResource($handle);
         $header = fgetcsv($handle, null, ',', '"', '');
@@ -47,38 +52,37 @@ final class PayrollRegistrationEmploymentStatusCodebookTest extends TestCase
         while (($row = fgetcsv($handle, null, ',', '"', '')) !== false) {
             $row = array_combine($header, $row);
             if (preg_match('/\A\d{4}\z/D', $row['chodnota']) === 1) {
-                $expected[$row['chodnota']] = $row['text'];
+                $csu[] = $row['chodnota'];
             }
         }
         fclose($handle);
-        ksort($expected, SORT_STRING);
 
-        $options = PayrollRegistrationEmploymentStatusCodebook::options(JmhzSpecVersion::V2027);
-
-        self::assertCount(34, $options);
-        self::assertSame(
-            array_map(
-                static fn (string|int $code, string $label): array => ['code' => (string) $code, 'label' => $label],
-                array_keys($expected),
-                array_values($expected),
-            ),
-            $options,
-        );
+        $options2027 = PayrollRegistrationEmploymentStatusCodebook::options(JmhzSpecVersion::V2027);
+        self::assertSame(PayrollRegistrationEmploymentStatusCodebook::options(JmhzSpecVersion::V2026), $options2027);
+        self::assertCount(34, $options2027);
+        $codes = array_column($options2027, 'code');
+        self::assertSame(['2119'], array_values(array_diff($codes, $csu)));
+        self::assertSame(['2219'], array_values(array_diff($csu, $codes)));
+        self::assertCount(34, PayrollRegistrationNkpzClassification::leaves());
     }
 
-    public function testVersionsDifferOnlyInEmployerLeaf(): void
+    public function testBothVintagesUse2119AndNormalizeTheCsuTypo(): void
     {
-        $codes = static fn (JmhzSpecVersion $version): array => array_column(
-            PayrollRegistrationEmploymentStatusCodebook::options($version),
-            'code',
-        );
+        foreach ([JmhzSpecVersion::V2026, JmhzSpecVersion::V2027] as $version) {
+            self::assertTrue(PayrollRegistrationEmploymentStatusCodebook::isKnown('2119', $version));
+            self::assertFalse(PayrollRegistrationEmploymentStatusCodebook::isKnown('2219', $version));
+        }
+        self::assertSame('2119', PayrollRegistrationEmploymentStatusCodebook::normalize('2219'));
+        self::assertSame('1111', PayrollRegistrationEmploymentStatusCodebook::normalize('1111'));
+        self::assertNull(PayrollRegistrationEmploymentStatusCodebook::normalize(null));
+    }
 
-        self::assertSame(['2119'], array_values(array_diff($codes(JmhzSpecVersion::V2026), $codes(JmhzSpecVersion::V2027))));
-        self::assertSame(['2219'], array_values(array_diff($codes(JmhzSpecVersion::V2027), $codes(JmhzSpecVersion::V2026))));
-        self::assertTrue(PayrollRegistrationEmploymentStatusCodebook::isKnown('2119'));
-        self::assertFalse(PayrollRegistrationEmploymentStatusCodebook::isKnown('2119', JmhzSpecVersion::V2027));
-        self::assertTrue(PayrollRegistrationEmploymentStatusCodebook::isKnown('2219', JmhzSpecVersion::V2027));
-        self::assertFalse(PayrollRegistrationEmploymentStatusCodebook::isKnown('2219'));
+    public function testStatutoryBodyWithoutContractIsSuggested2210(): void
+    {
+        self::assertSame('2210', PayrollRegistrationEmploymentStatusCodebook::suggest('statutory_body', 'S', false));
+        self::assertNull(PayrollRegistrationEmploymentStatusCodebook::suggest('statutory_body', '1', false));
+        self::assertSame('1111', PayrollRegistrationEmploymentStatusCodebook::suggest('employment', '1', false));
+        self::assertTrue(PayrollRegistrationEmploymentStatusCodebook::isKnown('2210', JmhzSpecVersion::V2027));
     }
 
     public function testDecisiveDateSelectsVersion(): void

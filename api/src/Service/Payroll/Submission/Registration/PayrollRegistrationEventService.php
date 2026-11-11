@@ -3257,7 +3257,13 @@ final readonly class PayrollRegistrationEventService
             };
         }
         // Kód NKPZ se proti číselníku ověří až nad finálními daty, viz
-        // assertEmploymentStatusCodeKnown().
+        // assertEmploymentStatusCodeKnown(). 2219 z iSMS ČSÚ je tisková
+        // chyba za 2119 (EDV REGZEC27 1.5.0.3), převádí se jako v profilu A1.
+        if (isset($result['employment_status_code'])) {
+            $result['employment_status_code'] = PayrollRegistrationEmploymentStatusCodebook::normalize(
+                (string) $result['employment_status_code'],
+            );
+        }
         if (isset($result['profession_code'])
             && !PayrollRegistrationProfessionCode::isRegistrable((string) $result['profession_code'])
         ) {

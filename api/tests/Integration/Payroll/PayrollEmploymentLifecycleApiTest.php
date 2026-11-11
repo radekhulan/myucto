@@ -831,6 +831,41 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
     }
 
     /**
+     * Vyřazený kód CZ-ISCO ČSSZ v registraci nepřijme: nově zadat ho nejde,
+     * uložený historický kód uložení podmínek nezablokuje (jen varuje).
+     */
+    public function testCzIscoRejectsNewlyEnteredRetiredCodeButKeepsStoredOne(): void
+    {
+        $employment = $this->create($this->employeeId, 'ISCO-2', 'employment', true);
+        $rejected = $this->action->addTerms(
+            $this->request(
+                'PUT',
+                "/api/payroll/employments/{$employment['id']}/terms",
+                [
+                    'row_version' => $employment['row_version'],
+                    ...$this->termsPayload(true, '2026-03-01'),
+                    'cz_isco_code' => '32114',
+                ],
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(422, $rejected->getStatusCode(), (string) $rejected->getBody());
+        self::assertStringContainsString('vyřazený', $this->json($rejected)['error']['message']);
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET cz_isco_code = ?
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute(['32114', $this->supplierId, (int) $employment['id']]);
+        $kept = $this->terms($employment, [
+            ...$this->termsPayload(true, '2026-04-01'),
+            'cz_isco_code' => '32114',
+            'change_reason' => 'Změna bez CZ-ISCO',
+        ]);
+        self::assertSame('32114', $kept['terms'][0]['cz_isco_code']);
+    }
+
+    /**
      * Zpětně potvrzený nástup nesmí zůstat schovaný pod událostí založení.
      *
      * Vztah převzatý z jiného zpracování se do systému zapisuje až po nástupu:

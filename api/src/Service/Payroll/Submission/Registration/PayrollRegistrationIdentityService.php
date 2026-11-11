@@ -1748,6 +1748,7 @@ final readonly class PayrollRegistrationIdentityService
              * ČSSZ se nepřepisuje.
              */
             $backdatePerson = false;
+            $personCovered = false;
             if (!$replaceExisting && $personIdentifier !== null) {
                 $active = $this->repository->activePersonExternalId(
                     $supplierId,
@@ -1755,15 +1756,21 @@ final readonly class PayrollRegistrationIdentityService
                     $environment,
                     'ik_mpsv',
                 );
-                $backdatePerson = $active !== null
-                    && $active['source_kind'] === 'verified_manual_import'
-                    && $active['valid_from'] > $validFrom
+                $matches = $active !== null
                     && $this->activePersonExternalIdMatches(
                         $supplierId,
                         $employment['employee_id'],
                         $environment,
                         $personIdentifier,
                     ) === true;
+                $backdatePerson = $matches
+                    && $active['source_kind'] === 'verified_manual_import'
+                    && $active['valid_from'] > $validFrom;
+                // Totéž OIČ opsané k POZDĚJŠÍ dohodě (brigádník s další DPP)
+                // už osobu k jejímu dni pokrývá: nic se nepřepisuje, zapíše
+                // se jen ID PPV nového vztahu. Dřív to končilo konfliktem
+                // „stejná hodnota, jiný den".
+                $personCovered = $matches && $active['valid_from'] <= $validFrom;
             }
             if ($backdatePerson) {
                 $this->discardManualPersonIdentifier(
@@ -1789,7 +1796,7 @@ final readonly class PayrollRegistrationIdentityService
                 }
             }
 
-            $person = $personIdentifier === null
+            $person = $personIdentifier === null || $personCovered
                 ? null
                 : $this->assignPersonExternalId(
                     $supplierId,
@@ -2831,6 +2838,16 @@ final readonly class PayrollRegistrationIdentityService
                 'Autoritativní profil REGZEC A1 nemá platný objekt.',
             );
         }
+        // Profil uložený 3. až 11. 11. 2026 pro nástup v roce 2027 mohl nést
+        // kód 2219 z iSMS ČSÚ; je to tisková chyba za 2119 (EDV REGZEC27
+        // 1.5.0.3). Převádí se při čtení, data se nemění.
+        if (is_array($profile['employment'] ?? null)
+            && is_string($profile['employment']['employment_status_code'] ?? null)
+        ) {
+            $profile['employment']['employment_status_code'] = PayrollRegistrationEmploymentStatusCodebook::normalize(
+                $profile['employment']['employment_status_code'],
+            );
+        }
 
         return $profile;
     }
@@ -3294,6 +3311,12 @@ final readonly class PayrollRegistrationIdentityService
             throw new \InvalidArgumentException(self::fieldMessage(
                 $key,
                 'musí být dvoupísmenný kód státu, například CZ nebo SK.',
+            ));
+        }
+        if (!PayrollRegistrationCodebooks::isCountry($value)) {
+            throw new \InvalidArgumentException(self::fieldMessage(
+                $key,
+                'není v číselníku států, teď je „' . $value . '". Vyberte stát z nabídky.',
             ));
         }
 

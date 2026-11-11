@@ -434,7 +434,7 @@ final class PayrollRegistrationA1SnapshotBuilder
             );
         }
 
-        return [
+        $employment = [
             'activity_code' => $this->text($input, 'activity_code', 3),
             'relationship_detail_code' => $this->optionalText(
                 $input,
@@ -457,6 +457,54 @@ final class PayrollRegistrationA1SnapshotBuilder
             'position_name' => $this->optionalText($input, 'position_name', 255),
             'leadership' => $this->optionalBool($input, 'leadership'),
         ];
+        $this->assertCodebookValues($employment, $effectiveOn);
+
+        return $employment;
+    }
+
+    /**
+     * Obec pracoviště a CZ-ISCO proti číselníkům, ze kterých je EDV přebírá
+     * ({@see PayrollRegistrationA1CodebookValues}).
+     *
+     * @param array<string,mixed> $employment
+     */
+    private function assertCodebookValues(array $employment, string $effectiveOn): void
+    {
+        $municipality = $employment['workplace_municipality_code'];
+        if (is_string($municipality) && preg_match('/^\d{6}$/D', $municipality) === 1) {
+            $problem = PayrollRegistrationA1CodebookValues::municipalityProblem($municipality, $effectiveOn);
+            if ($problem !== null) {
+                $this->malformed(
+                    'workplace_municipality_code',
+                    $problem['fallback']
+                        ? 'není v číselníku obcí CISOB, teď je „' . $municipality . '". Číselník obcí pro rok '
+                            . substr($effectiveOn, 0, 4) . ' ještě není vyhlášený a kód neplatil ani k '
+                            . $problem['checked_on'] . '. Vyberte kód obce z nabídky.'
+                        : 'není v číselníku obcí CISOB k ' . $problem['checked_on'] . ', teď je „'
+                            . $municipality . '". Vyberte kód obce z nabídky.',
+                    'codebook',
+                    ['value' => $municipality, 'codebook' => 'CISOB'],
+                );
+            }
+        }
+        $profession = $employment['profession_code'];
+        if (is_string($profession)
+            && PayrollRegistrationProfessionCode::isRegistrable($profession)
+            && !in_array($profession, PayrollRegistrationSpecVersionRules::PROFESSION_CODES_2027, true)
+        ) {
+            $status = PayrollRegistrationA1CodebookValues::professionProblem($profession);
+            if ($status !== null) {
+                $this->malformed(
+                    'profession_code',
+                    ($status === 'retired'
+                        ? 'je v klasifikaci CZ-ISCO vyřazený'
+                        : 'není v klasifikaci CZ-ISCO')
+                        . ', teď je „' . $profession . '". Vyberte platnou kategorii CZ-ISCO z nabídky na kartě vztahu.',
+                    'codebook',
+                    ['value' => $profession, 'codebook' => 'CZ-ISCO'],
+                );
+            }
+        }
     }
 
     /** @param array<string,mixed> $employment @return array<string,mixed> */
@@ -777,7 +825,9 @@ final class PayrollRegistrationA1SnapshotBuilder
      */
     private function employmentStatus(array $input): ?string
     {
-        $value = $this->optionalText($input, 'employment_status_code', 16);
+        $value = PayrollRegistrationEmploymentStatusCodebook::normalize(
+            $this->optionalText($input, 'employment_status_code', 16),
+        );
         if ($value === null) {
             return null;
         }

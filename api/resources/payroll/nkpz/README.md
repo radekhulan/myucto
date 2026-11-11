@@ -1,14 +1,15 @@
 # Národní klasifikace postavení v zaměstnání (NKPZ)
 
-Připnutý číselník ČSÚ 80145 (`NKPZ_KL`, sdělení ČSÚ č. 401/2024 Sb.) pro
-postavení v zaměstnání v registraci zaměstnance (REGZEC `job/@relat`, ID 10249)
-s rozhodným datem od 1. 1. 2027.
+Připnutý číselník ČSÚ 80145 (`NKPZ_KL`, sdělení ČSÚ č. 401/2024 Sb.) k postavení
+v zaměstnání v registraci zaměstnance (REGZEC `job/@relat`, ID 10249).
 
-Datový slovník JMHZ 1.4.1.6 nesl NKPZ vloženou (65 položek) a z ní dál čte
-REGZEC 2025. Slovník 1.5.0.3 ji vede jen jako externí referenci
-„CIS Klasif. postavení v zaměstn" bez položek, proto REGZEC 2027 bere
-oficiální číselník ČSÚ. Ročník volí `PayrollRegistrationEmploymentStatusCodebook`
-podle rozhodného data (`JmhzSpecVersion`).
+**Podání tento číselník nepoužívá, je jen reference.** REGZEC 2025 i REGZEC 2027
+berou postavení v zaměstnání z výčtu vloženého ve slovníku 1.4.1.6
+(`PayrollRegistrationEmploymentStatusCodebook`), který je řádek po řádku shodný
+s listem „CIS Klasif. postavení v zaměst" v EDV REGZEC27 1.5.0.3 (závazná
+definice věty ČSSZ/MPSV) i s číselníkem MPSV
+`DS_CIS_Klasifikace_postaveni_v_zamestnani`. Export ČSÚ zůstává jako hlídač
+příchodu nového sdělení ČSÚ.
 
 | Zdroj | Soubor | Původ | SHA-256 |
 |---|---|---|---|
@@ -26,9 +27,12 @@ Listy se liší jediným kódem. Slovník 1.4.1.6 má
 2119 „Zaměstnavatelé – fyzické osoby jinde neuvedené", sdělení č. 401/2024 Sb.
 i iSMS ČSÚ uvádějí tutéž položku pod kódem 2219 (iSMS ji věší pod 221).
 Kromě toho se liší název nelistové položky 134 („… č. 361/2003 Sb., …").
-U zaměstnanců se kód zaměstnavatele fyzické osoby prakticky nepoužije, rozdíl
-je ale vědomý: REGZEC 2025 drží verzi, kterou ČSSZ vydala ke slovníku 1.4.1.6,
-REGZEC 2027 oficiální číselník.
+Kód 2219 je tisková chyba přílohy sdělení č. 401/2024 Sb. (řádek stojí uvnitř
+bloku 211 fyzických osob, vzor xx19 „jinde neuvedené" je i u 3119 a 5119),
+kterou převzala iSMS ČSÚ a podle prvních číslic ji zařadila pod 221. Systematická
+část NKPZ ČSÚ (`nkpz_systematicka_cast.xlsx`), EDV REGZEC25 1.4.0.6 i REGZEC27
+1.5.0.3 a číselník MPSV mají 2119. Podání proto posílá 2119 v obou ročnících
+a uložený kód 2219 při čtení převádí na 2119.
 
 ## Obnova
 

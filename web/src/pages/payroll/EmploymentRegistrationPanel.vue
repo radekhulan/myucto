@@ -571,8 +571,8 @@ const a1InsurerOptions = computed(() => {
  * Postavení v zaměstnání — jen čtyřmístné kódy NKPZ (ČSSZ kratší odmítá).
  * U druhu činnosti 15 a 16 číselník podle EDV zužuje na 1341 a 1342. Uložený
  * kód mimo nabídku (dřív se ukládaly dva znaky) se ukáže označený, aby ho
- * první uložení tiše nesmazalo. Nástup od 1. 1. 2027 bere číselník ČSÚ
- * (REGZEC 2027), dřívější vložený ze slovníku 1.4.1.6.
+ * první uložení tiše nesmazalo. Nástup od 1. 1. 2027 bere nabídku `from_2027`
+ * (REGZEC 2027); podle EDV 1.5.0.3 je shodná s dřívější (list 2119).
  */
 const a1EmploymentStatusOptions = computed(() => {
   const activity = a1Form.value.employment.activity_code

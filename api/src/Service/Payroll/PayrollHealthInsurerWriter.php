@@ -70,12 +70,20 @@ final class PayrollHealthInsurerWriter
                 'evidence_note' => null,
             ];
         } elseif ($covering === null) {
-            if ($rows !== []) {
+            // Všechny věty skončily před měsícem doplnění (pojištění vedené jen
+            // za předchozí dohodu brigádníka): naváže se věta bez konce,
+            // existující se nemění. Stejné pravidlo drží hromadné zákonné
+            // údaje (PayrollStatutoryEvidenceBulkDefaults). Mezera MEZI větami
+            // (pozdější věta existuje) zůstává na člověku.
+            if ($rows !== [] && !self::allEndBefore($rows, $monthStart)) {
                 throw new \DomainException(
                     "Zdravotní pojištění k {$monthStart} v evidenci vedené není a navazuje na jiné období. "
                     . 'Zapište pojišťovnu ručně v zákonné evidenci osoby.',
                 );
             }
+            // Řada pojištění navazuje den po dni: věta za skončenou poslední
+            // začne hned po ní.
+            $lastEnd = self::latestEnd($rows);
             $rows[] = [
                 'jurisdiction' => 'czech_regime_verified',
                 'foreign_country_code' => null,
@@ -84,7 +92,9 @@ final class PayrollHealthInsurerWriter
                 'insurer_code' => $insurerCode,
                 'insurer_evidence_reference' => null,
                 'health_evidence_document_id' => null,
-                'effective_from' => $monthStart,
+                'effective_from' => $lastEnd === null
+                    ? $monthStart
+                    : (new \DateTimeImmutable($lastEnd))->modify('+1 day')->format('Y-m-d'),
                 'effective_to' => null,
                 'evidence_note' => null,
             ];
@@ -125,6 +135,33 @@ final class PayrollHealthInsurerWriter
             $ip,
             $userAgent,
         );
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private static function latestEnd(array $rows): ?string
+    {
+        $latest = null;
+        foreach ($rows as $row) {
+            $to = $row['effective_to'] ?? null;
+            if (is_string($to) && $to !== '' && ($latest === null || $to > $latest)) {
+                $latest = $to;
+            }
+        }
+
+        return $latest;
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private static function allEndBefore(array $rows, string $date): bool
+    {
+        foreach ($rows as $row) {
+            $to = $row['effective_to'] ?? null;
+            if (!is_string($to) || $to === '' || $to >= $date) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /** @param list<array<string,mixed>> $rows */

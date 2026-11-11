@@ -12701,7 +12701,7 @@
     },
     "registrationA1": {
       "title": "Přihlášky zaměstnanců k podání (REGZEC A1)",
-      "intro": "Vztahy, které ve zvoleném období trvají nebo začnou a u ČSSZ ještě nejsou přihlášené: nemají ID PPV, nemají připravenou ani odeslanou přihlášku a nepřihlásil je předchozí program. Přihlášku vybraným připravíte jedním tlačítkem stejně jako na kartě vztahu. Připravená podání pak odešlete ve frontě K odeslání.",
+      "intro": "Vztahy, které ve zvoleném období trvají, začnou nebo skončily a u ČSSZ ještě nejsou přihlášené: nemají ID PPV, nemají připravenou ani odeslanou přihlášku a nepřihlásil je předchozí program. Dohodu, která skončila dřív, než byla přihlášená, přihlásíte dodatečně a skončení pak ohlásí odhláška A2. Přihlášku vybraným připravíte jedním tlačítkem stejně jako na kartě vztahu. Připravená podání pak odešlete ve frontě K odeslání.",
       "legal": "Připraví se plná přihláška A1, i před nástupem. Připravují se jen vztahy s úplným profilem registrace; u neúplných řádek ukáže, co chybí, a odkaz na kartu vztahu.",
       "from": "Období od",
       "to": "Období do",

@@ -110,7 +110,7 @@ final readonly class PayrollRegistrationA1BatchService
                 ? self::skipped(
                     $employmentId,
                     'not_found',
-                    'Pracovní vztah u téhle firmy není, nebo už skončil, takže se za něj přihláška nepodává.',
+                    'Pracovní vztah u téhle firmy není, je archivovaný, nebo zaměstnanec nenastoupil, takže se za něj přihláška nepodává.',
                 )
                 : $this->prepareOne($supplierId, $environment, $row, $startPeriod, $userId);
         }

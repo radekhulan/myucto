@@ -228,9 +228,11 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(0, $this->countSubmissions());
     }
 
-    /** Skončený vztah bez schváleného A2 zdroje nesmí znovu vytvořit A1. */
+    /** Skončený přihlášený vztah (ID PPV) bez schváleného A2 zdroje nesmí znovu vytvořit A1. */
     public function testTerminatedEmploymentCannotFallBackToA1(): void
     {
+        $this->seedTrustedReceipt();
+        $submissions = $this->countSubmissions();
         $this->db->pdo()->prepare(
             'UPDATE payroll_employments
                 SET actual_start_date = ?, end_date = "2026-08-31",
@@ -244,6 +246,31 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(422, $response->getStatusCode());
         self::assertSame(
             'registration_regzec_a2_source_missing',
+            $body['error']['code'],
+        );
+        self::assertSame($submissions, $this->countSubmissions());
+    }
+
+    /**
+     * Skončený vztah, který přihlášený NENÍ (bez ID PPV), se přihlašuje
+     * dodatečnou A1; chybí-li profil A1, řekne to hláška místo odkazu na A2,
+     * kterou bez přihlášky podat nejde.
+     */
+    public function testTerminatedUnregisteredEmploymentAsksForA1Profile(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-31",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+
+        $response = $this->post();
+        $body = $this->json($response);
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'registration_regzec_a1_profile_missing',
             $body['error']['code'],
         );
         self::assertSame(0, $this->countSubmissions());
@@ -2089,24 +2116,47 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertStringContainsString('relat="2119"', $xml);
     }
 
-    public function testA3OfEmploymentEnded2026RejectsStatusCodeOnlyIn2027Codebook(): void
+    /**
+     * Vztah s kódem 2119 z roku 2026 projde změnou A3 v lednu 2027 (REGZEC27)
+     * beze změny kódu: EDV REGZEC27 1.5.0.3 vede 2119, ne 2219 z iSMS ČSÚ.
+     */
+    public function testA3In2027KeepsStatusCode2119FromRegzec25(): void
     {
-        self::$todayOverride = '2026-12-28';
-        $this->action = $this->buildAction($this->container, true);
-        $this->employmentActiveSince('2026-03-01');
-        $this->db->pdo()->prepare(
-            'UPDATE payroll_employments SET end_date = "2026-11-30", status = "ended"
-              WHERE supplier_id = ? AND id = ?',
-        )->execute([$this->supplierId, $this->employmentId]);
-        $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+        $xml = $this->preparedA3Xml(
+            '2027-01-05',
+            '2027-01-05',
+            'synthetic-a3-nkpz-2027-2119',
+            null,
+            ['employment' => ['employment_status_code' => '2119']],
+        );
+
+        self::assertStringContainsString('xmlns="' . PayrollRegistrationSchemaCatalog::NS_REGZEC_2027 . '"', $xml);
+        self::assertStringContainsString('relat="2119"', $xml);
+    }
+
+    /**
+     * 2219 je tisková chyba sdělení ČSÚ č. 401/2024 Sb. za 2119: změna A3
+     * ji převede a věta nese 2119 (v obou ročnících). Kód mimo číselník
+     * dál neprojde.
+     */
+    public function testA3ConvertsCsuTypo2219To2119AndRejectsUnknownStatusCode(): void
+    {
+        $xml = $this->preparedA3Xml(
+            '2026-11-20',
+            '2026-12-28',
+            'synthetic-a3-nkpz-2219',
+            '2026-11-30',
+            ['employment' => ['employment_status_code' => '2219']],
+        );
+        self::assertStringContainsString('relat="2119"', $xml);
 
         $response = ($this->action)->approveEvent(
             $this->request('POST')->withParsedBody([
                 'environment' => 'test',
                 'interaction' => 'change',
-                'effective_on' => '2026-11-20',
-                'source_reference' => 'synthetic-a3-nkpz-2027-only',
-                'changes' => ['employment' => ['employment_status_code' => '2219']],
+                'effective_on' => '2026-11-21',
+                'source_reference' => 'synthetic-a3-nkpz-unknown',
+                'changes' => ['employment' => ['employment_status_code' => '2229']],
             ]),
             new Response(),
             ['employmentId' => (string) $this->employmentId],

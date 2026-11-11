@@ -117,7 +117,12 @@ final class PayrollEmploymentMergeService
 
         // ── Lešení zdroje, zmizí s ním ──────────────────────────────────────
         // Podmínky: s `adopt_terms` je cíl převezme, jinak platí podmínky cíle.
-        'payroll_employment_terms' => ['action' => self::DROP],
+        // Podmínky zdroje zároveň nesou kontrolu živé přihlášky ČSSZ: součást
+        // podání nemá `employment_id`, váže se jen přes `subject_reference`.
+        'payroll_employment_terms' => ['action' => self::DROP, 'blocks' => [
+            'where' => PayrollEmploymentDeletionRepository::LIVE_REGISTRATION_SUBMISSION,
+            'reason' => 'registration',
+        ]],
         'payroll_employment_checklist_items' => ['action' => self::DROP],
         // Časovou osu zdroje nahradí událost `merged` u cíle a auditní záznam.
         'payroll_employment_events' => ['action' => self::DROP],

@@ -282,15 +282,17 @@ final class PayrollRegistrationEventMessageWordingTest extends TestCase
             }
         };
 
+        // Oba ročníky: 2119 platí (EDV 1.4.0.6 i 1.5.0.3), 2219 (tisková chyba
+        // sdělení ČSÚ č. 401/2024 Sb.) ani neznámý kód ne.
         self::assertFalse($rejected(['employment_status_code' => '2119'], '2026-12-10', '2026-12-10'));
         self::assertTrue($rejected(['employment_status_code' => '2219'], '2026-12-10', '2026-12-10'));
         // Změna s platností v roce 2026 vyhotovená v lednu 2027 jde jako REGZEC27.
-        self::assertFalse($rejected(['employment_status_code' => '2219'], '2026-12-15', '2027-01-05'));
-        self::assertTrue($rejected(['employment_status_code' => '2119'], '2026-12-15', '2027-01-05'));
+        self::assertFalse($rejected(['employment_status_code' => '2119'], '2026-12-15', '2027-01-05'));
+        self::assertTrue($rejected(['employment_status_code' => '2219'], '2026-12-15', '2027-01-05'));
         // Vztah skončený 30. 11. 2026: REGZEC25 i při vyhotovení 28. 12. 2026.
         $ended = ['employment_status_code' => '2119', 'end_on' => '2026-11-30'];
         self::assertFalse($rejected($ended, '2026-11-20', '2026-12-28'));
-        self::assertTrue($rejected(['employment_status_code' => '2219'] + $ended, '2026-11-20', '2026-12-28'));
+        self::assertTrue($rejected(['employment_status_code' => '2229'] + $ended, '2026-11-20', '2026-12-28'));
     }
 
     private function messageFrom(string $method, array $arguments): string

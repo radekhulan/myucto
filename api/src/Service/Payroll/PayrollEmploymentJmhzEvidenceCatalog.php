@@ -345,7 +345,8 @@ final class PayrollEmploymentJmhzEvidenceCatalog
                 ],
                 $pick('duvod_ukonceni_sluz_pomeru'),
             ),
-            // Slovník 1.5.0.3 NKPZ nevkládá, nabídka 2027 jde z číselníku ČSÚ.
+            // Nabídka 2027 je výčet EDV REGZEC27 1.5.0.3 (s 2119), shodný s 2026;
+            // 2219 z iSMS ČSÚ je tisková chyba sdělení č. 401/2024 Sb.
             'employment_status_codes' => PayrollRegistrationEmploymentStatusCodebook::options(
                 JmhzSpecVersion::V2027,
             ),

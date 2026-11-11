@@ -377,6 +377,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
             $sections[$key] = $rows;
         }
         foreach ($additions as $key) {
+            $lastEnd = null;
             foreach ($sections[$key] as $row) {
                 $to = $row['effective_to'] ?? null;
                 if (!is_string($to) || $to === '' || $to >= $effectiveFrom) {
@@ -384,8 +385,16 @@ final class PayrollStatutoryEvidenceBulkDefaults
                         "Sekce {$key} už od {$effectiveFrom} řádek má — hromadné doplnění do ní psát nesmí.",
                     );
                 }
+                $lastEnd = $lastEnd === null || $to > $lastEnd ? $to : $lastEnd;
             }
-            $sections[$key][] = $this->defaultRow($key, $effectiveFrom, $today);
+            // Navazující řada (rezidence, příslušnost) nesmí mít díru: věta
+            // za skončenou poslední větou začne hned po ní, ne až začátkem
+            // doplnění. Lednová a březnová dohoda s únorem mezi nimi by jinak
+            // skončily chybou „musí na sebe navazovat".
+            $from = $lastEnd !== null && PayrollPersonStatutoryEvidenceRepository::isContiguous($key)
+                ? (new DateTimeImmutable($lastEnd))->modify('+1 day')->format('Y-m-d')
+                : $effectiveFrom;
+            $sections[$key][] = $this->defaultRow($key, $from, $today);
         }
 
         return ['sections' => $sections];

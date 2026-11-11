@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll;
 
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationCodebooks;
+
 use DateTimeImmutable;
 use InvalidArgumentException;
 use MyInvoice\Service\Codebook\HealthInsurers;
@@ -975,6 +977,9 @@ final class PayrollPersonStatutoryEvidenceValidator
         $value = strtoupper($value);
         if (preg_match('/^[A-Z]{2}$/D', $value) !== 1) {
             throw new InvalidArgumentException("Pole {$key} není ISO kód země.");
+        }
+        if (!PayrollRegistrationCodebooks::isCountry($value)) {
+            throw new InvalidArgumentException("Pole {$key}: kód státu „{$value}\" není v číselníku států. Vyberte stát z nabídky.");
         }
 
         return $value;
