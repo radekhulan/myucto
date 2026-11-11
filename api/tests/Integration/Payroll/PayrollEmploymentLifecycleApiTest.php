@@ -1090,8 +1090,8 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertSame(['field' => 'activity_code'], $this->json($response)['error']['details']);
     }
 
-    /** Ukončený vztah je archiv — opravovat se v něm nedá stejně jako verzovat. */
-    public function testCorrectionIsRefusedOnAClosedEmployment(): void
+    /** Údaje pro JMHZ lze u ukončeného vztahu bez podání opravit bez změny trvání. */
+    public function testCorrectionOfJmhzEvidenceIsAllowedOnAnEndedEmploymentWithoutSubmission(): void
     {
         $employment = $this->create($this->employeeId, 'OPRAVA-4', 'employment', true);
         $employment = $this->transition($employment, 'active', '2026-01-01');
@@ -1101,14 +1101,20 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             $this->request(
                 'PATCH',
                 "/api/payroll/employments/{$employment['id']}/terms/current",
-                ['row_version' => $employment['row_version']]
+                ['row_version' => $employment['row_version'], 'cz_isco_code' => '25120']
                     + $this->termsPayload(true, '2026-01-01'),
             ),
             new Response(),
             ['id' => (string) $employment['id']],
         );
 
-        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $corrected = $this->json($response)['employment'];
+        self::assertSame('ended', $corrected['status']);
+        self::assertSame('2026-02-28', $corrected['end_date']);
+        self::assertCount(1, $corrected['terms']);
+        self::assertSame($employment['terms'][0]['id'], $corrected['terms'][0]['id']);
+        self::assertSame('25120', $corrected['terms'][0]['cz_isco_code']);
     }
 
     /**
