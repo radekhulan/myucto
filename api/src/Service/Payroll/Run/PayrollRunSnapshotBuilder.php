@@ -1111,8 +1111,10 @@ final class PayrollRunSnapshotBuilder
         foreach ($monthlyParts as $id => $part) $hourlyContexts[$id]['monthly_fund_source'] = $part['source'];
         $hourlyAverageCheck = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageInputGuard($this->db))->invalidInputs($supplierId, $periodStart, $inputRows, $hourlyContexts);
         $employmentFacts = [];
+        $averageEarnings = [];
         foreach ($eligibleRows as $row) {
             $employmentFacts[(int) $row['employment_id']] = self::employmentDriftFactsFromRow($row);
+            $averageEarnings[(int) $row['employment_id']] = $this->averageEarningSnapshot($row);
         }
         return [
             'eligible_employment_ids' => $eligible,
@@ -1129,6 +1131,7 @@ final class PayrollRunSnapshotBuilder
             'inputs' => $inputs,
             'absences' => $absences,
             'statutory_evidence' => $statutoryEvidence,
+            'average_earnings' => $averageEarnings,
         ];
     }
 

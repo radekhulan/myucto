@@ -4787,6 +4787,7 @@
         "employments_removed": "Employments that no longer belong to the period: {count}",
         "statutory_evidence_changed": "People with changed statutory records: {count}",
         "employment_terms_changed": "Relationships with changed terms (primary relationship, place of work, payroll office, working time): {count}",
+        "average_earnings_changed": "Relationships with a changed approved quarterly average earning: {count}",
         "action": "Click “Refresh inputs”, then recalculate the run.",
         "action_forbidden": "Inputs can be refreshed by a user allowed to calculate payroll and write payroll inputs."
       },

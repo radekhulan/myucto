@@ -4787,6 +4787,7 @@
         "employments_removed": "Pracovní vztahy, které do období už nepatří: {count}",
         "statutory_evidence_changed": "Osoby se změněnou zákonnou evidencí: {count}",
         "employment_terms_changed": "Vztahy se změněnými podmínkami (hlavní vztah, místo výkonu, účtárna, úvazek): {count}",
+        "average_earnings_changed": "Vztahy se změněným schváleným průměrným výdělkem čtvrtletí: {count}",
         "action": "Klikněte na „Obnovit podklady“ a potom běh přepočítejte.",
         "action_forbidden": "Obnovit podklady může uživatel s právem počítat mzdy a zapisovat mzdové vstupy."
       },

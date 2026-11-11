@@ -7873,6 +7873,7 @@ export interface PayrollRun {
 export interface PayrollRunSourceDrift {
   worked_time_changed?: number
   employment_terms_changed?: number
+  average_earnings_changed?: number
   remuneration_changed: number
   total: number
   inputs_added: number
