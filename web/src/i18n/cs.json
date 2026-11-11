@@ -6268,7 +6268,7 @@
         "worked": "Skutečně odpracováno",
         "worked_rounded_hint": "Doba ze zápisů je zaokrouhlená na tisíciny hodiny, víc desetinných míst hlášení nedovolí.",
         "evidence_days": "Dní v evidenčním stavu: {count}",
-        "evidence_days_agreement": "(u dohody se podle pokynů MPSV uvádí 0)",
+        "evidence_days_agreement": "Dny v evidenčním stavu se u dohody nevedou; do hlášení jde podle pokynů MPSV 0.",
         "note": "Poznámka k ověření (volitelné)",
         "confirm": "Potvrdit a schválit měsíc",
         "unworked_evidence_hint": "Zdroj obsahuje absenci. Berte ji jako podklad pro kontrolu; hodnoty podmíněných bloků potvrďte výslovně.",
@@ -6299,6 +6299,7 @@
         "hours_unit": "hodin",
         "standard_fund_hint": "Kolik hodin má měsíc na plný úvazek: 8 hodin za každý pracovní den včetně svátků v jinak pracovní den (pokyny MPSV). Předvyplněno ze zákonné týdenní doby (40 h) - přepište, pokud u vás platí kratší. U jednatele, společníka a člena orgánu (druh činnosti K a N až S) je podle pokynů MPSV 0.",
         "agreed_fund_hint": "Kolik hodin má za měsíc odpracovat tenhle člověk podle smlouvy.",
+        "agreed_fund_hint_agreement": "U dohody předpokládaný rozsah práce v měsíci včetně plánované dovolené. Bez rozvrhu směn se navrhuje odpracovaná doba, ne týdenní úvazek z karty.",
         "holiday_hours_hint": "Svátky v jinak pracovní dny: {hours} h. Nezadávejte je do neodpracovaných hodin níže - aplikace je při schválení přičte k celkovým i placeným neodpracovaným hodinám sama (pokyny MPSV k 10275 a 10276)."
       },
       "bulk": {

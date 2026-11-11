@@ -6268,7 +6268,7 @@
         "worked": "Actually worked",
         "worked_rounded_hint": "Time from the entries is rounded to thousandths of an hour; the report allows no more decimal places.",
         "evidence_days": "Days on the register: {count}",
-        "evidence_days_agreement": "(reported as 0 for agreements under the MPSV instructions)",
+        "evidence_days_agreement": "Days in the headcount are not kept for agreements; 0 is reported under the MPSV instructions.",
         "note": "Verification note (optional)",
         "confirm": "Confirm and approve the month",
         "unworked_evidence_hint": "The source includes an absence. Treat it as review evidence and explicitly confirm the conditional-block values.",
@@ -6299,6 +6299,7 @@
         "hours_unit": "hours",
         "standard_fund_hint": "How many hours the month has at full time: 8 hours for every working day including public holidays falling on a working day (MPSV instructions). Prefilled from the statutory weekly hours (40 h) — overwrite if yours is shorter. For an executive, partner or board member (activity K and N to S) the MPSV instructions require 0.",
         "agreed_fund_hint": "How many hours this person is contracted to work this month.",
+        "agreed_fund_hint_agreement": "For an agreement, the expected scope of work in the month including planned leave. Without a shift schedule the hours worked are suggested, not the weekly hours from the card.",
         "holiday_hours_hint": "Public holidays on working days: {hours} h. Do not enter them in the unworked hours below — on approval the app adds them to the total and the paid unworked hours itself (MPSV instructions for 10275 and 10276)."
       },
       "bulk": {

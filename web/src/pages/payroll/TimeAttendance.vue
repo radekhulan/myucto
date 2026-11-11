@@ -3659,7 +3659,7 @@ onMounted(async () => {
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.agreed_fund') }}</span>
             <input v-model="approvalAgreedFund" data-test="jmhz-agreed-fund" inputmode="decimal" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
-            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.time.jmhz.agreed_fund_hint') }}</span>
+            <span class="mt-1 block text-xs text-neutral-500" data-test="jmhz-agreed-fund-hint">{{ t(approvalIsAgreement ? 'payroll.time.jmhz.agreed_fund_hint_agreement' : 'payroll.time.jmhz.agreed_fund_hint') }}</span>
           </label>
           <div v-if="approvalWeeklyWorkNotStated" class="block" data-test="jmhz-weekly-work-not-stated">
             <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.weekly_work') }}</span>
@@ -3677,8 +3677,8 @@ onMounted(async () => {
           </label>
         </div>
         <p class="text-sm text-neutral-600" data-test="jmhz-evidence-days">
-          {{ t('payroll.time.jmhz.evidence_days', { count: approvalItem.jmhz_work_summary.preview?.suggestions.evidence_days ?? 0 }) }}
-          <span v-if="approvalIsAgreement">{{ t('payroll.time.jmhz.evidence_days_agreement') }}</span>
+          <template v-if="approvalIsAgreement">{{ t('payroll.time.jmhz.evidence_days_agreement') }}</template>
+          <template v-else>{{ t('payroll.time.jmhz.evidence_days', { count: approvalItem.jmhz_work_summary.preview?.suggestions.evidence_days ?? 0 }) }}</template>
         </p>
         <p
           v-if="approvalHolidayHours !== null"
