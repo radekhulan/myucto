@@ -1396,6 +1396,13 @@ final class Bootstrap
             (bool) $config->get('app.debug', false),
         );
         $errors = $app->addErrorMiddleware($displayErrors, true, true, $container->get(LoggerInterface::class));
+        // Odpověď na nezachycenou výjimku nikdy nenese soubor, řádek ani trace
+        // (ani s `app.debug`) a chybějící šifrovací klíč hlásí jako stav instance.
+        $errors->setDefaultErrorHandler(new \MyInvoice\Http\ApiErrorHandler(
+            $app->getCallableResolver(),
+            $app->getResponseFactory(),
+            $container->get(LoggerInterface::class),
+        ));
         $errors->setErrorHandler(
             \PDOException::class,
             new \MyInvoice\Http\ForeignKeyConflictHandler($app->getResponseFactory(), $errors->getDefaultErrorHandler()),

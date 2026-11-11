@@ -184,6 +184,13 @@ info:
     { "error": { "code": "validation_failed", "message": "..." } }
     ```
 
+    Neočekávaná chyba serveru vrátí `500 internal_error` s obecnou hláškou a polem
+    `request_id`, pod kterým správce instalace najde detail v logu aplikace. Odpověď
+    nikdy neobsahuje cesty k souborům ani výpis zásobníku. Nemá-li instalace šifrovací
+    klíč, kterým jsou uložené šifrované osobní údaje (typicky kopie databáze bez
+    původní konfigurace), vrátí operace, která je potřebuje, `503 encryption_key_unavailable`;
+    jde o nastavení instalace, které opraví její správce.
+
   contact:
     name: MyÚčto.cz
     url: https://myucto.cz

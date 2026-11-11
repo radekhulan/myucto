@@ -83,6 +83,32 @@ final class InternalErrorRedactionMiddlewareTest extends TestCase
         self::assertSame([], $logger->records);
     }
 
+    public function testDebugKeepsExceptionTextWithoutServerPaths(): void
+    {
+        $root = rtrim(\MyInvoice\Bootstrap::rootDir(), '/\\');
+        $middleware = new InternalErrorRedactionMiddleware(new Config(['app' => ['env' => 'development']]), $this->logger());
+        $handler = new class ($root) implements RequestHandlerInterface {
+            public function __construct(private readonly string $root) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                return Json::internalError(
+                    (new ResponseFactory())->createResponse(),
+                    'save_failed',
+                    'fopen(' . $this->root . '/storage/exports/x.csv): Failed to open stream',
+                    500,
+                );
+            }
+        };
+
+        $response = $middleware->process($this->request(), $handler);
+        $raw = (string) $response->getBody();
+        $body = json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertStringNotContainsString($root, $raw);
+        self::assertSame('fopen(storage/exports/x.csv): Failed to open stream', $body['error']['message']);
+    }
+
     public function testProductionKeepsAuthoredMessageOfInternalServerError(): void
     {
         $logger = $this->logger();

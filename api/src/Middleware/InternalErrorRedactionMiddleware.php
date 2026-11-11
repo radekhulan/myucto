@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Middleware;
 
+use MyInvoice\Http\ApiErrorHandler;
 use MyInvoice\Http\Json;
 use MyInvoice\I18n\Locale;
 use MyInvoice\Infrastructure\Config\Config;
@@ -66,7 +67,7 @@ final class InternalErrorRedactionMiddleware implements MiddlewareInterface
             return $response;
         }
         if ($this->exposesDetails()) {
-            return $response;
+            return $this->withRelativePaths($response);
         }
         if (!str_contains(strtolower($response->getHeaderLine('Content-Type')), 'json')) {
             return $response;
@@ -136,11 +137,45 @@ final class InternalErrorRedactionMiddleware implements MiddlewareInterface
         );
     }
 
-    private static function genericMessage(string $requestId): string
+    /** Obecná hláška 500 s kódem požadavku; sdílí ji {@see \MyInvoice\Http\ApiErrorHandler}. */
+    public static function genericMessage(string $requestId): string
     {
         return Locale::current() === 'en'
             ? sprintf('Internal server error. Details are in the application log under request ID %s.', $requestId)
             : sprintf('Interní chyba serveru. Podrobnosti jsou v logu aplikace pod kódem požadavku %s.', $requestId);
+    }
+
+    /**
+     * Ve vývoji a s `app.debug` zůstává text výjimky v odpovědi, ale bez
+     * absolutních cest serveru: ty do odpovědi API nepatří nikdy (stejné pravidlo
+     * jako {@see ApiErrorHandler} u nezachycených výjimek).
+     */
+    private function withRelativePaths(Response $response): Response
+    {
+        if (!str_contains(strtolower($response->getHeaderLine('Content-Type')), 'json')) {
+            return $response;
+        }
+        $body = $response->getBody();
+        if ($body->isSeekable()) {
+            $body->rewind();
+        }
+        $raw = (string) $body->getContents();
+        try {
+            $payload = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return $this->restoredBody($response, $raw);
+        }
+        if (!is_array($payload) || !isset($payload['error']['message']) || !is_string($payload['error']['message'])) {
+            return $this->restoredBody($response, $raw);
+        }
+        $relative = ApiErrorHandler::withoutRootPath($payload['error']['message']);
+        if ($relative === $payload['error']['message']) {
+            return $this->restoredBody($response, $raw);
+        }
+        $payload['error']['message'] = $relative;
+        $encoded = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return $this->restoredBody($response, $encoded === false ? $raw : $encoded)->withoutHeader('Content-Length');
     }
 
     /** Body jsme přečetli; vrátíme ho beze změny, ať ho další vrstva umí odeslat. */

@@ -219,6 +219,28 @@ describe('PayrollJmhzOrdinaryEvidencePanel', () => {
     expect(wrapper.find('[data-test="jmhz-ordinary-evidence-retry-18"]').exists()).toBe(false)
   })
 
+  /**
+   * Instalace bez šifrovacího klíče: karta nesmí tvrdit, že revize nemá žádný
+   * vztah, a hlášku o stavu instalace (kdo ji opraví) ukáže tak, jak ji poslal server.
+   */
+  it('selhané načtení kvůli chybějícímu klíči neukáže prázdnou revizi, ale hlášku serveru', async () => {
+    m.get.mockRejectedValueOnce({
+      response: {
+        status: 503,
+        data: { error: { code: 'encryption_key_unavailable', message: 'Šifrované osobní údaje nejde přečíst.' } },
+      },
+    })
+    const wrapper = mount(PayrollJmhzOrdinaryEvidencePanel, {
+      props: { runs: [run] as never[] },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('jmhz_evidence_no_scopes')
+    expect(wrapper.text()).not.toContain('jmhz_evidence_all_resolved')
+    expect(wrapper.get('[role="alert"]').text()).toContain('Šifrované osobní údaje nejde přečíst.')
+    expect(wrapper.get('[role="alert"]').text()).not.toContain('jmhz_guidance.actions.support')
+  })
+
   /** „2026-07" vedle „01.07.2026" ve zbytku appky vypadá jako useknuté datum. */
   it('období karty ukáže česky, ne jako strojové YYYY-MM', async () => {
     const wrapper = mount(PayrollJmhzOrdinaryEvidencePanel, {
