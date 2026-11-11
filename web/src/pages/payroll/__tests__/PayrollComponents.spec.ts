@@ -1215,6 +1215,17 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
+  it('odkaz z blokace otevře zařazení konkrétní složky do JMHZ v číselníku', async () => {
+    m.routeQuery = { tab: 'catalog', component: '5', panel: 'jmhz' }
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    const editor = wrapper.find('[data-testid="payroll-jmhz-mapping-editor"]')
+    expect(editor.exists()).toBe(true)
+    expect(editor.text()).toContain('Syntetická odměna')
+    wrapper.unmount()
+  })
+
   it('keeps the payroll catalogue usable when JMHZ configuration cannot load', async () => {
     m.componentJmhzTargets.mockRejectedValue(new Error('synthetic JMHZ failure'))
     const wrapper = mount(PayrollComponents)

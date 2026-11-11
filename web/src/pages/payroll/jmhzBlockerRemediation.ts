@@ -127,9 +127,12 @@ export function jmhzRemediationTarget(
           Math.ceil(Number(period.slice(5, 7)) / 3),
         )
       }
+      const quarterQuery = period
+        ? { year: period.slice(0, 4), quarter: String(Math.ceil(Number(period.slice(5, 7)) / 3)) }
+        : {}
       return employmentId === null
-        ? { name: 'payroll-absences', query: { tab: 'averages' } }
-        : { name: 'payroll-absences', query: { employment: String(employmentId), tab: 'averages' } }
+        ? { name: 'payroll-absences', query: { tab: 'averages', ...quarterQuery } }
+        : { name: 'payroll-absences', query: { employment: String(employmentId), tab: 'averages', ...quarterQuery } }
     }
     case 'time':
       return employmentId === null
@@ -138,7 +141,10 @@ export function jmhzRemediationTarget(
     case 'runs':
       return { name: 'payroll-runs', query: periodQuery }
     case 'components':
-      return { name: 'payroll-components' }
+      return {
+        name: 'payroll-components',
+        query: jmhzComponentQuery(blocker.code, blocker.entity_type === 'component' ? entityId : null),
+      }
     case 'ordinary_evidence':
       return { name: 'payroll-submissions', query: periodQuery, hash: '#jmhz-ordinary-evidence' }
     case 'employer_annual':
@@ -161,6 +167,21 @@ export function jmhzRemediationTarget(
     default:
       return null
   }
+}
+
+/**
+ * Proklik na číselník složek, stejně jako `JmhzBlockerRemediationPath::componentPath()`
+ * na serveru: jednotlivá složka otevře svoje zařazení do JMHZ, souhrnný nález
+ * číselník vyfiltrovaný na složky s tímtéž problémem.
+ */
+export function jmhzComponentQuery(code: string, componentId: number | null): Record<string, string> {
+  if (componentId !== null) return { tab: 'catalog', component: String(componentId), panel: 'jmhz' }
+  // Neověřené zařazení odměny je zařazení, ne chybějící stav — filtr ho nemá.
+  if (code === 'component_jmhz_bonus_regularity_unverified') return { tab: 'catalog' }
+  const jmhz = code === 'component_jmhz_manual_review'
+    ? 'manual_review'
+    : code === 'component_jmhz_treatment_invalid' ? 'invalid' : 'missing'
+  return { tab: 'catalog', jmhz }
 }
 
 /**

@@ -162,7 +162,8 @@ final class PayrollRunIssueGuidance
             'support' => '/admin/support',
             'inputs' => '/payroll/quick-inputs',
             'time' => '/payroll/time',
-            'components' => '/payroll/components',
+            // Bez `tab` otevře stránka Mzdové vstupy, ne číselník.
+            'components' => '/payroll/components?tab=catalog',
             'risky_savings' => '/payroll/components?tab=risky_savings',
             'runs' => '/payroll/runs',
             'rulesets' => '/payroll/rulesets',
@@ -191,6 +192,9 @@ final class PayrollRunIssueGuidance
                 elseif (array_intersect(['part_time_discount_unverified', 'part_time_discount_relationship_kind_unsupported', 'part_time_discount_may_select_only_one_relationship_per_person'], $parts) !== []) $query['field'] = 'social_part_time_discount_reason';
             }
             if ($query !== []) $path .= '?' . http_build_query($query);
+        } elseif ($target === 'components') {
+            $componentId = self::reference($issue, 'component');
+            if ($componentId !== null) $path .= '&component=' . $componentId;
         } elseif ($target === 'risky_savings') {
             if ($employeeId !== null) $path .= '&person=' . $employeeId;
             if ($employmentId !== null) $path .= '&employment=' . $employmentId;

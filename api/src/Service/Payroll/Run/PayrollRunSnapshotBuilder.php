@@ -454,7 +454,8 @@ final class PayrollRunSnapshotBuilder
                     $employmentId,
                     sprintf(
                         '%s: pracovní vztah nemá schválenou docházku. Zamknutím vstupů se '
-                        . 'stav zmrazí a měsíční hlášení ČSSZ by ji už nevidělo.',
+                        . 'stav zmrazí a měsíční hlášení ČSSZ by ji už nevidělo. Schvalte '
+                        . 'docházku v Mzdy → Docházka (odkaz otevře tento vztah a měsíc).',
                         (string) $row['full_name'],
                     ),
                     "/payroll/time?employment={$employmentId}&period=" . substr($periodStart, 0, 7),
@@ -517,6 +518,7 @@ final class PayrollRunSnapshotBuilder
                     "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms");
             }
             $riskySavingsEvidence = $this->riskySavingsEvidence($row);
+            $riskySavingsPath = self::riskySavingsPath($employeeId, $employmentId);
             if ($riskySavingsEvidence !== null) {
                 foreach ($this->riskySavingsPolicy->issues(
                     $riskySavingsEvidence,
@@ -528,7 +530,7 @@ final class PayrollRunSnapshotBuilder
                         'employment',
                         $employmentId,
                         $this->riskySavingsValidationMessage($issue),
-                        '/payroll/components',
+                        $riskySavingsPath,
                     );
                 }
                 foreach ($this->riskySavingsPolicy->warnings(
@@ -541,7 +543,7 @@ final class PayrollRunSnapshotBuilder
                         'employment',
                         $employmentId,
                         $this->riskySavingsValidationMessage($warning),
-                        '/payroll/components',
+                        $riskySavingsPath,
                     );
                 }
             }
@@ -1390,6 +1392,19 @@ final class PayrollRunSnapshotBuilder
             'row_version' => $rowVersion,
             'automatic_posting_enabled' => $automaticPosting,
         ];
+    }
+
+    /**
+     * Rovnou na záložku Rizikové spoření zúženou na vztah. Bez `tab` stránka
+     * otevře Mzdové vstupy, kde se evidence rizikové práce opravit nedá.
+     */
+    private static function riskySavingsPath(int $employeeId, int $employmentId): string
+    {
+        return '/payroll/components?' . http_build_query([
+            'tab' => 'risky_savings',
+            'person' => $employeeId,
+            'employment' => $employmentId,
+        ]);
     }
 
     private static function formatPeriod(string $periodStart): string
