@@ -377,6 +377,19 @@ final class PayrollE2eFixJmhzPreparationTest extends TestCase
         self::assertSame(200, $this->approveTimeMonth($person['employment_id'], '2027-01', $workdays)->getStatusCode());
         $this->createApprovedInput($person, $this->baseComponentId, 4_500_000, 'jan-base', '2027-01-01');
         $this->openYear2027($person['employee_id']);
+
+        // Kontrola před během: obě věci, na kterých lednové hlášení stojí,
+        // jsou vidět už před výpočtem. Roční údaje zaměstnavatele účetní
+        // doplnit může (odkaz nese rok 2027), číselníky ne.
+        $annual = $this->readinessFinding('jmhz_employer_annual_collective_agreement_missing', '2027-01-01', '2027-02-12');
+        self::assertNotNull($annual, 'Kontrola před během neohlásila roční údaje zaměstnavatele za rok 2027.');
+        self::assertSame(PayrollRunReadinessImpact::IMPACT_ANYTIME, $annual['impact']);
+        self::assertSame(
+            '/payroll/settings?tab=submissions&year=2027#jmhz-employer-annual-evidence',
+            $annual['remediation_path'],
+        );
+        self::assertNotNull($this->readinessFinding('jmhz_workplace_codebooks_not_published', '2027-01-01', '2027-02-12'));
+
         $run = $this->runPayrollMonth('2027-01-01', '2027-02-12', $officeId, 'jan');
         self::assertNotNull($run['approved'], CanonicalJson::encode($run['blockers']) . CanonicalJson::encode($run['warnings']));
 

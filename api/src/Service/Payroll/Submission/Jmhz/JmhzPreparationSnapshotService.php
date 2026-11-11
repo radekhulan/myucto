@@ -714,14 +714,15 @@ final readonly class JmhzPreparationSnapshotService
         }
         // Roční údaje zaměstnavatele (prosinec, od 2027 každý měsíc): touž
         // cestou jako příprava, aby je účetní doplnila před schválením mzdy.
-        if ($termsChecked) {
-            foreach (JmhzPreparationSnapshotBuilder::employerAnnualIssues(
-                $supplierId,
-                $periodStart,
-                $this->employerAnnualEvidence->snapshotForPreparation($supplierId, $periodStart),
-            ) as $issue) {
-                $issues[] = $issue;
-            }
+        // Platí i pro ročník, jehož hlášení aplikace zatím sestavit neumí:
+        // na rozdíl od pracoviště je to údaj, který účetní doplnit může
+        // a po aktualizaci aplikace by na něm příprava stála.
+        foreach (JmhzPreparationSnapshotBuilder::employerAnnualIssues(
+            $supplierId,
+            $periodStart,
+            $this->employerAnnualEvidence->snapshotForPreparation($supplierId, $periodStart),
+        ) as $issue) {
+            $issues[] = $issue;
         }
         /*
          * Stav žádosti o roční zúčtování (10319) v lednu a únoru. Zmrazení ho
