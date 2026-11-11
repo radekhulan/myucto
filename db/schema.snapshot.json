@@ -1189,7 +1189,9 @@
         "2283_payroll_submission_parts_subject_index.sql",
         "2284_payroll_statutory_entry_successor_index.sql",
         "2285_payroll_run_summaries.sql",
-        "2286_payroll_component_employer_contribution_non_monetary.sql"
+        "2286_payroll_component_employer_contribution_non_monetary.sql",
+        "2287_payroll_run_live_period_slot.sql",
+        "2288_payroll_run_exclusions.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -19547,6 +19549,44 @@
                 "metadata_json": "json_valid(`metadata_json`)"
             }
         },
+        "payroll_run_exclusions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "active_key": "tinyint(3) unsigned NULL DEFAULT NULL STORED GENERATED AS (if(`lifted_at` is null and `settled_revision_id` is null,1,NULL))",
+                "employee_id": "bigint(20) unsigned NOT NULL",
+                "excluded_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "excluded_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "excluded_revision_no": "int(10) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "lift_reason": "enum('included','run_cancelled') NULL DEFAULT NULL",
+                "lifted_at": "datetime NULL DEFAULT NULL",
+                "lifted_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "reason": "varchar(500) NOT NULL",
+                "run_id": "bigint(20) unsigned NOT NULL",
+                "settled_revision_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_run_exclusion_excluded_by": "BTREE (excluded_by)",
+                "fk_payroll_run_exclusion_lifted_by": "BTREE (lifted_by)",
+                "fk_payroll_run_exclusion_revision": "BTREE (supplier_id, settled_revision_id)",
+                "idx_payroll_run_exclusion_employee": "BTREE (supplier_id, employee_id)",
+                "uq_payroll_run_exclusion_active": "UNIQUE BTREE (supplier_id, run_id, employee_id, active_key)"
+            },
+            "foreign_keys": {
+                "fk_payroll_run_exclusion_employee": "(supplier_id, employee_id) -> payroll_employees (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_run_exclusion_excluded_by": "(excluded_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_run_exclusion_lifted_by": "(lifted_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_payroll_run_exclusion_revision": "(supplier_id, settled_revision_id) -> payroll_run_revisions (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_run_exclusion_run": "(supplier_id, run_id) -> payroll_runs (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_payroll_run_exclusion_lift": "`lifted_at` is null and `lift_reason` is null or `lifted_at` is not null and `lift_reason` is not null"
+            }
+        },
         "payroll_run_persons": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -19686,6 +19726,7 @@
                 "office_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "office_scope_id": "bigint(20) unsigned NULL DEFAULT NULL STORED GENERATED AS (coalesce(`office_id`,0))",
                 "payment_date": "date NOT NULL",
+                "period_slot": "tinyint(3) unsigned NULL DEFAULT NULL STORED GENERATED AS (if(`run_kind` = 'takeover' and `status` = 'cancelled',NULL,1))",
                 "period_start": "date NOT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "run_kind": "enum('calculated','takeover') NOT NULL DEFAULT 'calculated'",
@@ -19705,7 +19746,7 @@
                 "fk_payroll_run_created_by": "BTREE (created_by)",
                 "fk_payroll_run_office": "BTREE (supplier_id, office_id)",
                 "fk_payroll_run_updated_by": "BTREE (updated_by)",
-                "uq_payroll_run_period": "UNIQUE BTREE (supplier_id, period_start, office_scope_id)",
+                "uq_payroll_run_live_period": "UNIQUE BTREE (supplier_id, period_start, office_scope_id, period_slot)",
                 "uq_payroll_run_supplier_id": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {

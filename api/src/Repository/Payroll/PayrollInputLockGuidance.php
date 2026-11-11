@@ -76,9 +76,11 @@ final class PayrollInputLockGuidance
         $label = self::RUN_STATUS_LABELS[$status] ?? $status;
         $next = in_array($status, self::CANCELLABLE, true)
             ? 'V Mzdy → Mzdové běhy otevřete běh a klikněte na „Zrušit běh“ (vstupy ani docházka '
-                . 'se nesmažou). Vstup pak opravte a v běhu zvolte „Začít z opravených vstupů“.'
+                . 'se nesmažou; potřebujete právo „Odemknout schválený mzdový běh“). Vstup pak '
+                . 'opravte a v běhu zvolte „Začít z opravených vstupů“.'
             : 'Běh je schválený, oprava jde jen opravnou revizí: v Mzdy → Mzdové běhy otevřete '
-                . 'běh, zvolte „Vyžádat opravu“ a potom „Otevřít opravu“.';
+                . 'běh, zvolte „Vyžádat opravu“ (právo „Zkontrolovat mzdový běh“) a potom „Otevřít '
+                . 'opravu“ (právo „Odemknout schválený mzdový běh“).';
 
         return sprintf(
             'Mzdový vstup za %s je uzamčený v mzdovém běhu č. %d (stav: %s), proto ho nelze %s. %s',

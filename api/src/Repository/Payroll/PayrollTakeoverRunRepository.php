@@ -27,12 +27,18 @@ final class PayrollTakeoverRunRepository
 {
     public function __construct(private readonly Connection $db) {}
 
-    /** Běh za období bez rozlišení účtárny; převzatý běh se zakládá jen bez ní. */
+    /**
+     * Běh za období bez rozlišení účtárny; převzatý běh se zakládá jen bez ní.
+     * Živý běh má přednost před zrušeným převzatým obalem, který vedle něj
+     * smí zůstat (`period_slot`).
+     */
     public function runForPeriod(int $supplierId, string $periodStart): ?array
     {
         $statement = $this->db->pdo()->prepare(
             'SELECT * FROM payroll_runs
               WHERE supplier_id = ? AND period_start = ? AND office_scope_id = 0
+              ORDER BY period_slot IS NULL, id DESC
+              LIMIT 1
               FOR UPDATE',
         );
         $statement->execute([$supplierId, $periodStart]);

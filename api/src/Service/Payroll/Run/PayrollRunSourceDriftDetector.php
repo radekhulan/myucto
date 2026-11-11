@@ -13,12 +13,34 @@ namespace MyInvoice\Service\Payroll\Run;
  */
 final class PayrollRunSourceDriftDetector
 {
+    /** Části aktuálních podkladů klíčované id vztahu. */
+    private const EMPLOYMENT_KEYED = [
+        'employment_facts',
+        'worked_time_evidence',
+        'hourly_entitlement_context',
+        'hourly_average_input_sources',
+        'hourly_wage_claims',
+        'manual_time_month_state',
+        'hourly_remuneration_terms',
+        'hourly_settlement_terms',
+        'inputs',
+        'absences',
+        'average_earnings',
+    ];
+
     public function __construct(
         private readonly PayrollRunSnapshotBuilder $builder,
     ) {}
 
-    /** @param array<string,mixed> $inputSnapshot */
-    public function detect(int $supplierId, array $inputSnapshot): PayrollRunSourceDrift
+    /**
+     * Vztahy osob, které účetní z běhu vyřadila ({@see PayrollRunExclusionFilter}),
+     * se neporovnávají: snímek je vědomě nemá, takže by je kontrola jinak
+     * hlásila jako nové a zastavila schválení.
+     *
+     * @param array<string,mixed> $inputSnapshot
+     * @param list<int> $excludedEmploymentIds
+     */
+    public function detect(int $supplierId, array $inputSnapshot, array $excludedEmploymentIds = []): PayrollRunSourceDrift
     {
         $periodStart = $inputSnapshot['period_start'] ?? null;
         $paymentDate = $inputSnapshot['payment_date'] ?? null;
@@ -48,16 +70,27 @@ final class PayrollRunSourceDriftDetector
             }
         }
 
-        return PayrollRunSourceDrift::between(
-            $inputSnapshot,
-            $this->builder->currentSources(
-                $supplierId,
-                $periodStart,
-                $paymentDate,
-                $officeId,
-                $employmentIds,
-                $employeeIds,
-            ),
+        $current = $this->builder->currentSources(
+            $supplierId,
+            $periodStart,
+            $paymentDate,
+            $officeId,
+            $employmentIds,
+            $employeeIds,
         );
+        if ($excludedEmploymentIds !== []) {
+            $current['eligible_employment_ids'] = array_values(array_diff(
+                $current['eligible_employment_ids'],
+                $excludedEmploymentIds,
+            ));
+            $excluded = array_fill_keys($excludedEmploymentIds, true);
+            foreach (self::EMPLOYMENT_KEYED as $key) {
+                if (is_array($current[$key] ?? null)) {
+                    $current[$key] = array_diff_key($current[$key], $excluded);
+                }
+            }
+        }
+
+        return PayrollRunSourceDrift::between($inputSnapshot, $current);
     }
 }

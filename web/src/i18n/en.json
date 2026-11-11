@@ -4420,7 +4420,12 @@
           "refresh_inputs": "Inputs refreshed",
           "validation_override": "Check exception approved",
           "validation_override_revoked": "Check exception revoked",
-          "unknown": "Another audit action"
+          "unknown": "Another audit action",
+          "withdraw_correction": "Correction request withdrawn",
+          "change_payment_date": "Payment date changed",
+          "exclude_employee": "Person excluded from run",
+          "include_employee": "Person returned to run",
+          "validation_overrides_carried": "Exceptions carried over from previous revision"
         }
       },
       "validation": {
@@ -4774,7 +4779,11 @@
         "cancel": "Cancel run",
         "close": "Close",
         "lock_and_calculate": "Calculate payroll",
-        "refresh_inputs": "Refresh inputs"
+        "refresh_inputs": "Refresh inputs",
+        "withdraw_correction": "Withdraw correction request",
+        "change_payment_date": "Change payment date",
+        "exclude_employee": "Exclude person from run",
+        "include_employee": "Return person to run"
       },
       "outcome": {
         "posted": "Payroll has been posted to accounting.",
@@ -4946,6 +4955,30 @@
         "confirm_note": "Starting locks the inputs and calculates payroll right away. Anything entered afterwards stays out of the calculation until the run is reopened.",
         "recheck": "Check again",
         "start_anyway": "Start anyway"
+      },
+      "withdraw_correction_hint": "The run returns to the state it was in before the correction was requested. The approved revision, posting, payments and filings stay unchanged. Source changes entered in the meantime will not get into the run; if you need them, do not withdraw and continue with “Open correction”.",
+      "forbidden_command": "You cannot see “{commands}” because you do not have the “{permission}” permission. Ask the company administrator to grant it.",
+      "change_payment_date": {
+        "hint_draft": "Only the payment date of the run changes. No input snapshot exists yet, so nothing is recalculated.",
+        "hint_locked": "The run gets a new revision with the new payment date and is recalculated right away: the statutory calculation and contribution and reporting deadlines depend on the payment date. Exceptions with identical text are carried over."
+      },
+      "exclusion": {
+        "exclude": "Exclude person from run",
+        "hint": "{name} will be excluded from this run: the run gets a new revision without this person and everyone else is calculated and approved as usual. The person gets no payslip or pay in this run and will not be in the approved revision. Pay them later through a correction of the run for the same period (Request correction, Open correction) once the missing data are completed. They get into the monthly JMHZ report through a corrective report. State what is missing and when it will be completed.",
+        "active_title": "Excluded from run: {count}",
+        "active_hint": "The revision does not calculate these people. Once their data are complete, return them to the run, or pay them through a correction after approval.",
+        "include": "Return to run",
+        "settled_title": "Without pay in this run: {count}",
+        "settled_hint": "The approved revision went without these people. To pay them: complete the missing data, click “Request correction” and “Open correction”; the correction revision includes them again. File the monthly report for them with a corrective JMHZ report."
+      },
+      "permission_names": {
+        "payroll_reopen": "Unlock approved payroll run",
+        "payroll_approve": "Approve payroll run",
+        "payroll_review": "Review payroll run",
+        "payroll_calculate": "Calculate payroll",
+        "payroll_inputs_write": "Manage payroll inputs",
+        "payroll_post": "Post payroll",
+        "payroll_payments": "Manage payouts and contributions"
       }
     },
     "quick_inputs": {
@@ -6486,7 +6519,7 @@
         "holiday_arrangement_missing": "The month contains work on a public holiday, but {name} has no agreed arrangement (time off in lieu, or a surcharge). Pay cannot be calculated without it, so approval stops here.",
         "difficulty_factors_missing": "The month contains work in a difficult environment, but {name} has no count of aggravating factors under § 117.",
         "average_earning_missing": "The surcharge for {name} is calculated from average earnings, and none is established for this period.",
-        "inputs_locked": "The payroll run for this month already has locked inputs, so approving attendance cannot write surcharges into them. In the payroll run click “Cancel run” (attendance and inputs are kept), come back and approve the month, then click “Start again and calculate” in the run.",
+        "inputs_locked": "The payroll run for this month already has locked inputs, so approving attendance cannot write surcharges into them. In the payroll run click “Cancel run” (attendance and inputs are kept; you need the “Unlock approved payroll run” permission), come back and approve the month, then click “Start again and calculate” in the run.",
         "overtime_conflict": "Overtime for {name} is entered twice — in attendance and in quick inputs. Keep only one record.",
         "link": {
           "holiday_arrangement_missing": "Open the employee card and set the surcharge arrangement",

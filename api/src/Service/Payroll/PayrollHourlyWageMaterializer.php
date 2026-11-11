@@ -65,7 +65,7 @@ final class PayrollHourlyWageMaterializer
               AND (NOT EXISTS (SELECT 1 FROM payroll_run_revisions own
                     JOIN payroll_run_employments frozen ON frozen.supplier_id = own.supplier_id AND frozen.revision_id = own.id
                     WHERE own.supplier_id = input.supplier_id AND own.run_id = ? AND frozen.employment_id = input.employment_id AND frozen.period_start = input.period_start)
-                OR EXISTS (SELECT 1 FROM payroll_runs other FORCE INDEX (uq_payroll_run_period)
+                OR EXISTS (SELECT 1 FROM payroll_runs other FORCE INDEX (uq_payroll_run_live_period)
                     JOIN payroll_run_revisions held ON held.supplier_id = other.supplier_id AND held.run_id = other.id
                     JOIN payroll_run_employments frozen ON frozen.supplier_id = held.supplier_id AND frozen.revision_id = held.id
                     WHERE other.supplier_id = input.supplier_id AND other.period_start = input.period_start AND other.id <> ?

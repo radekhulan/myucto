@@ -45,6 +45,11 @@ final readonly class PayrollRunTransitionContext
          * a vyžaduje důvod stejně jako vyžádání opravy.
          */
         public bool $hasApprovedRevision = false,
+        /*
+         * Stav, ze kterého účetní vyžádala opravu (poslední událost
+         * `request_correction`). Vzetí žádosti zpět vrací běh přesně sem.
+         */
+        public ?PayrollRunStatus $correctionRequestedFrom = null,
     ) {
         if ($actorUserId <= 0) {
             throw new \InvalidArgumentException('Uživatel přechodu musí být platný.');

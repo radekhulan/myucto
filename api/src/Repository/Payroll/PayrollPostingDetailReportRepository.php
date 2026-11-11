@@ -17,7 +17,7 @@ use PDO;
  * v deníku, takže součet sestavy sedí na deník za období.
  *
  * Tři dotazy bez ohledu na počet běhů a zaměstnanců: dávky po běhu přes
- * `uq_payroll_run_period`, alokace přes `uq_payroll_posting_allocation`,
+ * `uq_payroll_run_live_period`, alokace přes `uq_payroll_posting_allocation`,
  * snapshoty podle primárního klíče revize.
  */
 final class PayrollPostingDetailReportRepository

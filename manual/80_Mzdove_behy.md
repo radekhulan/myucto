@@ -188,6 +188,18 @@ revize.
 
 Zrušený běh znovu otevřete tlačítkem **Začít z opravených vstupů**.
 
+Opravu jste vyžádali omylem? Ve stavu **Čeká na opravu** klikněte na **Vzít
+žádost o opravu zpět**. Běh se vrátí do stavu před vyžádáním (schváleno,
+zaúčtováno, uhrazeno nebo uzavřeno) a schválená revize, zaúčtování, platby ani
+podání se nemění. Změny podkladů zadané mezitím do běhu nejdou; potřebujete-li
+je, pokračujte **Otevřít opravu**. Krok smí uživatel s právem „Zkontrolovat
+mzdový běh“.
+
+Když **Otevřít opravu** odmítne dohoda o srážce ze mzdy, jejíž sražená částka
+se od schválení změnila, karta běhu jmenuje osobu a dohodu a nabídne odkaz do
+`Mzdy → Dohody o srážkách`. Vraťte u dohody stav sražené částky, nebo žádost
+o opravu vezměte zpět.
+
 > [!IMPORTANT]
 > Zaměstnanec založený až po schválení měsíce, nebo vztah, kterému jste
 > posunuli nástup do už schváleného měsíce, se do schváleného běhu sám
@@ -226,6 +238,44 @@ v historii běhu přibude událost **Podklady obnoveny**.
 Nechcete-li nový vstup do měsíce zahrnout, zrušte ho nebo ho přesuňte do jiného
 období. U schváleného běhu vede cesta přes **Vyžádat opravu**
 ([§ 80.5](#805-krok-za-krokem-oprava-schvaleneho-mesice)).
+
+## 80.6a Krok za krokem: vyřazení osoby, kterou nejde spočítat
+
+Jedna osoba v ruční kontrole (chybí zdravotní pojišťovna, podmínky vztahu nebo
+hodnoty pro srážky) zastaví schválení celého běhu. Nechcete-li kvůli ní
+odkládat výplatu ostatním:
+
+1. U blokace osoby v kontrolách běhu klikněte na **Vyřadit osobu z běhu**.
+2. Napište důvod (co chybí a kdy se doplní) a potvrďte. Běh dostane novou
+   revizi bez této osoby a hned se přepočítá.
+3. Schvalte běh obvyklým postupem.
+4. Až údaje doplníte, klikněte na **Vyžádat opravu** a **Otevřít opravu**.
+   Opravná revize osobu zase obsahuje; po schválení dostane mzdu za stejné
+   období.
+5. Měsíční hlášení JMHZ za ni podejte opravným hlášením
+   ([§ 85.9](85_Podani_a_hlaseni.md#859-krok-za-krokem-oprava-nebo-storno-odeslaneho-hlaseni-jmhz)).
+
+**Jak poznáte, že je hotovo:** Na kartě běhu je rámeček **Z běhu vyřazeno**
+(dokud je revize otevřená) nebo **Bez mzdy v tomto běhu** (po schválení)
+s důvodem a autorem; v historii běhu je událost **Osoba vyřazena z běhu**.
+
+Osobu, kterou jste vyřadili omylem, vrátíte tlačítkem **Vrátit do běhu**,
+dokud revize není schválená. Vyřazená osoba nemá v běhu výplatní pásku, mzdu
+ani zamčené vstupy. Osobu, která je už ve schválené revizi, z opravy vyřadit
+nejde: mzdu už dostala. Vyřazení smí uživatel s právy „Schválit mzdový běh“
+a „Spravovat mzdové vstupy“. Zrušení běhu vyřazení zruší.
+
+## 80.6b Krok za krokem: změna data výplaty
+
+Datum výplaty jde změnit až do schválení běhu, i u zrušeného běhu.
+
+1. Na kartě běhu klikněte na **Změnit datum výplaty**.
+2. Zadejte nové datum a potvrďte.
+
+U konceptu a zrušeného běhu se změní jen datum. Běh se snímkem vstupů dostane
+novou revizi s novým datem a hned se přepočítá, protože na datu výplaty závisí
+zákonný výpočet i lhůty odvodů a hlášení. Datum schváleného běhu změnit nejde.
+Krok smí uživatel s právy „Vypočítat mzdy“ a „Spravovat mzdové vstupy“.
 
 ## 80.7 Krok za krokem: doplnění zákonných údajů po importu
 
@@ -329,6 +379,11 @@ hlášením najdete v [Přechodu mezd v průběhu roku](113_Prechod_mezd_v_prube
 | Schválení odmítnuto s výzvou k obnovení | Od zmrazení snímku přibyly nebo se změnily schválené podklady | Klikněte na **Obnovit podklady** a přepočítejte ([§ 80.6](#806-krok-za-krokem-obnoveni-podkladu-rozpracovaneho-behu)). |
 | Přepočet nevzal opravený údaj | **Přepočítat** počítá ze zmrazeného snímku | **Obnovit podklady**, u schváleného běhu **Vyžádat opravu**. |
 | Datum výplaty se neuloží | Je později než poslední den následujícího měsíce (§ 141 odst. 1 zákoníku práce) | Zadejte skutečné datum výplaty v zákonné lhůtě. |
+| „Mzdový běh č. N za toto období už existuje s datem výplaty…“ | Za období už je běh (i zrušený) s jiným datem | V běhu č. N klikněte na **Změnit datum výplaty** ([§ 80.6b](#806b-krok-za-krokem-zmena-data-vyplaty)). |
+| Jedna osoba v ruční kontrole drží schválení celého běhu | Zákonný výpočet ukládá výsledky jen za všechny osoby běhu | **Vyřadit osobu z běhu** a doplatek opravou ([§ 80.6a](#806a-krok-za-krokem-vyrazeni-osoby-kterou-nejde-spocitat)). |
+| Na kartě běhu chybí **Zrušit běh**, **Začít znovu** nebo **Uzavřít** | Nemáte právo, které krok vyžaduje | Věta pod tlačítky jmenuje chybějící právo; požádejte správce firmy o jeho přidělení. |
+| „Nad tímto mzdovým během právě probíhá jiný požadavek“ | Souběžně běží výpočet, výjimka nebo obnova podkladů | Počkejte, až doběhne, a akci zopakujte; obrazovka data načte znovu. |
+| Vztah vypadl z běhu, ale jeho vstupy jsou zamčené | Vstupy zamkla předchozí revize | **Obnovit podklady**: vstupy vztahů, které nová revize nezná, se odemknou a jdou zrušit nebo přesunout. |
 | Rozpad daně ukazuje **Vyžaduje ruční kontrolu** | Chybí ověřené prohlášení, rezidence nebo nárok na dítě | Opravte podklad na kartě osoby a vytvořte novou revizi výpočtu. |
 | Nedokončený zákonný výpočet u většiny lidí po importu | Osoby nemají rezidenci ani příslušnost k pojištění | **Doplnit výchozí údaje (N osob)** ([§ 80.7](#807-krok-za-krokem-doplneni-zakonnych-udaju-po-importu)). |
 | Výpočet zdravotního pojištění skončí chybou | Osoba nemá zdravotní pojišťovnu (hlášení JMHZ ji nenese) | **Zdravotní pojišťovny hromadně**. |
@@ -399,7 +454,10 @@ revizi. Archivní export nese celý řetěz revizí.
 Prázdný technický běh smažete tlačítkem **Smazat prázdný běh**, i po jeho
 zrušení. Tlačítko se ukáže, jen když běh nemá revizi, uzamčené vstupy,
 výpočet, dokument, podání, platbu ani účetní stopu. Běh s věcnou evidencí
-zůstává kvůli auditu dohledatelný a jde jen zrušit.
+zůstává kvůli auditu dohledatelný a jde jen zrušit. Zrušený běh za období
+zůstává a pokračuje se v něm přes **Začít znovu**; špatné datum výplaty
+opravíte tlačítkem **Změnit datum výplaty**. Zrušený převzatý běh založení
+nového běhu za stejné období nebrání.
 
 ### 80.11.3 Schvalování vstupů
 
@@ -503,8 +561,14 @@ osob.
 **Obnovit podklady** založí novou revizi téhož druhu (opravná zůstává
 opravnou) ze stejných podkladů, jaké by vzalo zamknutí vstupů, nově schválené
 vstupy zamkne a běh vrátí k přepočtu. Rozpracovaná revize zůstane v historii
-jako zahozená. Schválenou revizi obnova nikdy nemění. Výjimky schválené
-u varování předchozí revize se nepřenášejí, nová revize je vyžaduje znovu.
+jako zahozená. Schválenou revizi obnova nikdy nemění. Výjimku schválenou
+u varování předchozí revize nová revize převezme, pokud má varování stejný
+kód, týká se stejné osoby nebo vztahu a má doslova stejný text; zůstane
+původní důvod i autor a historie běhu zapíše „Výjimky převzaté z předchozí
+revize“. Změněné varování vyžaduje výjimku znovu. Totéž platí pro opravu
+schváleného běhu a pro nový start zrušeného běhu. Vstupy vztahů, které nová
+revize už nezná (nenastoupil, ukončený vztah), obnova odemkne, takže je jde
+zrušit nebo přesunout.
 Obnovit podklady smí uživatel s právem počítat mzdy a zapisovat mzdové vstupy.
 
 Schválení revize, ke které existují novější podklady, aplikace odmítne. Nejde

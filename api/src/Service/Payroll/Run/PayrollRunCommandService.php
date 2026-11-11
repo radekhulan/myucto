@@ -560,6 +560,105 @@ final class PayrollRunCommandService
         );
     }
 
+    /**
+     * „Vzít žádost o opravu zpět" — běh se vrátí do stavu, ze kterého se o opravu
+     * žádalo. Dřív vedla ze stavu „čeká na opravu" jediná cesta, otevřít opravu;
+     * omylem vyžádaná oprava tak držela běh i roční uzávěrku.
+     */
+    public function withdrawCorrection(
+        int $supplierId,
+        int $runId,
+        int $expectedVersion,
+        string $idempotencyKey,
+        int $actorUserId,
+        string $reason = '',
+    ): PayrollRunCommandResult {
+        return $this->execute(
+            $supplierId,
+            $runId,
+            $expectedVersion,
+            PayrollRunCommand::WITHDRAW_CORRECTION,
+            $idempotencyKey,
+            $actorUserId,
+            $reason === '' ? null : $reason,
+        );
+    }
+
+    /**
+     * Opraví datum výplaty běhu, který ještě není schválený. Dřív šlo datum
+     * zadat jen při založení: po zamknutí vstupů nešlo změnit, zrušený běh se
+     * smazat nedal a nový běh skončil hláškou „existuje s jiným datem výplaty".
+     */
+    public function changePaymentDate(
+        int $supplierId,
+        int $runId,
+        int $expectedVersion,
+        string $idempotencyKey,
+        int $actorUserId,
+        string $paymentDate,
+    ): PayrollRunCommandResult {
+        return $this->execute(
+            $supplierId,
+            $runId,
+            $expectedVersion,
+            PayrollRunCommand::CHANGE_PAYMENT_DATE,
+            $idempotencyKey,
+            $actorUserId,
+            null,
+            trim($paymentDate),
+        );
+    }
+
+    /**
+     * Vyřadí osobu z otevřené revize běhu: nová revize bez ní, důvod v auditu.
+     * Osoba v ruční kontrole tak nezastaví výplatu ostatním; doplatek jde
+     * opravou běhu za stejné období („Vyžádat opravu" a „Otevřít opravu"),
+     * jejíž revize osobu zase obsahuje.
+     */
+    public function excludeEmployee(
+        int $supplierId,
+        int $runId,
+        int $expectedVersion,
+        string $idempotencyKey,
+        int $actorUserId,
+        int $employeeId,
+        string $reason,
+    ): PayrollRunCommandResult {
+        return $this->execute(
+            $supplierId,
+            $runId,
+            $expectedVersion,
+            PayrollRunCommand::EXCLUDE_EMPLOYEE,
+            $idempotencyKey,
+            $actorUserId,
+            $reason,
+            null,
+            $employeeId,
+        );
+    }
+
+    /** Vrátí vyřazenou osobu do běhu (nová revize s ní). */
+    public function includeEmployee(
+        int $supplierId,
+        int $runId,
+        int $expectedVersion,
+        string $idempotencyKey,
+        int $actorUserId,
+        int $employeeId,
+    ): PayrollRunCommandResult {
+        return $this->execute(
+            $supplierId,
+            $runId,
+            $expectedVersion,
+            PayrollRunCommand::INCLUDE_EMPLOYEE,
+            $idempotencyKey,
+            $actorUserId,
+            null,
+            null,
+            $employeeId,
+        );
+    }
+
     public function deleteRun(
         int $supplierId,
         int $runId,
@@ -695,10 +794,18 @@ final class PayrollRunCommandService
         string $idempotencyKey,
         int $actorUserId,
         ?string $reason = null,
+        ?string $paymentDate = null,
+        ?int $employeeId = null,
     ): PayrollRunCommandResult {
         $this->assertActor($actorUserId);
         if ($supplierId <= 0 || $runId <= 0 || $expectedVersion <= 0) {
             throw new \InvalidArgumentException('Identifikace mzdového příkazu není platná.');
+        }
+        if (in_array($command, [
+            PayrollRunCommand::EXCLUDE_EMPLOYEE,
+            PayrollRunCommand::INCLUDE_EMPLOYEE,
+        ], true) && ($employeeId === null || $employeeId <= 0)) {
+            throw new \InvalidArgumentException('Vyberte osobu, které se příkaz týká.');
         }
         $normalizedKey = trim($idempotencyKey);
         if (mb_strlen($normalizedKey) < 8 || mb_strlen($normalizedKey) > 190) {
@@ -716,6 +823,8 @@ final class PayrollRunCommandService
             'reason' => $reason,
             'run_id' => $runId,
             'supplier_id' => $supplierId,
+            ...($paymentDate === null ? [] : ['payment_date' => $paymentDate]),
+            ...($employeeId === null ? [] : ['employee_id' => $employeeId]),
         ]));
 
         $pdo = $this->db->pdo();
@@ -770,17 +879,57 @@ final class PayrollRunCommandService
                 && ($from === PayrollRunStatus::CORRECTION_PENDING
                     || $approvedBaseline !== null);
             $revision = $this->runs->currentRevision($supplierId, $runId);
-            // Obnova podkladů druh revize nemění: opravná zůstává opravnou
-            // (snímek jde přes `prepareCorrectionSnapshot()` stejně jako při
-            // znovuotevření), řádná řádnou.
-            $refreshAsCorrection = $command === PayrollRunCommand::REFRESH_INPUTS
+            /*
+             * Příkazy, které otevřenou revizi nahradí novou ze stejných podkladů:
+             * obnova podkladů, vyřazení a vrácení osoby a změna data výplaty
+             * u běhu se snímkem. Druh revize nemění: opravná zůstává opravnou
+             * (snímek jde přes `prepareCorrectionSnapshot()` stejně jako při
+             * znovuotevření), řádná řádnou.
+             */
+            $rebuildsRevision = in_array($command, [
+                PayrollRunCommand::REFRESH_INPUTS,
+                PayrollRunCommand::EXCLUDE_EMPLOYEE,
+                PayrollRunCommand::INCLUDE_EMPLOYEE,
+            ], true) || ($command === PayrollRunCommand::CHANGE_PAYMENT_DATE
+                && $revision !== null
+                && !in_array($from, [PayrollRunStatus::DRAFT, PayrollRunStatus::CANCELLED], true));
+            $refreshAsCorrection = $rebuildsRevision
                 && ($revision['revision_kind'] ?? null) === 'correction';
+            $snapshotPaymentDate = (string) $run['payment_date'];
+            if ($commandAvailable && $command === PayrollRunCommand::CHANGE_PAYMENT_DATE) {
+                $snapshotPaymentDate = $this->paymentDate(
+                    (string) $paymentDate,
+                    $this->period((string) $run['period_start']),
+                )->format('Y-m-d');
+                if ($snapshotPaymentDate === (string) $run['payment_date']) {
+                    throw new \DomainException(sprintf(
+                        'Běh už má datum výplaty %s.',
+                        (new \DateTimeImmutable($snapshotPaymentDate))->format('j. n. Y'),
+                    ));
+                }
+            }
+            $excludedEmployees = $this->runs->activeExclusionEmployeeIds($supplierId, $runId);
+            if ($commandAvailable && $command === PayrollRunCommand::EXCLUDE_EMPLOYEE) {
+                $excludedEmployees = $this->exclusionTarget(
+                    $supplierId,
+                    $runId,
+                    $revision,
+                    (int) $employeeId,
+                    $excludedEmployees,
+                );
+            }
+            if ($commandAvailable && $command === PayrollRunCommand::INCLUDE_EMPLOYEE) {
+                if (!in_array((int) $employeeId, $excludedEmployees, true)) {
+                    throw new \DomainException('Osoba z tohoto běhu vyřazená není.');
+                }
+                $excludedEmployees = array_values(array_diff($excludedEmployees, [(int) $employeeId]));
+            }
             $snapshot = null;
             if (in_array($command, [
                 PayrollRunCommand::LOCK_INPUTS,
                 PayrollRunCommand::REOPEN,
             ], true)
-                || ($command === PayrollRunCommand::REFRESH_INPUTS
+                || ($rebuildsRevision
                     && $commandAvailable
                     && $revision !== null)
             ) {
@@ -798,7 +947,7 @@ final class PayrollRunCommandService
                 $snapshot = $this->snapshotBuilder->build(
                     $supplierId,
                     (string) $run['period_start'],
-                    (string) $run['payment_date'],
+                    $snapshotPaymentDate,
                     $run['office_id'] === null ? null : (int) $run['office_id'],
                     $hourlyBlockers,
                 );
@@ -809,6 +958,24 @@ final class PayrollRunCommandService
                             $runId,
                             $snapshot,
                         );
+                }
+                $peopleBefore = count(PayrollRunExclusionFilter::employeeIds($snapshot->data));
+                $snapshot = PayrollRunExclusionFilter::apply($snapshot, $excludedEmployees);
+                if ($command === PayrollRunCommand::EXCLUDE_EMPLOYEE) {
+                    $peopleAfter = count(PayrollRunExclusionFilter::employeeIds($snapshot->data));
+                    if (!in_array((int) $employeeId, PayrollRunExclusionFilter::employeeIds($snapshot->data), true)
+                        && $peopleAfter === $peopleBefore
+                    ) {
+                        throw new \DomainException(
+                            'Osoba v aktuálních podkladech běhu není. Klikněte na „Obnovit podklady“.',
+                        );
+                    }
+                    if ($peopleAfter === 0) {
+                        throw new \DomainException(
+                            'Po vyřazení by v běhu nezůstal nikdo. Pokud se za období nemá vyplácet, '
+                            . 'běh zrušte.',
+                        );
+                    }
                 }
             }
             $counts = $revision === null
@@ -844,7 +1011,11 @@ final class PayrollRunCommandService
                 && $command === PayrollRunCommand::APPROVE
                 && is_array($revision['input_snapshot'] ?? null)
                     ? $this->sourceDrift
-                        ->detect($supplierId, $revision['input_snapshot'])
+                        ->detect(
+                            $supplierId,
+                            $revision['input_snapshot'],
+                            $this->runs->excludedEmploymentIds($supplierId, $runId),
+                        )
                         ->total()
                     : 0;
             $context = new PayrollRunTransitionContext(
@@ -881,21 +1052,40 @@ final class PayrollRunCommandService
                 reason: $reason,
                 correctionRevision: $refreshAsCorrection,
                 staleSourceCount: $staleSourceCount,
-                hasApprovedRevision: $command === PayrollRunCommand::CANCEL
+                hasApprovedRevision: in_array($command, [
+                    PayrollRunCommand::CANCEL,
+                    PayrollRunCommand::CHANGE_PAYMENT_DATE,
+                ], true)
                     && $this->runs->latestApprovedRevision($supplierId, $runId) !== null,
+                correctionRequestedFrom: $command === PayrollRunCommand::WITHDRAW_CORRECTION
+                    ? PayrollRunStatus::tryFrom(
+                        (string) $this->runs->correctionRequestedFrom($supplierId, $runId),
+                    )
+                    : null,
             );
             $transition = $this->workflow->transition($from, $command, $context);
 
+            $eventMetadata = [];
+            if ($command === PayrollRunCommand::CHANGE_PAYMENT_DATE) {
+                $this->runs->setPaymentDate($supplierId, $runId, $expectedVersion, $snapshotPaymentDate);
+                $eventMetadata = [
+                    'payment_date_from' => (string) $run['payment_date'],
+                    'payment_date_to' => $snapshotPaymentDate,
+                ];
+            }
+            if ($employeeId !== null) {
+                $eventMetadata['employee_id'] = $employeeId;
+            }
             $replacedRevisionId = null;
             if ($command === PayrollRunCommand::LOCK_INPUTS
                 || $command === PayrollRunCommand::REOPEN
-                || $command === PayrollRunCommand::REFRESH_INPUTS
+                || $rebuildsRevision
             ) {
                 if ($snapshot === null) {
                     throw new \LogicException('Nová revize mzdového běhu nemá snímek vstupů.');
                 }
                 $revisionNo = (int) $run['current_revision_no'] + 1;
-                if ($command === PayrollRunCommand::REFRESH_INPUTS) {
+                if ($rebuildsRevision) {
                     $replacedRevisionId = $revision === null ? null : (int) $revision['id'];
                     // Opravná revize se dál vztahuje ke schválenému základu,
                     // proti kterému se opravuje; řádná navazuje na tu, kterou
@@ -922,6 +1112,31 @@ final class PayrollRunCommandService
                     $revisionId,
                     $snapshot,
                 );
+                if ($revision !== null) {
+                    $carried = $this->runs->carryOverOverrides(
+                        $supplierId,
+                        $revisionId,
+                        (int) $revision['id'],
+                    );
+                    if ($carried !== []) {
+                        $this->runs->insertEvent(
+                            $supplierId,
+                            $runId,
+                            $revisionId,
+                            'validation_overrides_carried',
+                            null,
+                            null,
+                            $actorUserId,
+                            sprintf('Výjimky převzaté z revize %d.', (int) $revision['revision_no']),
+                            [
+                                'from_revision_id' => (int) $revision['id'],
+                                'from_revision_no' => (int) $revision['revision_no'],
+                                'count' => count($carried),
+                                'validations' => $carried,
+                            ],
+                        );
+                    }
+                }
                 if ($reopenAsCorrection || $refreshAsCorrection) {
                     $this->runs->unlockInputsForCorrection(
                         $supplierId,
@@ -934,6 +1149,33 @@ final class PayrollRunCommandService
                         $revisionId,
                         (string) $run['period_start'],
                         $run['office_id'] === null ? null : (int) $run['office_id'],
+                    );
+                    if ($rebuildsRevision) {
+                        $this->runs->unlockInputsOutsideRevision(
+                            $supplierId,
+                            $runId,
+                            $revisionId,
+                            (string) $run['period_start'],
+                        );
+                    }
+                }
+                if ($command === PayrollRunCommand::EXCLUDE_EMPLOYEE) {
+                    $this->runs->insertExclusion(
+                        $supplierId,
+                        $runId,
+                        (int) $employeeId,
+                        (string) $reason,
+                        $actorUserId,
+                        $revisionNo,
+                    );
+                }
+                if ($command === PayrollRunCommand::INCLUDE_EMPLOYEE) {
+                    $this->runs->liftExclusions(
+                        $supplierId,
+                        $runId,
+                        (int) $employeeId,
+                        $actorUserId,
+                        'included',
                     );
                 }
                 $revision = $this->runs->revision($supplierId, $revisionId);
@@ -1055,6 +1297,7 @@ final class PayrollRunCommandService
                     (int) $revision['id'],
                     $actorUserId,
                 );
+                $this->runs->settleExclusions($supplierId, $runId, (int) $revision['id']);
                 $this->runs->lockApprovedInputs(
                     $supplierId,
                     (int) $revision['id'],
@@ -1209,6 +1452,7 @@ final class PayrollRunCommandService
                  */
                 if ($command === PayrollRunCommand::CANCEL) {
                     $this->runs->abandonRevisionsOnCancel($supplierId, $runId);
+                    $this->runs->liftExclusions($supplierId, $runId, null, $actorUserId, 'run_cancelled');
                     /*
                      * Zrušený běh, který nikdy nebyl schválený, nesmí dál držet
                      * zámek vstupů. Jinak docházka s příplatky nešla schválit
@@ -1257,6 +1501,7 @@ final class PayrollRunCommandService
                     ...($replacedRevisionId === null
                         ? []
                         : ['replaced_revision_id' => $replacedRevisionId]),
+                    ...$eventMetadata,
                 ],
             );
             $this->runs->insertCommandReceipt(
@@ -1286,6 +1531,50 @@ final class PayrollRunCommandService
             $this->rollbackCommandTransaction($pdo, $nestedTransaction, $e);
             throw $e;
         }
+    }
+
+    /**
+     * Kontrola, že osobu jde z otevřené revize vyřadit. Vrací nový seznam
+     * vyřazených osob běhu.
+     *
+     * Vyřadit jde jen osobu, kterou aktuální revize opravdu obsahuje. U opravy
+     * schváleného běhu navíc jen osobu, která ve schválené revizi NENÍ — ta už
+     * mzdu dostala a vyřazením z opravy by se jí vzala.
+     *
+     * @param array<string,mixed>|null $revision
+     * @param list<int> $excluded
+     * @return list<int>
+     */
+    private function exclusionTarget(
+        int $supplierId,
+        int $runId,
+        ?array $revision,
+        int $employeeId,
+        array $excluded,
+    ): array {
+        if (in_array($employeeId, $excluded, true)) {
+            throw new \DomainException('Osoba je z tohoto běhu už vyřazená.');
+        }
+        if ($revision === null
+            || !$this->runs->revisionHasEmployee($supplierId, (int) $revision['id'], $employeeId)
+        ) {
+            throw new \DomainException(
+                'Osoba v aktuální revizi běhu není, takže ji není z čeho vyřadit.',
+            );
+        }
+        $approved = $this->runs->latestApprovedRevision($supplierId, $runId);
+        if ($approved !== null
+            && $this->runs->revisionHasEmployee($supplierId, (int) $approved['id'], $employeeId)
+        ) {
+            throw new \DomainException(
+                'Osoba je ve schválené revizi běhu a mzdu už dostala. Z opravy ji vyřadit nelze: '
+                . 'doplňte chybějící údaje, nebo vezměte opravu zpět zrušením opravné revize.',
+            );
+        }
+        $excluded[] = $employeeId;
+        sort($excluded);
+
+        return $excluded;
     }
 
     /**
