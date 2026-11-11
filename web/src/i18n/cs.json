@@ -4180,6 +4180,7 @@
         "time_month_missing": "Chybí schválená pracovní doba",
         "employment_without_inputs": "Pracovní vztah bez mzdových vstupů",
         "dpp_annual_hours_approaching": "Dohoda o provedení práce se blíží limitu 300 hodin",
+        "overtime_wage_from_attendance": "Dosažená mzda za přesčas založená z docházky",
         "recurring_component_without_input": "Pravidelná mzdová složka bez vstupu"
       }
     },

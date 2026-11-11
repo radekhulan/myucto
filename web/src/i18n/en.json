@@ -4180,6 +4180,7 @@
         "time_month_missing": "Approved working time missing",
         "employment_without_inputs": "Employment without payroll inputs",
         "dpp_annual_hours_approaching": "Agreement to perform work approaching the 300-hour limit",
+        "overtime_wage_from_attendance": "Overtime wage created from attendance",
         "recurring_component_without_input": "Recurring payroll component without input"
       }
     },
