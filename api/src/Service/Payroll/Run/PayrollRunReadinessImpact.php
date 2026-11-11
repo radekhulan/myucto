@@ -95,6 +95,7 @@ final class PayrollRunReadinessImpact
         'draft_inputs_present' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
         'time_month_not_approved' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
         'time_month_missing' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
+        'hourly_claim_component_conflict' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
         // Vztah bez schválené složky výpočet neprojde (zákonný výpočet skončí
         // ruční kontrolou „chybí schválená mzdová složka"), i když snímek sám
         // to hlásí jen jako varování. Cesta ven: zadat složku, případně 0 Kč.

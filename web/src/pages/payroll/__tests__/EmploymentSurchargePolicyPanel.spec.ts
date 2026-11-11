@@ -153,6 +153,12 @@ beforeEach(() => {
 })
 
 describe('EmploymentSurchargePolicyPanel', () => {
+  it('vyžaduje výslovné datum účinnosti nové zásady', async () => {
+    const wrapper = await mountPanel()
+    await wrapper.get('[data-test="surcharge-policy-add"]').trigger('click')
+    expect((wrapper.get('[data-test="surcharge-policy-valid-from"]').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.get('[data-test="surcharge-policy-save"]').attributes('disabled')).toBeDefined()
+  })
   it('ukáže zákonný výchozí stav, když zásada neexistuje — u svátku náhradní volno', async () => {
     const wrapper = await mountPanel()
 
@@ -222,6 +228,7 @@ describe('EmploymentSurchargePolicyPanel', () => {
     const wrapper = await mountPanel()
     await wrapper.find('[data-test="surcharge-policy-add"]').trigger('click')
     await wrapper.find('[data-test="surcharge-policy-rate-holiday"]').setValue('50')
+    await wrapper.find('[data-test="surcharge-policy-valid-from"]').setValue('2026-03-01')
 
     // Klient varuje hned, ale tlačítko Uložit neblokuje — autorita je server.
     const warning = wrapper.find('[data-test="surcharge-policy-below-statutory"]')
@@ -254,14 +261,15 @@ describe('EmploymentSurchargePolicyPanel', () => {
    * takže překlep v sazbě se „opravoval" novou verzí od dalšího dne a v historii
    * po sobě nechal den se sazbou, kterou nikdo nesjednal.
    */
-  it('opraví otevřenou verzi s optimistickým zámkem a účinnost nechá být', async () => {
+  it('opraví účinnost nepoužité verze s optimistickým zámkem', async () => {
     vi.mocked(payrollApi.employmentSurchargePolicies).mockResolvedValue(response([policy()]))
     const wrapper = await mountPanel()
 
     await wrapper.find('[data-test="surcharge-policy-edit"]').trigger('click')
     const validFrom = wrapper.get('[data-test="surcharge-policy-valid-from"]')
     expect((validFrom.element as HTMLInputElement).value).toBe('01. 01. 2026')
-    expect(validFrom.attributes('disabled')).toBeDefined()
+    expect(validFrom.attributes('disabled')).toBeUndefined()
+    await validFrom.setValue('2026-02-01')
 
     await wrapper.find('[data-test="surcharge-policy-rate-overtime"]').setValue('35')
     await wrapper.find('[data-test="surcharge-policy-form"]').trigger('submit')
@@ -270,11 +278,8 @@ describe('EmploymentSurchargePolicyPanel', () => {
     expect(payrollApi.updateEmploymentSurchargePolicy).toHaveBeenCalledWith(
       10,
       5,
-      expect.objectContaining({ overtime_rate_bp: 3500, row_version: 1 }),
+      expect.objectContaining({ overtime_rate_bp: 3500, valid_from: '2026-02-01', row_version: 1 }),
     )
-    // Účinnost se opravou neposílá — je to hranice proti předchozí verzi.
-    expect(vi.mocked(payrollApi.updateEmploymentSurchargePolicy).mock.calls[0][2])
-      .not.toHaveProperty('valid_from')
     expect(payrollApi.createEmploymentSurchargePolicy).not.toHaveBeenCalled()
     expect(payrollApi.closeEmploymentSurchargePolicy).not.toHaveBeenCalled()
   })
@@ -318,6 +323,9 @@ describe('EmploymentSurchargePolicyPanel', () => {
     expect(edit.attributes('disabled')).toBeDefined()
     expect(edit.attributes('title'))
       .toContain('payroll.people.surcharge_policy.edit_blocked_no_open')
+    await wrapper.get('[data-test="surcharge-policy-edit-5"]').trigger('click')
+    expect(wrapper.get('[data-test="surcharge-policy-valid-from"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-test="surcharge-policy-valid-to"]').exists()).toBe(false)
   })
 
   it('odmítnutí kvůli historii i konflikt verze vysvětlí a přenačte stav', async () => {
@@ -349,6 +357,7 @@ describe('EmploymentSurchargePolicyPanel', () => {
     await wrapper.find('[data-test="surcharge-policy-add"]').trigger('click')
 
     await wrapper.find('[data-test="surcharge-policy-standby-rate"]').setValue('5')
+    await wrapper.find('[data-test="surcharge-policy-valid-from"]').setValue('2026-03-01')
     const save = wrapper.get('[data-test="surcharge-policy-save"]')
     expect(save.attributes('disabled')).toBeDefined()
     expect(save.attributes('title')).toContain('payroll.people.surcharge_policy.standby.invalid')
@@ -368,6 +377,7 @@ describe('EmploymentSurchargePolicyPanel', () => {
   it('prázdná odměna za pohotovost znamená zákonné minimum a posílá se jako null', async () => {
     const wrapper = await mountPanel()
     await wrapper.find('[data-test="surcharge-policy-add"]').trigger('click')
+    await wrapper.find('[data-test="surcharge-policy-valid-from"]').setValue('2026-03-01')
     await wrapper.find('[data-test="surcharge-policy-form"]').trigger('submit')
     await flushPromises()
     expect(payrollApi.createEmploymentSurchargePolicy).toHaveBeenCalledWith(10, expect.objectContaining({

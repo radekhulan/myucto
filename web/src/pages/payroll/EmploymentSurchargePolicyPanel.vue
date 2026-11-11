@@ -31,15 +31,6 @@
  * nenahrazuje vlastní — jinak by tu byly dvě autority a jedna z nich by
  * dřív nebo později lhala.
  *
- * ── Oprava vs. přepis historie ──────────────────────────────────────────────
- *
- * Opravit jde jediná verze — ta OTEVŘENÁ (`valid_to === null`), a jen její
- * OBSAH. Uzavřená verze už nějaký měsíc odměnila a mzdový list na ni ukazuje;
- * změnit jí zpětně sazbu by znamenalo, že doklad tvrdí něco jiného, než z čeho
- * vznikl. Datum účinnosti se neopravuje ani u otevřené verze: je to hranice
- * proti předchozí verzi, jejíž konec je z něj dopočítaný. Jiná účinnost = nová
- * verze. Konec platnosti se v témže formuláři jen DOPLŇUJE (zásada se nemaže,
- * uzavírá se) a server hlídá, ať nevznikne díra ani překryv.
  */
 import { computed, onMounted, ref } from 'vue'
 import { isAxiosError } from 'axios'
@@ -148,14 +139,6 @@ const HOLIDAY_MODES: Exclude<PayrollSurchargeCompensationMode, 'included_in_wage
   'surcharge',
 ]
 
-function localDate(): string {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
 interface PolicyForm {
   hourly_terms: PayrollHourlyPolicyTerms | null
   valid_from: string
@@ -187,7 +170,7 @@ interface PolicyForm {
 function newForm(): PolicyForm {
   return {
     hourly_terms: null,
-    valid_from: localDate(),
+    valid_from: '',
     valid_to: '',
     overtime_mode: 'surcharge',
     holiday_mode: 'compensatory_time_off',
@@ -363,11 +346,6 @@ const addDisabledReason = computed(() => (props.canWrite
 const currentPolicy = computed(() => policies.value.find(policy => policy.valid_to === null) ?? null)
 const historyPolicies = computed(() => policies.value.filter(policy => policy.valid_to !== null))
 
-/*
- * Opravovat jde jen otevřená verze. Uzavřená už odměnila nějaký měsíc a mzdový
- * list na ni ukazuje — tlačítko, které by ji nabídlo k úpravě, by končilo
- * odmítnutím ze serveru.
- */
 const editDisabledReason = computed(() => {
   if (!props.canWrite) return t('payroll.people.surcharge_policy.no_permission')
   if (!currentPolicy.value) return t('payroll.people.surcharge_policy.edit_blocked_no_open')
@@ -440,12 +418,8 @@ function openNew() {
   editorOpen.value = true
 }
 
-/**
- * Oprava otevřené verze. `valid_from` se ukáže, ale needituje — je to hranice
- * proti předchozí, uzavřené verzi, jejíž konec je z něj dopočítaný.
- */
-function openEdit() {
-  const current = currentPolicy.value
+function openEdit(policy?: PayrollEmploymentSurchargePolicy) {
+  const current = policy ?? currentPolicy.value
   if (!current) return
   hourlyTermsValid.value = true
   form.value = newForm()
@@ -529,6 +503,7 @@ async function save() {
       await payrollApi.createEmploymentSurchargePolicy(props.employmentId, payload)
     } else {
       const payload: PayrollEmploymentSurchargePolicyUpdatePayload = {
+        valid_from: form.value.valid_from,
         ...agreed,
         ...rates,
         row_version: editingVersion.value,
@@ -596,17 +571,13 @@ onMounted(load)
         {{ t('payroll.people.surcharge_policy.title') }}
       </h4>
       <div class="flex flex-wrap gap-2">
-        <!--
-          Opravit jde jen otevřená verze — u uzavřené je tlačítko zašedlé i
-          s důvodem, ne skryté: jinak by uživatel hledal, kde se překlep opravuje.
-        -->
         <button
           type="button"
           data-test="surcharge-policy-edit"
           :class="btnOutlineSm('neutral')"
           :disabled="editDisabledReason !== ''"
           :title="disabledTitle(editDisabledReason !== '', editDisabledReason)"
-          @click="openEdit"
+          @click="openEdit()"
         >
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path :d="ICONS.edit" />
@@ -724,6 +695,16 @@ onMounted(load)
           · {{ t('payroll.people.surcharge_policy.overtime_mode') }}: {{ modeLabel(policy.overtime_mode) }}
           · {{ t('payroll.people.surcharge_policy.holiday_mode') }}: {{ modeLabel(policy.holiday_mode) }}
           <PayrollHourlyPolicyTermsSummary v-if="policy.hourly_terms" :value="policy.hourly_terms" />
+          <button
+            v-if="canWrite"
+            type="button"
+            :data-test="`surcharge-policy-edit-${policy.id}`"
+            :class="btnOutlineSm('neutral')"
+            @click="openEdit(policy)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>
+            {{ t('payroll.people.surcharge_policy.edit') }}
+          </button>
         </li>
       </ul>
     </div>
@@ -755,7 +736,7 @@ onMounted(load)
           <DateInput
             v-model="form.valid_from"
             data-test="surcharge-policy-valid-from"
-            :disabled="!canWrite || editingId !== null"
+            :disabled="!canWrite"
             class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100" />
           <span v-if="editingId !== null" class="mt-1 block text-neutral-500">
             {{ t('payroll.people.surcharge_policy.valid_from_locked') }}
@@ -765,7 +746,7 @@ onMounted(load)
           Konec platnosti se jen DOPLŇUJE, a jen u opravy. Zásada se nemaže;
           uzavřít ji je jediný způsob, jak sjednání ukončit.
         -->
-        <label v-if="editingId !== null" class="text-xs text-neutral-600">
+        <label v-if="editingId !== null && policies.find(policy => policy.id === editingId)?.valid_to === null" class="text-xs text-neutral-600">
           {{ t('payroll.people.surcharge_policy.valid_to') }}
           <DateInput
             v-model="form.valid_to"

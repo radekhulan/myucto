@@ -1062,6 +1062,32 @@ describe('PayrollQuickInputs', () => {
     expect(m.putPref).not.toHaveBeenCalled()
   })
 
+  it('vysvětlí příplatky z hodinové docházky a nenabízí nový ruční příplatek', async () => {
+    m.pagePrefs.value = { flags: { surcharges: true } }
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({ hourly_remuneration_in_period: true })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="quick-surcharge-night-12"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="quick-surcharge-mobile-night-12"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('payroll.quick_inputs.surcharges.unavailable.hourly_attendance')
+  })
+
+  it('dovolí vymazat dřívější ruční příplatek hodinového zaměstnance', async () => {
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({
+      hourly_remuneration_in_period: true,
+      surcharges: surchargeStates({ night: { hours_milli: 4000, amount_minor: 10_000, row_version: 2, status: 'draft' } }),
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    const hours = wrapper.get('[data-testid="quick-surcharge-night-12"]')
+    expect(hours.attributes('disabled')).toBeUndefined()
+    await hours.setValue('')
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+    expect(m.save.mock.calls[0][0].rows[0].surcharges.night).toEqual({ hours_milli: null, factors: null })
+    expect(m.save.mock.calls[0][0].rows[0].surcharges.weekend).toBeUndefined()
+  })
+
   /** Uložená preference přepínač zapne ještě před prvním kliknutím. */
   it('restores the remembered toggle state', async () => {
     m.pagePrefs.value = { flags: { surcharges: true } }

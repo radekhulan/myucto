@@ -119,6 +119,12 @@ uložení ikona stavu. Pole, do kterého zadat nejde, ukazuje **Nedostupné**
 a důvod najdete v popisku po najetí myší nebo v pruhu **Proč některé
 příplatky nejde zadat**.
 
+U hodinově odměňovaného vztahu se příplatky počítají z docházky, nové ruční
+příplatky zde nezadáváte. Dříve zadaný ruční příplatek odeberte vymazáním
+hodin a uložením změny. Kolizi ohlásí kontrola před zahájením běhu se jménem
+a odkazem na vstup. Pokud už vstup zamkl neschválený běh, nejdřív běh zrušte,
+vstup opravte a začněte z opravených vstupů.
+
 ## 79.6 Krok za krokem: úprava hodnoty z importu
 
 1. Najděte buňku se šipkou dolů (hodnota z importu, například z docházky).
