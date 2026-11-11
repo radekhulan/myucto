@@ -2690,7 +2690,7 @@ describe('PayrollRuns', () => {
             remediation_path: '/payroll/people?person=7&panel=statutory_evidence',
           }],
           bulk_actions: [
-            { kind: 'statutory_defaults', count: 3 },
+            { kind: 'statutory_defaults', count: 3, employee_ids: [7, 8, 9] },
             { kind: 'health_insurer', count: 1 },
           ],
         }],
@@ -2704,7 +2704,7 @@ describe('PayrollRuns', () => {
       const statutory = wrapper.get('[data-test="run-readiness-bulk-action-statutory_defaults"]')
       expect(JSON.parse(statutory.attributes('data-to')!)).toEqual({
         name: 'payroll-people',
-        query: { bulk: 'statutory_defaults', period: '2026-02' },
+        query: { bulk: 'statutory_defaults', period: '2026-02', employees: '7,8,9' },
       })
       expect(statutory.text()).toContain('payroll.runs.readiness.bulk.statutory_defaults')
       expect(wrapper.find('[data-test="run-readiness-bulk-action-health_insurer"]').exists()).toBe(true)

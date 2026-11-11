@@ -6787,7 +6787,7 @@
       },
       "data_gap_summary": {
         "blocking_title": "Nothing missing | 1 item is missing that the month cannot go through without | {count} items are missing that the month cannot go through without",
-        "blocking_hint": "Filings cannot be submitted and contributions cannot be calculated without them. You can still save the card and add them any time.",
+        "blocking_hint": "Payroll is calculated without them, but the registration and the monthly report cannot be filed. You can still save the card and add them any time.",
         "advisory_title": "Nothing missing | 1 item left to add | {count} items left to add",
         "advisory_hint": "None of this stops the month. Add them when there is time.",
         "open": "Add →"
@@ -10112,6 +10112,8 @@
         "detail_action": "Detail",
         "not_prepared_action": "Where to prepare it",
         "external_action": "Filed outside the app",
+        "bulk_external_hint": "{count} obligations are past due with no filing in the application. Anything you filed elsewhere (for example registrations on the ČSSZ ePortal) can be marked in bulk as handled outside the application in the Statutory deadlines panel.",
+        "bulk_external_action": "Bulk in Statutory deadlines",
         "external_title": "Filed outside the app",
         "external_hint": "You filed the report on the authority's portal, not from the app. The obligation is closed as fulfilled; the submission status stays as it is, because the app never sent it.",
         "external_filed_on": "Date filed on the portal",
@@ -24066,6 +24068,7 @@
     "no_items": "No items.",
     "expandable_list": {
       "show_all": "Show all {count}",
+      "show_listed": "Show the {count} listed of {total}",
       "collapse": "Collapse list",
       "search": "Search by name or personal number",
       "search_label": "Search the list",

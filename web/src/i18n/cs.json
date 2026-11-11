@@ -6787,7 +6787,7 @@
       },
       "data_gap_summary": {
         "blocking_title": "Nic nechybí | Chybí 1 údaj, bez kterého měsíc neprojde | Chybí {count} údaje, bez kterých měsíc neprojde | Chybí {count} údajů, bez kterých měsíc neprojde",
-        "blocking_hint": "Bez nich se nedá podat hlášení ani spočítat odvody. Kartu ale uložíte i tak a doplnit je můžete kdykoli.",
+        "blocking_hint": "Mzdy se spočítají i bez nich, ale nepůjde podat přihlášku ani měsíční hlášení. Kartu uložíte i tak a doplnit je můžete kdykoli.",
         "advisory_title": "Nic nechybí | Zbývá doplnit 1 údaj | Zbývají doplnit {count} údaje | Zbývá doplnit {count} údajů",
         "advisory_hint": "Nic z toho měsíc nezastaví. Doplňte je, až bude čas.",
         "open": "Doplnit →"
@@ -10112,6 +10112,8 @@
         "detail_action": "Detail",
         "not_prepared_action": "Kde to připravit",
         "external_action": "Podáno mimo aplikaci",
+        "bulk_external_hint": "Po termínu je {count} povinností bez podání v aplikaci. Co jste podali jinde (například přihlášky na ePortálu ČSSZ), označíte hromadně jako vyřízené mimo aplikaci v panelu Zákonné termíny.",
+        "bulk_external_action": "Hromadně v Zákonných termínech",
         "external_title": "Podáno mimo aplikaci",
         "external_hint": "Hlášení jste odeslali na portálu úřadu, ne z aplikace. Povinnost se uzavře jako splněná; stav podání zůstane, protože aplikace ho neodeslala.",
         "external_filed_on": "Den podání na portálu",
@@ -24066,6 +24068,7 @@
     "no_items": "Žádné položky.",
     "expandable_list": {
       "show_all": "Zobrazit všech {count}",
+      "show_listed": "Zobrazit vypsaných {count} z {total}",
       "collapse": "Sbalit seznam",
       "search": "Hledat podle jména nebo os. čísla",
       "search_label": "Hledat v seznamu",

@@ -8,7 +8,7 @@ import {
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
-import { formatPeriod } from '@/composables/useFormat'
+import { formatPeriod, formatPeriodNumeric } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import { BTN_DISABLED_NOTE, btnFilled, btnOutline, btnOutlineSm, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
 import { healthInsurerOptions } from '@/utils/healthInsurers'
@@ -92,7 +92,8 @@ async function save() {
   try {
     const response = await payrollApi.healthInsurerBulkApply(assignments.value)
     result.value = response
-    toast.success(t('payroll.health_insurer_bulk.applied_toast', { count: response.counts.applied }))
+    if (response.counts.applied === 0 && response.counts.failed > 0) toast.warning(t('payroll.health_insurer_bulk.failed_title', { count: response.counts.failed }))
+    else toast.success(t('payroll.health_insurer_bulk.applied_toast', { count: response.counts.applied }))
     emit('applied', response)
   } catch (error) {
     saveError.value = apiErrorMessage(error, t('payroll.health_insurer_bulk.apply_failed'))
@@ -154,7 +155,7 @@ onMounted(load)
                 v-if="row.known_from"
                 class="block text-xs text-neutral-500"
                 :data-test="`health-insurer-bulk-known-${row.employee_id}`"
-              >{{ t('payroll.health_insurer_bulk.known_later', { period: formatPeriod(row.known_from.slice(0, 7)) }) }}</span>
+              >{{ t('payroll.health_insurer_bulk.known_later', { period: formatPeriodNumeric(row.known_from.slice(0, 7)) }) }}</span>
             </span>
             <select
               v-model="row.insurer_code"
@@ -203,7 +204,7 @@ onMounted(load)
       </template>
 
       <section v-if="result" class="space-y-3" data-test="health-insurer-bulk-result">
-        <p class="text-sm text-success-700">{{ t('payroll.health_insurer_bulk.applied_toast', { count: result.counts.applied }) }}</p>
+        <p v-if="result.counts.applied > 0" class="text-sm text-success-700">{{ t('payroll.health_insurer_bulk.applied_toast', { count: result.counts.applied }) }}</p>
         <div v-if="result.failed.length" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-xs text-danger-700">
           <p class="font-medium">{{ t('payroll.health_insurer_bulk.failed_title', { count: result.failed.length }) }}</p>
           <ul class="mt-1 space-y-0.5">

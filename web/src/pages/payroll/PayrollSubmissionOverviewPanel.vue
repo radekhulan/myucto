@@ -208,6 +208,12 @@ const counts = computed(() => {
   }
 })
 
+// Souhrn po termínu platí za celé období, stránka nese jen 50 řádků.
+const unpreparedOverdueCount = computed(() => items.value.some(item =>
+  item.latest_submission === null && item.deadline.phase === 'overdue')
+  ? deadlineSummary.value.overdue
+  : 0)
+
 function statusClass(status: string): string {
   if (status === 'fulfilled') return 'bg-success-50 text-success-700'
   if (status === 'submitted') return 'bg-primary-50 text-primary-700'
@@ -1104,6 +1110,22 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
           </dd>
         </div>
       </dl>
+
+      <!--
+        Desítky povinností po termínu bez podání (typicky přihlášky dohod
+        podané dřív jiným programem) se po jedné neodškrtávají: hromadné
+        „vyřízeno mimo aplikaci" je v panelu Zákonné termíny na přehledu mezd.
+      -->
+      <p
+        v-if="unpreparedOverdueCount > 1"
+        class="flex flex-wrap items-center gap-2 rounded-xl border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-700"
+        data-test="submission-bulk-external-hint"
+      >
+        <span>{{ t('payroll.submissions.overview.bulk_external_hint', { count: unpreparedOverdueCount }) }}</span>
+        <RouterLink :to="{ name: 'payroll-dashboard', hash: '#payroll-deadlines' }" :class="btnOutlineSm('neutral')" data-test="submission-bulk-external-link">
+          {{ t('payroll.submissions.overview.bulk_external_action') }}
+        </RouterLink>
+      </p>
 
       <p
         v-if="settleError"
