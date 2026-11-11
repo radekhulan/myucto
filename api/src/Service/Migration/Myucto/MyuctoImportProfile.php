@@ -4,13 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Myucto;
 
+use MyInvoice\Repository\DimensionAssignmentRepository;
+
 /** Explicit first import profile: business records, no instance credentials or runtime jobs. */
 final class MyuctoImportProfile
 {
     /** Prvních 16 znaků otisku je součástí cesty importovaných souborů, takže dvojtečka musí stát až za nimi. */
-    public const VERSION = 'company-complete-v1';
+    public const VERSION = 'company-dimensions-v1';
     /** Starší profily, jejichž obnova se shodnými daty je pro aktuální profil úplná. */
-    public const COMPATIBLE_VERSIONS = ['classifications-v1', 'posting-groups-v1', 'vat-clearing-runs-v1'];
+    public const COMPATIBLE_VERSIONS = ['classifications-v1', 'posting-groups-v1', 'vat-clearing-runs-v1', 'company-complete-v1'];
     public const TABLES = [
         'currencies', 'revenue_categories', 'expense_categories', 'cost_centers',
         'chart_of_accounts', 'vat_classifications', 'accounting_periods', 'clients', 'client_bank_accounts',
@@ -39,6 +41,8 @@ final class MyuctoImportProfile
         'income_tax_returns', 'tax_advance_schedules',
         'bank_posting_rules', 'bank_counterparty_map', 'bank_card_merchant_map', 'expense_classification_rules',
         'bank_rule_templates', 'auto_posting_policy',
+        // Nastavení dimenzí firmy: pravidla povinnosti, mapa účtotvorné dimenze, výchozí dimenze karet.
+        'dimension_account_rules', 'dimension_account_map', 'dimension_defaults',
         'accounting_corrections', 'accounting_closing_steps',
         'number_series', 'accounting_document_series',
     ];
@@ -56,12 +60,20 @@ final class MyuctoImportProfile
             'refs' => ['internal_document_id' => 'internal_documents']],
         'journal_entry_line_dimensions' => ['key' => ['line_id', 'dimension_type_id'],
             'refs' => ['line_id' => 'journal_entry_lines', 'dimension_type_id' => 'dimension_types', 'dimension_value_id' => 'dimension_values']],
+        'journal_entry_line_dimension_splits' => ['key' => ['line_id', 'dimension_type_id', 'dimension_value_id'],
+            'refs' => ['line_id' => 'journal_entry_lines', 'dimension_type_id' => 'dimension_types', 'dimension_value_id' => 'dimension_values']],
+        // Cíl `doc_id` podle druhu dokladu je v DimensionAssignmentRepository::DOC_TYPE_TABLES (jedno místo
+        // i pro archiv účetnictví). Druh, jehož doklady obnova nepřenáší (ostatní položky), se vynechá a vykáže.
         'document_dimensions' => ['key' => ['supplier_id', 'doc_type', 'doc_id', 'item_no', 'dimension_type_id'],
             'refs' => ['dimension_type_id' => 'dimension_types', 'dimension_value_id' => 'dimension_values'],
-            'polymorphic' => ['doc_id' => ['doc_type', ['purchase_invoice' => 'purchase_invoices', 'invoice' => 'invoices',
-                'cash_document' => 'cash_documents', 'bank_transaction' => 'bank_transactions', 'journal_template' => 'journal_entry_templates',
-                'recurring_template' => 'recurring_invoice_templates', 'asset' => 'assets']]],
+            'polymorphic' => ['doc_id' => ['doc_type', DimensionAssignmentRepository::DOC_TYPE_TABLES]],
             'tolerant' => true],
+        'document_dimension_splits' => ['key' => ['supplier_id', 'doc_type', 'doc_id', 'item_no', 'dimension_type_id', 'dimension_value_id'],
+            'refs' => ['dimension_type_id' => 'dimension_types', 'dimension_value_id' => 'dimension_values'],
+            'polymorphic' => ['doc_id' => ['doc_type', DimensionAssignmentRepository::DOC_TYPE_TABLES]],
+            'tolerant' => true],
+        'bank_posting_rule_dimensions' => ['key' => ['rule_id', 'dimension_type_id'],
+            'refs' => ['rule_id' => 'bank_posting_rules', 'dimension_type_id' => 'dimension_types', 'dimension_value_id' => 'dimension_values']],
         'document_links' => ['key' => ['document_id', 'entity_type', 'entity_id'],
             'refs' => ['document_id' => 'documents'],
             'polymorphic' => ['entity_id' => ['entity_type', ['client' => 'clients', 'invoice' => 'invoices',
@@ -170,6 +182,16 @@ final class MyuctoImportProfile
         'accounting_closing_steps' => ['done_by' => 'users'],
         'number_series' => ['created_by' => 'users'],
         'internal_documents' => ['number_series_id' => 'number_series'],
+        // Typ hodnoty je součástí složeného FK (type_id, id) na dimension_values.
+        'dimension_account_map' => ['dimension_type_id' => 'dimension_types'],
+        'dimension_defaults' => ['dimension_type_id' => 'dimension_types'],
+    ];
+    /**
+     * Řádky, jejichž vlastník leží mimo převáděný graf (výchozí dimenze produktu a skladové
+     * kategorie, sklad obnova nepřenáší). Obnova je vynechá a vykáže mezi vynechanými.
+     */
+    public const OUTSIDE_GRAPH_OWNERS = [
+        'dimension_defaults' => ['product_id', 'product_category_id'],
     ];
     /**
      * Vazby z EXTRA_REFERENCES, které míří na řádek, jenž mohl ve zdroji zaniknout

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Accounting\Archive;
 
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Anonymization\MembershipCloneScrubber;
 use MyInvoice\Service\Document\JournalAttachmentStorage;
@@ -63,6 +64,8 @@ final class ArchiveRestoreService
         'cost_centers',
         'dimension_types',
         'dimension_values',
+        'dimension_account_rules',
+        'dimension_account_map',
         'nonprofit_membership_rates',
         'accounting_supplier_settings',
         'accounting_document_series',
@@ -159,6 +162,12 @@ final class ArchiveRestoreService
         'fulfillment_returns',
         'fulfillment_return_items',
         'sales_order_fulfillment_links',
+        // Dimenze až po všech dokladech, kartách a řádcích deníku, na které odkazují.
+        'dimension_defaults',
+        'journal_entry_line_dimensions',
+        'journal_entry_line_dimension_splits',
+        'document_dimensions',
+        'document_dimension_splits',
         'journal_entry_attachments',
         'exchange_rates',
     ];
@@ -211,6 +220,30 @@ final class ArchiveRestoreService
         'product_variant_i18n_inheritance',
         'exchange_rates',
         'internal_document_lines',
+        'journal_entry_line_dimensions',
+        'journal_entry_line_dimension_splits',
+        'document_dimensions',
+        'document_dimension_splits',
+    ];
+
+    /**
+     * Přiřazení dimenzí — importují se dávkově ({@see importDimensionAssignments()}),
+     * cíl přiřazení se překládá přes mapy obnovených řádků deníku a dokladů.
+     */
+    private const DIMENSION_ASSIGNMENT_TABLES = [
+        'journal_entry_line_dimensions',
+        'journal_entry_line_dimension_splits',
+        'document_dimensions',
+        'document_dimension_splits',
+    ];
+
+    /** Vlastník výchozí dimenze (právě jeden sloupec je vyplněný, chk_dimdef_owner). */
+    private const DIMENSION_DEFAULT_OWNERS = [
+        'client_id' => 'clients',
+        'project_id' => 'projects',
+        'product_id' => 'stock_items',
+        'product_category_id' => 'stock_categories',
+        'supplier_bank_account_id' => 'supplier_bank_accounts',
     ];
 
     /** @var array<string, array<string,string>> table → col → referenced_table (z info_schema) */
@@ -236,6 +269,14 @@ final class ArchiveRestoreService
 
     /** @var list<array{table:string,newId:int,col:string,ref:string,old:int,special?:string,type?:string}> */
     private array $deferred = [];
+
+    /**
+     * Sdílené typy a hodnoty dimenzí skupiny firem ověřené v cílové instanci
+     * (dimension_types|dimension_values → id → true). Ponechávají si původní id.
+     *
+     * @var array<string, array<int,bool>>
+     */
+    private array $sharedDimensions = [];
 
     public function __construct(
         private readonly Connection $db,
@@ -411,6 +452,7 @@ final class ArchiveRestoreService
 
         $this->maps = [];
         $this->deferred = [];
+        $this->sharedDimensions = [];
         $warnings = [];
         $counts = [];
         $newSupplierId = 0;
@@ -448,6 +490,7 @@ final class ArchiveRestoreService
                 if ($table === 'supplier') {
                     $newSupplierId = $this->maps['supplier'][$oldSupplierId]
                         ?? throw new RestoreException('supplier_map', 'Nový supplier_id se nepodařilo zjistit.');
+                    $this->verifySharedDimensions((array) ($manifest['shared_dimensions'] ?? []), $newSupplierId);
                 }
             }
 
@@ -525,8 +568,12 @@ final class ArchiveRestoreService
         if (!is_file($path)) {
             return 0;
         }
+        if (in_array($table, self::DIMENSION_ASSIGNMENT_TABLES, true)) {
+            return $this->importDimensionAssignments($table, $path, $target, $warnings);
+        }
         $processedSet = array_fill_keys($processed, true);
         $hasId = !in_array($table, self::NO_ID_TABLES, true);
+        $skippedDefaults = 0;
         $isExchange = $table === 'exchange_rates';
         $isBankStatement = $table === 'bank_statements';
         $pdo = $this->db->pdo();
@@ -562,6 +609,12 @@ final class ArchiveRestoreService
                     continue;
                 }
 
+                if ($table === 'dimension_defaults' && !$this->dimensionDefaultOwnerRestored($row)) {
+                    // Vlastník (projekt, bankovní účet, karta bez skladu) v archivu není a jiný
+                    // vlastník být nesmí (chk_dimdef_owner) — výchozí hodnotu nelze k ničemu připojit.
+                    $skippedDefaults++;
+                    continue;
+                }
                 [$cols, $vals, $rowDefers] = $this->buildInsert($table, $row, $target, $processedSet, $warnings);
                 $placeholders = implode(', ', array_fill(0, count($cols), '?'));
                 $sql = 'INSERT INTO `' . $table . '` (`' . implode('`, `', $cols) . '`) VALUES (' . $placeholders . ')';
@@ -585,7 +638,212 @@ final class ArchiveRestoreService
         } finally {
             fclose($fh);
         }
+        if ($skippedDefaults > 0) {
+            $warnings[] = "dimension_defaults: {$skippedDefaults}× výchozí dimenze vynechána (vlastník — projekt, bankovní účet nebo karta — v archivu není)";
+        }
         return $inserted;
+    }
+
+    /** @param array<string,mixed> $row */
+    private function dimensionDefaultOwnerRestored(array $row): bool
+    {
+        foreach (self::DIMENSION_DEFAULT_OWNERS as $column => $ownerTable) {
+            if (($row[$column] ?? null) !== null) {
+                return isset($this->maps[$ownerTable][(int) $row[$column]]);
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Dávkový import přiřazení dimenzí (řádky deníku, doklady a jejich rozpady na podíly).
+     * Cíl přiřazení se překládá přes mapy obnovených řádků deníku a dokladů podle `doc_type`,
+     * typ a hodnota dimenze přes mapy číselníku, sdílené hodnoty skupiny si nechají id.
+     * Přiřazení k cíli, který archiv nenese (šablony, doklad mimo archiv), se nevkládá —
+     * vynechané se vykážou souhrnně ve varováních, obnova kvůli nim nepadá.
+     *
+     * @param list<string> $warnings (by-ref)
+     */
+    private function importDimensionAssignments(string $table, string $path, int $target, array &$warnings): int
+    {
+        $fh = fopen($path, 'rb');
+        if ($fh === false) {
+            throw new RestoreException('read_failed', "Nelze číst {$table}.jsonl");
+        }
+        $pdo = $this->db->pdo();
+        $isLine = str_starts_with($table, 'journal_entry_line_');
+        $inserted = 0;
+        $skipped = [];
+        $columns = null;
+        $batch = [];
+        $flush = function () use (&$batch, &$columns, &$inserted, $table, $pdo): void {
+            if ($batch === [] || $columns === null) {
+                return;
+            }
+            $row = '(' . implode(', ', array_fill(0, count($columns), '?')) . ')';
+            $pdo->prepare('INSERT INTO `' . $table . '` (`' . implode('`, `', $columns) . '`) VALUES '
+                . implode(', ', array_fill(0, count($batch), $row)))
+                ->execute(array_merge(...$batch));
+            $inserted += count($batch);
+            $batch = [];
+        };
+        try {
+            while (($line = fgets($fh)) !== false) {
+                if (trim($line) === '') {
+                    continue;
+                }
+                $row = json_decode($line, true);
+                if (!is_array($row)) {
+                    throw new RestoreException('json_row', "{$table}: neparsovatelný řádek");
+                }
+                $reason = null;
+                if ($isLine) {
+                    $newLine = $this->maps['journal_entry_lines'][(int) ($row['line_id'] ?? 0)] ?? null;
+                    if ($newLine === null) {
+                        $reason = 'řádek deníku v archivu není';
+                    } else {
+                        $row['line_id'] = $newLine;
+                    }
+                } else {
+                    $docType = (string) ($row['doc_type'] ?? '');
+                    $docTable = DimensionAssignmentRepository::DOC_TYPE_TABLES[$docType] ?? null;
+                    $newDoc = $docTable === null ? null : ($this->maps[$docTable][(int) ($row['doc_id'] ?? 0)] ?? null);
+                    if ($newDoc !== null) {
+                        $row['doc_id'] = $newDoc;
+                    } elseif ($docTable !== null && in_array($docTable, self::RESTORE_ORDER, true)) {
+                        $reason = "doklad typu {$docType} v archivu není";
+                    } else {
+                        $reason = "archiv doklady typu {$docType} nepřenáší";
+                    }
+                }
+                if ($reason === null) {
+                    $typeId = $this->dimensionRef('dimension_types', $row['dimension_type_id'] ?? null);
+                    $valueId = $this->dimensionRef('dimension_values', $row['dimension_value_id'] ?? null);
+                    if ($typeId === null || $valueId === null) {
+                        $reason = 'typ nebo hodnota dimenze v archivu není';
+                    } else {
+                        $row['dimension_type_id'] = $typeId;
+                        $row['dimension_value_id'] = $valueId;
+                    }
+                }
+                if ($reason !== null) {
+                    $skipped[$reason] = ($skipped[$reason] ?? 0) + 1;
+                    continue;
+                }
+                $row['supplier_id'] = $target;
+                if (array_key_exists('assignment_origin_ref', $row)) {
+                    $row['assignment_origin_ref'] = $this->remapAssignmentOriginRef($row['assignment_origin_ref']);
+                }
+                foreach (array_keys($row) as $col) {
+                    if (isset($this->generated[$table][$col])) {
+                        unset($row[$col]);
+                    }
+                }
+                $keys = array_keys($row);
+                if ($columns !== $keys) {
+                    $flush();
+                    $columns = $keys;
+                }
+                $batch[] = array_map([$this, 'scalar'], array_values($row));
+                if (count($batch) >= 500) {
+                    $flush();
+                }
+            }
+            $flush();
+        } finally {
+            fclose($fh);
+        }
+        foreach ($skipped as $reason => $count) {
+            $warnings[] = "{$table}: {$count}× přiřazení dimenze vynecháno ({$reason})";
+        }
+        return $inserted;
+    }
+
+    /** Nové id typu/hodnoty dimenze: přemapované z archivu, nebo ověřené sdílené id skupiny. */
+    private function dimensionRef(string $table, mixed $old): ?int
+    {
+        if ($old === null) {
+            return null;
+        }
+        $old = (int) $old;
+        return $this->maps[$table][$old] ?? (isset($this->sharedDimensions[$table][$old]) ? $old : null);
+    }
+
+    /**
+     * Původ přiřazení `document:{doc_type}:{doc_id}:{item_no}` ukazuje na doklad, ze
+     * kterého se dimenze převzala — id se přeloží na obnovený doklad. Ostatní původy
+     * (pravidlo, zápočet, modul) jsou popis provenience a zůstávají beze změny.
+     */
+    private function remapAssignmentOriginRef(mixed $ref): mixed
+    {
+        if (!is_string($ref) || preg_match('/^document:([a-z_]+):(\d+):(\d+)$/', $ref, $m) !== 1) {
+            return $ref;
+        }
+        $docTable = DimensionAssignmentRepository::DOC_TYPE_TABLES[$m[1]] ?? null;
+        $newDoc = $docTable === null ? null : ($this->maps[$docTable][(int) $m[2]] ?? null);
+        return $newDoc === null ? $ref : 'document:' . $m[1] . ':' . $newDoc . ':' . $m[3];
+    }
+
+    /**
+     * Ověří sdílené (skupinové) typy a hodnoty dimenzí, na které archiv odkazuje: v cílové
+     * instanci musí existovat se stejným id, kódem a skupinou a obnovená firma musí do té
+     * skupiny patřit. Jinak by přiřazení tiše ukázala na jinou hodnotu nebo cizí skupinu,
+     * proto obnova skončí chybou (transakce se vrátí) s výpisem rozdílů.
+     *
+     * @param array<string,mixed> $shared sekce `shared_dimensions` manifestu
+     */
+    private function verifySharedDimensions(array $shared, int $newSupplierId): void
+    {
+        $this->sharedDimensions = [];
+        $expected = [
+            'dimension_types' => is_array($shared['types'] ?? null) ? $shared['types'] : [],
+            'dimension_values' => is_array($shared['values'] ?? null) ? $shared['values'] : [],
+        ];
+        if ($expected['dimension_types'] === [] && $expected['dimension_values'] === []) {
+            return;
+        }
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare('SELECT supplier_group_id FROM supplier WHERE id = ?');
+        $stmt->execute([$newSupplierId]);
+        $group = $stmt->fetchColumn();
+        $group = $group === false || $group === null ? null : (int) $group;
+
+        $problems = [];
+        foreach ($expected as $table => $rows) {
+            $ids = array_values(array_unique(array_map(static fn (array $r): int => (int) ($r['id'] ?? 0), $rows)));
+            $actual = [];
+            foreach (array_chunk($ids, 500) as $chunk) {
+                $cols = $table === 'dimension_values' ? 'id, type_id, code, supplier_id, supplier_group_id' : 'id, code, supplier_id, supplier_group_id';
+                $q = $pdo->prepare("SELECT {$cols} FROM {$table} WHERE id IN (" . implode(', ', array_fill(0, count($chunk), '?')) . ')');
+                $q->execute($chunk);
+                foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                    $actual[(int) $r['id']] = $r;
+                }
+            }
+            foreach ($rows as $r) {
+                $id = (int) ($r['id'] ?? 0);
+                $label = ($table === 'dimension_types' ? 'typ' : 'hodnota') . " #{$id} „" . ($r['code'] ?? '') . '"';
+                $have = $actual[$id] ?? null;
+                $expectedGroup = isset($r['supplier_group_id']) ? (int) $r['supplier_group_id'] : null;
+                if ($have === null) {
+                    $problems[] = "{$label} v této instanci neexistuje";
+                } elseif ($have['supplier_id'] !== null || (string) $have['code'] !== (string) ($r['code'] ?? '')
+                    || ($have['supplier_group_id'] === null ? null : (int) $have['supplier_group_id']) !== $expectedGroup
+                    || ($table === 'dimension_values' && (int) $have['type_id'] !== (int) ($r['type_id'] ?? 0))) {
+                    $problems[] = "{$label} má v této instanci jiný kód, typ nebo vlastníka („" . $have['code'] . '")';
+                } elseif ($expectedGroup === null || $expectedGroup !== $group) {
+                    $problems[] = "{$label} patří skupině firem #" . ($expectedGroup ?? '-') . ', obnovená firma je ve skupině #' . ($group ?? '-');
+                } else {
+                    $this->sharedDimensions[$table][$id] = true;
+                }
+            }
+        }
+        if ($problems !== []) {
+            $count = count($problems);
+            throw new RestoreException('shared_dimensions', "Archiv odkazuje na sdílené dimenze skupiny firem, které v této instanci nesouhlasí ({$count}):\n  - "
+                . implode("\n  - ", array_slice($problems, 0, 20)) . ($count > 20 ? "\n  - …" : '')
+                . "\nObnovu proveďte do instance se stejnou skupinou firem a jejími dimenzemi (obnova nic nezměnila).");
+        }
     }
 
     /**
@@ -868,6 +1126,10 @@ final class ArchiveRestoreService
             // id platí instančně (u users tím zůstává zachovaná auditní stopa
             // created_by/posted_by); cross-instance obnova vyžaduje tytéž globální
             // řádky, jinak FK spadne (rollback).
+            return $old;
+        }
+        // Sdílená hodnota/typ dimenze skupiny firem — ověřená v cíli, id platí instančně.
+        if (isset($this->sharedDimensions[$refTable][$old]) && !isset($this->maps[$refTable][$old])) {
             return $old;
         }
         // Tenant tabulka (přímo nebo tranzitivně) — MUSÍ se remapovat přes mapu.

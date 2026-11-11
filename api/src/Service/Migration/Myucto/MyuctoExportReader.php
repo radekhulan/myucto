@@ -180,6 +180,7 @@ final class MyuctoExportReader
                     unset($tables[$table]);
                 }
             }
+            $sharedDimensions = $this->sharedDimensions($zip, $manifest, $bytes);
             $supplierId = self::id($manifest['supplier']['id'] ?? null);
             if (count($tables['supplier'] ?? []) !== 1 || !isset($tables['supplier'][$supplierId])) {
                 throw new RuntimeException('Export musí obsahovat právě jednu zdrojovou firmu.');
@@ -241,6 +242,9 @@ final class MyuctoExportReader
             }
             [$stored, $missing] = $this->storedFiles($zip, $tables, $available, $supplierId, $bytes);
             $package = ['manifest' => $manifest, 'tables' => $tables, 'skipped' => $skipped, 'assets' => $assets, 'context' => $context];
+            if ($sharedDimensions !== []) {
+                $package['shared_dimensions'] = $sharedDimensions;
+            }
             if ($stored !== [] || $missing !== []) {
                 $package['stored_files'] = $stored;
                 $package['missing_files'] = $missing;
@@ -316,6 +320,59 @@ final class MyuctoExportReader
         ksort($missing);
 
         return [$stored, $missing];
+    }
+
+    /**
+     * Sdílené typy a hodnoty dimenzí skupiny firem, na které data firmy odkazují
+     * (sekce `shared_dimensions` manifestu). Nejsou to řádky k převodu: obnova je
+     * v cíli dohledá ({@see MyuctoImporter}), proto musí patřit skupině, ne firmě.
+     *
+     * @return array<string,array<int,array<string,mixed>>> tabulka => id => řádek
+     */
+    private function sharedDimensions(ZipArchive $zip, array $manifest, int &$bytes): array
+    {
+        $section = $manifest['sections']['data']['shared_dimensions'] ?? [];
+        if (!is_array($section)) {
+            throw new RuntimeException('Neplatná sekce sdílených dimenzí exportu.');
+        }
+        $out = [];
+        foreach ($section as $table => $info) {
+            if (!in_array($table, ['dimension_types', 'dimension_values'], true) || !is_array($info)
+                || !is_int($info['rows'] ?? null) || !is_string($info['entry'] ?? null)
+                || !isset($manifest['checksums'][$info['entry']]) || !self::safePath($info['entry'])) {
+                throw new RuntimeException('Neplatná sekce sdílených dimenzí exportu.');
+            }
+            $out[$table] = [];
+            foreach (explode("\n", $this->content($zip, $info['entry'], $bytes)) as $line) {
+                if (trim($line) === '') {
+                    continue;
+                }
+                $row = json_decode($line, true, 64, JSON_THROW_ON_ERROR);
+                if (!is_array($row) || array_is_list($row) || ($row['supplier_id'] ?? null) !== null
+                    || ($row['supplier_group_id'] ?? null) === null || !is_string($row['code'] ?? null)) {
+                    throw new RuntimeException('Sdílená dimenze exportu nepatří skupině firem.');
+                }
+                foreach ($row as $value) {
+                    if ($value !== null && !is_scalar($value)) {
+                        throw new RuntimeException('Neplatná hodnota sdílené dimenze exportu.');
+                    }
+                }
+                $id = self::id($row['id'] ?? null);
+                if (isset($out[$table][$id])) {
+                    throw new RuntimeException('Duplicitní ID sdílené dimenze exportu.');
+                }
+                $out[$table][$id] = $row;
+            }
+            if (count($out[$table]) !== $info['rows']) {
+                throw new RuntimeException('Počet sdílených dimenzí exportu nesedí.');
+            }
+        }
+        foreach ($out['dimension_values'] ?? [] as $row) {
+            if (!isset($out['dimension_types'][self::id($row['type_id'] ?? null)])) {
+                throw new RuntimeException('Sdílená hodnota dimenze exportu nemá svůj typ.');
+            }
+        }
+        return array_filter($out);
     }
 
     private function content(ZipArchive $zip, string $entry, int &$bytes): string

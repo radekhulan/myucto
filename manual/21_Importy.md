@@ -1225,8 +1225,14 @@ Obnova dále přenáší:
   na doklady, kontakty, zakázky a zápisy deníku. Soubory se uloží do úložiště
   dokumentů cílové firmy, náhledy se vygenerují znovu.
 - **Archiv PDF vydaných faktur** (odeslané a archivované verze) včetně souborů.
-- **Analytické dimenze**: typy a hodnoty dimenzí a jejich přiřazení dokladům
-  a řádkům účetního deníku.
+- **Analytické dimenze**: typy a hodnoty dimenzí, jejich přiřazení dokladům
+  a řádkům účetního deníku včetně rozpadu na podíly, povinnost dimenzí na účtech,
+  mapa účtotvorné dimenze, výchozí dimenze klientů, zakázek a bankovních účtů
+  a dimenze pravidel účtování banky. Sdílené dimenze skupiny firem obnova
+  nezakládá znovu: dohledá je podle kódu typu a hodnoty ve skupině, do které
+  cílová firma patří. Když cílová firma do skupiny nepatří nebo skupině některý
+  typ či hodnota chybí, obnova skončí bez zápisu a vypíše, co chybí. Firmu pak
+  zařaďte do skupiny se stejnými dimenzemi a obnovu opakujte.
 - **Interní doklady** s řádky, **vazby účetních zápisů na doklady**, **šablony
   účetních zápisů** a **poznámky k zápisům**.
 - **Daně**: přiznání k dani z příjmů a rozpis záloh na daň a pojistné.
@@ -1248,7 +1254,8 @@ zvýší na hodnotu zdroje. Podpisové profily, skupiny firem, vozidla a ostatn�
 doklady se nepřenášejí; vazby na ně se odpojí a protokol je vypíše.
 
 Vazby na doklady, které export nenese (dokument nebo dimenze u ostatního
-dokladu, oprava účtování u smazaného pohybu), obnova vynechá a protokol je
+dokladu, výchozí dimenze skladové karty nebo kategorie, oprava účtování
+u smazaného pohybu), obnova vynechá a protokol je
 vypíše jako vynechané vazby. Soubory, které export nenese, protokol vypíše jako
 chybějící. Nenese-li export počítadla řad vydaných nebo přijatých dokladů
 (starší export, záloha MyInvoice, doklady číslované ručně), protokol upozorní,

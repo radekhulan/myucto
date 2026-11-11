@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ImportJobRepository;
+use MyInvoice\Service\Accounting\Dimension\SharedDimensionReferences;
 use MyInvoice\Service\Backup\BackupFileCollector;
 use MyInvoice\Service\Backup\ReadableDocumentArchiveLayout;
 use MyInvoice\Service\Cron\BackupEncryption;
@@ -35,6 +36,7 @@ use Psr\Log\LoggerInterface;
  * Co je uvnitř (viz `CTI-MNE.txt` v archivu):
  *   data/{tabulka}.jsonl   strojově čitelný export všech agend (JSON Lines)
  *   shared/payroll/…       globální mzdové podklady nutné k obnově
+ *   shared/dimensions/…    dimenze skupiny firem, na které data firmy odkazují
  *   doklady/{rok}/…        PDF a ISDOC vydaných, PDF přijatých, výpisy z účtu
  *   prilohy/…              skeny, přílohy deníku (§ 33a), dokumenty DMS, mzdové doklady
  *   manifest.json          co v archivu je, kolik toho je, k jakému datu, jaká verze
@@ -794,6 +796,7 @@ final class InstanceExportService
         $sharedPayrollTables = $this->exportSharedPayrollTables($archive, $workDir);
         $sharedTables = $this->exportSharedTables($archive, $workDir);
         $identity = $this->exportIdentity($archive, $supplierId, $workDir);
+        $sharedDimensions = $this->exportSharedDimensions($archive, $supplierId, $workDir);
         // Dočasné soubory drží ZipArchive až do close — vynutíme zápis, ať se uvolní.
         $archive->flushNow();
 
@@ -807,6 +810,9 @@ final class InstanceExportService
             'shared_payroll_note' => 'Globální legislativní podklady a výpočetní obsah správcovských '
                 . 'odchylek jsou součástí obnovy. Identita správců, jejich důvody ani globální audit se neexportují.',
             'identity' => $identity,
+            'shared_dimensions' => $sharedDimensions,
+            'shared_dimensions_note' => 'Typy a hodnoty dimenzí skupiny firem, na které odkazují data firmy. '
+                . 'Patří skupině, ne firmě: obnova je v cíli dohledá ve skupině cílové firmy podle kódu, nezakládá je.',
             'skipped_tables' => array_diff_key(
                 $this->scopes->skipped(),
                 array_fill_keys([...self::SHARED_PAYROLL_TABLES, ...self::SHARED_TABLES], true),
@@ -888,6 +894,40 @@ final class InstanceExportService
             ];
         }
         return $tables;
+    }
+
+    /**
+     * Sdílené dimenze skupiny firem (supplier_id IS NULL), na které odkazují data firmy
+     * ({@see SharedDimensionReferences}). Tenantový filtr je nevybere, přiřazení firmy na ně
+     * ale míří: bez nich by archiv nesl ID hodnot bez kódu a názvu a obnova by je neuměla
+     * dohledat. Jen odkazované řádky, ne celý číselník skupiny.
+     *
+     * @return array<string,array<string,mixed>>
+     */
+    private function exportSharedDimensions(InstanceExportArchive $archive, int $supplierId, string $workDir): array
+    {
+        $refs = SharedDimensionReferences::collect($this->db->pdo(), $supplierId, $this->db->schemaSnapshot()['columns']);
+        $out = [];
+        foreach (['dimension_types' => $refs['type_ids'], 'dimension_values' => $refs['value_ids']] as $table => $ids) {
+            $columns = $this->exportableColumns($table);
+            if ($columns === null || $ids === []) {
+                continue;
+            }
+            $select = implode(', ', array_map(static fn (string $column): string => '`' . $column . '`', $columns['exported']));
+            $rows = [];
+            foreach (array_chunk($ids, 500) as $chunk) {
+                $stmt = $this->db->pdo()->prepare('SELECT ' . $select . ' FROM `' . $table . '` WHERE supplier_id IS NULL AND id IN ('
+                    . implode(', ', array_fill(0, count($chunk), '?')) . ') ORDER BY id');
+                $stmt->execute($chunk);
+                array_push($rows, ...$stmt->fetchAll(PDO::FETCH_ASSOC));
+            }
+            $tmp = $workDir . DIRECTORY_SEPARATOR . 'shared-dimensions-' . $table . '.jsonl';
+            $count = $this->writeRowsJsonl($rows, $tmp);
+            $entry = 'shared/dimensions/' . $table . '.jsonl';
+            $archive->addFile($entry, $tmp, deleteAfterFlush: true);
+            $out[$table] = ['rows' => $count, 'entry' => $entry, 'scope' => 'supplier_group_shared', 'redacted_columns' => $columns['redacted']];
+        }
+        return $out;
     }
 
     /**
@@ -1742,6 +1782,8 @@ final class InstanceExportService
             '               Tabulek: ' . $sharedPayrollTableCount . '; neobsahují data jiných firem.',
             'shared/config  Globální číselníky, historické kurzy, vlastní daňové konstanty',
             '               a sdílené e-mailové šablony instance bez identit správců.',
+            'shared/dimensions Typy a hodnoty dimenzí skupiny firem, na které odkazují data',
+            '               firmy (kódy a názvy k ID v přiřazeních dimenzí). Jen je-li co nést.',
             'doklady/       PDF dokladů po LETECH a agendách (vydané faktury, přijaté faktury,',
             '               výpisy z účtu) a ISDOC vydaných faktur. Tohle je část, kterou',
             '               v praxi potřebuješ nejčastěji — otevře ji jakákoli čtečka PDF.',
