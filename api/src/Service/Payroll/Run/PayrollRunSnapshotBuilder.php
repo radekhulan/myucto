@@ -2570,9 +2570,14 @@ final class PayrollRunSnapshotBuilder
      * Plátce mzdy přitom oprávněnému za neprovedené srážky ručí (§ 292
      * o. s. ř.).
      *
-     * Zda výživné trvá, nebo srážky skončily, z evidence poznat nejde, proto
+         * Zda výživné trvá, nebo srážky skončily, z evidence poznat nejde, proto
      * se nic neodhaduje: varování s POVINNÝM potvrzením, stejně jako
-     * u doručeného a nepřevedeného případu. Za oddlužení se exekuce
+     * u doručeného a nepřevedeného případu. Varování říká, co udělat: založit
+     * na další měsíční dávku nový případ (do aktivního případu pohledávku
+     * přidat nejde, čerpanou pohledávku nejde zvýšit a částka za víc měsíců
+     * naráz by se srazila celá hned) a vyčerpaný případ označit za uhrazený,
+     * čímž z evidence vypadne a varování skončí. Má-li příkaz vedle vyčerpané
+     * dávky i dávku se zůstatkem, varování nevzniká. Za oddlužení se exekuce
      * neprovádí a souběh s přednostní pohledávkou řeší výpočet sám.
      * Do `$data` nevstupuje, takže `input_hash` se nemění.
      *
@@ -2592,30 +2597,39 @@ final class PayrollRunSnapshotBuilder
             ) {
                 continue;
             }
+            // Po příkazech: další dávka přidaná k témuž příkazu varování
+            // ukončí, vyčerpaná lednová dávka vedle ní už nevadí.
+            $liveByOrder = [];
             foreach (is_array($evidence['claims'] ?? null) ? $evidence['claims'] : [] as $claim) {
                 if (!is_array($claim)
                     || ($claim['category'] ?? null) !== 'current_maintenance'
                     || ($claim['legal_basis'] ?? null) !== 'statutory'
                     || ($claim['active'] ?? false) !== true
-                    || (int) ($claim['outstanding_minor_units'] ?? 0) > 0
                 ) {
                     continue;
                 }
+                $order = is_string($claim['enforcement_order_id'] ?? null) && trim($claim['enforcement_order_id']) !== ''
+                    ? 'order:' . $claim['enforcement_order_id']
+                    : 'claim:' . (string) ($claim['id'] ?? '');
+                $liveByOrder[$order] = ($liveByOrder[$order] ?? false)
+                    || (int) ($claim['outstanding_minor_units'] ?? 0) > 0;
+            }
+            if (in_array(false, $liveByOrder, true)) {
                 $validations[] = new PayrollRunValidation(
                     'warning',
                     'enforcement_current_maintenance_exhausted',
                     'employee',
                     $employeeId,
-                    'U běžného výživného je evidovaná částka pohledávky vyčerpaná,'
-                    . ' v tomto běhu se na ně nesrazí nic. Běžné výživné se sráží'
-                    . ' každý měsíc, dokud soud výkon rozhodnutí nezastaví (§ 280'
-                    . ' odst. 3 a § 290 odst. 2 o. s. ř.). Trvá-li výživné, přidejte'
-                    . ' k témuž příkazu pohledávku na další splatné výživné; pokud'
-                    . ' srážky skončily, případ ukončete.',
+                    'U běžného výživného je evidovaná částka vyčerpaná, v tomto běhu se na ně nesrazí'
+                    . ' nic. Běžné výživné se sráží každý měsíc, dokud soud výkon rozhodnutí nezastaví'
+                    . ' (§ 280 odst. 3 a § 290 odst. 2 o. s. ř.). Trvá-li, založte na další měsíční'
+                    . ' dávku nový případ s pohledávkou „běžné výživné“ a aktivujte ho; do aktivního'
+                    . ' případu pohledávku přidat ani zvýšit nejde. Částku za víc měsíců naráz'
+                    . ' nezapisujte, srazila by se celá hned. Vyčerpaný případ po úhradě označte za'
+                    . ' uhrazený.',
                     "/payroll/enforcement?person={$employeeId}",
                     true,
                 );
-                break;
             }
         }
 

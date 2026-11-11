@@ -411,7 +411,24 @@ a vyúčtování zahrnují i srážky z odstupného. Pokračující exekuce, doh
 o srážkách a insolvenci uveďte v zápočtovém listu, aby v nich další plátce
 pokračoval.
 
-### 88.12.10 Paušální náhrada plátce mzdy v účetnictví
+### 88.12.10 Paušální náhrada plátce mzdy
+
+Paušální náhradu nákladů plátce mzdy (50 Kč za měsíc, nejvýše třetina sražené
+částky) hradí povinný (§ 270 odst. 2 o. s. ř., § 87 odst. 3 exekučního řádu)
+a uspokojuje se z první třetiny před ostatními pohledávkami (§ 279 odst. 1).
+V běžném měsíci, kdy srážku omezuje třetina, ji plátce odečte ze sražené
+částky a oprávněný dostane o ni méně; pohledávka se umořuje jen tím, co
+oprávněnému došlo. Stačí-li třetina na víc (poslední měsíc exekuce, výživné
+kryté celé z druhé třetiny), srazí se náhrada navíc: při zbývajícím dluhu
+1 000 Kč se srazí 1 050 Kč, oprávněný dostane celý zbytek a exekuce skončí.
+Náhrada nikdy nespotřebuje celou srážku.
+
+**Běžné výživné** se sráží každý měsíc, evidence ale vede u pohledávky jednu
+částku. Do pohledávky zapište jednu měsíční dávku; částka za víc měsíců naráz
+by se srazila celá hned. Na další měsíc založte nový případ s pohledávkou
+běžného výživného a aktivujte ho, vyčerpaný případ po úhradě označte za
+uhrazený. Zapomenete-li, mzdový běh se před schválením zastaví varováním
+s odkazem na exekuce osoby.
 
 Plátce si ze sražené částky ponechá paušální náhradu nákladů (§ 270 odst. 2
 o. s. ř.) a oprávněnému pošle zbytek. Mzdový předpis proto sraženou částku
