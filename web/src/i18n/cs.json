@@ -9734,7 +9734,11 @@
           "frozen": "Obsahová oprava je připravená jako podání č. {id}. Zkontrolujte ji a odešlete samostatnou akcí.",
           "already": "Stejná obsahová oprava už byla zmrazená - je to podání č. {id}.",
           "load_failed": "Účinný stav formulářů se nepodařilo autoritativně načíst.",
-          "failed": "Obsahovou opravu se nepodařilo připravit."
+          "failed": "Obsahovou opravu se nepodařilo připravit.",
+          "prepare_current": "Připravit z aktuální revize",
+          "prepare_current_failed": "Přípravu z aktuální revize se nepodařilo vytvořit.",
+          "prepare_current_blocked": "Příprava z aktuální revize má nálezy ({count}). Opravte je podle Otestovat XML a zkuste to znovu.",
+          "prepare_current_unusable": "Příprava z aktuální revize se k tomuto podání nehodí (jiná účtárna nebo nález na pojistné části). Ověřte ji v Otestovat XML."
         }
       },
       "signing": {

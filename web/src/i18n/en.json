@@ -9734,7 +9734,11 @@
           "frozen": "The content correction is prepared as submission no. {id}. Review it and send it with a separate action.",
           "already": "The same content correction was already frozen — it is submission no. {id}.",
           "load_failed": "The effective form state could not be resolved authoritatively.",
-          "failed": "The content correction could not be prepared."
+          "failed": "The content correction could not be prepared.",
+          "prepare_current": "Prepare from the current revision",
+          "prepare_current_failed": "The preparation from the current revision could not be created.",
+          "prepare_current_blocked": "The preparation from the current revision has findings ({count}). Fix them following Test XML and try again.",
+          "prepare_current_unusable": "The preparation from the current revision does not fit this submission (another office or a finding on the insurance part). Check it in Test XML."
         }
       },
       "signing": {

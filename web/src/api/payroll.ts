@@ -8633,6 +8633,9 @@ export interface PayrollJmhzContentCorrectionPreparations {
   submission_id: number
   preparations: PayrollJmhzContentCorrectionPreparation[]
   auto_selected_preparation_id: number | null
+  run_id?: number
+  /** Aktuální schválená revize běhu; z ní lze připravit novou přípravu. */
+  current_revision_id?: number | null
 }
 
 export interface PayrollJmhzContentCorrectionCandidates {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Repository\Payroll\PayrollRegistrationA2EvidenceRepository;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
@@ -909,6 +910,16 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         $months = $evidence->correctiveMonths($this->supplierId, 'test', $late['employment_id'], '2026-12-31', 'PPV-LATE');
         self::assertSame((int) $frozen['body']['submission_id'], $months[0]['submission_id']);
         self::assertSame('pending', $months[0]['decision']);
+
+        $this->acceptJmhzSubmission((int) $frozen['body']['submission_id']);
+        $corrections = $this->container->get(JmhzContentCorrectionSubmissionService::class);
+        self::assertInstanceOf(JmhzContentCorrectionSubmissionService::class, $corrections);
+        $candidates = $corrections->preparationCandidates(
+            $this->supplierId,
+            'test',
+            (int) $frozen['body']['submission_id'],
+        );
+        self::assertSame($revisionId, $candidates['current_revision_id'], 'Audit #5: prázdný stav ví, z jaké revize připravit.');
     }
 
     /**
