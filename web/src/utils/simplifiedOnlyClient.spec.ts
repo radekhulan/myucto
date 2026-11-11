@@ -29,4 +29,12 @@ describe('simplifiedOnlyClientProblem', () => {
     expect(simplifiedOnlyClientProblem({ ...base, simplifiedOnly: false, isSimplified: false, totalWithVat: 50000 })).toBeNull()
     expect(simplifiedOnlyClientProblem({ ...base, supplierIsVatPayer: false, isSimplified: false, totalWithVat: 50000 })).toBeNull()
   })
+
+  it('dobropis pustí jen jako zjednodušený opravný doklad k původnímu dokladu', () => {
+    const creditNote = { ...base, invoiceType: 'credit_note', totalWithVat: -1000, hasOriginal: true }
+    expect(simplifiedOnlyClientProblem(creditNote)).toBeNull()
+    expect(simplifiedOnlyClientProblem({ ...creditNote, hasOriginal: false })).toBe('credit_note_requires_original')
+    expect(simplifiedOnlyClientProblem({ ...creditNote, isSimplified: false })).toBe('requires_simplified')
+    expect(simplifiedOnlyClientProblem({ ...creditNote, totalWithVat: -12100 })).toBe('over_limit')
+  })
 })

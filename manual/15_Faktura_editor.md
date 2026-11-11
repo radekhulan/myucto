@@ -183,7 +183,9 @@ Schválení mimo systém (telefonem) zapíše správce, viz [§ 15.9.7](#1597-sc
 1. Je-li to **koncept**, otevřete ho a upravte, nebo ho smažte tlačítkem **Smazat**.
 2. Je-li fakturu potřeba stornovat, otevřete její detail a klikněte na **Storno / dobropis**.
 3. Zvolte, zda jde o interní storno (klientovi se nic neposílá), nebo o dobropis (opravný
-   daňový doklad, který klientovi pošlete).
+   daňový doklad, který klientovi pošlete). Dobropis k zjednodušenému dokladu drobného
+   zákazníka vznikne rovnou jako zjednodušený opravný daňový doklad (§ 45 odst. 2 ZDPH, viz
+   [§ 18.3.1](18_Klienti.md#1831-drobny-zakaznik-bez-adresy)).
 4. Zrušit omylem provedené storno lze tlačítkem **Zrušit storno**.
 
 **Jak poznáte, že je hotovo:** původní faktura má stav **Storno**, případně vznikl dobropis
@@ -209,6 +211,8 @@ Rozdíl mezi stornem a dobropisem a zaúčtování dobropisu viz [§ 15.9.9](#15
 | Pole data se neuloží | Neplatné datum (např. `31. 2.`) | Opravte datum |
 | „Odběratel … je veden jako drobný zákazník bez adresy. Lze mu vystavit jen zjednodušený daňový doklad…“ | Klient je drobný zákazník a doklad není zjednodušená faktura | Zaškrtněte **Zjednodušený daňový doklad**, nebo doplňte na kartě klienta adresu a volbu **Drobný zákazník** vypněte |
 | „…zjednodušený daňový doklad lze vystavit jen do 10 000 Kč včetně daně…“ u drobného zákazníka | Doklad přesahuje limit § 30 ZDPH | Doplňte na kartě klienta adresu a vystavte běžnou fakturu, nebo prodej snižte |
+| „…Dobropis mu lze vystavit jen jako zjednodušený opravný daňový doklad k vystavenému zjednodušenému daňovému dokladu téhož odběratele…“ | Dobropis drobnému zákazníkovi nemá vazbu na jeho vystavený zjednodušený doklad (§ 45 odst. 2 ZDPH) | Založte dobropis tlačítkem **Storno / dobropis** v detailu původního dokladu, nebo doplňte na kartě klienta adresu a volbu **Drobný zákazník** vypněte |
+| „Dobropis na … přesahuje částku, kterou lze ještě opravit u zjednodušeného dokladu…“ | Dobropisy k jednomu zjednodušenému dokladu by dohromady přesáhly jeho částku | Snižte částku dobropisu, nebo doplňte na kartě klienta adresu a opravu vystavte jako běžný dobropis |
 
 ## 15.9 Podrobnosti a pravidla
 
@@ -301,8 +305,12 @@ Jedna faktura odečítá vždy jen jednu zálohu.
 - **Drobný zákazník bez adresy** (viz [§ 18.3.1](18_Klienti.md#1831-drobny-zakaznik-bez-adresy)): po výběru
   takového klienta editor u plátce rovnou zaškrtne **Zjednodušený daňový doklad** a pod ním
   připomene limit 10 000 Kč včetně DPH. Zrušíte-li zaškrtnutí, změníte typ na zálohovou fakturu
-  či dobropis nebo přesáhne-li doklad limit, editor zobrazí varování a vystavení se odmítne.
+  nebo přesáhne-li doklad limit, editor zobrazí varování a vystavení se odmítne.
   Řešením je doplnit na kartě klienta adresu (pak lze vystavit běžnou fakturu), nebo prodej snížit.
+  Dobropis takovému klientovi jde jen jako zjednodušený opravný daňový doklad k jeho vystavenému
+  zjednodušenému dokladu (§ 45 odst. 2 ZDPH) a nejvýše do částky, která z původního dokladu
+  zbývá. Na PDF má titulek **Zjednodušený opravný daňový doklad**. Dobropis z detailu původního
+  dokladu (**Storno / dobropis**) tyto podmínky splní sám.
   Doklad pošlete zákazníkovi e-mailem stejně jako jakoukoli jinou fakturu. Stejné pravidlo platí
   i pro pravidelnou fakturaci, automatické vystavení, rychlou účtenku a API.
 
@@ -1092,6 +1100,11 @@ Pokud zjistíte, že vystavená faktura je špatně:
   klientovi pošlete jako oficiální opravu. Účetně správné, ale vyžaduje, abyste s klientem
   komunikovali o tom, co a proč. Dobropis vztahující se k jiné faktuře vystavte přes **Storno /
   dobropis** v detailu té faktury, ne ručně.
+- **Zjednodušený opravný daňový doklad** (§ 45 odst. 2 ZDPH) - dobropis k zjednodušenému
+  dokladu odběratele, který vám není dostatečně znám (drobný zákazník bez adresy, viz
+  [§ 18.3.1](18_Klienti.md#1831-drobny-zakaznik-bez-adresy)). Nemusí nést označení a DIČ
+  odběratele ani rozdíl základu a daně; číslo původního dokladu, důvod opravy, rozdíl celkové
+  částky a den doručení nese vždy.
 
 > [!TIP]
 > **Zaúčtování dobropisu.** Dobropis se do [Účetního deníku](52_Ucetni_denik.md) zaúčtuje
