@@ -708,6 +708,10 @@
     "write": true,
     "api": [
       [
+        "DELETE",
+        "/api/eshop/attribute-options/{id}"
+      ],
+      [
         "GET",
         "/api/eshop/attributes/{id}/options"
       ]
@@ -877,6 +881,10 @@
     "write": true,
     "api": [
       [
+        "DELETE",
+        "/api/eshop/media/{id}"
+      ],
+      [
         "GET",
         "/api/eshop/products/{id}/media"
       ]
@@ -924,6 +932,10 @@
   "delete_purchase_invoice_pdf": {
     "write": true,
     "api": [
+      [
+        "DELETE",
+        "/api/purchase-invoices/{id}/pdf"
+      ],
       [
         "GET",
         "/api/purchase-invoices/{id}"
@@ -3713,6 +3725,10 @@
       [
         "GET",
         "/api/invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/invoices/{id}/uncancel"
       ]
     ]
   },
@@ -3891,6 +3907,10 @@
     "api": [
       [
         "GET",
+        "/api/accounting/other-items/{id}"
+      ],
+      [
+        "PUT",
         "/api/accounting/other-items/{id}"
       ]
     ]

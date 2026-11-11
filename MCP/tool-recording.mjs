@@ -129,12 +129,16 @@ export function scenarios(tool) {
   // Nástroje mimo klientský katalog: jen tolik, aby scénář došel k API (manifest rout).
   const minimal = {
     set_purchase_invoice_payment_account: { account_number: '1000000005', bank_code: '0100' },
-    update_other_item: { title: 'Syntetický doklad' },
+    update_other_item: { title: 'Syntetický doklad', amount: 100 },
+    delete_attribute_option: { option_id: 7 },
+    delete_product_media: { media_id: 7 },
     allocate_other_item_payment: { bank_transaction_id: 7 },
     get_payroll_salary_result: { period: '2026-01' },
     create_analytic_account: { account_code: '378.800' },
   }[tool.name];
   if (minimal) cases.push({ args: { ...args, ...minimal } });
+  if (tool.name === 'delete_purchase_invoice_pdf') cases.push({ args, options: { pdfPath: 'synthetic.pdf' } });
+  if (tool.name === 'uncancel_invoice') cases.push({ args, options: { status: 'cancelled' } });
   return cases;
 }
 

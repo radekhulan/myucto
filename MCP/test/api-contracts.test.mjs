@@ -44,6 +44,17 @@ test('verzovaný manifest rout pokrývá celý katalog včetně nástrojů mimo 
   }
 });
 
+test('zápisové nástroje mají v manifestu rout i zápisovou operaci', () => {
+  // Scénáře těchto nástrojů zatím nedojdou za kontrolu syntetických dat k zápisu;
+  // nabídka je pak podle čtecí routy volnější a zápis odmítne až API. Seznam se smí jen zmenšovat.
+  const pendingScenarios = ['change_payroll_salary', 'purchase_orders_receipt', 'set_invoice_payment_schedule',
+    'set_other_item_installments', 'set_purchase_invoice_exchange_rate', 'set_purchase_invoice_expense_kinds'];
+  const routes = JSON.parse(readFileSync(new URL('../src/tool-routes.generated.json', import.meta.url), 'utf8'));
+  const readOnly = Object.entries(routes).filter(([, entry]) => entry.write && entry.api.length > 0
+    && entry.api.every(([method]) => method === 'GET')).map(([name]) => name);
+  assert.deepEqual(readOnly.toSorted(), pendingScenarios.toSorted());
+});
+
 test('šablona zaznamenané cesty skryje ID i hodnoty z argumentů', () => {
   assert.equal(routeTemplate('/api/invoices/7/payments/8'), '/api/invoices/{id}/payments/{id}');
   assert.equal(routeTemplate('/api/reports/vat-return?period=2026-01'), '/api/reports/vat-return');
