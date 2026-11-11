@@ -52,7 +52,7 @@ final class AnnualTaxCertificatePaymentEvidenceProviderTest extends TestCase
         [$connection, $fixture] = $this->fixture('2027-02-01', 42_000_000);
         try {
             $this->expectException(\DomainException::class);
-            $this->expectExceptionMessage('31. 1. 2027');
+            $this->expectExceptionMessage('do 31. 1. 2027. V Mzdy > Platby > Spárování úhrad');
 
             (new AnnualTaxCertificatePaymentEvidenceProvider(
                 $connection,

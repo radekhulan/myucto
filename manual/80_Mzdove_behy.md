@@ -104,11 +104,19 @@ a již uzavřenou revizi nepřepíše.
    nového roku ještě nejsou vyhlášené. Týká-li se nález víc osob, než se do
    přehledu vejde, odkaz **Zobrazit všech N osob v seznamu zaměstnanců**
    otevře seznam zúžený právě na ně. Nález má v kontrole před zahájením
-   stejnou závažnost jako po výpočtu: chybějící přihláška ČSSZ (u DPP a DPČ
-   i bez účasti na pojištění) nebo oznámení zdravotní pojišťovně je mezi nálezy, kvůli kterým běh nepůjde
-   schválit, dokud se nepodá nebo neschválí výjimka (podáno mimo aplikaci).
+   stejnou závažnost jako po výpočtu: chybějící přihláška ČSSZ u vztahu
+   s účastí na pojištění nebo oznámení zdravotní pojišťovně je mezi nálezy,
+   kvůli kterým běh nepůjde schválit, dokud se nepodá nebo neschválí výjimka
+   (podáno mimo aplikaci). U DPP a DPČ bez účasti na pojištění je chybějící
+   registrace jen připomínkou.
    Chybějící docházka schválení nezastaví, doplnění po zamknutí vstupů ale
    stojí opravnou revizi.
+   U osob s částkou k výplatě kontrola hlásí také chybějící výplatní
+   pravidlo a odkáže na výplatní údaje v kartě zaměstnance. Výpočet ani
+   schválení tím nejsou omezené, bez pravidla ale nepůjdou připravit platby.
+   Doplnění po schválení vyžaduje opravnou revizi a nový výpočet běhu.
+   Nulová nebo záporná výplata pravidlo nepotřebuje; existující pravidlo
+   pro hotovost nebo jiný způsob výplaty se jako chybějící nehlásí.
 5. Zůstal-li některý vstup v konceptu, běh to ohlásí jako blokaci. Klikněte
    přímo u ní na **Schválit vše**. Na jinou obrazovku nemusíte. Tentýž
    problém se neopakuje jako vztah bez mzdových vstupů ani jako chybějící

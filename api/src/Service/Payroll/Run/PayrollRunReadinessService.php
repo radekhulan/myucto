@@ -130,6 +130,7 @@ final class PayrollRunReadinessService
         private readonly PayrollEmploymentBulkClosure $bulkClosure,
         // Nulové počáteční úhrny, které doplní založení běhu.
         private readonly PayrollOpeningBalanceService $openingBalances,
+        private readonly PayrollRunCalculationPipeline $calculation,
     ) {}
 
     /**
@@ -251,6 +252,10 @@ final class PayrollRunReadinessService
         }
 
         if ($snapshot !== null) {
+            $payoutFinding = $this->payoutRuleFinding($supplierId, $periodStart, $snapshot->data);
+            if ($payoutFinding !== null) {
+                $findings[] = $payoutFinding;
+            }
             // Jméno u každého záznamu: 25× „Otevřít místo k opravě" bez jména
             // neříkalo, koho proklik otevře.
             $validations = $this->reportedValidations($supplierId, $snapshot->validations);
@@ -729,6 +734,85 @@ final class PayrollRunReadinessService
                 && isset($seeded[(int) $match[1]])
             ),
         ));
+    }
+
+    private function peopleWithoutPayoutRule(int $supplierId, string $periodStart, array $snapshotData): array
+    {
+        if (PayrollRunPaymentPreparationService::missingPayoutRules($snapshotData) === []) {
+            return [];
+        }
+        $withoutPayout = [];
+        try {
+            $employeeIds = array_column(array_column($snapshotData['people'], 'employee'), 'id');
+            $zeroOpenings = array_fill_keys(
+                $this->openingBalances->provableZeroOpeningEmployeeIds($supplierId, $periodStart, $employeeIds),
+                true,
+            );
+            foreach ($snapshotData['people'] as &$person) {
+                $employeeId = $person['employee']['id'];
+                if (!isset($zeroOpenings[$employeeId])) {
+                    continue;
+                }
+                foreach (PayrollOpeningBalanceService::accumulatorValues([]) as $kind => $totals) {
+                    $person['statutory_accumulators'][$kind] = [
+                        'status' => 'verified',
+                        'issue_code' => null,
+                        'state' => [
+                            'schema_version' => 'payroll-statutory-accumulator-state.v1',
+                            'calculation_kind' => $kind,
+                            'supplier_id' => $supplierId,
+                            'employee_id' => $employeeId,
+                            'year' => (int) substr($periodStart, 0, 4),
+                            'before_period_start' => $periodStart,
+                            'totals' => $totals,
+                        ],
+                    ];
+                }
+            }
+            unset($person);
+            $result = $this->calculation->calculate($snapshotData, $supplierId, persist: false);
+            foreach ($result['people'] as $person) {
+                $payable = $person['payable_after_enforcement_minor'] ?? null;
+                if (($person['statutory']['status'] ?? null) === 'calculated'
+                    && is_int($payable) && $payable <= 0
+                ) {
+                    $withoutPayout[$person['employee_id']] = true;
+                }
+            }
+        } catch (\Throwable) {
+            $withoutPayout = [];
+        }
+        return PayrollRunPaymentPreparationService::missingPayoutRules($snapshotData, $withoutPayout);
+    }
+
+    private function payoutRuleFinding(int $supplierId, string $periodStart, array $snapshotData): ?array
+    {
+        $missing = $this->peopleWithoutPayoutRule($supplierId, $periodStart, $snapshotData);
+        if ($missing === []) {
+            return null;
+        }
+        $guidance = PayrollRunIssueGuidance::describe('payout_rule_missing');
+        $entities = [];
+        foreach (array_slice($missing, 0, self::MAX_ENTITIES) as $person) {
+            $person['remediation_path'] = PayrollRunIssueGuidance::describe(
+                'payout_rule_missing',
+                $person['entity_id'],
+            )['remediation_path'];
+            $entities[] = $person;
+        }
+
+        return self::withPeopleList(
+            self::finding(
+                'payout_rule_missing',
+                $guidance['message'],
+                count($entities) === 1 ? $entities[0]['remediation_path'] : $guidance['remediation_path'],
+                count($missing),
+                $entities,
+            ),
+            array_column($missing, 'entity_id'),
+            $periodStart,
+            (string) $snapshotData['payment_date'],
+        );
     }
 
     /**
@@ -1377,8 +1461,8 @@ final class PayrollRunReadinessService
      * nálezu (`?filter=run_finding`) a ptá se TÉTO metody, tedy téhož snímku
      * a téhož výběru validací jako přehled. Dvě pravidla by se rozešla v počtu.
      *
-     * Jen pro nálezy z validací snímku (docházka, mzdové složky, podmínky
-     * vztahu …); ostatní nálezy mají vlastní hromadnou akci. Neznámý kód
+     * Pro chybějící výplatní pravidla a validace snímku (docházka, mzdové složky,
+     * podmínky vztahu …); ostatní nálezy mají vlastní hromadnou akci. Neznámý kód
      * i chyba snímku vrací prázdný výčet.
      *
      * @return list<int> id osob (`payroll_employees.id`)
@@ -1392,6 +1476,12 @@ final class PayrollRunReadinessService
         try {
             $this->snapshotBuilder->assertRulesetCoverage($periodStart);
             $snapshot = $this->snapshotBuilder->build($supplierId, $periodStart, $paymentDate, null);
+            if ($code === 'payout_rule_missing') {
+                $ids = array_column($this->peopleWithoutPayoutRule($supplierId, $periodStart, $snapshot->data), 'entity_id');
+                sort($ids, SORT_NUMERIC);
+
+                return $ids;
+            }
         } catch (\Throwable) {
             return [];
         }

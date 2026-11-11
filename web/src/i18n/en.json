@@ -4080,7 +4080,7 @@
         "later_terms": "later employment terms already change the workplace",
         "employment_closed": "the employment has ended",
         "employment_reported": "the employment has ended and a JMHZ report for its month is frozen or submitted: revert the termination, correct the details and file a corrective report",
-        "period_settled": "the period is already settled",
+        "period_settled": "the terms being corrected also cover a settled month without an open payroll correction; open corrections for every affected settled month, correcting only the selected month is not enough",
         "workplace_not_verified": "the existing workplace is not verified"
       },
       "excluded_title": "Excluded ({count})",
@@ -4096,7 +4096,7 @@
         "failed": "Failed"
       },
       "failed_title": "Could not be filled in ({count})",
-      "recalculate_notice": "The payroll run for which you filled in the workplace needs to be recalculated and approved as a new revision for the new value to be reflected in the report."
+      "recalculate_notice": "After filling in the workplace in an open payroll revision, choose Refresh inputs, recalculate payroll and approve the new revision so the corrected data appears in the report. For an approved run, first request and open a correction."
     },
     "bulk_closure": {
       "open": "End finished agreements",
@@ -4906,6 +4906,7 @@
       },
       "readiness": {
         "affected": "Affects: {names}",
+        "payout_rule_missing": "A net wage payout rule is missing. Calculation and approval can proceed, but payment preparation will be blocked. Add a payout rule in the employee card under Payout / accounts. Fixing this after approval requires a correction revision and recalculation of the run.",
         "people_list": "Show in the employee list | Show this person in the employee list | Show all {count} people in the employee list",
         "open_all": "Open the agenda for all affected ({count})",
         "fill_probable_average": "Fill in probable earnings from the rate",
@@ -5109,6 +5110,7 @@
       "search_placeholder": "Name or personal number",
       "search_empty": "No employment in this month matches “{q}”.",
       "search_clear": "Clear search",
+      "blocker_unknown": "Payroll evidence requires review.",
       "blockers": {
         "hourly_remuneration_calculation_unsupported": "This saved revision contains an hourly processing blocker. Check its specific evidence and prepare a new payroll revision.",
         "hourly_preview_unavailable": "The hourly wage preview could not be built from the saved evidence. Check the hours and premium evidence; other rows are not affected.",
@@ -8323,6 +8325,12 @@
       },
       "termination": {
         "title": "Termination",
+        "follow_up": {
+          "title": "Follow-up actions after termination",
+          "eldp": "Pension insurance record (ELDP)",
+          "certificates": "Employment and Labour Office certificates",
+          "tax_certificate": "Taxable income certificate"
+        },
         "subtitle": "How and why the employment ended is entered only here. The A2 deregistration and the Labour Office certificate are prefilled from it, and leave settlement and severance pay are created for the last payroll run.",
         "load_failed": "The termination could not be loaded.",
         "action_failed": "The action failed.",
@@ -9222,9 +9230,11 @@
       "office_select": "Select an office",
       "office_empty": "The employer has no active payroll office yet — create one in payroll settings.",
       "office_missing_warning": "This employment has no payroll office. Social insurance cannot be reported and the payroll run will stop on it. Select it in the Payroll office field of the employment and save.",
+      "workplace_missing_warning": "The workplace municipality or country for JMHZ is missing. In More details, select the workplace municipality from the codebook, fill in the country and save the employment terms.",
+      "workplace_complete": "Fill in workplace",
       "terms_basics_hint": "Fill in what actually changes. Only fields the save cannot go through without are marked with an asterisk; everything else is optional.",
       "terms_advanced_title": "More details",
-      "terms_advanced_hint": "JMHZ evidence, insurance and tax regimes, rate categories and discounts. An ordinary employment needs none of it.",
+      "terms_advanced_hint": "Place of work and other JMHZ evidence, insurance and tax regimes, rate categories and discounts.",
       "change_reason_hint": "Optional. Shows up in the employment timeline."
     },
     "transport_delivery": {

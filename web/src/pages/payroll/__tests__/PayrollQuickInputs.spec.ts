@@ -60,10 +60,15 @@ vi.mock('@/composables/useToast', () => ({
 }))
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
 // `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
-vi.mock('vue-i18n', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({ t: (key: string) => key, te: (key: string) => key === 'payroll.hourly_preview.blockers.hourly_time_missing', locale: ref('cs-CZ') }),
-}))
+vi.mock('vue-i18n', async (importOriginal) => {
+  const original = await importOriginal<typeof import('vue-i18n')>()
+  const { default: cs } = await import('@/i18n/cs.json')
+  const { te } = original.createI18n({ legacy: false, locale: 'cs', messages: { cs } }).global
+  return {
+    ...original,
+    useI18n: () => ({ t: (key: string) => key, te, locale: ref('cs-CZ') }),
+  }
+})
 
 // Preference tabulek (přepínač příplatků, zvolené sloupce složek) drží stav,
 // aby šlo ověřit, co stránka ukládá a jak čte uloženou volbu.
@@ -606,9 +611,9 @@ describe('PayrollQuickInputs', () => {
     await flushPromises()
     const hourlyRow = wrapper.get('[data-testid="quick-hourly-row-12"]')
     const items = hourlyRow.findAll('[data-test="hourly-preview-blockers"] li').map(item => item.text())
-    expect(items).toEqual(['Doložte příplatkové vrstvy ke každému úseku pracovní doby.', 'payroll.hourly_preview.blockers.hourly_time_missing'])
+    expect(items).toEqual(['payroll.hourly_preview.blockers.hourly_premium_evidence_missing', 'payroll.hourly_preview.blockers.hourly_time_missing'])
     const personCell = hourlyRow.element.previousElementSibling!.querySelector('td')!
-    expect(personCell.textContent).not.toContain('Doložte příplatkové vrstvy')
+    expect(personCell.textContent).not.toContain('hourly_premium_evidence_missing')
     expect(personCell.textContent).not.toContain('hourly_time_missing')
   })
 

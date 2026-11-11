@@ -14,6 +14,7 @@ import { formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
 import { personalNumberLabel } from './employmentLifecycleUi'
 import { payrollInputEditable } from './payrollComponentsUi'
+import { payrollQuickInputBlockerMessage } from './payrollQuickInputBlockerMessage'
 
 /**
  * Karty zaměstnanců na přehledu mezd.
@@ -36,7 +37,7 @@ const props = defineProps<{
   period: string
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const auth = useAuthStore()
 const pageSize = 25
 const loading = ref(true)
@@ -433,7 +434,7 @@ onBeforeUnmount(() => {
 
           <ul v-if="row.blockers.length > 0" class="mt-3 space-y-1">
             <li v-for="blocker in row.blockers" :key="blocker" class="text-xs text-warning-700">
-              {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
+              {{ payrollQuickInputBlockerMessage(t, te, blocker) }}
             </li>
           </ul>
 

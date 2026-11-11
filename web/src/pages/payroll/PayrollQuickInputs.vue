@@ -28,6 +28,7 @@ import PayrollInputHistory from '@/components/payroll/PayrollInputHistory.vue'
 import PayrollWorkedHoursSummary from '@/components/payroll/PayrollWorkedHoursSummary.vue'
 import PayrollHourlyWagePreview from '@/components/payroll/PayrollHourlyWagePreview.vue'
 import { uniqueBy } from './payrollFieldFeedback'
+import { payrollQuickInputBlockerMessage } from './payrollQuickInputBlockerMessage'
 import { averageEarningsTarget } from './payrollRemediation'
 import PayrollWorkedHoursPanel from '@/components/payroll/PayrollWorkedHoursPanel.vue'
 import {
@@ -998,11 +999,10 @@ const MANAGED_BLOCKER_SUFFIX = '_managed_elsewhere'
 
 /** Text blokace podle kódu v jazyce aplikace; serverová zpráva je jen záloha. */
 function blockerMessage(row: UiRow, code: string): string {
-  const own = `payroll.quick_inputs.blockers.${code}`
-  if (te(own)) return t(own)
-  const hourly = `payroll.hourly_preview.blockers.${code}`
-  if (te(hourly)) return t(hourly)
-  return row.hourly_wage_preview?.blockers.find(blocker => blocker.code === code)?.message ?? t(own)
+  return payrollQuickInputBlockerMessage(
+    t, te, code,
+    row.hourly_wage_preview?.blockers.find(blocker => blocker.code === code)?.message,
+  )
 }
 
 /*

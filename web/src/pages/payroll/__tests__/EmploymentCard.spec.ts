@@ -326,6 +326,23 @@ describe('ukončení zapsané dopředu', () => {
 })
 
 describe('doskok na podklady JMHZ', () => {
+  it('otevře dokumenty skončeného vztahu a předá oprávnění k navazujícím úkonům', async () => {
+    HTMLElement.prototype.scrollIntoView = vi.fn()
+    const ended = { ...employment(), status: 'ended' as const, end_date: '2025-12-31' }
+    const wrapper = await mountCard(ended, {
+      props: { employment: ended, canWrite: false, canReadDocuments: true },
+      attachTo: document.body,
+    })
+    expect(wrapper.find('[data-test="employment-exit-documents"]').exists()).toBe(false)
+
+    await (wrapper.vm as unknown as { focusSection: (panel: string) => Promise<void> }).focusSection('exit_documents')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="employment-exit-documents"]').classes()).toContain('field-flash')
+    expect(wrapper.findComponent({ name: 'EmploymentTerminationPanel' }).attributes('can-read-documents')).toBe('true')
+    wrapper.unmount()
+  })
+
   it.each(['office_id', 'weekly_hours', 'social_employer_rate_category', 'social_part_time_discount_reason'])('zvýrazní konkrétní podmínku %s v uzavřeném vztahu', async field => {
     HTMLElement.prototype.scrollIntoView = vi.fn()
     const wrapper = await mountCard({ ...employment(), status: 'ended', relation_type: 'dpc' }, { attachTo: document.body })
@@ -574,6 +591,56 @@ describe('EmploymentCard', () => {
     expect(payload.weekly_hours).toBe('37.50')
     // Účinnost drží opravovaná verze; klient ji neposílá, aby s ní nešlo hnout.
     expect('effective_from' in payload).toBe(false)
+  })
+
+  it('na chybějící obec pracoviště upozorní před rozbalením dalších údajů a dovede na pole', async () => {
+    const wrapper = await mountCard()
+
+    expect(wrapper.get('[data-test="employment-workplace-missing"]').text())
+      .toContain('payroll.people.workplace_missing_warning')
+    expect(wrapper.get('[data-test="terms-advanced"]').attributes('open')).toBeUndefined()
+
+    await wrapper.get('[data-test="employment-workplace-complete"]').trigger('click')
+    await flushPromises()
+
+    expect(revealField).toHaveBeenCalledWith('[data-test="jmhz-municipality"]', expect.anything())
+    expect(wrapper.get('[data-test="terms-advanced"]').attributes('open')).toBeDefined()
+
+    const municipality = selectByTest(wrapper, 'jmhz-municipality')
+    municipality.vm.$emit('search', 'Praha')
+    await flushPromises()
+    municipality.vm.$emit('update:modelValue', '554782')
+    await flushPromises()
+    expect(wrapper.find('[data-test="employment-workplace-missing"]').exists()).toBe(false)
+  })
+
+  it('při chybějícím státu pracoviště dovede na stát a u úplného pracoviště nevaruje', async () => {
+    const stored = employment()
+    stored.terms[0]!.jmhz_workplace_municipality_code = '554782'
+    const wrapper = await mountCard(stored)
+
+    expect(wrapper.find('[data-test="employment-workplace-missing"]').exists()).toBe(true)
+    await wrapper.get('[data-test="employment-workplace-complete"]').trigger('click')
+    await flushPromises()
+    expect(revealField).toHaveBeenCalledWith('[data-test="jmhz-country"]', expect.anything())
+
+    await wrapper.get('[data-test="jmhz-country"]').setValue('CZ')
+    expect(wrapper.find('[data-test="employment-workplace-missing"]').exists()).toBe(false)
+  })
+
+  it.each([
+    ['11', null],
+    ['12', null],
+    ['13', null],
+    ['14', null],
+    ['1', '2'],
+  ])('u formuláře bez vykonávané pozice nevaruje na pracoviště (%s/%s)', async (activity, detail) => {
+    const stored = employment()
+    stored.terms[0]!.activity_code = activity
+    stored.terms[0]!.jmhz_relationship_detail_code = detail
+    const wrapper = await mountCard(stored)
+
+    expect(wrapper.find('[data-test="employment-workplace-missing"]').exists()).toBe(false)
   })
 
   it('novou verzi založí, jen když si ji uživatel vybere — a vyžádá si datum', async () => {

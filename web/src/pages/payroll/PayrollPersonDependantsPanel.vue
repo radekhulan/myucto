@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
@@ -58,6 +58,7 @@ const errorMessage = ref('')
 const data = ref<PayrollDependantsResponse | null>(null)
 const expandedId = ref<number | null>(null)
 const editor = ref<'dependant' | 'claim' | null>(null)
+const editorSection = ref<HTMLElement | null>(null)
 const editingDependantId = ref<number | null>(null)
 const editingClaimId = ref<number | null>(null)
 
@@ -207,6 +208,10 @@ function toggleDetail(id: number): void {
   expandedId.value = expandedId.value === id ? null : id
 }
 
+function scrollEditorIntoView(): void {
+  void nextTick(() => editorSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }))
+}
+
 function openDependantEditor(dependant: PayrollDependant | null): void {
   errorMessage.value = ''
   editor.value = 'dependant'
@@ -226,6 +231,7 @@ function openDependantEditor(dependant: PayrollDependant | null): void {
   dependantForm.note = dependant?.note ?? ''
   dependantForm.row_version = dependant?.row_version ?? 0
   editorBaseline.value = editorFingerprint()
+  scrollEditorIntoView()
 }
 
 function openClaimEditor(dependant: PayrollDependant, claim: PayrollDependantClaim | null): void {
@@ -251,6 +257,7 @@ function openClaimEditor(dependant: PayrollDependant, claim: PayrollDependantCla
   claimForm.effective_to = claim?.effective_to ?? latestClaimTo(dependant) ?? ''
   claimForm.row_version = claim?.row_version ?? 0
   editorBaseline.value = editorFingerprint()
+  scrollEditorIntoView()
 }
 
 /*
@@ -767,7 +774,8 @@ function creditLabel(claim: PayrollDependantClaim): string {
 
     <form
       v-if="editor !== null"
-      class="border-t border-neutral-200 p-4 sm:p-6"
+      ref="editorSection"
+      class="scroll-mt-24 border-t border-neutral-200 p-4 sm:p-6"
       data-test="dependant-editor"
       @submit.prevent="save"
     >

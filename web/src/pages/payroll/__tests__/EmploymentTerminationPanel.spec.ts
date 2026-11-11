@@ -116,6 +116,38 @@ describe('EmploymentTerminationPanel', () => {
     vi.clearAllMocks()
   })
 
+  it('links to ELDP and exit certificates for the ended employment without generating them', async () => {
+    const data = overview()
+    data.employment.end_date = '2025-12-31'
+    m.employmentTermination.mockResolvedValue(data)
+    const wrapper = mount(EmploymentTerminationPanel, {
+      props: { employmentId: 12, canWrite: false, canReadDocuments: true },
+    })
+    await flushPromises()
+
+    const actions = wrapper.get('[data-test="termination-follow-up"]')
+    expect(actions.get('[data-test="termination-eldp-link"]').attributes('href'))
+      .toBe('/payroll/submissions/eldp?person=20&employment=12&year=2025')
+    expect(actions.get('[data-test="termination-certificates-link"]').attributes('href'))
+      .toBe('/payroll/people?person=20&employment=12&panel=exit_documents')
+    expect(actions.get('[data-test="termination-tax-certificate-link"]').attributes('href'))
+      .toBe('/payroll/documents?person=20&period=2025-12&tab=annual')
+    expect(actions.findAll('button')).toHaveLength(0)
+    expect(m.saveEmploymentTermination).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('hides certificate links without document access', async () => {
+    m.employmentTermination.mockResolvedValue(overview())
+    const wrapper = mountPanel(false)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="termination-eldp-link"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="termination-certificates-link"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="termination-tax-certificate-link"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('shows what is missing, for whom and where to fix it', async () => {
     m.employmentTermination.mockResolvedValue(overview({
       issues: [

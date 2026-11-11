@@ -1275,9 +1275,9 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('Delta Nová')
   })
 
-  it('směruje pole do přesně vybraného vztahu, nikoli do první karty osoby', async () => {
+  it.each(['jmhz_profile', 'exit_documents'])('směruje panel %s do přesně vybraného vztahu, nikoli do první karty osoby', async panel => {
     m.routeQuery.employment = '44'
-    m.routeQuery.panel = 'jmhz_profile'
+    m.routeQuery.panel = panel
     m.routeQuery.field = 'jmhz_deep_mining_work_applies'
     const focus = vi.fn()
     m.person.mockResolvedValue({
@@ -1292,7 +1292,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
       },
     }))
     await flushPromises()
-    expect(focus).toHaveBeenCalledExactlyOnceWith(44, 'jmhz_profile', 'jmhz_deep_mining_work_applies')
+    expect(focus).toHaveBeenCalledExactlyOnceWith(44, panel, 'jmhz_deep_mining_work_applies')
     expect(m.routerReplace).toHaveBeenCalledWith({ query: { employment: '44' } })
     wrapper.unmount()
   })
