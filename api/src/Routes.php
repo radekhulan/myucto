@@ -1353,9 +1353,17 @@ final class Routes
                 '/runs/{id:[0-9]+}/takeover/discard',
                 [PayrollRunsAction::class, 'takeoverDiscard'],
             );
-            // Detail existuje kvůli tomu, aby seznam nemusel posílat celý
-            // výsledkový snapshot každého běhu — ten se dotahuje na vyžádání.
+            // Detail nese hlavičku, souhrn výsledku a nálezy kontrol. Výsledky
+            // osob se stránkují zvlášť, aby odpověď nerostla s počtem lidí.
             $g->get('/runs/{id:[0-9]+}', [PayrollRunsAction::class, 'detail']);
+            $g->get(
+                '/runs/{id:[0-9]+}/people',
+                [\MyInvoice\Action\Payroll\PayrollRunPeopleAction::class, 'list'],
+            );
+            $g->get(
+                '/runs/{id:[0-9]+}/people/{employeeId:[0-9]+}',
+                [\MyInvoice\Action\Payroll\PayrollRunPeopleAction::class, 'detail'],
+            );
             $g->post('/runs', [PayrollRunsAction::class, 'create']);
             $g->delete('/runs/{id:[0-9]+}', [PayrollRunsAction::class, 'delete']);
             $g->post(

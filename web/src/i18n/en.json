@@ -4206,6 +4206,48 @@
       "breakdown_show": "Show per-employee breakdown",
       "breakdown_hide": "Hide per-employee breakdown",
       "breakdown_failed": "The per-employee breakdown could not be loaded. Please try again.",
+      "people_table": {
+        "title": "Employees in the run",
+        "subtitle": "Calculation result per person. Click a column header to sort; open a person to see how tax, insurance and net pay were calculated.",
+        "search": "Search name or personal number",
+        "only_findings": "With findings only",
+        "count": "no employees | 1 employee | {n} employees",
+        "columns": {
+          "name": "Employee",
+          "gross_minor": "Gross pay",
+          "insurance_minor": "Employee insurance",
+          "tax_minor": "Tax",
+          "net_minor": "Net pay",
+          "payable_minor": "To be paid",
+          "finding": "Finding",
+          "actions": "Actions"
+        },
+        "tax_kind": {
+          "advance": "advance",
+          "withholding": "withholding tax",
+          "mixed": "advance and withholding tax"
+        },
+        "tax_bonus": "tax bonus {amount}",
+        "finding": {
+          "none": "No findings",
+          "error": "Calculation error",
+          "manual_review": "Needs manual review",
+          "blockers": "no blockers | 1 blocker | {n} blockers",
+          "warnings": "no warnings | 1 warning | {n} warnings"
+        },
+        "actions": {
+          "detail": "Calculation detail",
+          "detail_hide": "Hide detail",
+          "payslip": "Payslip"
+        },
+        "empty": "The run has no per-person results yet.",
+        "no_results": "No employee in this run matches the search.",
+        "retry": "Try again",
+        "totals": "Total | Total for 1 person | Total for {n} people",
+        "totals_narrowed": "Selection | Selection, 1 person | Selection, {n} people",
+        "detail_title": "Pay calculation: {name}",
+        "detail_load_failed": "The calculation detail could not be loaded. Please try again."
+      },
       "save_failed": "Payroll run could not be created.",
       "command_done": "Payroll run status was changed.",
       "command_failed": "Payroll run command failed.",

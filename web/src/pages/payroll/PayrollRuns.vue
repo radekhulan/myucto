@@ -14,16 +14,12 @@ import {
   type PayrollRunReadinessBulkKind,
   type PayrollRunReadinessFinding,
   type PayrollRunRevisionHistory,
-  type PayrollRunResultPerson,
   type PayrollRunValidation,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { payrollAbsenceApi } from '@/api/payrollAbsences'
 import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
-import PayrollPayslipHourlyBreakdown from '@/components/payroll/PayrollPayslipHourlyBreakdown.vue'
-import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
-import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
-import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
+import PayrollRunPeopleTable from '@/components/payroll/PayrollRunPeopleTable.vue'
 import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
@@ -122,12 +118,12 @@ const paymentDateTouched = ref(false)
 const runs = ref<PayrollRun[]>([])
 const personNames = ref<Record<number, string>>({})
 /**
- * Osobní rozpad běhu (`result_snapshot.people`) je ta objemná část výsledku a
- * seznam ho úmyslně neposílá — server by ho jinak musel načíst pro všechny běhy
- * firmy najednou. Drží se proto stranou a dotahuje se pro jeden rozbalený běh.
+ * U kterých běhů je rozbalený přehled osob. Výsledky osob seznam běhů neposílá;
+ * stránkuje a dotahuje si je `PayrollRunPeopleTable` sama.
  */
-const breakdowns = ref<Record<number, PayrollRunResultPerson[]>>({})
-const breakdownLoading = ref<Record<number, boolean>>({})
+const breakdownOpen = ref<Record<number, boolean>>({})
+/** Číselník jmen se stahuje jednou, ne při každém obnovení seznamu běhů. */
+let personNamesLoaded = false
 const histories = ref<Record<number, PayrollRunHistory>>({})
 const historyOpen = ref<Record<number, boolean>>({})
 const historyLoading = ref<Record<number, boolean>>({})
@@ -972,7 +968,7 @@ async function load() {
   try {
     const [page, people] = await Promise.all([
       payrollApi.runsPage(period.value, { limit: pageSize, offset: offset.value }),
-      payrollApi.peopleOptions().catch(() => null),
+      personNamesLoaded ? Promise.resolve(null) : payrollApi.peopleOptions().catch(() => null),
     ])
     runs.value = page.runs
     total.value = page.total
@@ -990,8 +986,11 @@ async function load() {
     ) {
       paymentDate.value = suggestedPaymentDate.value
     }
-    // Rozpad patří ke konkrétní revizi; po přenačtení seznamu už nemusí platit.
-    breakdowns.value = {}
+    // Otevřený přehled osob zůstává; při změně revize se přenačte sám.
+    breakdownOpen.value = Object.fromEntries(
+      Object.entries(breakdownOpen.value)
+        .filter(([id]) => page.runs.some(run => String(run.id) === id && run.result_snapshot)),
+    )
     histories.value = {}
     historyOpen.value = {}
     historyFailed.value = {}
@@ -1012,34 +1011,29 @@ async function load() {
 }
 
 // Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
+      personNamesLoaded = true
+    }
+    // Nález jmenuje osobu, kterou číselník ještě nezná (založená mezitím
+    // jinde): příští načtení si jména stáhne znovu.
+    if (personNamesLoaded && page.runs.some(run => run.validations.some(validation =>
+      validation.entity_type === 'employee'
+      && validation.entity_id !== null
+      && personNames.value[validation.entity_id] === undefined))
+    ) {
+      personNamesLoaded = false
 function goToPage(nextPage: number) {
   offset.value = Math.max(0, (nextPage - 1) * pageSize)
   void load()
 }
 
-/**
- * Dotáhne osobní rozpad jednoho běhu. Opakované kliknutí rozpad schová, aby si
- * uživatel mohl seznam zase zpřehlednit; jednou stažená data se drží v paměti.
- */
-async function toggleBreakdown(run: PayrollRun) {
-  if (breakdowns.value[run.id] !== undefined) {
-    const { [run.id]: _removed, ...rest } = breakdowns.value
-    breakdowns.value = rest
+/** Rozbalí nebo schová přehled osob jednoho běhu. */
+function toggleBreakdown(run: PayrollRun) {
+  if (breakdownOpen.value[run.id]) {
+    const { [run.id]: _removed, ...rest } = breakdownOpen.value
+    breakdownOpen.value = rest
     return
   }
-  breakdownLoading.value = { ...breakdownLoading.value, [run.id]: true }
-  try {
-    const detail = await payrollApi.run(run.id)
-    breakdowns.value = {
-      ...breakdowns.value,
-      [run.id]: detail.result_snapshot?.people ?? [],
-    }
-  } catch {
-    toast.error(t('payroll.runs.breakdown_failed'))
-  } finally {
-    const { [run.id]: _pending, ...rest } = breakdownLoading.value
-    breakdownLoading.value = rest
-  }
+  breakdownOpen.value = { ...breakdownOpen.value, [run.id]: true }
 }
 
 const HISTORY_TOTAL_KEYS: PayrollRunHistoryTotalKey[] = [
@@ -2315,19 +2309,13 @@ onMounted(load)
             type="button"
             :data-testid="`payroll-run-${run.id}-breakdown-toggle`"
             :class="btnOutline('neutral')"
-            :disabled="breakdownLoading[run.id]"
+            :aria-expanded="!!breakdownOpen[run.id]"
             @click="toggleBreakdown(run)"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.chart" />
             </svg>
-            {{
-              breakdownLoading[run.id]
-                ? t('common.loading')
-                : breakdowns[run.id]
-                  ? t('payroll.runs.breakdown_hide')
-                  : t('payroll.runs.breakdown_show')
-            }}
+            {{ breakdownOpen[run.id] ? t('payroll.runs.breakdown_hide') : t('payroll.runs.breakdown_show') }}
           </button>
           <button
             type="button"
@@ -2485,31 +2473,12 @@ onMounted(load)
           </div>
         </section>
 
-        <PayrollPayslipHourlyBreakdown
-          v-if="breakdowns[run.id]?.length"
-          :people="breakdowns[run.id]"
-          :person-names="personNames"
-        />
-
-        <PayrollIncomeTaxBreakdown
-          v-if="breakdowns[run.id]?.length"
-          :people="breakdowns[run.id]"
-          :person-names="personNames"
-        />
-
-        <PayrollInsuranceBreakdown
-          v-if="breakdowns[run.id]?.length"
-          :revision-id="run.revision_id"
-          :people="breakdowns[run.id]"
-          :person-names="personNames"
-        />
-
-        <PayrollNetPayBreakdown
-          v-if="breakdowns[run.id]?.length"
+        <PayrollRunPeopleTable
+          v-if="breakdownOpen[run.id] && run.result_snapshot"
+          :run-id="run.id"
           :revision-id="run.revision_id"
           :approved="run.revision_status === 'approved'"
-          :people="breakdowns[run.id]"
-          :person-names="personNames"
+          :refresh-key="run.row_version"
         />
 
         <!--
@@ -2539,6 +2508,7 @@ onMounted(load)
             :to="{ name: 'payroll-settings', query: { tab: 'warnings' } }"
             class="inline-flex items-center gap-1 whitespace-nowrap text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-700"
             :data-testid="`payroll-run-${run.id}-hidden-warnings`"
+          :period="run.period_start.slice(0, 7)"
           >
             <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eyeOff" /></svg>
             {{ t('payroll.runs.hidden_warnings_link', { count: run.hidden_validation_count }) }}

@@ -188,8 +188,15 @@ ukazuje na `Mzdy → Přehled mezd` rozcestník **Jak to funguje**.
     tlačítkem **Schválit vše**. Varování, které nejde odstranit, převezmete
     tlačítkem **Schválit výjimku** s odůvodněním.
 12. Zkontrolujte dlaždice **Peněžní příjem před srážkou**, **Exekuční srážka
-    a paušál**, **K výplatě po srážce** a rozpad pod odkazem **Zobrazit rozpad
-    podle zaměstnanců**.
+    a paušál**, **K výplatě po srážce** a klikněte na **Zobrazit rozpad
+    podle zaměstnanců**. Otevře se tabulka **Zaměstnanci v běhu** s hrubou
+    mzdou, pojistným zaměstnance, daní (záloha nebo srážková daň), čistou
+    mzdou a částkou k výplatě každé osoby a se součtem dole. Řadíte kliknutím
+    na záhlaví sloupce, hledáte podle jména nebo osobního čísla a volba **Jen
+    s nálezem** nechá v tabulce jen osoby, kterých se týká některá kontrola
+    běhu. Tlačítko **Detail výpočtu** u osoby ukáže, jak vznikla její daň,
+    pojistné a čistá mzda. Po schválení vede tlačítko **Výplatní páska** na
+    měsíční dokumenty osoby.
 13. Je-li něco špatně, opravte zdrojový údaj a klikněte na **Přepočítat**.
     Změněný podklad (nový nebo opravený vstup, nepřítomnost, zákonná evidence)
     převezme do běhu tlačítko **Obnovit podklady**.

@@ -6,6 +6,8 @@ import type { PayrollRun, PayrollRunReadiness, PayrollRunValidation } from '@/ap
 const m = vi.hoisted(() => ({
   runs: vi.fn(),
   runDetail: vi.fn(),
+  runPeople: vi.fn(),
+  runPerson: vi.fn(),
   runHistory: vi.fn(),
   peopleOptions: vi.fn(),
   deleteRun: vi.fn(),
@@ -57,6 +59,8 @@ vi.mock('@/api/payroll', () => ({
       })),
     advancePayrollStart: m.advanceStart,
     run: m.runDetail,
+    runPeople: m.runPeople,
+    runPerson: m.runPerson,
     runHistory: m.runHistory,
     peopleOptions: m.peopleOptions,
     deleteRun: m.deleteRun,
@@ -155,6 +159,10 @@ describe('PayrollRuns', () => {
       summary: { total: 0, send: 0, generate: 0, manual: 0, done: 0 },
     })
     m.runDetail.mockResolvedValue(run())
+    m.runPeople.mockResolvedValue({
+      run_id: 15, period_start: '2026-04-01', revision_id: 9, revision_no: 1, revision_status: 'approved',
+      items: [], total: 0, limit: 25, offset: 0, sort: 'name', dir: 'asc', totals: null,
+    })
     m.runHistory.mockResolvedValue({ run_id: 15, revisions: [], events: [] })
     m.peopleOptions.mockResolvedValue([])
     m.deleteRun.mockResolvedValue(undefined)
@@ -392,18 +400,15 @@ describe('PayrollRuns', () => {
     expect(blocker.text()).toBe('Mzdový běh už obsahuje neměnnou revizi.')
   })
 
-  // Seznam běhů posílal celý výsledkový snapshot každého běhu včetně osobního
-  // rozpadu — u firmy se stovkou zaměstnanců to server nedokázal ani načíst.
-  // Rozpad se proto dotahuje až na vyžádání, pro jeden konkrétní běh.
-  it('loads the per-employee breakdown only when the user asks for it', async () => {
+  // Detail běhu nesl výsledky všech osob (u 150 lidí 2,8 MB) a stránka z nich
+  // ukázala jednu. Přehled osob se proto stránkuje zvlášť a stahuje se až na
+  // vyžádání; detail běhu se kvůli němu nevolá vůbec.
+  it('opens the paged people table on demand without fetching the whole run', async () => {
     m.runs.mockResolvedValue([run({
       revision_id: 9,
       revision_status: 'approved',
       result_snapshot: { totals: { cash_payable_minor: 100_000 } },
     })])
-    m.runDetail.mockResolvedValue(run({
-      result_snapshot: { totals: { cash_payable_minor: 100_000 }, people: [] },
-    }))
 
     const wrapper = mount(PayrollRuns)
     await flushPromises()
@@ -413,7 +418,22 @@ describe('PayrollRuns', () => {
     await wrapper.get('[data-testid="payroll-run-15-breakdown-toggle"]').trigger('click')
     await flushPromises()
 
-    expect(m.runDetail).toHaveBeenCalledWith(15)
+    await wrapper.get('[data-testid="payroll-run-15-calculate"]').trigger('click')
+    await flushPromises()
+    expect(m.runs.mock.calls.length).toBeGreaterThan(1)
+    expect(m.peopleOptions).toHaveBeenCalledTimes(1)
+
+    // Nález na osobu mimo číselník: příští načtení si jména stáhne znovu.
+    m.runs.mockResolvedValue([run({ status: 'calculated', available_commands: ['calculate', 'approve', 'cancel'], validations: [validation({
+      id: 77, code: 'enforcement_manual_review', entity_type: 'employee', entity_id: 3,
+      message: 'Ověřte evidenci pohledávek.', requires_override: false,
+    })] })])
+    await wrapper.get('[data-testid="payroll-run-15-calculate"]').trigger('click')
+    await flushPromises()
+    expect(m.peopleOptions).toHaveBeenCalledTimes(1)
+    await wrapper.get('[data-testid="payroll-run-15-calculate"]').trigger('click')
+    await flushPromises()
+    expect(m.peopleOptions).toHaveBeenCalledTimes(2)
   })
 
   // Bez práva `payroll.enforcement` posílá server součet srážek jako null;
@@ -435,10 +455,30 @@ describe('PayrollRuns', () => {
       revision_id: 10,
       revision_no: 2,
       revision_kind: 'correction',
+    expect(m.runPeople).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="payroll-run-15-people"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="payroll-run-15-breakdown-toggle"]').trigger('click')
+    await flushPromises()
+
+    expect(m.runPeople).toHaveBeenCalledWith(15, expect.objectContaining({ limit: 25, offset: 0 }))
       revision_status: 'approved',
+    expect(wrapper.find('[data-testid="payroll-run-15-people"]').exists()).toBe(true)
       result_snapshot: { totals: { cash_payable_minor: 120_000 } },
     })])
+    expect(wrapper.find('[data-testid="payroll-run-15-people"]').exists()).toBe(false)
+  })
+
+  // Číselník jmen (13 kB u 150 osob) se stahoval při každém obnovení seznamu
+  // běhů, tedy i po každém příkazu. Stačí jednou; znovu jen když nález
+  // jmenuje osobu, kterou číselník nezná.
+  it('loads the people names once, not on every reload of the run list', async () => {
+    m.peopleOptions.mockResolvedValue([{ id: 2, full_name: 'Jana Syntetická' }])
+    m.runs.mockResolvedValue([run({ status: 'calculated', available_commands: ['calculate', 'approve', 'cancel'] })])
+
+    const wrapper = mount(PayrollRuns)
     m.runHistory.mockResolvedValue({
+    expect(m.peopleOptions).toHaveBeenCalledTimes(1)
       run_id: 15,
       revisions: [
         {

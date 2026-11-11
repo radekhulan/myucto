@@ -118,6 +118,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/payroll/inputs/[0-9]+$#',
         '#^/api/payroll/runs$#',
         '#^/api/payroll/runs/[0-9]+$#',
+        '#^/api/payroll/runs/[0-9]+/people(/[0-9]+)?$#',
         '#^/api/payroll/revisions/[0-9]+/net-results/[0-9]+$#',
         '#^/api/payroll/time/month$#',
         '#^/api/payroll/time/entries$#',

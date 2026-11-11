@@ -30,7 +30,8 @@ use PHPUnit\Framework\TestCase;
  *     dávat tytéž odpovědi jako původní PHP cyklus — včetně osoby, které chybí
  *     `payout_accounts`, a včetně starší verze schématu;
  *  3. seznam stránkuje a strop nejde obejít parametrem z URL;
- *  4. celý výsledkový snapshot je pořád dosažitelný — v detailu jednoho běhu.
+ *  4. detail běhu nese souhrn výsledku bez osob (ty stránkuje přehled osob běhu);
+ *  5. souhrn uložený u běhu seznam použije jen pro revizi, ke které patří.
  */
 #[Group('integration')]
 final class PayrollRunListPayloadTest extends TestCase
@@ -88,18 +89,74 @@ final class PayrollRunListPayloadTest extends TestCase
         self::assertArrayNotHasKey('result_snapshot_json', $run);
         self::assertArrayNotHasKey('input_snapshot', $run);
 
+        // Ani detail běhu výsledky osob nenese: u 150 lidí z nich bylo 2,8 MB
+        // na jedno rozkliknutí. Zůstává souhrn a počet osob, osoby stránkuje
+        // PayrollRunPeopleRepository (viz PayrollRunPeopleApiTest).
         $detail = $this->runs->detail($this->supplierId, $runId);
         self::assertNotNull($detail);
-        self::assertSame(
-            [['employee_id' => 1, 'net_minor' => 115_656]],
-            $detail['result_snapshot']['people'],
-            'Celý rozpad musí zůstat dosažitelný — jen na vyžádání pro jeden běh.',
-        );
+        self::assertArrayNotHasKey('people', $detail['result_snapshot']);
+        self::assertSame(123_456, $detail['result_snapshot']['totals']['cash_payable_minor']);
+        self::assertSame(2, $detail['result_snapshot']['person_count']);
+        self::assertTrue($detail['payment_materialization_supported']);
+        self::assertArrayNotHasKey('result_snapshot_json', $detail);
+        self::assertArrayNotHasKey('result_summary_json', $detail);
         self::assertArrayNotHasKey(
             'input_snapshot',
             $detail,
             'Vstupní snapshot nese osobní údaje všech zaměstnanců a žádná obrazovka ho nezobrazuje.',
         );
+    }
+
+    /**
+     * Souhrn uložený u běhu (sloupce `summary_*`) seznam použije místo čtení
+     * megabajtového snímku, ale jen patří-li aktuální revizi. Cizí nebo
+     * chybějící souhrn se ignoruje a čte se ze snímku.
+     */
+    public function testListReadsStoredSummaryOnlyWhenItBelongsToTheCurrentRevision(): void
+    {
+        $runId = $this->seedRun('2030-07-01', $this->inputSnapshot(withPayoutAccounts: false), [
+            'totals' => [
+                'cash_payable_minor' => 100,
+                'enforcement_withheld_minor' => 20,
+                'payable_after_enforcement_minor' => 80,
+            ],
+        ]);
+        $pdo = $this->db->pdo();
+        $revisionId = (int) $pdo->query(
+            'SELECT id FROM payroll_run_revisions WHERE run_id = ' . $runId,
+        )->fetchColumn();
+        $store = $pdo->prepare(
+            'UPDATE payroll_runs
+                SET summary_revision_id = ?, summary_person_count = 7,
+                    summary_payment_materialization = 1,
+                    summary_cash_payable_minor = 900,
+                    summary_enforcement_withheld_minor = 50,
+                    summary_payable_after_enforcement_minor = 850
+              WHERE id = ?',
+        );
+
+        // Souhrn patří aktuální revizi: čísla jdou ze sloupců, snímek se nečte.
+        $store->execute([$revisionId, $runId]);
+        $run = $this->runs->list($this->supplierId)['items'][0];
+        self::assertSame(
+            ['cash_payable_minor' => 900, 'enforcement_withheld_minor' => 50, 'payable_after_enforcement_minor' => 850],
+            $run['result_snapshot']['totals'],
+        );
+        self::assertTrue($run['payment_materialization_supported']);
+        self::assertSame(7, $this->runs->detail($this->supplierId, $runId)['result_snapshot']['person_count']);
+        foreach (array_keys($run) as $key) {
+            self::assertStringStartsNotWith('summary_', (string) $key, 'Uložený souhrn je vnitřní údaj.');
+        }
+
+        // Souhrn jiné revize: platí snímek aktuální revize.
+        $store->execute([$revisionId + 1_000_000, $runId]);
+        $run = $this->runs->list($this->supplierId)['items'][0];
+        self::assertSame(
+            ['cash_payable_minor' => 100, 'enforcement_withheld_minor' => 20, 'payable_after_enforcement_minor' => 80],
+            $run['result_snapshot']['totals'],
+        );
+        self::assertFalse($run['payment_materialization_supported']);
+        self::assertSame(2, $this->runs->detail($this->supplierId, $runId)['result_snapshot']['person_count']);
     }
 
     /** Revize bez spočítaného výsledku nemá `result_snapshot` vůbec, ne prázdné totals. */

@@ -386,6 +386,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/operational-reconciliation(?:/issues/[0-9]+)?$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/operational-reconciliation/sweep$#', 'payroll', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/runs/[0-9]+$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/runs/[0-9]+/people(/[0-9]+)?$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/runs$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/runs/[0-9]+$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/calculate$#', 'payroll.calculate', AccessLevel::WRITE],
