@@ -208,6 +208,10 @@ final class PayrollRunReadinessService
             ) as $finding) {
                 $findings[] = $finding;
             }
+            $declarationFinding = self::taxDeclarationFinding($snapshot->data);
+            if ($declarationFinding !== null) {
+                $findings[] = $declarationFinding;
+            }
             /*
              * Nálezy, které se dosud ozvaly až u ZMRAZENÍ měsíčního hlášení.
              * Nepíšou se tu znovu — volá se tatáž cesta, jen nasucho. Bez toho
@@ -224,7 +228,15 @@ final class PayrollRunReadinessService
             }
         }
 
-        $peopleFinding = $this->personDataGapFinding($supplierId, $periodStart);
+        // Stav prohlášení posuzuje nad snímkem `taxDeclarationFinding()` týmž
+        // pravidlem jako výpočet. Katalog mezer ho hodnotí jinak (živé tabulky,
+        // překryv intervalů v období), takže by tatáž věc visela dvakrát
+        // s jiným počtem. Bez snímku zůstává jediným zdrojem katalog.
+        $peopleFinding = $this->personDataGapFinding(
+            $supplierId,
+            $periodStart,
+            $snapshot === null ? [] : ['tax_declaration'],
+        );
         if ($peopleFinding !== null) {
             $findings[] = $peopleFinding;
         }
@@ -292,13 +304,89 @@ final class PayrollRunReadinessService
         }
 
         return match (true) {
-            $code === 'tax_declaration_not_signed_summary' => [['kind' => 'declaration_signed', 'count' => $count]],
+            $code === 'tax_declaration_not_signed_summary',
+            $code === 'tax_declaration_evidence_missing' => [['kind' => 'declaration_signed', 'count' => $count]],
             $code === 'employments_past_agreed_end' => [['kind' => 'closure', 'count' => $count]],
             str_starts_with($code, 'jmhz_')
                 && JmhzBlockerCatalog::remediation($code)['kind'] === 'workplace'
                 => [['kind' => 'workplace', 'count' => $count]],
             default => [],
         };
+    }
+
+    /**
+     * Osoby běhu, kterým výpočet zastaví daň na „Chybí ověřený stav daňového
+     * prohlášení".
+     *
+     * ── Co bylo špatně ──────────────────────────────────────────────────────
+     * Kontrola před během brala stav prohlášení z katalogu mezer v seznamu
+     * zaměstnanců: živé tabulky, záznam platný kdykoli v období, všichni se
+     * vztahem v měsíci. Výpočet ale posuzuje zákonnou evidenci ZMRAZENOU ve
+     * snímku k datu výpočtu daně a jen u osob, které do běhu vstoupily.
+     * U simulace února tak kontrola hlásila dvě osoby a zamknutí s výpočtem
+     * pak zastavily šestnáct.
+     *
+     * Teď se ptá nad týmž snímkem, který postaví zamknutí, a týmž pravidlem
+     * jako výpočet ({@see PayrollRunStatutoryInputAssembler::taxDeclarationIssue()}).
+     * Osobu bez zmrazené evidence nebo bez vztahu výpočet zastaví jiným kódem,
+     * proto se tu nepočítá.
+     *
+     * @param array<string,mixed> $snapshotData
+     * @return array<string,mixed>|null
+     */
+    private static function taxDeclarationFinding(array $snapshotData): ?array
+    {
+        $affected = [];
+        foreach ((array) ($snapshotData['people'] ?? []) as $person) {
+            if (!is_array($person)
+                || !is_array($person['employee'] ?? null)
+                || !is_array($person['statutory_evidence'] ?? null)
+                || ($person['employments'] ?? []) === []
+            ) {
+                continue;
+            }
+            if (PayrollRunStatutoryInputAssembler::taxDeclarationIssue($person['statutory_evidence']) === null) {
+                continue;
+            }
+            $affected[] = [
+                'id' => (int) ($person['employee']['id'] ?? 0),
+                'full_name' => (string) ($person['employee']['full_name'] ?? ''),
+            ];
+        }
+        if ($affected === []) {
+            return null;
+        }
+        usort(
+            $affected,
+            static fn (array $left, array $right): int =>
+                [$left['full_name'], $left['id']] <=> [$right['full_name'], $right['id']],
+        );
+        $named = array_column(array_slice($affected, 0, self::MAX_ENTITIES), 'full_name');
+        $hidden = count($affected) - count($named);
+
+        return self::finding(
+            'tax_declaration_evidence_missing',
+            sprintf(
+                'Chybí ověřený stav daňového prohlášení (%d): %s%s. Bez něj výpočet mzdy '
+                . 'zastaví daň a běh nepůjde schválit. U každé osoby zaznamenejte, zda '
+                . 'prohlášení podepsala, nebo použijte Mzdy → Zaměstnanci → Další funkce '
+                . '→ Podepsaná prohlášení hromadně.',
+                count($affected),
+                implode(', ', $named),
+                $hidden > 0 ? sprintf(' a dalších %d', $hidden) : '',
+            ),
+            '/payroll/people?bulk=declaration_signed',
+            count($affected),
+            array_map(
+                static fn (array $person): array => [
+                    'entity_type' => 'employee',
+                    'entity_id' => $person['id'],
+                    'label' => $person['full_name'],
+                    'remediation_path' => self::gapPath($person['id'], 'tax_declaration'),
+                ],
+                array_slice($affected, 0, self::MAX_ENTITIES),
+            ),
+        );
     }
 
     /**
@@ -419,7 +507,8 @@ final class PayrollRunReadinessService
      *   count:int,entities:list<array{entity_type:string,entity_id:?int}>
      * }|null
      */
-    private function personDataGapFinding(int $supplierId, string $periodStart): ?array
+    /** @param list<string> $excludedGaps klíče mezer, které posuzuje jiný nález */
+    private function personDataGapFinding(int $supplierId, string $periodStart, array $excludedGaps = []): ?array
     {
         try {
             // K období běhu, ne k dnešku: dohoda skončená v únoru s údaji
@@ -429,6 +518,7 @@ final class PayrollRunReadinessService
                 $periodStart,
                 (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d'),
                 self::MAX_ENTITIES,
+                $excludedGaps,
             );
         } catch (\Throwable) {
             // Kontrola je pomocná; její pád nesmí přebít nálezy, kvůli kterým

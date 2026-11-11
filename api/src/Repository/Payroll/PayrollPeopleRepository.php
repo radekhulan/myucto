@@ -378,6 +378,7 @@ final class PayrollPeopleRepository
      * ({@see PayrollPersonDataGapCatalog::expressionsForPeriod()}). U každé osoby
      * se vrací i klíče chybějících údajů, aby nález řekl CO chybí.
      *
+     * @param list<string> $excludedKeys mezery, které volající posuzuje jinde
      * @return array{total:int,gap_totals:array<string,int>,people:list<array{id:int,full_name:string,gaps:list<string>}>}
      */
     public function blockingDataGapsForPeriod(
@@ -385,14 +386,19 @@ final class PayrollPeopleRepository
         string $periodStart,
         string $periodEnd,
         int $limit = 25,
+        array $excludedKeys = [],
     ): array {
         $limit = max(1, $limit);
         $definitions = PayrollPersonDataGapCatalog::definitions();
         $expressions = array_filter(
             PayrollPersonDataGapCatalog::expressionsForPeriod($periodStart, $periodEnd),
-            static fn (string $key): bool => $definitions[$key]['severity'] === PayrollPersonDataGapCatalog::SEVERITY_BLOCKING,
+            static fn (string $key): bool => $definitions[$key]['severity'] === PayrollPersonDataGapCatalog::SEVERITY_BLOCKING
+                && !in_array($key, $excludedKeys, true),
             ARRAY_FILTER_USE_KEY,
         );
+        if ($expressions === []) {
+            return ['total' => 0, 'gap_totals' => [], 'people' => []];
+        }
         $columns = [];
         $totals = [];
         foreach ($expressions as $key => $expression) {
