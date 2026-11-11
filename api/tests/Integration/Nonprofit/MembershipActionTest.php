@@ -127,7 +127,7 @@ final class MembershipActionTest extends TestCase
         $claimId = (int) $this->pdo->query('SELECT id FROM nonprofit_membership_charge_claims WHERE operation_id=' . (int) $confirmed['operation']['id'])->fetchColumn();
         [$status, $publicClaim] = $this->publicCall('receivables', [], ['claim_id' => (string) $claimId]);
         self::assertSame(200, $status);
-        self::assertNull($publicClaim['items'][0]['settlement']['open_cents']);
+        self::assertSame('1800000', $publicClaim['items'][0]['settlement']['open_cents']);
         self::assertSame('proven_utc', $publicClaim['items'][0]['recorded_time_status']);
         self::assertStringEndsWith('Z', $publicClaim['items'][0]['recorded_at']);
         [$status] = $this->publicCall('roles', ['as_of' => '2026-06-30'], ['member_id' => (string) $member['id']], []);
@@ -374,6 +374,20 @@ final class MembershipActionTest extends TestCase
         self::assertSame(422,$status,'Oprávněný uživatel musí projít až k validaci vstupu.');
         [$status]=$this->call('POST','createRate',[],[],['accounting.templates'=>2],'bearer');
         self::assertSame(403,$status);
+    }
+
+    public function testSelectionRefreshRequiresReadSessionButNotJournalWrite(): void
+    {
+        $body = ['member_ids' => [], 'filters' => ['year' => 2026]];
+        [$status, $result] = $this->call('POST', 'selectionCheck', $body, [], ['accounting' => 1]);
+        self::assertSame(200, $status);
+        self::assertSame([], $result['member_ids']);
+        [$status] = $this->call('POST', 'selectionCheck', $body, [], ['accounting' => 1], 'bearer');
+        self::assertSame(403, $status);
+        [$status] = $this->call('POST', 'selectionCheck', $body, [], []);
+        self::assertSame(403, $status);
+        [$status] = $this->call('GET', 'titles', null, [], ['accounting' => 1]);
+        self::assertSame(200, $status);
     }
 
     private function call(string $httpMethod, string $method, ?array $body, array $args = [], ?array $permissions = null, string $auth = 'session'): array

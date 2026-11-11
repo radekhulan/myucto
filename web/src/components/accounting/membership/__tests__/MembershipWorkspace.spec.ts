@@ -1,15 +1,19 @@
+import { appIsoDate } from '@/utils/date'
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h, KeepAlive, ref } from 'vue'
+import { defineComponent, h, KeepAlive, ref, reactive } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatDate } from '@/composables/useFormat'
 import Workspace from '../MembershipWorkspace.vue'
 import MembershipBatchFlow from '../MembershipBatchFlow.vue'
+import FilterBar from '@/components/ui/FilterBar.vue'
 import type { MemberPage, MemberRow } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
 
-const api = vi.hoisted(() => ({ members: vi.fn(), createMember: vi.fn() }))
+const api = vi.hoisted(() => ({ members: vi.fn(), createMember: vi.fn(), titles: vi.fn(), selectionCheck: vi.fn() }))
+const navigation = vi.hoisted(() => ({route: {query: {}} as {query: Record<string, string>}, replace: vi.fn()}))
+vi.mock('vue-router', async importOriginal => ({...await importOriginal<typeof import('vue-router')>(), useRoute: () => navigation.route, useRouter: () => ({replace: navigation.replace})}))
 const accounting = vi.hoisted(() => ({ listPeriods: vi.fn() }))
 vi.mock('@/api/nonprofitMembership', () => ({ membershipApi: api }))
 vi.mock('@/api/accounting', () => ({ accountingApi: accounting }))
@@ -32,6 +36,9 @@ const ClientSearchSelect = defineComponent({
     },
   }, [h('option', { value: '' }), h('option', { value: '3' }, 'Synthetic client 3')]),
 })
+const SearchableSelect = defineComponent({ props: ['modelValue', 'options', 'disabled'], emits: ['update:modelValue'], setup: (p, {emit, attrs}) => () => h('select', { ...attrs, value: p.modelValue ?? '', disabled: p.disabled,
+  onChange: (e: Event) => { const option = (p.options as {value: string | number}[]).find(x => String(x.value) === (e.target as HTMLSelectElement).value); emit('update:modelValue', option?.value ?? null) },
+}, [h('option', {value: ''}), ...(p.options as {value: string | number; label: string}[]).map(x => h('option', {value: x.value}, x.label))]) })
 const Detail = defineComponent({ name: 'MembershipMemberDetail', props: ['supplier', 'canManage', 'memberId', 'label', 'periods', 'refreshVersion'], emits: ['changed', 'close'], setup: () => () => h('div', { 'data-stub': 'detail' }, [h('h2', { tabindex: -1, 'data-focus': 'member-heading' })]) })
 const ClientFormModal = defineComponent({ name: 'ClientFormModal', emits: ['created', 'close'], setup: () => () => h('div', { 'data-stub': 'client-modal' }) })
 const Reconciliation = defineComponent({ name: 'MembershipReconciliation', props: ['supplier', 'periods', 'dataVersion'], setup: () => () => h('div', { 'data-stub': 'reconciliation' }) })
@@ -48,13 +55,17 @@ function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
     props: { supplier: 5, canManage: true, ...props },
     global: {
       plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })],
-      stubs: { ActionBar, ClientSearchSelect, ClientFormModal, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation, MembershipBatchFlow: true },
+      stubs: { ActionBar, SearchableSelect, ClientSearchSelect, ClientFormModal, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation, MembershipBatchFlow: true },
     },
   })
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  navigation.route = reactive({query: {}})
+  navigation.replace.mockImplementation(({query}: {query: Record<string, string>}) => {navigation.route.query = query; return Promise.resolve()})
+  api.titles.mockResolvedValue({items: ['SYNTHETIC'], next_after_title_key: null})
+  api.selectionCheck.mockImplementation((_supplier: number, ids: number[]) => Promise.resolve({member_ids: ids}))
   Element.prototype.scrollIntoView = vi.fn()
   accounting.listPeriods.mockResolvedValue([period])
   api.members.mockResolvedValue(page([
@@ -66,6 +77,130 @@ beforeEach(() => {
 })
 
 describe('Membership workspace', () => {
+  it('adds the current application year when filtering payment status across a title history', async () => {
+    navigation.route.query = {year:'',title_key:'SYNTHETIC',payment_status:'all'}
+    const w=mounted(); await flushPromises()
+    await w.get('[data-field="member-payment-status"]').setValue('unpaid'); await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:Number(appIsoDate().slice(0,4)),payment_status:'unpaid'}))
+    expect(w.get('[data-section="status-year-help"]').text()).toBe(cs.nonprofitMembership.listStatusNeedsYear)
+    w.unmount()
+  })
+
+  it('preserves selection from unloaded pages on refresh and reconciles it with the server', async () => {
+    api.members.mockResolvedValueOnce(page([row(1)], 1)).mockResolvedValueOnce(page([row(90)]))
+    const w = mounted(); await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-action="more-members"]').trigger('click'); await flushPromises()
+    await w.get('[data-member="90"] [data-action="batch-check-member"]').setValue(true)
+    api.members.mockResolvedValue(page([row(1)], 1))
+    await w.get('[data-action="reload-members"]').trigger('click'); await flushPromises()
+    await w.get('[data-action="batch-open"]').trigger('click'); await flushPromises()
+    expect(w.findComponent(MembershipBatchFlow).props('selectedMemberIds')).toEqual([1,90])
+    expect(api.selectionCheck).toHaveBeenCalledWith(5, [1,90], expect.objectContaining({payment_status: 'all'}))
+    w.unmount()
+  })
+  it('restores URL filters and debounces search by 300 ms', async () => {
+    navigation.route.query = {year: '2027', title_key: 'SYNTHETIC', payment_status: 'unproven', search: 'Synthetic'}
+    const w = mounted(); await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5, 0, 50, {search: 'Synthetic', year: 2027, title_key: 'SYNTHETIC', payment_status: 'unproven'})
+    vi.useFakeTimers()
+    const calls = api.members.mock.calls.length
+    await w.get('[data-field="member-search"]').setValue('Synthetic person')
+    await vi.advanceTimersByTimeAsync(299)
+    expect(api.members).toHaveBeenCalledTimes(calls)
+    await vi.advanceTimersByTimeAsync(1); await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({search:'Synthetic person'}))
+    expect(navigation.replace).toHaveBeenCalledWith({query: expect.objectContaining({search:'Synthetic person'})})
+    vi.useRealTimers(); w.unmount()
+  })
+  it('loads every page of title choices and displays a natural person label', async () => {
+    api.titles.mockResolvedValueOnce({items:['A'],next_after_title_key:'A'}).mockResolvedValueOnce({items:['B'],next_after_title_key:null})
+    api.members.mockResolvedValue(page([row(1,{company_name:'',first_name:'Syntetická',last_name:'Osoba'})]))
+    const w=mounted(); await flushPromises()
+    expect(w.get('[data-field="member-title"]').text()).toContain('B')
+    expect(api.titles).toHaveBeenLastCalledWith(5,expect.any(Number),'A')
+    expect(w.get('[data-member="1"]').text()).toContain('Syntetická Osoba')
+    w.unmount()
+  })
+
+  it('does not retain selectable stale rows or a cursor after a failed filter change', async () => {
+    api.members.mockResolvedValueOnce(page([row(1)],1))
+    const w=mounted();await flushPromises()
+    expect(w.find('[data-action="more-members"]').exists()).toBe(true)
+    api.members.mockRejectedValueOnce(new Error('Synthetic filter failure'))
+    await w.get('[data-field="member-payment-status"]').setValue('paid'); await flushPromises()
+    expect(w.findAll('[data-section="member-row"]')).toHaveLength(0)
+    expect(w.find('[data-action="more-members"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('clears batch selection when a data refresh removes members from the current filter', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    api.members.mockResolvedValueOnce(page([]))
+    api.selectionCheck.mockResolvedValueOnce({member_ids: []})
+    w.findComponent(Detail).vm.$emit('changed');await flushPromises()
+    expect(w.findComponent(MembershipBatchFlow).props('selectedMemberIds')).toEqual([])
+    w.unmount()
+  })
+
+  it('does not discard selected members when applying unchanged filters', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    expect(w.find('[data-action="filter-members"]').exists()).toBe(false)
+    await w.get('[data-field="member-year"]').setValue(appIsoDate().slice(0,4));await flushPromises()
+    expect((w.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(true)
+    w.unmount()
+  })
+  it('applies an edited numeric year without assuming the input model stays a string', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-field="member-year"]').setValue('2027')
+    await new Promise(resolve => setTimeout(resolve,320));await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2027}))
+    w.unmount()
+  })
+  it('sends search, title and proven-unpaid filters to the server and clears checked members', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-field="member-search"]').setValue('Synthetic')
+    await w.get('[data-field="member-year"]').setValue('')
+    await w.get('[data-field="member-title"]').setValue('SYNTHETIC')
+    await w.get('[data-field="member-payment-status"]').setValue('unpaid')
+    await new Promise(resolve => setTimeout(resolve,320));await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,{search:'Synthetic',year:Number(appIsoDate().slice(0,4)),title_key:'SYNTHETIC',payment_status:'unpaid'})
+    expect((w.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
+    expect(w.text()).toContain(cs.nonprofitMembership.listSelectionCleared)
+    w.unmount()
+  })
+
+  it('shows unproven payments without presenting an unknown open balance as debt', async () => {
+    api.members.mockResolvedValue(page([row(1,{contribution:{status:'unproven',claim_count:1,prescribed_cents:'50000',paid_cents:null,open_cents:null}})]))
+    const w=mounted();await flushPromises()
+    expect(w.get('[data-field="contribution-status"]').text()).toBe(cs.nonprofitMembership.listStatus_unproven)
+    expect(w.get('[data-field="contribution-amounts"]').text()).toContain('—')
+    expect(w.get('[data-field="contribution-amounts"]').text()).toContain('500,00')
+    expect(w.find('[data-field="contribution-unpaired"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('hides the filters behind the shared toggle like other lists', async () => {
+    const w=mounted();await flushPromises()
+    expect(w.findComponent(FilterBar).props('collapsible')).toBe(true)
+    w.unmount()
+  })
+
+  it('marks an unpaid charge without a paired payment', async () => {
+    api.members.mockResolvedValue(page([
+      row(1,{contribution:{status:'unpaid',unpaired_count:1,claim_count:1,prescribed_cents:'50000',paid_cents:'0',open_cents:'50000'}}),
+      row(2,{contribution:{status:'unpaid',unpaired_count:0,claim_count:1,prescribed_cents:'50000',paid_cents:'20000',open_cents:'30000'}}),
+    ]))
+    const w=mounted();await flushPromises()
+    expect(w.get('[data-member="1"] [data-field="contribution-unpaired"]').text()).toBe(cs.nonprofitMembership.listUnpaired.replace('{count}','1'))
+    expect(w.find('[data-member="2"] [data-field="contribution-unpaired"]').exists()).toBe(false)
+    w.unmount()
+  })
   it('passes selected members into a batch and invalidates the existing detail when any batch part completes', async () => {
     const w=mounted();await flushPromises()
     await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
@@ -110,7 +245,7 @@ describe('Membership workspace', () => {
   it('lists members and does not present a future revision as the current status', async () => {
     const w = mounted()
     await flushPromises()
-    expect(api.members).toHaveBeenCalledWith(5, 0, 50)
+    expect(api.members).toHaveBeenCalledWith(5, 0, 50, expect.any(Object))
     expect(w.findAll('[data-section="member-row"]')).toHaveLength(3)
     const current = w.get('[data-member="1"] [data-field="member-revision"]')
     expect(current.text()).toContain(cs.nonprofitMembership.status_active)
@@ -133,7 +268,7 @@ describe('Membership workspace', () => {
     await flushPromises()
     await w.get('[data-action="more-members"]').trigger('click')
     await flushPromises()
-    expect(api.members.mock.calls[1]).toEqual([5, 1, 50])
+    expect(api.members.mock.calls[1]?.slice(0,3)).toEqual([5, 1, 50])
     expect(w.findAll('[data-section="member-row"]')).toHaveLength(2)
     expect(w.find('[data-action="more-members"]').exists()).toBe(false)
     w.unmount()
@@ -248,7 +383,7 @@ describe('Membership workspace', () => {
     resolve(page([row(99)]))
     await flushPromises()
     expect(w.text()).not.toContain('M-99')
-    expect(api.members).toHaveBeenLastCalledWith(6, 0, 50)
+    expect(api.members).toHaveBeenLastCalledWith(6, 0, 50, expect.objectContaining({search:'',title_key:'',payment_status:'all'}))
     expect(w.findAll('[data-section="member-row"]')).toHaveLength(3)
     w.unmount()
   })
@@ -268,8 +403,9 @@ describe('Membership workspace', () => {
     const w = mounted()
     await flushPromises()
     expect(w.get('[data-section="workspace-error"]').text()).toContain(cs.nonprofitMembership.error)
+    expect(w.get('[data-section="workspace-error"]').text()).not.toContain('Synthetic forbidden')
     expect(w.get('[data-section="workspace-error"]').classes()).toEqual(expect.arrayContaining(['bg-danger-50', 'text-danger-700']))
-    expect(w.find('[data-section="members-empty"]').exists()).toBe(true)
+    expect(w.find('[data-section="members-empty"]').exists()).toBe(false)
     w.unmount()
   })
 
@@ -350,5 +486,221 @@ describe('Membership workspace', () => {
     const sections = Array.from<Element>(w.element.querySelectorAll('[data-section="members"], [data-stub="reconciliation"]')).map(el => el.getAttribute('data-section') ?? 'reconciliation')
     expect(sections).toEqual(['members', 'reconciliation'])
     w.unmount()
+  })
+
+  it('waits until the year is typed before loading members or titles', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      const members=api.members.mock.calls.length, titles=api.titles.mock.calls.length
+      for (const value of ['2','20','202','2025']) {
+        await w.get('[data-field="member-year"]').setValue(value)
+        await vi.advanceTimersByTimeAsync(100)
+        expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
+      }
+      expect(api.members).toHaveBeenCalledTimes(members)
+      expect(api.titles).toHaveBeenCalledTimes(titles)
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(api.members).toHaveBeenCalledTimes(members+1)
+      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2025}))
+      expect(api.titles).toHaveBeenCalledTimes(titles+1)
+      expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('keeps the current rows visible while a refresh is loading', async () => {
+    const w=mounted();await flushPromises()
+    let resolve: (value: MemberPage) => void = () => {}
+    api.members.mockReturnValueOnce(new Promise<MemberPage>(r => {resolve = r}))
+    await w.get('[data-action="reload-members"]').trigger('click');await flushPromises()
+    expect(w.findAll('[data-section="member-row"]')).toHaveLength(3)
+    expect(w.find('[data-section="members-loading"]').exists()).toBe(true)
+    expect(w.get('[data-section="members"]').attributes('aria-busy')).toBe('true')
+    resolve(page([row(1)]));await flushPromises()
+    expect(w.get('[data-section="members"]').attributes('aria-busy')).toBe('false')
+    expect(w.findAll('[data-section="member-row"]')).toHaveLength(1)
+    w.unmount()
+  })
+
+  it('shows one styled retry for a title loading failure', async () => {
+    api.titles.mockRejectedValue(new Error('Synthetic titles failure'))
+    api.members.mockRejectedValueOnce(new Error('Synthetic members failure'))
+    const w=mounted();await flushPromises()
+    expect(w.find('[data-action="filter-members"]').exists()).toBe(false)
+    const retry=w.get('[data-section="titles-error"]').findAll('button')
+    expect(retry).toHaveLength(1)
+    expect(retry[0].classes()).toContain('whitespace-nowrap')
+    expect(retry[0].get('svg').attributes('stroke-width')).toBe('2')
+    api.titles.mockResolvedValue({items: ['SYNTHETIC'], next_after_title_key: null})
+    await retry[0].trigger('click');await flushPromises()
+    expect(w.find('[data-section="titles-error"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('loads titles for the applied year even when search typing cancels the year timer', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-year"]').setValue('2025')
+      await vi.advanceTimersByTimeAsync(100)
+      await w.get('[data-field="member-search"]').setValue('Synthetic')
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2025,search:'Synthetic'}))
+      expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('loads titles for a year typed before a batch lock once the batch unlocks', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-year"]').setValue('2025')
+      w.findComponent(MembershipBatchFlow).vm.$emit('lock', true);await flushPromises()
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(api.titles).not.toHaveBeenCalledWith(5,2025,undefined)
+      w.findComponent(MembershipBatchFlow).vm.$emit('lock', false);await flushPromises()
+      expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('reloads titles after a saved batch or a change in member detail', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    api.titles.mockResolvedValue({items: ['SYNTHETIC','SYNTHETIC-NEW'], next_after_title_key: null})
+    const before=api.titles.mock.calls.length
+    w.findComponent(MembershipBatchFlow).vm.$emit('changed');await flushPromises()
+    expect(api.titles).toHaveBeenCalledTimes(before+1)
+    expect(w.get('[data-field="member-title"]').findAll('option').map(o => o.text())).toContain('SYNTHETIC-NEW')
+    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
+    w.findComponent(Detail).vm.$emit('changed');await flushPromises()
+    expect(api.titles).toHaveBeenCalledTimes(before+2)
+    w.unmount()
+  })
+
+  it('keeps the year validation error when reloading with an invalid year', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-year"]').setValue('202')
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(w.get('[data-section="workspace-error"]').text()).toBe(cs.nonprofitMembership.listNeedPeriod)
+      const calls=api.members.mock.calls.length
+      await w.get('[data-action="reload-members"]').trigger('click');await flushPromises()
+      expect(api.members).toHaveBeenCalledTimes(calls)
+      expect(w.get('[data-section="workspace-error"]').text()).toBe(cs.nonprofitMembership.listNeedPeriod)
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('reloads titles for the applied year, not for an unapplied year in the form', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-year"]').setValue('9999')
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(w.get('[data-section="workspace-error"]').text()).toBe(cs.nonprofitMembership.listNeedPeriod)
+      await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
+      w.findComponent(Detail).vm.$emit('changed');await flushPromises()
+      expect(api.titles).toHaveBeenLastCalledWith(5,Number(appIsoDate().slice(0,4)),undefined)
+      expect(w.find('[data-section="titles-error"]').exists()).toBe(false)
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('reloads with the applied filters while a batch is locked', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    w.findComponent(MembershipBatchFlow).vm.$emit('lock', true);await flushPromises()
+    await w.get('[data-field="member-year"]').setValue('202')
+    const calls=api.members.mock.calls.length
+    await w.get('[data-action="reload-members"]').trigger('click');await flushPromises()
+    expect(api.members).toHaveBeenCalledTimes(calls+1)
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:Number(appIsoDate().slice(0,4))}))
+    expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('applies a filter chip removed during a batch once the batch unlocks', async () => {
+    navigation.route.query = {year: '2026', payment_status: 'unpaid'}
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    w.findComponent(MembershipBatchFlow).vm.$emit('lock', true);await flushPromises()
+    const calls=api.members.mock.calls.length
+    w.findComponent(FilterBar).vm.$emit('clear', 'status');await flushPromises()
+    expect(api.members).toHaveBeenCalledTimes(calls)
+    w.findComponent(MembershipBatchFlow).vm.$emit('lock', false);await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2026,payment_status:'all'}))
+    w.unmount()
+  })
+
+  it('applies clearing all filters during a batch once the batch unlocks', async () => {
+    navigation.route.query = {year: '', title_key: 'SYNTHETIC', search: 'Synthetic'}
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    w.findComponent(MembershipBatchFlow).vm.$emit('lock', true);await flushPromises()
+    const calls=api.members.mock.calls.length
+    w.findComponent(FilterBar).vm.$emit('clear-all');await flushPromises()
+    expect(api.members).toHaveBeenCalledTimes(calls)
+    w.findComponent(MembershipBatchFlow).vm.$emit('lock', false);await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({search:'',year:Number(appIsoDate().slice(0,4)),title_key:'',payment_status:'all'}))
+    w.unmount()
+  })
+
+  it('requests titles once when reloading a changed year', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-year"]').setValue('2025')
+      const before=api.titles.mock.calls.length
+      await w.get('[data-action="reload-members"]').trigger('click');await flushPromises()
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(api.titles).toHaveBeenCalledTimes(before+1)
+      expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('does not apply a partially typed year when the status changes during the delay', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-year"]').setValue('202')
+      await w.get('[data-field="member-payment-status"]').setValue('unpaid')
+      expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
+      await w.get('[data-field="member-year"]').setValue('2025')
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
+      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2025,payment_status:'unpaid'}))
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('waits with a title change for a running search delay and applies it together', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      const calls=api.members.mock.calls.length
+      await w.get('[data-field="member-search"]').setValue('Syn')
+      await w.get('[data-field="member-title"]').setValue('SYNTHETIC');await flushPromises()
+      expect(api.members).toHaveBeenCalledTimes(calls)
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(api.members).toHaveBeenCalledTimes(calls+1)
+      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({search:'Syn',title_key:'SYNTHETIC'}))
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('applies title and status at once when no typing delay is running', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-title"]').setValue('SYNTHETIC');await flushPromises()
+      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({title_key:'SYNTHETIC'}))
+      const calls=api.members.mock.calls.length
+      await w.get('[data-field="member-payment-status"]').setValue('paid');await flushPromises()
+      expect(api.members).toHaveBeenCalledTimes(calls+1)
+      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({title_key:'SYNTHETIC',payment_status:'paid'}))
+    } finally { vi.useRealTimers(); w.unmount() }
   })
 })

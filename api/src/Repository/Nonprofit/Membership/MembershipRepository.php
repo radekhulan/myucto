@@ -24,32 +24,6 @@ final class MembershipRepository
         return $row === false ? null : $this->memberRow($row);
     }
 
-    public function page(int $supplier, int $afterId = 0, int $limit = 100): array
-    {
-        $limit = max(1, min(100, $limit));
-        $q = $this->db->pdo()->prepare(
-            "SELECT m.*,c.company_name,r.revision_no,r.effective_from,r.status
-               FROM nonprofit_members m
-               JOIN clients c ON c.supplier_id=m.supplier_id AND c.id=m.client_id
-          LEFT JOIN nonprofit_member_revisions r
-                 ON r.supplier_id=m.supplier_id AND r.member_id=m.id
-                AND NOT EXISTS(SELECT 1 FROM nonprofit_member_revisions newer
-                                WHERE newer.supplier_id=r.supplier_id AND newer.member_id=r.member_id
-                                  AND newer.revision_no>r.revision_no)
-              WHERE m.supplier_id=? AND m.id>?
-              ORDER BY m.id
-              LIMIT {$limit}"
-        );
-        $q->execute([$supplier, max(0, $afterId)]);
-        $rows = [];
-        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            foreach (['id', 'supplier_id', 'client_id', 'created_by'] as $field) $row[$field] = (int) $row[$field];
-            $row['revision_no'] = $row['revision_no'] === null ? null : (int) $row['revision_no'];
-            $rows[] = $row;
-        }
-        return $rows;
-    }
-
     public function byIdentity(int $supplier, int $client, string $number, bool $currentRead = false): ?array
     {
         $this->current($currentRead);

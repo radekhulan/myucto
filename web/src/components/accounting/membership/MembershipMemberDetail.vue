@@ -40,8 +40,9 @@ const anyLocked = computed(() => locks.value.revision || locks.value.issue || lo
 const member = computed(() => ({ id: props.memberId, member_number: identity.value?.member_number ?? '', label: props.label }))
 
 const issued = computed(() => claims.value.filter(c => c.reversal_claim_id === null).reduce((sum, c) => sum + c.amount_cents, 0))
-const provenOpen = computed(() => claims.value.reduce((sum, c) => sum + (c.settlement.open_cents ?? 0), 0))
-const unproven = computed(() => claims.value.filter(c => c.settlement.status === 'ambiguous').length)
+const needsReview = computed(() => claims.value.filter(c => c.settlement.status === 'ambiguous').length)
+// Stejně jako řádek seznamu: s předpisem k prověření je zůstatek neurčený.
+const openTotal = computed(() => needsReview.value ? null : claims.value.reduce((sum, c) => sum + (c.settlement.open_cents ?? 0), 0))
 
 async function load(append = false) {
   const ticket = ++generation, supplier = props.supplier, id = props.memberId
@@ -180,10 +181,10 @@ const actions = computed<ActionItem[]>(() => [
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.claimsHelp') }}</p>
       <dl class="grid gap-3 sm:grid-cols-3" data-section="claims-summary">
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.sumIssued') }}</dt><dd class="tabular-nums" data-field="sum-issued">{{ formatMoneyMinor(issued) }}</dd></div>
-        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.sumProvenOpen') }}</dt><dd class="tabular-nums" data-field="sum-proven-open">{{ formatMoneyMinor(provenOpen) }}</dd></div>
-        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.sumUnproven') }}</dt><dd data-field="sum-unproven">{{ unproven }}</dd></div>
+        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.sumOpen') }}</dt><dd class="tabular-nums" data-field="sum-open">{{ formatMoneyMinor(openTotal) }}</dd></div>
+        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.sumNeedsReview') }}</dt><dd data-field="sum-needs-review">{{ needsReview }}</dd></div>
       </dl>
-      <p v-if="unproven" class="text-sm text-warning-700" data-section="unproven-note">{{ t('nonprofitMembership.unprovenNote') }}</p>
+      <p v-if="needsReview" class="text-sm text-warning-700" data-section="unproven-note">{{ t('nonprofitMembership.unprovenNote') }}</p>
       <p v-if="nextAfter !== null" class="text-sm text-neutral-500" data-section="partial-note">{{ t('nonprofitMembership.partialSummary') }}</p>
       <p v-if="identity && !claims.length && !loading" class="text-sm text-neutral-500">{{ t('nonprofitMembership.claimsEmpty') }}</p>
       <div v-for="claim in claims" :key="claim.claim_id" class="grid gap-3 rounded border border-neutral-200 p-3 sm:grid-cols-[1fr_1fr_auto]" data-section="claim-row" :data-claim="claim.claim_id">

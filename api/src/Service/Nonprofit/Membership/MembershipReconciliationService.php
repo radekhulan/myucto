@@ -19,20 +19,26 @@ final class MembershipReconciliationService
         $evidence = $this->balances->pairingEvidence($supplier, $claims);
         $rows = [];
         $activeClaimCents = 0;
-        $provenOpenCents = 0;
-        $unreconciled = 0;
+        $openCents = 0;
+        $needsReview = 0;
         foreach ($claims as $claim) {
             $settlement = $this->settlement($claim, $evidence[$claim['claim_id']] ?? null);
             if ($claim['reversal_claim_id'] === null) $activeClaimCents += $claim['amount_cents'];
-            if ($settlement['open_cents'] !== null) $provenOpenCents += $settlement['open_cents'];
-            if ($settlement['status'] === 'unreconciled' || $settlement['status'] === 'ambiguous') $unreconciled++;
+            // Nespárovaný předpis je neuhrazený celou částkou; neurčený zůstatek mají jen předpisy k prověření.
+            if ($settlement['open_cents'] !== null) {
+                $openCents += $settlement['open_cents'];
+            }
+            if ($settlement['status'] === 'ambiguous') {
+                $needsReview++;
+            }
             $rows[] = $claim + ['settlement' => $settlement];
         }
         return [
             'member_id' => $member,
             'page_active_claim_cents' => $activeClaimCents,
-            'page_proven_open_cents' => $provenOpenCents,
-            'page_unreconciled_count' => $unreconciled,
+            // Stejně jako seznam: s předpisem k prověření je zůstatek neurčený, ne součet jen známých částí.
+            'page_open_cents' => $needsReview > 0 ? null : $openCents,
+            'page_needs_review_count' => $needsReview,
             'items' => $rows,
             'next_after_claim_id' => $more ? $claims[array_key_last($claims)]['claim_id'] : null,
         ];
@@ -72,11 +78,11 @@ final class MembershipReconciliationService
         if ($claim['reversal_claim_id'] !== null) {
             return ['status' => 'reversed', 'paid_cents' => null, 'open_cents' => 0, 'pairing_id' => null, 'evidence' => 'membership_reversal_claim'];
         }
-        if ($claim['posted_at'] === null || $claim['reversed_by'] !== null) {
+        if ($claim['posted_at'] === null || $claim['reversed_by'] !== null || !$claim['account_id'] || empty($claim['receipt_valid'])) {
             return ['status' => 'ambiguous', 'paid_cents' => null, 'open_cents' => null, 'pairing_id' => null, 'evidence' => 'journal_receipt_mismatch'];
         }
         if ($evidence === null) {
-            return ['status' => 'unreconciled', 'paid_cents' => null, 'open_cents' => null, 'pairing_id' => null, 'evidence' => 'no_native_pairing'];
+            return ['status' => 'unreconciled', 'paid_cents' => 0, 'open_cents' => $claim['amount_cents'], 'pairing_id' => null, 'evidence' => 'no_native_pairing'];
         }
         $net = $evidence['net_cents'];
         if ($evidence['invalid_count'] !== 0 || $evidence['membership_claim_count'] !== 1 || $net < 0 || $net > $claim['amount_cents']) {
@@ -89,5 +95,17 @@ final class MembershipReconciliationService
             'pairing_id' => $evidence['pairing_id'],
             'evidence' => 'journal_line_pairing_bank_or_cash',
         ];
+    }
+
+    /**
+     * SQL podoba pravidel settlement(): filtr musí proběhnout před stránkováním, PHP metodu z SQL volat nelze.
+     * Agregace párování je společná; shodu stavů SQL přehledu s detailem ověřuje integrační test.
+     */
+    public static function settlementStatusSql(): string
+    {
+        return "CASE WHEN c.posted_at IS NULL OR c.reversed_by IS NOT NULL OR c.receipt_valid=0 THEN 'ambiguous'
+          WHEN p.claim_id IS NULL THEN 'unreconciled'
+          WHEN p.invalid_count<>0 OR p.membership_claim_count<>1 OR p.net_cents<0 OR p.net_cents>c.amount_cents THEN 'ambiguous'
+          WHEN p.net_cents=0 THEN 'settled' ELSE 'partially_settled' END";
     }
 }

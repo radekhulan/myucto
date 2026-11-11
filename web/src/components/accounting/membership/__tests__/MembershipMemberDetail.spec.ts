@@ -44,7 +44,7 @@ const period = { id: 11, supplier_id: 5, fiscal_year: 2026, starts_on: '2000-01-
 function detail(history: MemberRevision[], items: ClaimRow[], next: number | null = null): MemberDetail {
   return {
     member: { id: 9, supplier_id: 5, client_id: 3, member_number: 'M-1', created_by: 1 }, history,
-    balance: { member_id: 9, page_active_claim_cents: 0, page_proven_open_cents: 0, page_unreconciled_count: 0, items, next_after_claim_id: next },
+    balance: { member_id: 9, page_active_claim_cents: 0, page_open_cents: 0, page_needs_review_count: 0, items, next_after_claim_id: next },
   }
 }
 function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
@@ -116,6 +116,15 @@ describe('Membership member detail', () => {
     w.unmount()
   })
 
+  it('sums the balance due of unpaired and partial charges when nothing needs review', async () => {
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], mixed.filter(c => c.settlement.status !== 'ambiguous')))
+    const w = mounted()
+    await flushPromises()
+    expect(w.get('[data-field="sum-open"]').text()).toBe(formatMoneyMinor(130000))
+    expect(w.get('[data-field="sum-needs-review"]').text()).toBe('0')
+    w.unmount()
+  })
+
   it('shows only ambiguous payments as needing review and unmatched charges as unpaid and never mixes the issued total with a debt', async () => {
     const w = mounted()
     await flushPromises()
@@ -130,8 +139,9 @@ describe('Membership member detail', () => {
     expect(rows[2]!.get('[data-field="settlement-amounts"]').text()).toContain(formatMoneyMinor(30000))
     expect(rows[3]!.get('[data-field="settlement-status"]').text()).toBe(cs.nonprofitMembership.settlement_reversed)
     expect(w.get('[data-field="sum-issued"]').text()).toBe(formatMoneyMinor(100000 + 80000 + 120050))
-    expect(w.get('[data-field="sum-proven-open"]').text()).toBe(formatMoneyMinor(130000))
-    expect(w.get('[data-field="sum-unproven"]').text()).toBe('1')
+    // Stejně jako řádek seznamu: s předpisem k prověření je zůstatek neurčený, ne součet známých částí.
+    expect(w.get('[data-field="sum-open"]').text()).toBe(formatMoneyMinor(null))
+    expect(w.get('[data-field="sum-needs-review"]').text()).toBe('1')
     expect(w.get('[data-section="unproven-note"]').text()).toContain(cs.nonprofitMembership.unprovenNote)
     expect(w.get('[data-section="claims-summary"]').text()).not.toMatch(/neuhrazen|dluh:/i)
     w.unmount()

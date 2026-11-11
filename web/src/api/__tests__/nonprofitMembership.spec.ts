@@ -54,6 +54,11 @@ it('posts exactly the documented bodies and never supplies an actor', async () =
   }
 })
 
+it('sends list filters with an explicit blank year for a title spanning all periods', async () => {
+  await api.members(5,0,50,{search:'Synthetic',title_key:'SYNTHETIC',year:null,payment_status:'unproven'})
+  expect(calls.get.mock.calls[0]?.[1].params).toEqual({after_id:0,limit:50,search:'Synthetic',title_key:'SYNTHETIC',year:'',payment_status:'unproven'})
+})
+
 it('refuses requests captured before a supplier switch', () => {
   scope.requested = '6'
   expect(() => api.members(5)).toThrow('nonprofit_membership_supplier_changed')
@@ -62,7 +67,12 @@ it('refuses requests captured before a supplier switch', () => {
   expect(calls.post).not.toHaveBeenCalled()
 })
 
-it('uses date-dependent allowed accounts and supports cancellation and renewed consent', async () => {
+it('uses paginated titles, full selection validation and date-dependent allowed accounts', async () => {
+  await api.titles(5,2026,'SYNTHETIC')
+  expect(calls.get).toHaveBeenLastCalledWith('/accounting/nonprofit-membership/titles', {headers:{'X-Supplier-Id':'5'},params:{year:2026,after_title_key:'SYNTHETIC',limit:100}})
+  const filters={year:2026,payment_status:'unproven' as const}
+  await api.selectionCheck(5,[1,90],filters)
+  expect(calls.post).toHaveBeenLastCalledWith('/accounting/nonprofit-membership/members/selection-check',{member_ids:[1,90],filters},{headers:{'X-Supplier-Id':'5'}})
   await api.rates(5,0,true,'2026-04-01')
   expect(calls.get).toHaveBeenLastCalledWith('/accounting/nonprofit-membership/rates',{headers:{'X-Supplier-Id':'5'},params:{after_id:0,active_only:1,date:'2026-04-01'}})
   await api.cancelBatch(5,7)

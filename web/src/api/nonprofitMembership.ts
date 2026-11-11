@@ -11,10 +11,12 @@ export interface MembershipLegalBasis { organisation_form: 'association'; relati
 
 /** Řádek seznamu členů: poslední revize může začínat v budoucnu, není to dnešní stav. */
 export interface MemberRow {
+  contribution?: {status: 'none' | 'paid' | 'unpaid' | 'unproven'; unpaired_count?: number; claim_count: number; prescribed_cents: string; paid_cents: string | null; open_cents: string | null}
   id: number; supplier_id: number; client_id: number; member_number: string; created_by: number; created_at?: string
-  company_name?: string; revision_no: number | null; effective_from: string | null; status: MemberStatus | null
+  company_name?: string; first_name?: string; last_name?: string; revision_no: number | null; effective_from: string | null; status: MemberStatus | null
 }
 export interface MemberPage { items: MemberRow[]; next_after_id: number | null }
+export interface MembershipListFilters {search?: string; year?: number | null; title_key?: string; payment_status?: 'all' | 'paid' | 'unpaid' | 'unproven' | 'none'}
 
 export interface MemberIdentity { id: number; supplier_id: number; client_id: number; member_number: string; created_by: number; created_at?: string }
 export interface MemberRevision {
@@ -32,7 +34,7 @@ export interface ClaimRow {
   title_key: string; period_from: string; period_to: string; settlement: ClaimSettlement
 }
 export interface MemberBalance {
-  member_id: number; page_active_claim_cents: number; page_proven_open_cents: number; page_unreconciled_count: number
+  member_id: number; page_active_claim_cents: number; page_open_cents: number | null; page_needs_review_count: number
   items: ClaimRow[]; next_after_claim_id: number | null
 }
 export interface MemberDetail { member: MemberIdentity; history: MemberRevision[]; balance: MemberBalance }
@@ -138,7 +140,9 @@ export const membershipApi = {
   rates: (supplier: number, afterId = 0, activeOnly = true, date?: string) => api.get<MembershipRatePage>(`${base}/rates`, { ...options(supplier), params: { after_id: afterId, active_only: activeOnly ? 1 : 0, ...(date ? {date} : {}) } }).then(r => r.data),
   createRate: (supplier: number, body: MembershipRateInput) => api.post<MembershipRate>(`${base}/rates`, body, options(supplier)).then(r => r.data),
   updateRate: (supplier: number, id: number, body: MembershipRateInput) => api.put<MembershipRate>(`${base}/rates/${id}`, body, options(supplier)).then(r => r.data),
-  members: (supplier: number, afterId = 0, limit = 50) => api.get<MemberPage>(`${base}/members`, { ...options(supplier), params: { after_id: afterId, limit } }).then(r => r.data),
+  selectionCheck: (supplier: number, memberIds: number[], filters: MembershipListFilters) => api.post<{member_ids: number[]}>(`${base}/members/selection-check`, {member_ids: memberIds, filters}, options(supplier)).then(r => r.data),
+  titles: (supplier: number, year?: number, afterTitleKey?: string) => api.get<{items: string[]; next_after_title_key: string | null}>(`${base}/titles`, { ...options(supplier), params: { ...(year ? {year} : {}), ...(afterTitleKey ? {after_title_key: afterTitleKey} : {}), limit: 100 } }).then(r => r.data),
+  members: (supplier: number, afterId = 0, limit = 50, filters: MembershipListFilters = {}) => api.get<MemberPage>(`${base}/members`, { ...options(supplier), params: { after_id: afterId, limit, ...filters, ...(filters.year === null ? {year: ''} : {}) } }).then(r => r.data),
   member: (supplier: number, id: number, afterClaimId = 0, limit = 50) => api.get<MemberDetail>(`${base}/members/${id}`, { ...options(supplier), params: { after_claim_id: afterClaimId, limit } }).then(r => r.data),
   claim: (supplier: number, id: number) => api.get<ClaimRow>(`${base}/claims/${id}`, options(supplier)).then(r => r.data),
   classificationOptions: (supplier: number) => api.get<DimensionOverview>('/accounting/dimensions', options(supplier)).then(r => r.data),
