@@ -163,6 +163,76 @@ final class PayrollEmploymentBulkClosureTest extends TestCase
         self::assertSame(['status' => 'ended', 'end_date' => '2026-03-31'], $this->state($employmentId));
     }
 
+    /**
+     * Kontrola před během za únor hlásila 20 skončených dohod a dialog jich
+     * v listopadu předvybral 42: bral i dohody skončené až po začátku února,
+     * protože období běhu ignoroval. Nález i předvýběr teď stojí na jednom
+     * pravidle: sjednaný konec (i jen z podmínek vztahu) uplynul před obdobím.
+     */
+    public function testRunPeriodNarrowsThePreselectionToAgreementsTheCheckReports(): void
+    {
+        $january = $this->employment($this->supplierId, 'Konec V Lednu', 'dpp', '2026-01-05', '2026-01-31');
+        $february = $this->employment($this->supplierId, 'Konec V Únoru', 'dpp', '2026-01-05', '2026-02-28');
+        $march = $this->employment($this->supplierId, 'Konec V Březnu', 'dpc', '2026-01-05', '2026-03-28');
+        // Konec jen v podmínkách vztahu (sloučení, převzetí): pravidlo ho zná také.
+        $termsOnly = $this->employment($this->supplierId, 'Konec V Podmínkách', 'dpp', '2026-01-05', null);
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on, fixed_term_end_on, weekly_hours)
+             VALUES (?, ?, '2026-01-05', '2026-01-05', '2026-01-20', 40)",
+        )->execute([$this->supplierId, $termsOnly]);
+        $this->employment($this->supplierId, 'Bez Konce', 'dpp', '2026-01-05', null);
+        // Už ukončený vztah se nehlásí, i když skončil před obdobím.
+        $this->employment($this->supplierId, 'Ukončená V Lednu', 'dpp', '2026-01-05', '2026-01-31', 'ended');
+
+        $reported = array_column(
+            $this->bulk->expiredBeforePeriod($this->supplierId, '2026-02-01', self::TODAY),
+            'employment_id',
+        );
+        sort($reported);
+        $expected = [$january, $termsOnly];
+        sort($expected);
+        self::assertSame($expected, $reported);
+
+        // Bez období dialog předvybírá všechny uplynulé konce (4), s obdobím
+        // jen ty, které hlásí kontrola před během (2); ostatní zůstávají v nabídce.
+        $preview = $this->bulk->preview($this->supplierId, 3, 12, self::TODAY, '2026-02-01');
+        self::assertSame('2026-02-01', $preview['period_start']);
+        $items = array_column($preview['items'], null, 'employment_id');
+        foreach ([$january, $february, $march, $termsOnly] as $id) {
+            self::assertSame('expired', $items[$id]['group'], (string) $id);
+        }
+        $beforePeriod = array_keys(array_filter(
+            $items,
+            static fn (array $item): bool => $item['before_period'] === true,
+        ));
+        sort($beforePeriod);
+        self::assertSame($expected, $beforePeriod);
+        self::assertSame(4, $preview['summary']['expired']);
+
+        // Náhled bez období nikoho jako „před obdobím" neoznačí.
+        $plain = $this->bulk->preview($this->supplierId, 3, 12, self::TODAY);
+        self::assertNull($plain['period_start']);
+        self::assertSame([], array_filter($plain['items'], static fn (array $item): bool => $item['before_period']));
+    }
+
+    /**
+     * Běh za budoucí měsíc: dohoda, jejíž konec ještě nenastal, ukončit nejde,
+     * proto ji nehlásí kontrola ani dialog (dřív se počty rozešly).
+     */
+    public function testAgreementEndingInTheFutureIsNotReportedForAFuturePeriod(): void
+    {
+        $past = $this->employment($this->supplierId, 'Konec Minulý', 'dpp', '2026-01-05', '2026-06-30');
+        $this->employment($this->supplierId, 'Konec Budoucí', 'dpp', '2026-01-05', '2026-11-30');
+
+        $reported = array_column($this->bulk->expiredBeforePeriod($this->supplierId, '2027-01-01', '2026-11-11'), 'employment_id');
+        self::assertSame([$past], $reported);
+
+        $preview = $this->bulk->preview($this->supplierId, 3, 12, '2026-11-11', '2027-01-01');
+        $marked = array_column(array_filter($preview['items'], static fn (array $item): bool => $item['before_period']), 'employment_id');
+        self::assertSame($reported, array_values($marked));
+    }
+
     public function testExpiredAgreementWithWorkAfterTheEndIsFlagged(): void
     {
         $employmentId = $this->employment($this->supplierId, 'Pokračující Dohoda', 'dpp', '2026-01-01', '2026-06-30');

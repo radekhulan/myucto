@@ -226,6 +226,12 @@ const statutoryBulkEffectiveOn = `${bulkQueryPeriod ?? payrollWorkingPeriod()}-0
 const workplaceBulkOpen = ref(false)
 const termsBulkOpen = ref(false)
 const bulkClosureOpen = ref(false)
+/**
+ * Období mzdového běhu, ze kterého se hromadné ukončení otevřelo odkazem
+ * (`?bulk=closure&period=RRRR-MM`). Z nabídky „Další funkce" se dialog otevírá
+ * bez období a předvybírá všechny uplynulé konce jako dosud.
+ */
+const bulkClosurePeriod = ref<string | null>(null)
 // Počet vztahů k ukončení na tlačítku; výpadek náhledu tlačítko neschová.
 const bulkClosureCount = ref<number | null>(null)
 // Po importu hlášení JMHZ (nenese pojišťovnu) sem vede proklik `?bulk=health_insurer`.
@@ -262,6 +268,8 @@ function openBulkFromQuery(bulk: unknown) {
   } else if (bulk === 'workplace' && canWriteEmployment.value) {
     workplaceBulkOpen.value = true
   } else if (bulk === 'closure' && canWriteEmployment.value) {
+    const linked = payrollQueryValue(route.query, 'period')
+    bulkClosurePeriod.value = linked !== null && /^\d{4}-(0[1-9]|1[0-2])$/.test(linked) ? linked : null
     bulkClosureOpen.value = true
   }
 }
@@ -647,7 +655,10 @@ const peopleBulkActions = computed<ActionItem[]>(() => [
     tier: bulkClosureCount.value ? 'secondary' : 'overflow',
     variant: 'warning',
     show: canWriteEmployment.value,
-    run: () => { bulkClosureOpen.value = true },
+    run: () => {
+      bulkClosurePeriod.value = null
+      bulkClosureOpen.value = true
+    },
   },
   {
     key: 'statutory-bulk',
@@ -2094,6 +2105,7 @@ onMounted(async () => {
 
     <PayrollBulkClosureDialog
       v-if="bulkClosureOpen"
+      :period="bulkClosurePeriod"
       @close="bulkClosureOpen = false"
       @applied="onBulkClosureApplied"
     />

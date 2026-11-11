@@ -2467,7 +2467,8 @@ final class PayrollInputRepository
         if ($travel->fetchColumn() !== false) {
             throw new PayrollInputCancellationException(
                 'input_has_movement',
-                'Vstup je navázaný na vyúčtování pracovní cesty; zrušit ho nelze.',
+                'Vstup je navázaný na vyúčtování pracovní cesty, proto ho tady nelze změnit ani zrušit. '
+                . 'Opravte vyúčtování cesty; vstup se podle něj upraví.',
             );
         }
 
@@ -2531,9 +2532,12 @@ final class PayrollInputRepository
         );
         $frozen->execute([$supplierId, $periodStart, (string) $id]);
         if ($frozen->fetchColumn() !== false) {
+            // Zábranu sdílí zrušení, oprava, zaokrouhlení i vrácení do konceptu.
+            // Věta „zrušit ho nelze" se ukazovala i tomu, kdo vstup jen opravoval
+            // nebo zaokrouhloval; teď říká obojí a vede na běh, který vstup drží.
             throw new PayrollInputCancellationException(
                 'input_has_movement',
-                'Vstup je zmrazený v revizi mzdového běhu; zrušit ho nelze.',
+                PayrollInputLockGuidance::message($pdo, $supplierId, 'locked', $periodStart, 'změnit ani zrušit'),
             );
         }
     }

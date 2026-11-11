@@ -53,6 +53,9 @@ final class PayrollEmploymentBulkClosure
 
     private const SETTLED_RUN_STATUSES = "'posted', 'payment_ready', 'paid', 'closed'";
 
+    /** Stavy vztahu, u kterých uplynulý sjednaný konec znamená „má být ukončen". */
+    private const EXPIRED_STATUSES = "'active', 'suspended'";
+
     /**
      * Druhy vztahů, které noční úloha ukončí sama ({@see self::endExpiredAgreements()}).
      * Dohoda sjednaná na dobu určitou uplynutím doby zaniká; pracovní poměr
@@ -93,7 +96,64 @@ final class PayrollEmploymentBulkClosure
     }
 
     /**
+     * Aktivní vztahy, jejichž sjednaný konec uplynul PŘED mzdovým obdobím.
+     *
+     * ── Co bylo špatně ──────────────────────────────────────────────────────
+     * Kontrola před během počítala vztahy s `end_date` před obdobím, dialog
+     * hromadného ukončení ale bral sjednaný konec i z podmínek vztahu a měřil
+     * ho k dnešku: kontrola za únor hlásila 20 dohod a dialog jich v listopadu
+     * předvybral 42 (i ty, které skončily až po začátku února). Nález teď čte
+     * TOTÉŽ pravidlo jako dialog ({@see self::agreedEndSql()}, stavy
+     * {@see self::EXPIRED_STATUSES}) a dialog otevřený z běhu předvybere právě
+     * tyto vztahy (`before_period` v náhledu).
+     *
+     * Konec, který ještě nenastal, se nepočítá ani u běhu za budoucí měsíc:
+     * takový vztah ukončit nejde a dialog ho nenabídne.
+     *
+     * @return list<array{employment_id:int,full_name:string,agreed_end_on:string}>
+     */
+    public function expiredBeforePeriod(int $supplierId, string $periodStart, ?string $today = null): array
+    {
+        $today = $this->today($today);
+        if (!IsoDate::isValid($periodStart)) {
+            throw new \InvalidArgumentException('Mzdové období není platné.');
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT dated.id, dated.full_name, dated.agreed_end_on
+               FROM (
+                    SELECT employment.id, employee.full_name,
+                           ' . self::agreedEndSql('employment') . ' AS agreed_end_on
+                      FROM payroll_employments employment
+                      JOIN payroll_employees employee
+                        ON employee.supplier_id = employment.supplier_id
+                       AND employee.id = employment.employee_id
+                     WHERE employment.supplier_id = ?
+                       AND employment.status IN (' . self::EXPIRED_STATUSES . ')
+               ) dated
+              WHERE dated.agreed_end_on IS NOT NULL
+                AND dated.agreed_end_on < ?
+                AND dated.agreed_end_on < ?
+              ORDER BY dated.full_name, dated.id'
+        );
+        $stmt->execute([$supplierId, $periodStart, $today]);
+
+        $rows = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $rows[] = [
+                'employment_id' => (int) $row['id'],
+                'full_name' => (string) $row['full_name'],
+                'agreed_end_on' => (string) $row['agreed_end_on'],
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
      * Kandidáti na ukončení a archivaci. Nic nezapisuje.
+     *
+     * S `$periodStart` (dialog otevřený z mzdového běhu) položka nese
+     * `before_period`: sjednaný konec uplynul před tímto obdobím.
      *
      * @return array<string,mixed>
      */
@@ -102,8 +162,12 @@ final class PayrollEmploymentBulkClosure
         int $inactivityMonths,
         int $archiveAfterMonths,
         ?string $today = null,
+        ?string $periodStart = null,
     ): array {
         $today = $this->today($today);
+        if ($periodStart !== null && !IsoDate::isValid($periodStart)) {
+            throw new \InvalidArgumentException('Mzdové období náhledu není platné.');
+        }
         if ($inactivityMonths < 1 || $inactivityMonths > 24) {
             throw new \InvalidArgumentException('Počet měsíců bez aktivity musí být 1 až 24.');
         }
@@ -129,7 +193,7 @@ final class PayrollEmploymentBulkClosure
                FROM (
                     SELECT dated.*,
                            CASE
-                               WHEN dated.status IN ('active', 'suspended')
+                               WHEN dated.status IN (" . self::EXPIRED_STATUSES . ")
                                 AND dated.agreed_end_on IS NOT NULL
                                 AND dated.agreed_end_on < ?
                                THEN 'expired'
@@ -219,11 +283,18 @@ final class PayrollEmploymentBulkClosure
                 'proposed_on' => $proposedOn,
                 'blocked_reason' => $blocked['reason'] ?? null,
                 'blocked_period' => $blocked['period'] ?? null,
+                // Sjednaný konec před mzdovým obdobím, ze kterého se dialog
+                // otevřel: právě tyhle vztahy hlásí kontrola před během
+                // ({@see self::expiredBeforePeriod()}) a jen ty se předvyberou.
+                'before_period' => $periodStart !== null
+                    && $group === 'expired'
+                    && (string) $row['agreed_end_on'] < $periodStart,
             ];
         }
 
         return [
             'as_of' => $today,
+            'period_start' => $periodStart,
             'activity_reference_on' => $reference,
             'inactivity_months' => $inactivityMonths,
             'archive_after_months' => $archiveAfterMonths,

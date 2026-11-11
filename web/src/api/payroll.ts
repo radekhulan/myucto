@@ -1265,10 +1265,17 @@ export interface PayrollBulkClosureItem {
   proposed_on: string
   blocked_reason: 'activity_after_end' | 'settled_after_end' | null
   blocked_period: string | null
+  /**
+   * Sjednaný konec uplynul před mzdovým obdobím, ze kterého se dialog otevřel.
+   * Právě tyto vztahy hlásí kontrola před během; bez období vždy `false`.
+   */
+  before_period?: boolean
 }
 
 export interface PayrollBulkClosurePreview {
   as_of: string
+  /** První den mzdového období, kterým je náhled zúžený (`null` = bez období). */
+  period_start?: string | null
   /** Do kdy se měří nečinnost: konec posledního schváleného mzdového měsíce, jinak dnešek. */
   activity_reference_on: string
   inactivity_months: number
@@ -9009,7 +9016,7 @@ export const payrollApi = {
       payload,
     ).then(response => response.data.result),
   /** Náhled hromadného ukončení skončených dohod a archivace; nic nezapisuje. */
-  bulkClosurePreview: (payload: { inactivity_months?: number, archive_after_months?: number } = {}) =>
+  bulkClosurePreview: (payload: { inactivity_months?: number, archive_after_months?: number, period?: string } = {}) =>
     api.post<{ preview: PayrollBulkClosurePreview }>(
       '/payroll/employments/bulk-closure/preview',
       payload,

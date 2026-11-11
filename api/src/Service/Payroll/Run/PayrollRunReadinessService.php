@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementStatute;
 use MyInvoice\Repository\Payroll\PayrollRulesetRepository;
 use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
+use MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
@@ -123,6 +124,8 @@ final class PayrollRunReadinessService
         private readonly PayrollDeadlineOverviewRepository $deadlines,
         // Dnešek pro upozornění, že období běhu ještě neskončilo nebo nezačalo.
         private readonly ClockInterface $clock,
+        // Skončené dohody: stejné pravidlo sjednaného konce jako hromadné ukončení.
+        private readonly PayrollEmploymentBulkClosure $bulkClosure,
     ) {}
 
     /**
@@ -796,20 +799,13 @@ final class PayrollRunReadinessService
     private function pastAgreedEndFinding(int $supplierId, string $periodStart): ?array
     {
         try {
-            $statement = $this->db->pdo()->prepare(
-                "SELECT employment.id, employee.full_name
-                   FROM payroll_employments employment
-                   JOIN payroll_employees employee
-                     ON employee.supplier_id = employment.supplier_id
-                    AND employee.id = employment.employee_id
-                  WHERE employment.supplier_id = ?
-                    AND employment.status IN ('active', 'suspended')
-                    AND employment.end_date IS NOT NULL
-                    AND employment.end_date < ?
-                  ORDER BY employee.full_name, employment.id"
+            // Totéž pravidlo jako dialog hromadného ukončení, aby počet v nálezu
+            // a počet předvybraných vztahů v dialogu byly jedno číslo.
+            $rows = $this->bulkClosure->expiredBeforePeriod(
+                $supplierId,
+                $periodStart,
+                $this->clock->now()->format('Y-m-d'),
             );
-            $statement->execute([$supplierId, $periodStart]);
-            $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
         } catch (\Throwable) {
             return null;
         }
@@ -822,15 +818,15 @@ final class PayrollRunReadinessService
             sprintf(
                 'Pracovní vztahy se sjednaným koncem před obdobím %s jsou pořád aktivní (%d). '
                 . 'Ukončete je hromadně v Mzdy → Zaměstnanci → Další funkce → Ukončit skončené dohody.',
-                substr($periodStart, 0, 7),
+                substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4),
                 count($rows),
             ),
-            '/payroll/people?bulk=closure',
+            '/payroll/people?bulk=closure&period=' . substr($periodStart, 0, 7),
             count($rows),
             array_map(
                 static fn (array $row): array => [
                     'entity_type' => 'employment',
-                    'entity_id' => (int) $row['id'],
+                    'entity_id' => $row['employment_id'],
                     'label' => (string) $row['full_name'],
                 ],
                 array_slice($rows, 0, self::MAX_ENTITIES),

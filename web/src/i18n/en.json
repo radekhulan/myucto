@@ -4102,6 +4102,8 @@
       "open_count": "End finished agreements ({count})",
       "title": "End finished agreements",
       "intro": "Preview of relationships that are no longer running according to their agreed end or to payroll. Each selected relationship is ended exactly as with the button on its card, including the exit checklist (deregistration, exit documents). Nothing changes until you confirm the selection.",
+      "period_note": "Opened from the payroll run check for {period}: no agreement has its agreed end before this period, so nothing is preselected. | Opened from the payroll run check for {period}: {count} agreement with an agreed end before this period is preselected, the one the check reports. | Opened from the payroll run check for {period}: {count} agreements with an agreed end before this period are preselected, the ones the check reports.",
+      "period_later": " | Another {count} ended only after the period started; it still belongs to the run and is not preselected, but you can end it as well. | Another {count} ended only after the period started; they still belong to the run and are not preselected, but you can end them as well.",
       "inactivity_months": "Without activity (months)",
       "archive_after_months": "Archive after (months)",
       "reload": "Load preview",

@@ -39,10 +39,20 @@ final class PayrollEmploymentBulkClosureAction
         }
 
         try {
+            // Dialog otevřený z mzdového běhu posílá jeho období: náhled označí
+            // vztahy se sjednaným koncem před ním, tytéž, které hlásí kontrola.
+            $period = $body['period'] ?? null;
+            if ($period !== null
+                && (!is_string($period) || preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $period) !== 1)
+            ) {
+                throw new \InvalidArgumentException('period musí být měsíc ve tvaru RRRR-MM.');
+            }
             $preview = $this->bulk->preview(
                 $this->currentSupplierId($request),
                 $this->months($body, 'inactivity_months', 3),
                 $this->months($body, 'archive_after_months', 12),
+                null,
+                $period === null ? null : "{$period}-01",
             );
         } catch (\InvalidArgumentException $exception) {
             return $this->invalid($response, $exception->getMessage());
