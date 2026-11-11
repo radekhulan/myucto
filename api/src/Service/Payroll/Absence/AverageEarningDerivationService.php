@@ -929,7 +929,7 @@ final class AverageEarningDerivationService
      * „Za odpracovanou dobu se považuje doba, za kterou zaměstnanci přísluší
      * mzda nebo plat" (§ 353 odst. 2 zákona č. 262/2006 Sb.). Zaměstnanci
      * s měsíční mzdou se za svátek, který připadl na jeho obvyklý pracovní den
-     * a ve kterém nepracoval, mzda nekrátí (§ 115 odst. 3 ZP — žádná mzda
+     * a ve kterém nepracoval, mzda nekrátí (§ 115 odst. 3 ZP: žádná mzda
      * „neušla", proto mu ani nepřísluší náhrada). Mzda za tu dobu tedy
      * přísluší a je celá v započitatelné hrubé mzdě
      * (`average_earning_base_minor`); kdyby hodiny svátku chyběly ve
@@ -939,7 +939,7 @@ final class AverageEarningDerivationService
      *
      * Hodiny svátku se berou z potvrzeného pracovního souhrnu měsíce
      * (`holiday_millihours`, tedy svátek v rozvrženém dni mimo nepřítomnost,
-     * za kterou se mzda krátí — ten vede souhrn zvlášť jako
+     * za kterou se mzda krátí; ten vede souhrn zvlášť jako
      * `holiday_unpaid_millihours`). Přičítají se JEN tehdy, když měsíc nese
      * započitatelnou měsíční mzdu (složka druhu `base_wage`) a svátek neplatí
      * náhrada mzdy: u hodinové mzdy za svátek přísluší náhrada (§ 115
