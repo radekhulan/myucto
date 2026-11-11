@@ -72,7 +72,7 @@ jobs:
           }
 
   backend-tests:
-    name: Backend (PHP 8.5 + PHPUnit, shard ${{ matrix.shard }}/4)
+    name: Backend (PHP 8.5 + MariaDB ${{ matrix.mariadb }}, shard ${{ matrix.shard }}/4)
     # Na ubuntu-26.04 se imagick ze setup-php sestaví proti ImageMagick 6, který
     # s Ghostscriptem 10.06 rasterizaci PDF neumí (/undefinedfilename). Produkční
     # image má ImageMagick 7, proto zatím zůstáváme na 24.04.
@@ -80,13 +80,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        mariadb: ['11.8', '12.3']
         shard: [1, 2, 3, 4]
 
     # Bez databáze se přeskočí celá Integration suita včetně testů atomicity
     # session — tedy zrovna to, co hlídá nejcitlivější garance autentizace.
     services:
       mariadb:
-        image: mariadb:11.8
+        image: mariadb:${{ matrix.mariadb }}
         env:
           MARIADB_ROOT_PASSWORD: ci
           MARIADB_DATABASE: myinvoice_ci
@@ -300,7 +301,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: backend-test-results-${{ matrix.shard }}
+          name: backend-test-results-mariadb-${{ matrix.mariadb }}-${{ matrix.shard }}
           path: api/test-results/
           if-no-files-found: ignore
 

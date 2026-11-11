@@ -160,7 +160,7 @@ final class StockItemPromoPriceRepository
                 stock_item_id BIGINT PATH '$.stock_item_id',
                 currency VARCHAR(3) PATH '$.currency',
                 from_date DATE PATH '$.from_date',
-                to_date DATE PATH '$.to_date' NULL ON EMPTY,
+                `to_date` DATE PATH '$.to_date' NULL ON EMPTY,
                 price DECIMAL(18,6) PATH '$.price'
             )) p
             JOIN invoice_items ii ON ii.stock_item_id = p.stock_item_id
@@ -173,7 +173,7 @@ final class StockItemPromoPriceRepository
             WHERE i.invoice_type IN ('invoice', 'credit_note')
               AND i.status NOT IN ('draft', 'cancelled')
               AND COALESCE(i.tax_date, i.issue_date) >= p.from_date
-              AND (p.to_date IS NULL OR COALESCE(i.tax_date, i.issue_date) <= p.to_date)
+              AND (p.`to_date` IS NULL OR COALESCE(i.tax_date, i.issue_date) <= p.`to_date`)
               AND {$priceBase} <= p.price
             GROUP BY p.position");
         $stmt->execute([json_encode($input, JSON_THROW_ON_ERROR), $supplierId]);
