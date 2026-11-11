@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\PayrollHourlyWageComponents;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind;
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollHealthCoverageLaterRecord;
@@ -252,6 +254,16 @@ final class PayrollRunReadinessService
         }
 
         if ($snapshot !== null) {
+            $conflicts = self::hourlyPremiumConflicts($snapshot->data, $periodStart);
+            if ($conflicts !== []) {
+                $findings[] = self::withPeopleList(self::finding(
+                    'hourly_claim_component_conflict',
+                    $conflicts[0]['message'],
+                    count($conflicts) === 1 ? $conflicts[0]['remediation_path'] : '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7),
+                    count($conflicts),
+                    array_slice($conflicts, 0, self::MAX_ENTITIES),
+                ), array_column($conflicts, 'employee_id'), $periodStart, $paymentDate);
+            }
             $payoutFinding = $this->payoutRuleFinding($supplierId, $periodStart, $snapshot->data);
             if ($payoutFinding !== null) {
                 $findings[] = $payoutFinding;
@@ -734,6 +746,33 @@ final class PayrollRunReadinessService
                 && isset($seeded[(int) $match[1]])
             ),
         ));
+    }
+
+    private static function hourlyPremiumConflicts(array $snapshotData, string $periodStart): array
+    {
+        $codes = array_map(static fn (PayrollSurchargeKind $kind): string => $kind->componentCode(), PayrollSurchargeKind::all());
+        $conflicts = [];
+        foreach ($snapshotData['people'] as $person) {
+            foreach ($person['employments'] as $employment) {
+                if (($employment['hourly_remuneration_terms'] ?? []) === []) continue;
+                $manual = [];
+                foreach ($employment['inputs'] as $input) {
+                    if ($input['source_kind'] === 'manual' && in_array($input['component']['code'], $codes, true)) {
+                        $manual[$input['component']['code']] = true;
+                    }
+                }
+                if ($manual === []) continue;
+                $id = (int) $employment['employment']['id'];
+                $conflicts[] = [
+                    'entity_type' => 'employment', 'entity_id' => $id,
+                    'employee_id' => (int) $person['employee']['id'],
+                    'label' => $person['employee']['full_name'] . ' (' . $employment['employment']['code'] . ')',
+                    'message' => PayrollHourlyWageComponents::componentConflictMessage(implode(', ', array_keys($manual))),
+                    'remediation_path' => '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7) . '&employment=' . $id,
+                ];
+            }
+        }
+        return $conflicts;
     }
 
     private function peopleWithoutPayoutRule(int $supplierId, string $periodStart, array $snapshotData): array
@@ -1476,6 +1515,11 @@ final class PayrollRunReadinessService
         try {
             $this->snapshotBuilder->assertRulesetCoverage($periodStart);
             $snapshot = $this->snapshotBuilder->build($supplierId, $periodStart, $paymentDate, null);
+            if ($code === 'hourly_claim_component_conflict') {
+                $ids = array_values(array_unique(array_column(self::hourlyPremiumConflicts($snapshot->data, $periodStart), 'employee_id')));
+                sort($ids, SORT_NUMERIC);
+                return $ids;
+            }
             if ($code === 'payout_rule_missing') {
                 $ids = array_column($this->peopleWithoutPayoutRule($supplierId, $periodStart, $snapshot->data), 'entity_id');
                 sort($ids, SORT_NUMERIC);

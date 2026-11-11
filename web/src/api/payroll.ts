@@ -2658,15 +2658,9 @@ export interface PayrollEmploymentSurchargePolicyPayload
   note: string | null
 }
 
-/**
- * Oprava OTEVŘENÉ verze zásady.
- *
- * `valid_from` tu chybí schválně: účinnost je hranice proti předchozí, uzavřené
- * verzi, jejíž konec je z ní odvozený. Jiná účinnost znamená novou verzi, ne
- * opravu — server hodnotu z těla ignoruje.
- */
 export interface PayrollEmploymentSurchargePolicyUpdatePayload
   extends Record<string, unknown>, PayrollSurchargeFixedHourlyFields {
+  valid_from?: string
   overtime_mode: PayrollSurchargeCompensationMode
   holiday_mode: Exclude<PayrollSurchargeCompensationMode, 'included_in_wage'>
   difficult_environment_factors: number | null

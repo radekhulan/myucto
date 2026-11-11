@@ -208,7 +208,7 @@ final class PayrollHourlyWageMaterializer
                 if (isset($blockers[$id]) || ($ready[$id]['settlement_only']
                     && ((int) $conflict['attendance_owned'] === 1 || (int) $conflict['current_work'] === 1))) continue;
                 $blockers[$id][] = ['code' => 'hourly_claim_component_conflict', 'remediation' => $inputsLink . $id,
-                    'message' => sprintf('Hodinový nárok koliduje s existující složkou %s. Ponechte jediný podklad: zrušte ruční vstup této složky, hodinový výpočet ji doplní sám.', $conflict['code'])];
+                    'message' => PayrollHourlyWageComponents::componentConflictMessage((string) $conflict['code'])];
             }
         }
         $premiumPairs = [];
@@ -235,7 +235,7 @@ final class PayrollHourlyWageMaterializer
                 if (isset($blockers[$id]) || $row['claim_source'] === 'time') continue;
                 $kind = PayrollSurchargeKind::from((string) $row['surcharge_kind']);
                 $blockers[$id][] = ['code' => 'hourly_premium_manual_source_conflict', 'remediation' => $inputsLink . $id,
-                    'message' => sprintf('%s (%s) je za toto období zadán ručně v rychlém měsíčním vstupu. Ponechte jen jeden podklad: ruční příplatek odeberte, hodinový výpočet ho doloží z evidence.', $kind->label(), $kind->section())];
+                    'message' => PayrollHourlyWageComponents::componentConflictMessage($kind->componentCode())];
             }
         }
         $plans = array_filter($plans, static fn (int $id): bool => !isset($blockers[$id]), ARRAY_FILTER_USE_KEY);

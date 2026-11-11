@@ -121,6 +121,7 @@ function storedEnvironment(): PayrollRegzelEnvironment {
       sessionStorage.removeItem(ENVIRONMENT_STORAGE_KEY)
       return 'production'
     }
+    if (route.query.environment === 'test' || route.query.environment === 'production') return route.query.environment
     return sessionStorage.getItem(ENVIRONMENT_STORAGE_KEY) === 'test' ? 'test' : 'production'
   } catch {
     return 'production'
@@ -332,7 +333,7 @@ watch(activeTab, (tab) => {
 
 watch(overviewPeriod, (period) => {
   if (route.query.period === period) return
-  void router.replace({ query: { ...route.query, period } })
+  void router.replace({ query: { ...route.query, period, submission: undefined } })
 })
 
 async function applySuggestedPeriod() {
@@ -413,6 +414,25 @@ function readDetailsState(): Record<string, boolean> {
 }
 
 const detailsOpen = ref<Record<string, boolean>>(readDetailsState())
+const requestedSubmissionId = computed(() => {
+  const value = Number(route.query.submission)
+  return Number.isSafeInteger(value) && value > 0 ? value : null
+})
+
+function clearRequestedSubmission() {
+  if (requestedSubmissionId.value !== null) void router.replace({ query: { ...route.query, submission: undefined } })
+}
+
+watch([requestedSubmissionId, activeTab], ([id, tab]) => {
+  if (id !== null) detailsOpen.value = { ...detailsOpen.value, [tab]: true }
+}, { immediate: true })
+
+watch(() => route.query.period, value => {
+  if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) overviewPeriod.value = value
+})
+watch(() => route.query.environment, value => {
+  if (value === 'production' || (value === 'test' && submissionTestAllowed.value)) environment.value = value
+})
 
 function rememberDetails(tab: string, event: Event) {
   const open = (event.target as HTMLDetailsElement).open
@@ -663,6 +683,8 @@ function rememberDetails(tab: string, event: Event) {
         v-model:environment="environment"
         v-model:period="overviewPeriod"
         mode="health"
+        :submission-id="requestedSubmissionId"
+        @close-submission="clearRequestedSubmission"
       />
       <details
         class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
@@ -981,6 +1003,8 @@ function rememberDetails(tab: string, event: Event) {
             v-model:environment="environment"
             v-model:period="overviewPeriod"
             mode="jmhz"
+            :submission-id="requestedSubmissionId"
+            @close-submission="clearRequestedSubmission"
           />
         </div>
       </details>
@@ -991,6 +1015,8 @@ function rememberDetails(tab: string, event: Event) {
         v-model:environment="environment"
         v-model:period="overviewPeriod"
         :mode="activeTab === 'other' ? activeTab : 'jmhz'"
+        :submission-id="requestedSubmissionId"
+        @close-submission="clearRequestedSubmission"
       />
     </template>
   </div>

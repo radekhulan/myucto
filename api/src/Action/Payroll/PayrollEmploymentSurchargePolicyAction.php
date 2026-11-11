@@ -89,6 +89,8 @@ final class PayrollEmploymentSurchargePolicyAction
             );
         } catch (\MyInvoice\Repository\Payroll\PayrollTermsSettledException $e) {
             return $this->domainError($response, $e);
+        } catch (PayrollSurchargePolicyHistoryLockedException $e) {
+            return Json::error($response, 'surcharge_policy_history_locked', $e->getMessage(), 409);
         } catch (DomainException $e) {
             // Zásada od téhož nebo pozdějšího dne už existuje. Není to vada
             // vstupu, ale stav — proto 409, ne 422.
@@ -121,15 +123,6 @@ final class PayrollEmploymentSurchargePolicyAction
     }
 
     /**
-     * Oprava OTEVŘENÉ a zároveň poslední verze.
-     *
-     * Sjednání se v praxi zapíše s překlepem v sazbě stejně často jako správně
-     * a dosud proti tomu nebyla obrana: zásadu šlo jen založit, takže překlep
-     * se „opravoval" založením další verze od dalšího dne a v historii po sobě
-     * nechal den, kdy prý platila sazba, kterou nikdo nesjednal. Kde vede
-     * hranice mezi opravou a přepisem historie a proč, viz
-     * {@see \MyInvoice\Repository\Payroll\PayrollSurchargePolicyHistoryLockedException}.
-     *
      * @param array<string,string> $args
      */
     public function update(Request $request, Response $response, array $args): Response
