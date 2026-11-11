@@ -64,6 +64,14 @@ final class PayrollRunStatutoryInputAssembler
     /** @var array<string,true> */
     private array $deferredSocialJurisdiction = [];
 
+    /**
+     * Osoby a druhy kumulace bez počátečního ročního stavu, se kterými výpočet
+     * doběhne (daň vždy, sociální pojištění mimo dosah ročního maxima).
+     *
+     * @var array<string,array<string,true>>
+     */
+    private array $missingAccumulators = [];
+
     private readonly PayrollRunStatutoryComponentMapper $components;
     private readonly SocialRelationshipKindMapper $socialKinds;
     private readonly HealthRelationshipKindMapper $healthKinds;
@@ -93,6 +101,7 @@ final class PayrollRunStatutoryInputAssembler
         $this->issues = [];
         $this->deferredHealthCoverage = [];
         $this->deferredSocialJurisdiction = [];
+        $this->missingAccumulators = [];
         if (($snapshot['schema_version'] ?? null) !== 'payroll-run-input.v2') {
             return $this->invalidSnapshot('unsupported_snapshot_schema');
         }
@@ -523,6 +532,7 @@ final class PayrollRunStatutoryInputAssembler
                     )
                     : null,
                 $jurisdictionMissing,
+                isset($this->missingAccumulators[$personReference]['social_insurance']),
             );
         } catch (\InvalidArgumentException) {
             $this->issue(
@@ -1855,7 +1865,9 @@ final class PayrollRunStatutoryInputAssembler
             $periodStart,
         );
         if ($state === null) {
-            return null;
+            // Bez počátečního stavu se počítá od nuly; roční maximum hlídá
+            // výpočet (SocialInsuranceMonthCalculator, yearToDateUnknown).
+            return isset($this->missingAccumulators[$personReference]['social_insurance']) ? 0 : null;
         }
         $value = $this->nonNegativeInt(
             $state['totals']['assessment_base_minor_units'] ?? null,
@@ -1888,7 +1900,15 @@ final class PayrollRunStatutoryInputAssembler
             $periodStart,
         );
         if ($state === null) {
-            return null;
+            /*
+             * Měsíční záloha, srážka, slevy i bonus se posuzují za měsíc
+             * (§ 38h, § 35d ZDP); roční úhrn je potřeba až pro roční zúčtování
+             * a potvrzení o příjmech. Bez počátečního stavu se proto počítá
+             * od nuly a běh na chybějící stav upozorní varováním.
+             */
+            return isset($this->missingAccumulators[$personReference]['income_tax'])
+                ? AnnualTaxAccumulatorInput::empty((int) substr($periodStart, 0, 4))
+                : null;
         }
         $totals = $this->object($state['totals'] ?? null);
         $values = [
@@ -1982,6 +2002,14 @@ final class PayrollRunStatutoryInputAssembler
         }
         $wrapper = $this->object($accumulators[$kind] ?? null);
         $state = $this->object($wrapper['state'] ?? null);
+        if (($wrapper['status'] ?? null) === 'unverified'
+            && $state === null
+            && ($wrapper['issue_code'] ?? null) === 'annual_accumulator_missing'
+        ) {
+            // Chybí počáteční stav: rozhodne volající podle druhu kumulace.
+            $this->missingAccumulators[$personReference][$kind] = true;
+            return null;
+        }
         if (($wrapper['status'] ?? null) !== 'verified' || $state === null) {
             $issueCode = $wrapper['issue_code'] ?? null;
             $this->issue(

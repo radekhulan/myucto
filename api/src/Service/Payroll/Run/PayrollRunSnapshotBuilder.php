@@ -933,7 +933,17 @@ final class PayrollRunSnapshotBuilder
         $unsignedWithoutResidence = [];
         $withoutHealthCoverage = [];
         $withoutSocialJurisdiction = [];
+        $withoutOpeningBalances = [];
         foreach ($people as $personId => $person) {
+            foreach (['social_insurance', 'income_tax'] as $accumulatorKind) {
+                $accumulator = $person['statutory_accumulators'][$accumulatorKind] ?? null;
+                if (is_array($accumulator)
+                    && ($accumulator['status'] ?? null) === 'unverified'
+                    && ($accumulator['issue_code'] ?? null) === 'annual_accumulator_missing'
+                ) {
+                    $withoutOpeningBalances[(int) $personId] = (int) $personId;
+                }
+            }
             $personEvidence = $statutoryEvidence[$personId] ?? null;
             if (is_array($personEvidence)
                 && $person['employments'] !== []
@@ -987,6 +997,17 @@ final class PayrollRunSnapshotBuilder
                 self::unsignedWithoutResidenceMessage(count($unsignedWithoutResidence)),
                 '/payroll/people?bulk=statutory_defaults',
                 subjectIds: $unsignedWithoutResidence,
+            );
+        }
+        if ($withoutOpeningBalances !== []) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'annual_accumulator_missing_summary',
+                'run',
+                null,
+                self::withoutOpeningBalancesMessage(count($withoutOpeningBalances)),
+                '/payroll/imports?tab=registration',
+                subjectIds: array_values($withoutOpeningBalances),
             );
         }
         if ($withoutSocialJurisdiction !== []) {
@@ -1122,6 +1143,20 @@ final class PayrollRunSnapshotBuilder
             . ' Doplňte ji před vystavením potvrzení o zdanitelných příjmech'
             . ' nebo před podpisem prohlášení, hromadně v Mzdy → Zaměstnanci'
             . ' → Další funkce → Doplnit výchozí zákonné údaje.',
+            $count,
+        );
+    }
+
+    public static function withoutOpeningBalancesMessage(int $count): string
+    {
+        return sprintf(
+            'Počet osob bez počátečních ročních úhrnů (pojistné a daň za dřívější'
+            . ' měsíce roku): %d. Měsíční záloha i srážková daň se počítají za měsíc,'
+            . ' takže výpočet pokračuje od nuly; sociální pojištění zastaví jen u'
+            . ' příjmu, který mohl dosáhnout ročního maximálního vyměřovacího základu.'
+            . ' Úhrny potřebuje roční zúčtování a potvrzení o příjmech: naimportujte'
+            . ' je hromadně v Mzdy → Importy → JMHZ (počáteční stavy), u nového'
+            . ' zaměstnance bez dřívější mzdy stačí na kartě vztahu uložit nulový stav.',
             $count,
         );
     }

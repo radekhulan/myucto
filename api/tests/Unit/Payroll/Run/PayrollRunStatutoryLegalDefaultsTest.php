@@ -215,6 +215,33 @@ final class PayrollRunStatutoryLegalDefaultsTest extends TestCase
         ));
     }
 
+    /**
+     * Převzetí mezd v průběhu roku bez počátečních úhrnů: daň se spočítá za
+     * měsíc, sociální pojištění také, dokud příjem nemohl dosáhnout ročního
+     * maxima vyměřovacího základu.
+     */
+    public function testMissingOpeningBalancesStopOnlyIncomeNearTheSocialCap(): void
+    {
+        $unverified = ['status' => 'unverified', 'issue_code' => 'annual_accumulator_missing', 'state' => null];
+        $snapshot = $this->agreementSnapshot(1_500_000, 'employment');
+        $snapshot['people'][0]['statutory_accumulators']['social_insurance'] = $unverified;
+        $snapshot['people'][0]['statutory_accumulators']['income_tax'] = $unverified;
+
+        $bundle = $this->assemble($snapshot);
+        self::assertSame([], $bundle->issues);
+        self::assertTrue($bundle->socialInsurance?->people[0]->yearToDateUnknown);
+        self::assertSame(0, $bundle->incomeTax[0]->annualAccumulator?->completedMonths);
+        $social = $this->social($bundle);
+        self::assertSame(SocialCalculationStatus::Calculated, $social->status, implode(',', $social->issues));
+        self::assertSame(TaxCalculationStatus::Calculated, $this->tax($bundle)->status);
+
+        $high = $this->agreementSnapshot(40_000_000, 'employment');
+        $high['people'][0]['statutory_accumulators']['social_insurance'] = $unverified;
+        $highSocial = $this->social($this->assemble($high));
+        self::assertSame(SocialCalculationStatus::ManualReview, $highSocial->status);
+        self::assertContains('person:employee:42:annual_accumulator_missing', $highSocial->issues);
+    }
+
     /** @param array<string,mixed> $snapshot */
     private function assemble(array $snapshot): PayrollRunStatutoryInputBundle
     {

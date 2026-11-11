@@ -104,29 +104,29 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
         self::assertSame('/payroll/components?tab=inputs&period=2026-02', $halere['remediation_path']);
         self::assertEqualsCanonicalizing(array_column($this->groups['halere'], 'employment_id'), array_column($halere['entities'], 'entity_id'));
 
-        // Prohlášení: tlačítko zúžené na dotčené osoby.
-        $declaration = self::finding($findings, 'tax_declaration_evidence_missing');
-        self::assertSame(5, $declaration['entity_total']);
-        self::assertEqualsCanonicalizing($statutoryIds, $declaration['bulk_actions'][0]['employee_ids']);
-
-        // Rezidence a pojišťovna: výpočet je zastaví, kontrola to musí říct
-        // jako blokaci schválení, ne jako „doplní se kdykoli".
-        $statutory = self::finding($findings, 'statutory_calculation_manual_review');
-        self::assertSame('approval', $statutory['impact']);
-        self::assertSame(10, $statutory['entity_total']);
-        self::assertEqualsCanonicalizing([...$statutoryIds, ...$insurerIds], array_column($statutory['entities'], 'entity_id'));
-        $bulk = array_column($statutory['bulk_actions'], 'count', 'kind');
+        // Výpočet nechce víc, než chce zákon (audit 12. 11. 2026, ř. 7 a 9):
+        // dohoda bez záznamu o prohlášení je „nepodepsaná" (srážková daň,
+        // rezidence nerozhoduje) a dohoda pod rozhodným příjmem pojišťovnu
+        // nepotřebuje, protože pojistné nevzniká. Nic z toho běh nezastaví,
+        // kontrola na to jen upozorní souhrnem s hromadnou opravou.
+        self::assertNull(self::finding($findings, 'tax_declaration_evidence_missing'));
+        self::assertNull(self::finding($findings, 'statutory_calculation_manual_review'));
+        $unsigned = self::finding($findings, 'tax_declaration_not_signed_summary');
+        self::assertNotNull($unsigned);
+        self::assertSame([], array_diff($statutoryIds, $unsigned['subject_ids']));
+        $residence = self::finding($findings, 'tax_residence_missing_unsigned_summary');
+        self::assertNotNull($residence);
+        self::assertEqualsCanonicalizing($statutoryIds, $residence['subject_ids']);
+        $coverage = self::finding($findings, 'health_coverage_missing_summary');
+        self::assertNotNull($coverage);
+        self::assertEqualsCanonicalizing($insurerIds, $coverage['subject_ids']);
+        self::assertNotContains($coverage['impact'], ['blocking', 'approval']);
         $statutoryPreview = $this->container->get(PayrollStatutoryEvidenceBulkDefaults::class)
             ->preview($this->supplierId, self::PERIOD_START, null);
-        self::assertSame($statutoryPreview['summary']['ready'], $bulk['statutory_defaults'] ?? null, 'Dialog výchozích údajů nabídne jiný počet osob.');
         self::assertEqualsCanonicalizing($statutoryIds, $statutoryPreview['ready_employee_ids']);
         $insurerPreview = $this->container->get(PayrollHealthInsurerBulkAssignment::class)->preview($this->supplierId, self::PERIOD_START);
-        self::assertSame(count($insurerPreview['people']), $bulk['health_insurer'] ?? null, 'Dialog pojišťovny nabídne jiný počet osob.');
         self::assertEqualsCanonicalizing($insurerIds, array_column($insurerPreview['people'], 'employee_id'));
-        foreach ($statutory['entities'] as $entity) {
-            self::assertStringStartsWith('/payroll/people?person=' . $entity['entity_id'] . '&panel=statutory_evidence', $entity['remediation_path']);
-            self::assertNotNull($entity['label']);
-        }
+
         // Tatáž věc nevisí podruhé v katalogu mezer jako „kdykoli".
         foreach (self::finding($findings, 'person_data_gap')['entities'] ?? [] as $entity) {
             self::assertSame([], array_intersect(['tax_residence', 'health_insurance', 'tax_declaration'], $entity['gaps']));
@@ -185,16 +185,10 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
             static fn (array $finding): bool => in_array($finding['impact'], ['blocking', 'approval'], true),
         ), 'code')));
         sort($predictedBlocking);
-        self::assertSame(['inputs_not_whole_crowns', 'statutory_calculation_manual_review', 'tax_declaration_evidence_missing'], $predictedBlocking);
+        self::assertSame(['inputs_not_whole_crowns'], $predictedBlocking);
         $blockedCodes = array_values(array_unique(array_column($blockers, 'code')));
         sort($blockedCodes);
-        self::assertSame(['inputs_not_whole_crowns', 'statutory_calculation_manual_review'], $blockedCodes, 'Výpočet zastavil něco, co kontrola nepředpověděla.');
-        $manual = array_values(array_filter($blockers, static fn (array $row): bool => $row['code'] === 'statutory_calculation_manual_review'));
-        self::assertCount($declaration['entity_total'] + $statutory['entity_total'], $manual, 'Počet blokací výpočtu nesedí s předpovědí.');
-        self::assertEqualsCanonicalizing(
-            array_values(array_unique([...$statutoryIds, ...$insurerIds])),
-            array_values(array_unique(array_map('intval', array_column($manual, 'entity_id')))),
-        );
+        self::assertSame(['inputs_not_whole_crowns'], $blockedCodes, 'Výpočet zastavil něco, co kontrola nepředpověděla.');
 
         // ── Hromadné opravy z nálezů; po nich nálezy zmizí ────────────────
         $this->applyBulkFixes(['statutory', 'insurer', 'closure']);

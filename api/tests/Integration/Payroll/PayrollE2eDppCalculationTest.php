@@ -242,24 +242,20 @@ final class PayrollE2eDppCalculationTest extends TestCase
         $this->month($follow, '2027-01', 1_250_000);
         $this->month($under, '2027-01', 1_249_900);
         $this->month($over, '2027-01', 1_249_900);
-        // Bez počátečních ročních úhrnů za rok 2027 se zákonný výpočet zastaví
-        // s návodem na kartu vztahu. Osoby bez exekuce nesmí dostat navíc
-        // zavádějící blokaci „chybí pravidla exekučních srážek".
+        // Bez počátečních ročních úhrnů za rok 2027 výpočet doběhne: záloha
+        // i srážka jsou měsíční a příjem dohody má k ročnímu maximu SP daleko
+        // (audit 12. 11. 2026, ř. 12). Běh na chybějící úhrny jen upozorní.
+        // Osoby bez exekuce nesmí dostat zavádějící blokaci „chybí pravidla
+        // exekučních srážek".
         $run = $this->runPayrollMonth('2027-01-01', '2027-02-12', $this->officeId, 'dpp-january-2027');
-        $codes = array_values(array_unique(array_column($run['blockers'], 'code')));
-        self::assertSame(['statutory_calculation_manual_review'], $codes, CanonicalJson::encode($run['blockers']));
-        self::assertStringContainsString('Počáteční stavy', $run['blockers'][0]['message']);
-        // Akce „Vytvořit běh" doplní prokazatelně nulové úhrny sama
-        // (mzdy za rok vede MyÚčto); tady totéž přes službu, pak znovu od opravených podkladů.
-        $openings = $this->container->get(\MyInvoice\Service\Payroll\PayrollOpeningBalanceService::class);
-        self::assertCount(3, $openings->seedProvableZeroOpenings($this->supplierId, '2027-01-01', [], $this->actors[0]));
-        $runRow = $run['calculated']->run;
-        $cancelled = $this->runs->cancel($this->supplierId, (int) $runRow['id'], (int) $runRow['row_version'], 'jan27-cancel', $this->actors[0], 'Počáteční úhrny');
-        $reopened = $this->runs->reopen($this->supplierId, (int) $runRow['id'], (int) $cancelled->run['row_version'], 'jan27-reopen', $this->actors[0], 'Počáteční úhrny doplněny');
-        $recalculated = $this->runs->calculate($this->supplierId, (int) $runRow['id'], (int) $reopened->run['row_version'], 'jan27-calc', $this->actors[0]);
-        self::assertSame([], $this->blockingValidations((int) $recalculated->revision['id']));
-        $approved = $this->runs->approve($this->supplierId, (int) $runRow['id'], (int) $recalculated->run['row_version'], 'jan27-approve', $this->actors[0]);
-        $run = ['approved' => $approved];
+        self::assertSame([], $run['blockers'], CanonicalJson::encode($run['blockers']));
+        $warning = $this->db->pdo()->prepare(
+            'SELECT message FROM payroll_run_validations
+              WHERE supplier_id = ? AND revision_id = ? AND code = "annual_accumulator_missing_summary"',
+        );
+        $warning->execute([$this->supplierId, (int) $run['calculated']->revision['id']]);
+        self::assertStringContainsString('počátečních ročních úhrnů', (string) $warning->fetchColumn());
+        self::assertNotNull($run['approved'], 'Běh bez blokace se má dát schválit i bez počátečních úhrnů.');
         $january = (int) $run['approved']->revision['id'];
         // 2027: DPP 12 500 Kč => účast; SP 887,50 => 888. ZP z minima 24 900 (sada
         // 2027): celkem 3 361,50 => 3 362, ze mzdy 1 687,50 => 1 688, zaměstnanec

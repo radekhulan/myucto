@@ -21,7 +21,13 @@ final readonly class SocialPersonMonthInput
         public ?string $jurisdictionEvidenceReference = null,
         public ?string $workingPensionerDiscountEvidenceReference = null,
         public bool $jurisdictionEvidenceMissing = false,
+        public bool $yearToDateUnknown = false,
     ) {
+        if ($yearToDateUnknown && $yearToDateAssessmentBaseBeforeMonthMinorUnits !== 0) {
+            throw new InvalidArgumentException(
+                'Unknown year-to-date social insurance base must be passed as zero.',
+            );
+        }
         if ($jurisdictionEvidenceMissing && $jurisdiction !== SocialJurisdictionEvidence::Unverified) {
             throw new InvalidArgumentException(
                 'Missing social jurisdiction evidence cannot carry a jurisdiction.',

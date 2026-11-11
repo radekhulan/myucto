@@ -370,9 +370,6 @@ final class SocialInsuranceMonthCalculator
         if ($input->workingPensionerDiscount === SocialDiscountEvidence::Unverified) {
             $issues[] = 'working_pensioner_discount_unverified';
         }
-        $issues = array_values(array_unique($issues));
-        sort($issues, SORT_STRING);
-
         $participatingBase = 0;
         $participates = false;
         foreach ($facts as $fact) {
@@ -386,6 +383,21 @@ final class SocialInsuranceMonthCalculator
                 $fact->assessmentBaseMinorUnits,
             );
         }
+        /*
+         * Neznámý úhrn předchozích měsíců roku (převzetí mezd v průběhu roku
+         * bez počátečních stavů) mění pojistné jen přes roční maximální
+         * vyměřovací základ (§ 15a zákona č. 589/1992 Sb.). Ten nemohl být
+         * dosažen, když ani měsíční základ násobený počtem měsíců roku do
+         * tohoto včetně na něj nedosáhne; jinak výpočet počká na počáteční stav.
+         */
+        if ($input->yearToDateUnknown && $participatingBase > 0) {
+            $months = (int) substr($calculationDate, 5, 2);
+            if ($participatingBase * $months >= $this->moneyParameter($ruleset, 'maximum_assessment_base.yearly')) {
+                $issues[] = 'annual_accumulator_missing';
+            }
+        }
+        $issues = array_values(array_unique($issues));
+        sort($issues, SORT_STRING);
 
         if ($issues !== []) {
             return new SocialPersonMonthResult(

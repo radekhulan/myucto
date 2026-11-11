@@ -286,4 +286,15 @@ final class PayrollRunValidationDetailsTest extends TestCase
     {
         return $this->pdo->query('SELECT * FROM payroll_run_validations')->fetchAll(PDO::FETCH_ASSOC);
     }
+
+    /**
+     * Chybějící sada exekučních srážek pro rok výplaty se týká jen osob se
+     * srážkou; osobě bez srážky výpočet vrátí „nic se nesráží" (audit ř. 19).
+     */
+    public function testMissingEnforcementRulesetTextConcernsOnlyPeopleWithDeductions(): void
+    {
+        $message = PayrollRunIssueGuidance::describe('enforcement_ruleset_not_effective_for_whole_year', 7)['message'];
+        self::assertStringContainsString('jen zaměstnance se srážkou', $message);
+        self::assertStringNotContainsString('i když zaměstnanec žádnou srážku nemá', $message);
+    }
 }

@@ -143,6 +143,7 @@ final class PayrollRunReadinessImpact
         'tax_residence_missing_unsigned_summary' => [self::IMPACT_REVISION, self::SCOPE_SETUP],
         'health_coverage_missing_summary' => [self::IMPACT_REVISION, self::SCOPE_SETUP],
         'social_jurisdiction_missing_summary' => [self::IMPACT_REVISION, self::SCOPE_SETUP],
+        'annual_accumulator_missing_summary' => [self::IMPACT_REVISION, self::SCOPE_SETUP],
         // Schválený průměr vstupuje do zmrazeného snímku vstupů běhu. Schválený
         // po výpočtu revize ho hlášení nevidí a oprava stojí opravnou revizi.
         'jmhz_average_hourly_earning_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
