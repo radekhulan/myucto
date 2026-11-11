@@ -289,6 +289,9 @@ final class PayrollRunSnapshotBuilder
             $periodEnd,
         );
         $deferredIncomes = $this->deferredIncomes($supplierId, $periodStart);
+        foreach (self::inputsAfterEmploymentEndValidations($employments, $deferredIncomes, $periodStart) as $validation) {
+            $validations[] = $validation;
+        }
         $payoutRuleRows = $this->batch->payoutRules($supplierId, $employeeIds);
         $payoutAccountRows = $this->batch->payoutAccounts(
             $supplierId,
@@ -1570,6 +1573,56 @@ final class PayrollRunSnapshotBuilder
                     implode(', ', $reasons),
                 ),
                 "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms",
+            );
+        }
+
+        return $validations;
+    }
+
+    /**
+     * Vztahy ukončené před začátkem období, které do běhu vstoupily jen kvůli
+     * mzdovému vstupu za období.
+     *
+     * Pravidlo členství ({@see PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql()})
+     * pouští skončený vztah do běhu, má-li za období nezrušený vstup, protože
+     * doplatek po skončení je legitimní. Bez potvrzeného odloženého příjmu je
+     * to ale skoro vždy vstup zadaný na špatný vztah (dohoda z ledna s vstupem
+     * za únor) a výpočet pak skončí obecnou výzvou k potvrzení odloženého
+     * příjmu, ze které nebylo poznat, o který vstup jde. Kontrola proto jmenuje
+     * měsíc vstupu, den konce a vede rovnou na vstupy vztahu.
+     *
+     * @param list<array<string,mixed>> $employments řádky {@see self::employmentRows()}
+     * @param array<int,mixed> $deferredIncomes potvrzené odložené příjmy období po vztazích
+     * @return list<PayrollRunValidation>
+     */
+    public static function inputsAfterEmploymentEndValidations(
+        array $employments,
+        array $deferredIncomes,
+        string $periodStart,
+    ): array {
+        $validations = [];
+        $period = substr($periodStart, 0, 7);
+        foreach ($employments as $row) {
+            $employmentId = (int) $row['employment_id'];
+            $endDate = $row['end_date'] ?? null;
+            if (!is_string($endDate) || $endDate >= $periodStart || isset($deferredIncomes[$employmentId])) {
+                continue;
+            }
+            $end = new \DateTimeImmutable($endDate);
+            $validations[] = new PayrollRunValidation(
+                'blocker',
+                'input_after_employment_end',
+                'employment',
+                $employmentId,
+                sprintf(
+                    '%s: vstup za %s je na vztahu ukončeném %s. Jde-li o doplatek po skončení, '
+                    . 'potvrďte na kartě vztahu odložený příjem; jinak vstup zrušte nebo ho zadejte '
+                    . 'na trvající vztah.',
+                    (string) ($row['full_name'] ?? ''),
+                    substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4),
+                    $end->format('j. n. Y'),
+                ),
+                '/payroll/components?tab=inputs&period=' . $period . '&employment=' . $employmentId,
             );
         }
 

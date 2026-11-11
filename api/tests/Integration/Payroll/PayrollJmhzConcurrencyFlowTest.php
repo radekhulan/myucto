@@ -285,8 +285,17 @@ final class PayrollJmhzConcurrencyFlowTest extends TestCase
         $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, 'concurrency-deferred-missing');
 
         self::assertNull($run['approved']);
-        self::assertSame(['statutory_calculation_manual_review'], array_column($run['blockers'], 'code'));
-        self::assertStringContainsString('v části Odložený příjem', (string) $run['blockers'][0]['message']);
+        $blockers = array_column($run['blockers'], null, 'code');
+        self::assertSame(
+            ['input_after_employment_end', 'statutory_calculation_manual_review'],
+            array_column($run['blockers'], 'code'),
+        );
+        self::assertStringContainsString('v části Odložený příjem', (string) $blockers['statutory_calculation_manual_review']['message']);
+        // Kontrola snímku jmenuje měsíc vstupu a den konce vztahu.
+        self::assertStringContainsString(
+            'vstup za 07/2026 je na vztahu ukončeném 30. 6. 2026',
+            (string) $blockers['input_after_employment_end']['message'],
+        );
     }
 
     /**
