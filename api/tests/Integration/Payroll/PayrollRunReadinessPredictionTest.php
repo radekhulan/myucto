@@ -178,7 +178,14 @@ final class PayrollRunReadinessPredictionTest extends TestCase
         self::assertSame($expected, $ids);
         self::assertSame([['kind' => 'annual_settlement_request', 'count' => 2]], $finding['bulk_actions']);
         self::assertStringContainsString('Syntetická Nevím', $finding['message']);
-        self::assertStringStartsWith('/payroll/annual-settlement', (string) $finding['entities'][0]['remediation_path']);
+        // Odkaz nese rok zúčtování (rok před hlášením), ne rok podle dneška.
+        self::assertSame('/payroll/annual-settlement?year=2026', $finding['remediation_path']);
+        foreach ($finding['entities'] as $entity) {
+            self::assertSame(
+                '/payroll/annual-settlement?year=2026&person=' . $entity['entity_id'],
+                $entity['remediation_path'],
+            );
+        }
 
         // Tlačítko vede na Roční zúčtování zúžené na tytéž osoby.
         $listed = \MyInvoice\Tests\Support\PayrollTestContainer::build()

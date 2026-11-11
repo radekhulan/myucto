@@ -119,7 +119,7 @@ final class PayrollE2eHppReadinessTest extends TestCase
 
         $finding = null;
         foreach ($readiness['findings'] as $candidate) {
-            if ($candidate['code'] === 'statutory_evidence_incomplete') {
+            if ($candidate['code'] === 'statutory_calculation_manual_review') {
                 $finding = $candidate;
             }
         }

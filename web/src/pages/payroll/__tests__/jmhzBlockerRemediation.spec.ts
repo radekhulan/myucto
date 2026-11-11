@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import { cs, en, i18nMessages } from '../../../../tests/locales'
-import type { PayrollJmhzXmlDryRunBlocker } from '@/api/payroll'
+import type { PayrollComponent, PayrollComponentJmhzMappingState, PayrollJmhzXmlDryRunBlocker } from '@/api/payroll'
 import { jmhzBlockerLabel, jmhzErrorMessage, jmhzRemediationKind, jmhzRemediationTarget } from '../jmhzBlockerRemediation'
 import { payrollCodeKey } from '../payrollServerMessage'
 
@@ -68,6 +68,7 @@ describe('navigace nálezů měsíčního hlášení', () => {
       { period: '2027-02', employments: [{ id: 7, employee_id: 3 }] },
     )
     expect(target('person', 3)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', person: '3' } })
+    expect(target('employee', 5)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', person: '5' } })
     expect(target('employment', 7)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', person: '3' } })
     expect(target('run', null)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026' } })
     expect(jmhzRemediationTarget(
@@ -129,34 +130,29 @@ describe('navigace nálezů měsíčního hlášení', () => {
 
 describe('zúžení číselníku složek z odkazu ?jmhz=', () => {
   it('souhrnný nález otevře jen složky s tímtéž stavem zařazení', async () => {
-    const { filterCatalogByJmhz, jmhzCatalogFilter, jmhzComponentQuery } = await import('@/pages/payroll/jmhzBlockerRemediation')
-    const states: Record<number, string> = { 1: 'configured', 2: 'missing', 3: 'manual_review' }
-    const components = [{ id: 1 }, { id: 2 }, { id: 3 }]
-    const stateOf = (component: { id: number }) => ({ status: states[component.id]! })
+    const { jmhzComponentQuery } = await import('@/pages/payroll/jmhzBlockerRemediation')
+    const { componentJmhzFilterFromQuery, componentMatchesJmhzFilter } = await import('@/pages/payroll/payrollRemediationQuery')
+    type Treatment = PayrollComponent['jmhz_treatment']
+    type Status = PayrollComponentJmhzMappingState['status']
+    const components: Array<{ id: number, jmhz_treatment: Treatment, status: Status }> = [
+      { id: 1, jmhz_treatment: 'included', status: 'configured' },
+      { id: 2, jmhz_treatment: 'included', status: 'missing' },
+      { id: 3, jmhz_treatment: 'manual_review', status: 'manual_review' },
+      { id: 4, jmhz_treatment: 'neznámé' as Treatment, status: 'excluded' },
+    ]
+    // Cesta odkazu: kód nálezu → `?jmhz=` → filtr stránky → složky číselníku.
+    const narrowed = (code: string): number[] => {
+      const filter = componentJmhzFilterFromQuery(jmhzComponentQuery(code, null))
+      return components
+        .filter(component => filter === null || componentMatchesJmhzFilter(filter, component, component))
+        .map(component => component.id)
+    }
 
-    const missing = jmhzCatalogFilter(jmhzComponentQuery('component_jmhz_mapping_missing', null).jmhz)
-    expect(filterCatalogByJmhz(components, stateOf, missing)).toEqual([{ id: 2 }])
-    const review = jmhzCatalogFilter(jmhzComponentQuery('component_jmhz_manual_review', null).jmhz)
-    expect(filterCatalogByJmhz(components, stateOf, review)).toEqual([{ id: 3 }])
-    expect(filterCatalogByJmhz(components, stateOf, jmhzCatalogFilter('invalid'))).toHaveLength(3)
-    expect(filterCatalogByJmhz(components, stateOf, jmhzCatalogFilter(undefined))).toHaveLength(3)
-  })
-})
-
-describe('odkaz na roční zúčtování z blokace hlášení', () => {
-  it('nese rok zúčtování (minulý rok hlášení) a osobu', async () => {
-    const { jmhzRemediationTarget } = await import('@/pages/payroll/jmhzBlockerRemediation')
-    const target = jmhzRemediationTarget(
-      {
-        code: 'jmhz_annual_request_status_unresolved',
-        entity_type: 'employee',
-        entity_id: 5,
-        attribute_ids: ['10319'],
-        remediation: { kind: 'annual_settlement', field: null },
-      } as unknown as PayrollJmhzXmlDryRunBlocker,
-      5,
-      { period: '2027-02', employments: [] },
-    )
-    expect(target).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', person: '5' } })
+    expect(narrowed('component_jmhz_mapping_missing')).toEqual([2])
+    expect(narrowed('component_jmhz_manual_review')).toEqual([3])
+    expect(narrowed('component_jmhz_treatment_invalid')).toEqual([4])
+    // Neověřené zařazení odměny filtr nenese: číselník zůstane celý.
+    expect(narrowed('component_jmhz_bonus_regularity_unverified')).toEqual([1, 2, 3, 4])
+    expect(componentJmhzFilterFromQuery({})).toBeNull()
   })
 })
