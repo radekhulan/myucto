@@ -25,7 +25,7 @@ import PayrollPayslipHourlyBreakdown from '@/components/payroll/PayrollPayslipHo
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
 import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
-import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, btnOutlineSmWrap, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate, formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
@@ -1964,8 +1964,8 @@ onMounted(load)
                 >
                   <template #item="{ item: entity }">
                     <p v-if="entity.message && entity.message !== finding.message" class="text-sm">{{ entity.message }}</p>
-                    <a v-if="entity.remediation_path" :href="readinessHref(entity.remediation_path)" :class="[btnOutlineSm('neutral'), 'mt-1 inline-flex']">
-                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+                    <a v-if="entity.remediation_path" :href="readinessHref(entity.remediation_path)" :class="[btnOutlineSmWrap('neutral'), 'mt-1 max-w-full text-left']" data-test="run-readiness-entity-link">
+                      <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
                       {{ t('payroll.runs.validation.open_remediation') }}<span v-if="entity.label">: {{ entity.label }}</span>
                     </a>
                   </template>
@@ -2196,7 +2196,7 @@ onMounted(load)
               </span>
             </div>
             <p class="mt-1 text-sm text-neutral-500">
-              {{ t('payroll.runs.payment_date_value', { date: run.payment_date }) }}
+              {{ t('payroll.runs.payment_date_value', { date: formatDate(run.payment_date) }) }}
               · {{ t('payroll.runs.revision', { revision: run.revision_no ?? 0 }) }}
             </p>
           </div>
@@ -3272,8 +3272,8 @@ onMounted(load)
               >
                 <template #item="{ item: entity }">
                   <p v-if="entity.message && entity.message !== finding.message">{{ entity.message }}</p>
-                  <a v-if="entity.remediation_path" :href="readinessHref(entity.remediation_path)" :class="[btnOutlineSm('neutral'), 'mt-1 inline-flex']">
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+                  <a v-if="entity.remediation_path" :href="readinessHref(entity.remediation_path)" :class="[btnOutlineSmWrap('neutral'), 'mt-1 max-w-full text-left']" data-test="run-readiness-entity-link">
+                    <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
                     {{ t('payroll.runs.validation.open_remediation') }}<span v-if="entity.label">: {{ entity.label }}</span>
                   </a>
                 </template>

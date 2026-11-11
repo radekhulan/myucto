@@ -268,6 +268,9 @@ final class PayrollJmhz2027FlowTest extends TestCase
         self::assertSame(1, $below[0]['count']);
         self::assertSame($person['employment_id'], $below[0]['entities'][0]['entity_id']);
         self::assertStringContainsString('24 900 Kč', $below[0]['message']);
+        // Období česky, ne ve tvaru ISO.
+        self::assertStringContainsString('pro období 01/2027', $below[0]['message']);
+        self::assertStringNotContainsString('2027-01', $below[0]['message']);
 
         $this->createApprovedInput($person, $this->baseComponentId, 2_240_000, 'minimum-2027', self::PERIOD_START);
         $this->createApprovedInput($partTime, $this->baseComponentId, 1_300_000, 'minimum-2027-pul', self::PERIOD_START);

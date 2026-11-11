@@ -922,7 +922,7 @@ final class PayrollRunReadinessService
                 . ' nesmí být nižší než minimální mzda (§ 111 zákoníku práce) a výpočet měsíční'
                 . ' mzdy doplatek do minima nedopočítává. Upravte mzdu v podmínkách vztahu,'
                 . ' nebo zadejte doplatek do minimální mzdy jako mzdový vstup.',
-                substr($periodStart, 0, 7),
+                substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4),
                 number_format(intdiv($minimum, 100), 0, ',', ' '),
                 count($below),
             ),

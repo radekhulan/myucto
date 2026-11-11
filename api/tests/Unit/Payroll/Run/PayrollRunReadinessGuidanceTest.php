@@ -31,6 +31,22 @@ final class PayrollRunReadinessGuidanceTest extends TestCase
         self::assertNotSame($first->message, $findings[0]['message']);
     }
 
+    /**
+     * Varování o nepodepsaném prohlášení mluvilo i u ledna 2027 jen o zvláštní
+     * sazbě daně. Zák. č. 360/2025 Sb. srážkovou daň podle § 6 odst. 4 ZDP od
+     * 1. 1. 2027 ruší (samostatný základ zálohy); věta proto jmenuje oba režimy
+     * a platí pro běh kteréhokoli roku.
+     */
+    public function testUnsignedDeclarationSummaryNamesTheRegimeOfBothYears(): void
+    {
+        $message = PayrollRunSnapshotBuilder::unsignedDeclarationsMessage(3);
+
+        self::assertStringContainsString('prohlášením poplatníka k dani: 3', $message);
+        self::assertStringContainsString('§ 6 odst. 4 ZDP', $message);
+        self::assertStringContainsString('do roku 2026 srážková daň', $message);
+        self::assertStringContainsString('od roku 2027 samostatný základ zálohy', $message);
+    }
+
     /** Q8-32: u každého záznamu je jméno, ne jen „Otevřít místo k opravě". */
     public function testGroupedEntitiesCarryTheEmploymentLabel(): void
     {

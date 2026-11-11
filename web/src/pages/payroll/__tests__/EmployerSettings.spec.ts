@@ -258,6 +258,8 @@ describe('EmployerSettings — účtová osnova', () => {
       social_security_variable_symbol: '0012345678',
       source_reference: 'synthetic-approved-source',
     }))
+    // Po uložení se dialog zavře sám; dřív zůstal otevřený s prázdným formulářem.
+    expect(document.querySelector('[data-registration-vs]')).toBeNull()
     wrapper.unmount()
   })
 

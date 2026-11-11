@@ -16,6 +16,7 @@ import { apiErrorMessage } from '@/api/errors'
 import type { PayrollPersonSensitiveReveal } from '@/api/payroll'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { formatMoneyMinor, formatNumber } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import { employmentCodeLabel, isValidPersonalNumber, personalNumberLabel, todayIso } from './employmentLifecycleUi'
 import PayrollPersonContactQuickFields from './PayrollPersonContactQuickFields.vue'
@@ -210,6 +211,12 @@ function minorToInput(value: number | null): string {
   const whole = Math.trunc(value / 100)
   const fraction = Math.abs(value % 100)
   return fraction === 0 ? String(whole) : `${whole}.${String(fraction).padStart(2, '0')}`
+}
+
+/** Týdenní úvazek v čtecím souhrnu podle jazyka („40", „37,5"), ne syrové „40.00" z databáze. */
+function weeklyHoursLabel(value: string): string {
+  const hours = Number(String(value).replace(',', '.'))
+  return Number.isFinite(hours) ? formatNumber(hours, { maximumFractionDigits: 2 }) : value
 }
 
 function amountMinor(value: string): number | null {
@@ -698,9 +705,9 @@ onMounted(load)
         <dd class="mt-0.5 text-sm text-neutral-900" data-test="read-employment">
           {{ t(`payroll.people.relations.${primaryEmployment.relation_type}`) }}
           <template v-if="personalNumberLabel(t, primaryEmployment.code)"> · {{ personalNumberLabel(t, primaryEmployment.code) }}</template>
-          <template v-if="form.weekly_hours"> · {{ form.weekly_hours }} {{ t('payroll.people.quick_edit.hours_unit') }}</template>
-          <template v-if="hourlyRemuneration"> · {{ t(`payroll.people.remuneration.hourly_${['dpp', 'dpc'].includes(primaryEmployment.relation_type) ? 'reward' : 'wage'}`) }}: {{ minorToInput(primaryEmployment.terms[0]?.hourly_rate_minor ?? null) }} Kč{{ t('payroll.people.remuneration.per_hour') }}</template>
-          <template v-else-if="form.monthly_gross"> · {{ form.monthly_gross }} Kč</template>
+          <template v-if="form.weekly_hours"> · {{ weeklyHoursLabel(form.weekly_hours) }} {{ t('payroll.people.quick_edit.hours_unit') }}</template>
+          <template v-if="hourlyRemuneration"> · {{ t(`payroll.people.remuneration.hourly_${['dpp', 'dpc'].includes(primaryEmployment.relation_type) ? 'reward' : 'wage'}`) }}: {{ formatMoneyMinor(primaryEmployment.terms[0]?.hourly_rate_minor ?? null) }}{{ t('payroll.people.remuneration.per_hour') }}</template>
+          <template v-else-if="form.monthly_gross"> · {{ formatMoneyMinor(amountMinor(form.monthly_gross)) }}</template>
         </dd>
       </div>
     </dl>
