@@ -65,6 +65,14 @@ final class PayrollEmploymentTermsBulkEdit
     ];
 
     private const CHANGE_REASON = 'Hromadná úprava podmínek vybraných vztahů.';
+
+    /** Jediné hodnoty, se kterými zákonný výpočet počítá. */
+    private const SUPPORTED_OVERRIDES = [
+        'social_insurance_participation' => 'automatic',
+        'health_insurance_participation' => 'automatic',
+        'tax_regime' => 'advance',
+    ];
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollEmploymentRepository $employments,
@@ -137,6 +145,7 @@ final class PayrollEmploymentTermsBulkEdit
                 'activity_code' => $row['activity_code'],
                 'work_place' => $row['work_place'],
                 'jmhz_workplace_municipality_code' => $row['jmhz_workplace_municipality_code'],
+                'unsupported_overrides' => self::unsupportedOverrides($row),
             ];
         }
 
@@ -414,7 +423,38 @@ final class PayrollEmploymentTermsBulkEdit
             $body['jmhz_workplace_country_code'] = $workplace['country_code'];
         }
 
+        if (isset($requested['reset_unsupported_overrides'])) {
+            // Výpočet umí jen automatickou účast a zálohovou daň; zákonné
+            // zařazení (srážka, účast podle příjmu) si odvodí sám. Ruční
+            // přepsání ho vždy zastavilo, takže návrat nic nezhorší.
+            foreach (self::SUPPORTED_OVERRIDES as $key => $supported) {
+                if ($body[$key] !== $supported) {
+                    $body[$key] = $supported;
+                    $fields[] = $key;
+                }
+            }
+        }
+
         return [$body, $fields, null];
+    }
+
+    /**
+     * Ruční přepsání, které výpočet nepodporuje
+     * (PayrollRunStatutoryInputAssembler, `*_override_unsupported`).
+     *
+     * @param array<string,mixed> $row
+     * @return list<string>
+     */
+    public static function unsupportedOverrides(array $row): array
+    {
+        $unsupported = [];
+        foreach (self::SUPPORTED_OVERRIDES as $key => $supported) {
+            if (array_key_exists($key, $row) && $row[$key] !== null && $row[$key] !== $supported) {
+                $unsupported[] = $key;
+            }
+        }
+
+        return $unsupported;
     }
 
     /**
@@ -507,6 +547,9 @@ final class PayrollEmploymentTermsBulkEdit
                 'country_code' => $country,
                 'name' => $name,
             ];
+        }
+        if (($changes['reset_unsupported_overrides'] ?? false) === true) {
+            $requested['reset_unsupported_overrides'] = true;
         }
         if ($requested === []) {
             throw new \InvalidArgumentException('Zvolte aspoň jeden údaj, který se má u vybraných vztahů upravit.');
@@ -697,6 +740,8 @@ final class PayrollEmploymentTermsBulkEdit
                     term.remuneration_type, term.hourly_rate_minor,
                     term.probable_hourly_earning_minor, term.cz_isco_code, term.activity_code,
                     term.work_place, term.jmhz_workplace_municipality_code,
+                    term.social_insurance_participation, term.health_insurance_participation,
+                    term.tax_regime,
                     (term.hourly_rate_minor IS NULL
                         AND (term.remuneration_type = 'hourly'
                              OR COALESCE(term.monthly_gross_minor, employment.monthly_gross_minor) IS NULL)

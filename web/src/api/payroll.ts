@@ -1220,6 +1220,8 @@ export interface PayrollTermsBulkPreviewItem {
   activity_code: string | null
   work_place: string | null
   jmhz_workplace_municipality_code: string | null
+  /** Ruční účast nebo daňový režim, které výpočet vždy zastaví. */
+  unsupported_overrides?: string[]
 }
 
 export interface PayrollTermsBulkPreview {
@@ -1241,6 +1243,8 @@ export interface PayrollTermsBulkChanges {
   activity_code?: string
   jmhz_workplace_municipality_code?: string
   jmhz_workplace_country_code?: string
+  /** Vrátit účast na automatickou a daň na zálohu (ruční přepsání výpočet neumí). */
+  reset_unsupported_overrides?: boolean
 }
 
 export interface PayrollTermsBulkOutcome {

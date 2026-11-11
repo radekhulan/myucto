@@ -3986,6 +3986,9 @@
       }
     },
     "terms_bulk": {
+      "override_badge": "manual participation/tax override",
+      "reset_overrides": "Reset insurance participation to \"automatic\" and tax to \"advance\" (relationships with a manual override: {count})",
+      "reset_overrides_hint": "The calculation does not support manual overrides and stops the payroll. It derives the statutory classification (participation by income, withholding tax) itself.",
       "title": "Edit terms of selected employments",
       "intro": "The chosen values are written exactly as on the employment card: as a correction of the current terms version or, when payroll from it is already posted, as a new version from the first unsettled month. Employments held by approved or locked payroll are skipped with a reason.",
       "new_version_badge": "new version from {month}",
@@ -7474,6 +7477,9 @@
       "health_mode": "Health insurance participation",
       "health_association_member": "Member of a cooperative or owners' association working for it for remuneration",
       "health_association_member_hint": "An employee for health insurance only in a month in which the counting income is reached (Section 5(a) of Act No. 48/1997 Coll.). In other months the person is left out of the payment statement and the minimum.",
+      "override_unsupported_hint": "The calculation supports only automatic participation by relationship type and income (it derives the statutory classification itself). Other options are disabled for now.",
+      "tax_regime_unsupported_hint": "The calculation supports only the advance; it derives withholding tax for agreements and small-scale employment below the threshold (§ 6(4) Income Tax Act) itself.",
+      "override_unsupported_warning": "The calculation does not support this option and will stop this payroll. Reset it to the default; for many relationships use Payroll → Employees → More actions → bulk terms edit.",
       "tax_regime_label": "Tax regime",
       "foreign_country": "Foreign legislation country",
       "a1_certificate_until": "A1 certificate valid until",

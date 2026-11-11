@@ -164,6 +164,54 @@ final class PayrollEmploymentTermsBulkEditTest extends TestCase
         self::assertSame(1, $this->termCount($filled));
     }
 
+    /**
+     * Ruční účast nebo srážkový režim výpočet vždy zastaví
+     * (`*_override_unsupported`); hromadně se vrátí na automatickou účast
+     * a zálohu, ze které výpočet zákonné zařazení odvodí sám.
+     */
+    public function testUnsupportedOverridesAreResetToStatutoryDefaults(): void
+    {
+        $overridden = $this->createDpp('Syntetický Přepsaný', 'DPP-OVR', [
+            'social_insurance_participation' => 'excluded',
+            'health_insurance_participation' => 'excluded',
+            'tax_regime' => 'withholding',
+        ]);
+        $plain = $this->createDpp('Syntetický Automatický', 'DPP-AUTO', []);
+
+        $preview = $this->bulk->preview($this->supplierId, self::PERIOD, 'dpp', [$overridden, $plain]);
+        $flags = array_column($preview['items'], 'unsupported_overrides', 'employment_id');
+        self::assertSame(
+            ['social_insurance_participation', 'health_insurance_participation', 'tax_regime'],
+            $flags[$overridden],
+        );
+        self::assertSame([], $flags[$plain]);
+
+        $result = $this->bulk->apply(
+            $this->supplierId,
+            self::PERIOD,
+            PayrollEmploymentTermsBulkEdit::MODE_FILL,
+            ['reset_unsupported_overrides' => true],
+            [$overridden, $plain],
+            $this->userId,
+            null,
+            null,
+        );
+
+        self::assertSame(['applied' => 1, 'skipped' => 1, 'failed' => 0], $result['counts'], json_encode($result, JSON_UNESCAPED_UNICODE));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT social_insurance_participation, health_insurance_participation, tax_regime
+               FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY effective_from DESC, id DESC LIMIT 1',
+        );
+        $stmt->execute([$this->supplierId, $overridden]);
+        self::assertSame([
+            'social_insurance_participation' => 'automatic',
+            'health_insurance_participation' => 'automatic',
+            'tax_regime' => 'advance',
+        ], $stmt->fetch(\PDO::FETCH_ASSOC));
+        self::assertSame(1, $this->termCount($overridden));
+    }
+
     public function testActivityCodeOutsideRelationFamilyIsSkipped(): void
     {
         $employment = $this->createDpp('Syntetická Dohoda', 'DPP-ACT', []);

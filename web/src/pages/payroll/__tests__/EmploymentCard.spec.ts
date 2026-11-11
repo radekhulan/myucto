@@ -569,6 +569,24 @@ describe('EmploymentCard', () => {
    * Kdo si přišel opravit překlep, dřív tím do evidence zapsal změnu podmínek
    * k datu, které si musel vymyslet.
    */
+  it('volby účasti a daně, které výpočet nepodporuje, nenabízí a uloženou upozorní', async () => {
+    const wrapper = await mountCard()
+    const disabled = (selector: string) => wrapper.get(selector).findAll('option')
+      .filter(option => (option.element as HTMLOptionElement).disabled)
+      .map(option => (option.element as HTMLOptionElement).value)
+    expect(disabled('[data-test="terms-social-mode"]')).toEqual(['included', 'excluded', 'foreign'])
+    expect(disabled('[data-test="terms-health-mode"]')).toEqual(['included', 'excluded', 'foreign'])
+    expect(disabled('[data-test="terms-tax-regime"]')).toEqual(['withholding', 'foreign', 'manual_review'])
+
+    const overridden = employment()
+    overridden.terms = [{ ...overridden.terms[0]!, tax_regime: 'withholding' }]
+    const stored = await mountCard(overridden)
+    expect(stored.get('[data-test="terms-tax-regime"]').findAll('option')
+      .filter(option => (option.element as HTMLOptionElement).disabled)
+      .map(option => (option.element as HTMLOptionElement).value)).toEqual(['foreign', 'manual_review'])
+    expect(stored.text()).toContain('payroll.people.override_unsupported_warning')
+  })
+
   it('běžnou úpravu uloží jako opravu platné verze, ne jako novou', async () => {
     vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()

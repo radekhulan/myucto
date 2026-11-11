@@ -171,6 +171,36 @@ describe('PayrollTermsBulkEditDialog', () => {
     expect(rows).toContain('payroll.terms_bulk.row_correction')
   })
 
+  it('vztahy s ručním přepsáním účasti nebo daně označí a hromadně vrátí na výchozí hodnoty', async () => {
+    const data = preview()
+    data.items[0] = item(12, 'Syntetická osoba', { unsupported_overrides: ['social_insurance_participation', 'tax_regime'] })
+    m.termsBulkPreview.mockResolvedValue(data)
+    m.termsBulkApply.mockResolvedValue({
+      period_start: '2026-08-01',
+      mode: 'fill',
+      counts: { applied: 1, skipped: 1, failed: 0 },
+      applied: [{ employment_id: 12, employee_id: 112, full_name: 'Syntetická osoba', fields: ['social_insurance_participation', 'tax_regime'], kind: 'correction', effective_from: '2026-06-01', warnings: [] }],
+      skipped: [{ employment_id: 13, employee_id: 113, full_name: 'Druhá syntetická osoba', reason: 'nothing_to_change' }],
+      failed: [],
+    })
+
+    const wrapper = mount(PayrollTermsBulkEditDialog, { ...MOUNT, props: { periodStart: '2026-08-01' } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="terms-bulk-override-12"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="terms-bulk-override-13"]').exists()).toBe(false)
+    await wrapper.get('[data-test="terms-bulk-reset-overrides"]').setValue(true)
+    await wrapper.get('[data-test="terms-bulk-apply"]').trigger('click')
+    await flushPromises()
+
+    expect(m.termsBulkApply).toHaveBeenCalledWith({
+      period_start: '2026-08-01',
+      mode: 'fill',
+      changes: { reset_unsupported_overrides: true },
+      employment_ids: [12, 13],
+    })
+  })
+
   it('pravděpodobný výdělek bez odůvodnění neodešle', async () => {
     m.termsBulkPreview.mockResolvedValue(preview())
 

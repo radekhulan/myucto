@@ -3986,6 +3986,9 @@
       }
     },
     "terms_bulk": {
+      "override_badge": "ruční přepsání účasti/daně",
+      "reset_overrides": "Vrátit účast na pojištění na „automaticky“ a daň na „zálohu“ (vztahů s ručním přepsáním: {count})",
+      "reset_overrides_hint": "Ruční přepsání výpočet nepodporuje a mzdu zastaví. Zákonné zařazení (účast podle příjmu, srážková daň) výpočet odvodí sám.",
       "title": "Upravit podmínky vybraných vztahů",
       "intro": "Zvolené údaje se zapíší stejně jako na kartě vztahu: jako oprava platné verze podmínek, nebo, je-li z ní už zúčtovaná mzda, jako nová verze od prvního nezúčtovaného měsíce. Vztahy, které drží schválená nebo zamčená mzda, se vynechají s důvodem.",
       "new_version_badge": "nová verze od {month}",
@@ -7474,6 +7477,9 @@
       "health_mode": "Účast na zdravotním pojištění",
       "health_association_member": "Člen družstva nebo SVJ, který pro ně pracuje za odměnu",
       "health_association_member_hint": "Zaměstnancem pro zdravotní pojištění je jen v měsíci, kdy dosáhne započitatelného příjmu (§ 5 písm. a) zákona č. 48/1997 Sb.). V ostatních měsících se nepočítá do přehledu o platbě ani do minima.",
+      "override_unsupported_hint": "Výpočet umí jen automatickou účast podle druhu vztahu a výše příjmu (zákonné zařazení si odvodí sám). Jiné volby jsou zatím vypnuté.",
+      "tax_regime_unsupported_hint": "Výpočet umí jen zálohu; srážkovou daň u DPP a zaměstnání malého rozsahu pod rozhodnou částkou (§ 6 odst. 4 ZDP) odvodí sám.",
+      "override_unsupported_warning": "Tuto volbu výpočet nepodporuje a mzdu vztahu zastaví. Vraťte ji na výchozí hodnotu; u více vztahů naráz v Mzdy → Zaměstnanci → Další funkce → Upravit podmínky vybraných vztahů.",
       "tax_regime_label": "Daňový režim",
       "foreign_country": "Stát cizích předpisů",
       "a1_certificate_until": "Potvrzení A1 platné do",

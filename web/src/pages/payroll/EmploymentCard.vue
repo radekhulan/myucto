@@ -623,6 +623,11 @@ function fieldWarning(field: string): string | null {
   return fieldWarnings.value[field] ?? null
 }
 
+/** Ruční přepsání, které výpočet nepodporuje: mzdu vždy zastaví. */
+function overrideUnsupportedWarning(value: string, supported: string): string | null {
+  return value === supported ? null : t('payroll.people.override_unsupported_warning')
+}
+
 /** Hodnota pole tak, jak ji účetní vidí — podle ní se pozná, že chybu opravuje. */
 function fieldValue(field: string): string {
   if (field === 'hourly_rate_minor') return hourlyRateInput.value
@@ -2539,16 +2544,18 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               <label :class="FIELD">
                 {{ t('payroll.people.social_mode') }}
                 <select v-model="termsForm.social_insurance_participation" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('social_insurance_participation')]" :aria-invalid="fieldInvalid('social_insurance_participation')" data-test="terms-social-mode">
-                  <option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option>
+                  <option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode" :disabled="mode !== 'automatic' && termsForm.social_insurance_participation !== mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option>
                 </select>
-                <FieldNote :error="fieldError('social_insurance_participation')" :warning="fieldWarning('social_insurance_participation')" />
+                <FieldNote :error="fieldError('social_insurance_participation')" :warning="fieldWarning('social_insurance_participation') || overrideUnsupportedWarning(termsForm.social_insurance_participation, 'automatic')" />
+                <span class="text-xs text-neutral-500">{{ t('payroll.people.override_unsupported_hint') }}</span>
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.health_mode') }}
                 <select v-model="termsForm.health_insurance_participation" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('health_insurance_participation')]" :aria-invalid="fieldInvalid('health_insurance_participation')" data-test="terms-health-mode">
-                  <option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option>
+                  <option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode" :disabled="mode !== 'automatic' && termsForm.health_insurance_participation !== mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option>
                 </select>
-                <FieldNote :error="fieldError('health_insurance_participation')" :warning="fieldWarning('health_insurance_participation')" />
+                <FieldNote :error="fieldError('health_insurance_participation')" :warning="fieldWarning('health_insurance_participation') || overrideUnsupportedWarning(termsForm.health_insurance_participation, 'automatic')" />
+                <span class="text-xs text-neutral-500">{{ t('payroll.people.override_unsupported_hint') }}</span>
               </label>
               <label
                 v-if="employment.relation_type !== 'dpp' && employment.relation_type !== 'dpc'"
@@ -2569,9 +2576,10 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               <label :class="FIELD">
                 {{ t('payroll.people.tax_regime_label') }}
                 <select v-model="termsForm.tax_regime" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('tax_regime')]" :aria-invalid="fieldInvalid('tax_regime')" data-test="terms-tax-regime">
-                  <option v-for="mode in ['advance','withholding','foreign','manual_review']" :key="mode" :value="mode">{{ t(`payroll.people.tax_regime.${mode}`) }}</option>
+                  <option v-for="mode in ['advance','withholding','foreign','manual_review']" :key="mode" :value="mode" :disabled="mode !== 'advance' && termsForm.tax_regime !== mode">{{ t(`payroll.people.tax_regime.${mode}`) }}</option>
                 </select>
-                <FieldNote :error="fieldError('tax_regime')" :warning="fieldWarning('tax_regime')" />
+                <FieldNote :error="fieldError('tax_regime')" :warning="fieldWarning('tax_regime') || overrideUnsupportedWarning(termsForm.tax_regime, 'advance')" />
+                <span class="text-xs text-neutral-500">{{ t('payroll.people.tax_regime_unsupported_hint') }}</span>
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.foreign_country') }}

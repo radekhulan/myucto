@@ -56,6 +56,7 @@ const probableEarning = ref('')
 const probableRationale = ref('')
 const czIscoCode = ref<string | null>(null)
 const activityCode = ref('')
+const resetOverrides = ref(false)
 const municipalityCode = ref<string | null>(null)
 const municipalityName = ref<string | null>(null)
 const countryCode = ref('CZ')
@@ -89,6 +90,10 @@ function formatMinor(value: number | null): string {
   return (value / 100).toLocaleString('cs-CZ', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 }
 
+const overrideCount = computed(() =>
+  (preview.value?.items ?? []).filter(item => item.unsupported_overrides?.length).length,
+)
+
 const changes = computed<PayrollTermsBulkChanges | null>(() => {
   const payload: PayrollTermsBulkChanges = {}
   const rate = toMinor(hourlyRate.value)
@@ -106,6 +111,7 @@ const changes = computed<PayrollTermsBulkChanges | null>(() => {
   }
   if (czIscoCode.value) payload.cz_isco_code = czIscoCode.value
   if (activityCode.value) payload.activity_code = activityCode.value
+  if (resetOverrides.value) payload.reset_unsupported_overrides = true
   if (municipalityCode.value) {
     payload.jmhz_workplace_municipality_code = municipalityCode.value
     payload.jmhz_workplace_country_code = countryCode.value
@@ -318,6 +324,11 @@ onMounted(async () => {
                 :data-test="`terms-bulk-new-version-${item.employment_id}`"
               >{{ t('payroll.terms_bulk.new_version_badge', { month: monthLabel(item.new_version_from) }) }}</span>
               <span
+                v-if="item.unsupported_overrides?.length"
+                class="rounded-full bg-danger-50 px-2 py-0.5 text-xs text-danger-700"
+                :data-test="`terms-bulk-override-${item.employment_id}`"
+              >{{ t('payroll.terms_bulk.override_badge') }}</span>
+              <span
                 v-if="item.imported_wage"
                 class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600"
                 :data-test="`terms-bulk-imported-wage-${item.employment_id}`"
@@ -478,6 +489,17 @@ onMounted(async () => {
             </select>
           </label>
         </div>
+
+        <label
+          v-if="overrideCount > 0 || resetOverrides"
+          class="flex items-start gap-2 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800"
+        >
+          <input v-model="resetOverrides" type="checkbox" :disabled="applying" class="mt-0.5" data-test="terms-bulk-reset-overrides">
+          <span>
+            {{ t('payroll.terms_bulk.reset_overrides', { count: overrideCount }) }}
+            <span class="block text-xs">{{ t('payroll.terms_bulk.reset_overrides_hint') }}</span>
+          </span>
+        </label>
 
         <p v-if="applyError" role="alert" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700">
           {{ applyError }}
