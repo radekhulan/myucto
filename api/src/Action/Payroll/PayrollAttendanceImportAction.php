@@ -82,6 +82,12 @@ final class PayrollAttendanceImportAction
             ) {
                 return $error;
             }
+            // Údaje pro registraci se zapisují na kartu osoby, vztahu a do zákonné evidence.
+            if (($body['fill_registration_data'] ?? false) === true
+                && ($error = $this->authorize($request, $response, 'payroll.person.write')) !== null
+            ) {
+                return $error;
+            }
             $result = $this->imports->apply(
                 $this->currentSupplierId($request),
                 $this->string($body, 'period'),
@@ -101,6 +107,8 @@ final class PayrollAttendanceImportAction
                 ($body['materialize_absence_compensations'] ?? false) === true,
                 ($body['create_deductions'] ?? false) === true,
                 ($body['confirm_source_checks'] ?? false) === true,
+                ($body['fill_registration_data'] ?? false) === true,
+                ($body['adopt_probable_earnings'] ?? false) === true,
             );
         } catch (AttendanceSourceConfirmationRequired $e) {
             return Json::error($response, 'source_confirmation_required', $e->getMessage(), 409, ['source_checks' => $e->checks]);

@@ -564,6 +564,25 @@ export interface PayrollEmploymentCreatePayload {
   meal_entitlement_basis?: PayrollMealEntitlementBasis
   monthly_gross_minor: number | null
   terms: PayrollEmploymentTermsPayload
+  /** U DPP: použít otevřenou dohodu osoby místo nové (server případně prodlouží konec). */
+  use_open_agreement?: number
+  /** U DPP: založit novou dohodu i vedle otevřené. */
+  confirm_new_agreement?: boolean
+}
+
+/** Otevřená DPP osoby, viz PayrollOpenAgreements::describe() na serveru. */
+export interface PayrollOpenAgreement {
+  employment_id: number
+  employee_id: number
+  employee_name: string
+  code: string
+  status: string
+  start_date: string | null
+  end_date: string | null
+  /** Pokrývá nástup nové dohody, jde ji použít místo nové. */
+  reusable: boolean
+  /** Na kolik se otevřené dohodě prodlouží sjednaný konec. */
+  extend_to: string | null
 }
 
 export type PayrollMealEntitlementBasis = 'shift' | 'calendar_day'
@@ -9175,8 +9194,13 @@ export const payrollApi = {
       `/payroll/people/${personId}/payout-rules/apply-defaults`,
     ).then(response => response.data),
   createEmployment: (personId: number, payload: PayrollEmploymentCreatePayload) =>
-    api.post<{ employment: PayrollEmployment; warnings?: PayrollEmploymentSaveWarning[] }>(`/payroll/people/${personId}/employments`, payload)
-      .then(response => employmentSaveResult(response.data)),
+    api.post<{ employment: PayrollEmployment; warnings?: PayrollEmploymentSaveWarning[]; reused?: boolean; extended_to?: string | null }>(`/payroll/people/${personId}/employments`, payload)
+      // `reused` = server místo nové DPP použil otevřenou dohodu osoby.
+      .then(response => ({
+        ...employmentSaveResult(response.data),
+        reused: response.data.reused === true,
+        extended_to: response.data.extended_to ?? null,
+      })),
   // Mzda smí jet i s novou verzí podmínek — „od září bereš víc" je jedna
   // změna, ne dvě. Klíč je volitelný: kdo ho nepošle, mzdy se nedotkne.
   remunerationOptions: (effectiveFrom: string) =>

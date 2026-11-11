@@ -1,6 +1,8 @@
 import { api } from './client'
 import { downloadApiFile } from '@/utils/downloadFile'
-import type { PayrollAgreementAnnualHours } from './payroll'
+import type { PayrollAgreementAnnualHours, PayrollOpenAgreement } from './payroll'
+
+export type { PayrollOpenAgreement }
 
 /** Soubor přenášený v JSON těle; obsah je base64 bez prefixu `data:`. */
 export interface ImportFilePayload {
@@ -387,6 +389,9 @@ export type AttendanceMeaning =
   | 'relation_label'
   | 'department' | 'cost_center' | 'position' | 'weekly_hours' | 'start_end_note' | 'start_date' | 'monthly_wage'
   | 'hourly_rate' | 'end_date' | 'bank_account'
+  | 'address_street' | 'address_house_number' | 'address_city' | 'address_postal_code' | 'address_country'
+  | 'citizenship' | 'cz_isco_code' | 'activity_code' | 'workplace' | 'tax_residence' | 'tax_declaration'
+  | 'tax_declaration_from' | 'education_code' | 'employment_status_code'
   | 'worked_hours' | 'overtime_hours' | 'night_hours' | 'weekend_hours' | 'holiday_work_hours'
   | 'afternoon_hours' | 'fund_hours'
   | 'vacation_hours' | 'holiday_hours' | 'sick_hours' | 'doctor_hours' | 'care_hours'
@@ -541,7 +546,43 @@ export interface AttendancePerson {
   reference: { gross_minor: number | null; net_minor: number | null; hours: string | null }
   /** Roční hodiny na DPP po započtení importované docházky; jen u osob přiřazených na DPP. */
   dpp_annual_hours?: PayrollAgreementAnnualHours & { imported_minutes: number }
+  /** Údaje pro registraci ČSSZ, které se zapíšou (nové osobě všechny, existující jen chybějící). */
+  registration?: AttendanceRegistrationItem[]
+  /** Návrh pravděpodobného výdělku ze sazby nebo z odměny za odpracované hodiny. */
+  probable_earning?: AttendanceProbableEarning | null
+  /** Osoba je v evidenci (vazba, rodné nebo osobní číslo), jen nemá vztah v období: založí se jí nový vztah. */
+  existing_person?: AttendanceExistingPerson | null
+  /** Otevřená DPP osoby, která v období nemá vztah (jen u osob k založení). */
+  open_agreement?: PayrollOpenAgreement | null
   warnings: string[]
+}
+
+export interface AttendanceExistingPerson {
+  employee_id: number
+  employee_name: string
+  matched_by: 'link' | 'birth_number' | 'employment_code'
+  /** Druh posledního vztahu osoby, výchozí druh nové dohody. */
+  relation_type: RegistrationRelationType
+}
+
+/** Pravděpodobný výdělek z podkladů, viz AttendanceImportService::probableEarnings(). */
+export interface AttendanceProbableEarning {
+  source: 'rate' | 'amount'
+  hourly_minor: number
+  amount_minor: number | null
+  hours: string | null
+}
+
+export interface AttendanceProbableEarningChange extends AttendanceProbableEarning {
+  key: string
+  display_name: string
+  employment_id: number
+}
+
+/** Údaj pro registraci ČSSZ v náhledu, viz AttendanceRegistrationData::display() na serveru. */
+export interface AttendanceRegistrationItem {
+  key: 'address' | 'citizenship' | 'cz_isco_code' | 'activity_code' | 'workplace' | 'tax_residence' | 'tax_declaration' | 'employment_status_code' | 'education_code'
+  value: string
 }
 
 export interface AttendanceComponentCheck {
@@ -637,6 +678,8 @@ export interface AttendancePreview {
   persons: AttendancePerson[]
   component_checks: AttendanceComponentCheck[]
   wage_changes: AttendanceWageChange[]
+  /** Pravděpodobné výdělky k potvrzení u vztahů, které žádný nemají. */
+  probable_earning_changes?: AttendanceProbableEarningChange[]
   upgrade_available: AttendanceSampleUpgrade | null
   summary: {
     persons: number
@@ -648,6 +691,8 @@ export interface AttendancePreview {
     amount_minor_total: number
     deductions?: number
     deduction_minor_total?: number
+    /** Přiřazené osoby, kterým v evidenci chybí údaje pro registraci z podkladů. */
+    registration_gaps?: number
   }
 }
 
@@ -680,6 +725,10 @@ export interface AttendanceApplyPayload {
   profile_id?: number | null
   /** Účetní potvrdila nález kontrol období a dvojích vstupů (`source_checks`). */
   confirm_source_checks?: boolean
+  /** Doplnit přiřazeným osobám chybějící údaje pro registraci ČSSZ z podkladů. */
+  fill_registration_data?: boolean
+  /** Zapsat navržené pravděpodobné výdělky vztahům, které žádný nemají. */
+  adopt_probable_earnings?: boolean
 }
 
 /** Výsledek zápisu srážek z podkladů (dohody o srážce na měsíc). */
@@ -725,6 +774,10 @@ export interface AttendanceApplyResult {
   wage_conflicts: { key: string; display_name: string; reason: string }[]
   runs_needing_refresh: AttendanceRunNeedingRefresh[]
   deductions?: AttendanceDeductionReport | null
+  /** Doplnění údajů pro registraci ČSSZ; null = volba vypnutá. */
+  registration?: { filled: number; notes: { key: string; display_name: string; reason: string }[] } | null
+  /** Zápis pravděpodobných výdělků; null = volba vypnutá. */
+  probable_earnings?: { adopted: number; conflicts: { key: string; display_name: string; reason: string }[] } | null
 }
 
 /** Hrubá a čistá mzda z mzdového exportu v dávce proti výpočtu mzdového běhu období. */
@@ -766,12 +819,16 @@ export interface AttendancePersonCreate {
   fixed_term_end_on?: string | null
   personal_number: string | null
   activate: boolean
+  /** Otevřená DPP osoby, která se použije místo nové dohody. */
+  use_open_agreement?: number | null
+  /** Výslovně nová DPP vedle otevřené dohody. */
+  create_new_agreement?: boolean
 }
 
 export interface AttendancePersonsResult {
   results: {
     person_key: string
-    status: 'created' | 'failed'
+    status: 'created' | 'employment_created' | 'reused' | 'failed'
     employee_id: number | null
     employment_id: number | null
     message: string | null

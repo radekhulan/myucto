@@ -14,6 +14,14 @@ final class AttendanceRuleSuggesterTest extends TestCase
     /** @return iterable<string,array{string,string,?string}> */
     public static function headers(): iterable
     {
+        // Hlavičky šablony Vzoru MyÚčto pozná návrh i ve vlastním sešitu.
+        yield ['Státní občanství', 'citizenship', null];
+        yield ['PSČ', 'address_postal_code', null];
+        yield ['Obec trvalého pobytu', 'address_city', null];
+        yield ['CZ-ISCO', 'cz_isco_code', null];
+        yield ['Místo výkonu práce', 'workplace', null];
+        yield ['Prohlášení poplatníka', 'tax_declaration', null];
+        yield ['Hodinová sazba (Kč/h)', 'hourly_rate', null];
         yield ['Jméno a příjmení', 'person_name', null];
         yield ['Zaměstnanec', 'person_name', null];
         yield ['Osobní číslo', 'personal_number', null];

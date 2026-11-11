@@ -24,12 +24,14 @@ use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\Payroll\Absence\ImportAbsenceCompensationRates;
 use MyInvoice\Service\Payroll\Absence\PayrollImportAbsenceCompensationMaterializer;
 use MyInvoice\Service\Payroll\Component\PayrollInputImportService;
+use MyInvoice\Service\Payroll\Employment\PayrollOpenAgreements;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportWriter;
 use MyInvoice\Service\Payroll\Net\DeductionAgreementStatus;
 use MyInvoice\Service\Payroll\Net\DeductionAgreementTerms;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 use MyInvoice\Service\Payroll\PayrollPersonProfileValidator;
+use MyInvoice\Service\Payroll\PayrollTaxDeclarationBulkSign;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -122,6 +124,10 @@ final class AttendanceImportService
         private readonly PayrollPersonProfileRepository $personProfiles,
         private readonly PayrollPersonAccountVerificationService $accountVerification,
         private readonly DemoMode $demo,
+        private readonly AttendanceOpenAgreementMatcher $openAgreementMatcher,
+        private readonly PayrollOpenAgreements $openAgreements,
+        private readonly RegistrationImportWriter $registrationWriter,
+        private readonly PayrollTaxDeclarationBulkSign $declarations,
     ) {
     }
 
@@ -242,6 +248,19 @@ final class AttendanceImportService
          * dávku s nálezem nepoužít a vrátit nález, `true` = účetní nález potvrdila.
          */
         ?bool $sourceChecksConfirmed = null,
+        /*
+         * Doplnit přiřazeným osobám údaje pro registraci ČSSZ, které jim
+         * v evidenci chybí ({@see AttendanceRegistrationData}). Jako souhrn
+         * docházky se zapisuje až po dávce a i při jejím opakování; zapisuje se
+         * jen chybějící, takže opakování nic nepřepíše.
+         */
+        bool $fillRegistrationData = false,
+        /*
+         * Zapsat navržené pravděpodobné výdělky vztahům, které žádný nemají
+         * ({@see self::probableEarnings()}). Jako mzda až po dávce, opakování
+         * už zapsaný výdělek nenavrhne znovu.
+         */
+        bool $adoptProbableEarnings = false,
     ): array {
         if ($approveCleanTimeMonths && !$writeTimeSummary) {
             throw new \InvalidArgumentException(
@@ -387,9 +406,30 @@ final class AttendanceImportService
             ];
         };
 
+        $assignedEmployments = array_fill_keys(
+            array_map(static fn (array $item): int => (int) $item['employment']['employment_id'], $assigned),
+            true,
+        );
+        $registration = fn (): array => [
+            'registration' => $fillRegistrationData
+                ? $this->fillRegistration($supplierId, $periodStart, $assigned, $userId)
+                : null,
+            'probable_earnings' => $adoptProbableEarnings
+                ? $this->adoptProbableEarnings(
+                    $supplierId,
+                    $periodStart,
+                    array_values(array_filter(
+                        $computed['probable_earning_changes'],
+                        static fn (array $change): bool => isset($assignedEmployments[(int) $change['employment_id']]),
+                    )),
+                    $userId,
+                )
+                : null,
+        ];
+
         $existing = $this->imports->findBatchByHash($supplierId, $periodStart, $fingerprint);
         if ($existing !== null) {
-            return self::replay($existing, $skipped, $adoptWages()) + $timeSteps((int) $existing['id']);
+            return self::replay($existing, $skipped, $adoptWages()) + $timeSteps((int) $existing['id']) + $registration();
         }
 
         $result = $this->transactional(function () use (
@@ -506,10 +546,10 @@ final class AttendanceImportService
             $winner = $this->imports->findBatchByHash($supplierId, $periodStart, $fingerprint)
                 ?? throw new \RuntimeException('Souběžně založenou dávku importu nelze načíst.');
 
-            return self::replay($winner, $skipped, $adoptWages()) + $timeSteps((int) $winner['id']);
+            return self::replay($winner, $skipped, $adoptWages()) + $timeSteps((int) $winner['id']) + $registration();
         }
         $wages = $adoptWages();
-        $time = $timeSteps((int) $result['import_id']);
+        $time = $timeSteps((int) $result['import_id']) + $registration();
 
         return [
             'replayed' => false,
@@ -567,6 +607,18 @@ final class AttendanceImportService
                     $data[(string) $person['key']][$field] = trim($value);
                 }
             }
+            if (is_array($person['open_agreement'] ?? null)) {
+                $data[(string) $person['key']]['_open_agreement'] = $person['open_agreement'];
+            }
+            if (($person['_registration'] ?? []) !== []) {
+                $data[(string) $person['key']]['_registration'] = $person['_registration'];
+            }
+            if (is_array($person['existing_person'] ?? null)) {
+                $data[(string) $person['key']]['_existing_person'] = $person['existing_person'];
+            }
+            if (($person['probable_earning']['source'] ?? null) === 'amount') {
+                $data[(string) $person['key']]['_probable_earning'] = $person['probable_earning'];
+            }
         }
 
         return $data;
@@ -611,10 +663,29 @@ final class AttendanceImportService
                 if (!is_array($item)) {
                     throw new \InvalidArgumentException('Údaje osoby nemají platný tvar.');
                 }
+                $open = $personData[$key]['_open_agreement'] ?? null;
+                $existing = $personData[$key]['_existing_person'] ?? null;
+                unset($personData[$key]['_open_agreement'], $personData[$key]['_existing_person']);
+                // Údaje pro registraci bere server jen ze souborů, nikdy z požadavku.
+                unset($item['_registration'], $item['_probable_earning']);
                 foreach ($personData[$key] ?? [] as $field => $value) {
                     if (in_array($item[$field] ?? null, [null, ''], true)) {
                         $item[$field] = $value;
                     }
+                }
+                $reused = $this->reuseOpenAgreement($supplierId, $item, is_array($open) ? $open : null, $userId, $ip, $userAgent);
+                if ($reused !== null) {
+                    $results[] = ['person_key' => $key, 'status' => 'reused'] + $reused;
+                    continue;
+                }
+                // Osoba z evidence (vazba, rodné číslo, osobní číslo) dostane jen
+                // nový vztah, druhá karta osoby se stejným rodným číslem nevznikne.
+                if (is_array($existing)) {
+                    $created = $this->license->mutatePayrollEmployees(
+                        fn (): array => $this->createEmploymentForExisting($supplierId, $item, $existing, $today, $userId, $ip, $userAgent),
+                    );
+                    $results[] = ['person_key' => $key, 'status' => 'employment_created'] + $created;
+                    continue;
                 }
                 $created = $this->license->mutatePayrollEmployees(
                     fn (): array => $this->createPerson($supplierId, $item, $today, $userId, $ip, $userAgent),
@@ -1122,6 +1193,8 @@ final class AttendanceImportService
         }
         unset($person);
         $persons = $this->withAgreementHours($supplierId, $periodStart, $persons, $matched['options']);
+        $persons = $this->openAgreementMatcher->annotate($supplierId, $periodStart, $persons);
+        $persons = $this->withRegistration($supplierId, $periodStart, $persons);
 
         $codes = [];
         foreach ($mapped['sheets'] as $sheet) {
@@ -1221,11 +1294,15 @@ final class AttendanceImportService
             'amount_minor_total' => 0,
             'deductions' => 0,
             'deduction_minor_total' => 0,
+            'registration_gaps' => 0,
         ];
         foreach ($persons as $person) {
             $status = $person['match']['status'];
             if ($status === 'linked' || $status === 'matched') {
                 ++$summary['matched'];
+                if (($person['registration'] ?? []) !== []) {
+                    ++$summary['registration_gaps'];
+                }
             } elseif ($status === 'ambiguous') {
                 ++$summary['ambiguous'];
             } else {
@@ -1255,6 +1332,12 @@ final class AttendanceImportService
             self::componentKinds($checks, array_values($definitions)),
         );
         array_push($warnings, ...$wageWarnings);
+        [$persons, $probableChanges] = $this->probableEarnings(
+            $supplierId,
+            $periodStart,
+            $persons,
+            self::componentKinds($checks, array_values($definitions)),
+        );
 
         return [
             'period' => substr($periodStart, 0, 7),
@@ -1290,6 +1373,7 @@ final class AttendanceImportService
             'persons' => $persons,
             'component_checks' => $checks,
             'wage_changes' => $wageChanges,
+            'probable_earning_changes' => $probableChanges,
             'unrecognized_columns' => $unrecognized,
             'summary' => $summary,
             'warnings' => array_values(array_unique($warnings)),
@@ -1661,17 +1745,237 @@ final class AttendanceImportService
     }
 
     /**
-     * @param array<string,mixed> $item
-     * @return array{employee_id:int,employment_id:int,message:?string}
+     * Údaje pro registraci ČSSZ z podkladů ({@see AttendanceRegistrationData}).
+     * Osobě k založení se ukáže všechno, co se při založení zapíše; osobě
+     * s vztahem v období jen to, co jí v evidenci chybí. Stav evidence se čte
+     * jedním během dotazů pro všechny osoby.
+     *
+     * @param list<array<string,mixed>> $persons
+     * @return list<array<string,mixed>>
      */
-    private function createPerson(
+    private function withRegistration(int $supplierId, string $periodStart, array $persons): array
+    {
+        $pairs = [];
+        foreach ($persons as $index => $person) {
+            $persons[$index]['registration'] = [];
+            $persons[$index]['_registration_plan'] = null;
+            if (($person['_registration'] ?? []) === []) {
+                continue;
+            }
+            $start = is_string($person['start_on'] ?? null) ? $person['start_on'] : $periodStart;
+            $plan = AttendanceRegistrationData::plan($person['_registration'], $start);
+            $persons[$index]['_registration_plan'] = $plan;
+            array_push($persons[$index]['warnings'], ...$plan['warnings']);
+            if (in_array($person['match']['status'], ['linked', 'matched'], true)
+                && is_int($person['match']['employment_id']) && is_int($person['match']['employee_id'])) {
+                $pairs[$index] = ['employee_id' => $person['match']['employee_id'], 'employment_id' => $person['match']['employment_id']];
+            }
+        }
+        $state = $this->imports->registrationState(
+            $supplierId,
+            array_values($pairs),
+            $periodStart,
+            (int) substr($periodStart, 0, 4),
+        );
+        foreach ($persons as $index => $person) {
+            $plan = $person['_registration_plan'];
+            if ($plan === null) {
+                continue;
+            }
+            if (isset($pairs[$index])) {
+                $plan = isset($state[$pairs[$index]['employment_id']])
+                    ? AttendanceRegistrationData::gaps($plan, $state[$pairs[$index]['employment_id']])
+                    : null;
+                $persons[$index]['_registration_plan'] = $plan;
+            }
+            $persons[$index]['registration'] = $plan === null ? [] : AttendanceRegistrationData::display($plan);
+        }
+
+        return $persons;
+    }
+
+    /**
+     * Zapíše údaje pro registraci jedné osobě: skupiny věty registrace stejnou
+     * cestou jako import registrace ČSSZ a podepsané prohlášení přes hromadný
+     * zápis prohlášení (ten osobu s podepsaným prohlášením přeskočí).
+     *
+     * @param array<string,mixed> $plan {@see AttendanceRegistrationData::plan()}
+     * @return list<string> co se nezapsalo a proč
+     */
+    private function writeRegistration(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $decisive,
+        array $plan,
+        int $taxYear,
+        ?int $userId,
+    ): array {
+        $notes = [];
+        if ($plan['steps'] !== []) {
+            $notes = $this->registrationWriter->supplement(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                $decisive,
+                $plan['steps'],
+                'attendance-import:' . substr($decisive, 0, 7),
+                $userId,
+                null,
+                null,
+            )['notes'];
+        }
+        if (is_array($plan['declaration'])) {
+            try {
+                $result = $this->declarations->apply(
+                    $supplierId,
+                    $taxYear,
+                    $plan['declaration']['signed_on'],
+                    [$employeeId],
+                    $userId,
+                    null,
+                    null,
+                );
+                $reasons = array_merge(...array_map(
+                    static fn (array $item): array => array_map('strval', (array) ($item['reasons'] ?? [$item['message'] ?? ''])),
+                    [...$result['skipped'], ...$result['failed']],
+                ));
+                if ($result['counts']['applied'] === 0 && !in_array('already_signed', $reasons, true)) {
+                    $notes[] = 'Prohlášení poplatníka se nezapsalo (' . implode(', ', array_filter($reasons)) . '), doplňte ho na kartě osoby.';
+                }
+            } catch (\InvalidArgumentException|\DomainException $e) {
+                $notes[] = 'Prohlášení poplatníka: ' . $e->getMessage();
+            }
+        }
+
+        return $notes;
+    }
+
+    /**
+     * Doplní údaje pro registraci přiřazeným osobám, kterým v evidenci chybí.
+     * Každá osoba zvlášť; chyba jedné ostatní nezastaví.
+     *
+     * @param list<array{person:array<string,mixed>,employment:array<string,mixed>}> $assigned
+     * @return array{filled:int,notes:list<array{key:string,display_name:string,reason:string}>}
+     */
+    private function fillRegistration(int $supplierId, string $periodStart, array $assigned, ?int $userId): array
+    {
+        $filled = 0;
+        $notes = [];
+        $wanted = array_values(array_filter(
+            $assigned,
+            static fn (array $item): bool => is_array($item['person']['_registration_plan'] ?? null)
+                && !AttendanceRegistrationData::isEmpty($item['person']['_registration_plan']),
+        ));
+        $starts = $this->imports->employmentStarts(
+            $supplierId,
+            array_map(static fn (array $item): int => (int) $item['employment']['employment_id'], $wanted),
+        );
+        foreach ($wanted as $item) {
+            $plan = $item['person']['_registration_plan'];
+            $employmentId = (int) $item['employment']['employment_id'];
+            // Údaj chyběl od začátku vztahu, doplňuje se proto k jeho nástupu.
+            $reasons = $this->writeRegistration(
+                $supplierId,
+                (int) $item['employment']['employee_id'],
+                $employmentId,
+                $starts[$employmentId] ?? $periodStart,
+                $plan,
+                (int) substr($periodStart, 0, 4),
+                $userId,
+            );
+            ++$filled;
+            foreach ($reasons as $reason) {
+                $notes[] = [
+                    'key' => (string) $item['person']['key'],
+                    'display_name' => (string) $item['person']['display_name'],
+                    'reason' => $reason,
+                ];
+            }
+        }
+
+        return ['filled' => $filled, 'notes' => $notes];
+    }
+
+    /**
+     * Otevřená DPP místo nové ({@see PayrollOpenAgreements}). Volba
+     * `use_open_agreement` nese id dohody, `create_new_agreement` výslovné
+     * založení nové. Když náhled u osoby otevřenou dohodu našel a volba chybí,
+     * nová DPP se nezaloží: výchozí je použít tu otevřenou.
+     *
+     * @param array<string,mixed> $item
+     * @param array<string,mixed>|null $open dohoda, kterou k osobě našel náhled
+     * @return array{employee_id:int,employment_id:int,message:string}|null null = zakládá se nová osoba
+     */
+    private function reuseOpenAgreement(
         int $supplierId,
         array $item,
-        string $today,
+        ?array $open,
         ?int $userId,
         ?string $ip,
         ?string $userAgent,
-    ): array {
+    ): ?array {
+        if (($item['relation_type'] ?? null) !== 'dpp' || ($item['create_new_agreement'] ?? false) === true) {
+            return null;
+        }
+        $chosen = $item['use_open_agreement'] ?? null;
+        if ($chosen === null) {
+            if ($open === null || ($open['reusable'] ?? false) !== true) {
+                return null;
+            }
+            throw new \InvalidArgumentException(
+                "Osoba už má otevřenou DPP {$open['code']}. Použijte ji, nebo výslovně zvolte založení nové dohody. "
+                . PayrollOpenAgreements::GUIDANCE,
+            );
+        }
+        if (!is_int($chosen) || $chosen <= 0) {
+            throw new \InvalidArgumentException('Otevřená dohoda k použití není platná.');
+        }
+        if ($open !== null && (int) $open['employment_id'] !== $chosen) {
+            throw new \InvalidArgumentException('Vybraná dohoda nepatří osobě z podkladů. Načtěte náhled znovu.');
+        }
+        $start = is_string($item['planned_start_on'] ?? null) ? $item['planned_start_on'] : '';
+        if (!\MyInvoice\Http\IsoDate::isValid($start)) {
+            throw new \InvalidArgumentException('Nástup nové dohody není platné datum.');
+        }
+        [$end] = self::fixedTermEnd($item['fixed_term_end_on'] ?? null, $start);
+        $reused = $this->openAgreements->reuse(
+            $supplierId,
+            $chosen,
+            $open === null ? null : (int) $open['employee_id'],
+            $start,
+            $end,
+            $userId,
+            $ip,
+            $userAgent,
+        );
+        $this->saveLinks(
+            $supplierId,
+            is_string($item['personal_number'] ?? null) ? $item['personal_number'] : '',
+            AttendanceText::personKey((string) ($item['full_name'] ?? '')),
+            $reused['employee_id'],
+            $reused['employment_id'],
+            $userId,
+        );
+
+        return [
+            'employee_id' => $reused['employee_id'],
+            'employment_id' => $reused['employment_id'],
+            'message' => 'Použila se otevřená dohoda, nová DPP se nezaložila'
+                . ($reused['extended_to'] === null ? '.' : ' a sjednaný konec se prodloužil do ' . self::czechDate($reused['extended_to']) . '.'),
+        ];
+    }
+
+    /**
+     * Podmínky nového vztahu z řádku zakládání: úvazek, měsíční mzda, sjednaný
+     * konec a pravděpodobný výdělek (ze sazby, jinak z odměny za hodiny).
+     * Nečitelné údaje vztah neshodí, vrátí se v `notes`.
+     *
+     * @param array<string,mixed> $item
+     * @return array{weekly_hours:?string,monthly_gross:?int,fixed_end:?string,hourly_minor:?int,rationale:?string,notes:list<string>}
+     */
+    private static function employmentTerms(array $item, string $plannedStart): array
+    {
         // Úvazek z podkladů bývá i text („noční - 18,75", „DPP"); nepřečtený
         // osobu neshodí, vztah vznikne bez něj a výsledek řekne, co doplnit.
         $rawWeekly = $item['weekly_hours'] ?? null;
@@ -1679,11 +1983,11 @@ final class AttendanceImportService
             $rawWeekly = sprintf('%.2F', $rawWeekly);
         }
         $weeklyHours = null;
-        $weeklyNote = null;
+        $notes = [];
         if (is_string($rawWeekly) && trim($rawWeekly) !== '') {
             $weeklyHours = AttendanceDecimal::weeklyHours($rawWeekly);
             if ($weeklyHours === null && !in_array($item['relation_type'] ?? null, ['dpp', 'dpc'], true)) {
-                $weeklyNote = sprintf(
+                $notes[] = sprintf(
                     'Úvazek „%s“ z podkladů nejde přečíst, vztah je založený bez něj. Doplňte ho na kartě zaměstnance.',
                     mb_substr(trim($rawWeekly), 0, 40),
                 );
@@ -1695,11 +1999,43 @@ final class AttendanceImportService
         if ($monthlyGross !== null && !is_int($monthlyGross)) {
             throw new \InvalidArgumentException('Měsíční mzda musí být celé číslo v korunách.');
         }
-        $notes = $weeklyNote === null ? [] : [$weeklyNote];
-        $plannedStart = is_string($item['planned_start_on'] ?? null) ? $item['planned_start_on'] : '';
         [$hourlyMinor, $hourlyNote] = self::hourlyRateMinor($item['hourly_rate'] ?? null);
         [$fixedEnd, $endNote] = self::fixedTermEnd($item['fixed_term_end_on'] ?? null, $plannedStart);
         array_push($notes, ...array_filter([$hourlyNote, $endNote]));
+        $proposal = $hourlyMinor === null ? null : ['source' => 'rate', 'hourly_minor' => $hourlyMinor, 'amount_minor' => null, 'hours' => null];
+        // Bez sazby v podkladech poslouží odměna za odpracované hodiny (návrh z náhledu, jen ze souborů).
+        if ($proposal === null && $hourlyNote === null && is_array($item['_probable_earning'] ?? null)) {
+            $proposal = $item['_probable_earning'];
+            $hourlyMinor = (int) $proposal['hourly_minor'];
+        }
+
+        return [
+            'weekly_hours' => $weeklyHours,
+            'monthly_gross' => $monthlyGross,
+            'fixed_end' => $fixedEnd,
+            // Sazba jde jen do pravděpodobného výdělku (§ 355 ZP), ne do
+            // hodinového odměňování — viz self::probableEarnings().
+            'hourly_minor' => $hourlyMinor,
+            'rationale' => $proposal === null ? null : self::probableRationale($proposal, $plannedStart),
+            'notes' => $notes,
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $item
+     * @return array{employee_id:int,employment_id:int,message:?string}
+     */
+    private function createPerson(
+        int $supplierId,
+        array $item,
+        string $today,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        $plannedStart = is_string($item['planned_start_on'] ?? null) ? $item['planned_start_on'] : '';
+        $terms = self::employmentTerms($item, $plannedStart);
+        $notes = $terms['notes'];
         $input = [
             'full_name' => $item['full_name'] ?? null,
             'first_name' => $item['first_name'] ?? null,
@@ -1709,16 +2045,11 @@ final class AttendanceImportService
             'health_insurer_code' => $item['health_insurer_code'] ?? null,
             'relation_type' => $item['relation_type'] ?? null,
             'planned_start_on' => $item['planned_start_on'] ?? null,
-            'weekly_hours' => $weeklyHours,
-            'monthly_gross' => $monthlyGross,
-            'fixed_term_end_on' => $fixedEnd,
-            // Sazbu ze smlouvy aplikace jinde neeviduje; jako pravděpodobný
-            // výdělek (§ 355 ZP) poslouží průměru, dokud nevznikne skutečný.
-            'probable_hourly_earning_minor' => $hourlyMinor,
-            'probable_earning_rationale' => $hourlyMinor === null ? null : sprintf(
-                'Sjednaná hodinová sazba %s Kč z podkladů importu docházky.',
-                number_format($hourlyMinor / 100, 2, ',', ' '),
-            ),
+            'weekly_hours' => $terms['weekly_hours'],
+            'monthly_gross' => $terms['monthly_gross'],
+            'fixed_term_end_on' => $terms['fixed_end'],
+            'probable_hourly_earning_minor' => $terms['hourly_minor'],
+            'probable_earning_rationale' => $terms['rationale'],
         ];
         $person = $this->personCreate->create($supplierId, $input, $userId, $ip, $userAgent);
         $employeeId = (int) ($person['id'] ?? 0);
@@ -1732,6 +2063,137 @@ final class AttendanceImportService
                 $notes[] = $accountNote;
             }
         }
+        $plan = is_array($item['_registration'] ?? null) && $item['_registration'] !== [] && $plannedStart !== ''
+            ? AttendanceRegistrationData::plan($item['_registration'], $plannedStart)
+            : null;
+
+        return $this->finishEmployment($supplierId, $employeeId, $employment, $item, $plannedStart, $today, $plan, $notes, $userId, $ip, $userAgent);
+    }
+
+    /**
+     * Nový vztah osobě, která už v evidenci je (uložená vazba, rodné číslo,
+     * osobní číslo) a v období vztah nemá — typicky brigádník, jehož dohoda
+     * minulý měsíc skončila. Nová karta osoby nevznikne, takže se rodné číslo
+     * ani osoba nezdvojí. Osobní karty (účet, pojišťovna) se netýká; údaje pro
+     * registraci se doplní jen tam, kde v evidenci chybí.
+     *
+     * @param array<string,mixed> $item
+     * @param array<string,mixed> $existing {@see AttendanceOpenAgreementMatcher} `existing_person`
+     * @return array{employee_id:int,employment_id:int,message:?string}
+     */
+    private function createEmploymentForExisting(
+        int $supplierId,
+        array $item,
+        array $existing,
+        string $today,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        $employeeId = (int) $existing['employee_id'];
+        $plannedStart = is_string($item['planned_start_on'] ?? null) ? $item['planned_start_on'] : '';
+        $relationType = is_string($item['relation_type'] ?? null) && $item['relation_type'] !== ''
+            ? $item['relation_type']
+            : (string) ($existing['relation_type'] ?? 'dpp');
+        $item['relation_type'] = $relationType;
+        $terms = self::employmentTerms($item, $plannedStart);
+        $hasPrimary = false;
+        foreach ($this->employments->listForEmployee($supplierId, $employeeId) as $row) {
+            if ((bool) $row['is_primary'] && in_array($row['status'], ['planned', 'preregistered', 'active', 'suspended'], true)) {
+                $hasPrimary = true;
+            }
+        }
+        $weekly = $terms['weekly_hours'] ?? '40.00';
+        $created = $this->employments->create(
+            $supplierId,
+            $employeeId,
+            $this->employmentValidator->create([
+                'code' => '',
+                'relation_type' => $relationType,
+                'monthly_gross_minor' => $terms['monthly_gross'] === null ? null : $terms['monthly_gross'] * 100,
+                'terms' => [
+                    'office_id' => null,
+                    'effective_from' => $plannedStart,
+                    'planned_start_on' => $plannedStart,
+                    'contract_signed_on' => null,
+                    'actual_start_on' => null,
+                    'fixed_term_end_on' => $terms['fixed_end'],
+                    'probable_hourly_earning_minor' => $terms['hourly_minor'],
+                    'probable_earning_rationale' => $terms['rationale'],
+                    'weekly_hours' => $weekly,
+                    'workload_basis_points' => \MyInvoice\Service\Payroll\PayrollPersonCreateValidator::workloadBasisPoints($weekly),
+                    'work_place' => null,
+                    'regular_workplace' => null,
+                    'jmhz_workplace_municipality_code' => null,
+                    'jmhz_workplace_country_code' => null,
+                    'jmhz_apz_contribution_status' => 'unverified',
+                    'jmhz_apz_instrument_code' => null,
+                    'jmhz_functional_benefits_status' => 'unverified',
+                    'jmhz_temporary_assignment_status' => 'unverified',
+                    'cz_isco_code' => null,
+                    // Druh činnosti podle pořadí souběžných vztahů doplní repozitář.
+                    'activity_code' => null,
+                    'jmhz_relationship_detail_code' => null,
+                    'social_insurance_participation' => 'automatic',
+                    'health_insurance_participation' => 'automatic',
+                    'tax_regime' => 'advance',
+                    'foreign_legislation_country_code' => null,
+                    'a1_certificate_until' => null,
+                    'risky_work' => false,
+                    'tax_declaration_signed' => false,
+                    'is_primary' => !$hasPrimary,
+                    'change_reason' => 'Nová dohoda z importu docházky osobě, která už je v evidenci.',
+                ],
+            ]),
+            $userId,
+            $ip,
+            $userAgent,
+        );
+        $employment = ['id' => (int) $created['id'], 'row_version' => (int) $created['row_version']];
+        $plan = null;
+        if (is_array($item['_registration'] ?? null) && $item['_registration'] !== [] && $plannedStart !== '') {
+            $state = $this->imports->registrationState(
+                $supplierId,
+                [['employee_id' => $employeeId, 'employment_id' => $employment['id']]],
+                $plannedStart,
+                (int) substr($plannedStart, 0, 4),
+            );
+            $plan = AttendanceRegistrationData::gaps(
+                AttendanceRegistrationData::plan($item['_registration'], $plannedStart),
+                $state[$employment['id']],
+            );
+        }
+        $notes = [
+            "Osoba {$existing['employee_name']} už v evidenci je, založil se jí nový pracovní vztah (nová karta osoby nevznikla).",
+            ...$terms['notes'],
+        ];
+
+        return $this->finishEmployment($supplierId, $employeeId, $employment, $item, $plannedStart, $today, $plan, $notes, $userId, $ip, $userAgent);
+    }
+
+    /**
+     * Společné dokončení nového vztahu: aktivace k nástupu, osobní číslo
+     * z podkladů, údaje pro registraci a uložená vazba pro další měsíce.
+     *
+     * @param array<string,mixed> $item
+     * @param array{id:int,row_version:int} $employment
+     * @param array<string,mixed>|null $plan {@see AttendanceRegistrationData::plan()}
+     * @param list<string> $notes
+     * @return array{employee_id:int,employment_id:int,message:?string}
+     */
+    private function finishEmployment(
+        int $supplierId,
+        int $employeeId,
+        array $employment,
+        array $item,
+        string $plannedStart,
+        string $today,
+        ?array $plan,
+        array $notes,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
         $message = $notes === [] ? null : implode(' ', $notes);
         if (($item['activate'] ?? false) === true) {
             if ($plannedStart <= $today) {
@@ -1750,7 +2212,7 @@ final class AttendanceImportService
                 $message = trim(($message ?? '') . ' Nástup je v budoucnu, vztah zůstal plánovaný.');
             }
         }
-        // Nová osoba dostane osobní číslo z podkladů místo automatického ZAM-….
+        // Vztah dostane osobní číslo z podkladů místo automatického ZAM-….
         $number = self::personalNumber($item['personal_number'] ?? null);
         if ($number !== null) {
             $renameError = $this->renameEmployment($supplierId, $employeeId, $employment['id'], $number, $userId);
@@ -1758,10 +2220,27 @@ final class AttendanceImportService
                 $message = trim(($message ?? '') . ' ' . $renameError);
             }
         }
+        if ($plan !== null && !AttendanceRegistrationData::isEmpty($plan)) {
+            $reasons = [
+                ...$plan['warnings'],
+                ...$this->writeRegistration(
+                    $supplierId,
+                    $employeeId,
+                    $employment['id'],
+                    $plannedStart,
+                    $plan,
+                    (int) substr($plannedStart, 0, 4),
+                    $userId,
+                ),
+            ];
+            if ($reasons !== []) {
+                $message = trim(($message ?? '') . ' ' . implode(' ', $reasons));
+            }
+        }
         $this->saveLinks(
             $supplierId,
             is_string($item['personal_number'] ?? null) ? $item['personal_number'] : '',
-            AttendanceText::personKey((string) $input['full_name']),
+            AttendanceText::personKey((string) ($item['full_name'] ?? '')),
             $employeeId,
             $employment['id'],
             $userId,
@@ -2210,6 +2689,179 @@ final class AttendanceImportService
         } else {
             $this->employments->correctTerms($supplierId, $employmentId, $terms, $version, $userId, null, null, true, $monthlyGross);
         }
+    }
+
+    /**
+     * Pravděpodobný hodinový výdělek (§ 355 ZP) z podkladů: ze sloupce
+     * hodinové sazby, jinak z odměny za odpracované hodiny (částka hodinové
+     * mzdy / odpracované hodiny). Do sjednaných podmínek se sazba jako
+     * hodinové odměňování NEZAPISUJE: vztah s hodinovými podmínkami počítá
+     * mzdu sám z doložených hodin a importovanou hodinovou mzdu by odmítla
+     * kontrola souběhu zdrojů ({@see \MyInvoice\Repository\Payroll\PayrollHourlyWageCollisionGuard}).
+     *
+     * Osobě k založení se návrh ukáže u zakládání (`probable_earning`).
+     * Existující vztah ho dostane jako změnu k potvrzení, jen když pravděpodobný
+     * výdělek ani schválený průměr pro čtvrtletí nemá.
+     *
+     * @param list<array<string,mixed>> $persons
+     * @param array<string,string> $kinds
+     * @return array{0:list<array<string,mixed>>,1:list<array<string,mixed>>}
+     */
+    private function probableEarnings(int $supplierId, string $periodStart, array $persons, array $kinds): array
+    {
+        $pairs = [];
+        foreach ($persons as $index => $person) {
+            $proposal = self::probableProposal($person, $kinds);
+            $persons[$index]['probable_earning'] = $proposal;
+            if ($proposal !== null
+                && in_array($person['match']['status'], ['linked', 'matched'], true)
+                && is_int($person['match']['employment_id'])) {
+                $pairs[$index] = $person['match']['employment_id'];
+            }
+        }
+        if ($pairs === []) {
+            return [$persons, []];
+        }
+        $month = (int) substr($periodStart, 5, 2);
+        $covered = $this->imports->employmentsWithEarningBasis(
+            $supplierId,
+            array_values($pairs),
+            (int) substr($periodStart, 0, 4),
+            intdiv($month - 1, 3) + 1,
+        );
+        $changes = [];
+        foreach ($pairs as $index => $employmentId) {
+            if (isset($covered[$employmentId])) {
+                continue;
+            }
+            $proposal = $persons[$index]['probable_earning'];
+            $changes[] = [
+                'key' => (string) $persons[$index]['key'],
+                'display_name' => (string) $persons[$index]['display_name'],
+                'employment_id' => $employmentId,
+            ] + $proposal;
+        }
+
+        return [$persons, $changes];
+    }
+
+    /**
+     * @param array<string,mixed> $person
+     * @param array<string,string> $kinds
+     * @return array{source:string,hourly_minor:int,amount_minor:?int,hours:?string}|null
+     */
+    private static function probableProposal(array $person, array $kinds): ?array
+    {
+        $rawRate = $person['hourly_rate'] ?? null;
+        if (is_string($rawRate) && trim($rawRate) !== '') {
+            [$rate] = self::hourlyRateMinor($rawRate);
+
+            return $rate === null ? null : ['source' => 'rate', 'hourly_minor' => $rate, 'amount_minor' => null, 'hours' => null];
+        }
+        $millihours = $person['_metrics']['worked_hours']['millihours'] ?? null;
+        $amount = 0;
+        foreach ($person['_components'] ?? [] as $code => $component) {
+            if (($kinds[(string) $code] ?? null) === 'hourly_wage') {
+                $amount += (int) $component['amount_minor'];
+            }
+        }
+        if (!is_int($millihours) || $millihours <= 0 || $amount <= 0) {
+            return null;
+        }
+
+        return [
+            'source' => 'amount',
+            'hourly_minor' => self::hourlyFromAmount($amount, $millihours),
+            'amount_minor' => $amount,
+            'hours' => AttendanceDecimal::formatMillihours($millihours),
+        ];
+    }
+
+    /**
+     * Hodinový výdělek v haléřích = částka / hodiny, zaokrouhlený na haléř
+     * (polovina nahoru) celočíselně: hodiny jsou v tisícinách, žádný float.
+     */
+    public static function hourlyFromAmount(int $amountMinor, int $millihours): int
+    {
+        return intdiv(2 * $amountMinor * 1000 + $millihours, 2 * $millihours);
+    }
+
+    /** @param array{source:string,hourly_minor:int,amount_minor:?int,hours:?string} $proposal */
+    private static function probableRationale(array $proposal, string $periodStart): string
+    {
+        return $proposal['source'] === 'rate'
+            ? sprintf(
+                'Sjednaná hodinová sazba %s Kč z podkladů importu docházky.',
+                number_format($proposal['hourly_minor'] / 100, 2, ',', ' '),
+            )
+            : sprintf(
+                'Odměna za odpracované hodiny podle importu docházky za %s: %s Kč za %s h.',
+                substr($periodStart, 0, 7),
+                number_format((int) $proposal['amount_minor'] / 100, 2, ',', ' '),
+                str_replace('.', ',', (string) $proposal['hours']),
+            );
+    }
+
+    /**
+     * Zapíše navržené pravděpodobné výdělky do podmínek vztahů. Oprava platné
+     * verze; zasahuje-li do zúčtovaného měsíce, nová verze od začátku období.
+     * Druh odměňování se nemění.
+     *
+     * @param list<array<string,mixed>> $changes
+     * @return array{adopted:int,conflicts:list<array{key:string,display_name:string,reason:string}>}
+     */
+    private function adoptProbableEarnings(int $supplierId, string $periodStart, array $changes, ?int $userId): array
+    {
+        $adopted = 0;
+        $conflicts = [];
+        foreach ($changes as $change) {
+            $employmentId = (int) $change['employment_id'];
+            try {
+                $current = $this->employments->currentTerms($supplierId, $employmentId)
+                    ?? throw new \DomainException('Pracovní vztah nemá verzi sjednaných podmínek.');
+                $body = RegistrationImportWriter::termsBody(
+                    $current,
+                    'Pravděpodobný výdělek z importu docházky za ' . substr($periodStart, 0, 7) . '.',
+                );
+                $body['probable_hourly_earning_minor'] = (int) $change['hourly_minor'];
+                $body['probable_earning_rationale'] = self::probableRationale($change, $periodStart);
+                $body['effective_from'] = (string) $current['effective_from'];
+                $terms = fn (array $body): array => $this->employmentValidator->terms(
+                    $body,
+                    $this->employments->currentCzIscoCode($supplierId, $employmentId),
+                    $this->employments->currentOtherWithholdingEligibility($supplierId, $employmentId),
+                    $this->employments->currentRelationType($supplierId, $employmentId),
+                    $current,
+                );
+                $version = $this->imports->employmentRowVersion($supplierId, $employmentId)
+                    ?? throw new PayrollEmploymentNotFoundException('Pracovní vztah nebyl nalezen.');
+                try {
+                    $this->employments->correctTerms($supplierId, $employmentId, $terms($body), $version, $userId, null, null);
+                } catch (PayrollTermsSettledException $e) {
+                    if ((string) $current['effective_from'] >= $periodStart) {
+                        throw $e;
+                    }
+                    $body['effective_from'] = $periodStart;
+                    $this->employments->addTerms($supplierId, $employmentId, $terms($body), $version, $userId, null, null);
+                }
+                ++$adopted;
+            } catch (PayrollEmploymentConflictException) {
+                $conflicts[] = self::conflict($change, 'Pracovní vztah mezitím změnil někdo jiný. Načtěte náhled znovu.');
+            } catch (PayrollEmploymentNotFoundException|\DomainException|\InvalidArgumentException $e) {
+                $conflicts[] = self::conflict($change, $e->getMessage());
+            }
+        }
+
+        return ['adopted' => $adopted, 'conflicts' => $conflicts];
+    }
+
+    /**
+     * @param array<string,mixed> $change
+     * @return array{key:string,display_name:string,reason:string}
+     */
+    private static function conflict(array $change, string $reason): array
+    {
+        return ['key' => (string) $change['key'], 'display_name' => (string) $change['display_name'], 'reason' => $reason];
     }
 
     /** Měsíční mzda z podkladů v haléřích; null, když text částkou není. */

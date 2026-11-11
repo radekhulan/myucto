@@ -21,10 +21,12 @@ import {
   personCanBeCreated,
   personCreateDetails,
   type PersonCreateDetailKey,
+  reusableOpenAgreement,
   splitDisplayName,
   type ManualLinks,
   type PersonDraft,
 } from './importHelpers'
+import { registrationSummary } from './attendanceRegistration'
 
 const props = withDefaults(defineProps<{
   persons: AttendancePerson[]
@@ -53,6 +55,7 @@ const RELATION_TYPES: RegistrationRelationType[] = ['employment', 'small_scale_e
 const filter = ref<Filter>('all')
 const createKeys = ref<string[]>([])
 const drafts = ref<Record<string, PersonDraft>>({})
+const newAgreementKeys = ref<string[]>([])
 const createForm = ref({
   relation_type: 'employment' as RegistrationRelationType,
   weekly_hours: '40',
@@ -176,13 +179,24 @@ function selectAllCreatable() {
 function detailValue(key: PersonCreateDetailKey, value: string, invalid: boolean): string {
   if (invalid) return t('payroll_imports.attendance.persons.details.unreadable', { value })
   if (key === 'start_on' || key === 'agreed_end_on') return formatDate(value)
-  if (key === 'hourly_rate' || key === 'monthly_wage') return formatMoneyMinor(Math.round(Number(value) * 100))
+  if (key === 'hourly_rate' || key === 'probable_earning' || key === 'monthly_wage') return formatMoneyMinor(Math.round(Number(value) * 100))
   return value
+}
+
+/** Otevřená DPP osoby, kterou jde použít místo nové; výchozí volba je použít ji. */
+function openAgreementFor(person: AttendancePerson) {
+  return reusableOpenAgreement(person, createForm.value.relation_type)
+}
+
+function setNewAgreement(person: AttendancePerson, createNew: boolean) {
+  newAgreementKeys.value = createNew
+    ? [...new Set([...newAgreementKeys.value, person.key])]
+    : newAgreementKeys.value.filter(key => key !== person.key)
 }
 
 function submitCreate() {
   if (createBlockedReason.value !== '') return
-  emit('create', buildPersonsPayload(createPersons.value, drafts.value, createForm.value))
+  emit('create', buildPersonsPayload(createPersons.value, drafts.value, createForm.value, undefined, new Set(newAgreementKeys.value)))
 }
 
 const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 bg-surface px-2 text-sm disabled:bg-neutral-100'
@@ -331,6 +345,37 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
               <dd :class="detail.invalid ? 'text-warning-700' : 'text-neutral-800'">{{ detailValue(detail.key, detail.value, detail.invalid) }}</dd>
             </div>
           </dl>
+          <p v-if="person.existing_person" class="order-last w-full text-[11px] font-medium text-payroll-700" data-testid="attendance-create-existing">
+            {{ t('payroll_imports.attendance.persons.existing_person', { name: person.existing_person.employee_name }) }}
+          </p>
+          <p v-if="person.registration?.length" class="order-last w-full text-[11px] text-neutral-600" data-testid="attendance-create-registration">
+            <span class="text-neutral-500">{{ t('payroll_imports.attendance.persons.registration_label') }}:</span> {{ registrationSummary(person, t) }}
+          </p>
+          <fieldset v-if="openAgreementFor(person)" class="order-last w-full rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs" data-testid="attendance-open-agreement">
+            <legend class="sr-only">{{ t('payroll_imports.attendance.persons.open_agreement.legend', { name: person.display_name }) }}</legend>
+            <p class="font-medium text-warning-700">
+              {{ t('payroll_imports.attendance.persons.open_agreement.title', {
+                code: openAgreementFor(person)?.code,
+                start: formatDate(openAgreementFor(person)?.start_date ?? ''),
+                end: openAgreementFor(person)?.end_date ? formatDate(openAgreementFor(person)?.end_date ?? '') : t('payroll_imports.attendance.persons.open_agreement.no_end'),
+              }) }}
+            </p>
+            <p class="mt-0.5 text-neutral-600">{{ t('payroll_imports.attendance.persons.open_agreement.guidance') }}</p>
+            <div class="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+              <label class="inline-flex items-center gap-1.5 text-neutral-800">
+                <input type="radio" :name="`open-agreement-${person.key}`" :checked="!newAgreementKeys.includes(person.key)" :disabled="disabled"
+                  data-testid="attendance-open-agreement-reuse" @change="setNewAgreement(person, false)">
+                {{ openAgreementFor(person)?.extend_to
+                  ? t('payroll_imports.attendance.persons.open_agreement.reuse_extend', { date: formatDate(openAgreementFor(person)?.extend_to ?? '') })
+                  : t('payroll_imports.attendance.persons.open_agreement.reuse') }}
+              </label>
+              <label class="inline-flex items-center gap-1.5 text-neutral-800">
+                <input type="radio" :name="`open-agreement-${person.key}`" :checked="newAgreementKeys.includes(person.key)" :disabled="disabled"
+                  data-testid="attendance-open-agreement-new" @change="setNewAgreement(person, true)">
+                {{ t('payroll_imports.attendance.persons.open_agreement.create_new') }}
+              </label>
+            </div>
+          </fieldset>
           <label class="block min-w-36 flex-1">
             <span class="mb-0.5 block text-[11px] text-neutral-500">{{ t('payroll_imports.attendance.persons.first_name') }}</span>
             <input :value="draftFor(person).first_name" class="h-8 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm" :disabled="disabled"

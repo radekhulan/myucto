@@ -134,6 +134,205 @@ final class PayrollAttendanceImportRepository
         );
     }
 
+    /**
+     * Které údaje pro registraci ČSSZ už evidence u vztahů vede: adresa
+     * trvalého pobytu a občanství k danému dni, CZ-ISCO, druh činnosti
+     * a místo výkonu práce v poslední verzi podmínek, ověřená daňová
+     * rezidence, podepsané prohlášení v roce a uložený profil registrace A1.
+     * Pár dotazů přes IN, ne dotaz za osobu.
+     *
+     * @param list<array{employee_id:int,employment_id:int}> $pairs
+     * @return array<int,array{residence_address:bool,citizenship:?string,cz_isco_code:?string,activity_code:?string,workplace:bool,tax_residence:bool,tax_declaration:bool,a1_profile:bool}> podle vztahu
+     */
+    public function registrationState(int $supplierId, array $pairs, string $onDate, int $year): array
+    {
+        if ($pairs === []) {
+            return [];
+        }
+        $employees = array_values(array_unique(array_map(static fn (array $pair): int => $pair['employee_id'], $pairs)));
+        $employments = array_values(array_unique(array_map(static fn (array $pair): int => $pair['employment_id'], $pairs)));
+        $inEmployees = implode(',', array_fill(0, count($employees), '?'));
+        $inEmployments = implode(',', array_fill(0, count($employments), '?'));
+        $pdo = $this->db->pdo();
+        $column = static function (string $sql, array $params) use ($pdo): array {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+
+            return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
+        };
+
+        $addresses = $column(
+            "SELECT DISTINCT employee_id FROM payroll_person_addresses
+              WHERE supplier_id = ? AND employee_id IN ({$inEmployees}) AND address_type = 'residence'
+                AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)",
+            [$supplierId, ...$employees, $onDate, $onDate],
+        );
+        $stmt = $pdo->prepare(
+            "SELECT employee_id, citizenship_country_code FROM (
+                SELECT employee_id, citizenship_country_code,
+                       ROW_NUMBER() OVER (PARTITION BY employee_id ORDER BY effective_from DESC, id DESC) AS position
+                  FROM payroll_person_identity_history
+                 WHERE supplier_id = ? AND employee_id IN ({$inEmployees}) AND effective_from <= ?
+             ) identity WHERE position = 1"
+        );
+        $stmt->execute([$supplierId, ...$employees, $onDate]);
+        $citizenship = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $value = $row['citizenship_country_code'];
+            $citizenship[(int) $row['employee_id']] = is_string($value) && $value !== '' ? $value : null;
+        }
+        $stmt = $pdo->prepare(
+            "SELECT employment_id, cz_isco_code, activity_code, work_place, jmhz_workplace_municipality_code FROM (
+                SELECT employment_id, cz_isco_code, activity_code, work_place, jmhz_workplace_municipality_code,
+                       ROW_NUMBER() OVER (PARTITION BY employment_id ORDER BY effective_from DESC, id DESC) AS position
+                  FROM payroll_employment_terms
+                 WHERE supplier_id = ? AND employment_id IN ({$inEmployments})
+             ) terms WHERE position = 1"
+        );
+        $stmt->execute([$supplierId, ...$employments]);
+        $terms = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $terms[(int) $row['employment_id']] = $row;
+        }
+        $residences = $column(
+            "SELECT DISTINCT employee_id FROM payroll_person_tax_residences
+              WHERE supplier_id = ? AND employee_id IN ({$inEmployees}) AND residence <> 'unverified'",
+            [$supplierId, ...$employees],
+        );
+        $declarations = $column(
+            "SELECT DISTINCT employee_id FROM payroll_person_tax_declarations
+              WHERE supplier_id = ? AND employee_id IN ({$inEmployees}) AND status = 'signed'
+                AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)",
+            [$supplierId, ...$employees, sprintf('%04d-12-31', $year), sprintf('%04d-01-01', $year)],
+        );
+        $profiles = $column(
+            "SELECT DISTINCT employment_id FROM payroll_registration_a1_profiles
+              WHERE supplier_id = ? AND employment_id IN ({$inEmployments})",
+            [$supplierId, ...$employments],
+        );
+
+        $result = [];
+        foreach ($pairs as $pair) {
+            $row = $terms[$pair['employment_id']] ?? [];
+            $text = static fn (string $key): ?string => is_string($row[$key] ?? null) && $row[$key] !== '' ? $row[$key] : null;
+            $result[$pair['employment_id']] = [
+                'residence_address' => isset($addresses[$pair['employee_id']]),
+                'citizenship' => $citizenship[$pair['employee_id']] ?? null,
+                'cz_isco_code' => $text('cz_isco_code'),
+                'activity_code' => $text('activity_code'),
+                'workplace' => $text('work_place') !== null || $text('jmhz_workplace_municipality_code') !== null,
+                'tax_residence' => isset($residences[$pair['employee_id']]),
+                'tax_declaration' => isset($declarations[$pair['employee_id']]),
+                'a1_profile' => isset($profiles[$pair['employment_id']]),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Osoby podle otisků rodných čísel a podle kódů vztahů (osobních čísel),
+     * bez ohledu na to, jestli mají vztah v období. Dva dotazy přes IN.
+     *
+     * @param list<string> $hashes
+     * @param list<string> $codes
+     * @return array{by_hash:array<string,list<int>>,by_code:array<string,list<int>>}
+     */
+    public function employeesByIdentifiers(int $supplierId, array $hashes, array $codes): array
+    {
+        $result = ['by_hash' => [], 'by_code' => []];
+        $hashes = array_values(array_unique(array_filter($hashes, static fn (string $hash): bool => $hash !== '')));
+        if ($hashes !== []) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT employee_id, value_hash FROM payroll_person_identifiers
+                  WHERE supplier_id = ? AND identifier_type = "birth_number"
+                    AND value_hash IN (' . implode(',', array_fill(0, count($hashes), '?')) . ')'
+            );
+            $stmt->execute([$supplierId, ...$hashes]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $result['by_hash'][(string) $row['value_hash']][] = (int) $row['employee_id'];
+            }
+        }
+        $codes = array_values(array_unique(array_filter(
+            array_map(static fn (string $code): string => mb_strtolower(trim($code), 'UTF-8'), $codes),
+            static fn (string $code): bool => $code !== '',
+        )));
+        if ($codes !== []) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT DISTINCT employee_id, LOWER(code) AS code FROM payroll_employments
+                  WHERE supplier_id = ? AND is_legacy_projection = 0
+                    AND code IN (' . implode(',', array_fill(0, count($codes), '?')) . ')'
+            );
+            $stmt->execute([$supplierId, ...$codes]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $result['by_code'][(string) $row['code']][] = (int) $row['employee_id'];
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Jméno osob a druh jejich posledního vztahu (výchozí druh nové dohody).
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,array{employee_name:string,relation_type:?string}>
+     */
+    public function employeeSummaries(int $supplierId, array $employeeIds): array
+    {
+        $employeeIds = array_values(array_unique(array_filter($employeeIds, static fn (int $id): bool => $id > 0)));
+        if ($employeeIds === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee.id, ' . PayrollPeopleRepository::fullNameExpression('employee') . ' AS employee_name,
+                    (SELECT employment.relation_type FROM payroll_employments employment
+                      WHERE employment.supplier_id = employee.supplier_id AND employment.employee_id = employee.id
+                        AND employment.is_legacy_projection = 0
+                      ORDER BY employment.id DESC LIMIT 1) AS relation_type
+               FROM payroll_employees employee
+              WHERE employee.supplier_id = ? AND employee.id IN (' . implode(',', array_fill(0, count($employeeIds), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, ...$employeeIds]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[(int) $row['id']] = [
+                'employee_name' => (string) $row['employee_name'],
+                'relation_type' => is_string($row['relation_type']) ? $row['relation_type'] : null,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Nástup vztahů (skutečný, jinak plánovaný) jedním dotazem.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,string>
+     */
+    public function employmentStarts(int $supplierId, array $employmentIds): array
+    {
+        $employmentIds = array_values(array_unique(array_filter($employmentIds, static fn (int $id): bool => $id > 0)));
+        if ($employmentIds === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, COALESCE(actual_start_date, start_date) AS start_on
+               FROM payroll_employments
+              WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($employmentIds), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, ...$employmentIds]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (is_string($row['start_on'] ?? null)) {
+                $result[(int) $row['id']] = $row['start_on'];
+            }
+        }
+
+        return $result;
+    }
+
     /** @return array{id:int,row_version:int,status:string}|null */
     public function latestEmploymentOfEmployee(int $supplierId, int $employeeId): ?array
     {
@@ -226,6 +425,38 @@ final class PayrollAttendanceImportRepository
         }
 
         return $result;
+    }
+
+    /**
+     * Vztahy, které už pravděpodobný výdělek mají (v poslední verzi podmínek),
+     * nebo mají schválený průměrný výdělek pro čtvrtletí. Těm import
+     * pravděpodobný výdělek nenavrhuje. Dva dotazy přes IN.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,true>
+     */
+    public function employmentsWithEarningBasis(int $supplierId, array $employmentIds, int $year, int $quarter): array
+    {
+        $employmentIds = array_values(array_unique(array_filter($employmentIds, static fn (int $id): bool => $id > 0)));
+        if ($employmentIds === []) {
+            return [];
+        }
+        $in = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT employment_id FROM (
+                SELECT employment_id, probable_hourly_earning_minor,
+                       ROW_NUMBER() OVER (PARTITION BY employment_id ORDER BY effective_from DESC, id DESC) AS position
+                  FROM payroll_employment_terms
+                 WHERE supplier_id = ? AND employment_id IN ({$in})
+             ) terms WHERE position = 1 AND probable_hourly_earning_minor IS NOT NULL
+             UNION
+             SELECT employment_id FROM payroll_average_earning_snapshots
+              WHERE supplier_id = ? AND employment_id IN ({$in})
+                AND applicable_year = ? AND applicable_quarter = ? AND status = 'approved'"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds, $supplierId, ...$employmentIds, $year, $quarter]);
+
+        return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
     }
 
     /**

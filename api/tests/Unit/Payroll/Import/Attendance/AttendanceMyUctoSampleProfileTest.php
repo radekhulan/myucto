@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfile;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfiles;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSheetAnalyzer;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceWorkbookReader;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
@@ -138,6 +139,21 @@ final class AttendanceMyUctoSampleProfileTest extends TestCase
         ksort($components);
         self::assertSame(['MZDA_HODINOVA_DOCH' => 765_000, 'ODMENA' => 100_000], $components);
         self::assertSame([], $eva['deductions']);
+        // Údaje pro registraci ČSSZ z ukázkového řádku.
+        self::assertSame([
+            'address_street' => 'Ukázková',
+            'address_house_number' => '12',
+            'address_city' => 'Praha',
+            'address_postal_code' => '110 00',
+            'address_country' => 'CZ',
+            'citizenship' => 'CZ',
+            'cz_isco_code' => '43111',
+            'workplace' => 'Praha',
+            'tax_residence' => 'CZ',
+            'tax_declaration' => 'ano',
+            'tax_declaration_from' => '2026-06-01',
+            'education_code' => 'M',
+        ], $eva['_registration']);
 
         $adam = $persons['adam prikladny'];
         self::assertSame([], $adam['warnings']);
@@ -170,13 +186,19 @@ final class AttendanceMyUctoSampleProfileTest extends TestCase
         }
         $sheet = $spreadsheet->getSheetByName(AttendanceMyUctoSampleProfile::SHEET);
         self::assertNotNull($sheet);
-        $sheet->setCellValueExplicit('V1', 'Prémie navíc (Kč)', DataType::TYPE_STRING);
-        $sheet->setCellValueExplicit('V2', 999, DataType::TYPE_NUMERIC);
+        $headers = array_column(AttendanceMyUctoSampleProfile::columns(), 'header');
+        $letter = static fn (string $header): string => Coordinate::stringFromColumnIndex(
+            (int) array_search($header, $headers, true) + 1,
+        );
+        $extra = Coordinate::stringFromColumnIndex(count($headers) + 1);
+        $sheet->setCellValueExplicit("{$extra}1", 'Prémie navíc (Kč)', DataType::TYPE_STRING);
+        $sheet->setCellValueExplicit("{$extra}2", 999, DataType::TYPE_NUMERIC);
         // „Odpracováno" jako čas v Excelu (trvání ve dnech): 42:30 a 60:00.
-        $sheet->setCellValueExplicit('J2', 42.5 / 24, DataType::TYPE_NUMERIC);
-        $sheet->setCellValueExplicit('J3', 60 / 24, DataType::TYPE_NUMERIC);
-        $sheet->getStyle('J2:J3')->getNumberFormat()->setFormatCode('[h]:mm');
-        $sheet->setCellValueExplicit('G2', '1. 7. 2026', DataType::TYPE_STRING);
+        $worked = $letter('Odpracováno (hod)');
+        $sheet->setCellValueExplicit("{$worked}2", 42.5 / 24, DataType::TYPE_NUMERIC);
+        $sheet->setCellValueExplicit("{$worked}3", 60 / 24, DataType::TYPE_NUMERIC);
+        $sheet->getStyle("{$worked}2:{$worked}3")->getNumberFormat()->setFormatCode('[h]:mm');
+        $sheet->setCellValueExplicit($letter('Nástup') . '2', '1. 7. 2026', DataType::TYPE_STRING);
         $path = tempnam(sys_get_temp_dir(), 'myucto_') . '.xlsx';
         try {
             (new XlsxWriter($spreadsheet))->save($path);

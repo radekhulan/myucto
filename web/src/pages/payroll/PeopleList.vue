@@ -11,6 +11,7 @@ import {
   type PayrollEmployment,
   type PayrollEmploymentCreatePayload,
   type PayrollOffice,
+  type PayrollOpenAgreement,
   type PayrollPeopleFilter,
   type PayrollEmploymentStatus,
   type PayrollPerson,
@@ -148,6 +149,15 @@ watch(() => [newEmployment.value?.terms.remuneration_type, newEmployment.value?.
   draft.terms.remuneration_basis = newEmploymentPrefilledBasis
 })
 const newEmploymentError = ref('')
+/*
+ * Otevřené DPP osoby, kvůli kterým server novou DPP nezaložil (409
+ * `open_agreement_exists`). Formulář pak nabídne použít otevřenou dohodu,
+ * nebo výslovně založit novou; změna druhu nebo dat volbu zahodí.
+ */
+const newEmploymentOpenAgreements = ref<PayrollOpenAgreement[]>([])
+watch(() => [newEmployment.value?.relation_type, newEmployment.value?.terms.planned_start_on, newEmployment.value?.terms.fixed_term_end_on], () => {
+  newEmploymentOpenAgreements.value = []
+})
 /*
  * Pole nového vztahu, kvůli kterému založení neprošlo — lokální kontrola nebo
  * `error.details.field` ze serveru. Pole, které formulář nemá (pracoviště,
@@ -1063,6 +1073,7 @@ function startCreate(personId: number) {
   newEmploymentHourlyRate.value = ''
   newEmploymentError.value = ''
   newEmploymentInvalidField.value = null
+  newEmploymentOpenAgreements.value = []
   newEmploymentPrefilledBasis = null
   newEmployment.value = employmentDraft(
     '',
@@ -1124,7 +1135,14 @@ function employmentDraft(
   }
 }
 
-async function saveNew(personId: number) {
+/** Odpověď 409 na další DPP vedle otevřené dohody, viz PayrollOpenAgreements na serveru. */
+function openAgreementsFromError(error: unknown): PayrollOpenAgreement[] | null {
+  const response = (error as { response?: { status?: number; data?: { error?: { code?: string; open_agreements?: PayrollOpenAgreement[] } } } }).response
+  if (response?.status !== 409 || response.data?.error?.code !== 'open_agreement_exists') return null
+  return response.data.error.open_agreements ?? []
+}
+
+async function saveNew(personId: number, choice: { use_open_agreement?: number; confirm_new_agreement?: boolean } = {}) {
   if (!newEmployment.value || savingNew.value) return
   const hourly = newEmployment.value.terms.remuneration_type === 'hourly'
   const hourlyRate = parsePayrollAmountToMinor(newEmploymentHourlyRate.value)
@@ -1144,8 +1162,9 @@ async function saveNew(personId: number) {
   newEmploymentError.value = ''
   newEmploymentInvalidField.value = null
   try {
-    const { employment, warnings } = await payrollApi.createEmployment(personId, {
+    const { employment, warnings, reused, extended_to: extendedTo } = await payrollApi.createEmployment(personId, {
       ...newEmployment.value,
+      ...choice,
       monthly_gross_minor: !hourly && Number(newEmploymentMonthlyGross.value) > 0
         ? Math.round(Number(newEmploymentMonthlyGross.value) * 100)
         : null,
@@ -1156,6 +1175,16 @@ async function saveNew(personId: number) {
         remuneration_basis: hourly ? (newEmployment.value.terms.remuneration_basis ?? '').trim() || null : null,
       },
     })
+    newEmploymentOpenAgreements.value = []
+    if (reused) {
+      updateEmployment(personId, employment)
+      creatingForId.value = null
+      newEmployment.value = null
+      toast.success(extendedTo
+        ? t('payroll.people.open_agreement.reused_extended', { code: employment.code, date: formatDate(extendedTo) })
+        : t('payroll.people.open_agreement.reused', { code: employment.code }))
+      return
+    }
     const person = details.value[personId]
     if (person) person.employments.push(employment)
     const listItem = people.value.find(item => item.id === personId)
@@ -1182,6 +1211,11 @@ async function saveNew(personId: number) {
       toast.success(t('payroll.people.employment_created'))
     }
   } catch (error) {
+    const openAgreements = openAgreementsFromError(error)
+    if (openAgreements !== null) {
+      newEmploymentOpenAgreements.value = openAgreements
+      return
+    }
     newEmploymentError.value = apiErrorMessage(error, t('payroll.people.mutation_failed'))
     const field = apiErrorField(error)
     if (field !== null && NEW_EMPLOYMENT_FIELD_TARGETS[field]) {
@@ -2222,6 +2256,34 @@ onMounted(async () => {
               v-model:temporary-assignment="newEmployment.terms.jmhz_temporary_assignment_status"
               :disabled="savingNew"
             />
+          </div>
+          <div v-if="newEmploymentOpenAgreements.length" class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm sm:col-span-2 lg:col-span-4" role="alert" data-test="new-employment-open-agreement">
+            <p class="font-medium text-warning-700">{{ t('payroll.people.open_agreement.title') }}</p>
+            <ul class="mt-1 space-y-0.5 text-neutral-700">
+              <li v-for="agreement in newEmploymentOpenAgreements" :key="agreement.employment_id">
+                {{ t('payroll.people.open_agreement.item', {
+                  code: agreement.code,
+                  start: agreement.start_date ? formatDate(agreement.start_date) : '—',
+                  end: agreement.end_date ? formatDate(agreement.end_date) : t('payroll.people.open_agreement.no_end'),
+                }) }}
+              </li>
+            </ul>
+            <p class="mt-1 text-neutral-600">{{ t('payroll.people.open_agreement.guidance') }}</p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <button v-for="agreement in newEmploymentOpenAgreements.filter(item => item.reusable)" :key="`reuse-${agreement.employment_id}`" type="button"
+                :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="savingNew" :data-test="`new-employment-reuse-${agreement.employment_id}`"
+                @click="saveNew(expandedId, { use_open_agreement: agreement.employment_id })">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+                {{ agreement.extend_to
+                  ? t('payroll.people.open_agreement.reuse_extend', { code: agreement.code, date: formatDate(agreement.extend_to) })
+                  : t('payroll.people.open_agreement.reuse', { code: agreement.code }) }}
+              </button>
+              <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :disabled="savingNew" data-test="new-employment-confirm-new"
+                @click="saveNew(expandedId, { confirm_new_agreement: true })">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                {{ t('payroll.people.open_agreement.create_new') }}
+              </button>
+            </div>
           </div>
           <p v-if="newEmploymentError" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700 sm:col-span-2 lg:col-span-4" role="alert">{{ newEmploymentError }}</p>
           <div class="flex flex-wrap items-end justify-end gap-2 sm:col-span-2 lg:col-span-4">
