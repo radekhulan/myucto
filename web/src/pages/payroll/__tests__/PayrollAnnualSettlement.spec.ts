@@ -711,12 +711,20 @@ describe('Roční zúčtování', () => {
       listResponse([person(), person({ employee_id: 8, employee_name: 'Druhá osoba' })]),
     )
     m.bulkSetAnnualSettlementRequestStatus.mockResolvedValue({ created: 1, updated: 1 })
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    // Potvrzuje se dialogem aplikace, ne nativním confirm() prohlížeče.
+    const nativeConfirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const wrapper = mountPage()
     await flushPromises()
 
     await wrapper.get('[data-test="annual-settlement-select-all"]').setValue(true)
     await wrapper.get('[data-test="annual-settlement-bulk-not-requested"]').trigger('click')
+    await flushPromises()
+
+    expect(nativeConfirm).not.toHaveBeenCalled()
+    expect(m.bulkSetAnnualSettlementRequestStatus).not.toHaveBeenCalled()
+    expect(document.body.querySelector('[data-test="annual-settlement-bulk-confirm"]')?.textContent)
+      .toContain('payroll.annual_settlement.bulk_request.confirm')
+    document.body.querySelector<HTMLButtonElement>('[data-test="annual-settlement-bulk-confirm-submit"]')!.click()
     await flushPromises()
 
     expect(m.bulkSetAnnualSettlementRequestStatus).toHaveBeenCalledWith(
@@ -726,6 +734,59 @@ describe('Roční zúčtování', () => {
     )
     expect(m.success).toHaveBeenCalled()
     expect(m.listAnnualSettlements).toHaveBeenCalledTimes(2)
+  })
+
+  /*
+   * Po vyřešení všech žádostí ukázal filtr „Žádost nerozhodnuta" text „Firma
+   * zatím nemá žádné zaměstnance". Prázdný výsledek filtru není prázdná firma.
+   */
+  it('prázdný výsledek zúžení neřekne, že firma nemá zaměstnance', async () => {
+    m.routeQuery = { state: 'request_undecided' }
+    m.listAnnualSettlements.mockResolvedValue(listResponse([], { state: 'request_undecided' }))
+    const wrapper = mountPage()
+    await flushPromises()
+    m.routeQuery = {}
+
+    const empty = wrapper.get('[data-test="annual-settlement-empty-filtered"]')
+    expect(empty.attributes('data-variant')).toBe('filtered')
+    expect(empty.text()).toBe('payroll.annual_settlement.no_undecided_title')
+    expect(wrapper.text()).not.toContain('payroll.annual_settlement.no_employees_title')
+  })
+
+  /*
+   * Odkaz „Nastavit nepožádal (5)" z kontroly před během nikoho nepředvybral.
+   * S `select=all` se vyberou všichni, kdo zúžení odpovídají, i z dalších stránek.
+   */
+  it('odkaz z kontroly před během předvybere všechny nerozhodnuté včetně dalších stránek', async () => {
+    m.routeQuery = { year: '2026', state: 'request_undecided', select: 'all' }
+    const firstPage = [person({ employee_id: 7 }), person({ employee_id: 8, employee_name: 'Druhá osoba' })]
+    m.listAnnualSettlements.mockImplementation((_year: number, page?: { limit?: number, offset?: number }) =>
+      Promise.resolve(page?.limit === 200
+        ? listResponse(
+          page.offset === 0 ? [...firstPage, person({ employee_id: 9 })] : [],
+          { total: 3, state: 'request_undecided' },
+        )
+        : listResponse(firstPage, { total: 3, state: 'request_undecided' })))
+    m.bulkSetAnnualSettlementRequestStatus.mockResolvedValue({ created: 3, updated: 0 })
+    const wrapper = mountPage()
+    await flushPromises()
+    m.routeQuery = {}
+
+    expect(wrapper.get('[data-test="annual-settlement-bulk-request-count"]').text())
+      .toContain('payroll.annual_settlement.bulk_request.selected')
+    await wrapper.get('[data-test="annual-settlement-bulk-not-requested"]').trigger('click')
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-test="annual-settlement-bulk-confirm-submit"]')!.click()
+    await flushPromises()
+
+    expect(m.bulkSetAnnualSettlementRequestStatus).toHaveBeenCalledWith(2026, [7, 8, 9], 'not_requested')
+  })
+
+  it('bez odkazu s předvýběrem nikoho sama nevybere', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="annual-settlement-bulk-request-count"]').exists()).toBe(false)
   })
 
   /**

@@ -1295,7 +1295,7 @@ function readinessBulkTarget(action: { kind: PayrollRunReadinessBulkKind, employ
     // Hlášení za leden a únor se ptá na žádost za MINULÝ rok. Hromadné
     // „nepožádal" je výběr na stránce Ročního zúčtování, zúžený na nerozhodnuté.
     const taxYear = Number(bulkPeriod.slice(0, 4)) - 1
-    return { name: 'payroll-annual-settlement', query: { year: String(taxYear), state: 'request_undecided' } }
+    return { name: 'payroll-annual-settlement', query: { year: String(taxYear), state: 'request_undecided', select: 'all' } }
   }
   // Nález nese osoby, kterých se týká — dialog se jimi zúží, ne na celý rok.
   const employees = action.employee_ids?.length ? { employees: action.employee_ids.join(',') } : {}

@@ -2411,7 +2411,7 @@ describe('PayrollRuns', () => {
       const action = wrapper.get('[data-test="run-readiness-bulk-action-annual_settlement_request"]')
       expect(JSON.parse(action.attributes('data-to')!)).toEqual({
         name: 'payroll-annual-settlement',
-        query: { year: '2025', state: 'request_undecided' },
+        query: { year: '2025', state: 'request_undecided', select: 'all' },
       })
       expect(action.text()).toContain('payroll.runs.readiness.bulk.annual_settlement_request')
       wrapper.unmount()
