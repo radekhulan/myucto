@@ -51,6 +51,7 @@ final class PayrollRunReadinessService
         'health_insurer',
         'workplace',
         'closure',
+        'annual_settlement_request',
     ];
 
     /**
@@ -307,6 +308,10 @@ final class PayrollRunReadinessService
             $code === 'tax_declaration_not_signed_summary',
             $code === 'tax_declaration_evidence_missing' => [['kind' => 'declaration_signed', 'count' => $count]],
             $code === 'employments_past_agreed_end' => [['kind' => 'closure', 'count' => $count]],
+            // Hromadné „nepožádal" je výběr na stránce Roční zúčtování, ne dialog
+            // v seznamu zaměstnanců; klient tam vede s rokem a zúžením.
+            $code === 'jmhz_annual_request_status_unresolved'
+                => [['kind' => 'annual_settlement_request', 'count' => $count]],
             str_starts_with($code, 'jmhz_')
                 && JmhzBlockerCatalog::remediation($code)['kind'] === 'workplace'
                 => [['kind' => 'workplace', 'count' => $count]],

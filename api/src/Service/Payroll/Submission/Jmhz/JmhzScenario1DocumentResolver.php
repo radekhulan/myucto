@@ -3436,21 +3436,18 @@ final class JmhzScenario1DocumentResolver
                 === JmhzAnnualEvidenceService::PROOF_NO_EMPLOYMENT_IN_TAX_YEAR
             && ($requestEvidence['tax_year'] ?? null) === $expectedTaxYear;
         $requested = null;
-        if ($month <= 2) {
-            $requested = match (true) {
-                $requestLocked => match ($requestStatus) {
-                    'requested' => true,
-                    'not_requested' => false,
-                    default => null,
-                },
-                $requestImpossible => false,
-                default => null,
-            };
-            if ($requested === null) {
+        if (JmhzAnnualEvidenceService::requestStatusReported($periodStart)) {
+            // Pravidlo sdílí kontrola před zahájením běhu, proto žije jinde.
+            $requestIssue = JmhzAnnualEvidenceService::requestIssueCode(
+                $request !== [],
+                $requestLocked ? $requestStatus : null,
+                $requestImpossible,
+            );
+            if ($requestIssue === null) {
+                $requested = $requestLocked && $requestStatus === 'requested';
+            } else {
                 $blockers[] = $this->blocker(
-                    $request === []
-                        ? 'jmhz_annual_request_source_missing'
-                        : 'jmhz_annual_request_status_unresolved',
+                    $requestIssue,
                     'person',
                     $employeeId,
                     ['10319'],

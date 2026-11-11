@@ -6902,6 +6902,7 @@ export type PayrollAnnualSettlementListState =
   | 'requested'
   | 'settled'
   | 'unsettled'
+  | 'request_undecided'
 
 export interface PayrollAnnualSettlementCreditRow {
   label: string
@@ -7923,6 +7924,7 @@ export type PayrollRunReadinessBulkKind =
   | 'health_insurer'
   | 'workplace'
   | 'closure'
+  | 'annual_settlement_request'
 
 /**
  * Kontrola před zahájením mzdového běhu. Čtecí, nic neukládá — stejný vzor

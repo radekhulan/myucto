@@ -2096,5 +2096,40 @@ describe('PayrollRuns', () => {
       expect(wrapper.text()).toContain('Syntetická Osoba: chybí daňová rezidence.')
       wrapper.unmount()
     })
+
+    it('nerozhodnutá žádost o roční zúčtování vede na hromadné nastavení za minulý rok', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: true,
+        has_findings: true,
+        findings: [{
+          code: 'jmhz_annual_request_status_unresolved',
+          severity: 'info',
+          impact: 'anytime',
+          scope: 'monthly',
+          message: 'Není rozhodnuto, zda o roční zúčtování za minulý rok požádal(a).',
+          remediation_path: '/payroll/annual-settlement',
+          count: 56,
+          entities: [],
+          bulk_actions: [{ kind: 'annual_settlement_request', count: 56 }],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const action = wrapper.get('[data-test="run-readiness-bulk-action-annual_settlement_request"]')
+      expect(JSON.parse(action.attributes('data-to')!)).toEqual({
+        name: 'payroll-annual-settlement',
+        query: { year: '2025', state: 'request_undecided' },
+      })
+      expect(action.text()).toContain('payroll.runs.readiness.bulk.annual_settlement_request')
+      wrapper.unmount()
+    })
   })
 })

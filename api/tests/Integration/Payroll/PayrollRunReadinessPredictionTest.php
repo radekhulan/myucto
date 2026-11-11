@@ -140,6 +140,51 @@ final class PayrollRunReadinessPredictionTest extends TestCase
         }
     }
 
+    public function testReadinessPredictsUndecidedAnnualSettlementRequestBeforeJmhzFreeze(): void
+    {
+        // Únor: hlášení se ptá, zda zaměstnanec požádal o roční zúčtování za
+        // rok 2025. Zmrazení hlášení ho bez odpovědi zastaví, kontrola před
+        // během o tom dřív mlčela.
+        [$withoutRowId] = $this->employment('Syntetický Bez žádosti');
+        [$unknownId] = $this->employment('Syntetická Nevím');
+        [$decidedId] = $this->employment('Syntetický Nepožádal');
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_annual_settlement_requests
+                (supplier_id, employee_id, tax_year, request_status, created_by, updated_by)
+             VALUES (?, ?, 2025, ?, ?, ?)'
+        );
+        $insert->execute([$this->supplierId, $unknownId, 'unknown', $this->actorId, $this->actorId]);
+        $insert->execute([$this->supplierId, $decidedId, 'not_requested', $this->actorId, $this->actorId]);
+
+        $result = $this->readiness->inspect($this->supplierId, '2026-02-01', '2026-03-10');
+
+        $finding = self::finding($result['findings'], 'jmhz_annual_request_status_unresolved');
+        self::assertNotNull($finding, json_encode(array_column($result['findings'], 'code')));
+        self::assertNull(self::finding($result['findings'], 'jmhz_annual_request_source_missing'));
+        self::assertSame(2, $finding['entity_total']);
+        $ids = array_column($finding['entities'], 'entity_id');
+        sort($ids);
+        $expected = [$withoutRowId, $unknownId];
+        sort($expected);
+        self::assertSame($expected, $ids);
+        self::assertSame([['kind' => 'annual_settlement_request', 'count' => 2]], $finding['bulk_actions']);
+        self::assertStringContainsString('Syntetická Nevím', $finding['message']);
+        self::assertStringStartsWith('/payroll/annual-settlement', (string) $finding['entities'][0]['remediation_path']);
+
+        // Tlačítko vede na Roční zúčtování zúžené na tytéž osoby.
+        $listed = \MyInvoice\Tests\Support\PayrollTestContainer::build()
+            ->get(\MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository::class)
+            ->listForYear($this->supplierId, 2025, 50, 0, '', 'request_undecided');
+        $listedIds = array_map(static fn (array $item): int => (int) $item['employee_id'], $listed['items']);
+        sort($listedIds);
+        self::assertSame($expected, $listedIds);
+        self::assertSame(2, $listed['total']);
+
+        // Mimo leden a únor se stav žádosti nehlásí.
+        $march = $this->readiness->inspect($this->supplierId, '2026-03-01', '2026-04-10');
+        self::assertNull(self::finding($march['findings'], 'jmhz_annual_request_status_unresolved'));
+    }
+
     /**
      * @param list<array<string,mixed>> $findings
      * @return array<string,mixed>|null

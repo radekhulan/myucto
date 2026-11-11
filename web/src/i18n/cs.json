@@ -4792,7 +4792,8 @@
           "declaration_signed": "Podepsaná prohlášení hromadně",
           "health_insurer": "Zdravotní pojišťovny hromadně ({count})",
           "workplace": "Doplnit místo výkonu práce ({count})",
-          "closure": "Ukončit skončené dohody ({count})"
+          "closure": "Ukončit skončené dohody ({count})",
+          "annual_settlement_request": "Nastavit „nepožádal“ o roční zúčtování ({count})"
         },
         "fill_probable_average_done": "Doplněno automaticky ze sjednané hodinové sazby: {count}. Průměr jde opravit novou revizí v Absence a dovolená → Průměrný výdělek.",
         "fill_probable_average_failed": "Pravděpodobný výdělek se nepodařilo doplnit.",
@@ -5769,7 +5770,8 @@
         "all": "Vše",
         "requested": "Požádali, nezúčtováno",
         "unsettled": "Bez zúčtování",
-        "settled": "Zúčtováno"
+        "settled": "Zúčtováno",
+        "request_undecided": "Žádost nerozhodnuta"
       },
       "not_settled": "Neprovedeno",
       "detail": "Podrobnosti",

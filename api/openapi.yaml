@@ -44931,11 +44931,11 @@ components:
                 items: { type: string }
         bulk_actions:
           type: array
-          description: Hromadné opravy ze seznamu zaměstnanců (/payroll/people?bulk=kind), které nález nabízí.
+          description: Hromadné opravy ze seznamu zaměstnanců (/payroll/people?bulk=kind), které nález nabízí; annual_settlement_request vede na hromadné nastavení stavu žádosti v Ročním zúčtování.
           items:
             type: object
             properties:
-              kind: { type: string, enum: [statutory_defaults, declaration_signed, health_insurer, workplace, closure] }
+              kind: { type: string, enum: [statutory_defaults, declaration_signed, health_insurer, workplace, closure, annual_settlement_request] }
               count: { type: integer, minimum: 0 }
 
     PayrollRunReadiness:
