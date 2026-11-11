@@ -5173,7 +5173,9 @@
         "delete": "Smazat",
         "delete_confirm": "Opravdu smazat nepoužitou mzdovou složku „{name}“? Pokud už byla použita ve mzdách, aplikace smazání bezpečně odmítne.",
         "deleted": "Nepoužitá mzdová složka byla smazána.",
-        "delete_failed": "Mzdovou složku nelze smazat. Pokud už byla použita, ukončete její platnost nebo ji deaktivujte."
+        "delete_failed": "Mzdovou složku nelze smazat. Pokud už byla použita, ukončete její platnost nebo ji deaktivujte.",
+        "jmhz_filter": "Zobrazeny jen složky se stavem „{status}“ ({count}), na které vede nález hlášení.",
+        "jmhz_filter_clear": "Zobrazit všechny složky"
       },
       "jmhz": {
         "title": "Mapování složky do JMHZ",

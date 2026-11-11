@@ -143,7 +143,13 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
         self::assertEqualsCanonicalizing(array_column($this->groups['workplace'], 'employment_id'), $workplacePreview['missing_employment_ids']);
 
         // Roční zúčtování a skončené dohody.
-        self::assertSame(2, self::finding($findings, 'jmhz_annual_request_status_unresolved')['entity_total']);
+        $annual = self::finding($findings, 'jmhz_annual_request_status_unresolved');
+        self::assertSame(2, $annual['entity_total']);
+        // Odkaz nese rok zúčtování (minulý rok hlášení), ne rok podle dneška.
+        self::assertSame('/payroll/annual-settlement?year=2025', $annual['remediation_path']);
+        foreach ($annual['entities'] as $entity) {
+            self::assertSame('/payroll/annual-settlement?year=2025&person=' . $entity['entity_id'], $entity['remediation_path']);
+        }
         $ended = self::finding($findings, 'employments_past_agreed_end');
         self::assertSame(3, $ended['entity_total']);
         $closurePreview = $this->container->get(PayrollEmploymentBulkClosure::class)->preview($this->supplierId, 3, 12);
