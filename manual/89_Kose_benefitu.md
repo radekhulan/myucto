@@ -212,6 +212,15 @@ vůbec: náklad je v knihách už ze zdrojového dokladu a mzdový zápis by ho
 zaúčtoval podruhé. Do daně a pojistného přitom vstupuje normálně (viz
 [Shoda účtování mezd](81_Shoda_uctovani_mezd.md#8153-ucetne-neutralni-nepenezni-plneni)).
 
+Příspěvek zaměstnavatele na penzijní a životní produkty a na pojištění
+dlouhodobé péče (složky *Příspěvek na penzijní a životní produkty* a *Příspěvek
+na dlouhodobou péči*) je nepeněžní plnění: zaměstnavatel ho platí penzijní
+společnosti nebo pojišťovně a zaměstnanci se nevyplácí. Do 50 000 Kč ročně je
+osvobozený, nadlimitní část se zdaní a pojistí z peněžní mzdy. Do měsíčního
+hlášení jde v údaji o příspěvcích na spoření na stáří jen osvobozená část.
+Chcete-li náklad a závazek vůči instituci účtovat mzdovým zápisem, vyplňte
+složce vlastní dvojici účtů.
+
 ### 89.6.6 Kontroly a časté chyby
 
 Kontrolujte období, osobu, limit, duplicity a zákonnou klasifikaci plnění.

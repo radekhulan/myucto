@@ -242,4 +242,100 @@ final class PayrollE2eFix4BenefitTest extends TestCase
         self::assertStringContainsString('1 234,56 Kč', $run['blockers'][0]['message']);
         self::assertStringNotContainsString('2 460,50', $run['blockers'][0]['message']);
     }
+
+    /**
+     * Příspěvek zaměstnavatele na doplňkové penzijní spoření 2 000 Kč
+     * výchozí složkou PRISPEVEK_PENZE_ZIVOTNI, kterou účetní posoudí jako
+     * osvobozenou (§ 6 odst. 9 písm. m) ZDP: „příjem v podobě příspěvku
+     * uhrazeného zaměstnavatelem na daňově podporované produkty spoření na
+     * stáří jeho zaměstnance“, do 50 000 Kč ročně). Zaměstnavatel ho platí
+     * penzijní společnosti, zaměstnanci se nevyplácí.
+     *
+     * Ruční přepočet: základ 40 000; SP 2 840; ZP 5 400, zaměstnanec 1 800;
+     * záloha 6 000 − 2 570 = 3 430; výplata 40 000 − 8 070 = 31 930 Kč.
+     * Dřív byla složka peněžní a zaměstnanec dostal 33 930 Kč.
+     * Hlášení: 10286 = 42 000, 10289 = 2 000, 10417 = 2 000.
+     */
+    public function testEmployerPensionContributionIsNotPaidOutToTheEmployee(): void
+    {
+        $person = $this->hire('Syntetický Spořivý', 'male', '1980-02-02');
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->input($person, 'MZDA_MESICNI', 4_000_000, 'base');
+        $pensionId = $this->componentId('PRISPEVEK_PENZE_ZIVOTNI');
+        $this->classifyAsExemptBasket($pensionId);
+        $this->mappings()->put($this->supplierId, $pensionId, '10293', null, $this->actors[0]);
+        $pension = $this->input($person, 'PRISPEVEK_PENZE_ZIVOTNI', 200_000, 'penze');
+        self::assertSame([200_000, 0], [$pension['benefit_exempt_minor'], $pension['benefit_taxable_minor']]);
+
+        $run = $this->approvedRun('fix4-pension');
+
+        $this->assertPayroll($run['person'], [
+            'taxable' => 4_000_000,
+            'social_base' => 4_000_000,
+            'health_base' => 4_000_000,
+            'social' => 284_000,
+            'health_employee' => 180_000,
+            'health_employer' => 360_000,
+            'advance' => 343_000,
+            'cash_income' => 4_000_000,
+            'non_cash_income' => 200_000,
+            'net' => 3_193_000,
+        ]);
+        $xml = $this->dryRunXml($run['revision_id'], 'fix4-pension');
+        foreach ([
+            '<form:zuctovanoCelkem>42000</form:zuctovanoCelkem>',
+            '<form:osvobozenoCelkem>2000</form:osvobozenoCelkem>',
+            '<form:prispevekZelSporeniOsvob>2000</form:prispevekZelSporeniOsvob>',
+            '<form:zakladDane>40000</form:zakladDane>',
+        ] as $fragment) {
+            self::assertStringContainsString($fragment, $xml);
+        }
+    }
+
+    /**
+     * Jednorázový příspěvek na penzi 60 000 Kč: 50 000 Kč osvobozeno
+     * (roční limit § 6 odst. 9 písm. m) ZDP), 10 000 Kč je zdanitelný příjem
+     * s odvodem pojistného. Zaměstnanec nedostane nic z příspěvku, daň
+     * a pojistné z nadlimitní části se mu srazí z peněžní mzdy.
+     *
+     * Ruční přepočet: základ 50 000; SP 3 550; ZP 6 750, zaměstnanec 2 250;
+     * záloha 7 500 − 2 570 = 4 930; výplata 40 000 − 10 730 = 29 270 Kč.
+     * Hlášení: 10286 = 100 000, 10289 = 50 000 a 10417 = 50 000 (pokyny
+     * 1.4.13: částky nad limit se v 10417 neevidují; dřív 60 000).
+     */
+    public function testPensionContributionAboveAnnualLimitReportsOnlyTheExemptPart(): void
+    {
+        $person = $this->hire('Syntetická Spořivá', 'female', '1983-03-13');
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->input($person, 'MZDA_MESICNI', 4_000_000, 'base');
+        $pensionId = $this->componentId('PRISPEVEK_PENZE_ZIVOTNI');
+        $this->classifyAsExemptBasket($pensionId);
+        $this->mappings()->put($this->supplierId, $pensionId, '10293', null, $this->actors[0]);
+        $pension = $this->input($person, 'PRISPEVEK_PENZE_ZIVOTNI', 6_000_000, 'penze');
+        self::assertSame([5_000_000, 1_000_000], [$pension['benefit_exempt_minor'], $pension['benefit_taxable_minor']]);
+
+        $run = $this->approvedRun('fix4-pension-limit');
+
+        $this->assertPayroll($run['person'], [
+            'taxable' => 5_000_000,
+            'social_base' => 5_000_000,
+            'health_base' => 5_000_000,
+            'social' => 355_000,
+            'health_employee' => 225_000,
+            'health_employer' => 450_000,
+            'advance' => 493_000,
+            'cash_income' => 4_000_000,
+            'non_cash_income' => 6_000_000,
+            'net' => 2_927_000,
+        ]);
+        $xml = $this->dryRunXml($run['revision_id'], 'fix4-pension-limit');
+        foreach ([
+            '<form:zuctovanoCelkem>100000</form:zuctovanoCelkem>',
+            '<form:osvobozenoCelkem>50000</form:osvobozenoCelkem>',
+            '<form:prispevekZelSporeniOsvob>50000</form:prispevekZelSporeniOsvob>',
+            '<form:zakladDane>50000</form:zakladDane>',
+        ] as $fragment) {
+            self::assertStringContainsString($fragment, $xml);
+        }
+    }
 }
