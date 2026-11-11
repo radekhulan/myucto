@@ -182,6 +182,18 @@ final class JmhzScenario1Xml2027SerializerTest extends TestCase
 
         self::assertSame('111111', self::value($xpath, '//f:mistoVykonuPrace/f:kodObce'));
         self::assertSame(0, $xpath->query('//f:mistoVykonuPrace/f:psc')?->length);
+        // Slovník 1.5.0.3: číselník obcí = CISOB + 111111 „Mimo ČR"; obec se
+        // odvozuje z kódu, zahraniční město ze smlouvy do 10229 nejde.
+        self::assertSame('Mimo ČR', self::value($xpath, '//f:mistoVykonuPrace/f:obec'));
+        self::assertSame('AT', self::value($xpath, '//f:mistoVykonuPrace/f:kodStatu'));
+
+        $payload['people'][0]['employments'][0]['term']['jmhz_workplace_country_code'] = 'CZ';
+        try {
+            $this->validator()->dryRun(self::resolution($payload), self::envelope());
+            self::fail('Místo výkonu mimo ČR se státem CZ nesmí projít.');
+        } catch (\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException $exception) {
+            self::assertSame('jmhz_xml_workplace_address_invalid', $exception->validationCode);
+        }
     }
 
     public function testContentCorrectionAndPackagesAreSchemaValid(): void
