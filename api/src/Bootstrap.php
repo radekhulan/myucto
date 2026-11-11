@@ -559,7 +559,9 @@ final class Bootstrap
                 );
             },
             \MyInvoice\Service\Migration\Myucto\MyuctoImportJobService::class => \DI\autowire()
-                ->constructorParameter('legacy', \DI\get(\MyInvoice\Service\Migration\MyInvoice\MyInvoiceBackupImportBridge::class)),
+                ->constructorParameter('legacy', \DI\get(\MyInvoice\Service\Migration\MyInvoice\MyInvoiceBackupImportBridge::class))
+                // Průběh obnovy po tabulkách se zapisuje vlastním spojením (obnova běží v jedné transakci).
+                ->constructorParameter('config', \DI\get(Config::class)),
             // DPPO podklady: ClosingService (4. arg) je konstrukčně volitelný (unit testy nad SQLite
             // ho nepředávají), ale PHP-DI autowire optional class-param nevyplní → explicitní bind,
             // aby náhled DPPO měl projekci závěrkových operací (Feature 1) i v produkci.

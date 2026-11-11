@@ -38594,7 +38594,7 @@
     "rights": "Write access to imports, the accounting journal and company settings is required.",
     "input": "1. Export and source instance",
     "file": "Export ZIP",
-    "file_hint": "Full restorable ZIP for one company, up to 2 GiB. Selected data and attachments: up to 64 MiB / 100,000 rows.",
+    "file_hint": "Full restorable ZIP for one company, up to 2 GiB. Company data is read as a stream: up to 8 GiB of data and 20 million rows per table.",
     "source": "Source instance name",
     "source_hint": "Use a stable unique name and keep it unchanged for retries. Letters, digits, periods, hyphens and underscores are allowed.",
     "password": "ZIP password (optional)",
