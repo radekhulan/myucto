@@ -9,6 +9,7 @@ use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Run\PayrollRunValidationOverrideService;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -109,7 +110,10 @@ final class PayrollE2eHpp2SurchargeTest extends TestCase
         $approved = $this->approveTimeMonth($person['employment_id'], self::PERIOD, self::workdays(self::PERIOD));
         self::assertSame(200, $approved->getStatusCode(), 'Zaseknutí: docházka. ' . (string) $approved->getBody());
 
-        $result = $this->submission('quick-surcharges');
+        // Přesčas zadaný jen rychlým vstupem docházka nenese: běh to hlásí
+        // varováním s povinným potvrzením (viz PayrollE2eFix4SurchargeTest).
+        // Tady jde o přesčas odpracovaný v jiném měsíci, účetní ho potvrdí.
+        $result = $this->submission('quick-surcharges', ['quick_overtime_hours_not_in_attendance']);
 
         $this->assertPayroll($result['person'], [
             'taxable' => 4_410_700,
@@ -530,16 +534,40 @@ final class PayrollE2eHpp2SurchargeTest extends TestCase
     /**
      * Běh, příprava JMHZ a dry-run; vrací zákonný výsledek první osoby a XML.
      *
+     * @param list<string> $confirmedWarnings kódy varování, která účetní před schválením potvrdí
      * @return array{person:array<string,mixed>,xml:string,revision_id:int}
      */
-    private function submission(string $scenario): array
+    private function submission(string $scenario, array $confirmedWarnings = []): array
     {
         $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, "hpp2-{$scenario}");
         self::assertSame([], $run['blockers'], 'Zaseknutí: výpočet. ' . CanonicalJson::encode($run['blockers']));
-        self::assertSame([], $run['warnings'], 'Zaseknutí: varování. ' . CanonicalJson::encode($run['warnings']));
-        self::assertNotNull($run['approved']);
-        $revisionId = (int) $run['approved']->revision['id'];
-        $people = $run['approved']->revision['result_snapshot']['statutory']['people'];
+        self::assertSame($confirmedWarnings, array_column($run['warnings'], 'code'), 'Zaseknutí: varování. ' . CanonicalJson::encode($run['warnings']));
+        $approved = $run['approved'];
+        if ($confirmedWarnings !== []) {
+            // Účetní varování vědomě potvrdí (výjimka s odůvodněním, druhý
+            // uživatel) a běh schválí.
+            $overrides = $this->container->get(PayrollRunValidationOverrideService::class);
+            self::assertInstanceOf(PayrollRunValidationOverrideService::class, $overrides);
+            $runRow = $run['calculated']->run;
+            $approver = $this->createActor('override-' . $scenario);
+            foreach ($run['warnings'] as $warning) {
+                $granted = $overrides->grant(
+                    $this->supplierId,
+                    (int) $runRow['id'],
+                    $warning['id'],
+                    (int) $runRow['row_version'],
+                    "hpp2-{$scenario}-override-{$warning['id']}",
+                    $approver,
+                    'Přesčas byl odpracován v březnu a zúčtován až v dubnové mzdě, dubnová docházka ho proto nenese.',
+                );
+                $runRow = $granted->run;
+            }
+            $reviewed = $this->runs->review($this->supplierId, (int) $runRow['id'], (int) $runRow['row_version'], "hpp2-{$scenario}-review", $this->actors[0]);
+            $approved = $this->runs->approve($this->supplierId, (int) $runRow['id'], (int) $reviewed->run['row_version'], "hpp2-{$scenario}-approve", $this->actors[0]);
+        }
+        self::assertNotNull($approved);
+        $revisionId = (int) $approved->revision['id'];
+        $people = $approved->revision['result_snapshot']['statutory']['people'];
 
         $preparation = $this->prepareJmhz($revisionId, "hpp2-{$scenario}");
         self::assertSame(201, $preparation['status'], CanonicalJson::encode($preparation['body']));
