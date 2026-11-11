@@ -13070,6 +13070,9 @@
         "where": "Fix for {name}:",
         "personCard": "Open the person card",
         "reconciliation": "Open payroll migration check",
+        "employmentTerms": "Edit employment terms",
+        "payrollRuns": "Open payroll runs",
+        "employerSettings": "Open employer settings",
         "editCase": "Edit case"
       },
       "codebooks": {

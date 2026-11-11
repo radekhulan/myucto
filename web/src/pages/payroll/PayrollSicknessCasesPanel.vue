@@ -32,7 +32,13 @@ import { useI18n } from 'vue-i18n'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
 import { personalNumberLabel } from './employmentLifecycleUi'
 import { usePayrollServerMessage } from './payrollServerMessage'
-import { apiErrorCode } from '@/api/errors'
+import {
+  sicknessErrorFix,
+  sicknessErrorProblems,
+  type SicknessErrorFix,
+  type SicknessErrorFixLink,
+  type SicknessErrorProblem,
+} from './sicknessErrorFix'
 import {
   payrollSicknessCasesApi,
   type PayrollSicknessBenefitKind,
@@ -287,56 +293,36 @@ function minorToCzk(value: number | null | undefined): string {
   return typeof value === 'number' ? String(value / 100) : ''
 }
 
-/** Kód poslední chyby ze serveru a případ, u kterého vznikla — pro proklik. */
-const errorCode = ref<string | null>(null)
+/** Chyby posledního volání serveru a případ, u kterého vznikly — pro proklik. */
+const errorProblems = ref<SicknessErrorProblem[]>([])
 const errorCase = ref<PayrollSicknessCase | null>(null)
 
 /*
- * Chyba serveru: `{ error: { code, message } }`. Dřív se četlo `data.error`
- * jako text, takže se místo věty ukázalo „[object Object]". V jiném jazyce
- * se místo české věty serveru ukáže překlad kódu. Kód si panel drží pro
- * proklik na místo, kde se chyba opraví.
+ * Chyba serveru: `{ error: { code, message, problems } }`. Dřív se četlo
+ * `data.error` jako text, takže se místo věty ukázalo „[object Object]". V jiném
+ * jazyce se místo české věty serveru ukáže překlad kódu. Chyby si panel drží
+ * pro proklik na místo, kde se každá opraví.
  */
 function message(err: unknown): string {
-  errorCode.value = apiErrorCode(err) || null
+  errorProblems.value = sicknessErrorProblems(err)
   return serverErrorMessage(err, t('payroll.sicknessCases.errors.generic'))
 }
 
-/** Chyby, které se opravují na kartě osoby (identita, účet, adresa, vyživovaná osoba). */
-const PERSON_CARD_ERRORS = [
-  'nempri_payment_connection_missing',
-  'nempri_payment_connection_required',
-  'nempri_payment_connection_invalid',
-  'nempri_bank_code_unknown',
-  'nempri_payment_connection_partner_settlement',
-  'nempri_payment_address_invalid',
-  'nempri_birth_number_missing',
-  'sickness_identity_incomplete',
-  'nempri_cared_person_not_found',
-]
-/** Chybějící převzaté mzdy se doplňují v Kontrole převodu mezd. */
-const RECONCILIATION_ERRORS = ['nempri_decisive_month_missing']
-
-/**
- * Kam s chybou: karta osoby, kontrola převodu, nebo editor tohoto případu.
- * Blokátor bez místa, kde se opraví, by účetní nechal hádat.
- */
-const errorFix = computed<{ kind: 'person' | 'reconciliation' | 'edit', item: PayrollSicknessCase } | null>(() => {
+/** Kam s chybami: karta osoby, podmínky vztahu, mzdové běhy, kontrola převodu, nastavení, nebo editor případu. */
+const errorFix = computed<(SicknessErrorFix & { item: PayrollSicknessCase }) | null>(() => {
   const item = errorCase.value
-  const code = errorCode.value
-  if (item === null || code === null) return null
-  if (PERSON_CARD_ERRORS.includes(code)) return { kind: 'person', item }
-  if (RECONCILIATION_ERRORS.includes(code)) return { kind: 'reconciliation', item }
-  if (code.startsWith('nempri_') || code.startsWith('hzupn_') || code.startsWith('dlo_')) {
-    return { kind: 'edit', item }
-  }
-  // Událost po skončení vztahu: opravuje se den vzniku u případu, nebo konec
-  // vztahu na kartě osoby — editor případu nabídne první z obou.
-  if (code.startsWith('sickness_event_') || code === 'sickness_protection_period_excluded') {
-    return { kind: 'edit', item }
-  }
-  return null
+  if (item === null) return null
+  const fix = sicknessErrorFix(errorProblems.value, item)
+  return fix === null ? null : { ...fix, item }
 })
+
+const ERROR_FIX_LABELS: Record<SicknessErrorFixLink['kind'], string> = {
+  person: 'payroll.sicknessCases.errorFix.personCard',
+  employment_terms: 'payroll.sicknessCases.errorFix.employmentTerms',
+  runs: 'payroll.sicknessCases.errorFix.payrollRuns',
+  reconciliation: 'payroll.sicknessCases.errorFix.reconciliation',
+  settings: 'payroll.sicknessCases.errorFix.employerSettings',
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -1165,30 +1151,23 @@ onMounted(() => void load())
       />
     </div>
 
-    <div v-if="error" class="rounded-lg bg-red-50 p-3 text-sm text-red-700" data-test="sickness-case-error">
-      <p class="whitespace-pre-line">{{ error }}</p>
+    <div v-if="error" class="rounded-lg bg-red-50 p-3 text-sm text-red-700" data-test="sickness-case-error-box">
+      <p class="whitespace-pre-line" data-test="sickness-case-error">{{ error }}</p>
       <div v-if="errorFix" class="mt-2 flex flex-wrap items-center gap-2" data-test="sickness-case-error-fix">
         <span class="text-xs">
           {{ t('payroll.sicknessCases.errorFix.where', { name: errorFix.item.full_name }) }}
         </span>
         <RouterLink
-          v-if="errorFix.kind === 'person'"
-          :to="{ name: 'payroll-people', query: { person: String(errorFix.item.employee_id) } }"
+          v-for="(link, index) in errorFix.links"
+          :key="`${link.kind}-${index}`"
+          :to="link.to"
           class="font-semibold underline"
-          data-test="sickness-case-error-fix-person"
+          :data-test="`sickness-case-error-fix-${link.kind}`"
         >
-          {{ t('payroll.sicknessCases.errorFix.personCard') }}
-        </RouterLink>
-        <RouterLink
-          v-else-if="errorFix.kind === 'reconciliation'"
-          :to="{ path: '/payroll/imports', query: { tab: 'reconciliation' } }"
-          class="font-semibold underline"
-          data-test="sickness-case-error-fix-reconciliation"
-        >
-          {{ t('payroll.sicknessCases.errorFix.reconciliation') }}
+          {{ t(ERROR_FIX_LABELS[link.kind]) }}
         </RouterLink>
         <ActionBar
-          v-if="errorFix.kind === 'edit' || errorFix.kind === 'reconciliation'"
+          v-if="errorFix.edit"
           :actions="[{
             key: 'error-fix-edit',
             label: t('payroll.sicknessCases.errorFix.editCase'),

@@ -13070,6 +13070,9 @@
         "where": "Oprava u osoby {name}:",
         "personCard": "Otevřít kartu osoby",
         "reconciliation": "Otevřít kontrolu převodu mezd",
+        "employmentTerms": "Upravit podmínky vztahu",
+        "payrollRuns": "Otevřít mzdové běhy",
+        "employerSettings": "Otevřít nastavení zaměstnavatele",
         "editCase": "Upravit případ"
       },
       "codebooks": {

@@ -307,6 +307,7 @@ final class PayrollSicknessCaseAction
                 $exception->validationCode === 'sickness_case_conflict'
                     ? 409
                     : 422,
+                $exception->extra,
             ));
         } catch (\OutOfBoundsException $exception) {
             return $this->noStore(Json::error(
