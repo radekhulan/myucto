@@ -72,10 +72,15 @@ final class PayrollRunReadinessService
      */
     private const GAPS_JUDGED_BY_SNAPSHOT = ['tax_declaration', 'tax_residence', 'health_insurance'];
 
-    /** Kódy zákonného vstupu, které hlásí už `taxDeclarationFinding()`. */
-    private const DECLARATION_ISSUE_CODES = [
+    /**
+     * Kódy zákonného vstupu, které hlásí jiný nález: stav prohlášení
+     * `taxDeclarationFinding()` a chybějící podmínky vztahu validace snímku
+     * (`missing_effective_employment_term`).
+     */
+    private const STATUTORY_ISSUES_REPORTED_ELSEWHERE = [
         'tax_declaration_evidence_missing',
         'tax_declaration_evidence_unverified',
+        'employment_term_missing',
     ];
 
     /** Sekce zákonné evidence, které doplní hromadné výchozí údaje. */
@@ -606,7 +611,8 @@ final class PayrollRunReadinessService
      * i odkaz se skládají TÝMŽ formátem jako validace běhu
      * ({@see PayrollRunIssueGuidance::describe()}), takže nález má stejný
      * počet řádků, jaký pak výpočet uloží. Stav prohlášení zůstává
-     * v `taxDeclarationFinding()` (vlastní hromadná oprava).
+     * v `taxDeclarationFinding()` (vlastní hromadná oprava) a chybějící
+     * podmínky vztahu ve validaci snímku, proto se tu nepočítají podruhé.
      *
      * @param array<string,mixed> $snapshotData
      * @return array<string,mixed>|null
@@ -628,7 +634,7 @@ final class PayrollRunReadinessService
         $statutoryPeople = [];
         $insurerPeople = [];
         foreach ($issues as $issue) {
-            if ($issue->isGlobal() || in_array($issue->code, self::DECLARATION_ISSUE_CODES, true)) {
+            if ($issue->isGlobal() || in_array($issue->code, self::STATUTORY_ISSUES_REPORTED_ELSEWHERE, true)) {
                 continue;
             }
             $detail = PayrollRunIssueGuidance::describe($issue->toIssueString());
@@ -682,7 +688,7 @@ final class PayrollRunReadinessService
                 implode(', ', $named),
                 $hidden > 0 ? sprintf(' a dalších %d', $hidden) : '',
             ),
-            null,
+            '/payroll/people?filter=blocking_data',
             count($details),
             array_map(
                 static fn (array $detail): array => [
@@ -829,6 +835,7 @@ final class PayrollRunReadinessService
         if ($below === []) {
             return null;
         }
+        $firstEmploymentId = array_key_first($below);
 
         return self::finding(
             'monthly_wage_below_minimum',
@@ -843,7 +850,7 @@ final class PayrollRunReadinessService
                 count($below),
             ),
             count($below) === 1
-                ? '/payroll/people?employment=' . array_key_first($below) . '&panel=employment_terms&field=monthly_gross_minor'
+                ? '/payroll/people?employment=' . $firstEmploymentId . '&panel=employment_terms&field=monthly_gross_minor'
                 : '/payroll/people',
             count($below),
             array_map(

@@ -65,7 +65,11 @@ import {
   type PayrollInputFilterState,
 } from '@/pages/payroll/payrollInputFilters'
 import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
-import { filterCatalogByJmhz, jmhzCatalogFilter, type JmhzCatalogFilter } from '@/pages/payroll/jmhzBlockerRemediation'
+import {
+  componentJmhzFilterFromQuery,
+  componentMatchesJmhzFilter,
+  type PayrollComponentJmhzFilter,
+} from '@/pages/payroll/payrollRemediationQuery'
 import {
   payrollPeriodRange,
   payrollPeriodScopeFromQuery,
@@ -902,14 +906,6 @@ async function load() {
  * Zařazení čeká na katalog JMHZ, jinak by editor ukázal prázdný cíl.
  */
 const requestedComponentId = ref<number | null>(payrollQueryId(route.query, 'component'))
-// Souhrnný nález JMHZ (`?jmhz=missing`) otevře číselník zúžený na složky s tímtéž stavem.
-const catalogJmhzFilter = ref<JmhzCatalogFilter | null>(jmhzCatalogFilter(route.query.jmhz))
-const catalogComponents = computed(() => filterCatalogByJmhz(components.value, jmhzState, catalogJmhzFilter.value))
-function clearCatalogJmhzFilter() {
-  catalogJmhzFilter.value = null
-  const { jmhz: _jmhz, ...query } = route.query
-  void router.replace({ query })
-}
 
 async function openRequestedComponent(jmhzLoaded: Promise<void>) {
   const id = requestedComponentId.value
@@ -946,6 +942,24 @@ function jmhzState(component: PayrollComponent): PayrollComponentJmhzMappingStat
       : component.jmhz_treatment === 'manual_review' ? 'manual_review' : 'excluded',
     mapping: null,
   }
+}
+
+/*
+ * Souhrnný nález zařazení do JMHZ (`?jmhz=missing|manual_review|invalid`)
+ * vede na číselník zúžený na složky s tímtéž problémem, odkud se zařadí.
+ */
+const jmhzFilter = ref<PayrollComponentJmhzFilter | null>(componentJmhzFilterFromQuery(route.query))
+const catalogComponents = computed(() => {
+  const filter = jmhzFilter.value
+  return filter === null
+    ? components.value
+    : components.value.filter(component => componentMatchesJmhzFilter(filter, component, jmhzState(component)))
+})
+
+function clearJmhzFilter() {
+  jmhzFilter.value = null
+  const { jmhz: _jmhz, ...query } = route.query
+  void router.replace({ query })
 }
 
 function jmhzBadgeClass(component: PayrollComponent): string {
@@ -2207,13 +2221,14 @@ onMounted(load)
           </p>
         </section>
 
-        <div v-if="catalogJmhzFilter" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800" data-testid="payroll-catalog-jmhz-filter">
-          <span>{{ t('payroll.components.catalog.jmhz_filter', { status: t(`payroll.components.jmhz.status.${catalogJmhzFilter}`), count: catalogComponents.length }) }}</span>
-          <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" data-testid="payroll-catalog-jmhz-filter-clear" @click="clearCatalogJmhzFilter">
+        <div v-if="jmhzFilter" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700" data-testid="payroll-component-jmhz-filter">
+          <span>{{ t(`payroll.components.jmhz_filter.${jmhzFilter}`) }}</span>
+          <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" data-testid="payroll-component-jmhz-filter-clear" @click="clearJmhzFilter">
             <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
-            {{ t('payroll.components.catalog.jmhz_filter_clear') }}
+            {{ t('payroll.components.jmhz_filter.clear') }}
           </button>
         </div>
+
         <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
           <div data-layout="desktop" class="hidden overflow-x-auto md:block">
             <table class="min-w-full divide-y divide-neutral-200 text-sm">

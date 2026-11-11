@@ -59,6 +59,7 @@ import {
   payrollAgendas,
   type PayrollAgendaDefinition,
 } from './payrollAgendaLinks'
+import { payrollPeopleFilterFromQuery } from './payrollRemediationQuery'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
@@ -108,14 +109,9 @@ const expandedId = ref<number | null>(null)
 const details = ref<Record<number, PayrollPerson>>({})
 const loadingDetailId = ref<number | null>(null)
 const searchQuery = ref('')
-// Odkaz z kontroly před během vede na `?filter=blocking_data`; bez čtení
-// parametru se otevřel seznam aktivních a lidé s chybějícími údaji v něm
-// nebyli poznat.
-const PEOPLE_FILTERS: PayrollPeopleFilter[] = ['all', 'active', 'needs_setup', 'needs_data', 'blocking_data', 'dpp_hours_limit']
-const queryPeopleFilter = Array.isArray(route.query.filter) ? route.query.filter[0] : route.query.filter
-const peopleFilter = ref<PayrollPeopleFilter>(
-  PEOPLE_FILTERS.find(filter => filter === queryPeopleFilter) ?? 'active',
-)
+// Odkaz z nálezu (kontrola před během → `?filter=blocking_data`) otevře
+// seznam rovnou zúžený.
+const peopleFilter = ref<PayrollPeopleFilter>(payrollPeopleFilterFromQuery(route.query))
 const narrowed = computed(
   () => peopleFilter.value !== 'all' || searchQuery.value.trim() !== '',
 )

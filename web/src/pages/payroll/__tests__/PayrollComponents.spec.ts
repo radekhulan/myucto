@@ -1288,6 +1288,39 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
+  /**
+   * Souhrnný nález „složky nemají zařazení do JMHZ" vede na `?jmhz=missing`.
+   * Stránka parametr nečetla a otevřela celý číselník, takže účetní hledala
+   * nezařazené složky mezi všemi.
+   */
+  it('souhrnný odkaz z blokace vyfiltruje číselník na složky s tímtéž problémem', async () => {
+    const [base] = await m.components() as Array<Record<string, unknown>>
+    m.components.mockResolvedValue([
+      base,
+      { ...base, id: 6, code: 'SYN_OK', name: 'Syntetická mzda zařazená' },
+      { ...base, id: 7, code: 'SYN_REVIEW', name: 'Syntetická složka ke kontrole', jmhz_treatment: 'manual_review' },
+    ])
+    m.componentJmhzMappings.mockResolvedValue([
+      { component_id: 5, jmhz_treatment: 'included', status: 'missing', mapping: null },
+      { component_id: 6, jmhz_treatment: 'included', status: 'configured', mapping: null },
+      { component_id: 7, jmhz_treatment: 'manual_review', status: 'manual_review', mapping: null },
+    ])
+    m.routeQuery = { tab: 'catalog', jmhz: 'missing' }
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('SYN_BONUS')
+    expect(wrapper.text()).not.toContain('SYN_OK')
+    expect(wrapper.text()).not.toContain('SYN_REVIEW')
+    expect(wrapper.find('[data-testid="payroll-component-jmhz-filter"]').text())
+      .toContain('payroll.components.jmhz_filter.missing')
+
+    await wrapper.get('[data-testid="payroll-component-jmhz-filter-clear"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('SYN_OK')
+    wrapper.unmount()
+  })
+
   it('keeps the payroll catalogue usable when JMHZ configuration cannot load', async () => {
     m.componentJmhzTargets.mockRejectedValue(new Error('synthetic JMHZ failure'))
     const wrapper = mount(PayrollComponents)

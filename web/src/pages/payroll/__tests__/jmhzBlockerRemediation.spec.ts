@@ -56,6 +56,26 @@ describe('navigace nálezů měsíčního hlášení', () => {
     )).toBeNull()
   })
 
+  /**
+   * Hlášení vykazuje roční zúčtování za předchozí zdaňovací období. Bez roku
+   * a osoby se stránka otevřela na loňském roce podle dnešního data a celém
+   * seznamu, ne na zaměstnanci a roce, kterého se nález týká.
+   */
+  it('nález ročního zúčtování otevře rok před vykazovaným měsícem a osobu', () => {
+    const target = (entityType: string, id: number | null) => jmhzRemediationTarget(
+      blocker({ code: 'jmhz_annual_request_status_unresolved', entity_type: entityType, remediation: { kind: 'annual_settlement', field: null } }),
+      id,
+      { period: '2027-02', employments: [{ id: 7, employee_id: 3 }] },
+    )
+    expect(target('person', 3)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', person: '3' } })
+    expect(target('employment', 7)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', person: '3' } })
+    expect(target('run', null)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026' } })
+    expect(jmhzRemediationTarget(
+      blocker({ code: 'jmhz_annual_request_status_unresolved', entity_type: 'run', remediation: { kind: 'annual_settlement', field: null } }),
+      null,
+    )).toEqual({ name: 'payroll-annual-settlement', query: {} })
+  })
+
   it('nález složky otevře její zařazení do JMHZ v číselníku, ne Mzdové vstupy', () => {
     expect(jmhzRemediationTarget(
       blocker({ code: 'component_jmhz_mapping_missing', entity_type: 'component', remediation: { kind: 'components', field: null } }),

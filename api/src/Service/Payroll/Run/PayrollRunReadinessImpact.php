@@ -146,14 +146,20 @@ final class PayrollRunReadinessImpact
         // Mzda vstupuje do zmrazeného snímku, oprava po zamknutí je revize.
         'monthly_wage_below_minimum' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         // Podmínky vztahu (pracoviště 10229 až 10231, tristavy, APZ, dočasné
-        // přidělení, kategorizace rizika) vstupují do zmrazeného snímku běhu.
+        // přidělení, kategorizace rizika, druh činnosti a upřesnění vztahu
+        // pro výběr formuláře) vstupují do zmrazeného snímku běhu.
         // Doplněné po výpočtu je příprava hlášení nevidí a oprava stojí
-        // opravnou revizi ({@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder::termIssues()}).
+        // opravnou revizi ({@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder::termReadinessIssues()}).
         'jmhz_workplace_codebooks_unverified' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'jmhz_verified_boolean_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'jmhz_apz_instrument_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'jmhz_temporary_assignment_user_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'jmhz_risk_categorization_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'jmhz_scenario_activity_code_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'jmhz_scenario_activity_code_invalid' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'jmhz_scenario_relationship_detail_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'jmhz_scenario_relationship_detail_invalid' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'jmhz_scenario_relationship_detail_not_applicable' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
 
         // ── Skupina 1: doplní se kdykoli, na výpočet to nemá vliv ────────────
         'run_without_employments' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],

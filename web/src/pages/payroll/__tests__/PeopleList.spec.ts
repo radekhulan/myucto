@@ -309,19 +309,24 @@ describe('PeopleList toolbar and shared employee creation', () => {
     }
   })
 
-  /*
-   * Zúžení nesmí zůstat v prohlížeči: kdyby hledal jen v načtené stránce,
-   * o člověku ze třetí stránky by obrazovka tvrdila, že neexistuje.
+  /**
+   * Kontrola před během posílá nález „chybí zákonné údaje" na
+   * `?filter=blocking_data`. Stránka parametr nečetla a otevřela aktivní
+   * zaměstnance, mezi kterými lidi s chybějícími údaji musela účetní hledat.
    */
-  it('odkaz z kontroly před během otevře seznam zúžený filtrem z adresy', async () => {
-    m.routeQuery = { filter: 'blocking_data' }
+  it('otevře seznam zúžený filtrem z odkazu nálezu', async () => {
+    m.routeQuery.filter = 'blocking_data'
     mountPage()
     await flushPromises()
 
     expect(m.peoplePage).toHaveBeenLastCalledWith(expect.objectContaining({ filter: 'blocking_data' }))
-    m.routeQuery = {}
+    expect(m.peoplePage).not.toHaveBeenCalledWith(expect.objectContaining({ filter: 'active' }))
   })
 
+  /*
+   * Zúžení nesmí zůstat v prohlížeči: kdyby hledal jen v načtené stránce,
+   * o člověku ze třetí stránky by obrazovka tvrdila, že neexistuje.
+   */
   it('sends the search term and the filter to the server instead of narrowing the page', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const wrapper = mountPage()

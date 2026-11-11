@@ -190,27 +190,6 @@ export function jmhzComponentQuery(code: string, componentId: number | null): Re
 }
 
 /**
- * Zúžení číselníku složek z odkazu `?jmhz=` (souhrnný nález bez konkrétní
- * složky, viz {@link jmhzComponentQuery}). Bez něj odkaz z nálezu otevřel celý
- * číselník a účetní hledala očima, které složky jsou bez zařazení.
- * Neplatné nastavení (`invalid`) stav mapování nemá, proto se nezužuje.
- */
-export type JmhzCatalogFilter = 'missing' | 'manual_review'
-
-export function jmhzCatalogFilter(raw: unknown): JmhzCatalogFilter | null {
-  const value = Array.isArray(raw) ? raw[0] : raw
-  return value === 'missing' || value === 'manual_review' ? value : null
-}
-
-export function filterCatalogByJmhz<T>(
-  components: T[],
-  stateOf: (component: T) => { status: string },
-  filter: JmhzCatalogFilter | null,
-): T[] {
-  return filter === null ? components : components.filter(component => stateOf(component).status === filter)
-}
-
-/**
  * Cíl prokliku u chyby z protokolu ČSSZ. Protokol zná jen IK MPSV a ID PPV,
  * ne naše ID vztahu, takže karta konkrétního zaměstnance se neotevře: vede
  * se na agendu, kde se náprava dělá (identifikátory hledá účetní podle

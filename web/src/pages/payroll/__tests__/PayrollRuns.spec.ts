@@ -657,6 +657,37 @@ describe('PayrollRuns', () => {
     expect(finding.findAll('a').map(link => link.attributes('href'))).toEqual(['/payroll/time?employment=3&period=2026-08', '/payroll/time?employment=4&period=2026-08'])
   })
 
+  /**
+   * Nález kontroly před během bez období (přesčasy → `/payroll/time`, test
+   * JMHZ → `/payroll/submissions/jmhz`) otevřel agendu na zpracovávaném
+   * měsíci, ne na měsíci kontroly. Karta běhu období doplňovala, kontrola ne.
+   */
+  it('odkazy předběžné kontroly vedou na měsíc kontroly, ne na dnešní', async () => {
+    m.runs.mockResolvedValue([run({ status: 'draft' })])
+    m.readiness.mockReturnValue({ period_start: '2026-08-01', payment_date: '2026-09-15', office_id: null, ready: false, has_findings: true, findings: [
+      {
+        code: 'overtime_limit_exceeded', severity: 'warning', impact: 'revision', scope: 'monthly',
+        message: 'Přesčasy nad limit.', remediation_path: '/payroll/time', count: 1, entities: [],
+      },
+      {
+        code: 'jmhz_readiness_check_failed', severity: 'info', impact: 'anytime', scope: 'monthly',
+        message: 'Test hlášení nedoběhl.', remediation_path: '/payroll/submissions/jmhz', count: 1, entities: [],
+      },
+      {
+        code: 'time_month_not_approved', severity: 'warning', impact: 'revision', scope: 'monthly',
+        message: 'Docházka vyžaduje kontrolu.', remediation_path: null, count: 1,
+        entities: [{ entity_type: 'employment', entity_id: 3, label: 'Jana Syntetická', message: 'Chybí docházka.', remediation_path: '/payroll/quick-inputs?employment=3' }],
+      },
+    ] })
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const href = (code: string) => wrapper.get(`[data-testid="run-readiness-${code}"]`).findAll('a').map(link => link.attributes('href'))
+    expect(href('overtime_limit_exceeded')).toEqual(['/payroll/time?period=2026-08'])
+    expect(href('jmhz_readiness_check_failed')).toEqual(['/payroll/submissions/jmhz?period=2026-08'])
+    expect(href('time_month_not_approved')).toEqual(['/payroll/quick-inputs?employment=3&period=2026-08'])
+  })
+
   it('keeps a grouped validation readable for hundreds of employees', async () => {
     m.peopleOptions.mockResolvedValue(Array.from({ length: 6 }, (_, index) => ({
       id: index + 1,

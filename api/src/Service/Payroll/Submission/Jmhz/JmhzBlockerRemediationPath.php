@@ -165,6 +165,7 @@ final class JmhzBlockerRemediationPath
             'employee_identity' => $personOnly === null ? '/payroll/people' : $people($personOnly + ['panel' => 'registration_identity']),
             'statutory_evidence' => $personOnly === null ? '/payroll/people' : $people($personOnly + ['panel' => 'statutory_evidence']),
             'dependants' => $personOnly === null ? '/payroll/people' : $people($personOnly + ['panel' => 'dependants']),
+            'deferred_income' => $scope === [] ? '/payroll/people' : $people($scope + ['panel' => 'deferred_income']),
             'absences' => '/payroll/absences?' . http_build_query(
                 ($employmentId === null ? [] : ['employment' => $employmentId]) + ['tab' => 'absences'] + $periodQuery,
             ),
@@ -180,8 +181,9 @@ final class JmhzBlockerRemediationPath
             'ordinary_evidence' => self::withQuery('/payroll/submissions', $periodQuery) . '#jmhz-ordinary-evidence',
             'employer_annual' => '/payroll/settings?tab=submissions#jmhz-employer-annual-evidence',
             'office' => '/payroll/settings?tab=employer#payroll-employer-offices',
-            // Hlášení za leden a únor se ptá na zúčtování MINULÉHO roku. Bez
-            // roku stránka otevřela rok podle dnešního data, ne podle hlášení.
+            // Hlášení vykazuje roční zúčtování za předchozí zdaňovací období
+            // (JmhzAnnualEvidenceService: rok hlášení - 1); bez roku by stránka
+            // otevřela loňský rok podle dnešního data, ne podle hlášení.
             'annual_settlement' => self::withQuery(
                 '/payroll/annual-settlement',
                 ($period === null ? [] : ['year' => $period['year'] - 1])

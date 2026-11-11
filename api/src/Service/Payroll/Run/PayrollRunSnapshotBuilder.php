@@ -2411,7 +2411,7 @@ final class PayrollRunSnapshotBuilder
                 'employment',
                 $employmentId,
                 'Sleva na pojistném za kratší úvazek je zadaná, ale za období není doložený přijatý záměr (OZUSPOJ). Podle § 7a odst. 5 se bez něj sleva neuplatní.',
-                '/payroll/submissions',
+                '/payroll/submissions/discount_intents?period=' . substr($periodStart, 0, 7),
                 true,
             );
         }
@@ -2435,7 +2435,7 @@ final class PayrollRunSnapshotBuilder
                     $missing
                         ? 'U záměru uplatňovat slevu na pojistném není zapsané písemné poučení zaměstnance. Zaměstnavatel ho musí informovat před prvním uplatněním slevy (§ 23d odst. 2 zákona č. 589/1992 Sb.), jinak se dopouští přestupku (§ 25d odst. 1 písm. j).'
                         : 'Zaměstnanec byl o uplatňování slevy na pojistném poučen až po prvním měsíci jejího uplatnění. Zaměstnavatel ho musí informovat písemně před prvním uplatněním slevy (§ 23d odst. 2 zákona č. 589/1992 Sb.).',
-                    '/payroll/submissions',
+                    '/payroll/submissions/discount_intents?period=' . substr($periodStart, 0, 7),
                     false,
                 );
             }

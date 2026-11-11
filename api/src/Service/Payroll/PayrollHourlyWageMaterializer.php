@@ -151,7 +151,7 @@ final class PayrollHourlyWageMaterializer
                 $code = (string) $plan['claim']['component_code'];
                 $componentProblems ??= PayrollHourlyWageComponents::definitionProblems($pdo, $supplierId, $periodStart);
                 if (!isset($componentProblems[$code])) continue;
-                $blockers[$employmentId][] = ['code' => 'hourly_component_definition_invalid', 'remediation' => '/payroll/components',
+                $blockers[$employmentId][] = ['code' => 'hourly_component_definition_invalid', 'remediation' => '/payroll/components?tab=catalog',
                     'message' => sprintf('Mzdová složka %s je ve firmě vedená jako vlastní nebo nemá v měsíci jednoznačnou verzi s klasifikací hodinové mzdy. Upravte nebo ukončete vlastní složku v číselníku.', $code)];
                 break;
             }

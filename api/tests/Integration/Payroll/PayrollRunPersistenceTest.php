@@ -1012,6 +1012,7 @@ final class PayrollRunPersistenceTest extends TestCase
         $hourly = array_values(array_filter($blockers, static fn(array $v): bool => (int) $v['entity_id'] === $employmentId && $v['code'] === 'hourly_component_definition_invalid'));
         self::assertCount(1, $hourly, json_encode(array_map(static fn(array $v): string => $v['entity_id'] . ':' . $v['code'] . ':' . $v['message'], $blockers), JSON_UNESCAPED_UNICODE));
         self::assertStringContainsString('MZDA_HODINOVA_ZAKLAD', $hourly[0]['message']);
+        self::assertSame('/payroll/components?tab=catalog', $hourly[0]['remediation_path']);
         self::assertSame([], array_values(array_filter($blockers, static fn(array $v): bool => (int) $v['entity_id'] === $colleagueEmployment)));
         $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payroll_inputs WHERE supplier_id = ? AND employment_id = ? AND external_id LIKE "hourly-wage:%" AND amount_minor < 0');
         $stmt->execute([$this->supplierId, $this->employmentId]);

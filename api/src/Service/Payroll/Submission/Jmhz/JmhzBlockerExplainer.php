@@ -70,6 +70,9 @@ final class JmhzBlockerExplainer
         'jmhz_workplace_codebooks_unverified' => 'Chybí ověřené číselníkové údaje pracoviště.',
         'jmhz_workplace_codebooks_not_published' => 'Číselník obcí a států pro vykazovaný rok ještě nebyl vyhlášen, '
             . 'proto nejde ověřit místo výkonu práce (obec, kód obce a stát) ani u správně vyplněného pracoviště.',
+        'jmhz_employer_annual_collective_agreement_missing' => 'Za rok hlášení chybí roční údaje zaměstnavatele: typy kolektivních smluv (10214).',
+        'jmhz_employer_annual_ownership_missing' => 'Za rok hlášení chybí roční údaje zaměstnavatele: forma vlastnictví (10220).',
+        'jmhz_employer_annual_ozp_summary_missing' => 'Za rok hlášení chybí roční údaje zaměstnavatele: průměrný přepočtený počet zaměstnanců a zaměstnanců se zdravotním postižením (10038, 10039, 10452).',
         'jmhz_preparation_not_ready' => 'Zdroje měsíčního hlášení nejsou úplné.',
         'jmhz_ordinary_evidence_missing' => 'Chybí potvrzení běžných právních skutečností.',
         'jmhz_attribute_10116_unresolved' => 'Není potvrzeno, zda se ze mzdy vykazují srážky.',
@@ -186,6 +189,9 @@ final class JmhzBlockerExplainer
 
     /** @var array<string,string> */
     private const ACTIONS = [
+        'jmhz_employer_annual_collective_agreement_missing' => 'Otevřete Mzdy → Nastavení mezd → Podání → Roční údaje zaměstnavatele pro JMHZ, vyplňte údaje za rok hlášení a uložte. Potom přípravu hlášení spusťte znovu.',
+        'jmhz_employer_annual_ownership_missing' => 'Otevřete Mzdy → Nastavení mezd → Podání → Roční údaje zaměstnavatele pro JMHZ, vyplňte údaje za rok hlášení a uložte. Potom přípravu hlášení spusťte znovu.',
+        'jmhz_employer_annual_ozp_summary_missing' => 'Otevřete Mzdy → Nastavení mezd → Podání → Roční údaje zaměstnavatele pro JMHZ, vyplňte údaje za rok hlášení a uložte. Potom přípravu hlášení spusťte znovu.',
         'jmhz_scenario1_scope_unsupported' => 'Zkontrolujte druhy činnosti v přípravě a nepodporované vztahy zpracujte individuálně.',
         'jmhz_scenario2_evidence_gap' => 'Tento scénář zatím zpracujte individuálně podle podkladů ČSSZ; hodnoty nelze bezpečně doplnit odhadem.',
         'component_jmhz_mapping_missing' => 'Otevřete Mzdy → Mzdové složky a doplňte zařazení. '

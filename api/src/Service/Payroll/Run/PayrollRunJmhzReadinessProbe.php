@@ -72,6 +72,12 @@ final class PayrollRunJmhzReadinessProbe
      */
     public function inspect(int $supplierId, string $periodStart, array $snapshotData): array
     {
+        // Měsíc před prvním měsícem JMHZ (1. 4. 2026) se nehlásí vůbec: nález
+        // by účetní posílal doplňovat podklady hlášení, které se nepodává
+        // (identita, průměr 10345, žádost o roční zúčtování 10319).
+        if (!PayrollStatutoryAgendaCatalog::jmhzApplies($periodStart)) {
+            return [];
+        }
         $periodEnd = (new \DateTimeImmutable($periodStart))
             ->modify('last day of this month')
             ->format('Y-m-d');
@@ -109,9 +115,7 @@ final class PayrollRunJmhzReadinessProbe
          * Účetní to má vědět už při mzdovém běhu, ne až u testu hlášení, a jako
          * jednu větu za firmu, ne nález u každého vztahu.
          */
-        if (PayrollStatutoryAgendaCatalog::jmhzApplies($periodStart)
-            && !JmhzExternalCodebookCatalog::publishedForPeriod($periodStart, $periodEnd)
-        ) {
+        if (!JmhzExternalCodebookCatalog::publishedForPeriod($periodStart, $periodEnd)) {
             $issues[] = [
                 'code' => 'jmhz_workplace_codebooks_not_published',
                 'entity_type' => 'supplier',

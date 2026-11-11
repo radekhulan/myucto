@@ -564,6 +564,8 @@ final readonly class JmhzPreparationSnapshotService
     ): array {
         $issues = [];
         $checkedComponents = [];
+        $periodStart = substr($periodEnd, 0, 8) . '01';
+        $termsChecked = self::monthlyReportBuildable($periodStart);
         $people = $input['people'] ?? [];
         if (!is_array($people) || !array_is_list($people)) {
             return [];
@@ -600,11 +602,17 @@ final readonly class JmhzPreparationSnapshotService
                         $issues[] = self::identityIssue($employmentId, $identity);
                     }
                 }
-                // Podmínky vztahu (pracoviště, tristavy, APZ, přidělení) týmž
-                // pravidlem jako příprava hlášení; zmrazení je zastaví.
-                if ($employmentId > 0) {
-                    foreach ($this->builder->termIssues($entry, substr($periodEnd, 0, 8) . '01') as $termIssue) {
-                        $issues[] = $termIssue;
+                /*
+                 * Místo výkonu práce, druh činnosti a scénář formuláře: příprava
+                 * hlášení je hlídá a dřív se ozvaly až po schválení mzdy, kdy
+                 * náprava stojí přípravu znovu. Kontrolují se touž cestou jako
+                 * v přípravě. U ročníku, jehož hlášení aplikace ještě sestavit
+                 * neumí (01/2027), je blokací samotná verze specifikace;
+                 * pracoviště by tam svádělo k doplňování, které nic nevyřeší.
+                 */
+                if ($termsChecked && $employmentId > 0) {
+                    foreach ($this->builder->termReadinessIssues($entry, $employmentId, $periodStart) as $issue) {
+                        $issues[] = $issue;
                     }
                 }
                 $inputRows = $entry['inputs'] ?? [];
@@ -663,6 +671,17 @@ final readonly class JmhzPreparationSnapshotService
                 }
             }
         }
+        // Roční údaje zaměstnavatele (prosinec, od 2027 každý měsíc): touž
+        // cestou jako příprava, aby je účetní doplnila před schválením mzdy.
+        if ($termsChecked) {
+            foreach (JmhzPreparationSnapshotBuilder::employerAnnualIssues(
+                $supplierId,
+                $periodStart,
+                $this->employerAnnualEvidence->snapshotForPreparation($supplierId, $periodStart),
+            ) as $issue) {
+                $issues[] = $issue;
+            }
+        }
         /*
          * Stav žádosti o roční zúčtování (10319) v lednu a únoru. Zmrazení ho
          * vyžaduje u každé osoby hlášení, a dřív se ozval až tam — po schválení
@@ -691,6 +710,17 @@ final readonly class JmhzPreparationSnapshotService
         }
 
         return $issues;
+    }
+
+    private static function monthlyReportBuildable(string $periodStart): bool
+    {
+        try {
+            JmhzSpecPackageCatalog::requireBuildable(JmhzSpecVersion::forPeriodStart($periodStart));
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return true;
     }
 
     /**

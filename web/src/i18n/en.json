@@ -5173,9 +5173,7 @@
         "delete": "Delete",
         "delete_confirm": "Really delete the unused payroll component “{name}”? If it has already been used in payroll, the application safely refuses the deletion.",
         "deleted": "The unused payroll component was deleted.",
-        "delete_failed": "The payroll component cannot be deleted. If it has already been used, end its validity or deactivate it.",
-        "jmhz_filter": "Showing only components with status “{status}” ({count}) referenced by the report finding.",
-        "jmhz_filter_clear": "Show all components"
+        "delete_failed": "The payroll component cannot be deleted. If it has already been used, end its validity or deactivate it."
       },
       "jmhz": {
         "title": "Map component to JMHZ",
@@ -5516,6 +5514,12 @@
         "not_subject_to_tax": "Not subject to tax (§ 6(7))",
         "statutory_exempt": "Exempt without a limit (§ 6(9))",
         "benefit_basket": "Annual exemption basket (§ 6(9)(d) and (m))"
+      },
+      "jmhz_filter": {
+        "missing": "Showing only components reported in JMHZ that have no mapping yet. Map them with Configure JMHZ.",
+        "manual_review": "Showing only components whose JMHZ mapping awaits review. Open Edit and choose whether the component is reported.",
+        "invalid": "Showing only components with an invalid JMHZ setting. Open Edit and set the JMHZ inclusion.",
+        "clear": "Show all components"
       }
     },
     "documents": {
