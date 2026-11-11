@@ -153,12 +153,51 @@ final class PayrollInputCancellationApiTest extends TestCase
         );
     }
 
-    public function testApprovedInputCannotBeCancelled(): void
+    /**
+     * Schválený vstup, který ještě nevstoupil do běhu, zruší uživatel s právem
+     * schvalovat. Kontrola před během u vstupu na skončeném vztahu radí „vstup
+     * zrušte" a odkazuje na výpis vstupů — ten dřív u schváleného vstupu žádnou
+     * akci neměl a server ho odmítl.
+     */
+    public function testApprovedInputOutsideRunIsCancelledByApprover(): void
     {
         $input = $this->createInput('approved-one', 45_000);
         $id = PayrollTimeValue::int($input['id'] ?? null, 'id');
-        $version = PayrollTimeValue::int($input['row_version'] ?? null, 'row_version');
+        $approvedInput = $this->approveInput($id, PayrollTimeValue::int($input['row_version'] ?? null, 'row_version'));
 
+        $response = $this->cancel(
+            $id,
+            PayrollTimeValue::int($approvedInput['row_version'] ?? null, 'row_version'),
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'cancelled',
+            PayrollTimeValue::row($this->json($response)['input'] ?? null, 'input')['status'],
+        );
+        self::assertSame([], $this->listedInputIds());
+    }
+
+    public function testApprovedInputFrozenInRunRevisionStaysLocked(): void
+    {
+        $input = $this->createInput('approved-frozen', 45_000);
+        $id = PayrollTimeValue::int($input['id'] ?? null, 'id');
+        $approvedInput = $this->approveInput($id, PayrollTimeValue::int($input['row_version'] ?? null, 'row_version'));
+        $this->freezeInRunRevision($id);
+
+        $response = $this->cancel(
+            $id,
+            PayrollTimeValue::int($approvedInput['row_version'] ?? null, 'row_version'),
+        );
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('input_has_movement', $this->errorCode($response));
+        $status = $this->db->pdo()->prepare('SELECT status FROM payroll_inputs WHERE id = ?');
+        $status->execute([$id]);
+        self::assertSame('approved', $status->fetchColumn(), 'Odmítnuté zrušení nesmí vstup vrátit do konceptu.');
+    }
+
+    /** @return array<string,mixed> */
+    private function approveInput(int $id, int $version): array
+    {
         $approved = $this->inputs->approve(
             $this->request('POST', "/api/payroll/inputs/{$id}/approve")
                 ->withParsedBody(['row_version' => $version]),
@@ -166,22 +205,16 @@ final class PayrollInputCancellationApiTest extends TestCase
             ['id' => (string) $id],
         );
         self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
-        $approvedInput = PayrollTimeValue::row($this->json($approved)['input'] ?? null, 'input');
 
-        $response = $this->cancel(
-            $id,
-            PayrollTimeValue::int($approvedInput['row_version'] ?? null, 'row_version'),
-        );
-        self::assertSame(409, $response->getStatusCode());
-        self::assertSame('input_state_conflict', $this->errorCode($response));
+        return PayrollTimeValue::row($this->json($approved)['input'] ?? null, 'input');
     }
 
     /**
-     * Roční akumulátor benefitu zakládá teprve schválení, a schválený vstup
-     * zrušit nejde. Kontrola akumulátoru ve `assertNoMovement()` proto neměla
-     * co chytit — zrušení stojí o stav dřív, na `input_state_conflict`.
+     * Roční akumulátor benefitu zakládá teprve schválení. Zrušení schváleného
+     * vstupu jde přes návrat do konceptu, který benefit s akumulátorem odmítá
+     * (uvolňuje ho jen storno benefitu) — u běžné složky akumulátor nevzniká.
      */
-    public function testBenefitAccumulatorExistsOnlyForApprovedInputsThatCancelRefusesAnyway(): void
+    public function testBenefitAccumulatorExistsOnlyForApprovedInputs(): void
     {
         $input = $this->createInput('benefit-one', 1_000);
         $id = PayrollTimeValue::int($input['id'] ?? null, 'id');
@@ -210,12 +243,12 @@ final class PayrollInputCancellationApiTest extends TestCase
         self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
         $approvedInput = PayrollTimeValue::row($this->json($approved)['input'] ?? null, 'input');
 
-        $blocked = $this->cancel(
+        self::assertSame(0, $this->accumulatorCount($secondId));
+        $cancelledApproved = $this->cancel(
             $secondId,
             PayrollTimeValue::int($approvedInput['row_version'] ?? null, 'row_version'),
         );
-        self::assertSame(409, $blocked->getStatusCode());
-        self::assertSame('input_state_conflict', $this->errorCode($blocked));
+        self::assertSame(200, $cancelledApproved->getStatusCode(), (string) $cancelledApproved->getBody());
     }
 
     private function accumulatorCount(int $inputId): int

@@ -2279,6 +2279,42 @@ final class PayrollInputRepository
     }
 
     /**
+     * Zrušení SCHVÁLENÉHO vstupu, který ještě nevstoupil do mzdového běhu.
+     *
+     * Kontrola před během posílá vstup na skončeném vztahu „zrušit, nebo zadat
+     * na trvající vztah" — schválený vstup ale `cancel()` odmítal a výpis vstupů
+     * u něj nenabízel žádnou akci. Jedinou cestou bylo vyprázdnit pole
+     * v rychlém zadávání, na které kontrola neodkazuje. Tady se to děje
+     * v jedné transakci týmiž kroky jako tam: návrat do konceptu
+     * ({@see revertToDraft()} hlídá zmrazenou revizi, vyúčtování cesty, import
+     * i benefit) a zrušení konceptu.
+     *
+     * @return array<string,mixed>|null null, když vstup neexistuje
+     */
+    public function cancelApproved(int $supplierId, int $id, int $expectedVersion): ?array
+    {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->revertToDraft($supplierId, $id, $expectedVersion);
+            $input = $this->cancel($supplierId, $id, $expectedVersion + 1);
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $input;
+    }
+
+    /**
      * Důkaz pohybu, který zrušení konceptu zakazuje.
      *
      * Materializace pracovní cesty a import si drží vazbu na řádek zdroje

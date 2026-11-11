@@ -478,14 +478,28 @@ final class PayrollInputsAction
                 422,
             );
         }
-        try {
-            $input = $this->inputs->cancel(
-                $this->currentSupplierId($request),
-                (int) ($args['id'] ?? 0),
-                $version,
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $current = $this->inputs->find($supplierId, $id);
+        // Schválený vstup (ještě mimo běh) smí zrušit ten, kdo smí schvalovat —
+        // stejné pravidlo jako u přepsání v rychlém zadávání.
+        $approved = ($current['status'] ?? null) === 'approved';
+        if ($approved && !RequestAuthorization::allows($request, 'payroll.approve', AccessLevel::WRITE)) {
+            return Json::error(
+                $response,
+                'input_state_conflict',
+                'Schválený mzdový vstup může zrušit jen uživatel s právem schvalovat mzdy.',
+                409,
             );
+        }
+        try {
+            $input = $approved
+                ? $this->inputs->cancelApproved($supplierId, $id, $version)
+                : $this->inputs->cancel($supplierId, $id, $version);
         } catch (PayrollInputCancellationException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), 409);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'input_state_conflict', $e->getMessage(), 409);
         } catch (PayrollInputConflictException $e) {
             return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
                 'current_row_version' => $e->currentVersion,
