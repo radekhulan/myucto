@@ -9114,7 +9114,9 @@
           "a4_attachment_missing": "No cover letter attached yet.",
           "identifiers_verified": "I verified the OIČ and ID PPV in the employee list on the ČSSZ ePortal",
           "identifiers_verified_hint": "Only for an employee taken over from an earlier notification (ONZ) whose numbers do not come from a ČSSZ protocol, an accepted A3 completion or an imported ČSSZ employee export. The A2 deregistration can then be filed without the A3 completion, which stays as a separate duty.",
-          "select_placeholder": "Select…"
+          "select_placeholder": "Select…",
+          "a2_override_reason": "Reason for the exception (at least 10 characters, stored with the termination)",
+          "a2_override_save": "Approve with exception"
         },
         "reprepare": "Prepare again",
         "reprepare_failed": "The filing could not be prepared again.",

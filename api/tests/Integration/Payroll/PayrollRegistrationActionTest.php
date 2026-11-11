@@ -477,6 +477,59 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(0, (int) $ledger->fetchColumn());
     }
 
+    /**
+     * Audit #3: bez přijatého opravného JMHZ jde odhláška schválit s výjimkou
+     * a důvodem; výjimka se uloží k události.
+     */
+    public function testA2WithoutAcceptedCorrectionCanBeApprovedWithReasonedException(): void
+    {
+        if (!$this->db->hasTable('payroll_registration_a2_evidence_ledger')) {
+            $this->markTestSkipped('Migrace důkazního ledgeru REGZEC A2 neproběhla.');
+        }
+        $this->seedTrustedReceipt();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON, null, null, true);
+        $this->seedCorrectiveMonth('2026-07-01');
+        $body = [
+            'environment' => 'test',
+            'interaction' => 'termination',
+            'effective_on' => '2026-08-25',
+        ];
+
+        $short = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody($body + ['jmhz_corrections_override_reason' => 'krátce']),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(422, $short->getStatusCode());
+        self::assertStringContainsString('schvalte ji s výjimkou', (string) $this->json($short)['error']['message']);
+
+        $approved = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody($body + [
+                'jmhz_corrections_override_reason' => 'Brigádník končí, opravné JMHZ za 07 pošleme do pátku.',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+        $event = $this->json($approved);
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody(['environment' => 'test', 'event_id' => $event['id']]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertNotContains(
+            $this->json($prepared)['error']['code'] ?? null,
+            ['registration_a2_jmhz_evidence_changed', 'registration_a2_jmhz_evidence_missing'],
+            (string) $prepared->getBody(),
+        );
+    }
+
     public function testA2RejectsManualOicProvenance(): void
     {
         $this->db->pdo()->prepare(

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Repository\Payroll\PayrollRegistrationA2EvidenceRepository;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
@@ -866,6 +867,48 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         self::assertSame(2, substr_count($correction, '</formularOsoby>'));
         $listed = $this->listJmhzDeferrals($revisionId);
         self::assertSame(0, $listed['body']['completable_count']);
+    }
+
+    /**
+     * Audit #3: odhláška A2 po opravné revizi. Vztah, kterému oprava nic
+     * nezměnila, opravné JMHZ nepotřebuje; u změněného se počítá i řádné
+     * hlášení podané z opravné revize.
+     */
+    public function testA2EvidenceSkipsUnchangedRelationAndCountsRegularReportFromCorrection(): void
+    {
+        $first = $this->hire('Adam Včasný', 'male', '1980-02-02');
+        $late = $this->hire('Cyril Opožděný', 'male', '1990-04-04', withAverage: false);
+        foreach ([$first, $late] as $person) {
+            $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+            $this->pay($person, 4_000_000);
+        }
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, 'a2-evidence');
+        self::assertNotNull($run['approved']);
+        $this->createApprovedAverage($late['employment_id'], 3);
+        $corrected = $this->correctPayrollRun($run['approved']->run, 'a2-evidence-fix', 'Doplněn průměr.');
+        $revisionId = (int) $corrected->revision['id'];
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_run_employments SET result_hash = SHA2("zmeneny-vysledek", 256)
+              WHERE supplier_id = ? AND revision_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $revisionId, $late['employment_id']]);
+        $evidence = $this->container->get(PayrollRegistrationA2EvidenceRepository::class);
+        self::assertInstanceOf(PayrollRegistrationA2EvidenceRepository::class, $evidence);
+
+        self::assertSame(
+            [],
+            $evidence->correctiveMonths($this->supplierId, 'test', $first['employment_id'], '2026-12-31', 'PPV-FIRST'),
+            'Vztah beze změny opravné JMHZ nepotřebuje.',
+        );
+        $months = $evidence->correctiveMonths($this->supplierId, 'test', $late['employment_id'], '2026-12-31', 'PPV-LATE');
+        self::assertCount(1, $months);
+        self::assertSame('missing', $months[0]['decision']);
+
+        $preparation = $this->prepareJmhz($revisionId, 'a2-evidence');
+        $frozen = $this->freezeJmhzSubmission((int) $preparation['body']['id'], $this->officeId);
+        self::assertSame(201, $frozen['status'], CanonicalJson::encode($frozen['body']));
+        $months = $evidence->correctiveMonths($this->supplierId, 'test', $late['employment_id'], '2026-12-31', 'PPV-LATE');
+        self::assertSame((int) $frozen['body']['submission_id'], $months[0]['submission_id']);
+        self::assertSame('pending', $months[0]['decision']);
     }
 
     /**

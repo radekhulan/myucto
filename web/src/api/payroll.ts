@@ -5781,6 +5781,8 @@ export interface PayrollRegistrationEventInput {
   /** A3 dohlášení údajů z profilu A1: celý profil, nebo jen co ONZ nevedla. */
   completion?: 'full' | 'minimal'
   ended_by_death?: boolean
+  /** Schválení A2 s výjimkou bez přijatého opravného JMHZ (důvod aspoň 10 znaků). */
+  jmhz_corrections_override_reason?: string
   unemployment?: {
     mode?: 'provided' | 'not_provided_2' | 'not_provided_3'
     early_termination_reason?: string

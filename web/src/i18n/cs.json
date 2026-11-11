@@ -9114,7 +9114,9 @@
           "a4_attachment_missing": "Průvodní dopis zatím není přiložený.",
           "identifiers_verified": "OIČ a ID PPV jsem ověřil(a) v Seznamu zaměstnanců na ePortálu ČSSZ",
           "identifiers_verified_hint": "Jen u zaměstnance převzatého z dřívějšího oznámení (ONZ), jehož čísla nejsou z protokolu ČSSZ, přijatého dohlášení A3 ani z importu exportu zaměstnanců ČSSZ. Odhlášku A2 pak jde podat i bez dohlášení A3; to zůstane jako samostatná povinnost.",
-          "select_placeholder": "Vyberte…"
+          "select_placeholder": "Vyberte…",
+          "a2_override_reason": "Důvod výjimky (alespoň 10 znaků, zapíše se k odhlášce)",
+          "a2_override_save": "Schválit s výjimkou"
         },
         "reprepare": "Připravit znovu",
         "reprepare_failed": "Podání se nepodařilo připravit znovu.",

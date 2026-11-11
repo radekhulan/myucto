@@ -126,6 +126,7 @@ const eventsBusy = ref(false)
 const eventSaving = ref(false)
 const eventError = ref('')
 const eventErrorCode = ref('')
+const a2OverrideReason = ref('')
 const selectedEventId = ref<number | null>(null)
 const eventFormOpen = ref(false)
 const eventInteraction = ref<PayrollRegistrationEventInteraction>('termination')
@@ -1841,6 +1842,9 @@ function eventPayload(): PayrollRegistrationEventInput {
   if (eventInteraction.value === 'termination' && identifiersVerifiedInCsszList.value) {
     payload.identifiers_verified_in_cssz_list = true
   }
+  if (eventInteraction.value === 'termination' && a2OverrideReason.value.trim().length >= 10) {
+    payload.jmhz_corrections_override_reason = a2OverrideReason.value.trim()
+  }
   return payload
 }
 
@@ -1857,6 +1861,7 @@ async function saveEvent(): Promise<void> {
     events.value = [event, ...events.value.filter(existing => existing.id !== event.id)]
     selectedEventId.value = event.id
     eventFormOpen.value = false
+    a2OverrideReason.value = ''
     resetEventForm()
     await run('preview')
   } catch (exception) {
@@ -4873,6 +4878,34 @@ async function copyXml(): Promise<void> {
 
       <div v-if="eventError" class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700" role="alert" data-test="registration-event-error">
         <p>{{ eventError }}</p>
+        <div
+          v-if="eventErrorCode === 'registration_a2_jmhz_corrections_incomplete' && canWrite"
+          class="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-3 text-warning-900"
+          data-test="registration-a2-override"
+        >
+          <label class="block text-xs font-medium" for="registration-a2-override-reason">
+            {{ t('payroll.people.registration.event.a2_override_reason') }}
+          </label>
+          <textarea
+            id="registration-a2-override-reason"
+            v-model="a2OverrideReason"
+            rows="2"
+            maxlength="500"
+            class="mt-1 w-full rounded-lg border border-neutral-300 bg-surface px-2 py-1 text-sm text-neutral-900"
+            data-test="registration-a2-override-reason"
+          />
+          <button
+            type="button"
+            :class="btnFilled('warning')"
+            class="mt-2"
+            :disabled="eventSaving || a2OverrideReason.trim().length < 10"
+            data-test="registration-a2-override-save"
+            @click="saveEvent"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+            {{ t('payroll.people.registration.event.a2_override_save') }}
+          </button>
+        </div>
         <div v-if="registrationRemediation(eventErrorCode) !== null" class="mt-2 flex flex-wrap gap-2">
           <button
             v-if="registrationRemediation(eventErrorCode)?.kind === 'a1_profile'"
