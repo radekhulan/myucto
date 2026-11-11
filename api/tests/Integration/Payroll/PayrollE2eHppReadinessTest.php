@@ -198,11 +198,15 @@ final class PayrollE2eHppReadinessTest extends TestCase
     }
 
     /**
-     * Před 1. 4. 2026 se měsíční hlášení JMHZ nepodává
-     * (PayrollStatutoryAgendaCatalog::JMHZ_FROM): kontrola únorového běhu
-     * nesmí účetní posílat doplňovat podklady hlášení, které neexistuje.
+     * Hlášení za leden až březen 2026 jde připravit stejně jako za pozdější
+     * měsíce (JmhzSpecVersion::monthlyReportPreparable(), podává se
+     * dodatečně), i když zákonný start JMHZ je 1. 4. 2026
+     * (PayrollStatutoryAgendaCatalog::JMHZ_FROM). Kontrola únorového běhu
+     * proto předpoví to, co příprava hlášení za únor zastaví, a nic z toho
+     * nesmí vypadat jako překážka výplaty: co vstupuje do snímku běhu, je
+     * varování s následkem opravné revize, ostatní jen informace.
      */
-    public function testNoJmhzFindingsBeforeJmhzStart(): void
+    public function testJmhzFindingsBeforeJmhzStartFollowReportPreparation(): void
     {
         $sequence = ++$this->sequence;
         $person = $this->createEmployment($this->officeId, 'Syntetický Únorový', $sequence, 'hpp', 'employment', 40, 10_000, true, '2026-02-01');
@@ -212,11 +216,55 @@ final class PayrollE2eHppReadinessTest extends TestCase
 
         $readiness = $this->readiness()->inspect($this->supplierId, '2026-02-01', '2026-03-13');
 
-        $jmhz = array_values(array_filter(
-            array_column($readiness['findings'], 'code'),
+        $predicted = array_filter(
+            array_column($readiness['findings'], null, 'code'),
             static fn (string $code): bool => str_starts_with($code, 'jmhz_') || str_starts_with($code, 'component_jmhz_'),
-        ));
-        self::assertSame([], $jmhz, CanonicalJson::encode($readiness['findings']));
+            ARRAY_FILTER_USE_KEY,
+        );
+        $expected = [
+            'jmhz_identity_missing' => ['anytime', 'info'],
+            'jmhz_workplace_codebooks_unverified' => ['revision', 'warning'],
+            'jmhz_scenario_activity_code_missing' => ['revision', 'warning'],
+            'jmhz_average_hourly_earning_missing' => ['revision', 'warning'],
+            // Únor: stav žádosti o roční zúčtování za rok 2025 (10319).
+            'jmhz_annual_request_status_unresolved' => ['anytime', 'info'],
+        ];
+        self::assertEqualsCanonicalizing(array_keys($expected), array_keys($predicted), CanonicalJson::encode($readiness['findings']));
+        foreach ($expected as $code => [$impact, $severity]) {
+            self::assertSame($impact, $predicted[$code]['impact'], $code);
+            self::assertSame($severity, $predicted[$code]['severity'], $code);
+            $this->assertActionable($predicted[$code], $code);
+        }
+        self::assertSame('/payroll/annual-settlement?year=2025', $predicted['jmhz_annual_request_status_unresolved']['remediation_path']);
+        self::assertSame('/payroll/absences?tab=averages&year=2026&quarter=1', $predicted['jmhz_average_hourly_earning_missing']['remediation_path']);
+
+        // Mzdu za únor spočítat a schválit jde; příprava hlášení za únor pak
+        // zastaví jen to, co kontrola předpověděla.
+        $run = $this->runPayrollMonth('2026-02-01', '2026-03-13', $this->officeId, 'feb-2026');
+        self::assertNotNull($run['approved'], CanonicalJson::encode($run['blockers']));
+        $preparation = $this->prepareJmhz((int) $run['approved']->revision['id'], 'feb-2026');
+        self::assertSame(201, $preparation['status'], CanonicalJson::encode($preparation['body']));
+        self::assertSame('blocked', $preparation['body']['readiness_status']);
+        $prepared = array_values(array_unique(array_column($preparation['body']['issues'], 'code')));
+        self::assertEqualsCanonicalizing(
+            [
+                'jmhz_workplace_codebooks_unverified',
+                'jmhz_scenario_activity_code_missing',
+                'jmhz_average_hourly_earning_missing',
+                // Kontrola slévá rozpad nálezů identity do jmhz_identity_missing.
+                'jmhz_identity_incomplete',
+                // Ozvěny chybějícího druhu činnosti (bez něj nejde určit scénář
+                // formuláře ani ELDP); kontrola hlásí příčinu, ne ozvěny,
+                // stejně jako v měsících od dubna.
+                'jmhz_eldp_ordinary_activity_unsupported',
+                'jmhz_ordinary_evidence_scenario_unsupported',
+            ],
+            $prepared,
+            'Příprava hlášení za 02/2026 zastaví něco jiného, než kontrola před během předpověděla.',
+        );
+        // Stav žádosti o roční zúčtování (10319) zastaví až test hlášení;
+        // za leden a únor 2026 to hlídají PayrollE2eDppCalculationTest
+        // a PayrollE2eNavPreflightAgencyTest.
     }
 
     /** @return array{employee_id:int,employment_id:int,name:string} */

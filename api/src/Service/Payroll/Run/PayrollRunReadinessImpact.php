@@ -165,6 +165,10 @@ final class PayrollRunReadinessImpact
         'jmhz_employer_annual_collective_agreement_missing' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'jmhz_employer_annual_ownership_missing' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'jmhz_employer_annual_ozp_summary_missing' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
+        // Stav žádosti o roční zúčtování (10319, hlášení za leden a únor) se
+        // čte až při přípravě hlášení a ve snímku běhu není: rozhodne se
+        // kdykoli před přípravou, mzdový běh na něj nečeká.
+        'jmhz_annual_request_status_unresolved' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
 
         // ── Skupina 1: doplní se kdykoli, na výpočet to nemá vliv ────────────
         'run_without_employments' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],

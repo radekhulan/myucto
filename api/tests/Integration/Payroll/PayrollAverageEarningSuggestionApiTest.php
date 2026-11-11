@@ -503,10 +503,9 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
             'employments' => [$entry($this->employmentId, null)],
         ]]];
 
-        // Hlášení se podává od 04/2026; dřívější měsíc kontrola nehlásí vůbec.
-        self::assertSame([], $probe->inspect($this->supplierId, '2026-01-01', $snapshot));
-
-        $findings = $probe->inspect($this->supplierId, '2026-04-01', $snapshot);
+        // Leden 2026: hlášení jde připravit i před zákonným startem JMHZ
+        // (04/2026), průměr proto kontrola hlásí už tady.
+        $findings = $probe->inspect($this->supplierId, '2026-01-01', $snapshot);
         $found = array_values(array_filter(
             $findings,
             static fn (array $finding): bool => $finding['code'] === 'jmhz_average_hourly_earning_missing',
@@ -516,13 +515,13 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         self::assertSame('warning', $found[0]['severity']);
         self::assertStringContainsString('Syntetický zaměstnanec', $found[0]['message']);
         self::assertSame(
-            '/payroll/absences?tab=averages&year=2026&quarter=2',
+            '/payroll/absences?tab=averages&year=2026&quarter=1',
             $found[0]['remediation_path'],
         );
 
         // Existující průměr nález nevyvolá.
         $snapshot['people'][0]['employments'][0] = $entry($this->employmentId, ['id' => 1]);
-        $withAverage = $probe->inspect($this->supplierId, '2026-04-01', $snapshot);
+        $withAverage = $probe->inspect($this->supplierId, '2026-01-01', $snapshot);
         self::assertSame([], array_filter(
             $withAverage,
             static fn (array $finding): bool => $finding['code'] === 'jmhz_average_hourly_earning_missing',

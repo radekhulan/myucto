@@ -11,7 +11,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerExplainer;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerRemediationPath;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
-use MyInvoice\Service\Payroll\Submission\PayrollStatutoryAgendaCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 use PDO;
 
 /**
@@ -72,10 +72,24 @@ final class PayrollRunJmhzReadinessProbe
      */
     public function inspect(int $supplierId, string $periodStart, array $snapshotData): array
     {
-        // Měsíc před prvním měsícem JMHZ (1. 4. 2026) se nehlásí vůbec: nález
-        // by účetní posílal doplňovat podklady hlášení, které se nepodává
-        // (identita, průměr 10345, žádost o roční zúčtování 10319).
-        if (!PayrollStatutoryAgendaCatalog::jmhzApplies($periodStart)) {
+        /*
+         * Předpověď se řídí týmž pravidlem jako příprava hlášení
+         * ({@see JmhzSpecVersion::monthlyReportPreparable()}), ne zákonným
+         * startem JMHZ 1. 4. 2026. Příprava dolní mez období nemá: hlášení
+         * za leden až březen 2026 firma připravuje a mrazí stejně jako
+         * pozdější měsíce a podává je dodatečně v přechodném okně 1. 4. až
+         * 30. 6. 2026 ({@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy},
+         * sada lhůt `cz-jmhz-deadlines-2026.transition.v1`). Příprava za tyhle
+         * měsíce zastaví tytéž věci jako jindy (podmínky vztahu, průměr 10345,
+         * zařazení složek, v lednu a únoru stav žádosti o roční zúčtování
+         * 10319). Kdyby o nich kontrola před během mlčela, ozvaly by se až
+         * u zmrazení hlášení po schválení mzdy.
+         *
+         * Nálezy nic neblokují a dopad nesou podle {@see PayrollRunReadinessImpact}:
+         * co je ve zmrazeném snímku běhu, stojí později opravnou revizi, ostatní
+         * se doplní kdykoli před přípravou hlášení.
+         */
+        if (!JmhzSpecVersion::monthlyReportPreparable($periodStart)) {
             return [];
         }
         $periodEnd = (new \DateTimeImmutable($periodStart))

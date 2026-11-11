@@ -20,14 +20,15 @@ use PHPUnit\Framework\TestCase;
  *
  * Firma má 60 dohod, z toho úmyslně vadné skupiny (bez zákonných údajů, bez
  * pojišťovny, bez průměru, vstup v haléřích, bez pracoviště, skončená dohoda
- * ve stavu aktivní). Test ověřuje, že
+ * ve stavu aktivní, nerozhodnutá žádost o roční zúčtování). Test ověřuje, že
  * každý nález má text, počet, odkaz a (kde to jde) hromadnou opravu, že počet
  * v nálezu sedí s výběrem dialogu hromadné opravy a že předpověď blokací
  * odpovídá tomu, co pak opravdu zastaví výpočet a přípravu JMHZ.
  *
- * Měsíc je květen 2026: podklady hlášení se před prvním měsícem JMHZ (04/2026)
- * nepředpovídají. Nerozhodnutou žádost o roční zúčtování (jen leden a únor,
- * poprvé 2027) hlídá `PayrollRunReadinessPredictionTest`.
+ * Měsíc je záměrně únor 2026, tedy před zákonným startem JMHZ (04/2026):
+ * hlášení za něj jde připravit (podává se dodatečně) a kontrola před během
+ * se řídí připravitelností hlášení, ne datem startu. Únor navíc nese stav
+ * žádosti o roční zúčtování za rok 2025 (10319).
  */
 #[Group('integration')]
 #[Group('payroll-full-flow')]
@@ -35,10 +36,10 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
 {
     use PayrollFullFlowTrait;
 
-    private const PERIOD = '2026-05';
-    private const PERIOD_START = '2026-05-01';
-    private const PAYDAY = '2026-06-12';
-    private const WORKED = ['2026-05-09', '2026-05-16', '2026-05-23'];
+    private const PERIOD = '2026-02';
+    private const PERIOD_START = '2026-02-01';
+    private const PAYDAY = '2026-03-13';
+    private const WORKED = ['2026-02-07', '2026-02-14', '2026-02-21'];
 
     private int $officeId;
     private int $componentId;
@@ -100,7 +101,7 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
         $halere = self::finding($findings, 'inputs_not_whole_crowns');
         self::assertSame(5, $halere['entity_total']);
         self::assertSame('approval', $halere['impact']);
-        self::assertSame('/payroll/components?tab=inputs&period=' . self::PERIOD, $halere['remediation_path']);
+        self::assertSame('/payroll/components?tab=inputs&period=2026-02', $halere['remediation_path']);
         self::assertEqualsCanonicalizing(array_column($this->groups['halere'], 'employment_id'), array_column($halere['entities'], 'entity_id'));
 
         // Prohlášení: tlačítko zúžené na dotčené osoby.
@@ -135,7 +136,7 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
         // Průměr pro JMHZ 10345: odkaz na průměry čtvrtletí období.
         $average = self::finding($findings, 'jmhz_average_hourly_earning_missing');
         self::assertSame(5, $average['entity_total']);
-        self::assertSame('/payroll/absences?tab=averages&year=2026&quarter=2', $average['remediation_path']);
+        self::assertSame('/payroll/absences?tab=averages&year=2026&quarter=1', $average['remediation_path']);
         self::assertEqualsCanonicalizing(array_column($this->groups['average'], 'employment_id'), array_column($average['entities'], 'entity_id'));
 
         // Pracoviště: předpověď blokace přípravy JMHZ, počet = dialog doplnění pracoviště.
@@ -146,7 +147,14 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
         self::assertSame([['kind' => 'workplace', 'count' => count($workplacePreview['missing_employment_ids'])]], $workplace['bulk_actions']);
         self::assertEqualsCanonicalizing(array_column($this->groups['workplace'], 'employment_id'), $workplacePreview['missing_employment_ids']);
 
-        // Skončené dohody.
+        // Roční zúčtování a skončené dohody.
+        $annual = self::finding($findings, 'jmhz_annual_request_status_unresolved');
+        self::assertSame(2, $annual['entity_total']);
+        // Odkaz nese rok zúčtování (minulý rok hlášení), ne rok podle dneška.
+        self::assertSame('/payroll/annual-settlement?year=2025', $annual['remediation_path']);
+        foreach ($annual['entities'] as $entity) {
+            self::assertSame('/payroll/annual-settlement?year=2025&person=' . $entity['entity_id'], $entity['remediation_path']);
+        }
         $ended = self::finding($findings, 'employments_past_agreed_end');
         self::assertSame(3, $ended['entity_total']);
         $closurePreview = $this->container->get(PayrollEmploymentBulkClosure::class)->preview($this->supplierId, 3, 12);
@@ -230,7 +238,7 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
         // ── Oprava zbytku přes opravnou revizi až po zmrazení ─────────────
         $requested = $this->runs->requestCorrection($this->supplierId, (int) $run['id'], (int) $approved->run['row_version'], 'nav-preflight-corr', $this->actors[0], 'Doplnění pracoviště a průměrů pro JMHZ.');
         $reopened = $this->runs->reopen($this->supplierId, (int) $run['id'], (int) $requested->run['row_version'], 'nav-preflight-reopen', $this->actors[0], 'Doplnění pracoviště a průměrů pro JMHZ.');
-        $this->applyBulkFixes(['workplace', 'average']);
+        $this->applyBulkFixes(['workplace', 'average', 'annual']);
         $final = $readiness->inspect($this->supplierId, self::PERIOD_START, self::PAYDAY, $this->officeId);
         foreach (array_keys($predictedJmhz) as $code) {
             self::assertNull(self::finding($final['findings'], $code), "{$code}: po hromadné opravě nález nezmizel.");
@@ -288,6 +296,7 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
             'workplace' => 2,
             'isco' => 1,
             'ended' => 3,
+            'annual' => 2,
         ];
         $sequence = 0;
         $all = [];
@@ -303,7 +312,7 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
             $this->groups[$group][] = $this->hireDpp($group, $seq);
         }
 
-        // Pravděpodobný výdělek pro Q2 hromadně všem kromě skupiny bez průměru
+        // Pravděpodobný výdělek pro Q1 hromadně všem kromě skupiny bez průměru
         // a skončených dohod.
         $probable = $this->container->get(ProbableEarningBulkService::class);
         self::assertInstanceOf(ProbableEarningBulkService::class, $probable);
@@ -319,7 +328,7 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
         $applied = $probable->apply(
             $this->supplierId,
             2026,
-            2,
+            1,
             15_000,
             'Sjednaná sazba brigádníka 150 Kč za hodinu.',
             $ids,
@@ -382,11 +391,20 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
             self::assertCount(5, $rounded['rounded'], json_encode($rounded, JSON_UNESCAPED_UNICODE));
             self::assertSame([360_100], array_values(array_unique(array_column($rounded['rounded'], 'to_minor'))));
         }
+        if (in_array('annual', $kinds, true)) {
+            foreach ($this->groups['annual'] as $person) {
+                $this->db->pdo()->prepare(
+                    'INSERT INTO payroll_annual_settlement_requests
+                        (supplier_id, employee_id, tax_year, request_status, created_by, updated_by)
+                     VALUES (?, ?, 2025, "not_requested", ?, ?)'
+                )->execute([$this->supplierId, $person['employee_id'], $actor, $actor]);
+            }
+        }
         if (in_array('average', $kinds, true)) {
             $result = $this->container->get(ProbableEarningBulkService::class)->apply(
                 $this->supplierId,
                 2026,
-                2,
+                1,
                 15_000,
                 'Sjednaná sazba 150 Kč za hodinu.',
                 array_column($this->groups['average'], 'employment_id'),
@@ -427,6 +445,14 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
             ->execute([$birthDate, $this->supplierId, $person['employee_id']]);
         $this->assignJmhzIdentity($person, self::syntheticOic($seq), sprintf('2%020d', $seq));
         $pdo = $this->db->pdo();
+        $annualStatus = $group === 'annual' ? null : 'not_requested';
+        if ($annualStatus !== null) {
+            $pdo->prepare(
+                'INSERT INTO payroll_annual_settlement_requests
+                    (supplier_id, employee_id, tax_year, request_status, created_by, updated_by)
+                 VALUES (?, ?, 2025, ?, ?, ?)'
+            )->execute([$this->supplierId, $person['employee_id'], $annualStatus, $this->actors[0], $this->actors[0]]);
+        }
 
         switch ($group) {
             case 'statutory':

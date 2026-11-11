@@ -152,8 +152,8 @@ final class PayrollRunReadinessPredictionTest extends TestCase
     {
         // Únor: hlášení se ptá, zda zaměstnanec požádal o roční zúčtování za
         // předchozí rok. Zmrazení hlášení ho bez odpovědi zastaví, kontrola
-        // před během o tom dřív mlčela. První takový únor s JMHZ je 2027
-        // (hlášení se podává od 04/2026), únor 2026 se nehlásí vůbec.
+        // před během o tom dřív mlčela. Platí pro každý únor, za který jde
+        // hlášení připravit, tedy i únor 2026 (viz konec testu).
         [$withoutRowId] = $this->employment('Syntetický Bez žádosti');
         [$unknownId] = $this->employment('Syntetická Nevím');
         [$decidedId] = $this->employment('Syntetický Nepožádal');
@@ -199,9 +199,29 @@ final class PayrollRunReadinessPredictionTest extends TestCase
         // Mimo leden a únor se stav žádosti nehlásí.
         $march = $this->readiness->inspect($this->supplierId, '2027-03-01', '2027-04-10');
         self::assertNull(self::finding($march['findings'], 'jmhz_annual_request_status_unresolved'));
-        // Před prvním měsícem JMHZ se žádost o roční zúčtování nehlásí.
-        $before = $this->readiness->inspect($this->supplierId, '2026-02-01', '2026-03-10');
-        self::assertNull(self::finding($before['findings'], 'jmhz_annual_request_status_unresolved'));
+
+        // Únor 2026: hlášení za něj jde připravit stejně jako za pozdější
+        // měsíce (podává se dodatečně) a příprava se na žádost za rok 2025
+        // ptá také. Kontrola ji proto hlásí i před zákonným startem JMHZ
+        // 1. 4. 2026, jako informaci, která mzdový běh nezastaví.
+        $insert2025 = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_annual_settlement_requests
+                (supplier_id, employee_id, tax_year, request_status, created_by, updated_by)
+             VALUES (?, ?, 2025, ?, ?, ?)'
+        );
+        $insert2025->execute([$this->supplierId, $unknownId, 'unknown', $this->actorId, $this->actorId]);
+        $insert2025->execute([$this->supplierId, $decidedId, 'not_requested', $this->actorId, $this->actorId]);
+        $february2026 = $this->readiness->inspect($this->supplierId, '2026-02-01', '2026-03-10');
+        $early = self::finding($february2026['findings'], 'jmhz_annual_request_status_unresolved');
+        self::assertNotNull($early, json_encode(array_column($february2026['findings'], 'code')));
+        $earlyIds = array_column($early['entities'], 'entity_id');
+        sort($earlyIds);
+        self::assertSame($expected, $earlyIds);
+        self::assertSame('/payroll/annual-settlement?year=2025', $early['remediation_path']);
+        self::assertSame('info', $early['severity']);
+        self::assertSame('anytime', $early['impact']);
+        $march2026 = $this->readiness->inspect($this->supplierId, '2026-03-01', '2026-04-10');
+        self::assertNull(self::finding($march2026['findings'], 'jmhz_annual_request_status_unresolved'));
     }
 
     public function testChangedEmploymentTermsMarkOpenRevisionAsStale(): void
