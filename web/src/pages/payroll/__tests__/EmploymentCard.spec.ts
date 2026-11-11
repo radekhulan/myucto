@@ -1623,6 +1623,36 @@ describe('EmploymentCard', () => {
     })
   })
 
+  it('u blokace schválenou docházkou nabídne docházku vztahu za dotčený měsíc', async () => {
+    toastMocks.error.mockClear()
+    routerMocks.push.mockClear()
+    const blocked: PayrollEmployment = {
+      ...employment(),
+      can_delete: false,
+      delete_blocker: {
+        code: 'payroll_employment_has_approved_time',
+        message: 'Docházka za 02/2026 je schválená.',
+        employment_id: null,
+        employment_code: null,
+        period: '2026-02-01',
+      },
+      delete_cascade: {},
+    }
+    const wrapper = await mountCard(blocked, {
+      props: { employment: blocked, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="action-delete-employment"]').trigger('click')
+    const [, action] = toastMocks.error.mock.calls[0]!
+    expect(action.label).toBe('payroll.people.delete.show_time')
+    action.handler()
+    expect(routerMocks.push).toHaveBeenCalledWith({
+      name: 'payroll-time',
+      query: { employment: '10', period: '2026-02' },
+    })
+  })
+
   it('u převzatého vztahu skryje interní značky a registraci nabídne s varováním', async () => {
     const legacy: PayrollEmployment = {
       ...employment(),

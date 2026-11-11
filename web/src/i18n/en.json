@@ -6718,7 +6718,8 @@
           "tax": "no tax declaration | 1 tax declaration and credit | {count} tax declarations and credits",
           "insurance": "no insurance record | 1 insurance record | {count} insurance records",
           "payout_rules": "no payout rule | 1 payout rule | {count} payout rules"
-        }
+        },
+        "show_time": "Open attendance"
       },
       "detail_hint": "Each relationship has its own terms history, lifecycle, checklist and audit timeline.",
       "dependants": {

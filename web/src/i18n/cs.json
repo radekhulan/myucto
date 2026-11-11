@@ -6718,7 +6718,8 @@
           "tax": "žádné daňové prohlášení | 1 daňové prohlášení a sleva | {count} daňová prohlášení a slevy | {count} daňových prohlášení a slev",
           "insurance": "žádný záznam pojištění | 1 záznam evidence pojištění | {count} záznamy evidence pojištění | {count} záznamů evidence pojištění",
           "payout_rules": "žádné výplatní pravidlo | 1 výplatní pravidlo | {count} výplatní pravidla | {count} výplatních pravidel"
-        }
+        },
+        "show_time": "Otevřít docházku"
       },
       "detail_hint": "Každý vztah má vlastní historii podmínek, stav, checklist a auditní časovou osu.",
       "dependants": {
