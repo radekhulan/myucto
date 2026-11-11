@@ -525,17 +525,22 @@ dohod** níže se nic neděje samo, rozhodujete vy.
 
 1. Klikněte na **Ukončit skončené dohody** (nad seznamem, nebo v **Další funkce**). Otevře se náhled ve třech skupinách:
    - **Uplynul sjednaný konec**: aktivní nebo přerušený vztah (jakéhokoli druhu),
-     jehož sjednaný konec už uplynul. Navržené datum ukončení je sjednaný konec.
+     jehož sjednaný konec už uplynul. Sjednaný konec je datum konce vztahu,
+     a není-li vyplněné, konec na dobu určitou z platných podmínek. Navržené
+     datum ukončení je sjednaný konec. Jen tato skupina je předvybraná.
    - **Dohody bez aktivity**: aktivní DPP nebo DPČ bez sjednaného konce, která
-     za zvolený počet měsíců (výchozí 3, včetně běžného měsíce) nemá žádný
-     nenulový mzdový vstup ani docházku. Navržené datum je poslední den měsíce
-     poslední aktivity, bez aktivity poslední den měsíce nástupu. Je-li už
-     zúčtovaný pozdější měsíc, navrhne se jeho poslední den, aby ukončení
-     neodporovalo odeslanému hlášení. Nulový vstup a nulový řádek mzdového běhu
-     se za aktivitu nepovažují.
+     za zvolený počet měsíců (výchozí 3) do posledního zpracovaného mzdového
+     měsíce (měsíc poslední schválené mzdy, bez schválené mzdy do běžného
+     měsíce) nemá žádný nenulový mzdový vstup ani docházku. Dohoda s prací
+     v měsících, které ještě nejsou zpracované, se tak nenabídne. Navržené
+     datum je poslední den měsíce poslední aktivity, bez aktivity poslední den
+     měsíce nástupu. Je-li už zúčtovaný pozdější měsíc, navrhne se jeho
+     poslední den, aby ukončení neodporovalo odeslanému hlášení. Nulový vstup
+     a nulový řádek mzdového běhu se za aktivitu nepovažují. Skupina není
+     předvybraná, vztahy v ní vyberete sami.
    - **Ukončené vztahy k archivaci**: vztahy ukončené před více než zvoleným
      počtem měsíců (výchozí 12). Archivace jen odklidí vztah ze seznamu a jde
-     vrátit akcí **Vrátit z archivu**.
+     vrátit akcí **Vrátit z archivu**. Ani tato skupina není předvybraná.
 2. Počet měsíců bez aktivity a počet měsíců před archivací změníte nahoře
    a kliknete na **Načíst náhled**.
 3. Zkontrolujte výběr. U ukončení můžete změnit datum, ukončit lze jen k dnešku
@@ -564,6 +569,17 @@ docházku nebo zúčtovanou mzdu, nechá aktivní. Ta zůstane ve skupině
 **Uplynul sjednaný konec** označená **Vyžaduje kontrolu** a datum konce
 posoudíte vy. Pracovní poměr na dobu určitou se sám neukončuje, protože
 pokračováním v práci se mění na dobu neurčitou; ten ukončíte ručně.
+
+**Oprava ukončeného vztahu pro JMHZ.** U ukončeného vztahu jde dál opravit
+údaje, které popisují vztah pro JMHZ: místo výkonu práce (včetně obce
+a adresy pracoviště), CZ-ISCO, druh činnosti, primární vztah a pravděpodobný
+výdělek. Opravíte je na kartě vztahu, akcí **Doplnit místo výkonu práce**
+i hromadnou úpravou podmínek; ukládá se vždy jako oprava platné verze
+a datum konce vztahu se nemění. Platí to, dokud za měsíce opravované verze
+není hlášení JMHZ zmrazené ani podané. Pak aplikace opravu odmítne a řekne,
+o které hlášení jde: vraťte ukončení vztahu, údaje opravte, vztah znovu
+ukončete a podejte opravné hlášení. Mzdu, úvazek ani data u ukončeného
+vztahu takto neopravíte, k tomu je potřeba vrátit ukončení.
 
 Má-li ukončený vztah mzdový vstup za měsíc po svém konci, dostane se do
 mzdového běhu toho měsíce jen kvůli tomuto vstupu. Kontrola běhu pak hlásí

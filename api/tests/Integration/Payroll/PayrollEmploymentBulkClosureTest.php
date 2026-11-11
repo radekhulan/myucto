@@ -117,6 +117,52 @@ final class PayrollEmploymentBulkClosureTest extends TestCase
         self::assertSame('2026-09-30', $short[$working]['proposed_on'] ?? null);
     }
 
+    /**
+     * Agentura má schválenou mzdu za únor a v říjnu teprve zpracovává jaro.
+     * Nečinnost se měří k únoru: dohoda s prací v květnu (vstup ještě není
+     * ve mzdách) nečinná není. Dřív se měřilo k dnešku a nabízela se.
+     */
+    public function testInactivityIsMeasuredToTheLastApprovedPayrollMonth(): void
+    {
+        $this->approvedRun('2026-02-01');
+        $springWork = $this->employment($this->supplierId, 'Jarní Brigáda', 'dpp', '2026-01-01', null);
+        $this->input($springWork, '2026-05-01', 120_000);
+        $autumnOnly = $this->employment($this->supplierId, 'Podzimní Brigáda', 'dpp', '2025-10-01', null);
+        $this->input($autumnOnly, '2025-11-01', 90_000);
+
+        $preview = $this->bulk->preview($this->supplierId, 3, 12, self::TODAY);
+
+        $byId = array_column($preview['items'], null, 'employment_id');
+        self::assertArrayNotHasKey($springWork, $byId);
+        self::assertSame('inactive', $byId[$autumnOnly]['group'] ?? null);
+        self::assertSame('2025-11-30', $byId[$autumnOnly]['proposed_on']);
+        self::assertSame('2025-12-01', $preview['activity_since']);
+        self::assertSame('2026-02-28', $preview['activity_reference_on']);
+    }
+
+    /**
+     * Sjednaný konec jen v podmínkách (vztah bez `end_date`) je taky uplynulý
+     * konec: náhled ho nabídne k ukončení a noční úloha ho ukončí.
+     */
+    public function testAgreedEndFromTermsCountsAsExpiredForPreviewAndCron(): void
+    {
+        $employmentId = $this->employment($this->supplierId, 'Konec V Podmínkách', 'dpp', '2026-03-01', null);
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on, fixed_term_end_on, weekly_hours)
+             VALUES (?, ?, '2026-03-01', '2026-03-01', '2026-03-31', 40)",
+        )->execute([$this->supplierId, $employmentId]);
+
+        $item = array_column($this->bulk->preview($this->supplierId, 3, 12, self::TODAY)['items'], null, 'employment_id')[$employmentId] ?? null;
+        self::assertSame('expired', $item['group'] ?? null);
+        self::assertSame('2026-03-31', $item['proposed_on']);
+        self::assertSame('2026-03-31', $item['agreed_end_on']);
+
+        $result = $this->bulk->endExpiredAgreements($this->supplierId, self::TODAY);
+        self::assertSame([$employmentId], $result['ended'], json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame(['status' => 'ended', 'end_date' => '2026-03-31'], $this->state($employmentId));
+    }
+
     public function testExpiredAgreementWithWorkAfterTheEndIsFlagged(): void
     {
         $employmentId = $this->employment($this->supplierId, 'Pokračující Dohoda', 'dpp', '2026-01-01', '2026-06-30');
@@ -240,6 +286,22 @@ final class PayrollEmploymentBulkClosureTest extends TestCase
         )->execute([$supplierId, $employeeId, 'BULK-' . $employeeId, $relationType, $status, $startOn, $startOn, $endOn]);
 
         return (int) $pdo->lastInsertId();
+    }
+
+    /** Schválená mzda firmy za měsíc (hranice zpracovaných měsíců). */
+    private function approvedRun(string $periodStart): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO payroll_runs (supplier_id, period_start, payment_date, status, current_revision_no, row_version)
+             VALUES (?, ?, ?, 'approved', 1, 1)",
+        )->execute([$this->supplierId, $periodStart, (new \DateTimeImmutable($periodStart))->modify('+1 month +14 days')->format('Y-m-d')]);
+        $pdo->prepare(
+            "INSERT INTO payroll_run_revisions
+                 (supplier_id, run_id, revision_no, status, schema_version,
+                  ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, 1, 'approved', 'test', ?, '{}', ?, ?)",
+        )->execute([$this->supplierId, (int) $pdo->lastInsertId(), str_repeat('a', 64), str_repeat('b', 64), random_bytes(32)]);
     }
 
     private function component(int $supplierId): int

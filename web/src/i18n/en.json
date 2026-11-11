@@ -4037,6 +4037,7 @@
         "terms_missing": "the employment has no terms version",
         "later_terms": "the current terms version starts after the selected month",
         "employment_closed": "the employment has ended",
+        "employment_reported": "the employment has ended and a JMHZ report for its month is frozen or submitted: revert the termination, correct the details and file a corrective report",
         "employment_not_in_period": "the employment does not last in the selected month",
         "period_settled": "payroll was posted in the meantime, run the edit again",
         "report_prepared": "the JMHZ monthly report for {period} is prepared, reopen the payroll for correction first",
@@ -4069,10 +4070,14 @@
         "terms_missing": "no effective employment terms",
         "later_terms": "later employment terms already change the workplace",
         "employment_closed": "the employment has ended",
+        "employment_reported": "the employment has ended and a JMHZ report for its month is frozen or submitted: revert the termination, correct the details and file a corrective report",
         "period_settled": "the period is already settled",
         "workplace_not_verified": "the existing workplace is not verified"
       },
       "excluded_title": "Excluded ({count})",
+      "unverified_title": "Place of work filled in but not verified ({count})",
+      "unverified_hint": "These employments already have a place of work, but the ČSSZ codebook did not verify it, so the bulk fill will not overwrite it and JMHZ still reports it as missing. Pick the municipality from the codebook on the employment card.",
+      "unverified_value": "filled in as \"{place}\" (municipality code {code})",
       "apply": "Fill in workplace for {count} employments",
       "applied_toast": "The workplace was filled in for {count} employments.",
       "result_title": "Fill-in result",
@@ -4106,7 +4111,7 @@
         "inactive": {
           "summary": "Agreements without activity",
           "title": "Agreements without activity",
-          "hint": "DPP and DPČ agreements without an agreed end that have no payroll input or attendance in the last {months} months. They will be ended as of the last day of the month of their last activity."
+          "hint": "DPP and DPČ agreements without an agreed end that have no payroll input or attendance in the {months} months up to {date} (the last processed payroll month, or today without an approved payroll). They will be ended as of the last day of the month of their last activity. They are not preselected, please review them."
         },
         "archive": {
           "summary": "To archive",
@@ -7140,7 +7145,8 @@
         "correct_settled_hint": "Payroll has already been settled under this version (last period starting {period}); the server will refuse a correction. Choose a new version.",
         "current_effective_from": "Current terms effective from",
         "current_effective_from_hint": "Corrects the date of the current version without creating a new one. For example when the terms start on the day they were entered instead of the start date.",
-        "effective_from_correction_needs_correct": "The effective date of the current version can only be corrected with \"Correct the effective terms\". Restore the date or change how to save."
+        "effective_from_correction_needs_correct": "The effective date of the current version can only be corrected with \"Correct the effective terms\". Restore the date or change how to save.",
+        "ended_jmhz_only": "The employment has ended: only JMHZ reporting details can be corrected (place of work, CZ-ISCO, activity code, main employment, probable earnings), and only while no JMHZ report for its months is frozen or submitted. Make any other change to the terms after reverting the termination."
       },
       "mutation_failed": "The employment relationship could not be updated.",
       "transition_saved": "The employment status has been changed.",

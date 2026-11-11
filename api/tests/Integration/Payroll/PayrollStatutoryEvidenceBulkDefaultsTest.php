@@ -222,6 +222,56 @@ final class PayrollStatutoryEvidenceBulkDefaultsTest extends TestCase
         self::assertSame(1, $after['tax_residences'][0]['row_version']);
     }
 
+    /**
+     * Rezidence a příslušnost skončily s první dohodou (28. 2.), osoba má další
+     * dohodu od 19. 3. Hromadné doplnění za březen dřív sekce hlásilo jako
+     * hotové a březen zůstal bez údajů. Doplní navazující větu bez konce,
+     * skončenou nechá být.
+     */
+    public function testEndedSentenceIsFollowedByOpenEndedDefault(): void
+    {
+        $employeeId = $this->person(start: '2026-03-19');
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_person_tax_residences
+                (supplier_id, employee_id, residence, country_code, effective_from, effective_to)
+             VALUES (?, ?, "czech-resident", "CZ", "2026-02-01", "2026-02-28")'
+        )->execute([$this->supplierId, $employeeId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_person_social_jurisdictions
+                (supplier_id, employee_id, jurisdiction, a1_status, effective_from, effective_to)
+             VALUES (?, ?, "czech_regime_verified", "not_applicable", "2026-02-01", "2026-02-28")'
+        )->execute([$this->supplierId, $employeeId]);
+
+        $preview = $this->byEmployee(
+            $this->bulk->preview($this->supplierId, '2026-03-31', [$employeeId])['people'],
+        )[$employeeId];
+        self::assertSame('add', $preview['sections']['tax_residences']['state']);
+        self::assertSame('add', $preview['sections']['social_jurisdictions']['state']);
+
+        $result = $this->bulk->apply(
+            $this->supplierId,
+            '2026-03-31',
+            [$employeeId],
+            PayrollStatutoryEvidenceBulkDefaults::DEFAULT_SECTIONS,
+            false,
+            $this->userId,
+            null,
+            null,
+        );
+
+        self::assertSame(['applied' => 1, 'skipped' => 0, 'failed' => 0], $result['counts'], json_encode($result, JSON_UNESCAPED_UNICODE));
+        $sections = $this->view($employeeId)['sections'];
+        foreach (['tax_residences', 'social_jurisdictions'] as $section) {
+            $ranges = array_map(
+                static fn (array $row): array => [$row['effective_from'], $row['effective_to']],
+                $sections[$section],
+            );
+            usort($ranges, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+            self::assertSame([['2026-02-01', '2026-02-28'], ['2026-03-01', null]], $ranges, $section);
+        }
+    }
+
     public function testApprovedPeriodIsNotWrittenInto(): void
     {
         $employeeId = $this->person();

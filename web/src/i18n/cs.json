@@ -4037,6 +4037,7 @@
         "terms_missing": "vztah nemá žádnou verzi podmínek",
         "later_terms": "platná verze podmínek začíná až po zvoleném měsíci",
         "employment_closed": "vztah je ukončený",
+        "employment_reported": "vztah je ukončený a za jeho měsíc je hlášení JMHZ zmrazené nebo podané: vraťte ukončení, opravte údaje a podejte opravné hlášení",
         "employment_not_in_period": "vztah ve zvoleném měsíci netrvá",
         "period_settled": "mzda se mezitím zaúčtovala, spusťte úpravu znovu",
         "report_prepared": "měsíční hlášení JMHZ za {period} je připravené, nejdřív otevřete mzdu k opravě",
@@ -4069,10 +4070,14 @@
         "terms_missing": "chybí účinné smluvní podmínky",
         "later_terms": "novější podmínky vztahu už pracoviště mění",
         "employment_closed": "pracovní vztah je ukončený",
+        "employment_reported": "vztah je ukončený a za jeho měsíc je hlášení JMHZ zmrazené nebo podané: vraťte ukončení, opravte údaje a podejte opravné hlášení",
         "period_settled": "období je už vyúčtované",
         "workplace_not_verified": "existující pracoviště není ověřené"
       },
       "excluded_title": "Vyřazeno ({count})",
+      "unverified_title": "Pracoviště vyplněné, ale neověřené ({count})",
+      "unverified_hint": "Tyto vztahy už pracoviště mají, jen ho číselník ČSSZ neověřil, takže ho hromadné doplnění nepřepíše a JMHZ ho dál hlásí jako chybějící. Na kartě vztahu vyberte obec z číselníku.",
+      "unverified_value": "vyplněno „{place}“ (kód obce {code})",
       "apply": "Doplnit pracoviště {count} vztahům",
       "applied_toast": "Pracoviště bylo doplněno u {count} pracovních vztahů.",
       "result_title": "Výsledek doplnění",
@@ -4106,7 +4111,7 @@
         "inactive": {
           "summary": "Dohody bez aktivity",
           "title": "Dohody bez aktivity",
-          "hint": "DPP a DPČ bez sjednaného konce, které za posledních {months} měsíců nemají mzdový vstup ani docházku. Ukončí se k poslednímu dni měsíce poslední aktivity."
+          "hint": "DPP a DPČ bez sjednaného konce, které za {months} měsíců do {date} (poslední zpracovaný mzdový měsíc, bez schválené mzdy dnešek) nemají mzdový vstup ani docházku. Ukončí se k poslednímu dni měsíce poslední aktivity. Nejsou předvybrané, zkontrolujte je."
         },
         "archive": {
           "summary": "K archivaci",
@@ -7140,7 +7145,8 @@
         "correct_settled_hint": "Z této verze je už zúčtovaná mzda (naposledy za období od {period}), opravu server odmítne. Zvolte novou verzi.",
         "current_effective_from": "Účinnost platných podmínek od",
         "current_effective_from_hint": "Opraví datum platné verze, novou verzi nezaloží. Například když podmínky platí až ode dne zápisu místo ode dne nástupu.",
-        "effective_from_correction_needs_correct": "Účinnost platné verze lze opravit jen volbou „Opravit platné podmínky“. Vraťte datum, nebo změňte způsob uložení."
+        "effective_from_correction_needs_correct": "Účinnost platné verze lze opravit jen volbou „Opravit platné podmínky“. Vraťte datum, nebo změňte způsob uložení.",
+        "ended_jmhz_only": "Vztah je ukončený: opravit jde jen údaje pro JMHZ (místo výkonu práce, CZ-ISCO, druh činnosti, primární vztah, pravděpodobný výdělek), a to dokud za jeho měsíce není hlášení JMHZ zmrazené ani podané. Jinou změnu podmínek udělejte po vrácení ukončení."
       },
       "mutation_failed": "Změnu pracovního vztahu se nepodařilo uložit.",
       "transition_saved": "Stav pracovního vztahu byl změněn.",

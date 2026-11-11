@@ -445,6 +445,104 @@ final class PayrollEmploymentTermsBulkEditTest extends TestCase
         self::assertSame(25000, (int) $this->term($employment)['hourly_rate_minor']);
     }
 
+    /**
+     * „Ukončit skončené dohody" proběhne dřív než JMHZ. Ukončená dohoda pak
+     * musí jít doplnit v údajích pro JMHZ, ne ve mzdě, a datum konce zůstane.
+     */
+    public function testEndedAgreementGetsJmhzFieldsButNotRate(): void
+    {
+        $employment = $this->createDpp('Syntetická Skončená', 'DPP-ENDED', []);
+        $this->endEmployment($employment, '2026-06-30');
+
+        $preview = $this->bulk->preview($this->supplierId, self::PERIOD, 'dpp', null);
+        self::assertSame([$employment], $preview['editable_employment_ids'], json_encode($preview['items'], JSON_UNESCAPED_UNICODE));
+
+        $result = $this->bulk->apply(
+            $this->supplierId,
+            self::PERIOD,
+            PayrollEmploymentTermsBulkEdit::MODE_FILL,
+            ['cz_isco_code' => '25120'],
+            [$employment],
+            $this->userId,
+            null,
+            null,
+        );
+        self::assertSame(['applied' => 1, 'skipped' => 0, 'failed' => 0], $result['counts'], json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame('25120', $this->term($employment)['cz_isco_code']);
+        $state = $this->db->pdo()->prepare('SELECT status, end_date FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $state->execute([$this->supplierId, $employment]);
+        self::assertSame(['status' => 'ended', 'end_date' => '2026-06-30'], $state->fetch(\PDO::FETCH_ASSOC));
+
+        $rate = $this->bulk->apply(
+            $this->supplierId,
+            self::PERIOD,
+            PayrollEmploymentTermsBulkEdit::MODE_FILL,
+            ['hourly_rate_minor' => 25000],
+            [$employment],
+            $this->userId,
+            null,
+            null,
+        );
+        self::assertSame('employment_closed', $rate['skipped'][0]['reason'] ?? null, json_encode($rate, JSON_UNESCAPED_UNICODE));
+        self::assertNull($this->term($employment)['hourly_rate_minor']);
+    }
+
+    public function testEndedAgreementWithFrozenJmhzReportIsExcluded(): void
+    {
+        $employment = $this->createDpp('Syntetická Vykázaná', 'DPP-REPORTED', []);
+        $this->endEmployment($employment, '2026-06-30');
+        $this->approvedRun($employment, 'approved');
+        $this->freezeJmhz();
+
+        $preview = $this->bulk->preview($this->supplierId, self::PERIOD, 'dpp', null);
+        self::assertSame([], $preview['editable_employment_ids']);
+        self::assertSame('employment_reported', $preview['items'][0]['reason']);
+    }
+
+    private function endEmployment(int $employmentId, string $endOn): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employments SET status = 'ended', end_date = ?, row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?",
+        )->execute([$endOn, $this->supplierId, $employmentId]);
+    }
+
+    /** Ostrá zmrazená příprava JMHZ z poslední revize běhu firmy. */
+    private function freezeJmhz(): void
+    {
+        $pdo = $this->db->pdo();
+        $revision = $pdo->prepare(
+            'SELECT revision.id, revision.run_id, run.period_start
+               FROM payroll_run_revisions revision
+               JOIN payroll_runs run ON run.supplier_id = revision.supplier_id AND run.id = revision.run_id
+              WHERE revision.supplier_id = ?
+              ORDER BY revision.id DESC LIMIT 1',
+        );
+        $revision->execute([$this->supplierId]);
+        $source = $revision->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($source);
+        $pdo->prepare(
+            "INSERT INTO payroll_jmhz_preparation_snapshots
+                (supplier_id, environment, run_id, source_revision_id, period_start, scenario_key,
+                 builder_version, readiness_status, issue_count, source_manifest_json,
+                 source_manifest_sha256, readiness_json, readiness_sha256, snapshot_ciphertext,
+                 snapshot_fingerprint, request_fingerprint, idempotency_key_hash, created_by)
+             VALUES (?, 'production', ?, ?, ?, 'scenario_1', 'jmhz-preparation-source.v1',
+                     'source_ready', 0, '{}', ?, '{}', ?, 'enc:v2:synteticky', ?, ?, ?, ?)",
+        )->execute([
+            $this->supplierId,
+            (int) $source['run_id'],
+            (int) $source['id'],
+            (string) $source['period_start'],
+            hash('sha256', 'manifest'),
+            hash('sha256', 'readiness'),
+            hash('sha256', 'snapshot'),
+            hash('sha256', 'request' . $source['id']),
+            hash('sha256', 'idempotency' . $source['id'], true),
+            $this->userId,
+        ]);
+    }
+
     /** @param array<string,mixed> $body */
     private function request(array $body, string $role, string $method = 'session'): \Psr\Http\Message\ServerRequestInterface
     {

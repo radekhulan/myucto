@@ -13,6 +13,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Deadline\PayrollChecklistDeadlinePolicy;
 use MyInvoice\Service\Payroll\PayrollEmploymentLifecycle;
 use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReportedEmploymentPeriods;
 use PDO;
 
 /**
@@ -88,6 +89,40 @@ final class PayrollEmploymentRepository
 
     /** Druhy, mezi kterými jde druh vztahu opravit (viz changeRelationType()). */
     public const RELATION_TYPE_CORRECTABLE = ['employment', 'small_scale_employment', 'dpp', 'dpc'];
+
+    /**
+     * Údaje podmínek, které jde opravit i u ukončeného vztahu: popisují vztah
+     * pro JMHZ a mzdu ani trvání vztahu nemění (viz assertEndedCorrectable()).
+     */
+    public const ENDED_CORRECTABLE_FIELDS = [
+        'work_place',
+        'regular_workplace',
+        'jmhz_workplace_municipality_code',
+        'jmhz_workplace_country_code',
+        'jmhz_workplace_address_point_code',
+        'jmhz_workplace_street',
+        'jmhz_workplace_house_number',
+        'jmhz_workplace_orientation_number',
+        'jmhz_workplace_postal_code',
+        'jmhz_external_codebook_overlay_key',
+        'jmhz_external_codebook_manifest_sha256',
+        'cz_isco_code',
+        'activity_code',
+        'jmhz_relationship_detail_code',
+        'is_primary',
+        'probable_hourly_earning_minor',
+        'probable_earning_rationale',
+    ];
+
+    /** Druh vztahu do vět pro účetní. */
+    private const RELATION_LABELS = [
+        'employment' => 'pracovní poměr',
+        'small_scale_employment' => 'zaměstnání malého rozsahu',
+        'dpp' => 'DPP',
+        'dpc' => 'DPČ',
+        'partner_dependent' => 'příjem společníka',
+        'statutory_body' => 'statutární orgán',
+    ];
 
     private const CHECKLIST_EXCEPTIONS = [
         'partner_dependent' => ['employment_contract'],
@@ -515,11 +550,12 @@ final class PayrollEmploymentRepository
             $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
             $employeeId = (int) $employment['employee_id'];
             $status = (string) $employment['status'];
-            if (in_array($status, ['ended', 'archived', 'no_show'], true)) {
+            if (in_array($status, ['archived', 'no_show'], true)) {
                 throw new \DomainException(
-                    'U ukončeného, archivovaného nebo nenastoupeného vztahu nelze podmínky opravit.'
+                    'U archivovaného nebo nenastoupeného vztahu nelze podmínky opravit.'
                 );
             }
+            $ended = $status === 'ended';
             $actualStart = $employment['actual_start_date'] === null
                 ? null
                 : (string) $employment['actual_start_date'];
@@ -563,11 +599,19 @@ final class PayrollEmploymentRepository
             }
             $this->assertRemunerationChange($supplierId, $employmentId, $previous, $data, $employment, (int) $previous['id'], $storedTo, $endRecurringBase, $userId);
             $movedFrom = (string) $data['effective_from'];
-            $data['tax_declaration_signed'] = $this->taxDeclarationSigned(
-                $supplierId,
-                $employeeId,
-                $movedFrom,
-            );
+            // Zrcadlo prohlášení se přepočte jen s posunem účinnosti. Oprava
+            // jiného údaje (pravděpodobný výdělek, pracoviště) nesmí zrcadlo
+            // tiše přepsat: mzdový běh bere prohlášení z evidence, ale změna
+            // v historii vztahu by tvrdila, že ji účetní udělala.
+            $data['tax_declaration_signed'] = $movedFrom === $storedFrom
+                ? (bool) ($previous['tax_declaration_signed'] ?? false)
+                : $this->taxDeclarationSigned($supplierId, $employeeId, $movedFrom);
+            if ($ended) {
+                $this->assertEndedCorrectable($supplierId, $employment, $previous, $data, $storedFrom, $storedTo);
+                // Datum konce ukončeného vztahu je skutečnost z ukončení, ne
+                // sjednaný konec z podmínek; oprava údajů pro JMHZ ho nemění.
+                $data['fixed_term_end_on'] = $previous['fixed_term_end_on'] ?? null;
+            }
             $this->assertTermsOpenFrom($supplierId, $employmentId, $storedFrom, $storedTo);
             $predecessor = null;
             if ($movedFrom !== $storedFrom) {
@@ -629,7 +673,7 @@ final class PayrollEmploymentRepository
                 $data['actual_start_on'],
                 $data['planned_start_on'],
                 $data['actual_start_on'],
-                $data['fixed_term_end_on'],
+                $ended ? $employment['end_date'] : $data['fixed_term_end_on'],
                 (int) ($replaceMonthlyGross || $data['remuneration_type'] === 'hourly'),
                 $data['monthly_gross_minor'],
                 $supplierId,
@@ -2527,6 +2571,84 @@ final class PayrollEmploymentRepository
     }
 
     /**
+     * Smí se ukončený vztah opravit tímhle tělem?
+     *
+     * „Ukončit skončené dohody" běží často dřív, než je hotové hlášení JMHZ
+     * za poslední měsíc. Dokud ukončený vztah opravit nešlo vůbec, musela
+     * účetní ukončení vrátit, údaj doplnit a vztah ukončit znovu, u každé
+     * dohody zvlášť. Opravit jde proto údaje, které jen popisují vztah pro
+     * JMHZ ({@see self::ENDED_CORRECTABLE_FIELDS}), a to dokud za žádný měsíc
+     * opravované verze není hlášení zmrazené ani podané
+     * ({@see JmhzReportedEmploymentPeriods}). Mzdu, úvazek ani daty se tu
+     * nehýbe: to je změna smlouvy, která patří k vrácení ukončení.
+     *
+     * @param array<string,mixed> $employment
+     * @param array<string,mixed> $previous
+     * @param TermsInput $data
+     */
+    private function assertEndedCorrectable(
+        int $supplierId,
+        array $employment,
+        array $previous,
+        array $data,
+        string $storedFrom,
+        ?string $storedTo,
+    ): void {
+        $code = (string) $employment['code'];
+        $ignored = ['tax_declaration_signed', 'fixed_term_end_on', 'monthly_gross_minor'];
+        if ($previous['office_id'] === null) {
+            // Prázdnou účtárnu doplní resolveOffice() výchozí; to není změna.
+            $ignored[] = 'office_id';
+        }
+        $blocked = [];
+        foreach (array_keys($this->diff($previous, $data)) as $field) {
+            if (!array_key_exists($field, $previous)
+                || in_array($field, $ignored, true)
+                || in_array($field, self::ENDED_CORRECTABLE_FIELDS, true)
+            ) {
+                continue;
+            }
+            $blocked[] = $field;
+        }
+        if ((string) $data['effective_from'] !== $storedFrom) {
+            $blocked[] = 'effective_from';
+        }
+        if ($blocked !== []) {
+            throw new \DomainException(sprintf(
+                'Vztah %s je ukončený. Opravit u něj jde jen údaje pro JMHZ (místo výkonu práce, CZ-ISCO, '
+                . 'druh činnosti, primární vztah, pravděpodobný výdělek); měníte i %s. Jinou změnu podmínek '
+                . 'udělejte po vrácení ukončení na kartě vztahu.',
+                $code,
+                implode(', ', $blocked),
+            ));
+        }
+        $end = $employment['end_date'] === null ? $storedTo : (string) $employment['end_date'];
+        if ($storedTo !== null && $end !== null && $storedTo < $end) {
+            $end = $storedTo;
+        }
+        $reported = JmhzReportedEmploymentPeriods::firstWithin(
+            JmhzReportedEmploymentPeriods::forEmployments(
+                $this->db->pdo(),
+                $supplierId,
+                [(int) $employment['id']],
+            )[(int) $employment['id']] ?? [],
+            $storedFrom,
+            $end,
+        );
+        if ($reported !== null) {
+            $period = JmhzReportedEmploymentPeriods::label($reported);
+            throw new \DomainException(sprintf(
+                'Ukončený vztah %s už je v hlášení JMHZ za %s, které je zmrazené nebo podané, takže jeho údaje '
+                . 'nejde opravit tady. Vraťte ukončení vztahu na kartě, údaje opravte, vztah znovu ukončete '
+                . 'a za %s podejte opravné hlášení JMHZ.',
+                $code,
+                $period,
+                $period,
+            ));
+        }
+    }
+
+    /**
      * Poslední zúčtované mzdové období vztahu (první den měsíce), nebo `null`.
      *
      * Karta vztahu se podle něj rozhodne DŘÍV, než uživatel uloží: dokud
@@ -3140,17 +3262,54 @@ final class PayrollEmploymentRepository
             return;
         }
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id
+            "SELECT code, relation_type,
+                    COALESCE(actual_start_date, start_date) AS start_on, end_date
                FROM payroll_employments
               WHERE supplier_id = ? AND employee_id = ? AND is_primary = 1
                 AND status IN ('planned', 'preregistered', 'active', 'suspended')
                 AND (? IS NULL OR id <> ?)
+              ORDER BY id
               LIMIT 1"
         );
         $stmt->execute([$supplierId, $employeeId, $exceptEmploymentId, $exceptEmploymentId]);
-        if ($stmt->fetchColumn() !== false) {
-            throw new \DomainException('Osoba už má jiný primární pracovní vztah.');
+        $other = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($other !== false) {
+            throw new \DomainException(self::primaryTakenMessage($other));
         }
+    }
+
+    /**
+     * Věta musí říct, KTERÝ vztah primární drží a jak to přepnout. Holé „osoba
+     * už má jiný primární vztah" posílalo účetní hledat mezi desítkami dohod
+     * brigádníka.
+     *
+     * @param array<string,mixed> $other
+     */
+    private static function primaryTakenMessage(array $other): string
+    {
+        $date = static fn (mixed $value): ?string => is_string($value) && $value !== ''
+            ? (new \DateTimeImmutable($value))->format('j. n. Y')
+            : null;
+        $from = $date($other['start_on'] ?? null);
+        $to = $date($other['end_date'] ?? null);
+        $period = match (true) {
+            $from !== null && $to !== null => "{$from} – {$to}",
+            $from !== null => "od {$from}",
+            $to !== null => "do {$to}",
+            default => 'bez data nástupu',
+        };
+        $code = (string) ($other['code'] ?? '');
+        $type = self::RELATION_LABELS[(string) ($other['relation_type'] ?? '')] ?? (string) ($other['relation_type'] ?? '');
+
+        return sprintf(
+            'Osoba už má primární pracovní vztah %s (%s, %s). Primární smí být jen jeden: '
+            . 'chcete-li za primární označit tento vztah, otevřete na kartě osoby vztah %s, '
+            . 'v opravě podmínek zrušte „Primární vztah" a uložte; potom ho nastavte tady.',
+            $code,
+            $type,
+            $period,
+            $code,
+        );
     }
 
     /**

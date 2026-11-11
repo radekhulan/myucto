@@ -112,6 +112,51 @@ final class PayrollProbableEarningBulkApiTest extends TestCase
         self::assertCount(2, $this->snapshots($employmentId));
     }
 
+    /**
+     * Hromadný pravděpodobný výdělek opravuje jen svá dvě pole. Dřív oprava
+     * přepočítala zrcadlo prohlášení k dani k účinnosti verze a vztahu, kde
+     * evidence prohlášení začíná až později, ho tiše shodila na „nepodepsáno"
+     * (v historii vztahu jako změna, kterou nikdo neudělal).
+     */
+    public function testOnlyProbableEarningChangesInTerms(): void
+    {
+        [$employeeId, $employmentId] = $this->dpp('Syntetická Podepsaná');
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_employment_terms SET tax_declaration_signed = 1, work_place = "Syntetické místo"
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $pdo->prepare(
+            "INSERT INTO payroll_person_tax_declarations (supplier_id, employee_id, status, effective_from)
+             VALUES (?, ?, 'signed', '2026-02-01')",
+        )->execute([$this->supplierId, $employeeId]);
+        $this->approvedMinimumWageAverage($employmentId);
+
+        $result = $this->setProbable([$employmentId], 18_000);
+
+        self::assertSame(200, $result['status'], json_encode($result['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(1, $result['body']['counts']['applied']);
+        $terms = $pdo->prepare(
+            'SELECT tax_declaration_signed, work_place, probable_hourly_earning_minor
+               FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?',
+        );
+        $terms->execute([$this->supplierId, $employmentId]);
+        $row = $terms->fetch(PDO::FETCH_ASSOC);
+        self::assertSame(1, (int) $row['tax_declaration_signed']);
+        self::assertSame('Syntetické místo', $row['work_place']);
+        self::assertSame(18_000, (int) $row['probable_hourly_earning_minor']);
+        $events = $pdo->prepare(
+            "SELECT diff_json FROM payroll_employment_events
+              WHERE supplier_id = ? AND employment_id = ? AND event_type = 'terms_corrected'",
+        );
+        $events->execute([$this->supplierId, $employmentId]);
+        $diff = json_decode((string) $events->fetchColumn(), true);
+        self::assertIsArray($diff);
+        $changed = array_keys($diff);
+        sort($changed);
+        self::assertSame(['probable_earning_rationale', 'probable_hourly_earning_minor'], $changed);
+    }
+
     public function testRefusesWhereFrozenJmhzUsesTheAverageAndProceedsWithOthers(): void
     {
         [$frozenEmployee, $frozen] = $this->dpp('Syntetický Zmrazený');
