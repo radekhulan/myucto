@@ -104,7 +104,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testListMarksAndActionDeletesOnlyEmptyTechnicalWrapper(): void
     {
-        $run = $this->createRun($this->supplierId, '2031-01-01');
+        $run = $this->createRun($this->supplierId, '2026-01-01');
         $decision = $this->runs->canDelete(
             $this->supplierId,
             (int) $run['id'],
@@ -113,8 +113,8 @@ final class PayrollRunDeletionTest extends TestCase
         self::assertNull($decision->blockerCode);
 
         $list = $this->action->list(
-            $this->request('GET', '/api/payroll/runs?period=2031-01')
-                ->withQueryParams(['period' => '2031-01']),
+            $this->request('GET', '/api/payroll/runs?period=2026-01')
+                ->withQueryParams(['period' => '2026-01']),
             new Response(),
         );
         self::assertSame(200, $list->getStatusCode());
@@ -149,7 +149,7 @@ final class PayrollRunDeletionTest extends TestCase
             0,
             $this->rowCount(
                 'payroll_period_ownership',
-                'supplier_id = ? AND period_start = "2031-01-01"',
+                'supplier_id = ? AND period_start = "2026-01-01"',
                 [$this->supplierId],
             ),
         );
@@ -169,7 +169,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testDeleteIsTenantScopedAndDoesNotRevealForeignRun(): void
     {
-        $foreign = $this->createRun($this->otherSupplierId, '2031-02-01');
+        $foreign = $this->createRun($this->otherSupplierId, '2026-02-01');
         $response = $this->action->delete(
             $this->request(
                 'DELETE',
@@ -189,7 +189,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testDeleteRejectsStaleRowVersion(): void
     {
-        $run = $this->createRun($this->supplierId, '2031-03-01');
+        $run = $this->createRun($this->supplierId, '2026-03-01');
         $response = $this->action->delete(
             $this->request(
                 'DELETE',
@@ -213,7 +213,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testDeleteRequiresSessionWritePermissionAndEnabledModule(): void
     {
-        $run = $this->createRun($this->supplierId, '2031-04-01');
+        $run = $this->createRun($this->supplierId, '2026-04-01');
         $path = "/api/payroll/runs/{$run['id']}";
         $body = ['row_version' => $run['row_version']];
 
@@ -252,7 +252,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testAnyAdditionalEventBlocksDeletion(): void
     {
-        $run = $this->createRun($this->supplierId, '2031-05-01');
+        $run = $this->createRun($this->supplierId, '2026-05-01');
         $this->runs->insertEvent(
             $this->supplierId,
             (int) $run['id'],
@@ -279,7 +279,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testCommandReceiptBlocksDeletion(): void
     {
-        $run = $this->createRun($this->supplierId, '2031-06-01');
+        $run = $this->createRun($this->supplierId, '2026-06-01');
         $this->runs->insertCommandReceipt(
             $this->supplierId,
             (int) $run['id'],
@@ -302,7 +302,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testRevisionBlocksDeletion(): void
     {
-        $run = $this->createRun($this->supplierId, '2031-07-01');
+        $run = $this->createRun($this->supplierId, '2026-07-01');
         $this->insertRevision($run, 'revision');
 
         $this->assertDeleteConflict($run, 'payroll_run_has_working_revision');
@@ -310,7 +310,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testLaterStatusAndNonzeroRevisionPointerCannotBeDeleted(): void
     {
-        $laterStatus = $this->createRun($this->supplierId, '2031-10-01');
+        $laterStatus = $this->createRun($this->supplierId, '2026-10-01');
         $this->db->pdo()->prepare(
             'UPDATE payroll_runs SET status = "inputs_locked"
               WHERE supplier_id = ? AND id = ?',
@@ -322,7 +322,7 @@ final class PayrollRunDeletionTest extends TestCase
 
         $revisionPointer = $this->createRun(
             $this->supplierId,
-            '2031-11-01',
+            '2026-11-01',
         );
         $this->db->pdo()->prepare(
             'UPDATE payroll_runs SET current_revision_no = 1
@@ -336,7 +336,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testCanonicallyCancelledEmptyWrapperCanBeDeleted(): void
     {
-        $run = $this->createRun($this->supplierId, '2031-12-01');
+        $run = $this->createRun($this->supplierId, '2026-12-01');
         $cancelled = $this->service->cancel(
             $this->supplierId,
             (int) $run['id'],
@@ -352,8 +352,8 @@ final class PayrollRunDeletionTest extends TestCase
             )?->canDelete,
         );
         $list = $this->action->list(
-            $this->request('GET', '/api/payroll/runs?period=2031-12')
-                ->withQueryParams(['period' => '2031-12']),
+            $this->request('GET', '/api/payroll/runs?period=2026-12')
+                ->withQueryParams(['period' => '2026-12']),
             new Response(),
         );
         self::assertTrue($this->json($list)['runs'][0]['can_delete']);
@@ -378,7 +378,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testCancelledWrapperWithoutCanonicalCancelProofIsBlocked(): void
     {
-        $run = $this->createRun($this->supplierId, '2033-01-01');
+        $run = $this->createRun($this->supplierId, '2026-10-01');
         $this->db->pdo()->prepare(
             'UPDATE payroll_runs SET status = "cancelled"
               WHERE supplier_id = ? AND id = ?',
@@ -392,7 +392,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testTamperedCancelReceiptBlocksDeletion(): void
     {
-        $run = $this->createRun($this->supplierId, '2033-02-01');
+        $run = $this->createRun($this->supplierId, '2026-11-01');
         $cancelled = $this->service->cancel(
             $this->supplierId,
             (int) $run['id'],
@@ -420,7 +420,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testGeneratedDocumentBlocksWithDownstreamCode(): void
     {
-        $run = $this->createRun($this->supplierId, '2031-08-01');
+        $run = $this->createRun($this->supplierId, '2026-08-01');
         $revisionId = $this->insertRevision($run, 'document');
         $hash = hash('sha256', 'synthetic-payroll-document');
         $this->db->pdo()->prepare(
@@ -464,14 +464,14 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testPostingBlocksWithDownstreamCode(): void
     {
-        $run = $this->createRun($this->supplierId, '2032-01-01');
+        $run = $this->createRun($this->supplierId, '2026-07-01');
         $revisionId = $this->insertRevision($run, 'posting');
         $hash = hash('sha256', 'synthetic-posting');
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_posting_batches
                 (supplier_id, run_id, revision_id, entry_date, status,
                  target_hash, delta_hash, created_by)
-             VALUES (?, ?, ?, "2032-01-31", "prepared", ?, ?, ?)',
+             VALUES (?, ?, ?, "2026-07-31", "prepared", ?, ?, ?)',
         )->execute([
             $this->supplierId,
             $run['id'],
@@ -491,7 +491,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testPaymentBlocksWithDownstreamCode(): void
     {
-        $run = $this->createRun($this->supplierId, '2032-02-01');
+        $run = $this->createRun($this->supplierId, '2026-08-01');
         $revisionId = $this->insertRevision($run, 'payment');
         $hash = hash('sha256', 'synthetic-payment');
         $this->db->pdo()->prepare(
@@ -515,7 +515,7 @@ final class PayrollRunDeletionTest extends TestCase
                  amount_minor, source_snapshot_json, source_snapshot_hash,
                  idempotency_key_hash, created_by)
              VALUES (?, ?, "synthetic:payment", "social_insurance",
-                     "outgoing", "synthetic-recipient", "2032-03-20",
+                     "outgoing", "synthetic-recipient", "2026-09-20",
                      1, "{}", ?, ?, ?)',
         )->execute([
             $this->supplierId,
@@ -530,7 +530,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testSubmissionBlocksWithDownstreamCode(): void
     {
-        $run = $this->createRun($this->supplierId, '2032-03-01');
+        $run = $this->createRun($this->supplierId, '2026-09-01');
         $revisionId = $this->insertRevision($run, 'submission');
         $obligationId = $this->insertSubmissionObligation();
         $columns = [
@@ -573,7 +573,7 @@ final class PayrollRunDeletionTest extends TestCase
 
     public function testRunEventAppendOnlyProtectionRemainsActiveWithoutGuard(): void
     {
-        $run = $this->createRun($this->supplierId, '2031-09-01');
+        $run = $this->createRun($this->supplierId, '2026-09-01');
         $stmt = $this->db->pdo()->prepare(
             'DELETE FROM payroll_run_events
               WHERE supplier_id = ? AND run_id = ?',
@@ -667,8 +667,8 @@ final class PayrollRunDeletionTest extends TestCase
             'SYNTHETIC',
             'payroll_run',
             'payroll-run:synthetic',
-            '2032-03-01',
-            '2032-03-31',
+            '2026-09-01',
+            '2026-09-30',
             'regular',
             'manual_upload',
             'open',
