@@ -204,12 +204,22 @@ final class PayrollE2eDppCalculationTest extends TestCase
         $december = (int) $run['approved']->revision['id'];
         $preparation = $this->prepareJmhz($december, 'dpp-december');
         self::assertSame('source_ready', $preparation['body']['readiness_status'], CanonicalJson::encode($preparation['body']['issues']));
-        // Dnes (11/2026) je prosinec budoucí měsíc: test XML ho zastaví
-        // kontrolou 90 se srozumitelnou větou; podává se až v lednu 2027.
+        // Dokud prosinec neskončil, zastaví test XML jen kontroly kalendáře
+        // se srozumitelnou větou; podává se až v lednu 2027.
         $tested = $this->dryRunJmhz((int) $preparation['body']['id'], $this->officeId);
         self::assertSame(200, $tested['status']);
         $messages = array_column($tested['body']['controls']['blocking'] ?? [], 'message');
-        self::assertContains('Hlášené období 2026-12 ještě neskončilo; podává se až za uplynulý kalendářní měsíc.', $messages);
+        // Do konce prosince ho zastaví jen kontroly kalendáře (období
+        // a pojištění končí po dnešku); žádná věcná kontrola katalogu ani XSD.
+        // Po 1. 1. 2027 je seznam prázdný, test na dnešním datu nestojí.
+        $factual = array_values(array_filter(
+            $messages,
+            static fn (string $message): bool => !str_starts_with($message, 'Hlášené období 2026-12 ještě neskončilo')
+                && !str_starts_with($message, 'Pojištění do 2026-12-31 je po datu vyplnění podání'),
+        ));
+        self::assertSame([], $factual);
+        self::assertSame(0, (int) ($tested['body']['controls']['counts']['unimplemented'] ?? 0));
+        self::assertSame([], $tested['body']['blockers'] ?? []);
         $xml = (string) preg_replace('/>\s+</', '><', (string) ($tested['body']['xml'] ?? ''));
         // DPP přesně 12 000 Kč: rozhodný příjem dosažen => účast; SP 852.
         // ZP: minimální vyměřovací základ 22 400 (§ 3 odst. 8 z. č. 592/1992 Sb.
