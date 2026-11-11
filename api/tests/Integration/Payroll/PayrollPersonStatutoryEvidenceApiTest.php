@@ -1097,6 +1097,66 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         return ['effective_on' => '2026-08-31', 'sections' => $sections];
     }
 
+    /**
+     * Formulář dřív předvyplnil „Platí od" prvním neuzavřeným měsícem a den
+     * podpisu ho nezměnil. Začátek teď odvozuje server ze dne podpisu, nástupů
+     * osoby a hranice schválené mzdy (§ 38k odst. 1, 4 a 7 ZDP).
+     */
+    public function testTaxDeclarationStartFollowsSignatureEntryAndApprovedPayroll(): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status, start_date, monthly_gross_minor)
+             VALUES (?, ?, 'HPP-38K', 'employment', 'active', '2026-12-15', 3600000)"
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        // Podpis 10. 1. 2027 je 26. den po nástupu: prohlášení platí od prosince.
+        $start = $this->json($this->taxDeclarationStart('2027-01-10'))['start'];
+        self::assertSame('2026-12-01', $start['legal_from']);
+        self::assertSame('employment_start', $start['basis']);
+        self::assertSame('2026-12-15', $start['entry']);
+        self::assertSame('2026-12-01', $start['open_from']);
+        self::assertFalse($start['frozen']);
+        self::assertNull($start['frozen_through']);
+
+        // 31. den po nástupu už platí jen roční lhůta do 15. 2.: od ledna.
+        $late = $this->json($this->taxDeclarationStart('2027-01-15'))['start'];
+        self::assertSame('2027-01-01', $late['legal_from']);
+        self::assertSame('year_start', $late['basis']);
+
+        // Prosinec i leden uzavřené schválenou mzdou: zákonný měsíc zůstává,
+        // předvyplní se první neuzavřený a formulář ví, že jde o uzavřené období.
+        $this->approveRun('2026-12-01');
+        $this->approveRun('2027-01-01');
+        $frozen = $this->json($this->taxDeclarationStart('2027-01-10'))['start'];
+        self::assertSame('2026-12-01', $frozen['legal_from']);
+        self::assertSame('employment_start', $frozen['basis']);
+        self::assertSame('2027-02-01', $frozen['open_from']);
+        self::assertTrue($frozen['frozen']);
+        self::assertSame('2027-01-31', $frozen['frozen_through']);
+    }
+
+    public function testTaxDeclarationStartValidatesInputAndTenant(): void
+    {
+        self::assertSame(422, $this->taxDeclarationStart('2027-02-31')->getStatusCode());
+        self::assertSame(422, $this->taxDeclarationStart('')->getStatusCode());
+        // Osoba cizí firmy se neprozradí ani výpočtem.
+        self::assertSame(404, $this->taxDeclarationStart('2027-01-10', $this->otherSupplierId)->getStatusCode());
+    }
+
+    private function taxDeclarationStart(string $signedOn, ?int $supplierId = null): Response
+    {
+        return $this->action->taxDeclarationStart(
+            $this->request(
+                'GET',
+                $supplierId ?? $this->supplierId,
+                "/api/payroll/people/{$this->employeeId}/statutory-evidence/tax-declaration-start",
+            )->withQueryParams(['signed_on' => $signedOn]),
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+    }
+
     private function show(?int $supplierId = null): Response
     {
         return $this->action->show(
