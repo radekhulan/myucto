@@ -93,6 +93,15 @@ nebo **Koncept** a v náhledu hrubého příjmu je přesčas započtený.
 > nelze vykázat dvakrát; schválení docházky ani uložení vstupu ho podruhé
 > nepřijme.
 
+Hodiny přesčasu v měsíčním hlášení (odpracované hodiny a z toho přesčas)
+i odpracovaná doba pro průměrný výdělek se berou ze schválené docházky.
+Přesčas zadaný jen tady v docházce chybí, proto mzdový běh před schválením
+zobrazí varování se jménem osoby, hodinami z rychlého vstupu a z docházky
+a odkazem na docházku měsíce. Správný postup: hodiny přesčasu tady vymažte
+a přesčas zapište do docházky; její schválení dosaženou mzdu i příplatek
+založí samo. Varování potvrďte jen tehdy, když platíte přesčas odpracovaný
+v jiném měsíci.
+
 ## 79.5 Krok za krokem: zákonné příplatky a další složky
 
 1. Klikněte na **Zadat i příplatky**. Odkryjí se sloupce pro noční práci

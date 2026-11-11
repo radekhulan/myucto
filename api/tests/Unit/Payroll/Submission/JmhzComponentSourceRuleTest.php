@@ -85,26 +85,27 @@ final class JmhzComponentSourceRuleTest extends TestCase
     }
 
     /**
-     * Zdaněná (nadlimitní) cestovní náhrada a soukromé užití služebního vozu:
-     * do 10286 a základu daně patří, do mzdy za práci 10328 ne (pokyny MPSV
-     * cestovní náhrady jmenují výslovně). Nezdaněná část zařazení dál nemá
-     * jen proto, že se do hlášení nezahrnuje.
+     * Zdaněná (nadlimitní) cestovní náhrada do rozpadu mzdy nepatří: pokyny
+     * k 10328 cestovní náhrady vylučují výslovně. Služební vůz k soukromým
+     * účelům pokyny nejmenují a 10328 zahrnuje i naturální mzdu, zařazení
+     * proto zůstává na účetní stejně jako u obecného nepeněžního příjmu.
      */
-    public function testTaxedTravelExcessAndCompanyCarNeedNoWageBreakdownMapping(): void
+    public function testTaxedTravelExcessNeedsNoWageBreakdownMappingButCompanyCarDoes(): void
     {
-        foreach (['travel_reimbursement', 'benefit_vehicle'] as $kind) {
-            self::assertNull(JmhzComponentSourceRule::issueCode('included', null, 'included', $kind), $kind);
-            self::assertTrue(JmhzComponentSourceRule::belongsOutsideWageBreakdown('included', 'included', $kind), $kind);
+        self::assertNull(JmhzComponentSourceRule::issueCode('included', null, 'included', 'travel_reimbursement'));
+        self::assertTrue(JmhzComponentSourceRule::belongsOutsideWageBreakdown('included', 'included', 'travel_reimbursement'));
+        self::assertSame(
+            'component_jmhz_manual_review',
+            JmhzComponentSourceRule::issueCode('manual_review', null, 'manual_review', 'travel_reimbursement'),
+        );
+        foreach (['benefit_vehicle', 'non_cash'] as $kind) {
             self::assertSame(
-                'component_jmhz_manual_review',
-                JmhzComponentSourceRule::issueCode('manual_review', null, 'manual_review', $kind),
+                'component_jmhz_mapping_missing',
+                JmhzComponentSourceRule::issueCode('included', null, 'included', $kind),
                 $kind,
             );
+            self::assertFalse(JmhzComponentSourceRule::belongsOutsideWageBreakdown('included', 'included', $kind), $kind);
         }
-        self::assertSame(
-            'component_jmhz_mapping_missing',
-            JmhzComponentSourceRule::issueCode('included', null, 'included', 'non_cash'),
-        );
     }
 
     /**

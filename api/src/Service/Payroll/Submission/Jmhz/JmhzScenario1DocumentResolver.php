@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
 use MyInvoice\Service\Payroll\Calculation\PayrollRounding;
+use MyInvoice\Service\Payroll\Component\PayrollWholeCrowns;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime;
 use MyInvoice\Service\Payroll\IncomeTax\StudentTaxCredit;
@@ -745,10 +746,9 @@ final class JmhzScenario1DocumentResolver
             $normalizedPeople[] = [
                 'employee_id' => $employeeId,
                 'summary' => [
-                    'income_total_czk' => $this->wholeCzk(
+                    'income_total_czk' => $this->incomeTotalCzk(
                         $this->nestedInt($personSummary, ['totals', 'jmhz_amount_minor']),
-                        '10286',
-                        'person',
+                        $exemptIncomeMinor,
                         $employeeId,
                         $blockers,
                     ),
@@ -765,15 +765,12 @@ final class JmhzScenario1DocumentResolver
                     // nepřispívá nebo složku nemá zavedenou; blok se pak
                     // nevykazuje vůbec.
                     'employer_contributions_czk' => $employerContributions,
+                    // Haléře osvobozené části pocházejí ze zákonného limitu
+                    // (129,50 Kč za směnu, polovina průměrné mzdy) a vykazují
+                    // se dolů, viz PayrollWholeCrowns::reportedExemptCzk().
                     'exempt_income_czk' => $exemptIncomeMinor === null
                         ? null
-                        : $this->wholeCzk(
-                            $exemptIncomeMinor,
-                            '10289',
-                            'person',
-                            $employeeId,
-                            $blockers,
-                        ),
+                        : PayrollWholeCrowns::reportedExemptCzk($exemptIncomeMinor),
                     'net_income_czk' => $this->wholeCzk(
                         $this->netIncomeMinor($tax, $social, $health, $net, $employments),
                         '10344',
@@ -4207,6 +4204,33 @@ final class JmhzScenario1DocumentResolver
         return $annual;
     }
 
+    /**
+     * Zúčtovaný příjem celkem (10286). Haléře smí nést jen osvobozená část
+     * benefitu v koši § 6 odst. 9 ZDP; jiné haléře jsou chyba vstupu a hlásí
+     * se jako dosud. Pravidlo drží {@see PayrollWholeCrowns::reportedIncomeTotalCzk()}.
+     *
+     * @param list<JmhzScenario1Blocker> $blockers
+     */
+    private function incomeTotalCzk(
+        ?int $totalMinor,
+        ?int $exemptMinor,
+        ?int $employeeId,
+        array &$blockers,
+    ): ?int {
+        if ($totalMinor === null) {
+            return null;
+        }
+        $czk = PayrollWholeCrowns::reportedIncomeTotalCzk($totalMinor, $exemptMinor ?? 0);
+        if ($czk === null) {
+            return $this->wholeCzk($totalMinor, '10286', 'person', $employeeId, $blockers);
+        }
+        if ($czk < 0 && in_array('10286', $this->negativeIncomeClamp, true)) {
+            return 0;
+        }
+
+        return $czk;
+    }
+
     private function wholeCzk(
         ?int $minor,
         string $attributeId,
@@ -4218,13 +4242,19 @@ final class JmhzScenario1DocumentResolver
             return null;
         }
         if ($minor % 100 !== 0) {
-            $blockers[] = $this->blocker(
-                'jmhz_scenario1_whole_czk_required',
-                $entityType,
-                $entityId,
-                [$attributeId],
-            );
-            return null;
+            if (!in_array($attributeId, PayrollWholeCrowns::REPORTED_ROUNDED_UP, true)) {
+                $blockers[] = $this->blocker(
+                    'jmhz_scenario1_whole_czk_required',
+                    $entityType,
+                    $entityId,
+                    [$attributeId],
+                );
+                return null;
+            }
+            // Základy a čistý příjem s haléři z nadlimitní části benefitu:
+            // nahoru, viz PayrollWholeCrowns::REPORTED_ROUNDED_UP. Haléř ve
+            // mzdě dál zastaví úhrn 10286 a výdělek po složkách.
+            $minor = PayrollWholeCrowns::roundUpMinor($minor);
         }
         $whole = intdiv($minor, 100);
         if ($whole < 0 && in_array($attributeId, $this->negativeIncomeClamp, true)) {

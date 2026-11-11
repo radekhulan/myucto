@@ -247,12 +247,28 @@ final class PayrollComponentDefaults
                 // (1 % / 0,5 % / 0,25 % vstupní ceny měsíčně), ne osvobozený
                 // benefit — žádný roční strop osvobození neexistuje.
                 ['SOUKROME_VOZIDLO', 'Soukromé užití vozidla', 'benefit_vehicle', 'non_monetary', 'regular', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
-                ['PRISPEVEK_PENZE_ZIVOTNI', 'Příspěvek na penzijní a životní produkty', 'benefit_pension', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'old_age_savings', null],
+                // Příspěvek zaměstnavatele na penzijní a životní produkty se
+                // ZAMĚSTNANCI NEVYPLÁCÍ: § 6 odst. 9 písm. m) ZDP osvobozuje
+                // „příjem v podobě příspěvku uhrazeného zaměstnavatelem na daňově
+                // podporované produkty spoření na stáří jeho zaměstnance nebo na
+                // daňově podporované pojištění dlouhodobé péče, jehož pojistníkem
+                // je jeho zaměstnanec, do úhrnné výše 50000 Kč ročně“. Plnění jde
+                // penzijní společnosti nebo pojišťovně, proto `non_monetary`
+                // (stejně jako PRISPEVEK_RIZIKOVE_SPORENI): do čisté mzdy
+                // k výplatě nevstupuje a nadlimitní část se zdaní a pojistí
+                // z peněžní mzdy. Jako `monetary` se příspěvek přičetl k výplatě
+                // a zaměstnanec ho dostal na účet. Zaúčtování nákladu a závazku
+                // vůči instituci určuje předkontace složky; bez ní je složka
+                // účetně neutrální a náklad vzniká platbou instituci.
+                ['PRISPEVEK_PENZE_ZIVOTNI', 'Příspěvek na penzijní a životní produkty', 'benefit_pension', 'non_monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'old_age_savings', null],
                 // § 6 odst. 9 písm. m) ZDP sdílí 50 000 Kč s příspěvkem na produkty
                 // spoření na stáří, ale jde-li o jinou formu podpory dlouhodobé péče
                 // než pojištění, spadá jinam. Zařazení tenhle číselník neurčí, takže
                 // limit zůstává prázdný a vyplní ho účetní.
-                ['PRISPEVEK_DLOUHODOBA_PECE', 'Příspěvek na dlouhodobou péči', 'benefit_care', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
+                // Nepeněžní ze stejného důvodu jako příspěvek na penzijní produkty:
+                // výchozí zařazení do JMHZ je 10418 (pojištění dlouhodobé péče)
+                // a pojistné platí zaměstnavatel pojišťovně.
+                ['PRISPEVEK_DLOUHODOBA_PECE', 'Příspěvek na dlouhodobou péči', 'benefit_care', 'non_monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
                 // Vzdělávání má DVA různé režimy: odborný rozvoj související
                 // s předmětem činnosti zaměstnavatele je podle § 6 odst. 9 písm. a)
                 // ZDP osvobozený BEZ limitu, ostatní vzdělávání spadá pod strop

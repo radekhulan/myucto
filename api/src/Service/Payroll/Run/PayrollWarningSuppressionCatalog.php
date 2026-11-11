@@ -39,6 +39,9 @@ final class PayrollWarningSuppressionCatalog
         'employment_without_inputs' => self::SUBJECT_EMPLOYMENT,
         // Jen upozornění předem; překročení limitu je jiný kód a skrýt nejde.
         'dpp_annual_hours_approaching' => self::SUBJECT_EMPLOYMENT,
+        // Jen oznámení, že dosaženou mzdu za přesčas založilo schválení
+        // docházky; ruční duplicita je jiný kód s povinným potvrzením.
+        'overtime_wage_from_attendance' => self::SUBJECT_EMPLOYMENT,
     ];
 
     /**

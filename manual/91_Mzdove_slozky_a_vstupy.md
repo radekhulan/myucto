@@ -319,6 +319,17 @@ a vstupy navázané na vyúčtování cesty zůstanou beze změny a pod lištou 
 uvedený důvod. Uzamčené vstupy uvolní zrušení běhu, vstupy ani docházka se tím
 nesmažou. Každá změna částky se zapisuje do auditu.
 
+Výjimkou je osvobozený benefit v zákonném koši (příspěvek na stravování,
+volnočasový nebo zdravotní benefit, přechodné ubytování). Zákonný limit sám
+nese haléře (129,50 Kč za směnu, polovina průměrné mzdy 24 483,50 Kč za rok
+2026), takže částka přesně na limitu ani nadlimitní část na celé koruny vyjít
+nemusí a zaokrouhlení nahoru by vytvořilo zdanitelný přebytek nad limit. Takový
+vstup proto kontrola nehlásí a tlačítko ho nemění. Měsíční hlášení pak vykáže
+osvobozenou část v celých korunách dolů, základ zálohy na daň, příjem
+zahrnovaný do vyměřovacího základu a čistý příjem nahoru, takže součet
+zdanitelné a osvobozené části dává zúčtovaný příjem celkem. Má-li schválený
+benefit nadlimitní část, musí být částka vstupu v celých korunách.
+
 [Rychlý měsíční vstup](79_Rychly_mesicni_vstup.md) uloží řádky rovnou jako
 schválené, má-li uživatel oprávnění.
 

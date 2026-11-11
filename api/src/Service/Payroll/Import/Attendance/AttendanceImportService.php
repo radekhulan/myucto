@@ -1245,10 +1245,10 @@ final class AttendanceImportService
             $component = $this->inputRepository->resolveComponent($supplierId, $code, $periodStart);
             $definition = $definitions[$code] ?? null;
             // Složku, kterou import teprve založí, posuzuje podle definice, se kterou ji založí.
-            $treatment = $component === null
-                ? ($definition === null ? null : AttendanceProfileComponents::definition($definition, $periodStart)['jmhz_treatment'] ?? null)
-                : ($component['jmhz_treatment'] ?? null);
-            if (PayrollWholeCrowns::reportedInJmhz($treatment)) {
+            $classified = $component === null
+                ? ($definition === null ? [] : AttendanceProfileComponents::definition($definition, $periodStart))
+                : $component;
+            if (PayrollWholeCrowns::required($classified)) {
                 $wholeCrownCodes[$code] = true;
             }
             $checks[] = match (true) {

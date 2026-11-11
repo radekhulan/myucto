@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Time\PayrollDuration;
 use PDO;
 
 /**
@@ -137,6 +138,7 @@ final class AverageEarningBatchService
             ));
         }
         $versions = [];
+        $recalculate = [];
         foreach ($requested as $item) {
             $employmentId = is_array($item) ? ($item['employment_id'] ?? null) : null;
             $version = is_array($item) ? ($item['input_version'] ?? null) : null;
@@ -150,6 +152,10 @@ final class AverageEarningBatchService
                 throw new \InvalidArgumentException('Pracovní vztah je v dávce uveden vícekrát.');
             }
             $versions[$employmentId] = $version;
+            // Výslovná žádost o novou revizi neaktuálního schváleného průměru.
+            if (($item['recalculate_outdated'] ?? false) === true) {
+                $recalculate[$employmentId] = true;
+            }
         }
 
         $ruleset = $this->rulesets->forDate(
@@ -166,6 +172,9 @@ final class AverageEarningBatchService
                 ->forMany($supplierId, array_keys($versions), $applicationStart, $applicationStart, true);
             $approved = [];
             $skipped = [];
+            $existing = $recalculate === []
+                ? []
+                : $this->existing($supplierId, array_keys($recalculate), $year, $quarter);
             foreach ($versions as $employmentId => $expectedVersion) {
                 $this->lockEmployment($supplierId, $employmentId);
                 if ($this->averages->quarterMismatch($supplierId, $employmentId, $year, $quarter) !== null) {
@@ -176,6 +185,37 @@ final class AverageEarningBatchService
                 $suggestion = $this->derivation->suggest($supplierId, $employmentId, $year, $quarter, $hourlyFloors[$employmentId] ?? []);
                 if (!hash_equals($expectedVersion, (string) $suggestion['input_version'])) {
                     throw new AverageEarningBatchConflictException($employmentId);
+                }
+                $outdated = isset($recalculate[$employmentId], $existing[$employmentId])
+                    && $existing[$employmentId]['status'] === 'approved'
+                    && !self::needsIndividualReview($suggestion)
+                    && array_values((array) ($suggestion['blockers'] ?? [])) === ['average_already_exists']
+                        ? self::outdatedDiagnosis($suggestion, $existing[$employmentId])
+                        : null;
+                if ($outdated !== null) {
+                    // Schválený průměr neodpovídá dnešním podkladům: nová
+                    // revize z aktuálních běhů. Schválením se dosavadní revize
+                    // nahradí; náhrady, které z ní už vznikly, se nemění.
+                    $approved[] = $this->createAndApprove(
+                        $supplierId,
+                        $employmentId,
+                        $year,
+                        $quarter,
+                        $applicationStart,
+                        [
+                            'source_kind' => 'actual',
+                            'gross_earnings_minor' => $outdated['gross_minor'],
+                            'worked_minutes' => PayrollDuration::exactMinutes($outdated['duration_units']),
+                            'worked_duration_units' => $outdated['duration_units'],
+                            'worked_days' => $outdated['worked_days'],
+                        ] + $suggestion,
+                        $ruleset,
+                        $userId,
+                        $hourlyFloors[$employmentId] ?? [],
+                        self::ACTUAL_RATIONALE,
+                        'bulk_recalculation',
+                    );
+                    continue;
                 }
                 if (($suggestion['ready'] ?? false) !== true || self::needsIndividualReview($suggestion)) {
                     $blockers = array_values(array_map('strval', (array) ($suggestion['blockers'] ?? [])));
@@ -413,6 +453,7 @@ final class AverageEarningBatchService
         ?array $existing,
     ): array {
         $takeover = self::needsIndividualReview($suggestion);
+        $outdated = $existing === null ? null : self::outdatedDiagnosis($suggestion, $existing);
 
         return [
             'employment_id' => (int) $suggestion['employment_id'],
@@ -436,8 +477,42 @@ final class AverageEarningBatchService
             'worked_days' => $suggestion['worked_days'],
             'input_version' => $suggestion['input_version'],
             'existing' => $existing,
-            'existing_outdated' => $existing !== null && self::existingOutdated($suggestion, $existing),
+            'existing_outdated' => $outdated !== null,
+            // Proč schválený průměr neodpovídá podkladům a kolik by vyšel
+            // nově; přehled podle toho účetní řekne, co se změnilo, a nabídne
+            // hromadné založení nové revize.
+            'existing_outdated_reason' => $outdated['reason'] ?? null,
+            'suggested_average_hourly_minor' => $outdated === null
+                ? null
+                : $this->suggestedAverage($suggestion, $outdated),
         ];
+    }
+
+    /**
+     * Průměr, který by z dnešních podkladů vyšel, nebo `null`, když ho
+     * spočítat nejde (pak účetní řeší vztah jednotlivě).
+     *
+     * @param array<string,mixed> $suggestion
+     * @param array{reason:string,gross_minor:int,duration_units:int,worked_days:int} $outdated
+     */
+    private function suggestedAverage(array $suggestion, array $outdated): ?int
+    {
+        try {
+            return $this->calculator->calculate(
+                // Průměr se zjišťuje k prvnímu dni po rozhodném období (§ 354 odst. 2 ZP).
+                (new \DateTimeImmutable((string) $suggestion['decisive_to']))->modify('+1 day')->format('Y-m-d'),
+                $outdated['gross_minor'],
+                0,
+                PayrollDuration::exactMinutes($outdated['duration_units']),
+                $outdated['worked_days'],
+                null,
+                null,
+                null,
+                $outdated['duration_units'],
+            )->averageHourlyMinor;
+        } catch (\InvalidArgumentException|\OverflowException|\DomainException) {
+            return null;
+        }
     }
 
     /**
@@ -486,24 +561,34 @@ final class AverageEarningBatchService
     }
 
     /**
-     * Platí založený skutečný průměr pořád? Mzdový běh rozhodného období
-     * se mohl po schválení průměru opravit (zpětně doplněná odměna, oprava
-     * docházky). Průměr pak nesedí na uzavřené běhy a s ním náhrady
-     * i atribut 10345 JMHZ v měsících čtvrtletí. Porovnávají se úhrny
-     * z aktuálních běhů s úhrny uloženými v průměru; ruční průměr
-     * z podkladů mimo MyÚčto (měsíce bez běhu) se posoudit nedá.
+     * Proč schválený skutečný průměr neodpovídá dnešním podkladům.
+     *
+     * Vrací `null`, když průměr sedí nebo se s návrhem porovnat nedá
+     * (pravděpodobný výdělek, převzaté měsíce, měsíc s blokací). Důvody:
+     *
+     *  - `holiday_hours`: započitatelná mzda je stejná, liší se jen
+     *    odpracovaná doba, a to právě o hodiny svátku krytého nekrácenou
+     *    měsíční mzdou. Ty do odpracované doby patří (§ 353 odst. 2 zákoníku
+     *    práce: „doba, za kterou zaměstnanci přísluší mzda“), dříve schválený
+     *    průměr je nezapočítal a vyšel vyšší.
+     *  - `earnings`: změnila se mzda rozhodného období (oprava běhu po
+     *    schválení průměru).
+     *  - `worked_time`: změnila se odpracovaná doba nebo dny (oprava docházky).
+     *  - `mixed`: obojí.
      *
      * @param array<string,mixed> $suggestion
      * @param array<string,mixed> $existing
+     * @return array{reason:string,gross_minor:int,duration_units:int,worked_days:int}|null
      */
-    private static function existingOutdated(array $suggestion, array $existing): bool
+    public static function outdatedDiagnosis(array $suggestion, array $existing): ?array
     {
-        if ($existing['source_kind'] !== 'actual') {
-            return false;
+        if (($existing['source_kind'] ?? null) !== 'actual') {
+            return null;
         }
         $gross = 0;
         $units = 0;
         $days = 0;
+        $holidayUnits = 0;
         foreach ((array) ($suggestion['months'] ?? []) as $month) {
             if ((array) ($month['blockers'] ?? []) !== []
                 || ($month['takeover'] ?? false) === true
@@ -511,16 +596,34 @@ final class AverageEarningBatchService
                 || AverageEarningDerivationService::durationUnits($month) === null
                 || !is_int($month['worked_days'] ?? null)
             ) {
-                return false;
+                return null;
             }
             $gross += $month['gross_earnings_minor'];
-            $units = \MyInvoice\Service\Payroll\Time\PayrollDuration::add($units, AverageEarningDerivationService::durationUnits($month));
+            $units = PayrollDuration::add($units, AverageEarningDerivationService::durationUnits($month));
             $days += $month['worked_days'];
+            if (is_int($month['wage_covered_holiday_duration_units'] ?? null)) {
+                $holidayUnits = PayrollDuration::add($holidayUnits, $month['wage_covered_holiday_duration_units']);
+            }
+        }
+        $existingUnits = AverageEarningDerivationService::durationUnits($existing);
+        $grossDiffers = $gross !== $existing['gross_earnings_minor'] - $existing['longer_period_allocated_minor'];
+        $timeDiffers = $units !== $existingUnits || $days !== $existing['worked_days'];
+        if (!$grossDiffers && !$timeDiffers) {
+            return null;
         }
 
-        return $gross !== $existing['gross_earnings_minor'] - $existing['longer_period_allocated_minor']
-            || $units !== AverageEarningDerivationService::durationUnits($existing)
-            || $days !== $existing['worked_days'];
+        return [
+            'reason' => match (true) {
+                $grossDiffers && $timeDiffers => 'mixed',
+                $grossDiffers => 'earnings',
+                $holidayUnits > 0 && $days === $existing['worked_days']
+                    && $existingUnits !== null && $units - $existingUnits === $holidayUnits => 'holiday_hours',
+                default => 'worked_time',
+            },
+            'gross_minor' => $gross,
+            'duration_units' => $units,
+            'worked_days' => $days,
+        ];
     }
 
     /**

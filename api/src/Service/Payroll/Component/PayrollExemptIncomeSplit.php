@@ -90,8 +90,30 @@ final readonly class PayrollExemptIncomeSplit
                 "Podklad osvobození složky vstupu {$inputId} není uveden.",
             );
         }
+        return new self($basis, self::frozenExemptPart(
+            $frozenInput,
+            $sourceAmountMinorUnits,
+            $inputId,
+        ));
+    }
+
+    /**
+     * Osvobozená část částky vstupu osvobozené složky: u vstupu v koši
+     * osvobození zmrazený podíl `benefit_exempt_minor`, jinak celá částka.
+     *
+     * Zdaněná nadlimitní část koše mezi osvobozené příjmy nepatří. Čtou to
+     * doklady o mzdě i příprava měsíčního hlášení (10289 „úhrn osvobozených
+     * příjmů“), proto je rozpad tady a ne u každého čtenáře zvlášť.
+     *
+     * @param array<string,mixed> $frozenInput zmrazený mzdový vstup revize
+     */
+    public static function frozenExemptPart(
+        array $frozenInput,
+        int $sourceAmountMinorUnits,
+        int $inputId,
+    ): int {
         if (($frozenInput['benefit_basket'] ?? null) === null) {
-            return new self($basis, $sourceAmountMinorUnits);
+            return $sourceAmountMinorUnits;
         }
 
         $exempt = self::nonNegativeInt($frozenInput, 'benefit_exempt_minor', $inputId);
@@ -102,7 +124,7 @@ final readonly class PayrollExemptIncomeSplit
             );
         }
 
-        return new self($basis, $exempt);
+        return $exempt;
     }
 
     /** @param array<string,mixed> $row */

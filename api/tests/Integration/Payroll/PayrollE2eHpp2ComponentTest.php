@@ -108,9 +108,13 @@ final class PayrollE2eHpp2ComponentTest extends TestCase
      * výplata 40 000 − 3 408 − 2 160 − 4 630 = 29 802.
      *
      * Hlášení: 10286 zúčtovaný příjem 48 000; 10344 čistý příjem (zdanitelný
-     * příjem po pojistném a dani) 48 000 − 10 198 = 37 802. Do mzdy za práci
-     * 10328 užití vozidla nepatří (pokyny MPSV: plnění, která nemají
-     * charakter mzdy za práci), zůstává 40 000.
+     * příjem po pojistném a dani) 48 000 − 10 198 = 37 802.
+     *
+     * Zařazení do rozpadu mzdy aplikace sama neurčí: pokyny k 10328 užití
+     * vozidla mezi vyloučenými plněními nejmenují a 10328 zahrnuje i naturální
+     * mzdu. Příprava hlášení se proto zastaví jedním nálezem u složky a účetní
+     * ji zařadí; tady přímo na úhrn 10328 (naturální mzda), takže 10328
+     * = 48 000 a tarif 10329 zůstává 40 000.
      */
     public function testCompanyCarOnePercentIsTaxedButNotPaidOut(): void
     {
@@ -133,10 +137,24 @@ final class PayrollE2eHpp2ComponentTest extends TestCase
             'net' => 2_980_200,
         ]);
 
+        // Vůz nemá výchozí zařazení: příprava se zastaví a řekne u které složky.
+        $blocked = $this->prepareJmhz($run['revision_id'], 'car-unmapped');
+        self::assertSame('blocked', $blocked['body']['readiness_status']);
+        self::assertSame(
+            [['code' => 'component_jmhz_mapping_missing', 'entity_type' => 'component', 'count' => 1]],
+            array_map(
+                static fn (array $issue): array => ['code' => $issue['code'], 'entity_type' => $issue['entity_type'], 'count' => $issue['count']],
+                $blocked['body']['issues'],
+            ),
+            CanonicalJson::encode($blocked['body']['issues']),
+        );
+        self::assertSame(1, $blocked['body']['issue_count'], 'Bez zařazení je jen služební vůz.');
+        $this->mappings()->put($this->supplierId, $this->componentId('SOUKROME_VOZIDLO'), '10328', null, $this->actors[0]);
+
         $xml = $this->dryRunXml($run['revision_id'], 'car');
         foreach ([
             '<form:zuctovanoCelkem>48000</form:zuctovanoCelkem>',
-            '<form:mzdaZuctovana>40000</form:mzdaZuctovana>',
+            '<form:mzdaZuctovana>48000</form:mzdaZuctovana>',
             '<form:tarif>40000</form:tarif>',
             '<form:zakladDane>48000</form:zakladDane>',
             '<form:vypoctenaZaloha>7200</form:vypoctenaZaloha>',

@@ -353,6 +353,45 @@ async function abandon(item: PayrollSubmissionQueueItem): Promise<void> {
   }
 }
 
+/**
+ * „Zrušit přípravu": řádné měsíční hlášení je zmrazené, ale ještě se
+ * neodesílalo. Po opravě mzdy ho účetní zruší a připraví znovu z opravené
+ * revize; bez toho by musela odeslat hlášení se starými částkami a hned po
+ * přijetí poslat opravné. Odeslané hlášení se tudy zrušit nedá (server to
+ * hlídá znovu).
+ */
+const withdrawing = ref<number | null>(null)
+
+function canWithdraw(item: PayrollSubmissionQueueItem): boolean {
+  return item.agenda_code === 'JMHZ25'
+    && item.submission_kind === 'regular'
+    && item.submission_status === 'ready'
+    && item.attempt === null
+}
+
+async function withdraw(item: PayrollSubmissionQueueItem): Promise<void> {
+  if (withdrawing.value !== null || abandoning.value !== null || batch.value !== null) return
+  // Potvrzení i důvod v jednom kroku: věta říká, co účetní potvrzuje.
+  const reason = window.prompt(t('payroll.submissions.queue.withdraw_prompt'), '')
+  if (reason === null || reason.trim() === '') return
+
+  withdrawing.value = item.submission_id
+  error.value = ''
+  try {
+    await payrollApi.withdrawUnsentSubmissionInQueue(
+      props.environment,
+      item.submission_id,
+      item.submission_row_version,
+      reason.trim(),
+    )
+    await load()
+  } catch (e) {
+    error.value = apiErrorMessage(e, t('payroll.submissions.queue.withdraw_failed'))
+  } finally {
+    withdrawing.value = null
+  }
+}
+
 async function sendSelected(): Promise<void> {
   await sendMany([...selected.value])
 }
@@ -898,6 +937,24 @@ useWindowRefresh(() => load(true), () => !loading.value && batch.value === null
                         : t('payroll.submissions.queue.abandon') }}
                     </span>
                   </button>
+                  <button
+                    v-if="canWithdraw(item)"
+                    type="button"
+                    :class="btnOutlineSm('danger')"
+                    :disabled="withdrawing !== null || abandoning !== null || batch !== null"
+                    :title="t('payroll.submissions.queue.withdraw_hint')"
+                    data-test="queue-withdraw"
+                    @click="withdraw(item)"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.x" />
+                    </svg>
+                    <span class="whitespace-nowrap">
+                      {{ withdrawing === item.submission_id
+                        ? t('payroll.submissions.queue.withdrawing')
+                        : t('payroll.submissions.queue.withdraw') }}
+                    </span>
+                  </button>
                 </div>
               </td>
             </tr>
@@ -1088,6 +1145,23 @@ useWindowRefresh(() => load(true), () => !loading.value && batch.value === null
               {{ abandoning === item.submission_id
                 ? t('payroll.submissions.queue.abandoning')
                 : t('payroll.submissions.queue.abandon') }}
+            </span>
+          </button>
+          <button
+            v-if="canWithdraw(item)"
+            type="button"
+            :class="[btnOutlineSm('danger'), 'mt-2 w-full justify-center']"
+            :disabled="withdrawing !== null || abandoning !== null || batch !== null"
+            :title="t('payroll.submissions.queue.withdraw_hint')"
+            @click="withdraw(item)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.x" />
+            </svg>
+            <span class="whitespace-nowrap">
+              {{ withdrawing === item.submission_id
+                ? t('payroll.submissions.queue.withdrawing')
+                : t('payroll.submissions.queue.withdraw') }}
             </span>
           </button>
         </article>

@@ -4186,6 +4186,7 @@
         "time_month_missing": "Approved working time missing",
         "employment_without_inputs": "Employment without payroll inputs",
         "dpp_annual_hours_approaching": "Agreement to perform work approaching the 300-hour limit",
+        "overtime_wage_from_attendance": "Overtime wage created from attendance",
         "recurring_component_without_input": "Recurring payroll component without input"
       }
     },
@@ -10395,6 +10396,11 @@
         "abandon_hint": "Did the authority refuse the filing? Discard the pending send and file again. The attempt stays in the history together with what the authority replied.",
         "abandon_prompt": "Why is the send being discarded? Paste what the authority replied — it stays with the attempt in the history.",
         "abandon_failed": "The pending send could not be discarded.",
+        "withdraw": "Cancel preparation",
+        "withdrawing": "Cancelling…",
+        "withdraw_hint": "The report is prepared but has not been sent yet. If the payroll changed, cancel the preparation and prepare the report again from the corrected payroll. The cancelled report stays in the history.",
+        "withdraw_prompt": "By cancelling you confirm that the prepared report has not been sent or uploaded to the ČSSZ ePortal from the downloaded file (the authority would reject a second regular report for the same period). Enter the reason for cancelling, it stays in the history:",
+        "withdraw_failed": "The prepared report could not be cancelled.",
         "select_all": "Select everything that can be sent",
         "select_row": "Select submission to send",
         "selected": "Selected: {count}",
@@ -32632,7 +32638,16 @@
       "bulk_inputs_changed": "The underlying data changed since the list was loaded. The list has been reloaded, please check your selection and submit again.",
       "bulk_empty": "There are no employments for this quarter.",
       "bulk_existing": "Existing average: {amount} · {status}",
-      "bulk_existing_outdated": "A payroll run of the decisive period was corrected after approval and the average no longer matches it. Create a new revision of the average and review compensations and JMHZ reports in the quarter.",
+      "bulk_outdated_reason": {
+        "holiday_hours": "The approved average is out of date: hours of a public holiday for which the monthly wage is not reduced now count as time worked (§ 353(2) of the Labour Code).",
+        "earnings": "The approved average is out of date: wages of the decisive period changed after it was approved (corrected payroll run).",
+        "worked_time": "The approved average is out of date: time worked in the decisive period changed after it was approved (corrected attendance).",
+        "mixed": "The approved average is out of date: both wages and time worked in the decisive period changed after it was approved."
+      },
+      "bulk_outdated_difference": "Current data give {suggested}/h instead of {existing}/h (difference {difference}/h).",
+      "bulk_outdated_action": "Compensation already paid does not change retroactively; the new average applies to compensation approved after it is created. Select the row and use “Create and approve selected” to create a new approved revision.",
+      "bulk_outdated_manual": "Compensation already paid does not change retroactively. Create a new revision of the average on the employment card.",
+      "bulk_select_outdated": "Select out-of-date averages",
       "bulk_actual_summary": "Actual average · earnings {gross}, worked {hours}, {days} days",
       "bulk_probable_summary": "Probable earning {amount} · {source}",
       "bulk_longer_period_note": "A bulk-created actual average does not account for a proportional share of wages for a period longer than one quarter (§ 358 of the Labour Code). For people with an annual bonus, create the average manually on their employment card.",

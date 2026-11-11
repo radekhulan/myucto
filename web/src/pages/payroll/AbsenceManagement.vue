@@ -206,8 +206,18 @@ const selectedReadyCandidates = computed(() => leaveCandidates.value.filter(cand
 const averageCandidatePage = computed(() => Math.floor(
   averageCandidateOffset.value / averageCandidatePageSize,
 ) + 1)
+/**
+ * Neaktuální schválený průměr jde hromadně přepočítat: z dnešních podkladů
+ * vznikne nová schválená revize. Náhrady vyplacené z původní revize se nemění.
+ */
+function averageRecalculable(candidate: AverageEarningCandidate): boolean {
+  return candidate.existing?.status === 'approved'
+    && candidate.existing_outdated === true
+    && candidate.suggested_average_hourly_minor != null
+}
 const selectedReadyAverageCandidates = computed(() => averageCandidates.value.filter(candidate =>
-  candidate.ready && selectedAverageCandidates.value.includes(candidate.employment_id)))
+  (candidate.ready || averageRecalculable(candidate))
+  && selectedAverageCandidates.value.includes(candidate.employment_id)))
 /*
  * „Nastavit pravděpodobný výdělek vybraným" zapisuje i podmínky vztahu, takže
  * vyžaduje i právo na pracovní vztahy (server: canSetProbableEarningInBulk).
@@ -234,7 +244,7 @@ function probableReasonText(reason: AverageEarningProbableReason | null | undefi
 }
 
 function averageCandidateSelectable(candidate: AverageEarningCandidate): boolean {
-  return candidate.ready || canSetProbable.value
+  return candidate.ready || averageRecalculable(candidate) || canSetProbable.value
 }
 
 /** Průměr (nebo návrh) jen z hodinové minimální mzdy, typicky brigádník bez sazby. */
@@ -1415,6 +1425,13 @@ function selectAllReadyAverageCandidates() {
     .map(candidate => candidate.employment_id)
 }
 
+/** Vybere schválené průměry, které neodpovídají dnešním podkladům. */
+function selectOutdatedAverageCandidates() {
+  selectedAverageCandidates.value = averageCandidates.value
+    .filter(averageRecalculable)
+    .map(candidate => candidate.employment_id)
+}
+
 async function createAveragesBulk() {
   if (selectedReadyAverageCandidates.value.length === 0) return
   saving.value = true
@@ -1428,6 +1445,8 @@ async function createAveragesBulk() {
       items: selectedReadyAverageCandidates.value.map(candidate => ({
         employment_id: candidate.employment_id,
         input_version: candidate.input_version,
+        // Neaktuální schválený průměr: výslovně žádáme novou revizi.
+        ...(averageRecalculable(candidate) ? { recalculate_outdated: true } : {}),
       })),
     })
     toast.success(t('payroll_absence.averages.bulk_created', { count: result.averages.length }))
@@ -2332,6 +2351,18 @@ onMounted(async () => {
                 {{ t('payroll_absence.leave.select_ready') }}
               </button>
               <button
+                v-if="averageCandidates.some(averageRecalculable)"
+                type="button"
+                :class="btnOutline('warning')"
+                class="whitespace-nowrap"
+                data-test="bulk-average-select-outdated"
+                :disabled="averageCandidateLoading"
+                @click="selectOutdatedAverageCandidates"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.funnel" /></svg>
+                {{ t('payroll_absence.averages.bulk_select_outdated') }}
+              </button>
+              <button
                 type="button"
                 :class="btnFilled('success')"
                 :disabled="saving || selectedReadyAverageCandidates.length === 0"
@@ -2445,8 +2476,18 @@ onMounted(async () => {
                   status: t(`payroll_absence.average_status.${candidate.existing.status}`),
                 }) }}
               </span>
-              <span v-if="candidate.existing && candidate.existing_outdated" class="mt-1 block text-xs text-warning-700">
-                {{ t('payroll_absence.averages.bulk_existing_outdated') }}
+              <span v-if="candidate.existing && candidate.existing_outdated" class="mt-1 block text-xs text-warning-700" :data-test="`bulk-average-outdated-${candidate.employment_id}`">
+                {{ t(`payroll_absence.averages.bulk_outdated_reason.${candidate.existing_outdated_reason ?? 'earnings'}`) }}
+                <template v-if="candidate.suggested_average_hourly_minor != null">
+                  {{ t('payroll_absence.averages.bulk_outdated_difference', {
+                    suggested: money(candidate.suggested_average_hourly_minor),
+                    existing: money(candidate.existing.average_hourly_minor),
+                    difference: money(candidate.suggested_average_hourly_minor - candidate.existing.average_hourly_minor),
+                  }) }}
+                </template>
+                {{ t(averageRecalculable(candidate)
+                  ? 'payroll_absence.averages.bulk_outdated_action'
+                  : 'payroll_absence.averages.bulk_outdated_manual') }}
               </span>
               <span v-else-if="candidate.ready && candidate.source_kind === 'actual'" class="mt-1 block text-xs text-neutral-500">
                 {{ t('payroll_absence.averages.bulk_actual_summary', {

@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   submissionDetail: vi.fn(),
   downloadSubmissionArtifact: vi.fn(),
   credentials: vi.fn(),
+  withdrawUnsentSubmissionInQueue: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -18,6 +19,7 @@ vi.mock('@/api/payroll', () => ({
     detectPayrollChangesForCompany: m.detectPayrollChangesForCompany,
     submissionDetail: m.submissionDetail,
     downloadSubmissionArtifact: m.downloadSubmissionArtifact,
+    withdrawUnsentSubmissionInQueue: m.withdrawUnsentSubmissionInQueue,
   },
 }))
 
@@ -345,6 +347,53 @@ describe('PayrollSubmissionQueuePanel', () => {
       .toBeDefined()
     expect(wrapper.get('[data-test="queue-send"]').attributes('disabled'))
       .toBeDefined()
+  })
+
+  /**
+   * Zmrazené, ale neodeslané řádné měsíční hlášení jde po opravě mzdy zrušit
+   * a připravit znovu. Bez tlačítka musela účetní odeslat hlášení se starými
+   * částkami a hned po přijetí poslat opravné.
+   */
+  it('u připraveného neodeslaného měsíčního hlášení nabídne Zrušit přípravu', async () => {
+    m.submissionQueue.mockResolvedValue(queueResponse([
+      item({ submission_id: 7, submission_row_version: 4, agenda_code: 'JMHZ25' }),
+    ]))
+    m.withdrawUnsentSubmissionInQueue.mockResolvedValue({
+      submission: { id: 7, status: 'cancelled_in_time', row_version: 5 },
+    })
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('  Oprava mzdy po zmrazení.  ')
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-test="queue-withdraw"]').trigger('click')
+    await flushPromises()
+
+    expect(prompt).toHaveBeenCalledWith('payroll.submissions.queue.withdraw_prompt', '')
+    expect(m.withdrawUnsentSubmissionInQueue).toHaveBeenCalledWith('test', 7, 4, 'Oprava mzdy po zmrazení.')
+    // Po zrušení se fronta načte znovu.
+    expect(m.submissionQueue).toHaveBeenCalledTimes(2)
+    prompt.mockRestore()
+  })
+
+  it('zrušení přípravy bez důvodu nic neodešle a jiným podáním se nenabízí', async () => {
+    m.submissionQueue.mockResolvedValue(queueResponse([
+      item({ submission_id: 7, submission_row_version: 4, agenda_code: 'JMHZ25' }),
+      // Registrace, opravné hlášení, odeslané hlášení a hlášení s pokusem.
+      item({ submission_id: 8, agenda_code: 'PREZEC26' }),
+      item({ submission_id: 9, agenda_code: 'JMHZ25', submission_kind: 'correction' }),
+      item({ submission_id: 10, agenda_code: 'JMHZ25', submission_status: 'submitted' }),
+      item({ submission_id: 11, agenda_code: 'JMHZ25', attempt: { id: 3, status: 'failed', error_message: null } }),
+    ]))
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('   ')
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test="queue-withdraw"]')).toHaveLength(1)
+    await wrapper.get('[data-test="queue-withdraw"]').trigger('click')
+    await flushPromises()
+
+    expect(m.withdrawUnsentSubmissionInQueue).not.toHaveBeenCalled()
+    prompt.mockRestore()
   })
 
   it('vybere vše, co lze odeslat, a pošle to jedním úkonem', async () => {
