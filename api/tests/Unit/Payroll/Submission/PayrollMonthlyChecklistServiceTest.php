@@ -470,6 +470,48 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
     }
 
     /**
+     * Sloupec „Jakou cestou" říká u nepřipravené povinnosti totéž, co pak
+     * odeslání opravdu udělá: se zvoleným podpisovým certifikátem VREP, bez
+     * něj datová schránka. Dřív řádek tvrdil datovou schránku, dokud se podání
+     * nepřipravilo, a potom VREP.
+     */
+    public function testUnpreparedJmhzDutyNamesTheSameChannelAsThePreparedSubmission(): void
+    {
+        $withCertificate = $this->onlyItem($this->service(
+            agendaDuties: [$this->agendaDuty(JmhzSubmissionBridgeService::AGENDA_CODE)],
+            signingProfile: true,
+        ), 'agenda_duty');
+        self::assertSame('VREP ČSSZ (podpisový certifikát)', $withCertificate['channel']['label']);
+
+        $withoutCertificate = $this->onlyItem($this->service(
+            agendaDuties: [$this->agendaDuty(JmhzSubmissionBridgeService::AGENDA_CODE)],
+        ), 'agenda_duty');
+        self::assertSame('datová schránka', $withoutCertificate['channel']['label']);
+    }
+
+    /**
+     * Povinnost v evidenci, ke které nevzniklo podání (příprava se zastavila
+     * až na katalogu kontrol): řádek je „Nepřipraveno" a nabízí přípravu.
+     * Dřív „Otevřeno" s odkazem na záložku JMHZ, která vedla zpět do přehledu.
+     */
+    public function testJmhzObligationWithoutSubmissionIsNotPreparedAndPreparable(): void
+    {
+        $item = $this->onlyItem($this->service(
+            submissionRows: [$this->submissionRow(
+                agendaCode: JmhzSubmissionBridgeService::AGENDA_CODE,
+                latestSubmissionStatus: null,
+            )],
+        ), 'submission');
+
+        self::assertSame('not_prepared', $item['status']);
+        self::assertSame(
+            ['agenda_code' => JmhzSubmissionBridgeService::AGENDA_CODE, 'period' => self::PERIOD, 'insurer_code' => null],
+            $item['action']['prepare'],
+        );
+        self::assertNull($item['action']['prepare_blocked']);
+    }
+
+    /**
      * Akce nesmí být odkaz „najděte si to" — musí povinnost připravit na jedno
      * kliknutí, a to za TU agendu, TO období a TU pojišťovnu.
      */

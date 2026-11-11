@@ -1964,6 +1964,54 @@ final class JmhzPreparationSnapshotBuilder
         ];
     }
 
+    /**
+     * Nález k otázce, zda tytéž děti vyživuje i jiná osoba (10453), nad
+     * zmrazenou evidencí nároků na děti. Jediné pravidlo pro sestavení
+     * hlášení ({@see JmhzScenario1DocumentResolver}) i kontrolu před během.
+     *
+     * Otázka se týká jen osoby, která zvýhodnění na aspoň jedno dítě sama
+     * uplatňuje; dítě „N" (uplatňuje jiná osoba) ji samo nezakládá.
+     *
+     * @param array<string,mixed> $evidence výstup {@see self::childCreditEvidence()}
+     */
+    public static function childCaregiverIssueCode(array $evidence): ?string
+    {
+        $children = is_array($evidence['children'] ?? null) ? $evidence['children'] : [];
+        $claimed = array_filter(
+            $children,
+            static fn (mixed $child): bool => is_array($child) && ($child['credit_claimed'] ?? true) !== false,
+        );
+        if ($claimed === []) {
+            return null;
+        }
+        $status = $evidence['other_household_caregiver_status'] ?? null;
+        if (in_array($status, ['none', 'present'], true)) {
+            return null;
+        }
+
+        // `unknown` = otázku nikdo nezodpověděl, `inconsistent` = nároky si
+        // u téže domácnosti odporují; obojí musí rozhodnout účetní.
+        return $status === 'inconsistent'
+            ? 'jmhz_scenario1_child_credit_caregiver_inconsistent'
+            : 'jmhz_scenario1_child_credit_caregiver_unknown';
+    }
+
+    /**
+     * Totéž nad osobou ze snímku vstupů běhu, nasucho pro kontrolu před během:
+     * po schválení mzdy stojí doplnění odpovědi opravnou revizi.
+     *
+     * @param array<string,mixed> $person řádek `input.people[]`
+     */
+    public function childCaregiverReadinessIssue(array $person): ?string
+    {
+        try {
+            return self::childCaregiverIssueCode($this->childCreditEvidence($person, []));
+        } catch (JmhzPreparationSnapshotException $exception) {
+            // Nárok bez dítěte nebo pořadí by přípravu hlášení zastavil stejně.
+            return $exception->validationCode;
+        }
+    }
+
     /** @return array<string,mixed> */
     private function object(mixed $value, string $field): array
     {

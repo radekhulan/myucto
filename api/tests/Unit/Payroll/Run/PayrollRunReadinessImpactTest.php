@@ -103,6 +103,63 @@ final class PayrollRunReadinessImpactTest extends TestCase
     }
 
     /**
+     * Blokace hlášení čtená ze schváleného běhu nejde odstranit opravou údaje:
+     * hláška musí říct, že je potřeba opravná revize. Údaj čtený až při
+     * přípravě hlášení revizi nestojí a hláška ji nesmí požadovat zbytečně.
+     */
+    public function testJmhzBlockerFromFrozenRunNeedsRevisionAndLiveSourceDoesNot(): void
+    {
+        foreach ([
+            ['jmhz_office_variable_symbol_invalid', 'office', []],
+            ['jmhz_scenario1_child_credit_caregiver_unknown', 'person', []],
+            ['jmhz_workplace_codebooks_unverified', 'employment', []],
+            ['jmhz_average_hourly_earning_unverified', 'employment', []],
+            ['jmhz_work_month_not_approved', 'employment', []],
+            // Hlášení 2027: adresa pracoviště je v podmínkách vztahu, den podpisu v zákonné evidenci.
+            ['jmhz_2027_source_missing', 'employment', ['10550']],
+            ['jmhz_2027_source_missing', 'person', ['10575']],
+        ] as [$code, $entityType, $attributeIds]) {
+            self::assertTrue(
+                PayrollRunReadinessImpact::jmhzBlockerNeedsRevision($code, $entityType, $attributeIds),
+                $code,
+            );
+        }
+        foreach ([
+            ['component_jmhz_mapping_missing', 'component', []],
+            ['jmhz_identity_oic_missing', 'employment', []],
+            ['jmhz_employer_annual_collective_agreement_missing', 'supplier', []],
+            ['jmhz_annual_request_status_unresolved', 'employee', []],
+            ['jmhz_scenario1_child_identity_incomplete', 'person', []],
+            ['jmhz_ordinary_evidence_missing', 'employment', []],
+            ['jmhz_workplace_codebooks_not_published', 'employment', []],
+            ['jmhz_2027_source_missing', 'revision', ['10214']],
+            // Kód, který nikdo nezařadil: o revizi se nic netvrdí.
+            ['future_rule', 'employment', []],
+        ] as [$code, $entityType, $attributeIds]) {
+            self::assertFalse(
+                PayrollRunReadinessImpact::jmhzBlockerNeedsRevision($code, $entityType, $attributeIds),
+                $code,
+            );
+        }
+    }
+
+    /** Totéž zařazení platí pro předpověď v kontrole před během. */
+    public function testPredictedJmhzFindingsFromFrozenRunAreRevisionImpact(): void
+    {
+        foreach ([
+            'jmhz_office_variable_symbol_invalid',
+            'jmhz_scenario1_child_credit_caregiver_unknown',
+            'jmhz_scenario1_child_credit_caregiver_inconsistent',
+        ] as $code) {
+            self::assertSame(
+                PayrollRunReadinessImpact::IMPACT_REVISION,
+                PayrollRunReadinessImpact::describe($code)['impact'],
+                $code,
+            );
+        }
+    }
+
+    /**
      * Neznámý kód nesmí nikdy zastavit. Falešná závora je horší než falešné
      * varování — koho aplikace pustí dál, ten si problém opraví.
      */

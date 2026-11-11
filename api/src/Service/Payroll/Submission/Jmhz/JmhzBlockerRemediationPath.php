@@ -41,28 +41,43 @@ final class JmhzBlockerRemediationPath
         ?string $periodStart = null,
     ): array {
         $blockers = array_slice($blockers, 0, self::MAX_BLOCKERS);
-        $ids = ['employment' => [], 'person' => []];
+        $ids = ['employment' => [], 'person' => [], 'office' => []];
         foreach ($blockers as $blocker) {
             $type = self::labelType($blocker->entityType);
             if ($blocker->entityId !== null && isset($ids[$type])) {
                 $ids[$type][] = $blocker->entityId;
             }
         }
-        $labels = $people === null ? ['employment' => [], 'person' => []] : [
+        $labels = $people === null ? ['employment' => [], 'person' => [], 'office' => []] : [
             'employment' => $people->employmentLabels($supplierId, $ids['employment']),
             'person' => $people->personLabels($supplierId, $ids['person']),
+            'office' => $people->officeLabels($supplierId, $ids['office']),
         ];
 
         $rows = [];
         foreach ($blockers as $blocker) {
             $type = self::labelType($blocker->entityType);
-            $rows[] = $blocker->toArray() + [
+            $row = $blocker->toArray();
+            $rows[] = $row + [
                 'label' => $blocker->entityId === null ? null : ($labels[$type][$blocker->entityId] ?? null),
                 'remediation_path' => self::forBlocker($blocker, $periodStart),
+                // Kde se po opravě údaje otevírá oprava schváleného běhu.
+                'revision_path' => $row['needs_revision'] ? self::revisionPath($periodStart) : null,
             ];
         }
 
         return $rows;
+    }
+
+    /**
+     * Mzdové běhy vykazovaného měsíce: tam se u schváleného běhu vyžádá
+     * a otevře oprava, kterou nález čtený ze schváleného běhu potřebuje.
+     *
+     * @param ?string $periodStart první den vykazovaného měsíce (`YYYY-MM-DD`)
+     */
+    public static function revisionPath(?string $periodStart): string
+    {
+        return self::resolve('', 'runs', null, '', null, $periodStart) ?? '/payroll/runs';
     }
 
     /** @param ?string $periodStart první den vykazovaného měsíce (`YYYY-MM-DD`) */
@@ -84,7 +99,7 @@ final class JmhzBlockerRemediationPath
      * Odkaz kontroly před během. Identita, složky a chybějící průměr mají
      * vlastní cestu (průměr vede na hromadný výpočet za čtvrtletí období),
      * ostatní kódy jdou přes katalogový druh nápravy stejně jako u zmrazení
-     * hlášení. `null` = katalog místo opravy nezná (zopakovat, ručně, správce).
+     * hlášení. `null` = katalog místo opravy nezná (zopakovat, zpracovat ručně).
      */
     public static function forReadinessCode(
         string $code,
@@ -196,6 +211,11 @@ final class JmhzBlockerRemediationPath
             ),
             'takeover' => '/payroll/imports?tab=reconciliation',
             'correction', 'submission' => '/payroll/submissions/transport',
+            // Nález, který účetní sama neopraví (poškozený podklad, chyba
+            // sestavení): stránka podpory, stejně jako odkaz v aplikaci
+            // (`jmhzBlockerRemediation.ts`). Dřív server u těchhle nálezů
+            // nevracel nic a hláška končila bez jakékoli cesty dál.
+            'support' => '/admin/support',
             default => null,
         };
     }

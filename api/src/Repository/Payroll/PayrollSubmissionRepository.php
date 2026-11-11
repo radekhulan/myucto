@@ -499,6 +499,45 @@ final class PayrollSubmissionRepository
     }
 
     /**
+     * Řádná povinnost období, ke které ještě NIKDY nevzniklo podání.
+     *
+     * Povinnost se eviduje dřív, než se podání zmrazí. Když zmrazení neprojde
+     * (katalog kontrol, datum), povinnost zůstane bez podání. Další příprava
+     * z opravené revize ji musí převzít: jako „druhé řádné hlášení" by ji
+     * pojistka období odmítla, ačkoli se nic nepodalo.
+     */
+    public function findUnfiledRegularObligationId(
+        int $supplierId,
+        string $environment,
+        string $agendaCode,
+        string $subjectReference,
+        string $periodStart,
+    ): ?int {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT obligation.id
+               FROM payroll_obligations obligation
+              WHERE obligation.supplier_id = ?
+                AND obligation.environment = ?
+                AND obligation.agenda_code = ?
+                AND obligation.subject_reference = ?
+                AND obligation.regular_period_scope_on = ?
+                AND obligation.status = "open"
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM payroll_submissions submission
+                     WHERE submission.supplier_id = obligation.supplier_id
+                       AND submission.obligation_id = obligation.id
+                )
+              ORDER BY obligation.id
+              LIMIT 1',
+        );
+        $statement->execute([$supplierId, $environment, $agendaCode, $subjectReference, $periodStart]);
+        $id = $statement->fetchColumn();
+
+        return $id === false ? null : (int) $id;
+    }
+
+    /**
      * @param list<string> $sourceReferences
      * @return array<string,array{
      *   id:int,source_event_hash:string,status:string,duplicate_count:int,

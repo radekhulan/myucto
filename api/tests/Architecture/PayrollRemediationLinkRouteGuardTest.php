@@ -145,7 +145,9 @@ final class PayrollRemediationLinkRouteGuardTest extends TestCase
     {
         $source = (string) file_get_contents(self::root() . '/web/src/router/workspaceRoutes.ts');
         preg_match_all(
-            "~path: '(payroll[^']*)'[^\\n]*?(?:import\\('@/(pages/[^']+\\.vue)'\\)|redirect: \\{ path: '([^']+)')~",
+            // Vedle rout mezd i stránka podpory: na ni vede nález, který účetní
+            // sama neopraví (druh nápravy `support`).
+            "~path: '(payroll[^']*|admin/support)'[^\\n]*?(?:import\\('@/(pages/[^']+\\.vue)'\\)|redirect: \\{ path: '([^']+)')~",
             $source,
             $matches,
             PREG_SET_ORDER,

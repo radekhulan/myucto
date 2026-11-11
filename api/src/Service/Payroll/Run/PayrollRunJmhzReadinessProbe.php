@@ -144,6 +144,7 @@ final class PayrollRunJmhzReadinessProbe
         $componentLabels = $this->componentLabels($supplierId, self::idsOf($issues, 'component'));
         $employmentLabels = $this->employmentLabels($supplierId, self::idsOf($issues, 'employment'));
         $employeeLabels = self::employeeLabels($snapshotData);
+        $officeLabels = $this->people->officeLabels($supplierId, self::idsOf($issues, 'office'));
 
         /** @var array<string,array<string,mixed>> $groups */
         $groups = [];
@@ -153,6 +154,7 @@ final class PayrollRunJmhzReadinessProbe
                 'component' => $componentLabels[$issue['entity_id']] ?? null,
                 'employment' => $employmentLabels[$issue['entity_id']] ?? null,
                 'employee' => $employeeLabels[$issue['entity_id']] ?? null,
+                'office' => $officeLabels[$issue['entity_id']] ?? null,
                 default => null,
             };
             if (!isset($groups[$code])) {
@@ -168,6 +170,7 @@ final class PayrollRunJmhzReadinessProbe
                     'entity_total' => 0,
                     'entities' => [],
                     'labels' => [],
+                    'detail' => is_string($issue['message'] ?? null) ? $issue['message'] : null,
                 ];
             }
             ++$groups[$code]['count'];
@@ -177,7 +180,12 @@ final class PayrollRunJmhzReadinessProbe
                     'entity_type' => $issue['entity_type'],
                     'entity_id' => $issue['entity_id'],
                     'label' => $label,
-                    'message' => self::message($issue['code'], $label === null ? [] : [$label], 1),
+                    'message' => self::message(
+                        $issue['code'],
+                        $label === null ? [] : [$label],
+                        1,
+                        is_string($issue['message'] ?? null) ? $issue['message'] : null,
+                    ),
                     'remediation_path' => self::remediationPath(
                         $issue['code'],
                         $issue['entity_id'],
@@ -195,8 +203,14 @@ final class PayrollRunJmhzReadinessProbe
         foreach ($groups as $group) {
             /** @var list<string> $labels */
             $labels = $group['labels'];
-            $group['message'] = self::message($group['code'], $labels, $group['count']);
-            unset($group['labels']);
+            // Konkrétní věta zdroje platí pro jeden záznam; u víc záznamů ji nese každý zvlášť.
+            $group['message'] = self::message(
+                $group['code'],
+                $labels,
+                $group['count'],
+                $group['count'] === 1 ? $group['detail'] : null,
+            );
+            unset($group['labels'], $group['detail']);
             $findings[] = $group;
         }
 
@@ -335,8 +349,10 @@ final class PayrollRunJmhzReadinessProbe
      * doslova ty ze slovníku a z formuláře — kdo je hledá očima, musí je najít.
      *
      * @param list<string> $labels
+     * @param ?string $detail konkrétní věta zdroje nálezu (např. proč je
+     *        variabilní symbol neplatný); má přednost před obecným důvodem
      */
-    private static function message(string $code, array $labels, int $count): string
+    private static function message(string $code, array $labels, int $count, ?string $detail = null): string
     {
         $named = $labels === []
             ? ''
@@ -410,6 +426,23 @@ final class PayrollRunJmhzReadinessProbe
                 . 'zapište žádost. Mzdový běh tím omezený není.',
                 $named !== '' ? $named : $count . '× osoba',
             ),
+            /*
+             * Dvě věci, které dřív vyšly najevo až u přípravy hlášení po
+             * schválení mzdy, kdy oprava stojí opravnou revizi. Text proto
+             * říká i to, že je levnější opravit je hned.
+             */
+            'jmhz_office_variable_symbol_invalid' => JmhzBlockerExplainer::reason($code, $detail)
+                . ($named === '' ? '' : ' Týká se: ' . $named . '.')
+                . ' ' . JmhzBlockerExplainer::action($code)
+                . ' Opravte ho před zamknutím vstupů: symbol se do mzdového běhu zmrazí'
+                . ' a po schválení by oprava stála opravnou revizi. Mzdový běh tím omezený není.',
+            'jmhz_scenario1_child_credit_caregiver_unknown',
+            'jmhz_scenario1_child_credit_caregiver_inconsistent' => JmhzBlockerExplainer::reason($code)
+                . ($named === '' ? '' : ' Týká se: ' . $named . '.')
+                . ' Měsíční hlášení tu odpověď vyžaduje u každého, kdo uplatňuje zvýhodnění na děti (údaj 10453),'
+                . ' a bez ní se nesestaví. ' . JmhzBlockerExplainer::action($code)
+                . ' Rozhodněte to před zamknutím vstupů: odpověď se do mzdového běhu zmrazí'
+                . ' a po schválení by doplnění stálo opravnou revizi. Mzdový běh tím omezený není.',
             'jmhz_workplace_codebooks_not_published' => JmhzBlockerExplainer::reason($code) . ' '
                 . JmhzBlockerExplainer::action($code)
                 . ' Hlášení za tento měsíc se proto zatím nezmrazí ani neodešle u žádného zaměstnance.',

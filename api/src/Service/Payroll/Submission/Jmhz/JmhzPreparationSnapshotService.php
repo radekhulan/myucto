@@ -11,6 +11,7 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSnapshotCompression;
+use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotException;
 
@@ -553,7 +554,7 @@ final readonly class JmhzPreparationSnapshotService
      * totéž zvládne jedním dotazem přes celou firmu.
      *
      * @param array<string,mixed> $input snímek vstupů (`payroll-run-input.v2`)
-     * @return list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}>
+     * @return list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>,message?:string}>
      */
     public function probeIssues(
         int $supplierId,
@@ -564,6 +565,7 @@ final readonly class JmhzPreparationSnapshotService
     ): array {
         $issues = [];
         $checkedComponents = [];
+        $checkedOffices = [];
         $periodStart = substr($periodEnd, 0, 8) . '01';
         $termsChecked = self::monthlyReportBuildable($periodStart);
         $people = $input['people'] ?? [];
@@ -582,6 +584,22 @@ final readonly class JmhzPreparationSnapshotService
             if (!is_array($employments) || !array_is_list($employments)) {
                 continue;
             }
+            /*
+             * Otázka, zda tytéž děti vyživuje i jiná osoba (10453): sestavení
+             * hlášení se na nezodpovězené zastaví až po schválení mzdy, kdy
+             * odpověď stojí opravnou revizi. Posuzuje se týmž pravidlem.
+             */
+            if ($employeeId > 0 && $employments !== []) {
+                $caregiverIssue = $this->builder->childCaregiverReadinessIssue($person);
+                if ($caregiverIssue !== null) {
+                    $issues[] = [
+                        'code' => $caregiverIssue,
+                        'entity_type' => 'employee',
+                        'entity_id' => $employeeId,
+                        'attribute_ids' => ['10453'],
+                    ];
+                }
+            }
             foreach ($employments as $entry) {
                 if (!is_array($entry) || array_is_list($entry)) {
                     continue;
@@ -590,6 +608,29 @@ final readonly class JmhzPreparationSnapshotService
                 $employmentId = is_array($employment) && is_int($employment['id'] ?? null)
                     ? $employment['id']
                     : 0;
+                /*
+                 * Variabilní symbol registrace u ČSSZ (10221) se s účtárnou
+                 * vztahu zmrazí do snímku běhu. Neplatný (kontrolní číslice,
+                 * kód okresu) zastaví sestavení hlášení až po schválení mzdy
+                 * a oprava stojí opravnou revizi; kontroluje se týmž pravidlem
+                 * ({@see CsszEmployerVariableSymbol::invalidReason()}).
+                 */
+                $officeId = is_array($employment) ? ($employment['office_id'] ?? null) : null;
+                $registration = is_array($employment) ? ($employment['office_registration'] ?? null) : null;
+                $symbol = is_array($registration) ? ($registration['social_security_variable_symbol'] ?? null) : null;
+                if (is_int($officeId) && $officeId > 0 && is_string($symbol) && !isset($checkedOffices[$officeId])) {
+                    $checkedOffices[$officeId] = true;
+                    $invalidReason = CsszEmployerVariableSymbol::invalidReason($symbol);
+                    if ($invalidReason !== null) {
+                        $issues[] = [
+                            'code' => 'jmhz_office_variable_symbol_invalid',
+                            'entity_type' => 'office',
+                            'entity_id' => $officeId,
+                            'attribute_ids' => ['10221'],
+                            'message' => JmhzScenario1DocumentResolver::invalidVariableSymbolMessage($symbol, $invalidReason),
+                        ];
+                    }
+                }
                 if (!$skipIdentity && $employeeId > 0 && $employmentId > 0) {
                     $identity = $this->identitySupplement(
                         $supplierId,
@@ -710,6 +751,42 @@ final readonly class JmhzPreparationSnapshotService
         }
 
         return $issues;
+    }
+
+    /**
+     * Nálezy nad údaji ZMRAZENÝMI ve snímku běhu, které {@see self::probeIssues()}
+     * posuzuje týmž pravidlem jako sestavení hlášení. Podle nich jde po blokaci
+     * poznat, jestli je údaj mezitím opravený a zbývá jen opravná revize
+     * ({@see JmhzFrozenSourceAdvisor}). Podmínky vztahu se u ročníku, který
+     * aplikace sestavit neumí, neposuzují, proto se tam ani neporovnávají.
+     *
+     * @return list<string>
+     */
+    public static function probedFrozenCodes(string $periodStart): array
+    {
+        $codes = [
+            'jmhz_office_variable_symbol_invalid',
+            'jmhz_scenario1_child_credit_caregiver_unknown',
+            'jmhz_scenario1_child_credit_caregiver_inconsistent',
+            'jmhz_average_hourly_earning_missing',
+        ];
+        if (!self::monthlyReportBuildable($periodStart)) {
+            return $codes;
+        }
+
+        return [
+            ...$codes,
+            'jmhz_workplace_codebooks_unverified',
+            'jmhz_verified_boolean_missing',
+            'jmhz_apz_instrument_missing',
+            'jmhz_temporary_assignment_user_missing',
+            'jmhz_risk_categorization_missing',
+            'jmhz_scenario_activity_code_missing',
+            'jmhz_scenario_activity_code_invalid',
+            'jmhz_scenario_relationship_detail_missing',
+            'jmhz_scenario_relationship_detail_invalid',
+            'jmhz_scenario_relationship_detail_not_applicable',
+        ];
     }
 
     private static function monthlyReportBuildable(string $periodStart): bool

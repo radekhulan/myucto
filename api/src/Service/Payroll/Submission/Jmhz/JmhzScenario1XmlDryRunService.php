@@ -56,11 +56,32 @@ final readonly class JmhzScenario1XmlDryRunService
             static fn (JmhzScenario1Blocker $blocker): array => $blocker->toArray(),
             $resolution->blockers,
         ));
+        // Závora přípravy (období neskončilo, ročník nejde sestavit): test
+        // obsah ověří i tak, ale musí říct, že hlášení zatím zmrazit nepůjde
+        // a proč, jinak účetní hledá chybu ve vlastních údajích.
+        $candidatePeriod = $resolution->candidate?->payload['scope']['period_start'] ?? null;
+        $gate = is_string($candidatePeriod) && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $candidatePeriod) === 1
+            ? (new JmhzPreparationGate($this->deadlines, $this->clock))->blocked($candidatePeriod)
+            : null;
+        if (($gate['code'] ?? null) === JmhzSpecPackageCatalog::UNAVAILABLE_CODE) {
+            /*
+             * Ročník, který aplikace ještě sestavit neumí (číselníky obcí
+             * a států pro rok nejsou vyhlášené): odložení vztahu nemá smysl,
+             * dokud nejde zmrazit ani hlášení za ostatní. Důvod nese závora
+             * jednou za hlášení; obrazovka podle ní nález číselníků u vztahů
+             * neukazuje jako další krok k doplnění.
+             */
+            $blockers = array_map(
+                static fn (array $blocker): array => ['deferrable' => false] + $blocker,
+                $blockers,
+            );
+        }
         if ($resolution->status() !== 'resolved') {
             $result = [
                 'status' => 'blocked',
                 'preparation_id' => $preparationId,
                 'office_id' => $officeId,
+                'preparation_gate' => $gate,
                 'blockers' => $blockers,
                 'deferred' => self::deferred($resolution, null),
                 'official_submission' => $this->officialSubmission(),
@@ -138,11 +159,34 @@ final readonly class JmhzScenario1XmlDryRunService
             true,
         );
         $first = $result['packages'][0];
+        /*
+         * Před koncem měsíce selžou kontroly 43, 44 a 90 jen kvůli dnešnímu
+         * datu. Když jinak nic nechybí, je obsah hlášení v pořádku a jediné,
+         * co zbývá, je počkat: obrazovka to řekne jednou větou místo výčtu
+         * „nepropustných vad".
+         */
+        $dateOnly = !$submittable
+            && ($gate['code'] ?? null) === JmhzPreparationGate::PERIOD_NOT_FINISHED_CODE
+            && array_reduce(
+                $reports,
+                static fn (bool $carry, JmhzControlEvaluationReport $report): bool => $carry
+                    && $report->coverageGaps() === []
+                    && array_filter(
+                        $report->blocking(),
+                        static fn (JmhzControlFinding $finding): bool
+                            => !in_array($finding->controlId, JmhzPreparationGate::DATE_ONLY_CONTROL_IDS, true),
+                    ) === [],
+                true,
+            );
 
         return [
             'status' => $submittable ? 'dry_run_valid' : 'dry_run_incomplete',
             'preparation_id' => $preparationId,
             'office_id' => $officeId,
+            'preparation_gate' => $gate,
+            // Obsah prošel; nepropustné vady plynou jen z toho, že období ještě neskončilo.
+            'waiting_for_period_end' => $dateOnly,
+            'date_only_control_ids' => JmhzPreparationGate::DATE_ONLY_CONTROL_IDS,
             'blockers' => [],
             'deferred' => self::deferred($resolution, $controls),
             'controls' => $controls->toArray(),

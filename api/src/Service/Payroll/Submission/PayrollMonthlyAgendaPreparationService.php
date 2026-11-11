@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission;
 
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationGate;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreviewService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 
 /**
  * PŘÍPRAVA MĚSÍČNÍ POVINNOSTI NA JEDNO KLIKNUTÍ.
@@ -46,6 +48,7 @@ final readonly class PayrollMonthlyAgendaPreparationService
         private JmhzSubmissionBridgeService $jmhzBridge,
         private JmhzPvpojPreviewService $jmhzOffices,
         private HealthInsuranceSubmissionService $health,
+        private JmhzPreparationGate $jmhzGate,
     ) {}
 
     /**
@@ -117,13 +120,72 @@ final readonly class PayrollMonthlyAgendaPreparationService
         ?int $userId,
         bool $lateDiscountConfirmed,
     ): array {
-        $preparation = $this->jmhzPreparations->freeze(
-            $supplierId,
-            $revisionId,
-            $environment,
-            self::JMHZ_PREPARATION_KEY_PREFIX . ':' . $environment . ':' . $revisionId,
-            $userId,
-        );
+        // Období, které ještě neskončilo, nebo ročník, který aplikace sestavit
+        // neumí: příprava skončí jednou větou a nic se nezaloží.
+        $this->jmhzGate->assertOpen($period . '-01');
+        $key = self::JMHZ_PREPARATION_KEY_PREFIX . ':' . $environment . ':' . $revisionId;
+        $preparation = $this->jmhzPreparations->freeze($supplierId, $revisionId, $environment, $key, $userId);
+        try {
+            return $this->freezeJmhzOffices(
+                $supplierId,
+                $environment,
+                $period,
+                $revisionId,
+                (int) $preparation['id'],
+                $userId,
+                $lateDiscountConfirmed,
+            );
+        } catch (JmhzXmlException $blocked) {
+            /*
+             * Odvozený klíč vrací při opakování TUTÉŽ přípravu, i když se mezitím
+             * změnily údaje, které příprava čte až při svém vzniku (zařazení
+             * složek, identifikátory ČSSZ, roční údaje zaměstnavatele, žádost
+             * o roční zúčtování, jméno dítěte). Účetní by údaj podle hlášky
+             * opravila a další pokus skončil na tomtéž nálezu. Zastavenou
+             * opakovanou přípravu proto postavíme znovu z aktuálních údajů;
+             * beze změny údajů vrátí služba tutéž přípravu a nic nepřibude.
+             */
+            if (($preparation['created'] ?? false) === true) {
+                throw $blocked;
+            }
+            $fresh = $this->jmhzPreparations->freeze(
+                $supplierId,
+                $revisionId,
+                $environment,
+                $key . ':' . bin2hex(random_bytes(8)),
+                $userId,
+            );
+            if ((int) $fresh['id'] === (int) $preparation['id']) {
+                throw $blocked;
+            }
+
+            return $this->freezeJmhzOffices(
+                $supplierId,
+                $environment,
+                $period,
+                $revisionId,
+                (int) $fresh['id'],
+                $userId,
+                $lateDiscountConfirmed,
+            );
+        }
+    }
+
+    /**
+     * @return array{
+     *   agenda_code:string,period:string,insurer_code:?string,
+     *   prepared:int,submission_ids:list<int>,path:string
+     * }
+     */
+    private function freezeJmhzOffices(
+        int $supplierId,
+        string $environment,
+        string $period,
+        int $revisionId,
+        int $preparationId,
+        ?int $userId,
+        bool $lateDiscountConfirmed,
+    ): array {
         $offices = $this->jmhzOffices->offices($supplierId, $revisionId);
         $blocked = array_values(array_filter(
             $offices,
@@ -148,7 +210,7 @@ final readonly class PayrollMonthlyAgendaPreparationService
         foreach ($offices === [] ? [null] : $offices as $office) {
             $frozen = $this->jmhzBridge->bridge(
                 $supplierId,
-                (int) $preparation['id'],
+                $preparationId,
                 null,
                 $environment,
                 $userId,

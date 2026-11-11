@@ -28,8 +28,9 @@ final readonly class JmhzScenario1Blocker
      *
      * @return array{
      *   code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>,
-     *   reason:string,action:string,message:?string,
-     *   remediation:array{kind:string,field:?string},deferrable:bool
+     *   reason:string,reason_specific:bool,action:string,message:?string,
+     *   remediation:array{kind:string,field:?string},deferrable:bool,
+     *   needs_revision:bool
      * }
      */
     public function toArray(): array
@@ -39,11 +40,22 @@ final readonly class JmhzScenario1Blocker
             'entity_type' => $this->entityType,
             'entity_id' => $this->entityId,
             'attribute_ids' => $this->attributeIds,
-            'reason' => JmhzBlockerExplainer::reason($this->code, $this->message),
+            'reason' => JmhzBlockerExplainer::reason($this->code, $this->message, $this->attributeIds, $this->entityType),
+            // Věta serveru je přesnější než obecný popisek kódu (konkrétní
+            // důvod zdroje nebo důvod podle dotčeného atributu).
+            'reason_specific' => JmhzBlockerExplainer::specificReason(
+                $this->code,
+                $this->message,
+                $this->attributeIds,
+                $this->entityType,
+            ) !== null,
             'action' => JmhzBlockerExplainer::action($this->code, $this->entityType, $this->attributeIds),
             'message' => $this->message,
             'remediation' => JmhzBlockerCatalog::remediationFor($this->code, $this->entityType, $this->attributeIds),
             'deferrable' => $this->deferrable(),
+            // Údaj čtený ze schváleného běhu: po opravě je potřeba opravná
+            // revize, jinak příprava hlášení čte dál starou hodnotu.
+            'needs_revision' => JmhzBlockerExplainer::needsRevision($this),
         ];
     }
 

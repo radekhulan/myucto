@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Run;
 
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog;
+
 /**
  * JEDINÉ místo, které říká, CO nález pro účetní znamená.
  *
@@ -160,6 +162,22 @@ final class PayrollRunReadinessImpact
         'jmhz_scenario_relationship_detail_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'jmhz_scenario_relationship_detail_invalid' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'jmhz_scenario_relationship_detail_not_applicable' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // Variabilní symbol registrace u ČSSZ (10221) se do snímku běhu zmrazí
+        // s účtárnou vztahu ({@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder::officeRegistrations()}).
+        // Opravený po schválení ho hlášení nevidí, dokud běh neprojde opravou.
+        'jmhz_office_variable_symbol_invalid' => [self::IMPACT_REVISION, self::SCOPE_SETUP],
+        'jmhz_office_variable_symbol_missing' => [self::IMPACT_REVISION, self::SCOPE_SETUP],
+        'jmhz_office_variable_symbol_mismatch' => [self::IMPACT_REVISION, self::SCOPE_SETUP],
+        'social_security_variable_symbol_missing' => [self::IMPACT_REVISION, self::SCOPE_SETUP],
+        'jmhz_employment_without_office' => [self::IMPACT_REVISION, self::SCOPE_SETUP],
+        // Odpověď, zda tytéž děti vyživuje i jiná osoba (10453), a její jméno
+        // jsou součástí nároku na dítě v zákonné evidenci zmrazené ve snímku.
+        'jmhz_scenario1_child_credit_caregiver_unknown' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'jmhz_scenario1_child_credit_caregiver_inconsistent' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'jmhz_scenario1_child_credit_caregiver_identity_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // Jméno a datum narození dítěte se čtou z evidence vyživovaných osob
+        // až při přípravě hlášení, ve snímku běhu nejsou.
+        'jmhz_scenario1_child_identity_incomplete' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         // Roční údaje zaměstnavatele pro JMHZ (prosinec, od 2027 každý měsíc)
         // nejsou ve snímku běhu: doplní se kdykoli před přípravou hlášení.
         'jmhz_employer_annual_collective_agreement_missing' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
@@ -197,6 +215,59 @@ final class PayrollRunReadinessImpact
 
     /** Nálezy identity pro ČSSZ mají společné zařazení — všechny do skupiny 1. */
     private const IDENTITY_PREFIX = 'jmhz_identity_';
+
+    /**
+     * Druhy nápravy ({@see JmhzBlockerCatalog}), jejichž údaj hlášení čte ze
+     * ZMRAZENÉHO snímku vstupů schválené revize: podmínky vztahu, zákonná
+     * evidence osoby včetně nároků na děti, průměrný výdělek, nepřítomnosti
+     * a docházka. Platí pro nálezy hlášení, které nemají vlastní řádek
+     * v {@see self::CLASSIFICATION}; řádek má vždy přednost.
+     *
+     * Údaje čtené až při přípravě hlášení (identifikátory ČSSZ, zařazení
+     * složek, roční údaje zaměstnavatele, žádost o roční zúčtování, běžná
+     * evidence JMHZ) sem nepatří: opravnou revizi nestojí.
+     */
+    private const FROZEN_SOURCE_KINDS = [
+        'employment_terms',
+        'workplace',
+        'statutory_evidence',
+        'dependants',
+        'averages',
+        'absences',
+        'time',
+    ];
+
+    /**
+     * Stojí oprava nálezu MĚSÍČNÍHO HLÁŠENÍ opravnou revizi schváleného běhu?
+     *
+     * Hlášení se sestavuje ze schválené revize. Údaj, který do jejího snímku
+     * vstoupil, oprava v nastavení ani na kartě nezmění: příprava hlášení dál
+     * čte starou hodnotu, dokud běh neprojde opravou, přepočtem a novým
+     * schválením. Blokace to musí říct, jinak účetní údaj opraví a hlášení
+     * se zastaví na tomtéž.
+     *
+     * Jedno místo pravdy pro přípravu hlášení i kontrolu před během: zařazení
+     * kódu ({@see self::CLASSIFICATION}) platí pro obojí stejně.
+     *
+     * @param list<string> $attributeIds dotčené atributy (nález s rozpadem podle atributu)
+     */
+    public static function jmhzBlockerNeedsRevision(string $code, string $entityType = '', array $attributeIds = []): bool
+    {
+        if (isset(self::CLASSIFICATION[$code])) {
+            return self::CLASSIFICATION[$code][0] === self::IMPACT_REVISION;
+        }
+        // Kód, který katalog nezná, nikdo nezařadil: o opravné revizi se u něj
+        // nic netvrdí (stejně jako neznámý nález nikdy neblokuje běh).
+        if (str_starts_with($code, self::IDENTITY_PREFIX) || !JmhzBlockerCatalog::knows($code)) {
+            return false;
+        }
+
+        return in_array(
+            JmhzBlockerCatalog::remediationFor($code, $entityType, $attributeIds)['kind'],
+            self::FROZEN_SOURCE_KINDS,
+            true,
+        );
+    }
 
     /**
      * Zařazení nálezu z kontroly snímku. Validace, kterou běh nad zmrazenými

@@ -248,6 +248,9 @@ final class Bootstrap
                 )->constructorParameter(
                     'people',
                     \DI\get(\MyInvoice\Repository\Payroll\PayrollPeopleRepository::class),
+                )->constructorParameter(
+                    'frozenSource',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenSourceAdvisor::class),
                 ),
             // Nepodané hlášení JMHZ za převzatý měsíc (Q15-17) — nepovinné kvůli
             // jednotkovým testům přehledů, v aplikaci se předává výslovně.
@@ -261,6 +264,9 @@ final class Bootstrap
                 )->constructorParameter(
                     'signingProfiles',
                     \DI\get(\MyInvoice\Repository\Payroll\PayrollSigningProfileRepository::class),
+                )->constructorParameter(
+                    'jmhzGate',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationGate::class),
                 ),
             \MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseFromAbsenceService::class =>
                 \DI\autowire()->constructorParameter(

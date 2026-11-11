@@ -150,7 +150,8 @@ final class JmhzSpecPackageCatalog
                 self::UNAVAILABLE_CODE,
                 'Hlášení se řídí specifikací ' . $version->label() . '. Číselník obcí'
                     . ' a států pro tento rok ještě nebyl vyhlášen, takže místo výkonu práce'
-                    . ' nejde ověřit a hlášení se nezmrazí ani neodešle. Připravíte ho po'
+                    . ' nejde ověřit a hlášení se nezmrazí ani neodešle. Na vaší straně kvůli'
+                    . ' tomu nic nechybí, údaje pracoviště neměňte ani nedoplňujte: hlášení připravíte po'
                     . ' vyhlášení číselníku a aktualizaci aplikace. Hlášení, opravy i storna'
                     . ' za období do 12/2026 podáte jako dosud; registrace zaměstnanců'
                     . ' (REGZEC) se tím neblokují.',

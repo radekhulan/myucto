@@ -235,12 +235,21 @@ export function jmhzErrorMessage(
   return apiErrorMessage(error, t(fallbackKey))
 }
 
-/** Popisek kódu: nejdřív katalog kódů, pak starší blok, pak věta serveru. */
+/**
+ * Popisek kódu: nejdřív katalog kódů, pak starší blok, pak věta serveru.
+ *
+ * Výjimka: když server označí svůj důvod za přesnější než obecný popisek
+ * kódu (`reason_specific`, např. PROČ je variabilní symbol neplatný nebo
+ * KTERÝ údaj hlášení 2027 chybí), ukáže se v češtině věta serveru. Obecný
+ * popisek kódu by přesný důvod zahodil.
+ */
 export function jmhzBlockerLabel(
   t: (key: string) => string,
   te: (key: string) => boolean,
   blocker: PayrollJmhzXmlDryRunBlocker,
+  locale?: string,
 ): string {
+  if (locale === 'cs' && blocker.reason_specific && blocker.reason) return blocker.reason
   const catalog = `payroll.jmhz_gate.codes.${blocker.code}`
   if (te(catalog)) return t(catalog)
   const legacy = `payroll.submissions.overview.jmhz_dry_run_blockers.${blocker.code}`

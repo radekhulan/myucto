@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPredecessorGapService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationGate;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
@@ -103,6 +104,9 @@ final readonly class PayrollMonthlyChecklistService
         private ?JmhzPredecessorGapService $predecessorGaps = null,
         private ?PayrollAwaitingRunDutyService $awaitingRuns = null,
         private ?PayrollSigningProfileRepository $signingProfiles = null,
+        // Závora přípravy měsíčního hlášení (období neskončilo, ročník nejde
+        // sestavit). Volitelná jako ostatní rozšíření: bez ní se nic nezhasíná.
+        private ?JmhzPreparationGate $jmhzGate = null,
     ) {}
 
     /**
@@ -166,15 +170,17 @@ final readonly class PayrollMonthlyChecklistService
         );
 
         $items = [
-            ...$this->submissionRows($registered, $transport, $outboxes, $environment, $signingReady),
+            ...$this->withUnfiledJmhzPreparation(
+                $this->submissionRows($registered, $transport, $outboxes, $environment, $signingReady),
+            ),
             ...array_map(
                 static fn (array $row): array => $row + ['outside_period' => true],
                 $this->submissionRows($outsideHoz, $transport, $outboxes, $environment, $signingReady),
             ),
-            ...$this->agendaDutyRows($supplierId, $period, $registered, $transport),
+            ...$this->agendaDutyRows($supplierId, $period, $registered, $transport, $environment, $signingReady),
             ...$this->deadlineRows($supplierId, $environment, $periodStart, $periodEnd),
             ...$this->predecessorJmhzRows($supplierId, $environment, $period),
-            ...$this->awaitingRunRows($supplierId, $period),
+            ...$this->awaitingRunRows($supplierId, $period, $transport, $environment, $signingReady),
         ];
         // Jednotný tvar řádku napříč prameny: podání a odchozí zprávu mají
         // jen řádky evidence, ostatní nesou prázdné hodnoty.
@@ -364,10 +370,15 @@ final readonly class PayrollMonthlyChecklistService
                     $row['latest_submission']['channel'] ?? null,
                     $description['channel'],
                 );
-            } elseif (str_starts_with($channels['default'], 'vrep_')) {
+            } else {
                 // JMHZ odejde frontou přes VREP, když je zvolený podpisový
                 // certifikát — sloupec „Jakou cestou" nesmí tvrdit datovku.
-                $description['channel'] = ['label' => self::VREP_CHANNEL_LABEL, 'note' => ''];
+                $description['channel'] = $this->plannedChannel(
+                    (string) $row['agenda_code'],
+                    $description['channel'],
+                    $environment,
+                    $signingReady,
+                );
             }
             if ($dispatched && !$done) {
                 $description['action'] = [
@@ -508,11 +519,24 @@ final readonly class PayrollMonthlyChecklistService
      *
      * @return list<array<string,mixed>>
      */
-    private function awaitingRunRows(int $supplierId, string $period): array
-    {
+    private function awaitingRunRows(
+        int $supplierId,
+        string $period,
+        array $transport = ['automatic' => false, 'channel' => 'manual_upload', 'reason' => null],
+        string $environment = 'production',
+        bool $signingReady = false,
+    ): array {
         if ($this->awaitingRuns === null) {
             return [];
         }
+        // Cesta odeslání je známá už teď: stejná jako u připraveného hlášení.
+        // Dřív tu sloupec „Jakou cestou" říkal „neznámo".
+        $channel = $this->plannedChannel(
+            PayrollAwaitingRunDutyService::agendaCode(),
+            $this->submissionAgendaDescription(PayrollAwaitingRunDutyService::agendaCode(), 'payroll_run:0', $transport)['channel'],
+            $environment,
+            $signingReady,
+        );
         $rows = [];
         foreach ($this->awaitingRuns->missing($supplierId, $period) as $gap) {
             [$year, $month] = explode('-', $gap['period']);
@@ -530,7 +554,7 @@ final readonly class PayrollMonthlyChecklistService
                 'status' => 'pending',
                 'document' => ['format' => 'XML (JMHZ — jednotné měsíční hlášení zaměstnavatele)', 'note' => ''],
                 'recipient' => self::withApplicable(['label' => 'ČSSZ a zdravotní pojišťovny', 'note' => '']),
-                'channel' => self::withApplicable(['label' => null, 'note' => '']),
+                'channel' => self::withApplicable($channel),
                 'done' => false,
                 'action' => [
                     'kind' => 'generate',
@@ -575,6 +599,8 @@ final readonly class PayrollMonthlyChecklistService
         string $period,
         array $registered,
         array $transport,
+        string $environment = 'production',
+        bool $signingReady = false,
     ): array {
         $rows = [];
         foreach ($this->agendaDuties->unprepared(
@@ -600,6 +626,22 @@ final readonly class PayrollMonthlyChecklistService
                 $transport,
             );
 
+            $action = [
+                'kind' => 'generate',
+                'label' => 'Připravit',
+                'path' => $description['tab_path'],
+                'reason' => null,
+                // Tohle je ten rozdíl proti pouhému odkazu: klient volá
+                // přípravu rovnou pro tuhle agendu, tohle období a tuhle
+                // pojišťovnu, a teprve pak otevře `path` s hotovým
+                // podáním.
+                'prepare' => [
+                    'agenda_code' => $agendaCode,
+                    'period' => $duty['period'],
+                    'insurer_code' => $duty['insurer_code'],
+                ],
+            ];
+
             $rows[] = [
                 'key' => $duty['key'],
                 'source' => 'agenda_duty',
@@ -614,27 +656,102 @@ final readonly class PayrollMonthlyChecklistService
                 'status' => 'not_prepared',
                 'document' => $description['document'],
                 'recipient' => self::withApplicable($description['recipient']),
-                'channel' => self::withApplicable($description['channel']),
+                'channel' => self::withApplicable($this->plannedChannel(
+                    $agendaCode,
+                    $description['channel'],
+                    $environment,
+                    $signingReady,
+                )),
                 'done' => false,
-                'action' => [
-                    'kind' => 'generate',
-                    'label' => 'Připravit',
-                    'path' => $description['tab_path'],
-                    'reason' => null,
-                    // Tohle je ten rozdíl proti pouhému odkazu: klient volá
-                    // přípravu rovnou pro tuhle agendu, tohle období a tuhle
-                    // pojišťovnu, a teprve pak otevře `path` s hotovým
-                    // podáním.
-                    'prepare' => [
-                        'agenda_code' => $agendaCode,
-                        'period' => $duty['period'],
-                        'insurer_code' => $duty['insurer_code'],
-                    ],
-                ],
+                'action' => $agendaCode === JmhzSubmissionBridgeService::AGENDA_CODE
+                    ? $this->withJmhzGate($action)
+                    : $action + ['prepare_blocked' => null],
             ];
         }
 
         return $rows;
+    }
+
+    /**
+     * Povinnost JMHZ v evidenci, ke které ještě NEVZNIKLO podání.
+     *
+     * Vznikne, když se příprava zastaví až na katalogu kontrol: povinnost se
+     * eviduje dřív než zmrazené podání. Řádek pak říkal „Otevřeno" a posílal
+     * na záložku JMHZ, která posílala zpátky sem. Nabízí proto TUTÉŽ přípravu
+     * jako povinnost bez evidence a pravdivý stav „Nepřipraveno"; příprava
+     * povinnost převezme ({@see JmhzSubmissionBridgeService}).
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function withUnfiledJmhzPreparation(array $rows): array
+    {
+        foreach ($rows as $index => $row) {
+            if ($row['agenda_code'] !== JmhzSubmissionBridgeService::AGENDA_CODE
+                || $row['submission_id'] !== null
+                || $row['done'] === true
+                || $row['status'] !== 'open'
+                || !is_string($row['period'] ?? null)
+            ) {
+                continue;
+            }
+            $rows[$index]['status'] = 'not_prepared';
+            $rows[$index]['action'] = $this->withJmhzGate([
+                'kind' => 'generate',
+                'label' => 'Připravit',
+                'path' => $row['action']['path'] ?? null,
+                'reason' => null,
+                'prepare' => [
+                    'agenda_code' => JmhzSubmissionBridgeService::AGENDA_CODE,
+                    'period' => $row['period'],
+                    'insurer_code' => null,
+                ],
+            ]);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Doplní k přípravě měsíčního hlášení důvod, proč ji teď spustit nejde
+     * ({@see JmhzPreparationGate}). Klient podle `prepare_blocked` tlačítka
+     * zneaktivní a větu ukáže u řádku; jinak by účetní klikla a dostala chybu.
+     *
+     * @param array<string,mixed> $action
+     * @return array<string,mixed>
+     */
+    private function withJmhzGate(array $action): array
+    {
+        $period = $action['prepare']['period'] ?? null;
+        $blocked = is_string($period) ? $this->jmhzGate?->blocked($period . '-01') : null;
+        $action['prepare_blocked'] = $blocked;
+        if ($blocked !== null) {
+            $action['reason'] = $blocked['message'];
+        }
+
+        return $action;
+    }
+
+    /**
+     * Kudy podání agendy odejde, dokud neodešlo: tatáž volba jako při odeslání
+     * frontou ({@see PayrollDispatchGate::channels()}). Jedno místo pro řádek
+     * s připraveným podáním, povinnost bez podání i měsíc čekající na běh,
+     * aby tentýž řádek neuváděl v jednom stavu datovou schránku a v jiném VREP.
+     *
+     * @param array{label:?string,note:string} $fallback popis kanálu agendy
+     * @return array{label:?string,note:string}
+     */
+    private function plannedChannel(string $agendaCode, array $fallback, string $environment, bool $signingReady): array
+    {
+        $channels = (new PayrollDispatchGate())->channels(
+            (new PayrollDispatchCapabilityCatalog())->forAgenda($agendaCode),
+            $environment,
+            $signingReady,
+        );
+
+        return str_starts_with($channels['default'], 'vrep_')
+            ? ['label' => self::VREP_CHANNEL_LABEL, 'note' => '']
+            : $fallback;
     }
 
     /**
@@ -703,7 +820,7 @@ final readonly class PayrollMonthlyChecklistService
      */
     private static function withoutPreparation(array $action): array
     {
-        return $action + ['prepare' => null];
+        return $action + ['prepare' => null, 'prepare_blocked' => null];
     }
 
     /**

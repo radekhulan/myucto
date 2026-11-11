@@ -380,7 +380,7 @@ final class JmhzExternalCodebookCatalog
         ) {
             return 'Obec i stát pracoviště v číselníku za celý měsíc platí, ale mzdový běh se spočítal dřív, '
                 . 'než aplikace číselník pro toto období měla. Údaje pracoviště neměňte: otevřete Mzdy → Mzdové '
-                . 'běhy, u běhu za tento měsíc zvolte „Otevřít opravu", spočítejte a schvalte ho znovu (částky '
+                . 'běhy, u běhu za tento měsíc zvolte „Vyžádat opravu" a „Otevřít opravu", spočítejte a schvalte ho znovu (částky '
                 . 'se nezmění) a hlášení připravte znovu.';
         }
 

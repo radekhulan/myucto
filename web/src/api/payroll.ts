@@ -3674,6 +3674,8 @@ export interface PayrollSubmissionOverviewItem {
   preferred_channel: string
   /** Kanál, kterým poslední podání skutečně odešlo (`isds`), jinak `null`. */
   dispatch_channel?: string | null
+  /** Kudy podání odejde, dokud neodešlo (volba fronty podání); `null` = neurčeno, platí plán povinnosti. */
+  planned_channel?: string | null
   status: PayrollSubmissionObligationStatus
   row_version: number
   earliest_submission_on: string
@@ -3792,6 +3794,8 @@ export interface PayrollSubmissionOverviewResponse {
     other: number
   }
   deadline_summary: Record<PayrollSubmissionDeadlinePhase, number>
+  /** Proč hlášení JMHZ za období teď nejde zmrazit ani odeslat; `null` = jde. */
+  jmhz_preparation_gate?: PayrollJmhzPreparationGate | null
   items: PayrollSubmissionOverviewItem[]
   total: number
   limit: number
@@ -4026,6 +4030,8 @@ export interface PayrollMonthlyChecklistAction {
   reason: string | null
   /** `null` = položka se připravuje jinde, tlačítko je jen odkaz. */
   prepare: PayrollMonthlyChecklistPreparation | null
+  /** Příprava teď spustit nejde (období neskončilo, ročník nejde sestavit); věta je i v `reason`. */
+  prepare_blocked?: PayrollJmhzPreparationGate | null
   /** Nepřipravené podání případu dávky nemocenského pojištění. */
   sickness?: { case_id: number, document: 'nempri' | 'nempri_transfer' | 'hzupn' } | null
 }
@@ -4964,11 +4970,18 @@ export interface PayrollJmhzXmlDryRunBlocker {
   attribute_ids: string[]
   /** Důvod česky ze serveru jako záloha, když kód nemá překlad. */
   reason?: string
+  /** Důvod serveru je přesnější než obecný popisek kódu (konkrétní věta zdroje, údaj podle atributu). */
+  reason_specific?: boolean
   action?: string
   message?: string | null
   remediation?: { kind: PayrollJmhzRemediationKind, field: string | null }
   /** Nález na vztahu nebo osobě, kvůli kterému lze vztah odložit z řádného hlášení. */
   deferrable?: boolean
+  /**
+   * Údaj hlášení čte ze schváleného mzdového běhu: po opravě údaje je potřeba
+   * opravná revize běhu, jinak příprava hlášení čte dál starou hodnotu.
+   */
+  needs_revision?: boolean
 }
 
 /** Nález blokace zmrazení hlášení se jménem a odkazem na opravu. */
@@ -4977,6 +4990,25 @@ export interface PayrollJmhzFreezeBlocker extends PayrollJmhzXmlDryRunBlocker {
   label: string | null
   /** Cesta v aplikaci, kde se údaj opravuje; `null` = není kam jít. */
   remediation_path: string | null
+  /** Mzdové běhy měsíce, kde se po opravě údaje otevírá oprava běhu; `null` = revize není potřeba. */
+  revision_path?: string | null
+  /**
+   * `true` = údaj je v evidenci už opravený a zbývá jen opravná revize,
+   * `false` = nejdřív opravit údaj, `null` = server to neumí posoudit.
+   */
+  fixed_in_source?: boolean | null
+}
+
+/**
+ * Proč hlášení JMHZ za období teď nejde připravit (zmrazit) ani odeslat:
+ * období ještě neskončilo (`available_from` říká, od kdy to půjde), nebo
+ * ročník hlášení aplikace ještě sestavit neumí. Účetní to vlastními údaji
+ * neodstraní, proto se podle toho akce zneaktivní.
+ */
+export interface PayrollJmhzPreparationGate {
+  code: 'jmhz_period_not_finished' | 'jmhz_spec_version_unavailable' | string
+  message: string
+  available_from: string | null
 }
 
 /** Vztahy vynechané z hlášení (odložené) a co to znamená pro kontroly. */
@@ -5090,6 +5122,12 @@ export interface PayrollJmhzControlReport {
 export interface PayrollJmhzXmlDryRun {
   status: 'blocked' | 'dry_run_valid' | 'dry_run_incomplete'
   preparation_id: number
+  /** Proč hlášení za období zatím nejde zmrazit; `null` = jde. */
+  preparation_gate?: PayrollJmhzPreparationGate | null
+  /** Obsah prošel; nepropustné vady plynou jen z toho, že období ještě neskončilo. */
+  waiting_for_period_end?: boolean
+  /** Kontroly, které u neskončeného období selžou jen kvůli dnešnímu datu. */
+  date_only_control_ids?: number[]
   blockers: PayrollJmhzXmlDryRunBlocker[]
   deferred?: PayrollJmhzDryRunDeferred | null
   /** Nad 1500 formulářů dílčí balíky hlášení; do 1500 prázdné. */
