@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 /**
  * Cron — dotažení protokolu ČSSZ a uzavření transakce u VREP (migrace 1379).
+ * Obsluhuje hlášení JMHZ i odeslané registrace PREZEC/REGZEC; registrace
+ * se sám neodesílá, jen se dotahuje výsledek už odeslaných.
  *
  * Použití:
  *   php api/bin/cron-jmhz-poll.php

@@ -1185,7 +1185,8 @@
         "2279_membership_rates.sql",
         "2280_membership_batches.sql",
         "2281_microsoft365_imap_oauth.sql",
-        "2282_clients_simplified_only.sql"
+        "2282_clients_simplified_only.sql",
+        "2283_payroll_submission_parts_subject_index.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -20619,6 +20620,7 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "idx_payroll_submission_parts_status": "BTREE (supplier_id, submission_id, status)",
+                "idx_payroll_submission_parts_subject": "BTREE (supplier_id, environment, subject_reference, agenda_code)",
                 "uq_payroll_submission_part_reference": "UNIQUE BTREE (supplier_id, submission_id, part_reference)",
                 "uq_payroll_submission_parts_aggregate_id": "UNIQUE BTREE (supplier_id, environment, submission_id, id)",
                 "uq_payroll_submission_parts_supplier_id": "UNIQUE BTREE (supplier_id, id)"

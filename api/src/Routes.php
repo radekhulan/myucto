@@ -2150,6 +2150,15 @@ final class Routes
                 '/submissions/registration-completion',
                 [\MyInvoice\Action\Payroll\PayrollRegistrationCompletionAction::class, 'complete'],
             );
+            // Hromadná příprava přihlášek zaměstnanců (A1).
+            $g->get(
+                '/submissions/registration-a1',
+                [\MyInvoice\Action\Payroll\PayrollRegistrationA1BatchAction::class, 'candidates'],
+            );
+            $g->post(
+                '/submissions/registration-a1',
+                [\MyInvoice\Action\Payroll\PayrollRegistrationA1BatchAction::class, 'prepare'],
+            );
             $g->post(
                 '/submissions/registration-transport/{submissionId:[0-9]+}',
                 [PayrollRegistrationTransportAction::class, 'send'],
