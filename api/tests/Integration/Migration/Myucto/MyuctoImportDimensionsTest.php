@@ -127,7 +127,7 @@ final class MyuctoImportDimensionsTest extends TestCase
             $this->rows("SELECT v.code, s.share FROM document_dimension_splits s JOIN dimension_values v ON v.id = s.dimension_value_id
                 WHERE s.supplier_id = ? AND s.doc_type = 'invoice' AND s.doc_id = " . $invoice . ' ORDER BY v.code', $this->target),
         );
-        // Ostatní položky obnova nepřenáší: jejich dimenze se vynechají a vykážou, nic nezmizí potichu.
+        // Dimenze ostatní položky, kterou export nenese (smazaná), se vynechají a vykážou, nic nezmizí potichu.
         self::assertSame(1, $report['dropped']['document_dimensions.other_item'] ?? null);
         self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM document_dimensions WHERE supplier_id = ? AND doc_type = 'other_item'", $this->target));
 

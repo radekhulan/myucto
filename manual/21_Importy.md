@@ -1195,6 +1195,15 @@ plátcovství včetně historie a význam klasifikací DPH. Její nastavení, p�
 ani přihlašovací údaje se nepřepisují. Cíl nesmí obsahovat vlastní obchodní data;
 přítomné výchozí číselníky se mohou použít při shodném významu.
 
+Účtová osnova exportované firmy je pro její deník závazná. Účty, které prázdná
+cílová firma už má (výchozí osnova nové firmy), se párují podle čísla účtu
+a při první obnově převezmou význam a název zdroje: druh účtu, stranu,
+syntetiku, daňovou uznatelnost, zúčtovací povahu a aktivitu. Protokol je vypíše
+v `adopted_chart`. Prázdná je firma, která nemá žádný zápis deníku ani doklad;
+firmu s vlastními daty obnova odmítne celou. Při opakované obnově do firmy, která
+už převzatá data má, se osnova nemění: liší-li se význam některého účtu, obnova
+skončí bez zápisu a vypíše účty s rozdíly.
+
 Nejprve spusťte zkoušku nanečisto:
 
 ```bash
@@ -1239,6 +1248,11 @@ Obnova dále přenáší:
 - **Banku a automatiku**: pravidla účtování banky, naučené protistrany
   a obchodníky plateb kartou, pravidla zařazení nákladů, šablony bankovních
   pravidel, nastavení automatického účtování a podepisování PDF výstupů.
+- **Ostatní pohledávky a závazky**: druhy včetně jejich číselných řad
+  a profilů kontace, doklady v konceptu i zaúčtované, jejich splátky, úhrady
+  z banky a pokladny, opakování, vlastní kontaci, dimenze, připojené dokumenty,
+  vazby z faktur a pravidel banky a nastavení složky dokumentů. Zaúčtovaný doklad
+  si ponechá svůj převzatý zápis deníku, obnova ho znovu neúčtuje.
 - **Historii** oprav účtování a kroků uzávěrky.
 - **Číselné řady a počítadla**: číselník řad, počítadla vydaných a přijatých
   dokladů, řady účetních dokladů a číslovací nastavení firmy (šablony čísel
@@ -1250,12 +1264,12 @@ otevření (šablony bankovních pravidel, automatické účtování, podepisov�
 doporučené šablony zápisů), první obnova nahradí nastavením zdroje, pokud ho
 export nese. Řady založené průvodcem se spárují s řadami zdroje a převezmou
 jejich předponu, název a šablonu. Počítadlo, které cílová firma už má, se jen
-zvýší na hodnotu zdroje. Podpisové profily, skupiny firem, vozidla a ostatní
-doklady se nepřenášejí; vazby na ně se odpojí a protokol je vypíše.
+zvýší na hodnotu zdroje. Podpisové profily, skupiny firem a vozidla
+se nepřenášejí; vazby na ně se odpojí a protokol je vypíše.
 
-Vazby na doklady, které export nenese (dokument nebo dimenze u ostatního
+Vazby na doklady, které export nenese (dokument nebo dimenze u smazaného
 dokladu, výchozí dimenze skladové karty nebo kategorie, oprava účtování
-u smazaného pohybu), obnova vynechá a protokol je
+u smazaného pohybu, řada smazaného druhu ostatní položky), obnova vynechá a protokol je
 vypíše jako vynechané vazby. Soubory, které export nenese, protokol vypíše jako
 chybějící. Nenese-li export počítadla řad vydaných nebo přijatých dokladů
 (starší export, záloha MyInvoice, doklady číslované ručně), protokol upozorní,
