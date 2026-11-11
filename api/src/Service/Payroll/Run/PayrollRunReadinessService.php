@@ -44,6 +44,15 @@ final class PayrollRunReadinessService
     /** Kolik konkrétních jmen se u nálezu vypíše, než se přejde na počet. */
     private const MAX_ENTITIES = 25;
 
+    /** Druhy hromadných oprav v `bulk_actions` nálezu ({@see self::bulkActions()}). */
+    public const BULK_ACTION_KINDS = [
+        'statutory_defaults',
+        'declaration_signed',
+        'health_insurer',
+        'workplace',
+        'closure',
+    ];
+
     /**
      * Nálezy, které před zahájením běhu nedávají smysl: odstraní je samo
      * zamknutí vstupů. Hodinová mzda se zmrazí právě při zamknutí, takže výzva
