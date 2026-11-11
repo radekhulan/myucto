@@ -10,9 +10,10 @@ use MyInvoice\Repository\DimensionAssignmentRepository;
 final class MyuctoImportProfile
 {
     /** Prvních 16 znaků otisku je součástí cesty importovaných souborů, takže dvojtečka musí stát až za nimi. */
-    public const VERSION = 'company-dimensions-v1';
+    public const VERSION = 'company-other-items-v1';
     /** Starší profily, jejichž obnova se shodnými daty je pro aktuální profil úplná. */
-    public const COMPATIBLE_VERSIONS = ['classifications-v1', 'posting-groups-v1', 'vat-clearing-runs-v1', 'company-complete-v1'];
+    public const COMPATIBLE_VERSIONS = ['classifications-v1', 'posting-groups-v1', 'vat-clearing-runs-v1', 'company-complete-v1',
+        'company-dimensions-v1'];
     public const TABLES = [
         'currencies', 'revenue_categories', 'expense_categories', 'cost_centers',
         'chart_of_accounts', 'vat_classifications', 'accounting_periods', 'clients', 'client_bank_accounts',
@@ -41,6 +42,10 @@ final class MyuctoImportProfile
         'income_tax_returns', 'tax_advance_schedules',
         'bank_posting_rules', 'bank_counterparty_map', 'bank_card_merchant_map', 'expense_classification_rules',
         'bank_rule_templates', 'auto_posting_policy',
+        // Ostatní pohledávky a závazky: druhy (před číselnými řadami druhů), doklady, splátky, úhrady,
+        // opakování a kontace. Zaúčtované se převezmou se svými zápisy deníku, znovu se neúčtují.
+        'other_item_kinds', 'other_items', 'other_item_installments', 'other_item_allocations',
+        'other_item_schedules', 'other_item_schedule_occurrences', 'other_item_posting_profiles', 'other_item_posting_overrides',
         // Nastavení dimenzí firmy: pravidla povinnosti, mapa účtotvorné dimenze, výchozí dimenze karet.
         'dimension_account_rules', 'dimension_account_map', 'dimension_defaults',
         'accounting_corrections', 'accounting_closing_steps',
@@ -63,7 +68,7 @@ final class MyuctoImportProfile
         'journal_entry_line_dimension_splits' => ['key' => ['line_id', 'dimension_type_id', 'dimension_value_id'],
             'refs' => ['line_id' => 'journal_entry_lines', 'dimension_type_id' => 'dimension_types', 'dimension_value_id' => 'dimension_values']],
         // Cíl `doc_id` podle druhu dokladu je v DimensionAssignmentRepository::DOC_TYPE_TABLES (jedno místo
-        // i pro archiv účetnictví). Druh, jehož doklady obnova nepřenáší (ostatní položky), se vynechá a vykáže.
+        // i pro archiv účetnictví). Přiřazení dokladu, který export nenese (smazaný doklad), se vynechá a vykáže.
         'document_dimensions' => ['key' => ['supplier_id', 'doc_type', 'doc_id', 'item_no', 'dimension_type_id'],
             'refs' => ['dimension_type_id' => 'dimension_types', 'dimension_value_id' => 'dimension_values'],
             'polymorphic' => ['doc_id' => ['doc_type', DimensionAssignmentRepository::DOC_TYPE_TABLES]],
@@ -79,8 +84,13 @@ final class MyuctoImportProfile
             'polymorphic' => ['entity_id' => ['entity_type', ['client' => 'clients', 'invoice' => 'invoices',
                 'purchase_invoice' => 'purchase_invoices', 'project' => 'projects', 'journal_entry' => 'journal_entries',
                 'bank_transaction' => 'bank_transactions', 'cash_document' => 'cash_documents', 'invoice_payment' => 'invoice_payments',
-                'internal_document' => 'internal_documents']]],
+                'internal_document' => 'internal_documents', 'other_item' => 'other_items']]],
             'tolerant' => true],
+        'other_item_posting_lines' => ['key' => ['supplier_id', 'other_item_id', 'position'],
+            'refs' => ['other_item_id' => 'other_items']],
+        'other_item_auto_match_blocks' => ['key' => ['supplier_id', 'other_item_id', 'bank_transaction_id'],
+            'refs' => ['other_item_id' => 'other_items', 'bank_transaction_id' => 'bank_transactions']],
+        'other_item_settings' => ['key' => ['supplier_id'], 'users' => ['updated_by']],
         'pdf_signature_output_settings' => ['key' => ['supplier_id', 'output_type'], 'detached' => ['default_profile_id']],
         'invoice_counters' => ['key' => ['supplier_id', 'client_id', 'revenue_category_id', 'invoice_type', 'period'],
             'refs' => ['client_id' => 'clients', 'revenue_category_id' => 'revenue_categories'], 'counter' => ['last_number']],
@@ -178,9 +188,10 @@ final class MyuctoImportProfile
         'journal_entry_notes' => ['created_by' => 'users', 'updated_by' => 'users'],
         'income_tax_returns' => ['created_by' => 'users', 'finalized_by' => 'users'],
         'tax_advance_schedules' => ['source_return_id' => 'income_tax_returns'],
-        'bank_posting_rules' => ['last_rejected_tx_id' => 'bank_transactions'],
         'accounting_closing_steps' => ['done_by' => 'users'],
         'number_series' => ['created_by' => 'users'],
+        // Pravidlo banky může párovat platby na konkrétní ostatní položku.
+        'bank_posting_rules' => ['last_rejected_tx_id' => 'bank_transactions', 'other_item_id' => 'other_items'],
         'internal_documents' => ['number_series_id' => 'number_series'],
         // Typ hodnoty je součástí složeného FK (type_id, id) na dimension_values.
         'dimension_account_map' => ['dimension_type_id' => 'dimension_types'],
@@ -196,7 +207,8 @@ final class MyuctoImportProfile
     /**
      * Vazby z EXTRA_REFERENCES, které míří na řádek, jenž mohl ve zdroji zaniknout
      * (vytěžení smazaného dokumentu, odmítnutý pohyb, přiznání), nebo na řadu, kterou
-     * obnova nepřenáší (export bez číselníku řad, řada ostatních dokladů). Export bez cíle
+     * obnova nepřenáší (export bez číselníku řad, řada ostatních dokladů), nebo na ostatní
+     * položku, kterou export nenese (starší export, záloha MyInvoice). Export bez cíle
      * vazbu nevyřadí z obnovy; obnova ji vynuluje a vykáže mezi odpojenými.
      */
     public const SOFT_REFERENCES = [
@@ -206,7 +218,7 @@ final class MyuctoImportProfile
         'internal_documents' => ['number_series_id'],
         'document_extractions' => ['document_id'],
         'tax_advance_schedules' => ['source_return_id'],
-        'bank_posting_rules' => ['last_rejected_tx_id'],
+        'bank_posting_rules' => ['last_rejected_tx_id', 'other_item_id'],
     ];
     /** Identifikátory datové schránky (ISDS), nikoli vazby na řádky databáze. */
     public const PRESERVED_IDS = ['idoklad_id', 'fakturoid_id', 'import_batch_id', 'dm_id', 'sender_box_id', 'recipient_box_id'];
@@ -243,8 +255,9 @@ final class MyuctoImportProfile
             'purchase_invoice' => 'purchase_invoices', 'cash_document' => 'cash_documents', 'journal_entry' => 'journal_entries',
             'bank_posting_rule' => 'bank_posting_rules']]],
         'number_series' => ['scope_id' => ['scope_type', ['company' => null, 'cash_register' => 'cash_registers', 'client' => 'clients',
-            'revenue_category' => 'revenue_categories', 'bank_account' => 'supplier_bank_accounts']]],
-        'accounting_document_series' => ['register_id' => ['series_code', ['cash_in' => 'cash_registers', 'cash_out' => 'cash_registers']]],
+            'revenue_category' => 'revenue_categories', 'bank_account' => 'supplier_bank_accounts', 'other_item_kind' => 'other_item_kinds']]],
+        'accounting_document_series' => ['register_id' => ['series_code', ['cash_in' => 'cash_registers', 'cash_out' => 'cash_registers',
+            'other_receivable' => 'other_item_kinds', 'other_payable' => 'other_item_kinds']]],
     ];
     /** Tabulky s `id`, jejichž řádek s polymorfní vazbou mimo export (smazaný doklad) obnova vynechá a vykáže. */
     public const TOLERANT_TABLES = ['accounting_corrections'];
@@ -262,12 +275,11 @@ final class MyuctoImportProfile
         'purchase_invoice_items' => ['expense_rule_id'],
         // Podání DPH obnova nepřenáší; běh zúčtování si ponechá formulář, variantu i čas podání.
         'vat_clearing_runs' => ['submission_id'],
-        // Skupiny firem, vozidla, podání, finální snímky přiznání, ostatní doklady, návrhy
+        // Skupiny firem, vozidla, podání, finální snímky přiznání, návrhy
         // automatiky a podpisové profily obnova nepřenáší.
         'dimension_types' => ['supplier_group_id'],
         'dimension_values' => ['supplier_group_id', 'car_id'],
         'income_tax_returns' => ['last_submission_id', 'final_snapshot_id'],
-        'bank_posting_rules' => ['other_item_id'],
         'accounting_corrections' => ['suggestion_id'],
     ];
     /**
@@ -299,6 +311,8 @@ final class MyuctoImportProfile
     public const CHART_SEMANTIC_COLUMNS = ['account_type', 'normal_side', 'is_synthetic', 'tax_deductibility', 'is_clearing'];
     /** Popisné údaje účtu, které první obnova převezme spolu s významem. */
     public const CHART_ADOPTED_COLUMNS = ['name', 'is_active'];
+    /** Vazby uvnitř šablony opakování ostatní položky (template_json) na převáděný graf. */
+    public const OTHER_ITEM_TEMPLATE_REFERENCES = ['kind_id' => 'other_item_kinds', 'partner_id' => 'clients'];
 
     /**
      * Firma obnovená starším profilem ze shodných dat. Otisk dat zahrnuje i seznam

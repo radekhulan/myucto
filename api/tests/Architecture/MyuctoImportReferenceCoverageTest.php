@@ -69,7 +69,7 @@ final class MyuctoImportReferenceCoverageTest extends TestCase
 
     /**
      * Tabulky bez vlastního `id` mají rozhodnutí v definici KEYLESS_TABLES: vazba na graf,
-     * polymorfní vazba, nebo odpojené nastavení. Jinak by obnova sloupec přenesla se
+     * polymorfní vazba, autor (obnova ho přiřadí aktérovi), nebo odpojené nastavení. Jinak by obnova sloupec přenesla se
      * zdrojovým ID, které v cílové instalaci znamená jiný řádek.
      */
     public function testEveryReferenceOfKeylessTableHasDecision(): void
@@ -87,7 +87,7 @@ final class MyuctoImportReferenceCoverageTest extends TestCase
                     continue;
                 }
                 if (isset($definition['refs'][$column]) || isset($definition['polymorphic'][$column])
-                    || in_array($column, $definition['detached'] ?? [], true)) {
+                    || in_array($column, $definition['detached'] ?? [], true) || in_array($column, $definition['users'] ?? [], true)) {
                     continue;
                 }
                 $missing[] = $table . '.' . $column;

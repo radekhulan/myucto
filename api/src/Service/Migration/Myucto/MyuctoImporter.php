@@ -314,7 +314,7 @@ final class MyuctoImporter
                     ['source' => 'myucto_import', 'source_entry_id' => (int) $sourceEntryId], null, null, $supplierId);
             }
             $this->restoreKeylessJournal($pdo, $tables, $map, $supplierId, $actorId, $previous === false, $schema, $report);
-            $this->restoreKeylessTables($pdo, $tables, $map, $supplierId, $previous === false, $schema, $report);
+            $this->restoreKeylessTables($pdo, $tables, $map, $supplierId, $actorId, $previous === false, $schema, $report);
             if ($previous === false && ($package['manifest']['origin']['type'] ?? null) !== 'myinvoice-backup') {
                 $report['numbering_adopted'] = $this->adoptSupplierNumbering($pdo, $root, $target, $supplierId, $schema);
             }
@@ -733,7 +733,7 @@ final class MyuctoImporter
      * @param array<string,array<int|string,array<string,mixed>>> $tables
      * @param array<string,array<int|string,int>> $map
      */
-    private function restoreKeylessTables(PDO $pdo, array $tables, array $map, int $supplierId, bool $firstRestore, array $schema, array &$report): void
+    private function restoreKeylessTables(PDO $pdo, array $tables, array $map, int $supplierId, int $actorId, bool $firstRestore, array $schema, array &$report): void
     {
         foreach (MyuctoImportProfile::KEYLESS_TABLES as $table => $definition) {
             $rows = $tables[$table] ?? [];
@@ -760,7 +760,7 @@ final class MyuctoImporter
             $expected = [];
             $inserts = [];
             foreach ($rows as $row) {
-                $out = $this->remapKeyless($table, $definition, $row, $map, $supplierId, $columns, $report);
+                $out = $this->remapKeyless($table, $definition, $row, $map, $supplierId, $actorId, $columns, $report);
                 if ($out === null) {
                     continue;
                 }
@@ -828,7 +828,7 @@ final class MyuctoImporter
      * @param array<string,array<int|string,int>> $map
      * @return array<string,mixed>|null
      */
-    private function remapKeyless(string $table, array $definition, array $row, array $map, int $supplierId, array $columns, array &$report): ?array
+    private function remapKeyless(string $table, array $definition, array $row, array $map, int $supplierId, int $actorId, array $columns, array &$report): ?array
     {
         $out = $row;
         if (isset($columns['supplier_id'])) {
@@ -854,6 +854,11 @@ final class MyuctoImporter
                 return null;
             }
             $out[$column] = $mapped;
+        }
+        foreach ($definition['users'] ?? [] as $column) {
+            if (($out[$column] ?? null) !== null) {
+                $out[$column] = $actorId;
+            }
         }
         foreach ($definition['detached'] ?? [] as $column) {
             if (($out[$column] ?? null) !== null) {
@@ -885,6 +890,50 @@ final class MyuctoImporter
                 ?? throw new RuntimeException('Chybí zdrojová vazba dimenze řádku interního dokladu.');
             $out[(string) $mappedType] = $map['dimension_values'][MyuctoExportReader::id($value)]
                 ?? throw new RuntimeException('Chybí zdrojová vazba hodnoty dimenze řádku interního dokladu.');
+        }
+        return json_encode($out, JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * Šablona opakování ostatní položky nese druh a partnera zdrojového dokladu. Obě vazby
+     * se přemapují; partner nebo druh, který export nenese, se ze šablony vynechá a vykáže,
+     * další výskyt pak vznikne bez něj (stejně jako u zdroje po smazání partnera).
+     */
+    private function remapOtherItemTemplate(string $json, array $map): string
+    {
+        $template = json_decode($json, true, 64, JSON_THROW_ON_ERROR);
+        if (!is_array($template)) {
+            throw new RuntimeException('Neplatná šablona opakování ostatní položky.');
+        }
+        foreach (MyuctoImportProfile::OTHER_ITEM_TEMPLATE_REFERENCES as $key => $reference) {
+            $value = $template[$key] ?? null;
+            if ($value === null) {
+                continue;
+            }
+            $mapped = (is_int($value) || (is_string($value) && ctype_digit($value))) ? ($map[$reference][(int) $value] ?? null) : null;
+            if ($mapped === null) {
+                $this->droppedLinks['other_item_schedules.template_json.' . $key] = ($this->droppedLinks['other_item_schedules.template_json.' . $key] ?? 0) + 1;
+            }
+            $template[$key] = $mapped;
+        }
+        return json_encode($template, JSON_THROW_ON_ERROR);
+    }
+
+    /** Výchozí dimenze kontace ostatních položek jsou seznam {type_id, value_id}; obě ID se přemapují. */
+    private function remapDimensionList(string $json, array $map, string $table): string
+    {
+        $dimensions = json_decode($json, true, 16, JSON_THROW_ON_ERROR);
+        if (!is_array($dimensions) || $dimensions === []) {
+            return $json;
+        }
+        $out = [];
+        foreach ($dimensions as $dimension) {
+            $out[] = [
+                'type_id' => $map['dimension_types'][MyuctoExportReader::id(is_array($dimension) ? ($dimension['type_id'] ?? null) : null)]
+                    ?? throw new RuntimeException('Chybí zdrojová vazba dimenze kontace ' . $table . '.'),
+                'value_id' => $map['dimension_values'][MyuctoExportReader::id($dimension['value_id'] ?? null)]
+                    ?? throw new RuntimeException('Chybí zdrojová vazba hodnoty dimenze kontace ' . $table . '.'),
+            ];
         }
         return json_encode($out, JSON_THROW_ON_ERROR);
     }
@@ -987,7 +1036,11 @@ final class MyuctoImporter
             $targets = MyuctoImportProfile::POLYMORPHIC_TARGETS[$table][$column][1];
             foreach ($tables[$table] ?? [] as $id => $row) {
                 $type = (string) ($row[$typeColumn] ?? '');
-                if (!array_key_exists($type, $targets) && (string) ($row[$column] ?? '0') !== '0') {
+                $scope = (string) ($row[$column] ?? '0');
+                // Smazaný druh ostatní položky po sobě nechá svou řadu; bez druhu ji obnova nepřenese.
+                $orphanKind = ($targets[$type] ?? null) === 'other_item_kinds' && $scope !== '0'
+                    && !isset($tables['other_item_kinds'][MyuctoExportReader::id($scope)]);
+                if ((!array_key_exists($type, $targets) && $scope !== '0') || $orphanKind) {
                     unset($tables[$table][$id]);
                     $dropped[$table . '.' . $type] = ($dropped[$table . '.' . $type] ?? 0) + 1;
                     if ($table === 'number_series') {
@@ -1304,7 +1357,7 @@ final class MyuctoImporter
             $target = match ($row['source_type']) {
                 'invoice', 'provision' => 'invoices', 'purchase_invoice' => 'purchase_invoices', 'cash' => 'cash_documents',
                 'bank' => 'bank_transactions', 'asset', 'asset_disposal' => 'assets', 'depreciation' => 'depreciation_entries',
-                'offset' => 'offset_agreements', 'settlement' => 'invoice_settlements',
+                'offset' => 'offset_agreements', 'settlement' => 'invoice_settlements', 'other_item' => 'other_items',
                 'closing', 'opening', 'income_tax', 'deferred_tax', 'profit_distribution', 'stock' => 'accounting_periods',
                 'manual' => null,
                 // Zúčtování DPH nese klíč zdaňovacího období (VatClearingService::sourceIdFor()), ne ID dokladu.
@@ -1369,6 +1422,12 @@ final class MyuctoImporter
         }
         if ($table === 'internal_documents' && ($row['document_links_json'] ?? null) !== null) {
             $out['document_links_json'] = $this->remapInternalDocumentLinks((string) $row['document_links_json'], $map);
+        }
+        if ($table === 'other_item_schedules' && ($row['template_json'] ?? null) !== null) {
+            $out['template_json'] = $this->remapOtherItemTemplate((string) $row['template_json'], $map);
+        }
+        if (in_array($table, ['other_item_posting_profiles', 'other_item_posting_overrides'], true) && ($row['dimensions_json'] ?? null) !== null) {
+            $out['dimensions_json'] = $this->remapDimensionList((string) $row['dimensions_json'], $map, $table);
         }
         if ($table === 'accounting_closing_steps' && ($row['step_key'] ?? null) === 'provisions' && ($row['payload'] ?? null) !== null) {
             $payload = json_decode((string) $row['payload'], true, 512, JSON_THROW_ON_ERROR);
