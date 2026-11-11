@@ -133,6 +133,9 @@ final class PayrollRunReadinessImpact
         // Schválený průměr vstupuje do zmrazeného snímku vstupů běhu. Schválený
         // po výpočtu revize ho hlášení nevidí a oprava stojí opravnou revizi.
         'jmhz_average_hourly_earning_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // § 111 odst. 2 ZP — sjednaná měsíční mzda pod minimální mzdou období.
+        // Mzda vstupuje do zmrazeného snímku, oprava po zamknutí je revize.
+        'monthly_wage_below_minimum' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
 
         // ── Skupina 1: doplní se kdykoli, na výpočet to nemá vliv ────────────
         'run_without_employments' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],

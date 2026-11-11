@@ -7,9 +7,12 @@ namespace MyInvoice\Service\Payroll\Run;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
+use MyInvoice\Repository\Payroll\PayrollRulesetRepository;
 use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog;
 use PDO;
 
@@ -245,6 +248,10 @@ final class PayrollRunReadinessService
         if ($pastEndFinding !== null) {
             $findings[] = $pastEndFinding;
         }
+        $minimumWageFinding = $this->minimumWageFinding($supplierId, $periodStart);
+        if ($minimumWageFinding !== null) {
+            $findings[] = $minimumWageFinding;
+        }
         // Jednotný tvar nálezu: co nepochází z katalogu skrytí, skrýt nejde.
         $findings = array_map(
             static function (array $finding): array {
@@ -456,6 +463,109 @@ final class PayrollRunReadinessService
                     'label' => (string) $row['full_name'],
                 ],
                 array_slice($rows, 0, self::MAX_ENTITIES),
+            ),
+        );
+    }
+
+    /**
+     * Pracovní poměry s měsíční mzdou sjednanou pod minimální mzdou období.
+     *
+     * § 111 odst. 2 ZP: mzda nesmí být nižší než minimální mzda. Měsíční
+     * minimální mzda (pravidlo `minimum_wage.monthly_40h_week`, pro rok 2027
+     * 24 900 Kč podle nařízení vlády č. 164/2026 Sb. a sdělení MPSV
+     * č. 171/2026 Sb.) platí pro stanovenou týdenní pracovní dobu 40 hodin,
+     * u kratší pracovní doby poměrně (§ 80 ZP). Podíl se bere jako menší
+     * z úvazku a sjednané týdenní doby proti 40 hodinám, takže při kratší
+     * stanovené době (§ 79 odst. 2) nález spíš nevznikne, než aby vznikl
+     * navíc. Měsíční mzda se do běhu zadává jako vstup a její doplatek do
+     * minima výpočet nedopočítává (hodinová mzda ho má vlastní), proto se
+     * na sjednanou mzdu upozorní před během, typicky v lednu po zvýšení
+     * minima.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function minimumWageFinding(int $supplierId, string $periodStart): ?array
+    {
+        try {
+            $minimum = (int) (new PayrollRulesetRegistry(new PayrollRulesetRepository($this->db)))
+                ->provider()
+                ->forCalculation(PayrollRulesetDomain::EmploymentThresholds, $periodStart)
+                ->parameter('minimum_wage.monthly_40h_week')
+                ->value;
+            $periodEnd = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+            $statement = $this->db->pdo()->prepare(
+                "SELECT employment.id, employee.full_name, terms.monthly_gross_minor,
+                        terms.weekly_hours, terms.workload_basis_points
+                   FROM payroll_employments employment
+                   JOIN payroll_employees employee
+                     ON employee.supplier_id = employment.supplier_id
+                    AND employee.id = employment.employee_id
+                   JOIN payroll_employment_terms terms
+                     ON terms.supplier_id = employment.supplier_id
+                    AND terms.employment_id = employment.id
+                  WHERE employment.supplier_id = ?
+                    AND employment.status IN ('active', 'suspended')
+                    AND employment.relation_type IN ('employment', 'small_scale_employment')
+                    AND terms.effective_from <= ?
+                    AND (terms.effective_to IS NULL OR terms.effective_to >= ?)
+                    AND COALESCE(terms.remuneration_type, 'monthly') = 'monthly'
+                    AND terms.monthly_gross_minor > 0
+                  ORDER BY employee.full_name, employment.id, terms.effective_from"
+            );
+            $statement->execute([$supplierId, $periodEnd, $periodStart]);
+            $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        } catch (\Throwable) {
+            return null;
+        }
+        if ($minimum <= 0) {
+            return null;
+        }
+        $below = [];
+        foreach ($rows as $row) {
+            // Podíl jako zlomek: úvazek v desetitisícinách, týdenní doba v setinách hodiny.
+            $workload = (int) ($row['workload_basis_points'] ?? 10_000);
+            [$numerator, $denominator] = [$workload > 0 ? $workload : 10_000, 10_000];
+            if ($row['weekly_hours'] !== null) {
+                $centiHours = (int) round(((float) $row['weekly_hours']) * 100);
+                if ($centiHours > 0 && $centiHours * $denominator < $numerator * 4_000) {
+                    [$numerator, $denominator] = [$centiHours, 4_000];
+                }
+            }
+            if ($numerator > $denominator) {
+                [$numerator, $denominator] = [1, 1];
+            }
+            if ((int) $row['monthly_gross_minor'] * $denominator < $minimum * $numerator) {
+                $below[(int) $row['id']] = (string) $row['full_name'];
+            }
+        }
+        if ($below === []) {
+            return null;
+        }
+
+        return self::finding(
+            'monthly_wage_below_minimum',
+            sprintf(
+                'Sjednaná měsíční mzda je nižší než minimální mzda pro období %s (%s Kč měsíčně'
+                . ' při 40 hodinách týdně, u kratší pracovní doby poměrně) u %d vztahů. Mzda'
+                . ' nesmí být nižší než minimální mzda (§ 111 zákoníku práce) a výpočet měsíční'
+                . ' mzdy doplatek do minima nedopočítává. Upravte mzdu v podmínkách vztahu,'
+                . ' nebo zadejte doplatek do minimální mzdy jako mzdový vstup.',
+                substr($periodStart, 0, 7),
+                number_format(intdiv($minimum, 100), 0, ',', ' '),
+                count($below),
+            ),
+            count($below) === 1
+                ? '/payroll/people?employment=' . array_key_first($below) . '&panel=employment_terms&field=monthly_gross_minor'
+                : '/payroll/people',
+            count($below),
+            array_map(
+                static fn (int $id, string $name): array => [
+                    'entity_type' => 'employment',
+                    'entity_id' => $id,
+                    'label' => $name,
+                ],
+                array_slice(array_keys($below), 0, self::MAX_ENTITIES),
+                array_slice(array_values($below), 0, self::MAX_ENTITIES),
             ),
         );
     }
