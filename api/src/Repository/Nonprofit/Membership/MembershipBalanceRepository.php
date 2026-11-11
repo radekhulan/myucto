@@ -15,7 +15,7 @@ final class MembershipBalanceRepository
     public function claimsForMember(int $supplier, int $member, int $afterId = 0, int $limit = 100): array
     {
         $limit = max(1, min(101, $limit));
-        $valid=self::receiptValiditySql();
+        $valid = self::receiptValiditySql();
         $q = $this->db->pdo()->prepare(
             "SELECT c.id claim_id,c.case_id,c.operation_id,c.member_id,c.client_id,c.amount_cents,
                     r.id reversal_claim_id,o.accounting_date,o.due_date,o.journal_entry_id,o.receivable_line_id,
@@ -41,7 +41,7 @@ final class MembershipBalanceRepository
 
     public function claim(int $supplier, int $claim): ?array
     {
-        $valid=self::receiptValiditySql();
+        $valid = self::receiptValiditySql();
         $q = $this->db->pdo()->prepare(
             "SELECT c.id claim_id,c.case_id,c.operation_id,c.member_id,c.client_id,c.amount_cents,
                     r.id reversal_claim_id,o.accounting_date,o.due_date,o.journal_entry_id,o.receivable_line_id,

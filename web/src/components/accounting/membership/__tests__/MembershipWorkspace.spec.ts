@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatDate } from '@/composables/useFormat'
 import Workspace from '../MembershipWorkspace.vue'
 import MembershipBatchFlow from '../MembershipBatchFlow.vue'
+import FilterBar from '@/components/ui/FilterBar.vue'
 import type { MemberPage, MemberRow } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
@@ -180,6 +181,24 @@ describe('Membership workspace', () => {
     expect(w.get('[data-field="contribution-status"]').text()).toBe(cs.nonprofitMembership.listStatus_unproven)
     expect(w.get('[data-field="contribution-amounts"]').text()).toContain('—')
     expect(w.get('[data-field="contribution-amounts"]').text()).toContain('500,00')
+    expect(w.find('[data-field="contribution-unpaired"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('hides the filters behind the shared toggle like other lists', async () => {
+    const w=mounted();await flushPromises()
+    expect(w.findComponent(FilterBar).props('collapsible')).toBe(true)
+    w.unmount()
+  })
+
+  it('marks an unpaid charge without a paired payment', async () => {
+    api.members.mockResolvedValue(page([
+      row(1,{contribution:{status:'unpaid',unpaired_count:1,claim_count:1,prescribed_cents:'50000',paid_cents:'0',open_cents:'50000'}}),
+      row(2,{contribution:{status:'unpaid',unpaired_count:0,claim_count:1,prescribed_cents:'50000',paid_cents:'20000',open_cents:'30000'}}),
+    ]))
+    const w=mounted();await flushPromises()
+    expect(w.get('[data-member="1"] [data-field="contribution-unpaired"]').text()).toBe(cs.nonprofitMembership.listUnpaired.replace('{count}','1'))
+    expect(w.find('[data-member="2"] [data-field="contribution-unpaired"]').exists()).toBe(false)
     w.unmount()
   })
   it('passes selected members into a batch and invalidates the existing detail when any batch part completes', async () => {
@@ -627,6 +646,33 @@ describe('Membership workspace', () => {
       await vi.advanceTimersByTimeAsync(300);await flushPromises()
       expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
       expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2025,payment_status:'unpaid'}))
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('waits with a title change for a running search delay and applies it together', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      const calls=api.members.mock.calls.length
+      await w.get('[data-field="member-search"]').setValue('Syn')
+      await w.get('[data-field="member-title"]').setValue('SYNTHETIC');await flushPromises()
+      expect(api.members).toHaveBeenCalledTimes(calls)
+      await vi.advanceTimersByTimeAsync(300);await flushPromises()
+      expect(api.members).toHaveBeenCalledTimes(calls+1)
+      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({search:'Syn',title_key:'SYNTHETIC'}))
+    } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('applies title and status at once when no typing delay is running', async () => {
+    const w=mounted();await flushPromises()
+    vi.useFakeTimers()
+    try {
+      await w.get('[data-field="member-title"]').setValue('SYNTHETIC');await flushPromises()
+      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({title_key:'SYNTHETIC'}))
+      const calls=api.members.mock.calls.length
+      await w.get('[data-field="member-payment-status"]').setValue('paid');await flushPromises()
+      expect(api.members).toHaveBeenCalledTimes(calls+1)
+      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({title_key:'SYNTHETIC',payment_status:'paid'}))
     } finally { vi.useRealTimers(); w.unmount() }
   })
 })

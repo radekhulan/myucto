@@ -62,7 +62,9 @@ final class MembershipAction
             $filter = MembershipListFilter::parse($query);
             $items = (new MembershipListRepository($this->db))->page($supplier, $after, $limit + 1, $filter);
             $more = count($items) > $limit;
-            if ($more) array_pop($items);
+            if ($more) {
+                array_pop($items);
+            }
             return ['items' => $items, 'next_after_id' => $more ? $items[array_key_last($items)]['id'] : null];
         });
     }
