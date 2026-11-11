@@ -167,7 +167,7 @@ final class KbPlusOnboardingAction
         return RequestAuthorization::isSessionAuth($request)
             && RequestAuthorization::allows($request, self::PERMISSION, $minimum)
             ? null
-            : Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            : Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
     }
 
     private function operationError(Response $response, BankConnectorOperationException $e): Response

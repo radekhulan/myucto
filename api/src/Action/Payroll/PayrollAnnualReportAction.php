@@ -35,7 +35,7 @@ final class PayrollAnnualReportAction
             return $error ?? Json::error(
                 $response,
                 'forbidden',
-                'Pro tuto akci nemáš oprávnění.',
+                'Pro tuto akci nemáte oprávnění.',
                 403,
             );
         }

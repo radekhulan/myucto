@@ -84,7 +84,7 @@ final class CreateTokenAction
         // defense-in-depth pro případ změny pravidel; fail-open BC větev membershipu
         // níže by jinak pro klienta bez řádků byla eskalace).
         if (RequestAuthorization::isClientType($request)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         $body = (array) ($request->getParsedBody() ?? []);

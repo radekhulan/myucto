@@ -59,7 +59,7 @@ final class PayrollEnforcementFactsAction
             return $error;
         }
         if (!$this->requirePermission($request, $response, 'documents', AccessLevel::READ, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         try {
             $body = $this->input($request);
@@ -115,7 +115,7 @@ final class PayrollEnforcementFactsAction
             return $error;
         }
         if (!$this->requirePermission($request, $response, 'documents', AccessLevel::READ, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         try {
             $body = $this->input($request);
@@ -176,7 +176,7 @@ final class PayrollEnforcementFactsAction
             return $error;
         }
         if (!$this->requirePermission($request, $response, 'documents', AccessLevel::READ, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         try {
             $body = $this->input($request);
@@ -221,7 +221,7 @@ final class PayrollEnforcementFactsAction
         }
         if (!$this->requirePermission($request, $response, 'payroll.enforcement', $level, $error)
             || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         return null;
     }

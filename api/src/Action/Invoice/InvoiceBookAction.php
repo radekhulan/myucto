@@ -37,7 +37,7 @@ final class InvoiceBookAction
     public function issued(Request $request, Response $response): Response
     {
         if (!RequestAuthorization::allows($request, 'invoices', AccessLevel::READ)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $format = self::format($request);
         if ($format === null) {
@@ -55,7 +55,7 @@ final class InvoiceBookAction
     public function received(Request $request, Response $response): Response
     {
         if (!RequestAuthorization::allows($request, 'purchase_invoices', AccessLevel::READ)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $format = self::format($request);
         if ($format === null) {

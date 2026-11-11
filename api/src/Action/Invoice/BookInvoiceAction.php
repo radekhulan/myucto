@@ -127,7 +127,7 @@ final class BookInvoiceAction
         if (RequestAuthorization::allows($request, self::PERMISSION, AccessLevel::WRITE)) {
             return null;
         }
-        return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
     }
 
     private function respondWithInvoice(Response $response, int $id): Response

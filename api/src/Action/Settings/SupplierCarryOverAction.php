@@ -22,7 +22,7 @@ final class SupplierCarryOverAction
     public function __invoke(Request $request, Response $response): Response
     {
         if (!RequestAuthorization::canCreateSupplier($request)) {
-            return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         if (!RequestAuthorization::isSessionAuth($request)) {
             return Json::sessionRequired($response, 'Převzetí ze stávajících firem je dostupné jen z webového rozhraní.');

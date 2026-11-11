@@ -196,7 +196,7 @@ final class TaxAction
             return Json::sessionRequired($response);
         }
         if (!RequestAuthorization::allows($request, TaxFamilyIdentifierService::PERMISSION, AccessLevel::WRITE)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         if ($sid <= 0) {
@@ -226,7 +226,7 @@ final class TaxAction
                 $request->getHeaderLine('User-Agent'),
             );
         } catch (PermissionDenied) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\DomainException $e) {

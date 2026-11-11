@@ -50,7 +50,7 @@ final class PayrollAnnualDocumentBatchAction
             AccessLevel::WRITE,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $kind = self::KINDS[$args['kind'] ?? ''] ?? null;
         if ($kind === PayrollDocumentKind::AnnualSettlementResult
@@ -138,7 +138,7 @@ final class PayrollAnnualDocumentBatchAction
             AccessLevel::READ,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $batch = $this->batch->detail(
             $this->currentSupplierId($request),
@@ -162,7 +162,7 @@ final class PayrollAnnualDocumentBatchAction
             AccessLevel::READ,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $query = $request->getQueryParams();
         try {
@@ -190,7 +190,7 @@ final class PayrollAnnualDocumentBatchAction
             AccessLevel::WRITE,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $supplierId = $this->currentSupplierId($request);
         $batchId = (int) ($args['batchId'] ?? 0);
@@ -242,7 +242,7 @@ final class PayrollAnnualDocumentBatchAction
             AccessLevel::WRITE,
             $error,
         )) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         return null;
     }

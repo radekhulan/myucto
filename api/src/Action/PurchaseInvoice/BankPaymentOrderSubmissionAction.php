@@ -26,7 +26,7 @@ final class BankPaymentOrderSubmissionAction
     public function get(Request $request, Response $response, array $args): Response
     {
         if (!RequestAuthorization::allows($request, 'purchase_invoices.payment_orders', AccessLevel::READ)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         return Json::ok($response, [
             'submission' => $this->service->find(
@@ -39,7 +39,7 @@ final class BankPaymentOrderSubmissionAction
     public function post(Request $request, Response $response, array $args): Response
     {
         if (!$this->mayWrite($request)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $body = (array) ($request->getParsedBody() ?? []);
         $connectionId = (int) ($body['connection_id'] ?? 0);
@@ -80,7 +80,7 @@ final class BankPaymentOrderSubmissionAction
     public function sign(Request $request, Response $response, array $args): Response
     {
         if (!RequestAuthorization::isSessionAuth($request) || !$this->mayWrite($request)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         try {
@@ -96,7 +96,7 @@ final class BankPaymentOrderSubmissionAction
     public function refresh(Request $request, Response $response, array $args): Response
     {
         if (!RequestAuthorization::isSessionAuth($request) || !$this->mayWrite($request)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         try {
             $submission = $this->signatures->refresh(SupplierGuard::currentId($request), (int) ($args['orderId'] ?? 0), 'purchase_invoice');
@@ -112,7 +112,7 @@ final class BankPaymentOrderSubmissionAction
         if (!RequestAuthorization::isSessionAuth($request)
             || !RequestAuthorization::allows($request, 'purchase_invoices.payment_orders', AccessLevel::READ)
             || !RequestAuthorization::allows($request, 'settings.bank_accounts', AccessLevel::READ)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         try {
             $items = $this->signatures->items(SupplierGuard::currentId($request), (int) ($args['orderId'] ?? 0), 'purchase_invoice');

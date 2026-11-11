@@ -723,7 +723,7 @@ final class TaxReturnAction
     ): ?Response
     {
         if (!RequestAuthorization::allows($request, $permission, $minimum)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         return null;
     }

@@ -263,7 +263,7 @@ final class InstanceAdminAction
         if ($this->managed->isManaged()) return Json::error($response, 'not_found', 'Správa instance není na této instalaci dostupná.', 404);
         if (RequestAuthorization::canManageInstance($request)
             && (!$superadminOnly || RequestAuthorization::isSuperadmin($request))) return null;
-        return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáš oprávnění.', 403);
+        return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáte oprávnění.', 403);
     }
 
     private function guardSupplier(Request $request, Response $response, array $args): ?Response

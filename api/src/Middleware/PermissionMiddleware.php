@@ -179,7 +179,7 @@ final class PermissionMiddleware implements MiddlewareInterface
         return Json::error(
             $this->responseFactory->createResponse(403),
             'forbidden_permission',
-            'Pro tuto akci nemáš oprávnění.',
+            'Pro tuto akci nemáte oprávnění.',
             403,
         );
     }
