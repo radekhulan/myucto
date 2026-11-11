@@ -14341,7 +14341,8 @@
         "jmhz_ordinary_evidence_risk_shifts_unexpected": "Počet směn při rizikové práci (10580) se uvádí jen u vztahu s prací zařazenou do kategorie 4.",
         "jmhz_ozp_wage_primary_mismatch": "Podporu zaměstnávání OZP má jen vedlejší pracovní vztah osoby, výdělek OZP ale nese souhrn hlavního vztahu.",
         "jmhz_xml_ozp_deductions_inconsistent": "Příznak srážek ve prospěch zaměstnavatele (10349) neodpovídá částkám 10350 až 10353 (kontrola 258).",
-        "jmhz_xml_ozp_wage_form_unsupported": "Výdělek osob OZP a srážky ve prospěch zaměstnavatele (10347 až 10353) formulář tohoto druhu nevede; hlášení zpracujte ručně."
+        "jmhz_xml_ozp_wage_form_unsupported": "Výdělek osob OZP a srážky ve prospěch zaměstnavatele (10347 až 10353) formulář tohoto druhu nevede; hlášení zpracujte ručně.",
+        "jmhz_deferral_nothing_to_complete": "Žádný odložený vztah nečeká na doplnění; opravné hlášení lze navázat až na přijaté řádné hlášení."
       },
       "settling": {
         "title": "Čerstvá změna údajů zaměstnance",

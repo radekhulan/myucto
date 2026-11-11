@@ -14341,7 +14341,8 @@
         "jmhz_ordinary_evidence_risk_shifts_unexpected": "The number of shifts in risk work (10580) is reported only for an employment with work classified in category 4.",
         "jmhz_ozp_wage_primary_mismatch": "Only a secondary employment of the person has disability employment support, but the disability wage data belongs to the summary of the primary employment.",
         "jmhz_xml_ozp_deductions_inconsistent": "The flag of deductions in favour of the employer (10349) does not match amounts 10350 to 10353 (control 258).",
-        "jmhz_xml_ozp_wage_form_unsupported": "This form type does not carry the disability wage data and deductions in favour of the employer (10347 to 10353); process the report manually."
+        "jmhz_xml_ozp_wage_form_unsupported": "This form type does not carry the disability wage data and deductions in favour of the employer (10347 to 10353); process the report manually.",
+        "jmhz_deferral_nothing_to_complete": "No deferred relation awaits completion; a corrective report can follow only an accepted regular report."
       },
       "settling": {
         "title": "Recent change of employee data",

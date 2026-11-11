@@ -38,6 +38,8 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
      * @var array<string,string>
      */
     private const NON_CODES = [
+        'jmhz_corrections_override' => 'key',
+        'jmhz_corrections_override_reason' => 'field',
         'eldp_code' => 'field',
         'eldp_code_evidence' => 'field',
         'eldp_code_row_sha256' => 'field',
