@@ -1184,7 +1184,8 @@
         "2278_stock_documents_updated_index.sql",
         "2279_membership_rates.sql",
         "2280_membership_batches.sql",
-        "2281_microsoft365_imap_oauth.sql"
+        "2281_microsoft365_imap_oauth.sql",
+        "2282_clients_simplified_only.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -4373,6 +4374,7 @@
                 "related_party_note": "varchar(255) NULL DEFAULT NULL",
                 "related_party_type": "enum('capital','otherwise','employment','close_person') NULL DEFAULT NULL",
                 "reverse_charge": "tinyint(1) NOT NULL DEFAULT 0",
+                "simplified_only": "tinyint(1) NOT NULL DEFAULT 0",
                 "street": "varchar(190) NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_number": "varchar(30) NULL DEFAULT NULL",
