@@ -2248,6 +2248,31 @@ describe('TimeAttendance — měsíční mřížka', () => {
   })
 
   /*
+   * „Schválit měsíc všem" dřív vzalo jen 25 řádků viditelné stránky, kontrola
+   * běhu přitom hlásila 39 vztahů. Počet i dávka teď pokrývají celý výběr.
+   */
+  it('schválit měsíc všem pracuje s celým výběrem, ne se stránkou', async () => {
+    const names = Array.from({ length: 30 }, (_, index) => `Osoba ${index + 1}`)
+    const all = gridPage(names)
+    const firstPage = { ...all, items: all.items.slice(0, 25), total: 30, open_total: 30 }
+    m.timeMonth.mockImplementation((_period: string, _incomplete: boolean, page?: { limit?: number }) =>
+      Promise.resolve(page?.limit === 200 ? { ...all, total: 30, open_total: 30 } : firstPage))
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    const button = wrapper.get('[data-test="payroll-time-approve-all"]')
+    await button.trigger('click')
+    await flushPromises()
+    expect(m.timeMonth).toHaveBeenCalledWith(expect.any(String), false, { limit: 200, offset: 0 }, null)
+
+    await wrapper.get('[data-test="bulk-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.approveTimeMonth).toHaveBeenCalledTimes(30)
+    wrapper.unmount()
+  })
+
+  /*
    * Pracovní poměr s nástupem uprostřed měsíce bez kalendáře: náhled má
    * nález, server by řádek odmítl 422. Dávka ho vyřadí jménem a důvodem.
    */

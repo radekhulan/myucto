@@ -1990,6 +1990,8 @@ export interface PayrollTimeOverview extends PayrollHistoricalPeriodInfo {
   employment_id: number | null
   items: PayrollTimeOverviewItem[]
   total: number
+  /** Otevřené (neschválené) měsíce celého výběru podle filtru, ne jen stránky. */
+  open_total?: number
   limit: number
   offset: number
 }

@@ -169,6 +169,30 @@ final class PayrollE2eAgencyFebruaryTest extends TestCase
     }
 
     /**
+     * „Schválit měsíc všem" potřebuje počet otevřených měsíců CELÉHO výběru;
+     * stránka nese jen 25 řádků.
+     */
+    public function testTimeOverviewCountsOpenMonthsOfWholeSelection(): void
+    {
+        $people = [];
+        foreach ([5, 6, 7] as $seq) {
+            $people[] = $this->hireDpp($seq, '2026-02-07', null);
+        }
+        $this->publishShifts($people[0]['employment_id'], ['2026-02-09']);
+        $approved = $this->approveTimeMonth($people[0]['employment_id'], self::PERIOD, ['2026-02-09'], dailyMinutes: 240);
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+
+        $overview = $this->json($this->time->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => self::PERIOD, 'limit' => '1', 'offset' => '0']),
+            new Response(),
+        ));
+        self::assertCount(1, $overview['items']);
+        self::assertSame(3, $overview['total']);
+        self::assertSame(2, $overview['open_total']);
+    }
+
+    /**
      * @return array{employee_id:int,employment_id:int,name:string}
      */
     private function hireDpp(int $seq, string $start, ?string $end): array
