@@ -12994,7 +12994,7 @@
         "foreignCase": "Foreign case (decision issued outside CZ and SK)",
         "slovakCase": "Slovak case (NEMPRI reports it as foreign, HZUPN as domestic)",
         "additionalNote": "Additional note for the social security office",
-        "decisionNumberHint": "The decision number (for e-sick-notes and e-care-notes the number from the doctor's decision) is mandatory for sickness, care and long-term care benefits; without it the authority cannot match the submission. Only a foreign case may omit it. A corrective submission replaces the earlier one with the same decision number.",
+        "decisionNumberHint": "The decision number (for e-sick-notes and e-care-notes the number from the doctor's decision) is mandatory for sickness, care, long-term care and maternity benefits (except taking a child into care; for maternity it ends with the letter M); without it the authority cannot match the submission. Only a foreign case may omit it. A corrective submission replaces the earlier one with the same decision number.",
         "smallScopeIncome": "Income from small-scope employment or DPP (CZK)",
         "smallScopeIncomeHint": "Fill in only for small-scope employment and an agreement to perform work (DPP): the countable income in the month the event arose, in whole crowns. The notification is then filed only after that month ends.",
         "applicationHint": "Copy the details from the application the employee handed to you. The employer accepts the application and forwards it to the authority (section 97(1) of the Sickness Insurance Act).",

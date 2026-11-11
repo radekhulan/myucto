@@ -12994,7 +12994,7 @@
         "foreignCase": "Zahraniční případ (rozhodnutí mimo ČR a SR)",
         "slovakCase": "Slovenský případ (NEMPRI ho hlásí jako zahraniční, HZUPN jako český)",
         "additionalNote": "Další sdělení pro OSSZ",
-        "decisionNumberHint": "Číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře) je u nemocenského, ošetřovného a dlouhodobého ošetřovného povinné; bez něj ČSSZ podání nespáruje. Nemusí ho mít jen zahraniční případ. Opravné podání nahradí dřívější podání se stejným číslem rozhodnutí.",
+        "decisionNumberHint": "Číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře) je u nemocenského, ošetřovného, dlouhodobého ošetřovného a peněžité pomoci v mateřství (kromě převzetí dítěte do péče, u PPM končí písmenem M) povinné; bez něj ČSSZ podání nespáruje. Nemusí ho mít jen zahraniční případ. Opravné podání nahradí dřívější podání se stejným číslem rozhodnutí.",
         "smallScopeIncome": "Příjem ze zaměstnání malého rozsahu nebo DPP (Kč)",
         "smallScopeIncomeHint": "Vyplňte jen u zaměstnání malého rozsahu a u dohody o provedení práce: započitatelný příjem z měsíce, v němž událost vznikla, v celých korunách. Oznámení se pak podává až po skončení tohoto měsíce.",
         "applicationHint": "Údaje opište ze žádosti, kterou vám zaměstnanec předal. Zaměstnavatel žádost přijímá a předává ČSSZ (§ 97 odst. 1 zákona o nemocenském pojištění).",

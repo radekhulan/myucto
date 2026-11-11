@@ -196,11 +196,21 @@ enum SicknessBenefitKind: string
         }
         if ($number === null) {
             if ($requirement === self::DECISION_REQUIRED && !$foreignCase) {
+                // Doklad, ze kterého se číslo opisuje, se liší podle druhu
+                // dávky; tvar hlídá kontrola NEMPRI25 č. 2 (decisionNumberPattern).
+                $source = match ($this) {
+                    self::Ppm => 'u peněžité pomoci v mateřství číslo, které lékař přidělil žádosti '
+                        . 'o dávku: sedm číslic zakončených písmenem M',
+                    self::Dlo => 'u dlouhodobého ošetřovného číslo rozhodnutí lékaře o potřebě '
+                        . 'dlouhodobé péče: sedm číslic zakončených písmenem L',
+                    default => 'u eNeschopenky a eOČR číslo z rozhodnutí lékaře',
+                };
+
                 return [
                     'code' => 'nempri_decision_number_missing',
-                    'message' => 'Chybí číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře). '
+                    'message' => 'Chybí číslo rozhodnutí (' . $source . '). '
                         . 'ČSSZ podle něj oznámení páruje s rozhodnutím; bez něj ho nezpracuje. '
-                        . 'Výjimkou je jen zahraniční případ.',
+                        . 'Výjimkou je jen zahraniční případ. Doplňte ho v případu dávky.',
                 ];
             }
 
