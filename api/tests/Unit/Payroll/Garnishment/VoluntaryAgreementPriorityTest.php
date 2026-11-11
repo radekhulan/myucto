@@ -95,10 +95,14 @@ final class VoluntaryAgreementPriorityTest extends TestCase
             [$this->agreement('agreement:1', 3_000_00, '2026-05-20')],
         ));
 
-        self::assertSame(600_000, $result->totalWithheldMinorUnits);
-        // Obecná část je 863 200; exekuce si vzala 600 000 a dohodě zbylo
-        // 263 200 — přesně tolik, kolik by dostala i bez přemostění.
-        self::assertSame(263_200, $calculator->voluntaryDeductionCapacity($result));
+        // Exekuce 6 000 Kč a náhrada plátce mzdy 50 Kč, kterou hradí povinný
+        // (§ 270 odst. 2 o. s. ř.) a která se uspokojuje z první třetiny před
+        // ostatními (§ 279 odst. 1).
+        self::assertSame(605_000, $result->totalWithheldMinorUnits);
+        self::assertSame(600_000, $result->allocationFor('exekuce')?->totalMinorUnits);
+        // Obecná část je 863 200; exekuce s náhradou si vzaly 605 000 a dohodě
+        // zbylo 258 200 — přesně tolik, kolik by dostala i bez přemostění.
+        self::assertSame(258_200, $calculator->voluntaryDeductionCapacity($result));
 
         $withoutBridge = $calculator->calculate($this->input(
             [$this->enforcement('exekuce', 6_000_00, '2026-03-01')],
@@ -121,10 +125,14 @@ final class VoluntaryAgreementPriorityTest extends TestCase
             [$this->agreement('agreement:1', 5_000_00, '2026-03-01')],
         ));
 
-        // Obecná část 863 200 se dělí v poměru 1 500 000 : 500 000, tedy 3 : 1
-        // — 647 400 exekuci a 215 800 dohodě.
-        self::assertSame(647_400, $result->totalWithheldMinorUnits);
-        self::assertSame(215_800, $calculator->voluntaryDeductionCapacity($result));
+        // Z obecné části 863 200 se nejdřív uspokojí náhrada plátce mzdy
+        // 5 000 (§ 279 odst. 1 věta poslední o. s. ř.), zbylých 858 200 se
+        // dělí v poměru 1 500 000 : 500 000, tedy 3 : 1 — 643 650 exekuci
+        // a 214 550 dohodě. Sráží se 643 650 + 5 000.
+        self::assertSame(648_650, $result->totalWithheldMinorUnits);
+        self::assertSame(643_650, $result->allocationFor('exekuce')?->totalMinorUnits);
+        self::assertSame(5_000, $result->employerFlatFeeMinorUnits);
+        self::assertSame(214_550, $calculator->voluntaryDeductionCapacity($result));
     }
 
     /**

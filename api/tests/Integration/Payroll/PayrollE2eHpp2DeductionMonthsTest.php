@@ -67,7 +67,8 @@ final class PayrollE2eHpp2DeductionMonthsTest extends TestCase
 
     /**
      * Běžné výživné 2 000 Kč měsíčně zaevidované částkou jedné měsíční dávky:
-     * v lednu se srazí, v únoru už evidence nic nenárokuje. Běh to nesmí
+     * v lednu se srazí (z druhé třetiny, paušál plátce mzdy 50 Kč navíc
+     * z volné první třetiny), v únoru už evidence nic nenárokuje. Běh to nesmí
      * přejít mlčky (plátce mzdy za neprovedené srážky ručí, § 292 o. s. ř.):
      * únorový běh nese varování s povinným potvrzením a odkazem na případ.
      */
@@ -77,7 +78,8 @@ final class PayrollE2eHpp2DeductionMonthsTest extends TestCase
         $this->claimIn('current_maintenance', '2026-01-12', 200_000, 200_000);
 
         $january = $this->month(...self::MONTHS[0]);
-        self::assertSame(200_000, $january['enforcement']['total_withheld_minor_units']);
+        self::assertSame(200_000, $january['enforcement']['allocations'][0]['total_minor_units']);
+        self::assertSame(205_000, $january['enforcement']['total_withheld_minor_units']);
         self::assertNotContains('enforcement_current_maintenance_exhausted', $january['validation_codes']);
         $this->approveEnforcementRun($january);
 
@@ -101,7 +103,8 @@ final class PayrollE2eHpp2DeductionMonthsTest extends TestCase
         $this->claimIn('maintenance_arrears', '2026-01-12', 200_000, 200_000);
 
         $january = $this->month(...self::MONTHS[0]);
-        self::assertSame(200_000, $january['enforcement']['total_withheld_minor_units']);
+        self::assertSame(200_000, $january['enforcement']['allocations'][0]['total_minor_units']);
+        self::assertSame(205_000, $january['enforcement']['total_withheld_minor_units']);
         $this->approveEnforcementRun($january);
 
         $february = $this->month(...self::MONTHS[1]);
