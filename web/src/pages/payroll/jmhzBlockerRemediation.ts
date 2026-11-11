@@ -151,8 +151,13 @@ export function jmhzRemediationTarget(
       return { name: 'payroll-settings', query: { tab: 'submissions' }, hash: '#jmhz-employer-annual-evidence' }
     case 'office':
       return { name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-offices' }
-    case 'annual_settlement':
-      return { name: 'payroll-annual-settlement' }
+    case 'annual_settlement': {
+      // Leden a únor hlásí zúčtování MINULÉHO roku; stejně jako server
+      // (`JmhzBlockerRemediationPath`) odkaz nese rok a osobu.
+      const year = period && /^\d{4}-/.test(period) ? { year: String(Number(period.slice(0, 4)) - 1) } : {}
+      const person = employeeId === null ? {} : { person: String(employeeId) }
+      return { name: 'payroll-annual-settlement', query: { ...year, ...person } }
+    }
     case 'deferred_income':
       return { name: 'payroll-people', query: { ...scope, panel: 'deferred_income' } }
     case 'takeover':
@@ -182,6 +187,27 @@ export function jmhzComponentQuery(code: string, componentId: number | null): Re
     ? 'manual_review'
     : code === 'component_jmhz_treatment_invalid' ? 'invalid' : 'missing'
   return { tab: 'catalog', jmhz }
+}
+
+/**
+ * Zúžení číselníku složek z odkazu `?jmhz=` (souhrnný nález bez konkrétní
+ * složky, viz {@link jmhzComponentQuery}). Bez něj odkaz z nálezu otevřel celý
+ * číselník a účetní hledala očima, které složky jsou bez zařazení.
+ * Neplatné nastavení (`invalid`) stav mapování nemá, proto se nezužuje.
+ */
+export type JmhzCatalogFilter = 'missing' | 'manual_review'
+
+export function jmhzCatalogFilter(raw: unknown): JmhzCatalogFilter | null {
+  const value = Array.isArray(raw) ? raw[0] : raw
+  return value === 'missing' || value === 'manual_review' ? value : null
+}
+
+export function filterCatalogByJmhz<T>(
+  components: T[],
+  stateOf: (component: T) => { status: string },
+  filter: JmhzCatalogFilter | null,
+): T[] {
+  return filter === null ? components : components.filter(component => stateOf(component).status === filter)
 }
 
 /**

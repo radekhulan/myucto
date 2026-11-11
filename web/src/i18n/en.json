@@ -5173,7 +5173,9 @@
         "delete": "Delete",
         "delete_confirm": "Really delete the unused payroll component “{name}”? If it has already been used in payroll, the application safely refuses the deletion.",
         "deleted": "The unused payroll component was deleted.",
-        "delete_failed": "The payroll component cannot be deleted. If it has already been used, end its validity or deactivate it."
+        "delete_failed": "The payroll component cannot be deleted. If it has already been used, end its validity or deactivate it.",
+        "jmhz_filter": "Showing only components with status “{status}” ({count}) referenced by the report finding.",
+        "jmhz_filter_clear": "Show all components"
       },
       "jmhz": {
         "title": "Map component to JMHZ",
@@ -6716,7 +6718,8 @@
           "tax": "no tax declaration | 1 tax declaration and credit | {count} tax declarations and credits",
           "insurance": "no insurance record | 1 insurance record | {count} insurance records",
           "payout_rules": "no payout rule | 1 payout rule | {count} payout rules"
-        }
+        },
+        "show_time": "Open attendance"
       },
       "detail_hint": "Each relationship has its own terms history, lifecycle, checklist and audit timeline.",
       "dependants": {
@@ -32483,7 +32486,8 @@
           "row_version_conflict": "Someone else changed the employment or its average in the meantime. Repeat the action."
         },
         "warning": {
-          "corrective_report_needed": "A JMHZ report with the original average was already filed for {period}. After approving the run correction, file a corrective report."
+          "corrective_report_needed": "A JMHZ report with the original average was already filed for {period}. After approving the run correction, file a corrective report.",
+          "raised_to_minimum_wage": "The entered earning of CZK {requested}/h is below the minimum wage. Under Section 357(1) of the Labour Code the average was raised to CZK {applied}/h, which compensations and the JMHZ report use."
         }
       },
       "bulk_load_failed": "Could not load candidates for the bulk average calculation.",

@@ -66,6 +66,32 @@ final class PayrollRunReadinessService
      */
     private const RESOLVED_BY_LOCKING = ['hourly_claims_not_materialized'];
 
+    /**
+     * Mezery katalogu osob, které se SE SNÍMKEM posuzují pravidlem výpočtu
+     * ({@see self::taxDeclarationFinding()}, {@see self::statutoryInputFinding()}).
+     */
+    private const GAPS_JUDGED_BY_SNAPSHOT = ['tax_declaration', 'tax_residence', 'health_insurance'];
+
+    /** Kódy zákonného vstupu, které hlásí už `taxDeclarationFinding()`. */
+    private const DECLARATION_ISSUE_CODES = [
+        'tax_declaration_evidence_missing',
+        'tax_declaration_evidence_unverified',
+    ];
+
+    /** Sekce zákonné evidence, které doplní hromadné výchozí údaje. */
+    private const STATUTORY_DEFAULT_FIELDS = [
+        'statutory.tax_residences',
+        'statutory.social_jurisdictions',
+        'statutory.social_discount_claims',
+    ];
+
+    /** Kódy zákonného vstupu, které vyřeší hromadné přiřazení pojišťovny. */
+    private const HEALTH_INSURER_ISSUE_CODES = [
+        'health_coverage_evidence_missing',
+        'health_insurer_evidence_unverified',
+        'health_insurer_snapshot_unverified',
+    ];
+
     /** Zdroje ověření účtu instituce, které platí za doklad. */
     private const VERIFIED_SOURCE_KINDS = [
         'official_registry',
@@ -244,6 +270,10 @@ final class PayrollRunReadinessService
             if ($settlementFinding !== null) {
                 $findings[] = $settlementFinding;
             }
+            $statutoryFinding = self::statutoryInputFinding($snapshot->data);
+            if ($statutoryFinding !== null) {
+                $findings[] = $statutoryFinding;
+            }
             /*
              * Nálezy, které se dosud ozvaly až u ZMRAZENÍ měsíčního hlášení.
              * Nepíšou se tu znovu — volá se tatáž cesta, jen nasucho. Bez toho
@@ -260,14 +290,16 @@ final class PayrollRunReadinessService
             }
         }
 
-        // Stav prohlášení posuzuje nad snímkem `taxDeclarationFinding()` týmž
-        // pravidlem jako výpočet. Katalog mezer ho hodnotí jinak (živé tabulky,
-        // překryv intervalů v období), takže by tatáž věc visela dvakrát
-        // s jiným počtem. Bez snímku zůstává jediným zdrojem katalog.
+        // Stav prohlášení, daňovou rezidenci a pojišťovnu posuzují nad snímkem
+        // `taxDeclarationFinding()` a `statutoryInputFinding()` týmž pravidlem
+        // jako výpočet. Katalog mezer je hodnotí jinak (živé tabulky, překryv
+        // intervalů v období), takže by tatáž věc visela dvakrát s jiným počtem
+        // a jako „doplní se kdykoli", ačkoli schválení zastaví. Bez snímku
+        // zůstává jediným zdrojem katalog.
         $peopleFinding = $this->personDataGapFinding(
             $supplierId,
             $periodStart,
-            $snapshot === null ? [] : ['tax_declaration'],
+            $snapshot === null ? [] : self::GAPS_JUDGED_BY_SNAPSHOT,
         );
         if ($peopleFinding !== null) {
             $findings[] = $peopleFinding;
@@ -284,7 +316,7 @@ final class PayrollRunReadinessService
         $findings = array_map(
             static function (array $finding): array {
                 $bulkActions = self::bulkActions($finding);
-                unset($finding['gap_totals'], $finding['bulk_employee_ids']);
+                unset($finding['gap_totals'], $finding['bulk_employee_ids'], $finding['bulk_totals']);
 
                 return $finding + [
                     'hideable' => false,
@@ -324,6 +356,18 @@ final class PayrollRunReadinessService
     {
         $code = (string) ($finding['code'] ?? '');
         $count = max((int) ($finding['count'] ?? 0), (int) ($finding['entity_total'] ?? 0));
+        if ($code === 'statutory_calculation_manual_review') {
+            /** @var array<string,int> $totals */
+            $totals = $finding['bulk_totals'] ?? [];
+            $actions = [];
+            foreach (['statutory_defaults', 'health_insurer'] as $kind) {
+                if (($totals[$kind] ?? 0) > 0) {
+                    $actions[] = ['kind' => $kind, 'count' => $totals[$kind]];
+                }
+            }
+
+            return $actions;
+        }
         if ($code === 'person_data_gap') {
             /** @var array<string,int> $totals */
             $totals = $finding['gap_totals'] ?? [];
@@ -347,6 +391,15 @@ final class PayrollRunReadinessService
         $declarationIds = $code === 'tax_declaration_evidence_missing'
             ? array_values(array_map('intval', (array) ($finding['bulk_employee_ids'] ?? [])))
             : array_values(array_map('intval', (array) ($finding['subject_ids'] ?? [])));
+
+        /*
+         * Tlačítko musí slibovat tolik osob, kolik dialog dostane. Souhrn
+         * nepodepsaných prohlášení je jediná validace běhu s výčtem osob
+         * v `subject_ids`: tlačítko ukazovalo „(1)" a dialog dostal 34 osob.
+         */
+        if ($declarationIds !== []) {
+            $count = count($declarationIds);
+        }
 
         return match (true) {
             $code === 'tax_declaration_not_signed_summary',
@@ -536,6 +589,117 @@ final class PayrollRunReadinessService
             count($pending),
             $entities,
         );
+    }
+
+    /**
+     * Osoby běhu, které zákonný výpočet zastaví ruční kontrolou (chybí
+     * daňová rezidence, platné zdravotní pojištění, ověřená pojišťovna …).
+     *
+     * ── Co bylo špatně ──────────────────────────────────────────────────────
+     * Chybějící rezidenci a pojišťovnu hlásila kontrola jen v katalogu mezer
+     * osob jako „doplní se kdykoli". Výpočet pak u týchž lidí skončil
+     * blokací „statutory_calculation_manual_review" a běh nešel schválit.
+     * Agentura s padesáti brigádníky se o tom dozvěděla až po zamknutí.
+     *
+     * Teď se pouští TÝŽ sestavovač zákonných vstupů jako výpočet
+     * ({@see PayrollRunStatutoryInputAssembler}) nad týmž snímkem a text
+     * i odkaz se skládají TÝMŽ formátem jako validace běhu
+     * ({@see PayrollRunIssueGuidance::describe()}), takže nález má stejný
+     * počet řádků, jaký pak výpočet uloží. Stav prohlášení zůstává
+     * v `taxDeclarationFinding()` (vlastní hromadná oprava).
+     *
+     * @param array<string,mixed> $snapshotData
+     * @return array<string,mixed>|null
+     */
+    private static function statutoryInputFinding(array $snapshotData): ?array
+    {
+        try {
+            $issues = (new PayrollRunStatutoryInputAssembler())->assemble($snapshotData)->issues;
+        } catch (\Throwable) {
+            return null;
+        }
+        $names = [];
+        foreach ((array) ($snapshotData['people'] ?? []) as $person) {
+            if (is_array($person) && is_array($person['employee'] ?? null)) {
+                $names[(int) ($person['employee']['id'] ?? 0)] = (string) ($person['employee']['full_name'] ?? '');
+            }
+        }
+        $details = [];
+        $statutoryPeople = [];
+        $insurerPeople = [];
+        foreach ($issues as $issue) {
+            if ($issue->isGlobal() || in_array($issue->code, self::DECLARATION_ISSUE_CODES, true)) {
+                continue;
+            }
+            $detail = PayrollRunIssueGuidance::describe($issue->toIssueString());
+            $key = $detail['entity_type'] . ':' . $detail['entity_id'] . ':' . $detail['remediation_path'] . ':' . $detail['message'];
+            if (isset($details[$key])) {
+                continue;
+            }
+            $details[$key] = $detail;
+            if ($detail['entity_type'] !== 'employee' || $detail['entity_id'] === null) {
+                continue;
+            }
+            foreach (self::STATUTORY_DEFAULT_FIELDS as $field) {
+                if (str_contains((string) $detail['remediation_path'], 'field=' . rawurlencode($field))
+                    || str_contains((string) $detail['remediation_path'], 'field=' . $field)
+                ) {
+                    $statutoryPeople[$detail['entity_id']] = true;
+                }
+            }
+            if (in_array($issue->code, self::HEALTH_INSURER_ISSUE_CODES, true)) {
+                $insurerPeople[$detail['entity_id']] = true;
+            }
+        }
+        if ($details === []) {
+            return null;
+        }
+        $details = array_values($details);
+        usort(
+            $details,
+            static fn (array $left, array $right): int =>
+                [$names[$left['entity_id']] ?? '', $left['entity_id'], $left['message']]
+                <=> [$names[$right['entity_id']] ?? '', $right['entity_id'], $right['message']],
+        );
+        $people = [];
+        foreach ($details as $detail) {
+            if ($detail['entity_type'] === 'employee' && $detail['entity_id'] !== null) {
+                $people[$detail['entity_id']] = $names[$detail['entity_id']] ?? (string) $detail['entity_id'];
+            }
+        }
+        $named = array_slice(array_values($people), 0, self::MAX_ENTITIES);
+        $hidden = count($people) - count($named);
+
+        return [...self::finding(
+            'statutory_calculation_manual_review',
+            sprintf(
+                'Zákonný výpočet zastaví u %d osob chybějící nebo neověřené údaje v zákonné '
+                . 'evidenci: %s%s. Mzdu spočítat půjde jen zčásti a běh nepůjde schválit. '
+                . 'Odkaz u každé osoby otevře místo opravy; daňovou rezidenci doplní Mzdy → '
+                . 'Zaměstnanci → Další funkce → Doplnit výchozí zákonné údaje, pojišťovnu '
+                . 'Přiřadit zdravotní pojišťovnu hromadně.',
+                count($people),
+                implode(', ', $named),
+                $hidden > 0 ? sprintf(' a dalších %d', $hidden) : '',
+            ),
+            null,
+            count($details),
+            array_map(
+                static fn (array $detail): array => [
+                    'entity_type' => $detail['entity_type'],
+                    'entity_id' => $detail['entity_id'],
+                    'label' => $detail['entity_type'] === 'employee' && $detail['entity_id'] !== null
+                        ? ($names[$detail['entity_id']] ?? null)
+                        : null,
+                    'message' => $detail['message'],
+                    'remediation_path' => $detail['remediation_path'],
+                ],
+                array_slice($details, 0, self::MAX_ENTITIES),
+            ),
+        ), 'bulk_totals' => [
+            'statutory_defaults' => count($statutoryPeople),
+            'health_insurer' => count($insurerPeople),
+        ]];
     }
 
     /**
@@ -1004,7 +1168,10 @@ final class PayrollRunReadinessService
             }
             ++$groups[$code]['entity_total'];
             if ($groups[$code]['remediation_path'] !== $validation->remediationPath) {
-                $groups[$code]['remediation_path'] = null;
+                $groups[$code]['remediation_path'] = self::commonRemediationPath(
+                    $groups[$code]['remediation_path'],
+                    $validation->remediationPath,
+                );
             }
             if ($groups[$code]['message'] !== $validation->message) {
                 $groups[$code]['message'] = 'U uvedených osob nebo pracovních vztahů je třeba doplnit podklady. Konkrétní důvod a odkaz k opravě najdete u každého záznamu.';
@@ -1024,6 +1191,42 @@ final class PayrollRunReadinessService
         }
 
         return array_values($groups);
+    }
+
+    /**
+     * Společný odkaz skupiny nálezů, které se liší jen zúžením na vztah.
+     *
+     * Pět vstupů s haléři vedlo každý na Mzdové vstupy zúžené na jeden vztah,
+     * skupina pak neměla odkaz žádný a hromadné zaokrouhlení celého období
+     * (táž stránka bez zúžení) nebylo odkud otevřít. Odkazy na různá místa
+     * zůstávají bez společného odkazu.
+     */
+    private static function commonRemediationPath(?string $left, ?string $right): ?string
+    {
+        if ($left === null || $right === null) {
+            return null;
+        }
+        $strip = static function (string $path): string {
+            $parts = explode('?', $path, 2);
+            if (!isset($parts[1])) {
+                return $path;
+            }
+            parse_str($parts[1], $query);
+            if (isset($query['panel'])) {
+                // Panel karty bez osoby nic neotevře.
+                return $path;
+            }
+            unset($query['employment']);
+            // Bez období by společný odkaz otevřel zpracovávaný měsíc, ne měsíc běhu.
+            if (!isset($query['period'])) {
+                return $path;
+            }
+
+            return $parts[0] . '?' . http_build_query($query);
+        };
+        $common = $strip($left);
+
+        return $common === $strip($right) ? $common : null;
     }
 
     /**

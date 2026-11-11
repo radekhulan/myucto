@@ -108,7 +108,14 @@ const expandedId = ref<number | null>(null)
 const details = ref<Record<number, PayrollPerson>>({})
 const loadingDetailId = ref<number | null>(null)
 const searchQuery = ref('')
-const peopleFilter = ref<PayrollPeopleFilter>('active')
+// Odkaz z kontroly před během vede na `?filter=blocking_data`; bez čtení
+// parametru se otevřel seznam aktivních a lidé s chybějícími údaji v něm
+// nebyli poznat.
+const PEOPLE_FILTERS: PayrollPeopleFilter[] = ['all', 'active', 'needs_setup', 'needs_data', 'blocking_data', 'dpp_hours_limit']
+const queryPeopleFilter = Array.isArray(route.query.filter) ? route.query.filter[0] : route.query.filter
+const peopleFilter = ref<PayrollPeopleFilter>(
+  PEOPLE_FILTERS.find(filter => filter === queryPeopleFilter) ?? 'active',
+)
 const narrowed = computed(
   () => peopleFilter.value !== 'all' || searchQuery.value.trim() !== '',
 )

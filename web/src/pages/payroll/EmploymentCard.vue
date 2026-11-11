@@ -1653,8 +1653,21 @@ const router = useRouter()
  */
 function deleteBlockerAction() {
   const blocker = props.employment.delete_blocker
+  const period = blocker?.period ? blocker.period.slice(0, 7) : null
+  // Schválená docházka: hláška radí „znovu otevřete v Docházce", odkaz vede
+  // rovnou na měsíc a vztah, kterého se týká.
+  if (blocker?.code === 'payroll_employment_has_approved_time') {
+    return {
+      label: t('payroll.people.delete.show_time'),
+      handler: () => {
+        void router.push({
+          name: 'payroll-time',
+          query: { employment: String(props.employment.id), ...(period ? { period } : {}) },
+        })
+      },
+    }
+  }
   if (blocker?.code !== 'payroll_employment_has_inputs') return undefined
-  const period = blocker.period ? blocker.period.slice(0, 7) : null
   return {
     label: t('payroll.people.delete.show_inputs'),
     handler: () => {

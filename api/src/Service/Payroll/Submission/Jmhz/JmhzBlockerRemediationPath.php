@@ -180,8 +180,13 @@ final class JmhzBlockerRemediationPath
             'ordinary_evidence' => self::withQuery('/payroll/submissions', $periodQuery) . '#jmhz-ordinary-evidence',
             'employer_annual' => '/payroll/settings?tab=submissions#jmhz-employer-annual-evidence',
             'office' => '/payroll/settings?tab=employer#payroll-employer-offices',
-            'annual_settlement' => '/payroll/annual-settlement'
-                . ($personId === null ? '' : '?' . http_build_query(['person' => $personId])),
+            // Hlášení za leden a únor se ptá na zúčtování MINULÉHO roku. Bez
+            // roku stránka otevřela rok podle dnešního data, ne podle hlášení.
+            'annual_settlement' => self::withQuery(
+                '/payroll/annual-settlement',
+                ($period === null ? [] : ['year' => $period['year'] - 1])
+                    + ($personId === null ? [] : ['person' => $personId]),
+            ),
             'takeover' => '/payroll/imports?tab=reconciliation',
             'correction', 'submission' => '/payroll/submissions/transport',
             default => null,

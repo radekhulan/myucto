@@ -103,6 +103,9 @@ final class PayrollRunReadinessImpact
         // Výpočet daně osobu bez ověřeného stavu prohlášení zastaví (ruční
         // kontrola), takže běh se spočítá jen zčásti a schválit nepůjde.
         'tax_declaration_evidence_missing' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
+        // Chybějící daňová rezidence, zdravotní pojištění a jiné zákonné údaje:
+        // výpočet osobu zastaví ruční kontrolou a běh nepůjde schválit.
+        'statutory_calculation_manual_review' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
 
         // ── Skupina 2: opraví se, ale po zamknutí přes opravnou revizi ───────
         // Rozhodnutí nepřítomnosti mění snímek vstupů (schválené nepřítomnosti).
@@ -142,6 +145,15 @@ final class PayrollRunReadinessImpact
         // § 111 odst. 2 ZP — sjednaná měsíční mzda pod minimální mzdou období.
         // Mzda vstupuje do zmrazeného snímku, oprava po zamknutí je revize.
         'monthly_wage_below_minimum' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // Podmínky vztahu (pracoviště 10229 až 10231, tristavy, APZ, dočasné
+        // přidělení, kategorizace rizika) vstupují do zmrazeného snímku běhu.
+        // Doplněné po výpočtu je příprava hlášení nevidí a oprava stojí
+        // opravnou revizi ({@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder::termIssues()}).
+        'jmhz_workplace_codebooks_unverified' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'jmhz_verified_boolean_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'jmhz_apz_instrument_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'jmhz_temporary_assignment_user_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'jmhz_risk_categorization_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
 
         // ── Skupina 1: doplní se kdykoli, na výpočet to nemá vliv ────────────
         'run_without_employments' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],

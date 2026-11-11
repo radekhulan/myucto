@@ -2502,6 +2502,12 @@ final class PayrollInputRepository
               WHERE revision.supplier_id = ?
                 AND run.period_start = ?
                 AND revision.status <> "abandoned"
+                -- Nikdy neschválená revize ZRUŠENÉHO běhu vstup nedrží: zrušení
+                -- vstupy odemyká a hláška zamčeného vstupu radí „Zrušit běh,
+                -- vstup opravit, Začít z opravených vstupů". Bez téhle výjimky
+                -- oprava po zrušení skončila na „zmrazený v revizi" a cesta
+                -- ven nevedla.
+                AND NOT (run.status = "cancelled" AND revision.status IN ("snapshot", "calculated", "reviewed"))
                 AND NOT EXISTS (
                     SELECT 1
                       FROM payroll_run_revisions open_correction

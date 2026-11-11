@@ -600,6 +600,13 @@ final readonly class JmhzPreparationSnapshotService
                         $issues[] = self::identityIssue($employmentId, $identity);
                     }
                 }
+                // Podmínky vztahu (pracoviště, tristavy, APZ, přidělení) týmž
+                // pravidlem jako příprava hlášení; zmrazení je zastaví.
+                if ($employmentId > 0) {
+                    foreach ($this->builder->termIssues($entry, substr($periodEnd, 0, 8) . '01') as $termIssue) {
+                        $issues[] = $termIssue;
+                    }
+                }
                 $inputRows = $entry['inputs'] ?? [];
                 if (!is_array($inputRows) || !array_is_list($inputRows)) {
                     continue;

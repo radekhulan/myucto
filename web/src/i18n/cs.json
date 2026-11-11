@@ -5173,7 +5173,9 @@
         "delete": "Smazat",
         "delete_confirm": "Opravdu smazat nepoužitou mzdovou složku „{name}“? Pokud už byla použita ve mzdách, aplikace smazání bezpečně odmítne.",
         "deleted": "Nepoužitá mzdová složka byla smazána.",
-        "delete_failed": "Mzdovou složku nelze smazat. Pokud už byla použita, ukončete její platnost nebo ji deaktivujte."
+        "delete_failed": "Mzdovou složku nelze smazat. Pokud už byla použita, ukončete její platnost nebo ji deaktivujte.",
+        "jmhz_filter": "Zobrazeny jen složky se stavem „{status}“ ({count}), na které vede nález hlášení.",
+        "jmhz_filter_clear": "Zobrazit všechny složky"
       },
       "jmhz": {
         "title": "Mapování složky do JMHZ",
@@ -6716,7 +6718,8 @@
           "tax": "žádné daňové prohlášení | 1 daňové prohlášení a sleva | {count} daňová prohlášení a slevy | {count} daňových prohlášení a slev",
           "insurance": "žádný záznam pojištění | 1 záznam evidence pojištění | {count} záznamy evidence pojištění | {count} záznamů evidence pojištění",
           "payout_rules": "žádné výplatní pravidlo | 1 výplatní pravidlo | {count} výplatní pravidla | {count} výplatních pravidel"
-        }
+        },
+        "show_time": "Otevřít docházku"
       },
       "detail_hint": "Každý vztah má vlastní historii podmínek, stav, checklist a auditní časovou osu.",
       "dependants": {
@@ -32483,7 +32486,8 @@
           "row_version_conflict": "Vztah nebo jeho průměr mezitím upravil někdo jiný. Akci zopakujte."
         },
         "warning": {
-          "corrective_report_needed": "Za {period} už bylo podané hlášení JMHZ s původním průměrem. Po schválení opravy běhu podejte opravné hlášení."
+          "corrective_report_needed": "Za {period} už bylo podané hlášení JMHZ s původním průměrem. Po schválení opravy běhu podejte opravné hlášení.",
+          "raised_to_minimum_wage": "Zadaný výdělek {requested} Kč/h je nižší než minimální mzda. Průměr se podle § 357 odst. 1 zákoníku práce zvýšil na {applied} Kč/h a s touto částkou počítají náhrady i hlášení JMHZ."
         }
       },
       "bulk_load_failed": "Kandidáty na hromadný výpočet průměru se nepodařilo načíst.",
