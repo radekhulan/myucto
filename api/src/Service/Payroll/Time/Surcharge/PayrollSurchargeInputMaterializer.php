@@ -6,14 +6,17 @@ namespace MyInvoice\Service\Payroll\Time\Surcharge;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
+use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollSurchargeClaimRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRounding;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRoundingPolicy;
+use MyInvoice\Service\Payroll\Calculation\RoundingMode;
 use MyInvoice\Service\Payroll\Employment\PayrollHourlyRemuneration;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Time\PayrollMonthlyFundService;
 use PDO;
 use PDOException;
 
@@ -59,12 +62,26 @@ final class PayrollSurchargeInputMaterializer
     /** Prefix `external_id` mzdového vstupu vzniklého materializací příplatku. */
     public const EXTERNAL_PREFIX = 'surcharge:';
 
+    /**
+     * Prefix `external_id` vstupu s DOSAŽENOU MZDOU za přesčas z docházky
+     * (první polovina nároku § 114 odst. 1 ZP). Rychlý měsíční vstup podle něj
+     * vstup řadí k přesčasu z docházky, ne k základní mzdě.
+     */
+    public const OVERTIME_WAGE_EXTERNAL_PREFIX = self::EXTERNAL_PREFIX . 'overtime_wage:';
+
+    /** Složka dosažené mzdy za přesčas u měsíční mzdy; táž jako v rychlém vstupu. */
+    private const OVERTIME_WAGE_COMPONENT = 'MZDA_HODINOVA';
+
+    /** Přesčas je v docházce, ale dosaženou mzdu z podkladů určit nejde. */
+    public const OVERTIME_WAGE_BASIS_MISSING = 'overtime_achieved_wage_basis_missing';
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollComponentRepository $components,
         private readonly PayrollInputRepository $inputs,
         private readonly PayrollSurchargeService $surcharges,
         private readonly PayrollSurchargeClaimRepository $claims,
+        private readonly PayrollMonthlyFundService $fund,
     ) {}
 
     /**
@@ -139,7 +156,17 @@ final class PayrollSurchargeInputMaterializer
             );
 
             $ledger = $this->latestByKind($supplierId, $employmentId, $periodStart);
-            if ($result->lines === [] && $ledger === []) {
+            // Dosažená mzda za přesčas (§ 114 odst. 1 ZP) náleží i tehdy, když se
+            // místo příplatku poskytuje náhradní volno a řádek příplatku nevznikne.
+            $overtimeMinutes = $this->surcharges->achievedOvertimeMinutes(
+                $supplierId,
+                $employmentId,
+                $periodStart,
+            );
+            $overtimeWageInputs = $this->overtimeWageInputs($supplierId, $employmentId, $periodStart);
+            if ($result->lines === [] && $ledger === []
+                && $overtimeMinutes === 0 && $overtimeWageInputs['count'] === 0
+            ) {
                 // Měsíc bez jediné příznakové minuty. Nemá cenu ani sahat na
                 // číselník složek — a hlavně to nesmí být důvod, proč by
                 // schválení docházky spadlo.
@@ -174,6 +201,15 @@ final class PayrollSurchargeInputMaterializer
                     $unchanged[] = $outcome['item'];
                 }
             }
+            $achievedWage = $this->reconcileAchievedOvertimeWage(
+                $supplierId,
+                $employmentId,
+                $periodStart,
+                $revisionNo,
+                $overtimeMinutes,
+                $overtimeWageInputs,
+                $userId,
+            );
             $this->commitOwned($pdo, $ownsTransaction);
         } catch (\Throwable $exception) {
             if ($ownsTransaction && $pdo->inTransaction()) {
@@ -182,7 +218,7 @@ final class PayrollSurchargeInputMaterializer
             throw $exception;
         }
 
-        return $this->report(
+        $report = $this->report(
             $employmentId,
             $periodStart,
             $revisionNo,
@@ -190,6 +226,165 @@ final class PayrollSurchargeInputMaterializer
             $unchanged,
             $result,
         );
+        // Dosažená mzda není příplatek: do `total_minor` ani počtů příplatků se
+        // nepočítá a nese ji vlastní klíč.
+        $report['achieved_overtime_wage'] = $achievedWage['wage'];
+        if ($achievedWage['finding'] !== null) {
+            $report['findings'][] = $achievedWage['finding'];
+            $report['requires_manual_review'] = true;
+        }
+
+        return $report;
+    }
+
+    /**
+     * Dosažená mzda za hodiny přesčasu z docházky u MĚSÍČNÍ mzdy.
+     *
+     * § 114 odst. 1 ZP přiznává za přesčas dvě věci vedle sebe: „mzdu, na
+     * kterou vzniklo za tuto dobu právo" a příplatek. Měsíční mzda kryje jen
+     * fond pracovní doby, přesčas je práce nad něj (§ 78 odst. 1 písm. i),
+     * takže za přesčasovou hodinu náleží sjednaná měsíční mzda / fond měsíce
+     * včetně svátků ({@see PayrollMonthlyFundService::wageFundMinutes()}),
+     * stejně jako v rychlém měsíčním vstupu. Bez tohoto kroku vyplatila
+     * docházka jen příplatek a hodiny přesčasu zůstaly nezaplacené.
+     *
+     * Zdrojem je sjednaná měsíční mzda z podmínek vztahu, ne vstup základní
+     * mzdy: ten v okamžiku schválení docházky nemusí existovat a v měsíci
+     * s nepřítomností nese jen poměrnou část.
+     *
+     * Opakované schválení nic nepřidá a změna docházky zapíše jen ROZDÍL proti
+     * tomu, co už za měsíc vzniklo, stejně jako u příplatků. Chybí-li sjednaná
+     * mzda nebo kalendář, částka se neodhaduje: vrátí se nález k ručnímu
+     * doplnění a dřívější vstupy zůstanou beze změny.
+     *
+     * @param array{count:int,sum:int} $existing
+     * @return array{wage:array<string,mixed>|null,finding:array{reason:string,message:string,local_date:?string}|null}
+     */
+    private function reconcileAchievedOvertimeWage(
+        int $supplierId,
+        int $employmentId,
+        string $periodStart,
+        int $revisionNo,
+        int $overtimeMinutes,
+        array $existing,
+        ?int $userId,
+    ): array {
+        if ($overtimeMinutes === 0 && $existing['count'] === 0) {
+            return ['wage' => null, 'finding' => null];
+        }
+        $period = substr($periodStart, 0, 7);
+        $desired = 0;
+        $monthlyGross = null;
+        $fundMinutes = null;
+        $rounding = PayrollWageRoundingPolicy::forSupplier($this->db, $supplierId);
+        if ($overtimeMinutes > 0) {
+            $monthlyGross = $this->agreedMonthlyGrossMinor($supplierId, $employmentId, $periodStart);
+            $fundMinutes = $this->fund->wageFundMinutes($supplierId, $employmentId, $period);
+            if ($monthlyGross === null || $monthlyGross <= 0 || $fundMinutes === null || $fundMinutes <= 0) {
+                return ['wage' => null, 'finding' => [
+                    'reason' => self::OVERTIME_WAGE_BASIS_MISSING,
+                    'local_date' => null,
+                    'message' => sprintf(
+                        'Docházka obsahuje %s h práce přesčas. Dosaženou mzdu za tyto hodiny '
+                        . '(§ 114 odst. 1 zákoníku práce) nelze určit, protože u pracovního vztahu '
+                        . 'chybí %s. Doplňte ji a měsíc docházky schvalte znovu, nebo dosaženou '
+                        . 'mzdu doplňte ručně ve mzdových vstupech; příplatek za přesčas ji nenahrazuje.',
+                        rtrim(rtrim(number_format($overtimeMinutes / 60, 2, ',', ''), '0'), ','),
+                        $monthlyGross === null || $monthlyGross <= 0
+                            ? 'sjednaná měsíční mzda v podmínkách vztahu'
+                            : 'pracovní kalendář pro tento měsíc',
+                    ),
+                ]];
+            }
+            // Jedním zlomkem `měsíční mzda × minuty přesčasu / fond`, pak na celé koruny
+            // podle volby firmy (§ 142 odst. 2 ZP), stejně jako příplatky.
+            $desired = self::wholeCzk(
+                RoundingMode::HalfUp->roundFraction($monthlyGross * $overtimeMinutes, $fundMinutes),
+                $rounding,
+            );
+        }
+        $delta = $desired - $existing['sum'];
+        if ($delta === 0) {
+            return ['wage' => [
+                'outcome' => 'unchanged',
+                'amount_minor' => 0,
+                'cumulative_minor' => $desired,
+                'overtime_minutes' => $overtimeMinutes,
+            ], 'finding' => null];
+        }
+        $externalId = sprintf('%s%s:%d', self::OVERTIME_WAGE_EXTERNAL_PREFIX, $periodStart, $existing['count'] + 1);
+        $created = $this->inputs->createApproved($supplierId, [
+            'employee_id' => $this->employeeId($supplierId, $employmentId),
+            'employment_id' => $employmentId,
+            'component_id' => $this->componentId($supplierId, self::OVERTIME_WAGE_COMPONENT, $periodStart),
+            'period_start' => $periodStart,
+            'source_period_start' => null,
+            'amount_minor' => $delta,
+            // Rozsah přesčasu v tisícinách hodiny nese první zápis, aby byl
+            // z mzdového listu vidět (§ 142 odst. 5 ZP); rozdílový řádek je
+            // oprava částky. Podklad výpočtu vrací zpráva materializace:
+            // vstup z docházky vlastní otisk podkladu nést nesmí (migrace 1627).
+            'quantity_milliunits' => $existing['count'] === 0
+                ? RoundingMode::HalfUp->roundFraction($overtimeMinutes * 1_000, 60)
+                : null,
+            'source_kind' => 'time',
+            'external_id' => $externalId,
+        ], $userId);
+
+        return ['wage' => [
+            'outcome' => 'written',
+            'input_id' => PayrollTimeValue::int($created['id'] ?? null, 'input_id'),
+            'amount_minor' => $delta,
+            'cumulative_minor' => $desired,
+            'overtime_minutes' => $overtimeMinutes,
+            'monthly_base_minor' => $monthlyGross,
+            'fund_minutes' => $fundMinutes,
+            'wage_rounding' => $rounding->value,
+        ], 'finding' => null];
+    }
+
+    /**
+     * Dosud zapsané vstupy dosažené mzdy za přesčas z docházky.
+     *
+     * @return array{count:int,sum:int}
+     */
+    private function overtimeWageInputs(int $supplierId, int $employmentId, string $periodStart): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) AS input_count,
+                    COALESCE(SUM(CASE WHEN status <> "cancelled" THEN amount_minor ELSE 0 END), 0) AS input_sum
+               FROM payroll_inputs
+              WHERE supplier_id = ? AND employment_id = ? AND period_start = ?
+                AND source_kind = "time" AND external_id LIKE ?
+              FOR UPDATE'
+        );
+        $stmt->execute([
+            $supplierId,
+            $employmentId,
+            $periodStart,
+            self::OVERTIME_WAGE_EXTERNAL_PREFIX . $periodStart . ':%',
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return [
+            'count' => (int) ($row['input_count'] ?? 0),
+            'sum' => (int) ($row['input_sum'] ?? 0),
+        ];
+    }
+
+    /** Sjednaná měsíční mzda účinná v měsíci; `null` u hodinové mzdy nebo bez sjednané částky. */
+    private function agreedMonthlyGrossMinor(int $supplierId, int $employmentId, string $periodStart): ?int
+    {
+        $periodEnd = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
+               FROM payroll_employments employment
+              WHERE employment.supplier_id = ? AND employment.id = ?'
+        );
+        $stmt->execute([$periodEnd, $periodEnd, $supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+
+        return $value === false || $value === null ? null : (int) $value;
     }
 
     /**

@@ -1872,6 +1872,14 @@ final class PayrollQuickInputRepository
             // mapoval přes `$quickSlot`, spadl by cizí hodinový základ do
             // přesčasu a formulář by tvrdil, že přesčas spravuje jiný vstup.
             $managedSlot = self::managedSlot($code, $kind);
+            if ($externalId !== null
+                && str_starts_with($externalId, PayrollSurchargeInputMaterializer::OVERTIME_WAGE_EXTERNAL_PREFIX)
+            ) {
+                // Dosažená mzda za přesčas ze schválené docházky nese stejný kód
+                // jako hodinový základ, ale je to přesčas: nesmí zamknout pole
+                // základní mzdy hláškou „spravuje jiný vstup".
+                $managedSlot = 'overtime';
+            }
             if (($managedSlot === 'overtime' || $managedSlot === 'bonus')
                 && self::hasOwnColumnOrigin($code, $externalId, $overriddenImports)
             ) {
