@@ -2075,6 +2075,15 @@ describe('PayrollRuns', () => {
       can_delete: false,
       available_commands: ['post', 'request_correction'],
       missing_employments: [],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-run-15-missing-employments"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('změněný schválený průměr čtvrtletí vypíše jako samostatný řádek změn podkladů', async () => {
     m.runs.mockResolvedValue([run({
       status: 'calculated',
@@ -2086,7 +2095,6 @@ describe('PayrollRuns', () => {
     const wrapper = mount(PayrollRuns)
     await flushPromises()
 
-    expect(wrapper.find('[data-testid="payroll-run-15-missing-employments"]').exists()).toBe(false)
     const box = wrapper.get('[data-testid="payroll-run-15-source-drift"]')
     expect(box.find('[data-test="payroll-run-source-drift-average_earnings_changed"]').text())
       .toContain('payroll.runs.source_drift.average_earnings_changed')
@@ -2094,6 +2102,7 @@ describe('PayrollRuns', () => {
 
     wrapper.unmount()
   })
+
 
   it('změněné podmínky vztahu vypíše a jako hlavní krok nabídne obnovu podkladů místo přepočtu', async () => {
     m.runs.mockResolvedValue([run({
