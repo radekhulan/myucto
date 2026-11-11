@@ -46,6 +46,7 @@ import {
   firstStatutoryReviewId,
   statutoryReviewEmployeeIds,
 } from '@/components/payroll/statutoryBulkDefaults'
+import { runRemediationHref } from './payrollRemediationQuery'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -301,11 +302,12 @@ function validationDisplayMessage(validation: PayrollRunValidation, count = 1): 
 
 /** Odkaz k nápravě doplněný o období běhu tam, kde cílová stránka období zná. */
 function remediationHref(remediationPath: string, runPeriod: string): string {
-  let path = remediationPath
-  if ((/^\/payroll\/(runs|time|quick-inputs|insolvency)(?:\?|$)/.test(path) || path.startsWith('/payroll/components?tab=risky_savings')) && !/[?&]period=/.test(path)) {
-    path += `${path.includes('?') ? '&' : '?'}period=${encodeURIComponent(runPeriod.slice(0, 7))}`
-  }
-  return path
+  return runRemediationHref(remediationPath, runPeriod)
+}
+
+/** Odkaz nálezu předběžné kontroly vede na měsíc kontroly, ne na zpracovávaný. */
+function readinessHref(remediationPath: string): string {
+  return runRemediationHref(remediationPath, readiness.value?.period_start)
 }
 
 /*
@@ -1901,7 +1903,7 @@ onMounted(load)
                 >
                   <template #item="{ item: entity }">
                     <p v-if="entity.message && entity.message !== finding.message" class="text-sm">{{ entity.message }}</p>
-                    <a v-if="entity.remediation_path" :href="entity.remediation_path" :class="[btnOutlineSm('neutral'), 'mt-1 inline-flex']">
+                    <a v-if="entity.remediation_path" :href="readinessHref(entity.remediation_path)" :class="[btnOutlineSm('neutral'), 'mt-1 inline-flex']">
                       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
                       {{ t('payroll.runs.validation.open_remediation') }}<span v-if="entity.label">: {{ entity.label }}</span>
                     </a>
@@ -1909,7 +1911,7 @@ onMounted(load)
                 </ExpandableList>
                 <a
                   v-if="finding.remediation_path && !finding.entities.some(entity => entity.remediation_path)"
-                  :href="finding.remediation_path"
+                  :href="readinessHref(finding.remediation_path)"
                   :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
                 >
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -3093,13 +3095,13 @@ onMounted(load)
               >
                 <template #item="{ item: entity }">
                   <p v-if="entity.message && entity.message !== finding.message">{{ entity.message }}</p>
-                  <a v-if="entity.remediation_path" :href="entity.remediation_path" :class="[btnOutlineSm('neutral'), 'mt-1 inline-flex']">
+                  <a v-if="entity.remediation_path" :href="readinessHref(entity.remediation_path)" :class="[btnOutlineSm('neutral'), 'mt-1 inline-flex']">
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
                     {{ t('payroll.runs.validation.open_remediation') }}<span v-if="entity.label">: {{ entity.label }}</span>
                   </a>
                 </template>
               </ExpandableList>
-              <a v-if="finding.remediation_path && !finding.entities.some(entity => entity.remediation_path)" :href="finding.remediation_path" :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']">
+              <a v-if="finding.remediation_path && !finding.entities.some(entity => entity.remediation_path)" :href="readinessHref(finding.remediation_path)" :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
                 {{ t('payroll.runs.validation.open_remediation') }}
               </a>

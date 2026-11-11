@@ -5514,6 +5514,12 @@
         "not_subject_to_tax": "Není předmětem daně (§ 6 odst. 7 ZDP)",
         "statutory_exempt": "Osvobozeno bez limitu (§ 6 odst. 9 ZDP)",
         "benefit_basket": "Roční koš osvobození (§ 6 odst. 9 písm. d) a m))"
+      },
+      "jmhz_filter": {
+        "missing": "Zobrazeny jen složky, které se vykazují v JMHZ a nemají určené zařazení. Zařaďte je tlačítkem Nastavit JMHZ.",
+        "manual_review": "Zobrazeny jen složky, jejichž zařazení do JMHZ čeká na kontrolu. Otevřete Upravit a zvolte, zda se složka vykazuje.",
+        "invalid": "Zobrazeny jen složky s neplatným nastavením pro JMHZ. Otevřete Upravit a nastavte zahrnutí do JMHZ.",
+        "clear": "Zobrazit všechny složky"
       }
     },
     "documents": {

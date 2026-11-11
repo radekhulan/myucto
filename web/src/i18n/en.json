@@ -5514,6 +5514,12 @@
         "not_subject_to_tax": "Not subject to tax (§ 6(7))",
         "statutory_exempt": "Exempt without a limit (§ 6(9))",
         "benefit_basket": "Annual exemption basket (§ 6(9)(d) and (m))"
+      },
+      "jmhz_filter": {
+        "missing": "Showing only components reported in JMHZ that have no mapping yet. Map them with Configure JMHZ.",
+        "manual_review": "Showing only components whose JMHZ mapping awaits review. Open Edit and choose whether the component is reported.",
+        "invalid": "Showing only components with an invalid JMHZ setting. Open Edit and set the JMHZ inclusion.",
+        "clear": "Show all components"
       }
     },
     "documents": {

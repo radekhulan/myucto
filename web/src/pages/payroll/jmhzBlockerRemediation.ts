@@ -152,7 +152,14 @@ export function jmhzRemediationTarget(
     case 'office':
       return { name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-offices' }
     case 'annual_settlement':
-      return { name: 'payroll-annual-settlement' }
+      // Hlášení vykazuje roční zúčtování za předchozí zdaňovací období.
+      return {
+        name: 'payroll-annual-settlement',
+        query: {
+          ...(period ? { year: String(Number(period.slice(0, 4)) - 1) } : {}),
+          ...(employeeId === null ? {} : { person: String(employeeId) }),
+        },
+      }
     case 'deferred_income':
       return { name: 'payroll-people', query: { ...scope, panel: 'deferred_income' } }
     case 'takeover':

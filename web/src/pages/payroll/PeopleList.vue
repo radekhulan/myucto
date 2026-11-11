@@ -59,6 +59,7 @@ import {
   payrollAgendas,
   type PayrollAgendaDefinition,
 } from './payrollAgendaLinks'
+import { payrollPeopleFilterFromQuery } from './payrollRemediationQuery'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
@@ -108,7 +109,9 @@ const expandedId = ref<number | null>(null)
 const details = ref<Record<number, PayrollPerson>>({})
 const loadingDetailId = ref<number | null>(null)
 const searchQuery = ref('')
-const peopleFilter = ref<PayrollPeopleFilter>('active')
+// Odkaz z nálezu (kontrola před během → `?filter=blocking_data`) otevře
+// seznam rovnou zúžený.
+const peopleFilter = ref<PayrollPeopleFilter>(payrollPeopleFilterFromQuery(route.query))
 const narrowed = computed(
   () => peopleFilter.value !== 'all' || searchQuery.value.trim() !== '',
 )
