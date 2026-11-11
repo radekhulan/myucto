@@ -239,6 +239,11 @@ final class PayrollJmhzSpecialCasesFlowTest extends TestCase
             new Response(),
         );
         self::assertSame(201, $overtime->getStatusCode(), (string) $overtime->getBody());
+        // Dosažená mzda za přesčas (§ 114 odst. 1 ZP) se zakládá z docházky jen ze
+        // sjednané měsíční mzdy v podmínkách vztahu; bez ní kontrola běhu varuje.
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET monthly_gross_minor = ? WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([4_200_000, $this->supplierId, $person['employment_id']]);
         $this->approveMonth($person['employment_id'], []);
         $this->pay($person, 4_200_000);
 

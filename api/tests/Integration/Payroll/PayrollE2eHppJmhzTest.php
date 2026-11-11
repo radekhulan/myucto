@@ -184,12 +184,13 @@ final class PayrollE2eHppJmhzTest extends TestCase
         $readiness = $this->container->get(PayrollRunReadinessService::class)->inspect($this->supplierId, '2027-01-01', '2027-02-12');
         $codes = array_column($readiness['findings'], 'code');
         self::assertNotContains('jmhz_workplace_codebooks_unverified', $codes, 'Pracoviště je vyplněné, chybí jen číselníky 2027.');
-        // Počáteční stavy roku 2027 chybí: kontrola to předpoví jako blokaci
-        // schválení s odkazem na kartu vztahu (výpočet osobu jinak vyřadí).
+        // Nástup 1. 1. 2027: počáteční stavy roku doplní při založení běhu
+        // prokazatelná nula, kontrola je proto nevyžaduje (dřív byly před během
+        // blokací a po výpočtu zmizely).
         $statutory = array_column($readiness['findings'], null, 'code')['statutory_calculation_manual_review'] ?? null;
-        self::assertNotNull($statutory, CanonicalJson::encode($readiness['findings']));
-        self::assertSame("/payroll/people?person={$person['employee_id']}&panel=opening_balances", $statutory['entities'][0]['remediation_path']);
-        self::assertStringContainsString('Počáteční stavy', $statutory['entities'][0]['message']);
+        foreach ($statutory['entities'] ?? [] as $entity) {
+            self::assertStringNotContainsString('Počáteční stavy', (string) ($entity['message'] ?? ''), CanonicalJson::encode($readiness['findings']));
+        }
     }
 
     private static function formGuid(string $xml): string
