@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\Component\PayrollExemptIncomeSplit;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 
 final class JmhzPreparationSnapshotBuilder
 {
+    /** Úhrn příspěvků zaměstnavatele na produkty spoření na stáří: nese jen osvobozené částky. */
+    private const EXEMPT_SAVINGS_TOTAL_ATTRIBUTE = '10417';
+
     public const LEGACY_BUILDER_VERSION = 'jmhz-preparation-source.v1';
     public const PREVIOUS_V2_BUILDER_VERSION = 'jmhz-preparation-source.v2';
     public const PREVIOUS_BUILDER_VERSION = 'jmhz-preparation-source.v3';
@@ -333,6 +337,7 @@ final class JmhzPreparationSnapshotBuilder
                         $component['tax_treatment'] ?? null,
                         $component['component_kind'] ?? null,
                     );
+                    $exemptPart = null;
                     if ($componentIssue !== null) {
                         $issues[] = $this->issue($componentIssue, 'component', $componentId);
                     } elseif ($treatment === 'included'
@@ -358,10 +363,31 @@ final class JmhzPreparationSnapshotBuilder
                          * se zařazením, která ji hlásí jako blokaci, případně
                          * (u složky bez zařazení) zůstane bez dopadu stejně
                          * jako dřív.
+                         *
+                         * U vstupu v koši osvobození (§ 6 odst. 9 ZDP) se
+                         * přičítá jen ZMRAZENÁ OSVOBOZENÁ ČÁST. Pokyny
+                         * k vyplnění měsíčního hlášení 1.4.13 popisují 10289
+                         * jako „úhrn osvobozených příjmů“; nadlimitní část
+                         * je zdanitelný příjem, který patří do 10286 a do
+                         * základu zálohy 10297, ne sem. Dřív se přičítala
+                         * celá částka vstupu a stravenkový paušál nad limit
+                         * se vykázal jako osvobozený celý.
                          */
+                        try {
+                            $exemptPart = PayrollExemptIncomeSplit::frozenExemptPart(
+                                $inputRow,
+                                $inputRow['amount_minor'],
+                                is_int($inputRow['id'] ?? null) ? $inputRow['id'] : 0,
+                            );
+                        } catch (\DomainException $exception) {
+                            $this->invalid(
+                                'jmhz_source_invalid',
+                                $exception->getMessage(),
+                            );
+                        }
                         $exemptIncome = $this->checkedAdd(
                             $exemptIncome,
-                            $inputRow['amount_minor'],
+                            $exemptPart,
                         );
                     }
                     if ($componentIssue === null
@@ -400,6 +426,20 @@ final class JmhzPreparationSnapshotBuilder
                                     'mapping.ancestor_attribute_ids',
                                 ),
                             ];
+                            /*
+                             * Příspěvek zaměstnavatele na produkty spoření na
+                             * stáří (10417 a jeho detail): pokyny 1.4.13 říkají
+                             * „uvádí se pouze částky osvobozené dle § 6 odst. 9
+                             * písm. m) ZDP“ a částky nad limit „se v tomto
+                             * atributu neevidují“. U vstupu v koši osvobození
+                             * se sem proto sčítá jen zmrazená osvobozená část,
+                             * stejně jako do 10289 výše.
+                             */
+                            if ($exemptPart !== null
+                                && in_array(self::EXEMPT_SAVINGS_TOTAL_ATTRIBUTE, $targets, true)
+                            ) {
+                                $amount = $exemptPart;
+                            }
                             foreach (array_values(array_unique($targets)) as $target) {
                                 $earnings[$target] = $this->checkedAdd(
                                     $earnings[$target] ?? 0,
