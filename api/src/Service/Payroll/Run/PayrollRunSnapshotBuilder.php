@@ -239,6 +239,9 @@ final class PayrollRunSnapshotBuilder
         foreach (PayrollRunWholeCrownInputs::validations($employments, $inputRows, $periodStart) as $validation) {
             $validations[] = $validation;
         }
+        foreach (PayrollRunQuickOvertimeHours::validations($employments, $inputRows, $timeMonthRows, $periodStart) as $validation) {
+            $validations[] = $validation;
+        }
         $hourlyFrozen = $this->batch->hourlyFrozenClaims($supplierId, array_keys($evidenceTerms), $periodStart);
         $hourlyPreviews = $evidenceTerms === [] ? [] : (new \MyInvoice\Service\Payroll\PayrollHourlyWagePreview($this->db))->fromSources(
             $supplierId, $periodStart, $employments, $evidenceTerms, $hourlyTerms, $workedTimeEvidence, $hourlyContexts, $monthlyParts);

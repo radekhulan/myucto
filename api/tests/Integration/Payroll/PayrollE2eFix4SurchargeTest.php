@@ -16,14 +16,26 @@ use Psr\Http\Message\ResponseInterface;
 use Slim\Psr7\Response;
 
 /**
- * OTEVŘENÝ NÁLEZ příplatků: test popisuje správné chování a nad současným
- * kódem PADÁ. Oprava vyžaduje rozhodnutí, kde mají hodiny přesčasu zadané
- * rychlým měsíčním vstupem vzniknout (viz docblok testu a zpráva A-hpp2).
+ * Přesčas zadaný hodinami v rychlém měsíčním vstupu a jeho hodiny v měsíčním
+ * hlášení (dříve otevřený nález P3 scénářů HPP).
+ *
+ * Odpracované hodiny 10268 a z toho přesčas 10269 se berou ze schválené
+ * docházky, stejně jako odpracovaná doba pro průměrný výdělek. Rychlý vstup do
+ * docházky nezapisuje a oba podklady přesčasu se vylučují, proto běh na přesčas
+ * zaplacený bez hodin v docházce upozorní varováním s povinným potvrzením
+ * a odkazem na docházku; po přesunu přesčasu do docházky nese hlášení hodiny
+ * stejně jako u přesčasu vedeného jen v docházce.
  * Podklady a pomocné metody jsou shodné s {@see PayrollE2eHpp2SurchargeTest}.
+ *
+ * Ruční přepočet (sjednaná mzda 42 000 Kč, fond dubna 176 h, průměr 250 Kč/h,
+ * 6 h přesčasu): dosažená mzda 42 000 / 176 × 6 = 1 431,82 → 1 432; příplatek
+ * 25 % × 250 × 6 = 375; hrubá 43 807; SP 7,1 % = 3 110,30 → 3 111; ZP 13,5 %
+ * = 5 913,95 → 5 914, zaměstnanec 1 972; záloha 43 900 × 15 % − 2 570 = 4 015;
+ * čistá 34 709 Kč.
  */
 #[Group('integration')]
 #[Group('payroll-full-flow')]
-final class PayrollE2eHpp2SurchargeOpenFindingsTest extends TestCase
+final class PayrollE2eFix4SurchargeTest extends TestCase
 {
     use PayrollFullFlowTrait;
 
@@ -55,36 +67,137 @@ final class PayrollE2eHpp2SurchargeOpenFindingsTest extends TestCase
     }
 
     /**
-     * Přesčas 6 h zadaný hodinami v rychlém měsíčním vstupu u firmy, která
-     * docházku potvrzuje jen souhrnem odpracovaných dnů: mzda i příplatek se
-     * vyplatí (1 432 + 375 Kč) a v hlášení jsou v 10329 a 10333, ale počet
-     * odpracovaných hodin 10268 zůstane 160 a přesčasové hodiny 10269 nula.
-     * Hlášení tak nese příplatek za přesčas bez jediné přesčasové hodiny.
+     * Firma potvrzuje docházku jen souhrnem odpracovaných dnů a přesčas 6 h
+     * zadá rychlým vstupem. Mzda i příplatek se vyplatí, docházka ale přesčas
+     * nenese: hlášení by vykázalo příplatek za přesčas (10333) s 0 h přesčasu
+     * (10269) a 160 odpracovanými hodinami (10268).
      *
-     * Správně: 10268 = 160 + 6 = 166 h, 10269 = 6 h (stejně jako když je
-     * týž přesčas veden v docházce, viz
-     * PayrollE2eHpp2SurchargeTest::testAttendanceOvertimeAlsoPaysTheAchievedWage).
-     * Návrh: běh má na rozdíl mezi hodinami přesčasu ve vstupech a v potvrzené
-     * docházce upozornit, nebo má rychlý vstup hodiny přesčasu do pracovního
-     * souhrnu měsíce zapsat. Místo: PayrollRunSnapshotBuilder (validace běhu),
-     * PayrollQuickInputRepository::upsertOvertimeParts, pracovní souhrn JMHZ.
+     * Běh se nezastaví potichu ani slepou uličkou: výpočet projde a schválení
+     * čeká na varování, které jmenuje osobu, hodiny z rychlého vstupu
+     * i z docházky a vede na docházku vztahu a měsíce.
      */
-    public function testQuickInputOvertimeHoursReachTheMonthlyReport(): void
+    public function testQuickInputOvertimeMissingInAttendanceStopsApprovalWithGuidance(): void
     {
         $person = $this->hire('Syntetický Přesčasový', 'male', '1984-03-12');
         $this->agreeMonthlyWage($person['employment_id'], 4_200_000);
         $this->ensureRegularCalendar($person['employment_id']);
-        $item = $this->quickItem($person['employment_id']);
-        $saved = $this->saveQuick($item, 4_200_000, 6_000, []);
+        $saved = $this->saveQuick($this->quickItem($person['employment_id']), 4_200_000, 6_000, []);
         self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
         $approved = $this->approveTimeMonth($person['employment_id'], self::PERIOD, self::workdays(self::PERIOD));
         self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
 
-        $result = $this->submission('quick-overtime-hours');
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, 'fix4-quick-overtime-missing');
 
-        self::assertStringContainsString('<form:prescas>375</form:prescas>', $result['xml']);
-        self::assertStringContainsString('<form:prescas>6.000</form:prescas>', $result['xml'], 'Přesčasové hodiny 10269 chybí.');
-        self::assertStringContainsString('<form:pocet>166.000</form:pocet>', $result['xml'], 'Odpracované hodiny 10268 neobsahují přesčas.');
+        self::assertSame([], $run['blockers'], CanonicalJson::encode($run['blockers']));
+        self::assertNull($run['approved'], 'Běh se schválil, přestože docházka přesčas nenese.');
+        $warnings = array_values(array_filter(
+            $run['warnings'],
+            static fn (array $warning): bool => $warning['code'] === 'quick_overtime_hours_not_in_attendance',
+        ));
+        self::assertCount(1, $warnings, CanonicalJson::encode($run['warnings']));
+        self::assertCount(1, $run['warnings'], CanonicalJson::encode($run['warnings']));
+        self::assertStringContainsString('Syntetický Přesčasový', $warnings[0]['message']);
+        self::assertStringContainsString('platí 6 h přesčasu', $warnings[0]['message']);
+        self::assertStringContainsString('eviduje 0', $warnings[0]['message']);
+        $stored = $this->db->pdo()->prepare(
+            'SELECT severity, requires_override, remediation_path, entity_type, entity_id
+               FROM payroll_run_validations
+              WHERE supplier_id = ? AND revision_id = ? AND code = "quick_overtime_hours_not_in_attendance"',
+        );
+        $stored->execute([$this->supplierId, (int) $run['calculated']->revision['id']]);
+        self::assertSame([[
+            'severity' => 'warning',
+            'requires_override' => 1,
+            'remediation_path' => '/payroll/time?employment=' . $person['employment_id'] . '&period=' . self::PERIOD,
+            'entity_type' => 'employment',
+            'entity_id' => $person['employment_id'],
+        ]], $stored->fetchAll(\PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Cesta, kterou varování radí: přesčas 6 h patří do docházky (2 h
+     * v úterý 14. 4. a 4 h v sobotu 18. 4.). Po vymazání hodin z rychlého
+     * vstupu schválení docházky založí dosaženou mzdu 1 432 Kč i příplatek
+     * 375 Kč samo, právě jednou, a hlášení nese hodiny: 10268 = 20 × 8 + 6
+     * = 166 h, 10269 = 6 h. Varování nevznikne.
+     */
+    public function testOvertimeMovedFromQuickInputToAttendanceReachesTheMonthlyReport(): void
+    {
+        $person = $this->hire('Syntetická Přesčasová', 'female', '1986-05-22');
+        $id = $person['employment_id'];
+        $this->agreeMonthlyWage($id, 4_200_000);
+        $this->ensureRegularCalendar($id);
+        $saved = $this->saveQuick($this->quickItem($id), 4_200_000, 6_000, []);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $cells = [];
+        foreach (self::workdays(self::PERIOD) as $day) {
+            $cells[] = $this->cell($id, 'regular', "{$day} 08:00", "{$day} 16:30", 30);
+        }
+        $cells[] = $this->cell($id, 'overtime', '2026-04-14 16:30', '2026-04-14 18:30', 0);
+        $cells[] = $this->cell($id, 'overtime', '2026-04-18 08:00', '2026-04-18 12:00', 0);
+
+        // Účetní hodiny přesčasu z rychlého vstupu vymaže (základ zůstává)
+        // a přesčas zapíše do docházky.
+        $cleared = $this->saveQuick($this->quickItem($id), 4_200_000, null, []);
+        self::assertSame(200, $cleared->getStatusCode(), (string) $cleared->getBody());
+        self::assertSame([], $this->json($cleared)['failures'] ?? [], (string) $cleared->getBody());
+        $approved = $this->approveCells($id, $cells);
+        self::assertSame(200, $approved->getStatusCode(), 'Zaseknutí: docházka. ' . (string) $approved->getBody());
+
+        self::assertSame([
+            'MZDA_HODINOVA' => 143_200,
+            'MZDA_MESICNI' => 4_200_000,
+            'PRIPLATEK_PRESCAS' => 37_500,
+        ], $this->inputs($id), 'Přesčas se má vyplatit právě jednou, z docházky.');
+
+        $result = $this->submission('fix4-overtime-moved');
+
+        $this->assertPayroll($result['person'], [
+            'taxable' => 4_380_700,
+            'social' => 311_100,
+            'health_employee' => 197_200,
+            'health_employer' => 394_200,
+            'advance' => 401_500,
+            'net' => 3_470_900,
+        ]);
+        foreach ([
+            '<form:zuctovanoCelkem>43807</form:zuctovanoCelkem>',
+            '<form:tarif>43432</form:tarif>',
+            '<form:prescas>375</form:prescas>',
+            '<form:prescas>6.000</form:prescas>',
+            '<form:pocet>166.000</form:pocet>',
+            '<form:mzdaCista>34709</form:mzdaCista>',
+        ] as $fragment) {
+            self::assertStringContainsString($fragment, $result['xml']);
+        }
+    }
+
+    /**
+     * Oba podklady přesčasu naráz nejdou: dokud přesčas nese rychlý vstup,
+     * schválení docházky s přesčasem se zastaví chybou, která říká proč
+     * (příplatek by se vyplatil dvakrát) a co udělat (ponechat jeden podklad).
+     * Proto varování běhu radí hodiny z rychlého vstupu vymazat.
+     */
+    public function testAttendanceOvertimeNextToQuickInputOvertimeIsRefusedWithGuidance(): void
+    {
+        $person = $this->hire('Syntetický Dvojitý', 'male', '1990-10-10');
+        $id = $person['employment_id'];
+        $this->agreeMonthlyWage($id, 4_200_000);
+        $this->ensureRegularCalendar($id);
+        $saved = $this->saveQuick($this->quickItem($id), 4_200_000, 6_000, []);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $cells = [];
+        foreach (self::workdays(self::PERIOD) as $day) {
+            $cells[] = $this->cell($id, 'regular', "{$day} 08:00", "{$day} 16:30", 30);
+        }
+        $cells[] = $this->cell($id, 'overtime', '2026-04-18 08:00', '2026-04-18 14:00', 0);
+
+        $conflict = $this->approveCells($id, $cells);
+
+        self::assertSame(409, $conflict->getStatusCode(), (string) $conflict->getBody());
+        self::assertSame('overtime_conflict', $this->json($conflict)['error']['code']);
+        self::assertStringContainsString('rychlým zadáním i docházkou', $this->json($conflict)['error']['message']);
+        self::assertStringContainsString('Ponechte jen jeden podklad', $this->json($conflict)['error']['message']);
     }
 
     /**
@@ -275,7 +388,13 @@ final class PayrollE2eHpp2SurchargeOpenFindingsTest extends TestCase
                     'overtime_average_snapshot_version' => $item['overtime_average_snapshot_version'],
                     'bonus_amount_minor' => 0,
                     'surcharges' => $surcharges,
-                    'versions' => ['base' => null, 'overtime' => null, 'bonus' => null, 'surcharges' => []],
+                    // Verze řádků tak, jak je posílá prohlížeč (první zadání = null).
+                    'versions' => [
+                        'base' => $item['inputs']['base']['row_version'] ?? null,
+                        'overtime' => $item['overtime_row_version'] ?? null,
+                        'bonus' => $item['inputs']['bonus']['row_version'] ?? null,
+                        'surcharges' => [],
+                    ],
                 ]],
             ]),
             new Response(),
