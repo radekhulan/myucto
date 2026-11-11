@@ -6,8 +6,12 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollUnsentSubmissionWithdrawAction;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
+use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -59,53 +63,47 @@ final class PayrollE2eFix4WithdrawUnsentReportTest extends TestCase
 
     public function testFrozenUnsentReportIsWithdrawnAndPreparedAgainFromTheCorrectedRun(): void
     {
-        [$regularId, $correctedPreparationId] = $this->frozenReportAndCorrectedPreparation();
+        $withdrawn = null;
+        [$regularId, $correctedPreparationId] = $this->frozenReportAndCorrectedPreparation(function (int $regularId) use (&$withdrawn): void {
+            // Zrušení vyžaduje výslovné potvrzení i důvod.
+            $rowVersion = (int) $this->scalar('SELECT row_version FROM payroll_submissions WHERE supplier_id = ? AND id = ?', [$this->supplierId, $regularId]);
+            $unconfirmed = $this->withdraw($regularId, ['row_version' => $rowVersion, 'reason' => 'Oprava mzdy po zmrazení.']);
+            self::assertSame(422, $unconfirmed->getStatusCode(), (string) $unconfirmed->getBody());
+            self::assertStringContainsString('nebylo odesláno ani nahráno na ePortál', $this->json($unconfirmed)['error']['message']);
+            $withoutReason = $this->withdraw($regularId, ['row_version' => $rowVersion, 'confirm_not_sent' => true, 'reason' => ' ']);
+            self::assertSame(422, $withoutReason->getStatusCode(), (string) $withoutReason->getBody());
+            self::assertSame('ready', $this->submissionStatus($regularId), 'Odmítnuté zrušení nesmí nic změnit.');
 
-        // Druhé řádné hlášení založit nejde a hláška říká obě cesty dál.
-        $refused = $this->freezeJmhzSubmission($correctedPreparationId, $this->officeId);
-        self::assertSame(409, $refused['status'], CanonicalJson::encode($refused['body']));
-        $message = (string) $refused['body']['error']['message'];
-        self::assertStringContainsString('ještě nebylo odesláno', $message);
-        self::assertStringContainsString('„Zrušit přípravu“', $message);
-        self::assertStringContainsString('opravným hlášením', $message);
+            $withdrawn = $this->withdraw($regularId, [
+                'row_version' => $rowVersion,
+                'confirm_not_sent' => true,
+                'reason' => 'Oprava mzdy po zmrazení: zapomenutá odměna za duben.',
+            ]);
+            self::assertSame(200, $withdrawn->getStatusCode(), (string) $withdrawn->getBody());
+            self::assertSame('cancelled_in_time', $this->json($withdrawn)['submission']['status']);
+            self::assertSame('cancelled_in_time', $this->submissionStatus($regularId));
+            self::assertSame('cancelled', $this->scalar(
+                'SELECT obligation.status FROM payroll_obligations obligation
+                   JOIN payroll_submissions submission
+                     ON submission.supplier_id = obligation.supplier_id AND submission.obligation_id = obligation.id
+                  WHERE submission.supplier_id = ? AND submission.id = ?',
+                [$this->supplierId, $regularId],
+            ));
+            // Auditní stopa: kdo, co a proč.
+            $audit = $this->db->pdo()->prepare(
+                'SELECT user_id, payload FROM activity_log
+                  WHERE supplier_id = ? AND action = "payroll.submission.unsent_withdrawn"
+                    AND entity_type = "payroll_submission" AND entity_id = ?',
+            );
+            $audit->execute([$this->supplierId, $regularId]);
+            $logged = $audit->fetchAll(\PDO::FETCH_ASSOC);
+            self::assertCount(1, $logged);
+            self::assertSame($this->actors[0], (int) $logged[0]['user_id']);
+            $payload = json_decode((string) $logged[0]['payload'], true);
+            self::assertSame('Oprava mzdy po zmrazení: zapomenutá odměna za duben.', $payload['reason']);
+            self::assertSame(self::PERIOD_START, $payload['period_start']);
 
-        // Zrušení vyžaduje výslovné potvrzení i důvod.
-        $rowVersion = (int) $this->scalar('SELECT row_version FROM payroll_submissions WHERE supplier_id = ? AND id = ?', [$this->supplierId, $regularId]);
-        $unconfirmed = $this->withdraw($regularId, ['row_version' => $rowVersion, 'reason' => 'Oprava mzdy po zmrazení.']);
-        self::assertSame(422, $unconfirmed->getStatusCode(), (string) $unconfirmed->getBody());
-        self::assertStringContainsString('nebylo odesláno ani nahráno na ePortál', $this->json($unconfirmed)['error']['message']);
-        $withoutReason = $this->withdraw($regularId, ['row_version' => $rowVersion, 'confirm_not_sent' => true, 'reason' => ' ']);
-        self::assertSame(422, $withoutReason->getStatusCode(), (string) $withoutReason->getBody());
-        self::assertSame('ready', $this->submissionStatus($regularId), 'Odmítnuté zrušení nesmí nic změnit.');
-
-        $withdrawn = $this->withdraw($regularId, [
-            'row_version' => $rowVersion,
-            'confirm_not_sent' => true,
-            'reason' => 'Oprava mzdy po zmrazení: zapomenutá odměna za duben.',
-        ]);
-        self::assertSame(200, $withdrawn->getStatusCode(), (string) $withdrawn->getBody());
-        self::assertSame('cancelled_in_time', $this->json($withdrawn)['submission']['status']);
-        self::assertSame('cancelled_in_time', $this->submissionStatus($regularId));
-        self::assertSame('cancelled', $this->scalar(
-            'SELECT obligation.status FROM payroll_obligations obligation
-               JOIN payroll_submissions submission
-                 ON submission.supplier_id = obligation.supplier_id AND submission.obligation_id = obligation.id
-              WHERE submission.supplier_id = ? AND submission.id = ?',
-            [$this->supplierId, $regularId],
-        ));
-        // Auditní stopa: kdo, co a proč.
-        $audit = $this->db->pdo()->prepare(
-            'SELECT user_id, payload FROM activity_log
-              WHERE supplier_id = ? AND action = "payroll.submission.unsent_withdrawn"
-                AND entity_type = "payroll_submission" AND entity_id = ?',
-        );
-        $audit->execute([$this->supplierId, $regularId]);
-        $logged = $audit->fetchAll(\PDO::FETCH_ASSOC);
-        self::assertCount(1, $logged);
-        self::assertSame($this->actors[0], (int) $logged[0]['user_id']);
-        $payload = json_decode((string) $logged[0]['payload'], true);
-        self::assertSame('Oprava mzdy po zmrazení: zapomenutá odměna za duben.', $payload['reason']);
-        self::assertSame(self::PERIOD_START, $payload['period_start']);
+        });
 
         // Nové řádné hlášení z opravené revize: nové částky, nový GUID podání.
         $refrozen = $this->freezeJmhzSubmission($correctedPreparationId, $this->officeId);
@@ -141,8 +139,9 @@ final class PayrollE2eFix4WithdrawUnsentReportTest extends TestCase
 
     public function testSentReportCannotBeWithdrawn(): void
     {
-        [$regularId] = $this->frozenReportAndCorrectedPreparation();
-        $this->acceptJmhzSubmission($regularId);
+        [$regularId] = $this->frozenReportAndCorrectedPreparation(function (int $regularId): void {
+            $this->acceptJmhzSubmission($regularId);
+        });
         $rowVersion = (int) $this->scalar('SELECT row_version FROM payroll_submissions WHERE supplier_id = ? AND id = ?', [$this->supplierId, $regularId]);
 
         $response = $this->withdraw($regularId, ['row_version' => $rowVersion, 'confirm_not_sent' => true, 'reason' => 'Oprava mzdy.']);
@@ -153,13 +152,76 @@ final class PayrollE2eFix4WithdrawUnsentReportTest extends TestCase
         self::assertSame('accepted', $this->submissionStatus($regularId));
     }
 
+    public function testApprovalCancelsUnsentJmhzAndHealthOverviewsFromPreviousRevision(): void
+    {
+        $healthId = 0;
+        [$regularId, $preparationId] = $this->frozenReportAndCorrectedPreparation(function (int $id, int $revisionId) use (&$healthId): void {
+            $health = $this->container->get(HealthInsuranceSubmissionService::class);
+            $prepared = $health->preparePaymentOverview($this->supplierId, 'test', $revisionId, '111', $this->actors[0]);
+            $healthId = (int) $prepared['submission_id'];
+            self::assertSame('ready', $this->submissionStatus($healthId));
+        });
+
+        self::assertSame('cancelled_in_time', $this->submissionStatus($regularId));
+        self::assertSame('cancelled_in_time', $this->submissionStatus($healthId));
+        $refrozen = $this->freezeJmhzSubmission($preparationId, $this->officeId);
+        self::assertSame(201, $refrozen['status'], CanonicalJson::encode($refrozen['body']));
+        self::assertNotSame($regularId, (int) $refrozen['body']['submission_id']);
+        $revisionId = (int) $this->scalar('SELECT source_revision_id FROM payroll_jmhz_preparation_snapshots WHERE supplier_id = ? AND id = ?', [$this->supplierId, $preparationId]);
+        $health = $this->container->get(HealthInsuranceSubmissionService::class);
+        $prepared = $health->preparePaymentOverview($this->supplierId, 'test', $revisionId, '111', $this->actors[0]);
+        self::assertSame('ready', $prepared['status']);
+        self::assertNotSame($healthId, (int) $prepared['submission_id']);
+        self::assertSame('regular', $this->scalar('SELECT submission_kind FROM payroll_submissions WHERE supplier_id = ? AND id = ?', [$this->supplierId, $prepared['submission_id']]));
+        $event = $this->scalar('SELECT metadata_json FROM payroll_run_events WHERE supplier_id = ? AND revision_id = ? AND event_type = "unsent_submissions_cancelled"', [$this->supplierId, $revisionId]);
+        self::assertEqualsCanonicalizing([$regularId, $healthId], json_decode((string) $event, true)['submission_ids']);
+    }
+
+    public function testApprovalPreservesSentReportsAndHealthOverviewsWithTransportAttempts(): void
+    {
+        $sentHealthId = 0;
+        $attemptedHealthId = 0;
+        [$regularId] = $this->frozenReportAndCorrectedPreparation(function (int $id, int $revisionId) use (&$sentHealthId, &$attemptedHealthId): void {
+            $this->acceptJmhzSubmission($id);
+            $health = $this->container->get(HealthInsuranceSubmissionService::class);
+            $sent = $health->preparePaymentOverview($this->supplierId, 'test', $revisionId, '111', $this->actors[0]);
+            $sentHealthId = (int) $sent['submission_id'];
+            $this->container->get(PayrollSubmissionService::class)->transition($this->supplierId, $sentHealthId, (int) $sent['row_version'], 'submitted');
+            $attempted = $health->preparePaymentOverview($this->supplierId, 'production', $revisionId, '111', $this->actors[0]);
+            $attemptedHealthId = (int) $attempted['submission_id'];
+            $this->container->get(PayrollSubmissionTransportAttemptRepository::class)->open(
+                $this->supplierId, 'production', $attemptedHealthId, 'health_portal', 1, 'fix8-prepared-attempt', hash('sha256', 'synthetic'), $this->actors[0],
+            );
+        });
+
+        self::assertSame('accepted', $this->submissionStatus($regularId));
+        self::assertSame('submitted', $this->submissionStatus($sentHealthId));
+        self::assertSame('ready', $this->submissionStatus($attemptedHealthId));
+    }
+
+    public function testApprovalPreservesHealthOverviewInLocalOutboxWithoutSending(): void
+    {
+        $healthId = 0;
+        $outboxId = 0;
+        $this->frozenReportAndCorrectedPreparation(function (int $id, int $revisionId) use (&$healthId, &$outboxId): void {
+            $health = $this->container->get(HealthInsuranceSubmissionService::class);
+            $prepared = $health->preparePaymentOverview($this->supplierId, 'production', $revisionId, '111', $this->actors[0]);
+            $healthId = (int) $prepared['submission_id'];
+            $queued = $this->container->get(HealthInsuranceIsdsSubmissionService::class)->enqueue($this->supplierId, $healthId, '111', $this->actors[0]);
+            $outboxId = (int) $queued['outbox_id'];
+        });
+
+        self::assertSame('ready', $this->submissionStatus($healthId));
+        self::assertSame('ready', $this->scalar('SELECT dispatch_state FROM submission_outbox WHERE supplier_id = ? AND id = ?', [$this->supplierId, $outboxId]));
+    }
+
     /**
      * Schválený duben se zmrazeným řádným hlášením, pak oprava běhu
      * (zapomenutá odměna 2 000 Kč) a nová příprava z opravené revize.
      *
      * @return array{int,int} id zmrazeného řádného podání a id nové přípravy
      */
-    private function frozenReportAndCorrectedPreparation(): array
+    private function frozenReportAndCorrectedPreparation(?callable $beforeCorrection = null): array
     {
         $person = $this->hire();
         $this->createApprovedInput($person, $this->baseComponentId, 4_500_000, 'base', self::PERIOD_START);
@@ -172,6 +234,8 @@ final class PayrollE2eFix4WithdrawUnsentReportTest extends TestCase
         $frozen = $this->freezeJmhzSubmission((int) $preparation['body']['id'], $this->officeId);
         self::assertSame(201, $frozen['status'], CanonicalJson::encode($frozen['body']));
         self::assertSame('ready', $frozen['body']['status']);
+
+        $beforeCorrection?->__invoke((int) $frozen['body']['submission_id'], (int) $run['approved']->revision['id']);
 
         $runId = (int) $run['approved']->run['id'];
         $requested = $this->runs->requestCorrection($this->supplierId, $runId, (int) $run['approved']->run['row_version'], 'zru-oprava-request', $this->actors[0], 'Zapomenutá odměna za duben.');

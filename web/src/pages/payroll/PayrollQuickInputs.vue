@@ -438,6 +438,7 @@ function rowClosed(row: PayrollQuickInputRow): boolean {
 function surchargeEditable(row: UiRow, kind: PayrollQuickSurchargeKind): boolean {
   if (rowClosed(row)) return false
   const state = surchargeState(row, kind)
+  if (row.hourly_remuneration_in_period && state?.row_version == null) return false
   if (state === null || !state.entry_available) return false
   return state.status === null || state.status === 'draft'
     || (state.status === 'approved' && canApprove.value)
@@ -776,6 +777,7 @@ const totalsView = computed(() => {
  * takže jeho nepřítomnost znamená „podklad nemáme", ne „všechno je v pořádku".
  */
 function surchargeUnavailableKey(row: UiRow, kind: PayrollQuickSurchargeKind): string | null {
+  if (row.hourly_remuneration_in_period) return 'hourly_attendance'
   const state = surchargeState(row, kind)
   if (state?.entry_available && !state.clear_only) return null
   return state?.clear_only ? 'clear_only' : (state?.unavailable_reason ?? 'basis_missing')

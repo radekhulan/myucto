@@ -1039,17 +1039,7 @@ export interface PayrollStatutoryBulkResult {
 
 export interface PayrollHealthInsurerBulkPreview {
   period_start: string
-  /**
-   * `known_*` = pojišťovna, kterou má osoba zapsanou až od pozdějšího měsíce;
-   * dialog ji předvyplní.
-   */
-  people: Array<{
-    employee_id: number
-    full_name: string
-    suggested_from: string
-    known_insurer_code?: string | null
-    known_from?: string | null
-  }>
+  people: Array<{ employee_id: number, full_name: string, suggested_from: string }>
 }
 
 export interface PayrollHealthInsurerAssignment {
@@ -8097,36 +8087,6 @@ export interface PayrollRun {
    * je dostane jen jeho oprava. Volitelné kvůli starší odpovědi.
    */
   missing_employments?: PayrollRunMissingEmployment[]
-  average_change?: PayrollRunAverageChange | null
-}
-
-export interface PayrollRunAverageChangeCompensation {
-  input_id: number
-  component_name: string
-  quantity_milliunits: number | null
-  amount_minor: number
-  average_hourly_minor: number | null
-  expected_amount_minor: number | null
-}
-
-export interface PayrollRunAverageChangeEmployment {
-  employment_id: number
-  employee_id: number
-  full_name: string
-  average_changed: boolean
-  frozen_average_hourly_minor: number | null
-  current_average_hourly_minor: number | null
-  compensations: PayrollRunAverageChangeCompensation[]
-}
-
-export interface PayrollRunAverageChange {
-  approved: boolean
-  action: 'request_correction' | 'reopen' | 'refresh_inputs' | null
-  average_changed_count: number
-  compensation_count: number
-  compensation_difference_minor: number
-  compensation_unknown_count: number
-  employments: PayrollRunAverageChangeEmployment[]
 }
 
 export interface PayrollRunMissingEmployment {
@@ -8247,8 +8207,6 @@ export interface PayrollRunReadinessFinding {
   /** `label` je lidský název konkrétní věci — nález MUSÍ jmenovat, čeho se týká. */
   /** `gaps` = klíče chybějících údajů osoby (`PayrollPersonDataGapKey`) u nálezu `person_data_gap`. */
   entities: { entity_type: string, entity_id: number | null, label: string | null, message?: string, remediation_path?: string | null, gaps?: string[] }[]
-  /** Varování, které v běhu čeká na výjimku; do té doby běh nejde schválit. */
-  requires_override?: boolean
   /** Jde nález trvale skrýt; `subject_ids` jsou VŠECHNY dotčené osoby (vztahy). */
   hideable?: boolean
   subject_type?: PayrollWarningSubjectType | null

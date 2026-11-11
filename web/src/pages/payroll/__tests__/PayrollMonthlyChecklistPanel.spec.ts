@@ -1012,20 +1012,23 @@ describe('PayrollMonthlyChecklistPanel', () => {
     expect(group.find('[data-test="jmhz-freeze-blocker-fixed"]').exists()).toBe(false)
   })
 
-  it('u údaje už opraveného v evidenci řekne, že zbývá jen opravná revize', async () => {
+  it.each([
+    { code: 'jmhz_scenario1_child_credit_caregiver_unknown', label: 'Syntetická Rodičovská', path: '/payroll/people?person=7&panel=dependants' },
+    { code: 'jmhz_average_hourly_earning_missing', label: 'Syntetická Průměrová', path: '/payroll/absences?employment=7&tab=averages&year=2026&quarter=3' },
+  ])('u údaje $code už opraveného v evidenci řekne, že zbývá jen opravná revize', async ({ code, label, path }) => {
     m.monthlyChecklist.mockResolvedValue(baseResponse({ items: [jmhzDutyItem()] }))
     m.prepareItem.mockRejectedValue({
       response: { data: { error: {
         code: 'conflict',
         message: 'Příprava JMHZ není úplná.',
         details: { blockers: [{
-          code: 'jmhz_scenario1_child_credit_caregiver_unknown',
+          code,
           entity_type: 'person',
           entity_id: 7,
           attribute_ids: ['10453'],
           reason: 'Není zodpovězeno, zda tytéž děti vyživuje i jiná osoba.',
-          label: 'Syntetická Rodičovská',
-          remediation_path: '/payroll/people?person=7&panel=dependants',
+          label,
+          remediation_path: path,
           needs_revision: true,
           revision_path: '/payroll/runs?period=2026-08',
           fixed_in_source: true,
@@ -1042,6 +1045,9 @@ describe('PayrollMonthlyChecklistPanel', () => {
       .toContain('payroll.jmhz_gate.freeze_blockers.fixed_in_source')
     expect(wrapper.get('tbody [data-test="jmhz-freeze-blocker-revision"]').text())
       .toContain('payroll.jmhz_gate.freeze_blockers.revision_only')
+    expect(wrapper.get('tbody [data-test="jmhz-freeze-blocker-revision-link"]').attributes('data-to'))
+      .toContain('/payroll/runs?period=2026-08')
+    expect(m.prepareItem).toHaveBeenCalledTimes(1)
   })
 
   /**
@@ -1102,5 +1108,22 @@ describe('PayrollMonthlyChecklistPanel', () => {
     // M13: příprava podání zmrazí a nic neodešle; obrazovka to řekne.
     expect(wrapper.get('[data-test="monthly-checklist-prepare-all-summary"]').text())
       .toContain('payroll.submissions.monthly_checklist.send.prepared_one')
+  })
+
+  it('připravené podání otevře s ID, obdobím a prostředím a nabídne jen odeslání', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({ items: [jmhzDutyItem({
+      source: 'submission', key: 'submission:9', submission_id: 15,
+      status: 'ready', dispatchable: true, dispatch_mode: 'isds_payroll', dispatch_modes: ['isds_payroll'],
+      action: { kind: 'send', label: 'Odeslat', path: '/payroll/submissions/jmhz', reason: null, prepare: null },
+    })] }))
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.get('[data-test="monthly-checklist-send-all"]').text())
+      .toContain('payroll.submissions.monthly_checklist.send.send_all')
+    const target = wrapper.get('tbody a[data-to]').attributes('data-to')!
+    expect(target).toContain('submission=15')
+    expect(target).toContain('period=2026-08')
+    expect(target).toContain('environment=production')
+    expect(wrapper.find('[data-test="monthly-checklist-prepare-all"]').exists()).toBe(false)
   })
 })
