@@ -101,6 +101,9 @@ final class PayrollRunReadinessImpact
         // Výpočet daně osobu bez ověřeného stavu prohlášení zastaví (ruční
         // kontrola), takže běh se spočítá jen zčásti a schválit nepůjde.
         'tax_declaration_evidence_missing' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
+        // Zákonná evidence osoby (pojišťovna, daňová rezidence, příslušnost
+        // k pojištění), bez které výpočet osobu vyřadí do ruční kontroly.
+        'statutory_evidence_incomplete' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
 
         // ── Skupina 2: opraví se, ale po zamknutí přes opravnou revizi ───────
         // Rozhodnutí nepřítomnosti mění snímek vstupů (schválené nepřítomnosti).

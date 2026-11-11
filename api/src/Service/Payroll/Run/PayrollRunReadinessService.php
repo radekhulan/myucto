@@ -213,6 +213,10 @@ final class PayrollRunReadinessService
             if ($declarationFinding !== null) {
                 $findings[] = $declarationFinding;
             }
+            $statutoryFinding = self::statutoryEvidenceFinding($snapshot->data);
+            if ($statutoryFinding !== null) {
+                $findings[] = $statutoryFinding;
+            }
             /*
              * Nálezy, které se dosud ozvaly až u ZMRAZENÍ měsíčního hlášení.
              * Nepíšou se tu znovu — volá se tatáž cesta, jen nasucho. Bez toho
@@ -289,7 +293,7 @@ final class PayrollRunReadinessService
     {
         $code = (string) ($finding['code'] ?? '');
         $count = max((int) ($finding['count'] ?? 0), (int) ($finding['entity_total'] ?? 0));
-        if ($code === 'person_data_gap') {
+        if ($code === 'person_data_gap' || $code === 'statutory_evidence_incomplete') {
             /** @var array<string,int> $totals */
             $totals = $finding['gap_totals'] ?? [];
             $actions = [];
@@ -406,6 +410,120 @@ final class PayrollRunReadinessService
             ),
         ), 'bulk_employee_ids' => array_column($affected, 'id')];
     }
+
+    /**
+     * Osoby, které zákonný výpočet vyřadí do ruční kontroly kvůli chybějící
+     * zákonné evidenci (pojišťovna, daňová rezidence, příslušnost
+     * k pojištění).
+     *
+     * ── Co bylo špatně ──────────────────────────────────────────────────────
+     * Kontrola znala tyhle díry jen z katalogu mezer jako informaci
+     * (`person_data_gap`, „opraví se kdykoli"). Výpočet ale osobu bez
+     * pojišťovny vyřadí a běh nejde schválit: kontrola tvrdila volnou cestu
+     * a zastavil až výpočet.
+     *
+     * Teď se ptá nad týmž snímkem a týmž sestavením vstupů jako výpočet
+     * ({@see PayrollRunStatutoryInputAssembler}) a text i odkaz u osoby bere
+     * z téhož formátovače jako validace běhu
+     * ({@see PayrollRunValidationMessageFormatter::statutoryDetails()}).
+     * Prohlášení hlásí `taxDeclarationFinding()` a chybějící podmínky vztahu
+     * validace snímku, proto se tu nepočítají podruhé.
+     *
+     * @param array<string,mixed> $snapshotData
+     * @return array<string,mixed>|null
+     */
+    private static function statutoryEvidenceFinding(array $snapshotData): ?array
+    {
+        try {
+            $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshotData);
+        } catch (\Throwable) {
+            return null;
+        }
+        $names = [];
+        foreach ((array) ($snapshotData['people'] ?? []) as $person) {
+            if (is_array($person) && is_array($person['employee'] ?? null)) {
+                $names[(int) ($person['employee']['id'] ?? 0)] = (string) ($person['employee']['full_name'] ?? '');
+            }
+        }
+        $gapByIssue = [
+            'health_coverage_evidence_missing' => 'health_insurance',
+            'tax_residence_evidence_missing' => 'tax_residence',
+            'social_jurisdiction_evidence_missing' => 'tax_residence',
+        ];
+        $affected = [];
+        $totals = [];
+        foreach ($bundle->blockedPeople as $employeeId => $issues) {
+            $relevant = array_values(array_filter(
+                $issues,
+                static fn (PayrollRunStatutoryInputIssue $issue): bool =>
+                    !in_array($issue->code, self::STATUTORY_ISSUES_REPORTED_ELSEWHERE, true),
+            ));
+            if ($relevant === []) {
+                continue;
+            }
+            $details = PayrollRunValidationMessageFormatter::statutoryDetails(['people' => [[
+                'person_reference' => "employee:{$employeeId}",
+                'issues' => array_map(
+                    static fn (PayrollRunStatutoryInputIssue $issue): string => $issue->toIssueString(),
+                    $relevant,
+                ),
+            ]]]);
+            $gaps = [];
+            foreach ($relevant as $issue) {
+                if (isset($gapByIssue[$issue->code])) {
+                    $gaps[$gapByIssue[$issue->code]] = true;
+                }
+            }
+            foreach (array_keys($gaps) as $gap) {
+                $totals[$gap] = ($totals[$gap] ?? 0) + 1;
+            }
+            $name = $names[$employeeId] ?? "#{$employeeId}";
+            $affected[] = [
+                'entity_type' => 'employee',
+                'entity_id' => (int) $employeeId,
+                'label' => $name,
+                'message' => $name . ': ' . implode(' ', array_values(array_unique(array_column($details, 'message')))),
+                'remediation_path' => $details[0]['remediation_path'] ?? self::gapPath((int) $employeeId, null),
+            ];
+        }
+        if ($affected === []) {
+            return null;
+        }
+        usort(
+            $affected,
+            static fn (array $left, array $right): int =>
+                [$left['label'], $left['entity_id']] <=> [$right['label'], $right['entity_id']],
+        );
+        $shown = array_slice($affected, 0, self::MAX_ENTITIES);
+        $hidden = count($affected) - count($shown);
+
+        return ['gap_totals' => $totals] + self::finding(
+            'statutory_evidence_incomplete',
+            sprintf(
+                'Zákonný výpočet vyřadí do ruční kontroly tyto osoby (%d): %s%s. Chybí jim '
+                . 'zákonná evidence (zdravotní pojišťovna, daňová rezidence nebo příslušnost '
+                . 'k pojištění); bez ní se pojistné ani daň nespočítají a běh nepůjde schválit. '
+                . 'Odkaz u osoby otevře místo, kde se údaj doplňuje.',
+                count($affected),
+                implode(', ', array_column($shown, 'label')),
+                $hidden > 0 ? sprintf(' a dalších %d', $hidden) : '',
+            ),
+            '/payroll/people?filter=blocking_data',
+            count($affected),
+            $shown,
+        );
+    }
+
+    /**
+     * Důvody vyřazení, které hlásí jiný nález: prohlášení
+     * (`tax_declaration_evidence_missing`) a chybějící podmínky vztahu
+     * (validace snímku `missing_effective_employment_term`).
+     */
+    private const STATUTORY_ISSUES_REPORTED_ELSEWHERE = [
+        'tax_declaration_evidence_missing',
+        'tax_declaration_evidence_unverified',
+        'employment_term_missing',
+    ];
 
     /**
      * Vztahy, které podle sjednaného konce skončily před obdobím běhu, ale
