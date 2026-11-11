@@ -47,9 +47,14 @@ final class PayrollEmploymentDeletionRepository
      * @var array<string,array{tables:list<string>,where?:string,code:string,message:string}>
      */
     private const BLOCKERS = [
+        // Profil registrace A1 (`payroll_registration_a1_profiles`) tu záměrně
+        // chybí: je to pracovní podklad pro podání, ne úkon. Převzatý z importu
+        // registrací jen opisuje cizí podklady, a když z něj vznikl chybný vztah,
+        // musí jít smazat. Co z aplikace k ČSSZ skutečně šlo, drží snímek identity
+        // a události, identifikátory vztahu od ČSSZ drží external ids. Profil se
+        // proto maže se vztahem (viz RESTRICT_SCAFFOLD).
         'registration' => [
             'tables' => [
-                'payroll_registration_a1_profiles',
                 'payroll_registration_identity_snapshots',
                 'payroll_registration_event_snapshots',
                 'payroll_registration_a2_evidence_ledger',
@@ -180,6 +185,7 @@ final class PayrollEmploymentDeletionRepository
             'payroll_average_earning_snapshots',
         ],
         'sickness' => ['payroll_sickness_cases'],
+        'registration_profile' => ['payroll_registration_a1_profiles'],
     ];
 
     /**
@@ -196,8 +202,11 @@ final class PayrollEmploymentDeletionRepository
      * ručně. Dimenze jsou účetní zatřídění a pravidelné složky stálý předpis; ani
      * jedno není pohyb. Rozpracovaný případ dávky je příprava podání, které nikdy
      * neodešlo; musí zmizet PŘED vztahem, protože na něj i na jeho absenci ukazuje
-     * cizím klíčem RESTRICT. Zbytek lešení odklidí ON DELETE CASCADE, což zároveň
-     * korektně obejde append-only triggery na vnucích (FK kaskáda triggery nespouští).
+     * cizím klíčem RESTRICT. Profil registrace A1 má FK RESTRICT taky; jeho
+     * mazací trigger pustí řádek vztahu, za který neodešlo registrační podání,
+     * a jinak mazání zastaví (viz {@see self::REGISTRATION_PROFILE_RETAINED}).
+     * Zbytek lešení odklidí ON DELETE CASCADE, což zároveň korektně obejde
+     * append-only triggery na vnucích (FK kaskáda triggery nespouští).
      *
      * @var array<string,string|null> tabulka => zúžení na mazané řádky
      */
@@ -205,13 +214,22 @@ final class PayrollEmploymentDeletionRepository
         'payroll_employment_dimensions' => null,
         'payroll_recurring_components' => null,
         'payroll_sickness_cases' => self::SICKNESS_DRAFT,
+        'payroll_registration_a1_profiles' => null,
     ];
 
     /**
-     * Důkazy, které drží druh pracovního vztahu. Oproti mazání chybí převzatý
-     * profil registrace (`payroll_registration_a1_profiles`): ten jen opisuje
-     * registraci podanou mimo aplikaci a oprava druhu je právě náprava jejího
-     * chybného převzetí. Mzdové vstupy drží druh jen schválené, koncept vstupu
+     * Hláška triggeru `trg_payroll_registration_a1_profile_immutable_delete`
+     * (migrace 1716): profil vztahu, za který už odešlo registrační podání,
+     * se nesmaže. Z aplikace takové podání nechá i snímek identity, který mazání
+     * blokuje dřív; trigger je pojistka pro podání bez snímku.
+     */
+    private const REGISTRATION_PROFILE_RETAINED = 'retained once registration was submitted';
+
+    /**
+     * Důkazy, které drží druh pracovního vztahu. Stejně jako u mazání chybí
+     * převzatý profil registrace (`payroll_registration_a1_profiles`): ten jen
+     * opisuje registraci podanou mimo aplikaci a oprava druhu je právě náprava
+     * jejího chybného převzetí. Mzdové vstupy drží druh jen schválené, koncept vstupu
      * opravu nepřežije bez kontroly, ale nic nepotvrdil. Dovolená drží proto,
      * že dohoda nárok na dovolenou nemá a vedená kniha dovolené by osiřela.
      *
@@ -470,7 +488,22 @@ final class PayrollEmploymentDeletionRepository
                 "DELETE scaffold FROM {$table} scaffold"
                 . " WHERE scaffold.supplier_id = ? AND scaffold.employment_id = ?{$filter}"
             );
-            $stmt->execute([$supplierId, $employmentId]);
+            try {
+                $stmt->execute([$supplierId, $employmentId]);
+            } catch (\PDOException $e) {
+                if (
+                    TransactionFailure::aborted($e)
+                    || !str_contains($e->getMessage(), self::REGISTRATION_PROFILE_RETAINED)
+                ) {
+                    throw $e;
+                }
+                throw new PayrollDeletionException(
+                    self::BLOCKERS['registration']['code'],
+                    self::BLOCKERS['registration']['message'],
+                    $employmentId,
+                    (string) $employment['code'],
+                );
+            }
         }
 
         $guard = $this->db->pdo()->prepare(self::guardedDeleteSql());

@@ -381,6 +381,14 @@ checklistu jsou splněné a odhláška A2 je přijatá.
 Nenastoupil-li zaměstnanec vůbec, klikněte na **Označit nenástup** a podejte
 storno A8 nebo ukončení předregistrace P2.
 
+Vztah, který vůbec neměl vzniknout (například ho import registrací založil
+z cizích podkladů a ČSSZ o něm neví), smažete tlačítkem **Smazat pracovní
+vztah**. Smaže se i s podmínkami, checklistem a nepodaným profilem registrace
+A1. Smazat ho nejde, jakmile z aplikace odešla nebo se připravila registrace
+ČSSZ, má identifikátory vztahu od ČSSZ, hlášení JMHZ, mzdový běh, mzdové
+vstupy, pracovní cesty nebo vydaný doklad. Hláška u tlačítka vždy řekne, co
+smazání drží.
+
 Vznikl-li vztah s nesprávným druhem (například import registrace převzal
 dohodu o provedení práce jako pracovní poměr), opravíte ho na kartě vztahu
 tlačítkem **Další akce vztahu → Opravit druh vztahu** (pod podmínkami vztahu,

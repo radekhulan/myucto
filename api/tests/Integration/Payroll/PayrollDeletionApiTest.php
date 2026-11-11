@@ -188,51 +188,77 @@ final class PayrollDeletionApiTest extends TestCase
         self::assertSame(1, $this->rowCount('payroll_employments', 'id', $employment['id']));
     }
 
-    public function testAuthoritativeA1ProfileBlocksEmploymentAndEmployeeDeletion(): void
+    /**
+     * Import registrací založil z cizích podkladů chybný vztah. Profil A1 je jen
+     * pracovní podklad: ČSSZ o vztahu neví, takže ho musí jít smazat i s profilem.
+     */
+    public function testImportedA1ProfileAloneDoesNotBlockEmploymentDeletion(): void
     {
         $employment = $this->create('HPP-A1', 'employment', true);
         $employmentId = (int) $employment['id'];
-        $this->db->pdo()->prepare(
-            'INSERT INTO payroll_registration_a1_profiles
-                (supplier_id, employee_id, employment_id, effective_on,
-                 profile_ciphertext, profile_hash, reference_hash, row_version)
-             VALUES (?, ?, ?, ?, ?, UNHEX(SHA2(?, 256)), ?, 1)'
-        )->execute([
-            $this->supplierId,
-            $this->employeeId,
-            $employmentId,
-            '2026-01-01',
-            'enc:v2:synthetic-fixture',
-            'synthetic-a1-profile',
-            str_repeat('a', 64),
-        ]);
+        $this->insertA1Profile($employmentId);
 
-        $employmentDecision = $this->employmentDeletion->canDelete(
-            $this->supplierId,
-            $employmentId,
-        );
-        self::assertNotNull($employmentDecision);
-        self::assertFalse($employmentDecision->canDelete);
-        self::assertSame('payroll_employment_registered', $employmentDecision->blockerCode);
+        $decision = $this->employmentDeletion->canDelete($this->supplierId, $employmentId);
+        self::assertNotNull($decision);
+        self::assertTrue($decision->canDelete, (string) $decision->blockerMessage);
+        self::assertSame(1, $decision->cascade['registration_profile']);
 
-        $employeeDecision = $this->employeeDeletion->canDelete(
-            $this->supplierId,
-            $this->employeeId,
-        );
-        self::assertNotNull($employeeDecision);
-        self::assertFalse($employeeDecision->canDelete);
-        self::assertSame($employmentId, $employeeDecision->blockedEmploymentId);
+        $response = $this->deleteEmployment($employment);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(0, $this->rowCount('payroll_employments', 'id', $employmentId));
+        self::assertSame(0, $this->rowCount('payroll_registration_a1_profiles', 'employment_id', $employmentId));
+        self::assertSame(0, $this->rowCount('payroll_employment_terms', 'employment_id', $employmentId));
+    }
 
-        foreach ([
-            $this->deleteEmployment($employment),
-            $this->deleteEmployee($this->employeeId),
-        ] as $response) {
+    public function testEmployeeWithImportedA1ProfileIsDeletable(): void
+    {
+        $employment = $this->create('HPP-A1E', 'employment', true);
+        $this->insertA1Profile((int) $employment['id']);
+
+        $decision = $this->employeeDeletion->canDelete($this->supplierId, $this->employeeId);
+        self::assertNotNull($decision);
+        self::assertTrue($decision->canDelete, (string) $decision->blockerMessage);
+
+        $response = $this->deleteEmployee($this->employeeId);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(0, $this->rowCount('payroll_employees', 'id', $this->employeeId));
+        self::assertSame(0, $this->rowCount('payroll_registration_a1_profiles', 'employee_id', $this->employeeId));
+    }
+
+    /**
+     * Identifikátor vztahu od ČSSZ nebo schválená událost registrace je skutečný
+     * úkon navenek. Ten mazání drží i nadále a profil A1 zůstane.
+     */
+    public function testA1ProfileWithRegistrationEvidenceStillBlocksDeletion(): void
+    {
+        $withIdentifier = $this->create('HPP-A1X', 'employment', true);
+        $this->insertA1Profile((int) $withIdentifier['id']);
+        $this->insertRegistrationIdentifier((int) $withIdentifier['id']);
+
+        $withEvent = $this->create('HPP-A1V', 'employment', false);
+        $this->insertA1Profile((int) $withEvent['id']);
+        $this->insertRegistrationEventSnapshot((int) $withEvent['id']);
+
+        foreach ([$withIdentifier, $withEvent] as $employment) {
+            $employmentId = (int) $employment['id'];
+            $decision = $this->employmentDeletion->canDelete($this->supplierId, $employmentId);
+            self::assertNotNull($decision);
+            self::assertFalse($decision->canDelete);
+            self::assertSame('payroll_employment_registered', $decision->blockerCode);
+
+            $response = $this->deleteEmployment($employment);
             self::assertSame(409, $response->getStatusCode());
             $error = $this->json($response)['error'];
-            self::assertStringNotContainsStringIgnoringCase('constraint', $error['message']);
+            self::assertSame('payroll_employment_registered', $error['code']);
             self::assertStringNotContainsStringIgnoringCase('SQLSTATE', $error['message']);
+            self::assertSame(1, $this->rowCount('payroll_employments', 'id', $employmentId));
+            self::assertSame(1, $this->rowCount('payroll_registration_a1_profiles', 'employment_id', $employmentId));
         }
-        self::assertSame(1, $this->rowCount('payroll_employments', 'id', $employmentId));
+
+        $employeeDecision = $this->employeeDeletion->canDelete($this->supplierId, $this->employeeId);
+        self::assertNotNull($employeeDecision);
+        self::assertFalse($employeeDecision->canDelete);
+        self::assertSame(409, $this->deleteEmployee($this->employeeId)->getStatusCode());
         self::assertSame(1, $this->rowCount('payroll_employees', 'id', $this->employeeId));
     }
 
@@ -712,6 +738,47 @@ final class PayrollDeletionApiTest extends TestCase
             $employmentId,
             "id-ppv-{$employmentId}",
             str_repeat('a', 64),
+        ]);
+    }
+
+    /** Profil REGZEC A1, jak ho zakládá import registrací z cizích podkladů. */
+    private function insertA1Profile(int $employmentId): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_registration_a1_profiles
+                (supplier_id, employee_id, employment_id, effective_on,
+                 profile_ciphertext, profile_hash, reference_hash, row_version)
+             VALUES (?, ?, ?, ?, ?, UNHEX(SHA2(?, 256)), SHA2(?, 256), 1)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $employmentId,
+            '2026-01-01',
+            'enc:v2:synthetic-fixture',
+            "synthetic-a1-profile-{$employmentId}",
+            "synthetic-a1-reference-{$employmentId}",
+        ]);
+    }
+
+    /** Schválená událost registrace (odhláška), tedy úkon, který jde k ČSSZ. */
+    private function insertRegistrationEventSnapshot(int $employmentId): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_registration_event_snapshots
+                (supplier_id, employee_id, employment_id, environment,
+                 interaction_code, action_code, effective_on, source_kind,
+                 source_reference, source_manifest_json, source_manifest_hash,
+                 snapshot_ciphertext, snapshot_fingerprint, approved_by, approved_at)
+             VALUES (?, ?, ?, 'test', 'termination', 2, '2026-03-31', 'employment_exit',
+                     ?, '{}', SHA2(?, 256), 'enc:v2:synthetic-event', SHA2(?, 256), ?, NOW())"
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $employmentId,
+            "employment-exit-{$employmentId}",
+            "manifest-{$employmentId}",
+            "fingerprint-{$employmentId}",
+            $this->userId,
         ]);
     }
 
