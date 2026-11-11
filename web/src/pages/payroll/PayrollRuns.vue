@@ -1970,6 +1970,16 @@ onMounted(load)
                     </a>
                   </template>
                 </ExpandableList>
+                <!-- Výčet je oříznutý: zbytek osob nálezu ukáže seznam zaměstnanců zúžený týmž pravidlem. -->
+                <a
+                  v-if="finding.people_list_path"
+                  :href="finding.people_list_path"
+                  :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+                  :data-test="`run-readiness-people-list-${finding.code}`"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+                  {{ t('payroll.runs.readiness.people_list', { count: finding.people_total ?? 0 }, finding.people_total ?? 0) }}
+                </a>
                 <a
                   v-if="finding.remediation_path && !finding.entities.some(entity => entity.remediation_path)"
                   :href="readinessHref(finding.remediation_path)"

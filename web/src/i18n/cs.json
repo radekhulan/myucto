@@ -4823,6 +4823,7 @@
       },
       "readiness": {
         "affected": "Týká se: {names}",
+        "people_list": "Zobrazit v seznamu zaměstnanců | Zobrazit tuto osobu v seznamu zaměstnanců | Zobrazit všechny {count} osoby v seznamu zaměstnanců | Zobrazit všech {count} osob v seznamu zaměstnanců",
         "fill_probable_average": "Doplnit pravděpodobný výdělek ze sazby",
         "bulk": {
           "statutory_defaults": "Doplnit výchozí zákonné údaje ({count})",
@@ -6562,7 +6563,8 @@
         "needs_setup": "K doplnění",
         "needs_data": "Mám doplnit údaje",
         "blocking_data": "Brání podání",
-        "dpp_hours_limit": "DPP u limitu 300 h"
+        "dpp_hours_limit": "DPP u limitu 300 h",
+        "run_finding": "Osoby z nálezu kontroly před během"
       },
       "dpp_hours": {
         "label_manual_review_required": "DPP — součet neověřen",
@@ -7144,6 +7146,11 @@
         "body": "Ve schváleném běhu tento vztah chybí, takže za ten měsíc nemá mzdu, výplatní pásku ani měsíční hlášení. Schválený běh se sám nezmění: otevřete běh, vyžádejte jeho opravu a otevřete ji, nová revize vztah převezme.",
         "open_run": "Otevřít běh {period}",
         "toast": "Nástup spadá do měsíce se schváleným mzdovým během ({periods}). Otevřete opravu běhu, jinak osoba za ten měsíc nedostane mzdu ani měsíční hlášení. | Nástup spadá do měsíce se schváleným mzdovým během ({periods}). Otevřete opravu běhu, jinak osoba za ten měsíc nedostane mzdu ani měsíční hlášení. | Nástup spadá do měsíců se schváleným mzdovým během ({periods}). Otevřete opravu těchto běhů, jinak osoba za ty měsíce nedostane mzdu ani měsíční hlášení."
+      },
+      "run_finding": {
+        "hint": "Seznam je zúžený na osoby z nálezu kontroly před během za {period}; nález už nikoho nezahrnuje. | Seznam je zúžený na {count} osobu z nálezu kontroly před během za {period}. | Seznam je zúžený na {count} osoby z nálezu kontroly před během za {period}. | Seznam je zúžený na {count} osob z nálezu kontroly před během za {period}.",
+        "back": "Zpět na mzdový běh",
+        "clear": "Zrušit zúžení"
       },
       "open_agreement": {
         "title": "Osoba už má otevřenou dohodu o provedení práce.",

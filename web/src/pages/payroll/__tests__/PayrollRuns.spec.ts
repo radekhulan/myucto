@@ -1847,6 +1847,63 @@ describe('PayrollRuns', () => {
   })
 
   /*
+   * U 150 nálezů bylo dosažitelných jen 25 („dalších 125 se do přehledu
+   * nevešlo") a zbytek nebylo kde najít.
+   */
+  it('nález s oříznutým výčtem vede na seznam zaměstnanců zúžený na všechny jeho osoby', async () => {
+    m.runs.mockResolvedValue([])
+    m.readiness.mockReturnValue({
+      period_start: '2026-10-01',
+      payment_date: '2026-11-10',
+      office_id: null,
+      ready: true,
+      has_findings: true,
+      findings: [{
+        code: 'time_month_missing',
+        severity: 'blocker',
+        impact: 'approval',
+        scope: 'monthly',
+        message: 'Pracovní vztah nemá za období založenou a schválenou pracovní dobu.',
+        remediation_path: '/payroll/time?period=2026-10',
+        count: 150,
+        entity_total: 150,
+        people_total: 148,
+        people_list_path: '/payroll/people?filter=run_finding&finding=time_month_missing&period=2026-10&payment_date=2026-11-10',
+        entities: [{
+          entity_type: 'employment',
+          entity_id: 3,
+          label: 'Syntetický Hromadný 01',
+          message: 'Syntetický Hromadný 01: pracovní vztah nemá za období založenou a schválenou pracovní dobu.',
+          remediation_path: '/payroll/time?employment=3&period=2026-10',
+        }],
+        bulk_actions: [],
+      }, {
+        code: 'employment_without_inputs',
+        severity: 'blocker',
+        impact: 'approval',
+        scope: 'monthly',
+        message: 'Pracovní vztah nemá v období žádnou schválenou mzdovou složku.',
+        remediation_path: null,
+        count: 1,
+        entity_total: 1,
+        entities: [{ entity_type: 'employment', entity_id: 3, label: 'Syntetický Hromadný 01' }],
+        bulk_actions: [],
+      }],
+    } satisfies PayrollRunReadiness)
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const link = wrapper.get('[data-test="run-readiness-people-list-time_month_missing"]')
+    expect(link.attributes('href'))
+      .toBe('/payroll/people?filter=run_finding&finding=time_month_missing&period=2026-10&payment_date=2026-11-10')
+    expect(link.text()).toContain('payroll.runs.readiness.people_list')
+    // Nález, který se vešel celý, odkaz na seznam nemá.
+    expect(wrapper.find('[data-test="run-readiness-people-list-employment_without_inputs"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  /*
    * Zaměstnanec založený až po schválení měsíce v běhu tiše chyběl: stránka
    * běhu se nezměnila a osoba zůstala bez mzdy i bez měsíčního hlášení.
    */

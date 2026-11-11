@@ -617,7 +617,8 @@ export interface PayrollPeopleResponse {
  * `needs_setup` je starší, užší pohled (pětice podmínek uložení profilu);
  * server ho pořád přijímá kvůli odkazům zvenčí, ale nabídka na obrazovce ho
  * už neukazuje. `needs_data` = cokoli z katalogu chybí, `blocking_data` =
- * chybí něco, bez čeho měsíc neprojde.
+ * chybí něco, bez čeho měsíc neprojde. `run_finding` = osoby jednoho nálezu
+ * kontroly před během; zapíná ho jen odkaz nálezu (`finding`, `period`).
  */
 export type PayrollPeopleFilter =
   | 'all'
@@ -626,6 +627,7 @@ export type PayrollPeopleFilter =
   | 'needs_data'
   | 'blocking_data'
   | 'dpp_hours_limit'
+  | 'run_finding'
 
 /** Osoba v rozbalovací nabídce — jen to, čím se dá vybrat. */
 export interface PayrollPersonOption {
@@ -7982,6 +7984,12 @@ export interface PayrollRunReadinessFinding {
   count: number
   /** Skutečný počet dotčených záznamů; `entities` je na serveru oříznutý. */
   entity_total?: number
+  /**
+   * Jen u nálezu s oříznutým výčtem: odkaz na seznam zaměstnanců zúžený na
+   * VŠECHNY osoby nálezu a jejich počet (osoba s více vztahy je tam jednou).
+   */
+  people_total?: number
+  people_list_path?: string
   /** `label` je lidský název konkrétní věci — nález MUSÍ jmenovat, čeho se týká. */
   /** `gaps` = klíče chybějících údajů osoby (`PayrollPersonDataGapKey`) u nálezu `person_data_gap`. */
   entities: { entity_type: string, entity_id: number | null, label: string | null, message?: string, remediation_path?: string | null, gaps?: string[] }[]
@@ -8855,12 +8863,19 @@ export const payrollApi = {
     sort_key?: string
     sort_dir?: 'asc' | 'desc'
     include_contacts?: boolean
+    /** Jen s `filter: 'run_finding'`: kód nálezu, období a datum výplaty z odkazu nálezu. */
+    finding?: string
+    period?: string
+    payment_date?: string
   }) =>
     api.get<PayrollPeopleResponse>('/payroll/people', {
       params: {
         limit: params.limit,
         offset: params.offset,
         filter: params.filter,
+        finding: params.finding,
+        period: params.period,
+        payment_date: params.payment_date,
         q: params.q === '' ? undefined : params.q,
         sort_key: params.sort_key,
         sort_dir: params.sort_dir,

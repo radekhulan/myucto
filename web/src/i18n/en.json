@@ -4823,6 +4823,7 @@
       },
       "readiness": {
         "affected": "Affects: {names}",
+        "people_list": "Show in the employee list | Show this person in the employee list | Show all {count} people in the employee list",
         "fill_probable_average": "Fill in probable earnings from the rate",
         "bulk": {
           "statutory_defaults": "Fill in default statutory data ({count})",
@@ -6562,7 +6563,8 @@
         "needs_setup": "Setup required",
         "needs_data": "Data to add",
         "blocking_data": "Blocks filing",
-        "dpp_hours_limit": "DPP near the 300 h limit"
+        "dpp_hours_limit": "DPP near the 300 h limit",
+        "run_finding": "People from a pre-run check finding"
       },
       "dpp_hours": {
         "label_manual_review_required": "DPP — total unverified",
@@ -7144,6 +7146,11 @@
         "body": "The approved run does not contain this relationship, so it has no pay, payslip or monthly report for that month. An approved run does not change by itself: open the run, request its correction and open it, the new revision picks the relationship up.",
         "open_run": "Open the run for {period}",
         "toast": "The start falls into a month with an approved payroll run ({periods}). Open a correction of the run, otherwise the person gets no pay and no monthly report for that month. | The start falls into months with approved payroll runs ({periods}). Open corrections of those runs, otherwise the person gets no pay and no monthly report for those months."
+      },
+      "run_finding": {
+        "hint": "The list is narrowed to the people from a pre-run check finding for {period}; the finding no longer includes anyone. | The list is narrowed to {count} person from a pre-run check finding for {period}. | The list is narrowed to {count} people from a pre-run check finding for {period}.",
+        "back": "Back to the payroll run",
+        "clear": "Clear the narrowing"
       },
       "open_agreement": {
         "title": "The person already has an open agreement to perform work (DPP).",

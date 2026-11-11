@@ -20,6 +20,7 @@ describe('parametry odkazů z nálezů', () => {
 
   it('filtr zaměstnanců z adresy přijme jen známou hodnotu', () => {
     expect(payrollPeopleFilterFromQuery({ filter: 'blocking_data' })).toBe('blocking_data')
+    expect(payrollPeopleFilterFromQuery({ filter: 'run_finding' })).toBe('run_finding')
     expect(payrollPeopleFilterFromQuery({ filter: 'cokoli' })).toBe('active')
     expect(payrollPeopleFilterFromQuery({})).toBe('active')
   })

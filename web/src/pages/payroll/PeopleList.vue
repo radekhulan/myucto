@@ -38,7 +38,7 @@ import { useToast } from '@/composables/useToast'
 import { healthInsurerOptions } from '@/utils/healthInsurers'
 import { czechBirthNumberFacts } from '@/utils/czechBirthNumber'
 import { fieldSelector, revealField } from '@/utils/revealField'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import EmploymentCard from './EmploymentCard.vue'
@@ -57,6 +57,7 @@ import { employmentCodeLabel, isValidPersonalNumber, personalNumberLabel, todayI
 import {
   payrollAgendaLabelKey,
   payrollAgendas,
+  payrollQueryValue,
   type PayrollAgendaDefinition,
 } from './payrollAgendaLinks'
 import { payrollPeopleFilterFromQuery } from './payrollRemediationQuery'
@@ -112,6 +113,19 @@ const searchQuery = ref('')
 // Odkaz z nálezu (kontrola před během → `?filter=blocking_data`) otevře
 // seznam rovnou zúžený.
 const peopleFilter = ref<PayrollPeopleFilter>(payrollPeopleFilterFromQuery(route.query))
+/*
+ * Zúžení na osoby jednoho nálezu kontroly před během (`?filter=run_finding`).
+ * Kód nálezu, období a datum výplaty nese odkaz z přehledu nálezů; server podle
+ * nich vybere osoby týmž snímkem, jakým nález vznikl. Bez nich zúžení nedává
+ * smysl, proto se v nabídce filtru ukazuje jen tehdy, když je zapnuté odkazem.
+ */
+const runFinding = (() => {
+  const finding = payrollQueryValue(route.query, 'finding')
+  const period = payrollQueryValue(route.query, 'period')
+  if (peopleFilter.value !== 'run_finding' || finding === null || period === null) return null
+  return { finding, period, payment_date: payrollQueryValue(route.query, 'payment_date') ?? undefined }
+})()
+if (peopleFilter.value === 'run_finding' && runFinding === null) peopleFilter.value = 'active'
 const narrowed = computed(
   () => peopleFilter.value !== 'all' || searchQuery.value.trim() !== '',
 )
@@ -276,6 +290,9 @@ const filterOptions = computed(() => [
   { value: 'needs_data' as const, label: t('payroll.people.filters.needs_data') },
   { value: 'blocking_data' as const, label: t('payroll.people.filters.blocking_data') },
   { value: 'dpp_hours_limit' as const, label: t('payroll.people.filters.dpp_hours_limit') },
+  ...(peopleFilter.value === 'run_finding'
+    ? [{ value: 'run_finding' as const, label: t('payroll.people.filters.run_finding') }]
+    : []),
 ])
 const relationOptions = computed(() => relationTypes.map(type => ({
   value: type,
@@ -974,6 +991,7 @@ async function load() {
       sort_key: activeSort.value?.key,
       sort_dir: activeSort.value?.dir,
       include_contacts: contactsShown.value || undefined,
+      ...(peopleFilter.value === 'run_finding' && runFinding !== null ? runFinding : {}),
     })
     people.value = page.items
     total.value = page.total
@@ -2007,6 +2025,34 @@ onMounted(async () => {
         </div>
       </div>
     </section>
+
+    <!-- Seznam zúžený odkazem z nálezu kontroly před během: řekne proč a nabídne cestu zpět. -->
+    <div
+      v-if="peopleFilter === 'run_finding' && runFinding !== null && !editing && !showEmployeeForm"
+      class="flex flex-wrap items-center gap-3 rounded-lg border border-primary-500/30 bg-primary-50 p-3 text-sm text-primary-800"
+      data-test="people-run-finding"
+    >
+      <p class="min-w-0 flex-1">
+        {{ t('payroll.people.run_finding.hint', { period: formatPeriod(runFinding.period), count: total }, total) }}
+      </p>
+      <RouterLink
+        :to="{ name: 'payroll-runs', query: { period: runFinding.period } }"
+        :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+        data-test="people-run-finding-back"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevronLeft" /></svg>
+        {{ t('payroll.people.run_finding.back') }}
+      </RouterLink>
+      <button
+        type="button"
+        :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+        data-test="people-run-finding-clear"
+        @click="peopleFilter = 'active'"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+        {{ t('payroll.people.run_finding.clear') }}
+      </button>
+    </div>
 
     <PayrollStatutoryBulkDefaultsDialog
       v-if="statutoryBulkOpen"

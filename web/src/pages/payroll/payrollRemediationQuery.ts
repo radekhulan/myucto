@@ -20,6 +20,7 @@ export const PAYROLL_PEOPLE_FILTERS: readonly PayrollPeopleFilter[] = [
   'needs_data',
   'blocking_data',
   'dpp_hours_limit',
+  'run_finding',
 ]
 
 /** `?filter=` seznamu zaměstnanců (nález „chybí zákonné údaje" vede na `blocking_data`). */
