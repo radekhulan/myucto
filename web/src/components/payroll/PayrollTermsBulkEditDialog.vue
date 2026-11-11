@@ -317,6 +317,11 @@ onMounted(async () => {
                 class="rounded-full bg-warning-50 px-2 py-0.5 text-xs text-warning-700"
                 :data-test="`terms-bulk-new-version-${item.employment_id}`"
               >{{ t('payroll.terms_bulk.new_version_badge', { month: monthLabel(item.new_version_from) }) }}</span>
+              <span
+                v-if="item.imported_wage"
+                class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600"
+                :data-test="`terms-bulk-imported-wage-${item.employment_id}`"
+              >{{ t('payroll.terms_bulk.imported_wage_badge') }}</span>
               <span class="ml-auto text-xs text-neutral-500">
                 {{ t('payroll.terms_bulk.current', {
                   rate: formatMinor(item.hourly_rate_minor),
@@ -372,6 +377,7 @@ onMounted(async () => {
               data-test="terms-bulk-hourly-rate"
               class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"
             >
+            <span class="mt-1 block text-xs text-neutral-500" data-test="terms-bulk-hourly-rate-hint">{{ t('payroll.terms_bulk.hourly_rate_hint') }}</span>
           </label>
           <label class="block">
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.terms_bulk.basis_kind') }}</span>
@@ -521,7 +527,7 @@ onMounted(async () => {
             <span class="font-medium">{{ personName(item) }}</span>:
             {{ item.kind === 'new_version'
               ? t('payroll.terms_bulk.row_new_version', { month: monthLabel(item.effective_from) })
-              : t('payroll.terms_bulk.row_correction') }}
+              : t('payroll.terms_bulk.row_correction') }}<template v-for="warning in item.warnings ?? []" :key="warning">; {{ t(`payroll.terms_bulk.reason.${warning}`) }}</template>
           </li>
           <li v-for="item in result.skipped" :key="`s${item.employment_id}`" class="text-warning-800">
             <RouterLink :to="cardLink(item.employment_id)" class="font-medium underline" @click="emit('close')">{{ personName(item) }}</RouterLink>:

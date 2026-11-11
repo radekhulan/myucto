@@ -4002,6 +4002,8 @@
       "overwrite_warning": "Přepsání změní i údaje, které už vztahy mají vyplněné. Použijte ho jen tehdy, když opravujete chybně zapsanou hodnotu u všech vybraných vztahů.",
       "fields_hint": "Upraví se jen vyplněná pole. Prázdné pole zůstane u vztahů beze změny.",
       "hourly_rate": "Sjednaná hodinová sazba (Kč)",
+      "hourly_rate_hint": "Přepne vztah na hodinový výpočet mzdy z odpracovaných směn. Vztahům, kterým se mzda importuje jako hotová částka, sazbu nenastavíme.",
+      "imported_wage_badge": "mzda z importu",
       "basis_kind": "Podklad odměňování",
       "basis_keep": "Ponechat, u dohod doplnit dohodu",
       "basis": "Označení podkladu",
@@ -4040,6 +4042,7 @@
         "report_prepared": "měsíční hlášení JMHZ za {period} je připravené, nejdřív otevřete mzdu k opravě",
         "run_locked": "mzda za {period} je schválená nebo zamčená, nejdřív ji otevřete k opravě",
         "hourly_not_supported": "u tohoto druhu vztahu hodinové odměňování nejde",
+        "hourly_rate_imported_wage": "sazba nenastavena: mzda se k vztahu importuje jako částka, hodinový výpočet by import zablokoval, nastavte pravděpodobný výdělek",
         "activity_code_relation_mismatch": "druh činnosti neodpovídá druhu vztahu",
         "nothing_to_change": "údaje už jsou vyplněné, nic se neměnilo"
       }

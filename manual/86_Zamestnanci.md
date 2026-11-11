@@ -310,8 +310,12 @@ nemusíte otevírat kartu každého vztahu.
    v měsíci trvají. Odškrtněte ty, kterých se změna netýká.
 3. Vyplňte jen údaje, které chcete změnit. Prázdné pole zůstane beze změny:
    - **Sjednaná hodinová sazba** přepne vztah na hodinové odměňování jako
-     na kartě. Podklad odměňování můžete zadat, jinak zůstane uložený a u DPP
-     a DPČ se doplní dohoda.
+     na kartě, mzda se pak počítá z odpracovaných směn. Podklad odměňování
+     můžete zadat, jinak zůstane uložený a u DPP a DPČ se doplní dohoda.
+     Vztahům, kterým se mzda za zvolený měsíc nebo poslední tři měsíce
+     importuje jako hotová částka (například z docházky), sazbu nenastavíme:
+     hodinový výpočet by další import zablokoval. Seznam je označí štítkem
+     **mzda z importu**; zadejte jim pravděpodobný výdělek.
    - **Pravděpodobný hodinový výdělek** (§ 355 ZP) vyžaduje odůvodnění, z čeho
      jste ho stanovili.
    - **CZ-ISCO** vyberete v našeptávači.

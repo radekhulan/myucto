@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
+use MyInvoice\Repository\Payroll\PayrollHourlyWageCollisionGuard;
 use MyInvoice\Repository\Payroll\PayrollTermsSettledException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
@@ -64,6 +65,9 @@ final class PayrollEmploymentTermsBulkEdit
 
     private const CHANGE_REASON = 'Hromadná úprava podmínek vybraných vztahů.';
 
+    /** Jak daleko zpět hledat importovanou mzdu, která by s hodinovou sazbou kolidovala. */
+    private const IMPORTED_WAGE_LOOKBACK_MONTHS = 3;
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollEmploymentRepository $employments,
@@ -72,6 +76,7 @@ final class PayrollEmploymentTermsBulkEdit
         private readonly JmhzExternalCodebookCatalog $codebooks,
         private readonly CzIscoCodebook $czIsco,
         private readonly ActivityLogger $activityLogger,
+        private readonly PayrollHourlyWageCollisionGuard $wageGuard,
     ) {}
 
     /**
@@ -95,6 +100,13 @@ final class PayrollEmploymentTermsBulkEdit
             $relationType,
             $employmentIds === null ? null : $this->normalizeIds($employmentIds),
         );
+        $importedWage = array_fill_keys(
+            $this->importedWageEmployments($supplierId, $monthStart, array_map(
+                static fn (array $row): int => (int) $row['id'],
+                $rows,
+            )),
+            true,
+        );
         $items = [];
         $editable = [];
         $summary = ['employments' => 0, 'editable' => 0, 'excluded' => 0];
@@ -115,6 +127,8 @@ final class PayrollEmploymentTermsBulkEdit
                 'reason' => $reason,
                 'locked_period' => $this->lockedPeriod($row),
                 'new_version_from' => $reason === null ? $this->newVersionFrom($row) : null,
+                // Sazbu u něj hromadně nenastavíme: mzda se importuje jako částka.
+                'imported_wage' => isset($importedWage[(int) $row['id']]),
                 'effective_from' => $row['effective_from'],
                 'remuneration_type' => $row['remuneration_type'],
                 'hourly_rate_minor' => $row['hourly_rate_minor'] === null ? null : (int) $row['hourly_rate_minor'],
@@ -174,6 +188,9 @@ final class PayrollEmploymentTermsBulkEdit
         foreach ($this->rows($supplierId, $monthStart, $monthEnd, null, $ids) as $row) {
             $rows[(int) $row['id']] = $row;
         }
+        $importedWage = isset($requested['hourly_rate'])
+            ? array_fill_keys($this->importedWageEmployments($supplierId, $monthStart, array_keys($rows)), true)
+            : [];
         $applied = [];
         $skipped = [];
         $failed = [];
@@ -191,9 +208,17 @@ final class PayrollEmploymentTermsBulkEdit
             try {
                 $current = $this->employments->currentTerms($supplierId, $employmentId)
                     ?? throw new \DomainException('Pracovní vztah nemá žádnou verzi podmínek.');
-                [$body, $fields, $refusal] = $this->body($row, $current, $requested, $mode);
+                $warnings = [];
+                [$body, $fields, $refusal] = $this->body(
+                    $row,
+                    $current,
+                    $requested,
+                    $mode,
+                    isset($importedWage[$employmentId]),
+                    $warnings,
+                );
                 if ($refusal !== null || $fields === []) {
-                    $skipped[] = $this->outcome($employmentId, $row, $refusal ?? 'nothing_to_change');
+                    $skipped[] = $this->outcome($employmentId, $row, $refusal ?? $warnings[0] ?? 'nothing_to_change');
                     continue;
                 }
                 $newVersionFrom = $this->newVersionFrom($row);
@@ -238,6 +263,7 @@ final class PayrollEmploymentTermsBulkEdit
                     'fields' => $fields,
                     'kind' => $newVersionFrom === null ? 'correction' : 'new_version',
                     'effective_from' => (string) $terms['effective_from'],
+                    'warnings' => $warnings,
                 ];
             } catch (PayrollTermsSettledException) {
                 $skipped[] = $this->outcome($employmentId, $row, 'period_settled');
@@ -284,9 +310,10 @@ final class PayrollEmploymentTermsBulkEdit
      * @param array<string,mixed> $row
      * @param array<string,mixed> $current
      * @param array<string,mixed> $requested
+     * @param list<string> $warnings výstup: údaje, které se u vztahu záměrně nezapsaly
      * @return array{0:array<string,mixed>,1:list<string>,2:?string} tělo, změněná pole, důvod vynechání
      */
-    private function body(array $row, array $current, array $requested, string $mode): array
+    private function body(array $row, array $current, array $requested, string $mode, bool $importedWage, array &$warnings): array
     {
         $relationType = (string) $row['relation_type'];
         $overwrite = $mode === self::MODE_OVERWRITE;
@@ -294,7 +321,12 @@ final class PayrollEmploymentTermsBulkEdit
         $body['effective_from'] = (string) $current['effective_from'];
         $fields = [];
 
-        if (isset($requested['hourly_rate'])) {
+        if (isset($requested['hourly_rate']) && $importedWage) {
+            // Mzda se k vztahu importuje jako hotová částka. Hodinové podmínky
+            // by ji PayrollHourlyWageCollisionGuard při dalším importu odmítl
+            // a s ní celý import měsíce. Sazbu proto nenastavíme.
+            $warnings[] = 'hourly_rate_imported_wage';
+        } elseif (isset($requested['hourly_rate'])) {
             if (!in_array($relationType, self::HOURLY_RELATION_TYPES, true)) {
                 return [$body, [], 'hourly_not_supported'];
             }
@@ -504,6 +536,23 @@ final class PayrollEmploymentTermsBulkEdit
         }
 
         return null;
+    }
+
+    /**
+     * Vztahy, kterým se mzda za zvolený měsíc nebo poslední tři měsíce
+     * importuje jako hotová částka — jedním dotazem pro celou dávku.
+     *
+     * @param list<int> $employmentIds
+     * @return list<int>
+     */
+    private function importedWageEmployments(int $supplierId, string $monthStart, array $employmentIds): array
+    {
+        return $this->wageGuard->employmentsWithExternalBaseWage(
+            $supplierId,
+            $employmentIds,
+            (new \DateTimeImmutable($monthStart))->modify('-' . self::IMPORTED_WAGE_LOOKBACK_MONTHS . ' months')->format('Y-m-d'),
+            $monthStart,
+        );
     }
 
     /**

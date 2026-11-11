@@ -4002,6 +4002,8 @@
       "overwrite_warning": "Overwriting also changes values the employments already have. Use it only when you are correcting a wrongly entered value for all selected employments.",
       "fields_hint": "Only filled-in fields are changed. An empty field leaves the employments unchanged.",
       "hourly_rate": "Agreed hourly rate (CZK)",
+      "hourly_rate_hint": "Switches the employment to hourly wage calculation from worked shifts. Employments whose wage is imported as a ready amount do not get the rate.",
+      "imported_wage_badge": "imported wage",
       "basis_kind": "Remuneration basis",
       "basis_keep": "Keep, use the agreement for agreements",
       "basis": "Basis reference",
@@ -4040,6 +4042,7 @@
         "report_prepared": "the JMHZ monthly report for {period} is prepared, reopen the payroll for correction first",
         "run_locked": "payroll for {period} is approved or locked, reopen it for correction first",
         "hourly_not_supported": "hourly remuneration is not available for this relation type",
+        "hourly_rate_imported_wage": "rate not set: the wage is imported as an amount and hourly calculation would block the import, set the probable earnings instead",
         "activity_code_relation_mismatch": "the activity type does not match the relation type",
         "nothing_to_change": "the values are already filled in, nothing changed"
       }

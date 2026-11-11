@@ -40,6 +40,7 @@ function item(id: number, name: string, overrides: Record<string, unknown> = {})
     reason: null,
     locked_period: null,
     new_version_from: null,
+    imported_wage: false,
     effective_from: '2026-06-01',
     remuneration_type: null,
     hourly_rate_minor: null,
@@ -78,7 +79,7 @@ describe('PayrollTermsBulkEditDialog', () => {
       period_start: '2026-08-01',
       mode: 'fill',
       counts: { applied: 1, skipped: 0, failed: 0 },
-      applied: [{ employment_id: 12, employee_id: 112, full_name: 'Syntetická osoba', fields: ['hourly_rate'], kind: 'correction', effective_from: '2026-06-01' }],
+      applied: [{ employment_id: 12, employee_id: 112, full_name: 'Syntetická osoba', fields: ['hourly_rate'], kind: 'correction', effective_from: '2026-06-01', warnings: [] }],
       skipped: [],
       failed: [],
     })
@@ -105,6 +106,41 @@ describe('PayrollTermsBulkEditDialog', () => {
     expect(wrapper.get('[data-test="terms-bulk-applied"]').text()).toBe('1')
   })
 
+  it('vysvětlí hodinový výpočet, označí vztah s importovanou mzdou a ve výsledku řekne, proč sazba chybí', async () => {
+    const data = preview()
+    data.items[0] = item(12, 'Syntetická osoba', { imported_wage: true })
+    m.termsBulkPreview.mockResolvedValue(data)
+    m.termsBulkApply.mockResolvedValue({
+      period_start: '2026-08-01',
+      mode: 'fill',
+      counts: { applied: 1, skipped: 0, failed: 0 },
+      applied: [{
+        employment_id: 12,
+        employee_id: 112,
+        full_name: 'Syntetická osoba',
+        fields: ['probable_earning'],
+        kind: 'correction',
+        effective_from: '2026-06-01',
+        warnings: ['hourly_rate_imported_wage'],
+      }],
+      skipped: [],
+      failed: [],
+    })
+
+    const wrapper = mount(PayrollTermsBulkEditDialog, { ...MOUNT, props: { periodStart: '2026-08-01' } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="terms-bulk-hourly-rate-hint"]').text()).toBe('payroll.terms_bulk.hourly_rate_hint')
+    expect(wrapper.find('[data-test="terms-bulk-imported-wage-12"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="terms-bulk-imported-wage-13"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="terms-bulk-hourly-rate"]').setValue('250')
+    await wrapper.get('[data-test="terms-bulk-apply"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="terms-bulk-rows"]').text())
+      .toContain('payroll.terms_bulk.reason.hourly_rate_imported_wage')
+  })
+
   it('u zúčtované verze ohlásí novou verzi od měsíce a výsledek ji odliší od opravy', async () => {
     const data = preview()
     data.items[0] = item(12, 'Syntetická osoba', { new_version_from: '2026-09-01' })
@@ -114,8 +150,8 @@ describe('PayrollTermsBulkEditDialog', () => {
       mode: 'fill',
       counts: { applied: 2, skipped: 0, failed: 0 },
       applied: [
-        { employment_id: 12, employee_id: 112, full_name: 'Syntetická osoba', fields: ['hourly_rate'], kind: 'new_version', effective_from: '2026-09-01' },
-        { employment_id: 13, employee_id: 113, full_name: 'Druhá syntetická osoba', fields: ['hourly_rate'], kind: 'correction', effective_from: '2026-06-01' },
+        { employment_id: 12, employee_id: 112, full_name: 'Syntetická osoba', fields: ['hourly_rate'], kind: 'new_version', effective_from: '2026-09-01', warnings: [] },
+        { employment_id: 13, employee_id: 113, full_name: 'Druhá syntetická osoba', fields: ['hourly_rate'], kind: 'correction', effective_from: '2026-06-01', warnings: [] },
       ],
       skipped: [],
       failed: [],

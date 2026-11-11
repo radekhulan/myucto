@@ -301,6 +301,62 @@ final class PayrollEmploymentTermsBulkEditTest extends TestCase
         self::assertSame(1, $this->termCount($employment));
     }
 
+    /**
+     * Vztah, kterému docházka importuje hodinovou mzdu jako hotovou částku
+     * (MZDA_HODINOVA_DOCH), nesmí hromadná sazba přepnout na hodinový výpočet:
+     * PayrollHourlyWageCollisionGuard by pak každý další import odmítl.
+     * Pravděpodobný výdělek zadaný ve stejné dávce se zapíše.
+     */
+    public function testImportedHourlyWageKeepsRateAndStillAppliesProbableEarning(): void
+    {
+        $employment = $this->createDpp('Syntetická Docházka', 'DPP-DOCH', []);
+        $componentId = $this->hourlyWageComponent();
+        $this->importedInput($employment, $componentId, '2026-05-01');
+
+        $result = $this->bulk->apply(
+            $this->supplierId,
+            self::PERIOD,
+            PayrollEmploymentTermsBulkEdit::MODE_FILL,
+            [
+                'hourly_rate_minor' => 25000,
+                'probable_hourly_earning_minor' => 26000,
+                'probable_earning_rationale' => 'Syntetický průměr stejné práce',
+            ],
+            [$employment],
+            $this->userId,
+            null,
+            null,
+        );
+
+        self::assertSame(['applied' => 1, 'skipped' => 0, 'failed' => 0], $result['counts'], json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame(['probable_earning'], $result['applied'][0]['fields']);
+        self::assertSame(['hourly_rate_imported_wage'], $result['applied'][0]['warnings']);
+        $term = $this->term($employment);
+        self::assertNull($term['remuneration_type']);
+        self::assertNull($term['hourly_rate_minor']);
+        self::assertSame(26000, (int) $term['probable_hourly_earning_minor']);
+
+        // Další měsíční import téže složky projde kontrolou zdroje mzdy.
+        $guard = \MyInvoice\Tests\Support\PayrollTestContainer::build()
+            ->get(\MyInvoice\Repository\Payroll\PayrollHourlyWageCollisionGuard::class);
+        $guard->externalInputs($this->supplierId, self::PERIOD, [
+            ['employment_id' => $employment, 'component_id' => $componentId],
+        ]);
+
+        // Jen sazba: vztah se vynechá s důvodem, nic se nezapíše.
+        $rateOnly = $this->bulk->apply(
+            $this->supplierId,
+            self::PERIOD,
+            PayrollEmploymentTermsBulkEdit::MODE_OVERWRITE,
+            ['hourly_rate_minor' => 25000],
+            [$employment],
+            $this->userId,
+            null,
+            null,
+        );
+        self::assertSame('hourly_rate_imported_wage', $rateOnly['skipped'][0]['reason']);
+    }
+
     public function testWritePermissionAndSessionAreRequired(): void
     {
         $employment = $this->createDpp('Syntetická Dohoda', 'DPP-RBAC', []);
@@ -371,6 +427,47 @@ final class PayrollEmploymentTermsBulkEditTest extends TestCase
                  (supplier_id, revision_id, employee_id, employment_id, input_json, input_hash)
              VALUES (?, ?, ?, ?, '{}', ?)",
         )->execute([$this->supplierId, $revisionId, (int) $employeeId->fetchColumn(), $employmentId, str_repeat('c', 64)]);
+    }
+
+    private function hourlyWageComponent(): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_component_definitions
+                (supplier_id, code, name, component_kind, value_kind,
+                 frequency_kind, tax_treatment,
+                 social_participation_treatment, social_treatment,
+                 health_participation_treatment, health_treatment,
+                 average_earning_treatment, enforcement_treatment,
+                 jmhz_treatment, statistics_treatment,
+                 accounting_debit_code, accounting_credit_code,
+                 valid_from, is_active)
+             VALUES (?, "MZDA_HODINOVA_DOCH", "Hodinová mzda podle docházky", "hourly_wage", "monetary",
+                     "regular", "included", "included", "included", "included", "included",
+                     "included", "included", "included", "included", "521", "331", "2026-01-01", 1)',
+        )->execute([$this->supplierId]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function importedInput(int $employmentId, int $componentId, string $period): void
+    {
+        $pdo = $this->db->pdo();
+        $employee = $pdo->prepare('SELECT employee_id FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $employee->execute([$this->supplierId, $employmentId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_input_imports
+                (supplier_id, period_start, source_kind, source_name, content_hash,
+                 status, row_count, accepted_count)
+             VALUES (?, ?, "csv", "dochazka-syntetika.csv", UNHEX(SHA2(?, 256)), "accepted", 1, 1)',
+        )->execute([$this->supplierId, $period, 'syntetika-hromadne-' . microtime(true)]);
+        $importId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payroll_inputs
+                (supplier_id, employee_id, employment_id, component_id, period_start,
+                 amount_minor, source_kind, import_id, external_id, status)
+             VALUES (?, ?, ?, ?, ?, 1800000, 'import', ?, 'SYN-DOCH-1', 'draft')",
+        )->execute([$this->supplierId, (int) $employee->fetchColumn(), $employmentId, $componentId, $period, $importId]);
     }
 
     /** @param array<string,mixed> $terms */

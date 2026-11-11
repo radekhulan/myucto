@@ -1099,6 +1099,8 @@ export interface PayrollTermsBulkPreviewItem {
   locked_period: string | null
   /** Z platné verze je zúčtovaná mzda: vznikne nová verze od tohoto dne. */
   new_version_from: string | null
+  /** Mzda se k vztahu importuje jako částka: hodinovou sazbu hromadně nenastavíme. */
+  imported_wage: boolean
   effective_from: string | null
   remuneration_type: 'monthly' | 'hourly' | null
   hourly_rate_minor: number | null
@@ -1144,6 +1146,8 @@ export interface PayrollTermsBulkResult {
     fields: string[]
     kind: 'correction' | 'new_version'
     effective_from: string
+    /** Údaje, které se u vztahu záměrně nezapsaly (např. `hourly_rate_imported_wage`). */
+    warnings: string[]
   }>
   skipped: Array<PayrollTermsBulkOutcome & { reason: string }>
   failed: Array<PayrollTermsBulkOutcome & { message: string }>
