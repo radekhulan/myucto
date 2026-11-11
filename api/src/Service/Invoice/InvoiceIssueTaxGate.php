@@ -93,6 +93,71 @@ final class InvoiceIssueTaxGate
     }
 
     /**
+     * Drobný zákazník (#310, `clients.simplified_only`): karta jen se jménem a kontaktem,
+     * bez adresy. Plátce mu smí vystavit jen zjednodušený daňový doklad (§ 30 ZDPH), protože
+     * běžný daňový doklad musí nést jméno a adresu odběratele (§ 29 odst. 1 písm. c).
+     *
+     * - Povolený je jen typ `invoice` s příznakem `is_simplified`. Zálohová faktura vede
+     *   k daňovému dokladu k platbě a dobropis je opravný daňový doklad (§ 45); obojí
+     *   potřebuje plné údaje odběratele, takže na takové kartě nejde.
+     * - Nad limitem § 30 odst. 1 (stejný limit jako {@see simplifiedRejection()}) brána
+     *   nabídne obě cesty: doplnit kartu, nebo prodej snížit. Částka se posuzuje stejně
+     *   jako u {@see SimplifiedDocumentPolicy::rejectionReason()}.
+     * - Neplátce (k rozhodnému datu dokladu) daňové doklady nevystavuje vůbec, zjednodušený
+     *   doklad pro něj není. Jeho faktura je účetní doklad (§ 11 ZÚ), kterému jako označení
+     *   odběratele stačí jméno, proto se brána neuplatní.
+     *
+     * Volají ji všechny cesty vystavení: editor a API ({@see \MyInvoice\Action\Invoice\IssueInvoiceAction}),
+     * rychlá účtenka, automatické vystavení ({@see AutoIssueAndSendService}) i pravidelná
+     * fakturace ({@see RecurringInvoiceGenerator}).
+     *
+     * @param array<string,mixed> $invoice hlavička s `client_id`, `supplier_id`, `invoice_type`,
+     *                                     `is_simplified`, `total_with_vat`, `issue_date`/`tax_date`
+     * @return array{code:string, message:string, status:int}|null
+     */
+    public function simplifiedOnlyClientRejection(array $invoice): ?array
+    {
+        $clientStmt = $this->db->pdo()->prepare('SELECT company_name, simplified_only FROM clients WHERE id = ?');
+        $clientStmt->execute([(int) ($invoice['client_id'] ?? 0)]);
+        $client = $clientStmt->fetch(\PDO::FETCH_ASSOC);
+        if ($client === false || (int) $client['simplified_only'] !== 1) {
+            return null;
+        }
+        if (!$this->vatStatus->isVatPayerAt((int) $invoice['supplier_id'], self::vatStatusDate($invoice))) {
+            return null;
+        }
+        $name = (string) $client['company_name'];
+        if (($invoice['invoice_type'] ?? 'invoice') !== 'invoice' || empty($invoice['is_simplified'])) {
+            return self::rejection(
+                'simplified_only_client_requires_simplified',
+                sprintf(
+                    'Odběratel „%s" je veden jako drobný zákazník bez adresy. Lze mu vystavit jen '
+                        . 'zjednodušený daňový doklad (§ 30 ZDPH). Zaškrtněte zjednodušený daňový '
+                        . 'doklad, nebo doplňte na kartě odběratele adresu a volbu drobný zákazník vypněte.',
+                    $name,
+                ),
+            );
+        }
+        $limit = $this->simplifiedLimit($invoice);
+        $total = abs((float) ($invoice['total_with_vat'] ?? 0));
+        if ($total > $limit) {
+            return self::rejection(
+                'simplified_only_client_over_limit',
+                sprintf(
+                    'Odběratel „%s" je veden jako drobný zákazník bez adresy a zjednodušený daňový '
+                        . 'doklad lze vystavit jen do %s Kč včetně daně (§ 30 odst. 1 ZDPH); doklad je '
+                        . 'na %s Kč. Doplňte na kartě odběratele adresu a další údaje a vystavte běžnou '
+                        . 'fakturu, nebo prodej snižte pod limit.',
+                    $name,
+                    number_format($limit, 0, ',', ' '),
+                    number_format($total, 2, ',', ' '),
+                ),
+            );
+        }
+        return null;
+    }
+
+    /**
      * § 30 odst. 1 a 2 ZDPH: limit zjednodušeného dokladu a jeho výjimky
      * ({@see SimplifiedDocumentPolicy}).
      *

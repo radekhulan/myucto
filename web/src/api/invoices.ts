@@ -421,6 +421,8 @@ export interface Invoice {
   client_reverse_charge?: boolean
   /** Odběratelem je systémový koncový zákazník (zjednodušený doklad bez odběratele, § 30). */
   client_is_walk_in?: boolean
+  /** Odběratel je drobný zákazník bez adresy (#310): jen zjednodušený doklad do limitu § 30. */
+  client_simplified_only?: boolean
   project_name?: string | null
   project_billing_template_id?: number | null
   project_hourly_rate?: number | null

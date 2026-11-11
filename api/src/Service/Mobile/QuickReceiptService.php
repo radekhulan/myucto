@@ -250,8 +250,9 @@ final class QuickReceiptService
             'prices_include_vat' => $in['prices_include_vat'],
             'reverse_charge' => false,
             'payment_method' => $method,
-            // Bez odběratele zjednodušený doklad (§ 30); brány níže ho odmítnou nad limit.
-            'is_simplified' => $walkIn,
+            // Bez odběratele i pro drobného zákazníka bez adresy (#310) zjednodušený doklad
+            // (§ 30); brány níže ho odmítnou nad limit.
+            'is_simplified' => $walkIn || !empty($client['simplified_only']),
             // Účtenka je zaplacená hned, upomínky nemají smysl.
             'auto_send_reminders' => 0,
             'items' => $items,
@@ -379,7 +380,7 @@ final class QuickReceiptService
         if (!InvoiceAmountPolicy::hasPositiveAmountToPay($invoice)) {
             throw QuickReceiptException::validation('Částka účtenky musí být kladná.', 'items');
         }
-        foreach (['reverseChargeRejection', 'walkInRejection', 'simplifiedRejection', 'vatPayerRejection'] as $gate) {
+        foreach (['reverseChargeRejection', 'simplifiedOnlyClientRejection', 'walkInRejection', 'simplifiedRejection', 'vatPayerRejection'] as $gate) {
             $rejected = $this->taxGate->{$gate}($invoice);
             if ($rejected === null) {
                 continue;

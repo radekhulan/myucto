@@ -23,14 +23,27 @@ final class Validation
         if (empty($data['company_name']) || !is_string($data['company_name']) || trim($data['company_name']) === '') {
             $err['company_name'][] = 'Firma / jméno je povinné';
         }
-        if (empty($data['street']) || trim((string) $data['street']) === '') {
-            $err['street'][] = 'Ulice je povinná';
-        }
-        if (empty($data['city']) || trim((string) $data['city']) === '') {
-            $err['city'][] = 'Město je povinné';
-        }
-        if (empty($data['zip']) || trim((string) $data['zip']) === '') {
-            $err['zip'][] = 'PSČ je povinné';
+        // Drobný zákazník (#310): karta bez adresy smí odebírat jen zjednodušené daňové
+        // doklady (§ 30 ZDPH), hlídá to InvoiceIssueTaxGate::simplifiedOnlyClientRejection().
+        // Místo adresy musí mít kontakt, kam doklad poslat.
+        $simplifiedOnly = !empty($data['simplified_only']) && filter_var($data['simplified_only'], FILTER_VALIDATE_BOOLEAN);
+        if (!$simplifiedOnly) {
+            if (empty($data['street']) || trim((string) $data['street']) === '') {
+                $err['street'][] = 'Ulice je povinná';
+            }
+            if (empty($data['city']) || trim((string) $data['city']) === '') {
+                $err['city'][] = 'Město je povinné';
+            }
+            if (empty($data['zip']) || trim((string) $data['zip']) === '') {
+                $err['zip'][] = 'PSČ je povinné';
+            }
+        } else {
+            if (trim((string) ($data['main_email'] ?? '')) === '' && trim((string) ($data['phone'] ?? '')) === '') {
+                $err['main_email'][] = 'Drobný zákazník musí mít e-mail nebo telefon';
+            }
+            if (!empty($data['reverse_charge']) && filter_var($data['reverse_charge'], FILTER_VALIDATE_BOOLEAN)) {
+                $err['reverse_charge'][] = 'Drobnému zákazníkovi nelze fakturovat v režimu přenesené daňové povinnosti (§ 30 odst. 2 ZDPH)';
+            }
         }
         // Délky sloupců clients: ručně zadaná delší hodnota je chyba vstupu, ne pád DB.
         foreach (ClientFieldLimits::errors($data) as $field => $messages) {

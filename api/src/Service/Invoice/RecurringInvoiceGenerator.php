@@ -71,6 +71,7 @@ final class RecurringInvoiceGenerator
         private readonly OssItemDeriver $ossDeriver,
         private readonly ClientRepository $clients,
         private readonly InvoicePaymentService $payments,
+        private readonly InvoiceIssueTaxGate $taxGate,
     ) {}
 
     /**
@@ -745,6 +746,10 @@ final class RecurringInvoiceGenerator
         $invoice = $this->invoices->find($invoiceId);
         if ($invoice === null) {
             throw new \RuntimeException("Invoice #$invoiceId not found after generation");
+        }
+        // Drobný zákazník bez adresy (#310): stejná brána jako vystavení z editoru.
+        if (($rejected = $this->taxGate->simplifiedOnlyClientRejection($invoice)) !== null) {
+            throw new \DomainException($rejected['message']);
         }
 
         $supplierId = (int) $invoice['supplier_id'];

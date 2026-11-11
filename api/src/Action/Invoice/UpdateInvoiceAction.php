@@ -87,6 +87,7 @@ final class UpdateInvoiceAction
         private readonly \MyInvoice\Repository\TaxConstantsRepository $taxConstants,
         private readonly FiledVatPeriodLookup $filedPeriods,
         private readonly NumberSeriesSelection $numberSeries,
+        private readonly \MyInvoice\Service\Invoice\InvoiceIssueTaxGate $taxGate,
     ) {}
 
     /**
@@ -527,6 +528,25 @@ final class UpdateInvoiceAction
             && ($reason = $this->simplifiedRejection($body, $existing)) !== null
         ) {
             return Json::error($response, 'simplified_document_not_allowed', $reason, 422);
+        }
+        // Drobný zákazník bez adresy (#310): vystavený doklad nesmí úpravou přestat být
+        // zjednodušeným ani přejít na takovou kartu jako běžná faktura. Limit hlídá
+        // simplifiedRejection() výše, proto se tu částka neposílá.
+        if ($existing['status'] !== 'draft') {
+            $rejected = $this->taxGate->simplifiedOnlyClientRejection([
+                'client_id'     => (int) ($body['client_id'] ?? $existing['client_id']),
+                'supplier_id'   => (int) $existing['supplier_id'],
+                'invoice_type'  => (string) ($body['invoice_type'] ?? $existing['invoice_type']),
+                'is_simplified' => array_key_exists('is_simplified', $body)
+                    ? filter_var($body['is_simplified'], FILTER_VALIDATE_BOOLEAN)
+                    : !empty($existing['is_simplified']),
+                'issue_date'    => (string) ($body['issue_date'] ?? $existing['issue_date']),
+                'tax_date'      => $body['tax_date'] ?? $existing['tax_date'] ?? null,
+                'total_with_vat' => 0,
+            ]);
+            if ($rejected !== null) {
+                return Json::error($response, $rejected['code'], $rejected['message'], $rejected['status']);
+            }
         }
 
         // SOUDRŽNOST DOKLADU (§ H1) — táž kontrola jako u importu a u založení dokladu,

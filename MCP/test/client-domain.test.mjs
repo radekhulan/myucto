@@ -245,3 +245,16 @@ for (const entry of readDetails) {
     }
   });
 }
+
+test('drobný zákazník se založí bez adresy, ale s kontaktem', async () => {
+  const tool = TOOLS_BY_NAME.get('create_client');
+  const posted = [];
+  const c = { post: async (path, body) => { posted.push([path, body]); return { id: 1, ...body }; }, get: async () => ({ data: [] }) };
+
+  const result = await tool.run(c, { company_name: 'Pepa Novák', main_email: 'pepa@example.test', simplified_only: true }, tool);
+  assert.equal(result.client.simplified_only, true);
+  assert.deepEqual(posted.map(([path]) => path), ['/clients']);
+
+  await assert.rejects(tool.run(c, { company_name: 'Pepa Novák', simplified_only: true }, tool), /e-mail nebo telefon/);
+  await assert.rejects(tool.run(c, { company_name: 'Pepa Novák', main_email: 'pepa@example.test' }, tool), /street, city, zip/);
+});
