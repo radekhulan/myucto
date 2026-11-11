@@ -1563,7 +1563,7 @@ const FOCUSABLE_PANELS = [
   'deferred_income',
   // Karta Skončení vztahu (srážky z odstupného podle § 299 odst. 4 o. s. ř.).
   'termination',
-  // Počáteční roční úhrny, na kartě hlavního pracovního vztahu.
+  // Počáteční roční úhrny, na kartě hlavního (bez něj posledního) pracovního vztahu.
   'opening_balances',
 ] as const
 
@@ -1598,7 +1598,7 @@ async function focusPanel(panel: string) {
     const target = Number.isInteger(employmentId) && employmentId > 0
       ? cards.find(card => card.employmentId === employmentId)
       : panel === 'opening_balances'
-        ? cards.find(card => card.isPrimary)
+        ? cards.find(card => card.holdsOpeningBalances)
         : cards.length === 1 ? cards[0] : undefined
     await target?.focusSection(panel, field)
     return

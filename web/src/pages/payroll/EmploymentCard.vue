@@ -49,6 +49,7 @@ import {
   employmentDiffValue,
   employmentEventNote,
   mergedFromCode,
+  openingBalancesHostId,
   personalNumberLabel,
   todayIso,
   transitionPresentation,
@@ -346,6 +347,7 @@ defineExpose({
   focusSection,
   employmentId: computed(() => props.employment.id),
   isPrimary: computed(() => props.employment.is_primary === true),
+  holdsOpeningBalances: computed(() => holdsOpeningBalances.value),
 })
 
 /**
@@ -1260,7 +1262,15 @@ const openingFirstIncludedMonth = computed(() => {
     ? Number(start.slice(5, 7))
     : 1
 })
-const showOpeningBalances = computed(() => props.employment.is_primary
+// Úhrny patří osobě: bez hlavního vztahu (skončená jediná dohoda) je nese
+// poslední vztah osoby, viz openingBalancesHostId().
+const holdsOpeningBalances = computed(() => {
+  const siblings = props.siblingEmployments ?? []
+  return siblings.length === 0
+    ? props.employment.is_primary
+    : openingBalancesHostId(siblings) === props.employment.id
+})
+const showOpeningBalances = computed(() => holdsOpeningBalances.value
   && payrollStartMonth.value !== null
   && openingStartPeriod.value !== null)
 /*

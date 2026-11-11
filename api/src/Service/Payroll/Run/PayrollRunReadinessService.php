@@ -13,6 +13,7 @@ use MyInvoice\Repository\Payroll\PayrollRulesetRepository;
 use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
 use MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use MyInvoice\Service\Payroll\PayrollOpeningBalanceService;
 use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry;
@@ -126,6 +127,8 @@ final class PayrollRunReadinessService
         private readonly ClockInterface $clock,
         // Skončené dohody: stejné pravidlo sjednaného konce jako hromadné ukončení.
         private readonly PayrollEmploymentBulkClosure $bulkClosure,
+        // Nulové počáteční úhrny, které doplní založení běhu.
+        private readonly PayrollOpeningBalanceService $openingBalances,
     ) {}
 
     /**
@@ -286,7 +289,10 @@ final class PayrollRunReadinessService
             if ($settlementFinding !== null) {
                 $findings[] = $settlementFinding;
             }
-            $statutoryFinding = self::statutoryInputFinding($snapshot->data);
+            $statutoryFinding = self::statutoryInputFinding(
+                $snapshot->data,
+                $this->statutoryIssuesBeforeRun($supplierId, $periodStart, $snapshot->data),
+            );
             if ($statutoryFinding !== null) {
                 $findings[] = $statutoryFinding;
             }
@@ -677,6 +683,50 @@ final class PayrollRunReadinessService
     }
 
     /**
+     * Problémy zákonných vstupů tak, jak je uvidí výpočet založeného běhu.
+     *
+     * Založení běhu doplní nulové počáteční úhrny tam, kde je nula prokazatelná
+     * ({@see PayrollOpeningBalanceService::provableZeroOpeningEmployeeIds()}).
+     * Kontrola před během je proto u takových osob nehlásí: dřív byly před
+     * během blokací a po výpočtu zmizely. Ostatní chybějící úhrny zůstávají.
+     *
+     * @param array<string,mixed> $snapshotData
+     * @return list<PayrollRunStatutoryInputIssue>|null null = sestavení selhalo
+     */
+    private function statutoryIssuesBeforeRun(int $supplierId, string $periodStart, array $snapshotData): ?array
+    {
+        try {
+            $issues = (new PayrollRunStatutoryInputAssembler())->assemble($snapshotData)->issues;
+        } catch (\Throwable) {
+            return null;
+        }
+        $missing = [];
+        foreach ($issues as $issue) {
+            if ($issue->code === 'annual_accumulator_missing'
+                && preg_match('/^employee:(\d+)$/D', (string) $issue->personReference, $match) === 1
+            ) {
+                $missing[(int) $match[1]] = (int) $match[1];
+            }
+        }
+        if ($missing === []) {
+            return array_values($issues);
+        }
+        $seeded = array_fill_keys(
+            $this->openingBalances->provableZeroOpeningEmployeeIds($supplierId, $periodStart, array_values($missing)),
+            true,
+        );
+
+        return array_values(array_filter(
+            $issues,
+            static fn (PayrollRunStatutoryInputIssue $issue): bool => !(
+                $issue->code === 'annual_accumulator_missing'
+                && preg_match('/^employee:(\d+)$/D', (string) $issue->personReference, $match) === 1
+                && isset($seeded[(int) $match[1]])
+            ),
+        ));
+    }
+
+    /**
      * Osoby běhu, které zákonný výpočet zastaví ruční kontrolou (chybí
      * daňová rezidence, platné zdravotní pojištění, ověřená pojišťovna …).
      *
@@ -697,11 +747,9 @@ final class PayrollRunReadinessService
      * @param array<string,mixed> $snapshotData
      * @return array<string,mixed>|null
      */
-    private static function statutoryInputFinding(array $snapshotData): ?array
+    private static function statutoryInputFinding(array $snapshotData, ?array $issues): ?array
     {
-        try {
-            $issues = (new PayrollRunStatutoryInputAssembler())->assemble($snapshotData)->issues;
-        } catch (\Throwable) {
+        if ($issues === null) {
             return null;
         }
         $names = [];

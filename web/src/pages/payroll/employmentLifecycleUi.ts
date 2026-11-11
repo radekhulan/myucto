@@ -1,4 +1,4 @@
-import type { PayrollEmploymentStatus } from '@/api/payroll'
+import type { PayrollEmployment, PayrollEmploymentStatus } from '@/api/payroll'
 import { appIsoDate } from '@/utils/date'
 
 export interface EmploymentTransitionPresentation {
@@ -263,4 +263,26 @@ export function employmentDiffFields(
  */
 export function todayIso(now = new Date()): string {
   return appIsoDate(now)
+}
+
+type OpeningBalancesCandidate = Pick<PayrollEmployment, 'id' | 'status' | 'is_primary' | 'start_date' | 'end_date'>
+
+/**
+ * Karta vztahu, na které osoba doplňuje počáteční roční úhrny.
+ *
+ * Úhrny patří osobě a roku, ne vztahu. Karta je ukazuje u hlavního vztahu;
+ * ukončení ale hlavní roli odebere (`is_primary = 0`), takže brigádník, jehož
+ * jediná dohoda skončila, by úhrny neměl kam uložit a odkaz z kontroly běhu
+ * by vedl do prázdna. Bez hlavního vztahu proto úhrny nese vztah, který
+ * skončil nejpozději (u souběhu ten s nejpozdějším nástupem). Hlavní roli
+ * vztahu to nemění, pravidla JMHZ 10495 zůstávají na serveru.
+ */
+export function openingBalancesHostId(employments: readonly OpeningBalancesCandidate[]): number | null {
+  const candidates = employments.filter(item => item.status !== 'no_show')
+  const primary = candidates.find(item => item.is_primary)
+  if (primary !== undefined) return primary.id
+  const rank = (item: OpeningBalancesCandidate) => `${item.end_date ?? '9999-12-31'}|${item.start_date ?? ''}|${String(item.id).padStart(12, '0')}`
+  const latest = [...candidates].sort((left, right) => rank(right).localeCompare(rank(left)))[0]
+
+  return latest?.id ?? null
 }

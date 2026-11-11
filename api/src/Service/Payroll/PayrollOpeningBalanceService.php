@@ -250,6 +250,45 @@ final readonly class PayrollOpeningBalanceService
         array $employeeIds = [],
         ?int $actorUserId = null,
     ): array {
+        $seeded = [];
+        foreach ($this->provableZeroOpeningEmployeeIds($supplierId, $periodStart, $employeeIds) as $employeeId) {
+            try {
+                $this->save(
+                    $supplierId,
+                    $employeeId,
+                    (int) substr($periodStart, 0, 4),
+                    [],
+                    'Automaticky: mzdy za předchozí měsíce roku vede MyÚčto, není co převádět.',
+                    $actorUserId,
+                );
+                $seeded[] = $employeeId;
+            } catch (\Throwable) {
+                // Doplnění je pohodlí, ne podmínka. Když nevyjde (schválená
+                // mzda za rok, souběžný zápis), zůstane ruční cesta.
+                continue;
+            }
+        }
+
+        return $seeded;
+    }
+
+    /**
+     * Zaměstnanci bez počátečních stavů roku, kterým je doplní založení běhu
+     * za dané období ({@see seedProvableZeroOpenings()}).
+     *
+     * Jediné místo pravidla: kontrola před během podle něj nehlásí chybějící
+     * úhrny, které nulou doplní sám běh. Dřív je hlásila jako blokaci a po
+     * založení běhu zmizely, takže účetní doplňovala ručně něco, co aplikace
+     * zná sama (typicky brigádník s dohodou od poloviny měsíce).
+     *
+     * @param list<int> $employeeIds prázdné = všichni zaměstnanci firmy
+     * @return list<int>
+     */
+    public function provableZeroOpeningEmployeeIds(
+        int $supplierId,
+        string $periodStart,
+        array $employeeIds = [],
+    ): array {
         if ($supplierId <= 0
             || preg_match('/^\d{4}-\d{2}-01$/D', $periodStart) !== 1) {
             return [];
@@ -263,7 +302,7 @@ final readonly class PayrollOpeningBalanceService
         }
         $firstRun = $this->firstRunPeriod($supplierId, $year);
 
-        $seeded = [];
+        $provable = [];
         foreach ($this->firstEmploymentStarts($supplierId, $employeeIds) as $employeeId => $firstStart) {
             // Okno „měsíce roku před obdobím, ve kterých u téhle firmy mohl mít
             // příjem" začíná pozdějším z: začátek roku a nástup.
@@ -283,24 +322,10 @@ final readonly class PayrollOpeningBalanceService
             if ($this->hasAnyOpening($supplierId, $employeeId, $year)) {
                 continue;
             }
-            try {
-                $this->save(
-                    $supplierId,
-                    $employeeId,
-                    $year,
-                    [],
-                    'Automaticky: mzdy za předchozí měsíce roku vede MyÚčto, není co převádět.',
-                    $actorUserId,
-                );
-                $seeded[] = $employeeId;
-            } catch (\Throwable) {
-                // Doplnění je pohodlí, ne podmínka. Když nevyjde (schválená
-                // mzda za rok, souběžný zápis), zůstane ruční cesta.
-                continue;
-            }
+            $provable[] = $employeeId;
         }
 
-        return $seeded;
+        return $provable;
     }
 
     private function firstRunPeriod(int $supplierId, int $year): ?string
