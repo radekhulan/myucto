@@ -41,7 +41,8 @@ final readonly class JmhzControlContext
     public static function today(
         ?string $govTalkVariableSymbol = null,
         bool $schemaValidated = false,
+        ?\DateTimeInterface $at = null,
     ): self {
-        return new self(PayrollSubmissionCalendar::today(), $govTalkVariableSymbol, $schemaValidated);
+        return new self(PayrollSubmissionCalendar::today($at), $govTalkVariableSymbol, $schemaValidated);
     }
 }
