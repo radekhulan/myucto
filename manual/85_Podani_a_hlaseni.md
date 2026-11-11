@@ -1824,6 +1824,15 @@ REGZEC.
 
 ### 85.14.16 Registrace zaměstnance PREZEC a REGZEC
 
+**Koho registrovat.** Do evidence zaměstnanců u ČSSZ se přihlašuje každá DPP
+a DPČ, i když v ní nevzniká účast na pojištění (dohoda pod rozhodným příjmem,
+cizinec pojištěný v jiném státě s A1). Za každý měsíc, kdy přihlášená dohoda
+trvá a nebyl zúčtován příjem, se podává řádný formulář s nulovými hodnotami:
+pojištění od 1. do posledního dne měsíce, počet dnů důchodového pojištění 0,
+vyměřovací základ 0 a bez kódu ELDP. Chybějící registraci dohody ohlásí mzdový
+běh i kontrola před během jako varování s povinnou výjimkou (viz
+[§ 86.12.14](86_Zamestnanci.md#861214-checklist-a-casova-osa)).
+
 **Zdroj osobních údajů.** Test registrace zaměstnance čte identitu z osobní
 karty účinnou přesně k datu nástupu pracovního vztahu. V `Mzdy →
 Zaměstnanci`, na kartě osoby v části **Úplná osobní evidence a historie**,

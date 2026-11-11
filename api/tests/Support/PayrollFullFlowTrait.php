@@ -565,6 +565,12 @@ trait PayrollFullFlowTrait
             $this->supplierId,
             $person['employment_id'],
         ]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_checklist_items
+                SET status = "completed"
+              WHERE supplier_id = ? AND employment_id = ?
+                AND phase = "onboarding" AND item_key = "social_jmhz_registration"',
+        )->execute([$this->supplierId, $person['employment_id']]);
         if (!$withIdentity) {
             return;
         }

@@ -24,6 +24,7 @@ use MyInvoice\Service\Payroll\Run\PayrollRunGarnishmentProcessor;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
 use MyInvoice\Service\Payroll\Run\PayrollRunValidationOverrideService;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -272,11 +273,11 @@ final class PayrollRunValidationOverrideTest extends TestCase
     }
 
     /**
-     * Dohoda s automatickou účastí se NEHLÁSÍ. U DPP pod rozhodným příjmem
-     * účast nevzniká, přihláška se nepodává a varování by bylo planým
-     * poplachem u každé brigády.
+     * Od 2026 se do evidence zaměstnanců u ČSSZ (REGZEC) přihlašuje každá DPP,
+     * i pod rozhodným příjmem bez účasti na pojištění (zákon č. 323/2025 Sb.).
+     * Zdravotní pojišťovně se DPP bez účasti nehlásí, takže to varování mlčí.
      */
-    public function testAgreementWithAutomaticParticipationIsNotWarnedAbout(): void
+    public function testAgreementWithAutomaticParticipationOwesSocialRegistrationOnly(): void
     {
         [, $employmentId] = $this->employment('SYN-DPP');
         $this->pendingOnboardingChecklist($employmentId);
@@ -287,12 +288,114 @@ final class PayrollRunValidationOverrideTest extends TestCase
         $locked = $this->lockedRun();
 
         $codes = array_column(
-            $this->requiresOverrideValidations((int) $locked['revision_id']),
+            array_filter(
+                $this->requiresOverrideValidations((int) $locked['revision_id']),
+                static fn (array $row): bool => (int) $row['entity_id'] === $employmentId,
+            ),
+            'code',
+        );
+
+        self::assertContains('employment_social_registration_missing', $codes);
+        self::assertNotContains('employment_health_registration_missing', $codes);
+    }
+
+    /** DPČ s vyloučenou účastí registraci u ČSSZ dluží také, oznámení pojišťovně ne. */
+    public function testAgreementExcludedFromInsuranceOwesSocialRegistrationOnly(): void
+    {
+        [, $employmentId] = $this->employment('SYN-DPC-EXCL');
+        $this->pendingOnboardingChecklist($employmentId);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET relation_type = "dpc"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET social_insurance_participation = "excluded",
+                    health_insurance_participation = "excluded",
+                    monthly_gross_minor = 300000
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $locked = $this->lockedRun();
+
+        $codes = array_column(
+            array_filter(
+                $this->requiresOverrideValidations((int) $locked['revision_id']),
+                static fn (array $row): bool => (int) $row['entity_id'] === $employmentId,
+            ),
+            'code',
+        );
+
+        self::assertContains('employment_social_registration_missing', $codes);
+        self::assertNotContains('employment_health_registration_missing', $codes);
+    }
+
+    /**
+     * Registrace podaná v aplikaci (evidovaná povinnost REGZEC A1 k vztahu)
+     * varování umlčí i bez odškrtnutého checklistu. Povinnost se pozná podle
+     * téže reference, kterou zakládá podání registrace.
+     */
+    public function testAgreementWithRegistrationObligationIsNotWarnedAbout(): void
+    {
+        [, $employmentId] = $this->employment('SYN-DPP-OBL');
+        $this->pendingOnboardingChecklist($employmentId);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET relation_type = "dpp"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_obligations
+                (supplier_id, environment, agenda_code, subject_type, subject_reference,
+                 period_start, period_end, obligation_kind, preferred_channel, status,
+                 source_event_type, source_event_reference, source_event_hash,
+                 request_fingerprint, idempotency_key_hash)
+             VALUES (?, "production", "REGZEC25", "employment", ?, "2026-06-01", "2026-06-30",
+                     "regular", "vrep_apep", "open", ?, ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            'payroll_employment:' . $employmentId,
+            PayrollRegistrationSubmissionService::SOURCE_EVENT_TYPE,
+            PayrollRegistrationSubmissionService::sourceEventReference($employmentId),
+            str_repeat('a', 64),
+            str_repeat('b', 64),
+            random_bytes(32),
+        ]);
+        $locked = $this->lockedRun();
+
+        $codes = array_column(
+            array_filter(
+                $this->requiresOverrideValidations((int) $locked['revision_id']),
+                static fn (array $row): bool => (int) $row['entity_id'] === $employmentId,
+            ),
             'code',
         );
 
         self::assertNotContains('employment_social_registration_missing', $codes);
-        self::assertNotContains('employment_health_registration_missing', $codes);
+    }
+
+    /** DPP registrovaná mimo aplikaci (odškrtnutý checklist) zůstává bez varování. */
+    public function testAgreementRegisteredOutsideTheAppIsNotWarnedAbout(): void
+    {
+        [, $employmentId] = $this->employment('SYN-DPP-EXT');
+        $this->pendingOnboardingChecklist($employmentId);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET relation_type = "dpp"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_checklist_items SET status = "completed"
+              WHERE supplier_id = ? AND employment_id = ? AND item_key = "social_jmhz_registration"',
+        )->execute([$this->supplierId, $employmentId]);
+        $locked = $this->lockedRun();
+
+        $codes = array_column(
+            array_filter(
+                $this->requiresOverrideValidations((int) $locked['revision_id']),
+                static fn (array $row): bool => (int) $row['entity_id'] === $employmentId,
+            ),
+            'code',
+        );
+
+        self::assertNotContains('employment_social_registration_missing', $codes);
     }
 
     /**

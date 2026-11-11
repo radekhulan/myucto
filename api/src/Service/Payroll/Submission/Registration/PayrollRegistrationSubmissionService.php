@@ -52,6 +52,7 @@ final readonly class PayrollRegistrationSubmissionService
     public const AGENDA_EMPLOYER_REGISTRATION = 'REGZEL26';
 
     public const SOURCE_EVENT_TYPE = 'payroll_employment_registration';
+    public const EMPLOYMENT_REFERENCE_PREFIX = 'payroll_employment_registration:';
     public const CHECKLIST_PHASE = 'onboarding';
     public const CHECKLIST_ITEM_KEY = 'social_jmhz_registration';
 
@@ -620,7 +621,7 @@ final readonly class PayrollRegistrationSubmissionService
             return "payroll_registration_event:{$eventId}";
         }
 
-        return "payroll_employment_registration:{$employmentId}";
+        return self::EMPLOYMENT_REFERENCE_PREFIX . $employmentId;
     }
 
     /**

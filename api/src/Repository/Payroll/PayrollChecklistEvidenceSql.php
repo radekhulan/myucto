@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Repository\Payroll;
 
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
+
 /**
  * Doklad, který položku checklistu pracovního vztahu odškrtne sám.
  *
@@ -93,9 +95,9 @@ final class PayrollChecklistEvidenceSql
           WHEN 'social_jmhz_registration' THEN EXISTS (
             SELECT 1 FROM payroll_obligations obligation
              WHERE obligation.supplier_id = item.supplier_id
-               AND obligation.source_event_type = 'payroll_employment_registration'
+               AND obligation.source_event_type = '" . PayrollRegistrationSubmissionService::SOURCE_EVENT_TYPE . "'
                AND obligation.source_event_reference
-                     = CONCAT('payroll_employment_registration:', item.employment_id)
+                     = CONCAT('" . PayrollRegistrationSubmissionService::EMPLOYMENT_REFERENCE_PREFIX . "', item.employment_id)
                AND {$done}
           )
           WHEN 'social_jmhz_deregistration' THEN EXISTS (
