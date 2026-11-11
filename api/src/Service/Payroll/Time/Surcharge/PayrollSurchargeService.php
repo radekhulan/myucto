@@ -93,6 +93,41 @@ final class PayrollSurchargeService
     }
 
     /**
+     * Minuty práce přesčas v měsíci, za které náleží dosažená mzda.
+     *
+     * § 114 odst. 1 ZP ji přiznává vedle příplatku i vedle náhradního volna;
+     * nenáleží jen tehdy, je-li mzda sjednána už s přihlédnutím k práci přesčas
+     * (§ 114 odst. 3).
+     */
+    public function achievedOvertimeMinutes(
+        int $supplierId,
+        int $employmentId,
+        string $periodStart,
+    ): int {
+        if (preg_match('/^\d{4}-\d{2}-01$/D', $periodStart) !== 1) {
+            throw PayrollSurchargeException::of(
+                'invalid_period',
+                'Období příplatků musí být první den měsíce.',
+            );
+        }
+        $ruleset = PayrollSurchargeRuleset::forDate($this->rulesets, $periodStart);
+        $policy = $this->policy($supplierId, $employmentId, $periodStart, $ruleset);
+        if ($policy->mode(PayrollSurchargeKind::Overtime) === PayrollSurchargeCompensationMode::IncludedInWage) {
+            return 0;
+        }
+        // Stejné okno jako ve forPeriod(): zápis patří do měsíce podle místního začátku.
+        $start = new DateTimeImmutable($periodStart . ' 00:00:00', new DateTimeZone('UTC'));
+        $entries = $this->repository->entries(
+            $supplierId,
+            $employmentId,
+            $start->modify('-2 days')->format('Y-m-d H:i:s'),
+            $start->modify('+1 month')->modify('+2 days')->format('Y-m-d H:i:s'),
+        );
+
+        return $this->evidence->overtimeMinutes($entries, $periodStart);
+    }
+
+    /**
      * Sjednaná zásada příplatků účinná k danému dni.
      *
      * Veřejná proto, že zásadu potřebuje i rychlé zadání mzdy: přesčas zadaný

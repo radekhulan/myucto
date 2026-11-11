@@ -467,11 +467,12 @@ final class PayrollQuickInputsApiTest extends TestCase
         self::assertTrue($items[0]['overtime_hours_available']);
         self::assertSame(2_000, $items[0]['overtime_hours_milli']);
         // Červen 2026: 22 pracovních dnů × 8 hodin = 10 560 minut fondu.
-        // Dosažená mzda 42 000 Kč / 176 h × 2 h = 477,27 Kč.
-        self::assertSame(47_727, $items[0]['overtime_wage_minor']);
+        // Dosažená mzda 42 000 Kč / 176 h × 2 h = 477,27 Kč, na celé koruny
+        // nahoru (§ 142 odst. 2 ZP) 478 Kč.
+        self::assertSame(47_800, $items[0]['overtime_wage_minor']);
         // Příplatek 25 % z průměrného výdělku 200 Kč/h × 2 h = 100 Kč.
         self::assertSame(10_000, $items[0]['overtime_premium_minor']);
-        self::assertSame(57_727, $items[0]['overtime_amount_minor']);
+        self::assertSame(57_800, $items[0]['overtime_amount_minor']);
         self::assertSame($averageSnapshotId, $items[0]['overtime_average_snapshot_id']);
         self::assertSame(1, $items[0]['overtime_average_snapshot_version']);
 
@@ -496,7 +497,7 @@ final class PayrollQuickInputsApiTest extends TestCase
 
         $wage = $this->quickInput('MZDA_HODINOVA');
         self::assertIsArray($wage);
-        self::assertSame(47_727, (int) $wage['amount_minor']);
+        self::assertSame(47_800, (int) $wage['amount_minor']);
         $wageSnapshot = json_decode(
             (string) $wage['source_snapshot_json'],
             true,
@@ -510,7 +511,7 @@ final class PayrollQuickInputsApiTest extends TestCase
      * Měsíční mzda pokrývá i svátek (§ 115 odst. 3 ZP), takže její hodinová
      * hodnota se dělí fondem VČETNĚ svátku — týmž, ze kterého se krátí za
      * nepřítomnost. Červenec 2026: 23 pracovních dnů (6. 7. svátek) = 184 h.
-     * Dosažená mzda 42 000 Kč / 184 h × 2 h = 456,52 Kč (z 176 h by to bylo 477,27).
+     * Dosažená mzda 42 000 Kč / 184 h × 2 h = 456,52 → 457 Kč (z 176 h by to bylo 478).
      */
     public function testAchievedOvertimeWageUsesFundIncludingHoliday(): void
     {
@@ -552,7 +553,7 @@ final class PayrollQuickInputsApiTest extends TestCase
         self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
         $items = PayrollTimeValue::row($this->json($saved)['month'] ?? null, 'month')['items'];
         self::assertIsArray($items);
-        self::assertSame(45_652, $items[0]['overtime_wage_minor']);
+        self::assertSame(45_700, $items[0]['overtime_wage_minor']);
     }
 
     /** Sjednaná vyšší sazba se musí propsat i do rychlého zadání. */
@@ -572,7 +573,7 @@ final class PayrollQuickInputsApiTest extends TestCase
         $items = PayrollTimeValue::row($this->json($saved)['month'] ?? null, 'month')['items'];
         // 40 % z 200 Kč/h × 2 h = 160 Kč.
         self::assertSame(16_000, $items[0]['overtime_premium_minor']);
-        self::assertSame(47_727, $items[0]['overtime_wage_minor']);
+        self::assertSame(47_800, $items[0]['overtime_wage_minor']);
     }
 
     /**
@@ -593,7 +594,7 @@ final class PayrollQuickInputsApiTest extends TestCase
         self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
         $items = PayrollTimeValue::row($this->json($saved)['month'] ?? null, 'month')['items'];
         self::assertSame(0, $items[0]['overtime_premium_minor']);
-        self::assertSame(47_727, $items[0]['overtime_wage_minor']);
+        self::assertSame(47_800, $items[0]['overtime_wage_minor']);
     }
 
     /**

@@ -891,6 +891,12 @@ final class PayrollRunSnapshotBuilder
         ) as $validation) {
             $validations[] = $validation;
         }
+        foreach (self::exhaustedCurrentMaintenanceValidations(
+            $enforcementEvidence,
+            array_keys($people),
+        ) as $validation) {
+            $validations[] = $validation;
+        }
 
         // Nepodepsané prohlášení poplatníka je rozhodnutý stav, ne mezera —
         // assembler ho proto neblokuje. Má ale daňový dopad (bez slevy na
@@ -2544,6 +2550,69 @@ final class PayrollRunSnapshotBuilder
                     "/payroll/enforcement?person={$employeeId}&case={$caseId}",
                     true,
                 );
+            }
+        }
+
+        return $validations;
+    }
+
+    /**
+     * Běžné výživné s vyčerpanou evidovanou částkou zastaví schválení běhu.
+     *
+     * Běžné výživné je opětující se dávka: sráží se každý měsíc, dokud soud
+     * výkon rozhodnutí nezastaví (§ 280 odst. 3 a § 290 odst. 2 o. s. ř.).
+     * Evidence pohledávek ale vede u každé pohledávky jen jednu částku
+     * a umořuje ji sraženými částkami, takže po jejím vyčerpání se na běžné
+     * výživné v dalších měsících nesrazilo nic a nikdo se to nedozvěděl.
+     * Plátce mzdy přitom oprávněnému za neprovedené srážky ručí (§ 292
+     * o. s. ř.).
+     *
+     * Zda výživné trvá, nebo srážky skončily, z evidence poznat nejde, proto
+     * se nic neodhaduje: varování s POVINNÝM potvrzením, stejně jako
+     * u doručeného a nepřevedeného případu. Za oddlužení se exekuce
+     * neprovádí a souběh s přednostní pohledávkou řeší výpočet sám.
+     * Do `$data` nevstupuje, takže `input_hash` se nemění.
+     *
+     * @param array<int,array<string,mixed>> $evidenceByEmployee
+     * @param list<int> $employeeIds
+     * @return list<PayrollRunValidation>
+     */
+    private static function exhaustedCurrentMaintenanceValidations(
+        array $evidenceByEmployee,
+        array $employeeIds,
+    ): array {
+        $validations = [];
+        foreach ($employeeIds as $employeeId) {
+            $evidence = $evidenceByEmployee[$employeeId] ?? null;
+            if (!is_array($evidence)
+                || (($evidence['insolvency']['mode'] ?? 'none') !== 'none')
+            ) {
+                continue;
+            }
+            foreach (is_array($evidence['claims'] ?? null) ? $evidence['claims'] : [] as $claim) {
+                if (!is_array($claim)
+                    || ($claim['category'] ?? null) !== 'current_maintenance'
+                    || ($claim['legal_basis'] ?? null) !== 'statutory'
+                    || ($claim['active'] ?? false) !== true
+                    || (int) ($claim['outstanding_minor_units'] ?? 0) > 0
+                ) {
+                    continue;
+                }
+                $validations[] = new PayrollRunValidation(
+                    'warning',
+                    'enforcement_current_maintenance_exhausted',
+                    'employee',
+                    $employeeId,
+                    'U běžného výživného je evidovaná částka pohledávky vyčerpaná,'
+                    . ' v tomto běhu se na ně nesrazí nic. Běžné výživné se sráží'
+                    . ' každý měsíc, dokud soud výkon rozhodnutí nezastaví (§ 280'
+                    . ' odst. 3 a § 290 odst. 2 o. s. ř.). Trvá-li výživné, přidejte'
+                    . ' k témuž příkazu pohledávku na další splatné výživné; pokud'
+                    . ' srážky skončily, případ ukončete.',
+                    "/payroll/enforcement?person={$employeeId}",
+                    true,
+                );
+                break;
             }
         }
 

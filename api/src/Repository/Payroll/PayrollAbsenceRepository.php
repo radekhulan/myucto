@@ -1140,9 +1140,12 @@ final class PayrollAbsenceRepository
         );
         $stmt->execute([$supplierId, $employmentId, $snapshotId, $year, $quarter]);
         if ($stmt->fetchColumn() === false) {
-            throw new \InvalidArgumentException(
-                'Náhrada vyžaduje schválený snapshot průměru stejného vztahu a čtvrtletí.'
-            );
+            throw new \InvalidArgumentException(sprintf(
+                'Náhrada vyžaduje schválený průměrný výdělek téhož vztahu za čtvrtletí, do kterého '
+                . 'nepřítomnost spadá (%d. čtvrtletí %d). Založte nebo schvalte ho na záložce Průměrný výdělek.',
+                $quarter,
+                $year,
+            ));
         }
     }
 

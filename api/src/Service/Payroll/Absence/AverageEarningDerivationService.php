@@ -169,6 +169,13 @@ final class AverageEarningDerivationService
         'worked_time_missing',
     ];
 
+    /**
+     * Náhrada mzdy za svátek u hodinové mzdy (§ 115 odst. 3 ZP). Kde ji měsíc
+     * nese, svátek do odpracované doby nepatří
+     * ({@see withHolidayCoveredByMonthlyWage()}).
+     */
+    private const HOLIDAY_COMPENSATION_COMPONENT = 'NAHRADA_MZDY_SVATEK';
+
     /** Odkud pravděpodobný výdělek pochází — viz docblock třídy, § 355 ZP. */
     public const PROBABLE_SOURCE_TERMS = 'terms';
     public const PROBABLE_SOURCE_ACHIEVED_WAGE = 'achieved_wage';
@@ -829,6 +836,8 @@ final class AverageEarningDerivationService
                     'blockers' => $month['blockers'],
                     ...(isset($month['settled_overtime_duration_delta_units'])
                         ? ['settled_overtime_duration_delta_units' => $month['settled_overtime_duration_delta_units']] : []),
+                    ...(isset($month['wage_covered_holiday_duration_units'])
+                        ? ['wage_covered_holiday_duration_units' => $month['wage_covered_holiday_duration_units']] : []),
                 ],
                 $months,
             ),
@@ -910,6 +919,79 @@ final class AverageEarningDerivationService
      * @return array<string,mixed>
      */
     public static function monthFromRow(?array $row, string $periodStart): array
+    {
+        return self::withHolidayCoveredByMonthlyWage(self::monthFromRunRow($row, $periodStart), $row);
+    }
+
+    /**
+     * Svátek krytý nekrácenou měsíční mzdou patří do odpracované doby.
+     *
+     * „Za odpracovanou dobu se považuje doba, za kterou zaměstnanci přísluší
+     * mzda nebo plat" (§ 353 odst. 2 zákona č. 262/2006 Sb.). Zaměstnanci
+     * s měsíční mzdou se za svátek, který připadl na jeho obvyklý pracovní den
+     * a ve kterém nepracoval, mzda nekrátí (§ 115 odst. 3 ZP: žádná mzda
+     * „neušla", proto mu ani nepřísluší náhrada). Mzda za tu dobu tedy
+     * přísluší a je celá v započitatelné hrubé mzdě
+     * (`average_earning_base_minor`); kdyby hodiny svátku chyběly ve
+     * jmenovateli, průměr by vyšel vyšší, než odpovídá zákonu (v čtvrtletí
+     * se čtyřmi svátky o více než 6 %), a s ním každá náhrada mzdy i údaj
+     * 10345 měsíčního hlášení.
+     *
+     * Hodiny svátku se berou z potvrzeného pracovního souhrnu měsíce
+     * (`holiday_millihours`, tedy svátek v rozvrženém dni mimo nepřítomnost,
+     * za kterou se mzda krátí; ten vede souhrn zvlášť jako
+     * `holiday_unpaid_millihours`). Přičítají se JEN tehdy, když měsíc nese
+     * započitatelnou měsíční mzdu (složka druhu `base_wage`) a svátek neplatí
+     * náhrada mzdy: u hodinové mzdy za svátek přísluší náhrada (§ 115
+     * odst. 3 ZP), která do hrubé mzdy pro průměr nevstupuje, a doba svátku
+     * proto do odpracované doby nepatří. Počet odpracovaných dnů (§ 355
+     * odst. 1 ZP) se nemění; zákon „odpracovaný den" nevymezuje.
+     *
+     * @param array<string,mixed> $month výstup {@see monthFromRunRow()}
+     * @param array<string,mixed>|null $row
+     * @return array<string,mixed>
+     */
+    private static function withHolidayCoveredByMonthlyWage(array $month, ?array $row): array
+    {
+        if ($row === null || $month['blockers'] !== [] || !is_string($row['input_json'] ?? null)) {
+            return $month;
+        }
+        $input = self::decode((string) $row['input_json']);
+        $holidayMillihours = $input['time_month']['jmhz_work_summary']['values']['holiday_millihours'] ?? null;
+        if (!is_int($holidayMillihours) || $holidayMillihours <= 0) {
+            return $month;
+        }
+        $monthlyWage = false;
+        foreach ((array) ($input['inputs'] ?? []) as $item) {
+            $component = is_array($item) && is_array($item['component'] ?? null) ? $item['component'] : [];
+            if (($component['code'] ?? null) === self::HOLIDAY_COMPENSATION_COMPONENT) {
+                return $month;
+            }
+            if (($component['component_kind'] ?? null) === 'base_wage'
+                && ($component['average_earning_treatment'] ?? null) === 'included'
+                && is_int($item['amount_minor'] ?? null)
+                && $item['amount_minor'] > 0
+            ) {
+                $monthlyWage = true;
+            }
+        }
+        $units = self::durationUnits($month);
+        if (!$monthlyWage || $units === null) {
+            return $month;
+        }
+        $holidayUnits = PayrollDuration::fromMillihours($holidayMillihours);
+        $month['worked_duration_units'] = PayrollDuration::add($units, $holidayUnits);
+        $month['worked_minutes'] = PayrollDuration::exactMinutes($month['worked_duration_units']);
+        $month['wage_covered_holiday_duration_units'] = $holidayUnits;
+
+        return $month;
+    }
+
+    /**
+     * @param array<string,mixed>|null $row
+     * @return array<string,mixed>
+     */
+    private static function monthFromRunRow(?array $row, string $periodStart): array
     {
         $context = [
             'blockers' => [],

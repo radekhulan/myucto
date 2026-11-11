@@ -1487,7 +1487,7 @@ final class PayrollQuickInputRepository
                     continue;
                 }
 
-                $this->guard($pdo, $collected, $employmentId, 'base', function () use (
+                $baseSaved = $this->guard($pdo, $collected, $employmentId, 'base', function () use (
                     $supplierId,
                     $employmentId,
                     $item,
@@ -1542,6 +1542,17 @@ final class PayrollQuickInputRepository
                         $autoApprove,
                     );
                 });
+                // Základ zadaný v témže řádku platí už pro přesčas téhož uložení.
+                // Řádek se načetl před uložením, takže bez toho by se dosažená
+                // mzda (§ 114 odst. 1 ZP) počítala z dřívějšího základu, u prvního
+                // zadání měsíce z nuly.
+                if ($baseSaved
+                    && is_int($row['base_amount_minor'])
+                    && !(bool) $item['base_managed_elsewhere']
+                    && ($item['hourly_remuneration_in_period'] ?? false) !== true
+                ) {
+                    $item['base_amount_minor'] = $row['base_amount_minor'];
+                }
 
                 $this->guard($pdo, $collected, $employmentId, 'overtime', function () use (
                     $supplierId,
@@ -1611,14 +1622,20 @@ final class PayrollQuickInputRepository
                             'U tohoto typu vztahu nelze přesčas zadat podle hodin. Použijte celkovou částku nebo odměnu.'
                         );
                     }
-                    $split = $this->overtimeSplit(
-                        $supplierId,
-                        $employmentId,
-                        $period,
-                        $item,
-                        $row,
-                        (int) $hours,
-                    );
+                    try {
+                        $split = $this->overtimeSplit(
+                            $supplierId,
+                            $employmentId,
+                            $period,
+                            $item,
+                            $row,
+                            (int) $hours,
+                        );
+                    } catch (PayrollSurchargeException $exception) {
+                        // Chybějící podklad (základ, kalendář) je vstupní stav
+                        // uživatele: vrací se u pole přesčasu, ne jako pád dávky.
+                        throw new \DomainException($exception->getMessage(), 0, $exception);
+                    }
                     $this->upsertOvertimeParts(
                         $supplierId,
                         (int) $item['employee_id'],
@@ -1855,6 +1872,14 @@ final class PayrollQuickInputRepository
             // mapoval přes `$quickSlot`, spadl by cizí hodinový základ do
             // přesčasu a formulář by tvrdil, že přesčas spravuje jiný vstup.
             $managedSlot = self::managedSlot($code, $kind);
+            if ($externalId !== null
+                && str_starts_with($externalId, PayrollSurchargeInputMaterializer::OVERTIME_WAGE_EXTERNAL_PREFIX)
+            ) {
+                // Dosažená mzda za přesčas ze schválené docházky nese stejný kód
+                // jako hodinový základ, ale je to přesčas: nesmí zamknout pole
+                // základní mzdy hláškou „spravuje jiný vstup".
+                $managedSlot = 'overtime';
+            }
             if (($managedSlot === 'overtime' || $managedSlot === 'bonus')
                 && self::hasOwnColumnOrigin($code, $externalId, $overriddenImports)
             ) {
@@ -2244,6 +2269,11 @@ final class PayrollQuickInputRepository
             'suspended_in_month' => $suspendedInMonth,
             'away_in_month' => $awayInMonth,
             'base_amount_minor' => $base,
+            // Sjednaná měsíční mzda z podmínek vztahu; z ní se v kráceném měsíci
+            // počítá dosažená mzda za přesčas ({@see self::overtimeMonthlyBase()}).
+            'agreed_monthly_gross_minor' => $hourlyRemuneration || $employment['monthly_gross_minor'] === null
+                ? null
+                : PayrollTimeValue::int($employment['monthly_gross_minor'], 'monthly_gross_minor'),
             'hourly_remuneration_in_period' => $hourlyRemuneration,
             'base_managed_elsewhere' => $managed['base'],
             // Pravidelné složky účinné v měsíci, ze kterých ještě nevznikl vstup.
@@ -2619,8 +2649,17 @@ final class PayrollQuickInputRepository
                 . 'zadejte celkovou částkou.'
             );
         }
-        $baseMinor = PayrollTimeValue::int($item['base_amount_minor'] ?? null, 'base_amount_minor');
-        $wage = PayrollAchievedWage::forMilliHours($baseMinor, $fundMinutes, $hours);
+        $baseMinor = self::overtimeMonthlyBase($item);
+        // Obě poloviny nároku se vyplácejí i hlásí v JMHZ v celých korunách
+        // (§ 142 odst. 2 ZP), stejně jako příplatky § 115 až § 118 o kus níž
+        // a příplatky z docházky. Haléřová částka by zastavila mzdový běh
+        // kontrolou `inputs_not_whole_crowns`.
+        $rounding = PayrollWageRoundingPolicy::forSupplier($this->db, $supplierId);
+        $premium = PayrollSurchargeInputMaterializer::wholeCzk($premium, $rounding);
+        $wage = PayrollSurchargeInputMaterializer::wholeCzk(
+            PayrollAchievedWage::forMilliHours($baseMinor, $fundMinutes, $hours),
+            $rounding,
+        );
 
         $common = [
             'schema_version' => 'payroll-quick-overtime-source.v2',
@@ -2637,6 +2676,7 @@ final class PayrollQuickInputRepository
             'ruleset_id' => $ruleset->version->id,
             'ruleset_content_hash' => $ruleset->version->contentHash,
             'rounding' => 'half-up-minor-unit',
+            'wage_rounding' => $rounding->value,
         ];
 
         return [
@@ -2659,6 +2699,32 @@ final class PayrollQuickInputRepository
                 'amount_minor' => $premium,
             ],
         ];
+    }
+
+    /**
+     * Měsíční mzda, ze které se určí dosažená mzda za hodinu přesčasu.
+     *
+     * § 114 odst. 1 ZP přiznává za přesčas „mzdu, na kterou vzniklo za tuto
+     * dobu právo". U měsíční mzdy je to sjednaná měsíční částka dělená fondem
+     * měsíce. V měsíci kráceném pro nepřítomnost, nástup nebo skončení nese
+     * pole základu jen poměrnou část (§ 109 odst. 1 ZP), a dělit ji celým
+     * fondem by hodinu přesčasu podhodnotilo. Proto má v takovém měsíci
+     * přednost sjednaná částka z podmínek vztahu; v plném měsíci platí základ
+     * z řádku, který účetní vidí a potvrzuje.
+     *
+     * @param array<string,mixed> $item
+     */
+    private static function overtimeMonthlyBase(array $item): int
+    {
+        $agreed = $item['agreed_monthly_gross_minor'] ?? null;
+        $shortened = ($item['base_proration'] ?? null) !== null
+            || ($item['away_in_month'] ?? false) === true
+            || ($item['partial_month'] ?? false) === true;
+        if ($shortened && is_int($agreed) && $agreed > 0) {
+            return $agreed;
+        }
+
+        return PayrollTimeValue::int($item['base_amount_minor'] ?? null, 'base_amount_minor');
     }
 
     /**

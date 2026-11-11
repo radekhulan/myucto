@@ -357,6 +357,15 @@ najednou, aplikace to zastaví.
 | § 117 | Příplatek za práci ve ztíženém pracovním prostředí | `PRIPLATEK_ZTIZENE_PROSTREDI` |
 | § 118 | Příplatek za práci v sobotu a v neděli | `PRIPLATEK_VIKEND` |
 
+U měsíční mzdy schválení docházky s přesčasem založí vedle příplatku i
+**dosaženou mzdu za přesčas** (§ 114 odst. 1) složkou `MZDA_HODINOVA`:
+sjednaná měsíční mzda z podmínek vztahu dělená fondem měsíce včetně svátků,
+krát hodiny přesčasu, zaokrouhleno na celé koruny. Náleží i tehdy, když se
+místo příplatku poskytuje náhradní volno; nenáleží, je-li mzda sjednána
+s přihlédnutím k práci přesčas (§ 114 odst. 3). Chybí-li v podmínkách vztahu
+sjednaná měsíční mzda, částka se neodhaduje a dosaženou mzdu doplňte ručně
+ve mzdových vstupech.
+
 #### Odměna za pracovní pohotovost (§ 140)
 
 Minuty pohotovosti se zadávají u směny v poli **Pohotovost (min)**. Při
