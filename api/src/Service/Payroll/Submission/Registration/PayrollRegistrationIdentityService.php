@@ -1748,6 +1748,7 @@ final readonly class PayrollRegistrationIdentityService
              * ČSSZ se nepřepisuje.
              */
             $backdatePerson = false;
+            $personCovered = false;
             if (!$replaceExisting && $personIdentifier !== null) {
                 $active = $this->repository->activePersonExternalId(
                     $supplierId,
@@ -1755,15 +1756,21 @@ final readonly class PayrollRegistrationIdentityService
                     $environment,
                     'ik_mpsv',
                 );
-                $backdatePerson = $active !== null
-                    && $active['source_kind'] === 'verified_manual_import'
-                    && $active['valid_from'] > $validFrom
+                $matches = $active !== null
                     && $this->activePersonExternalIdMatches(
                         $supplierId,
                         $employment['employee_id'],
                         $environment,
                         $personIdentifier,
                     ) === true;
+                $backdatePerson = $matches
+                    && $active['source_kind'] === 'verified_manual_import'
+                    && $active['valid_from'] > $validFrom;
+                // Totéž OIČ opsané k POZDĚJŠÍ dohodě (brigádník s další DPP)
+                // už osobu k jejímu dni pokrývá: nic se nepřepisuje, zapíše
+                // se jen ID PPV nového vztahu. Dřív to končilo konfliktem
+                // „stejná hodnota, jiný den".
+                $personCovered = $matches && $active['valid_from'] <= $validFrom;
             }
             if ($backdatePerson) {
                 $this->discardManualPersonIdentifier(
@@ -1789,7 +1796,7 @@ final readonly class PayrollRegistrationIdentityService
                 }
             }
 
-            $person = $personIdentifier === null
+            $person = $personIdentifier === null || $personCovered
                 ? null
                 : $this->assignPersonExternalId(
                     $supplierId,
