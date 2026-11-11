@@ -56,7 +56,9 @@ final class PayrollMonthlyAgendaDutyRepository
         // snímek se čte až v druhém kroku, a to jedině u vybrané revize každého
         // běhu. Dřív CTE počítala JSON funkce nad schválenými revizemi CELÉ
         // historie firmy a období filtrovala až potom, takže přehled podání
-        // zpomaloval s každým dalším měsícem.
+        // zpomaloval s každým dalším měsícem. `STRAIGHT_JOIN` drží pořadí
+        // (nejdřív výběr revizí, pak snímek podle klíče): u malé tabulky si
+        // optimalizátor jinak vybral průchod všemi revizemi firmy i se snímky.
         $statement = $this->db->pdo()->prepare(
             'WITH approved AS (
                  SELECT run.id AS run_id,
@@ -81,7 +83,7 @@ final class PayrollMonthlyAgendaDutyRepository
                     JSON_EXTRACT(snapshot.input_snapshot_json, ?)
                         AS insurer_codes
                FROM approved
-               JOIN payroll_run_revisions snapshot
+      STRAIGHT_JOIN payroll_run_revisions snapshot
                  ON snapshot.supplier_id = ?
                 AND snapshot.id = approved.revision_id
               WHERE approved.row_rank = 1
