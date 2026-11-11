@@ -127,7 +127,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testDryRunApplyAndRepeatPreserveAmountsAndTargetConfiguration(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $before = $this->pdo->query('SELECT * FROM supplier WHERE id = ' . $this->target)->fetch(PDO::FETCH_ASSOC);
         $dry = $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance');
         self::assertSame(1, $dry['created']['invoices']); self::assertSame(0, $this->targetCount('invoices'));
@@ -173,7 +173,7 @@ final class MyuctoImportTest extends TestCase
     public function testCompositeSourceStaysCompositeInInstallationWithSingleDefault(): void
     {
         $this->installationDefaultSingle($this->target);
-        $package = (new MyuctoExportReader())->read($this->makeArchive(self::ENTRY_FORM_TABLES, 'entry-form-export.zip'));
+        $package = self::readArrays($this->makeArchive(self::ENTRY_FORM_TABLES, 'entry-form-export.zip'));
         self::assertSame([], $package['tables']['accounting_entry_form_history']);
 
         $this->importer->import($package, $this->target, $this->actor, 'synthetic-entry-form', false);
@@ -191,14 +191,14 @@ final class MyuctoImportTest extends TestCase
     public function testExportFromOlderVersionWithoutEntryFormTablesIsComposite(): void
     {
         $this->installationDefaultSingle($this->target);
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         self::assertArrayNotHasKey('accounting_entry_form_history', $package['tables']);
 
         $this->importer->import($package, $this->target, $this->actor, 'synthetic-entry-form', false);
 
         self::assertSame([], $this->entryFormHistory($this->target));
         self::assertSame($this->journalImage($this->source), $this->journalImage($this->target));
-        $repeat = $this->importer->import((new MyuctoExportReader())->read($this->makeArchive(self::ENTRY_FORM_TABLES, 'entry-form-export.zip')),
+        $repeat = $this->importer->import(self::readArrays($this->makeArchive(self::ENTRY_FORM_TABLES, 'entry-form-export.zip')),
             $this->target, $this->actor, 'synthetic-entry-form', false);
         self::assertSame([], $repeat['created'], 'Export s prázdnými tabulkami formy má stejný otisk jako export starší verze.');
     }
@@ -210,7 +210,7 @@ final class MyuctoImportTest extends TestCase
             $this->installationDefaultSingle($this->target);
         }
         $this->singleSourceJournal();
-        $package = (new MyuctoExportReader())->read($this->makeArchive(self::ENTRY_FORM_TABLES, 'entry-form-export.zip'));
+        $package = self::readArrays($this->makeArchive(self::ENTRY_FORM_TABLES, 'entry-form-export.zip'));
         self::assertCount(1, $package['tables']['journal_entry_pair_status']);
         self::assertCount(1, $package['tables']['journal_pair_reversals']);
 
@@ -244,7 +244,7 @@ final class MyuctoImportTest extends TestCase
     {
         $this->pdo->prepare("INSERT INTO accounting_entry_form_history (supplier_id, valid_from, entry_form, note) VALUES (?, '2090-01-01', 'single', 'Syntetická vlastní volba')")
             ->execute([$this->target]);
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         try {
             $this->importer->import($package, $this->target, $this->actor, 'synthetic-entry-form', false);
             self::fail('Firma s vlastní jinou formou zápisu nesmí obnovu převzít tiše.');
@@ -259,7 +259,7 @@ final class MyuctoImportTest extends TestCase
     public function testPairedJournalWithoutSingleFormInExportIsRejected(): void
     {
         $this->singleSourceJournal();
-        $package = (new MyuctoExportReader())->read($this->makeArchive(self::ENTRY_FORM_TABLES, 'entry-form-export.zip'));
+        $package = self::readArrays($this->makeArchive(self::ENTRY_FORM_TABLES, 'entry-form-export.zip'));
         $package['tables']['accounting_entry_form_history'] = [];
         try {
             $this->importer->import($package, $this->target, $this->actor, 'synthetic-entry-form', false);
@@ -361,7 +361,7 @@ final class MyuctoImportTest extends TestCase
     {
         $this->pdo->prepare("INSERT INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on, created_reason) VALUES (?, 2090, '2090-01-01', '2090-12-31', 'setup')")
             ->execute([$this->target]);
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $applied = $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false);
         self::assertSame([['fiscal_year' => 2090, 'starts_on' => '2090-01-01', 'ends_on' => '2090-12-31']], $applied['replaced_periods']);
         self::assertSame(1, $applied['created']['accounting_periods']);
@@ -373,7 +373,7 @@ final class MyuctoImportTest extends TestCase
     {
         $this->pdo->prepare("INSERT INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on, status, created_reason) VALUES (?, 2090, '2090-01-01', '2090-12-31', 'closed', 'setup')")
             ->execute([$this->target]);
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         try { $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false); self::fail('Použité období nesmí převod přepsat.'); }
         catch (\RuntimeException $e) { self::assertStringContainsString('accounting_periods', $e->getMessage()); }
         self::assertSame(0, $this->targetCount('invoices'));
@@ -382,7 +382,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testCrossTenantRowIsRejectedBeforeAnyWrite(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $id = array_key_first($package['tables']['clients']); $package['tables']['clients'][$id]['supplier_id'] = $this->target;
         try { $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false); self::fail('Cizí firma nesmí projít.'); }
         catch (\RuntimeException $e) { self::assertStringContainsString('jiné firmy', $e->getMessage()); }
@@ -391,7 +391,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testRestoreRemapsEveryPostingAndBothDocumentTypes(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $originalEntry = reset($package['tables']['journal_entries']);
         $originalPosting = reset($package['tables']['journal_document_postings']);
         $nextEntry = max(array_keys($package['tables']['journal_entries']));
@@ -435,7 +435,7 @@ final class MyuctoImportTest extends TestCase
      */
     public function testCreditNoteOffsetIsRemappedAndSettingsReferencesAreDetached(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $creditNote = max(array_keys($package['tables']['invoices'])) + 1;
         $package['tables']['invoices'][$creditNote] = array_replace($package['tables']['invoices'][$this->invoice], [
             'id' => $creditNote, 'invoice_type' => 'credit_note', 'varsymbol' => 'SYNTHETIC-2090-02',
@@ -476,7 +476,7 @@ final class MyuctoImportTest extends TestCase
      */
     public function testVatClearingReversedPostingAndSetupBankAccountAreRestored(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $original = reset($package['tables']['journal_entries']);
         $lines = array_filter($package['tables']['journal_entry_lines'], static fn (array $line): bool => (int) $line['entry_id'] === (int) $original['id']);
         $nextEntry = max(array_keys($package['tables']['journal_entries']));
@@ -554,7 +554,7 @@ final class MyuctoImportTest extends TestCase
         $fixture = $this->seedCompleteCompany();
         $this->seedTargetDefaults();
         $targetSeries = (int) $this->pdo->query("SELECT id FROM number_series WHERE legacy_key = 'issued:invoice' AND supplier_id = " . $this->target)->fetchColumn();
-        $package = (new MyuctoExportReader())->read($this->makeArchive(array_keys(MyuctoImportProfile::KEYLESS_TABLES), 'complete-export.zip', $fixture['files']));
+        $package = self::readArrays($this->makeArchive(array_keys(MyuctoImportProfile::KEYLESS_TABLES), 'complete-export.zip', $fixture['files']));
         // Vazba na ostatní doklad (obnova je nepřenáší) se vynechá a vykáže.
         $package['tables']['document_links'][] = ['document_id' => $fixture['document'], 'supplier_id' => $this->source,
             'entity_type' => 'other_item', 'entity_id' => 987654, 'created_at' => '2090-01-20 10:00:00'];
@@ -696,7 +696,7 @@ final class MyuctoImportTest extends TestCase
     public function testExportWithoutNewTablesRestoresUnchangedAndFlagsNumbering(): void
     {
         $this->seedTargetDefaults();
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         foreach ([...MyuctoImportProfile::OPTIONAL_GRAPH_TABLES, ...array_keys(MyuctoImportProfile::KEYLESS_TABLES)] as $table) {
             self::assertSame([], $package['tables'][$table] ?? [], $table);
             unset($package['tables'][$table]);
@@ -714,7 +714,7 @@ final class MyuctoImportTest extends TestCase
         $this->pdo->prepare("UPDATE external_entity_map SET external_id = REPLACE(external_id, ?, 'vat-clearing-runs-v1:')
             WHERE supplier_id = ? AND entity_type = 'myucto_import'")
             ->execute([MyuctoImportProfile::VERSION . ':', $this->target]);
-        $repeat = $this->importer->import((new MyuctoExportReader())->read($this->archive), $this->target, $this->actor, 'synthetic-instance', false);
+        $repeat = $this->importer->import(self::readArrays($this->archive), $this->target, $this->actor, 'synthetic-instance', false);
         self::assertSame([], $repeat['created']);
         self::assertSame(1, $repeat['existing']['invoices']);
     }
@@ -841,7 +841,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testMissingPostingDocumentRollsBackEntireGraph(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $posting = array_key_first($package['tables']['journal_document_postings']);
         $package['tables']['journal_document_postings'][$posting]['doc_id'] = 999999999;
         try {
@@ -857,7 +857,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testMissingReferenceRollsBackEntireGraph(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $package['tables']['invoices'][$this->invoice]['client_id'] = 999999999;
         try { $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false); self::fail('Chybějící vazba nesmí projít.'); }
         catch (\RuntimeException $e) { self::assertStringContainsString('Chybí zdrojová vazba', $e->getMessage()); }
@@ -866,7 +866,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testChangedSourceIsRejectedAfterApply(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false);
         $package['tables']['invoices'][$this->invoice]['total_vat'] = '22.00';
         $this->expectException(\RuntimeException::class);
@@ -876,7 +876,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testDifferentCompanyIdentityIsRejected(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $package['tables']['supplier'][$this->source]['ic'] = '99999999';
         $this->expectException(\RuntimeException::class); $this->expectExceptionMessage('ic');
         $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false);
@@ -895,7 +895,7 @@ final class MyuctoImportTest extends TestCase
             $this->pdo->prepare("INSERT INTO invoice_counters (supplier_id, client_id, revenue_category_id, invoice_type, period, last_number) VALUES (?, 0, 0, 'invoice', '2090', 7)")->execute([$this->source]);
             $exporter = $container->get(\MyInvoice\Service\Export\Instance\InstanceExportService::class);
             $export = $exporter->runForSupplier($this->source, [\MyInvoice\Service\Export\Instance\InstanceExportService::PART_RESTORE], targetDir: $this->root . '/native-export');
-            $package = (new MyuctoExportReader())->read($export['abs_path'], (string) $config->get('cron.backup.password', ''));
+            $package = self::readArrays($export['abs_path'], (string) $config->get('cron.backup.password', ''));
             self::assertSame($this->source, $package['manifest']['supplier']['id']);
             self::assertCount(1, $package['tables']['recurring_invoice_templates']);
             self::assertArrayHasKey('posting_rules', $package['tables']);
@@ -915,7 +915,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testOwnTargetDataIsNotMerged(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $currency = (int) $this->pdo->query('SELECT default_currency_id FROM supplier WHERE id = ' . $this->target)->fetchColumn();
         $country = (int) $this->pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ'")->fetchColumn();
         $this->pdo->prepare("INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email, currency_default_id) VALUES (?, 'Vlastní syntetický partner', 'Test', 'Test', '11000', ?, 'own@example.test', ?)")->execute([$this->target, $country, $currency]);
@@ -926,7 +926,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testHistoricalVatConfigurationMustMatch(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $this->pdo->prepare("INSERT INTO supplier_vat_status_history (supplier_id, effective_from, is_vat_payer, is_identified) VALUES (?, '2089-01-01', 0, 0)")->execute([$this->target]);
         try { $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false); self::fail('Odlišná historie DPH nesmí projít.'); }
         catch (\RuntimeException $e) { self::assertStringContainsString('Historie DPH', $e->getMessage()); }
@@ -935,7 +935,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testRepeatDetectsChangedTarget(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false);
         $this->pdo->prepare('UPDATE invoices SET total_vat = 22 WHERE supplier_id = ?')->execute([$this->target]);
         $this->expectException(\RuntimeException::class); $this->expectExceptionMessage('Rekonciliace');
@@ -1057,7 +1057,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testStoredClassificationsHistoryAndEffectiveRulesSurviveRestore(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $package['tables']['de_movement_classification_history'] = array_reverse(
             $package['tables']['de_movement_classification_history'],
             true
@@ -1124,7 +1124,7 @@ final class MyuctoImportTest extends TestCase
     {
         $this->pdo->prepare("INSERT INTO posting_rules (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active) SELECT ?, rule_key, description, debit_account_code, credit_account_code, priority, is_active FROM posting_rules WHERE supplier_id = ? AND priority = 120")
             ->execute([$this->target, $this->source]);
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $dry = $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance');
         self::assertSame(1, $dry['reused']['posting_rules']);
         $this->pdo->prepare("UPDATE posting_rules SET is_active = 0 WHERE supplier_id = ?")->execute([$this->target]);
@@ -1144,7 +1144,7 @@ final class MyuctoImportTest extends TestCase
     {
         $this->pdo->prepare("INSERT INTO posting_rules (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active) SELECT ?, 'synthetic.target.only', description, debit_account_code, credit_account_code, priority, is_active FROM posting_rules WHERE supplier_id = ? AND priority = 120")
             ->execute([$this->target, $this->source]);
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         try {
             $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false);
             self::fail('Předkontace navíc v cílové firmě nesmí projít.');
@@ -1158,7 +1158,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testOldProfileCannotSilentlyExtendAnExistingRestore(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false);
         $this->pdo->prepare("UPDATE external_entity_map SET external_id = ? WHERE supplier_id = ? AND entity_type = 'myucto_import'")
             ->execute([str_repeat('a', 64), $this->target]);
@@ -1170,7 +1170,7 @@ final class MyuctoImportTest extends TestCase
     /** Export ze zdroje bez skupin zaúčtování obnovený starším profilem se opakuje bez chyby. */
     public function testEarlierProfileRestoreOfSameDataCanBeRepeated(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         unset($package['tables']['journal_document_postings']);
         $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false);
         $this->pdo->prepare("UPDATE external_entity_map SET external_id = REPLACE(external_id, ?, 'classifications-v1:')
@@ -1186,7 +1186,7 @@ final class MyuctoImportTest extends TestCase
     #[DataProvider('invalidClassificationGraphs')]
     public function testInvalidClassificationGraphLeavesTargetEmpty(string $table, string $column, mixed $value): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $id = array_key_first($package['tables'][$table]);
         $package['tables'][$table][$id][$column] = $value === 'foreign_supplier' ? $this->target : $value;
         try {
@@ -1212,7 +1212,7 @@ final class MyuctoImportTest extends TestCase
 
     public function testRepeatRejectsChangedClassificationTimestamp(): void
     {
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false);
         $this->pdo->prepare("UPDATE de_movement_classification SET updated_at = '2090-04-01 10:00:00' WHERE supplier_id = ?")
             ->execute([$this->target]);
@@ -1229,7 +1229,7 @@ final class MyuctoImportTest extends TestCase
         $insert->execute([$this->source, 'invoice_send', 'cs', 'Syntetický předmět {{ invoice.varsymbol }}', '<p>Syntetický obsah</p>', 'Syntetický obsah', $this->actor]);
         $insert->execute([$this->source, 'invoice_send', 'en', 'Synthetic subject', '<p>Synthetic content</p>', 'Synthetic content', null]);
         $this->archive = $this->makeArchive();
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         self::assertCount(2, $package['tables']['supplier_email_templates']);
         // Autor z jiné instalace nesmí být použit jako lokální ID uživatele.
         foreach ($package['tables']['supplier_email_templates'] as &$row) {
@@ -1266,7 +1266,7 @@ final class MyuctoImportTest extends TestCase
         $insert->execute([$this->source, 'Synthetic source']);
         $insert->execute([$this->target, 'Synthetic existing target']);
         $this->archive = $this->makeArchive();
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         try {
             $this->importer->import($package, $this->target, $this->actor, 'synthetic-email-conflict', false);
             self::fail('Existující firemní šablona se nesmí přepsat importem.');
@@ -1281,7 +1281,7 @@ final class MyuctoImportTest extends TestCase
     public function testNonprofitFrameworkOfSourceMustMatchTargetBeforeAnyWrite(): void
     {
         $this->framework($this->source, '1900-01-01', 'cz_504');
-        $package = (new MyuctoExportReader())->read($this->makeArchive(['supplier_accounting_frameworks'], 'framework-export.zip'));
+        $package = self::readArrays($this->makeArchive(['supplier_accounting_frameworks'], 'framework-export.zip'));
         self::assertArrayNotHasKey('supplier_accounting_frameworks', $package['tables']);
         self::assertSame(['supplier_accounting_frameworks' => 1], $package['skipped']);
         try {
@@ -1299,7 +1299,7 @@ final class MyuctoImportTest extends TestCase
     {
         $this->framework($this->source, '1900-01-01', 'cz_504');
         $this->framework($this->target, '1900-01-01', 'cz_504');
-        $package = (new MyuctoExportReader())->read($this->makeArchive(['supplier_accounting_frameworks'], 'framework-export.zip'));
+        $package = self::readArrays($this->makeArchive(['supplier_accounting_frameworks'], 'framework-export.zip'));
         $report = $this->importer->import($package, $this->target, $this->actor, 'synthetic-framework', false);
         self::assertSame(1, $report['created']['journal_entries']);
         self::assertSame(['supplier_accounting_frameworks' => 1], $report['outside_scope']);
@@ -1308,7 +1308,7 @@ final class MyuctoImportTest extends TestCase
     public function testExportWithoutFrameworkHistoryCannotFillNonprofitTarget(): void
     {
         $this->framework($this->target, '2090-01-01', 'cz_504');
-        $package = (new MyuctoExportReader())->read($this->archive);
+        $package = self::readArrays($this->archive);
         try {
             $this->importer->import($package, $this->target, $this->actor, 'synthetic-framework', false);
             self::fail('Export v rámci 500 nesmí projít do období vedeného podle vyhlášky 504.');
@@ -1367,5 +1367,17 @@ final class MyuctoImportTest extends TestCase
     {
         foreach (scandir($path) ?: [] as $entry) if ($entry !== '.' && $entry !== '..') { $child = $path . '/' . $entry; if (is_dir($child)) $this->removeDir($child); else @unlink($child); }
         @rmdir($path);
+    }
+
+    /**
+     * Balíček s tabulkami v polích, aby test mohl export cíleně poškodit. Úložiště čtečky
+     * zůstává v balíčku: drží dočasné soubory příloh, dokud balíček žije.
+     */
+    private static function readArrays(string $path, string $password = ''): array
+    {
+        $package = (new MyuctoExportReader())->read($path, $password);
+        $package['store'] = $package['tables'];
+        $package['tables'] = $package['tables']->toArrays();
+        return $package;
     }
 }

@@ -43,15 +43,16 @@ final class MyInvoiceBackupConverterTest extends TestCase
         $result = (new MyInvoiceBackupConverter())->convert($backup, [$files], $out, 1, 'tax_evidence', $this->history());
         self::assertSame(2, $result['files']);
         $package = (new MyuctoExportReader())->read($out);
-        self::assertCount(1, $package['tables']['supplier']);
-        self::assertCount(1, $package['tables']['clients']);
-        self::assertSame('Selected', $package['tables']['clients'][11]['company_name']);
-        self::assertSame('121.00', $package['tables']['recurring_invoice_template_items'][31]['unit_price_without_vat']);
-        self::assertSame('1', $package['tables']['recurring_invoice_templates'][21]['prices_include_vat']);
-        self::assertSame(1, $package['tables']['bank_statements'][61]['supplier_id']);
-        self::assertSame("\0\xff", $package['tables']['bank_statements'][61]['file_content']);
-        self::assertArrayNotHasKey('users', $package['tables']);
-        self::assertArrayNotHasKey('branding_profiles', $package['tables']);
+        $tables = $package['tables']->toArrays();
+        self::assertCount(1, $tables['supplier']);
+        self::assertCount(1, $tables['clients']);
+        self::assertSame('Selected', $tables['clients'][11]['company_name']);
+        self::assertSame('121.00', $tables['recurring_invoice_template_items'][31]['unit_price_without_vat']);
+        self::assertSame('1', $tables['recurring_invoice_templates'][21]['prices_include_vat']);
+        self::assertSame(1, $tables['bank_statements'][61]['supplier_id']);
+        self::assertSame("\0\xff", $tables['bank_statements'][61]['file_content']);
+        self::assertFalse($package['tables']->hasTable('users'));
+        self::assertFalse($package['tables']->hasTable('branding_profiles'));
         self::assertCount(2, $package['assets']);
         $zip = new ZipArchive();
         $zip->open($out);
@@ -69,7 +70,7 @@ final class MyInvoiceBackupConverterTest extends TestCase
         $backup = $this->zip('db.zip', ['synthetic.sql' => $this->dump(false)]);
         $out = $this->root . '/by-ic.zip';
         (new MyInvoiceBackupConverter())->convert($backup, [], $out, 0, 'tax_evidence', $this->history(), '', '', '00000000');
-        self::assertSame([1], array_keys((new MyuctoExportReader())->read($out)['tables']['supplier']));
+        self::assertSame([1], (new MyuctoExportReader())->read($out)['tables']->ids('supplier'));
     }
 
     public function testAmbiguousCompanyIcIsRejected(): void
@@ -107,7 +108,7 @@ final class MyInvoiceBackupConverterTest extends TestCase
         $out = $this->root . '/converted.zip';
         $result = (new MyInvoiceBackupConverter())->convert($backup, [], $out, 1, 'tax_evidence', $this->history(), $password, $password);
         self::assertTrue($result['encrypted']);
-        self::assertCount(1, (new MyuctoExportReader())->read($out, $password)['tables']['invoices']);
+        self::assertSame(1, (new MyuctoExportReader())->read($out, $password)['tables']->count('invoices'));
         $zip = new ZipArchive();
         $zip->open($out);
         self::assertFalse($zip->getFromName('manifest.json'));

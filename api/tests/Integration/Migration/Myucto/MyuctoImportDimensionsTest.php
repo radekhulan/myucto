@@ -194,8 +194,56 @@ final class MyuctoImportDimensionsTest extends TestCase
 
     private string $lastExport = '';
 
+    /**
+     * Firma nad dřívějšími limity čtečky (100 000 řádků / 64 MiB dat): 120 000 přiřazení
+     * dimenzí dokladu. Obnova projde celou cestou proudem a paměť nedrží řádky, jen indexy.
+     */
+    public function testCompanyAboveFormerReaderLimitsRestoresByStreaming(): void
+    {
+        $invoice = $this->scalar("SELECT id FROM invoices WHERE supplier_id = ? AND varsymbol = 'SYNTHETIC-DIM-01'", $this->source);
+        $this->pdo->prepare("INSERT INTO dimension_types (supplier_id, code, name, kind) VALUES (?, 'STR2', 'Středisko 2', 'cost_center')")->execute([$this->source]);
+        $type = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name) VALUES (?, ?, 'C', 'Středisko C')")->execute([$type, $this->source]);
+        $value = (int) $this->pdo->lastInsertId();
+        $first = $this->scalar("SELECT id FROM dimension_types WHERE supplier_id = ? AND code = 'STR'", $this->source);
+        $firstValue = $this->scalar("SELECT v.id FROM dimension_values v JOIN dimension_types t ON t.id = v.type_id WHERE v.supplier_id = ? AND t.code = 'STR' AND v.code = 'B'", $this->source);
+        $this->pdo->prepare("INSERT INTO document_dimensions (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id)
+            SELECT ?, 'invoice', ?, s.seq, t.type_id, t.value_id FROM seq_1_to_60000 s
+            CROSS JOIN (SELECT ? AS type_id, ? AS value_id UNION ALL SELECT ?, ?) t")
+            ->execute([$this->source, $invoice, $first, $firstValue, $type, $value]);
+        $rows = $this->scalar("SELECT COUNT(*) FROM document_dimensions WHERE supplier_id = ? AND doc_type = 'invoice'", $this->source);
+        self::assertGreaterThan(100_000, $rows);
+
+        $path = $this->export();
+        gc_collect_cycles();
+        $base = memory_get_usage();
+        memory_reset_peak_usage();
+        $report = $this->import($path);
+        $peak = memory_get_peak_usage() - $base;
+
+        self::assertSame($rows, $report['created']['document_dimensions']);
+        self::assertSame($rows, $report['reconciliation']['document_dimensions']);
+        self::assertSame(['document_dimensions.other_item' => 1], array_filter($report['dropped'], static fn (string $k): bool => str_starts_with($k, 'document_dimensions'), ARRAY_FILTER_USE_KEY));
+        self::assertSame($rows, $this->scalar("SELECT COUNT(*) FROM document_dimensions WHERE supplier_id = ? AND doc_type = 'invoice'", $this->target));
+        self::assertSame(
+            $this->rows("SELECT d.item_no, t.code, v.code FROM document_dimensions d JOIN dimension_types t ON t.id = d.dimension_type_id
+                JOIN dimension_values v ON v.id = d.dimension_value_id WHERE d.supplier_id = ? AND d.item_no IN (1, 30000, 60000) ORDER BY 1, 2", $this->source),
+            $this->rows("SELECT d.item_no, t.code, v.code FROM document_dimensions d JOIN dimension_types t ON t.id = d.dimension_type_id
+                JOIN dimension_values v ON v.id = d.dimension_value_id WHERE d.supplier_id = ? AND d.item_no IN (1, 30000, 60000) ORDER BY 1, 2", $this->target),
+        );
+        // Řádky v polích (export, přemapované a cílové) by zabraly přes 250 MiB; proudem
+        // zůstanou jen indexy a klíče (kolem 50 MiB včetně metadat schématu).
+        self::assertLessThan(96 * 1024 * 1024, $peak, 'Paměť obnovy roste s počtem řádků: ' . round($peak / 1048576) . ' MiB.');
+    }
+
     /** @return array<string,mixed> */
     private function exportAndImport(): array
+    {
+        $this->lastExport = $this->export();
+        return $this->import($this->lastExport);
+    }
+
+    private function export(): string
     {
         $old = getenv('MYINVOICE_DATA_DIR');
         try {
@@ -203,8 +251,7 @@ final class MyuctoImportDimensionsTest extends TestCase
             $container = Bootstrap::buildContainer();
             $export = $container->get(InstanceExportService::class)
                 ->runForSupplier($this->source, [InstanceExportService::PART_RESTORE], targetDir: $this->root . '/export');
-            $this->lastExport = $export['abs_path'];
-            return $this->import($this->lastExport);
+            return $export['abs_path'];
         } finally {
             putenv($old === false ? 'MYINVOICE_DATA_DIR' : 'MYINVOICE_DATA_DIR=' . $old);
         }
