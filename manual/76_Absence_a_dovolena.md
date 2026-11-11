@@ -339,7 +339,10 @@ listu se doba vykáže jako vyloučená doba.
 
 Záložka **Průměrný výdělek** vede čtvrtletní snapshot průměrného nebo
 pravděpodobného hodinového výdělku. Skutečný průměr používá započitatelnou
-mzdu a odpracovaný čas v rozhodném období. Formuláře zadávají částky v Kč
+mzdu a odpracovaný čas v rozhodném období. U měsíční mzdy návrh do
+odpracovaného času počítá i svátek v obvyklý pracovní den, za který se mzda
+nekrátí (doba, za kterou mzda přísluší, § 353 odst. 2 zákoníku práce);
+u hodinové mzdy se svátek placený náhradou mzdy nezapočítává. Formuláře zadávají částky v Kč
 a čas v hodinách či dnech. Částky se ukládají v haléřích; skutečně
 odpracovaná doba průměru se zachová přesně, bez vynuceného zaokrouhlení
 na minuty. Staré celominutové podklady se nemění. Částečný první nebo

@@ -310,8 +310,9 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
         self::assertTrue($item['existing_outdated'] ?? null, 'Schválený průměr Q2 je po opravě března neaktuální: ' . CanonicalJson::encode($item));
         self::assertFalse($items[$this->people['soubeh']['person']['employment_id']]['existing_outdated'] ?? null);
 
-        // Navazující opravy: nová revize průměru Q2 (122 000 Kč / 504 h) a opravy
-        // dubna až června; opravné hlášení nese jen stálou se změněným 10345.
+        // Navazující opravy: nová revize průměru Q2 (122 000 Kč / 512 h; 504 h
+        // odpracovaných a 8 h svátku 1. 1. krytého měsíční mzdou, § 353 odst. 2 ZP)
+        // a opravy dubna až června; opravné hlášení nese jen stálou se změněným 10345.
         $created = $this->absences->createAverage(
             $this->request('POST', '/api/payroll/absences/average')->withParsedBody([
                 'employment_id' => $stala['employment_id'],
@@ -321,7 +322,7 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
                 'decisive_to' => '2026-03-31',
                 'gross_earnings_minor' => 122_000_00,
                 'longer_period_allocated_minor' => 0,
-                'worked_minutes' => 504 * 60,
+                'worked_minutes' => 512 * 60,
                 'worked_days' => 63,
                 'probable_hourly_minor' => null,
                 'rationale' => 'Revize po opravě března.',
@@ -361,7 +362,7 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
             );
             $xml = (string) preg_replace('/>\s+</', '><', $reader->bytes($this->supplierId, 'test', (int) $frozen['submission_id']));
             self::assertStringContainsString('<mesic>' . (int) substr($period, 5, 2) . '</mesic>', $xml);
-            self::assertStringContainsString('<form:vydelekPrumernyHod>242.06</form:vydelekPrumernyHod>', $xml, $period);
+            self::assertStringContainsString('<form:vydelekPrumernyHod>238.28</form:vydelekPrumernyHod>', $xml, $period);
             self::assertSame(1, substr_count($xml, '</formularOsoby>'));
         }
     }
