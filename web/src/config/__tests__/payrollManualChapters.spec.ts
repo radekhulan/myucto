@@ -22,7 +22,7 @@ const EXPECTED_CHAPTERS = new Map<string, string>([
   ['/payroll/submissions', '85_Podani_a_hlaseni'],
   // Záložka podání a karta člověka mají vlastní adresu, aby na ně šlo odkázat.
   // Kapitolu dědí po rodiči — je to tatáž agenda, ne nová.
-  ['/payroll/submissions/:tab([a-z_]+)', '85_Podani_a_hlaseni'],
+  ['/payroll/submissions/:tab([a-z0-9_]+)', '85_Podani_a_hlaseni'],
   ['/payroll/people', '86_Zamestnanci'],
   ['/payroll/personnel-file', '86_Zamestnanci'],
   ['/payroll/people/:id(\\d+)', '86_Zamestnanci'],
