@@ -30,12 +30,12 @@ describe('tiché obnovení přihlášení přes Entra ID', () => {
     })
   })
 
-  it('poslední přihlášení přes Entra stačí i bez vynucení, Google ne', () => {
+  it('Entra jen jako možnost nepřesměruje, ani po posledním přihlášení přes Entra', () => {
     setSsoRenewalPolicy(entraStrong)
     rememberSsoSession({ provider: 'google', expires_at: '2026-11-09T20:00:00Z' })
     expect(beginSsoRenewal('/')).toEqual({ action: 'login' })
     rememberSsoSession({ provider: 'entra', expires_at: '2026-11-09T20:00:00Z' })
-    expect(beginSsoRenewal('/').action).toBe('renew')
+    expect(beginSsoRenewal('/')).toEqual({ action: 'login' })
   })
 
   it('sezení z hesla a ruční odhlášení tiché obnovení vypnou', () => {
@@ -66,7 +66,7 @@ describe('tiché obnovení přihlášení přes Entra ID', () => {
   })
 
   it('preventivně obnoví deset minut před vypršením podle času serveru', () => {
-    setSsoRenewalPolicy(entraStrong)
+    setSsoRenewalPolicy({ ...entraStrong, sso_required_provider: 'entra' })
     const now = 10_000_000
     // Hodiny prohlížeče jdou o hodinu napřed; rozhoduje zbývající čas podle serveru.
     rememberSsoSession(
@@ -76,5 +76,16 @@ describe('tiché obnovení přihlášení přes Entra ID', () => {
     )
     expect(ssoRenewalDue(now)).toBe(false)
     expect(ssoRenewalDue(now + 6 * 60 * 1000)).toBe(true)
+  })
+
+  it('bez vynucení se preventivně neobnovuje', () => {
+    setSsoRenewalPolicy(entraStrong)
+    const now = 10_000_000
+    rememberSsoSession(
+      { provider: 'entra', expires_at: '2026-11-09T12:15:00Z' },
+      '2026-11-09T12:00:00Z',
+      now,
+    )
+    expect(ssoRenewalDue(now + 6 * 60 * 1000)).toBe(false)
   })
 })

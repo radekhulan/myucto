@@ -12,10 +12,10 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
+use MyInvoice\Repository\Payroll\PayrollJmhzWorkMonthRevisionPurger;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Absence\PayrollImportAbsenceCompensationMaterializer;
-use MyInvoice\Service\Sample\SamplePayrollPurger;
 use PDO;
 
 /**
@@ -48,7 +48,8 @@ use PDO;
  * Souhrn pracovního měsíce pro JMHZ (`payroll_jmhz_work_month_revisions`)
  * vzniká už schválením docházky, není to podání. Po znovuotevření měsíce
  * zůstane jen jako historie schválení měsíce, který se přesouvá, a zmizí se
- * zdrojem ({@see self::dropWorkMonthRevisions()}). Totéž platí pro prázdný
+ * zdrojem ({@see PayrollJmhzWorkMonthRevisionPurger}, stejnou cestou jako při
+ * smazání vztahu). Totéž platí pro prázdný
  * měsíc cíle, který nahradí měsíc zdroje.
  *
  * Každá tabulka s `employment_id` má v {@see self::TABLES} výslovné rozhodnutí.
@@ -124,15 +125,25 @@ final class PayrollEmploymentMergeService
         'payroll_employment_dimensions' => ['action' => self::DROP],
         'payroll_registration_change_scans' => ['action' => self::DROP],
         // Souhrny JMHZ dřívějších schválení docházky zdroje. Jsou neměnné a drží
-        // je cizí klíč, proto je maže dropWorkMonthRevisions() ještě před přesunem měsíců.
+        // je cizí klíč, proto je maže PayrollJmhzWorkMonthRevisionPurger ještě před přesunem měsíců.
         'payroll_jmhz_work_month_revisions' => ['action' => self::DROP],
+        // Převzatý profil registrace A1 a návrhy hlášení změn jsou pracovní
+        // podklady, ne úkon u ČSSZ. Zmizí se zdrojem stejně jako při smazání
+        // vztahu (PayrollEmploymentDeletionRepository). Kdyby blokovaly, vztah
+        // z importu registrací by nešel sloučit ani jedním směrem.
+        'payroll_registration_a1_profiles' => ['action' => self::DROP],
+        'payroll_registration_change_proposals' => ['action' => self::DROP],
+        // Průměrný výdělek je výpočet nad vztahem a se smazaným vztahem zmizí
+        // (FK kaskáda). Kde se podle něj už počítalo, drží zdroj mzdový běh
+        // nebo kniha dovolené. Cíl si průměr spočítá znovu nad sloučenými daty.
+        'payroll_average_earning_snapshots' => ['action' => self::DROP],
 
         // ── Blokuje ─────────────────────────────────────────────────────────
-        'payroll_registration_a1_profiles' => ['action' => self::BLOCK, 'reason' => 'registration'],
+        // Registraci drží jen skutečný úkon: snímek podané registrace, událost,
+        // evidence A2, identifikátory vztahu od ČSSZ a úkol ztotožnění.
         'payroll_registration_identity_snapshots' => ['action' => self::BLOCK, 'reason' => 'registration'],
         'payroll_registration_event_snapshots' => ['action' => self::BLOCK, 'reason' => 'registration'],
         'payroll_registration_a2_evidence_ledger' => ['action' => self::BLOCK, 'reason' => 'registration'],
-        'payroll_registration_change_proposals' => ['action' => self::BLOCK, 'reason' => 'registration'],
         'payroll_employment_external_ids' => ['action' => self::BLOCK, 'reason' => 'registration'],
         'payroll_identity_resolution_tasks' => ['action' => self::BLOCK, 'reason' => 'registration'],
         'payroll_jmhz_eldp_evidence_snapshots' => ['action' => self::BLOCK, 'reason' => 'submission'],
@@ -146,7 +157,7 @@ final class PayrollEmploymentMergeService
         'payroll_eldp_statement_claims' => ['action' => self::BLOCK, 'reason' => 'eldp'],
         'payroll_run_employments' => ['action' => self::BLOCK, 'reason' => 'run'],
         'payroll_statutory_relationship_results' => ['action' => self::BLOCK, 'reason' => 'run'],
-        'payroll_migration_reference_totals' => ['action' => self::BLOCK, 'reason' => 'run'],
+        'payroll_migration_reference_totals' => ['action' => self::BLOCK, 'reason' => 'takeover'],
         'payroll_employment_exit_revisions' => ['action' => self::BLOCK, 'reason' => 'document'],
         'payroll_wage_statement_revisions' => ['action' => self::BLOCK, 'reason' => 'document'],
         'payroll_taxable_income_confirmation_requests' => ['action' => self::BLOCK, 'reason' => 'document'],
@@ -165,7 +176,6 @@ final class PayrollEmploymentMergeService
         'payroll_insolvency_payment_instructions' => ['action' => self::BLOCK, 'reason' => 'money'],
         'payroll_enforcement_termination_notices' => ['action' => self::BLOCK, 'reason' => 'money'],
         'payroll_discount_intents' => ['action' => self::BLOCK, 'reason' => 'money'],
-        'payroll_average_earning_snapshots' => ['action' => self::BLOCK, 'reason' => 'leave'],
         'payroll_leave_ledger' => ['action' => self::BLOCK, 'reason' => 'leave'],
         'payroll_leave_entitlement_snapshots' => ['action' => self::BLOCK, 'reason' => 'leave'],
         'payroll_sickness_cases' => ['action' => self::BLOCK, 'reason' => 'leave'],
@@ -177,8 +187,8 @@ final class PayrollEmploymentMergeService
     private const BLOCK_REASONS = [
         'registration' => [
             'code' => 'payroll_merge_source_registered',
-            'message' => 'Slučovaný vztah má záznam registrace u ČSSZ nebo zdravotní pojišťovny. Slučujte opačně: '
-                . 'otevřete vztah bez registrace a sloučte ho do registrovaného.',
+            'message' => 'Slučovaný vztah má z aplikace podanou nebo připravenou registraci ČSSZ, nebo identifikátory '
+                . 'vztahu od ČSSZ. Slučujte opačně: otevřete druhý vztah a sloučte ho do tohoto.',
         ],
         'submission' => [
             'code' => 'payroll_merge_source_has_submissions',
@@ -189,10 +199,17 @@ final class PayrollEmploymentMergeService
             'code' => 'payroll_merge_source_has_eldp_statement',
             'message' => 'Za slučovaný vztah je sestavený evidenční list důchodového pojištění, proto ho sloučit nelze.',
         ],
+        // Text doplní PayrollEmploymentDeletionRepository::runBlockerMessage() o konkrétní běh.
         'run' => [
             'code' => 'payroll_merge_source_in_run',
-            'message' => 'Slučovaný vztah je zahrnutý v mzdovém běhu nebo má převzaté výsledky mezd. '
-                . 'Nejdřív smažte nebo zrušte ten mzdový běh, teprve pak půjde vztah sloučit.',
+            'message' => 'Slučovaný vztah je zahrnutý v mzdovém běhu nebo má vypočtené zákonné výsledky běhu. '
+                . 'Výpočet se vázal na tento vztah, proto ho sloučit nelze.',
+        ],
+        'takeover' => [
+            'code' => 'payroll_merge_source_has_takeover',
+            'message' => 'Slučovaný vztah má převzaté výsledky mezd z předchozího programu. Převzaté výsledky '
+                . 'se vážou k tomuto vztahu, proto ho sloučit nelze. Slučujte opačně: otevřete druhý vztah '
+                . 'a sloučte ho do tohoto.',
         ],
         'document' => [
             'code' => 'payroll_merge_source_has_documents',
@@ -211,7 +228,7 @@ final class PayrollEmploymentMergeService
         ],
         'leave' => [
             'code' => 'payroll_merge_source_has_leave',
-            'message' => 'Slučovaný vztah má průměrný výdělek, knihu dovolené nebo případ nemocenské. '
+            'message' => 'Slučovaný vztah má knihu dovolené nebo případ nemocenské. '
                 . 'Ty se počítaly podle tohoto vztahu, proto ho sloučit nelze.',
         ],
         'termination' => [
@@ -235,6 +252,7 @@ final class PayrollEmploymentMergeService
         private readonly ActivityLogger $activityLogger,
         private readonly PayrollInputRepository $inputs,
         private readonly PayrollTimeRepository $time,
+        private readonly PayrollJmhzWorkMonthRevisionPurger $workMonthRevisions,
     ) {}
 
     /**
@@ -372,10 +390,10 @@ final class PayrollEmploymentMergeService
         $dimensions = $this->count($supplierId, 'payroll_employment_dimensions', $sourceId);
 
         $droppedSummaries = array_merge(
-            $this->dropWorkMonthRevisions($supplierId, 'employment_id', [$sourceId]),
+            $this->workMonthRevisions->drop($supplierId, 'employment_id', [$sourceId]),
             $typeChanges
-                ? $this->dropWorkMonthRevisions($supplierId, 'employment_id', [$targetId])
-                : $this->dropWorkMonthRevisions($supplierId, 'time_month_id', $plan['replace']),
+                ? $this->workMonthRevisions->drop($supplierId, 'employment_id', [$targetId])
+                : $this->workMonthRevisions->drop($supplierId, 'time_month_id', $plan['replace']),
         );
         $moved = [];
         foreach (self::TABLES as $table => $decision) {
@@ -482,7 +500,15 @@ final class PayrollEmploymentMergeService
         foreach ($reasons as $alias => $reason) {
             if ((int) ($row[$alias] ?? 0) > 0) {
                 $blocker = self::BLOCK_REASONS[$reason];
-                throw new PayrollDeletionException($blocker['code'], $blocker['message'], $sourceId, $sourceCode);
+                $message = $blocker['message'];
+                $run = $reason === 'run' ? $this->deletion->runInvolvement($supplierId, $sourceId) : null;
+                if ($run !== null) {
+                    $message = sprintf(
+                        'Slučovaný vztah je zahrnutý v %s. Výpočet běhu se vázal na tento vztah, proto ho sloučit nelze.',
+                        $run['label'],
+                    );
+                }
+                throw new PayrollDeletionException($blocker['code'], $message, $sourceId, $sourceCode);
             }
         }
     }
@@ -812,84 +838,6 @@ final class PayrollEmploymentMergeService
         }
 
         return ['inputs' => $revertedInputs, 'months' => $reopened];
-    }
-
-    /**
-     * Smaže souhrny JMHZ zdroje i události schválení, které na ně ukazují.
-     *
-     * Obojí je append-only. Triggery pustí smazání jen řádku, který je
-     * výslovně označený v `sample_data_entries` a jen při nastavené
-     * `@payroll_sample_purge_supplier_id` (migrace 1995). Značky vzniknou
-     * a zmizí v téže transakci. Měsíce zdroje jsou v tu chvíli otevřené,
-     * mzdový běh a podání JMHZ sloučení zablokovaly dřív, takže jde jen
-     * o historii schválení: u zdroje a u prázdného měsíce cíle, který se nahrazuje.
-     *
-     * @param 'employment_id'|'time_month_id' $column
-     * @param list<int> $ids
-     * @return list<array{id:int,period_start:string,revision_no:int,summary_sha256:string}> pro auditní záznam
-     */
-    private function dropWorkMonthRevisions(int $supplierId, string $column, array $ids): array
-    {
-        if ($ids === []) {
-            return [];
-        }
-        $pdo = $this->db->pdo();
-        $placeholders = implode(', ', array_fill(0, count($ids), '?'));
-        $stmt = $pdo->prepare(
-            "SELECT id, period_start, time_month_revision_no, summary_sha256
-               FROM payroll_jmhz_work_month_revisions
-              WHERE supplier_id = ? AND {$column} IN ({$placeholders})
-              ORDER BY id"
-        );
-        $stmt->execute([$supplierId, ...$ids]);
-        $revisions = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        if ($revisions === []) {
-            return [];
-        }
-        $revisionIds = array_map(static fn (array $row): int => (int) $row['id'], $revisions);
-        $placeholders = implode(', ', array_fill(0, count($revisionIds), '?'));
-        $events = $pdo->prepare(
-            "SELECT id FROM payroll_time_month_events
-              WHERE supplier_id = ? AND jmhz_work_summary_revision_id IN ({$placeholders})"
-        );
-        $events->execute([$supplierId, ...$revisionIds]);
-        $eventIds = array_map('intval', $events->fetchAll(PDO::FETCH_COLUMN));
-
-        $rows = ['payroll_time_month_events' => $eventIds, 'payroll_jmhz_work_month_revisions' => $revisionIds];
-        $mark = $pdo->prepare('INSERT INTO sample_data_entries (supplier_id, entity_type, entity_id) VALUES (?, ?, ?)');
-        foreach ($rows as $table => $ids) {
-            foreach ($ids as $id) {
-                $mark->execute([$supplierId, SamplePayrollPurger::ownershipType($table), $id]);
-            }
-        }
-        $pdo->prepare('SET @payroll_sample_purge_supplier_id = ?')->execute([$supplierId]);
-        try {
-            foreach ($rows as $table => $ids) {
-                if ($ids === []) {
-                    continue;
-                }
-                $in = implode(', ', array_fill(0, count($ids), '?'));
-                $pdo->prepare("DELETE FROM {$table} WHERE supplier_id = ? AND id IN ({$in})")
-                    ->execute([$supplierId, ...$ids]);
-            }
-        } finally {
-            $pdo->exec('SET @payroll_sample_purge_supplier_id = NULL');
-        }
-        foreach ($rows as $table => $ids) {
-            if ($ids === []) {
-                continue;
-            }
-            $in = implode(', ', array_fill(0, count($ids), '?'));
-            $pdo->prepare("DELETE FROM sample_data_entries WHERE supplier_id = ? AND entity_type = ? AND entity_id IN ({$in})")
-                ->execute([$supplierId, SamplePayrollPurger::ownershipType($table), ...$ids]);
-        }
-
-        return array_map(static fn (array $row): array => [
-            'id' => (int) $row['id'],
-            'period_start' => (string) $row['period_start'],
-            'revision_no' => (int) $row['time_month_revision_no'],
-            'summary_sha256' => (string) $row['summary_sha256'],
-        ], $revisions);
     }
 
     /** @param list<array{id:int,external_id:?string,status:string}> $inputs */

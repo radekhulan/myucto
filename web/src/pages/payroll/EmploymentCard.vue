@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { fieldSelector, revealField } from '@/utils/revealField'
 import { useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollChecklistStatus,
@@ -431,6 +431,13 @@ const baseline = ref('')
 
 const canEditTerms = computed(() => props.canWrite
   && ['planned', 'preregistered', 'active', 'suspended'].includes(props.employment.status))
+/*
+ * Ukončený vztah jde opravit jen v údajích pro JMHZ (pracoviště, CZ-ISCO,
+ * druh činnosti, primární vztah, pravděpodobný výdělek), a to opravou platné
+ * verze. Server hlídá, že za jeho měsíce není hlášení JMHZ zmrazené ani podané.
+ */
+const endedJmhzOnly = computed(() => props.canWrite && props.employment.status === 'ended')
+const canEditJmhzTerms = computed(() => canEditTerms.value || endedJmhzOnly.value)
 
 function minorToInput(value: number | null): string {
   if (value === null) return ''
@@ -641,6 +648,12 @@ function rejectField(field: string, message: string): false {
  * uživatel to jen výslovně potvrdí, nemusí kvůli tomu odcházet na předpisy.
  */
 const endRecurringOffer = ref<{ name: string | null; date: string } | null>(null)
+/*
+ * Mzda se k vztahu importuje jako hotová částka (docházka). Přechod na
+ * hodinový výpočet ze směn by další import zablokoval, server ho proto bez
+ * výslovného potvrzení odmítne a karta nabídne pravděpodobný výdělek.
+ */
+const importedWageOffer = ref(false)
 const endRecurringLabel = computed(() => {
   const offer = endRecurringOffer.value
   if (offer === null) return ''
@@ -773,6 +786,7 @@ function hydrate(employment: PayrollEmployment) {
   saveError.value = ''
   invalidField.value = null
   endRecurringOffer.value = null
+  importedWageOffer.value = false
   baseline.value = fingerprint()
 }
 
@@ -938,11 +952,12 @@ function discardChanges() {
  * jako první a `row_version` pro podmínky se bere z odpovědi, ne z propu:
  * dva zápisy za sebou by jinak druhý shodily na konflikt verzí.
  */
-async function save(options: { endRecurringBase?: boolean } = {}): Promise<boolean> {
+async function save(options: { endRecurringBase?: boolean, confirmImportedWageSwitch?: boolean } = {}): Promise<boolean> {
   const form = termsForm.value
   if (!form || busy.value) return false
   if (!dirty.value) return true
   endRecurringOffer.value = null
+  importedWageOffer.value = false
   invalidField.value = null
   const gross = hourlyRemuneration.value ? null : inputToMinor(grossInput.value)
   const hourlyRate = hourlyRemuneration.value ? inputToMinor(hourlyRateInput.value) : null
@@ -1019,6 +1034,7 @@ async function save(options: { endRecurringBase?: boolean } = {}): Promise<boole
         ? null
         : form.probable_earning_rationale,
       ...(options.endRecurringBase ? { end_recurring_base: true } : {}),
+      ...(options.confirmImportedWageSwitch ? { confirm_imported_wage_switch: true } : {}),
     }
     const versionMode = saveMode.value === 'version'
     const { employment: updated, warnings } = versionMode
@@ -1075,6 +1091,9 @@ async function save(options: { endRecurringBase?: boolean } = {}): Promise<boole
         invalidField.value = canonicalField(field)
         void revealTermsField(invalidField.value)
       }
+      if (apiErrorDetailCode(error) === 'hourly_rate_imported_wage' && !options.confirmImportedWageSwitch) {
+        importedWageOffer.value = true
+      }
       if (apiErrorDetailCode(error) === 'recurring_base_wage_active' && !options.endRecurringBase) {
         const details = apiErrorDetails(error)
         const name = [details.recurring_name, details.name].find(value => typeof value === 'string' && value !== '') as string | undefined
@@ -1094,6 +1113,34 @@ async function save(options: { endRecurringBase?: boolean } = {}): Promise<boole
 
 function confirmEndRecurringBase(): void {
   void save({ endRecurringBase: true })
+}
+
+/** Uživatel vědomě přechází z importované částky na výpočet ze směn. */
+function confirmImportedWageSwitch(): void {
+  void save({ confirmImportedWageSwitch: true })
+}
+
+/*
+ * Náhrada za sazbu: způsob odměňování se vrátí na uložený stav a karta
+ * otevře pravděpodobný výdělek. Je-li už vyplněný, rovnou se uloží.
+ */
+function keepImportedWage(): void {
+  const form = termsForm.value
+  const terms = currentTerms.value
+  if (!form || !terms) return
+  importedWageOffer.value = false
+  saveError.value = ''
+  invalidField.value = null
+  form.remuneration_type = terms.remuneration_type ?? null
+  form.remuneration_basis_kind = terms.remuneration_basis_kind ?? null
+  form.remuneration_basis = terms.remuneration_basis ?? null
+  hourlyRateInput.value = minorToInput(terms.hourly_rate_minor ?? null)
+  probableEarningOpen.value = true
+  if (probableEarningInput.value.trim() !== '' && dirty.value) {
+    void save()
+    return
+  }
+  void revealTermsField('probable_hourly_earning_minor')
 }
 
 function warningHasTarget(field: string): boolean {
@@ -1135,11 +1182,11 @@ const { managed } = usePersonCardSaveSection({
     const name = [relationLabel(), personalNumberLabel(t, props.employment.code)]
       .filter(part => part !== '')
       .join(' · ')
-    return canEditTerms.value && dirty.value && termsForm.value !== null
+    return canEditJmhzTerms.value && dirty.value && termsForm.value !== null
       ? `${name} (${saveModeSummary.value})`
       : name
   },
-  dirty: () => canEditTerms.value && dirty.value,
+  dirty: () => canEditJmhzTerms.value && dirty.value,
   save: () => save(),
   discard: discardChanges,
   focus: () => saveBar.value?.scrollIntoView?.({ behavior: 'smooth', block: 'center' }),
@@ -1598,6 +1645,27 @@ const deleteBlockerMessage = computed<string>(
   () => props.employment.delete_blocker?.message ?? '',
 )
 
+const router = useRouter()
+
+/**
+ * Blokují-li smazání mzdové vstupy, hláška nabídne rovnou jejich seznam
+ * zúžený na tenhle vztah a období, kterého se týká.
+ */
+function deleteBlockerAction() {
+  const blocker = props.employment.delete_blocker
+  if (blocker?.code !== 'payroll_employment_has_inputs') return undefined
+  const period = blocker.period ? blocker.period.slice(0, 7) : null
+  return {
+    label: t('payroll.people.delete.show_inputs'),
+    handler: () => {
+      void router.push({
+        name: 'payroll-components',
+        query: { tab: 'inputs', employment: String(props.employment.id), ...(period ? { period } : {}) },
+      })
+    },
+  }
+}
+
 /**
  * Smazání vztahu se potvrzuje dál — vratné to není. Server maže i navázané
  * záznamy (proto `delete_cascade`) a znovu je založit ručně nejde. Dialog už
@@ -1724,7 +1792,10 @@ const actions = computed<ActionItem[]>(() => [
     show: props.canWrite,
     run: () => {
       if (!props.employment.can_delete) {
-        toast.error(deleteBlockerMessage.value || t('payroll.people.delete.blocked_title'))
+        const message = deleteBlockerMessage.value || t('payroll.people.delete.blocked_title')
+        const action = deleteBlockerAction()
+        if (action) toast.error(message, action)
+        else toast.error(message)
         return
       }
       void removeEmployment()
@@ -2017,7 +2088,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               v-if="!probableEarningOpen"
               type="button"
               :class="btnOutlineSm('neutral')"
-              :disabled="!canEditTerms || busy"
+              :disabled="!canEditJmhzTerms || busy"
               data-test="terms-probable-earning-open"
               @click="probableEarningOpen = true"
             >
@@ -2030,7 +2101,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                 <input
                   v-model="probableEarningInput"
                   inputmode="decimal"
-                  :disabled="!canEditTerms || busy"
+                  :disabled="!canEditJmhzTerms || busy"
                   :class="[INPUT, fieldClass('probable_hourly_earning_minor')]" :aria-invalid="fieldInvalid('probable_hourly_earning_minor')"
                   data-test="terms-probable-earning-hourly"
                 >
@@ -2042,7 +2113,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                 <input
                   v-model="termsForm.probable_earning_rationale"
                   maxlength="1000"
-                  :disabled="!canEditTerms || busy"
+                  :disabled="!canEditJmhzTerms || busy"
                   :class="[INPUT, fieldClass('probable_earning_rationale')]" :aria-invalid="fieldInvalid('probable_earning_rationale')"
                   data-test="terms-probable-earning-rationale"
                 >
@@ -2085,7 +2156,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             {{ t('payroll.people.activity_code') }}
             <select
               v-model="termsForm.activity_code"
-              :disabled="!canEditTerms || busy"
+              :disabled="!canEditJmhzTerms || busy"
               :class="[INPUT, fieldClass('activity_code')]" :aria-invalid="fieldInvalid('activity_code')"
               data-test="jmhz-activity-code"
               data-a1-field="activity_code"
@@ -2105,7 +2176,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             {{ t('payroll.people.jmhz_evidence.relationship_detail') }}
             <select
               v-model="termsForm.jmhz_relationship_detail_code"
-              :disabled="!canEditTerms || busy || selectedRelationshipDetailMode === 'fixed_none'"
+              :disabled="!canEditJmhzTerms || busy || selectedRelationshipDetailMode === 'fixed_none'"
               :class="[INPUT, fieldClass('jmhz_relationship_detail_code')]" :aria-invalid="fieldInvalid('jmhz_relationship_detail_code')"
               data-test="jmhz-relationship-detail"
               data-a1-field="jmhz_relationship_detail_code"
@@ -2148,7 +2219,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <input
               v-model="termsForm.is_primary"
               type="checkbox"
-              :disabled="!canEditTerms || busy"
+              :disabled="!canEditJmhzTerms || busy"
               class="rounded border-neutral-300 text-payroll-600"
               data-test="terms-is-primary"
               data-a1-field="is_primary"
@@ -2249,7 +2320,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                   :options="municipalityOptions.map(option => ({ value: option.code, label: option.label, secondary: option.code }))"
                   :selected-option="selectedMunicipality"
                   :remote="true"
-                  :disabled="!canEditTerms || busy"
+                  :disabled="!canEditJmhzTerms || busy"
                   :loading="municipalitiesLoading"
                   :loading-label="t('payroll.people.jmhz_evidence.searching_municipality')"
                   :no-results-label="t('payroll.people.jmhz_evidence.no_municipality')"
@@ -2264,7 +2335,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.jmhz_evidence.country_code') }}
-                <select v-model="termsForm.jmhz_workplace_country_code" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_country_code')]" :aria-invalid="fieldInvalid('jmhz_workplace_country_code')" data-test="jmhz-country">
+                <select v-model="termsForm.jmhz_workplace_country_code" :disabled="!canEditJmhzTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_country_code')]" :aria-invalid="fieldInvalid('jmhz_workplace_country_code')" data-test="jmhz-country">
                   <option :value="null">—</option>
                   <option v-for="country in jmhzOptions?.countries ?? []" :key="country.code" :value="country.code">{{ country.code }} · {{ country.label }}</option>
                 </select>
@@ -2274,27 +2345,27 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                 <p class="text-xs text-neutral-500 sm:col-span-2" data-test="jmhz-address-hint">{{ t('payroll.people.jmhz_evidence.address_hint') }}</p>
                 <label :class="[FIELD, 'sm:col-span-2']">
                   {{ t('payroll.people.jmhz_evidence.street') }}
-                  <input v-model="termsForm.jmhz_workplace_street" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_street')]" :aria-invalid="fieldInvalid('jmhz_workplace_street')" maxlength="50" data-test="jmhz-street">
+                  <input v-model="termsForm.jmhz_workplace_street" :disabled="!canEditJmhzTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_street')]" :aria-invalid="fieldInvalid('jmhz_workplace_street')" maxlength="50" data-test="jmhz-street">
                   <FieldNote :error="fieldError('jmhz_workplace_street')" :warning="fieldWarning('jmhz_workplace_street')" />
                 </label>
                 <label :class="FIELD">
                   {{ t('payroll.people.jmhz_evidence.house_number') }}
-                  <input v-model="termsForm.jmhz_workplace_house_number" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_house_number')]" :aria-invalid="fieldInvalid('jmhz_workplace_house_number')" inputmode="numeric" maxlength="4" data-test="jmhz-house-number">
+                  <input v-model="termsForm.jmhz_workplace_house_number" :disabled="!canEditJmhzTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_house_number')]" :aria-invalid="fieldInvalid('jmhz_workplace_house_number')" inputmode="numeric" maxlength="4" data-test="jmhz-house-number">
                   <FieldNote :error="fieldError('jmhz_workplace_house_number')" :warning="fieldWarning('jmhz_workplace_house_number')" />
                 </label>
                 <label :class="FIELD">
                   {{ t('payroll.people.jmhz_evidence.orientation_number') }}
-                  <input v-model="termsForm.jmhz_workplace_orientation_number" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_orientation_number')]" :aria-invalid="fieldInvalid('jmhz_workplace_orientation_number')" maxlength="12" data-test="jmhz-orientation-number">
+                  <input v-model="termsForm.jmhz_workplace_orientation_number" :disabled="!canEditJmhzTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_orientation_number')]" :aria-invalid="fieldInvalid('jmhz_workplace_orientation_number')" maxlength="12" data-test="jmhz-orientation-number">
                   <FieldNote :error="fieldError('jmhz_workplace_orientation_number')" :warning="fieldWarning('jmhz_workplace_orientation_number')" />
                 </label>
                 <label :class="FIELD">
                   {{ t('payroll.people.jmhz_evidence.postal_code') }}
-                  <input v-model="termsForm.jmhz_workplace_postal_code" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_postal_code')]" :aria-invalid="fieldInvalid('jmhz_workplace_postal_code')" inputmode="numeric" maxlength="6" data-test="jmhz-postal-code">
+                  <input v-model="termsForm.jmhz_workplace_postal_code" :disabled="!canEditJmhzTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_postal_code')]" :aria-invalid="fieldInvalid('jmhz_workplace_postal_code')" inputmode="numeric" maxlength="6" data-test="jmhz-postal-code">
                   <FieldNote :error="fieldError('jmhz_workplace_postal_code')" :warning="fieldWarning('jmhz_workplace_postal_code')" />
                 </label>
                 <label :class="FIELD">
                   {{ t('payroll.people.jmhz_evidence.address_point_code') }}
-                  <input v-model="termsForm.jmhz_workplace_address_point_code" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_address_point_code')]" :aria-invalid="fieldInvalid('jmhz_workplace_address_point_code')" inputmode="numeric" maxlength="9" data-test="jmhz-address-point">
+                  <input v-model="termsForm.jmhz_workplace_address_point_code" :disabled="!canEditJmhzTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_address_point_code')]" :aria-invalid="fieldInvalid('jmhz_workplace_address_point_code')" inputmode="numeric" maxlength="9" data-test="jmhz-address-point">
                   <FieldNote :error="fieldError('jmhz_workplace_address_point_code')" :warning="fieldWarning('jmhz_workplace_address_point_code')" />
                 </label>
               </template>
@@ -2309,7 +2380,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               </label>
               <label :class="[FIELD, 'sm:col-span-2']">
                 {{ t('payroll.people.regular_workplace') }}
-                <input v-model="termsForm.regular_workplace" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('regular_workplace')]" :aria-invalid="fieldInvalid('regular_workplace')" data-test="terms-regular-workplace">
+                <input v-model="termsForm.regular_workplace" :disabled="!canEditJmhzTerms || busy" :class="[INPUT, fieldClass('regular_workplace')]" :aria-invalid="fieldInvalid('regular_workplace')" data-test="terms-regular-workplace">
                 <FieldNote :error="fieldError('regular_workplace')" :warning="fieldWarning('regular_workplace')" />
               </label>
               <div :class="[FIELD, 'sm:col-span-2']" data-test="terms-cz-isco">
@@ -2564,7 +2635,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         a bez přilepení, aby se dvě lišty nepřekrývaly.
       -->
       <div
-        v-if="canEditTerms && dirty"
+        v-if="canEditJmhzTerms && dirty"
         ref="saveBar"
         class="mt-3 rounded-md border border-neutral-200 bg-surface px-3 py-3"
         :class="managed ? 'border-warning-500/40' : 'sticky bottom-[var(--app-footer-height,0px)] z-10 shadow-[0_-2px_10px_rgba(21,19,29,0.08)]'"
@@ -2587,10 +2658,28 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             {{ endRecurringLabel }}
           </button>
         </div>
+        <div
+          v-if="importedWageOffer"
+          class="mb-3 space-y-2 rounded-md border border-warning-500/40 bg-warning-50 px-3 py-2 text-xs text-warning-800"
+          data-test="terms-imported-wage"
+        >
+          <p>{{ t('payroll.people.remuneration.imported_wage_hint') }}</p>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" :class="[btnFilledSm('primary'), 'whitespace-nowrap']" :disabled="busy" data-test="terms-imported-wage-probable" @click="keepImportedWage">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
+              {{ t('payroll.people.remuneration.imported_wage_keep') }}
+            </button>
+            <button type="button" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" :disabled="busy" data-test="terms-imported-wage-confirm" @click="confirmImportedWageSwitch">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+              {{ t('payroll.people.remuneration.imported_wage_switch') }}
+            </button>
+          </div>
+        </div>
 
         <p class="mb-2 text-xs font-medium text-neutral-900" data-test="terms-save-mode-summary">{{ saveModeSummary }}</p>
+        <p v-if="endedJmhzOnly" class="mb-2 text-xs text-neutral-600" data-test="terms-ended-jmhz-only">{{ t('payroll.people.save_mode.ended_jmhz_only') }}</p>
         <div class="flex flex-wrap items-end justify-between gap-3">
-          <fieldset class="min-w-0">
+          <fieldset v-if="!endedJmhzOnly" class="min-w-0">
             <legend class="text-xs font-medium text-neutral-600">{{ t('payroll.people.save_mode.title') }}</legend>
             <div class="mt-1 flex flex-wrap items-start gap-x-4 gap-y-2">
               <label class="flex max-w-xs items-start gap-2 text-xs text-neutral-700">

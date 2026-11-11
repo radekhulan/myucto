@@ -98,6 +98,37 @@ final class PayrollTakeoverFollowUpTest extends TestCase
         self::assertSame([['207', '2026-05-01']], $this->coverage($second));
     }
 
+    /**
+     * Dohoda za dřívější měsíc přidaná osobě, která už má pojišťovnu od
+     * pozdějška. Náhled ji nabídl, ale zápis ji odmítl („navazuje na jiné
+     * období") — hromadná akce z kontroly běhu tak neudělala nic.
+     */
+    public function testInsurerIsPrependedBeforeLaterCoverage(): void
+    {
+        [$employee] = $this->employment('Syntetická osoba s pozdější ZP', '2026-02-07');
+        $this->health->apply($this->supplierId, [
+            ['employee_id' => $employee, 'insurer_code' => '111', 'effective_from' => '2026-04-01'],
+        ], $this->userId, null, null);
+        self::assertSame(
+            [$employee],
+            array_column($this->health->preview($this->supplierId, '2026-02-01')['people'], 'employee_id'),
+        );
+
+        $result = $this->health->apply($this->supplierId, [
+            ['employee_id' => $employee, 'insurer_code' => '111', 'effective_from' => '2026-02-01'],
+        ], $this->userId, null, null);
+
+        self::assertSame(['applied' => 1, 'failed' => 0], $result['counts'], json_encode($result['failed'], JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertSame([['111', '2026-02-01'], ['111', '2026-04-01']], $this->coverage($employee));
+        $to = $this->db->pdo()->prepare(
+            'SELECT effective_to FROM payroll_person_health_coverage_history
+              WHERE supplier_id = ? AND employee_id = ? AND effective_from = "2026-02-01"'
+        );
+        $to->execute([$this->supplierId, $employee]);
+        self::assertSame('2026-03-31', $to->fetchColumn());
+        self::assertSame([], $this->health->preview($this->supplierId, '2026-02-01')['people']);
+    }
+
     public function testInvalidInsurerIsRejectedBeforeAnyWrite(): void
     {
         [$employee] = $this->employment('Syntetická osoba', '2026-03-01');

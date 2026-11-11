@@ -112,7 +112,44 @@ Průměrný výdělek se zakládá jednou za čtvrtletí pro každý pracovní v
 3. Projděte návrhy. U každého vztahu vidíte skutečný průměr nebo
    pravděpodobný výdělek se zdrojem, nebo důvod, proč návrh nevznikl.
 4. Klikněte na **Vybrat připravené na stránce** a pak na **Založit a schválit
-   vybrané**.
+   vybrané**. Vztah, jehož návrh mezitím přestal být připravený, se
+   neschválí; ostatní ano. Pod přehledem ho uvidíte jménem s důvodem
+   a odkazem na kartu osoby.
+
+**Pravděpodobný výdělek pro více vztahů najednou** (typicky brigádníci na
+dohodu, kteří mají sazbu jen v importovaných odměnách a návrh jim vyšel
+z hodinové minimální mzdy):
+
+1. V části **Nastavit pravděpodobný výdělek vybraným** zaškrtněte vztahy.
+   Pomůže **Rychlý výběr**: **Dohody o provedení práce** nebo **Průměr
+   z minimální mzdy**.
+2. Vyplňte **Hodinový výdělek (Kč)** a **Odůvodnění**, z čeho částka vychází
+   (§ 355 odst. 2 zákoníku práce). Odůvodnění je povinné.
+3. Klikněte na **Nastavit vybraným**.
+
+Částka se uloží do platné verze podmínek vztahu jako jejich oprava, ne jako
+nová verze, a za zvolené čtvrtletí vznikne nová schválená revize průměru.
+Dosavadní schválený průměr s jinou částkou tím přejde do stavu nahrazený.
+Vztah, který už má stejnou částku, zůstane beze změny.
+
+Pod přehledem se ukáže souhrn a jménem každý vztah, u kterého se nastavení
+neprovedlo, s dalším krokem:
+
+- Schválený průměr už použil **uzavřený mzdový běh** některého měsíce
+  čtvrtletí: aplikace ho tiše nemění. Otevřete běh k opravě a nastavení
+  zopakujte. Pokud z běhu už vzniklo hlášení JMHZ, po schválení opravy
+  podejte opravné hlášení.
+- Za čtvrtletí **čeká ke schválení jiná revize průměru**: schvalte ji, nebo ji
+  smažte v detailu osoby, a nastavení zopakujte.
+
+Když je běh čtvrtletí otevřený k opravě a hlášení JMHZ za něj už odešlo,
+průměr se změní a u vztahu se ukáže upozornění na opravné hlášení. Když
+podmínky vztahu opravit nejde (zúčtované období, ukončený vztah), průměr se
+nastaví a upozornění řekne proč. Pro další čtvrtletí pak pravděpodobný
+výdělek zadejte na kartě vztahu.
+
+Akce vyžaduje právo spravovat docházku a absence i právo spravovat pracovní
+vztahy.
 
 **Pro jednoho zaměstnance:**
 

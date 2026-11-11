@@ -300,6 +300,60 @@ final class PayrollInputsAction
     }
 
     /**
+     * Hromadné zaokrouhlení haléřových vstupů období nahoru na celé koruny,
+     * aby je přijalo měsíční hlášení (viz kontrola běhu `inputs_not_whole_crowns`).
+     * Schválené vstupy zaokrouhlí jen uživatel s právem schvalovat; uzamčené
+     * a vypočtené vstupy se vrátí v `skipped` s důvodem. Do auditu jde každá
+     * změněná částka.
+     */
+    public function roundWholeCrowns(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $supplierId = $this->currentSupplierId($request);
+        $userId = $this->userId($request);
+        try {
+            $periodStart = $this->period($body['period'] ?? null);
+            $employmentId = self::narrowingId($body, 'employment_id');
+            $result = $this->inputs->roundUpToWholeCrowns(
+                $supplierId,
+                $periodStart,
+                $employmentId,
+                RequestAuthorization::allows($request, 'payroll.approve', AccessLevel::WRITE),
+                $userId,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+        $this->logger->log(
+            'payroll.inputs.rounded_whole_crowns',
+            $userId,
+            'payroll_input',
+            null,
+            [
+                'period_start' => $periodStart,
+                'employment_id' => $employmentId,
+                'rounded' => array_map(
+                    static fn (array $row): array => [
+                        'id' => $row['id'],
+                        'from_minor' => $row['from_minor'],
+                        'to_minor' => $row['to_minor'],
+                    ],
+                    $result['rounded'],
+                ),
+                'skipped_count' => count($result['skipped']),
+            ],
+            $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return Json::ok($response, $result);
+    }
+
+    /**
      * Filtr hromadné akce: `period` + volitelné `filter` (tytéž klíče jako
      * výpis). Starší tvar `{period, employment_id}` platí dál.
      *
@@ -478,14 +532,28 @@ final class PayrollInputsAction
                 422,
             );
         }
-        try {
-            $input = $this->inputs->cancel(
-                $this->currentSupplierId($request),
-                (int) ($args['id'] ?? 0),
-                $version,
+        $supplierId = $this->currentSupplierId($request);
+        $id = (int) ($args['id'] ?? 0);
+        $current = $this->inputs->find($supplierId, $id);
+        // Schválený vstup (ještě mimo běh) smí zrušit ten, kdo smí schvalovat —
+        // stejné pravidlo jako u přepsání v rychlém zadávání.
+        $approved = ($current['status'] ?? null) === 'approved';
+        if ($approved && !RequestAuthorization::allows($request, 'payroll.approve', AccessLevel::WRITE)) {
+            return Json::error(
+                $response,
+                'input_state_conflict',
+                'Schválený mzdový vstup může zrušit jen uživatel s právem schvalovat mzdy.',
+                409,
             );
+        }
+        try {
+            $input = $approved
+                ? $this->inputs->cancelApproved($supplierId, $id, $version)
+                : $this->inputs->cancel($supplierId, $id, $version);
         } catch (PayrollInputCancellationException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), 409);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'input_state_conflict', $e->getMessage(), 409);
         } catch (PayrollInputConflictException $e) {
             return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
                 'current_row_version' => $e->currentVersion,

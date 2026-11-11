@@ -358,6 +358,106 @@ final class RegistrationImportWriter
         ];
     }
 
+    /**
+     * Doplňkové skupiny věty nad osobou a vztahem, které už v evidenci jsou,
+     * bez hlavního kroku (založení, ukončení). Volá ho import docházky, když
+     * šablona nese údaje pro registraci ČSSZ: zapisuje se stejnými cestami
+     * a se stejnými savepointy jako věta registrace, takže co jedna skupina
+     * nezapíše, vrátí se v `notes` a zbytek projde.
+     *
+     * Volající předává jen to, co se má zapsat; adresu, občanství a podmínky
+     * tahle cesta přepíše, proto je u existující osoby předem zúží na
+     * chybějící údaje.
+     *
+     * @param array{
+     *   terms?:array<string,string>,
+     *   identity_facts?:array<string,string>,
+     *   addresses?:array<string,array<string,string>>,
+     *   tax_residence?:array{residence:string,country_code:string,identifier:?string},
+     *   a1_profile?:array<string,mixed>
+     * } $steps
+     * @return array{operations:list<string>,notes:list<string>}
+     */
+    public function supplement(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $decisive,
+        array $steps,
+        string $reference,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        $operations = [];
+        $notes = [];
+        $this->atomic('registration_import_supplement', function () use (
+            $supplierId,
+            $employeeId,
+            $employmentId,
+            $decisive,
+            $steps,
+            $reference,
+            $userId,
+            $ip,
+            $userAgent,
+            &$operations,
+            &$notes,
+        ): void {
+            if (($steps['terms'] ?? []) !== []) {
+                $this->optional('Podmínky vztahu', $notes, $operations, 'terms', fn () => $this->writeTerms(
+                    $supplierId,
+                    $employmentId,
+                    $steps['terms'],
+                    $decisive,
+                    $userId,
+                    $ip,
+                    $userAgent,
+                ));
+            }
+            if (($steps['identity_facts'] ?? []) !== []) {
+                $this->optional('Státní občanství', $notes, $operations, 'identity_facts', fn () => $this->writeIdentityFacts(
+                    $supplierId,
+                    $employeeId,
+                    $decisive,
+                    $steps['identity_facts'],
+                ));
+            }
+            if (($steps['addresses'] ?? []) !== []) {
+                $this->optional('Adresa', $notes, $operations, 'address', fn () => $this->writePersonCard(
+                    $supplierId,
+                    $employeeId,
+                    $decisive,
+                    $steps['addresses'],
+                    null,
+                    $userId,
+                    $ip,
+                    $userAgent,
+                ));
+            }
+            if (is_array($steps['tax_residence'] ?? null)) {
+                $this->optional('Daňová rezidence', $notes, $operations, 'tax_residence', fn () => $this->writeTaxResidence(
+                    $supplierId,
+                    $employeeId,
+                    $steps['tax_residence'],
+                    $reference,
+                    $userId,
+                ));
+            }
+            // Profil A1 až nakonec: návrh se skládá z kmenových dat výše.
+            if (($steps['a1_profile'] ?? []) !== []) {
+                $this->optional('Profil registrace A1', $notes, $operations, 'a1_profile', fn () => $this->writeA1Profile(
+                    $supplierId,
+                    $employmentId,
+                    $steps['a1_profile'],
+                    $userId,
+                ));
+            }
+        });
+
+        return ['operations' => $operations, 'notes' => $notes];
+    }
+
     /** @param array{relation_type:string,planned_start_on:string,workload?:?array{workload_basis_points:int,weekly_hours:string}} $input */
     private function createEmployment(
         int $supplierId,
@@ -368,12 +468,11 @@ final class RegistrationImportWriter
         ?string $ip,
         ?string $userAgent,
     ): int {
-        $hasPrimary = false;
-        foreach ($this->lookup->employments($supplierId, $employeeId) as $row) {
-            if ($row['is_primary'] && in_array($row['status'], ['planned', 'preregistered', 'active', 'suspended'], true)) {
-                $hasPrimary = true;
-            }
-        }
+        $hasPrimary = $this->employments->hasOverlappingPrimary(
+            $supplierId,
+            $employeeId,
+            $input['planned_start_on'],
+        );
         [$activityCode, $detailCode] = PayrollEmploymentJmhzActivityFamily::firstRelationDefaults($input['relation_type']);
         $created = $this->employments->create(
             $supplierId,

@@ -3158,6 +3158,31 @@ final class PayrollRunPersistenceTest extends TestCase
         );
     }
 
+    /** Odmítnuté založení běhu říká, kde se příčina napraví. */
+    public function testRunCreationRefusalSaysWhereToFixIt(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_module_state SET start_period = "2026-08-01" WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+        try {
+            $this->service->createRun($this->supplierId, '2026-06-01', '2026-07-15', null, $this->actors[0]);
+            self::fail('Běh před prvním mzdovým obdobím nesmí vzniknout.');
+        } catch (\DomainException $e) {
+            self::assertStringContainsString('Období 2026-06 předchází prvnímu mzdovému období', $e->getMessage());
+            self::assertStringContainsString('(2026-08)', $e->getMessage());
+            self::assertStringContainsString('Mzdy → Přehled mezd', $e->getMessage());
+        }
+
+        $pdo->prepare('UPDATE supplier SET payroll_enabled = 0 WHERE id = ?')->execute([$this->supplierId]);
+        try {
+            $this->service->createRun($this->supplierId, '2026-09-01', '2026-10-15', null, $this->actors[0]);
+            self::fail('Firma bez vedení mezd nesmí založit běh.');
+        } catch (\DomainException $e) {
+            self::assertStringContainsString('vedení mezd zapnuté', $e->getMessage());
+            self::assertStringContainsString('„Vést mzdy“ v Nastavení firmy', $e->getMessage());
+        }
+    }
+
     public function testCommandsStopWhenPayrollModuleIsDisabled(): void
     {
         $run = $this->createRun();
@@ -3832,6 +3857,29 @@ final class PayrollRunPersistenceTest extends TestCase
      * a samo NIC neudělá — žádný běh, žádnou revizi, žádný zmrazený snímek.
      * Vzor je `GET /payroll/year-close/{year}` s jeho `blockers`.
      */
+    /**
+     * Chybějící IČO firmy zastaví snímek běhu. Kontrola před během to dřív
+     * schovala za „Obnovte stránku"; teď řekne příčinu a odkáže na nastavení.
+     */
+    public function testReadinessNamesAFixableSnapshotCauseWithItsLink(): void
+    {
+        $this->db->pdo()->prepare('UPDATE supplier SET ic = "" WHERE id = ?')->execute([$this->supplierId]);
+
+        $readiness = $this->container->get(\MyInvoice\Service\Payroll\Run\PayrollRunReadinessService::class)
+            ->inspect($this->supplierId, '2026-06-01', '2026-07-15');
+
+        $codes = array_column($readiness['findings'], 'code');
+        self::assertNotContains('readiness_check_failed', $codes);
+        $identity = array_values(array_filter(
+            $readiness['findings'],
+            static fn (array $finding): bool => $finding['code'] === 'employer_identity_incomplete',
+        ));
+        self::assertCount(1, $identity, json_encode($codes, JSON_THROW_ON_ERROR));
+        self::assertSame('/admin/settings', $identity[0]['remediation_path']);
+        self::assertStringContainsString('IČO', $identity[0]['message']);
+        self::assertSame('blocker', $identity[0]['severity']);
+    }
+
     public function testRunListReportsReadinessWithoutTouchingAnything(): void
     {
         $role = new EffectiveRole(
@@ -3886,7 +3934,10 @@ final class PayrollRunPersistenceTest extends TestCase
                 'hideable',
                 'subject_type',
                 'subject_ids',
+                // Hromadná oprava ze seznamu zaměstnanců, kterou nález nabízí.
+                'bulk_actions',
             ], array_keys($finding));
+            self::assertIsList($finding['bulk_actions']);
             self::assertIsInt($finding['entity_total']);
             self::assertGreaterThanOrEqual(count($finding['entities']), $finding['entity_total']);
             self::assertContains($finding['severity'], ['blocker', 'warning', 'info']);

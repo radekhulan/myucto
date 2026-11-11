@@ -109,12 +109,14 @@ export type PayrollChecklistStatus = 'pending' | 'completed' | 'not_applicable'
  * Důvod, proč objekt nejde smazat. `message` je věta pro uživatele, podle které
  * se dá jednat — ukazuje se místo zašedlého tlačítka bez vysvětlení.
  * `employment_code` je vyplněný, když osobu blokuje konkrétní pracovní vztah.
+ * `period` (první den měsíce) je období, kterého se blokátor vztahu týká.
  */
 export interface PayrollDeleteBlocker {
   code: string
   message: string
   employment_id: number | null
   employment_code: string | null
+  period?: string | null
 }
 
 /** Počty toho, co zmizí spolu s objektem. Klíče se překládají přes i18n. */
@@ -562,6 +564,25 @@ export interface PayrollEmploymentCreatePayload {
   meal_entitlement_basis?: PayrollMealEntitlementBasis
   monthly_gross_minor: number | null
   terms: PayrollEmploymentTermsPayload
+  /** U DPP: použít otevřenou dohodu osoby místo nové (server případně prodlouží konec). */
+  use_open_agreement?: number
+  /** U DPP: založit novou dohodu i vedle otevřené. */
+  confirm_new_agreement?: boolean
+}
+
+/** Otevřená DPP osoby, viz PayrollOpenAgreements::describe() na serveru. */
+export interface PayrollOpenAgreement {
+  employment_id: number
+  employee_id: number
+  employee_name: string
+  code: string
+  status: string
+  start_date: string | null
+  end_date: string | null
+  /** Pokrývá nástup nové dohody, jde ji použít místo nové. */
+  reusable: boolean
+  /** Na kolik se otevřené dohodě prodlouží sjednaný konec. */
+  extend_to: string | null
 }
 
 export type PayrollMealEntitlementBasis = 'shift' | 'calendar_day'
@@ -886,7 +907,12 @@ export interface PayrollStatutoryEvidence {
    * prohlášení) a nabídka dne dosažení důchodového věku z data narození
    * (`null`, když výpočet jednoznačný není).
    */
-  derived?: { taxpayer_credit: boolean, pension_age_suggestion?: string | null }
+  derived?: {
+    taxpayer_credit: boolean
+    pension_age_suggestion?: string | null
+    /** Podepsané věty prohlášení, jejichž začátek neodpovídá § 38k ZDP (jen upozornění). */
+    tax_declaration_checks?: PayrollTaxDeclarationCheck[]
+  }
   /**
    * Důvody, proč by mzdový běh k datu snímku skončil v ručním posouzení.
    * Klíče jsou tytéž, jaké hlásí `PayrollRunStatutoryInputAssembler`.
@@ -1005,9 +1031,20 @@ export interface PayrollHealthInsurerBulkResult {
   failed: Array<{ employee_id: number, message: string }>
 }
 
-export type PayrollDeclarationSignState = 'ready' | 'already_signed' | 'period_frozen' | 'timeline_gap' | 'employee_not_found'
+export interface PayrollTaxDeclarationCheck {
+  id: number
+  /** Zákonný první měsíc; `null` = prohlášení platí až od dalšího roku. */
+  legal_from: string | null
+  basis: PayrollDeclarationEffectiveBasis
+  warning: 'earlier_than_allowed' | 'later_than_entitled'
+}
+
+export type PayrollDeclarationSignState = 'ready' | 'already_signed' | 'period_frozen' | 'after_year_end' | 'timeline_gap' | 'employee_not_found'
 
 export type PayrollDeclarationSignChange = 'add' | 'close_previous' | 'replace'
+
+/** Proč prohlášení platí od daného měsíce (§ 38k ZDP, TaxDeclarationEffectiveMonth). */
+export type PayrollDeclarationEffectiveBasis = 'employment_start' | 'year_start' | 'following_month' | 'after_frozen_period'
 
 export interface PayrollDeclarationSignPerson {
   employee_id: number
@@ -1017,15 +1054,19 @@ export interface PayrollDeclarationSignPerson {
   /** Stav prohlášení, které se podpisem ukončí nebo nahradí (`not-signed`, `unverified`, `signed`). */
   current_status: string | null
   effective_from: string | null
+  effective_from_basis: PayrollDeclarationEffectiveBasis | null
+  /** Slevu za měsíce uzavřené schválenou mzdou dorovná roční zúčtování. */
+  annual_settlement: boolean
   effective_to: string | null
 }
 
 export interface PayrollDeclarationSignPreview {
   year: number
   signed_on: string
-  /** `null` = celý rok je uzavřený schválenou mzdou. */
+  /** První měsíc pro stávající zaměstnance; `null` = do roku nepatří žádný měsíc. */
   effective_from: string | null
-  effective_from_basis: 'year_start' | 'signing_month' | 'after_frozen_period'
+  effective_from_basis: PayrollDeclarationEffectiveBasis
+  annual_settlement: boolean
   frozen_through: string | null
   summary: Record<'people' | PayrollDeclarationSignState, number>
   ready_employee_ids: number[]
@@ -1037,7 +1078,14 @@ export interface PayrollDeclarationSignResult {
   year: number
   signed_on: string
   counts: { applied: number, skipped: number, failed: number }
-  applied: Array<{ employee_id: number, change: PayrollDeclarationSignChange, effective_from: string, effective_to: string | null }>
+  applied: Array<{
+    employee_id: number
+    change: PayrollDeclarationSignChange
+    effective_from: string
+    effective_from_basis: PayrollDeclarationEffectiveBasis
+    annual_settlement: boolean
+    effective_to: string | null
+  }>
   skipped: Array<{ employee_id: number, reasons: string[] }>
   failed: Array<{ employee_id: number, message: string }>
 }
@@ -1072,7 +1120,18 @@ export interface PayrollWorkplaceBulkPreview {
   }
   suggestions: PayrollWorkplaceBulkSuggestion[]
   missing_employment_ids: number[]
+  /** Pracoviště vyplněné, ale číselníkem neověřené: hromadně se nepřepisuje, opravuje se na kartě. */
+  unverified: PayrollWorkplaceBulkUnverified[]
   items: PayrollWorkplaceBulkPreviewItem[]
+}
+
+export interface PayrollWorkplaceBulkUnverified {
+  employment_id: number
+  employee_id: number
+  full_name: string
+  employment_code: string
+  work_place: string | null
+  municipality_code: string | null
 }
 
 export interface PayrollWorkplaceBulkResult {
@@ -1084,6 +1143,74 @@ export interface PayrollWorkplaceBulkResult {
   applied: Array<{ employment_id: number }>
   skipped: Array<{ employment_id: number, reason: string }>
   failed: Array<{ employment_id: number, message: string }>
+  unverified: PayrollWorkplaceBulkUnverified[]
+}
+
+export type PayrollTermsBulkMode = 'fill' | 'overwrite'
+
+export interface PayrollTermsBulkPreviewItem {
+  employment_id: number
+  employee_id: number
+  full_name: string
+  employment_code: string
+  relation_type: PayrollRelationType
+  state: 'editable' | 'excluded'
+  reason: string | null
+  locked_period: string | null
+  /** Z platné verze je zúčtovaná mzda: vznikne nová verze od tohoto dne. */
+  new_version_from: string | null
+  /** Mzda se k vztahu importuje jako částka: hodinovou sazbu hromadně nenastavíme. */
+  imported_wage: boolean
+  effective_from: string | null
+  remuneration_type: 'monthly' | 'hourly' | null
+  hourly_rate_minor: number | null
+  probable_hourly_earning_minor: number | null
+  cz_isco_code: string | null
+  activity_code: string | null
+  work_place: string | null
+  jmhz_workplace_municipality_code: string | null
+}
+
+export interface PayrollTermsBulkPreview {
+  period_start: string
+  relation_type: PayrollRelationType | null
+  summary: { employments: number, editable: number, excluded: number }
+  editable_employment_ids: number[]
+  activity_codes: Array<{ code: string, label: string }>
+  items: PayrollTermsBulkPreviewItem[]
+}
+
+export interface PayrollTermsBulkChanges {
+  hourly_rate_minor?: number
+  remuneration_basis_kind?: string
+  remuneration_basis?: string
+  probable_hourly_earning_minor?: number
+  probable_earning_rationale?: string
+  cz_isco_code?: string
+  activity_code?: string
+  jmhz_workplace_municipality_code?: string
+  jmhz_workplace_country_code?: string
+}
+
+export interface PayrollTermsBulkOutcome {
+  employment_id: number
+  employee_id: number | null
+  full_name: string | null
+}
+
+export interface PayrollTermsBulkResult {
+  period_start: string
+  mode: PayrollTermsBulkMode
+  counts: { applied: number, skipped: number, failed: number }
+  applied: Array<PayrollTermsBulkOutcome & {
+    fields: string[]
+    kind: 'correction' | 'new_version'
+    effective_from: string
+    /** Údaje, které se u vztahu záměrně nezapsaly (např. `hourly_rate_imported_wage`). */
+    warnings: string[]
+  }>
+  skipped: Array<PayrollTermsBulkOutcome & { reason: string }>
+  failed: Array<PayrollTermsBulkOutcome & { message: string }>
 }
 
 export type PayrollBulkClosureGroup = 'expired' | 'inactive' | 'archive'
@@ -1110,6 +1237,8 @@ export interface PayrollBulkClosureItem {
 
 export interface PayrollBulkClosurePreview {
   as_of: string
+  /** Do kdy se měří nečinnost: konec posledního schváleného mzdového měsíce, jinak dnešek. */
+  activity_reference_on: string
   inactivity_months: number
   archive_after_months: number
   activity_since: string
@@ -3040,6 +3169,11 @@ export interface PayrollInputApproveBatchResult extends PayrollInputBatchProgres
 
 export interface PayrollInputCancelBatchResult extends PayrollInputBatchProgress {
   cancelled: number[]
+}
+
+export interface PayrollInputWholeCrownsResult {
+  rounded: Array<{ id: number, employee_name: string, component_name: string, from_minor: number, to_minor: number }>
+  skipped: Array<{ id: number, employee_name: string, component_name: string, amount_minor: number, reason: string }>
 }
 
 export interface PayrollInputBatchPayload {
@@ -5430,6 +5564,53 @@ export interface PayrollRegistrationCompletionResult {
   }>
 }
 
+/** Vztah, který potřebuje přihlášku REGZEC A1 (hromadná příprava). */
+export interface PayrollRegistrationA1Candidate {
+  employment_id: number
+  employee_id: number
+  employee_name: string
+  code: string
+  relation_type: string
+  status: string
+  start_date: string | null
+  end_date: string | null
+  profile_status: 'verified' | 'draft' | 'missing'
+  complete: boolean
+  problems: Array<{ field: string | null, code: string, message: string }>
+  after_pre_registration: boolean
+  deadline: {
+    earliest_registration_on: string
+    due_on: string
+    derived: boolean
+    overdue: boolean
+  } | null
+  warnings: Array<{
+    code: string
+    employment_id: number
+    employment_code: string
+    message: string
+  }>
+}
+
+export interface PayrollRegistrationA1Candidates {
+  items: PayrollRegistrationA1Candidate[]
+  from: string
+  to: string
+  today: string
+}
+
+export interface PayrollRegistrationA1BatchResult {
+  results: Array<{
+    employment_id: number
+    status: 'prepared' | 'skipped'
+    submission_id: number | null
+    agenda_code: string | null
+    created: boolean
+    code: string | null
+    message: string | null
+  }>
+}
+
 /** Varování před podáním, které podání neblokuje (překryv 603/604). */
 export interface PayrollRegistrationWarning {
   code: string
@@ -6767,6 +6948,7 @@ export type PayrollAnnualSettlementListState =
   | 'requested'
   | 'settled'
   | 'unsettled'
+  | 'request_undecided'
 
 export interface PayrollAnnualSettlementCreditRow {
   label: string
@@ -7679,6 +7861,7 @@ export interface PayrollRun {
  */
 export interface PayrollRunSourceDrift {
   worked_time_changed?: number
+  employment_terms_changed?: number
   remuneration_changed: number
   total: number
   inputs_added: number
@@ -7772,12 +7955,23 @@ export interface PayrollRunReadinessFinding {
   /** Skutečný počet dotčených záznamů; `entities` je na serveru oříznutý. */
   entity_total?: number
   /** `label` je lidský název konkrétní věci — nález MUSÍ jmenovat, čeho se týká. */
-  entities: { entity_type: string, entity_id: number | null, label: string | null, message?: string, remediation_path?: string | null }[]
+  /** `gaps` = klíče chybějících údajů osoby (`PayrollPersonDataGapKey`) u nálezu `person_data_gap`. */
+  entities: { entity_type: string, entity_id: number | null, label: string | null, message?: string, remediation_path?: string | null, gaps?: string[] }[]
   /** Jde nález trvale skrýt; `subject_ids` jsou VŠECHNY dotčené osoby (vztahy). */
   hideable?: boolean
   subject_type?: PayrollWarningSubjectType | null
   subject_ids?: number[]
+  /** Hromadné opravy ze seznamu zaměstnanců (`/payroll/people?bulk=`), které nález nabízí. */
+  bulk_actions?: { kind: PayrollRunReadinessBulkKind, count: number, employee_ids?: number[] }[]
 }
+
+export type PayrollRunReadinessBulkKind =
+  | 'statutory_defaults'
+  | 'declaration_signed'
+  | 'health_insurer'
+  | 'workplace'
+  | 'closure'
+  | 'annual_settlement_request'
 
 /**
  * Kontrola před zahájením mzdového běhu. Čtecí, nic neukládá — stejný vzor
@@ -8724,6 +8918,26 @@ export const payrollApi = {
       '/payroll/employments/workplace-bulk/apply',
       payload,
     ).then(response => response.data.result),
+  /** Náhled hromadné úpravy podmínek vztahů měsíce; nic nezapisuje. */
+  termsBulkPreview: (payload: {
+    period_start: string
+    relation_type?: PayrollRelationType | null
+    employment_ids?: number[] | null
+  }) =>
+    api.post<{ preview: PayrollTermsBulkPreview }>(
+      '/payroll/employments/terms-bulk/preview',
+      payload,
+    ).then(response => response.data.preview),
+  termsBulkApply: (payload: {
+    period_start: string
+    mode: PayrollTermsBulkMode
+    changes: PayrollTermsBulkChanges
+    employment_ids: number[]
+  }) =>
+    api.post<{ result: PayrollTermsBulkResult }>(
+      '/payroll/employments/terms-bulk/apply',
+      payload,
+    ).then(response => response.data.result),
   /** Náhled hromadného ukončení skončených dohod a archivace; nic nezapisuje. */
   bulkClosurePreview: (payload: { inactivity_months?: number, archive_after_months?: number } = {}) =>
     api.post<{ preview: PayrollBulkClosurePreview }>(
@@ -9029,8 +9243,13 @@ export const payrollApi = {
       `/payroll/people/${personId}/payout-rules/apply-defaults`,
     ).then(response => response.data),
   createEmployment: (personId: number, payload: PayrollEmploymentCreatePayload) =>
-    api.post<{ employment: PayrollEmployment; warnings?: PayrollEmploymentSaveWarning[] }>(`/payroll/people/${personId}/employments`, payload)
-      .then(response => employmentSaveResult(response.data)),
+    api.post<{ employment: PayrollEmployment; warnings?: PayrollEmploymentSaveWarning[]; reused?: boolean; extended_to?: string | null }>(`/payroll/people/${personId}/employments`, payload)
+      // `reused` = server místo nové DPP použil otevřenou dohodu osoby.
+      .then(response => ({
+        ...employmentSaveResult(response.data),
+        reused: response.data.reused === true,
+        extended_to: response.data.extended_to ?? null,
+      })),
   // Mzda smí jet i s novou verzí podmínek — „od září bereš víc" je jedna
   // změna, ne dvě. Klíč je volitelný: kdo ho nepošle, mzdy se nedotkne.
   remunerationOptions: (effectiveFrom: string) =>
@@ -9822,6 +10041,20 @@ export const payrollApi = {
     effective_on?: string
   }) => api.post<PayrollRegistrationCompletionResult>(
     '/payroll/submissions/registration-completion',
+    payload,
+  ).then(response => response.data),
+  registrationA1Candidates: (
+    environment: PayrollJmhzTransportEnvironment,
+    period: { from?: string, to?: string } = {},
+  ) => api.get<PayrollRegistrationA1Candidates>(
+    '/payroll/submissions/registration-a1',
+    { params: { environment, ...period } },
+  ).then(response => response.data),
+  prepareRegistrationA1Batch: (payload: {
+    environment: PayrollJmhzTransportEnvironment
+    employment_ids: number[]
+  }) => api.post<PayrollRegistrationA1BatchResult>(
+    '/payroll/submissions/registration-a1',
     payload,
   ).then(response => response.data),
   sendEmploymentRegistrationTransport: (
@@ -11131,6 +11364,13 @@ export const payrollApi = {
   /** Hromadné zrušení konceptů — výčtem `ids` nebo podle `filter`. */
   cancelInputsBatch: (payload: PayrollInputBatchPayload) =>
     api.post<PayrollInputCancelBatchResult>('/payroll/inputs/cancel-batch', payload)
+      .then(response => response.data),
+  /**
+   * Haléřové vstupy období zaokrouhlí nahoru na celé koruny, aby je přijalo
+   * měsíční hlášení. Uzamčené a vypočtené vstupy vrátí v `skipped` s důvodem.
+   */
+  roundInputsWholeCrowns: (payload: { period: string, employment_id?: number | null }) =>
+    api.post<PayrollInputWholeCrownsResult>('/payroll/inputs/round-whole-crowns', payload)
       .then(response => response.data),
   cancelInput: (id: number, rowVersion: number) =>
     api.post<{ input: PayrollInput }>(`/payroll/inputs/${id}/cancel`, {

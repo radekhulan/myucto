@@ -418,6 +418,59 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
         );
     }
 
+    /**
+     * Dohoda za dřívější měsíc u osoby, která OIČ už má od pozdějška: karta
+     * dřívějšího vztahu OIČ k jeho datu nevidí, účetní opíše totéž číslo
+     * znovu. Dřív konflikt „stejná hodnota, jiný den" bez cesty ven.
+     */
+    public function testSameManualOicOnEarlierAgreementMovesItsValidityBack(): void
+    {
+        $this->service->assignManualJmhzIdentity(
+            $this->supplierId,
+            $this->employmentId,
+            'test',
+            '1000000001',
+            '200000000000000000002',
+            '2026-08-01',
+            null,
+            true,
+            null,
+        );
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, end_date, is_legacy_projection)
+             VALUES (?, ?, "dpp-earlier-synthetic", "dpp", "ended",
+                     "2026-02-07", "2026-02-28", 0)'
+        )->execute([$this->supplierId, $this->employeeId]);
+        $earlier = (int) $pdo->lastInsertId();
+
+        $assigned = $this->service->assignManualJmhzIdentity(
+            $this->supplierId,
+            $earlier,
+            'test',
+            '1000000001',
+            '200000000000000000003',
+            '2026-02-07',
+            null,
+            true,
+            null,
+        );
+
+        self::assertSame('2026-02-07', $assigned['person_external_identifier']['valid_from']);
+        foreach (['2026-02-20' => $earlier, '2026-08-04' => $this->employmentId] as $onDate => $employmentId) {
+            $status = $this->service->jmhzIdentityStatusAt(
+                $this->supplierId,
+                $employmentId,
+                'test',
+                $onDate,
+            );
+            self::assertNotNull($status['person_external_identifier'], "OIČ k {$onDate}");
+            self::assertNotNull($status['employment_external_identifier'], "ID PPV k {$onDate}");
+        }
+    }
+
     public function testManualJmhzIdentityValidatesPairBeforeWriteAndChecksTenant(): void
     {
         try {

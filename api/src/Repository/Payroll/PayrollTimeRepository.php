@@ -957,12 +957,12 @@ final class PayrollTimeRepository
                 $candidateStart,
                 $candidateEnd,
             ]);
-            foreach (self::rows($draftShifts) as $draftShift) {
-                if (self::startsInPeriod($draftShift, $periodStart)) {
-                    throw new \InvalidArgumentException(
-                        'Před schválením měsíce publikujte všechny plánované směny.'
-                    );
-                }
+            $unpublished = array_values(array_filter(
+                self::rows($draftShifts),
+                static fn (array $shift): bool => self::startsInPeriod($shift, $periodStart),
+            ));
+            if ($unpublished !== []) {
+                throw new \InvalidArgumentException(self::unpublishedShiftsMessage($unpublished));
             }
 
             $draftEntries = $pdo->prepare(
@@ -2814,6 +2814,41 @@ final class PayrollTimeRepository
     }
 
     /** @param array<string,mixed> $row */
+    /**
+     * Kolik plánovaných směn čeká na publikování a od kdy, aby je účetní
+     * v kalendáři docházky našla a nemusela procházet celý měsíc.
+     *
+     * @param non-empty-list<array<string,mixed>> $shifts
+     */
+    private static function unpublishedShiftsMessage(array $shifts): string
+    {
+        $firstDates = array_map(
+            static fn (array $shift): string => (new \DateTimeImmutable(
+                PayrollTimeValue::string($shift['starts_at_utc'] ?? null, 'starts_at_utc'),
+                new \DateTimeZone('UTC'),
+            ))->setTimezone(new \DateTimeZone(
+                PayrollTimeValue::string($shift['timezone_name'] ?? null, 'timezone_name'),
+            ))->format('Y-m-d'),
+            $shifts,
+        );
+        sort($firstDates);
+        $first = \DateTimeImmutable::createFromFormat('!Y-m-d', $firstDates[0]);
+        $count = count($shifts);
+
+        return sprintf(
+            'Měsíc nejde schválit: %d %s, první %s. V Mzdy → Docházka otevřete u tohoto vztahu '
+                . 'každou plánovanou směnu a zapněte „Publikovat zaměstnanci“, nebo nepotřebnou '
+                . 'směnu zrušte. Potom měsíc schvalte znovu.',
+            $count,
+            match (true) {
+                $count === 1 => 'plánovaná směna není publikovaná',
+                $count < 5 => 'plánované směny nejsou publikované',
+                default => 'plánovaných směn není publikovaných',
+            },
+            $first === false ? $firstDates[0] : $first->format('j. n. Y'),
+        );
+    }
+
     private static function startsInPeriod(array $row, string $periodStart): bool
     {
         $utc = new \DateTimeImmutable(

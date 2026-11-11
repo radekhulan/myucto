@@ -24,7 +24,7 @@ final class AttendanceMyUctoSampleProfile
 {
     public const KEY = 'myucto';
     public const NAME = 'Vzor MyÚčto';
-    public const VERSION = 2;
+    public const VERSION = 4;
 
     public const SHEET = 'Podklady';
     public const GUIDE_SHEET = 'Návod';
@@ -116,6 +116,50 @@ final class AttendanceMyUctoSampleProfile
             $column('Číslo účtu', ['číslo účtu*', 'bankovní účet*'], 'bank_account', self::FORMAT_TEXT,
                 'Účet pro výplatu ve tvaru předčíslí-číslo/kód banky (např. 1000000005/0100) nebo IBAN. Při založení osoby se uloží jako výplatní účet; před první výplatou ho na kartě osoby ověřte.',
                 ['1000000005/0100', null]),
+            // Údaje pro registraci ČSSZ (AttendanceRegistrationData): nové osobě
+            // se zapíšou při založení, existující jen doplní, co v evidenci chybí.
+            $column('Ulice', ['ulice', 'ulice a číslo*', 'ulice trvalého pobytu*'], 'address_street', self::FORMAT_TEXT,
+                'Ulice adresy trvalého pobytu (u obce bez ulic název obce nebo části). Adresa se zapíše, jen když je vyplněná ulice, obec i PSČ.',
+                ['Ukázková', null]),
+            $column('Číslo domu', ['číslo domu*', 'číslo popisné*'], 'address_house_number', self::FORMAT_TEXT,
+                'Číslo popisné, případně s orientačním za lomítkem (12/3).',
+                ['12', null]),
+            $column('Obec', ['obec', 'obec trvalého pobytu*', 'obec bydliště*', 'město'], 'address_city', self::FORMAT_TEXT,
+                'Obec adresy trvalého pobytu.',
+                ['Praha', null]),
+            $column('PSČ', ['psč*'], 'address_postal_code', self::FORMAT_TEXT,
+                'Poštovní směrovací číslo, s mezerou nebo bez (110 00).',
+                ['110 00', null]),
+            $column('Stát', ['stát', 'stát trvalého pobytu*', 'stát bydliště*'], 'address_country', self::FORMAT_TEXT,
+                'Dvoupísmenný kód státu adresy (CZ, SK, UA…). Prázdný znamená CZ.',
+                ['CZ', null]),
+            $column('Státní občanství', ['státní občanství*', 'občanství*', 'státní příslušnost*'], 'citizenship', self::FORMAT_TEXT,
+                'Dvoupísmenný kód státu občanství (CZ, SK, UA…).',
+                ['CZ', null]),
+            $column('CZ-ISCO', ['cz-isco*', 'cz isco*', 'isco*', 'kód zaměstnání*'], 'cz_isco_code', self::FORMAT_TEXT,
+                'Kód zaměstnání podle klasifikace CZ-ISCO (pět číslic). Uloží se do podmínek vztahu.',
+                ['43111', null]),
+            $column('Druh činnosti', ['druh činnosti*'], 'activity_code', self::FORMAT_TEXT,
+                'Kód druhu činnosti pro ČSSZ (např. T u první DPP). Prázdný doplní aplikace podle druhu vztahu.',
+                [null, null]),
+            $column('Místo výkonu práce', ['místo výkonu práce*'], 'workplace', self::FORMAT_TEXT,
+                'Obec, kde osoba převážně pracuje. Šest číslic se bere jako kód obce (554782 = Praha), jinak jako název.',
+                ['Praha', null]),
+            $column('Daňová rezidence', ['daňová rezidence*'], 'tax_residence', self::FORMAT_TEXT,
+                'Dvoupísmenný kód státu daňové rezidence. Prázdný u osoby s českou adresou z podkladů znamená CZ.',
+                ['CZ', null]),
+            $column('Prohlášení poplatníka', ['prohlášení poplatníka*'], 'tax_declaration', self::FORMAT_TEXT,
+                'Ano, když osoba podepsala prohlášení poplatníka (§ 38k ZDP). Zapíše se jen osobě, která podepsané prohlášení na rok nemá.',
+                ['ano', 'ne']),
+            $column('Prohlášení od', ['prohlášení od*'], 'tax_declaration_from', self::FORMAT_DATE,
+                'Den podpisu prohlášení. Bez něj se použije den nástupu.',
+                ['2026-06-01', null]),
+            $column('Vzdělání', ['vzdělání*', 'nejvyšší vzdělání*'], 'education_code', self::FORMAT_TEXT,
+                'Nejvyšší dosažené vzdělání jako kód KKOV pro ČSSZ (např. K, M, R). Uloží se do profilu registrace.',
+                ['M', null]),
+            $column('Postavení v zaměstnání', ['postavení v zaměstnání*'], 'employment_status_code', self::FORMAT_TEXT,
+                'Čtyřmístný kód klasifikace postavení v zaměstnání (NKPZ) pro ČSSZ. Uloží se do profilu registrace.',
+                [null, null]),
             $column('Odpracováno (hod)', ['odpracováno*'], 'worked_hours', self::FORMAT_HOURS,
                 'Všechny odpracované hodiny v měsíci včetně noci, víkendu, svátku a přesčasu.',
                 [42.5, 60]),

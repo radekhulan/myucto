@@ -107,6 +107,7 @@ final class PayrollRunJmhzReadinessProbe
 
         $componentLabels = $this->componentLabels($supplierId, self::idsOf($issues, 'component'));
         $employmentLabels = $this->employmentLabels($supplierId, self::idsOf($issues, 'employment'));
+        $employeeLabels = self::employeeLabels($snapshotData);
 
         /** @var array<string,array<string,mixed>> $groups */
         $groups = [];
@@ -115,6 +116,7 @@ final class PayrollRunJmhzReadinessProbe
             $label = match ($issue['entity_type']) {
                 'component' => $componentLabels[$issue['entity_id']] ?? null,
                 'employment' => $employmentLabels[$issue['entity_id']] ?? null,
+                'employee' => $employeeLabels[$issue['entity_id']] ?? null,
                 default => null,
             };
             if (!isset($groups[$code])) {
@@ -140,7 +142,12 @@ final class PayrollRunJmhzReadinessProbe
                     'entity_id' => $issue['entity_id'],
                     'label' => $label,
                     'message' => self::message($issue['code'], $label === null ? [] : [$label], 1),
-                    'remediation_path' => self::remediationPath($issue['code'], $issue['entity_id'], $periodStart),
+                    'remediation_path' => self::remediationPath(
+                        $issue['code'],
+                        $issue['entity_id'],
+                        $periodStart,
+                        $issue['entity_type'],
+                    ),
                 ];
                 if ($label !== null && !in_array($label, $groups[$code]['labels'], true)) {
                     $groups[$code]['labels'][] = $label;
@@ -216,6 +223,12 @@ final class PayrollRunJmhzReadinessProbe
      */
     private static function normalizeCode(string $code): string
     {
+        // Chybějící řádek žádosti a žádost se stavem „nevím" řeší účetní
+        // stejně: rozhodne, zda zaměstnanec o roční zúčtování požádal.
+        if ($code === 'jmhz_annual_request_source_missing') {
+            return 'jmhz_annual_request_status_unresolved';
+        }
+
         return in_array($code, [
             'jmhz_identity_oic_missing',
             'jmhz_identity_id_ppv_missing',
@@ -223,6 +236,25 @@ final class PayrollRunJmhzReadinessProbe
         ], true)
             ? 'jmhz_identity_missing'
             : $code;
+    }
+
+    /**
+     * Jména osob ze snímku pro nálezy vázané na osobu.
+     *
+     * @param array<string,mixed> $snapshotData
+     * @return array<int,string>
+     */
+    private static function employeeLabels(array $snapshotData): array
+    {
+        $labels = [];
+        foreach ((array) ($snapshotData['people'] ?? []) as $person) {
+            $employee = is_array($person) ? ($person['employee'] ?? null) : null;
+            if (is_array($employee) && is_int($employee['id'] ?? null)) {
+                $labels[$employee['id']] = (string) ($employee['full_name'] ?? '');
+            }
+        }
+
+        return $labels;
     }
 
     /** @param array<string,mixed> $snapshotData */
@@ -334,16 +366,31 @@ final class PayrollRunJmhzReadinessProbe
                 . 'Mzdový běh tím omezený není.',
                 $named !== '' ? $named : $count . '× pracovní vztah',
             ),
+            'jmhz_annual_request_status_unresolved' => sprintf(
+                'Není rozhodnuto, zda o roční zúčtování za minulý rok požádal(a): %s. '
+                . 'Hlášení za leden a únor tu odpověď vyžaduje u každé osoby a bez ní '
+                . 'se nezmrazí. Otevřete Mzdy → Roční zúčtování, vyberte osoby, které '
+                . 'nepožádaly, a nastavte „nepožádal" hromadně; u těch, kdo požádali, '
+                . 'zapište žádost. Mzdový běh tím omezený není.',
+                $named !== '' ? $named : $count . '× osoba',
+            ),
             default => JmhzBlockerExplainer::guidance($code)
                 . ($named === '' ? '' : ' Týká se: ' . $named . '.')
-                . ' Otevřete Mzdová podání → JMHZ a spusťte test hlášení. Mzdový běh tím není omezený.',
+                . ' Odkaz vede na místo opravy; potom ověřte stav testem hlášení v Mzdová podání → JMHZ.'
+                . ' Mzdový běh tím není omezený.',
         };
     }
 
-    private static function remediationPath(string $code, ?int $entityId = null, ?string $periodStart = null): ?string
-    {
+    private static function remediationPath(
+        string $code,
+        ?int $entityId = null,
+        ?string $periodStart = null,
+        string $entityType = '',
+    ): ?string {
         // Cestu skládá jediné místo, stejné jako u blokace zmrazení hlášení.
-        return JmhzBlockerRemediationPath::forReadinessCode($code, $entityId, $periodStart)
+        // Obecná stránka JMHZ zbývá jen kódům, u kterých katalog místo opravy
+        // nezná (zopakovat test, ruční podání, správce).
+        return JmhzBlockerRemediationPath::forReadinessCode($code, $entityId, $periodStart, $entityType)
             ?? '/payroll/submissions/jmhz';
     }
 

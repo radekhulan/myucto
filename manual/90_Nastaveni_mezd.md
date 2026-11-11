@@ -826,7 +826,10 @@ předvyplní jako pravidelná mzda a nástup z poznámky („nový nástup 15. 6
 jako den nástupu. Sloupce **Datum narození** a **Zdravotní pojišťovna (kód)**
 (třímístný, např. 111) se zapíšou rovnou. **Hodinová sazba** se uloží do
 podmínek vztahu jako pravděpodobný hodinový výdělek s odůvodněním (§ 355 ZP),
-ze kterého se počítají náhrady, než vznikne skutečný průměr. **Konec dohody**
+ze kterého se počítají náhrady, než vznikne skutečný průměr. Bez sloupce sazby
+navrhne import pravděpodobný výdělek z odměny za odpracované hodiny (částka
+hodinové mzdy podle docházky dělená odpracovanými hodinami, na haléře) a náhled
+ho u zakládané osoby ukáže. **Konec dohody**
 se uloží jako sjednaný konec vztahu, takže ho po uplynutí nabídne hromadné
 ukončení dohod. **Číslo účtu** (předčíslí-číslo/kód banky nebo IBAN) projde
 stejnou kontrolou jako na kartě osoby a uloží se jako výplatní účet
@@ -838,6 +841,29 @@ už v evidenci je, import sazbu, konec ani účet nemění. Automatické založe
 týká jen osob s osobním nebo rodným číslem; osoba bez čísel bývá jinak zapsané
 jméno někoho z evidence. Uvádějí-li podklady ukončení, osoba dostane upozornění;
 import vztah neukončuje.
+
+**Osoba, která už v evidenci je.** Osobu, kterou import v měsíci nenašel, hledá
+v celé evidenci podle uložené vazby, rodného čísla a osobního čísla. Najde-li
+ji (typicky brigádník, jehož dohoda minulý měsíc skončila), náhled to u ní
+napíše a založení jí přidá jen nový pracovní vztah, druhá karta osoby se stejným
+rodným číslem nevznikne. Druh vztahu je z podkladů, bez něj stejný jako poslední
+vztah osoby, nástup ze sloupce Nástup, jinak první den měsíce. Výplatní účet ani
+pojišťovnu import u takové osoby nemění a údaje pro registraci jen doplní.
+Skončila-li předchozí dohoda před nástupem nové, stane se nová dohoda hlavním
+(primárním) vztahem osoby; předchozí si hlavní roli ponechá v měsících, kdy
+trvala. Stejně to platí při ručním přidání vztahu. Měsíční hlášení navíc bere
+jediný vztah, který osoba v měsíci vykazuje, vždy jako primární.
+
+**Otevřená DPP osoby.** Osobu, kterou import v měsíci nenašel, hledá také mezi
+neukončenými DPP firmy (uložená vazba, osobní číslo, rodné číslo, jméno). Má-li
+otevřenou DPP (bez konce nebo s koncem v den nástupu či později), náhled to
+u osoby napíše a při zakládání nabídne **Použít otevřenou dohodu** (výchozí
+volba), případně s prodloužením konce do **Konce dohody** z podkladů, nebo
+**Založit novou dohodu**. Jedna dlouhodobá DPP znamená jednu registraci u ČSSZ;
+nová dohoda ke každé akci znamená novou přihlášku i odhlášku. Otevřenou dohodu,
+která začíná až po nástupu z podkladů, použít nejde; náhled jen poradí posunout
+její nástup na kartě vztahu. Ruční zakládání vztahu se chová stejně
+(viz [§ 86.3.1](86_Zamestnanci.md#8631-dalsi-dpp-osoby-ktera-ma-otevrenou-dohodu)).
 
 **Roční limit DPP.** U osoby přiřazené na dohodu o provedení práce náhled sečte
 odpracované hodiny za celý kalendářní rok včetně importovaného měsíce a jiných
@@ -867,6 +893,27 @@ takové osobě upravte mzdu na kartě vztahu. Výsledek vypíše převzaté
 a nepřevzaté mzdy a běhy k přepočtu s odkazem na ně; běh vezme novou mzdu až
 z nového snímku vstupů (viz [Mzdové běhy](80_Mzdove_behy.md)).
 
+**Pravděpodobný výdělek z podkladů.** Vztahu, který nemá pravděpodobný výdělek
+ani schválený průměrný výdělek pro čtvrtletí, nabídne souhrn volbu **Doplnit
+pravděpodobný výdělek z podkladů** se seznamem navržených částek (ze sazby, jinak
+z odměny za odpracované hodiny). Zapíše se do platné verze podmínek, zasahuje-li
+do zúčtovaného měsíce, jako nová verze od prvního dne období. Sazba z podkladů se
+záměrně neukládá jako sjednané hodinové odměňování: vztah s hodinovým
+odměňováním počítá mzdu sám z doložených hodin a importovanou hodinovou mzdu
+by kontrola souběhu zdrojů odmítla, takže by import měsíce neprošel. Hodinové
+odměňování proto nastavte na kartě vztahu jen tehdy, když mzdu nemá počítat
+docházkový systém.
+
+**Částky s haléři.** Měsíční hlášení (JMHZ) vykazuje výdělek v celých korunách.
+Má-li částka složky zařazené do hlášení haléře (provize, příplatek za víkend),
+nabídne souhrn volbu **Zaokrouhlit částky s haléři nahoru na celé koruny**
+s jejich počtem. Je zapnutá za každý měsíc, za který jde připravit měsíční
+hlášení, tedy i za měsíce před zákonným startem JMHZ. Tabulka pak ukazuje
+zaokrouhlenou částku a pod ní původní hodnotu a vstupy vzniknou už
+zaokrouhlené. Zaokrouhluje se vždy nahoru, ve prospěch zaměstnance (§ 142
+odst. 2 zákoníku práce). Bez volby by takové vstupy zablokovaly mzdový běh
+kontrolou celých korun, viz [Mzdové složky a vstupy](91_Mzdove_slozky_a_vstupy.md).
+
 **Srážky ze mzdy.** Sloupce **Obědy – srážka ze mzdy** a **Srážka ze mzdy** (ve
 vzoru GIRITON dotovaná cena obědů a srážky z hlavního seznamu) se k hrubé mzdě
 nepřičítají. **Založit srážky ze mzdy** z nich založí dohody o srážce jen pro
@@ -887,6 +934,7 @@ každý sloupec šablony.
 | Skupina | Sloupce |
 |---|---|
 | Osoba | Osobní číslo, Příjmení a jméno (povinné), Rodné číslo, Datum narození, Zdravotní pojišťovna (kód), Druh vztahu (HPP, DPP, DPČ), Nástup, Týdenní úvazek, Měsíční mzda, Hodinová sazba (Kč/h), Konec dohody, Číslo účtu |
+| Registrace ČSSZ | Ulice, Číslo domu, Obec, PSČ, Stát, Státní občanství, CZ-ISCO, Druh činnosti, Místo výkonu práce, Daňová rezidence, Prohlášení poplatníka, Prohlášení od, Vzdělání, Postavení v zaměstnání |
 | Hodiny | Odpracováno; z toho noc, víkend, svátek, přesčas; Dovolená, Nemoc, Lékař |
 | Peníze (Kč za měsíc) | Hodinová mzda celkem, Odměna, Mimořádná odměna, Srážka z čisté mzdy |
 
@@ -895,11 +943,40 @@ sloupci vždy stejně; noc, víkend, svátek a přesčas jsou část odpracovan�
 hodin. Datum jako datum v Excelu nebo text „1. 6. 2026". **Druh vztahu** určí
 druh vztahu nově zakládané osoby, **Nástup** její den nástupu (bez něj první den
 měsíce), **Hodinová sazba**, **Konec dohody** a **Číslo účtu** se převezmou při
-jejím založení (viz Osoby výše). **Hodinová mzda celkem** jde na složku **Hodinová mzda podle
+jejím založení (viz Osoby výše), údaje pro registraci ČSSZ popisuje odstavec níže. **Hodinová mzda celkem** jde na složku **Hodinová mzda podle
 docházky** (zařazení JMHZ 10329), **Odměna** na **Odměnu** z číselníku,
 **Mimořádná odměna** na vlastní složku vzoru (pravidelnost odměny pro JMHZ
 zařadí účetní jednou za firmu) a **Srážka z čisté mzdy** založí dohodu o srážce
 na daný měsíc. Sloupce, které vzor nezná, i ostatní listy sešitu se ignorují.
+
+**Údaje pro registraci ČSSZ.** Sloupce skupiny Registrace ČSSZ jsou nepovinné
+a slouží k tomu, aby šlo osobu přihlásit k ČSSZ bez dopisování karet:
+
+- adresa trvalého pobytu (Ulice, Číslo domu, Obec, PSČ, Stát jako kód, prázdný
+  znamená CZ) se zapíše, jen když je vyplněná ulice, obec i PSČ;
+- **Státní občanství** a **Daňová rezidence** jako dvoupísmenný kód státu.
+  Bez sloupce rezidence dostane osoba s českou adresou rezidenci CZ;
+- **CZ-ISCO**, **Druh činnosti** (prázdný doplní aplikace podle druhu vztahu)
+  a **Místo výkonu práce** (šest číslic = kód obce, jinak název) jdou do
+  podmínek vztahu;
+- **Prohlášení poplatníka** ano zapíše podepsané prohlášení s dnem podpisu
+  **Prohlášení od** (bez něj ke dni nástupu). První měsíc slevy určí stejně
+  jako hromadný zápis prohlášení podle § 38k ZDP;
+- **Vzdělání** (kód KKOV, např. M) a **Postavení v zaměstnání** (čtyřmístný kód
+  NKPZ) jdou do profilu registrace.
+
+Nové osobě se všechno zapíše při založení a náhled zakládání to u ní ukáže.
+U osoby, která už v evidenci je, ukáže souhrn jen chybějící údaje a volba
+**Doplnit chybějící údaje pro registraci ČSSZ** je při použití zapíše; nic, co
+už evidence vede, se nepřepisuje. Volba vyžaduje oprávnění k zápisu osob.
+Nečitelná hodnota osobu nezastaví: u osoby se objeví upozornění a hodnota se
+nezapíše. Co se zapsat nepodařilo, vypíše výsledek importu s důvodem.
+
+Totéž funguje i s vlastním sešitem firmy. V **Mapování sloupců** je pro tyto
+údaje (a pro hodinovou sazbu, konec dohody a číslo účtu) skupina významů
+**Registrace ČSSZ**, kterou přiřadíte vlastním sloupcům profilu. Sloupec
+pojmenovaný stejně jako v šabloně Vzoru MyÚčto (např. Státní občanství, PSČ,
+CZ-ISCO, Místo výkonu práce) import navrhne sám.
 
 **Správa profilů mapování.** Seznam profilů firmy v záložce **Mapování
 sloupců** nabízí **Nový profil** a **Import JSON**. Profil uložený jako

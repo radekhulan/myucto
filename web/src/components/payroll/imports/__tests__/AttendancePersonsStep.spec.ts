@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
-import type { AttendancePerson } from '@/api/payrollImports'
+import type { AttendancePerson, AttendancePersonCreate } from '@/api/payrollImports'
 
 vi.mock('vue-router', async () => {
   const { defineComponent: define, h: render } = await import('vue')
@@ -88,5 +88,75 @@ describe('AttendancePersonsStep — náhled zakládání osob', () => {
       { person_key: 'alena', hourly_rate: '180,50', fixed_term_end_on: '31. 12. 2026', planned_start_on: '2026-06-15' },
       { person_key: 'bela', hourly_rate: 'dle dohody', fixed_term_end_on: null },
     ])
+  })
+
+  it('bez sazby ukáže pravděpodobný výdělek z odměny za odpracované hodiny', async () => {
+    const iva = person('iva', {
+      display_name: 'Výdělková Iva',
+      probable_earning: { source: 'amount', hourly_minor: 3_333, amount_minor: 10_000, hours: '3.00' },
+    })
+    const wrapper = mount(AttendancePersonsStep, {
+      props: { persons: [iva], options: [], manualLinks: {}, period: '2026-06', canCreate: true },
+    })
+    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
+    const details = wrapper.get('[data-testid="attendance-create-details"]').text()
+    expect(details).toContain('payroll_imports.attendance.persons.details.probable_earning')
+    expect(details).toMatch(/33,33/)
+  })
+
+  it('u osoby z evidence řekne, že vznikne jen nový vztah', async () => {
+    const anna = person('anna', {
+      display_name: 'Lednová Anna',
+      existing_person: { employee_id: 5, employee_name: 'Anna Lednová', matched_by: 'employment_code', relation_type: 'dpp' },
+    })
+    const wrapper = mount(AttendancePersonsStep, {
+      props: { persons: [anna], options: [], manualLinks: {}, period: '2026-02', canCreate: true },
+    })
+    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
+    expect(wrapper.get('[data-testid="attendance-create-existing"]').text())
+      .toBe('payroll_imports.attendance.persons.existing_person{"name":"Anna Lednová"}')
+  })
+
+  it('ukáže údaje pro registraci ČSSZ, které se nové osobě zapíšou', async () => {
+    const hana = person('hana', {
+      display_name: 'Registrační Hana',
+      registration: [{ key: 'address', value: 'Praha (CZ)' }, { key: 'cz_isco_code', value: '43111' }],
+    })
+    const wrapper = mount(AttendancePersonsStep, {
+      props: { persons: [hana], options: [], manualLinks: {}, period: '2026-06', canCreate: true },
+    })
+    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
+    const text = wrapper.get('[data-testid="attendance-create-registration"]').text()
+    expect(text).toContain('payroll_imports.attendance.persons.registration_label')
+    expect(text).toContain('payroll_imports.attendance.registration.address Praha (CZ)')
+    expect(text).toContain('payroll_imports.attendance.registration.cz_isco_code 43111')
+  })
+
+  it('u osoby s otevřenou DPP nabídne použít ji a jako výchozí pošle její použití', async () => {
+    const eva = person('eva', {
+      display_name: 'Ukázková Eva',
+      open_agreement: {
+        employment_id: 77, employee_id: 5, employee_name: 'Eva Ukázková', code: 'B001', status: 'active',
+        start_date: '2026-05-01', end_date: '2026-06-30', reusable: true, extend_to: '2026-12-31',
+      },
+    })
+    const wrapper = mount(AttendancePersonsStep, {
+      props: { persons: [eva], options: [], manualLinks: {}, period: '2026-06', canCreate: true },
+    })
+    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
+
+    const box = wrapper.get('[data-testid="attendance-open-agreement"]')
+    expect(box.text()).toContain('payroll_imports.attendance.persons.open_agreement.guidance')
+    expect(box.text()).toContain('payroll_imports.attendance.persons.open_agreement.reuse_extend')
+    expect((wrapper.get('[data-testid="attendance-open-agreement-reuse"]').element as HTMLInputElement).checked).toBe(true)
+
+    await wrapper.get('[data-testid="attendance-create-submit"]').trigger('click')
+    expect(wrapper.emitted('create')?.[0]?.[0]).toMatchObject([{ person_key: 'eva', relation_type: 'dpp', use_open_agreement: 77 }])
+
+    await wrapper.get('[data-testid="attendance-open-agreement-new"]').setValue(true)
+    await wrapper.get('[data-testid="attendance-create-submit"]').trigger('click')
+    const payload = (wrapper.emitted('create')?.[1]?.[0] ?? []) as AttendancePersonCreate[]
+    expect(payload).toMatchObject([{ person_key: 'eva', create_new_agreement: true }])
+    expect(payload?.[0]).not.toHaveProperty('use_open_agreement')
   })
 })

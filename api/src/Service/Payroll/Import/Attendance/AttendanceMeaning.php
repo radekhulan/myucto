@@ -51,6 +51,28 @@ final class AttendanceMeaning
         'hourly_rate',
         'end_date',
         'bank_account',
+        ...self::REGISTRATION,
+    ];
+
+    /**
+     * Údaje pro registraci ČSSZ ({@see AttendanceRegistrationData}). Nové osobě
+     * se zapíšou při založení, existující jen doplní, co v evidenci chybí.
+     */
+    public const REGISTRATION = [
+        'address_street',
+        'address_house_number',
+        'address_city',
+        'address_postal_code',
+        'address_country',
+        'citizenship',
+        'cz_isco_code',
+        'activity_code',
+        'workplace',
+        'tax_residence',
+        'tax_declaration',
+        'tax_declaration_from',
+        'education_code',
+        'employment_status_code',
     ];
 
     /** Měsíční souhrny hodin, které jdou do evidence dávky. */

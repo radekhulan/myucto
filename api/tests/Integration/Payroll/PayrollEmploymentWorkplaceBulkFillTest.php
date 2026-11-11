@@ -8,8 +8,12 @@ use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
+use MyInvoice\Service\Payroll\PayrollEmploymentTermsBody;
+use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollEmploymentWorkplaceBulkFill;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use MyInvoice\Tests\Support\JmhzFrozenSubmissionFixture;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -30,6 +34,8 @@ final class PayrollEmploymentWorkplaceBulkFillTest extends TestCase
     private Connection $db;
     private PayrollEmploymentAction $action;
     private PayrollEmploymentWorkplaceBulkFill $bulk;
+    private PayrollEmploymentRepository $repository;
+    private PayrollEmploymentValidator $validator;
     private int $supplierId;
     private int $employeeId;
     private int $officeId;
@@ -48,6 +54,8 @@ final class PayrollEmploymentWorkplaceBulkFillTest extends TestCase
         }
         $this->action = $container->get(PayrollEmploymentAction::class);
         $this->bulk = $container->get(PayrollEmploymentWorkplaceBulkFill::class);
+        $this->repository = $container->get(PayrollEmploymentRepository::class);
+        $this->validator = $container->get(PayrollEmploymentValidator::class);
 
         $pdo = $this->db->pdo();
         $sourceSupplierId = (int) ($pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
@@ -152,11 +160,205 @@ final class PayrollEmploymentWorkplaceBulkFillTest extends TestCase
         $preview = $this->bulk->preview($this->supplierId, '2026-06-01', null);
         self::assertSame('invalid', $preview['items'][0]['state']);
         self::assertSame([], $preview['missing_employment_ids']);
+        // Nepřepíše se, ale náhled ho jmenuje i s vyplněným textem.
+        self::assertSame([[
+            'employment_id' => $employmentId,
+            'employee_id' => $this->employeeId,
+            'full_name' => 'Syntetický Pracovník',
+            'employment_code' => 'BULK-2',
+            'work_place' => 'Praha',
+            'municipality_code' => self::PRAGUE,
+        ]], $preview['unverified']);
 
         $result = $this->bulk->apply($this->supplierId, '2026-06-01', self::PRAGUE, 'CZ', [$employmentId], $this->userId, null, null);
         self::assertSame(0, $result['counts']['applied']);
         self::assertSame('workplace_not_verified', $result['skipped'][0]['reason']);
+        self::assertSame([$employmentId], array_column($result['unverified'], 'employment_id'));
         self::assertSame('Praha', $this->term($employmentId)['work_place']);
+    }
+
+    /**
+     * Ukončený vztah bez hlášení JMHZ za poslední měsíc se doplní stejně jako
+     * běžící; datum skutečného konce zůstane.
+     */
+    public function testEndedEmploymentGetsWorkplaceWhileNoJmhzReport(): void
+    {
+        $employmentId = $this->createEmployment('BULK-ENDED', true);
+        $this->endEmployment($employmentId, '2026-06-30');
+
+        $preview = $this->bulk->preview($this->supplierId, '2026-06-01', null);
+        self::assertSame([$employmentId], $preview['missing_employment_ids'], json_encode($preview['items'], JSON_UNESCAPED_UNICODE));
+
+        $result = $this->bulk->apply($this->supplierId, '2026-06-01', self::PRAGUE, 'CZ', [$employmentId], $this->userId, null, null);
+
+        self::assertSame(['applied' => 1, 'skipped' => 0, 'failed' => 0], $result['counts'], json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame(self::PRAGUE, $this->term($employmentId)['jmhz_workplace_municipality_code']);
+        $state = $this->db->pdo()->prepare('SELECT status, end_date FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $state->execute([$this->supplierId, $employmentId]);
+        self::assertSame(['status' => 'ended', 'end_date' => '2026-06-30'], $state->fetch(\PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Zmrazené hlášení JMHZ za měsíc ukončeného vztahu opravu zastaví —
+     * v náhledu i na kartě — a věta jmenuje hlášení a další krok.
+     */
+    public function testEndedEmploymentWithFrozenJmhzReportIsRefusedWithNextStep(): void
+    {
+        $employmentId = $this->createEmployment('BULK-REPORTED', true);
+        $this->endEmployment($employmentId, '2026-06-30');
+        $this->frozenJmhz($employmentId, '2026-06-01');
+
+        $preview = $this->bulk->preview($this->supplierId, '2026-06-01', null);
+        self::assertSame('excluded', $preview['items'][0]['state']);
+        self::assertSame('employment_reported', $preview['items'][0]['reason']);
+
+        try {
+            $this->correctOnCard($employmentId, ['cz_isco_code' => '25120']);
+            self::fail('Oprava ukončeného vztahu s podaným hlášením musí být odmítnutá.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('hlášení JMHZ za 6/2026', $exception->getMessage());
+            self::assertStringContainsString('opravné hlášení', $exception->getMessage());
+        }
+    }
+
+    /** Mzdu ani úvazek ukončeného vztahu oprava údajů pro JMHZ neotevře. */
+    public function testEndedEmploymentRefusesNonJmhzChange(): void
+    {
+        $employmentId = $this->createEmployment('BULK-WAGE', true);
+        $this->endEmployment($employmentId, '2026-06-30');
+
+        try {
+            $this->correctOnCard($employmentId, ['weekly_hours' => '20']);
+            self::fail('Úvazek ukončeného vztahu se opravit nesmí.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('weekly_hours', $exception->getMessage());
+        }
+
+        $this->correctOnCard($employmentId, ['cz_isco_code' => '25120']);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT cz_isco_code FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?',
+        );
+        $stmt->execute([$this->supplierId, $employmentId]);
+        self::assertSame('25120', $stmt->fetchColumn());
+    }
+
+    /** @param array<string,mixed> $changes */
+    private function correctOnCard(int $employmentId, array $changes): void
+    {
+        $current = $this->repository->currentTerms($this->supplierId, $employmentId);
+        self::assertIsArray($current);
+        $body = [
+            ...PayrollEmploymentTermsBody::fromCurrent($current, 'Syntetická oprava'),
+            'effective_from' => (string) $current['effective_from'],
+            ...$changes,
+        ];
+        $version = $this->db->pdo()->prepare('SELECT row_version FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $version->execute([$this->supplierId, $employmentId]);
+        $this->repository->correctTerms(
+            $this->supplierId,
+            $employmentId,
+            $this->validator->terms($body, null, null, 'employment', $current),
+            (int) $version->fetchColumn(),
+            $this->userId,
+            null,
+            null,
+        );
+    }
+
+    private function endEmployment(int $employmentId, string $endOn): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employments SET status = 'ended', end_date = ?, row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?",
+        )->execute([$endOn, $this->supplierId, $employmentId]);
+    }
+
+    /**
+     * Ukončený vztah, za jehož měsíc je jen PŘIPRAVENÉ (nezmrazené) hlášení —
+     * typicky zablokované právě chybějícím pracovištěm. Příprava dřív platila
+     * za zmrazenou a hromadné doplnění, na které blokátor odkazuje, vztah
+     * vyřadilo s výzvou k opravnému hlášení.
+     */
+    public function testPreparedButNotFrozenJmhzKeepsEndedEmploymentFillable(): void
+    {
+        $employmentId = $this->createEmployment('BULK-PREPARED', true);
+        $this->endEmployment($employmentId, '2026-06-30');
+        $this->frozenJmhz($employmentId, '2026-06-01', false);
+
+        $preview = $this->bulk->preview($this->supplierId, '2026-06-01', null);
+        self::assertSame('missing', $preview['items'][0]['state'], json_encode($preview['items'][0]));
+
+        $result = $this->bulk->apply($this->supplierId, '2026-06-01', self::PRAGUE, 'CZ', [$employmentId], $this->userId, null, null);
+        self::assertSame(1, $result['counts']['applied'], json_encode($result, JSON_UNESCAPED_UNICODE));
+    }
+
+    /**
+     * Verze podmínek z importu bez skutečného nástupu u ukončeného vztahu,
+     * který nástup má. Oprava ho do verze převezme sama a strážce ukončeného
+     * vztahu to bral jako změnu od účetní: hromadné doplnění pracoviště
+     * skončilo „měníte i actual_start_on" u každé takové dohody.
+     */
+    public function testEndedEmploymentWithImportedTermsWithoutActualStartIsFillable(): void
+    {
+        $employmentId = $this->createEmployment('BULK-NOSTART', true);
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employments SET actual_start_date = '2026-06-01' WHERE supplier_id = ? AND id = ?",
+        )->execute([$this->supplierId, $employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET actual_start_on = NULL WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $this->endEmployment($employmentId, '2026-06-30');
+
+        $result = $this->bulk->apply($this->supplierId, '2026-06-01', self::PRAGUE, 'CZ', [$employmentId], $this->userId, null, null);
+
+        self::assertSame(['applied' => 1, 'skipped' => 0, 'failed' => 0], $result['counts'], json_encode($result['failed'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(self::PRAGUE, $this->term($employmentId)['jmhz_workplace_municipality_code']);
+    }
+
+    /** Schválený běh za měsíc a z něj ostrá příprava JMHZ, volitelně zmrazená do podání. */
+    private function frozenJmhz(int $employmentId, string $periodStart, bool $frozen = true): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO payroll_runs (supplier_id, period_start, payment_date, status, current_revision_no, row_version)
+             VALUES (?, ?, ?, 'approved', 1, 1)",
+        )->execute([$this->supplierId, $periodStart, (new \DateTimeImmutable($periodStart))->modify('+1 month +14 days')->format('Y-m-d')]);
+        $runId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payroll_run_revisions
+                 (supplier_id, run_id, revision_no, status, schema_version,
+                  ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, 1, 'approved', 'test', ?, '{}', ?, ?)",
+        )->execute([$this->supplierId, $runId, str_repeat('a', 64), str_repeat('b', 64), random_bytes(32)]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payroll_run_employments
+                 (supplier_id, revision_id, employee_id, employment_id, input_json, input_hash)
+             VALUES (?, ?, ?, ?, '{}', ?)",
+        )->execute([$this->supplierId, $revisionId, $this->employeeId, $employmentId, str_repeat('c', 64)]);
+        $pdo->prepare(
+            "INSERT INTO payroll_jmhz_preparation_snapshots
+                (supplier_id, environment, run_id, source_revision_id, period_start, scenario_key,
+                 builder_version, readiness_status, issue_count, source_manifest_json,
+                 source_manifest_sha256, readiness_json, readiness_sha256, snapshot_ciphertext,
+                 snapshot_fingerprint, request_fingerprint, idempotency_key_hash, created_by)
+             VALUES (?, 'production', ?, ?, ?, 'scenario_1', 'jmhz-preparation-source.v1',
+                     'source_ready', 0, '{}', ?, '{}', ?, 'enc:v2:synteticky', ?, ?, ?, ?)",
+        )->execute([
+            $this->supplierId,
+            $runId,
+            $revisionId,
+            $periodStart,
+            hash('sha256', 'manifest'),
+            hash('sha256', 'readiness'),
+            hash('sha256', 'snapshot'),
+            hash('sha256', 'request' . $revisionId),
+            hash('sha256', 'idempotency' . $revisionId, true),
+            $this->userId,
+        ]);
+        if ($frozen) {
+            JmhzFrozenSubmissionFixture::freeze($pdo, $this->supplierId, $periodStart, hash('sha256', 'snapshot'), $this->userId);
+        }
     }
 
     public function testMunicipalityOutsideTheCodebookIsRefused(): void

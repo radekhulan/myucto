@@ -44889,6 +44889,7 @@ components:
         statutory_evidence_changed: { type: integer, minimum: 0 }
         remuneration_changed: { type: integer, minimum: 0, description: Počet vztahů se změnou hodinových podmínek účinných ve zpracovávaném měsíci. }
         worked_time_changed: { type: integer, minimum: 0, description: Počet vztahů se změnou vybraného zdroje hodin nebo jeho obsahu či schválení. }
+        employment_terms_changed: { type: integer, minimum: 0, description: Počet vztahů se změnou podmínek, které snímek nese (hlavní vztah, místo výkonu, účtárna, úvazek, druh činnosti, mzda). }
         snapshot_created_at: { type: string }
 
     PayrollRunValidation:
@@ -44925,6 +44926,22 @@ components:
               label: { type: [string, "null"] }
               message: { type: string, description: Konkrétní důvod této entity, pokud se liší od souhrnu. }
               remediation_path: { type: [string, "null"], description: Cíl nápravy této entity; má přednost před společným odkazem skupiny. }
+              gaps:
+                type: array
+                description: U nálezu person_data_gap klíče chybějících údajů osoby za období běhu.
+                items: { type: string }
+        bulk_actions:
+          type: array
+          description: Hromadné opravy ze seznamu zaměstnanců (/payroll/people?bulk=kind), které nález nabízí; annual_settlement_request vede na hromadné nastavení stavu žádosti v Ročním zúčtování.
+          items:
+            type: object
+            properties:
+              kind: { type: string, enum: [statutory_defaults, declaration_signed, health_insurer, workplace, closure, annual_settlement_request] }
+              count: { type: integer, minimum: 0 }
+              employee_ids:
+                type: array
+                description: U declaration_signed osoby, kterých se nález týká; hromadný podpis se na ně zúží.
+                items: { type: integer, minimum: 1 }
 
     PayrollRunReadiness:
       type: [object, "null"]

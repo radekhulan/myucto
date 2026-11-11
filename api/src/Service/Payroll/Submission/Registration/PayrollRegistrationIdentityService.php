@@ -802,6 +802,37 @@ final readonly class PayrollRegistrationIdentityService
     }
 
     /**
+     * Vady naposledy uloženého profilu A1 tak, jak by je ukázalo tlačítko
+     * „Kontrola" na kartě vztahu. `null`, když profil uložený není.
+     * Podklad pro hromadný přehled přihlášek, který vady ukazuje u každého
+     * vztahu bez otevírání formuláře.
+     *
+     * @return list<array{field:?string,code:string,message:string}>|null
+     */
+    public function storedA1ProfileProblems(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+    ): ?array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $stored = $this->repository->latestA1Profile(
+            $supplierId,
+            $employeeId,
+            $employmentId,
+        );
+        if ($stored === null) {
+            return null;
+        }
+
+        return $this->checkA1Profile(
+            $supplierId,
+            $employmentId,
+            $this->decodeA1Profile($stored),
+        )['problems'];
+    }
+
+    /**
      * Interní citlivý zdroj pro neměnný submission snapshot.
      *
      * @return array{
@@ -1705,6 +1736,40 @@ final readonly class PayrollRegistrationIdentityService
                     'Platnost identifikátorů leží mimo dobu trvání '
                     . 'pracovního vztahu. Zadejte den mezi nástupem '
                     . 'a skončením vztahu.',
+                );
+            }
+            /*
+             * OIČ je číslo osoby, ne vztahu. Dostane-li osoba dohodu za dřívější
+             * měsíc, než od kdy je OIČ v evidenci, karta dřívějšího vztahu ho
+             * k jeho datu nevidí a účetní ho opíše znovu — stejnou hodnotu.
+             * Dřív to skončilo na „stejná hodnota, jiný den" bez cesty ven
+             * (oprava se k vztahu bez čísla nenabízí). Ručně opsané stejné
+             * číslo se proto jen přesune na dřívější den; převzaté z protokolu
+             * ČSSZ se nepřepisuje.
+             */
+            $backdatePerson = false;
+            if (!$replaceExisting && $personIdentifier !== null) {
+                $active = $this->repository->activePersonExternalId(
+                    $supplierId,
+                    $employment['employee_id'],
+                    $environment,
+                    'ik_mpsv',
+                );
+                $backdatePerson = $active !== null
+                    && $active['source_kind'] === 'verified_manual_import'
+                    && $active['valid_from'] > $validFrom
+                    && $this->activePersonExternalIdMatches(
+                        $supplierId,
+                        $employment['employee_id'],
+                        $environment,
+                        $personIdentifier,
+                    ) === true;
+            }
+            if ($backdatePerson) {
+                $this->discardManualPersonIdentifier(
+                    $supplierId,
+                    $employment['employee_id'],
+                    $environment,
                 );
             }
             if ($replaceExisting) {

@@ -78,9 +78,11 @@ async function loadPreview() {
     for (const key of Object.keys(dates)) delete dates[Number(key)]
     let preselected = 0
     for (const item of preview.value.items) {
-      // Položka s prací nebo zúčtovanou mzdou po datu konce se nepředvybírá —
-      // datum konce u ní musí posoudit člověk.
-      const pick = item.blocked_reason === null && preselected < preview.value.max_items
+      // Předvybírá se jen uplynulý sjednaný konec. Nečinnost je jen návrh
+      // (vstupy za nezpracované měsíce ještě nemusí být zadané) a archivace
+      // úklid; obojí vybírá účetní sama. Položka s prací nebo zúčtovanou
+      // mzdou po datu konce se nepředvybírá, datum musí posoudit člověk.
+      const pick = item.group === 'expired' && item.blocked_reason === null && preselected < preview.value.max_items
       selected[item.employment_id] = pick
       if (pick) preselected++
       dates[item.employment_id] = item.proposed_on
@@ -229,7 +231,7 @@ onMounted(loadPreview)
             <div>
               <h3 class="text-sm font-semibold text-neutral-900">{{ t(`payroll.bulk_closure.groups.${group}.title`) }}</h3>
               <p class="text-xs text-neutral-500">
-                {{ t(`payroll.bulk_closure.groups.${group}.hint`, { months: group === 'archive' ? preview.archive_after_months : preview.inactivity_months }) }}
+                {{ t(`payroll.bulk_closure.groups.${group}.hint`, { months: group === 'archive' ? preview.archive_after_months : preview.inactivity_months, date: formatDate(preview.activity_reference_on) }) }}
               </p>
             </div>
             <label class="flex items-center gap-2 text-xs text-neutral-600">

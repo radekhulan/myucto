@@ -51,7 +51,25 @@ final class PayrollHealthInsurerWriter
         $sections = $view['sections'];
         $rows = $sections['health_coverages'];
         $covering = self::covering($rows, $monthStart);
-        if ($covering === null) {
+        $earliestFrom = self::earliestFrom($rows);
+        if ($covering === null && $earliestFrom !== null && $earliestFrom > $monthStart) {
+            // Vztah začal dřív než první věta pojištění — typicky dohoda za
+            // dřívější měsíc přidaná k osobě, která už pojišťovnu od pozdějška
+            // má. Před první větu se doplní ohraničená věta až do dne před ní;
+            // existující řada se nemění. Mezera MEZI větami zůstává na člověku.
+            $rows[] = [
+                'jurisdiction' => 'czech_regime_verified',
+                'foreign_country_code' => null,
+                'jurisdiction_evidence_reference' => null,
+                'insurer_status' => 'verified',
+                'insurer_code' => $insurerCode,
+                'insurer_evidence_reference' => null,
+                'health_evidence_document_id' => null,
+                'effective_from' => $monthStart,
+                'effective_to' => (new \DateTimeImmutable($earliestFrom))->modify('-1 day')->format('Y-m-d'),
+                'evidence_note' => null,
+            ];
+        } elseif ($covering === null) {
             if ($rows !== []) {
                 throw new \DomainException(
                     "Zdravotní pojištění k {$monthStart} v evidenci vedené není a navazuje na jiné období. "
@@ -107,6 +125,20 @@ final class PayrollHealthInsurerWriter
             $ip,
             $userAgent,
         );
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private static function earliestFrom(array $rows): ?string
+    {
+        $earliest = null;
+        foreach ($rows as $row) {
+            $from = (string) $row['effective_from'];
+            if ($earliest === null || $from < $earliest) {
+                $earliest = $from;
+            }
+        }
+
+        return $earliest;
     }
 
     /**

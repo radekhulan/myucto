@@ -18,6 +18,7 @@ import type {
   AttendanceUnit,
   AttendanceUnrecognizedColumn,
   ImportFilePayload,
+  PayrollOpenAgreement,
   RegistrationEmploymentOption,
   RegistrationOpeningBalance,
   RegistrationPair,
@@ -360,6 +361,13 @@ export function minutesToHours(minutes: number): string {
 
 // ─── Docházka: číselníky mapování ─────────────────────────────────────────────
 
+/** Údaje pro registraci ČSSZ, viz AttendanceMeaning::REGISTRATION na serveru. */
+export const REGISTRATION_MEANINGS: readonly AttendanceMeaning[] = [
+  'address_street', 'address_house_number', 'address_city', 'address_postal_code', 'address_country',
+  'citizenship', 'cz_isco_code', 'activity_code', 'workplace', 'tax_residence', 'tax_declaration',
+  'tax_declaration_from', 'education_code', 'employment_status_code',
+]
+
 export const ATTENDANCE_MEANING_GROUPS: { key: string; meanings: AttendanceMeaning[] }[] = [
   { key: 'other', meanings: ['ignore'] },
   {
@@ -369,6 +377,10 @@ export const ATTENDANCE_MEANING_GROUPS: { key: string; meanings: AttendanceMeani
       'relation_label', 'department', 'cost_center', 'position', 'weekly_hours', 'start_end_note',
       'start_date', 'monthly_wage', 'hourly_rate', 'end_date', 'bank_account',
     ],
+  },
+  {
+    key: 'registration',
+    meanings: [...REGISTRATION_MEANINGS],
   },
   {
     key: 'work',
@@ -404,7 +416,7 @@ export const AUTO_COMPONENT_CODE = '*'
 const TEXT_MEANINGS = new Set<AttendanceMeaning>([
   'person_name', 'personal_number', 'birth_number', 'birth_date', 'health_insurer_code', 'relation_label',
   'department', 'cost_center', 'position', 'start_end_note', 'start_date', 'monthly_wage',
-  'hourly_rate', 'end_date', 'bank_account',
+  'hourly_rate', 'end_date', 'bank_account', ...REGISTRATION_MEANINGS,
 ])
 const MONEY_MEANINGS = new Set<AttendanceMeaning>([
   'component', 'net_meal_deduction', 'net_other_deduction', 'reference_gross', 'reference_net',
@@ -909,7 +921,7 @@ export interface PersonCreateDefaults {
  * bez něj se použije jednotný `defaults.relation_type` jako dosud (ruční
  * založení v kroku Osoby, kde druh vybírá uživatel jednou pro celou dávku).
  */
-export type PersonCreateDetailKey = 'start_on' | 'agreed_end_on' | 'hourly_rate' | 'monthly_wage' | 'bank_account'
+export type PersonCreateDetailKey = 'start_on' | 'agreed_end_on' | 'hourly_rate' | 'probable_earning' | 'monthly_wage' | 'bank_account'
 
 /**
  * Údaje z podkladů, které se nové osobě převezmou — pro náhled zakládání.
@@ -928,6 +940,9 @@ export function personCreateDetails(
   if (rate !== '') {
     const parsed = parseLocaleNumber(rate)
     details.push({ key: 'hourly_rate', value: parsed !== null && parsed > 0 ? String(parsed) : rate, invalid: parsed === null || parsed <= 0 })
+  } else if (person.probable_earning?.source === 'amount') {
+    // Bez sazby navrhne server pravděpodobný výdělek z odměny za odpracované hodiny.
+    details.push({ key: 'probable_earning', value: String(person.probable_earning.hourly_minor / 100), invalid: false })
   }
   const wage = person.monthly_wage?.trim() ?? ''
   if (wage !== '') {
@@ -938,11 +953,20 @@ export function personCreateDetails(
   return details
 }
 
+/**
+ * Otevřená DPP osoby, kterou jde použít místo nové dohody. Výchozí je ji
+ * použít; `newAgreementKeys` jsou osoby, u kterých uživatel zvolil novou.
+ */
+export function reusableOpenAgreement(person: AttendancePerson, relationType: RegistrationRelationType): PayrollOpenAgreement | null {
+  return relationType === 'dpp' && person.open_agreement?.reusable ? person.open_agreement : null
+}
+
 export function buildPersonsPayload(
   persons: AttendancePerson[],
   drafts: Record<string, PersonDraft>,
   defaults: PersonCreateDefaults,
   relationTypeFor?: (person: AttendancePerson) => RegistrationRelationType,
+  newAgreementKeys: ReadonlySet<string> = new Set(),
 ): AttendancePersonCreate[] {
   return persons.map(person => {
     const draft = drafts[person.key] ?? splitDisplayName(person.display_name)
@@ -950,13 +974,18 @@ export function buildPersonsPayload(
     const lastName = draft.last_name.trim()
     const weekly = (person.weekly_hours ?? '').trim() || defaults.weekly_hours.trim()
     const wage = parseLocaleNumber(person.monthly_wage) ?? NaN
+    const relationType = relationTypeFor ? relationTypeFor(person) : defaults.relation_type
+    const open = reusableOpenAgreement(person, relationType)
     return {
       person_key: person.key,
       full_name: [firstName, lastName].filter(Boolean).join(' ') || person.display_name,
       first_name: firstName,
       last_name: lastName,
       birth_number: null,
-      relation_type: relationTypeFor ? relationTypeFor(person) : defaults.relation_type,
+      relation_type: relationType,
+      ...(open === null ? {} : newAgreementKeys.has(person.key)
+        ? { create_new_agreement: true }
+        : { use_open_agreement: open.employment_id }),
       weekly_hours: weekly === '' ? null : weekly.replace(',', '.'),
       monthly_gross: Number.isFinite(wage) && wage > 0 ? Math.round(wage) : null,
       // Nástup z poznámky v podkladech je přesnější než jednotný den pro celou dávku.

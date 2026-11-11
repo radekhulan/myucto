@@ -30,6 +30,7 @@ import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 import PayrollExternalJmhzSubmissionsPanel from './PayrollExternalJmhzSubmissionsPanel.vue'
 import PayrollSubmissionQueuePanel from './PayrollSubmissionQueuePanel.vue'
 import PayrollRegistrationCompletionPanel from './PayrollRegistrationCompletionPanel.vue'
+import PayrollRegistrationA1BatchPanel from './PayrollRegistrationA1BatchPanel.vue'
 import TaxSubmissions from '@/pages/reports/TaxSubmissions.vue'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -37,7 +38,7 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 type SubmissionTab =
-  'monthly' | 'queue' | 'transport' | 'regzel' | 'registration_completion' | 'jmhz'
+  'monthly' | 'queue' | 'transport' | 'regzel' | 'registration_a1' | 'registration_completion' | 'jmhz'
   | 'discount_intents' | 'sickness' | 'eldp'
   | 'health' | 'tax_statements' | 'statutory' | 'other' | 'inbox' | 'certificate'
 
@@ -86,10 +87,10 @@ const activeTab = ref<SubmissionTab>('monthly')
 // tenhle měsíc udělat, fronta odpovídá na navazující „a co z toho mám
 // připravené a ještě to neodešlo" — napříč agendami i zaměstnanci. Bez ní
 // se ta odpověď skládala z pěti různých obrazovek.
-// Dohlášení údajů (A3) stojí hned za registrací zaměstnavatele: obojí je
-// registrační agenda ČSSZ mimo měsíční hlášení.
+// Přihlášky (A1) a dohlášení údajů (A3) stojí hned za registrací
+// zaměstnavatele: všechno je registrační agenda ČSSZ mimo měsíční hlášení.
 const tabs: SubmissionTab[] = [
-  'monthly', 'queue', 'transport', 'regzel', 'registration_completion', 'jmhz',
+  'monthly', 'queue', 'transport', 'regzel', 'registration_a1', 'registration_completion', 'jmhz',
   'discount_intents', 'sickness', 'eldp',
   'health', 'tax_statements', 'statutory', 'other', 'inbox', 'certificate',
 ]
@@ -385,7 +386,7 @@ const tabGroups: { key: 'extraordinary' | 'more'; labelKey: string; tabs: Submis
   {
     key: 'extraordinary',
     labelKey: 'payroll.submissions.tabs_extraordinary',
-    tabs: ['statutory', 'regzel', 'registration_completion', 'discount_intents', 'sickness', 'eldp', 'other'],
+    tabs: ['statutory', 'regzel', 'registration_a1', 'registration_completion', 'discount_intents', 'sickness', 'eldp', 'other'],
   },
   { key: 'more', labelKey: 'payroll.submissions.tabs_more', tabs: ['inbox', 'certificate'] },
 ]
@@ -576,6 +577,11 @@ function rememberDetails(tab: string, event: Event) {
 
     <PayrollTransportHistoryPanel
       v-else-if="activeTab === 'transport'"
+      v-model:environment="environment"
+    />
+
+    <PayrollRegistrationA1BatchPanel
+      v-else-if="activeTab === 'registration_a1'"
       v-model:environment="environment"
     />
 

@@ -200,10 +200,16 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\PayrollTaxDeclarationBulkSign::STATES',
         'payroll.ts::PayrollDeclarationSignChange'
             => 'const:MyInvoice\Service\Payroll\PayrollTaxDeclarationBulkSign::CHANGES',
+        'payroll.ts::PayrollDeclarationEffectiveBasis'
+            => 'const:MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationEffectiveMonth::BASES',
         'payroll.ts::PayrollBulkClosureGroup'
             => 'const:MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure::GROUPS',
         'payroll.ts::PayrollBulkClosureAction'
             => 'const:MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure::ACTIONS',
+        'payroll.ts::PayrollTermsBulkMode'
+            => 'const:MyInvoice\Service\Payroll\PayrollEmploymentTermsBulkEdit::MODES',
+        'payroll.ts::PayrollRunReadinessBulkKind'
+            => 'const:MyInvoice\Service\Payroll\Run\PayrollRunReadinessService::BULK_ACTION_KINDS',
         'payrollImports.ts::AttendanceSampleKey'
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfiles::KEYS',
         'payrollImports.ts::AttendanceProfileComponentKind'

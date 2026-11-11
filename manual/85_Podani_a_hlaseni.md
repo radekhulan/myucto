@@ -43,7 +43,7 @@ nejbližší pracovní den.
 <!-- cols: 24 44 32 -->
 | Situace | Co podat a do kdy | Kde v aplikaci |
 |---|---|---|
-| Nástup | Přihláška na ČSSZ (PREZEC nebo REGZEC A1) před nástupem, nejdřív 8 dnů předem. Oznámení zdravotní pojišťovně (HOZ, kód `P`) do 8 dnů, u DPP a DPČ do 20. dne následujícího měsíce. | karta pracovního vztahu, část **Registrace vztahu na ČSSZ**; postup v [§ 85.5](#855-krok-za-krokem-nastup-zamestnance) |
+| Nástup | Přihláška na ČSSZ (PREZEC nebo REGZEC A1) před nástupem, nejdřív 8 dnů předem. Oznámení zdravotní pojišťovně (HOZ, kód `P`) do 8 dnů, u DPP a DPČ do 20. dne následujícího měsíce. | karta pracovního vztahu, část **Registrace vztahu na ČSSZ**, nebo hromadně **Mimořádná podání ▾ → Přihlášky k podání (A1)**; postup v [§ 85.5](#855-krok-za-krokem-nastup-zamestnance) |
 | Zaměstnanec nenastoupil | Storno A8, nebo ukončení předregistrace P2, do 8 dnů od předpokládaného dne nástupu | karta pracovního vztahu, **Nová událost A2–A8** |
 | Změna údajů (adresa, jméno, pojišťovna, místo výkonu práce…) | Změna A3 do 8 dnů ode dne, kdy jste se o změně dozvěděli. Změna zdravotní pojišťovny navíc HOZ oběma pojišťovnám do 8 dnů. | karta pracovního vztahu, blok **Změny k ohlášení**; postup v [§ 85.8](#858-krok-za-krokem-zmena-udaju-zamestnance-a3) |
 | Nemoc přes 14 dnů, karanténa, ošetřování, dlouhodobá péče, mateřská, otcovská | NEMPRI v lhůtě, kterou ukáže aplikace u případu. Po návratu z nemoci HZUPN neprodleně. | **Mimořádná podání ▾ → Dávky nemocenského**; postup v [§ 85.6](#856-krok-za-krokem-nemoc-osetrovani-materska-a-otcovska) |
@@ -65,6 +65,7 @@ nejbližší pracovní den.
 | když bonusy převýší zálohy | Požádat finanční úřad o poukázání chybějící částky na daňovém bonusu | viz [§ 85.14.24](#851424-zadost-o-poukazani-chybejici-castky-na-danovem-bonusu) |
 | jednou při zavádění | Registrace zaměstnavatele (REGZEL), doplňující údaje | `Mzdy → Nastavení mezd`, záložka **Podání**; na stránce podání **Mimořádná podání ▾ → Registrace zaměstnavatele** |
 | jednou po převodu z jiného programu | Dohlášení údajů zaměstnanců přihlášených přes ONZ (A3) | **Mimořádná podání ▾ → Dohlášení údajů (A3)** |
+| při nástupu více lidí najednou | Přihlášky zaměstnanců (A1) hromadně | **Mimořádná podání ▾ → Přihlášky k podání (A1)** |
 
 ## 85.2 Než začnete
 
@@ -187,7 +188,7 @@ protože mzdy se podávají zpětně.
 | **Roční vyúčtování daně** | Archiv vyúčtování daně (jen s oprávněním k sestavám). |
 | **K odeslání** | Všechno připravené, co ještě neodešlo, napříč měsíci a agendami. |
 | **Odesláno** | Odeslaná podání ČSSZ, jejich protokoly, opravy a storna. |
-| **Mimořádná podání ▾** | **Přehled povinností**, **Registrace zaměstnavatele**, **Dohlášení údajů (A3)**, **Záměr slevy**, **Dávky nemocenského**, **Evidenční list DP**, **Ostatní**. |
+| **Mimořádná podání ▾** | **Přehled povinností**, **Registrace zaměstnavatele**, **Přihlášky k podání (A1)**, **Dohlášení údajů (A3)**, **Záměr slevy**, **Dávky nemocenského**, **Evidenční list DP**, **Ostatní**. |
 | **Další ▾** | **Inbox** (připomínky lhůt a problémů) a **Certifikát**. |
 
 Na úzkém displeji se záložky zalamují do dalšího řádku. Každá záložka má
@@ -302,10 +303,16 @@ pojišťovně (HOZ).
 5. Klikněte na **Připravit podání**.
 6. Klikněte na **Odeslat do produkce** (nebo podání odešlete ze záložky
    **K odeslání**, kde jsou všechny připravené registrace pohromadě).
-7. Po převzetí klikněte na **Zjistit výsledek** a po načtení protokolu na
+7. Výsledek si aplikace po převzetí zjistí sama a transakci uzavře. Chcete-li
+   ho hned, klikněte na **Zjistit výsledek** a po načtení protokolu na
    **Uzavřít**.
 8. Podali-li jste částečné přihlášení P1, podejte plnou registraci A1 do
    8 dnů po nástupu stejným postupem.
+
+Nastupuje-li víc lidí najednou, připravte přihlášky A1 hromadně v
+**Mimořádná podání ▾ → Přihlášky k podání (A1)** (viz
+[§ 85.14.16](#851416-registrace-zamestnance-prezec-a-regzec)). Profil A1
+(krok 3) se doplňuje u každého vztahu zvlášť.
 
 **Oznámení zdravotní pojišťovně** (do 8 dnů, u DPP a DPČ do 20. dne
 následujícího měsíce):
@@ -1983,23 +1990,56 @@ nemá pole pro stát narození, proto se u osoby narozené mimo ČR píše stát
 název obce („Bratislava, Slovensko“); k tomu je potřeba mít na kartě osoby
 vyplněný stát narození. Místo narození smí mít i se státem nejvýš 50 znaků.
 
+#### Hromadná příprava přihlášek A1
+
+Na stránce `Mzdy → Podání a hlášení` v **Mimořádná podání ▾ → Přihlášky
+k podání (A1)** je seznam vztahů, které ve zvoleném období (**Období od**,
+**Období do**; výchozí je tento a příští měsíc) trvají nebo začnou a přihlášku
+ještě potřebují. Seznam vynechá vztahy, které už mají v daném prostředí
+ID PPV, mají přihlášku připravenou ve frontě nebo odeslanou, nebo je přihlásil
+předchozí program (podání v historii předchozího programu nebo nástup před
+začátkem vedení mezd v MyÚčtu). Vztah s přijatým částečným přihlášením P1
+v seznamu zůstává, protože plná přihláška A1 je jeho další krok.
+
+U každého vztahu seznam ukáže:
+
+- stav profilu A1: **Úplný**, **Neúplný** s výčtem chybějících údajů (stejným,
+  jaký ukáže **Kontrola** na kartě), nebo **Chybí**, a odkaz **Otevřít kartu
+  vztahu**,
+- lhůtu přihlášky (den nástupu, po přijatém P1 osmý den po nástupu); po lhůtě
+  je zvýrazněná,
+- varování, má-li osoba jinou otevřenou DPP, která už ID PPV má. Takový vztah
+  je nejspíš založený dvakrát a místo nové přihlášky je lepší vztahy sloučit.
+
+Zaškrtněte vztahy s úplným profilem a klikněte na **Připravit vybrané**.
+Každému se připraví plná přihláška A1 stejnou cestou jako tlačítkem
+**Připravit podání** na kartě vztahu, i před nástupem. Vztah s neúplným
+profilem, s ID PPV nebo s už existující přihláškou se přeskočí a pod hlášením
+o výsledku je u něj důvod. Opakované stisknutí druhou přihlášku nezaloží.
+Připravené přihlášky pak odešlete v záložce **K odeslání**.
+
 #### Odeslání registrace přes VREP
 
 Po přípravě registrace zůstává na kartě pracovního vztahu přesně zmrazené
 XML. Prostředí (test nebo produkce) zvolte ještě před přípravou a pak
 stiskněte **Odeslat do testu** nebo **Odeslat do produkce**. Každé stisknutí
-založí jeden doložitelný pokus; aplikace jej sama neopakuje ani se sama
-neptá na stav.
+založí jeden doložitelný pokus; aplikace registraci sama neodesílá ani
+odeslání neopakuje.
 
-Po převzetí bránou klikněte ručně na **Zjistit výsledek**. Potvrzení
-o převzetí není přijetí registrace; rozhoduje až protokol ČSSZ. Protokol se
+Na výsledek se aplikace ptá sama: úloha na pozadí, která dotahuje protokoly
+JMHZ, se v rozvrhu brány ptá i na odeslané registrace a po načtení protokolu
+transakci sama uzavře. Tlačítka **Zjistit výsledek** a **Uzavřít** zůstávají
+pro případ, kdy nechcete čekat na další běh, nebo kdy se automatice nedaří;
+když protokol nedorazí ani po stropu dotazů, podání se objeví k ruční kontrole.
+Potvrzení o převzetí není přijetí registrace; rozhoduje až protokol ČSSZ.
+Protokol se
 k podání uloží a podle výsledku formuláře se podání vede jako přijaté,
 částečně přijaté nebo odmítnuté; u odmítnutí je u podání kód a text chyby od
 ČSSZ. Uvádí-li protokol k přijaté přihlášce A1 OIČ a ID PPV, aplikace je
 zapíše do identifikátorů osoby a pracovního vztahu s doloženým původem
 „protokol ČSSZ“. Protokol, ve kterém čísla zatím chybí (ČSSZ je přiděluje
-dodatečně), přijetí potvrdí, ale čísla nezapíše. Až je protokol načtený,
-stiskněte **Uzavřít**, aby se dokončila transakce u brány. Neuzavírejte
+dodatečně), přijetí potvrdí, ale čísla nezapíše. Po načtení protokolu se
+transakce u brány uzavírá (automaticky, nebo tlačítkem **Uzavřít**). Neuzavírejte
 přenos během čekání na protokol, jinak by nebylo možné výsledek bezpečně
 načíst. Testovací a produkční pokusy jsou oddělené; pracovní vztah není
 přihlášený, dokud přijetí nepotvrdí ČSSZ.

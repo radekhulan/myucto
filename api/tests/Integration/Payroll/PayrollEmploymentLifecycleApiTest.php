@@ -1152,6 +1152,8 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
                         'relation_type' => $relationType,
                         'monthly_gross_minor' => 4000000,
                         'terms' => $terms,
+                        // Souběžná druhá DPP vedle otevřené jen s výslovným potvrzením.
+                        'confirm_new_agreement' => true,
                     ],
                 ),
                 new Response(),

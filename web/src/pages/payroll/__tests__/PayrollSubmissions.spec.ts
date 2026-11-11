@@ -567,6 +567,7 @@ describe('PayrollSubmissions', () => {
     expect(extraordinary).toEqual([
       'payroll.submissions.tabs.statutory',
       'payroll.submissions.tabs.regzel',
+      'payroll.submissions.tabs.registration_a1',
       'payroll.submissions.tabs.registration_completion',
       'payroll.submissions.tabs.discount_intents',
       'payroll.submissions.tabs.sickness',
@@ -637,8 +638,10 @@ describe('PayrollSubmissions', () => {
     // Čtrnáctá je Dohlášení údajů (REGZEC A3) za zaměstnance přihlášené přes ONZ.
     // Patnáctá je roční vyúčtování daně (DPZVD6/DPSVD2), které se podává do EPO
     // a mezi daňová přiznání nepatří.
+    // Šestnáctá jsou přihlášky k podání (REGZEC A1) připravované hromadně.
     const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(15)
+    expect(tabs).toHaveLength(16)
+    expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.registration_a1'))).toBe(true)
     expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.statutory'))).toBe(true)
     expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.registration_completion'))).toBe(true)
     await clickTab(wrapper, 'regzel')

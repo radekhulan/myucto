@@ -18,6 +18,7 @@ const m = vi.hoisted(() => ({
   createAutomaticEntitlements: vi.fn(),
   averageCandidates: vi.fn(),
   createAveragesBulk: vi.fn(),
+  setProbableBulk: vi.fn(),
   recordChildbirth: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -68,6 +69,7 @@ vi.mock('@/api/payrollAbsences', () => ({
     createAutomaticEntitlements: m.createAutomaticEntitlements,
     averageCandidates: m.averageCandidates,
     createAveragesBulk: m.createAveragesBulk,
+    setProbableBulk: m.setProbableBulk,
     recordChildbirth: m.recordChildbirth,
   },
 }))
@@ -87,6 +89,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       (typeof params?.code === 'string' ? `${key}:${params.code}` : key),
+    te: () => true,
     locale: ref('cs-CZ'),
   }),
 }))
@@ -220,7 +223,7 @@ describe('AbsenceManagement', () => {
     m.averageCandidates.mockResolvedValue({
       items: [], total: 0, limit: 25, offset: 0,
     })
-    m.createAveragesBulk.mockResolvedValue([])
+    m.createAveragesBulk.mockResolvedValue({ averages: [], skipped: [] })
   })
 
   it('explains itself instead of pulsing forever when the company has no employee', async () => {
@@ -1844,6 +1847,130 @@ describe('AbsenceManagement', () => {
 
       expect(wrapper.text()).toContain('payroll_absence.averages.bulk_inputs_changed')
       expect(m.averageCandidates).toHaveBeenCalledTimes(2)
+      wrapper.unmount()
+    })
+
+    it('ukáže přeskočené vztahy hromadného schválení jménem a důvodem', async () => {
+      m.averageCandidates.mockResolvedValue({ items: [averageCandidate()], total: 1, limit: 25, offset: 0 })
+      m.createAveragesBulk.mockResolvedValueOnce({
+        averages: [],
+        skipped: [{
+          employment_id: 12,
+          employee_id: 5,
+          employee_name: 'Syntetická osoba',
+          employment_code: 'SYNTH-HPP',
+          blockers: ['probable_earning_not_recorded'],
+        }],
+      })
+
+      const wrapper = await mountAllEmployees()
+      await wrapper.get('[data-test="tab-averages"]').trigger('click')
+      await flushPromises()
+      const selectReady = wrapper.findAll('button')
+        .find(button => button.text() === 'payroll_absence.leave.select_ready')
+      await selectReady!.trigger('click')
+      await wrapper.get('[data-test="bulk-average-create"]').trigger('click')
+      await flushPromises()
+
+      const skipped = wrapper.get('[data-test="bulk-average-skipped"]')
+      expect(skipped.text()).toContain('Syntetická osoba')
+      expect(skipped.text()).toContain('payroll_absence.averages.blockers.probable_earning_not_recorded')
+      wrapper.unmount()
+    })
+
+    it('nastaví pravděpodobný výdělek vybraným vztahům a vypíše neprovedené jménem', async () => {
+      m.averageCandidates.mockResolvedValue({
+        items: [
+          averageCandidate({
+            employment_id: 12,
+            relation_type: 'dpp',
+            ready: false,
+            blockers: ['average_already_exists'],
+            source_kind: 'probable',
+            probable_source: 'minimum_wage',
+            existing: { id: 3, status: 'approved', source_kind: 'probable', average_hourly_minor: 13_440, probable_source: 'minimum_wage' },
+          }),
+          averageCandidate({
+            employment_id: 13,
+            employee_name: 'Druhá syntetická osoba',
+            relation_type: 'dpp',
+            ready: false,
+            blockers: ['average_already_exists'],
+            existing: { id: 4, status: 'approved', source_kind: 'probable', average_hourly_minor: 13_440, probable_source: 'minimum_wage' },
+          }),
+          averageCandidate({ employment_id: 14, employee_name: 'Zaměstnanec HPP', relation_type: 'employment' }),
+        ],
+        total: 3,
+        limit: 25,
+        offset: 0,
+      })
+      m.setProbableBulk.mockResolvedValue({
+        counts: { applied: 1, unchanged: 0, failed: 1 },
+        applied: [{ employment_id: 12, employee_id: 5, employee_name: 'Syntetická osoba', employment_code: 'A', warnings: [], snapshot_id: 9 }],
+        unchanged: [],
+        failed: [{
+          employment_id: 13,
+          employee_id: 6,
+          employee_name: 'Druhá syntetická osoba',
+          employment_code: 'B',
+          code: 'average_reported_in_jmhz',
+          message: 'server',
+          params: { quarter: '1/2026', period: '2/2026' },
+        }],
+      })
+
+      const wrapper = await mountAllEmployees()
+      await wrapper.get('[data-test="tab-averages"]').trigger('click')
+      await flushPromises()
+
+      await wrapper.get('[data-test="probable-select-minimum"]').trigger('click')
+      expect(wrapper.get('[data-test="probable-apply"]').text()).toContain('payroll_absence.averages.probable_bulk.apply')
+      // Bez odůvodnění se nic neodešle (§ 355 odst. 2 ZP).
+      await wrapper.get('[data-test="probable-amount"]').setValue('180')
+      await wrapper.get('[data-test="probable-apply"]').trigger('click')
+      await flushPromises()
+      expect(m.setProbableBulk).not.toHaveBeenCalled()
+      expect(wrapper.text()).toContain('payroll_absence.averages.probable_bulk.rationale_required')
+
+      await wrapper.get('[data-test="probable-rationale"]').setValue('Sjednaná odměna 180 Kč/h')
+      await wrapper.get('[data-test="probable-apply"]').trigger('click')
+      await flushPromises()
+
+      expect(m.setProbableBulk).toHaveBeenCalledWith({
+        year: expect.any(Number),
+        quarter: expect.any(Number),
+        probable_hourly_minor: 18_000,
+        rationale: 'Sjednaná odměna 180 Kč/h',
+        employment_ids: [12, 13],
+      })
+      const failed = wrapper.get('[data-test="probable-bulk-failed"]')
+      expect(failed.text()).toContain('Druhá syntetická osoba')
+      expect(failed.text()).toContain('payroll_absence.averages.probable_bulk.failure.average_reported_in_jmhz')
+      wrapper.unmount()
+    })
+
+    it('rychlý výběr DPP vybere jen dohody o provedení práce', async () => {
+      m.averageCandidates.mockResolvedValue({
+        items: [
+          averageCandidate({ employment_id: 12, relation_type: 'dpp' }),
+          averageCandidate({ employment_id: 14, employee_name: 'Zaměstnanec HPP', relation_type: 'employment' }),
+        ],
+        total: 2,
+        limit: 25,
+        offset: 0,
+      })
+      m.setProbableBulk.mockResolvedValue({ counts: { applied: 1, unchanged: 0, failed: 0 }, applied: [], unchanged: [], failed: [] })
+
+      const wrapper = await mountAllEmployees()
+      await wrapper.get('[data-test="tab-averages"]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-test="probable-select-dpp"]').trigger('click')
+      await wrapper.get('[data-test="probable-amount"]').setValue('180')
+      await wrapper.get('[data-test="probable-rationale"]').setValue('Dohoda')
+      await wrapper.get('[data-test="probable-apply"]').trigger('click')
+      await flushPromises()
+
+      expect(m.setProbableBulk.mock.calls[0]![0].employment_ids).toEqual([12])
       wrapper.unmount()
     })
   })

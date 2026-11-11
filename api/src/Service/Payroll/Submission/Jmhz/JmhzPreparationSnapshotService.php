@@ -656,6 +656,32 @@ final readonly class JmhzPreparationSnapshotService
                 }
             }
         }
+        /*
+         * Stav žádosti o roční zúčtování (10319) v lednu a únoru. Zmrazení ho
+         * vyžaduje u každé osoby hlášení, a dřív se ozval až tam — po schválení
+         * běhu, typicky u desítek brigádníků naráz.
+         */
+        $employeeIds = [];
+        foreach ($people as $person) {
+            $employeeId = is_array($person) && is_array($person['employee'] ?? null)
+                ? ($person['employee']['id'] ?? null)
+                : null;
+            if (is_int($employeeId) && $employeeId > 0) {
+                $employeeIds[] = $employeeId;
+            }
+        }
+        foreach ($this->annualEvidence->requestIssuesForProbe(
+            $supplierId,
+            $employeeIds,
+            substr($periodEnd, 0, 8) . '01',
+        ) as $employeeId => $code) {
+            $issues[] = [
+                'code' => $code,
+                'entity_type' => 'employee',
+                'entity_id' => $employeeId,
+                'attribute_ids' => ['10319'],
+            ];
+        }
 
         return $issues;
     }

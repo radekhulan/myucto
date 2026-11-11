@@ -252,6 +252,38 @@ final class AttendanceImportServiceTest extends TestCase
     }
 
     /**
+     * Noční příplatek 1 234,50 Kč by měsíční hlášení odmítlo až po schválení
+     * mzdy. Volba importu ho zaokrouhlí nahoru na celé koruny; náhled ukáže
+     * původní i zaokrouhlenou částku a vstup vznikne už zaokrouhlený.
+     */
+    public function testWholeCrownsOptionRoundsReportedComponentsUp(): void
+    {
+        $files = AttendanceFixture::scenario();
+        $rules = $this->rules($files);
+
+        $plain = $this->service->preview($this->supplierId, self::PERIOD, $files, $rules, null);
+        self::assertTrue($plain['whole_crowns_default']);
+        self::assertFalse($plain['round_whole_crowns']);
+        self::assertSame(1, $plain['summary']['halere_components']);
+
+        $preview = $this->service->preview($this->supplierId, self::PERIOD, $files, $rules, null, null, true);
+        $components = array_column($this->byKey($preview['persons'])['jana testovaci']['components'], null, 'component_code');
+        self::assertSame(123_500, $components['PREMIE_PRIPLATKY']['amount_minor']);
+        self::assertSame(123_450, $components['PREMIE_PRIPLATKY']['rounded_from_minor']);
+        self::assertArrayNotHasKey('rounded_from_minor', $components['ODMENA']);
+
+        $this->service->apply(
+            $this->supplierId, self::PERIOD, $files, $rules, [], false, true, $this->userId,
+            roundWholeCrowns: true,
+        );
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT amount_minor FROM payroll_inputs WHERE supplier_id = ? AND external_id = ?',
+        );
+        $stmt->execute([$this->supplierId, 'attendance:' . self::PERIOD . ":{$this->jana['employment_id']}:PREMIE_PRIPLATKY"]);
+        self::assertSame(123_500, (int) $stmt->fetchColumn());
+    }
+
+    /**
      * Srážky z podkladů = dohoda o srážce na importovaný měsíc. Opakování ji
      * nezdvojí, jiná částka ji opraví, dokud z ní schválená mzda nic nestrhla.
      */

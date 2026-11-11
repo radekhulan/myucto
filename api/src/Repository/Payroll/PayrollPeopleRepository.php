@@ -368,6 +368,98 @@ final class PayrollPeopleRepository
         return ['total' => max($total, count($people)), 'people' => $people];
     }
 
+    /**
+     * Osoby, kterým chybí blokující údaj pro KONKRÉTNÍ mzdové období.
+     *
+     * Kontrola před během dřív četla {@see self::activeWithBlockingDataGaps()},
+     * tedy stav k dnešku: dohoda skončená v únoru s rezidencí zapsanou jen na
+     * únor svítila u únorového běhu jako „bez rezidence". Tady se hodnotí jen
+     * lidé s vztahem v období a údaje platné kdykoli v období
+     * ({@see PayrollPersonDataGapCatalog::expressionsForPeriod()}). U každé osoby
+     * se vrací i klíče chybějících údajů, aby nález řekl CO chybí.
+     *
+     * @param list<string> $excludedKeys mezery, které volající posuzuje jinde
+     * @return array{total:int,gap_totals:array<string,int>,people:list<array{id:int,full_name:string,gaps:list<string>}>}
+     */
+    public function blockingDataGapsForPeriod(
+        int $supplierId,
+        string $periodStart,
+        string $periodEnd,
+        int $limit = 25,
+        array $excludedKeys = [],
+    ): array {
+        $limit = max(1, $limit);
+        $definitions = PayrollPersonDataGapCatalog::definitions();
+        $expressions = array_filter(
+            PayrollPersonDataGapCatalog::expressionsForPeriod($periodStart, $periodEnd),
+            static fn (string $key): bool => $definitions[$key]['severity'] === PayrollPersonDataGapCatalog::SEVERITY_BLOCKING
+                && !in_array($key, $excludedKeys, true),
+            ARRAY_FILTER_USE_KEY,
+        );
+        if ($expressions === []) {
+            return ['total' => 0, 'gap_totals' => [], 'people' => []];
+        }
+        $columns = [];
+        $totals = [];
+        foreach ($expressions as $key => $expression) {
+            $column = PayrollPersonDataGapCatalog::COLUMN_PREFIX . $key;
+            $columns[] = "({$expression}) AS {$column}";
+            // Kolik lidí v CELÉM výsledku má tutéž mezeru: hromadná oprava
+            // v kontrole běhu ukazuje skutečný počet, ne jen vypsaná jména.
+            $totals[] = "SUM(gap_person.{$column}) OVER () AS total_{$column}";
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT gap_person.*,
+                    COUNT(*) OVER () AS total_count,
+                    ' . implode(",\n                    ", $totals) . '
+               FROM (
+                    SELECT employee.id,
+                           ' . self::fullNameExpression() . ' AS full_name,
+                           ' . implode(",\n                           ", $columns)
+            . ' ' . self::fromClause()
+            . ' WHERE employee.supplier_id = ?
+                AND ' . PayrollPersonDataGapCatalog::employedInPeriodExpression($periodStart, $periodEnd)
+            . ' ) gap_person
+              WHERE ' . implode(' OR ', array_map(
+                static fn (string $key): string => 'gap_person.' . PayrollPersonDataGapCatalog::COLUMN_PREFIX . $key . ' = 1',
+                array_keys($expressions),
+            ))
+            . ' ORDER BY gap_person.full_name ASC, gap_person.id ASC
+               LIMIT ?',
+        );
+        $stmt->bindValue(1, $supplierId, PDO::PARAM_INT);
+        $stmt->bindValue(2, $supplierId, PDO::PARAM_INT);
+        $stmt->bindValue(3, $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $people = [];
+        $total = 0;
+        $gapTotals = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $person = $this->normalizeRow($row);
+            $total = $this->intValue($person, 'total_count');
+            foreach (array_keys($expressions) as $key) {
+                $count = (int) ($row['total_' . PayrollPersonDataGapCatalog::COLUMN_PREFIX . $key] ?? 0);
+                if ($count > 0) {
+                    $gapTotals[$key] = $count;
+                }
+            }
+            $gaps = [];
+            foreach (array_keys($expressions) as $key) {
+                if ((int) ($row[PayrollPersonDataGapCatalog::COLUMN_PREFIX . $key] ?? 0) === 1) {
+                    $gaps[] = $key;
+                }
+            }
+            $people[] = [
+                'id' => $this->intValue($person, 'id'),
+                'full_name' => $this->stringValue($person, 'full_name'),
+                'gaps' => $gaps,
+            ];
+        }
+
+        return ['total' => max($total, count($people)), 'gap_totals' => $gapTotals, 'people' => $people];
+    }
+
     public function listOptionsForTenant(int $supplierId): array
     {
         // Tentýž výraz jako stránkovaný seznam — jinak by nabídka značila jiné

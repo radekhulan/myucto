@@ -1113,6 +1113,7 @@ final class Routes
             // do vzoru s číselným id a skončilo jako 404.
             $g->post('/inputs/approve-batch', [PayrollInputsAction::class, 'approveBatch']);
             $g->post('/inputs/cancel-batch', [PayrollInputsAction::class, 'cancelBatch']);
+            $g->post('/inputs/round-whole-crowns', [PayrollInputsAction::class, 'roundWholeCrowns']);
             $g->post('/inputs/{id:[0-9]+}/approve', [PayrollInputsAction::class, 'approve']);
             $g->post('/inputs/{id:[0-9]+}/cancel', [PayrollInputsAction::class, 'cancel']);
             $g->post(
@@ -1749,6 +1750,15 @@ final class Routes
                 '/employments/workplace-bulk/apply',
                 [\MyInvoice\Action\Payroll\PayrollEmploymentWorkplaceBulkFillAction::class, 'apply'],
             );
+            // Hromadná úprava podmínek vybraných vztahů (sazba, pravděpodobný výdělek, CZ-ISCO…).
+            $g->post(
+                '/employments/terms-bulk/preview',
+                [\MyInvoice\Action\Payroll\PayrollEmploymentTermsBulkEditAction::class, 'preview'],
+            );
+            $g->post(
+                '/employments/terms-bulk/apply',
+                [\MyInvoice\Action\Payroll\PayrollEmploymentTermsBulkEditAction::class, 'apply'],
+            );
             // Hromadné ukončení skončených dohod a archivace dávno ukončených vztahů.
             $g->post(
                 '/employments/bulk-closure/preview',
@@ -2149,6 +2159,15 @@ final class Routes
             $g->post(
                 '/submissions/registration-completion',
                 [\MyInvoice\Action\Payroll\PayrollRegistrationCompletionAction::class, 'complete'],
+            );
+            // Hromadná příprava přihlášek zaměstnanců (A1).
+            $g->get(
+                '/submissions/registration-a1',
+                [\MyInvoice\Action\Payroll\PayrollRegistrationA1BatchAction::class, 'candidates'],
+            );
+            $g->post(
+                '/submissions/registration-a1',
+                [\MyInvoice\Action\Payroll\PayrollRegistrationA1BatchAction::class, 'prepare'],
             );
             $g->post(
                 '/submissions/registration-transport/{submissionId:[0-9]+}',
@@ -2578,6 +2597,8 @@ final class Routes
             $g->get('/time/average-candidates', [PayrollAbsenceAction::class, 'averageCandidates']);
             $g->post('/time/averages/bulk', [PayrollAbsenceAction::class, 'createAutomaticAverages']);
             $g->post('/time/averages/probable-from-rate', [PayrollAbsenceAction::class, 'fillProbableFromRate']);
+            // Pravděpodobný výdělek zadaný účetní vybraným vztahům (podmínky + průměr).
+            $g->post('/time/averages/probable-bulk', [PayrollAbsenceAction::class, 'setProbableEarningBulk']);
             $g->post('/time/averages', [PayrollAbsenceAction::class, 'createAverage']);
             $g->post('/time/averages/{id:[0-9]+}/approve', [PayrollAbsenceAction::class, 'approveAverage']);
             $g->delete('/time/averages/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteAverage']);

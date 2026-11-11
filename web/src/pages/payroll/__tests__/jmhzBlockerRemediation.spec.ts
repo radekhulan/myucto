@@ -56,6 +56,25 @@ describe('navigace nálezů měsíčního hlášení', () => {
     )).toBeNull()
   })
 
+  it('nález složky otevře její zařazení do JMHZ v číselníku, ne Mzdové vstupy', () => {
+    expect(jmhzRemediationTarget(
+      blocker({ code: 'component_jmhz_mapping_missing', entity_type: 'component', remediation: { kind: 'components', field: null } }),
+      12,
+    )).toEqual({ name: 'payroll-components', query: { tab: 'catalog', component: '12', panel: 'jmhz' } })
+    expect(jmhzRemediationTarget(
+      blocker({ code: 'component_jmhz_manual_review', entity_type: 'run', remediation: { kind: 'components', field: null } }),
+      null,
+    )).toEqual({ name: 'payroll-components', query: { tab: 'catalog', jmhz: 'manual_review' } })
+  })
+
+  it('souhrnný nález průměrů vede na čtvrtletí vykazovaného období', () => {
+    expect(jmhzRemediationTarget(
+      blocker({ code: 'jmhz_average_hourly_earning_missing', entity_type: 'run', remediation: { kind: 'averages', field: null } }),
+      null,
+      { period: '2026-08' },
+    )).toEqual({ name: 'payroll-absences', query: { tab: 'averages', year: '2026', quarter: '3' } })
+  })
+
   it('popisek je z katalogu kódů v jazyce uživatele, ne česká věta serveru', () => {
     const { t, te } = i18n('en')
     const label = jmhzBlockerLabel(t, te, blocker({ code: 'jmhz_deferral_still_blocked', reason: 'Česká věta serveru.' }))

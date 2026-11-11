@@ -45,7 +45,7 @@ function preview(overrides: Record<string, unknown> = {}) {
   }
 }
 
-const MOUNT = { global: { stubs: { teleport: true } } }
+const MOUNT = { global: { stubs: { teleport: true, RouterLink: { props: ['to'], template: '<a><slot /></a>' } } } }
 
 describe('PayrollWorkplaceBulkFillDialog', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -86,6 +86,40 @@ describe('PayrollWorkplaceBulkFillDialog', () => {
       employment_ids: [12, 13],
     })
     expect(wrapper.get('[data-test="workplace-bulk-applied"]').text()).toBe('2')
+  })
+
+  /* Vyplněné neověřené pracoviště se nepřepisuje, ale musí být vidět jménem i po uložení. */
+  it('jmenovitě ukáže vyplněná, ale neověřená pracoviště i ve výsledku', async () => {
+    const unverified = [{ employment_id: 14, employee_id: 7, full_name: 'Neověřená osoba', employment_code: 'SYNTH-DPP', work_place: 'Praha', municipality_code: null }]
+    m.workplaceBulkPreview.mockResolvedValue(preview({ unverified }))
+    m.workplaceBulkApply.mockResolvedValue({
+      period_start: '2026-08-01',
+      municipality_code: '554782',
+      municipality_name: 'Praha',
+      country_code: 'CZ',
+      counts: { applied: 2, skipped: 0, failed: 0 },
+      applied: [{ employment_id: 12 }, { employment_id: 13 }],
+      skipped: [],
+      failed: [],
+      unverified: [],
+    })
+
+    const wrapper = mount(PayrollWorkplaceBulkFillDialog, {
+      ...MOUNT,
+      props: { periodStart: '2026-08-01', employmentIds: null },
+    })
+    await flushPromises()
+
+    const block = wrapper.get('[data-test="workplace-bulk-unverified"]')
+    expect(block.text()).toContain('payroll.workplace_bulk.unverified_title 1')
+    expect(block.get('[data-test="workplace-bulk-unverified-14"]').text()).toContain('Neověřená osoba')
+    expect(block.get('[data-test="workplace-bulk-unverified-14"]').text()).toContain('Praha')
+
+    await wrapper.get('[data-test="workplace-bulk-apply"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="workplace-bulk-result"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="workplace-bulk-unverified-14"]').exists()).toBe(true)
   })
 
   it('bez návrhu nedovolí odeslat, dokud se obec nezvolí', async () => {

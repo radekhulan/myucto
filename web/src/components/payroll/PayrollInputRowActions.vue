@@ -30,7 +30,7 @@ const { t } = useI18n()
     <button v-if="canWrite && payrollInputListEditable(input)" type="button" data-testid="payroll-input-edit" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" @click="emit('edit', input)">
       <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}
     </button>
-    <button v-if="canWrite && input.status === 'draft'" type="button" data-testid="payroll-input-cancel" :class="[btnOutlineSm('danger'), 'whitespace-nowrap']" :disabled="saving" @click="emit('cancel', input)">
+    <button v-if="canWrite && (input.status === 'draft' || (canApprove && input.status === 'approved' && !input.benefit_basket))" type="button" data-testid="payroll-input-cancel" :class="[btnOutlineSm('danger'), 'whitespace-nowrap']" :disabled="saving" @click="emit('cancel', input)">
       <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.inputs.cancel') }}
     </button>
     <button v-if="canApprove && input.status === 'draft'" type="button" data-testid="payroll-input-approve" :class="[btnOutlineSm('success'), 'whitespace-nowrap']" :disabled="saving" @click="emit('approve', input)">

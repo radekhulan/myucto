@@ -354,6 +354,15 @@ final class AttendancePersonAggregator
             }
         }
         $bankAccount = trim((string) ($identity['bank_account'] ?? ''));
+        // Údaje pro registraci ČSSZ (adresa, občanství…) klient celé nedostane;
+        // náhled z nich ukáže jen to, co se zapíše ({@see AttendanceRegistrationData}).
+        $registration = [];
+        foreach (AttendanceMeaning::REGISTRATION as $field) {
+            $value = trim((string) ($identity[$field] ?? ''));
+            if ($value !== '') {
+                $registration[$field] = $value;
+            }
+        }
 
         return $person + [
             'sources' => $sources,
@@ -368,6 +377,7 @@ final class AttendancePersonAggregator
             '_birth_date' => $birthDate,
             '_health_insurer_code' => $insurerCode === '' ? null : $insurerCode,
             '_bank_account' => $bankAccount === '' ? null : $bankAccount,
+            '_registration' => $registration,
             '_metrics' => $internalMetrics,
             '_components' => $internalComponents,
             '_deductions' => $internalDeductions,
@@ -495,7 +505,7 @@ final class AttendancePersonAggregator
                 }
             }
         }
-        if (in_array($meaning, ['birth_date', 'start_date', 'end_date'], true) && $cell->kind === AttendanceCell::NUMBER) {
+        if (in_array($meaning, ['birth_date', 'start_date', 'end_date', 'tax_declaration_from'], true) && $cell->kind === AttendanceCell::NUMBER) {
             return self::excelDate((float) $cell->number) ?? '';
         }
         if ($cell->kind === AttendanceCell::ERROR) {

@@ -127,6 +127,13 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => toastMocks,
 }))
 
+const routerMocks = vi.hoisted(() => ({ push: vi.fn() }))
+
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRouter: () => routerMocks,
+}))
+
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
 // `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
 vi.mock('vue-i18n', async (importOriginal) => ({
@@ -298,6 +305,22 @@ describe('ukončení zapsané dopředu', () => {
 
     expect(wrapper.find('[data-test="employment-ends-on"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="employment-toggle"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  /* Ukončený vztah jde opravit jen v údajích pro JMHZ a jen opravou platné verze. */
+  it('u ukončeného vztahu pustí opravu údajů pro JMHZ, ne mzdy', async () => {
+    const wrapper = await mountCard({ ...employment(), status: 'ended', end_date: '2020-01-31' })
+    await wrapper.get('[data-test="employment-toggle"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="terms-weekly-hours"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="terms-is-primary"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-test="terms-regular-workplace"]').setValue('Syntetické pracoviště')
+
+    expect(wrapper.find('[data-test="terms-save-bar"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="terms-ended-jmhz-only"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="save-mode-version"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })
@@ -787,6 +810,59 @@ describe('EmploymentCard', () => {
     await flushPromises()
     expect(vi.mocked(payrollApi.addEmploymentTerms).mock.calls[1]![2]).toMatchObject({ remuneration_type: 'hourly', end_recurring_base: true, effective_from: '2099-03-01' })
     expect(wrapper.find('[data-test="terms-end-recurring-base"]').exists()).toBe(false)
+  })
+
+  describe('sazba u vztahu s importovanou mzdou', () => {
+    function importedWageError() {
+      return { response: { status: 422, data: { error: {
+        code: 'validation_failed',
+        message: 'Mzda se k vztahu importuje jako částka; hodinový výpočet ze směn by další import zablokoval.',
+        details: { field: 'remuneration_type', code: 'hourly_rate_imported_wage' },
+      } } } }
+    }
+
+    async function submitHourly() {
+      const wrapper = await mountCard()
+      await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
+      await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200')
+      await wrapper.get('[data-test="terms-remuneration-basis"]').setValue('Syntetická dohoda')
+      await wrapper.get('[data-test="save-mode-correct"]').setValue()
+      await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+      await flushPromises()
+      return wrapper
+    }
+
+    it('vysvětlí střet s importem a s potvrzením uložení zopakuje s příznakem', async () => {
+      vi.mocked(payrollApi.correctEmploymentTerms).mockReset()
+      vi.mocked(payrollApi.correctEmploymentTerms)
+        .mockRejectedValueOnce(importedWageError())
+        .mockResolvedValueOnce({ employment: employment(), warnings: [] })
+      const wrapper = await submitHourly()
+
+      expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls[0]![2]).not.toHaveProperty('confirm_imported_wage_switch')
+      const offer = wrapper.get('[data-test="terms-imported-wage"]')
+      expect(offer.text()).toContain('payroll.people.remuneration.imported_wage_hint')
+      expect(offer.text()).toContain('payroll.people.remuneration.imported_wage_keep')
+
+      await wrapper.get('[data-test="terms-imported-wage-confirm"]').trigger('click')
+      await flushPromises()
+      expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls[1]![2])
+        .toMatchObject({ remuneration_type: 'hourly', confirm_imported_wage_switch: true })
+    })
+
+    it('volba pravděpodobného výdělku vrátí odměňování a sazbu neuloží', async () => {
+      vi.mocked(payrollApi.correctEmploymentTerms).mockReset()
+      vi.mocked(payrollApi.correctEmploymentTerms).mockRejectedValueOnce(importedWageError())
+      const wrapper = await submitHourly()
+
+      await wrapper.get('[data-test="terms-imported-wage-probable"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.find('[data-test="terms-imported-wage"]').exists()).toBe(false)
+      expect((wrapper.get('[data-test="terms-remuneration-type"]').element as HTMLSelectElement).value).not.toBe('hourly')
+      expect(wrapper.find('[data-test="terms-probable-earning-hourly"]').exists()).toBe(true)
+      expect(vi.mocked(payrollApi.correctEmploymentTerms)).toHaveBeenCalledTimes(1)
+    })
   })
 
   it.each(['', '0', '-1', '180.555', '10000000.01', 'nesjednáno'])('odmítne neplatnou hodinovou sazbu %s před uložením', async (rate) => {
@@ -1513,6 +1589,38 @@ describe('EmploymentCard', () => {
     // `no_show` zůstává — je to jiný případ, ne náhrada za mazání.
     expect(wrapper.get('[data-test="actions"]').text())
       .toContain('payroll.people.transition.no_show')
+  })
+
+  it('u blokace mzdovými vstupy nabídne jejich seznam zúžený na vztah a období', async () => {
+    toastMocks.error.mockClear()
+    routerMocks.push.mockClear()
+    const blocked: PayrollEmployment = {
+      ...employment(),
+      can_delete: false,
+      delete_blocker: {
+        code: 'payroll_employment_has_inputs',
+        message: 'Pracovní vztah má schválené mzdové vstupy za 03/2026.',
+        employment_id: null,
+        employment_code: null,
+        period: '2026-03-01',
+      },
+      delete_cascade: {},
+    }
+    const wrapper = await mountCard(blocked, {
+      props: { employment: blocked, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="action-delete-employment"]').trigger('click')
+    expect(toastMocks.error).toHaveBeenCalledTimes(1)
+    const [message, action] = toastMocks.error.mock.calls[0]!
+    expect(message).toBe('Pracovní vztah má schválené mzdové vstupy za 03/2026.')
+    expect(action.label).toBe('payroll.people.delete.show_inputs')
+    action.handler()
+    expect(routerMocks.push).toHaveBeenCalledWith({
+      name: 'payroll-components',
+      query: { tab: 'inputs', employment: '10', period: '2026-03' },
+    })
   })
 
   it('u převzatého vztahu skryje interní značky a registraci nabídne s varováním', async () => {

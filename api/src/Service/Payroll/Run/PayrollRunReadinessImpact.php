@@ -78,6 +78,14 @@ final class PayrollRunReadinessImpact
          * podkladů by účetní poslalo opravovat data, která se nikdy počítat nebudou.
          */
         'period_before_module_start' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        // Snímek běhu bez nich nevznikne
+        // ({@see PayrollRunSnapshotFixableException}), běh tedy nejde zahájit.
+        'employer_policy_invalid' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        'employer_identity_incomplete' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        'employer_accounts_incomplete' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        'employer_accounts_invalid' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        'employment_dimension_split_invalid' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        'employment_dimension_share_invalid' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
 
         // ── Spočítat jde, schválit ne: v běhu jsou to blokující validace ─────
         'draft_inputs_present' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
@@ -90,6 +98,9 @@ final class PayrollRunReadinessImpact
         // Vstupy vztahu, který do běhu nevstoupí (nepotvrzený nástup, podmínky
         // účinné až po období). Bez opravy se tiše nevyplatí.
         'inputs_on_unstarted_employment' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
+        // Výpočet daně osobu bez ověřeného stavu prohlášení zastaví (ruční
+        // kontrola), takže běh se spočítá jen zčásti a schválit nepůjde.
+        'tax_declaration_evidence_missing' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
 
         // ── Skupina 2: opraví se, ale po zamknutí přes opravnou revizi ───────
         // Rozhodnutí nepřítomnosti mění snímek vstupů (schválené nepřítomnosti).
@@ -127,6 +138,9 @@ final class PayrollRunReadinessImpact
         'run_without_employments' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'readiness_check_failed' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'person_data_gap' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
+        // Aktivní vztah po sjednaném konci: běh ho vezme jako trvající, ale
+        // ukončit se dá kdykoli a hromadně.
+        'employments_past_agreed_end' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'institution_account_unverified' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
         'employment_without_office' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
         'employment_social_registration_missing' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],

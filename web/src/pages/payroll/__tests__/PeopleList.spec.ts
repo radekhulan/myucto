@@ -304,7 +304,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
 
     expect(wrapper.find('[data-test="quick-inputs-link"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="action-more-label"]').exists()).toBe(true)
-    for (const key of ['statutory-bulk', 'declaration-sign-bulk', 'health-insurer-bulk', 'workplace-bulk', 'bulk-closure']) {
+    for (const key of ['statutory-bulk', 'declaration-sign-bulk', 'health-insurer-bulk', 'workplace-bulk', 'terms-bulk', 'bulk-closure']) {
       expect(wrapper.get(`[data-test="action-${key}"]`).attributes('data-tier')).toBe('overflow')
     }
   })
@@ -619,6 +619,35 @@ describe('PeopleList toolbar and shared employee creation', () => {
     await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
     await flushPromises()
     expect(m.toastWarning).toHaveBeenCalledWith(expect.stringContaining('Místo výkonu práce neodpovídá CISOB.'))
+  })
+
+  it('další DPP vedle otevřené dohody nabídne použít otevřenou a odešle volbu', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    m.createEmployment
+      .mockRejectedValueOnce({ response: { status: 409, data: { error: {
+        code: 'open_agreement_exists', message: 'Osoba už má otevřenou dohodu.',
+        open_agreements: [{
+          employment_id: 77, employee_id: 1, employee_name: 'Alfa Aktivní', code: 'DPP-1', status: 'active',
+          start_date: '2026-06-01', end_date: '2026-06-30', reusable: true, extend_to: '2026-09-30',
+        }],
+      } } } })
+      .mockResolvedValueOnce({ employment: { id: 77, employee_id: 1, relation_type: 'dpp', code: 'DPP-1' }, warnings: [], reused: true, extended_to: '2026-09-30' })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.toastError).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="new-employment-open-agreement"]').text()).toContain('payroll.people.open_agreement.guidance')
+    expect(wrapper.find('[data-test="new-employment-confirm-new"]').exists()).toBe(true)
+    await wrapper.get('[data-test="new-employment-reuse-77"]').trigger('click')
+    await flushPromises()
+    expect(m.createEmployment).toHaveBeenLastCalledWith(1, expect.objectContaining({ use_open_agreement: 77 }))
+    expect(m.toastSuccess).toHaveBeenCalledWith(expect.stringContaining('payroll.people.open_agreement.reused_extended'))
+    expect(wrapper.find('[data-test="new-employment-form"]').exists()).toBe(false)
   })
 
   it('podklad sjednání nabízí jen u hodinového režimu nového vztahu', async () => {
@@ -1089,6 +1118,33 @@ describe('PeopleList toolbar and shared employee creation', () => {
    * neaktivní člověk ve výchozím filtru chybí a listovat kvůli odkazu celý
    * seznam by stálo tolik požadavků, kolik má firma stránek.
    */
+  it('proklik z kontroly běhu otevře hromadnou opravu na období běhu', async () => {
+    m.routeQuery.bulk = 'workplace'
+    m.routeQuery.period = '2026-02'
+    const wrapper = mount(PeopleList, {
+      global: {
+        stubs: {
+          ActionBar: true,
+          RouterLink: true,
+          EmploymentCard: true,
+          PayrollPersonQuickEdit: true,
+          PayrollPersonProfilePanel: true,
+          PayrollPersonStatutoryEvidencePanel: true,
+          PayrollWorkplaceBulkFillDialog: {
+            props: ['periodStart', 'employmentIds'],
+            template: '<div data-test="workplace-bulk-stub">{{ periodStart }}</div>',
+          },
+          PayrollBulkClosureDialog: { template: '<div data-test="closure-bulk-stub" />' },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="workplace-bulk-stub"]').text()).toBe('2026-02-01')
+    expect(wrapper.find('[data-test="closure-bulk-stub"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('opens a person missing from the page by fetching that single detail', async () => {
     m.routeQuery.person = '2'
     m.person.mockResolvedValue({

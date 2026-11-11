@@ -306,9 +306,9 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
     }
 
     /**
-     * Automatický sweep je JMHZ-specifický a nesmí registrační podání omylem
-     * dotazovat třídou CSSZ_JMHZ. PREZEC/REGZEC se po ručně spuštěném odeslání
-     * sledují jen přes svou explicitní transportní akci.
+     * JMHZ fronta nesmí registrační podání dotazovat třídou CSSZ_JMHZ.
+     * PREZEC/REGZEC mají vlastní frontu, kterou sweep obsluhuje přes
+     * registrační transport.
      */
     public function testJmhzDueQueuesExcludeRegistrationAttempts(): void
     {
@@ -343,6 +343,10 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
             $sent['id'],
             array_column($this->repository->listDuePolls(50), 'id'),
         );
+        self::assertContains(
+            $sent['id'],
+            array_column($this->repository->listDueRegistrationPolls(50), 'id'),
+        );
         $completed = $this->repository->markCompleted(
             (int) $sent['id'],
             (int) $sent['row_version'],
@@ -350,6 +354,14 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         self::assertNotContains(
             $completed['id'],
             array_column($this->repository->listDueCloses(50, 8), 'id'),
+        );
+        self::assertNotContains(
+            $completed['id'],
+            array_column($this->repository->listDueRegistrationPolls(50), 'id'),
+        );
+        self::assertContains(
+            $completed['id'],
+            array_column($this->repository->listDueRegistrationCloses(50, 8), 'id'),
         );
     }
 

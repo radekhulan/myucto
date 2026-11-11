@@ -120,6 +120,25 @@ enum JmhzSpecVersion: string
     }
 
     /**
+     * Připraví se za období měsíční hlášení? Stejné pravidlo, kterým se řídí
+     * příprava a zmrazení hlášení: {@see JmhzPreparationSnapshotService::freeze()}
+     * přijme schválenou revizi běhu za KTERÉKOLI období (dolní mez nemá, firmy
+     * hlásí i 01/2026 a 02/2026 před zákonným startem) a ročník datové věty
+     * určuje jen {@see self::forPeriodStart()}. Na tohle se váže vše, co má
+     * hlášení předběhnout, např. kontrola celých korun ve mzdovém běhu.
+     */
+    public static function monthlyReportPreparable(string $periodStart): bool
+    {
+        try {
+            self::forPeriodStart(substr($periodStart, 0, 10));
+        } catch (JmhzXmlException) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Registrační podání podle data události: nástup, skončení nebo platnost
      * změny (`YYYY-MM-DD`).
      */

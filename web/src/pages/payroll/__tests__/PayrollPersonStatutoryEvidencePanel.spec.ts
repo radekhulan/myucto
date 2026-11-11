@@ -345,6 +345,22 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
       .not.toContain('payroll.people.statutory_evidence.current_missing')
   })
 
+  it('u prohlášení se začátkem v rozporu s § 38k ZDP ukáže upozornění, ne blokátor', async () => {
+    const evidence = filledEvidence()
+    evidence.derived = {
+      taxpayer_credit: true,
+      tax_declaration_checks: [{ id: 5, legal_from: '2026-02-01', basis: 'following_month', warning: 'earlier_than_allowed' }],
+    }
+    mocks.statutoryEvidence.mockResolvedValue(evidence)
+    const wrapper = await startEditing()
+
+    expect(wrapper.get('[data-test="declaration-check-0"]').text())
+      .toContain('payroll.people.statutory_evidence.declaration_check.earlier_than_allowed')
+    expect(wrapper.find('[data-test="issues-tax_declarations-0"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="section-tax_declarations"]').text())
+      .toContain('payroll.people.statutory_evidence.section_hint.tax_declarations')
+  })
+
   it('má jediné společné Uložit, žádné tlačítko na jednotlivý záznam', async () => {
     const wrapper = await startEditing()
 

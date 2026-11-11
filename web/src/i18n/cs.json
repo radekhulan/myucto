@@ -3847,10 +3847,13 @@
       "reload": "Načíst náhled",
       "effective_from": "Platí od {date}",
       "basis": {
-        "year_start": "od začátku roku, prohlášení je podepsané před rokem nebo v lednu",
-        "signing_month": "od měsíce podpisu, za dřívější měsíce se sleva neuplatní",
-        "after_frozen_period": "až po období uzavřeném schválenou mzdou (do {date})"
+        "employment_start": "od měsíce nástupu, prohlášení je podepsané do 30 dnů po nástupu (§ 38k odst. 4 ZDP)",
+        "year_start": "od ledna, prohlášení je podepsané nejpozději 15. února (§ 38k odst. 4 ZDP)",
+        "following_month": "od měsíce po podpisu, prohlášení je podepsané po lhůtě (§ 38k odst. 7 ZDP); nově nastoupivší do 30 dnů po nástupu mají první měsíc od nástupu",
+        "after_frozen_period": "až po období uzavřeném schválenou mzdou (do {date}), slevu za uzavřené měsíce dorovná roční zúčtování"
       },
+      "annual_settlement": "slevu za uzavřené měsíce dorovná roční zúčtování",
+      "person_effective": "od {date}",
       "year_frozen": "Celý rok {year} je uzavřený schválenou mzdou (do {date}). Do uzavřeného výpočtu se zpětně nezapisuje.",
       "recalculate_title": "Rozpracované mzdy k přepočtu",
       "recalculate_hint": "Tyto mzdy se počítaly bez podpisu. Po zápisu je přepočítejte.",
@@ -3864,6 +3867,7 @@
         "ready": "Zapíše se",
         "already_signed": "Na rok už podepsáno, přeskočí se",
         "period_frozen": "Období uzavřené schválenou mzdou",
+        "after_year_end": "Prohlášení platí až od dalšího roku",
         "timeline_gap": "Předchozí záznam končí dřív, zapište na kartě osoby",
         "employee_not_found": "Osoba nenalezena"
       },
@@ -3976,6 +3980,78 @@
         "after_frozen_period": "od měsíce po schváleném období"
       }
     },
+    "terms_bulk": {
+      "title": "Upravit podmínky vybraných vztahů",
+      "intro": "Zvolené údaje se zapíší stejně jako na kartě vztahu: jako oprava platné verze podmínek, nebo, je-li z ní už zúčtovaná mzda, jako nová verze od prvního nezúčtovaného měsíce. Vztahy, které drží schválená nebo zamčená mzda, se vynechají s důvodem.",
+      "new_version_badge": "nová verze od {month}",
+      "period": "Vztahy trvající v měsíci",
+      "relation_type": "Druh vztahu",
+      "relation_all": "Všechny druhy",
+      "retry": "Zkusit znovu",
+      "load_failed": "Vztahy se nepodařilo načíst.",
+      "apply_failed": "Úpravu podmínek se nepodařilo uložit.",
+      "applied_toast": "Podmínky upraveny u {count} vztahů.",
+      "summary": {
+        "employments": "Vztahů v měsíci",
+        "selected": "Vybráno k úpravě",
+        "excluded": "Nelze upravit"
+      },
+      "select_all": "Vybrat všechny upravitelné vztahy",
+      "current": "sazba {rate} Kč/h · CZ-ISCO {isco} · činnost {activity}",
+      "nothing_editable": "V měsíci není žádný vztah, který by šel hromadně upravit.",
+      "excluded_title": "Vynechané vztahy ({count})",
+      "mode": "Režim",
+      "mode_fill": "Doplnit jen prázdné údaje",
+      "mode_overwrite": "Přepsat vyplněné údaje",
+      "overwrite_warning": "Přepsání změní i údaje, které už vztahy mají vyplněné. Použijte ho jen tehdy, když opravujete chybně zapsanou hodnotu u všech vybraných vztahů.",
+      "fields_hint": "Upraví se jen vyplněná pole. Prázdné pole zůstane u vztahů beze změny.",
+      "hourly_rate": "Sjednaná hodinová sazba (Kč)",
+      "hourly_rate_hint": "Přepne vztah na hodinový výpočet mzdy z odpracovaných směn. Vztahům, kterým se mzda importuje jako hotová částka, sazbu nenastavíme.",
+      "imported_wage_badge": "mzda z importu",
+      "basis_kind": "Podklad odměňování",
+      "basis_keep": "Ponechat, u dohod doplnit dohodu",
+      "basis": "Označení podkladu",
+      "basis_placeholder": "Například Dohoda o provedení práce",
+      "probable_earning": "Pravděpodobný hodinový výdělek (Kč)",
+      "probable_rationale": "Odůvodnění pravděpodobného výdělku (§ 355 ZP)",
+      "probable_rationale_placeholder": "Z čeho jste výdělek stanovili",
+      "cz_isco": "CZ-ISCO",
+      "activity_code": "Druh činnosti",
+      "no_change": "Beze změny",
+      "activity_needs_relation": "Druh činnosti nabídneme po výběru jednoho druhu vztahu.",
+      "municipality": "Místo výkonu práce (obec)",
+      "search_municipality": "Hledat obec",
+      "country": "Stát pracoviště",
+      "apply": "Upravit {count} vztahů",
+      "blocked": {
+        "no_selection": "Vyberte aspoň jeden vztah.",
+        "no_change": "Vyplňte aspoň jeden údaj, který se má upravit.",
+        "invalid_amount": "Částka musí být kladné číslo s nejvýše dvěma desetinnými místy.",
+        "rationale_required": "K pravděpodobnému výdělku doplňte odůvodnění."
+      },
+      "result_title": "Výsledek úpravy",
+      "result": {
+        "applied": "Upraveno",
+        "skipped": "Vynecháno",
+        "failed": "Chyba"
+      },
+      "row_correction": "oprava",
+      "row_new_version": "nová verze od {month}",
+      "reason": {
+        "terms_missing": "vztah nemá žádnou verzi podmínek",
+        "later_terms": "platná verze podmínek začíná až po zvoleném měsíci",
+        "employment_closed": "vztah je ukončený",
+        "employment_reported": "vztah je ukončený a za jeho měsíc je hlášení JMHZ zmrazené nebo podané: vraťte ukončení, opravte údaje a podejte opravné hlášení",
+        "employment_not_in_period": "vztah ve zvoleném měsíci netrvá",
+        "period_settled": "mzda se mezitím zaúčtovala, spusťte úpravu znovu",
+        "report_prepared": "měsíční hlášení JMHZ za {period} je připravené, nejdřív otevřete mzdu k opravě",
+        "run_locked": "mzda za {period} je schválená nebo zamčená, nejdřív ji otevřete k opravě",
+        "hourly_not_supported": "u tohoto druhu vztahu hodinové odměňování nejde",
+        "hourly_rate_imported_wage": "sazba nenastavena: mzda se k vztahu importuje jako částka, hodinový výpočet by import zablokoval, nastavte pravděpodobný výdělek",
+        "activity_code_relation_mismatch": "druh činnosti neodpovídá druhu vztahu",
+        "nothing_to_change": "údaje už jsou vyplněné, nic se neměnilo"
+      }
+    },
     "workplace_bulk": {
       "title": "Hromadně doplnit místo výkonu práce",
       "intro": "Místo výkonu práce je sjednané v pracovní smlouvě, aplikace ho neodhaduje - zvolte obec, kde zaměstnanci skutečně pracují. Vyplněné pracoviště se nepřepisuje.",
@@ -3998,10 +4074,14 @@
         "terms_missing": "chybí účinné smluvní podmínky",
         "later_terms": "novější podmínky vztahu už pracoviště mění",
         "employment_closed": "pracovní vztah je ukončený",
+        "employment_reported": "vztah je ukončený a za jeho měsíc je hlášení JMHZ zmrazené nebo podané: vraťte ukončení, opravte údaje a podejte opravné hlášení",
         "period_settled": "období je už vyúčtované",
         "workplace_not_verified": "existující pracoviště není ověřené"
       },
       "excluded_title": "Vyřazeno ({count})",
+      "unverified_title": "Pracoviště vyplněné, ale neověřené ({count})",
+      "unverified_hint": "Tyto vztahy už pracoviště mají, jen ho číselník ČSSZ neověřil, takže ho hromadné doplnění nepřepíše a JMHZ ho dál hlásí jako chybějící. Na kartě vztahu vyberte obec z číselníku.",
+      "unverified_value": "vyplněno „{place}“ (kód obce {code})",
       "apply": "Doplnit pracoviště {count} vztahům",
       "applied_toast": "Pracoviště bylo doplněno u {count} pracovních vztahů.",
       "result_title": "Výsledek doplnění",
@@ -4035,7 +4115,7 @@
         "inactive": {
           "summary": "Dohody bez aktivity",
           "title": "Dohody bez aktivity",
-          "hint": "DPP a DPČ bez sjednaného konce, které za posledních {months} měsíců nemají mzdový vstup ani docházku. Ukončí se k poslednímu dni měsíce poslední aktivity."
+          "hint": "DPP a DPČ bez sjednaného konce, které za {months} měsíců do {date} (poslední zpracovaný mzdový měsíc, bez schválené mzdy dnešek) nemají mzdový vstup ani docházku. Ukončí se k poslednímu dni měsíce poslední aktivity. Nejsou předvybrané, zkontrolujte je."
         },
         "archive": {
           "summary": "K archivaci",
@@ -4706,6 +4786,7 @@
         "employments_added": "Pracovní vztahy, které do období nově patří: {count}",
         "employments_removed": "Pracovní vztahy, které do období už nepatří: {count}",
         "statutory_evidence_changed": "Osoby se změněnou zákonnou evidencí: {count}",
+        "employment_terms_changed": "Vztahy se změněnými podmínkami (hlavní vztah, místo výkonu, účtárna, úvazek): {count}",
         "action": "Klikněte na „Obnovit podklady“ a potom běh přepočítejte.",
         "action_forbidden": "Obnovit podklady může uživatel s právem počítat mzdy a zapisovat mzdové vstupy."
       },
@@ -4716,6 +4797,14 @@
       "readiness": {
         "affected": "Týká se: {names}",
         "fill_probable_average": "Doplnit pravděpodobný výdělek ze sazby",
+        "bulk": {
+          "statutory_defaults": "Doplnit výchozí zákonné údaje ({count})",
+          "declaration_signed": "Podepsaná prohlášení hromadně",
+          "health_insurer": "Zdravotní pojišťovny hromadně ({count})",
+          "workplace": "Doplnit místo výkonu práce ({count})",
+          "closure": "Ukončit skončené dohody ({count})",
+          "annual_settlement_request": "Nastavit „nepožádal“ o roční zúčtování ({count})"
+        },
         "fill_probable_average_done": "Doplněno automaticky ze sjednané hodinové sazby: {count}. Průměr jde opravit novou revizí v Absence a dovolená → Průměrný výdělek.",
         "fill_probable_average_failed": "Pravděpodobný výdělek se nepodařilo doplnit.",
         "impact": {
@@ -5164,6 +5253,7 @@
         "cancel_failed": "Měsíční vstup se nepodařilo zrušit.",
         "reverse_benefit": "Stornovat benefit",
         "reverse_benefit_reason": "Důvod storna benefitu - proč se uvolňuje roční koš osvobození (§ 6 odst. 9 ZDP)?",
+        "reverse_benefit_reason_required": "Benefit se nestornoval: bez důvodu storno nejde uložit. Klikněte znovu na „Stornovat benefit“ a důvod vyplňte.",
         "benefit_reversed": "Benefit byl stornován a roční koš osvobození se uvolnil.",
         "reverse_benefit_failed": "Benefit se nepodařilo stornovat.",
         "empty": "V tomto období nejsou mzdové vstupy",
@@ -5219,6 +5309,12 @@
         "approve_matching": "Schválit {count} odpovídajících filtru",
         "cancel_matching": "Zrušit {count} konceptů",
         "cancel_matching_confirm": "Zrušit {count} konceptů odpovídajících filtru? Zmizí ze seznamu a přestanou blokovat mzdový běh. Vrátit to nejde.",
+        "round_whole_crowns": "Zaokrouhlit vstupy na celé koruny nahoru",
+        "round_whole_crowns_hint": "Měsíční hlášení vykazuje výdělek v celých korunách. Vstupy s haléři v období se zaokrouhlí nahoru, ve prospěch zaměstnance.",
+        "round_whole_crowns_confirm": "Zaokrouhlit haléřové vstupy období nahoru na celé koruny? Změní se koncepty i schválené vstupy, které ještě nejsou uzamčené během.",
+        "round_whole_crowns_done": "Zaokrouhleno vstupů: {count}. Nezměněno: {skipped}.",
+        "round_whole_crowns_none": "V období nejsou vstupy s haléři, které by měsíční hlášení odmítlo.",
+        "round_whole_crowns_failed": "Vstupy se nepodařilo zaokrouhlit.",
         "export_xlsx": "Excel",
         "export_pdf": "PDF",
         "export_hint": "Stáhne všechny vstupy odpovídající filtru, ne jen zobrazenou stránku.",
@@ -5690,7 +5786,8 @@
         "all": "Vše",
         "requested": "Požádali, nezúčtováno",
         "unsettled": "Bez zúčtování",
-        "settled": "Zúčtováno"
+        "settled": "Zúčtováno",
+        "request_undecided": "Žádost nerozhodnuta"
       },
       "not_settled": "Neprovedeno",
       "detail": "Podrobnosti",
@@ -6369,6 +6466,9 @@
         "end_recurring_base_hint": "Vztah má aktivní předpis základní mzdy. Hodinová mzda se z něj nepočítá, a aby se mzda nevyplatila dvakrát, musí předpis skončit den před účinností nové verze.",
         "end_recurring_base_named": "Ukončit předpis {name} k {date} a uložit",
         "end_recurring_base": "Ukončit předpis základní mzdy k {date} a uložit",
+        "imported_wage_hint": "Mzda se k vztahu importuje jako částka (například z docházky). Hodinový výpočet ze směn by další import zablokoval. Místo sazby nastavte pravděpodobný výdělek, nebo potvrďte, že mzdu budete nově počítat ze směn a import hodinové mzdy ukončíte.",
+        "imported_wage_keep": "Nastavit jen pravděpodobný výdělek",
+        "imported_wage_switch": "Přesto přepnout na hodinový výpočet",
         "basis_kinds": {
           "wage_statement": "Mzdový výměr",
           "contract": "Pracovní smlouva",
@@ -6419,6 +6519,7 @@
       "statutory_bulk_action": "Doplnit výchozí zákonné údaje",
       "declaration_sign_bulk_action": "Podepsaná prohlášení hromadně",
       "workplace_bulk_action": "Doplnit místo výkonu práce",
+      "terms_bulk_action": "Upravit podmínky vybraných vztahů",
       "more_functions": "Další funkce",
       "no_results_title": "Žádný zaměstnanec neodpovídá filtru",
       "no_results_description": "Upravte hledaný text nebo zvolte jiné zobrazení.",
@@ -6603,8 +6704,11 @@
           "components": "žádná pravidelná složka | 1 pravidelná složka mzdy | {count} pravidelné složky mzdy | {count} pravidelných složek mzdy",
           "time": "žádný záznam docházky | 1 záznam docházky a kalendáře | {count} záznamy docházky a kalendáře | {count} záznamů docházky a kalendáře",
           "absences": "žádná absence | 1 záznam absence a dovolené | {count} záznamy absencí a dovolené | {count} záznamů absencí a dovolené",
-          "sickness": "žádný případ dávky | 1 nepodaný případ dávky nemocenského pojištění | {count} nepodané případy dávek nemocenského pojištění | {count} nepodaných případů dávek nemocenského pojištění"
+          "sickness": "žádný případ dávky | 1 nepodaný případ dávky nemocenského pojištění | {count} nepodané případy dávek nemocenského pojištění | {count} nepodaných případů dávek nemocenského pojištění",
+          "registration_profile": "žádný profil registrace | 1 nepodaný profil registrace ČSSZ | {count} nepodané profily registrace ČSSZ | {count} nepodaných profilů registrace ČSSZ",
+          "registration_changes": "žádný návrh hlášení změny | 1 návrh hlášení změny registrace | {count} návrhy hlášení změn registrace | {count} návrhů hlášení změn registrace"
         },
+        "show_inputs": "Zobrazit mzdové vstupy",
         "person_cascade": {
           "employments": "žádný pracovní vztah | 1 pracovní vztah | {count} pracovní vztahy | {count} pracovních vztahů",
           "profile": "žádný údaj profilu | 1 údaj profilu a osobních dat | {count} údaje profilu a osobních dat | {count} údajů profilu a osobních dat",
@@ -7000,6 +7104,17 @@
       "add_employment": "Přidat pracovní vztah",
       "employment_created": "Pracovní vztah byl založen.",
       "employment_created_with_warnings": "Pracovní vztah byl založen. Zkontrolujte na kartě vztahu: {messages}",
+      "open_agreement": {
+        "title": "Osoba už má otevřenou dohodu o provedení práce.",
+        "item": "DPP {code} od {start} do {end}",
+        "no_end": "neurčita",
+        "guidance": "Jedna dlouhodobá DPP znamená jednu registraci u ČSSZ. Každou novou dohodu je potřeba znovu přihlásit a po skončení odhlásit, proto je výhodnější použít otevřenou dohodu a případně jí prodloužit konec.",
+        "reuse": "Použít dohodu {code}",
+        "reuse_extend": "Použít dohodu {code} a prodloužit konec do {date}",
+        "create_new": "Přesto založit novou DPP",
+        "reused": "Použila se otevřená dohoda {code}, nová DPP se nezaložila.",
+        "reused_extended": "Použila se otevřená dohoda {code} s koncem prodlouženým do {date}, nová DPP se nezaložila."
+      },
       "code": "Osobní číslo",
       "relation_type": "Typ vztahu",
       "initial_terms": "Počáteční smluvní podmínky",
@@ -7043,7 +7158,8 @@
         "correct_settled_hint": "Z této verze je už zúčtovaná mzda (naposledy za období od {period}), opravu server odmítne. Zvolte novou verzi.",
         "current_effective_from": "Účinnost platných podmínek od",
         "current_effective_from_hint": "Opraví datum platné verze, novou verzi nezaloží. Například když podmínky platí až ode dne zápisu místo ode dne nástupu.",
-        "effective_from_correction_needs_correct": "Účinnost platné verze lze opravit jen volbou „Opravit platné podmínky“. Vraťte datum, nebo změňte způsob uložení."
+        "effective_from_correction_needs_correct": "Účinnost platné verze lze opravit jen volbou „Opravit platné podmínky“. Vraťte datum, nebo změňte způsob uložení.",
+        "ended_jmhz_only": "Vztah je ukončený: opravit jde jen údaje pro JMHZ (místo výkonu práce, CZ-ISCO, druh činnosti, primární vztah, pravděpodobný výdělek), a to dokud za jeho měsíce není hlášení JMHZ zmrazené ani podané. Jinou změnu podmínek udělejte po vrácení ukončení."
       },
       "mutation_failed": "Změnu pracovního vztahu se nepodařilo uložit.",
       "transition_saved": "Stav pracovního vztahu byl změněn.",
@@ -7450,6 +7566,11 @@
         "current_ended": "Zadáno jen do {day}, k {month} chybí. Trvá-li vztah dál, nechte Platí do prázdné.",
         "current_none_claimed": "Žádná sleva",
         "derived_taxpayer_credit": "Sleva na poplatníka (z podepsaného prohlášení)",
+        "declaration_check": {
+          "earlier_than_allowed": "Podle dne podpisu platí prohlášení až od {month} (§ 38k ZDP). Za dřívější měsíce sleva nenáleží, posuňte začátek záznamu.",
+          "later_than_entitled": "Podle dne podpisu náleží sleva už od {month} (§ 38k ZDP). Za měsíce uzavřené schválenou mzdou ji dorovná roční zúčtování.",
+          "next_year": "Prohlášení podepsané po lhůtě platí až od dalšího roku (§ 38k odst. 7 ZDP)."
+        },
         "current_from": "platí od {day}",
         "current_none": "k vybranému měsíci nic neplatí",
         "history": "Historie a záznamy - zatím žádný | Historie a záznamy (1) | Historie a záznamy ({count}) | Historie a záznamy ({count})",
@@ -7493,7 +7614,7 @@
           "social_pensions": "Pobíraný důchod"
         },
         "section_hint": {
-          "tax_declarations": "Rozhoduje o tom, zda se uplatní měsíční slevy a zvýhodnění, nebo se sráží daň bez nich.",
+          "tax_declarations": "Rozhoduje o tom, zda se uplatní měsíční slevy a zvýhodnění, nebo se sráží daň bez nich. Začátek záznamu je první měsíc slevy: při podpisu do 30 dnů po nástupu měsíc nástupu, při podpisu do 15. února leden, jinak měsíc po podpisu (§ 38k ZDP). Den podpisu zapište k podepsanému prohlášení.",
           "tax_residences": "Nerezident se zdaňuje jinak než rezident; odkaz na podklad lze uložit nepovinně.",
           "tax_credit_claims": "Měsíční slevy na dani na poplatníka, na invaliditu a na držitele ZTP/P. Uplatní se jen s podepsaným prohlášením; bez záznamu se sleva neodečte a záloha na daň je o ni vyšší. Každý druh slevy se vede jako vlastní řada, takže mohou platit souběžně.",
           "social_jurisdictions": "Zda osoba podléhá českému sociálnímu pojištění. U cizího režimu je nutná země; odkaz na podklad je nepovinný.",
@@ -8974,6 +9095,7 @@
         "queue": "K odeslání",
         "transport": "Odesláno",
         "regzel": "Registrace zaměstnavatele",
+        "registration_a1": "Přihlášky k podání (A1)",
         "registration_completion": "Dohlášení údajů (A3)",
         "jmhz": "JMHZ",
         "discount_intents": "Záměr slevy",
@@ -12567,6 +12689,58 @@
         "program": "Předchozí program",
         "open": "Zobrazit podání",
         "deadline": "Lhůta dohlášení (30. 4. 2026) uplynula před začátkem vedení mezd v MyÚčtu, dohlášení tedy vyřídil předchozí program. Když ho ČSSZ nemá, dohlaste ho ručně."
+      }
+    },
+    "registrationA1": {
+      "title": "Přihlášky zaměstnanců k podání (REGZEC A1)",
+      "intro": "Vztahy, které ve zvoleném období trvají nebo začnou a u ČSSZ ještě nejsou přihlášené: nemají ID PPV, nemají připravenou ani odeslanou přihlášku a nepřihlásil je předchozí program. Přihlášku vybraným připravíte jedním tlačítkem stejně jako na kartě vztahu. Připravená podání pak odešlete ve frontě K odeslání.",
+      "legal": "Připraví se plná přihláška A1, i před nástupem. Připravují se jen vztahy s úplným profilem registrace; u neúplných řádek ukáže, co chybí, a odkaz na kartu vztahu.",
+      "from": "Období od",
+      "to": "Období do",
+      "submit": "Připravit vybrané ({count})",
+      "reload": "Načíst znovu",
+      "select_all": "Vybrat všechny úplné",
+      "select_one": "Vybrat {name}",
+      "open_profile": "Otevřít kartu vztahu",
+      "open_queue": "Otevřít frontu K odeslání",
+      "open_ended": "trvá",
+      "empty": "Ve zvoleném období žádný vztah přihlášku nepotřebuje.",
+      "load_failed": "Seznam přihlášek k podání se nepodařilo načíst.",
+      "submit_failed": "Přihlášky se nepodařilo připravit.",
+      "done": "Připraveno: {prepared}, přeskočeno: {skipped}. U přeskočených je důvod v řádku.",
+      "more_problems": "a další vady ({count}), celý seznam ukáže Kontrola na kartě vztahu",
+      "col": {
+        "person": "Zaměstnanec",
+        "period": "Trvání vztahu",
+        "profile": "Profil registrace (A1)",
+        "deadline": "Lhůta přihlášky"
+      },
+      "profile": {
+        "verified": "Úplný",
+        "draft": "Neúplný",
+        "missing": "Chybí"
+      },
+      "deadline": {
+        "due": "do {date}",
+        "overdue": "po lhůtě (do {date})",
+        "not_derived": "lhůtu aplikace neodvozuje, podejte bez odkladu",
+        "unknown": "bez data nástupu",
+        "after_p1": "po přijatém částečném přihlášení (P1)"
+      },
+      "warning": {
+        "duplicate_dpp": "Osoba má jinou otevřenou DPP ({code}), která už má ID PPV. Nejspíš jde o tentýž vztah založený dvakrát - zvažte sloučení vztahů místo nové přihlášky."
+      },
+      "result": {
+        "prepared": "Připraveno, podání č. {id}.",
+        "existing": "Přihláška už existuje, podání č. {id}.",
+        "open": "K odeslání"
+      },
+      "skip": {
+        "id_ppv": "Vztah už má ID PPV, přihláška se nepodává.",
+        "live_registration": "Přihláška už je připravená nebo odeslaná.",
+        "predecessor": "Přihlášku podal předchozí program.",
+        "profile_incomplete": "Profil registrace není úplný, přihláška se nepřipravila.",
+        "not_found": "Vztah nebyl nalezen nebo už skončil."
       }
     },
     "healthInsurerNotice": {
@@ -32275,6 +32449,32 @@
       "bulk_hint": "Založí a rovnou schválí průměrný výdělek u vybraných pracovních vztahů za zvolené čtvrtletí.",
       "bulk_create": "Založit a schválit vybrané ({count})",
       "bulk_created": "Průměrný výdělek byl založen a schválen u {count} pracovních vztahů.",
+      "bulk_skipped": "Bez schválení zůstalo {count} vztahů, jejich návrh není připravený. Otevřete osobu a doplňte, co chybí, nebo jim nastavte pravděpodobný výdělek:",
+      "probable_bulk": {
+        "title": "Nastavit pravděpodobný výdělek vybraným",
+        "hint": "Pravděpodobný výdělek (§ 355 odst. 2 zákoníku práce) stanovíte jednou částkou pro všechny vybrané vztahy. Uloží se do podmínek vztahu a za zvolené čtvrtletí vznikne nová schválená revize průměru; dosavadní schválený průměr s jinou částkou se tím nahradí.",
+        "quick_select": "Rychlý výběr:",
+        "select_dpp": "Dohody o provedení práce",
+        "select_minimum_wage": "Průměr z minimální mzdy",
+        "clear_selection": "Zrušit výběr",
+        "amount": "Hodinový výdělek (Kč)",
+        "rationale": "Odůvodnění",
+        "rationale_placeholder": "Například: sjednaná odměna 180 Kč za hodinu podle dohod",
+        "rationale_required": "Doplňte odůvodnění pravděpodobného výdělku, zákon ho vyžaduje.",
+        "apply": "Nastavit vybraným ({count})",
+        "done": "Pravděpodobný výdělek nastaven u {applied} vztahů, beze změny {unchanged}.",
+        "summary": "Nastaveno: {applied} · beze změny: {unchanged} · neprovedeno: {failed}",
+        "failure": {
+          "employment_not_found": "Pracovní vztah nebyl nalezen.",
+          "average_pending_review": "Za čtvrtletí čeká ke schválení jiná revize průměru. Schvalte ji, nebo ji smažte v detailu osoby, a nastavení zopakujte.",
+          "average_used_by_closed_run": "Schválený průměr za Q{quarter} už použil uzavřený mzdový běh za {period}. Otevřete běh k opravě a nastavení zopakujte.",
+          "average_reported_in_jmhz": "Schválený průměr za Q{quarter} už použil uzavřený mzdový běh za {period} a z něj vzniklo hlášení JMHZ. Otevřete běh k opravě, nastavení zopakujte a po schválení opravy podejte opravné hlášení JMHZ.",
+          "row_version_conflict": "Vztah nebo jeho průměr mezitím upravil někdo jiný. Akci zopakujte."
+        },
+        "warning": {
+          "corrective_report_needed": "Za {period} už bylo podané hlášení JMHZ s původním průměrem. Po schválení opravy běhu podejte opravné hlášení."
+        }
+      },
       "bulk_load_failed": "Kandidáty na hromadný výpočet průměru se nepodařilo načíst.",
       "bulk_inputs_changed": "Podklady se od načtení seznamu změnily. Seznam byl znovu načten, zkontrolujte výběr a odešlete znovu.",
       "bulk_empty": "Pro toto čtvrtletí nejsou žádné pracovní vztahy.",
@@ -36119,6 +36319,7 @@
     "meaning_groups": {
       "other": "Ostatní",
       "identity": "Osoba a vztah",
+      "registration": "Registrace ČSSZ",
       "work": "Odpracováno",
       "absence": "Nepřítomnost",
       "money": "Peníze a kontrola"
@@ -36141,6 +36342,20 @@
       "hourly_rate": "Hodinová sazba",
       "end_date": "Konec dohody",
       "bank_account": "Číslo účtu",
+      "address_street": "Ulice (trvalý pobyt)",
+      "address_house_number": "Číslo domu",
+      "address_city": "Obec (trvalý pobyt)",
+      "address_postal_code": "PSČ",
+      "address_country": "Stát adresy",
+      "citizenship": "Státní občanství",
+      "cz_isco_code": "CZ-ISCO",
+      "activity_code": "Druh činnosti ČSSZ",
+      "workplace": "Místo výkonu práce",
+      "tax_residence": "Daňová rezidence",
+      "tax_declaration": "Prohlášení poplatníka",
+      "tax_declaration_from": "Prohlášení od",
+      "education_code": "Vzdělání (KKOV)",
+      "employment_status_code": "Postavení v zaměstnání (NKPZ)",
       "worked_hours": "Odpracováno",
       "overtime_hours": "Přesčas",
       "night_hours": "Noční práce",
@@ -36267,6 +36482,17 @@
         "other_source": "{files}: {count} vstupů, importováno {date}",
         "confirm": "Rozumím, podklady opravdu patří do vybraného období a vstupy z jiného importu vyřeším sám."
       },
+      "registration": {
+        "address": "Adresa",
+        "citizenship": "Občanství",
+        "cz_isco_code": "CZ-ISCO",
+        "activity_code": "Druh činnosti",
+        "workplace": "Místo výkonu práce",
+        "tax_residence": "Daňová rezidence",
+        "tax_declaration": "Prohlášení od",
+        "employment_status_code": "Postavení v zaměstnání",
+        "education_code": "Vzdělání"
+      },
       "persons": {
         "title": "Osoby",
         "intro": "Každé osobě z podkladů přiřaďte pracovní vztah. Osoby bez vztahu se při použití přeskočí. Chybějící osoby můžete rovnou založit.",
@@ -36320,10 +36546,22 @@
         "last_name": "Příjmení",
         "swap_names": "Prohodit jméno a příjmení",
         "remove_from_create": "Nezakládat",
+        "registration_label": "Pro registraci ČSSZ",
+        "existing_person": "Osoba {name} už v evidenci je, založí se jí jen nový pracovní vztah (nová karta osoby nevznikne).",
+        "open_agreement": {
+          "legend": "Otevřená dohoda osoby {name}",
+          "title": "Osoba má otevřenou DPP {code} od {start} do {end}.",
+          "no_end": "neurčita",
+          "guidance": "Jedna dlouhodobá DPP znamená jednu registraci u ČSSZ. Každou novou dohodu je potřeba znovu přihlásit a po skončení odhlásit.",
+          "reuse": "Použít otevřenou dohodu",
+          "reuse_extend": "Použít otevřenou dohodu a prodloužit konec do {date}",
+          "create_new": "Založit novou dohodu"
+        },
         "details": {
           "start_on": "Nástup",
           "agreed_end_on": "Konec dohody",
           "hourly_rate": "Hodinová sazba",
+          "probable_earning": "Pravděpodobný výdělek (z odměny za hodiny)",
           "monthly_wage": "Měsíční mzda",
           "bank_account": "Účet",
           "unreadable": "„{value}“ nejde přečíst, nepřevezme se"
@@ -36370,6 +36608,15 @@
         "adopt_personal_numbers_hint": "Vztahy s automatickým číslem (1, ZAM-7…) dostanou osobní číslo z podkladů; ručně zadané číslo se nepřepisuje.",
         "adopt_monthly_wage": "Převzít měsíční mzdu z podkladů ({count} změn)",
         "adopt_monthly_wage_hint": "Zapíše se jen u osob bez překážky v tabulce Měsíční mzda z podkladů. Chybějící mzda se doplní do platných podmínek vztahu, jiná mzda založí novou verzi podmínek od prvního dne období.",
+        "fill_registration": "Doplnit chybějící údaje pro registraci ČSSZ ({count} osob)",
+        "fill_registration_hint": "Z podkladů se zapíše jen to, co osobám v evidenci chybí (adresa, občanství, CZ-ISCO, místo výkonu práce, daňová rezidence, prohlášení, profil registrace). Nic se nepřepisuje.",
+        "adopt_probable_earnings": "Doplnit pravděpodobný výdělek z podkladů ({count} vztahů)",
+        "adopt_probable_earnings_hint": "Jen vztahům bez pravděpodobného výdělku a bez schváleného průměru za čtvrtletí. Výdělek slouží k náhradám, dokud nevznikne průměr; sjednané odměňování se nemění.",
+        "round_whole_crowns": "Zaokrouhlit částky s haléři nahoru na celé koruny ({count})",
+        "round_whole_crowns_hint": "Měsíční hlášení vykazuje výdělek v celých korunách a mzda se zaokrouhluje nahoru, ve prospěch zaměstnance. Tabulka ukazuje zaokrouhlené částky i původní hodnotu.",
+        "rounded_from": "z {amount}",
+        "probable_from_amount": "{rate}/h (odměna {amount} za {hours} h)",
+        "probable_from_rate": "{rate}/h (sazba z podkladů)",
         "wages_title": "Měsíční mzda z podkladů",
         "wages_hint": "Rozdíly mezi mzdou v podkladech a sjednanými podmínkami vztahu. Osoby s důvodem se nepřevezmou; mzdu jim upravte na kartě vztahu.",
         "wages_person": "Osoba",
@@ -36410,6 +36657,8 @@
         "personal_numbers_adopted": "Převzato osobních čísel: {count}",
         "personal_number_conflicts_title": "Osobní čísla, která se nepřevzala ({count})",
         "monthly_wages_adopted": "Převzato měsíčních mezd: {count}",
+        "registration_filled": "Údaje pro registraci doplněny osobám: {count}",
+        "probable_earnings_adopted": "Doplněn pravděpodobný výdělek vztahům: {count}",
         "deductions": "Srážky ze mzdy: založeno {created}, upraveno {updated}, beze změny {unchanged}",
         "deduction_conflicts_title": "Srážky, které se nezapsaly ({count})",
         "wage_conflicts_title": "Měsíční mzdy, které se nepřevzaly ({count})",

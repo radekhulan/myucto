@@ -20,11 +20,12 @@ use PDO;
  * nepracují. Náhled nabízí tři skupiny:
  *
  * - `expired`: aktivní (nebo přerušený) vztah, jehož sjednaný konec
- *   (`payroll_employments.end_date`, při založení převzatý z
- *   `fixed_term_end_on` podmínek) už uplynul → ukončit k tomu dni;
+ *   ({@see self::agreedEndSql()}) už uplynul → ukončit k tomu dni;
  * - `inactive`: aktivní DPP/DPČ bez sjednaného konce, u které za posledních
- *   N měsíců (včetně běžného) není nenulový mzdový vstup ani docházka →
- *   ukončit k poslednímu dni měsíce poslední aktivity;
+ *   N měsíců do posledního schváleného mzdového měsíce (bez schválené mzdy
+ *   do běžného) není nenulový mzdový vstup ani docházka → ukončit
+ *   k poslednímu dni měsíce poslední aktivity. Klient ji nepředvybírá:
+ *   nečinnost je jen návrh, kdežto uplynulý konec je skutečnost;
  * - `archive`: ukončený vztah s koncem starším než X měsíců → archivovat.
  *
  * Aktivitou je nezrušený mzdový vstup s nenulovou částkou nebo množstvím
@@ -38,6 +39,9 @@ use PDO;
  * (odhláška, výstupní doklady) a auditní stopou. Navíc se odmítne ukončení,
  * po jehož datu má vztah ještě mzdový vstup, docházku nebo zúčtovaný běh:
  * takový vztah zjevně trval dál a datum konce musí posoudit člověk.
+ *
+ * Uplynulé dohody ukončuje každou noc i úloha `cron-payroll-end-agreements`
+ * ({@see self::endExpiredAgreements()}) se stejnými kandidáty a pojistkami.
  */
 final class PayrollEmploymentBulkClosure
 {
@@ -49,14 +53,44 @@ final class PayrollEmploymentBulkClosure
 
     private const SETTLED_RUN_STATUSES = "'posted', 'payment_ready', 'paid', 'closed'";
 
+    /**
+     * Druhy vztahů, které noční úloha ukončí sama ({@see self::endExpiredAgreements()}).
+     * Dohoda sjednaná na dobu určitou uplynutím doby zaniká; pracovní poměr
+     * na dobu určitou se při pokračování v práci mění na neurčitou dobu
+     * (§ 65 odst. 2 ZP), takže o jeho konci rozhoduje člověk.
+     */
+    public const AUTO_END_RELATION_TYPES = ['dpp', 'dpc'];
+
     private const NOTE_END = 'Hromadné ukončení skončených dohod.';
+    private const NOTE_AUTO_END = 'Automatické ukončení dohody po uplynutí sjednaného konce.';
     private const NOTE_ARCHIVE = 'Hromadná archivace ukončených vztahů.';
+    private const SYSTEM_ACTOR = 'system';
 
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollEmploymentRepository $employments,
         private readonly ActivityLogger $activityLogger,
+        private readonly PayrollApprovedPeriodFreeze $freeze,
     ) {}
+
+    /**
+     * Sjednaný konec vztahu: `payroll_employments.end_date`, a není-li
+     * vyplněný, konec na dobu určitou z poslední verze podmínek. Některé
+     * zápisy (sloučení vztahů, převzetí) mění jen podmínky; dohoda s koncem
+     * jen v nich by jinak „uplynulou" nikdy nebyla a ruční akce ani noční
+     * úloha by ji neukončily. Jedno pravidlo pro náhled, zápis i cron.
+     */
+    private static function agreedEndSql(string $alias): string
+    {
+        return "COALESCE({$alias}.end_date, (
+                    SELECT latest.fixed_term_end_on
+                      FROM payroll_employment_terms latest
+                     WHERE latest.supplier_id = {$alias}.supplier_id
+                       AND latest.employment_id = {$alias}.id
+                     ORDER BY latest.effective_from DESC, latest.id DESC
+                     LIMIT 1
+                ))";
+    }
 
     /**
      * Kandidáti na ukončení a archivaci. Nic nezapisuje.
@@ -77,9 +111,15 @@ final class PayrollEmploymentBulkClosure
             throw new \InvalidArgumentException('Počet měsíců před archivací musí být 1 až 120.');
         }
         $todayDate = new \DateTimeImmutable($today);
-        // Běžný měsíc je jedním z N sledovaných: při N = 3 a dnešku v říjnu
-        // se hledá aktivita od 1. srpna.
-        $activitySince = $todayDate->modify('first day of this month')
+        // Nečinnost se měří k poslednímu zpracovanému mzdovému měsíci, ne
+        // k dnešku. Agentura, která má schválené mzdy za únor a v listopadu
+        // teprve zpracovává jaro, by jinak ukončila dohody s prací v březnu
+        // až srpnu, jen protože jejich vstupy ještě nikdo nezadal do mezd.
+        // Bez schválené mzdy se měří k dnešku. Měsíc reference je jedním z N
+        // sledovaných: při N = 3 a referenci v říjnu se hledá aktivita od srpna.
+        $frozenThrough = $this->freeze->frozenThrough($supplierId);
+        $reference = $frozenThrough !== null && $frozenThrough < $today ? $frozenThrough : $today;
+        $activitySince = (new \DateTimeImmutable($reference))->modify('first day of this month')
             ->modify('-' . ($inactivityMonths - 1) . ' months')
             ->format('Y-m-d');
         $archiveBefore = $todayDate->modify('-' . $archiveAfterMonths . ' months')->format('Y-m-d');
@@ -87,32 +127,36 @@ final class PayrollEmploymentBulkClosure
         $stmt = $this->db->pdo()->prepare(
             "SELECT candidate.*
                FROM (
-                    SELECT employment.id, employment.employee_id, employment.code,
-                           employment.relation_type, employment.status, employment.row_version,
-                           COALESCE(employment.actual_start_date, employment.start_date) AS start_on,
-                           employment.end_date, employee.full_name,
+                    SELECT dated.*,
                            CASE
-                               WHEN employment.status IN ('active', 'suspended')
-                                AND employment.end_date IS NOT NULL
-                                AND employment.end_date < ?
+                               WHEN dated.status IN ('active', 'suspended')
+                                AND dated.agreed_end_on IS NOT NULL
+                                AND dated.agreed_end_on < ?
                                THEN 'expired'
-                               WHEN employment.status IN ('active')
-                                AND employment.end_date IS NULL
-                                AND employment.relation_type IN ('dpp', 'dpc')
-                                AND COALESCE(employment.actual_start_date, employment.start_date) < ?
+                               WHEN dated.status IN ('active')
+                                AND dated.agreed_end_on IS NULL
+                                AND dated.relation_type IN ('dpp', 'dpc')
+                                AND dated.start_on < ?
                                THEN 'inactive'
-                               WHEN employment.status IN ('ended')
-                                AND employment.end_date IS NOT NULL
-                                AND employment.end_date < ?
+                               WHEN dated.status IN ('ended')
+                                AND dated.end_date IS NOT NULL
+                                AND dated.end_date < ?
                                THEN 'archive'
-                           END AS candidate_group,
-                           " . $this->activityColumns('employment') . "
-                      FROM payroll_employments employment
-                      JOIN payroll_employees employee
-                        ON employee.supplier_id = employment.supplier_id
-                       AND employee.id = employment.employee_id
-                     WHERE employment.supplier_id = ?
-                       AND employment.status IN ('active', 'suspended', 'ended')
+                           END AS candidate_group
+                      FROM (
+                            SELECT employment.id, employment.employee_id, employment.code,
+                                   employment.relation_type, employment.status, employment.row_version,
+                                   COALESCE(employment.actual_start_date, employment.start_date) AS start_on,
+                                   employment.end_date, employee.full_name,
+                                   " . self::agreedEndSql('employment') . " AS agreed_end_on,
+                                   " . $this->activityColumns('employment') . "
+                              FROM payroll_employments employment
+                              JOIN payroll_employees employee
+                                ON employee.supplier_id = employment.supplier_id
+                               AND employee.id = employment.employee_id
+                             WHERE employment.supplier_id = ?
+                               AND employment.status IN ('active', 'suspended', 'ended')
+                      ) dated
                ) candidate
               WHERE candidate.candidate_group IS NOT NULL
                 AND (
@@ -143,7 +187,7 @@ final class PayrollEmploymentBulkClosure
                 ? substr($row['last_settled_period'], 0, 7)
                 : null;
             $proposedOn = match ($group) {
-                'expired' => (string) $row['end_date'],
+                'expired' => (string) $row['agreed_end_on'],
                 'inactive' => min($today, $this->inactiveEndDate(
                     $lastActivity,
                     $lastSettled,
@@ -167,7 +211,9 @@ final class PayrollEmploymentBulkClosure
                 'group' => $group,
                 'action' => $group === 'archive' ? 'archive' : 'end',
                 'start_on' => $row['start_on'] === null ? null : (string) $row['start_on'],
-                'agreed_end_on' => $row['end_date'] === null ? null : (string) $row['end_date'],
+                'agreed_end_on' => $group === 'archive'
+                    ? ($row['end_date'] === null ? null : (string) $row['end_date'])
+                    : ($row['agreed_end_on'] === null ? null : (string) $row['agreed_end_on']),
                 'last_activity_period' => $lastActivity,
                 'last_settled_period' => $lastSettled,
                 'proposed_on' => $proposedOn,
@@ -178,6 +224,7 @@ final class PayrollEmploymentBulkClosure
 
         return [
             'as_of' => $today,
+            'activity_reference_on' => $reference,
             'inactivity_months' => $inactivityMonths,
             'archive_after_months' => $archiveAfterMonths,
             'activity_since' => $activitySince,
@@ -213,6 +260,126 @@ final class PayrollEmploymentBulkClosure
         foreach ($this->preview($supplierId, $inactivityMonths, $archiveAfterMonths, $today)['items'] as $candidate) {
             $candidates[(int) $candidate['employment_id']] = (string) $candidate['action'];
         }
+        [$applied, $failed] = $this->applyCommands($supplierId, $commands, $candidates, $userId, $ip, $userAgent, self::NOTE_END);
+
+        $this->activityLogger->log(
+            'payroll.employment.bulk_closure',
+            $userId,
+            null,
+            null,
+            $this->logContext($applied, $failed),
+            $ip,
+            $userAgent,
+            $supplierId,
+        );
+
+        return [
+            'counts' => ['applied' => count($applied), 'failed' => count($failed)],
+            'applied' => $applied,
+            'failed' => $failed,
+        ];
+    }
+
+    /**
+     * Noční ukončení dohod, jejichž sjednaný konec už uplynul.
+     *
+     * Bere tytéž kandidáty jako náhled ruční akce (skupina `expired`), jen
+     * DPP a DPČ ({@see self::AUTO_END_RELATION_TYPES}), a zapisuje stejnou
+     * cestou jako {@see self::apply()}: přechod stavu s kontrolním seznamem
+     * odchodu a auditem, ke dni sjednaného konce. Vztah, kterému ruční akce
+     * ukončení odmítne (mzdový vstup, docházka nebo zúčtovaný běh po konci),
+     * se nechá být a jen se započítá jako `blocked`: datum skutečného konce
+     * musí posoudit člověk. Opakovaný běh nic nezmění, ukončený vztah už
+     * kandidátem není. Aktérem je systém (bez uživatele).
+     *
+     * @return array{ended:list<int>,blocked:list<int>,failed:list<array{employment_id:int,code:string,message:string}>}
+     */
+    public function endExpiredAgreements(int $supplierId, ?string $today = null): array
+    {
+        $today = $this->today($today);
+        $commands = [];
+        $blocked = [];
+        foreach ($this->preview($supplierId, 3, 12, $today)['items'] as $candidate) {
+            if ($candidate['group'] !== 'expired'
+                || !in_array($candidate['relation_type'], self::AUTO_END_RELATION_TYPES, true)
+            ) {
+                continue;
+            }
+            $employmentId = (int) $candidate['employment_id'];
+            if ($candidate['blocked_reason'] !== null) {
+                $blocked[] = $employmentId;
+                continue;
+            }
+            $commands[] = [
+                'employment_id' => $employmentId,
+                'action' => 'end',
+                'effective_on' => (string) $candidate['proposed_on'],
+                'row_version' => (int) $candidate['row_version'],
+            ];
+        }
+        if ($commands === []) {
+            return ['ended' => [], 'blocked' => $blocked, 'failed' => []];
+        }
+
+        $applied = [];
+        $failed = [];
+        foreach (array_chunk($commands, self::MAX_ITEMS) as $chunk) {
+            $candidates = array_fill_keys(array_column($chunk, 'employment_id'), 'end');
+            [$chunkApplied, $chunkFailed] = $this->applyCommands(
+                $supplierId,
+                $chunk,
+                $candidates,
+                null,
+                null,
+                self::SYSTEM_ACTOR,
+                self::NOTE_AUTO_END,
+            );
+            array_push($applied, ...$chunkApplied);
+            array_push($failed, ...$chunkFailed);
+        }
+
+        $this->activityLogger->log(
+            'payroll.employment.auto_closure',
+            null,
+            null,
+            null,
+            ['actor' => self::SYSTEM_ACTOR, 'as_of' => $today, 'blocked_employment_ids' => $blocked]
+                + $this->logContext($applied, $failed),
+            null,
+            self::SYSTEM_ACTOR,
+            $supplierId,
+        );
+
+        return [
+            'ended' => array_values(array_map(
+                static fn (array $item): int => $item['employment_id'],
+                array_filter($applied, static fn (array $item): bool => $item['status'] === 'ended'),
+            )),
+            'blocked' => $blocked,
+            'failed' => $failed,
+        ];
+    }
+
+    /**
+     * Zápis vybraných položek, každá vlastním přechodem stavu. Chyba jedné
+     * položky ostatní nezastaví.
+     *
+     * @param list<array{employment_id:int,action:'end'|'archive',effective_on:string,row_version:int}> $commands
+     * @param array<int,string> $candidates akce, kterou vztahu povoluje náhled
+     * @return array{
+     *   list<array{employment_id:int,status:string,effective_on:string}>,
+     *   list<array{employment_id:int,code:string,message:string}>
+     * }
+     */
+    private function applyCommands(
+        int $supplierId,
+        array $commands,
+        array $candidates,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+        string $endNote,
+    ): array {
         $activity = $this->activityFor(
             $supplierId,
             array_values(array_map(
@@ -251,7 +418,7 @@ final class PayrollEmploymentBulkClosure
                     $command['action'] === 'end' ? 'ended' : 'archived',
                     $command['row_version'],
                     $command['effective_on'],
-                    $command['action'] === 'end' ? self::NOTE_END : self::NOTE_ARCHIVE,
+                    $command['action'] === 'end' ? $endNote : self::NOTE_ARCHIVE,
                     $userId,
                     $ip,
                     $userAgent,
@@ -287,31 +454,26 @@ final class PayrollEmploymentBulkClosure
             }
         }
 
-        $this->activityLogger->log(
-            'payroll.employment.bulk_closure',
-            $userId,
-            null,
-            null,
-            [
-                'ended_employment_ids' => array_values(array_map(
-                    static fn (array $item): int => $item['employment_id'],
-                    array_filter($applied, static fn (array $item): bool => $item['status'] === 'ended'),
-                )),
-                'archived_employment_ids' => array_values(array_map(
-                    static fn (array $item): int => $item['employment_id'],
-                    array_filter($applied, static fn (array $item): bool => $item['status'] === 'archived'),
-                )),
-                'failed_employment_ids' => array_column($failed, 'employment_id'),
-            ],
-            $ip,
-            $userAgent,
-            $supplierId,
-        );
+        return [$applied, $failed];
+    }
 
+    /**
+     * @param list<array{employment_id:int,status:string,effective_on:string}> $applied
+     * @param list<array{employment_id:int,code:string,message:string}> $failed
+     * @return array<string,list<int>>
+     */
+    private function logContext(array $applied, array $failed): array
+    {
         return [
-            'counts' => ['applied' => count($applied), 'failed' => count($failed)],
-            'applied' => $applied,
-            'failed' => $failed,
+            'ended_employment_ids' => array_values(array_map(
+                static fn (array $item): int => $item['employment_id'],
+                array_filter($applied, static fn (array $item): bool => $item['status'] === 'ended'),
+            )),
+            'archived_employment_ids' => array_values(array_map(
+                static fn (array $item): int => $item['employment_id'],
+                array_filter($applied, static fn (array $item): bool => $item['status'] === 'archived'),
+            )),
+            'failed_employment_ids' => array_column($failed, 'employment_id'),
         ];
     }
 

@@ -9,6 +9,8 @@ use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog;
 use PDO;
 
 /**
@@ -41,6 +43,16 @@ final class PayrollRunReadinessService
 {
     /** Kolik konkrétních jmen se u nálezu vypíše, než se přejde na počet. */
     private const MAX_ENTITIES = 25;
+
+    /** Druhy hromadných oprav v `bulk_actions` nálezu ({@see self::bulkActions()}). */
+    public const BULK_ACTION_KINDS = [
+        'statutory_defaults',
+        'declaration_signed',
+        'health_insurer',
+        'workplace',
+        'closure',
+        'annual_settlement_request',
+    ];
 
     /**
      * Nálezy, které před zahájením běhu nedávají smysl: odstraní je samo
@@ -139,6 +151,17 @@ final class PayrollRunReadinessService
                 $paymentDate,
                 $officeId,
             );
+        } catch (PayrollRunSnapshotFixableException $e) {
+            // Chybějící identita firmy, předkontace nebo rozpad dimenzí: věc,
+            // kterou účetní opraví sama. Hláška to říká i s místem opravy;
+            // obecné „obnovte stránku" by ji poslalo jinam.
+            $findings[] = self::finding(
+                $e->findingCode,
+                $e->getMessage(),
+                $e->remediationPath,
+                1,
+                [],
+            );
         } catch (\Throwable $e) {
             // Nasucho postavený snímek se zahazuje, takže výjimka tady nic
             // nerozbila — jen se z ní stane nález. Duplicitní hlášku o politice
@@ -186,6 +209,10 @@ final class PayrollRunReadinessService
             ) as $finding) {
                 $findings[] = $finding;
             }
+            $declarationFinding = self::taxDeclarationFinding($snapshot->data);
+            if ($declarationFinding !== null) {
+                $findings[] = $declarationFinding;
+            }
             /*
              * Nálezy, které se dosud ozvaly až u ZMRAZENÍ měsíčního hlášení.
              * Nepíšou se tu znovu — volá se tatáž cesta, jen nasucho. Bez toho
@@ -202,17 +229,35 @@ final class PayrollRunReadinessService
             }
         }
 
-        $peopleFinding = $this->personDataGapFinding($supplierId);
+        // Stav prohlášení posuzuje nad snímkem `taxDeclarationFinding()` týmž
+        // pravidlem jako výpočet. Katalog mezer ho hodnotí jinak (živé tabulky,
+        // překryv intervalů v období), takže by tatáž věc visela dvakrát
+        // s jiným počtem. Bez snímku zůstává jediným zdrojem katalog.
+        $peopleFinding = $this->personDataGapFinding(
+            $supplierId,
+            $periodStart,
+            $snapshot === null ? [] : ['tax_declaration'],
+        );
         if ($peopleFinding !== null) {
             $findings[] = $peopleFinding;
         }
+        $pastEndFinding = $this->pastAgreedEndFinding($supplierId, $periodStart);
+        if ($pastEndFinding !== null) {
+            $findings[] = $pastEndFinding;
+        }
         // Jednotný tvar nálezu: co nepochází z katalogu skrytí, skrýt nejde.
         $findings = array_map(
-            static fn (array $finding): array => $finding + [
-                'hideable' => false,
-                'subject_type' => null,
-                'subject_ids' => [],
-            ],
+            static function (array $finding): array {
+                $bulkActions = self::bulkActions($finding);
+                unset($finding['gap_totals'], $finding['bulk_employee_ids']);
+
+                return $finding + [
+                    'hideable' => false,
+                    'subject_type' => null,
+                    'subject_ids' => [],
+                    'bulk_actions' => $bulkActions,
+                ];
+            },
             $findings,
         );
 
@@ -227,6 +272,192 @@ final class PayrollRunReadinessService
             'has_findings' => $findings !== [],
             'findings' => $findings,
         ];
+    }
+
+    /**
+     * Hromadné opravy, které nález nabízí.
+     *
+     * Nic se tu nepočítá znovu: každá vede na existující dialog v Mzdy →
+     * Zaměstnanci → Další funkce (`/payroll/people?bulk=<kind>`), který si
+     * kandidáty vybere sám. `count` je jen odhad na tlačítko z nálezu.
+     * Schválení vstupů a docházky nabízí karta běhu zvlášť (kroky schválení).
+     *
+     * @param array<string,mixed> $finding
+     * @return list<array{kind:string,count:int}>
+     */
+    private static function bulkActions(array $finding): array
+    {
+        $code = (string) ($finding['code'] ?? '');
+        $count = max((int) ($finding['count'] ?? 0), (int) ($finding['entity_total'] ?? 0));
+        if ($code === 'person_data_gap') {
+            /** @var array<string,int> $totals */
+            $totals = $finding['gap_totals'] ?? [];
+            $actions = [];
+            $statutory = max($totals['tax_residence'] ?? 0, $totals['tax_declaration'] ?? 0);
+            if ($statutory > 0) {
+                $actions[] = ['kind' => 'statutory_defaults', 'count' => $statutory];
+            }
+            if (($totals['health_insurance'] ?? 0) > 0) {
+                $actions[] = ['kind' => 'health_insurer', 'count' => $totals['health_insurance']];
+            }
+
+            return $actions;
+        }
+
+        /*
+         * Podpis prohlášení je fakt o konkrétních lidech. Bez výčtu otevřel
+         * dialog všechny osoby roku a předvybral i ty, kterým má evidence
+         * výslovně „Nepodepsáno" — tlačítko „(16)" tak zapsalo podpis 47 lidem.
+         */
+        $declarationIds = $code === 'tax_declaration_evidence_missing'
+            ? array_values(array_map('intval', (array) ($finding['bulk_employee_ids'] ?? [])))
+            : array_values(array_map('intval', (array) ($finding['subject_ids'] ?? [])));
+
+        return match (true) {
+            $code === 'tax_declaration_not_signed_summary',
+            $code === 'tax_declaration_evidence_missing' => [[
+                'kind' => 'declaration_signed',
+                'count' => $count,
+                ...($declarationIds === [] ? [] : ['employee_ids' => $declarationIds]),
+            ]],
+            $code === 'employments_past_agreed_end' => [['kind' => 'closure', 'count' => $count]],
+            // Hromadné „nepožádal" je výběr na stránce Roční zúčtování, ne dialog
+            // v seznamu zaměstnanců; klient tam vede s rokem a zúžením.
+            $code === 'jmhz_annual_request_status_unresolved'
+                => [['kind' => 'annual_settlement_request', 'count' => $count]],
+            str_starts_with($code, 'jmhz_')
+                && JmhzBlockerCatalog::remediation($code)['kind'] === 'workplace'
+                => [['kind' => 'workplace', 'count' => $count]],
+            default => [],
+        };
+    }
+
+    /**
+     * Osoby běhu, kterým výpočet zastaví daň na „Chybí ověřený stav daňového
+     * prohlášení".
+     *
+     * ── Co bylo špatně ──────────────────────────────────────────────────────
+     * Kontrola před během brala stav prohlášení z katalogu mezer v seznamu
+     * zaměstnanců: živé tabulky, záznam platný kdykoli v období, všichni se
+     * vztahem v měsíci. Výpočet ale posuzuje zákonnou evidenci ZMRAZENOU ve
+     * snímku k datu výpočtu daně a jen u osob, které do běhu vstoupily.
+     * U simulace února tak kontrola hlásila dvě osoby a zamknutí s výpočtem
+     * pak zastavily šestnáct.
+     *
+     * Teď se ptá nad týmž snímkem, který postaví zamknutí, a týmž pravidlem
+     * jako výpočet ({@see PayrollRunStatutoryInputAssembler::taxDeclarationIssue()}).
+     * Osobu bez zmrazené evidence nebo bez vztahu výpočet zastaví jiným kódem,
+     * proto se tu nepočítá.
+     *
+     * @param array<string,mixed> $snapshotData
+     * @return array<string,mixed>|null
+     */
+    private static function taxDeclarationFinding(array $snapshotData): ?array
+    {
+        $affected = [];
+        foreach ((array) ($snapshotData['people'] ?? []) as $person) {
+            if (!is_array($person)
+                || !is_array($person['employee'] ?? null)
+                || !is_array($person['statutory_evidence'] ?? null)
+                || ($person['employments'] ?? []) === []
+            ) {
+                continue;
+            }
+            if (PayrollRunStatutoryInputAssembler::taxDeclarationIssue($person['statutory_evidence']) === null) {
+                continue;
+            }
+            $affected[] = [
+                'id' => (int) ($person['employee']['id'] ?? 0),
+                'full_name' => (string) ($person['employee']['full_name'] ?? ''),
+            ];
+        }
+        if ($affected === []) {
+            return null;
+        }
+        usort(
+            $affected,
+            static fn (array $left, array $right): int =>
+                [$left['full_name'], $left['id']] <=> [$right['full_name'], $right['id']],
+        );
+        $named = array_column(array_slice($affected, 0, self::MAX_ENTITIES), 'full_name');
+        $hidden = count($affected) - count($named);
+
+        return [...self::finding(
+            'tax_declaration_evidence_missing',
+            sprintf(
+                'Chybí ověřený stav daňového prohlášení (%d): %s%s. Bez něj výpočet mzdy '
+                . 'zastaví daň a běh nepůjde schválit. U každé osoby zaznamenejte, zda '
+                . 'prohlášení podepsala, nebo použijte Mzdy → Zaměstnanci → Další funkce '
+                . '→ Podepsaná prohlášení hromadně.',
+                count($affected),
+                implode(', ', $named),
+                $hidden > 0 ? sprintf(' a dalších %d', $hidden) : '',
+            ),
+            '/payroll/people?bulk=declaration_signed',
+            count($affected),
+            array_map(
+                static fn (array $person): array => [
+                    'entity_type' => 'employee',
+                    'entity_id' => $person['id'],
+                    'label' => $person['full_name'],
+                    'remediation_path' => self::gapPath($person['id'], 'tax_declaration'),
+                ],
+                array_slice($affected, 0, self::MAX_ENTITIES),
+            ),
+        ), 'bulk_employee_ids' => array_column($affected, 'id')];
+    }
+
+    /**
+     * Vztahy, které podle sjednaného konce skončily před obdobím běhu, ale
+     * pořád jsou aktivní. Do běhu vstoupí jako trvající (nulové hlášení,
+     * výzva k mzdě) a z běhu je nikdo neukončí. Ukončení po jednom nikdo
+     * nestíhá, proto nález nabízí hromadné ukončení skončených dohod.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function pastAgreedEndFinding(int $supplierId, string $periodStart): ?array
+    {
+        try {
+            $statement = $this->db->pdo()->prepare(
+                "SELECT employment.id, employee.full_name
+                   FROM payroll_employments employment
+                   JOIN payroll_employees employee
+                     ON employee.supplier_id = employment.supplier_id
+                    AND employee.id = employment.employee_id
+                  WHERE employment.supplier_id = ?
+                    AND employment.status IN ('active', 'suspended')
+                    AND employment.end_date IS NOT NULL
+                    AND employment.end_date < ?
+                  ORDER BY employee.full_name, employment.id"
+            );
+            $statement->execute([$supplierId, $periodStart]);
+            $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        } catch (\Throwable) {
+            return null;
+        }
+        if ($rows === []) {
+            return null;
+        }
+
+        return self::finding(
+            'employments_past_agreed_end',
+            sprintf(
+                'Pracovní vztahy se sjednaným koncem před obdobím %s jsou pořád aktivní (%d). '
+                . 'Ukončete je hromadně v Mzdy → Zaměstnanci → Další funkce → Ukončit skončené dohody.',
+                substr($periodStart, 0, 7),
+                count($rows),
+            ),
+            '/payroll/people?bulk=closure',
+            count($rows),
+            array_map(
+                static fn (array $row): array => [
+                    'entity_type' => 'employment',
+                    'entity_id' => (int) $row['id'],
+                    'label' => (string) $row['full_name'],
+                ],
+                array_slice($rows, 0, self::MAX_ENTITIES),
+            ),
+        );
     }
 
     /**
@@ -294,12 +525,18 @@ final class PayrollRunReadinessService
      *   count:int,entities:list<array{entity_type:string,entity_id:?int}>
      * }|null
      */
-    private function personDataGapFinding(int $supplierId): ?array
+    /** @param list<string> $excludedGaps klíče mezer, které posuzuje jiný nález */
+    private function personDataGapFinding(int $supplierId, string $periodStart, array $excludedGaps = []): ?array
     {
         try {
-            $gaps = $this->people->activeWithBlockingDataGaps(
+            // K období běhu, ne k dnešku: dohoda skončená v únoru s údaji
+            // zapsanými na únor za únor nic nedluží.
+            $gaps = $this->people->blockingDataGapsForPeriod(
                 $supplierId,
+                $periodStart,
+                (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d'),
                 self::MAX_ENTITIES,
+                $excludedGaps,
             );
         } catch (\Throwable) {
             // Kontrola je pomocná; její pád nesmí přebít nálezy, kvůli kterým
@@ -311,22 +548,27 @@ final class PayrollRunReadinessService
             return null;
         }
 
-        $names = array_map(
-            static fn (array $person): string => $person['full_name'],
+        $named = array_map(
+            static fn (array $person): string => sprintf(
+                '%s (%s)',
+                $person['full_name'],
+                implode(', ', array_map(self::gapLabel(...), $person['gaps'])),
+            ),
             $people,
         );
         // Jmen je nejvýš MAX_ENTITIES, počet je ale celkový — „25×" u firmy,
         // kde údaje chybí dvěma stům lidí, by účetní poslalo špatným směrem.
         $hidden = $gaps['total'] - count($people);
 
-        return self::finding(
+        // `gap_totals` čte jen výběr hromadných oprav; do odpovědi nejde.
+        return ['gap_totals' => $gaps['gap_totals'] ?? []] + self::finding(
             'person_data_gap',
             sprintf(
-                'Chybí zákonné údaje u těchto zaměstnanců: %s%s. Bez nich se '
-                . 'nedá podat hlášení ani spočítat odvody. Otevřete Mzdy → '
-                . 'Zaměstnanci, zapněte filtr „Mám doplnit údaje" a doplňte je; '
-                . 'karta osoby nahoře vypíše, co konkrétně chybí.',
-                implode(', ', $names),
+                'Za období %s chybí zákonné údaje u těchto zaměstnanců: %s%s. Bez nich se '
+                . 'nedá podat hlášení ani spočítat odvody. Odkaz u osoby otevře místo, kde '
+                . 'se údaj doplňuje.',
+                substr($periodStart, 0, 7),
+                implode('; ', $named),
                 $hidden > 0 ? sprintf(' a dalších %d', $hidden) : '',
             ),
             '/payroll/people?filter=blocking_data',
@@ -336,10 +578,48 @@ final class PayrollRunReadinessService
                     'entity_type' => 'employee',
                     'entity_id' => $person['id'],
                     'label' => $person['full_name'],
+                    'message' => sprintf(
+                        '%s: chybí %s.',
+                        $person['full_name'],
+                        implode(', ', array_map(self::gapLabel(...), $person['gaps'])),
+                    ),
+                    'gaps' => $person['gaps'],
+                    'remediation_path' => self::gapPath($person['id'], $person['gaps'][0] ?? null),
                 ],
                 $people,
             ),
         );
+    }
+
+    /** Název chybějícího údaje do věty nálezu (klíče {@see PayrollPersonDataGapCatalog}). */
+    private static function gapLabel(string $key): string
+    {
+        return match ($key) {
+            'employment' => 'pracovní vztah',
+            'name' => 'jméno a příjmení',
+            'identifier' => 'rodné číslo nebo EČP',
+            'residence' => 'adresa trvalého pobytu',
+            'health_insurance' => 'zdravotní pojišťovna',
+            'tax_residence' => 'daňová rezidence',
+            'payout_account' => 'ověřený výplatní účet',
+            'contact' => 'kontakt',
+            'citizenship' => 'státní občanství',
+            'birth_date' => 'datum narození',
+            'tax_declaration' => 'stav daňového prohlášení',
+            default => $key,
+        };
+    }
+
+    private static function gapPath(int $personId, ?string $key): string
+    {
+        $query = ['person' => $personId];
+        if ($key !== null) {
+            $gap = PayrollPersonDataGapCatalog::describe($key);
+            if ($gap['panel'] !== null) $query['panel'] = $gap['panel'];
+            if ($gap['field'] !== null) $query['field'] = $gap['field'];
+        }
+
+        return '/payroll/people?' . http_build_query($query);
     }
 
     /**

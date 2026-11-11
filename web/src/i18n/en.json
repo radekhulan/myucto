@@ -3847,10 +3847,13 @@
       "reload": "Load preview",
       "effective_from": "Valid from {date}",
       "basis": {
-        "year_start": "from the start of the year, the declaration was signed before the year or in January",
-        "signing_month": "from the month of signature, the credit does not apply to earlier months",
-        "after_frozen_period": "only after the period closed by an approved payroll (until {date})"
+        "employment_start": "from the month of starting work, the declaration was signed within 30 days of the start (§ 38k(4) of the Income Tax Act)",
+        "year_start": "from January, the declaration was signed by 15 February (§ 38k(4) of the Income Tax Act)",
+        "following_month": "from the month after the signature, the declaration was signed after the deadline (§ 38k(7) of the Income Tax Act); new starters signing within 30 days of the start get the month of the start",
+        "after_frozen_period": "only after the period closed by an approved payroll (until {date}), the annual tax settlement makes up the credit for closed months"
       },
+      "annual_settlement": "the annual tax settlement makes up the credit for closed months",
+      "person_effective": "from {date}",
       "year_frozen": "The whole year {year} is closed by an approved payroll (until {date}). Nothing is written retroactively into a closed calculation.",
       "recalculate_title": "Payrolls in progress to recalculate",
       "recalculate_hint": "These payrolls were calculated without the signature. Recalculate them after recording.",
@@ -3864,6 +3867,7 @@
         "ready": "Will be recorded",
         "already_signed": "Already signed for the year, skipped",
         "period_frozen": "Period closed by an approved payroll",
+        "after_year_end": "The declaration applies only from the next year",
         "timeline_gap": "The previous record ends earlier, record it on the person card",
         "employee_not_found": "Person not found"
       },
@@ -3976,6 +3980,78 @@
         "after_frozen_period": "from the month after the approved period"
       }
     },
+    "terms_bulk": {
+      "title": "Edit terms of selected employments",
+      "intro": "The chosen values are written exactly as on the employment card: as a correction of the current terms version or, when payroll from it is already posted, as a new version from the first unsettled month. Employments held by approved or locked payroll are skipped with a reason.",
+      "new_version_badge": "new version from {month}",
+      "period": "Employments lasting in month",
+      "relation_type": "Relation type",
+      "relation_all": "All types",
+      "retry": "Try again",
+      "load_failed": "Employments could not be loaded.",
+      "apply_failed": "The terms could not be saved.",
+      "applied_toast": "Terms updated for {count} employments.",
+      "summary": {
+        "employments": "Employments in month",
+        "selected": "Selected for editing",
+        "excluded": "Cannot be edited"
+      },
+      "select_all": "Select all editable employments",
+      "current": "rate {rate} CZK/h · CZ-ISCO {isco} · activity {activity}",
+      "nothing_editable": "There is no employment in the month that can be edited in bulk.",
+      "excluded_title": "Skipped employments ({count})",
+      "mode": "Mode",
+      "mode_fill": "Fill in empty values only",
+      "mode_overwrite": "Overwrite filled values",
+      "overwrite_warning": "Overwriting also changes values the employments already have. Use it only when you are correcting a wrongly entered value for all selected employments.",
+      "fields_hint": "Only filled-in fields are changed. An empty field leaves the employments unchanged.",
+      "hourly_rate": "Agreed hourly rate (CZK)",
+      "hourly_rate_hint": "Switches the employment to hourly wage calculation from worked shifts. Employments whose wage is imported as a ready amount do not get the rate.",
+      "imported_wage_badge": "imported wage",
+      "basis_kind": "Remuneration basis",
+      "basis_keep": "Keep, use the agreement for agreements",
+      "basis": "Basis reference",
+      "basis_placeholder": "For example Agreement to complete a job",
+      "probable_earning": "Probable hourly earnings (CZK)",
+      "probable_rationale": "Rationale for probable earnings (§ 355 Labour Code)",
+      "probable_rationale_placeholder": "How the earnings were determined",
+      "cz_isco": "CZ-ISCO",
+      "activity_code": "Activity type",
+      "no_change": "No change",
+      "activity_needs_relation": "Activity types are offered once a single relation type is selected.",
+      "municipality": "Place of work (municipality)",
+      "search_municipality": "Search municipality",
+      "country": "Workplace country",
+      "apply": "Edit {count} employments",
+      "blocked": {
+        "no_selection": "Select at least one employment.",
+        "no_change": "Fill in at least one value to change.",
+        "invalid_amount": "The amount must be a positive number with at most two decimal places.",
+        "rationale_required": "Add a rationale for the probable earnings."
+      },
+      "result_title": "Result",
+      "result": {
+        "applied": "Updated",
+        "skipped": "Skipped",
+        "failed": "Failed"
+      },
+      "row_correction": "correction",
+      "row_new_version": "new version from {month}",
+      "reason": {
+        "terms_missing": "the employment has no terms version",
+        "later_terms": "the current terms version starts after the selected month",
+        "employment_closed": "the employment has ended",
+        "employment_reported": "the employment has ended and a JMHZ report for its month is frozen or submitted: revert the termination, correct the details and file a corrective report",
+        "employment_not_in_period": "the employment does not last in the selected month",
+        "period_settled": "payroll was posted in the meantime, run the edit again",
+        "report_prepared": "the JMHZ monthly report for {period} is prepared, reopen the payroll for correction first",
+        "run_locked": "payroll for {period} is approved or locked, reopen it for correction first",
+        "hourly_not_supported": "hourly remuneration is not available for this relation type",
+        "hourly_rate_imported_wage": "rate not set: the wage is imported as an amount and hourly calculation would block the import, set the probable earnings instead",
+        "activity_code_relation_mismatch": "the activity type does not match the relation type",
+        "nothing_to_change": "the values are already filled in, nothing changed"
+      }
+    },
     "workplace_bulk": {
       "title": "Bulk-fill place of work",
       "intro": "The place of work is agreed in the employment contract, the application does not estimate it — choose the municipality where the employees actually work. An already filled-in workplace is never overwritten.",
@@ -3998,10 +4074,14 @@
         "terms_missing": "no effective employment terms",
         "later_terms": "later employment terms already change the workplace",
         "employment_closed": "the employment has ended",
+        "employment_reported": "the employment has ended and a JMHZ report for its month is frozen or submitted: revert the termination, correct the details and file a corrective report",
         "period_settled": "the period is already settled",
         "workplace_not_verified": "the existing workplace is not verified"
       },
       "excluded_title": "Excluded ({count})",
+      "unverified_title": "Place of work filled in but not verified ({count})",
+      "unverified_hint": "These employments already have a place of work, but the ČSSZ codebook did not verify it, so the bulk fill will not overwrite it and JMHZ still reports it as missing. Pick the municipality from the codebook on the employment card.",
+      "unverified_value": "filled in as \"{place}\" (municipality code {code})",
       "apply": "Fill in workplace for {count} employments",
       "applied_toast": "The workplace was filled in for {count} employments.",
       "result_title": "Fill-in result",
@@ -4035,7 +4115,7 @@
         "inactive": {
           "summary": "Agreements without activity",
           "title": "Agreements without activity",
-          "hint": "DPP and DPČ agreements without an agreed end that have no payroll input or attendance in the last {months} months. They will be ended as of the last day of the month of their last activity."
+          "hint": "DPP and DPČ agreements without an agreed end that have no payroll input or attendance in the {months} months up to {date} (the last processed payroll month, or today without an approved payroll). They will be ended as of the last day of the month of their last activity. They are not preselected, please review them."
         },
         "archive": {
           "summary": "To archive",
@@ -4706,6 +4786,7 @@
         "employments_added": "Employments that now belong to the period: {count}",
         "employments_removed": "Employments that no longer belong to the period: {count}",
         "statutory_evidence_changed": "People with changed statutory records: {count}",
+        "employment_terms_changed": "Relationships with changed terms (primary relationship, place of work, payroll office, working time): {count}",
         "action": "Click “Refresh inputs”, then recalculate the run.",
         "action_forbidden": "Inputs can be refreshed by a user allowed to calculate payroll and write payroll inputs."
       },
@@ -4716,6 +4797,14 @@
       "readiness": {
         "affected": "Affects: {names}",
         "fill_probable_average": "Fill in probable earnings from the rate",
+        "bulk": {
+          "statutory_defaults": "Fill in default statutory data ({count})",
+          "declaration_signed": "Signed declarations in bulk",
+          "health_insurer": "Health insurers in bulk ({count})",
+          "workplace": "Fill in place of work ({count})",
+          "closure": "End finished agreements ({count})",
+          "annual_settlement_request": "Mark annual settlement as not requested ({count})"
+        },
         "fill_probable_average_done": "Filled in automatically from the agreed hourly rate: {count}. The average can be corrected with a new revision in Absences and leave → Average earnings.",
         "fill_probable_average_failed": "Probable earnings could not be filled in.",
         "impact": {
@@ -5164,6 +5253,7 @@
         "cancel_failed": "The monthly input could not be cancelled.",
         "reverse_benefit": "Reverse benefit",
         "reverse_benefit_reason": "Reason for reversing the benefit — why is the annual exemption basket being released (§ 6(9) of the Income Tax Act)?",
+        "reverse_benefit_reason_required": "The benefit was not reversed: a reversal cannot be saved without a reason. Click “Reverse benefit” again and fill in the reason.",
         "benefit_reversed": "The benefit was reversed and the annual exemption basket was released.",
         "reverse_benefit_failed": "The benefit could not be reversed.",
         "empty": "There are no payroll inputs in this period",
@@ -5219,6 +5309,12 @@
         "approve_matching": "Approve {count} matching the filter",
         "cancel_matching": "Cancel {count} drafts",
         "cancel_matching_confirm": "Cancel {count} drafts matching the filter? They disappear from the list and stop blocking the payroll run. This cannot be undone.",
+        "round_whole_crowns": "Round inputs up to whole crowns",
+        "round_whole_crowns_hint": "The monthly employer report states earnings in whole crowns. Inputs with hellers in the period are rounded up, in the employee's favour.",
+        "round_whole_crowns_confirm": "Round inputs with hellers in this period up to whole crowns? Drafts and approved inputs not yet locked by a payroll run will change.",
+        "round_whole_crowns_done": "Inputs rounded: {count}. Left unchanged: {skipped}.",
+        "round_whole_crowns_none": "No inputs in this period have hellers that the monthly report would reject.",
+        "round_whole_crowns_failed": "The inputs could not be rounded.",
         "export_xlsx": "Excel",
         "export_pdf": "PDF",
         "export_hint": "Downloads every input matching the filter, not just the page shown.",
@@ -5690,7 +5786,8 @@
         "all": "All",
         "requested": "Requested, not settled",
         "unsettled": "Not settled",
-        "settled": "Settled"
+        "settled": "Settled",
+        "request_undecided": "Request undecided"
       },
       "not_settled": "Not performed",
       "detail": "Details",
@@ -6369,6 +6466,9 @@
         "end_recurring_base_hint": "The employment has an active base wage recurring item. Hourly pay does not use it, so the item must end the day before the new version takes effect to avoid paying the wage twice.",
         "end_recurring_base_named": "End recurring item {name} on {date} and save",
         "end_recurring_base": "End the base wage recurring item on {date} and save",
+        "imported_wage_hint": "The wage for this employment is imported as an amount (for example from attendance). Hourly calculation from shifts would block the next import. Set the probable earnings instead of the rate, or confirm that the wage will now be calculated from shifts and the hourly wage import ends.",
+        "imported_wage_keep": "Set probable earnings only",
+        "imported_wage_switch": "Switch to hourly calculation anyway",
         "basis_kinds": {
           "wage_statement": "Wage statement",
           "contract": "Employment contract",
@@ -6419,6 +6519,7 @@
       "statutory_bulk_action": "Fill in default statutory data",
       "declaration_sign_bulk_action": "Signed declarations in bulk",
       "workplace_bulk_action": "Fill in place of work",
+      "terms_bulk_action": "Edit terms of selected employments",
       "more_functions": "More functions",
       "no_results_title": "No employee matches the filter",
       "no_results_description": "Change the search text or choose another view.",
@@ -6603,8 +6704,11 @@
           "components": "no recurring component | 1 recurring pay component | {count} recurring pay components",
           "time": "no attendance record | 1 attendance and calendar record | {count} attendance and calendar records",
           "absences": "no absence | 1 absence and leave record | {count} absence and leave records",
-          "sickness": "no benefit case | 1 unsubmitted sickness insurance benefit case | {count} unsubmitted sickness insurance benefit cases"
+          "sickness": "no benefit case | 1 unsubmitted sickness insurance benefit case | {count} unsubmitted sickness insurance benefit cases",
+          "registration_profile": "no registration profile | 1 unsubmitted ČSSZ registration profile | {count} unsubmitted ČSSZ registration profiles",
+          "registration_changes": "no change report proposal | 1 registration change report proposal | {count} registration change report proposals"
         },
+        "show_inputs": "Show payroll inputs",
         "person_cascade": {
           "employments": "no relationship | 1 employment relationship | {count} employment relationships",
           "profile": "no profile detail | 1 profile and personal detail | {count} profile and personal details",
@@ -7000,6 +7104,17 @@
       "add_employment": "Add relationship",
       "employment_created": "The employment relationship has been created.",
       "employment_created_with_warnings": "The employment relationship has been created. Check on the employment card: {messages}",
+      "open_agreement": {
+        "title": "The person already has an open agreement to perform work (DPP).",
+        "item": "DPP {code} from {start} to {end}",
+        "no_end": "indefinite",
+        "guidance": "One long-term DPP means one registration with the Czech Social Security Administration. Every new agreement has to be registered again and deregistered after it ends, so it is better to use the open agreement and extend its end if needed.",
+        "reuse": "Use agreement {code}",
+        "reuse_extend": "Use agreement {code} and extend its end to {date}",
+        "create_new": "Create a new DPP anyway",
+        "reused": "The open agreement {code} was used, no new DPP was created.",
+        "reused_extended": "The open agreement {code} was used with its end extended to {date}, no new DPP was created."
+      },
       "code": "Personal number",
       "relation_type": "Relationship type",
       "initial_terms": "Initial contractual terms",
@@ -7043,7 +7158,8 @@
         "correct_settled_hint": "Payroll has already been settled under this version (last period starting {period}); the server will refuse a correction. Choose a new version.",
         "current_effective_from": "Current terms effective from",
         "current_effective_from_hint": "Corrects the date of the current version without creating a new one. For example when the terms start on the day they were entered instead of the start date.",
-        "effective_from_correction_needs_correct": "The effective date of the current version can only be corrected with \"Correct the effective terms\". Restore the date or change how to save."
+        "effective_from_correction_needs_correct": "The effective date of the current version can only be corrected with \"Correct the effective terms\". Restore the date or change how to save.",
+        "ended_jmhz_only": "The employment has ended: only JMHZ reporting details can be corrected (place of work, CZ-ISCO, activity code, main employment, probable earnings), and only while no JMHZ report for its months is frozen or submitted. Make any other change to the terms after reverting the termination."
       },
       "mutation_failed": "The employment relationship could not be updated.",
       "transition_saved": "The employment status has been changed.",
@@ -7450,6 +7566,11 @@
         "current_ended": "Recorded only until {day}, missing for {month}. If the relationship continues, leave Valid to empty.",
         "current_none_claimed": "No credit",
         "derived_taxpayer_credit": "Basic taxpayer credit (from the signed declaration)",
+        "declaration_check": {
+          "earlier_than_allowed": "Based on the signing date the declaration applies only from {month} (§ 38k of the Income Tax Act). The credit is not due for earlier months, move the start of the record.",
+          "later_than_entitled": "Based on the signing date the credit is due already from {month} (§ 38k of the Income Tax Act). The annual tax settlement makes it up for months closed by an approved payroll.",
+          "next_year": "A declaration signed after the deadline applies only from the next year (§ 38k(7) of the Income Tax Act)."
+        },
         "current_from": "valid from {day}",
         "current_none": "nothing applies to the selected month",
         "history": "History and records — none yet | History and records (1) | History and records ({count}) | History and records ({count})",
@@ -7493,7 +7614,7 @@
           "social_pensions": "Pension received"
         },
         "section_hint": {
-          "tax_declarations": "Decides whether monthly credits and allowances apply, or tax is withheld without them.",
+          "tax_declarations": "Decides whether monthly credits and allowances apply, or tax is withheld without them. The start of the record is the first month of the credit: the month of starting work when signed within 30 days of the start, January when signed by 15 February, otherwise the month after the signature (§ 38k of the Income Tax Act). Record the signing date with a signed declaration.",
           "tax_residences": "A non-resident is taxed differently than a resident; a supporting reference can be stored optionally.",
           "tax_credit_claims": "Monthly tax credits for the taxpayer, disability and ZTP/P card holders. They apply only with a signed declaration; without a record the credit is not deducted and the tax advance is higher by its amount. Each kind of credit is its own series, so they may apply concurrently.",
           "social_jurisdictions": "Whether the person is subject to Czech social insurance. A foreign regime needs a country; a supporting reference is optional.",
@@ -8974,6 +9095,7 @@
         "queue": "To send",
         "transport": "Sent",
         "regzel": "Employer registration",
+        "registration_a1": "Registrations to file (A1)",
         "registration_completion": "Data supplement (A3)",
         "jmhz": "JMHZ",
         "discount_intents": "Discount intent",
@@ -12567,6 +12689,58 @@
         "program": "The previous program",
         "open": "Show filing",
         "deadline": "The completion deadline (30 April 2026) passed before payroll started in MyÚčto, so the previous program handled it. If ČSSZ does not have it, file it manually."
+      }
+    },
+    "registrationA1": {
+      "title": "Employee registrations to file (REGZEC A1)",
+      "intro": "Employments that last or start in the selected period and are not yet registered with ČSSZ: they have no ID PPV, no prepared or sent registration, and the previous program did not register them. Prepare the registration for the selected ones with one button, exactly as on the employment card. Then send the prepared filings from the To send queue.",
+      "legal": "A full A1 registration is prepared, even before the start date. Only employments with a complete registration profile are prepared; for incomplete ones the row shows what is missing and links to the employment card.",
+      "from": "Period from",
+      "to": "Period to",
+      "submit": "Prepare selected ({count})",
+      "reload": "Reload",
+      "select_all": "Select all complete",
+      "select_one": "Select {name}",
+      "open_profile": "Open employment card",
+      "open_queue": "Open the To send queue",
+      "open_ended": "ongoing",
+      "empty": "No employment in the selected period needs a registration.",
+      "load_failed": "The list of registrations to file could not be loaded.",
+      "submit_failed": "The registrations could not be prepared.",
+      "done": "Prepared: {prepared}, skipped: {skipped}. Skipped rows show the reason.",
+      "more_problems": "and more issues ({count}); Check on the employment card shows the full list",
+      "col": {
+        "person": "Employee",
+        "period": "Employment period",
+        "profile": "Registration profile (A1)",
+        "deadline": "Registration deadline"
+      },
+      "profile": {
+        "verified": "Complete",
+        "draft": "Incomplete",
+        "missing": "Missing"
+      },
+      "deadline": {
+        "due": "by {date}",
+        "overdue": "overdue (by {date})",
+        "not_derived": "deadline not derived by the app, file without delay",
+        "unknown": "no start date",
+        "after_p1": "after an accepted limited registration (P1)"
+      },
+      "warning": {
+        "duplicate_dpp": "The person has another open DPP ({code}) that already has an ID PPV. It is probably the same employment created twice - consider merging the employments instead of filing a new registration."
+      },
+      "result": {
+        "prepared": "Prepared, filing no. {id}.",
+        "existing": "The registration already exists, filing no. {id}.",
+        "open": "To send"
+      },
+      "skip": {
+        "id_ppv": "The employment already has an ID PPV, no registration is filed.",
+        "live_registration": "A registration is already prepared or sent.",
+        "predecessor": "The previous program filed the registration.",
+        "profile_incomplete": "The registration profile is incomplete, the registration was not prepared.",
+        "not_found": "The employment was not found or has already ended."
       }
     },
     "healthInsurerNotice": {
@@ -32275,6 +32449,32 @@
       "bulk_hint": "Creates and immediately approves the average earning for the selected employments in the chosen quarter.",
       "bulk_create": "Create and approve selected ({count})",
       "bulk_created": "The average earning was created and approved for {count} employments.",
+      "bulk_skipped": "{count} employments were not approved because their proposal is not ready. Open the person and complete what is missing, or set a probable earning for them:",
+      "probable_bulk": {
+        "title": "Set probable earning for selected",
+        "hint": "Set the probable earning (Section 355(2) of the Labour Code) as one amount for all selected employments. It is stored in the employment terms and a new approved revision of the average is created for the chosen quarter; an existing approved average with a different amount is replaced.",
+        "quick_select": "Quick select:",
+        "select_dpp": "Agreements to perform work (DPP)",
+        "select_minimum_wage": "Average from minimum wage",
+        "clear_selection": "Clear selection",
+        "amount": "Hourly earning (CZK)",
+        "rationale": "Rationale",
+        "rationale_placeholder": "For example: agreed reward of CZK 180 per hour under the agreements",
+        "rationale_required": "Enter the rationale for the probable earning; the law requires it.",
+        "apply": "Set for selected ({count})",
+        "done": "Probable earning set for {applied} employments, {unchanged} unchanged.",
+        "summary": "Set: {applied} · unchanged: {unchanged} · not done: {failed}",
+        "failure": {
+          "employment_not_found": "The employment was not found.",
+          "average_pending_review": "Another revision of the average is waiting for approval in this quarter. Approve it or delete it in the person's detail, then repeat the action.",
+          "average_used_by_closed_run": "The approved average for Q{quarter} was already used by the closed payroll run for {period}. Reopen the run for correction and repeat the action.",
+          "average_reported_in_jmhz": "The approved average for Q{quarter} was already used by the closed payroll run for {period}, which produced a JMHZ report. Reopen the run for correction, repeat the action and after approving the correction file a corrective JMHZ report.",
+          "row_version_conflict": "Someone else changed the employment or its average in the meantime. Repeat the action."
+        },
+        "warning": {
+          "corrective_report_needed": "A JMHZ report with the original average was already filed for {period}. After approving the run correction, file a corrective report."
+        }
+      },
       "bulk_load_failed": "Could not load candidates for the bulk average calculation.",
       "bulk_inputs_changed": "The underlying data changed since the list was loaded. The list has been reloaded, please check your selection and submit again.",
       "bulk_empty": "There are no employments for this quarter.",
@@ -36119,6 +36319,7 @@
     "meaning_groups": {
       "other": "Other",
       "identity": "Person and employment",
+      "registration": "Social security registration",
       "work": "Worked",
       "absence": "Absence",
       "money": "Money and checks"
@@ -36141,6 +36342,20 @@
       "hourly_rate": "Hourly rate",
       "end_date": "Agreement end",
       "bank_account": "Bank account",
+      "address_street": "Street (permanent address)",
+      "address_house_number": "House number",
+      "address_city": "Municipality (permanent address)",
+      "address_postal_code": "Postal code",
+      "address_country": "Address country",
+      "citizenship": "Citizenship",
+      "cz_isco_code": "CZ-ISCO",
+      "activity_code": "Social security activity type",
+      "workplace": "Place of work",
+      "tax_residence": "Tax residence",
+      "tax_declaration": "Taxpayer declaration",
+      "tax_declaration_from": "Declaration from",
+      "education_code": "Education (KKOV)",
+      "employment_status_code": "Employment status (NKPZ)",
       "worked_hours": "Worked",
       "overtime_hours": "Overtime",
       "night_hours": "Night work",
@@ -36267,6 +36482,17 @@
         "other_source": "{files}: {count} inputs, imported {date}",
         "confirm": "I understand: the data really belong to the selected period and I will resolve the inputs from the other import myself."
       },
+      "registration": {
+        "address": "Address",
+        "citizenship": "Citizenship",
+        "cz_isco_code": "CZ-ISCO",
+        "activity_code": "Activity type",
+        "workplace": "Place of work",
+        "tax_residence": "Tax residence",
+        "tax_declaration": "Declaration from",
+        "employment_status_code": "Employment status",
+        "education_code": "Education"
+      },
       "persons": {
         "title": "People",
         "intro": "Assign an employment to every person from the data. People without an employment are skipped when applying. You can create missing people right away.",
@@ -36320,10 +36546,22 @@
         "last_name": "Last name",
         "swap_names": "Swap first and last name",
         "remove_from_create": "Do not create",
+        "registration_label": "For social security registration",
+        "existing_person": "{name} is already in the records; only a new employment relationship is created (no new person record).",
+        "open_agreement": {
+          "legend": "Open agreement of {name}",
+          "title": "The person has an open agreement to perform work (DPP) {code} from {start} to {end}.",
+          "no_end": "indefinite",
+          "guidance": "One long-term DPP means one registration with the Czech Social Security Administration. Every new agreement has to be registered again and deregistered after it ends.",
+          "reuse": "Use the open agreement",
+          "reuse_extend": "Use the open agreement and extend its end to {date}",
+          "create_new": "Create a new agreement"
+        },
         "details": {
           "start_on": "Start",
           "agreed_end_on": "Agreement end",
           "hourly_rate": "Hourly rate",
+          "probable_earning": "Probable earnings (from pay for hours)",
           "monthly_wage": "Monthly wage",
           "bank_account": "Account",
           "unreadable": "“{value}” cannot be read and will not be taken over"
@@ -36370,6 +36608,15 @@
         "adopt_personal_numbers_hint": "Employments with an automatic number (1, ZAM-7…) get the personal number from the source files; a manually entered number is never overwritten.",
         "adopt_monthly_wage": "Adopt the monthly wage from the source files ({count} changes)",
         "adopt_monthly_wage_hint": "Only people without an obstacle in the Monthly wage from source files table are written. A missing wage is added to the current employment terms; a different wage creates a new version of the terms from the first day of the period.",
+        "fill_registration": "Fill in missing social security registration data ({count} people)",
+        "fill_registration_hint": "Only data missing in the records is written from the source files (address, citizenship, CZ-ISCO, place of work, tax residence, declaration, registration profile). Nothing is overwritten.",
+        "adopt_probable_earnings": "Fill in probable earnings from the source files ({count} employments)",
+        "adopt_probable_earnings_hint": "Only for employments without probable earnings and without an approved average for the quarter. The earnings are used for wage compensation until an average exists; the agreed remuneration is not changed.",
+        "round_whole_crowns": "Round amounts with hellers up to whole crowns ({count})",
+        "round_whole_crowns_hint": "The monthly employer report states earnings in whole crowns and wages are rounded up, in the employee's favour. The table shows the rounded amounts with the original value.",
+        "rounded_from": "from {amount}",
+        "probable_from_amount": "{rate}/h (pay {amount} for {hours} h)",
+        "probable_from_rate": "{rate}/h (rate from the source files)",
         "wages_title": "Monthly wage from source files",
         "wages_hint": "Differences between the wage in the source files and the agreed employment terms. People with a reason are not adopted; change their wage on the employment card.",
         "wages_person": "Person",
@@ -36410,6 +36657,8 @@
         "personal_numbers_adopted": "Personal numbers adopted: {count}",
         "personal_number_conflicts_title": "Personal numbers not adopted ({count})",
         "monthly_wages_adopted": "Monthly wages adopted: {count}",
+        "registration_filled": "Registration data filled in for people: {count}",
+        "probable_earnings_adopted": "Probable earnings filled in for employments: {count}",
         "deductions": "Deductions from pay: created {created}, updated {updated}, unchanged {unchanged}",
         "deduction_conflicts_title": "Deductions not written ({count})",
         "wage_conflicts_title": "Monthly wages not adopted ({count})",

@@ -5,6 +5,7 @@ type SelectInstance = ComponentPublicInstance<{ modelValue: unknown }>
 
 const m = vi.hoisted(() => ({
   approveInputsBatch: vi.fn(),
+  roundInputsWholeCrowns: vi.fn(),
   exportInputs: vi.fn(),
   routeQuery: {} as Record<string, string | string[]>,
   routerReplace: vi.fn(),
@@ -73,6 +74,7 @@ vi.mock('@/api/payroll', () => ({
     updateInput: vi.fn(),
     approveInput: vi.fn(),
     approveInputsBatch: m.approveInputsBatch,
+    roundInputsWholeCrowns: m.roundInputsWholeCrowns,
     exportInputs: m.exportInputs,
     riskySavings: m.riskySavings,
     institutionAccounts: m.institutionAccounts,
@@ -638,6 +640,32 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
+  /**
+   * Kontrola běhu `inputs_not_whole_crowns` vede sem: jedním kliknutím se
+   * haléřové vstupy období (zúžené na vztah z odkazu) zaokrouhlí nahoru
+   * a co server nezměnil, zůstane pod lištou s důvodem.
+   */
+  it('rounds inputs of the period up to whole crowns and lists what stayed', async () => {
+    m.routeQuery = { employment: '12', period: '2026-05' }
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    m.roundInputsWholeCrowns.mockResolvedValue({
+      rounded: [{ id: 9, employee_name: 'Syntetická osoba', component_name: 'Provize', from_minor: 123450, to_minor: 123500 }],
+      skipped: [{ id: 10, employee_name: 'Syntetická osoba', component_name: 'Provize', amount_minor: 50050, reason: 'Uzamčeno během.' }],
+    })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="payroll-inputs-round-whole-crowns"]').trigger('click')
+    await flushPromises()
+
+    expect(m.roundInputsWholeCrowns).toHaveBeenCalledWith({ period: '2026-05', employment_id: 12 })
+    expect(wrapper.get('[data-testid="payroll-inputs-batch-failures"]').text())
+      .toContain('Syntetická osoba · Provize: Uzamčeno během.')
+    expect(m.toastSuccess).toHaveBeenCalledWith('payroll.components.inputs.round_whole_crowns_done')
+    confirm.mockRestore()
+    wrapper.unmount()
+  })
+
   /*
    * Schvalovat 500 vstupů po jednom je zhruba tisíc kliknutí. Hromadné
    * schválení bere celé období, ne jen zobrazenou stránku — blokátor běhu
@@ -1125,6 +1153,40 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
+  it('posune editor mapování JMHZ i úpravy složky do zorného pole nad dlouhým katalogem', async () => {
+    const scrollIntoView = vi.fn()
+    const original = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    try {
+      const wrapper = mount(PayrollComponents)
+      await flushPromises()
+      await wrapper.findAll('button')
+        .find(button => button.text() === 'payroll.components.tabs.catalog')!
+        .trigger('click')
+      await flushPromises()
+
+      await wrapper.findAll('button')
+        .find(button => button.text() === 'payroll.components.jmhz.configure')!
+        .trigger('click')
+      await flushPromises()
+      const jmhzEditor = wrapper.get('[data-testid="payroll-jmhz-mapping-editor"]')
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+      expect(scrollIntoView.mock.contexts[0]).toBe(jmhzEditor.element)
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: 'smooth', block: 'start' })
+
+      await wrapper.findAll('button')
+        .find(button => button.text() === 'common.edit')!
+        .trigger('click')
+      await flushPromises()
+      const componentEditor = wrapper.get('[data-testid="payroll-component-editor"]')
+      expect(scrollIntoView).toHaveBeenCalledTimes(2)
+      expect(scrollIntoView.mock.contexts[1]).toBe(componentEditor.element)
+      wrapper.unmount()
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+    }
+  })
+
   it('smaže dosud nepoužitou mzdovou složku po potvrzení', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const wrapper = mount(PayrollComponents)
@@ -1212,6 +1274,17 @@ describe('PayrollComponents', () => {
 
     expect(wrapper.text()).toContain('payroll.components.jmhz.status.outside_breakdown')
     expect(wrapper.text()).not.toContain('payroll.components.jmhz.status.missing')
+    wrapper.unmount()
+  })
+
+  it('odkaz z blokace otevře zařazení konkrétní složky do JMHZ v číselníku', async () => {
+    m.routeQuery = { tab: 'catalog', component: '5', panel: 'jmhz' }
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    const editor = wrapper.find('[data-testid="payroll-jmhz-mapping-editor"]')
+    expect(editor.exists()).toBe(true)
+    expect(editor.text()).toContain('Syntetická odměna')
     wrapper.unmount()
   })
 

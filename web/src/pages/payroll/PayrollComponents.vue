@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { personalNumberLabel, todayIso } from './employmentLifecycleUi'
 import { useRoute, useRouter } from 'vue-router'
@@ -415,7 +415,17 @@ const inputError = ref('')
 const importApiError = ref('')
 
 const componentEditorOpen = ref(false)
+const componentEditorSection = ref<HTMLElement | null>(null)
 const jmhzEditorOpen = ref(false)
+const jmhzEditorSection = ref<HTMLElement | null>(null)
+
+/**
+ * Editory katalogu se vykreslují nad dlouhou tabulkou složek. Otevřený z řádku
+ * níž v tabulce by zůstal mimo zobrazení a klik by vypadal, že nic neudělal.
+ */
+function scrollEditorIntoView(section: Ref<HTMLElement | null>): void {
+  void nextTick(() => section.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }))
+}
 const editingComponent = ref<PayrollComponent | null>(null)
 const editingJmhzComponent = ref<PayrollComponent | null>(null)
 const jmhzTargets = ref<PayrollComponentJmhzTarget[]>([])
@@ -853,10 +863,11 @@ async function load() {
     if (activeTab.value === 'catalog') {
       // Nečekáme na volitelný katalog JMHZ: běžná správa složek musí zůstat
       // použitelná i při dočasně nedostupném podkladu pro mapování.
-      void loadJmhzConfiguration()
+      const jmhzLoaded = loadJmhzConfiguration()
       const catalog = await payrollApi.componentCatalog()
       components.value = catalog.components
       minimumClassificationRules.value = catalog.minimum_wage_classification ?? null
+      void openRequestedComponent(jmhzLoaded)
     } else if (activeTab.value === 'recurring') {
       const [catalog] = await Promise.all([
         payrollApi.components(),
@@ -883,6 +894,35 @@ async function load() {
     loading.value = false
   }
 }
+
+/*
+ * Odkaz z kontroly běhu nebo z blokace JMHZ (`?tab=catalog&component=ID`)
+ * otevře rovnou editor složky, s `panel=jmhz` její zařazení do hlášení.
+ * Zařazení čeká na katalog JMHZ, jinak by editor ukázal prázdný cíl.
+ */
+const requestedComponentId = ref<number | null>(payrollQueryId(route.query, 'component'))
+
+async function openRequestedComponent(jmhzLoaded: Promise<void>) {
+  const id = requestedComponentId.value
+  if (id === null) return
+  requestedComponentId.value = null
+  const component = components.value.find(item => item.id === id)
+  if (!component) return
+  if (payrollQueryValue(route.query, 'panel') === 'jmhz') {
+    await jmhzLoaded
+    openJmhzMapping(component)
+  } else {
+    await editComponent(component)
+  }
+}
+
+watch(() => route.query.component, () => {
+  const id = payrollQueryId(route.query, 'component')
+  if (id === null) return
+  requestedComponentId.value = id
+  if (activeTab.value !== 'catalog') activeTab.value = 'catalog'
+  else void load()
+})
 
 function setJmhzMappings(states: PayrollComponentJmhzMappingState[]) {
   jmhzMappings.value = Object.fromEntries(states.map(state => [state.component_id, state]))
@@ -916,6 +956,7 @@ function openJmhzMapping(component: PayrollComponent) {
     : null
   jmhzError.value = ''
   jmhzEditorOpen.value = true
+  scrollEditorIntoView(jmhzEditorSection)
 }
 
 async function saveJmhzMapping() {
@@ -1037,6 +1078,7 @@ async function editComponent(component: PayrollComponent) {
   })
   componentError.value = ''
   componentEditorOpen.value = true
+  scrollEditorIntoView(componentEditorSection)
 }
 
 /**
@@ -1728,6 +1770,43 @@ async function cancelMatchingInputs() {
   await runInputBatch('cancel', null)
 }
 
+/**
+ * Haléřové vstupy období nahoru na celé koruny (kontrola běhu
+ * `inputs_not_whole_crowns`). Server bere jen vstupy, které by měsíční
+ * hlášení odmítlo; co nezměnil, zůstane pod lištou s důvodem.
+ */
+async function roundInputsWholeCrowns() {
+  if (batchDisabledInRange.value) return
+  if (!window.confirm(t('payroll.components.inputs.round_whole_crowns_confirm'))) return
+  inputError.value = ''
+  inputBatchFailures.value = []
+  saving.value = true
+  try {
+    const result = await payrollApi.roundInputsWholeCrowns({
+      period: period.value,
+      employment_id: focusEmploymentId.value,
+    })
+    await loadInputsPage()
+    inputBatchFailures.value = groupPayrollInputFailures(result.skipped.map(row => ({
+      id: row.id,
+      code: 'not_rounded',
+      message: `${row.employee_name} · ${row.component_name}: ${row.reason}`,
+    })))
+    if (result.rounded.length === 0 && result.skipped.length === 0) {
+      toast.success(t('payroll.components.inputs.round_whole_crowns_none'))
+    } else {
+      toast.success(t('payroll.components.inputs.round_whole_crowns_done', {
+        count: result.rounded.length,
+        skipped: result.skipped.length,
+      }))
+    }
+  } catch (error: any) {
+    inputError.value = apiErrorMessage(error, t('payroll.components.inputs.round_whole_crowns_failed'))
+  } finally {
+    saving.value = false
+  }
+}
+
 async function approveSelectedInputs() {
   await runInputBatch('approve', [...selectedInputIds.value])
 }
@@ -1772,7 +1851,11 @@ async function cancelInput(input: PayrollInput) {
 
 async function reverseBenefitInput(input: PayrollInput) {
   const reason = window.prompt(t('payroll.components.inputs.reverse_benefit_reason'))
-  if (reason === null || reason.trim() === '') return
+  if (reason === null) return
+  if (reason.trim() === '') {
+    inputError.value = t('payroll.components.inputs.reverse_benefit_reason_required')
+    return
+  }
   inputError.value = ''
   saving.value = true
   try {
@@ -2018,7 +2101,7 @@ onMounted(load)
           </button>
         </div>
 
-        <section v-if="componentEditorOpen" data-testid="payroll-component-editor" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
+        <section v-if="componentEditorOpen" ref="componentEditorSection" data-testid="payroll-component-editor" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <h3 class="font-semibold text-neutral-900">{{ t(editingComponent ? 'payroll.components.catalog.edit' : 'payroll.components.catalog.new') }}</h3>
             <button :class="btnOutline('neutral')" @click="componentEditorOpen = false">
@@ -2078,7 +2161,7 @@ onMounted(load)
           </div>
         </section>
 
-        <section v-if="jmhzEditorOpen && editingJmhzComponent" data-testid="payroll-jmhz-mapping-editor" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
+        <section v-if="jmhzEditorOpen && editingJmhzComponent" ref="jmhzEditorSection" data-testid="payroll-jmhz-mapping-editor" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 class="font-semibold text-neutral-900">{{ t('payroll.components.jmhz.title') }}</h3>
@@ -2361,6 +2444,10 @@ onMounted(load)
                 {{ t('payroll.components.inputs.export_pdf') }}
               </button>
               <span v-if="batchProgress !== null" role="status" class="text-xs text-neutral-500">{{ t('payroll.components.inputs.batch_progress', { done: batchProgress }) }}</span>
+              <button v-if="canWrite && summaryTotal > 0 && !batchDisabledInRange" type="button" data-testid="payroll-inputs-round-whole-crowns" :class="[btnOutline('warning'), 'whitespace-nowrap']" :disabled="saving" :title="t('payroll.components.inputs.round_whole_crowns_hint')" @click="roundInputsWholeCrowns">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.coin" /></svg>
+                {{ t('payroll.components.inputs.round_whole_crowns') }}
+              </button>
               <button v-if="canWrite && matchingDraftCount > 0 && !batchDisabledInRange" type="button" data-testid="payroll-inputs-cancel-matching" :class="[btnOutline('danger'), 'whitespace-nowrap']" :disabled="saving" @click="cancelMatchingInputs">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>
                 {{ t('payroll.components.inputs.cancel_matching', { count: matchingDraftCount }) }}

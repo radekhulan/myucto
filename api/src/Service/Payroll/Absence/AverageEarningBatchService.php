@@ -68,7 +68,7 @@ final class AverageEarningBatchService
         $total = (int) $count->fetchColumn();
 
         $stmt = $this->db->pdo()->prepare(
-            "SELECT employment.id, employment.code, employee.full_name
+            "SELECT employment.id, employment.code, employment.relation_type, employee.full_name
                FROM payroll_employments employment
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
@@ -103,18 +103,24 @@ final class AverageEarningBatchService
                 (string) $row['full_name'],
                 (string) $row['code'],
                 $existing[$employmentId] ?? null,
-            );
+            ) + ['relation_type' => (string) $row['relation_type']];
         }
 
         return compact('items', 'total', 'limit', 'offset');
     }
 
     /**
-     * Založí a schválí průměry vybraných vztahů. Vše, nebo nic.
+     * Založí a schválí průměry vybraných vztahů.
+     *
+     * Změněné podklady (jiná `input_version`) zastaví celou dávku, protože
+     * účetní potvrzovala čísla, která už neplatí. Vztah, jehož návrh připravený
+     * není (chybí podklad, průměr za čtvrtletí už existuje, převzaté mzdy), dávku
+     * nezastaví: přeskočí se a vrátí v `skipped` se jménem a kódy důvodů, aby ho
+     * přehled ukázal u osoby a ostatní vztahy se schválily.
      *
      * @param list<mixed> $requested položky `{employment_id, input_version}`
      *        z přehledu
-     * @return list<array<string,mixed>> schválené snapshoty
+     * @return array{approved:list<array<string,mixed>>,skipped:list<array{employment_id:int,employee_id:int,employee_name:string,employment_code:string,blockers:list<string>}>}
      */
     public function createBatch(
         int $supplierId,
@@ -159,6 +165,7 @@ final class AverageEarningBatchService
             $hourlyFloors = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db))
                 ->forMany($supplierId, array_keys($versions), $applicationStart, $applicationStart, true);
             $approved = [];
+            $skipped = [];
             foreach ($versions as $employmentId => $expectedVersion) {
                 $this->lockEmployment($supplierId, $employmentId);
                 if ($this->averages->quarterMismatch($supplierId, $employmentId, $year, $quarter) !== null) {
@@ -170,19 +177,13 @@ final class AverageEarningBatchService
                 if (!hash_equals($expectedVersion, (string) $suggestion['input_version'])) {
                     throw new AverageEarningBatchConflictException($employmentId);
                 }
-                if (($suggestion['ready'] ?? false) !== true) {
-                    throw new \InvalidArgumentException(sprintf(
-                        'Pracovní vztah %d nemá připravený návrh průměru: %s.',
-                        $employmentId,
-                        implode(', ', (array) $suggestion['blockers']),
-                    ));
-                }
-                if (self::needsIndividualReview($suggestion)) {
-                    throw new \InvalidArgumentException(sprintf(
-                        'Pracovní vztah %d má průměr z převzatých mezd předchozího programu; '
-                        . 'potvrďte ho jednotlivě v Nepřítomnostech → Průměrné výdělky.',
-                        $employmentId,
-                    ));
+                if (($suggestion['ready'] ?? false) !== true || self::needsIndividualReview($suggestion)) {
+                    $blockers = array_values(array_map('strval', (array) ($suggestion['blockers'] ?? [])));
+                    if (self::needsIndividualReview($suggestion)) {
+                        $blockers[] = 'takeover_needs_review';
+                    }
+                    $skipped[$employmentId] = array_values(array_unique($blockers));
+                    continue;
                 }
                 $approved[] = $this->createAndApprove(
                     $supplierId,
@@ -200,7 +201,19 @@ final class AverageEarningBatchService
                 $pdo->commit();
             }
 
-            return $approved;
+            $people = $this->people($supplierId, array_keys($skipped));
+            $skippedRows = [];
+            foreach ($skipped as $employmentId => $blockers) {
+                $skippedRows[] = [
+                    'employment_id' => $employmentId,
+                    'employee_id' => (int) ($people[$employmentId]['employee_id'] ?? 0),
+                    'employee_name' => (string) ($people[$employmentId]['full_name'] ?? ''),
+                    'employment_code' => (string) ($people[$employmentId]['code'] ?? ''),
+                    'blockers' => $blockers,
+                ];
+            }
+
+            return ['approved' => $approved, 'skipped' => $skippedRows];
         } catch (\Throwable $exception) {
             if ($ownsTransaction && $pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -439,7 +452,8 @@ final class AverageEarningBatchService
         $in = implode(', ', array_fill(0, count($employmentIds), '?'));
         $stmt = $this->db->pdo()->prepare(
             "SELECT id, employment_id, status, source_kind, average_hourly_minor, revision_no,
-                    gross_earnings_minor, longer_period_allocated_minor, worked_minutes, worked_duration_units, worked_days
+                    gross_earnings_minor, longer_period_allocated_minor, worked_minutes, worked_duration_units, worked_days,
+                    JSON_VALUE(input_trace, '$.probable_source') AS probable_source
                FROM payroll_average_earning_snapshots
               WHERE supplier_id = ? AND applicable_year = ? AND applicable_quarter = ?
                 AND employment_id IN ({$in})
@@ -454,6 +468,10 @@ final class AverageEarningBatchService
                 'status' => (string) $row['status'],
                 'source_kind' => (string) $row['source_kind'],
                 'average_hourly_minor' => (int) $row['average_hourly_minor'],
+                // Odkud byl pravděpodobný výdělek vzat (minimální mzda, sazba,
+                // zadání účetní); přehled podle toho nabídne výběr řádků
+                // s průměrem jen z minimální mzdy.
+                'probable_source' => is_string($row['probable_source'] ?? null) ? $row['probable_source'] : null,
                 'gross_earnings_minor' => (int) $row['gross_earnings_minor'],
                 'longer_period_allocated_minor' => (int) $row['longer_period_allocated_minor'],
                 'worked_minutes' => $row['worked_minutes'] === null ? null : (int) $row['worked_minutes'],
@@ -549,6 +567,86 @@ final class AverageEarningBatchService
         $stmt->execute([$supplierId, $employmentId, $to, $from]);
 
         return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Pravděpodobný výdělek zadaný účetní (§ 355 odst. 2 ZP) jako nová
+     * schválená revize průměru za čtvrtletí. Schválení odsune dosavadní
+     * schválenou revizi stejně jako na kartě průměru
+     * ({@see PayrollAverageEarningRepository::approve()}); jestli se to smí,
+     * rozhoduje volající ({@see ProbableEarningBulkService}).
+     *
+     * @return array<string,mixed> schválený snapshot
+     */
+    public function approveProbableEarning(
+        int $supplierId,
+        int $employmentId,
+        int $year,
+        int $quarter,
+        int $hourlyMinor,
+        string $rationale,
+        ?int $userId,
+    ): array {
+        [$applicationStart] = $this->quarter($year, $quarter);
+        $start = new \DateTimeImmutable($applicationStart);
+        $floors = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db))
+            ->forMany($supplierId, [$employmentId], $applicationStart, $applicationStart, true);
+
+        return $this->createAndApprove(
+            $supplierId,
+            $employmentId,
+            $year,
+            $quarter,
+            $applicationStart,
+            [
+                'source_kind' => 'probable',
+                'probable_source' => AverageEarningDerivationService::PROBABLE_SOURCE_TERMS,
+                'probable_hourly_minor' => $hourlyMinor,
+                'probable_rationale' => $rationale,
+                'worked_minutes' => 0,
+                'decisive_from' => $start->modify('-3 months')->format('Y-m-d'),
+                'decisive_to' => $start->modify('-1 day')->format('Y-m-d'),
+                'input_version' => hash('sha256', \MyInvoice\Service\Payroll\Ruleset\CanonicalJson::encode([$employmentId, $year, $quarter, $hourlyMinor, $rationale])),
+            ],
+            $this->rulesets->forDate(PayrollRulesetDomain::CompensationAverages, $applicationStart),
+            $userId,
+            $floors[$employmentId] ?? [],
+            $rationale,
+            'bulk_probable',
+        );
+    }
+
+    /**
+     * Jméno a označení vztahů pro hlášení přeskočených řádků jedním dotazem.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,array{employee_id:int,full_name:string,code:string}>
+     */
+    public function people(int $supplierId, array $employmentIds): array
+    {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $in = implode(', ', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT employment.id, employment.employee_id, employment.code, employee.full_name
+               FROM payroll_employments employment
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = employment.supplier_id
+                AND employee.id = employment.employee_id
+              WHERE employment.supplier_id = ? AND employment.id IN ({$in})",
+        );
+        $stmt->execute([$supplierId, ...$employmentIds]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[(int) $row['id']] = [
+                'employee_id' => (int) $row['employee_id'],
+                'full_name' => (string) $row['full_name'],
+                'code' => (string) $row['code'],
+            ];
+        }
+
+        return $result;
     }
 
     private function lockEmployment(int $supplierId, int $employmentId): void

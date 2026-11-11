@@ -1698,6 +1698,26 @@ describe('PayrollRuns', () => {
     wrapper.unmount()
   })
 
+  it('změněné podmínky vztahu vypíše a jako hlavní krok nabídne obnovu podkladů místo přepočtu', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'review', 'approve', 'cancel'],
+      source_drift: { ...drift, total: 1, inputs_added: 0, statutory_evidence_changed: 0, employment_terms_changed: 1 },
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const box = wrapper.get('[data-testid="payroll-run-15-source-drift"]')
+    expect(box.find('[data-test="payroll-run-source-drift-employment_terms_changed"]').text())
+      .toContain('payroll.runs.source_drift.employment_terms_changed')
+    const buttons = wrapper.findAll('button[data-testid^="payroll-run-15-"]')
+    expect(buttons[0]!.attributes('data-testid')).toBe('payroll-run-15-refresh_inputs')
+
+    wrapper.unmount()
+  })
+
   it('bez změn podkladů nevaruje a hlavním krokem zůstává schválení', async () => {
     m.runs.mockResolvedValue([run({
       status: 'calculated',
@@ -2047,6 +2067,122 @@ describe('PayrollRuns', () => {
 
       expect(m.hideWarning).toHaveBeenCalledWith({ code: 'time_month_missing', subject_ids: [42], reason: null })
 
+      wrapper.unmount()
+    })
+
+    it('nález s hromadnou opravou otevře dialog ze seznamu zaměstnanců na období běhu', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: true,
+        has_findings: true,
+        findings: [{
+          code: 'person_data_gap',
+          severity: 'info',
+          impact: 'anytime',
+          scope: 'setup',
+          message: 'Za období 2026-02 chybí zákonné údaje.',
+          remediation_path: '/payroll/people?filter=blocking_data',
+          count: 3,
+          entities: [{
+            entity_type: 'employee',
+            entity_id: 7,
+            label: 'Syntetická Osoba',
+            message: 'Syntetická Osoba: chybí daňová rezidence.',
+            gaps: ['tax_residence'],
+            remediation_path: '/payroll/people?person=7&panel=statutory_evidence',
+          }],
+          bulk_actions: [
+            { kind: 'statutory_defaults', count: 3 },
+            { kind: 'health_insurer', count: 1 },
+          ],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const statutory = wrapper.get('[data-test="run-readiness-bulk-action-statutory_defaults"]')
+      expect(JSON.parse(statutory.attributes('data-to')!)).toEqual({
+        name: 'payroll-people',
+        query: { bulk: 'statutory_defaults', period: '2026-02' },
+      })
+      expect(statutory.text()).toContain('payroll.runs.readiness.bulk.statutory_defaults')
+      expect(wrapper.find('[data-test="run-readiness-bulk-action-health_insurer"]').exists()).toBe(true)
+      expect(wrapper.text()).toContain('Syntetická Osoba: chybí daňová rezidence.')
+      wrapper.unmount()
+    })
+
+    it('nerozhodnutá žádost o roční zúčtování vede na hromadné nastavení za minulý rok', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: true,
+        has_findings: true,
+        findings: [{
+          code: 'jmhz_annual_request_status_unresolved',
+          severity: 'info',
+          impact: 'anytime',
+          scope: 'monthly',
+          message: 'Není rozhodnuto, zda o roční zúčtování za minulý rok požádal(a).',
+          remediation_path: '/payroll/annual-settlement',
+          count: 56,
+          entities: [],
+          bulk_actions: [{ kind: 'annual_settlement_request', count: 56 }],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const action = wrapper.get('[data-test="run-readiness-bulk-action-annual_settlement_request"]')
+      expect(JSON.parse(action.attributes('data-to')!)).toEqual({
+        name: 'payroll-annual-settlement',
+        query: { year: '2025', state: 'request_undecided' },
+      })
+      expect(action.text()).toContain('payroll.runs.readiness.bulk.annual_settlement_request')
+      wrapper.unmount()
+    })
+
+    it('hromadný podpis prohlášení z nálezu nese jen dotčené osoby', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: false,
+        has_findings: true,
+        findings: [{
+          code: 'tax_declaration_evidence_missing',
+          severity: 'blocker',
+          impact: 'approval',
+          scope: 'monthly',
+          message: 'Chybí ověřený stav daňového prohlášení (2).',
+          remediation_path: '/payroll/people?bulk=declaration_signed',
+          count: 2,
+          entities: [],
+          bulk_actions: [{ kind: 'declaration_signed', count: 2, employee_ids: [14, 15] }],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const action = wrapper.get('[data-test="run-readiness-bulk-action-declaration_signed"]')
+      expect(JSON.parse(action.attributes('data-to')!)).toEqual({
+        name: 'payroll-people',
+        query: { bulk: 'declaration_signed', period: '2026-02', employees: '14,15' },
+      })
       wrapper.unmount()
     })
   })
