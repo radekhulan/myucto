@@ -10,7 +10,10 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollEmployeeDeletionRepository;
+use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentDeletionRepository;
+use MyInvoice\Repository\Payroll\PayrollTimeRepository;
+use MyInvoice\Service\Payroll\Time\PayrollTimeImportApprovalService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -35,6 +38,10 @@ final class PayrollDeletionApiTest extends TestCase
     private PayrollPeopleAction $people;
     private PayrollEmploymentDeletionRepository $employmentDeletion;
     private PayrollEmployeeDeletionRepository $employeeDeletion;
+    private PayrollTimeRepository $time;
+    private PayrollTimeImportApprovalService $approvals;
+    private PayrollAttendanceImportRepository $imports;
+    private int $componentId;
     private int $supplierId;
     private int $otherSupplierId;
     private int $employeeId;
@@ -57,6 +64,9 @@ final class PayrollDeletionApiTest extends TestCase
         $this->people = $container->get(PayrollPeopleAction::class);
         $this->employmentDeletion = $container->get(PayrollEmploymentDeletionRepository::class);
         $this->employeeDeletion = $container->get(PayrollEmployeeDeletionRepository::class);
+        $this->time = $container->get(PayrollTimeRepository::class);
+        $this->approvals = $container->get(PayrollTimeImportApprovalService::class);
+        $this->imports = $container->get(PayrollAttendanceImportRepository::class);
 
         $pdo = $this->db->pdo();
         $sourceSupplierId = (int) ($pdo->query(
@@ -162,12 +172,87 @@ final class PayrollDeletionApiTest extends TestCase
         self::assertNotNull($decision);
         self::assertFalse($decision->canDelete);
         self::assertSame('payroll_employment_in_run', $decision->blockerCode);
-        self::assertStringContainsString('mzdového běhu', (string) $decision->blockerMessage);
+        self::assertStringContainsString('mzdovém běhu za 01/2026 (stav: rozpracovaný)', (string) $decision->blockerMessage);
+        self::assertStringNotContainsString('zrušte', (string) $decision->blockerMessage);
 
         $response = $this->deleteEmployment($employment);
         self::assertSame(409, $response->getStatusCode());
         self::assertSame('payroll_employment_in_run', $this->json($response)['error']['code']);
         self::assertSame(1, $this->rowCount('payroll_employments', 'id', $employment['id']));
+    }
+
+    /**
+     * Zrušený běh si revizi nechává a ta drží vztah cizím klíčem. Hláška musí
+     * říct, že jde o zrušený běh a za které období, ne radit „zrušte ho".
+     */
+    public function testCancelledRunIsNamedInsteadOfAdvisingToCancelIt(): void
+    {
+        $employment = $this->create('HPP-3C', 'employment', true);
+        $this->linkToRunRevision((int) $employment['id'], 'cancelled');
+
+        $decision = $this->employmentDeletion->canDelete($this->supplierId, (int) $employment['id']);
+        self::assertNotNull($decision);
+        self::assertFalse($decision->canDelete);
+        self::assertSame('payroll_employment_in_run', $decision->blockerCode);
+        self::assertStringContainsString('zrušeném mzdovém běhu za 01/2026', (string) $decision->blockerMessage);
+        self::assertSame('2026-01-01', $decision->blockerPayload()['period'] ?? null);
+    }
+
+    /**
+     * Mzdový vstup se nemaže, jen ruší. Hláška nesmí posílat uživatele „smazat
+     * vstupy", jmenuje období a nabízí sloučení.
+     */
+    public function testInputBlockerNamesPeriodAndRealNextStep(): void
+    {
+        $employment = $this->create('HPP-IN', 'employment', true);
+        $this->insertInput((int) $employment['id'], 'approved', '2026-03-01');
+        $this->insertInput((int) $employment['id'], 'draft', '2026-02-01');
+
+        $decision = $this->employmentDeletion->canDelete($this->supplierId, (int) $employment['id']);
+        self::assertNotNull($decision);
+        self::assertSame('payroll_employment_has_inputs', $decision->blockerCode);
+        $message = (string) $decision->blockerMessage;
+        self::assertStringContainsString('schválené mzdové vstupy za 03/2026', $message);
+        self::assertStringContainsString('Sloučit do jiného vztahu', $message);
+        self::assertStringNotContainsString('smažte', $message);
+        self::assertSame('2026-03-01', $decision->blockerPayload()['period'] ?? null);
+    }
+
+    /**
+     * Schválení docházky zapisuje souhrn pro JMHZ. Podání to není, takže hláška
+     * nesmí tvrdit „připraveno nebo odesláno hlášení JMHZ". Po znovuotevření
+     * měsíce je souhrn jen historie a vztah jde smazat.
+     */
+    public function testApprovedAttendanceIsNotReportedAsJmhzSubmission(): void
+    {
+        $employment = $this->create('HPP-AT', 'employment', false);
+        $employmentId = (int) $employment['id'];
+        $this->approveImportedAttendance($employmentId);
+        self::assertSame(1, $this->rowCount('payroll_jmhz_work_month_revisions', 'employment_id', $employmentId));
+
+        $decision = $this->employmentDeletion->canDelete($this->supplierId, $employmentId);
+        self::assertNotNull($decision);
+        self::assertFalse($decision->canDelete);
+        self::assertSame('payroll_employment_has_approved_time', $decision->blockerCode, (string) $decision->blockerMessage);
+        self::assertStringContainsString('Docházka za 02/2026 je schválená', (string) $decision->blockerMessage);
+
+        $month = $this->time->monthState($this->supplierId, $employmentId, '2026-02-01');
+        $this->time->reopenMonth(
+            $this->supplierId,
+            $employmentId,
+            '2026-02-01',
+            (int) ($month['row_version'] ?? 0),
+            'Vztah vznikl omylem',
+            $this->userId,
+        );
+
+        $response = $this->deleteEmployment($employment);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(0, $this->rowCount('payroll_employments', 'id', $employmentId));
+        self::assertSame(0, $this->rowCount('payroll_jmhz_work_month_revisions', 'employment_id', $employmentId));
+        self::assertSame(0, (int) $this->db->pdo()->query(
+            "SELECT COUNT(*) FROM sample_data_entries WHERE supplier_id = {$this->supplierId} AND entity_type LIKE 'payroll_row_%'"
+        )->fetchColumn(), 'Značky pro smazání souhrnů nezůstaly.');
     }
 
     public function testEmploymentWithRegistrationRecordIsBlocked(): void
@@ -506,7 +591,7 @@ final class PayrollDeletionApiTest extends TestCase
         self::assertSame('HPP-10', $decision->blockedEmploymentCode);
         // Hláška musí říct KTERÝ vztah to blokuje, ne obecné „nelze smazat".
         self::assertStringContainsString('HPP-10', (string) $decision->blockerMessage);
-        self::assertStringContainsString('mzdového běhu', (string) $decision->blockerMessage);
+        self::assertStringContainsString('mzdovém běhu za 01/2026', (string) $decision->blockerMessage);
 
         $response = $this->deleteEmployee($this->employeeId);
         self::assertSame(409, $response->getStatusCode());
@@ -677,14 +762,14 @@ final class PayrollDeletionApiTest extends TestCase
         return $this->json($response)['employment'];
     }
 
-    private function linkToRunRevision(int $employmentId): void
+    private function linkToRunRevision(int $employmentId, string $runStatus = 'draft'): void
     {
         $pdo = $this->db->pdo();
         $run = $pdo->prepare(
-            'INSERT INTO payroll_runs (supplier_id, period_start, payment_date)
-             VALUES (?, ?, ?)'
+            'INSERT INTO payroll_runs (supplier_id, period_start, payment_date, status)
+             VALUES (?, ?, ?, ?)'
         );
-        $run->execute([$this->supplierId, '2026-01-01', '2026-02-10']);
+        $run->execute([$this->supplierId, '2026-01-01', '2026-02-10', $runStatus]);
         $runId = (int) $pdo->lastInsertId();
 
         $revision = $pdo->prepare(
@@ -739,6 +824,79 @@ final class PayrollDeletionApiTest extends TestCase
             "id-ppv-{$employmentId}",
             str_repeat('a', 64),
         ]);
+    }
+
+    private function insertInput(int $employmentId, string $status, string $period): void
+    {
+        $pdo = $this->db->pdo();
+        if (!isset($this->componentId)) {
+            $pdo->prepare(
+                'INSERT INTO payroll_component_definitions
+                    (supplier_id, code, name, component_kind, value_kind,
+                     frequency_kind, tax_treatment,
+                     social_participation_treatment, social_treatment,
+                     health_participation_treatment, health_treatment,
+                     average_earning_treatment, enforcement_treatment,
+                     jmhz_treatment, statistics_treatment,
+                     accounting_debit_code, accounting_credit_code,
+                     valid_from, is_active)
+                 VALUES (?, "ODMENA", "Odměna", "bonus", "monetary", "one_off", "included",
+                         "included", "included", "included", "included",
+                         "included", "included", "included", "included",
+                         "521", "331", "2026-01-01", 1)'
+            )->execute([$this->supplierId]);
+            $this->componentId = (int) $pdo->lastInsertId();
+        }
+        $approved = $status === 'approved';
+        $pdo->prepare(
+            'INSERT INTO payroll_inputs
+                (supplier_id, employee_id, employment_id, component_id, period_start, amount_minor,
+                 source_kind, external_id, status, component_snapshot_json, component_snapshot_hash,
+                 created_by, approved_by, approved_at)
+             VALUES (?, ?, ?, ?, ?, 130000, "time", NULL, ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $employmentId,
+            $this->componentId,
+            $period,
+            $status,
+            $approved ? '{}' : null,
+            $approved ? hash('sha256', 'snapshot', true) : null,
+            $this->userId,
+            $approved ? $this->userId : null,
+            $approved ? date('Y-m-d H:i:s') : null,
+        ]);
+    }
+
+    /** Únorová docházka z importu, schválená stejnou cestou jako v aplikaci. */
+    private function approveImportedAttendance(int $employmentId): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_module_state (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "setup", "2026-01-01", ?, NOW())',
+        )->execute([$this->supplierId, $this->userId]);
+        $importId = $this->imports->insertBatch(
+            $this->supplierId,
+            '2026-02-01',
+            'attendance',
+            random_bytes(32),
+            [['name' => 'dochazka.xlsx', 'sha256' => hash('sha256', 'syntetický soubor docházky')]],
+            [],
+            1,
+            [[
+                'employment_id' => $employmentId,
+                'meaning' => 'worked_hours',
+                'component_code' => '',
+                'quantity_millihours' => 52_000,
+                'amount_minor' => null,
+                'source_ref' => 'dochazka.xlsx!List1!C3',
+            ]],
+            $this->userId,
+        );
+        self::assertNotNull($importId);
+        $result = $this->approvals->applyBatch($this->supplierId, $importId, true, $this->userId);
+        self::assertSame(1, $result['approved'], (string) json_encode($result, JSON_UNESCAPED_UNICODE));
     }
 
     /** Profil REGZEC A1, jak ho zakládá import registrací z cizích podkladů. */

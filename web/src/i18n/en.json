@@ -6604,8 +6604,10 @@
           "time": "no attendance record | 1 attendance and calendar record | {count} attendance and calendar records",
           "absences": "no absence | 1 absence and leave record | {count} absence and leave records",
           "sickness": "no benefit case | 1 unsubmitted sickness insurance benefit case | {count} unsubmitted sickness insurance benefit cases",
-          "registration_profile": "no registration profile | 1 unsubmitted ČSSZ registration profile | {count} unsubmitted ČSSZ registration profiles"
+          "registration_profile": "no registration profile | 1 unsubmitted ČSSZ registration profile | {count} unsubmitted ČSSZ registration profiles",
+          "registration_changes": "no change report proposal | 1 registration change report proposal | {count} registration change report proposals"
         },
+        "show_inputs": "Show payroll inputs",
         "person_cascade": {
           "employments": "no relationship | 1 employment relationship | {count} employment relationships",
           "profile": "no profile detail | 1 profile and personal detail | {count} profile and personal details",

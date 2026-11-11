@@ -66,9 +66,13 @@ final class PayrollEmploymentDeletionRepository
                 . 'Ten úkon už proběhl navenek, takže vztah smazat nelze. '
                 . 'Pokud člověk nakonec nenastoupil, použijte Označit nenástup.',
         ],
+        // Souhrn pracovního měsíce (`payroll_jmhz_work_month_revisions`) tu není:
+        // vzniká každým schválením docházky a podání to není. Hlášení JMHZ drží
+        // snímky níže; souhrn otevřeného měsíce zmizí se vztahem stejně jako při
+        // sloučení ({@see PayrollJmhzWorkMonthRevisionPurger}), schválený měsíc
+        // hlásí `approved_time`.
         'submission' => [
             'tables' => [
-                'payroll_jmhz_work_month_revisions',
                 'payroll_jmhz_eldp_evidence_snapshots',
                 'payroll_jmhz_eldp_idempotency_claims',
                 'payroll_jmhz_ordinary_evidence_snapshots',
@@ -88,11 +92,14 @@ final class PayrollEmploymentDeletionRepository
                 . 'pojištění. Z něj se člověku jednou počítá důchod, takže je neměnný a vztah '
                 . 'smazat nelze — použijte Označit nenástup nebo Ukončit.',
         ],
+        // Blokuje i zrušený běh: revize běhu drží vztah cizím klíčem a zrušený
+        // běh s revizí smazat nejde. Hlášku doplní {@see self::describe()}
+        // o období a stav běhu.
         'run' => [
             'tables' => ['payroll_run_employments'],
             'code' => 'payroll_employment_in_run',
-            'message' => 'Pracovní vztah je zahrnutý v revizi mzdového běhu. '
-                . 'Nejdřív smažte nebo zrušte ten mzdový běh, teprve pak půjde vztah smazat.',
+            'message' => 'Pracovní vztah je zahrnutý v revizi mzdového běhu. Výpočet běhu se váže '
+                . 'k tomuto vztahu, proto vztah smazat nelze. Použijte Označit nenástup nebo Ukončit.',
         ],
         'exit_document' => [
             'tables' => ['payroll_employment_exit_revisions'],
@@ -106,11 +113,27 @@ final class PayrollEmploymentDeletionRepository
             'message' => 'K pracovnímu vztahu je vydaný mzdový výměr. '
                 . 'Ten je neměnný, takže vztah smazat nelze.',
         ],
+        // Mzdový vstup se nemaže, jen ruší, a zrušený zůstává u vztahu. Hláška
+        // proto nesmí radit „smažte je"; období a další krok podle stavu
+        // vstupu doplní {@see self::describe()}.
         'input' => [
             'tables' => ['payroll_inputs'],
             'code' => 'payroll_employment_has_inputs',
-            'message' => 'Pracovní vztah má zadané mzdové vstupy. '
-                . 'Nejdřív je smažte v Mzdových vstupech, teprve pak půjde vztah smazat.',
+            'message' => 'Pracovní vztah má mzdové vstupy. Mzdový vstup se nemaže, jen ruší, a zrušený '
+                . 'zůstává u vztahu, proto vztah smazat nelze.',
+        ],
+        // Schválená docházka. Souhrn pro JMHZ vzniká schválením, takže blokuje
+        // jen souhrn měsíce, který je pořád schválený; po znovuotevření měsíce
+        // je souhrn jen historie a zmizí se vztahem.
+        'approved_time' => [
+            'tables' => ['payroll_jmhz_work_month_revisions'],
+            'where' => 'EXISTS (SELECT 1 FROM payroll_time_months approved_month'
+                . ' WHERE approved_month.supplier_id = {t}.supplier_id'
+                . ' AND approved_month.id = {t}.time_month_id'
+                . " AND approved_month.status = 'approved')",
+            'code' => 'payroll_employment_has_approved_time',
+            'message' => 'Pracovní vztah má schválenou docházku. Nejdřív ji v Docházce znovu otevřete, '
+                . 'teprve pak půjde vztah smazat.',
         ],
         'hourly_wage_claim' => [
             'tables' => ['payroll_hourly_wage_claims', 'payroll_hourly_time_entitlements', 'payroll_hourly_included_consumption', 'payroll_hourly_evidence_revisions'],
@@ -186,6 +209,7 @@ final class PayrollEmploymentDeletionRepository
         ],
         'sickness' => ['payroll_sickness_cases'],
         'registration_profile' => ['payroll_registration_a1_profiles'],
+        'registration_changes' => ['payroll_registration_change_proposals'],
     ];
 
     /**
@@ -205,6 +229,10 @@ final class PayrollEmploymentDeletionRepository
      * cizím klíčem RESTRICT. Profil registrace A1 má FK RESTRICT taky; jeho
      * mazací trigger pustí řádek vztahu, za který neodešlo registrační podání,
      * a jinak mazání zastaví (viz {@see self::REGISTRATION_PROFILE_RETAINED}).
+     * Návrh hlášení změny registrace je výsledek detekce nad profilem; skutečné
+     * podání změny drží událost registrace, která mazání blokuje dřív.
+     * Souhrny pracovního měsíce pro JMHZ maže před vztahem
+     * {@see PayrollJmhzWorkMonthRevisionPurger} (append-only, FK RESTRICT).
      * Zbytek lešení odklidí ON DELETE CASCADE, což zároveň korektně obejde
      * append-only triggery na vnucích (FK kaskáda triggery nespouští).
      *
@@ -215,6 +243,23 @@ final class PayrollEmploymentDeletionRepository
         'payroll_recurring_components' => null,
         'payroll_sickness_cases' => self::SICKNESS_DRAFT,
         'payroll_registration_a1_profiles' => null,
+        'payroll_registration_change_proposals' => null,
+    ];
+
+    /** Stavy mzdového běhu do hlášky blokátoru. */
+    private const RUN_STATUS_LABELS = [
+        'draft' => 'rozpracovaný',
+        'inputs_locked' => 'se zamčenými vstupy',
+        'calculated' => 'spočítaný',
+        'reviewed' => 'zkontrolovaný',
+        'approved' => 'schválený',
+        'posted' => 'zaúčtovaný',
+        'payment_ready' => 'připravený k výplatě',
+        'paid' => 'vyplacený',
+        'closed' => 'uzavřený',
+        'correction_pending' => 'čeká na opravu',
+        'reopened' => 'otevřený k opravě',
+        'cancelled' => 'zrušený',
     ];
 
     /**
@@ -249,9 +294,9 @@ final class PayrollEmploymentDeletionRepository
                 . 'nebo identifikátory vztahu od ČSSZ. Druh vztahu proto opravit nelze. '
                 . 'Ukončete vztah a založte nový se správným druhem.',
         ],
+        // Souhrn pracovního měsíce není podání; schválenou docházku drží `approved_time`.
         'submission' => [
             'tables' => [
-                'payroll_jmhz_work_month_revisions',
                 'payroll_jmhz_eldp_evidence_snapshots',
                 'payroll_jmhz_eldp_idempotency_claims',
                 'payroll_jmhz_ordinary_evidence_snapshots',
@@ -331,6 +376,7 @@ final class PayrollEmploymentDeletionRepository
     public function __construct(
         private readonly Connection $db,
         private readonly ActivityLogger $activityLogger,
+        private readonly PayrollJmhzWorkMonthRevisionPurger $workMonthRevisions,
     ) {}
 
     /**
@@ -381,9 +427,15 @@ final class PayrollEmploymentDeletionRepository
             return null;
         }
 
-        foreach (self::BLOCKERS as $alias => $blocker) {
+        foreach (array_keys(self::BLOCKERS) as $alias) {
             if ((int) $row["blocker_{$alias}"] > 0) {
-                return PayrollDeletionDecision::blocked($blocker['code'], $blocker['message']);
+                $described = $this->describe($alias, $supplierId, $employmentId);
+
+                return PayrollDeletionDecision::blocked(
+                    $described['code'],
+                    $described['message'],
+                    $described['period'],
+                );
             }
         }
 
@@ -393,6 +445,134 @@ final class PayrollEmploymentDeletionRepository
         }
 
         return PayrollDeletionDecision::allowed($cascade);
+    }
+
+    /**
+     * Mzdový běh, který vztah drží, pojmenovaný pro hlášku: období a stav.
+     * Nezrušený běh má přednost před zrušeným, novější před starším. Sdílí ho
+     * mazání i sloučení vztahu, aby obě hlášky jmenovaly tentýž běh.
+     *
+     * @return array{period_start:string,status:string,label:string}|null
+     */
+    public function runInvolvement(int $supplierId, int $employmentId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT run.period_start, run.status
+               FROM payroll_run_employments run_employment
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run_employment.supplier_id
+                AND revision.id = run_employment.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE run_employment.supplier_id = ? AND run_employment.employment_id = ?
+              ORDER BY run.status = 'cancelled', run.period_start DESC, run.id DESC
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        $period = (string) $row['period_start'];
+        $status = (string) $row['status'];
+        $label = $status === 'cancelled'
+            ? sprintf('zrušeném mzdovém běhu za %s', self::monthLabel($period))
+            : sprintf(
+                'mzdovém běhu za %s (stav: %s)',
+                self::monthLabel($period),
+                self::RUN_STATUS_LABELS[$status] ?? $status,
+            );
+
+        return ['period_start' => $period, 'status' => $status, 'label' => $label];
+    }
+
+    /**
+     * Hláška blokátoru s konkrétním obdobím a dalším krokem. Volá se jen pro
+     * blokátor, který opravdu platí, takže stojí nejvýš jeden dotaz navíc.
+     *
+     * @return array{code:string,message:string,period:?string}
+     */
+    private function describe(string $alias, int $supplierId, int $employmentId): array
+    {
+        $blocker = self::BLOCKERS[$alias];
+        $described = ['code' => $blocker['code'], 'message' => $blocker['message'], 'period' => null];
+
+        if ($alias === 'run') {
+            $run = $this->runInvolvement($supplierId, $employmentId);
+            if ($run !== null) {
+                $described['period'] = $run['period_start'];
+                $described['message'] = $run['status'] === 'cancelled'
+                    ? sprintf(
+                        'Pracovní vztah je zahrnutý ve %s. Zrušený běh si nechává svou revizi i s tímto '
+                        . 'vztahem, proto vztah smazat nelze. Použijte Označit nenástup nebo Ukončit.',
+                        $run['label'],
+                    )
+                    : sprintf(
+                        'Pracovní vztah je zahrnutý v %s. Výpočet běhu se váže k tomuto vztahu, proto '
+                        . 'vztah smazat nelze. Použijte Označit nenástup nebo Ukončit.',
+                        $run['label'],
+                    );
+            }
+        } elseif ($alias === 'input') {
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT status, MIN(period_start) AS period_start
+                   FROM payroll_inputs
+                  WHERE supplier_id = ? AND employment_id = ?
+                  GROUP BY status
+                  ORDER BY FIELD(status, 'locked', 'approved', 'draft', 'cancelled')
+                  LIMIT 1"
+            );
+            $stmt->execute([$supplierId, $employmentId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (is_array($row)) {
+                $period = (string) $row['period_start'];
+                $described['period'] = $period;
+                $month = self::monthLabel($period);
+                $described['message'] = match ((string) $row['status']) {
+                    'locked' => sprintf(
+                        'Mzdové vstupy za %s už zamkl a zpracoval mzdový běh. Vztah proto smazat nelze. '
+                        . 'Použijte Označit nenástup nebo Ukončit.',
+                        $month,
+                    ),
+                    'approved' => sprintf(
+                        'Pracovní vztah má schválené mzdové vstupy za %s. Mzdový vstup se nemaže, jen ruší, '
+                        . 'a zrušený zůstává u vztahu, proto vztah smazat nelze. Patří-li vstupy jinému vztahu '
+                        . 'téže osoby, přesuňte je přes Další akce vztahu, Sloučit do jiného vztahu (schválení '
+                        . 'sloučení samo vrátí do konceptu). Jinak vztah ukončete.',
+                        $month,
+                    ),
+                    default => sprintf(
+                        'Pracovní vztah má mzdové vstupy za %s. Mzdový vstup se nemaže, jen ruší, a zrušený '
+                        . 'zůstává u vztahu, proto vztah smazat nelze. Patří-li vstupy jinému vztahu téže osoby, '
+                        . 'přesuňte je přes Další akce vztahu, Sloučit do jiného vztahu. Jinak vztah ukončete.',
+                        $month,
+                    ),
+                };
+            }
+        } elseif ($alias === 'approved_time') {
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT MIN(period_start) FROM payroll_time_months
+                  WHERE supplier_id = ? AND employment_id = ? AND status = 'approved'"
+            );
+            $stmt->execute([$supplierId, $employmentId]);
+            $period = $stmt->fetchColumn();
+            if (is_string($period) && $period !== '') {
+                $described['period'] = $period;
+                $described['message'] = sprintf(
+                    'Docházka za %s je schválená. Nejdřív ji v Docházce znovu otevřete, teprve pak půjde '
+                    . 'vztah smazat.',
+                    self::monthLabel($period),
+                );
+            }
+        }
+
+        return $described;
+    }
+
+    private static function monthLabel(string $period): string
+    {
+        return substr($period, 5, 2) . '/' . substr($period, 0, 4);
     }
 
     /**
@@ -482,6 +662,10 @@ final class PayrollEmploymentDeletionRepository
             );
         }
 
+        // Souhrny JMHZ dřívějších schválení docházky. Schválený měsíc zablokoval
+        // `approved_time`, podání JMHZ blokátor `submission`; zbývá historie.
+        $droppedSummaries = $this->workMonthRevisions->drop($supplierId, 'employment_id', [$employmentId]);
+
         foreach (self::RESTRICT_SCAFFOLD as $table => $where) {
             $filter = $where === null ? '' : ' AND ' . str_replace('{t}', 'scaffold', $where);
             $stmt = $this->db->pdo()->prepare(
@@ -533,6 +717,7 @@ final class PayrollEmploymentDeletionRepository
                 'end_date' => $employment['end_date'],
                 'row_version' => $rowVersion,
                 'cascade' => $decision->cascade,
+                'dropped_jmhz_work_month_revisions' => $droppedSummaries,
             ],
             $ip,
             $userAgent,
@@ -571,14 +756,16 @@ final class PayrollEmploymentDeletionRepository
             return null;
         }
         $alias = (string) $row['blocker'];
-        $blocker = self::BLOCKERS[$alias]
-            ?? throw new \LogicException('Neznámý blokátor pracovního vztahu.');
+        if (!isset(self::BLOCKERS[$alias])) {
+            throw new \LogicException('Neznámý blokátor pracovního vztahu.');
+        }
+        $described = $this->describe($alias, $supplierId, (int) $row['id']);
 
         return [
             'id' => (int) $row['id'],
             'code' => (string) $row['code'],
-            'code_key' => $blocker['code'],
-            'message' => $blocker['message'],
+            'code_key' => $described['code'],
+            'message' => $described['message'],
         ];
     }
 
@@ -644,6 +831,8 @@ final class PayrollEmploymentDeletionRepository
         foreach (array_keys(self::RESTRICT_SCAFFOLD) as $table) {
             $tables[] = [$table, null];
         }
+        // Souhrny JMHZ smazal purger; nový souhrn ze souběžného schválení je konflikt.
+        $tables[] = ['payroll_jmhz_work_month_revisions', null];
 
         $joins = [];
         $conditions = [];

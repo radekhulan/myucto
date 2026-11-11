@@ -109,12 +109,14 @@ export type PayrollChecklistStatus = 'pending' | 'completed' | 'not_applicable'
  * Důvod, proč objekt nejde smazat. `message` je věta pro uživatele, podle které
  * se dá jednat — ukazuje se místo zašedlého tlačítka bez vysvětlení.
  * `employment_code` je vyplněný, když osobu blokuje konkrétní pracovní vztah.
+ * `period` (první den měsíce) je období, kterého se blokátor vztahu týká.
  */
 export interface PayrollDeleteBlocker {
   code: string
   message: string
   employment_id: number | null
   employment_code: string | null
+  period?: string | null
 }
 
 /** Počty toho, co zmizí spolu s objektem. Klíče se překládají přes i18n. */

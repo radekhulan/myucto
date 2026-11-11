@@ -127,6 +127,13 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => toastMocks,
 }))
 
+const routerMocks = vi.hoisted(() => ({ push: vi.fn() }))
+
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRouter: () => routerMocks,
+}))
+
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
 // `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
 vi.mock('vue-i18n', async (importOriginal) => ({
@@ -1513,6 +1520,38 @@ describe('EmploymentCard', () => {
     // `no_show` zůstává — je to jiný případ, ne náhrada za mazání.
     expect(wrapper.get('[data-test="actions"]').text())
       .toContain('payroll.people.transition.no_show')
+  })
+
+  it('u blokace mzdovými vstupy nabídne jejich seznam zúžený na vztah a období', async () => {
+    toastMocks.error.mockClear()
+    routerMocks.push.mockClear()
+    const blocked: PayrollEmployment = {
+      ...employment(),
+      can_delete: false,
+      delete_blocker: {
+        code: 'payroll_employment_has_inputs',
+        message: 'Pracovní vztah má schválené mzdové vstupy za 03/2026.',
+        employment_id: null,
+        employment_code: null,
+        period: '2026-03-01',
+      },
+      delete_cascade: {},
+    }
+    const wrapper = await mountCard(blocked, {
+      props: { employment: blocked, canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="action-delete-employment"]').trigger('click')
+    expect(toastMocks.error).toHaveBeenCalledTimes(1)
+    const [message, action] = toastMocks.error.mock.calls[0]!
+    expect(message).toBe('Pracovní vztah má schválené mzdové vstupy za 03/2026.')
+    expect(action.label).toBe('payroll.people.delete.show_inputs')
+    action.handler()
+    expect(routerMocks.push).toHaveBeenCalledWith({
+      name: 'payroll-components',
+      query: { tab: 'inputs', employment: '10', period: '2026-03' },
+    })
   })
 
   it('u převzatého vztahu skryje interní značky a registraci nabídne s varováním', async () => {

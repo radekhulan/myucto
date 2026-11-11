@@ -383,11 +383,15 @@ storno A8 nebo ukončení předregistrace P2.
 
 Vztah, který vůbec neměl vzniknout (například ho import registrací založil
 z cizích podkladů a ČSSZ o něm neví), smažete tlačítkem **Smazat pracovní
-vztah**. Smaže se i s podmínkami, checklistem a nepodaným profilem registrace
-A1. Smazat ho nejde, jakmile z aplikace odešla nebo se připravila registrace
-ČSSZ, má identifikátory vztahu od ČSSZ, hlášení JMHZ, mzdový běh, mzdové
-vstupy, pracovní cesty nebo vydaný doklad. Hláška u tlačítka vždy řekne, co
-smazání drží.
+vztah**. Smaže se i s podmínkami, checklistem, docházkou, nepodaným profilem
+registrace A1 a návrhy hlášení změn registrace. Smazat ho nejde, jakmile
+z aplikace odešla nebo se připravila registrace ČSSZ, má identifikátory vztahu
+od ČSSZ, hlášení JMHZ, mzdový běh (i zrušený), mzdové vstupy, pracovní cesty
+nebo vydaný doklad. Schválenou docházku nejdřív znovu otevřete. Mzdový vstup
+se nemaže, jen ruší, a zůstává u vztahu i zrušený; vstupy, které patří jinému
+vztahu téže osoby, přesunete sloučením (viz níže). Hláška u tlačítka vždy
+řekne, co smazání drží a za jaké období, u mzdových vstupů nabídne rovnou
+jejich seznam.
 
 Vznikl-li vztah s nesprávným druhem (například import registrace převzal
 dohodu o provedení práce jako pracovní poměr), opravíte ho na kartě vztahu
@@ -418,9 +422,13 @@ sloučení proto měsíce u cílového vztahu zkontrolujte a znovu schvalte. Ru�
 zadané vstupy cílového vztahu (např. nulová měsíční mzda) ani jeho prázdný
 pracovní měsíc sloučení nevadí.
 
-Sloučení nejde, pokud má slučovaný vztah registraci ČSSZ, hlášení JMHZ,
-mzdový běh, zamčené mzdové vstupy, průměrný výdělek, knihu dovolené nebo
-případ nemocenské. Nejde ani do ukončeného či archivovaného vztahu, do vztahu
+Převzatý profil registrace A1 z importu registrací ani návrh hlášení změny
+sloučení nebrání; zmizí se slučovaným vztahem, stejně jako jeho průměrný
+výdělek, který si cílový vztah spočítá znovu. Sloučení nejde, pokud má
+slučovaný vztah z aplikace podanou nebo připravenou registraci ČSSZ nebo
+identifikátory vztahu od ČSSZ, hlášení JMHZ, mzdový běh, převzaté výsledky
+mezd z předchozího programu, zamčené mzdové vstupy, knihu dovolené nebo
+případ nemocenské. Hláška u mzdového běhu jmenuje jeho období a stav. Nejde ani do ukončeného či archivovaného vztahu, do vztahu
 ve mzdovém běhu za měsíce, kterých se přesun týká, a když docházku za stejný
 měsíc mají oba vztahy (časové záznamy, souhrn importu nebo vstupy z importu
 docházky). Posune-li se
