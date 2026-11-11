@@ -9114,7 +9114,9 @@
           "a4_attachment_missing": "Průvodní dopis zatím není přiložený.",
           "identifiers_verified": "OIČ a ID PPV jsem ověřil(a) v Seznamu zaměstnanců na ePortálu ČSSZ",
           "identifiers_verified_hint": "Jen u zaměstnance převzatého z dřívějšího oznámení (ONZ), jehož čísla nejsou z protokolu ČSSZ, přijatého dohlášení A3 ani z importu exportu zaměstnanců ČSSZ. Odhlášku A2 pak jde podat i bez dohlášení A3; to zůstane jako samostatná povinnost.",
-          "select_placeholder": "Vyberte…"
+          "select_placeholder": "Vyberte…",
+          "a2_override_reason": "Důvod výjimky (alespoň 10 znaků, zapíše se k odhlášce)",
+          "a2_override_save": "Schválit s výjimkou"
         },
         "reprepare": "Připravit znovu",
         "reprepare_failed": "Podání se nepodařilo připravit znovu.",
@@ -9732,7 +9734,11 @@
           "frozen": "Obsahová oprava je připravená jako podání č. {id}. Zkontrolujte ji a odešlete samostatnou akcí.",
           "already": "Stejná obsahová oprava už byla zmrazená - je to podání č. {id}.",
           "load_failed": "Účinný stav formulářů se nepodařilo autoritativně načíst.",
-          "failed": "Obsahovou opravu se nepodařilo připravit."
+          "failed": "Obsahovou opravu se nepodařilo připravit.",
+          "prepare_current": "Připravit z aktuální revize",
+          "prepare_current_failed": "Přípravu z aktuální revize se nepodařilo vytvořit.",
+          "prepare_current_blocked": "Příprava z aktuální revize má nálezy ({count}). Opravte je podle Otestovat XML a zkuste to znovu.",
+          "prepare_current_unusable": "Příprava z aktuální revize se k tomuto podání nehodí (jiná účtárna nebo nález na pojistné části). Ověřte ji v Otestovat XML."
         }
       },
       "signing": {
@@ -13588,7 +13594,7 @@
           "completing": "Opravné hlášení je připravené, odešlete ho na záložce Odesláno.",
           "completed": "ČSSZ opravné hlášení s formulářem přijala.",
           "revoked": "Odložení bylo zrušeno a vztah se podává v řádném hlášení.",
-          "stale": "Běh má novější revizi. Pokud vztah stále blokuje, odložte ho znovu v testu hlášení."
+          "stale": "Běh má novější revizi. Pokud vztah stále blokuje, převezměte odložení tlačítkem nad seznamem, nebo ho odložte znovu."
         },
         "complete": "Doplnit opravným hlášením",
         "complete_failed": "Opravné hlášení se nepodařilo připravit.",
@@ -13604,7 +13610,17 @@
         "in_report_hint": "Jejich formuláře se nepodají; pojistná část je za všechny zaměstnance. Po doplnění dat je pošlete opravným hlášením ze seznamu odložených vztahů.",
         "summary_excluded": "Souhrn daní neobsahuje zálohu na daň u odložených osob bez spočtené zálohy ({count}); doplní se opravným hlášením.",
         "expected_warnings": "Varování kontrol {controls} jsou u odloženého vztahu očekávaná: pojistná část je za všechny zaměstnance, formuláře jen za podané. ČSSZ takové hlášení přijme.",
-        "expected_badge": "očekávané"
+        "expected_badge": "očekávané",
+        "bulk": "Odložit všechny dotčené ({count})",
+        "bulk_hint": "Nález se týká zaměstnanců ({count}). Můžete je jedním rozhodnutím odložit z řádného hlášení a podat hlášení za ostatní.",
+        "bulk_firm_left": "Firemní nálezy ({count}) odložení neodstraní, opravte je v nastavení mezd.",
+        "bulk_confirm": "Odložit ({count})",
+        "bulk_done": "Odloženo zaměstnanců: {count}. Hlášení za ostatní teď připravte znovu.",
+        "carry_over": "Převzít trvající odložení do aktuální revize ({count})",
+        "carry_failed": "Odložení se nepodařilo převzít.",
+        "carried": "Převzato odložených vztahů: {count}. Vztahy, které už nález nemají, se podají v řádném hlášení.",
+        "complete_all": "Doplnit všechny odložené jedním opravným hlášením ({count})",
+        "completed_all": "Opravné hlášení doplňuje odložené vztahy ({count}); odešlete ho na záložce Odesláno."
       },
       "packages": {
         "title": "Hlášení má víc než 1500 formulářů a dělí se do dílčích balíků ({count}).",
@@ -14203,7 +14219,7 @@
         "jmhz_special_scenarios_frozen_resolution_missing": "Příprava neobsahuje zmrazené zařazení zvláštního scénáře JMHZ pro tento pracovní vztah. Podejte hlášení ručně přes ePortál ČSSZ.",
         "jmhz_special_scenarios_resolution_blocked": "Normalizovaný dokument zvláštních scénářů JMHZ není úplný; jde o technickou chybu, kterou musí posoudit podpora.",
         "jmhz_special_scenarios_source_version_unsupported": "Příprava JMHZ byla vytvořena starší verzí sestavovače a nelze pro ni bezpečně určit zvláštní scénář. Připravte hlášení znovu.",
-        "jmhz_registration_change_settling": "U některého pracovního vztahu v hlášení ČSSZ za posledních 48 hodin přijala změnu údajů zaměstnance (REGZEC A3). Hlášení odeslané dřív by mohla zamítnout (chyba 243), proto se zatím nepřipravuje.",
+        "jmhz_registration_change_settling": "Čerstvá změna údajů zaměstnance (do 48 h)",
         "jmhz_submission_artifact_mismatch": "Otisk uloženého artefaktu podání neodpovídá zmrazenému XML JMHZ. Zmrazte hlášení znovu z přípravy.",
         "jmhz_submission_component_identity_missing": "Ve zmrazeném podání JMHZ chybí identifikace pracovního vztahu. Zmrazte hlášení znovu z přípravy.",
         "jmhz_submission_components_missing": "Řádné podání neobsahuje žádný pracovní vztah, který by šlo opravit.",
@@ -14327,7 +14343,13 @@
         "jmhz_ordinary_evidence_risk_shifts_unexpected": "Počet směn při rizikové práci (10580) se uvádí jen u vztahu s prací zařazenou do kategorie 4.",
         "jmhz_ozp_wage_primary_mismatch": "Podporu zaměstnávání OZP má jen vedlejší pracovní vztah osoby, výdělek OZP ale nese souhrn hlavního vztahu.",
         "jmhz_xml_ozp_deductions_inconsistent": "Příznak srážek ve prospěch zaměstnavatele (10349) neodpovídá částkám 10350 až 10353 (kontrola 258).",
-        "jmhz_xml_ozp_wage_form_unsupported": "Výdělek osob OZP a srážky ve prospěch zaměstnavatele (10347 až 10353) formulář tohoto druhu nevede; hlášení zpracujte ručně."
+        "jmhz_xml_ozp_wage_form_unsupported": "Výdělek osob OZP a srážky ve prospěch zaměstnavatele (10347 až 10353) formulář tohoto druhu nevede; hlášení zpracujte ručně.",
+        "jmhz_deferral_nothing_to_complete": "Žádný odložený vztah nečeká na doplnění; opravné hlášení lze navázat až na přijaté řádné hlášení."
+      },
+      "settling": {
+        "title": "Čerstvá změna údajů zaměstnance",
+        "hint": "ČSSZ takové hlášení může zamítnout (chyba 243), ale nemusí. Můžete ho odeslat i tak, nebo dotčené zaměstnance odložit a doplnit je opravným hlášením po 48 hodinách.",
+        "confirm": "Připravit a odeslat i tak"
       }
     },
     "server_codes": {

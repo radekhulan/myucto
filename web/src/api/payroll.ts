@@ -4100,6 +4100,8 @@ export interface PayrollMonthlyChecklistPreparation {
   insurer_code: string | null
   /** Vědomé potvrzení varování kontroly 290 (sleva po splatnosti pojistného). */
   confirm_late_discount?: boolean
+  /** Vědomé odeslání do 48 h po přijaté změně údajů zaměstnance (REGZEC A3). */
+  confirm_registration_settling?: boolean
 }
 
 export interface PayrollMonthlyChecklistAction {
@@ -4181,6 +4183,9 @@ export interface PayrollMonthlyChecklistPreparationResult {
   submission_ids: number[]
   /** Kam se má uživatel podívat na hotové podání. */
   path: string
+  /** Mzdové účtárny bez variabilního symbolu ČSSZ, za které se hlášení nepřipravilo. */
+  skipped_offices?: { office_id: number, name: string }[]
+  warning?: string | null
 }
 
 export interface PayrollMonthlyChecklistResponse {
@@ -5144,7 +5149,45 @@ export interface PayrollJmhzDeferralList {
   due_on: string
   overdue: boolean
   open_count: number
+  /** Odložení starší revize, která lze převzít do aktuální. */
+  carry_over_count?: number
+  /** Odložení čekající na doplnění opravným hlášením. */
+  completable_count?: number
   deferrals: PayrollJmhzDeferral[]
+}
+
+/** Odkud lze z chyby zmrazení odložit dotčené osoby jedním rozhodnutím. */
+export interface PayrollJmhzDeferralContext {
+  preparation_id: number
+  environment: 'test' | 'production'
+  office_id: number | null
+  /** `null` = všechny osoby s nálezem, který lze odložit. */
+  employment_ids: number[] | null
+  count: number
+  firm_blocker_count?: number
+}
+
+export interface PayrollJmhzBulkDeferral {
+  created: boolean
+  deferral_ids: number[]
+  source_revision_id: number
+  employment_ids: number[]
+  people: { employee_id: number, office_id: number | null, employment_ids: number[], blocker_codes: string[] }[]
+  firm_blocker_count: number
+}
+
+export interface PayrollJmhzDeferralCarryOver {
+  created: boolean
+  deferral_ids: number[]
+  employment_ids: number[]
+  source_revision_id: number
+}
+
+export interface PayrollJmhzDeferralCompleteAll {
+  submissions: PayrollJmhzCorrectiveSubmission[]
+  completed_employment_ids: number[]
+  still_blocked_employment_ids: number[]
+  preparation_id: number
 }
 
 export interface PayrollJmhzDeferralCreated {
@@ -5748,6 +5791,8 @@ export interface PayrollRegistrationEventInput {
   /** A3 dohlášení údajů z profilu A1: celý profil, nebo jen co ONZ nevedla. */
   completion?: 'full' | 'minimal'
   ended_by_death?: boolean
+  /** Schválení A2 s výjimkou bez přijatého opravného JMHZ (důvod aspoň 10 znaků). */
+  jmhz_corrections_override_reason?: string
   unemployment?: {
     mode?: 'provided' | 'not_provided_2' | 'not_provided_3'
     early_termination_reason?: string
@@ -8630,6 +8675,9 @@ export interface PayrollJmhzContentCorrectionPreparations {
   submission_id: number
   preparations: PayrollJmhzContentCorrectionPreparation[]
   auto_selected_preparation_id: number | null
+  run_id?: number
+  /** Aktuální schválená revize běhu; z ní lze připravit novou přípravu. */
+  current_revision_id?: number | null
 }
 
 export interface PayrollJmhzContentCorrectionCandidates {
@@ -10128,6 +10176,7 @@ export const payrollApi = {
     environment: PayrollJmhzTransportEnvironment,
     officeId?: number | null,
     confirmLateDiscount = false,
+    confirmRegistrationSettling = false,
   ) => api.post<PayrollJmhzFrozenSubmission>(
     `/payroll/submissions/jmhz-freeze/${preparationId}`,
     {
@@ -10135,6 +10184,7 @@ export const payrollApi = {
       ...(obligationId == null ? {} : { obligation_id: obligationId }),
       ...(officeId == null ? {} : { office: officeId }),
       ...(confirmLateDiscount ? { confirm_late_discount: true } : {}),
+      ...(confirmRegistrationSettling ? { confirm_registration_settling: true } : {}),
     },
   ).then(response => response.data),
   /** Odložení vztahů z řádného hlášení za mzdový běh revize. */
@@ -10172,6 +10222,44 @@ export const payrollApi = {
   ) => api.post<{ revoked_ids: number[], employee_id: number, source_revision_id: number }>(
     `/payroll/submissions/jmhz-deferrals/${deferralId}/revoke`,
     { row_version: rowVersion, reason },
+  ).then(response => response.data),
+  /** Odloží jedním důvodem všechny dotčené osoby přípravy (nebo zadané vztahy). */
+  deferJmhzEmployments: (input: {
+    environment: PayrollJmhzTransportEnvironment
+    preparationId: number
+    officeId?: number | null
+    employmentIds?: number[] | null
+    reason: string
+  }) => api.post<PayrollJmhzBulkDeferral>(
+    '/payroll/submissions/jmhz-deferrals/bulk',
+    {
+      environment: input.environment,
+      preparation_id: input.preparationId,
+      ...(input.officeId == null ? {} : { office: input.officeId }),
+      ...(input.employmentIds == null ? {} : { employment_ids: input.employmentIds }),
+      reason: input.reason,
+    },
+  ).then(response => response.data),
+  /** Převezme trvající odložení starší revize do revize přípravy. */
+  carryOverJmhzDeferrals: (input: {
+    environment: PayrollJmhzTransportEnvironment
+    preparationId: number
+    officeId?: number | null
+  }) => api.post<PayrollJmhzDeferralCarryOver>(
+    '/payroll/submissions/jmhz-deferrals/carry-over',
+    {
+      environment: input.environment,
+      preparation_id: input.preparationId,
+      ...(input.officeId == null ? {} : { office: input.officeId }),
+    },
+  ).then(response => response.data),
+  /** Doplní všechny odložené vztahy jedním opravným hlášením za registraci. */
+  completeAllJmhzDeferrals: (
+    revisionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<PayrollJmhzDeferralCompleteAll>(
+    '/payroll/submissions/jmhz-deferrals/complete-all',
+    { revision: revisionId, environment },
   ).then(response => response.data),
   /** Doplní formulář odloženého vztahu opravným hlášením (jen zmrazí). */
   completeJmhzDeferral: (

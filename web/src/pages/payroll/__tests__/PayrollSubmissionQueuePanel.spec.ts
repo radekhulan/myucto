@@ -375,6 +375,18 @@ describe('PayrollSubmissionQueuePanel', () => {
     prompt.mockRestore()
   })
 
+  /** Audit #17: zrušení přípravy i pro ročník 2027 a přehled o platbě pojistného. */
+  it('Zrušit přípravu nabídne i u JMHZ27 a přehledu ZP', async () => {
+    m.submissionQueue.mockResolvedValue(queueResponse([
+      item({ submission_id: 7, agenda_code: 'JMHZ27' }),
+      item({ submission_id: 8, agenda_code: 'PPZ_2026' }),
+    ]))
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test="queue-withdraw"]')).toHaveLength(2)
+  })
+
   it('zrušení přípravy bez důvodu nic neodešle a jiným podáním se nenabízí', async () => {
     m.submissionQueue.mockResolvedValue(queueResponse([
       item({ submission_id: 7, submission_row_version: 4, agenda_code: 'JMHZ25' }),

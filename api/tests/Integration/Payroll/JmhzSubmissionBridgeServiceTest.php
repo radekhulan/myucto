@@ -209,12 +209,26 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         } catch (JmhzXmlException $exception) {
             self::assertSame('jmhz_registration_change_settling', $exception->validationCode);
             self::assertStringContainsString('6. 8. 2026 14:00', $exception->getMessage());
+            self::assertSame('jmhz_registration_change_settling', JmhzSubmissionBridgeService::clientErrorCode($exception));
+            $details = $exception->clientDetails()['details'];
+            self::assertSame([1, 2], $details['deferral']['employment_ids']);
+            self::assertSame(self::PREPARATION_ID, $details['deferral']['preparation_id']);
         }
         $count = $this->row(
             'SELECT COUNT(*) AS c FROM payroll_submissions WHERE supplier_id = ?',
             [$this->supplierId],
         );
         self::assertSame(0, (int) $count['c']);
+
+        $result = $this->bridge(registrationSettlement: $settlement)->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $obligationId,
+            self::ENVIRONMENT,
+            $this->userId,
+            registrationSettlingConfirmed: true,
+        );
+        self::assertSame('ready', $result['status'], 'Účetní hlášení vědomě odešle i tak.');
     }
 
     public function testFreezesWhenNoRegistrationChangeIsSettling(): void

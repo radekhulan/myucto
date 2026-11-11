@@ -252,6 +252,11 @@ final class Bootstrap
                     'frozenSource',
                     \DI\get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenSourceAdvisor::class),
                 ),
+            \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeferralService::class =>
+                \DI\autowire()->constructorParameter(
+                    'settlement',
+                    \DI\get(\MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationChangeSettlement::class),
+                ),
             // Nepodané hlášení JMHZ za převzatý měsíc (Q15-17) — nepovinné kvůli
             // jednotkovým testům přehledů, v aplikaci se předává výslovně.
             \MyInvoice\Service\Payroll\Submission\PayrollMonthlyChecklistService::class =>

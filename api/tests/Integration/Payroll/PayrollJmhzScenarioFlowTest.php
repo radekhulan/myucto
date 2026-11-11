@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Repository\Payroll\PayrollRegistrationA2EvidenceRepository;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
@@ -732,6 +734,192 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         );
         // Dokud ČSSZ opravu nepřijme, povinnost trvá.
         self::assertSame(1, $listed['body']['open_count']);
+    }
+
+    /**
+     * Audit #2: zmrazení v ostrém provozu zastaví dva vztahy bez průměru.
+     * Chyba nabídne odložení všech dotčených; jeden důvod je odloží oba
+     * a řádné hlášení za zbytek se zmrazí.
+     */
+    public function testFreezeBlockerOffersBulkDeferralOfAllAffectedInProduction(): void
+    {
+        $first = $this->hire('Adam Včasný', 'male', '1980-02-02');
+        $late = $this->hire('Cyril Opožděný', 'male', '1990-04-04', withAverage: false);
+        $later = $this->hire('Dana Opožděná', 'female', '1991-05-05', withAverage: false);
+        foreach ([$first, $late, $later] as $person) {
+            $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+            $this->pay($person, 4_000_000);
+        }
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, 'bulk-deferral');
+        self::assertNotNull($run['approved']);
+        $revisionId = (int) $run['approved']->revision['id'];
+        $preparation = $this->prepareJmhz($revisionId, 'bulk-deferral', 'production');
+        self::assertSame(201, $preparation['status'], CanonicalJson::encode($preparation['body']));
+        $preparationId = (int) $preparation['body']['id'];
+
+        $blocked = $this->freezeJmhzSubmission($preparationId, $this->officeId, 'production');
+        self::assertSame(409, $blocked['status']);
+        $deferral = $blocked['body']['error']['details']['deferral'] ?? null;
+        self::assertIsArray($deferral, CanonicalJson::encode($blocked['body']));
+        self::assertSame($preparationId, $deferral['preparation_id']);
+        self::assertSame('production', $deferral['environment']);
+        self::assertSame(2, $deferral['count']);
+        self::assertNull($deferral['employment_ids']);
+
+        $deferred = $this->bulkDeferJmhz($preparationId, $this->officeId, 'Průměr doplníme, pošle se opravou.', 'production');
+        self::assertSame(201, $deferred['status'], CanonicalJson::encode($deferred['body']));
+        self::assertSame(
+            [$late['employment_id'], $later['employment_id']],
+            $deferred['body']['employment_ids'],
+        );
+        self::assertCount(2, $deferred['body']['people']);
+        $reasons = $this->scalar(
+            'SELECT COUNT(DISTINCT reason) FROM payroll_jmhz_deferrals WHERE supplier_id = ? AND source_revision_id = ?',
+            [$this->supplierId, $revisionId],
+        );
+        self::assertSame(1, (int) $reasons);
+
+        $frozen = $this->freezeJmhzSubmission($preparationId, $this->officeId, 'production');
+        self::assertSame(201, $frozen['status'], CanonicalJson::encode($frozen['body']));
+
+        $again = $this->bulkDeferJmhz($preparationId, $this->officeId, 'Po zmrazení už nejde.', 'production');
+        self::assertSame(422, $again['status']);
+        self::assertSame('jmhz_deferral_regular_frozen', $again['body']['error']['code']);
+    }
+
+    /**
+     * Audit #15: odložení z revize, kterou řádné hlášení nepoužilo, se po
+     * opravě běhu převezme do nové revize, pokud vztah dál nese nález. Dvě
+     * odložené osoby pak doplní jedno opravné hlášení.
+     */
+    public function testDeferralCarriesOverToNewRevisionAndAllAreCompletedByOneCorrection(): void
+    {
+        $first = $this->hire('Adam Včasný', 'male', '1980-02-02');
+        $late = $this->hire('Cyril Opožděný', 'male', '1990-04-04', withAverage: false);
+        $later = $this->hire('Dana Opožděná', 'female', '1991-05-05', withAverage: false);
+        foreach ([$first, $late, $later] as $person) {
+            $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+            $this->pay($person, 4_000_000);
+        }
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, 'carry-deferral');
+        self::assertNotNull($run['approved']);
+        $firstRevisionId = (int) $run['approved']->revision['id'];
+        $preparation = $this->prepareJmhz($firstRevisionId, 'carry-deferral');
+        $deferred = $this->bulkDeferJmhz(
+            (int) $preparation['body']['id'],
+            $this->officeId,
+            'Průměr doplníme, pošle se opravou.',
+        );
+        self::assertSame(201, $deferred['status'], CanonicalJson::encode($deferred['body']));
+
+        $corrected = $this->correctPayrollRun(
+            $run['approved']->run,
+            'carry-deferral-fix',
+            'Oprava běhu před podáním hlášení.',
+        );
+        $revisionId = (int) $corrected->revision['id'];
+        self::assertNotSame($firstRevisionId, $revisionId);
+        $listed = $this->listJmhzDeferrals($revisionId);
+        self::assertSame(2, $listed['body']['carry_over_count']);
+
+        $preparation = $this->prepareJmhz($revisionId, 'carry-deferral-2');
+        self::assertSame(201, $preparation['status'], CanonicalJson::encode($preparation['body']));
+        $preparationId = (int) $preparation['body']['id'];
+        $carried = $this->carryOverJmhzDeferrals($preparationId, $this->officeId);
+        self::assertSame(201, $carried['status'], CanonicalJson::encode($carried['body']));
+        self::assertSame([$late['employment_id'], $later['employment_id']], $carried['body']['employment_ids']);
+        $reason = $this->scalar(
+            'SELECT reason FROM payroll_jmhz_deferrals WHERE supplier_id = ? AND source_revision_id = ? LIMIT 1',
+            [$this->supplierId, $revisionId],
+        );
+        self::assertStringStartsWith('Převzato z revize', (string) $reason);
+        self::assertSame(0, $this->listJmhzDeferrals($revisionId)['body']['carry_over_count']);
+        $replayed = $this->carryOverJmhzDeferrals($preparationId, $this->officeId);
+        self::assertSame(200, $replayed['status']);
+        self::assertFalse($replayed['body']['created']);
+
+        $frozen = $this->freezeJmhzSubmission($preparationId, $this->officeId);
+        self::assertSame(201, $frozen['status'], CanonicalJson::encode($frozen['body']));
+        $regularId = (int) $frozen['body']['submission_id'];
+        $this->acceptJmhzSubmission($regularId, 'partially_accepted');
+
+        $this->createApprovedAverage($late['employment_id'], 3);
+        $this->createApprovedAverage($later['employment_id'], 3);
+        $fixed = $this->correctPayrollRun(
+            $corrected->run,
+            'carry-deferral-complete',
+            'Doplněny průměrné výdělky odložených vztahů.',
+        );
+        self::assertSame('approved', $fixed->run['status']);
+        self::assertSame(2, $this->listJmhzDeferrals($revisionId)['body']['completable_count']);
+
+        $completed = $this->completeAllJmhzDeferrals($revisionId);
+        self::assertSame(201, $completed['status'], CanonicalJson::encode($completed['body']));
+        self::assertCount(1, $completed['body']['submissions']);
+        self::assertSame([$late['employment_id'], $later['employment_id']], $completed['body']['completed_employment_ids']);
+        self::assertSame([], $completed['body']['still_blocked_employment_ids']);
+        $frozenReader = $this->container->get(JmhzFrozenPayloadReader::class);
+        self::assertInstanceOf(JmhzFrozenPayloadReader::class, $frozenReader);
+        $correction = (string) preg_replace(
+            '/>\s+</',
+            '><',
+            $frozenReader->bytes($this->supplierId, 'test', (int) $completed['body']['submissions'][0]['submission_id']),
+        );
+        self::assertSame(2, substr_count($correction, '</formularOsoby>'));
+        $listed = $this->listJmhzDeferrals($revisionId);
+        self::assertSame(0, $listed['body']['completable_count']);
+    }
+
+    /**
+     * Audit #3: odhláška A2 po opravné revizi. Vztah, kterému oprava nic
+     * nezměnila, opravné JMHZ nepotřebuje; u změněného se počítá i řádné
+     * hlášení podané z opravné revize.
+     */
+    public function testA2EvidenceSkipsUnchangedRelationAndCountsRegularReportFromCorrection(): void
+    {
+        $first = $this->hire('Adam Včasný', 'male', '1980-02-02');
+        $late = $this->hire('Cyril Opožděný', 'male', '1990-04-04', withAverage: false);
+        foreach ([$first, $late] as $person) {
+            $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+            $this->pay($person, 4_000_000);
+        }
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, 'a2-evidence');
+        self::assertNotNull($run['approved']);
+        $this->createApprovedAverage($late['employment_id'], 3);
+        $corrected = $this->correctPayrollRun($run['approved']->run, 'a2-evidence-fix', 'Doplněn průměr.');
+        $revisionId = (int) $corrected->revision['id'];
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_run_employments SET result_hash = SHA2("zmeneny-vysledek", 256)
+              WHERE supplier_id = ? AND revision_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $revisionId, $late['employment_id']]);
+        $evidence = $this->container->get(PayrollRegistrationA2EvidenceRepository::class);
+        self::assertInstanceOf(PayrollRegistrationA2EvidenceRepository::class, $evidence);
+
+        self::assertSame(
+            [],
+            $evidence->correctiveMonths($this->supplierId, 'test', $first['employment_id'], '2026-12-31', 'PPV-FIRST'),
+            'Vztah beze změny opravné JMHZ nepotřebuje.',
+        );
+        $months = $evidence->correctiveMonths($this->supplierId, 'test', $late['employment_id'], '2026-12-31', 'PPV-LATE');
+        self::assertCount(1, $months);
+        self::assertSame('missing', $months[0]['decision']);
+
+        $preparation = $this->prepareJmhz($revisionId, 'a2-evidence');
+        $frozen = $this->freezeJmhzSubmission((int) $preparation['body']['id'], $this->officeId);
+        self::assertSame(201, $frozen['status'], CanonicalJson::encode($frozen['body']));
+        $months = $evidence->correctiveMonths($this->supplierId, 'test', $late['employment_id'], '2026-12-31', 'PPV-LATE');
+        self::assertSame((int) $frozen['body']['submission_id'], $months[0]['submission_id']);
+        self::assertSame('pending', $months[0]['decision']);
+
+        $this->acceptJmhzSubmission((int) $frozen['body']['submission_id']);
+        $corrections = $this->container->get(JmhzContentCorrectionSubmissionService::class);
+        self::assertInstanceOf(JmhzContentCorrectionSubmissionService::class, $corrections);
+        $candidates = $corrections->preparationCandidates(
+            $this->supplierId,
+            'test',
+            (int) $frozen['body']['submission_id'],
+        );
+        self::assertSame($revisionId, $candidates['current_revision_id'], 'Audit #5: prázdný stav ví, z jaké revize připravit.');
     }
 
     /**

@@ -69,6 +69,29 @@ final class PayrollRegistrationA2EvidenceRepository
                 AND employment_result.employment_id = ?
               WHERE run.supplier_id = ?
                 AND run.period_start BETWEEN "2026-01-01" AND ?
+                AND NOT (
+                    EXISTS (
+                        SELECT 1 FROM payroll_run_revisions earlier
+                         WHERE earlier.supplier_id = revision.supplier_id
+                           AND earlier.run_id = revision.run_id
+                           AND earlier.revision_no < revision.revision_no
+                           AND earlier.status IN ("approved", "superseded")
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM payroll_run_revisions earlier
+                          LEFT JOIN payroll_run_employments earlier_result
+                            ON earlier_result.supplier_id = earlier.supplier_id
+                           AND earlier_result.revision_id = earlier.id
+                           AND earlier_result.employment_id = employment_result.employment_id
+                         WHERE earlier.supplier_id = revision.supplier_id
+                           AND earlier.run_id = revision.run_id
+                           AND earlier.revision_no < revision.revision_no
+                           AND earlier.status IN ("approved", "superseded")
+                           AND (earlier_result.id IS NULL
+                                OR employment_result.result_hash IS NULL
+                                OR NOT (earlier_result.result_hash <=> employment_result.result_hash))
+                    )
+                )
               ORDER BY run.period_start, run.id'
                 . ($forUpdate ? ' FOR UPDATE' : ''),
         );
@@ -190,27 +213,35 @@ final class PayrollRegistrationA2EvidenceRepository
                 'reason' => 'Opravná mzdová revize nemá zdrojově připravené JMHZ.',
             ]];
         }
-        $sourceReference = 'jmhz_preparation:' . (int) $preparation['id'];
         $submission = $this->one(
-            'SELECT submission.id, submission.status
-               FROM payroll_submission_parts part
+            'SELECT submission.id, submission.status,
+                    CAST(SUBSTRING(part.source_entity_reference, 18) AS UNSIGNED) AS preparation_id
+               FROM payroll_jmhz_preparation_snapshots preparation
+               JOIN payroll_submission_parts part
+                 ON part.supplier_id = preparation.supplier_id
+                AND part.environment = preparation.environment
+                AND part.source_entity_type = "jmhz_preparation"
+                AND part.source_entity_reference = CONCAT("jmhz_preparation:", preparation.id)
                JOIN payroll_submissions submission
                  ON submission.supplier_id = part.supplier_id
                 AND submission.environment = part.environment
                 AND submission.id = part.submission_id
-              WHERE part.supplier_id = ? AND part.environment = ?
-                AND part.source_entity_type = "jmhz_preparation"
-                AND part.source_entity_reference = ?
-                AND submission.submission_kind = "correction"
-              ORDER BY submission.id DESC LIMIT 1' . ($forUpdate ? ' FOR UPDATE' : ''),
-            [$supplierId, $environment, $sourceReference],
+              WHERE preparation.supplier_id = ? AND preparation.environment = ?
+                AND preparation.run_id = ? AND preparation.source_revision_id = ?
+                AND submission.submission_kind IN ("correction", "regular")
+                AND submission.status NOT IN ("cancelled_in_time", "superseded")
+              ORDER BY submission.status IN ("accepted", "partially_accepted") DESC,
+                       submission.id DESC
+              LIMIT 1' . ($forUpdate ? ' FOR UPDATE' : ''),
+            [$supplierId, $environment, $runId, $revisionId],
         );
         if ($submission === null) {
             return [...$base, ...[
                 'decision' => 'missing',
-                'reason' => 'Opravná mzdová revize nemá vytvořené opravné JMHZ.',
+                'reason' => 'Opravná mzdová revize nemá vytvořené opravné ani řádné JMHZ.',
             ]];
         }
+        $base['preparation_id'] = (int) $submission['preparation_id'];
         $submissionId = (int) $submission['id'];
         $attempt = $this->one(
             'SELECT id, status, correlation_reference, sent_at

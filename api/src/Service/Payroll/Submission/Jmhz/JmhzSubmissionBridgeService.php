@@ -56,6 +56,9 @@ final readonly class JmhzSubmissionBridgeService
     /** Měsíc, za který řádné hlášení už podal předchozí mzdový program. */
     public const EXTERNAL_SUBMISSION_CODE = 'jmhz_period_submitted_externally';
 
+    /** Do 48 h po přijaté změně údajů (REGZEC A3): odeslat i tak, nebo odložit dotčené. */
+    public const REGISTRATION_SETTLING_CODE = 'jmhz_registration_change_settling';
+
     /**
      * Kód chyby 409 pro obrazovku. Potvrzení slevy po lhůtě a měsíc podaný
      * předchozím programem nesou vlastní kód (obrazovka nabídne potvrzení,
@@ -66,7 +69,7 @@ final readonly class JmhzSubmissionBridgeService
     {
         return in_array(
             $exception->validationCode,
-            [self::LATE_DISCOUNT_CONFIRMATION_CODE, self::EXTERNAL_SUBMISSION_CODE],
+            [self::LATE_DISCOUNT_CONFIRMATION_CODE, self::EXTERNAL_SUBMISSION_CODE, self::REGISTRATION_SETTLING_CODE],
             true,
         ) ? $exception->validationCode : 'conflict';
     }
@@ -143,8 +146,11 @@ final readonly class JmhzSubmissionBridgeService
         int $supplierId,
         string $environment,
         JmhzScenario1NormalizedDocument $document,
+        bool $confirmed,
+        int $preparationId,
+        ?int $officeId,
     ): void {
-        if ($this->registrationSettlement === null) {
+        if ($this->registrationSettlement === null || $confirmed) {
             return;
         }
         $employmentIds = [];
@@ -164,11 +170,25 @@ final readonly class JmhzSubmissionBridgeService
         );
         if ($pending !== null) {
             throw new JmhzXmlException(
-                'jmhz_registration_change_settling',
+                self::REGISTRATION_SETTLING_CODE,
                 PayrollRegistrationChangeSettlement::message(
                     $pending['until'],
                     count($pending['employment_ids']),
                 ),
+                [],
+                [
+                    'settling' => [
+                        'until' => $pending['until']->format(\DateTimeInterface::ATOM),
+                        'employment_ids' => $pending['employment_ids'],
+                    ],
+                    'deferral' => [
+                        'preparation_id' => $preparationId,
+                        'environment' => $environment,
+                        'office_id' => $officeId,
+                        'employment_ids' => $pending['employment_ids'],
+                        'count' => count($pending['employment_ids']),
+                    ],
+                ],
             );
         }
     }
@@ -189,6 +209,7 @@ final readonly class JmhzSubmissionBridgeService
         ?int $createdBy = null,
         ?int $officeId = null,
         bool $lateDiscountConfirmed = false,
+        bool $registrationSettlingConfirmed = false,
     ): array {
         if ($supplierId <= 0
             || $preparationId <= 0
@@ -240,6 +261,7 @@ final readonly class JmhzSubmissionBridgeService
                         : JmhzBlockerExplainer::describeNamed($resolution->blockers, $this->people, $supplierId))
                     . self::alreadyFixedSentence($payload),
                 $payload,
+                self::deferralContext($resolution, $preparationId, $environment, $officeId),
             );
         }
         $document = $resolution->requireResolvedDocument();
@@ -286,6 +308,7 @@ final readonly class JmhzSubmissionBridgeService
             $periodStart,
             $keys,
             $lateDiscountConfirmed,
+            $registrationSettlingConfirmed,
             $split,
         ): array {
             if (!$this->submissionRepository->lockSupplier($supplierId)) {
@@ -328,7 +351,14 @@ final readonly class JmhzSubmissionBridgeService
             // Až za opakováním: už zmrazené podání se vrací beze změny, nové řádné
             // za měsíc podaný předchozím programem nevznikne (výjimka vrátí transakci).
             $this->assertNotSubmittedExternally($supplierId, $environment, $periodStart);
-            $this->assertRegistrationChangesSettled($supplierId, $environment, $document);
+            $this->assertRegistrationChangesSettled(
+                $supplierId,
+                $environment,
+                $document,
+                $registrationSettlingConfirmed,
+                $preparationId,
+                $officeId,
+            );
 
             // Odsud dál se mrazí. GUIDy vznikají právě tady a nikde jinde.
             $envelope = JmhzSubmissionEnvelope::create(
@@ -596,6 +626,56 @@ final readonly class JmhzSubmissionBridgeService
     public static function packageArtifactKey(string $artifactKey, int $ordinal): string
     {
         return "{$artifactKey}:package:{$ordinal}";
+    }
+
+    /**
+     * Kolik osob s nálezem lze z řádného hlášení odložit; podle toho obrazovka
+     * nabídne „Odložit všechny dotčené".
+     *
+     * @return array<string,mixed>
+     */
+    private static function deferralContext(
+        JmhzScenario1Resolution $resolution,
+        int $preparationId,
+        string $environment,
+        ?int $officeId,
+    ): array {
+        $employees = [];
+        $employmentEmployee = [];
+        $people = $resolution->candidate?->payload['people'] ?? [];
+        foreach (is_array($people) ? $people : [] as $person) {
+            $employeeId = is_array($person) ? ($person['employee_id'] ?? null) : null;
+            foreach ((is_array($person) && is_array($person['employments'] ?? null) ? $person['employments'] : []) as $employment) {
+                if (is_int($employeeId) && is_array($employment) && is_int($employment['employment_id'] ?? null)) {
+                    $employmentEmployee[$employment['employment_id']] = $employeeId;
+                }
+            }
+        }
+        $firm = 0;
+        foreach ($resolution->blockers as $blocker) {
+            if (!$blocker->deferrable()) {
+                $firm++;
+                continue;
+            }
+            $employee = $blocker->entityType === 'employment'
+                ? ($employmentEmployee[(int) $blocker->entityId] ?? 'employment:' . $blocker->entityId)
+                : $blocker->entityId;
+            $employees[(string) $employee] = true;
+        }
+        if ($employees === []) {
+            return [];
+        }
+
+        return [
+            'deferral' => [
+                'preparation_id' => $preparationId,
+                'environment' => $environment,
+                'office_id' => $officeId,
+                'employment_ids' => null,
+                'count' => count($employees),
+                'firm_blocker_count' => $firm,
+            ],
+        ];
     }
 
     private static function formCount(JmhzScenario1NormalizedDocument $document): int

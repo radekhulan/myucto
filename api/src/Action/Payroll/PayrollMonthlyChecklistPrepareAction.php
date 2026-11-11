@@ -97,6 +97,7 @@ final class PayrollMonthlyChecklistPrepareAction
                 $insurerCode,
                 $this->userId($request),
                 ($body['confirm_late_discount'] ?? false) === true,
+                ($body['confirm_registration_settling'] ?? false) === true,
             );
         } catch (\RuntimeException|\DomainException|\InvalidArgumentException $exception) {
             return self::failureResponse($response, $exception);
@@ -125,7 +126,7 @@ final class PayrollMonthlyChecklistPrepareAction
                 JmhzSubmissionBridgeService::clientErrorCode($exception),
                 $exception->getMessage(),
                 409,
-                $exception->blockers === [] ? [] : ['details' => ['blockers' => $exception->blockers]],
+                $exception->clientDetails(),
             );
         }
         if ($exception instanceof \DomainException) {

@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
   freezeJmhzZeroAmendment: vi.fn(),
   jmhzContentCorrectionCandidates: vi.fn(),
   jmhzContentCorrectionPreparations: vi.fn(),
+  freezeJmhzPreparation: vi.fn(),
   freezeJmhzContentCorrection: vi.fn(),
   jmhzImportedProtocols: vi.fn(),
   jmhzImportedProtocolErrors: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('@/api/payroll', () => ({
     freezeJmhzZeroAmendment: m.freezeJmhzZeroAmendment,
     jmhzContentCorrectionCandidates: m.jmhzContentCorrectionCandidates,
     jmhzContentCorrectionPreparations: m.jmhzContentCorrectionPreparations,
+    freezeJmhzPreparation: m.freezeJmhzPreparation,
     freezeJmhzContentCorrection: m.freezeJmhzContentCorrection,
     jmhzImportedProtocols: m.jmhzImportedProtocols,
     jmhzImportedProtocolErrors: m.jmhzImportedProtocolErrors,
@@ -1586,6 +1588,43 @@ describe('PayrollTransportHistoryPanel', () => {
 
     expect(wrapper.get('[data-test="transport-correct-blocked"]').text())
       .toContain('payroll.jmhz_gate.correction_blocked.title')
+  })
+
+  /** Audit #5: prázdný stav nabídne přípravu z aktuální revize. */
+  it('bez úplné přípravy nabídne Připravit z aktuální revize', async () => {
+    m.jmhzContentCorrectionPreparations.mockResolvedValueOnce({
+      environment: 'production',
+      submission_id: 70,
+      preparations: [],
+      auto_selected_preparation_id: null,
+      run_id: 8,
+      current_revision_id: 302,
+    })
+    m.freezeJmhzPreparation.mockResolvedValue({ id: 126, readiness_status: 'source_ready', issue_count: 0 })
+    m.jmhzContentCorrectionCandidates.mockResolvedValue({
+      environment: 'production',
+      submission_id: 70,
+      preparation_id: 125,
+      document_sha256: 'f'.repeat(64),
+      forms: [],
+    })
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({ status: 'awaiting_protocol', completed_at: null, submission_status: 'accepted' })],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="transport-correct-70"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="transport-correct-preparation-empty"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="transport-correct-prepare-current"]').trigger('click')
+    await flushPromises()
+
+    expect(m.freezeJmhzPreparation).toHaveBeenCalledWith(302, expect.any(String), 'production')
+    expect(m.jmhzContentCorrectionPreparations).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-test="transport-correct-preparation-empty"]').exists()).toBe(false)
   })
 
   it('obsahová oprava rozliší opravu přijatého a doplnění odmítnutého formuláře', async () => {

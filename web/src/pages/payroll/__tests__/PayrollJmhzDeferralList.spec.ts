@@ -5,6 +5,8 @@ const m = vi.hoisted(() => ({
   list: vi.fn(),
   revoke: vi.fn(),
   complete: vi.fn(),
+  carryOver: vi.fn(),
+  completeAll: vi.fn(),
   locale: { value: 'cs' },
 }))
 
@@ -13,6 +15,8 @@ vi.mock('@/api/payroll', () => ({
     jmhzDeferrals: m.list,
     revokeJmhzDeferral: m.revoke,
     completeJmhzDeferral: m.complete,
+    carryOverJmhzDeferrals: m.carryOver,
+    completeAllJmhzDeferrals: m.completeAll,
   },
 }))
 
@@ -75,6 +79,49 @@ describe('PayrollJmhzDeferralList', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.locale.value = 'cs'
+  })
+
+  /** Audit #15: trvající odložení starší revize jde převzít jedním klikem. */
+  it('převezme trvající odložení starší revize do aktuální přípravy', async () => {
+    m.list.mockResolvedValue({ ...listOf([deferral({ state: 'stale', can_revoke: false })]), carry_over_count: 1, completable_count: 0 })
+    m.carryOver.mockResolvedValue({ created: true, deferral_ids: [9], employment_ids: [12], source_revision_id: 19 })
+    const wrapper = mount(PayrollJmhzDeferralList, {
+      props: { revisionId: 19, environment: 'test', canWrite: true, preparationId: 77, officeId: 4 },
+      global: { stubs },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-test="jmhz-deferral-carry-over"]').trigger('click')
+    await flushPromises()
+
+    expect(m.carryOver).toHaveBeenCalledWith({ environment: 'test', preparationId: 77, officeId: 4 })
+    expect(wrapper.get('[data-test="jmhz-deferral-success"]').text()).toContain('payroll.jmhz_gate.deferral.carried 1')
+    expect(wrapper.emitted('changed')).toHaveLength(1)
+  })
+
+  /** Audit #15: víc odložených k doplnění jde jedním opravným hlášením. */
+  it('doplní všechny odložené jedním opravným hlášením', async () => {
+    m.list.mockResolvedValue({
+      ...listOf([
+        deferral({ state: 'to_complete', can_complete: true, can_revoke: false }),
+        deferral({ id: 6, employment_id: 14, state: 'to_complete', can_complete: true, can_revoke: false }),
+      ]),
+      carry_over_count: 0,
+      completable_count: 2,
+    })
+    m.completeAll.mockResolvedValue({ submissions: [{ submission_id: 99 }], completed_employment_ids: [12, 14], still_blocked_employment_ids: [], preparation_id: 3 })
+    const wrapper = mount(PayrollJmhzDeferralList, {
+      props: { revisionId: 19, environment: 'production', canWrite: true },
+      global: { stubs },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="jmhz-deferral-carry-over"]').exists()).toBe(false)
+    await wrapper.get('[data-test="jmhz-deferral-complete-all"]').trigger('click')
+    await flushPromises()
+
+    expect(m.completeAll).toHaveBeenCalledWith(19, 'production')
+    expect(wrapper.get('[data-test="jmhz-deferral-success"]').text()).toContain('payroll.jmhz_gate.deferral.completed_all 2')
   })
 
   it('ukáže odložený vztah jako nesplněnou povinnost s lhůtou a důvodem', async () => {

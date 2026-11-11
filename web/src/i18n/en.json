@@ -9114,7 +9114,9 @@
           "a4_attachment_missing": "No cover letter attached yet.",
           "identifiers_verified": "I verified the OIČ and ID PPV in the employee list on the ČSSZ ePortal",
           "identifiers_verified_hint": "Only for an employee taken over from an earlier notification (ONZ) whose numbers do not come from a ČSSZ protocol, an accepted A3 completion or an imported ČSSZ employee export. The A2 deregistration can then be filed without the A3 completion, which stays as a separate duty.",
-          "select_placeholder": "Select…"
+          "select_placeholder": "Select…",
+          "a2_override_reason": "Reason for the exception (at least 10 characters, stored with the termination)",
+          "a2_override_save": "Approve with exception"
         },
         "reprepare": "Prepare again",
         "reprepare_failed": "The filing could not be prepared again.",
@@ -9732,7 +9734,11 @@
           "frozen": "The content correction is prepared as submission no. {id}. Review it and send it with a separate action.",
           "already": "The same content correction was already frozen — it is submission no. {id}.",
           "load_failed": "The effective form state could not be resolved authoritatively.",
-          "failed": "The content correction could not be prepared."
+          "failed": "The content correction could not be prepared.",
+          "prepare_current": "Prepare from the current revision",
+          "prepare_current_failed": "The preparation from the current revision could not be created.",
+          "prepare_current_blocked": "The preparation from the current revision has findings ({count}). Fix them following Test XML and try again.",
+          "prepare_current_unusable": "The preparation from the current revision does not fit this submission (another office or a finding on the insurance part). Check it in Test XML."
         }
       },
       "signing": {
@@ -13588,7 +13594,7 @@
           "completing": "The corrective report is prepared; send it from Sent tab.",
           "completed": "ČSSZ accepted the corrective report with the form.",
           "revoked": "The deferral was cancelled and the employment is filed in the regular report.",
-          "stale": "The run has a newer revision. If the employment still blocks, defer it again in the report test."
+          "stale": "The run has a newer revision. If the relation still blocks, carry the deferral over with the button above the list, or defer it again."
         },
         "complete": "Add with a corrective report",
         "complete_failed": "The corrective report could not be prepared.",
@@ -13604,7 +13610,17 @@
         "in_report_hint": "Their forms are not filed; the insurance part covers all employees. Once the data are complete, send them in a corrective report from the list of deferred employments.",
         "summary_excluded": "The tax summary leaves out the advance tax of deferred people without a calculated advance ({count}); it will be added by the corrective report.",
         "expected_warnings": "Control warnings {controls} are expected with a deferred employment: the insurance part covers all employees, the forms only the filed ones. ČSSZ accepts such a report.",
-        "expected_badge": "expected"
+        "expected_badge": "expected",
+        "bulk": "Defer all affected ({count})",
+        "bulk_hint": "The finding affects {count} employees. You can defer them from the regular report with one decision and file the report for the others.",
+        "bulk_firm_left": "Company-level findings ({count}) are not removed by deferral; fix them in payroll settings.",
+        "bulk_confirm": "Defer ({count})",
+        "bulk_done": "Employees deferred: {count}. Prepare the report for the others again.",
+        "carry_over": "Carry ongoing deferrals over to the current revision ({count})",
+        "carry_failed": "The deferrals could not be carried over.",
+        "carried": "Deferrals carried over: {count}. Relations without a finding are filed in the regular report.",
+        "complete_all": "Complete all deferred in one corrective report ({count})",
+        "completed_all": "The corrective report completes the deferred relations ({count}); send it on the Sent tab."
       },
       "packages": {
         "title": "The report has more than 1500 forms and is split into partial packages ({count}).",
@@ -14203,7 +14219,7 @@
         "jmhz_special_scenarios_frozen_resolution_missing": "The preparation does not contain the frozen special JMHZ scenario classification for this employment. File the report manually through the ČSSZ ePortal.",
         "jmhz_special_scenarios_resolution_blocked": "The normalized special-scenarios JMHZ document is incomplete; this is a technical issue for support to investigate.",
         "jmhz_special_scenarios_source_version_unsupported": "The JMHZ preparation was built by an older builder version and its special scenario cannot be safely determined. Prepare the report again.",
-        "jmhz_registration_change_settling": "ČSSZ accepted a change of employee data (REGZEC A3) for an employment in the report within the last 48 hours. A report sent earlier could be rejected (error 243), so it is not prepared yet.",
+        "jmhz_registration_change_settling": "Recent change of employee data (within 48 h)",
         "jmhz_submission_artifact_mismatch": "The stored artifact's fingerprint does not match the frozen JMHZ XML. Freeze the report again from the preparation.",
         "jmhz_submission_component_identity_missing": "The frozen JMHZ submission is missing the employment identification. Freeze the report again from the preparation.",
         "jmhz_submission_components_missing": "The regular submission does not contain any employment that could be corrected.",
@@ -14327,7 +14343,13 @@
         "jmhz_ordinary_evidence_risk_shifts_unexpected": "The number of shifts in risk work (10580) is reported only for an employment with work classified in category 4.",
         "jmhz_ozp_wage_primary_mismatch": "Only a secondary employment of the person has disability employment support, but the disability wage data belongs to the summary of the primary employment.",
         "jmhz_xml_ozp_deductions_inconsistent": "The flag of deductions in favour of the employer (10349) does not match amounts 10350 to 10353 (control 258).",
-        "jmhz_xml_ozp_wage_form_unsupported": "This form type does not carry the disability wage data and deductions in favour of the employer (10347 to 10353); process the report manually."
+        "jmhz_xml_ozp_wage_form_unsupported": "This form type does not carry the disability wage data and deductions in favour of the employer (10347 to 10353); process the report manually.",
+        "jmhz_deferral_nothing_to_complete": "No deferred relation awaits completion; a corrective report can follow only an accepted regular report."
+      },
+      "settling": {
+        "title": "Recent change of employee data",
+        "hint": "ČSSZ may reject such a report (error 243), but it does not have to. You can send it anyway, or defer the affected employees and complete them with a corrective report after 48 hours.",
+        "confirm": "Prepare and send anyway"
       }
     },
     "server_codes": {

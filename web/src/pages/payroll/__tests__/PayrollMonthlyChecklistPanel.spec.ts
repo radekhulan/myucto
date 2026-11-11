@@ -591,6 +591,32 @@ describe('PayrollMonthlyChecklistPanel', () => {
     expect(m.dispatchBatch).not.toHaveBeenCalled()
   })
 
+  /** Audit #23: účtárna bez VS ČSSZ nezastaví ostatní; přehled ji vypíše. */
+  it('po přípravě vypíše účtárny, za které se hlášení nepřipravilo', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({
+      summary: { total: 1, send: 0, generate: 1, manual: 0, done: 0 },
+      items: [agendaDutyItem()],
+    }))
+    m.prepareItem.mockResolvedValue({
+      agenda_code: 'JMHZ25',
+      period: '2026-08',
+      insurer_code: null,
+      prepared: 1,
+      submission_ids: [42],
+      path: '/payroll/submissions/jmhz',
+      skipped_offices: [{ office_id: 2, name: 'Brno' }],
+      warning: 'Mzdová účtárna Brno nemá desetimístný variabilní symbol u ČSSZ.',
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('tbody [data-test="monthly-checklist-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="monthly-checklist-prepare-warning"]').text())
+      .toContain('Mzdová účtárna Brno nemá desetimístný variabilní symbol u ČSSZ.')
+  })
+
   it('„Připravit a odeslat" připraví, po potvrzení odešle frontou a nabídne jedno potvrzení Mobilním klíčem', async () => {
     const prepared = {
       ...agendaDutyItem(),

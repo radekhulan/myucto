@@ -1304,6 +1304,44 @@ describe('EmploymentRegistrationPanel', () => {
     }))
   })
 
+  it('approves A2 with a reasoned exception when the corrective JMHZ is not accepted', async () => {
+    m.approveEvent.mockRejectedValueOnce({
+      response: { data: { error: {
+        code: 'registration_a2_jmhz_corrections_incomplete',
+        message: 'Odhlášku nejde schválit, dokud nejsou uzavřená opravná JMHZ.',
+      } } },
+    })
+    m.approveEvent.mockResolvedValueOnce({
+      id: 96,
+      employment_id: 5,
+      environment: 'production',
+      interaction: 'termination',
+      action_code: 2,
+      effective_on: '2026-09-15',
+      source_kind: 'employment_exit',
+      source_reference: 'termination',
+      snapshot_fingerprint: 'f'.repeat(64),
+      approved_at: '2026-09-15 11:00:00',
+      consumed: false,
+      created: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+    await wrapper.get('[data-test="registration-event-effective-on"]').setValue('2026-09-15')
+    await wrapper.get('[data-test="registration-event-save"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="registration-a2-override-reason"]').setValue('Opravné JMHZ pošleme do pátku.')
+    await wrapper.get('[data-test="registration-a2-override-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.approveEvent).toHaveBeenLastCalledWith(5, expect.objectContaining({
+      interaction: 'termination',
+      jmhz_corrections_override_reason: 'Opravné JMHZ pošleme do pátku.',
+    }))
+  })
+
   it('files A8 for another reason only with an explanation attachment', async () => {
     m.approveEvent.mockResolvedValue({
       id: 94,

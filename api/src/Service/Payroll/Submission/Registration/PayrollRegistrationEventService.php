@@ -355,7 +355,7 @@ final readonly class PayrollRegistrationEventService
             'snapshot_fingerprint' => $fingerprint,
             'approved_by' => $approvedBy,
         ]);
-        if ($interaction === 'termination') {
+        if ($interaction === 'termination' && !is_array($data['jmhz_corrections_override'] ?? null)) {
             $evidence = is_array($data['jmhz_correction_evidence'] ?? null)
                 ? $data['jmhz_correction_evidence']
                 : [];
@@ -540,7 +540,8 @@ final readonly class PayrollRegistrationEventService
             $external,
             true,
         );
-        if ($current->decision() !== 'accepted'
+        $overridden = is_array($event['data']['jmhz_corrections_override'] ?? null);
+        if (($current->decision() !== 'accepted' && !$overridden)
             || !is_string($stored['fingerprint'] ?? null)
             || !hash_equals($stored['fingerprint'], $current->fingerprint())
         ) {
@@ -551,6 +552,9 @@ final readonly class PayrollRegistrationEventService
                     . ' (JMHZ), která se od schválení změnila. Načtěte měsíce'
                     . ' k opravě znovu a schvalte novou událost.',
             );
+        }
+        if ($overridden) {
+            return;
         }
         $ledger = $this->a2Evidence->findForEvent($supplierId, $environment, $eventId);
         if ($ledger === null
@@ -1398,15 +1402,29 @@ final readonly class PayrollRegistrationEventService
             $employmentExternalIdentifier,
             true,
         );
+        $override = null;
         if ($evidence->decision() !== 'accepted') {
-            throw new PayrollRegistrationXmlException(
-                'registration_a2_jmhz_corrections_incomplete',
-                $this->actionName(2)
-                    . ' nejde schválit, dokud nejsou uzavřená opravná jednotná'
-                    . ' měsíční hlášení zaměstnavatele (JMHZ) za období '
-                    . implode(', ', $evidence->blockedPeriods())
-                    . '. Hlášení za tato období dokončete a schválení zopakujte.',
-            );
+            $overrideReason = is_string($input['jmhz_corrections_override_reason'] ?? null)
+                ? trim($input['jmhz_corrections_override_reason'])
+                : '';
+            if (mb_strlen($overrideReason) < 10) {
+                throw new PayrollRegistrationXmlException(
+                    'registration_a2_jmhz_corrections_incomplete',
+                    $this->actionName(2)
+                        . ' nejde schválit, dokud nejsou uzavřená opravná jednotná'
+                        . ' měsíční hlášení zaměstnavatele (JMHZ) za období '
+                        . implode(', ', $evidence->blockedPeriods())
+                        . '. Hlášení za tato období dokončete a schválení zopakujte.'
+                        . ' ČSSZ pořadí odhlášky a opravného hlášení nehlídá: pokud'
+                        . ' odhlášku potřebujete podat hned, schvalte ji s výjimkou'
+                        . ' a uveďte důvod (alespoň 10 znaků); opravné hlášení pak'
+                        . ' pošlete bez zbytečného odkladu.',
+                );
+            }
+            $override = [
+                'reason' => mb_substr($overrideReason, 0, 500),
+                'blocked_periods' => $evidence->blockedPeriods(),
+            ];
         }
 
         $unemployment = $this->unemployment(
@@ -1436,7 +1454,8 @@ final readonly class PayrollRegistrationEventService
             'ended_by_death' => $endedByDeath,
             'unemployment' => $unemployment,
             'jmhz_correction_evidence' => $evidence->toArray(),
-        ] + ($permit === null ? [] : ['foreign_permit' => $permit]);
+        ] + ($override === null ? [] : ['jmhz_corrections_override' => $override])
+            + ($permit === null ? [] : ['foreign_permit' => $permit]);
     }
 
     /**

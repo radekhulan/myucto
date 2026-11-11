@@ -131,6 +131,9 @@ const correctableComponents = ref<PayrollJmhzContentCorrectionForm[]>([])
 const correctionPreparations = ref<PayrollJmhzContentCorrectionPreparation[]>([])
 const selectedCorrectionGuids = ref<string[]>([])
 const correctionPreparationId = ref<number | null>(null)
+const correctionCurrentRevisionId = ref<number | null>(null)
+const correctionPreparing = ref(false)
+const correctionPrepareIssue = ref('')
 const correctionCandidatesLoaded = ref(false)
 const correctionQuery = ref('')
 const correctionImpactConfirmed = ref(false)
@@ -1330,6 +1333,34 @@ function askToCancel(submissionId: number) {
   success.value = ''
 }
 
+async function prepareCorrectionFromCurrentRevision(submissionId: number) {
+  const revisionId = correctionCurrentRevisionId.value
+  if (!canWrite.value || revisionId === null || correctionPreparing.value) return
+  correctionPreparing.value = true
+  correctionPrepareIssue.value = ''
+  actionError.value = ''
+  try {
+    const preparation = await payrollApi.freezeJmhzPreparation(
+      revisionId,
+      crypto.randomUUID(),
+      requestEnvironment.value,
+    )
+    await askToCorrect(submissionId)
+    if (correctionPreparations.value.length === 0) {
+      correctionPrepareIssue.value = preparation.readiness_status === 'source_ready'
+        ? t('payroll.submissions.transport.correction.prepare_current_unusable')
+        : t('payroll.submissions.transport.correction.prepare_current_blocked', { count: preparation.issue_count })
+    }
+  } catch (exception: unknown) {
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.correction.prepare_current_failed'),
+    )
+  } finally {
+    correctionPreparing.value = false
+  }
+}
+
 async function askToCorrect(submissionId: number) {
   if (!canWrite.value || busy.value) return
   cancellingId.value = null
@@ -1343,6 +1374,7 @@ async function askToCorrect(submissionId: number) {
   correctionImpactConfirmed.value = false
   actionError.value = ''
   success.value = ''
+  correctionPrepareIssue.value = ''
   correctionPreparationLoadingId.value = submissionId
   let autoSelected: number | null = null
   try {
@@ -1352,6 +1384,7 @@ async function askToCorrect(submissionId: number) {
     )
     if (correctingId.value !== submissionId) return
     correctionPreparations.value = result.preparations
+    correctionCurrentRevisionId.value = result.current_revision_id ?? null
     correctionPreparationId.value = result.auto_selected_preparation_id
     autoSelected = result.auto_selected_preparation_id
   } catch (exception: unknown) {
@@ -2170,6 +2203,24 @@ useWindowRefresh(() => load(true), () => !busy.value && cancellingId.value === n
               class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-4 text-sm text-neutral-700"
             >
               {{ t('payroll.submissions.transport.correction.preparation_empty') }}
+              <div v-if="canWrite && correctionCurrentRevisionId !== null" class="mt-3">
+                <button
+                  type="button"
+                  :class="btnOutline('warning')"
+                  :disabled="busy || correctionPreparing"
+                  data-test="transport-correct-prepare-current"
+                  @click="prepareCorrectionFromCurrentRevision(actionTarget(entry.group))"
+                >
+                  {{ correctionPreparing ? t('common.loading') : t('payroll.submissions.transport.correction.prepare_current') }}
+                </button>
+              </div>
+              <p
+                v-if="correctionPrepareIssue"
+                class="mt-2 text-xs text-warning-800"
+                data-test="transport-correct-prepare-current-issue"
+              >
+                {{ correctionPrepareIssue }}
+              </p>
             </div>
             <div
               v-else-if="correctionPreparations.length > 1"
