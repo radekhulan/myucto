@@ -159,4 +159,32 @@ describe('AttendancePersonsStep — náhled zakládání osob', () => {
     expect(payload).toMatchObject([{ person_key: 'eva', create_new_agreement: true }])
     expect(payload?.[0]).not.toHaveProperty('use_open_agreement')
   })
+
+  it('hromadný výběr všech nenalezených zachová druh vztahu z podkladů, společná volba platí jen bez údaje', async () => {
+    const dpp = person('b001', { display_name: 'Brigádní Adam', relation_label: 'DPP' })
+    const dpc = person('b002', { display_name: 'Brigádní Bedřich', personal_number: 'B002', relation_label: 'Dohoda o pracovní činnosti' })
+    const unknown = person('b003', { display_name: 'Brigádní Cyril', personal_number: 'B003', relation_label: null })
+    const returning = person('b004', {
+      display_name: 'Brigádní Dana', personal_number: 'B004', relation_label: null,
+      existing_person: { employee_id: 9, employee_name: 'Dana Brigádní', matched_by: 'employment_code', relation_type: 'dpp' },
+    })
+    const wrapper = mount(AttendancePersonsStep, {
+      props: { persons: [dpp, dpc, unknown, returning], options: [], manualLinks: {}, period: '2026-04', canCreate: true },
+    })
+
+    await wrapper.get('[data-testid="attendance-select-all-creatable"]').trigger('click')
+    expect(wrapper.get('[data-testid="attendance-create-relation-type-hint"]').text())
+      .toBe('payroll_imports.attendance.persons.relation_type_fallback_hint{"count":1}')
+    const relations = wrapper.findAll('[data-testid="attendance-create-relation"]').map(item => item.text())
+    expect(relations[0]).toContain('payroll_imports.relation_types.dpp')
+    expect(relations[0]).toContain('payroll_imports.attendance.persons.relation_origin_source')
+    expect(relations[2]).toContain('payroll_imports.attendance.persons.relation_origin_common')
+
+    await wrapper.get('[data-testid="attendance-create-relation-type"]').setValue('employment')
+    await wrapper.get('[data-testid="attendance-create-submit"]').trigger('click')
+    const payload = (wrapper.emitted('create')?.[0]?.[0] ?? []) as AttendancePersonCreate[]
+    expect(payload.map(item => [item.person_key, item.relation_type])).toEqual([
+      ['b001', 'dpp'], ['b002', 'dpc'], ['b003', 'employment'], ['b004', 'dpp'],
+    ])
+  })
 })

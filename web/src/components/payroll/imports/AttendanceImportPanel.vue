@@ -37,7 +37,6 @@ import {
   chunk,
   componentsToCreate,
   filesFingerprint,
-  guessRelationType,
   isValidPeriod,
   mismatchedPeriods,
   personCanBeCreated,
@@ -337,15 +336,8 @@ async function apply() {
   try {
     if (autoCreateMissingPersons.value && showAutoCreateOption.value) {
       applyPhase.value = 'creating'
-      const payload = buildPersonsPayload(
-        creatableMissingPersons.value,
-        {},
-        autoPersonCreateDefaults(period.value),
-        // Osoba z evidence bez druhu v podkladech dostane druh svého posledního vztahu.
-        person => person.relation_label || !person.existing_person
-          ? guessRelationType(person.relation_label)
-          : person.existing_person.relation_type,
-      )
+      // Druh vztahu z podkladů, osoba z evidence bez údaje dostane druh svého posledního vztahu.
+      const payload = buildPersonsPayload(creatableMissingPersons.value, {}, autoPersonCreateDefaults(period.value))
       try {
         autoCreateResult.value = await createPersonsInChunks(payload)
         // Krok Osoby pak ukáže výsledek u každého řádku.
