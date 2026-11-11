@@ -304,7 +304,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
 
     expect(wrapper.find('[data-test="quick-inputs-link"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="action-more-label"]').exists()).toBe(true)
-    for (const key of ['statutory-bulk', 'declaration-sign-bulk', 'health-insurer-bulk', 'workplace-bulk', 'bulk-closure']) {
+    for (const key of ['statutory-bulk', 'declaration-sign-bulk', 'health-insurer-bulk', 'workplace-bulk', 'terms-bulk', 'bulk-closure']) {
       expect(wrapper.get(`[data-test="action-${key}"]`).attributes('data-tier')).toBe('overflow')
     }
   })

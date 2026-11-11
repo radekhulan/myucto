@@ -1749,6 +1749,15 @@ final class Routes
                 '/employments/workplace-bulk/apply',
                 [\MyInvoice\Action\Payroll\PayrollEmploymentWorkplaceBulkFillAction::class, 'apply'],
             );
+            // Hromadná úprava podmínek vybraných vztahů (sazba, pravděpodobný výdělek, CZ-ISCO…).
+            $g->post(
+                '/employments/terms-bulk/preview',
+                [\MyInvoice\Action\Payroll\PayrollEmploymentTermsBulkEditAction::class, 'preview'],
+            );
+            $g->post(
+                '/employments/terms-bulk/apply',
+                [\MyInvoice\Action\Payroll\PayrollEmploymentTermsBulkEditAction::class, 'apply'],
+            );
             // Hromadné ukončení skončených dohod a archivace dávno ukončených vztahů.
             $g->post(
                 '/employments/bulk-closure/preview',

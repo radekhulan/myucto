@@ -1086,6 +1086,63 @@ export interface PayrollWorkplaceBulkResult {
   failed: Array<{ employment_id: number, message: string }>
 }
 
+export type PayrollTermsBulkMode = 'fill' | 'overwrite'
+
+export interface PayrollTermsBulkPreviewItem {
+  employment_id: number
+  employee_id: number
+  full_name: string
+  employment_code: string
+  relation_type: PayrollRelationType
+  state: 'editable' | 'excluded'
+  reason: string | null
+  locked_period: string | null
+  effective_from: string | null
+  remuneration_type: 'monthly' | 'hourly' | null
+  hourly_rate_minor: number | null
+  probable_hourly_earning_minor: number | null
+  cz_isco_code: string | null
+  activity_code: string | null
+  work_place: string | null
+  jmhz_workplace_municipality_code: string | null
+}
+
+export interface PayrollTermsBulkPreview {
+  period_start: string
+  relation_type: PayrollRelationType | null
+  summary: { employments: number, editable: number, excluded: number }
+  editable_employment_ids: number[]
+  activity_codes: Array<{ code: string, label: string }>
+  items: PayrollTermsBulkPreviewItem[]
+}
+
+export interface PayrollTermsBulkChanges {
+  hourly_rate_minor?: number
+  remuneration_basis_kind?: string
+  remuneration_basis?: string
+  probable_hourly_earning_minor?: number
+  probable_earning_rationale?: string
+  cz_isco_code?: string
+  activity_code?: string
+  jmhz_workplace_municipality_code?: string
+  jmhz_workplace_country_code?: string
+}
+
+export interface PayrollTermsBulkOutcome {
+  employment_id: number
+  employee_id: number | null
+  full_name: string | null
+}
+
+export interface PayrollTermsBulkResult {
+  period_start: string
+  mode: PayrollTermsBulkMode
+  counts: { applied: number, skipped: number, failed: number }
+  applied: Array<PayrollTermsBulkOutcome & { fields: string[] }>
+  skipped: Array<PayrollTermsBulkOutcome & { reason: string }>
+  failed: Array<PayrollTermsBulkOutcome & { message: string }>
+}
+
 export type PayrollBulkClosureGroup = 'expired' | 'inactive' | 'archive'
 export type PayrollBulkClosureAction = 'end' | 'archive'
 
@@ -8722,6 +8779,26 @@ export const payrollApi = {
   }) =>
     api.post<{ result: PayrollWorkplaceBulkResult }>(
       '/payroll/employments/workplace-bulk/apply',
+      payload,
+    ).then(response => response.data.result),
+  /** Náhled hromadné úpravy podmínek vztahů měsíce; nic nezapisuje. */
+  termsBulkPreview: (payload: {
+    period_start: string
+    relation_type?: PayrollRelationType | null
+    employment_ids?: number[] | null
+  }) =>
+    api.post<{ preview: PayrollTermsBulkPreview }>(
+      '/payroll/employments/terms-bulk/preview',
+      payload,
+    ).then(response => response.data.preview),
+  termsBulkApply: (payload: {
+    period_start: string
+    mode: PayrollTermsBulkMode
+    changes: PayrollTermsBulkChanges
+    employment_ids: number[]
+  }) =>
+    api.post<{ result: PayrollTermsBulkResult }>(
+      '/payroll/employments/terms-bulk/apply',
       payload,
     ).then(response => response.data.result),
   /** Náhled hromadného ukončení skončených dohod a archivace; nic nezapisuje. */

@@ -98,7 +98,8 @@ má stav **Aktivní** a v checklistu nástupu jsou registrace splněné.
 > [!TIP]
 > Víc lidí najednou doplníte v nabídce **Další funkce** nad seznamem: **Doplnit
 > výchozí zákonné údaje**, **Podepsaná prohlášení hromadně**, **Zdravotní
-> pojišťovny hromadně** a **Doplnit místo výkonu práce**.
+> pojišťovny hromadně**, **Doplnit místo výkonu práce** a **Upravit podmínky
+> vybraných vztahů** ([§ 86.6.1](#8661-hromadna-uprava-podminek-vybranych-vztahu)).
 > Skončené dohody ukončíte najednou akcí **Ukončit skončené dohody**
 > ([§ 86.9.1](#8691-hromadne-ukonceni-skoncenych-dohod)). Když nějaké čekají,
 > je přímo nad seznamem s jejich počtem, jinak v **Další funkce**.
@@ -297,6 +298,43 @@ hodinový způsob odměňování zůstávají podporované.
 > Změna mzdy ani úvazku se ČSSZ nehlásí, projeví se v nejbližším měsíčním
 > hlášení. Změnu adresy, jména nebo pojišťovny ale ohlásíte do 8 dnů, viz
 > [§ 85.8](85_Podani_a_hlaseni.md#858-krok-za-krokem-zmena-udaju-zamestnance-a3).
+
+### 86.6.1 Hromadná úprava podmínek vybraných vztahů
+
+Máte-li desítky brigádníků na DPP se stejnou sazbou, profesí nebo pracovištěm,
+nemusíte otevírat kartu každého vztahu.
+
+1. V seznamu zaměstnanců otevřete **Další funkce** a klikněte na **Upravit
+   podmínky vybraných vztahů**.
+2. Zvolte měsíc a **Druh vztahu** (výchozí je DPP). Dialog nabídne vztahy, které
+   v měsíci trvají. Odškrtněte ty, kterých se změna netýká.
+3. Vyplňte jen údaje, které chcete změnit. Prázdné pole zůstane beze změny:
+   - **Sjednaná hodinová sazba** přepne vztah na hodinové odměňování jako
+     na kartě. Podklad odměňování můžete zadat, jinak zůstane uložený a u DPP
+     a DPČ se doplní dohoda.
+   - **Pravděpodobný hodinový výdělek** (§ 355 ZP) vyžaduje odůvodnění, z čeho
+     jste ho stanovili.
+   - **CZ-ISCO** vyberete v našeptávači.
+   - **Druh činnosti** nabízí jen kódy, které k zvolenému druhu vztahu patří.
+     Při výběru „Všechny druhy" se nenabízí.
+   - **Místo výkonu práce** je obec z číselníku ČSSZ a stát pracoviště.
+4. Zvolte režim. **Doplnit jen prázdné údaje** (výchozí) nesahá na údaj, který
+   vztah už má. **Přepsat vyplněné údaje** ho nahradí.
+5. Klikněte na **Upravit … vztahů**. Výsledek ukáže po řádcích, co se upravilo,
+   co se vynechalo a proč. Jméno osoby vede na kartu vztahu.
+
+Úprava se zapíše jako oprava platné verze podmínek, stejně jako **Opravit
+platné podmínky** na kartě. Nová verze nevznikne. Vztah se vynechá, když:
+
+- je z platné verze už zúčtovaná nebo vyplacená mzda. Změnu zapište na kartě
+  jako novou verzi podmínek od prvního nezúčtovaného měsíce,
+- jeho mzdu za některý měsíc platné verze drží schválený nebo zamčený běh,
+  nebo je za něj připravené měsíční hlášení JMHZ. Nejdřív mzdu otevřete
+  k opravě,
+- je ukončený, jeho platná verze začíná až po zvoleném měsíci, nebo zvolený
+  druh činnosti k jeho druhu vztahu nepatří.
+
+Chyba jednoho vztahu ostatní nezastaví.
 
 ## 86.7 Krok za krokem: identifikátory od ČSSZ (OIČ a ID PPV)
 
