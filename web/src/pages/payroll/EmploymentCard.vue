@@ -641,6 +641,12 @@ function rejectField(field: string, message: string): false {
  * uživatel to jen výslovně potvrdí, nemusí kvůli tomu odcházet na předpisy.
  */
 const endRecurringOffer = ref<{ name: string | null; date: string } | null>(null)
+/*
+ * Mzda se k vztahu importuje jako hotová částka (docházka). Přechod na
+ * hodinový výpočet ze směn by další import zablokoval, server ho proto bez
+ * výslovného potvrzení odmítne a karta nabídne pravděpodobný výdělek.
+ */
+const importedWageOffer = ref(false)
 const endRecurringLabel = computed(() => {
   const offer = endRecurringOffer.value
   if (offer === null) return ''
@@ -773,6 +779,7 @@ function hydrate(employment: PayrollEmployment) {
   saveError.value = ''
   invalidField.value = null
   endRecurringOffer.value = null
+  importedWageOffer.value = false
   baseline.value = fingerprint()
 }
 
@@ -938,11 +945,12 @@ function discardChanges() {
  * jako první a `row_version` pro podmínky se bere z odpovědi, ne z propu:
  * dva zápisy za sebou by jinak druhý shodily na konflikt verzí.
  */
-async function save(options: { endRecurringBase?: boolean } = {}): Promise<boolean> {
+async function save(options: { endRecurringBase?: boolean, confirmImportedWageSwitch?: boolean } = {}): Promise<boolean> {
   const form = termsForm.value
   if (!form || busy.value) return false
   if (!dirty.value) return true
   endRecurringOffer.value = null
+  importedWageOffer.value = false
   invalidField.value = null
   const gross = hourlyRemuneration.value ? null : inputToMinor(grossInput.value)
   const hourlyRate = hourlyRemuneration.value ? inputToMinor(hourlyRateInput.value) : null
@@ -1019,6 +1027,7 @@ async function save(options: { endRecurringBase?: boolean } = {}): Promise<boole
         ? null
         : form.probable_earning_rationale,
       ...(options.endRecurringBase ? { end_recurring_base: true } : {}),
+      ...(options.confirmImportedWageSwitch ? { confirm_imported_wage_switch: true } : {}),
     }
     const versionMode = saveMode.value === 'version'
     const { employment: updated, warnings } = versionMode
@@ -1075,6 +1084,9 @@ async function save(options: { endRecurringBase?: boolean } = {}): Promise<boole
         invalidField.value = canonicalField(field)
         void revealTermsField(invalidField.value)
       }
+      if (apiErrorDetailCode(error) === 'hourly_rate_imported_wage' && !options.confirmImportedWageSwitch) {
+        importedWageOffer.value = true
+      }
       if (apiErrorDetailCode(error) === 'recurring_base_wage_active' && !options.endRecurringBase) {
         const details = apiErrorDetails(error)
         const name = [details.recurring_name, details.name].find(value => typeof value === 'string' && value !== '') as string | undefined
@@ -1094,6 +1106,34 @@ async function save(options: { endRecurringBase?: boolean } = {}): Promise<boole
 
 function confirmEndRecurringBase(): void {
   void save({ endRecurringBase: true })
+}
+
+/** Uživatel vědomě přechází z importované částky na výpočet ze směn. */
+function confirmImportedWageSwitch(): void {
+  void save({ confirmImportedWageSwitch: true })
+}
+
+/*
+ * Náhrada za sazbu: způsob odměňování se vrátí na uložený stav a karta
+ * otevře pravděpodobný výdělek. Je-li už vyplněný, rovnou se uloží.
+ */
+function keepImportedWage(): void {
+  const form = termsForm.value
+  const terms = currentTerms.value
+  if (!form || !terms) return
+  importedWageOffer.value = false
+  saveError.value = ''
+  invalidField.value = null
+  form.remuneration_type = terms.remuneration_type ?? null
+  form.remuneration_basis_kind = terms.remuneration_basis_kind ?? null
+  form.remuneration_basis = terms.remuneration_basis ?? null
+  hourlyRateInput.value = minorToInput(terms.hourly_rate_minor ?? null)
+  probableEarningOpen.value = true
+  if (probableEarningInput.value.trim() !== '' && dirty.value) {
+    void save()
+    return
+  }
+  void revealTermsField('probable_hourly_earning_minor')
 }
 
 function warningHasTarget(field: string): boolean {
@@ -2586,6 +2626,23 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
             {{ endRecurringLabel }}
           </button>
+        </div>
+        <div
+          v-if="importedWageOffer"
+          class="mb-3 space-y-2 rounded-md border border-warning-500/40 bg-warning-50 px-3 py-2 text-xs text-warning-800"
+          data-test="terms-imported-wage"
+        >
+          <p>{{ t('payroll.people.remuneration.imported_wage_hint') }}</p>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" :class="[btnFilledSm('primary'), 'whitespace-nowrap']" :disabled="busy" data-test="terms-imported-wage-probable" @click="keepImportedWage">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
+              {{ t('payroll.people.remuneration.imported_wage_keep') }}
+            </button>
+            <button type="button" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" :disabled="busy" data-test="terms-imported-wage-confirm" @click="confirmImportedWageSwitch">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+              {{ t('payroll.people.remuneration.imported_wage_switch') }}
+            </button>
+          </div>
         </div>
 
         <p class="mb-2 text-xs font-medium text-neutral-900" data-test="terms-save-mode-summary">{{ saveModeSummary }}</p>

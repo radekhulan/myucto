@@ -357,6 +357,71 @@ final class PayrollEmploymentTermsBulkEditTest extends TestCase
         self::assertSame('hourly_rate_imported_wage', $rateOnly['skipped'][0]['reason']);
     }
 
+    /**
+     * Karta vztahu: přepnutí na hodinovou sazbu u vztahu s importovanou mzdou
+     * se bez výslovného potvrzení neuloží (oprava i nová verze). Odpověď
+     * vysvětlí důvod; s potvrzením se uloží.
+     */
+    public function testCardRefusesHourlySwitchOverImportedWageUntilConfirmed(): void
+    {
+        $employment = $this->createDpp('Syntetická Karta', 'DPP-KARTA', []);
+        $this->importedInput($employment, $this->hourlyWageComponent(), '2026-06-01');
+
+        foreach (['correctTerms', 'addTerms'] as $method) {
+            $refused = $this->cardSave($method, $employment, []);
+            $body = $this->bodyOf($refused);
+            self::assertSame(422, $refused->getStatusCode(), $method . ': ' . $body);
+            $error = json_decode($body, true)['error'];
+            self::assertSame('hourly_rate_imported_wage', $error['details']['code'], $body);
+            self::assertSame('remuneration_type', $error['details']['field']);
+            self::assertStringContainsString('importuje jako částka', $error['message']);
+            self::assertNull($this->term($employment)['remuneration_type']);
+        }
+
+        $confirmed = $this->cardSave('correctTerms', $employment, ['confirm_imported_wage_switch' => true]);
+        self::assertSame(200, $confirmed->getStatusCode(), $this->bodyOf($confirmed));
+        self::assertSame('hourly', $this->term($employment)['remuneration_type']);
+    }
+
+    public function testCardSwitchesToHourlyWithoutImportedWage(): void
+    {
+        $employment = $this->createDpp('Syntetická Bez Importu', 'DPP-KARTA2', []);
+
+        $saved = $this->cardSave('correctTerms', $employment, []);
+
+        self::assertSame(200, $saved->getStatusCode(), $this->bodyOf($saved));
+        self::assertSame(25000, (int) $this->term($employment)['hourly_rate_minor']);
+    }
+
+    /** @param array<string,mixed> $extra */
+    private function cardSave(string $method, int $employmentId, array $extra): ResponseInterface
+    {
+        $current = $this->db->pdo()->prepare('SELECT row_version FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $current->execute([$this->supplierId, $employmentId]);
+        $repository = \MyInvoice\Tests\Support\PayrollTestContainer::build()
+            ->get(\MyInvoice\Repository\Payroll\PayrollEmploymentRepository::class);
+        $terms = $repository->currentTerms($this->supplierId, $employmentId);
+        self::assertIsArray($terms);
+        $body = [
+            ...\MyInvoice\Service\Payroll\PayrollEmploymentTermsBody::fromCurrent($terms, 'Syntetická změna'),
+            'effective_from' => $method === 'addTerms' ? '2026-07-01' : (string) $terms['effective_from'],
+            'remuneration_type' => 'hourly',
+            'hourly_rate_minor' => 25000,
+            'remuneration_basis_kind' => 'agreement',
+            'remuneration_basis' => 'Syntetická dohoda',
+            'row_version' => (int) $current->fetchColumn(),
+            ...$extra,
+        ];
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('POST', "/api/payroll/employments/{$employmentId}/terms")
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+            ->withParsedBody($body);
+
+        return $this->employmentAction->{$method}($request, new Response(), ['id' => (string) $employmentId]);
+    }
+
     public function testWritePermissionAndSessionAreRequired(): void
     {
         $employment = $this->createDpp('Syntetická Dohoda', 'DPP-RBAC', []);

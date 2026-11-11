@@ -266,6 +266,14 @@ uložení, takže se mzda nevyplatí dvakrát. Starší verze podmínek, které 
 mzdu dosud přebíraly z pracovního vztahu, dostanou při přechodu tutéž částku
 zapsanou výslovně, takže se mzda za minulé měsíce nezmění.
 
+Importuje-li se vztahu mzda jako hotová částka (například hodinová mzda
+z docházky) v měsíci účinnosti, ve třech měsících před ním nebo později,
+karta přechod na hodinový výpočet neuloží hned. Hodinový výpočet ze směn by
+totiž každý další import odmítl. Nabídne **Nastavit jen pravděpodobný
+výdělek**, který způsob odměňování vrátí a otevře pole pravděpodobného
+výdělku, nebo **Přesto přepnout na hodinový výpočet**, když mzdu nově
+počítáte ze směn a import hodinové mzdy ukončíte.
+
 **Chyby a varování u pole.** Neprojde-li uložení kvůli konkrétnímu údaji,
 karta ho orámuje červeně, hlášku napíše přímo pod něj a na pole najede;
 je-li ve sbalených **Dalších údajích**, sama je rozbalí. Údaj, který byl

@@ -6440,6 +6440,9 @@
         "end_recurring_base_hint": "Vztah má aktivní předpis základní mzdy. Hodinová mzda se z něj nepočítá, a aby se mzda nevyplatila dvakrát, musí předpis skončit den před účinností nové verze.",
         "end_recurring_base_named": "Ukončit předpis {name} k {date} a uložit",
         "end_recurring_base": "Ukončit předpis základní mzdy k {date} a uložit",
+        "imported_wage_hint": "Mzda se k vztahu importuje jako částka (například z docházky). Hodinový výpočet ze směn by další import zablokoval. Místo sazby nastavte pravděpodobný výdělek, nebo potvrďte, že mzdu budete nově počítat ze směn a import hodinové mzdy ukončíte.",
+        "imported_wage_keep": "Nastavit jen pravděpodobný výdělek",
+        "imported_wage_switch": "Přesto přepnout na hodinový výpočet",
         "basis_kinds": {
           "wage_statement": "Mzdový výměr",
           "contract": "Pracovní smlouva",

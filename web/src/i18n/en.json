@@ -6440,6 +6440,9 @@
         "end_recurring_base_hint": "The employment has an active base wage recurring item. Hourly pay does not use it, so the item must end the day before the new version takes effect to avoid paying the wage twice.",
         "end_recurring_base_named": "End recurring item {name} on {date} and save",
         "end_recurring_base": "End the base wage recurring item on {date} and save",
+        "imported_wage_hint": "The wage for this employment is imported as an amount (for example from attendance). Hourly calculation from shifts would block the next import. Set the probable earnings instead of the rate, or confirm that the wage will now be calculated from shifts and the hourly wage import ends.",
+        "imported_wage_keep": "Set probable earnings only",
+        "imported_wage_switch": "Switch to hourly calculation anyway",
         "basis_kinds": {
           "wage_statement": "Wage statement",
           "contract": "Employment contract",

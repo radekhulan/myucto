@@ -13,7 +13,32 @@ final class PayrollHourlyWageCollisionGuard
     /** Složky základní mzdy, které s hodinovými podmínkami vztahu kolidují vždy. */
     private const BASE_COMPONENT_KINDS = ['base_wage', 'hourly_wage'];
 
+    /** Kolik měsíců před účinností hodinové sazby se importovaná mzda ještě počítá. */
+    public const IMPORTED_WAGE_LOOKBACK_MONTHS = 3;
+
     public function __construct(private readonly Connection $db) {}
+
+    /**
+     * Vztahy, které by přechod na hodinové podmínky účinné od `$effectiveFrom`
+     * odřízl od importu mzdy: mají externí základní mzdu v měsíci účinnosti,
+     * ve třech měsících před ním nebo kdykoli později.
+     *
+     * Jediné místo, kde se okno určuje — sdílí ho karta vztahu i hromadná úprava.
+     *
+     * @param list<int> $employmentIds
+     * @return list<int>
+     */
+    public function employmentsBlockingHourlySwitch(int $supplierId, array $employmentIds, string $effectiveFrom): array
+    {
+        $month = new \DateTimeImmutable(substr($effectiveFrom, 0, 8) . '01');
+
+        return $this->employmentsWithExternalBaseWage(
+            $supplierId,
+            $employmentIds,
+            $month->modify('-' . self::IMPORTED_WAGE_LOOKBACK_MONTHS . ' months')->format('Y-m-d'),
+            '9999-12-01',
+        );
+    }
 
     /**
      * Vztahy, kterým v daných měsících chodí základní mzda jako hotová částka
@@ -21,7 +46,7 @@ final class PayrollHourlyWageCollisionGuard
      *
      * Přepnutím na hodinové podmínky by {@see externalInputs()} každý další
      * takový vstup odmítla, proto se na to musí ptát každý, kdo hodinové
-     * podmínky zapisuje hromadně. Pravidelné předpisy řeší přechod na
+     * podmínky zapisuje. Pravidelné předpisy řeší přechod na
      * hodinovou mzdu samostatně, vstupy vzniklé z výpočtu se nepočítají.
      *
      * @param list<int> $employmentIds

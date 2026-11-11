@@ -64,10 +64,6 @@ final class PayrollEmploymentTermsBulkEdit
     ];
 
     private const CHANGE_REASON = 'Hromadná úprava podmínek vybraných vztahů.';
-
-    /** Jak daleko zpět hledat importovanou mzdu, která by s hodinovou sazbou kolidovala. */
-    private const IMPORTED_WAGE_LOOKBACK_MONTHS = 3;
-
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollEmploymentRepository $employments,
@@ -539,20 +535,15 @@ final class PayrollEmploymentTermsBulkEdit
     }
 
     /**
-     * Vztahy, kterým se mzda za zvolený měsíc nebo poslední tři měsíce
-     * importuje jako hotová částka — jedním dotazem pro celou dávku.
+     * Vztahy, kterým se mzda od tří měsíců před zvoleným měsícem importuje
+     * jako hotová částka, jedním dotazem pro celou dávku.
      *
      * @param list<int> $employmentIds
      * @return list<int>
      */
     private function importedWageEmployments(int $supplierId, string $monthStart, array $employmentIds): array
     {
-        return $this->wageGuard->employmentsWithExternalBaseWage(
-            $supplierId,
-            $employmentIds,
-            (new \DateTimeImmutable($monthStart))->modify('-' . self::IMPORTED_WAGE_LOOKBACK_MONTHS . ' months')->format('Y-m-d'),
-            $monthStart,
-        );
+        return $this->wageGuard->employmentsBlockingHourlySwitch($supplierId, $employmentIds, $monthStart);
     }
 
     /**
