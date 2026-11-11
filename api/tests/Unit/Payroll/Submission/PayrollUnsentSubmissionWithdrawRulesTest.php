@@ -24,6 +24,13 @@ final class PayrollUnsentSubmissionWithdrawRulesTest extends TestCase
         }
     }
 
+    public function testJmhz27AndHealthPaymentOverviewCanBeWithdrawn(): void
+    {
+        self::assertNull(PayrollUnsentSubmissionWithdrawService::blockedReason('JMHZ27', 'regular', 'ready', 0, false));
+        self::assertNull(PayrollUnsentSubmissionWithdrawService::blockedReason('PPZ_2026', 'regular', 'ready', 0, false));
+        self::assertNotNull(PayrollUnsentSubmissionWithdrawService::blockedReason('PPZ_2026', 'regular', 'submitted', 0, false));
+    }
+
     /** @return iterable<string,array{string,string,string,int,bool,string}> */
     public static function blocked(): iterable
     {

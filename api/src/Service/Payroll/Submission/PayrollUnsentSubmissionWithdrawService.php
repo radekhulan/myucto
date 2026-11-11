@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission;
 
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 
 /**
@@ -40,7 +41,11 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 final readonly class PayrollUnsentSubmissionWithdrawService
 {
     /** Agendy měsíčního hlášení, jejichž řádné podání smí být za období jen jedno. */
-    private const AGENDAS = ['JMHZ', ...JmhzSpecVersion::MONTHLY_AGENDA_CODES];
+    private const AGENDAS = [
+        'JMHZ',
+        ...JmhzSpecVersion::MONTHLY_AGENDA_CODES,
+        HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW,
+    ];
 
     public function __construct(
         private PayrollSubmissionService $submissions,
@@ -62,7 +67,7 @@ final readonly class PayrollUnsentSubmissionWithdrawService
         bool $queuedInDataBox,
     ): ?string {
         if (!in_array($agendaCode, self::AGENDAS, true) || $submissionKind !== 'regular') {
-            return 'Zrušit přípravu jde jen u řádného měsíčního hlášení.';
+            return 'Zrušit přípravu jde jen u řádného měsíčního hlášení a přehledu o platbě pojistného.';
         }
         if (!in_array($submissionStatus, PayrollSubmissionStateMachine::PRE_SUBMISSION_STATUSES, true)) {
             return 'Hlášení už bylo odesláno nebo o něm úřad rozhodl. Změny pošlete opravným '
@@ -121,6 +126,15 @@ final readonly class PayrollUnsentSubmissionWithdrawService
                 $expectedRowVersion,
                 'cancelled_in_time',
             );
+            if ((string) $obligation['agenda_code'] === HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW) {
+                $this->repository->updateObligationStatus(
+                    $supplierId,
+                    $environment,
+                    (int) $obligation['id'],
+                    (int) $obligation['row_version'],
+                    'cancelled',
+                );
+            }
 
             return [
                 'submission' => [
