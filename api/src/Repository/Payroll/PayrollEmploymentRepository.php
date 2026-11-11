@@ -89,6 +89,16 @@ final class PayrollEmploymentRepository
     /** Druhy, mezi kterými jde druh vztahu opravit (viz changeRelationType()). */
     public const RELATION_TYPE_CORRECTABLE = ['employment', 'small_scale_employment', 'dpp', 'dpc'];
 
+    /** Druh vztahu do vět pro účetní. */
+    private const RELATION_LABELS = [
+        'employment' => 'pracovní poměr',
+        'small_scale_employment' => 'zaměstnání malého rozsahu',
+        'dpp' => 'DPP',
+        'dpc' => 'DPČ',
+        'partner_dependent' => 'příjem společníka',
+        'statutory_body' => 'statutární orgán',
+    ];
+
     private const CHECKLIST_EXCEPTIONS = [
         'partner_dependent' => ['employment_contract'],
         'statutory_body' => ['employment_contract'],
@@ -3142,17 +3152,54 @@ final class PayrollEmploymentRepository
             return;
         }
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id
+            "SELECT code, relation_type,
+                    COALESCE(actual_start_date, start_date) AS start_on, end_date
                FROM payroll_employments
               WHERE supplier_id = ? AND employee_id = ? AND is_primary = 1
                 AND status IN ('planned', 'preregistered', 'active', 'suspended')
                 AND (? IS NULL OR id <> ?)
+              ORDER BY id
               LIMIT 1"
         );
         $stmt->execute([$supplierId, $employeeId, $exceptEmploymentId, $exceptEmploymentId]);
-        if ($stmt->fetchColumn() !== false) {
-            throw new \DomainException('Osoba už má jiný primární pracovní vztah.');
+        $other = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($other !== false) {
+            throw new \DomainException(self::primaryTakenMessage($other));
         }
+    }
+
+    /**
+     * Věta musí říct, KTERÝ vztah primární drží a jak to přepnout. Holé „osoba
+     * už má jiný primární vztah" posílalo účetní hledat mezi desítkami dohod
+     * brigádníka.
+     *
+     * @param array<string,mixed> $other
+     */
+    private static function primaryTakenMessage(array $other): string
+    {
+        $date = static fn (mixed $value): ?string => is_string($value) && $value !== ''
+            ? (new \DateTimeImmutable($value))->format('j. n. Y')
+            : null;
+        $from = $date($other['start_on'] ?? null);
+        $to = $date($other['end_date'] ?? null);
+        $period = match (true) {
+            $from !== null && $to !== null => "{$from} – {$to}",
+            $from !== null => "od {$from}",
+            $to !== null => "do {$to}",
+            default => 'bez data nástupu',
+        };
+        $code = (string) ($other['code'] ?? '');
+        $type = self::RELATION_LABELS[(string) ($other['relation_type'] ?? '')] ?? (string) ($other['relation_type'] ?? '');
+
+        return sprintf(
+            'Osoba už má primární pracovní vztah %s (%s, %s). Primární smí být jen jeden: '
+            . 'chcete-li za primární označit tento vztah, otevřete na kartě osoby vztah %s, '
+            . 'v opravě podmínek zrušte „Primární vztah" a uložte; potom ho nastavte tady.',
+            $code,
+            $type,
+            $period,
+            $code,
+        );
     }
 
     /**
