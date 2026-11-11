@@ -6842,6 +6842,7 @@
           "other_claimant_excluded": "The other taxpayer does not claim the credit for this period",
           "other_household_caregiver": "Another person in the same household supports the same children",
           "other_household_caregiver_hint": "The monthly report asks for this (JMHZ 10453). Without an answer the report cannot be built; answering yes requires naming the other person.",
+          "other_household_caregiver_undecided": "Not decided yet: the claim is saved, but until you answer the question the monthly report (JMHZ) for this person cannot be built. Answer before calculating the payroll; the answer is frozen into the payroll run and adding it after approval would require a run correction.",
           "other_caregiver_given_name": "Other supporting person - given name",
           "other_caregiver_family_name": "Other supporting person - family name",
           "other_caregiver_birth_date": "Other supporting person - date of birth",

@@ -518,6 +518,17 @@ function blockerLabel(blocker: string): string {
   return t(`payroll.people.dependants.blockers.${blocker}`)
 }
 
+/**
+ * Uplatňovaný nárok bez odpovědi, zda tytéž děti vyživuje i jiná osoba.
+ * Uložit ho jde (odpověď nemusí být hned známá), ale měsíční hlášení se bez
+ * ní nesestaví a po schválení mzdy stojí doplnění opravnou revizi běhu.
+ */
+function caregiverUndecided(claim: PayrollDependantClaim): boolean {
+  return claim.credit_status !== 'claimed_by_other'
+    && claim.superseded_by_id === null
+    && claim.other_household_caregiver_status === 'unknown'
+}
+
 function periodLabel(from: string, to: string | null): string {
   return to === null
     ? t('payroll.people.dependants.period_open', { from })
@@ -656,6 +667,13 @@ function creditLabel(claim: PayrollDependantClaim): string {
                           </button>
                         </div>
                       </div>
+                      <p
+                        v-if="caregiverUndecided(claim)"
+                        class="mt-2 rounded-md bg-warning-50 px-2 py-1 text-xs text-warning-700"
+                        :data-test="`claim-caregiver-undecided-${claim.id}`"
+                      >
+                        {{ t('payroll.people.dependants.form.other_household_caregiver_undecided') }}
+                      </p>
                       <ul v-if="claim.blockers.length > 0" class="mt-2 space-y-1" :data-test="`claim-blockers-${claim.id}`">
                         <li v-for="blocker in claim.blockers" :key="blocker" class="rounded-md bg-warning-50 px-2 py-1 text-xs text-warning-700">
                           {{ blockerLabel(blocker) }}
@@ -726,6 +744,9 @@ function creditLabel(claim: PayrollDependantClaim): string {
               </p>
               <p class="mt-0.5 break-words text-xs text-neutral-500">{{ periodLabel(claim.effective_from, claim.effective_to) }}</p>
               <p class="mt-0.5 break-words text-xs text-neutral-600">{{ creditLabel(claim) }}</p>
+              <p v-if="caregiverUndecided(claim)" class="mt-2 break-words rounded-md bg-warning-50 px-2 py-1 text-xs text-warning-700">
+                {{ t('payroll.people.dependants.form.other_household_caregiver_undecided') }}
+              </p>
               <ul v-if="claim.blockers.length > 0" class="mt-2 space-y-1">
                 <li v-for="blocker in claim.blockers" :key="blocker" class="break-words rounded-md bg-warning-50 px-2 py-1 text-xs text-warning-700">
                   {{ blockerLabel(blocker) }}
@@ -915,6 +936,15 @@ function creditLabel(claim: PayrollDependantClaim): string {
           {{ t('payroll.people.dependants.form.other_household_caregiver') }}<RequiredMark />
           <SearchableSelect v-model="claimForm.other_household_caregiver_status" class="mt-1" :options="caregiverOptions" :clearable="false" accent="payroll" />
           <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.other_household_caregiver_hint') }}</span>
+          <!--
+            „Zatím nerozhodnuto" uložit jde, pole je ale povinné pro hlášení:
+            bez upozornění se na to přišlo až u přípravy JMHZ po schválení mzdy.
+          -->
+          <span
+            v-if="claimForm.other_household_caregiver_status === 'unknown'"
+            class="mt-1 block rounded-md bg-warning-50 px-2 py-1 text-xs text-warning-700"
+            data-test="claim-caregiver-undecided"
+          >{{ t('payroll.people.dependants.form.other_household_caregiver_undecided') }}</span>
         </label>
         <p v-else class="text-xs text-neutral-500 sm:col-span-2 lg:col-span-3" data-test="claim-other-caregiver-required">
           {{ t('payroll.people.dependants.form.other_caregiver_required_hint') }}

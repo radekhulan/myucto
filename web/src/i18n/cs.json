@@ -6842,6 +6842,7 @@
           "other_claimant_excluded": "Druhý poplatník zvýhodnění v tomto období neuplatňuje",
           "other_household_caregiver": "Vyživuje tytéž děti i jiná osoba v téže domácnosti",
           "other_household_caregiver_hint": "ČSSZ se na to ptá v měsíčním hlášení (JMHZ 10453). Bez odpovědi se hlášení nesestaví; u odpovědi „ano“ musí být druhá osoba pojmenovaná.",
+          "other_household_caregiver_undecided": "Zatím nerozhodnuto: nárok se uloží, ale dokud na otázku neodpovíte, měsíční hlášení (JMHZ) za tuto osobu se nesestaví. Odpovězte před výpočtem mzdy; odpověď se do mzdového běhu zmrazí a po jeho schválení by doplnění stálo opravu běhu.",
           "other_caregiver_given_name": "Jméno jiné vyživující osoby",
           "other_caregiver_family_name": "Příjmení jiné vyživující osoby",
           "other_caregiver_birth_date": "Datum narození jiné vyživující osoby",
