@@ -1186,7 +1186,8 @@
         "2280_membership_batches.sql",
         "2281_microsoft365_imap_oauth.sql",
         "2282_clients_simplified_only.sql",
-        "2283_payroll_submission_parts_subject_index.sql"
+        "2283_payroll_submission_parts_subject_index.sql",
+        "2284_payroll_component_employer_contribution_non_monetary.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
