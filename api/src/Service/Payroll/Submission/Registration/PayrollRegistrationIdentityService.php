@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Registration;
 
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
@@ -54,6 +55,7 @@ final readonly class PayrollRegistrationIdentityService
         private PayrollRegistrationIdentityRepository $repository,
         private PayrollSensitiveData $sensitiveData,
         private PayrollRulesetProvider $rulesets,
+        private ActivityLogger $activity,
     ) {}
 
     /**
@@ -1743,11 +1745,22 @@ final readonly class PayrollRegistrationIdentityService
              * měsíc, než od kdy je OIČ v evidenci, karta dřívějšího vztahu ho
              * k jeho datu nevidí a účetní ho opíše znovu — stejnou hodnotu.
              * Dřív to skončilo na „stejná hodnota, jiný den" bez cesty ven
-             * (oprava se k vztahu bez čísla nenabízí). Ručně opsané stejné
-             * číslo se proto jen přesune na dřívější den; převzaté z protokolu
-             * ČSSZ se nepřepisuje.
+             * (oprava se k vztahu bez čísla nenabízí). Stejné číslo se proto
+             * jen přesune na dřívější den, ať je opsané ručně, nebo převzaté
+             * z protokolu ČSSZ.
+             *
+             * § 20 odst. 1 a 2 zákona č. 323/2025 Sb.: „Fyzické osobě lze
+             * přidělit pouze jedno osobní identifikační číslo." a „Osobní
+             * identifikační číslo se přiděluje bez časového omezení a je
+             * neměnné." Datový slovník JMHZ ho proto vede u osoby (ID 10051,
+             * třída Základní identifikace), ne u vztahu (ID PPV, 10228).
+             * Číslo z protokolu k pozdější dohodě tedy patří i k dřívější
+             * dohodě téže osoby. Zákaz přepisu chrání HODNOTU: převzatému
+             * číslu se posune jen začátek platnosti, hodnota, původ i odkaz
+             * na protokol zůstanou a jiné číslo se odmítne.
              */
             $backdatePerson = false;
+            $backdateReceiptPerson = null;
             $personCovered = false;
             if (!$replaceExisting && $personIdentifier !== null) {
                 $active = $this->repository->activePersonExternalId(
@@ -1763,9 +1776,26 @@ final readonly class PayrollRegistrationIdentityService
                         $environment,
                         $personIdentifier,
                     ) === true;
-                $backdatePerson = $matches
-                    && $active['source_kind'] === 'verified_manual_import'
-                    && $active['valid_from'] > $validFrom;
+                if ($active !== null && !$matches
+                    && $active['source_kind'] === 'trusted_receipt'
+                ) {
+                    throw new \DomainException(self::fieldNote(
+                        'person_external_identifier',
+                        'se liší od čísla, které téhle osobě přidělila ČSSZ '
+                        . 'v protokolu o přijetí přihlášky. Osoba má jediné OIČ '
+                        . 'a to se nemění, proto ho ruční zápis nepřepíše. '
+                        . 'Porovnejte opis s protokolem od ČSSZ, nejspíš jde '
+                        . 'o překlep nebo o číslo jiné osoby. Vede-li ČSSZ '
+                        . 'u osoby opravdu jiné číslo, vyžádejte si od ní '
+                        . 'opravu a doložte ji novým protokolem.',
+                    ));
+                }
+                $earlier = $matches && $active['valid_from'] > $validFrom;
+                $backdatePerson = $earlier
+                    && $active['source_kind'] === 'verified_manual_import';
+                if ($earlier && $active['source_kind'] === 'trusted_receipt') {
+                    $backdateReceiptPerson = $active;
+                }
                 // Totéž OIČ opsané k POZDĚJŠÍ dohodě (brigádník s další DPP)
                 // už osobu k jejímu dni pokrývá: nic se nepřepisuje, zapíše
                 // se jen ID PPV nového vztahu. Dřív to končilo konfliktem
@@ -1796,9 +1826,17 @@ final readonly class PayrollRegistrationIdentityService
                 }
             }
 
-            $person = $personIdentifier === null || $personCovered
-                ? null
-                : $this->assignPersonExternalId(
+            $person = null;
+            if ($backdateReceiptPerson !== null) {
+                $person = $this->backdateReceiptPersonIdentifier(
+                    $supplierId,
+                    $employmentId,
+                    $backdateReceiptPerson,
+                    $validFrom,
+                    $createdBy,
+                );
+            } elseif ($personIdentifier !== null && !$personCovered) {
+                $person = $this->assignPersonExternalId(
                     $supplierId,
                     $employment['employee_id'],
                     $environment,
@@ -1809,6 +1847,7 @@ final readonly class PayrollRegistrationIdentityService
                     null,
                     $createdBy,
                 );
+            }
             $employmentExternal = $employmentIdentifier === null
                 ? null
                 : $this->assignEmploymentExternalId(
@@ -1871,6 +1910,69 @@ final readonly class PayrollRegistrationIdentityService
                 'employment_external_identifier' => $employmentExternal,
             ];
         });
+    }
+
+    /**
+     * Posune začátek platnosti OIČ převzatého z protokolu ČSSZ na den
+     * dřívější dohody téže osoby a zapíše o tom auditní stopu.
+     *
+     * Do stopy jde, CO se posunulo a odkud kam, ne hodnota čísla — auditní
+     * záznam nesmí být druhým místem, odkud se identifikátor dá přečíst.
+     * Zmrazená podání nesou vlastní kopii čísla a tímhle se nemění; nová
+     * příprava hlášení za dřívější měsíc už číslo k rozhodnému dni najde.
+     *
+     * @param array{
+     *   id:int,employee_id:int,environment:string,identifier_type:string,
+     *   value_masked:string,valid_from:string,source_kind:string,
+     *   source_receipt_id:?int,row_version:int
+     * } $active
+     * @return array{
+     *   id:int,employee_id:int,environment:string,identifier_type:string,
+     *   value_masked:string,valid_from:string,row_version:int,created:bool
+     * }
+     */
+    private function backdateReceiptPersonIdentifier(
+        int $supplierId,
+        int $employmentId,
+        array $active,
+        string $validFrom,
+        ?int $actorId,
+    ): array {
+        $this->repository->backdatePersonExternalId(
+            $supplierId,
+            $active['id'],
+            $active['row_version'],
+            $validFrom,
+            $actorId,
+        );
+        $this->activity->log(
+            action: 'payroll.jmhz_identity.validity_backdated',
+            userId: $actorId,
+            entityType: 'payroll_employment',
+            entityId: $employmentId,
+            payload: [
+                'identifier' => 'ik_mpsv',
+                'external_id' => $active['id'],
+                'employee_id' => $active['employee_id'],
+                'environment' => $active['environment'],
+                'source_kind' => $active['source_kind'],
+                'source_receipt_id' => $active['source_receipt_id'],
+                'valid_from_before' => $active['valid_from'],
+                'valid_from_after' => $validFrom,
+            ],
+            supplierId: $supplierId,
+        );
+
+        return [
+            'id' => $active['id'],
+            'employee_id' => $active['employee_id'],
+            'environment' => $active['environment'],
+            'identifier_type' => $active['identifier_type'],
+            'value_masked' => $active['value_masked'],
+            'valid_from' => $validFrom,
+            'row_version' => $active['row_version'] + 1,
+            'created' => false,
+        ];
     }
 
     /**

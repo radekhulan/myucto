@@ -46,6 +46,7 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
             new PayrollRegistrationIdentityRepository($db),
             $sensitive,
             \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry::defaults(),
+            new \MyInvoice\Service\ActivityLogger($db),
         );
 
         $pdo = $db->pdo();

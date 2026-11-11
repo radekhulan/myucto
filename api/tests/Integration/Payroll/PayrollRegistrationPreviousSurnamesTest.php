@@ -37,7 +37,7 @@ final class PayrollRegistrationPreviousSurnamesTest extends TestCase
         self::assertInstanceOf(PayrollSensitiveData::class, $sensitive);
         $this->db = $db;
         $this->repository = new PayrollRegistrationIdentityRepository($db);
-        $this->service = new PayrollRegistrationIdentityService($this->repository, $sensitive, \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry::defaults());
+        $this->service = new PayrollRegistrationIdentityService($this->repository, $sensitive, \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry::defaults(), new \MyInvoice\Service\ActivityLogger($db));
 
         $pdo = $db->pdo();
         $source = (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();

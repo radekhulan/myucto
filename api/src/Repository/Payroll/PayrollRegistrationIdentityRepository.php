@@ -1302,6 +1302,65 @@ final class PayrollRegistrationIdentityRepository
         return $statement->rowCount() === 1;
     }
 
+    /**
+     * Posune začátek platnosti OIČ osoby na dřívější den. Mění se jen
+     * `valid_from`: hodnota, původ (`source_kind`) ani odkaz na protokol
+     * ČSSZ zůstávají, takže číslo převzaté z protokolu je dál doložené týmž
+     * protokolem. Starší věta historie, do které by posun zasáhl, znamená
+     * rozpor v evidenci a posun se odmítne.
+     */
+    public function backdatePersonExternalId(
+        int $supplierId,
+        int $externalId,
+        int $expectedRowVersion,
+        string $validFrom,
+        ?int $updatedBy,
+    ): void {
+        $overlap = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_person_external_ids moved
+               JOIN payroll_person_external_ids older
+                 ON older.supplier_id = moved.supplier_id
+                AND older.employee_id = moved.employee_id
+                AND older.environment = moved.environment
+                AND older.identifier_type = moved.identifier_type
+                AND older.id <> moved.id
+                AND older.valid_to IS NOT NULL
+                AND older.valid_to >= ?
+              WHERE moved.supplier_id = ? AND moved.id = ?
+              LIMIT 1'
+        );
+        $overlap->execute([$validFrom, $supplierId, $externalId]);
+        if ($overlap->fetchColumn() !== false) {
+            throw new \DomainException(
+                'Osobní identifikační číslo od ČSSZ (OIČ) má v evidenci starší '
+                . 'ukončenou větu, do které by dřívější začátek platnosti '
+                . 'zasáhl. Zadejte den až po jejím konci.',
+            );
+        }
+        $statement = $this->db->pdo()->prepare(
+            'UPDATE payroll_person_external_ids
+                SET valid_from = ?, updated_by = ?, row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND row_version = ?
+                AND valid_to IS NULL AND valid_from > ?'
+        );
+        $statement->execute([
+            $validFrom,
+            $updatedBy,
+            $supplierId,
+            $externalId,
+            $expectedRowVersion,
+            $validFrom,
+        ]);
+        if ($statement->rowCount() !== 1) {
+            throw new \DomainException(
+                'Osobní identifikační číslo od ČSSZ (OIČ) se mezitím změnilo, '
+                . 'takže jeho platnost nejde bezpečně posunout. Otevřete '
+                . 'kartu vztahu znovu a zápis zopakujte.',
+            );
+        }
+    }
+
     /** Je na identifikátor navázaná rozpracovaná úloha ztotožnění? */
     public function externalIdHasResolutionTask(
         int $supplierId,
