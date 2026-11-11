@@ -397,7 +397,9 @@ final class AttendanceImportServiceTest extends TestCase
         self::assertSame(0, $this->countRows('SELECT COUNT(*) FROM payroll_inputs WHERE supplier_id = ?', [$this->supplierId]));
 
         $persons = $this->byKey($this->service->preview($this->supplierId, self::PERIOD, $files, null, null)['persons']);
-        self::assertSame('linked', $persons['jana testovaci']['match']['status']);
+        // Rodné číslo v podkladech má přednost i před uloženou vazbou.
+        self::assertSame('birth_number', $persons['jana testovaci']['match']['matched_by']);
+        self::assertSame($this->jana['employment_id'], $persons['jana testovaci']['match']['employment_id']);
         self::assertSame('link', $persons['petr zkusebni']['match']['matched_by']);
     }
 

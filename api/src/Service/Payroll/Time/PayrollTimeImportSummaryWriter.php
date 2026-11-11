@@ -19,8 +19,9 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
  * Dávka nese hodiny jen jako řádky evidence; pracovní měsíc vztahu o nich
  * dosud nevěděl. Tady se z řádků dávky stane neměnný souhrn k měsíci, včetně
  * původu každého čísla (soubor!list!buňka a otisk souboru). Bere se jen to,
- * co podklady opravdu nesou: měsíční součty hodin. Dny ani data absencí
- * v podkladech nejsou a nevymýšlejí se.
+ * co podklady opravdu nesou: měsíční součty hodin a, má-li je soubor ve
+ * sloupci, počet odpracovaných dnů (§ 355 ZP, JMHZ 10267). Data absencí
+ * v podkladech nejsou a nevymýšlejí se; chybějící dny zůstávají `null`.
  *
  * Každý vztah se zapisuje ve vlastní transakci (nebo savepointu): chyba
  * jednoho — schválený měsíc, časové záznamy jako druhý zdroj — vrátí jen jeho
@@ -64,8 +65,13 @@ final class PayrollTimeImportSummaryWriter
 
         /** @var array<int,array{values:array<string,int>,sources:array<string,array{ref:string,file_sha256:?string}>}> $summaries */
         $summaries = [];
+        $workedDays = [];
         foreach ($this->imports->batchRows($supplierId, $importId) as $row) {
             $meaning = (string) $row['meaning'];
+            if ($meaning === 'worked_days' && $row['quantity_millihours'] !== null) {
+                $workedDays[(int) $row['employment_id']] = intdiv((int) $row['quantity_millihours'], 1000);
+                continue;
+            }
             if (!in_array($meaning, AttendanceMeaning::HOURS, true) || $row['quantity_millihours'] === null) {
                 continue;
             }
@@ -84,9 +90,10 @@ final class PayrollTimeImportSummaryWriter
             ksort($values);
             $sources = $summary['sources'];
             ksort($sources);
+            $days = $workedDays[$employmentId] ?? null;
             $content = hash('sha256', CanonicalJson::encode([
                 'values' => $values,
-                'worked_days' => null,
+                'worked_days' => $days,
                 'sources' => $sources,
             ]));
 
@@ -102,6 +109,7 @@ final class PayrollTimeImportSummaryWriter
                         $sources,
                         $content,
                         $userId,
+                        $days,
                     ),
                 ]);
             } catch (PayrollTimeLockedException|PayrollTimeConflictException|\InvalidArgumentException|\DomainException $e) {

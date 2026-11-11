@@ -36596,6 +36596,7 @@
       "education_code": "Vzdělání (KKOV)",
       "employment_status_code": "Postavení v zaměstnání (NKPZ)",
       "worked_hours": "Odpracováno",
+      "worked_days": "Odpracované dny",
       "overtime_hours": "Přesčas",
       "night_hours": "Noční práce",
       "weekend_hours": "Víkend",
@@ -36743,12 +36744,14 @@
           "linked": "Propojené",
           "matched": "Spárované",
           "ambiguous": "Nejasné",
+          "conflict": "Rozpor",
           "not_found": "Nenalezené"
         },
         "status": {
           "linked": "Propojeno",
           "matched": "Spárováno",
           "ambiguous": "Nejasné",
+          "conflict": "Rozpor",
           "not_found": "Nenalezeno"
         },
         "matched_by": {
@@ -36792,6 +36795,12 @@
         "create_manually": "Založit osobu ručně",
         "remove_from_create": "Nezakládat",
         "registration_label": "Pro registraci ČSSZ",
+        "existing_person_confirm": {
+          "title": "V evidenci je osoba {name} se stejným jménem a datem narození.",
+          "hint": "Podklady nenesou rodné číslo, import proto za vás nerozhodne. Bez volby se osoba nezaloží.",
+          "existing": "Je to tatáž osoba: založit jí jen nový pracovní vztah",
+          "new": "Jiná osoba: založit novou kartu"
+        },
         "existing_person": "Osoba {name} už v evidenci je, založí se jí jen nový pracovní vztah (nová karta osoby nevznikne).",
         "open_agreement": {
           "legend": "Otevřená dohoda osoby {name}",

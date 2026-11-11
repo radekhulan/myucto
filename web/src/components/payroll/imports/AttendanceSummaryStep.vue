@@ -33,6 +33,7 @@ const meanings = computed(() => summaryMeanings(props.preview.persons))
 const components = computed(() => summaryComponents(props.preview.persons))
 const deductionMeanings = computed(() => summaryDeductions(props.preview.persons))
 const optionById = computed(() => new Map(props.preview.employment_options.map(option => [option.employment_id, option])))
+const hasWorkedDays = computed(() => props.preview.persons.some(person => typeof person.worked_days === 'number'))
 const hasReference = computed(() => props.preview.persons.some(person =>
   person.reference.gross_minor !== null || person.reference.net_minor !== null || person.reference.hours !== null))
 const skippedCount = computed(() => props.preview.persons.filter(person => employmentOf(person) === null).length)
@@ -217,6 +218,7 @@ function checkClass(check: AttendanceComponentCheck): string {
           <thead>
             <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
               <th class="sticky left-0 top-0 z-20 min-w-52 border-b border-neutral-200 bg-surface px-3 py-2">{{ t('payroll_imports.attendance.summary.person') }}</th>
+              <th v-if="hasWorkedDays" class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right normal-case">{{ meaningLabel('worked_days') }}</th>
               <th v-for="meaning in meanings" :key="meaning" class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right normal-case" :title="meaning">{{ meaningLabel(meaning) }}</th>
               <th v-for="code in components" :key="`c-${code}`" class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right font-mono normal-case">{{ code }}</th>
               <th v-for="meaning in deductionMeanings" :key="`d-${meaning}`" class="sticky top-0 z-10 border-b border-neutral-200 bg-surface px-3 py-2 text-right normal-case">{{ meaningLabel(meaning) }}</th>
@@ -240,6 +242,7 @@ function checkClass(check: AttendanceComponentCheck): string {
                   <li v-for="warning in person.warnings" :key="warning">{{ warning }}</li>
                 </ul>
               </td>
+              <td v-if="hasWorkedDays" class="whitespace-nowrap border-b border-neutral-100 px-3 py-2 text-right tabular-nums text-neutral-800" data-testid="attendance-worked-days">{{ person.worked_days ?? '' }}</td>
               <td v-for="meaning in meanings" :key="meaning" class="whitespace-nowrap border-b border-neutral-100 px-3 py-2 text-right tabular-nums"
                 :class="metric(person, meaning)?.conflicts.length ? 'bg-warning-50 font-medium text-warning-700' : 'text-neutral-800'"
                 :title="metric(person, meaning) ? conflictTitle(metric(person, meaning)!.source, metric(person, meaning)!.conflicts) : undefined">
@@ -276,6 +279,10 @@ function checkClass(check: AttendanceComponentCheck): string {
           <p v-if="employmentOf(person)" class="text-xs text-neutral-500">{{ employmentOf(person)?.label }}</p>
           <span v-else class="mt-0.5 inline-block rounded-full bg-warning-50 px-2 py-0.5 text-[11px] font-medium text-warning-700">{{ t('payroll_imports.attendance.summary.will_skip') }}</span>
           <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            <template v-if="typeof person.worked_days === 'number'">
+              <dt class="text-neutral-500">{{ meaningLabel('worked_days') }}</dt>
+              <dd class="text-right tabular-nums text-neutral-800">{{ person.worked_days }}</dd>
+            </template>
             <template v-for="item in person.metrics" :key="item.meaning">
               <dt class="text-neutral-500">{{ meaningLabel(item.meaning) }}</dt>
               <dd class="text-right tabular-nums" :class="item.conflicts.length ? 'font-medium text-warning-700' : 'text-neutral-800'">{{ formatHours(item.hours, locale) }}<span v-if="item.conflicts.length"> ⚠</span></dd>

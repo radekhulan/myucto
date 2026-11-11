@@ -1971,6 +1971,7 @@ final class PayrollTimeRepository
         array $sources,
         string $contentSha256,
         ?int $userId,
+        ?int $workedDays = null,
     ): array {
         $pdo = $this->db->pdo();
         $scope = $this->beginTransactionScope();
@@ -2071,7 +2072,7 @@ final class PayrollTimeRepository
                     (supplier_id, time_month_id, time_month_revision_no, employment_id,
                      period_start, attendance_import_id, values_json, worked_days,
                      sources_json, content_sha256, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             )->execute([
                 $supplierId,
                 $monthId,
@@ -2080,6 +2081,7 @@ final class PayrollTimeRepository
                 $periodStart,
                 $attendanceImportId,
                 CanonicalJson::encode($values),
+                $workedDays,
                 CanonicalJson::encode($sources),
                 $contentSha256,
                 $userId,

@@ -80,7 +80,7 @@ final class AttendanceMyUctoTemplate
             $format = match ($column['format']) {
                 AttendanceMyUctoSampleProfile::FORMAT_DATE => self::DATE_FORMAT,
                 AttendanceMyUctoSampleProfile::FORMAT_AMOUNT => self::AMOUNT_FORMAT,
-                AttendanceMyUctoSampleProfile::FORMAT_HOURS => null,
+                AttendanceMyUctoSampleProfile::FORMAT_HOURS, AttendanceMyUctoSampleProfile::FORMAT_DAYS => null,
                 default => NumberFormat::FORMAT_TEXT,
             };
             if ($format !== null) {
@@ -145,6 +145,7 @@ final class AttendanceMyUctoTemplate
             AttendanceMyUctoSampleProfile::FORMAT_DATE => 'datum',
             AttendanceMyUctoSampleProfile::FORMAT_HOURS => 'hodiny',
             AttendanceMyUctoSampleProfile::FORMAT_AMOUNT => 'částka v Kč',
+            AttendanceMyUctoSampleProfile::FORMAT_DAYS => 'počet dnů',
         ];
         $tableHeader = count($lines);
         foreach (AttendanceMyUctoSampleProfile::columns() as $column) {

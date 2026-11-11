@@ -11,6 +11,7 @@ import type {
 import {
   autoCreatablePersons,
   autoPersonCreateDefaults,
+  existingPersonNeedsConfirmation,
   personHasIdentifier,
   buildAttendanceLinks,
   buildPersonsPayload,
@@ -415,6 +416,7 @@ describe('pravidla mapování', () => {
     expect(ruleUnitForMeaning('sick_hours', 'excel_duration')).toBe('excel_duration')
     expect(ruleUnitForMeaning('sick_hours', 'hours')).toBe('hours')
     expect(ruleUnitForMeaning('sick_hours', 'text')).toBeNull()
+    expect(ruleUnitForMeaning('worked_days', null)).toBe('text')
   })
 
   it('kód složky převede na velká písmena a hvězdičku zachová', () => {
@@ -736,6 +738,33 @@ describe('osoby a vazby', () => {
     expect(autoCreatablePersons([missing, numbered, masked, matched], {}).map(item => item.key)).toEqual(['karel', 'jitka'])
     // Podklady bez čísel vůbec: zakládá se jako dřív každý nenalezený.
     expect(autoCreatablePersons([missing, matched], {}).map(item => item.key)).toEqual(['petr'])
+  })
+
+  it('rozpor rodného a osobního čísla osobu nezaloží; shodu jména a data narození potvrzuje uživatel', () => {
+    const conflict = person('rozpor', {
+      personal_number: '1',
+      match: { ...missing.match, status: 'conflict', conflict: 'Rozpor v podkladech.' },
+      errors: ['Rozpor v podkladech.'],
+    })
+    expect(personCanBeCreated(conflict, {})).toBe(false)
+    expect(effectiveEmploymentId(conflict, { rozpor: 9 })).toBe(9)
+
+    const suggested = person('jmeno', {
+      birth_number_masked: null,
+      personal_number: 'B9',
+      existing_person: { employee_id: 42, employee_name: 'Shodná Eva', matched_by: 'name_birth_date', relation_type: 'dpp', requires_confirmation: true },
+    })
+    expect(existingPersonNeedsConfirmation(suggested)).toBe(true)
+    expect(autoCreatablePersons([suggested], {})).toEqual([])
+    const defaults = { relation_type: 'dpp' as const, weekly_hours: '', planned_start_on: '2026-04-01', activate: true }
+    const [unchosen] = buildPersonsPayload([suggested], {}, defaults)
+    expect(unchosen.confirm_existing_person).toBeUndefined()
+    expect(unchosen.create_new_person).toBeUndefined()
+    const [confirmed] = buildPersonsPayload([suggested], {}, defaults, undefined, new Set(), { jmeno: 'existing' })
+    expect(confirmed.confirm_existing_person).toBe(42)
+    const [fresh] = buildPersonsPayload([suggested], {}, defaults, undefined, new Set(), { jmeno: 'new' })
+    expect(fresh.create_new_person).toBe(true)
+    expect(fresh.confirm_existing_person).toBeUndefined()
   })
 
   it('nástup z poznámky v podkladech má přednost před dnem pro celou dávku', () => {

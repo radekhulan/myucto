@@ -36596,6 +36596,7 @@
       "education_code": "Education (KKOV)",
       "employment_status_code": "Employment status (NKPZ)",
       "worked_hours": "Worked",
+      "worked_days": "Worked days",
       "overtime_hours": "Overtime",
       "night_hours": "Night work",
       "weekend_hours": "Weekend",
@@ -36743,12 +36744,14 @@
           "linked": "Linked",
           "matched": "Matched",
           "ambiguous": "Ambiguous",
+          "conflict": "Conflict",
           "not_found": "Not found"
         },
         "status": {
           "linked": "Linked",
           "matched": "Matched",
           "ambiguous": "Ambiguous",
+          "conflict": "Conflict",
           "not_found": "Not found"
         },
         "matched_by": {
@@ -36792,6 +36795,12 @@
         "create_manually": "Create person manually",
         "remove_from_create": "Do not create",
         "registration_label": "For social security registration",
+        "existing_person_confirm": {
+          "title": "The records contain {name} with the same name and date of birth.",
+          "hint": "The source has no birth number, so the import will not decide for you. Without a choice the person is not created.",
+          "existing": "Same person: create only a new employment relationship",
+          "new": "Different person: create a new person record"
+        },
         "existing_person": "{name} is already in the records; only a new employment relationship is created (no new person record).",
         "open_agreement": {
           "legend": "Open agreement of {name}",

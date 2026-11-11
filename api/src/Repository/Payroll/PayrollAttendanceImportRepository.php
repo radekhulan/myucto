@@ -273,6 +273,87 @@ final class PayrollAttendanceImportRepository
     }
 
     /**
+     * Co o osobách v evidenci ví párování podle rodného čísla: má osoba
+     * uložené rodné číslo (jen příznak, hodnota se nečte ani nedešifruje)
+     * a jaké má datum narození (aktuální identita, jinak karta).
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,array{has_birth_number:bool,birth_date:?string}>
+     */
+    public function identityFacts(int $supplierId, array $employeeIds): array
+    {
+        $employeeIds = array_values(array_unique(array_filter($employeeIds, static fn (int $id): bool => $id > 0)));
+        if ($employeeIds === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee.id,
+                    COALESCE((
+                        SELECT identity.birth_date
+                          FROM payroll_person_identity_history identity
+                         WHERE identity.supplier_id = employee.supplier_id
+                           AND identity.employee_id = employee.id
+                           AND identity.effective_from <= CURRENT_DATE
+                           AND (identity.effective_to IS NULL OR identity.effective_to >= CURRENT_DATE)
+                         ORDER BY identity.effective_from DESC, identity.id DESC
+                         LIMIT 1
+                    ), employee.birth_date) AS birth_date,
+                    EXISTS (
+                        SELECT 1 FROM payroll_person_identifiers identifier
+                         WHERE identifier.supplier_id = employee.supplier_id
+                           AND identifier.employee_id = employee.id
+                           AND identifier.identifier_type = "birth_number"
+                    ) AS has_birth_number
+               FROM payroll_employees employee
+              WHERE employee.supplier_id = ? AND employee.id IN (' . implode(',', array_fill(0, count($employeeIds), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, ...$employeeIds]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[(int) $row['id']] = [
+                'has_birth_number' => (int) $row['has_birth_number'] === 1,
+                'birth_date' => is_string($row['birth_date']) && $row['birth_date'] !== '' ? substr($row['birth_date'], 0, 10) : null,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Osoby celé evidence s některým z dat narození (karta nebo historie
+     * identity) — kandidáti na shodu jména a data narození u podkladů bez
+     * rodného čísla.
+     *
+     * @param list<string> $birthDates Y-m-d
+     * @return array<string,list<int>> datum narození → osoby
+     */
+    public function employeesByBirthDates(int $supplierId, array $birthDates): array
+    {
+        $birthDates = array_values(array_unique(array_filter(
+            $birthDates,
+            static fn (string $date): bool => preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1,
+        )));
+        if ($birthDates === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($birthDates), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id AS employee_id, birth_date FROM payroll_employees
+              WHERE supplier_id = ? AND birth_date IN ({$placeholders})
+             UNION
+             SELECT employee_id, birth_date FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND birth_date IN ({$placeholders})"
+        );
+        $stmt->execute([$supplierId, ...$birthDates, $supplierId, ...$birthDates]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[substr((string) $row['birth_date'], 0, 10)][] = (int) $row['employee_id'];
+        }
+
+        return array_map(static fn (array $ids): array => array_values(array_unique($ids)), $result);
+    }
+
+    /**
      * Jméno osob a druh jejich posledního vztahu (výchozí druh nové dohody).
      *
      * @param list<int> $employeeIds

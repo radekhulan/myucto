@@ -50,6 +50,7 @@ final class AttendanceRuleSuggester
         ['/prescas/', 'overtime_hours', null],
         ['/sluzebni cest|pracovni cest/', 'business_trip_hours', null],
         ['/home ?office|prace z domova/', 'home_office_hours', null],
+        ['/odpracovan\w* dn|dny odprac|pocet dnu|^dny$|^odpracovane dny$/', 'worked_days', null],
         ['/prace celkem|odprac|^prace$/', 'worked_hours', null],
         ['/^hodiny$|^hodin$|pocet hodin|hodiny celkem/', 'reference_hours', null],
     ];

@@ -27,7 +27,7 @@ final class AttendanceMeaning
     ];
 
     /** Stavy párování osoby na pracovní vztah ({@see AttendancePersonMatcher}). */
-    public const MATCH_STATUSES = ['linked', 'matched', 'ambiguous', 'not_found'];
+    public const MATCH_STATUSES = ['linked', 'matched', 'ambiguous', 'conflict', 'not_found'];
 
     public const IGNORE = 'ignore';
     public const PERSON_NAME = 'person_name';
@@ -51,6 +51,7 @@ final class AttendanceMeaning
         'hourly_rate',
         'end_date',
         'bank_account',
+        'worked_days',
         ...self::REGISTRATION,
     ];
 

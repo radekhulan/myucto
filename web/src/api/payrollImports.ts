@@ -388,7 +388,7 @@ export type AttendanceMeaning =
   | 'ignore' | 'person_name' | 'personal_number' | 'birth_number' | 'birth_date' | 'health_insurer_code'
   | 'relation_label'
   | 'department' | 'cost_center' | 'position' | 'weekly_hours' | 'start_end_note' | 'start_date' | 'monthly_wage'
-  | 'hourly_rate' | 'end_date' | 'bank_account'
+  | 'hourly_rate' | 'end_date' | 'bank_account' | 'worked_days'
   | 'address_street' | 'address_house_number' | 'address_city' | 'address_postal_code' | 'address_country'
   | 'citizenship' | 'cz_isco_code' | 'activity_code' | 'workplace' | 'tax_residence' | 'tax_declaration'
   | 'tax_declaration_from' | 'education_code' | 'employment_status_code'
@@ -475,7 +475,7 @@ export interface AttendanceEmploymentOption {
   relation_type?: string
 }
 
-export type AttendanceMatchStatus = 'linked' | 'matched' | 'ambiguous' | 'not_found'
+export type AttendanceMatchStatus = 'linked' | 'matched' | 'ambiguous' | 'conflict' | 'not_found'
 
 export interface AttendanceConflict {
   hours?: string | null
@@ -540,8 +540,12 @@ export interface AttendancePerson {
     employee_id: number | null
     employee_name: string | null
     employment_code: string | null
+    /** Rozpor rodného a osobního čísla (stav `conflict`), řádek se nepároval. */
+    conflict?: string | null
     candidates: { employment_id: number; employee_id: number; label: string }[]
   }
+  /** Odpracované dny v měsíci ze sloupce podkladů; zapíšou se do souhrnu pracovního měsíce. */
+  worked_days?: number | null
   metrics: AttendanceMetric[]
   components: AttendanceComponentValue[]
   deductions?: AttendanceDeductionValue[]
@@ -574,9 +578,11 @@ export type AttendanceRateWage =
 export interface AttendanceExistingPerson {
   employee_id: number
   employee_name: string
-  matched_by: 'link' | 'birth_number' | 'employment_code'
+  matched_by: 'link' | 'birth_number' | 'employment_code' | 'name_birth_date'
   /** Druh posledního vztahu osoby, výchozí druh nové dohody. */
   relation_type: RegistrationRelationType
+  /** Shoda jen podle jména a data narození: založení vyžaduje potvrzení uživatele. */
+  requires_confirmation?: boolean
 }
 
 /** Pravděpodobný výdělek z podkladů, viz AttendanceImportService::probableEarnings(). */
@@ -704,6 +710,10 @@ export interface AttendancePreview {
     matched: number
     ambiguous: number
     not_found: number
+    /** Z `not_found`: rozpor rodného a osobního čísla. Starší server klíč nemá. */
+    conflicts?: number
+    /** Osoby s odpracovanými dny v podkladech. */
+    worked_days?: number
     metrics: number
     components: number
     amount_minor_total: number
@@ -849,6 +859,10 @@ export interface AttendancePersonCreate {
   use_open_agreement?: number | null
   /** Výslovně nová DPP vedle otevřené dohody. */
   create_new_agreement?: boolean
+  /** Potvrzení, že osoba z podkladů je osoba z evidence se shodným jménem a datem narození (její id). */
+  confirm_existing_person?: number
+  /** Výslovně nová karta osoby i přes shodu jména a data narození. */
+  create_new_person?: boolean
 }
 
 export interface AttendancePersonsResult {
