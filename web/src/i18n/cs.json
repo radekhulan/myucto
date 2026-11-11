@@ -5588,6 +5588,7 @@
         "running": "Připravuji přehled…",
         "hint": "PDF se všemi zaměstnanci za zvolený měsíc a souhrnem osobních nákladů. Bere schválené mzdy, u převzatých měsíců mzdy z předchozího programu.",
         "failed": "Přehled mezd se nepodařilo vytvořit."
+      "batch_worker_running": "Zpracování běží…",
       },
       "batch_attempts": "pokusů: {count}",
       "batch_retry": "Opakovat",

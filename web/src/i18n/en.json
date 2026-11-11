@@ -5588,6 +5588,7 @@
         "running": "Preparing the overview…",
         "hint": "PDF with all employees for the selected month and a summary of personnel costs. Uses approved payroll, or payroll taken over from the previous system for migrated months.",
         "failed": "The payroll overview could not be created."
+      "batch_worker_running": "Processing is running…",
       },
       "batch_attempts": "attempts: {count}",
       "batch_retry": "Retry",
