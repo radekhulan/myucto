@@ -76,6 +76,9 @@ export interface PayrollAbsenceEmployment {
   relation_type: string
   status: string
   full_name: string
+  /** Den nástupu (skutečný, jinak sjednaný) a konec vztahu; rozliší starou a novou dohodu. */
+  start_date?: string | null
+  end_date?: string | null
 }
 
 export interface AverageSnapshot {

@@ -19,6 +19,26 @@ export interface PayrollEmploymentOption {
   code: string
   relation_type: string
   status: string
+  start_date: string | null
+  end_date: string | null
+}
+
+/**
+ * Platí vztah v měsíci vstupu? `ended` = skončil před měsícem,
+ * `not_started` = začne až po něm. Stejné pravidlo hlídá náhled dopadu
+ * na serveru (`PayrollInputPreviewService::employmentPeriodWarning`);
+ * tady jde o okamžité varování při výběru vztahu.
+ */
+export function payrollEmploymentPeriodFit(
+  option: Pick<PayrollEmploymentOption, 'start_date' | 'end_date'>,
+  period: string,
+): 'ok' | 'ended' | 'not_started' {
+  if (!/^\d{4}-\d{2}$/.test(period)) return 'ok'
+  const first = `${period}-01`
+  const last = `${period}-31`
+  if (option.end_date && option.end_date < first) return 'ended'
+  if (option.start_date && option.start_date > last) return 'not_started'
+  return 'ok'
 }
 
 /**
@@ -145,6 +165,8 @@ export function payrollEmploymentOptionsFromContext(
       code: employment.code,
       relation_type: employment.relation_type,
       status: employment.status,
+      start_date: employment.start_date ?? null,
+      end_date: employment.end_date ?? null,
     }))
     .filter(option => !PAYROLL_INPUT_EXCLUDED_STATUSES.includes(option.status))
     // Řazení drží klient: české řazení podle jména se v collation serveru

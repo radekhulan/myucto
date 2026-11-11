@@ -5240,7 +5240,8 @@
         "preview_status": {
           "supported": "Vstup lze bezpečně zpracovat.",
           "manual_review": "Vstup vyžaduje ruční posouzení.",
-          "not_supported": "Vstup není podporovaný."
+          "not_supported": "Vstup není podporovaný.",
+          "employment_outside_period": "Vstup jde uložit, ale vybraný pracovní vztah v tomto měsíci neplatí."
         },
         "annual_limit": "Ročně použito {used}; po vstupu {after}; limit {limit}.",
         "saved": "Měsíční vstup byl uložen.",
@@ -5252,6 +5253,13 @@
         "cancelled": "Měsíční vstup byl zrušen.",
         "cancel_failed": "Měsíční vstup se nepodařilo zrušit.",
         "reverse_benefit": "Stornovat benefit",
+        "locked_hint": "Vstup drží mzdový běh. Neschválený běh zrušte (vstupy ani docházka se nesmažou), pak vstup opravte nebo zrušte. Schválený běh opravíte jen opravnou revizí (Vyžádat opravu).",
+        "locked_open_run": "Otevřít mzdový běh",
+        "employment_open_end": "dosud",
+        "employment_outside_period": {
+          "ended": "Vztah {code} ({validity}) za {period} už neplatí. Vstup zadejte na trvající vztah; jde-li o doplatek po skončení, potvrďte nejdřív na kartě vztahu odložený příjem.",
+          "not_started": "Vztah {code} ({validity}) za {period} ještě neplatí. Vstup zadejte za měsíc, kdy vztah trvá."
+        },
         "reverse_benefit_reason": "Důvod storna benefitu - proč se uvolňuje roční koš osvobození (§ 6 odst. 9 ZDP)?",
         "reverse_benefit_reason_required": "Benefit se nestornoval: bez důvodu storno nejde uložit. Klikněte znovu na „Stornovat benefit“ a důvod vyplňte.",
         "benefit_reversed": "Benefit byl stornován a roční koš osvobození se uvolnil.",

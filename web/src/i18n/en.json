@@ -5240,7 +5240,8 @@
         "preview_status": {
           "supported": "The input can be processed safely.",
           "manual_review": "The input requires manual review.",
-          "not_supported": "The input is not supported."
+          "not_supported": "The input is not supported.",
+          "employment_outside_period": "The input can be saved, but the selected employment is not valid in this month."
         },
         "annual_limit": "Used this year {used}; after input {after}; limit {limit}.",
         "saved": "The monthly input was saved.",
@@ -5252,6 +5253,13 @@
         "cancelled": "The monthly input was cancelled.",
         "cancel_failed": "The monthly input could not be cancelled.",
         "reverse_benefit": "Reverse benefit",
+        "locked_hint": "A payroll run holds this input. Cancel an unapproved run (inputs and attendance are kept), then correct or cancel the input. An approved run can only be fixed with a correction revision (Request correction).",
+        "locked_open_run": "Open payroll run",
+        "employment_open_end": "ongoing",
+        "employment_outside_period": {
+          "ended": "Employment {code} ({validity}) is no longer valid for {period}. Enter the input on an ongoing employment; for a payment after termination, first confirm the deferred income on the employment card.",
+          "not_started": "Employment {code} ({validity}) is not valid yet for {period}. Enter the input for a month in which the employment lasts."
+        },
         "reverse_benefit_reason": "Reason for reversing the benefit — why is the annual exemption basket being released (§ 6(9) of the Income Tax Act)?",
         "reverse_benefit_reason_required": "The benefit was not reversed: a reversal cannot be saved without a reason. Click “Reverse benefit” again and fill in the reason.",
         "benefit_reversed": "The benefit was reversed and the annual exemption basket was released.",

@@ -85,13 +85,14 @@ import {
   monthStart,
   parsePayrollAmountToMinor,
   payrollEmploymentOptionsFromContext,
+  payrollEmploymentPeriodFit,
   payrollImportFingerprint,
   payrollImportIssues,
   payrollMinorToInput,
   type PayrollEmploymentOption,
 } from '@/pages/payroll/payrollComponentsUi'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
+import { formatDate, formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
 import DateInput from '@/components/ui/DateInput.vue'
 
 type Tab = 'catalog' | 'recurring' | 'inputs' | 'risky_savings' | 'import'
@@ -480,19 +481,41 @@ const personOptions = computed(() => Array.from(
     label: item.full_name,
   }])).values(),
 ))
+/**
+ * Výběr vztahu ukáže i období platnosti a stav: stará skončená a nová
+ * dohoda téže osoby se jinak lišily jen kódem a vstup se snadno zadal na
+ * skončenou (případ z podpory).
+ */
+function employmentValidityLabel(item: PayrollEmploymentOption): string {
+  const from = item.start_date ? formatDate(item.start_date) : '?'
+  const to = item.end_date ? formatDate(item.end_date) : t('payroll.components.inputs.employment_open_end')
+  return `${from} – ${to} · ${t(`payroll.people.employment_status.${item.status}`)}`
+}
 function employmentOptionsFor(employeeId: number | null) {
   return employments.value
     .filter(item => item.employee_id === employeeId)
     .map(item => ({
       value: item.employment_id,
       label: relationLabel(item.relation_type),
-      secondary: item.code,
+      secondary: `${item.code} · ${employmentValidityLabel(item)}`,
     }))
 }
 const recurringEmploymentOptions = computed(() =>
   employmentOptionsFor(recurringEmployeeId.value))
 const inputEmploymentOptions = computed(() =>
   employmentOptionsFor(inputForm.value.employee_id))
+/** Vybraný vztah v měsíci vstupu neplatí: varuje hned při výběru, ne až kontrola běhu. */
+const inputEmploymentPeriodWarning = computed(() => {
+  const selected = employments.value.find(item => item.employment_id === inputForm.value.employment_id)
+  if (!selected) return null
+  const fit = payrollEmploymentPeriodFit(selected, period.value)
+  if (fit === 'ok') return null
+  return t(`payroll.components.inputs.employment_outside_period.${fit}`, {
+    code: selected.code,
+    validity: employmentValidityLabel(selected),
+    period: formatPeriod(`${period.value}-01`),
+  })
+})
 const regularComponentOptions = computed(() => activeRegularComponents.value.map(item => ({
   value: item.id,
   label: item.name,
@@ -2326,7 +2349,7 @@ onMounted(load)
           <p v-if="editingImported" class="mt-3 text-xs text-neutral-600" data-testid="payroll-input-origin-hint">{{ t('payroll.components.inputs.edit_origin_hint') }}</p>
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <div class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employee') }}</span><PayrollPersonSearchSelect :model-value="inputForm.employee_id" data-test="payroll-input-person" :candidates="personOptions" :label="t('payroll.components.fields.employee')" :clearable="false" :disabled="editingImported" @update:model-value="selectInputEmployee" /></div>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="inputForm.employment_id" data-test="payroll-input-employment" :options="inputEmploymentOptions" :clearable="false" :disabled="editingImported" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="selectInputEmployment($event)" /></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="inputForm.employment_id" data-test="payroll-input-employment" :options="inputEmploymentOptions" :clearable="false" :disabled="editingImported" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="selectInputEmployment($event)" /><span v-if="inputEmploymentPeriodWarning" class="mt-1 block text-xs font-medium text-warning-700" data-testid="payroll-input-employment-outside-period">{{ inputEmploymentPeriodWarning }}</span></label>
             <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.component') }}</span><SearchableSelect :model-value="inputForm.component_id" :options="inputComponentOptions" :clearable="false" :disabled="editingImported" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="inputForm.component_id = $event" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.amount') }}</span><input v-model="inputForm.amount" data-testid="payroll-input-amount" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.quantity') }}</span><input v-model="inputForm.quantity" data-testid="payroll-input-quantity" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
@@ -2340,10 +2363,14 @@ onMounted(load)
             :class="inputPreview.support_status === 'supported'
               && !inputPreview.annual_limit_exceeded
               && !mealEvidenceIncomplete
+              && !inputPreview.employment_warning
               ? 'border-success-500/30 bg-success-50 text-success-700'
               : 'border-warning-500/40 bg-warning-50 text-warning-700'"
           >
-            <p class="font-medium">{{ t(`payroll.components.inputs.preview_status.${inputPreview.support_status}`) }}</p>
+            <p class="font-medium">{{ inputPreview.support_status === 'supported' && inputPreview.employment_warning
+              ? t('payroll.components.inputs.preview_status.employment_outside_period')
+              : t(`payroll.components.inputs.preview_status.${inputPreview.support_status}`) }}</p>
+            <p v-if="inputPreview.employment_warning" class="mt-1" data-testid="payroll-input-preview-employment-warning">{{ inputPreview.employment_warning.message }}</p>
             <p v-if="inputPreview.blocker" class="mt-1">{{ inputPreview.blocker }}</p>
             <p v-if="inputPreview.annual_limit_minor !== null" class="mt-1">{{ t('payroll.components.inputs.annual_limit', { used: formatMoney(inputPreview.annual_used_minor), after: formatMoney(inputPreview.annual_after_minor), limit: formatMoney(inputPreview.annual_limit_minor) }) }}</p>
             <template v-if="inputPreview.exemption_basket">
