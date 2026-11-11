@@ -38345,7 +38345,7 @@
     "rights": "Potřebujete právo zápisu pro import, účetní deník a nastavení firmy.",
     "input": "1. Export a původní instance",
     "file": "ZIP s exportem",
-    "file_hint": "Úplný obnovitelný ZIP pro jednu firmu, nejvýše 2 GiB. Vybraná data a přílohy: nejvýše 64 MiB / 100 000 řádků.",
+    "file_hint": "Úplný obnovitelný ZIP pro jednu firmu, nejvýše 2 GiB. Data firmy se čtou proudem: nejvýše 8 GiB dat a 20 milionů řádků v jedné tabulce.",
     "source": "Název původní instance",
     "source_hint": "Stabilní jedinečný název. Při opakování použijte stejný. Povolené jsou písmena, číslice, tečka, pomlčka a podtržítko.",
     "password": "Heslo ZIPu (volitelné)",

@@ -1176,8 +1176,8 @@ změny, jen bez vazby na tato nastavení. Protokol běhu vypíše, u kolika řá
 se vazba odpojila. Zápočty dobropisů se převádějí včetně vazby na fakturu.
 
 Průvodce přijímá ZIP do **2 GiB**, nahrává jej po částech a používá stejný
-importér jako CLI. Vybraná data a přílohy mají společný limit **64 MiB / 100 000
-řádků**. Kontrola i obnova běží na pozadí ve společném workeru importů. Stránku
+importér jako CLI. Data firmy se čtou proudem po tabulkách, takže obnovu zvládne
+i firma se statisíci řádky deníku a přiřazení dimenzí. Kontrola i obnova běží na pozadí ve společném workeru importů. Stránku
 můžete zavřít: po návratu se připojí k rozpracovanému běhu. V **Historii běhů**
 uvidíte průběh, protokol i výsledek dokončených kontrol a obnov. Nahrané ZIPy
 se čistí po 24 hodinách bez práce s nimi; protokoly zůstávají v historii.
@@ -1298,8 +1298,25 @@ a doporučení automatiky, mezipaměti, nálezy kontroly deníku, data bankovní
 API ani další tabulky mimo tento seznam obnova nepřenáší. Doklad s živou vazbou na nepodporovaný
 graf se odmítne, vazba se tiše nenuluje. Rovněž se odmítají nepodporovaná
 syntetická ID závěrkových zápisů. Zkontrolujte proto před ostrým importem
-`outside_scope` a celý výsledek zkoušky. Limit načtených dat a potřebných souborů
-je 64 MiB, nejvýše 100 000 řádků; celý ZIP může mít nejvýše 20 GiB.
+`outside_scope` a celý výsledek zkoušky.
+
+Export se čte proudem: tabulky řádek po řádku a přílohy přímo do dočasných
+souborů, v paměti zůstávají jen indexy. Limity chrání před poškozeným nebo
+podvrženým archivem:
+
+| Limit | Hodnota |
+|---|---|
+| Celý ZIP (rozbalený obsah) | 20 GiB, nejvýše 250 000 položek |
+| Manifest | 64 MiB |
+| Data převáděných tabulek celkem | 8 GiB |
+| Řádků v jedné tabulce | 20 000 000 |
+| Jeden řádek dat | 16 MiB |
+| Jedna příloha | 512 MiB |
+| Kompresní poměr položky nad 1 MiB | nejvýše 300 : 1 |
+
+Dočasné soubory obnovy vznikají v adresáři pro dočasné soubory PHP
+(`sys_get_temp_dir()`) a po skončení běhu se smažou; počítejte tam s volným
+místem zhruba ve velikosti rozbalených dat firmy.
 
 Po kontrole protokolu přidejte `--apply`:
 
@@ -1394,8 +1411,8 @@ Libovolné SQL skripty, výrazy a jiné způsoby zápisu nejsou podporované.
 
 Limity převodu: každý vstupní ZIP do 2 GiB, rozbalený SQL dump do 512 MiB,
 podporované databázové řádky **celé zdrojové instance** do 64 MiB / 100 000
-řádků. Vybraná data firmy a její originály mají společný limit 64 MiB / 100 000
-řádků stávajícího importéru. Starší bankovní výpis bez firmy se přiřadí podle
+řádků. Pro vybraná data firmy a její originály pak platí limity obnovy z exportu
+MyÚčta (viz výše). Starší bankovní výpis bez firmy se přiřadí podle
 účtu a banky; pokud nelze v záloze určit jedinou firmu, převod skončí chybou.
 
 Výsledný ZIP nahrajte přes dlaždici **MyÚčto / MyInvoice** v `Systém → Přechod z jiných účetních
