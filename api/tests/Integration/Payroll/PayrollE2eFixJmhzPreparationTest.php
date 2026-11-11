@@ -178,6 +178,34 @@ final class PayrollE2eFixJmhzPreparationTest extends TestCase
         self::assertSame(201, $this->prepareFromChecklist()['status']);
     }
 
+    public function testAverageFixedInSourceStillExplainsRequiredRevisionAndLinksToRun(): void
+    {
+        $officeId = $this->createOffice('AVG', 'Syntetická účtárna průměru', '1100001237');
+        $this->configureSocialInsuranceOutput($officeId);
+        $person = $this->hire($officeId, 'Syntetická Průměrová', 'female', '1987-10-10', withAverage: false);
+        $this->createApprovedInput($person, $this->baseComponentId, 4_500_000, 'fix-average', self::PERIOD_START);
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $officeId, 'fix-average');
+        self::assertNotNull($run['approved'], CanonicalJson::encode($run['blockers']));
+
+        $blocked = $this->prepareFromChecklist();
+        self::assertSame(409, $blocked['status'], CanonicalJson::encode($blocked['body']));
+        $blocker = array_column($blocked['body']['error']['details']['blockers'], null, 'code')['jmhz_average_hourly_earning_missing'];
+        self::assertTrue($blocker['needs_revision']);
+        self::assertFalse($blocker['fixed_in_source']);
+        self::assertSame('/payroll/runs?period=2026-07', $blocker['revision_path']);
+
+        $this->createApprovedAverage($person['employment_id'], 3);
+        $still = $this->prepareFromChecklist();
+        self::assertSame(409, $still['status'], CanonicalJson::encode($still['body']));
+        $blocker = array_column($still['body']['error']['details']['blockers'], null, 'code')['jmhz_average_hourly_earning_missing'];
+        self::assertTrue($blocker['needs_revision']);
+        self::assertTrue($blocker['fixed_in_source']);
+        self::assertStringContainsString('„Vyžádat opravu" a „Otevřít opravu"', (string) $still['body']['error']['message']);
+        self::assertSame('/payroll/runs?period=2026-07', $blocker['revision_path']);
+        $this->correctPayrollRun($run['approved']->run, 'fix-average-corr', 'Doplněný průměrný výdělek.');
+        self::assertSame(201, $this->prepareFromChecklist()['status']);
+    }
+
     /**
      * B1: údaj, který se čte až při přípravě hlášení (zařazení složky), se po
      * opravě projeví hned při dalším pokusu. Dřív opakovaná příprava
@@ -476,7 +504,7 @@ final class PayrollE2eFixJmhzPreparationTest extends TestCase
     }
 
     /** @return array{employee_id:int,employment_id:int,name:string} */
-    private function hire(int $officeId, string $name, string $sex, string $birthDate): array
+    private function hire(int $officeId, string $name, string $sex, string $birthDate, bool $withAverage = true): array
     {
         $sequence = ++$this->sequence;
         $person = $this->createEmployment($officeId, $name, $sequence, 'hpp', 'employment', 40, 10_000, true, self::PERIOD_START);
@@ -492,7 +520,9 @@ final class PayrollE2eFixJmhzPreparationTest extends TestCase
         $workdays = self::workdays(self::PERIOD);
         $this->publishShifts($person['employment_id'], $workdays);
         self::assertSame(200, $this->approveTimeMonth($person['employment_id'], self::PERIOD, $workdays)->getStatusCode());
-        $this->createApprovedAverage($person['employment_id'], 3);
+        if ($withAverage) {
+            $this->createApprovedAverage($person['employment_id'], 3);
+        }
 
         return $person;
     }

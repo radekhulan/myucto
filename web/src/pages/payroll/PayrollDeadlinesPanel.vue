@@ -160,6 +160,7 @@ defineExpose({ reload: load })
     v-if="allowed"
     class="rounded-xl border bg-surface p-4 shadow-sm sm:p-6"
     :class="overdueCount > 0 ? 'border-danger-500/40' : 'border-neutral-200'"
+    id="payroll-deadlines"
     data-test="payroll-deadlines"
   >
     <div class="flex flex-wrap items-start justify-between gap-3">

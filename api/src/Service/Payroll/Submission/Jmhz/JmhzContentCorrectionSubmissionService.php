@@ -102,6 +102,8 @@ final readonly class JmhzContentCorrectionSubmissionService
             'submission_id' => $regularSubmissionId,
             'preparations' => $rows,
             'auto_selected_preparation_id' => count($rows) === 1 ? $rows[0]['id'] : null,
+            'run_id' => $runId,
+            'current_revision_id' => $this->deferrals->currentApprovedRevisionId($supplierId, $runId),
         ];
     }
 

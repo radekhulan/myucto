@@ -65,7 +65,7 @@ final class PayrollHourlyWageMaterializer
               AND (NOT EXISTS (SELECT 1 FROM payroll_run_revisions own
                     JOIN payroll_run_employments frozen ON frozen.supplier_id = own.supplier_id AND frozen.revision_id = own.id
                     WHERE own.supplier_id = input.supplier_id AND own.run_id = ? AND frozen.employment_id = input.employment_id AND frozen.period_start = input.period_start)
-                OR EXISTS (SELECT 1 FROM payroll_runs other FORCE INDEX (uq_payroll_run_period)
+                OR EXISTS (SELECT 1 FROM payroll_runs other FORCE INDEX (uq_payroll_run_live_period)
                     JOIN payroll_run_revisions held ON held.supplier_id = other.supplier_id AND held.run_id = other.id
                     JOIN payroll_run_employments frozen ON frozen.supplier_id = held.supplier_id AND frozen.revision_id = held.id
                     WHERE other.supplier_id = input.supplier_id AND other.period_start = input.period_start AND other.id <> ?
@@ -208,7 +208,7 @@ final class PayrollHourlyWageMaterializer
                 if (isset($blockers[$id]) || ($ready[$id]['settlement_only']
                     && ((int) $conflict['attendance_owned'] === 1 || (int) $conflict['current_work'] === 1))) continue;
                 $blockers[$id][] = ['code' => 'hourly_claim_component_conflict', 'remediation' => $inputsLink . $id,
-                    'message' => sprintf('Hodinový nárok koliduje s existující složkou %s. Ponechte jediný podklad: zrušte ruční vstup této složky, hodinový výpočet ji doplní sám.', $conflict['code'])];
+                    'message' => PayrollHourlyWageComponents::componentConflictMessage((string) $conflict['code'])];
             }
         }
         $premiumPairs = [];
@@ -235,7 +235,7 @@ final class PayrollHourlyWageMaterializer
                 if (isset($blockers[$id]) || $row['claim_source'] === 'time') continue;
                 $kind = PayrollSurchargeKind::from((string) $row['surcharge_kind']);
                 $blockers[$id][] = ['code' => 'hourly_premium_manual_source_conflict', 'remediation' => $inputsLink . $id,
-                    'message' => sprintf('%s (%s) je za toto období zadán ručně v rychlém měsíčním vstupu. Ponechte jen jeden podklad: ruční příplatek odeberte, hodinový výpočet ho doloží z evidence.', $kind->label(), $kind->section())];
+                    'message' => PayrollHourlyWageComponents::componentConflictMessage($kind->componentCode())];
             }
         }
         $plans = array_filter($plans, static fn (int $id): bool => !isset($blockers[$id]), ARRAY_FILTER_USE_KEY);

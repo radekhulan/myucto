@@ -6,7 +6,6 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -63,11 +62,9 @@ final class PayrollE2eHpp2CorrectionTest extends TestCase
      * zaměstnavatel 4 230; záloha 7 050 − 2 570 = 4 480; čistá 47 000
      * − 3 337 − 2 115 − 4 480 = 37 068 Kč.
      *
-     * Podání: druhé řádné hlášení za týž měsíc založit nejde a opravné lze
-     * navázat až na přijaté řádné hlášení. Hláška musí říct první krok
-     * (odeslat připravené hlášení), ne jen „pošlete opravné hlášení".
-     * Po přijetí řádného hlášení nese opravné hlášení typ O, GUID původního
-     * formuláře a nové částky.
+     * Podání: schválení opravy zruší neodeslané řádné hlášení ze starší
+     * revize, takže nové řádné hlášení s opravenými částkami jde zmrazit
+     * hned a opravné hlášení není potřeba.
      */
     public function testCorrectionAfterFrozenUnsentReportEndsAsCorrectiveReport(): void
     {
@@ -131,70 +128,33 @@ final class PayrollE2eHpp2CorrectionTest extends TestCase
             'Opravená mzda nesouhlasí s ručním přepočtem.',
         );
 
-        // Nová příprava je v pořádku, druhé řádné hlášení ale založit nejde.
+        // Schválení opravy zrušilo neodeslané řádné hlášení ze starší revize,
+        // nové řádné hlášení z opravené revize proto jde zmrazit hned.
+        self::assertSame('cancelled_in_time', (string) $this->scalar(
+            'SELECT status FROM payroll_submissions WHERE supplier_id = ? AND id = ?',
+            [$this->supplierId, $regularId],
+        ));
         $repared = $this->prepareJmhz($correctedRevisionId, 'opr-fix');
         self::assertSame('source_ready', $repared['body']['readiness_status'], CanonicalJson::encode($repared['body']));
         $refrozen = $this->freezeJmhzSubmission((int) $repared['body']['id'], $this->officeId);
-        self::assertSame(409, $refrozen['status'], CanonicalJson::encode($refrozen['body']));
-        $message = (string) $refrozen['body']['error']['message'];
-        self::assertStringContainsString('ještě nebylo odesláno', $message);
-        self::assertStringContainsString('nejdřív odešlete', $message);
-        self::assertStringContainsString('opravným hlášením', $message);
-
-        $corrections = $this->container->get(JmhzContentCorrectionSubmissionService::class);
-        self::assertInstanceOf(JmhzContentCorrectionSubmissionService::class, $corrections);
-        try {
-            $corrections->candidates($this->supplierId, 'test', $regularId, (int) $repared['body']['id'], $this->officeId);
-            self::fail('Opravné hlášení nesmí jít navázat na neodeslané řádné hlášení.');
-        } catch (\DomainException $exception) {
-            self::assertStringContainsString('přijaté', $exception->getMessage());
-        }
-
-        // Řádné hlášení odesláno a přijato: oprava jde jako opravné hlášení.
-        $this->acceptJmhzSubmission($regularId);
-        $candidates = $corrections->candidates($this->supplierId, 'test', $regularId, (int) $repared['body']['id'], $this->officeId);
-        self::assertCount(1, $candidates['forms'], CanonicalJson::encode($candidates));
-        self::assertSame('correct_values', $candidates['forms'][0]['action']);
-        self::assertTrue($candidates['forms'][0]['changed']);
-        $correction = $corrections->freeze(
-            $this->supplierId,
-            'test',
-            $regularId,
-            (int) $repared['body']['id'],
-            [(string) $candidates['forms'][0]['employment_external_identifier']],
-            $this->actors[0],
-            $this->officeId,
-        );
-        self::assertSame('correction', $correction['submission_kind']);
-        self::assertSame($regularId, $correction['corrects_submission_id']);
+        self::assertSame(201, $refrozen['status'], CanonicalJson::encode($refrozen['body']));
+        $newId = (int) $refrozen['body']['submission_id'];
+        self::assertNotSame($regularId, $newId);
 
         $reader = $this->container->get(JmhzFrozenPayloadReader::class);
         self::assertInstanceOf(JmhzFrozenPayloadReader::class, $reader);
         $original = (string) preg_replace('/>\s+</', '><', $reader->bytes($this->supplierId, 'test', $regularId));
-        $correctionXml = (string) preg_replace('/>\s+</', '><', $reader->bytes($this->supplierId, 'test', (int) $correction['submission_id']));
+        $replacement = (string) preg_replace('/>\s+</', '><', $reader->bytes($this->supplierId, 'test', $newId));
+        self::assertStringContainsString('<form:zuctovanoCelkem>45000</form:zuctovanoCelkem>', $original, 'Zrušené hlášení zůstává v historii beze změny.');
         foreach ([
             '<typPodani>R</typPodani>',
-            '<form:zuctovanoCelkem>45000</form:zuctovanoCelkem>',
-            '<form:odmenyNepravidelne>0</form:odmenyNepravidelne>',
-            '<form:danZalohaPoSleve>4180</form:danZalohaPoSleve>',
-            '<form:mzdaCista>35600</form:mzdaCista>',
-        ] as $fragment) {
-            self::assertStringContainsString($fragment, $original, 'Původní zmrazené hlášení se nemění.');
-        }
-        foreach ([
-            '<typPodani>O</typPodani>',
-            '<typFormulare>O</typFormulare>',
-            '<mesic>4</mesic>',
             '<form:zuctovanoCelkem>47000</form:zuctovanoCelkem>',
-            '<form:mzdaZuctovana>47000</form:mzdaZuctovana>',
-            '<form:tarif>45000</form:tarif>',
             '<form:odmenyNepravidelne>2000</form:odmenyNepravidelne>',
             '<form:danZalohaPoSleve>4480</form:danZalohaPoSleve>',
             '<form:mzdaCista>37068</form:mzdaCista>',
         ] as $fragment) {
-            self::assertStringContainsString($fragment, $correctionXml);
+            self::assertStringContainsString($fragment, $replacement);
         }
-        self::assertSame(self::formGuid($original), self::formGuid($correctionXml), 'Opravný formulář navazuje na GUID původního.');
     }
 
     private function revisionHash(int $revisionId): string
@@ -203,13 +163,6 @@ final class PayrollE2eHpp2CorrectionTest extends TestCase
             'SELECT CONCAT(HEX(input_snapshot_hash), ":", HEX(result_snapshot_hash)) FROM payroll_run_revisions WHERE supplier_id = ? AND id = ?',
             [$this->supplierId, $revisionId],
         );
-    }
-
-    private static function formGuid(string $xml): string
-    {
-        self::assertSame(1, preg_match('#<formularOsoby[^>]*><hlavicka><idFormulare>([^<]+)</idFormulare>#', $xml, $match), 'Formulář nemá GUID.');
-
-        return $match[1];
     }
 
     /** @return array{employee_id:int,employment_id:int,name:string} */

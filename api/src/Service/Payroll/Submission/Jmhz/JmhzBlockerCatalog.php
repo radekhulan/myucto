@@ -251,6 +251,7 @@ final class JmhzBlockerCatalog
         'jmhz_deferral_regular_missing' => 'submission',
         'jmhz_deferral_regular_not_accepted' => 'submission',
         'jmhz_deferral_revision_missing' => 'runs',
+        'jmhz_deferral_nothing_to_complete' => 'submission',
         'jmhz_deferral_still_blocked' => 'retry',
         'jmhz_delivered_protocol_channel_unsupported' => 'submission',
         'jmhz_delivered_protocol_form_unknown' => 'submission',

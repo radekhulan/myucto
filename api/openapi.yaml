@@ -44868,6 +44868,23 @@ components:
               employment_code: { type: string }
               relation_type: { type: string }
               start_date: { type: [string, "null"], format: date }
+        exclusions:
+          type: array
+          description: Jen v seznamu běhů. Osoby vědomě vyřazené z běhu. `active` = vyřazené z otevřené revize; jinak šla schválená revize bez nich a čekají na doplatek opravou běhu.
+          items:
+            type: object
+            required: [id, employee_id, full_name, reason, excluded_at, excluded_revision_no, active]
+            properties:
+              id: { type: integer, format: int64 }
+              employee_id: { type: integer, format: int64 }
+              full_name: { type: string }
+              reason: { type: string }
+              excluded_at: { type: string }
+              excluded_by: { type: [integer, "null"], format: int64 }
+              excluded_by_name: { type: [string, "null"] }
+              excluded_revision_no: { type: integer }
+              active: { type: boolean }
+              settled_revision_no: { type: [integer, "null"] }
         average_change: { $ref: '#/components/schemas/PayrollRunAverageChange' }
         validations:
           type: array

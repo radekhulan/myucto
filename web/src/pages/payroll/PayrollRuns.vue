@@ -6,6 +6,7 @@ import {
   payrollApi,
   type PayrollRun,
   type PayrollRunCommand,
+  type PayrollRunExclusion,
   type PayrollRunHistory,
   type PayrollRunHistoryEvent,
   type PayrollRunHistoryTotalDiff,
@@ -20,12 +21,13 @@ import {
   type PayrollRunValidation,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
+import type { PermissionKey } from '@/security/permissions'
 import { payrollAbsenceApi } from '@/api/payrollAbsences'
 import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
 import PayrollRunPeopleTable from '@/components/payroll/PayrollRunPeopleTable.vue'
 import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, btnOutlineSmWrap, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatDate, formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
+import { formatDate, formatDateTime, formatMoneyMinor as money, formatPeriod, formatPeriodNumeric } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -151,7 +153,9 @@ const total = ref(0)
 const pageSize = 12
 const offset = ref(0)
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
-const pendingCommand = ref<{ run: PayrollRun, command: PayrollRunCommand } | null>(null)
+type CommandTarget = { employee_id?: number, employment_id?: number, label: string }
+const pendingCommand = ref<{ run: PayrollRun, command: PayrollRunCommand, target?: CommandTarget } | null>(null)
+const commandPaymentDate = ref('')
 const pendingDelete = ref<PayrollRun | null>(null)
 /** Běh čekající na potvrzení schválení: je to závazný krok, zpět vede jen oprava běhu. */
 const pendingApprove = ref<PayrollRun | null>(null)
@@ -159,6 +163,7 @@ const commandReason = ref('')
 const averageCorrectionRunId = ref<number | null>(null)
 const commandError = ref('')
 const commandBlockers = ref<Record<number, string>>({})
+const commandBlockerLinks = ref<Record<number, string>>({})
 /** Proč se koncepty vstupů nepodařilo schválit — seskupené po větě, u běhu. */
 type DraftInputFailure = { message: string, count: number }
 const draftInputFailures = ref<Record<number, DraftInputFailure[]>>({})
@@ -723,6 +728,8 @@ const KNOWN_COMMANDS: PayrollRunCommand[] = [
   'post',
   'prepare_payments',
   'request_correction',
+  'withdraw_correction',
+  'change_payment_date',
   'reopen',
   'cancel',
   'close',
@@ -812,7 +819,7 @@ function commandClass(run: PayrollRun, command: PayrollRunCommand): string {
     return btnFilled(command === 'approve' ? 'success' : 'primary')
   }
   if (command === 'cancel') return btnOutline('danger')
-  if (command === 'request_correction' || command === 'reopen') {
+  if (command === 'request_correction' || command === 'reopen' || command === 'exclude_employee') {
     return btnOutline('warning')
   }
   return btnOutline('neutral')
@@ -826,7 +833,8 @@ function commandIcon(command: PayrollRunCommand): string {
   if (command === 'review' || command === 'approve' || command === 'close') {
     return ICONS.check
   }
-  if (command === 'cancel') return ICONS.x
+  if (command === 'cancel' || command === 'exclude_employee') return ICONS.x
+  if (command === 'change_payment_date') return ICONS.calendar
   return ICONS.uturn
 }
 
@@ -897,6 +905,59 @@ function sourceDriftLines(run: PayrollRun): { key: string, text: string }[] {
     .map(key => ({ key, text: t(`payroll.runs.source_drift.${key}`, { count: drift[key] }) }))
 }
 
+/*
+ * Práva příkazů běhu — kopie mapy z `PayrollRunsAction::command()`. Tlačítko,
+ * které server odmítne 403, se neukazuje; dřív viděla účetní bez práva
+ * k otevření běhu „Zrušit" a „Začít znovu" a dostala jen chybu.
+ */
+const COMMAND_PERMISSIONS: Partial<Record<PayrollRunCommand, PermissionKey[]>> = {
+  lock_and_calculate: ['payroll.calculate', 'payroll.inputs.write'],
+  refresh_inputs: ['payroll.calculate', 'payroll.inputs.write'],
+  change_payment_date: ['payroll.calculate', 'payroll.inputs.write'],
+  calculate: ['payroll.calculate'],
+  review: ['payroll.review'],
+  request_correction: ['payroll.review'],
+  withdraw_correction: ['payroll.review'],
+  approve: ['payroll.approve'],
+  close: ['payroll.approve'],
+  reopen: ['payroll.reopen'],
+  cancel: ['payroll.reopen'],
+  post: ['payroll.post'],
+  prepare_payments: ['payroll.payments'],
+  mark_paid: ['payroll.payments'],
+  exclude_employee: ['payroll.approve', 'payroll.inputs.write'],
+  include_employee: ['payroll.approve', 'payroll.inputs.write'],
+}
+
+function commandPermissions(command: PayrollRunCommand): PermissionKey[] {
+  return COMMAND_PERMISSIONS[command] ?? ['payroll.inputs.write']
+}
+
+function commandPermitted(command: PayrollRunCommand): boolean {
+  return commandPermissions(command).every(permission => auth.canWrite(permission))
+}
+
+/**
+ * Které kroky běhu účetní nevidí kvůli chybějícímu právu a jaké právo chybí.
+ * Bez téhle věty to vypadalo, že běh žádnou cestu dál nemá.
+ */
+function forbiddenCommandHint(run: PayrollRun): string {
+  const missing = new Map<PermissionKey, string[]>()
+  for (const command of run.available_commands) {
+    if (!KNOWN_COMMANDS.includes(command) || command === 'lock_inputs' || commandPermitted(command)) continue
+    for (const permission of commandPermissions(command)) {
+      if (auth.canWrite(permission)) continue
+      const labels = missing.get(permission) ?? []
+      labels.push(commandLabel(command, run))
+      missing.set(permission, labels)
+    }
+  }
+  return Array.from(missing, ([permission, commands]) => t('payroll.runs.forbidden_command', {
+    commands: commands.join(', '),
+    permission: t(`payroll.runs.permission_names.${permission.replace(/\./g, '_')}`),
+  })).join(' ')
+}
+
 function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
   // Sloučený krok a samostatné „Uzamknout vstupy" jsou tatáž práce. Nabízet
   // obojí vedle sebe by účetní jen postavilo před volbu, kterou nemá jak
@@ -905,21 +966,7 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
   return run.available_commands.filter(command => {
     if (!KNOWN_COMMANDS.includes(command)) return false
     if (combined && command === 'lock_inputs') return false
-    if (command === 'lock_and_calculate') {
-      return canWrite.value && auth.canWrite('payroll.calculate')
-    }
-    if (command === 'calculate') return auth.canWrite('payroll.calculate')
-    // Obnova podkladů zamyká nově schválené vstupy — stejné dvě brány jako
-    // sloučený krok „Spočítat mzdy".
-    if (command === 'refresh_inputs') {
-      return canWrite.value && auth.canWrite('payroll.calculate')
-    }
-    if (command === 'request_correction') return auth.canWrite('payroll.review')
-    if (command === 'approve') return auth.canWrite('payroll.approve')
-    if (command === 'reopen') return auth.canWrite('payroll.reopen')
-    if (command === 'post') return auth.canWrite('payroll.post')
-    if (command === 'prepare_payments') return auth.canWrite('payroll.payments')
-    return canWrite.value
+    return commandPermitted(command)
   }).sort((a, b) => commandWeight(run, a) - commandWeight(run, b))
 }
 
@@ -1207,6 +1254,9 @@ function historyEventLabel(event: PayrollRunHistoryEvent): string {
     ...KNOWN_COMMANDS,
     'validation_override',
     'validation_override_revoked',
+    'validation_overrides_carried',
+    'exclude_employee',
+    'include_employee',
   ])
   return known.has(event.event_type)
     ? t(`payroll.runs.history.event.${event.event_type}`)
@@ -1281,15 +1331,17 @@ function reloadedRun(run: PayrollRun): PayrollRun | null {
  */
 function commandNeedsReason(run: PayrollRun, command: PayrollRunCommand): boolean {
   return command === 'request_correction'
+    || command === 'exclude_employee'
     || (command === 'cancel' && run.revision_kind === 'correction')
 }
 
 async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
   averageCorrectionRunId.value = null
-  if (command === 'request_correction' || command === 'cancel') {
+  if (['request_correction', 'cancel', 'withdraw_correction', 'change_payment_date'].includes(command)) {
     pendingCommand.value = { run, command }
     commandReason.value = ''
     commandError.value = ''
+    commandPaymentDate.value = run.payment_date
     return
   }
   /*
@@ -1500,15 +1552,17 @@ async function submitCommand(
   run: PayrollRun,
   command: PayrollRunCommand,
   reason?: string,
+  extra: { payment_date?: string, employee_id?: number, employment_id?: number } = {},
 ) {
   saving.value = true
   runningCommand.value = { runId: run.id, command }
   delete commandBlockers.value[run.id]
+  delete commandBlockerLinks.value[run.id]
   try {
     const response = await payrollApi.commandRun(
       run.id,
       command,
-      { row_version: run.row_version, ...(reason ? { reason } : {}) },
+      { row_version: run.row_version, ...(reason ? { reason } : {}), ...extra },
       crypto.randomUUID(),
     )
     const outcome = response.outcome?.outcome ?? null
@@ -1534,7 +1588,7 @@ async function submitCommand(
      * další krok je přepočet. Udělá se rovnou, ať účetní nemačká dvě tlačítka
      * za sebou a neplete si „obnoveno" se „spočítáno".
      */
-    if (command === 'refresh_inputs' || command === 'reopen') {
+    if (['refresh_inputs', 'reopen', 'change_payment_date', 'exclude_employee', 'include_employee'].includes(command)) {
       const fresh = reloadedRun(run)
       if (fresh !== null && fresh.available_commands.includes('calculate')
         && auth.canWrite('payroll.calculate')
@@ -1558,7 +1612,13 @@ async function submitCommand(
   } catch (error: any) {
     const failure = error?.response?.data?.error
     const message = failure?.message || t('payroll.runs.command_failed')
-    if (pendingCommand.value) commandError.value = message
+    // Chyba s místem opravy (dohoda o srážce, chybějící údaj) zůstane u běhu
+    // i s odkazem: z toastu se na místo opravy nedalo dostat.
+    if (typeof failure?.remediation_path === 'string' && failure.remediation_path !== '') {
+      commandBlockers.value = { ...commandBlockers.value, [run.id]: message }
+      commandBlockerLinks.value = { ...commandBlockerLinks.value, [run.id]: failure.remediation_path }
+      if (pendingCommand.value) commandError.value = message
+    } else if (pendingCommand.value) commandError.value = message
     // Blokující důvod u zaúčtování a plateb je celá věta („komu chybí výplatní
     // pravidlo", „kolik zbývá uhradit"). V toastu se ztratí dřív, než se podle
     // ní dá jednat — proto zůstane viset u konkrétního běhu.
@@ -1588,6 +1648,9 @@ function dismissBlocker(runId: number) {
   const next = { ...commandBlockers.value }
   delete next[runId]
   commandBlockers.value = next
+  const links = { ...commandBlockerLinks.value }
+  delete links[runId]
+  commandBlockerLinks.value = links
 }
 
 async function confirmCommand() {
@@ -1597,11 +1660,62 @@ async function confirmCommand() {
     commandError.value = t('payroll.runs.reason_required')
     return
   }
-  await submitCommand(
-    pendingCommand.value.run,
-    pendingCommand.value.command,
-    reason || undefined,
-  )
+  const pending = pendingCommand.value
+  const extra: { payment_date?: string, employee_id?: number, employment_id?: number } = {}
+  if (pending.command === 'change_payment_date') {
+    if (!commandPaymentDate.value) {
+      commandError.value = t('payroll.runs.create_blocked_payment_date')
+      return
+    }
+    extra.payment_date = commandPaymentDate.value
+  }
+  if (pending.target?.employee_id) extra.employee_id = pending.target.employee_id
+  if (pending.target?.employment_id) extra.employment_id = pending.target.employment_id
+  await submitCommand(pending.run, pending.command, reason || undefined, extra)
+}
+
+/**
+ * Vyřadit jde osobu z nálezu ruční kontroly (zákonný výpočet, srážky), jen
+ * v otevřené revizi a se stejným právem jako výjimka u kontroly.
+ */
+const EXCLUDABLE_CODES = new Set(['statutory_calculation_manual_review', 'enforcement_manual_review'])
+
+function canExclude(run: PayrollRun, validation: DisplayValidation): boolean {
+  return validation.severity === 'blocker'
+    && EXCLUDABLE_CODES.has(validation.code)
+    && (validation.entity_type === 'employee' || validation.entity_type === 'employment')
+    && validation.entity_id !== null
+    && run.available_commands.includes('exclude_employee')
+    && commandPermitted('exclude_employee')
+}
+
+function askExclude(run: PayrollRun, validation: DisplayValidation): void {
+  const id = validation.entity_id
+  if (id === null) return
+  const label = validation.entity_labels[0]
+    ?? (validation.entity_type === 'employee' ? personNames.value[id] : undefined)
+    ?? validation.display_message.split(':')[0]
+  pendingCommand.value = {
+    run,
+    command: 'exclude_employee',
+    target: validation.entity_type === 'employee'
+      ? { employee_id: id, label }
+      : { employment_id: id, label },
+  }
+  commandReason.value = ''
+  commandError.value = ''
+}
+
+async function includeExcluded(run: PayrollRun, exclusion: PayrollRunExclusion): Promise<void> {
+  await submitCommand(run, 'include_employee', undefined, { employee_id: exclusion.employee_id })
+}
+
+function activeExclusions(run: PayrollRun): PayrollRunExclusion[] {
+  return (run.exclusions ?? []).filter(exclusion => exclusion.active)
+}
+
+function settledExclusions(run: PayrollRun): PayrollRunExclusion[] {
+  return (run.exclusions ?? []).filter(exclusion => !exclusion.active)
 }
 
 function groupedFailures(
@@ -2196,7 +2310,7 @@ onMounted(() => { void load() })
                     :data-test="`run-readiness-bulk-action-${action.kind}`"
                   >
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="READINESS_BULK_ICONS[action.kind]" /></svg>
-                    {{ t(`payroll.runs.readiness.bulk.${action.kind}`, { count: action.count, period: formatPeriod(readinessBulkPeriod()) }) }}
+                    {{ t(`payroll.runs.readiness.bulk.${action.kind}`, { count: action.count, period: formatPeriodNumeric(readinessBulkPeriod()) }) }}
                   </RouterLink>
                 </div>
                 <div
@@ -2416,6 +2530,13 @@ onMounted(() => { void load() })
           {{ commandHint(run) }}
         </p>
         <p
+          v-if="forbiddenCommandHint(run)"
+          :data-testid="`payroll-run-${run.id}-forbidden`"
+          class="mt-2 max-w-3xl text-sm text-neutral-500"
+        >
+          {{ forbiddenCommandHint(run) }}
+        </p>
+        <p
           v-if="visibleCommands(run).includes('approve') && commandDisabled(run, 'approve')"
           :data-testid="`payroll-run-${run.id}-approve-blocked`"
           class="mt-2 flex max-w-3xl flex-wrap items-center gap-x-2 gap-y-1 text-sm text-warning-800"
@@ -2622,7 +2743,15 @@ onMounted(() => { void load() })
           <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path :d="ICONS.bell" />
           </svg>
-          <p class="flex-1">{{ commandBlockers[run.id] }}</p>
+          <p class="flex-1">
+            {{ commandBlockers[run.id] }}
+            <RouterLink
+              v-if="commandBlockerLinks[run.id]"
+              :to="commandBlockerLinks[run.id]"
+              class="ml-1 whitespace-nowrap font-medium text-primary-600 hover:underline"
+              :data-testid="`payroll-run-${run.id}-blocker-link`"
+            >{{ t('payroll.runs.validation.open_remediation') }}</RouterLink>
+          </p>
           <button
             type="button"
             class="cursor-pointer shrink-0 rounded p-1 text-warning-600 hover:bg-warning-100"
@@ -2633,6 +2762,62 @@ onMounted(() => { void load() })
               <path :d="ICONS.x" />
             </svg>
           </button>
+        </div>
+
+        <!--
+          Vyřazené osoby: dokud je revize otevřená, jde osobu vrátit. Po
+          schválení čekají na doplatek opravou běhu za stejné období.
+        -->
+        <div
+          v-if="activeExclusions(run).length || settledExclusions(run).length"
+          :data-testid="`payroll-run-${run.id}-exclusions`"
+          class="mt-4 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
+        >
+          <template v-if="activeExclusions(run).length">
+            <p class="font-medium">{{ t('payroll.runs.exclusion.active_title', { count: activeExclusions(run).length }) }}</p>
+            <p class="mt-1 text-xs">{{ t('payroll.runs.exclusion.active_hint') }}</p>
+            <ul class="mt-2 space-y-1">
+              <li
+                v-for="exclusion in activeExclusions(run)"
+                :key="exclusion.id"
+                class="flex flex-wrap items-center gap-2 rounded-md bg-surface/70 px-2.5 py-1.5"
+                :data-testid="`payroll-run-${run.id}-exclusion-${exclusion.employee_id}`"
+              >
+                <span class="min-w-0 flex-1 text-xs">
+                  <span class="font-medium">{{ exclusion.full_name }}</span>
+                  · {{ exclusion.reason }}
+                  <span v-if="exclusion.excluded_by_name" class="text-warning-700">({{ exclusion.excluded_by_name }})</span>
+                </span>
+                <button
+                  v-if="run.available_commands.includes('include_employee') && commandPermitted('include_employee')"
+                  type="button"
+                  :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+                  :disabled="saving"
+                  :data-testid="`payroll-run-${run.id}-include-${exclusion.employee_id}`"
+                  @click="includeExcluded(run, exclusion)"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.uturn" /></svg>
+                  {{ t('payroll.runs.exclusion.include') }}
+                </button>
+              </li>
+            </ul>
+          </template>
+          <template v-if="settledExclusions(run).length">
+            <p class="font-medium" :class="activeExclusions(run).length ? 'mt-3' : ''">
+              {{ t('payroll.runs.exclusion.settled_title', { count: settledExclusions(run).length }) }}
+            </p>
+            <p class="mt-1 text-xs">{{ t('payroll.runs.exclusion.settled_hint') }}</p>
+            <ul class="mt-2 space-y-1">
+              <li
+                v-for="exclusion in settledExclusions(run)"
+                :key="exclusion.id"
+                class="rounded-md bg-surface/70 px-2.5 py-1.5 text-xs"
+                :data-testid="`payroll-run-${run.id}-settled-exclusion-${exclusion.employee_id}`"
+              >
+                <span class="font-medium">{{ exclusion.full_name }}</span> · {{ exclusion.reason }}
+              </li>
+            </ul>
+          </template>
         </div>
 
         <dl v-if="run.result_snapshot?.totals" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -3117,6 +3302,23 @@ onMounted(() => { void load() })
               </template>
             </ExpandableList>
             <!--
+              Jedna osoba v ruční kontrole nesmí zastavit výplatu ostatním.
+              Vyřazení založí revizi bez ní; doplatek jde opravou běhu.
+            -->
+            <button
+              v-if="canExclude(run, validation)"
+              type="button"
+              :data-testid="`payroll-validation-${validation.id}-exclude`"
+              :class="[btnOutlineSm('warning'), 'mt-2 inline-flex whitespace-nowrap']"
+              :disabled="saving"
+              @click="askExclude(run, validation)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.x" />
+              </svg>
+              {{ t('payroll.runs.exclusion.exclude') }}
+            </button>
+            <!--
               Trvalé skrytí varování: u osob skupiny jedním klikem, nebo celý
               typ ve firmě. Blokující chyby a výjimky sem nikdy nepatří.
             -->
@@ -3581,7 +3783,38 @@ onMounted(() => { void load() })
             ? t('payroll.runs.cancel_correction_hint')
             : t('payroll.runs.cancel_hint') }}
         </p>
-        <label class="block text-sm font-medium text-neutral-700">
+        <p
+          v-if="pendingCommand.command === 'withdraw_correction'"
+          class="text-sm text-neutral-700"
+          data-test="run-withdraw-hint"
+        >
+          {{ t('payroll.runs.withdraw_correction_hint') }}
+        </p>
+        <p
+          v-if="pendingCommand.command === 'exclude_employee'"
+          class="text-sm text-neutral-700"
+          data-test="run-exclude-hint"
+        >
+          {{ t('payroll.runs.exclusion.hint', { name: pendingCommand.target?.label ?? '' }) }}
+        </p>
+        <template v-if="pendingCommand.command === 'change_payment_date'">
+          <p class="text-sm text-neutral-700" data-test="run-payment-date-hint">
+            {{ t(['draft', 'cancelled'].includes(pendingCommand.run.status)
+              ? 'payroll.runs.change_payment_date.hint_draft'
+              : 'payroll.runs.change_payment_date.hint_locked') }}
+          </p>
+          <label class="block text-sm font-medium text-neutral-700">
+            {{ t('payroll.runs.payment_date') }}
+            <input
+              v-model="commandPaymentDate"
+              type="date"
+              required
+              class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+              data-test="run-command-payment-date"
+            >
+          </label>
+        </template>
+        <label v-else class="block text-sm font-medium text-neutral-700">
           {{ commandNeedsReason(pendingCommand.run, pendingCommand.command)
             ? t('payroll.runs.reason_prompt')
             : t('payroll.runs.reason_prompt_optional') }}

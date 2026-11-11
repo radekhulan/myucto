@@ -213,8 +213,9 @@ Lhůta: 20. den následujícího měsíce (na pracovní den se posouvá).
    Test jde spustit i před koncem měsíce: je-li obsah v pořádku, řekne to
    a uvede den, od kdy půjde hlášení připravit.
 6. Jeden zaměstnanec s neúplnými daty nemusí blokovat ostatní: u jeho nálezu
-   klikněte na **Odložit z hlášení** a zadejte důvod (viz
-   [§ 85.14.10](#851410-odlozeni-vztahu-z-radneho-hlaseni)).
+   klikněte na **Odložit z hlášení** a zadejte důvod. Týká-li se nález víc
+   lidí, odložte je všechny jedním důvodem tlačítkem **Odložit všechny
+   dotčené (N)** (viz [§ 85.14.10](#851410-odlozeni-vztahu-z-radneho-hlaseni)).
 7. Přepněte na záložku **Měsíc**. U řádku JMHZ klikněte na **Připravit
    a odeslat**. Chcete-li hlášení jen zmrazit a odeslat později, klikněte na
    **Jen připravit** a později na **Odeslat**. Všechna podání měsíce najednou
@@ -268,8 +269,14 @@ podání opravit (viz [§ 85.9](#859-krok-za-krokem-oprava-nebo-storno-odeslaneh
 > Vyšší slevu po lhůtě ČSSZ neuzná.
 
 Druhé řádné hlášení za týž měsíc aplikace nepřipraví. Obsahuje-li hlášení
-vztah s právě přijatou změnou údajů (A3), připraví se nejdřív 48 hodin po jejím
-přijetí; hláška uvede, od kdy to jde.
+vztah s právě přijatou změnou údajů (A3) mladší než 48 hodin, příprava se
+zastaví s varováním: ČSSZ takové hlášení může zamítnout (chyba 243). Můžete ho
+**Připravit a odeslat i tak**, nebo dotčené vztahy **odložit** a doplnit je
+opravným hlášením po 48 hodinách.
+
+Má-li běh víc mzdových účtáren a jedné chybí variabilní symbol ČSSZ, hlášení
+za ostatní účtárny se připraví a přehled vypíše, za kterou se nepřipravilo.
+Po doplnění symbolu ho za ni připravte v `Mzdy → Podání a hlášení → JMHZ`.
 
 ## 85.4 Krok za krokem: přehledy o platbě pojistného zdravotním pojišťovnám
 
@@ -455,8 +462,12 @@ vztahy než státních zaměstnanců pokračují.
 
 > [!WARNING]
 > Příprava A2 prověří všechna období od ledna 2026 do měsíce
-> skončení. Chybí-li u opraveného měsíce přijaté opravné JMHZ, odhláška se
-> nepřipraví a hláška uvede konkrétní období (viz
+> skončení, ve kterých opravná revize běhu vztahu něco změnila. Za doklad se
+> počítá přijaté opravné i řádné JMHZ připravené z té opravné revize; měsíc,
+> kde se vztahu oprava netýká, se neprověřuje. Chybí-li doklad, schválení se
+> zastaví s konkrétním obdobím. ČSSZ pořadí nehlídá, proto můžete odhlášku
+> **Schválit s výjimkou** s důvodem (alespoň 10 znaků); opravné hlášení pak
+> pošlete bez odkladu (viz
 > [§ 85.14.16](#851416-registrace-zamestnance-prezec-a-regzec)).
 
 ## 85.8 Krok za krokem: změna údajů zaměstnance (A3)
@@ -496,7 +507,9 @@ podání A3 má stav přijato podle protokolu ČSSZ.
 2. Na stránce `Mzdy → Podání a hlášení` otevřete záložku **Odesláno**.
 3. U platné karty období klikněte na **Opravit hodnoty hlášení**.
 4. Vyberte **Aktuální příprava JMHZ** (jediná se vybere sama) a klikněte na
-   **Načíst výsledky formulářů**.
+   **Načíst výsledky formulářů**. Není-li žádná úplná aktuální příprava,
+   klikněte na **Připravit z aktuální revize**; aplikace připraví hlášení
+   ze schválené revize běhu a výběr načte znovu.
 5. Vyberte zaměstnance, jejichž údaje se mění. Tlačítko **Vybrat označené
    protokolem** vybere ty, u kterých protokol hlásil chybu.
 6. Potvrďte dopad a klikněte na **Připravit obsahovou opravu**.
@@ -1051,10 +1064,17 @@ Jsou na to tři cesty a liší se tím, co po nich zůstane:
 | **Smazat pokus** | u pokusu v historii na záložce **Odesláno** | Řádek z historie zmizí úplně. Zůstane po něm jen záznam v auditním logu. |
 | **Potvrdit opakování** | u pokusu „Možná doručeno“ (fronta i **Odesláno**) | Po dohledání protokolu uvolní odeslání téhož dokumentu se stejným GUID. Pokus zůstane v historii i s důvodem. |
 
-**Zrušit přípravu.** Připravené řádné měsíční hlášení, které se ještě neodesílalo,
-má na záložce **K odeslání** tlačítko **Zrušit přípravu**. Použijte ho po opravě
-mzdy: za jedno období smí existovat jen jedno řádné hlášení, takže nové hlášení
-z opravené mzdy jde připravit až po zrušení původního. Aplikace se zeptá na důvod
+**Schválení opravné revize.** Neodeslaná JMHZ a přehledy zdravotních pojišťoven
+ze starších revizí stejného běhu se při schválení opravy automaticky zruší.
+Zůstávají v historii ve stavu **Včas zrušeno** a nelze je odeslat. Připravte je
+znovu z opraveného běhu. Podání, která už byla odeslána, mají pokus o odeslání
+nebo čekají v odchozí frontě datové schránky, se tím nemění. Zrušení se eviduje
+v historii mzdového běhu.
+
+**Zrušit přípravu.** Připravené řádné měsíční hlášení (i ročníku 2027)
+a přehled o platbě pojistného, které se ještě neodesílaly, mají na záložce
+**K odeslání** tlačítko **Zrušit přípravu**. Přípravu tak můžete
+zrušit i ručně. Aplikace se zeptá na důvod
 a zrušením potvrzujete, že hlášení neodešlo ani ručně přes ePortál ČSSZ ze
 staženého souboru (druhé řádné hlášení za totéž období by úřad odmítl). Zrušené
 hlášení i s důvodem zůstane v historii. Odeslané hlášení zrušit nejde; změny se
@@ -1369,13 +1389,28 @@ Co odložení znamená:
   pojistná část, souhrn nebo mzdová složka se odložením jednoho vztahu
   nevyřeší.
 
+**Víc lidí najednou.** Zastaví-li zmrazení hlášení nález u víc osob (typicky
+brigádníci bez adresy), nabídne seznam nálezů v přehledu podání i v odeslání
+JMHZ tlačítko **Odložit všechny dotčené (N)**. Jeden důvod platí pro všechny;
+odloží se každá osoba s nálezem, který odložit jde. Totéž tlačítko je i v testu
+hlášení. Odložit jde i vztah s přijatou změnou údajů (A3) mladší než 48 hodin.
+
+**Oprava běhu před podáním.** Odložení patří k revizi běhu. Opravíte-li běh
+dřív, než řádné hlášení zmrazíte, nabídne seznam **Odložené vztahy**
+tlačítko **Převzít trvající odložení do aktuální revize (N)**. Převezmou se
+jen vztahy, které nález stále mají; důvod dostane poznámku, ze které revize
+pochází.
+
 Odložené vztahy běhu jsou vidět v seznamu **Odložené vztahy** pod testem se
 stavem a lhůtou. Dokud řádné hlášení nezmrazíte, můžete odložení zrušit (opět
 s důvodem). Po přijetí řádného hlášení doplňte data vztahu, případně opravte
 a znovu schvalte mzdový běh, a zvolte **Doplnit opravným hlášením**. Aplikace
 připraví hlášení nad aktuální revizí a zmrazí opravné hlášení, které formulář
 odloženého vztahu doplní. Odešlete ho na záložce **Odesláno** jako každé
-jiné. Když data vztahu ještě nejsou úplná, řekne přesně, co chybí.
+jiné. Když data vztahu ještě nejsou úplná, řekne přesně, co chybí. Čeká-li na
+doplnění víc vztahů, **Doplnit všechny odložené jedním opravným hlášením (N)**
+připraví jedno opravné hlášení za každou registraci; vztahy, kterým data dál
+chybí, zůstanou odložené.
 
 ### 85.14.11 Zmrazení, odeslání a protokol JMHZ
 

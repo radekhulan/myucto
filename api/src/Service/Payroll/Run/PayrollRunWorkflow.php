@@ -14,6 +14,7 @@ final class PayrollRunWorkflow
         return match ($status) {
             PayrollRunStatus::DRAFT => [
                 PayrollRunCommand::LOCK_INPUTS,
+                PayrollRunCommand::CHANGE_PAYMENT_DATE,
                 PayrollRunCommand::CANCEL,
             ],
             // `REFRESH_INPUTS` je dostupné jen u OTEVŘENÉ revize (snímek,
@@ -23,6 +24,9 @@ final class PayrollRunWorkflow
             PayrollRunStatus::REOPENED => [
                 PayrollRunCommand::CALCULATE,
                 PayrollRunCommand::REFRESH_INPUTS,
+                PayrollRunCommand::CHANGE_PAYMENT_DATE,
+                PayrollRunCommand::EXCLUDE_EMPLOYEE,
+                PayrollRunCommand::INCLUDE_EMPLOYEE,
                 PayrollRunCommand::CANCEL,
             ],
             // `APPROVE` je dostupné už z `CALCULATED`: bez pravidla čtyř očí
@@ -36,12 +40,18 @@ final class PayrollRunWorkflow
                 PayrollRunCommand::REFRESH_INPUTS,
                 PayrollRunCommand::REVIEW,
                 PayrollRunCommand::APPROVE,
+                PayrollRunCommand::CHANGE_PAYMENT_DATE,
+                PayrollRunCommand::EXCLUDE_EMPLOYEE,
+                PayrollRunCommand::INCLUDE_EMPLOYEE,
                 PayrollRunCommand::CANCEL,
             ],
             PayrollRunStatus::REVIEWED => [
                 PayrollRunCommand::CALCULATE,
                 PayrollRunCommand::REFRESH_INPUTS,
                 PayrollRunCommand::APPROVE,
+                PayrollRunCommand::CHANGE_PAYMENT_DATE,
+                PayrollRunCommand::EXCLUDE_EMPLOYEE,
+                PayrollRunCommand::INCLUDE_EMPLOYEE,
                 PayrollRunCommand::CANCEL,
             ],
             PayrollRunStatus::APPROVED => [
@@ -77,9 +87,11 @@ final class PayrollRunWorkflow
             ],
             PayrollRunStatus::CORRECTION_PENDING => [
                 PayrollRunCommand::REOPEN,
+                PayrollRunCommand::WITHDRAW_CORRECTION,
             ],
             PayrollRunStatus::CANCELLED => [
                 PayrollRunCommand::REOPEN,
+                PayrollRunCommand::CHANGE_PAYMENT_DATE,
             ],
         };
     }
@@ -111,9 +123,21 @@ final class PayrollRunWorkflow
             PayrollRunCommand::CALCULATE => PayrollRunStatus::CALCULATED,
             // Nová revize nemá výsledek, takže běh se vrací tam, odkud se
             // počítá. Druh revize se nemění, proto i stav zůstává „svůj".
-            PayrollRunCommand::REFRESH_INPUTS => $context->correctionRevision
+            PayrollRunCommand::REFRESH_INPUTS,
+            PayrollRunCommand::EXCLUDE_EMPLOYEE,
+            PayrollRunCommand::INCLUDE_EMPLOYEE => $context->correctionRevision
                 ? PayrollRunStatus::REOPENED
                 : PayrollRunStatus::INPUTS_LOCKED,
+            // Koncept a zrušený běh snímek nemají, mění se jen datum. Běh se
+            // snímkem dostane novou revizi bez výsledku a vrací se k přepočtu.
+            PayrollRunCommand::CHANGE_PAYMENT_DATE => in_array($from, [
+                PayrollRunStatus::DRAFT,
+                PayrollRunStatus::CANCELLED,
+            ], true) ? $from : PayrollRunStatus::INPUTS_LOCKED,
+            PayrollRunCommand::WITHDRAW_CORRECTION => $context->correctionRequestedFrom
+                ?? throw new \DomainException(
+                    'Stav před vyžádáním opravy se nepodařilo dohledat. Pokračujte „Otevřít opravu“.',
+                ),
             PayrollRunCommand::REVIEW => PayrollRunStatus::REVIEWED,
             PayrollRunCommand::APPROVE => PayrollRunStatus::APPROVED,
             PayrollRunCommand::POST => PayrollRunStatus::POSTED,
@@ -209,6 +233,39 @@ final class PayrollRunWorkflow
             && trim((string) $context->reason) === ''
         ) {
             throw new \DomainException('Tento přechod vyžaduje uvedení důvodu.');
+        }
+        if ($command === PayrollRunCommand::CHANGE_PAYMENT_DATE && $context->hasApprovedRevision) {
+            throw new \DomainException(
+                'Běh má schválenou revizi, podle které se už mohlo účtovat, platit a podávat. '
+                . 'Datum výplaty schváleného běhu změnit nelze.',
+            );
+        }
+        if (in_array($command, [
+            PayrollRunCommand::EXCLUDE_EMPLOYEE,
+            PayrollRunCommand::INCLUDE_EMPLOYEE,
+        ], true) && !$context->hasImmutableSnapshot) {
+            throw new \DomainException('Osobu lze vyřadit nebo vrátit jen u běhu se snímkem vstupů.');
+        }
+        if ($command === PayrollRunCommand::EXCLUDE_EMPLOYEE
+            && mb_strlen(trim((string) $context->reason)) < 10
+        ) {
+            throw new \DomainException(
+                'Vyřazení osoby z běhu vyžaduje důvod (aspoň 10 znaků), např. co chybí a kdy se doplní.',
+            );
+        }
+        if ($command === PayrollRunCommand::WITHDRAW_CORRECTION
+            && !in_array($context->correctionRequestedFrom, [
+                PayrollRunStatus::APPROVED,
+                PayrollRunStatus::POSTED,
+                PayrollRunStatus::PAYMENT_READY,
+                PayrollRunStatus::PAID,
+                PayrollRunStatus::CLOSED,
+            ], true)
+        ) {
+            throw new \DomainException(
+                'Žádost o opravu nejde vzít zpět: stav před ní se nepodařilo dohledat. '
+                . 'Pokračujte „Otevřít opravu“.',
+            );
         }
         if ($command === PayrollRunCommand::REOPEN
             && !in_array($from, [

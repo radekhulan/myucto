@@ -2,8 +2,9 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
-import type { PayrollJmhzFreezeBlocker } from '@/api/payroll'
+import type { PayrollJmhzBulkDeferral, PayrollJmhzDeferralContext, PayrollJmhzFreezeBlocker } from '@/api/payroll'
 import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import JmhzBulkDefer from './JmhzBulkDefer.vue'
 import { pathWithReturn } from './jmhzFreezeBlockers'
 
 /**
@@ -14,7 +15,11 @@ const props = defineProps<{
   blockers: PayrollJmhzFreezeBlocker[]
   /** `YYYY-MM` vykazovaného období; podle něj se u ročního zúčtování předvyplní rok. */
   period?: string | null
+  deferral?: PayrollJmhzDeferralContext | null
+  canWrite?: boolean
 }>()
+
+const emit = defineEmits<{ deferred: [result: PayrollJmhzBulkDeferral] }>()
 
 const { t } = useI18n()
 const route = useRoute()
@@ -72,6 +77,12 @@ const groups = computed<Group[]>(() => {
     <p class="text-xs text-neutral-500">
       {{ t('payroll.jmhz_gate.freeze_blockers.hint') }}
     </p>
+    <JmhzBulkDefer
+      v-if="deferral"
+      :context="deferral"
+      :can-write="canWrite === true"
+      @deferred="emit('deferred', $event)"
+    />
     <section
       v-for="group in groups"
       :key="group.reason"

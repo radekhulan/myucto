@@ -23,6 +23,8 @@ import {
 const props = defineProps<{
   preview: AttendancePreview
   manualLinks: ManualLinks
+  /** Osoby bez vztahu, které použití samo založí; do součtů patří. */
+  createKeys?: string[]
 }>()
 
 const { t, te, locale } = useI18n()
@@ -36,10 +38,32 @@ const optionById = computed(() => new Map(props.preview.employment_options.map(o
 const hasWorkedDays = computed(() => props.preview.persons.some(person => typeof person.worked_days === 'number'))
 const hasReference = computed(() => props.preview.persons.some(person =>
   person.reference.gross_minor !== null || person.reference.net_minor !== null || person.reference.hours !== null))
-const skippedCount = computed(() => props.preview.persons.filter(person => employmentOf(person) === null).length)
+const createKeySet = computed(() => new Set(props.createKeys ?? []))
+function isIncluded(person: AttendancePerson): boolean {
+  return employmentOf(person) !== null || createKeySet.value.has(person.key)
+}
+const includedPersons = computed(() => props.preview.persons.filter(isIncluded))
+const skippedCount = computed(() => props.preview.persons.length - includedPersons.value.length)
+function componentsMinor(persons: AttendancePerson[]): number {
+  return persons.reduce((sum, person) => sum + person.components.reduce((total, item) => total + item.amount_minor, 0), 0)
+}
+const includedAmountMinor = computed(() => componentsMinor(includedPersons.value))
+const skippedAmountMinor = computed(() => componentsMinor(props.preview.persons) - includedAmountMinor.value)
 const conflictCount = computed(() => props.preview.persons.filter(personHasConflicts).length)
 const wageChanges = computed(() => props.preview.wage_changes ?? [])
 const rateWages = computed(() => props.preview.summary.rate_wages ?? { computed: 0, amount_minor: 0, no_hours: 0, hourly_terms: 0 })
+// Přeskočená osoba vstup nedostane, do počtu a částky mzdy ze sazby nepatří.
+const includedRateWages = computed(() => {
+  let count = 0
+  let amount = 0
+  for (const person of includedPersons.value) {
+    const wage = person.rate_wage
+    if (!wage || wage.status !== 'computed') continue
+    count++
+    amount += wage.amount_minor
+  }
+  return { count, amount }
+})
 
 /** „30,50 h × 200,00 Kč" u mzdy dopočtené ze sazby a hodin. */
 function rateWageFormula(person: AttendancePerson, code: string): string | null {
@@ -124,11 +148,11 @@ function checkClass(check: AttendanceComponentCheck): string {
   <div class="space-y-4">
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       <article class="rounded-lg bg-neutral-50 p-3"><p class="text-xs text-neutral-500">{{ t('payroll_imports.attendance.summary.persons') }}</p><p class="mt-1 text-lg font-semibold">{{ preview.summary.persons }}</p></article>
-      <article class="rounded-lg bg-success-50 p-3"><p class="text-xs text-success-700">{{ t('payroll_imports.attendance.summary.linked') }}</p><p class="mt-1 text-lg font-semibold text-success-700">{{ preview.summary.persons - skippedCount }}</p></article>
+      <article class="rounded-lg bg-success-50 p-3"><p class="text-xs text-success-700">{{ t('payroll_imports.attendance.summary.linked') }}</p><p class="mt-1 text-lg font-semibold text-success-700">{{ preview.persons.length - skippedCount }}</p></article>
       <article class="rounded-lg p-3" :class="skippedCount ? 'bg-warning-50' : 'bg-neutral-50'"><p class="text-xs" :class="skippedCount ? 'text-warning-700' : 'text-neutral-500'">{{ t('payroll_imports.attendance.summary.skipped') }}</p><p class="mt-1 text-lg font-semibold" :class="skippedCount ? 'text-warning-700' : ''">{{ skippedCount }}</p></article>
       <article class="rounded-lg p-3" :class="conflictCount ? 'bg-warning-50' : 'bg-neutral-50'"><p class="text-xs" :class="conflictCount ? 'text-warning-700' : 'text-neutral-500'">{{ t('payroll_imports.attendance.summary.conflicts') }}</p><p class="mt-1 text-lg font-semibold" :class="conflictCount ? 'text-warning-700' : ''">{{ conflictCount }}</p></article>
       <article class="rounded-lg bg-neutral-50 p-3"><p class="text-xs text-neutral-500">{{ t('payroll_imports.attendance.summary.metrics') }}</p><p class="mt-1 text-lg font-semibold">{{ preview.summary.metrics }}</p></article>
-      <article class="rounded-lg bg-neutral-50 p-3"><p class="text-xs text-neutral-500">{{ t('payroll_imports.attendance.summary.amount_total') }}</p><p class="mt-1 text-lg font-semibold">{{ formatMoneyMinor(preview.summary.amount_minor_total) }}</p></article>
+      <article class="rounded-lg bg-neutral-50 p-3"><p class="text-xs text-neutral-500">{{ t('payroll_imports.attendance.summary.amount_total') }}</p><p class="mt-1 text-lg font-semibold" data-testid="attendance-amount-total">{{ formatMoneyMinor(includedAmountMinor) }}</p><p v-if="skippedAmountMinor > 0" class="mt-0.5 text-xs text-warning-700" data-testid="attendance-amount-skipped">{{ t('payroll_imports.attendance.summary.amount_skipped', { amount: formatMoneyMinor(skippedAmountMinor) }) }}</p></article>
     </div>
 
     <!-- Podklady jen s hodinami a sazbou: bez tohohle by souhrn ukázal 0 Kč mezd a nikdo by nevěděl proč. -->
@@ -137,7 +161,8 @@ function checkClass(check: AttendanceComponentCheck): string {
       data-testid="attendance-rate-wages">
       <h3 class="font-semibold text-neutral-900">{{ t('payroll_imports.attendance.summary.rate_wages_title') }}</h3>
       <p v-if="rateWages.computed" class="mt-1 text-neutral-700" data-testid="attendance-rate-wages-computed">
-        {{ t('payroll_imports.attendance.summary.rate_wages_computed', { count: rateWages.computed, amount: formatMoneyMinor(rateWages.amount_minor) }) }}
+        {{ t('payroll_imports.attendance.summary.rate_wages_computed', { count: includedRateWages.count, amount: formatMoneyMinor(includedRateWages.amount) }) }}
+        <template v-if="includedRateWages.count < rateWages.computed">{{ t('payroll_imports.attendance.summary.rate_wages_skipped', { count: rateWages.computed - includedRateWages.count }) }}</template>
       </p>
       <p v-if="rateWages.no_hours" class="mt-1 font-medium text-warning-700" data-testid="attendance-rate-wages-no-hours">
         {{ t('payroll_imports.attendance.summary.rate_wages_no_hours', { count: rateWages.no_hours }) }}

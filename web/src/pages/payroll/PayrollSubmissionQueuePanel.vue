@@ -363,7 +363,7 @@ async function abandon(item: PayrollSubmissionQueueItem): Promise<void> {
 const withdrawing = ref<number | null>(null)
 
 function canWithdraw(item: PayrollSubmissionQueueItem): boolean {
-  return item.agenda_code === 'JMHZ25'
+  return ['JMHZ', 'JMHZ25', 'JMHZ27', 'PPZ_2026'].includes(item.agenda_code)
     && item.submission_kind === 'regular'
     && item.submission_status === 'ready'
     && item.attempt === null

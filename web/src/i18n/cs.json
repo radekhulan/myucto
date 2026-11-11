@@ -4429,7 +4429,12 @@
           "refresh_inputs": "Podklady obnoveny",
           "validation_override": "Schválena výjimka kontroly",
           "validation_override_revoked": "Výjimka kontroly odvolána",
-          "unknown": "Další auditní krok"
+          "unknown": "Další auditní krok",
+          "withdraw_correction": "Žádost o opravu vzata zpět",
+          "change_payment_date": "Změněno datum výplaty",
+          "exclude_employee": "Osoba vyřazena z běhu",
+          "include_employee": "Osoba vrácena do běhu",
+          "validation_overrides_carried": "Výjimky převzaté z předchozí revize"
         }
       },
       "validation": {
@@ -4783,7 +4788,11 @@
         "cancel": "Zrušit běh",
         "close": "Uzavřít",
         "lock_and_calculate": "Spočítat mzdy",
-        "refresh_inputs": "Obnovit podklady"
+        "refresh_inputs": "Obnovit podklady",
+        "withdraw_correction": "Vzít žádost o opravu zpět",
+        "change_payment_date": "Změnit datum výplaty",
+        "exclude_employee": "Vyřadit osobu z běhu",
+        "include_employee": "Vrátit osobu do běhu"
       },
       "outcome": {
         "posted": "Mzdy jsou zaúčtované.",
@@ -4955,6 +4964,30 @@
         "confirm_note": "Zahájením se zamknou vstupy a rovnou se spočítají mzdy. Co zapíšete potom, se do výpočtu nedostane, dokud běh znovu neotevřete.",
         "recheck": "Zkontrolovat znovu",
         "start_anyway": "Přesto zahájit"
+      },
+      "withdraw_correction_hint": "Běh se vrátí do stavu, ve kterém byl před vyžádáním opravy. Schválená revize, zaúčtování, platby ani podání se nemění. Změny podkladů zadané mezitím se do běhu nedostanou; pokud je potřebujete, opravu nevracejte a pokračujte „Otevřít opravu“.",
+      "forbidden_command": "Krok „{commands}“ nevidíte, protože nemáte právo „{permission}“. Požádejte správce firmy o jeho přidělení.",
+      "change_payment_date": {
+        "hint_draft": "Změní se jen datum výplaty běhu. Snímek vstupů ještě nevznikl, takže se nic nepřepočítává.",
+        "hint_locked": "Běh dostane novou revizi s novým datem výplaty a hned se přepočítá: na datu výplaty závisí zákonný výpočet i lhůty odvodů a hlášení. Výjimky se stejným textem se převezmou."
+      },
+      "exclusion": {
+        "exclude": "Vyřadit osobu z běhu",
+        "hint": "{name} se z tohoto běhu vyřadí: běh dostane novou revizi bez této osoby a ostatním se mzda spočítá a schválí jako obvykle. Osoba nedostane výplatní pásku ani mzdu v tomto běhu a nebude ve schválené revizi. Mzdu jí doplatíte opravou běhu za stejné období (Vyžádat opravu, Otevřít opravu), až doplníte chybějící údaje. Do měsíčního hlášení JMHZ se pak dostane opravným hlášením. Uveďte, co chybí a kdy se doplní.",
+        "active_title": "Z běhu vyřazeno: {count}",
+        "active_hint": "Tyto osoby revize nepočítá. Až údaje doplníte, vraťte je do běhu, nebo je doplaťte opravou po schválení.",
+        "include": "Vrátit do běhu",
+        "settled_title": "Bez mzdy v tomto běhu: {count}",
+        "settled_hint": "Schválená revize šla bez těchto osob. Doplatek: doplňte chybějící údaje, klikněte na „Vyžádat opravu“ a „Otevřít opravu“; opravná revize je už obsahuje. Měsíční hlášení za ně podejte opravným hlášením JMHZ."
+      },
+      "permission_names": {
+        "payroll_reopen": "Odemknout schválený mzdový běh",
+        "payroll_approve": "Schválit mzdový běh",
+        "payroll_review": "Zkontrolovat mzdový běh",
+        "payroll_calculate": "Vypočítat mzdy",
+        "payroll_inputs_write": "Spravovat mzdové vstupy",
+        "payroll_post": "Zaúčtovat mzdy",
+        "payroll_payments": "Spravovat výplaty a odvody"
       }
     },
     "quick_inputs": {
@@ -5002,6 +5035,7 @@
         "unavailable_placeholder": "Nedostupné",
         "unavailable_note_title": "Proč některé příplatky nejde zadat",
         "unavailable": {
+          "hourly_attendance": "Příplatky hodinového zaměstnance se počítají z docházky. Dříve ručně zadaný příplatek zrušte vymazáním hodin a uložením změny.",
           "clear_only": "Podklad výpočtu už není k dispozici, takže novou hodnotu zadat nelze. Zadanou hodinu jde vymazat, nebo doplňte chybějící podklad.",
           "claimed_by_attendance": "Příplatek za toto období už vznikl ze schválené docházky. Ručně ho zadat nelze - vyplatil by se dvakrát.",
           "managed_elsewhere": "Příplatek v tomto měsíci spravuje jiný mzdový nebo pravidelný vstup.",
@@ -6494,7 +6528,7 @@
         "holiday_arrangement_missing": "Měsíc obsahuje práci ve svátek, ale u vztahu {name} není sjednaná zásada (náhradní volno, nebo příplatek). Bez ní se z evidence nedá spočítat mzda, takže ji schválení nepustí dál.",
         "difficulty_factors_missing": "Měsíc obsahuje práci ve ztíženém prostředí, ale u vztahu {name} chybí počet ztěžujících vlivů podle § 117.",
         "average_earning_missing": "Příplatek se u vztahu {name} počítá z průměrného výdělku a ten pro toto období není zjištěný.",
-        "inputs_locked": "Mzdový běh za tento měsíc už má zamčené vstupy, takže schválení docházky do nich nemůže zapsat příplatky. V mzdovém běhu klikněte na „Zrušit běh“ (docházka ani vstupy se nesmažou), vraťte se sem a měsíc schvalte. Potom v běhu klikněte na „Začít znovu a spočítat“.",
+        "inputs_locked": "Mzdový běh za tento měsíc už má zamčené vstupy, takže schválení docházky do nich nemůže zapsat příplatky. V mzdovém běhu klikněte na „Zrušit běh“ (docházka ani vstupy se nesmažou; potřebujete právo „Odemknout schválený mzdový běh“), vraťte se sem a měsíc schvalte. Potom v běhu klikněte na „Začít znovu a spočítat“.",
         "overtime_conflict": "Přesčas je u vztahu {name} zadaný dvakrát - v docházce i v rychlých vstupech. Nechte jen jednu evidenci.",
         "link": {
           "holiday_arrangement_missing": "Otevřít kartu zaměstnance a doplnit zásadu příplatků",
@@ -6798,7 +6832,7 @@
       },
       "data_gap_summary": {
         "blocking_title": "Nic nechybí | Chybí 1 údaj, bez kterého měsíc neprojde | Chybí {count} údaje, bez kterých měsíc neprojde | Chybí {count} údajů, bez kterých měsíc neprojde",
-        "blocking_hint": "Bez nich se nedá podat hlášení ani spočítat odvody. Kartu ale uložíte i tak a doplnit je můžete kdykoli.",
+        "blocking_hint": "Mzdy se spočítají i bez nich, ale nepůjde podat přihlášku ani měsíční hlášení. Kartu uložíte i tak a doplnit je můžete kdykoli.",
         "advisory_title": "Nic nechybí | Zbývá doplnit 1 údaj | Zbývají doplnit {count} údaje | Zbývá doplnit {count} údajů",
         "advisory_hint": "Nic z toho měsíc nezastaví. Doplňte je, až bude čas.",
         "open": "Doplnit →"
@@ -9125,7 +9159,9 @@
           "a4_attachment_missing": "Průvodní dopis zatím není přiložený.",
           "identifiers_verified": "OIČ a ID PPV jsem ověřil(a) v Seznamu zaměstnanců na ePortálu ČSSZ",
           "identifiers_verified_hint": "Jen u zaměstnance převzatého z dřívějšího oznámení (ONZ), jehož čísla nejsou z protokolu ČSSZ, přijatého dohlášení A3 ani z importu exportu zaměstnanců ČSSZ. Odhlášku A2 pak jde podat i bez dohlášení A3; to zůstane jako samostatná povinnost.",
-          "select_placeholder": "Vyberte…"
+          "select_placeholder": "Vyberte…",
+          "a2_override_reason": "Důvod výjimky (alespoň 10 znaků, zapíše se k odhlášce)",
+          "a2_override_save": "Schválit s výjimkou"
         },
         "reprepare": "Připravit znovu",
         "reprepare_failed": "Podání se nepodařilo připravit znovu.",
@@ -9172,11 +9208,11 @@
         "title": "Zásady zákonných příplatků (§ 114–118)",
         "hint": "Co je u tohoto pracovního vztahu sjednáno nad rámec zákonného minima. Bez sjednání platí zákonný výchozí stav - a měsíc s prací o svátku nebo ve ztíženém prostředí se pak nedá schválit.",
         "add": "Nová verze zásady",
-        "edit": "Opravit platnou verzi",
-        "edit_blocked_no_open": "Opravit jde jen verze, která právě platí a nemá konec platnosti. Starší verze se nepřepisují - mzdy spočítané podle nich na ně dál ukazují.",
-        "edit_title": "Oprava platné verze zásady",
-        "edit_hint": "Opravuje se obsah sjednání, ne jeho účinnost. Chcete-li změnu od jiného dne, založte novou verzi.",
-        "history_locked_error": "Tuhle verzi zásady už nelze měnit - je uzavřená nebo ji překryla novější. Založte místo toho novou verzi.",
+        "edit": "Opravit zásadu",
+        "edit_blocked_no_open": "Žádná otevřená zásada. Nepoužitou ukončenou verzi můžete opravit v seznamu starších verzí.",
+        "edit_title": "Oprava nepoužité zásady",
+        "edit_hint": "Obsah i datum účinnosti lze opravit, dokud zásada nebyla použita ve zmrazené nebo schválené revizi běhu. Použitou zásadu měňte novou verzí.",
+        "history_locked_error": "Zásada zasahuje do období se zmrazenou nebo schválenou revizí běhu. Založte novou verzi od dosud nezmrazeného období.",
         "conflict_error": "Zásadu mezitím změnil někdo jiný. Načetli jsme aktuální stav - zkontrolujte jej a uložte znovu.",
         "no_permission": "Zásady příplatků může měnit jen uživatel s právem zapisovat do pracovních vztahů. Požádejte o ně správce firmy.",
         "empty": "Vztah zatím nemá sjednanou žádnou zásadu příplatků - platí zákonný výchozí stav.",
@@ -9187,10 +9223,10 @@
         "history_title": "Starší verze",
         "open_ended": "bez omezení",
         "new_title": "Nová verze zásady",
-        "new_hint": "Zásada se nepřepisuje - nová verze vzniká vedle té staré a historie zůstává čitelná.",
+        "new_hint": "Vyplňte skutečný začátek platnosti sjednání. Nová verze zachovává historii předchozích zásad.",
         "valid_from": "Platí od",
-        "valid_from_required": "Vyplňte datum, od kterého nová verze zásady platí.",
-        "valid_from_locked": "Účinnost se opravou nemění - je to hranice proti předchozí verzi, jejíž konec je z ní dopočítaný.",
+        "valid_from_required": "Vyplňte datum, od kterého zásada platí.",
+        "valid_from_locked": "Změna data nesmí zasáhnout do zmrazeného nebo schváleného období ani překročit sousední verzi.",
         "valid_to": "Ukončit platnost k",
         "valid_to_hint": "Nepovinné. Vyplněním se zásada uzavře; od dalšího dne platí zákonný výchozí stav, takže u svátku náhradní volno a u ztíženého prostředí chybějící podklad.",
         "valid_to_invalid": "Konec platnosti nesmí předcházet začátku platnosti zásady.",
@@ -9361,6 +9397,7 @@
           "send": "Odeslat",
           "open": "Otevřít",
           "all": "Připravit a odeslat vše ({count})",
+          "send_all": "Odeslat vše ({count})",
           "prepare_all": "Jen připravit vše ({count})",
           "prepare_all_summary": "Připraveno podání: {prepared}. Nepovedlo se: {failed}. Nic se neodeslalo.",
           "working": "Připravuji a odesílám…",
@@ -9742,7 +9779,11 @@
           "frozen": "Obsahová oprava je připravená jako podání č. {id}. Zkontrolujte ji a odešlete samostatnou akcí.",
           "already": "Stejná obsahová oprava už byla zmrazená - je to podání č. {id}.",
           "load_failed": "Účinný stav formulářů se nepodařilo autoritativně načíst.",
-          "failed": "Obsahovou opravu se nepodařilo připravit."
+          "failed": "Obsahovou opravu se nepodařilo připravit.",
+          "prepare_current": "Připravit z aktuální revize",
+          "prepare_current_failed": "Přípravu z aktuální revize se nepodařilo vytvořit.",
+          "prepare_current_blocked": "Příprava z aktuální revize má nálezy ({count}). Opravte je podle Otestovat XML a zkuste to znovu.",
+          "prepare_current_unusable": "Příprava z aktuální revize se k tomuto podání nehodí (jiná účtárna nebo nález na pojistné části). Ověřte ji v Otestovat XML."
         }
       },
       "signing": {
@@ -10134,6 +10175,8 @@
         "detail_action": "Detail",
         "not_prepared_action": "Kde to připravit",
         "external_action": "Podáno mimo aplikaci",
+        "bulk_external_hint": "Po termínu je {count} povinností bez podání v aplikaci. Co jste podali jinde (například přihlášky na ePortálu ČSSZ), označíte hromadně jako vyřízené mimo aplikaci v panelu Zákonné termíny.",
+        "bulk_external_action": "Hromadně v Zákonných termínech",
         "external_title": "Podáno mimo aplikaci",
         "external_hint": "Hlášení jste odeslali na portálu úřadu, ne z aplikace. Povinnost se uzavře jako splněná; stav podání zůstane, protože aplikace ho neodeslala.",
         "external_filed_on": "Den podání na portálu",
@@ -13596,7 +13639,7 @@
           "completing": "Opravné hlášení je připravené, odešlete ho na záložce Odesláno.",
           "completed": "ČSSZ opravné hlášení s formulářem přijala.",
           "revoked": "Odložení bylo zrušeno a vztah se podává v řádném hlášení.",
-          "stale": "Běh má novější revizi. Pokud vztah stále blokuje, odložte ho znovu v testu hlášení."
+          "stale": "Běh má novější revizi. Pokud vztah stále blokuje, převezměte odložení tlačítkem nad seznamem, nebo ho odložte znovu."
         },
         "complete": "Doplnit opravným hlášením",
         "complete_failed": "Opravné hlášení se nepodařilo připravit.",
@@ -13612,7 +13655,17 @@
         "in_report_hint": "Jejich formuláře se nepodají; pojistná část je za všechny zaměstnance. Po doplnění dat je pošlete opravným hlášením ze seznamu odložených vztahů.",
         "summary_excluded": "Souhrn daní neobsahuje zálohu na daň u odložených osob bez spočtené zálohy ({count}); doplní se opravným hlášením.",
         "expected_warnings": "Varování kontrol {controls} jsou u odloženého vztahu očekávaná: pojistná část je za všechny zaměstnance, formuláře jen za podané. ČSSZ takové hlášení přijme.",
-        "expected_badge": "očekávané"
+        "expected_badge": "očekávané",
+        "bulk": "Odložit všechny dotčené ({count})",
+        "bulk_hint": "Nález se týká zaměstnanců ({count}). Můžete je jedním rozhodnutím odložit z řádného hlášení a podat hlášení za ostatní.",
+        "bulk_firm_left": "Firemní nálezy ({count}) odložení neodstraní, opravte je v nastavení mezd.",
+        "bulk_confirm": "Odložit ({count})",
+        "bulk_done": "Odloženo zaměstnanců: {count}. Hlášení za ostatní teď připravte znovu.",
+        "carry_over": "Převzít trvající odložení do aktuální revize ({count})",
+        "carry_failed": "Odložení se nepodařilo převzít.",
+        "carried": "Převzato odložených vztahů: {count}. Vztahy, které už nález nemají, se podají v řádném hlášení.",
+        "complete_all": "Doplnit všechny odložené jedním opravným hlášením ({count})",
+        "completed_all": "Opravné hlášení doplňuje odložené vztahy ({count}); odešlete ho na záložce Odesláno."
       },
       "packages": {
         "title": "Hlášení má víc než 1500 formulářů a dělí se do dílčích balíků ({count}).",
@@ -14211,7 +14264,7 @@
         "jmhz_special_scenarios_frozen_resolution_missing": "Příprava neobsahuje zmrazené zařazení zvláštního scénáře JMHZ pro tento pracovní vztah. Podejte hlášení ručně přes ePortál ČSSZ.",
         "jmhz_special_scenarios_resolution_blocked": "Normalizovaný dokument zvláštních scénářů JMHZ není úplný; jde o technickou chybu, kterou musí posoudit podpora.",
         "jmhz_special_scenarios_source_version_unsupported": "Příprava JMHZ byla vytvořena starší verzí sestavovače a nelze pro ni bezpečně určit zvláštní scénář. Připravte hlášení znovu.",
-        "jmhz_registration_change_settling": "U některého pracovního vztahu v hlášení ČSSZ za posledních 48 hodin přijala změnu údajů zaměstnance (REGZEC A3). Hlášení odeslané dřív by mohla zamítnout (chyba 243), proto se zatím nepřipravuje.",
+        "jmhz_registration_change_settling": "Čerstvá změna údajů zaměstnance (do 48 h)",
         "jmhz_submission_artifact_mismatch": "Otisk uloženého artefaktu podání neodpovídá zmrazenému XML JMHZ. Zmrazte hlášení znovu z přípravy.",
         "jmhz_submission_component_identity_missing": "Ve zmrazeném podání JMHZ chybí identifikace pracovního vztahu. Zmrazte hlášení znovu z přípravy.",
         "jmhz_submission_components_missing": "Řádné podání neobsahuje žádný pracovní vztah, který by šlo opravit.",
@@ -14335,7 +14388,13 @@
         "jmhz_ordinary_evidence_risk_shifts_unexpected": "Počet směn při rizikové práci (10580) se uvádí jen u vztahu s prací zařazenou do kategorie 4.",
         "jmhz_ozp_wage_primary_mismatch": "Podporu zaměstnávání OZP má jen vedlejší pracovní vztah osoby, výdělek OZP ale nese souhrn hlavního vztahu.",
         "jmhz_xml_ozp_deductions_inconsistent": "Příznak srážek ve prospěch zaměstnavatele (10349) neodpovídá částkám 10350 až 10353 (kontrola 258).",
-        "jmhz_xml_ozp_wage_form_unsupported": "Výdělek osob OZP a srážky ve prospěch zaměstnavatele (10347 až 10353) formulář tohoto druhu nevede; hlášení zpracujte ručně."
+        "jmhz_xml_ozp_wage_form_unsupported": "Výdělek osob OZP a srážky ve prospěch zaměstnavatele (10347 až 10353) formulář tohoto druhu nevede; hlášení zpracujte ručně.",
+        "jmhz_deferral_nothing_to_complete": "Žádný odložený vztah nečeká na doplnění; opravné hlášení lze navázat až na přijaté řádné hlášení."
+      },
+      "settling": {
+        "title": "Čerstvá změna údajů zaměstnance",
+        "hint": "ČSSZ takové hlášení může zamítnout (chyba 243), ale nemusí. Můžete ho odeslat i tak, nebo dotčené zaměstnance odložit a doplnit je opravným hlášením po 48 hodinách.",
+        "confirm": "Připravit a odeslat i tak"
       }
     },
     "server_codes": {
@@ -24088,6 +24147,7 @@
     "no_items": "Žádné položky.",
     "expandable_list": {
       "show_all": "Zobrazit všech {count}",
+      "show_listed": "Zobrazit vypsaných {count} z {total}",
       "collapse": "Sbalit seznam",
       "search": "Hledat podle jména nebo os. čísla",
       "search_label": "Hledat v seznamu",
@@ -36886,6 +36946,7 @@
         "save_links_hint": "Příští import stejné osoby spáruje automaticky podle osobního čísla nebo jména.",
         "adopt_personal_numbers": "Převzít osobní čísla z podkladů",
         "adopt_personal_numbers_hint": "Vztahy s automatickým číslem (1, ZAM-7…) dostanou osobní číslo z podkladů; ručně zadané číslo se nepřepisuje.",
+        "adopt_personal_numbers_ambiguous": "Osobní číslo {numbers} má víc osob, k párování se nepoužilo a nepřevezme se. | Osobní čísla {numbers} má víc osob, k párování se nepoužila a nepřevezmou se.",
         "adopt_monthly_wage": "Převzít měsíční mzdu z podkladů ({count} změn)",
         "adopt_monthly_wage_hint": "Zapíše se jen u osob bez překážky v tabulce Měsíční mzda z podkladů. Chybějící mzda se doplní do platných podmínek vztahu, jiná mzda založí novou verzi podmínek od prvního dne období.",
         "fill_registration": "Doplnit chybějící údaje pro registraci ČSSZ ({count} osob)",
@@ -36898,6 +36959,8 @@
         "rate_wage_formula": "{hours} h × {rate}",
         "rate_wages_title": "Mzda ze sazby a odpracovaných hodin",
         "rate_wages_computed": "Podklady u části osob nemají částku mzdy, jen hodiny a hodinovou sazbu. Import mzdu dopočte jako sazba × odpracované hodiny a vytvoří z ní mzdový vstup (složka Hodinová mzda podle docházky). Osob: {count}, celkem {amount}.",
+        "rate_wages_skipped": " Přeskočené osoby ({count}) vstup nedostanou a do součtu nejsou započtené.",
+        "amount_skipped": "dalších {amount} u přeskočených osob se nepřenese",
         "rate_wages_no_hours": "Mzda nevznikne u osob, které mají sazbu, ale v podkladech ne odpracované hodiny (počet: {count}). Důvod je u osoby v tabulce níže.",
         "rate_wages_hourly_terms": "Mzda nevznikne u osob, jejichž vztah má na kartě hodinové odměňování (počet: {count}): z importovaného souhrnu hodin ho mzdový běh nespočítá. Postup je u osoby v tabulce níže.",
         "probable_from_amount": "{rate}/h (odměna {amount} za {hours} h)",
@@ -37000,6 +37063,7 @@
       "options": {
         "write_summary": "Zapsat souhrn docházky do pracovních měsíců",
         "write_summary_hint": "Hodiny z podkladů se uloží jako souhrn pracovního měsíce každého vztahu, ze kterého vychází měsíční hlášení ČSSZ. Opravná dávka souhrn otevřeného měsíce nahradí, schválený měsíc nezmění.",
+        "write_summary_off": "Bez zápisu souhrnu se odpracované hodiny a dny z podkladů do pracovních měsíců neuloží: budou chybět pro průměr na náhrady i pro měsíční hlášení a měsíce nepůjde schválit.",
         "approve_clean": "Bezchybné měsíce rovnou schválit",
         "approve_clean_hint": "Schválí se jen měsíce, u kterých souhrn nic netvrdí bez podkladu. Ostatní se ve výsledku vypíšou po lidech s důvodem a odkazem na nápravu.",
         "approve_needs_summary": "Schválení stojí na zapsaném souhrnu. Nejdřív zapněte zápis souhrnu do pracovních měsíců.",

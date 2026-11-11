@@ -88,8 +88,20 @@ final class PayrollRunDeductionLedgerApprover
                     );
                     $movement = $runNet[self::key($employeeId, $agreementId)] ?? 0;
                     if ($movement < 0 || $movement > $withheld) {
-                        throw new \DomainException(
-                            'Stav dohody neodpovídá schváleným srážkám mzdového běhu.',
+                        throw new PayrollRunSnapshotFixableException(
+                            'deduction_agreement_state_mismatch',
+                            sprintf(
+                                '%s: dohoda o srážce ze mzdy „%s“ eviduje sraženo celkem %s Kč, ale '
+                                    . 'schválená revize běhu z ní srazila %s Kč. Dohoda se od schválení '
+                                    . 'změnila (úprava sražené částky, zrušení nebo převod), takže opravu '
+                                    . 'nejde otevřít. V Mzdy → Dohody o srážkách vraťte u dohody stav '
+                                    . 'sražené částky, nebo vezměte žádost o opravu zpět.',
+                                is_string($employee['full_name'] ?? null) ? $employee['full_name'] : 'Osoba #' . $employeeId,
+                                self::agreementLabel($agreement, $agreementId),
+                                number_format($withheld / 100, 2, ',', ' '),
+                                number_format($movement / 100, 2, ',', ' '),
+                            ),
+                            '/payroll/deduction-agreements?person=' . $employeeId,
                         );
                     }
                     $agreement['withheld_total_minor'] = $withheld - $movement;
@@ -102,6 +114,18 @@ final class PayrollRunDeductionLedgerApprover
 
             return $snapshot;
         });
+    }
+
+    /** @param array<string,mixed> $agreement */
+    private static function agreementLabel(array $agreement, int $agreementId): string
+    {
+        $title = is_string($agreement['title'] ?? null) ? trim($agreement['title']) : '';
+        $reference = is_string($agreement['agreement_reference'] ?? null) ? trim($agreement['agreement_reference']) : '';
+        if ($title !== '' && $reference !== '') {
+            return "{$title} ({$reference})";
+        }
+
+        return $title !== '' ? $title : ($reference !== '' ? $reference : '#' . $agreementId);
     }
 
     public function approve(

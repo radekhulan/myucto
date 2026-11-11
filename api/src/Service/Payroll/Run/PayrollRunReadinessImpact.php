@@ -97,6 +97,7 @@ final class PayrollRunReadinessImpact
         // V běhu je to varování bez povinné výjimky: schválit jde, ale
         // doplnění po zamknutí vstupů stojí opravnou revizi.
         'time_month_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'hourly_claim_component_conflict' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
         // Vztah bez schválené složky výpočet neprojde (zákonný výpočet skončí
         // ruční kontrolou „chybí schválená mzdová složka"), i když snímek sám
         // to hlásí jen jako varování. Cesta ven: zadat složku, případně 0 Kč.

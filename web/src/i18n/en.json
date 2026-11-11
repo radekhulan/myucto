@@ -4429,7 +4429,12 @@
           "refresh_inputs": "Inputs refreshed",
           "validation_override": "Check exception approved",
           "validation_override_revoked": "Check exception revoked",
-          "unknown": "Another audit action"
+          "unknown": "Another audit action",
+          "withdraw_correction": "Correction request withdrawn",
+          "change_payment_date": "Payment date changed",
+          "exclude_employee": "Person excluded from run",
+          "include_employee": "Person returned to run",
+          "validation_overrides_carried": "Exceptions carried over from previous revision"
         }
       },
       "validation": {
@@ -4783,7 +4788,11 @@
         "cancel": "Cancel run",
         "close": "Close",
         "lock_and_calculate": "Calculate payroll",
-        "refresh_inputs": "Refresh inputs"
+        "refresh_inputs": "Refresh inputs",
+        "withdraw_correction": "Withdraw correction request",
+        "change_payment_date": "Change payment date",
+        "exclude_employee": "Exclude person from run",
+        "include_employee": "Return person to run"
       },
       "outcome": {
         "posted": "Payroll has been posted to accounting.",
@@ -4955,6 +4964,30 @@
         "confirm_note": "Starting locks the inputs and calculates payroll right away. Anything entered afterwards stays out of the calculation until the run is reopened.",
         "recheck": "Check again",
         "start_anyway": "Start anyway"
+      },
+      "withdraw_correction_hint": "The run returns to the state it was in before the correction was requested. The approved revision, posting, payments and filings stay unchanged. Source changes entered in the meantime will not get into the run; if you need them, do not withdraw and continue with “Open correction”.",
+      "forbidden_command": "You cannot see “{commands}” because you do not have the “{permission}” permission. Ask the company administrator to grant it.",
+      "change_payment_date": {
+        "hint_draft": "Only the payment date of the run changes. No input snapshot exists yet, so nothing is recalculated.",
+        "hint_locked": "The run gets a new revision with the new payment date and is recalculated right away: the statutory calculation and contribution and reporting deadlines depend on the payment date. Exceptions with identical text are carried over."
+      },
+      "exclusion": {
+        "exclude": "Exclude person from run",
+        "hint": "{name} will be excluded from this run: the run gets a new revision without this person and everyone else is calculated and approved as usual. The person gets no payslip or pay in this run and will not be in the approved revision. Pay them later through a correction of the run for the same period (Request correction, Open correction) once the missing data are completed. They get into the monthly JMHZ report through a corrective report. State what is missing and when it will be completed.",
+        "active_title": "Excluded from run: {count}",
+        "active_hint": "The revision does not calculate these people. Once their data are complete, return them to the run, or pay them through a correction after approval.",
+        "include": "Return to run",
+        "settled_title": "Without pay in this run: {count}",
+        "settled_hint": "The approved revision went without these people. To pay them: complete the missing data, click “Request correction” and “Open correction”; the correction revision includes them again. File the monthly report for them with a corrective JMHZ report."
+      },
+      "permission_names": {
+        "payroll_reopen": "Unlock approved payroll run",
+        "payroll_approve": "Approve payroll run",
+        "payroll_review": "Review payroll run",
+        "payroll_calculate": "Calculate payroll",
+        "payroll_inputs_write": "Manage payroll inputs",
+        "payroll_post": "Post payroll",
+        "payroll_payments": "Manage payouts and contributions"
       }
     },
     "quick_inputs": {
@@ -5002,6 +5035,7 @@
         "unavailable_placeholder": "Unavailable",
         "unavailable_note_title": "Why some surcharges cannot be entered",
         "unavailable": {
+          "hourly_attendance": "Premiums for an hourly employee are calculated from attendance. Clear the hours of any previously entered manual premium and save the change.",
           "clear_only": "The calculation basis is no longer available, so a new value cannot be entered. You can clear what is there, or restore the missing basis.",
           "claimed_by_attendance": "This surcharge already arose from approved attendance for this period. It cannot be entered manually — it would be paid twice.",
           "managed_elsewhere": "Another payroll or recurring input manages this surcharge for the month.",
@@ -6494,7 +6528,7 @@
         "holiday_arrangement_missing": "The month contains work on a public holiday, but {name} has no agreed arrangement (time off in lieu, or a surcharge). Pay cannot be calculated without it, so approval stops here.",
         "difficulty_factors_missing": "The month contains work in a difficult environment, but {name} has no count of aggravating factors under § 117.",
         "average_earning_missing": "The surcharge for {name} is calculated from average earnings, and none is established for this period.",
-        "inputs_locked": "The payroll run for this month already has locked inputs, so approving attendance cannot write surcharges into them. In the payroll run click “Cancel run” (attendance and inputs are kept), come back and approve the month, then click “Start again and calculate” in the run.",
+        "inputs_locked": "The payroll run for this month already has locked inputs, so approving attendance cannot write surcharges into them. In the payroll run click “Cancel run” (attendance and inputs are kept; you need the “Unlock approved payroll run” permission), come back and approve the month, then click “Start again and calculate” in the run.",
         "overtime_conflict": "Overtime for {name} is entered twice — in attendance and in quick inputs. Keep only one record.",
         "link": {
           "holiday_arrangement_missing": "Open the employee card and set the surcharge arrangement",
@@ -6798,7 +6832,7 @@
       },
       "data_gap_summary": {
         "blocking_title": "Nothing missing | 1 item is missing that the month cannot go through without | {count} items are missing that the month cannot go through without",
-        "blocking_hint": "Filings cannot be submitted and contributions cannot be calculated without them. You can still save the card and add them any time.",
+        "blocking_hint": "Payroll is calculated without them, but the registration and the monthly report cannot be filed. You can still save the card and add them any time.",
         "advisory_title": "Nothing missing | 1 item left to add | {count} items left to add",
         "advisory_hint": "None of this stops the month. Add them when there is time.",
         "open": "Add →"
@@ -9125,7 +9159,9 @@
           "a4_attachment_missing": "No cover letter attached yet.",
           "identifiers_verified": "I verified the OIČ and ID PPV in the employee list on the ČSSZ ePortal",
           "identifiers_verified_hint": "Only for an employee taken over from an earlier notification (ONZ) whose numbers do not come from a ČSSZ protocol, an accepted A3 completion or an imported ČSSZ employee export. The A2 deregistration can then be filed without the A3 completion, which stays as a separate duty.",
-          "select_placeholder": "Select…"
+          "select_placeholder": "Select…",
+          "a2_override_reason": "Reason for the exception (at least 10 characters, stored with the termination)",
+          "a2_override_save": "Approve with exception"
         },
         "reprepare": "Prepare again",
         "reprepare_failed": "The filing could not be prepared again.",
@@ -9172,11 +9208,11 @@
         "title": "Statutory surcharge policy (Sections 114–118)",
         "hint": "What is agreed for this employment relation beyond the statutory minimum. Without an agreement the statutory default applies — and a month with work on a public holiday or in a difficult environment cannot be approved.",
         "add": "New policy version",
-        "edit": "Correct the effective version",
-        "edit_blocked_no_open": "Only the version that is currently effective and has no end date can be corrected. Older versions are never rewritten — payrolls calculated from them still point at them.",
-        "edit_title": "Correction of the effective policy version",
-        "edit_hint": "The correction changes what was agreed, not when it took effect. For a change from a different date, create a new version.",
-        "history_locked_error": "This policy version can no longer be changed — it is closed or a newer one supersedes it. Create a new version instead.",
+        "edit": "Correct policy",
+        "edit_blocked_no_open": "There is no open policy. An unused closed version can be corrected in the older versions list.",
+        "edit_title": "Correct an unused policy",
+        "edit_hint": "Both the terms and effective date can be corrected until the policy is used in a frozen or approved run revision. Change a used policy by creating a new version.",
+        "history_locked_error": "The policy affects a period with a frozen or approved run revision. Create a new version starting in a period that has not been frozen.",
         "conflict_error": "Someone else changed the policy in the meantime. The current state has been reloaded — check it and save again.",
         "no_permission": "Only a user allowed to write employment relations can change the surcharge policy. Ask your company administrator for the permission.",
         "empty": "This relation has no agreed surcharge policy yet — the statutory default applies.",
@@ -9187,10 +9223,10 @@
         "history_title": "Older versions",
         "open_ended": "open-ended",
         "new_title": "New policy version",
-        "new_hint": "A policy is never rewritten — a new version is created next to the old one and the history stays readable.",
+        "new_hint": "Enter the actual start date of the agreement. A new version preserves the history of previous policies.",
         "valid_from": "Valid from",
-        "valid_from_required": "Fill in the date from which the new policy version applies.",
-        "valid_from_locked": "A correction never moves the effective date — it is the boundary against the previous version, whose end is derived from it.",
+        "valid_from_required": "Enter the date from which the policy applies.",
+        "valid_from_locked": "Changing the date must not affect a frozen or approved period or cross an adjacent version.",
         "valid_to": "End validity on",
         "valid_to_hint": "Optional. Filling it in closes the policy; from the next day the statutory default applies, so compensatory time off for holidays and a missing basis for a difficult environment.",
         "valid_to_invalid": "The end of validity cannot precede the start of the policy.",
@@ -9361,6 +9397,7 @@
           "send": "Send",
           "open": "Open",
           "all": "Prepare and send all ({count})",
+          "send_all": "Send all ({count})",
           "prepare_all": "Prepare all only ({count})",
           "prepare_all_summary": "Submissions prepared: {prepared}. Failed: {failed}. Nothing was sent.",
           "working": "Preparing and sending…",
@@ -9742,7 +9779,11 @@
           "frozen": "The content correction is prepared as submission no. {id}. Review it and send it with a separate action.",
           "already": "The same content correction was already frozen — it is submission no. {id}.",
           "load_failed": "The effective form state could not be resolved authoritatively.",
-          "failed": "The content correction could not be prepared."
+          "failed": "The content correction could not be prepared.",
+          "prepare_current": "Prepare from the current revision",
+          "prepare_current_failed": "The preparation from the current revision could not be created.",
+          "prepare_current_blocked": "The preparation from the current revision has findings ({count}). Fix them following Test XML and try again.",
+          "prepare_current_unusable": "The preparation from the current revision does not fit this submission (another office or a finding on the insurance part). Check it in Test XML."
         }
       },
       "signing": {
@@ -10134,6 +10175,8 @@
         "detail_action": "Detail",
         "not_prepared_action": "Where to prepare it",
         "external_action": "Filed outside the app",
+        "bulk_external_hint": "{count} obligations are past due with no filing in the application. Anything you filed elsewhere (for example registrations on the ČSSZ ePortal) can be marked in bulk as handled outside the application in the Statutory deadlines panel.",
+        "bulk_external_action": "Bulk in Statutory deadlines",
         "external_title": "Filed outside the app",
         "external_hint": "You filed the report on the authority's portal, not from the app. The obligation is closed as fulfilled; the submission status stays as it is, because the app never sent it.",
         "external_filed_on": "Date filed on the portal",
@@ -13596,7 +13639,7 @@
           "completing": "The corrective report is prepared; send it from Sent tab.",
           "completed": "ČSSZ accepted the corrective report with the form.",
           "revoked": "The deferral was cancelled and the employment is filed in the regular report.",
-          "stale": "The run has a newer revision. If the employment still blocks, defer it again in the report test."
+          "stale": "The run has a newer revision. If the relation still blocks, carry the deferral over with the button above the list, or defer it again."
         },
         "complete": "Add with a corrective report",
         "complete_failed": "The corrective report could not be prepared.",
@@ -13612,7 +13655,17 @@
         "in_report_hint": "Their forms are not filed; the insurance part covers all employees. Once the data are complete, send them in a corrective report from the list of deferred employments.",
         "summary_excluded": "The tax summary leaves out the advance tax of deferred people without a calculated advance ({count}); it will be added by the corrective report.",
         "expected_warnings": "Control warnings {controls} are expected with a deferred employment: the insurance part covers all employees, the forms only the filed ones. ČSSZ accepts such a report.",
-        "expected_badge": "expected"
+        "expected_badge": "expected",
+        "bulk": "Defer all affected ({count})",
+        "bulk_hint": "The finding affects {count} employees. You can defer them from the regular report with one decision and file the report for the others.",
+        "bulk_firm_left": "Company-level findings ({count}) are not removed by deferral; fix them in payroll settings.",
+        "bulk_confirm": "Defer ({count})",
+        "bulk_done": "Employees deferred: {count}. Prepare the report for the others again.",
+        "carry_over": "Carry ongoing deferrals over to the current revision ({count})",
+        "carry_failed": "The deferrals could not be carried over.",
+        "carried": "Deferrals carried over: {count}. Relations without a finding are filed in the regular report.",
+        "complete_all": "Complete all deferred in one corrective report ({count})",
+        "completed_all": "The corrective report completes the deferred relations ({count}); send it on the Sent tab."
       },
       "packages": {
         "title": "The report has more than 1500 forms and is split into partial packages ({count}).",
@@ -14211,7 +14264,7 @@
         "jmhz_special_scenarios_frozen_resolution_missing": "The preparation does not contain the frozen special JMHZ scenario classification for this employment. File the report manually through the ČSSZ ePortal.",
         "jmhz_special_scenarios_resolution_blocked": "The normalized special-scenarios JMHZ document is incomplete; this is a technical issue for support to investigate.",
         "jmhz_special_scenarios_source_version_unsupported": "The JMHZ preparation was built by an older builder version and its special scenario cannot be safely determined. Prepare the report again.",
-        "jmhz_registration_change_settling": "ČSSZ accepted a change of employee data (REGZEC A3) for an employment in the report within the last 48 hours. A report sent earlier could be rejected (error 243), so it is not prepared yet.",
+        "jmhz_registration_change_settling": "Recent change of employee data (within 48 h)",
         "jmhz_submission_artifact_mismatch": "The stored artifact's fingerprint does not match the frozen JMHZ XML. Freeze the report again from the preparation.",
         "jmhz_submission_component_identity_missing": "The frozen JMHZ submission is missing the employment identification. Freeze the report again from the preparation.",
         "jmhz_submission_components_missing": "The regular submission does not contain any employment that could be corrected.",
@@ -14335,7 +14388,13 @@
         "jmhz_ordinary_evidence_risk_shifts_unexpected": "The number of shifts in risk work (10580) is reported only for an employment with work classified in category 4.",
         "jmhz_ozp_wage_primary_mismatch": "Only a secondary employment of the person has disability employment support, but the disability wage data belongs to the summary of the primary employment.",
         "jmhz_xml_ozp_deductions_inconsistent": "The flag of deductions in favour of the employer (10349) does not match amounts 10350 to 10353 (control 258).",
-        "jmhz_xml_ozp_wage_form_unsupported": "This form type does not carry the disability wage data and deductions in favour of the employer (10347 to 10353); process the report manually."
+        "jmhz_xml_ozp_wage_form_unsupported": "This form type does not carry the disability wage data and deductions in favour of the employer (10347 to 10353); process the report manually.",
+        "jmhz_deferral_nothing_to_complete": "No deferred relation awaits completion; a corrective report can follow only an accepted regular report."
+      },
+      "settling": {
+        "title": "Recent change of employee data",
+        "hint": "ČSSZ may reject such a report (error 243), but it does not have to. You can send it anyway, or defer the affected employees and complete them with a corrective report after 48 hours.",
+        "confirm": "Prepare and send anyway"
       }
     },
     "server_codes": {
@@ -24088,6 +24147,7 @@
     "no_items": "No items.",
     "expandable_list": {
       "show_all": "Show all {count}",
+      "show_listed": "Show the {count} listed of {total}",
       "collapse": "Collapse list",
       "search": "Search by name or personal number",
       "search_label": "Search the list",
@@ -36886,6 +36946,7 @@
         "save_links_hint": "The next import matches the same person automatically by personal number or name.",
         "adopt_personal_numbers": "Adopt personal numbers from the source files",
         "adopt_personal_numbers_hint": "Employments with an automatic number (1, ZAM-7…) get the personal number from the source files; a manually entered number is never overwritten.",
+        "adopt_personal_numbers_ambiguous": "Personal number {numbers} is shared by several people; it was not used for matching and will not be adopted. | Personal numbers {numbers} are shared by several people; they were not used for matching and will not be adopted.",
         "adopt_monthly_wage": "Adopt the monthly wage from the source files ({count} changes)",
         "adopt_monthly_wage_hint": "Only people without an obstacle in the Monthly wage from source files table are written. A missing wage is added to the current employment terms; a different wage creates a new version of the terms from the first day of the period.",
         "fill_registration": "Fill in missing social security registration data ({count} people)",
@@ -36898,6 +36959,8 @@
         "rate_wage_formula": "{hours} h × {rate}",
         "rate_wages_title": "Wage from the rate and hours worked",
         "rate_wages_computed": "For some people the data has no wage amount, only hours and an hourly rate. The import calculates the wage as rate × hours worked and creates a payroll input from it (component Hourly wage from attendance). People: {count}, total {amount}.",
+        "rate_wages_skipped": " Skipped people ({count}) get no input and are not included in the total.",
+        "amount_skipped": "another {amount} for skipped people will not be transferred",
         "rate_wages_no_hours": "No wage is created for people who have a rate but no hours worked in the data (count: {count}). The reason is shown next to the person in the table below.",
         "rate_wages_hourly_terms": "No wage is created for people whose employment has hourly remuneration on the card (count: {count}): the payroll run cannot calculate it from an imported hours summary. The steps are shown next to the person in the table below.",
         "probable_from_amount": "{rate}/h (pay {amount} for {hours} h)",
@@ -37000,6 +37063,7 @@
       "options": {
         "write_summary": "Write the attendance summary into work months",
         "write_summary_hint": "Hours from the files are stored as the work month summary of each employment, which the monthly ČSSZ report is based on. A corrective batch replaces the summary of an open month and leaves an approved month unchanged.",
+        "write_summary_off": "Without the summary, worked hours and days from the source files are not stored in the work months: they will be missing for the average earnings and the monthly report, and the months cannot be approved.",
         "approve_clean": "Approve clean months right away",
         "approve_clean_hint": "Only months whose summary claims nothing without a source are approved. The others are listed in the result by person, with the reason and a link to fix it.",
         "approve_needs_summary": "Approval builds on the written summary. Turn on writing the summary into work months first.",

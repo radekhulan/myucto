@@ -109,8 +109,16 @@ final class PayrollHealthInsurerBulkAssignment
                     $userAgent,
                 );
                 $applied[] = $item['employee_id'];
-            } catch (\Throwable $e) {
+            } catch (\InvalidArgumentException|\DomainException $e) {
                 $failed[] = ['employee_id' => $item['employee_id'], 'message' => $e->getMessage()];
+            } catch (\Throwable $e) {
+                // Chyba databáze (SQLSTATE …) do dialogu nepatří: účetní s ní nic nenadělá.
+                error_log('payroll.health_insurer_bulk: ' . $e->getMessage());
+                $failed[] = [
+                    'employee_id' => $item['employee_id'],
+                    'message' => 'Pojišťovnu se nepodařilo uložit kvůli chybě serveru. Zkuste to znovu; '
+                        . 'pokud se chyba opakuje, kontaktujte podporu.',
+                ];
             }
         }
         $this->activityLogger->log(

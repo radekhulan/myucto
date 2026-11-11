@@ -91,3 +91,36 @@ describe('AttendanceSummaryStep: mzda ze sazby a hodin', () => {
     expect(wrapper.find('[data-testid="attendance-rate-wages"]').exists()).toBe(false)
   })
 })
+
+describe('AttendanceSummaryStep: přeskočené osoby', () => {
+  const rate = (key: string, minor: number, overrides: Partial<AttendancePerson> = {}) => person(key, {
+    components: [{ component_code: 'MZDA_HODINOVA_DOCH', amount: String(minor / 100), amount_minor: minor, source: 'mesic.xlsx', conflicts: [] }],
+    rate_wage: { status: 'computed', component_code: 'MZDA_HODINOVA_DOCH', hours: '8.00', hourly_rate_minor: 18_000, amount_minor: minor },
+    ...overrides,
+  })
+  const unassigned = {
+    status: 'not_found' as const, matched_by: null, employment_id: null, employee_id: null,
+    employee_name: null, employment_code: null, candidates: [],
+  }
+
+  it('do počtu a částek nepočítá osobu, která vstup nedostane', () => {
+    const persons = [rate('B040', 144_000), rate('B041', 108_000, { match: unassigned })]
+    const wrapper = mount(AttendanceSummaryStep, {
+      props: { preview: preview(persons, { computed: 2, amount_minor: 252_000, no_hours: 0, hourly_terms: 0 }), manualLinks: {} },
+    })
+    const computed = wrapper.get('[data-testid="attendance-rate-wages-computed"]').text()
+    expect(computed).toContain('"count":1')
+    expect(computed).toContain('rate_wages_skipped{"count":1}')
+    expect(wrapper.get('[data-testid="attendance-amount-total"]').text()).toMatch(/1\s?440/)
+    expect(wrapper.get('[data-testid="attendance-amount-skipped"]').text()).toMatch(/1\s?080/)
+  })
+
+  it('osobu, kterou použití samo založí, do součtů započte', () => {
+    const persons = [rate('B040', 144_000), rate('B041', 108_000, { match: unassigned })]
+    const wrapper = mount(AttendanceSummaryStep, {
+      props: { preview: preview(persons, { computed: 2, amount_minor: 252_000, no_hours: 0, hourly_terms: 0 }), manualLinks: {}, createKeys: ['B041'] },
+    })
+    expect(wrapper.get('[data-testid="attendance-rate-wages-computed"]').text()).toContain('"count":2')
+    expect(wrapper.find('[data-testid="attendance-amount-skipped"]').exists()).toBe(false)
+  })
+})
