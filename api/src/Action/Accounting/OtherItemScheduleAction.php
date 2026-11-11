@@ -137,7 +137,7 @@ final class OtherItemScheduleAction
     private function assertAutoPostPermission(Request $request, int $supplierId): void
     {
         if (!$this->canAutoPost($request, $supplierId)) {
-            throw new OtherItemException('forbidden', 'Pro automatické účtování nemáš oprávnění.', 403);
+            throw new OtherItemException('forbidden', 'Pro automatické účtování nemáte oprávnění.', 403);
         }
     }
 

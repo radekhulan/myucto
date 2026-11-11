@@ -100,7 +100,7 @@ final class PermissionMiddleware implements MiddlewareInterface
         if ($route->kind !== RoutePermissionMap::SUPERADMIN) {
             $access = $this->supplierAccess->resolve($request);
             if ($access->denied) {
-                return Json::error($this->responseFactory->createResponse(403), 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
+                return Json::error($this->responseFactory->createResponse(403), 'forbidden_supplier', 'K této firmě nemáte oprávnění.', 403);
             }
         }
 
