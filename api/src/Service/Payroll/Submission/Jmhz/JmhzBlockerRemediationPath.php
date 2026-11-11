@@ -179,7 +179,12 @@ final class JmhzBlockerRemediationPath
             'runs' => self::withQuery('/payroll/runs', $periodQuery),
             'components' => self::componentPath($code, $entityType === 'component' ? $entityId : null),
             'ordinary_evidence' => self::withQuery('/payroll/submissions', $periodQuery) . '#jmhz-ordinary-evidence',
-            'employer_annual' => '/payroll/settings?tab=submissions#jmhz-employer-annual-evidence',
+            // Roční údaje zaměstnavatele se vedou po letech: odkaz nese rok
+            // HLÁŠENÉHO období, jinak formulář otevřel výchozí (už vyplněný) rok.
+            'employer_annual' => self::withQuery(
+                '/payroll/settings',
+                ['tab' => 'submissions'] + ($period === null ? [] : ['year' => $period['year']]),
+            ) . '#jmhz-employer-annual-evidence',
             'office' => '/payroll/settings?tab=employer#payroll-employer-offices',
             // Hlášení vykazuje roční zúčtování za předchozí zdaňovací období
             // (JmhzAnnualEvidenceService: rok hlášení - 1); bez roku by stránka

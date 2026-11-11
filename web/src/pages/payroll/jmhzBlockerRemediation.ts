@@ -148,7 +148,12 @@ export function jmhzRemediationTarget(
     case 'ordinary_evidence':
       return { name: 'payroll-submissions', query: periodQuery, hash: '#jmhz-ordinary-evidence' }
     case 'employer_annual':
-      return { name: 'payroll-settings', query: { tab: 'submissions' }, hash: '#jmhz-employer-annual-evidence' }
+      // Stejně jako server: rok hlášeného období, ne výchozí rok formuláře.
+      return {
+        name: 'payroll-settings',
+        query: { tab: 'submissions', ...(period && /^\d{4}-/.test(period) ? { year: period.slice(0, 4) } : {}) },
+        hash: '#jmhz-employer-annual-evidence',
+      }
     case 'office':
       return { name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-offices' }
     case 'annual_settlement': {

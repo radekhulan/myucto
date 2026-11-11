@@ -135,6 +135,39 @@ describe('JmhzEmployerAnnualEvidenceSettings', () => {
     expect(field.classList.contains('ring-2')).toBe(true)
   })
 
+  /**
+   * M7: odkaz z blokace hlášení nese rok hlášeného období. Formulář se na něm
+   * otevře sám (dřív výchozí rok a ruční přepis) a pro rok 2027 neříká, že
+   * se údaje připojí jen k prosincovému podání.
+   */
+  it('otevře rok z odkazu a pro 2027 vysvětlí měsíční hlášení typů kolektivních smluv', async () => {
+    window.history.replaceState({}, '', '/payroll/settings?tab=submissions&year=2027')
+    try {
+      const wrapper = mount(JmhzEmployerAnnualEvidenceSettings, { props: { canWrite: true } })
+      await flushPromises()
+
+      expect(m.load).toHaveBeenCalledWith(2027)
+      expect(wrapper.text()).toContain('payroll.employer.jmhz_annual.subtitle_2027')
+      expect(wrapper.text()).toContain('payroll.employer.jmhz_annual.collective_types_2027')
+      expect(wrapper.text()).not.toContain('payroll.employer.jmhz_annual.subtitle ')
+    } finally {
+      window.history.replaceState({}, '', '/')
+    }
+  })
+
+  it('bez roku v odkazu nechá výchozí rok a prosincové texty', async () => {
+    vi.useFakeTimers({ now: new Date(2026, 10, 11), toFake: ['Date'] })
+    try {
+      const wrapper = mount(JmhzEmployerAnnualEvidenceSettings, { props: { canWrite: true } })
+      await flushPromises()
+
+      expect(m.load).toHaveBeenCalledWith(2026)
+      expect(wrapper.text()).not.toContain('payroll.employer.jmhz_annual.subtitle_2027')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('selhané načtení nabídne opakování, ne prázdnou sekci', async () => {
     m.load.mockRejectedValueOnce(new Error('offline'))
     const wrapper = mount(JmhzEmployerAnnualEvidenceSettings, {

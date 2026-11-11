@@ -67,7 +67,8 @@ final class PayrollE2eHppJmhzTest extends TestCase
         // ohlásí kontrola před během, ne až příprava hlášení po schválení.
         foreach (['jmhz_employer_annual_collective_agreement_missing', 'jmhz_employer_annual_ownership_missing', 'jmhz_employer_annual_ozp_summary_missing'] as $code) {
             self::assertArrayHasKey($code, $findings, CanonicalJson::encode($readiness['findings']));
-            self::assertSame('/payroll/settings?tab=submissions#jmhz-employer-annual-evidence', $findings[$code]['remediation_path']);
+            // Odkaz nese rok hlášeného období, aby formulář neotevřel výchozí (už vyplněný) rok.
+            self::assertSame('/payroll/settings?tab=submissions&year=2026#jmhz-employer-annual-evidence', $findings[$code]['remediation_path']);
             self::assertStringContainsString('Roční údaje zaměstnavatele pro JMHZ', $findings[$code]['message']);
         }
         self::assertArrayHasKey('component_jmhz_mapping_missing', $findings);
