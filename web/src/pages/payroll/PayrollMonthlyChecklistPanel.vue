@@ -657,6 +657,24 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
       </button>
     </div>
 
+    <!--
+      Příprava hlášení je jeden synchronní požadavek, u větší firmy na desítky
+      sekund. Změna popisku na tlačítku v řádku se snadno přehlédne.
+    -->
+    <p
+      v-if="preparing !== ''"
+      class="flex items-start gap-3 rounded-xl border border-payroll-200 bg-payroll-50 p-4 text-sm text-payroll-800"
+      role="status"
+      aria-live="polite"
+      data-test="monthly-checklist-preparing-progress"
+    >
+      <svg class="mt-0.5 h-4 w-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
+        <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+      </svg>
+      <span>{{ t('payroll.submissions.monthly_checklist.preparing_progress') }}</span>
+    </p>
+
     <div v-if="loading" class="grid grid-cols-2 gap-3 lg:grid-cols-5">
       <div v-for="index in 5" :key="index" class="h-20 animate-pulse rounded-xl bg-neutral-100" />
     </div>

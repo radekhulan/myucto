@@ -643,6 +643,32 @@ describe('PayrollMonthlyChecklistPanel', () => {
     expect(m.push).not.toHaveBeenCalled()
   })
 
+  // Příprava hlášení je jeden synchronní požadavek, u větší firmy na desítky
+  // sekund. Po dobu čekání musí být vidět, že se něco děje, ne jen zašedlá tlačítka.
+  it('ukazuje průběh, dokud příprava hlášení běží', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({ items: [agendaDutyItem()] }))
+    let finish: (value: unknown) => void = () => {}
+    m.prepareItem.mockReturnValue(new Promise((resolve) => { finish = resolve }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-test="monthly-checklist-preparing-progress"]').exists()).toBe(false)
+
+    await wrapper.get('tbody [data-test="monthly-checklist-prepare-send"]').trigger('click')
+    await flushPromises()
+
+    const progress = wrapper.get('[data-test="monthly-checklist-preparing-progress"]')
+    expect(progress.attributes('role')).toBe('status')
+    expect(progress.text()).toContain('preparing_progress')
+    // Druhé kliknutí za běhu nic nespustí.
+    expect(wrapper.get('tbody [data-test="monthly-checklist-prepare-send"]').attributes('disabled')).toBeDefined()
+    expect(m.prepareItem).toHaveBeenCalledTimes(1)
+
+    finish({ submission_ids: [], prepared: 0, path: null })
+    await flushPromises()
+    expect(wrapper.find('[data-test="monthly-checklist-preparing-progress"]').exists()).toBe(false)
+  })
+
   it('„Připravit a odeslat vše" pokryje nepřipravené i připravené řádky jedním potvrzením', async () => {
     const ready = {
       ...agendaDutyItem(),

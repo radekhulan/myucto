@@ -384,6 +384,33 @@ describe('PayrollRuns', () => {
     expect(m.deleteRun).not.toHaveBeenCalled()
   })
 
+  // Výpočet i schválení jsou jeden synchronní požadavek, u větší firmy na
+  // desítky sekund. Zašedlé tlačítko bez průběhu vypadalo jako zamrzlá stránka.
+  it('shows progress while a run command is in flight and blocks a second click', async () => {
+    m.runs.mockResolvedValue([run({ status: 'calculated', available_commands: ['calculate', 'approve', 'cancel'] })])
+    let finish: (value: unknown) => void = () => {}
+    m.commandRun.mockReturnValue(new Promise((resolve) => { finish = resolve }))
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="payroll-run-15-command-progress"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="payroll-run-15-calculate"]').trigger('click')
+    await flushPromises()
+
+    const progress = wrapper.get('[data-testid="payroll-run-15-command-progress"]')
+    expect(progress.attributes('role')).toBe('status')
+    expect(progress.text()).toContain('payroll.runs.command_progress.calculate')
+    expect(progress.text()).toContain('payroll.runs.command_progress.hint')
+    expect(wrapper.get('[data-testid="payroll-run-15-calculate"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="payroll-run-15-approve"]').attributes('disabled')).toBeDefined()
+    expect(m.commandRun).toHaveBeenCalledTimes(1)
+
+    finish({ outcome: null })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="payroll-run-15-command-progress"]').exists()).toBe(false)
+  })
+
   // Schované tlačítko účetní nic neřekne. Běh se stane nesmazatelným hned
   // prvním „Uzamknout vstupy" a bez důvodu to vypadá jako závada aplikace.
   it('says why the run cannot be deleted instead of just hiding the button', async () => {
@@ -413,10 +440,30 @@ describe('PayrollRuns', () => {
     const wrapper = mount(PayrollRuns)
     await flushPromises()
 
-    expect(m.runDetail).not.toHaveBeenCalled()
+    expect(m.runPeople).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="payroll-run-15-people"]').exists()).toBe(false)
 
     await wrapper.get('[data-testid="payroll-run-15-breakdown-toggle"]').trigger('click')
     await flushPromises()
+
+    expect(m.runPeople).toHaveBeenCalledWith(15, expect.objectContaining({ limit: 25, offset: 0 }))
+    expect(m.runDetail).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="payroll-run-15-people"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="payroll-run-15-breakdown-toggle"]').trigger('click')
+    expect(wrapper.find('[data-testid="payroll-run-15-people"]').exists()).toBe(false)
+  })
+
+  // Číselník jmen (13 kB u 150 osob) se stahoval při každém obnovení seznamu
+  // běhů, tedy i po každém příkazu. Stačí jednou; znovu jen když nález
+  // jmenuje osobu, kterou číselník nezná.
+  it('loads the people names once, not on every reload of the run list', async () => {
+    m.peopleOptions.mockResolvedValue([{ id: 2, full_name: 'Jana Syntetická' }])
+    m.runs.mockResolvedValue([run({ status: 'calculated', available_commands: ['calculate', 'approve', 'cancel'] })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    expect(m.peopleOptions).toHaveBeenCalledTimes(1)
 
     await wrapper.get('[data-testid="payroll-run-15-calculate"]').trigger('click')
     await flushPromises()
@@ -455,30 +502,10 @@ describe('PayrollRuns', () => {
       revision_id: 10,
       revision_no: 2,
       revision_kind: 'correction',
-    expect(m.runPeople).not.toHaveBeenCalled()
-    expect(wrapper.find('[data-testid="payroll-run-15-people"]').exists()).toBe(false)
-
-    await wrapper.get('[data-testid="payroll-run-15-breakdown-toggle"]').trigger('click')
-    await flushPromises()
-
-    expect(m.runPeople).toHaveBeenCalledWith(15, expect.objectContaining({ limit: 25, offset: 0 }))
       revision_status: 'approved',
-    expect(wrapper.find('[data-testid="payroll-run-15-people"]').exists()).toBe(true)
       result_snapshot: { totals: { cash_payable_minor: 120_000 } },
     })])
-    expect(wrapper.find('[data-testid="payroll-run-15-people"]').exists()).toBe(false)
-  })
-
-  // Číselník jmen (13 kB u 150 osob) se stahoval při každém obnovení seznamu
-  // běhů, tedy i po každém příkazu. Stačí jednou; znovu jen když nález
-  // jmenuje osobu, kterou číselník nezná.
-  it('loads the people names once, not on every reload of the run list', async () => {
-    m.peopleOptions.mockResolvedValue([{ id: 2, full_name: 'Jana Syntetická' }])
-    m.runs.mockResolvedValue([run({ status: 'calculated', available_commands: ['calculate', 'approve', 'cancel'] })])
-
-    const wrapper = mount(PayrollRuns)
     m.runHistory.mockResolvedValue({
-    expect(m.peopleOptions).toHaveBeenCalledTimes(1)
       run_id: 15,
       revisions: [
         {

@@ -59,6 +59,19 @@ const loading = ref(false)
  */
 const loadFailed = ref(false)
 const saving = ref(false)
+/**
+ * Příkaz běhu, na jehož odpověď se čeká. Výpočet, schválení i oprava jsou jeden
+ * synchronní požadavek, u větší firmy na desítky sekund; samotné zašedlé
+ * tlačítko vypadalo jako zamrzlá stránka.
+ */
+const runningCommand = ref<{ runId: number, command: PayrollRunCommand } | null>(null)
+const COMMANDS_WITH_PROGRESS_TEXT = new Set<PayrollRunCommand>([
+  'lock_and_calculate', 'calculate', 'refresh_inputs', 'approve', 'reopen', 'post', 'prepare_payments',
+])
+
+function commandProgressLabel(command: PayrollRunCommand): string {
+  return t(`payroll.runs.command_progress.${COMMANDS_WITH_PROGRESS_TEXT.has(command) ? command : 'other'}`)
+}
 /*
  * Období drží URL, ne jen stav komponenty. Účetní zpracovává mzdy zpětně — v září
  * dělá srpen — a bez toho ji každé obnovení stránky, návrat z detailu i sdílený
@@ -998,6 +1011,16 @@ async function load() {
       personNames.value = Object.fromEntries(
         people.map(person => [person.id, person.full_name]),
       )
+      personNamesLoaded = true
+    }
+    // Nález jmenuje osobu, kterou číselník ještě nezná (založená mezitím
+    // jinde): příští načtení si jména stáhne znovu.
+    if (personNamesLoaded && page.runs.some(run => run.validations.some(validation =>
+      validation.entity_type === 'employee'
+      && validation.entity_id !== null
+      && personNames.value[validation.entity_id] === undefined))
+    ) {
+      personNamesLoaded = false
     }
   } catch {
     // Seznam běhů se nechává být: „za období nebyl spuštěn žádný běh" je
@@ -1011,16 +1034,6 @@ async function load() {
 }
 
 // Stránkuje sdílená `PaginationBar` (číslo stránky od jedné); server zná offset.
-      personNamesLoaded = true
-    }
-    // Nález jmenuje osobu, kterou číselník ještě nezná (založená mezitím
-    // jinde): příští načtení si jména stáhne znovu.
-    if (personNamesLoaded && page.runs.some(run => run.validations.some(validation =>
-      validation.entity_type === 'employee'
-      && validation.entity_id !== null
-      && personNames.value[validation.entity_id] === undefined))
-    ) {
-      personNamesLoaded = false
 function goToPage(nextPage: number) {
   offset.value = Math.max(0, (nextPage - 1) * pageSize)
   void load()
@@ -1304,6 +1317,7 @@ async function submitCommand(
   reason?: string,
 ) {
   saving.value = true
+  runningCommand.value = { runId: run.id, command }
   delete commandBlockers.value[run.id]
   try {
     const response = await payrollApi.commandRun(
@@ -1373,6 +1387,7 @@ async function submitCommand(
     }
   } finally {
     saving.value = false
+    runningCommand.value = null
   }
 }
 
@@ -2233,6 +2248,23 @@ onMounted(load)
           {{ run.delete_blocker }}
         </p>
 
+        <p
+          v-if="runningCommand?.runId === run.id"
+          :data-testid="`payroll-run-${run.id}-command-progress`"
+          class="mt-4 flex items-start gap-3 rounded-lg border border-payroll-200 bg-payroll-50 p-3 text-sm text-payroll-800"
+          role="status"
+          aria-live="polite"
+        >
+          <svg class="mt-0.5 h-4 w-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
+            <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+          </svg>
+          <span>
+            <span class="font-medium">{{ commandProgressLabel(runningCommand.command) }}</span>
+            {{ t('payroll.runs.command_progress.hint') }}
+          </span>
+        </p>
+
         <div
           v-if="commandBlockers[run.id]"
           :data-testid="`payroll-run-${run.id}-blocker`"
@@ -2477,6 +2509,7 @@ onMounted(load)
           v-if="breakdownOpen[run.id] && run.result_snapshot"
           :run-id="run.id"
           :revision-id="run.revision_id"
+          :period="run.period_start.slice(0, 7)"
           :approved="run.revision_status === 'approved'"
           :refresh-key="run.row_version"
         />
@@ -2508,7 +2541,6 @@ onMounted(load)
             :to="{ name: 'payroll-settings', query: { tab: 'warnings' } }"
             class="inline-flex items-center gap-1 whitespace-nowrap text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-700"
             :data-testid="`payroll-run-${run.id}-hidden-warnings`"
-          :period="run.period_start.slice(0, 7)"
           >
             <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eyeOff" /></svg>
             {{ t('payroll.runs.hidden_warnings_link', { count: run.hidden_validation_count }) }}

@@ -4249,6 +4249,17 @@
         "detail_load_failed": "Detail výpočtu se nepodařilo načíst. Zkuste to prosím znovu."
       },
       "save_failed": "Mzdový běh se nepodařilo vytvořit.",
+      "command_progress": {
+        "lock_and_calculate": "Zamykám vstupy a počítám mzdy…",
+        "calculate": "Počítám mzdy…",
+        "refresh_inputs": "Obnovuji podklady běhu…",
+        "approve": "Schvaluji běh a zapisuji roční kumulace…",
+        "reopen": "Zakládám opravnou revizi…",
+        "post": "Účtuji mzdy…",
+        "prepare_payments": "Připravuji platby…",
+        "other": "Provádím krok…",
+        "hint": "U větší firmy může krok trvat desítky sekund. Stránku nechte otevřenou; opakované kliknutí ani obnovení stránky krok nespustí podruhé."
+      },
       "command_done": "Stav mzdového běhu byl změněn.",
       "command_failed": "Příkaz mzdového běhu se nepodařilo provést.",
       "payments_unsettled": "Běh zatím není skutečně uhrazený. V agendě Mzdové příkazy a úhrady spárujte všechny částky s bankovními pohyby nebo zaúčtovanými pokladními doklady a vyřešte případné vratky či storna.",
@@ -5577,6 +5588,7 @@
       "batch_stalled_hint": "Dokumenty generuje úloha na pozadí (cron-payroll-document-worker), která se na této instalaci nespouští. Zpracování můžete spustit ručně; trvale ho zajistí úloha nastavená v Systém → Plánované úlohy.",
       "batch_worker_start": "Spustit zpracování",
       "batch_worker_starting": "Spouštím…",
+      "batch_worker_running": "Zpracování běží…",
       "batch_worker_started": "Zpracování dávky je spuštěné.",
       "batch_worker_start_failed": "Zpracování dávky se nepodařilo spustit.",
       "batch_bundle_ready": "Měsíční ZIP vznikl až po úspěšném dokončení všech osob.",
@@ -5588,7 +5600,6 @@
         "running": "Připravuji přehled…",
         "hint": "PDF se všemi zaměstnanci za zvolený měsíc a souhrnem osobních nákladů. Bere schválené mzdy, u převzatých měsíců mzdy z předchozího programu.",
         "failed": "Přehled mezd se nepodařilo vytvořit."
-      "batch_worker_running": "Zpracování běží…",
       },
       "batch_attempts": "pokusů: {count}",
       "batch_retry": "Opakovat",
@@ -9172,6 +9183,7 @@
         "load_failed": "Měsíční přehled se nenačetl. Zkuste to prosím znovu.",
         "prepare_failed": "Podání se nepodařilo připravit. Zkuste to prosím znovu.",
         "preparing": "Připravuji…",
+        "preparing_progress": "Připravuji hlášení. U větší firmy to může trvat desítky sekund; stránku nechte otevřenou.",
         "empty": "Za zvolené období nemá firma žádnou otevřenou položku.",
         "unknown": "neznámo",
         "not_applicable": "netýká se",
