@@ -5164,6 +5164,7 @@
         "cancel_failed": "The monthly input could not be cancelled.",
         "reverse_benefit": "Reverse benefit",
         "reverse_benefit_reason": "Reason for reversing the benefit — why is the annual exemption basket being released (§ 6(9) of the Income Tax Act)?",
+        "reverse_benefit_reason_required": "The benefit was not reversed: a reversal cannot be saved without a reason. Click “Reverse benefit” again and fill in the reason.",
         "benefit_reversed": "The benefit was reversed and the annual exemption basket was released.",
         "reverse_benefit_failed": "The benefit could not be reversed.",
         "empty": "There are no payroll inputs in this period",

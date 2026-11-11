@@ -1115,9 +1115,13 @@ final class PayrollInputRepository
                 'row_version',
             );
             if (!in_array($status, ['draft', 'approved'], true)) {
-                throw new \DomainException(
-                    'Přepsat lze jen rozpracovaný nebo dosud nezamčený schválený mzdový vstup.',
-                );
+                throw new \DomainException(PayrollInputLockGuidance::message(
+                    $pdo,
+                    $supplierId,
+                    $status,
+                    PayrollTimeValue::string($current['period_start'] ?? null, 'period_start'),
+                    'přepsat',
+                ));
             }
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollInputConflictException($currentVersion);
@@ -1987,10 +1991,17 @@ final class PayrollInputRepository
                 $row['row_version'] ?? null,
                 'row_version',
             );
+            if ($status === 'draft') {
+                throw new \DomainException('Mzdový vstup už je koncept; opravte ho přímo.');
+            }
             if ($status !== 'approved') {
-                throw new \DomainException(
-                    'Do konceptu lze vrátit jen schválený, dosud nezamčený mzdový vstup.',
-                );
+                throw new \DomainException(PayrollInputLockGuidance::message(
+                    $pdo,
+                    $supplierId,
+                    $status,
+                    PayrollTimeValue::string($row['period_start'] ?? null, 'period_start'),
+                    'vrátit do konceptu',
+                ));
             }
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollInputConflictException($currentVersion);

@@ -1802,7 +1802,11 @@ async function cancelInput(input: PayrollInput) {
 
 async function reverseBenefitInput(input: PayrollInput) {
   const reason = window.prompt(t('payroll.components.inputs.reverse_benefit_reason'))
-  if (reason === null || reason.trim() === '') return
+  if (reason === null) return
+  if (reason.trim() === '') {
+    inputError.value = t('payroll.components.inputs.reverse_benefit_reason_required')
+    return
+  }
   inputError.value = ''
   saving.value = true
   try {

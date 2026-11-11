@@ -5164,6 +5164,7 @@
         "cancel_failed": "Měsíční vstup se nepodařilo zrušit.",
         "reverse_benefit": "Stornovat benefit",
         "reverse_benefit_reason": "Důvod storna benefitu - proč se uvolňuje roční koš osvobození (§ 6 odst. 9 ZDP)?",
+        "reverse_benefit_reason_required": "Benefit se nestornoval: bez důvodu storno nejde uložit. Klikněte znovu na „Stornovat benefit“ a důvod vyplňte.",
         "benefit_reversed": "Benefit byl stornován a roční koš osvobození se uvolnil.",
         "reverse_benefit_failed": "Benefit se nepodařilo stornovat.",
         "empty": "V tomto období nejsou mzdové vstupy",
