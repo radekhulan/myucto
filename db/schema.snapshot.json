@@ -1186,7 +1186,9 @@
         "2280_membership_batches.sql",
         "2281_microsoft365_imap_oauth.sql",
         "2282_clients_simplified_only.sql",
-        "2283_payroll_submission_parts_subject_index.sql"
+        "2283_payroll_submission_parts_subject_index.sql",
+        "2284_payroll_statutory_entry_successor_index.sql",
+        "2285_payroll_run_summaries.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -19549,14 +19551,23 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
+                "advance_tax_minor": "bigint(20) NULL DEFAULT NULL",
+                "employee_health_minor": "bigint(20) NULL DEFAULT NULL",
                 "employee_id": "bigint(20) unsigned NOT NULL",
+                "employee_social_minor": "bigint(20) NULL DEFAULT NULL",
+                "gross_minor": "bigint(20) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "net_minor": "bigint(20) NULL DEFAULT NULL",
+                "payable_minor": "bigint(20) NULL DEFAULT NULL",
                 "period_start": "date NOT NULL",
                 "result_hash": "char(64) NULL DEFAULT NULL",
                 "result_json": "longtext NULL DEFAULT NULL",
+                "result_status": "varchar(16) NULL DEFAULT NULL",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "status": "enum('pending','calculated','blocked') NOT NULL DEFAULT 'pending'",
-                "supplier_id": "int(10) unsigned NOT NULL"
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "tax_bonus_minor": "bigint(20) NULL DEFAULT NULL",
+                "withholding_tax_minor": "bigint(20) NULL DEFAULT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
@@ -19678,6 +19689,12 @@
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "run_kind": "enum('calculated','takeover') NOT NULL DEFAULT 'calculated'",
                 "status": "enum('draft','inputs_locked','calculated','reviewed','approved','posted','payment_ready','paid','closed','correction_pending','reopened','cancelled') NOT NULL DEFAULT 'draft'",
+                "summary_cash_payable_minor": "bigint(20) NULL DEFAULT NULL",
+                "summary_enforcement_withheld_minor": "bigint(20) NULL DEFAULT NULL",
+                "summary_payable_after_enforcement_minor": "bigint(20) NULL DEFAULT NULL",
+                "summary_payment_materialization": "tinyint(1) NULL DEFAULT NULL",
+                "summary_person_count": "int(10) unsigned NULL DEFAULT NULL",
+                "summary_revision_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
@@ -20126,6 +20143,7 @@
                 "fk_payroll_statutory_entry_previous": "BTREE (supplier_id, employee_id, tax_year, period_start, calculation_kind, replaces_entry_id)",
                 "fk_payroll_statutory_entry_user": "BTREE (created_by)",
                 "idx_payroll_statutory_entry_read_model": "BTREE (supplier_id, employee_id, tax_year, calculation_kind, period_start)",
+                "idx_payroll_statutory_entry_successor": "BTREE (supplier_id, replaces_entry_id)",
                 "uq_payroll_statutory_entry_replacement": "UNIQUE BTREE (supplier_id, employee_id, tax_year, period_start, calculation_kind, predecessor_scope_id)",
                 "uq_payroll_statutory_entry_revision": "UNIQUE BTREE (supplier_id, revision_id, employee_id, calculation_kind)",
                 "uq_payroll_statutory_entry_scope_id": "UNIQUE BTREE (supplier_id, employee_id, tax_year, period_start, calculation_kind, id)",

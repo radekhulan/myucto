@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
+use MyInvoice\Action\Payroll\PayrollRunPeopleAction;
 use MyInvoice\Action\Payroll\PayrollRunsAction;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -33,6 +34,7 @@ final class PayrollEnforcementDisclosureApiTest extends TestCase
 
     private Connection $db;
     private PayrollRunsAction $runs;
+    private PayrollRunPeopleAction $runPeople;
     private PayrollPeopleAction $people;
     private PayrollEnforcementAction $enforcement;
     private int $userId;
@@ -59,6 +61,7 @@ final class PayrollEnforcementDisclosureApiTest extends TestCase
         }
         $this->db = $db;
         $this->runs = $runs;
+        $this->runPeople = $container->get(PayrollRunPeopleAction::class);
         $this->people = $people;
         $this->enforcement = $enforcement;
         if (!$db->hasTable('payroll_enforcement_cases')) {
@@ -97,30 +100,55 @@ final class PayrollEnforcementDisclosureApiTest extends TestCase
     {
         $runId = $this->runWithEnforcementSnapshot();
 
+        // Výsledek osoby (dřív součást detailu běhu) vrací samostatný endpoint
+        // a zužuje ho stejně: bez práva na exekuce jen sražená částka.
+        $personUri = "/api/payroll/runs/{$runId}/people/{$this->employeeId}";
+        $personArgs = ['id' => (string) $runId, 'employeeId' => (string) $this->employeeId];
         foreach (['session', 'bearer'] as $method) {
-            $response = $this->runs->detail(
-                $this->request('GET', "/api/payroll/runs/{$runId}", $this->payrollReader(), $method),
+            $response = $this->runPeople->detail(
+                $this->request('GET', $personUri, $this->payrollReader(), $method),
                 new Response(),
-                ['id' => (string) $runId],
+                $personArgs,
             );
             self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
             $body = (string) $response->getBody();
             self::assertStringNotContainsString('maintenance_arrears', $body, $method);
             self::assertStringNotContainsString('eligible_dependants', $body, $method);
-            $person = $this->json($response)['run']['result_snapshot']['people'][0];
+            $person = $this->json($response)['result'];
             self::assertTrue($person['enforcement']['redacted']);
             self::assertSame(1051400, $person['enforcement']['result']['total_withheld_minor_units']);
             self::assertSame(30000, $person['payable_after_enforcement_minor']);
+
+            // Detail běhu výsledky osob nenese vůbec a součet srážek bez práva skryje.
+            $detail = $this->runs->detail(
+                $this->request('GET', "/api/payroll/runs/{$runId}", $this->payrollReader(), $method),
+                new Response(),
+                ['id' => (string) $runId],
+            );
+            self::assertSame(200, $detail->getStatusCode(), (string) $detail->getBody());
+            self::assertStringNotContainsString('maintenance_arrears', (string) $detail->getBody(), $method);
+            $snapshot = $this->json($detail)['run']['result_snapshot'];
+            self::assertArrayNotHasKey('people', $snapshot);
+            self::assertNull($snapshot['totals']['enforcement_withheld_minor']);
         }
 
-        $full = $this->runs->detail(
+        $full = $this->runPeople->detail(
+            $this->request('GET', $personUri, $this->enforcementReader()),
+            new Response(),
+            $personArgs,
+        );
+        self::assertSame(200, $full->getStatusCode());
+        $person = $this->json($full)['result'];
+        self::assertSame('maintenance_arrears', $person['enforcement']['input']['claims'][0]['category']);
+        $fullDetail = $this->runs->detail(
             $this->request('GET', "/api/payroll/runs/{$runId}", $this->enforcementReader()),
             new Response(),
             ['id' => (string) $runId],
         );
-        self::assertSame(200, $full->getStatusCode());
-        $person = $this->json($full)['run']['result_snapshot']['people'][0];
-        self::assertSame('maintenance_arrears', $person['enforcement']['input']['claims'][0]['category']);
+        self::assertSame(
+            1051400,
+            $this->json($fullDetail)['run']['result_snapshot']['totals']['enforcement_withheld_minor'],
+        );
 
         // Seznam běhů: součet srážek jen s právem na exekuce.
         foreach ([[$this->payrollReader(), null], [$this->enforcementReader(), 1051400]] as [$role, $expected]) {
@@ -192,21 +220,22 @@ final class PayrollEnforcementDisclosureApiTest extends TestCase
              VALUES (?, "2026-06-01", "2026-06-30")'
         )->execute([$this->supplierId]);
         $runId = (int) $pdo->lastInsertId();
+        $personResult = [
+            'employee_id' => $this->employeeId,
+            'payable_after_enforcement_minor' => 30000,
+            'enforcement' => [
+                'input' => [
+                    'claims' => [['category' => 'maintenance_arrears', 'outstanding_minor_units' => 18765400]],
+                    'evidence' => ['eligible_dependants' => 1],
+                    'insolvency' => ['mode' => 'none'],
+                ],
+                'result' => ['insolvency_applied' => false, 'total_withheld_minor_units' => 1051400],
+            ],
+        ];
         $snapshot = json_encode([
             'schema_version' => 'payroll-run-result.v1',
             'totals' => ['enforcement_withheld_minor' => 1051400],
-            'people' => [[
-                'employee_id' => $this->employeeId,
-                'payable_after_enforcement_minor' => 30000,
-                'enforcement' => [
-                    'input' => [
-                        'claims' => [['category' => 'maintenance_arrears', 'outstanding_minor_units' => 18765400]],
-                        'evidence' => ['eligible_dependants' => 1],
-                        'insolvency' => ['mode' => 'none'],
-                    ],
-                    'result' => ['insolvency_applied' => false, 'total_withheld_minor_units' => 1051400],
-                ],
-            ]],
+            'people' => [$personResult],
         ], JSON_THROW_ON_ERROR);
         $pdo->prepare(
             'INSERT INTO payroll_run_revisions
@@ -225,7 +254,22 @@ final class PayrollEnforcementDisclosureApiTest extends TestCase
             hash('sha256', $snapshot),
             hash('sha256', 'synthetic-disclosure-revision', true),
         ]);
+        $revisionId = (int) $pdo->lastInsertId();
         $pdo->prepare('UPDATE payroll_runs SET current_revision_no = 1 WHERE id = ?')->execute([$runId]);
+        // Výsledek osoby tak, jak ho vedle snímku revize ukládá výpočet.
+        $personJson = json_encode($personResult, JSON_THROW_ON_ERROR);
+        $pdo->prepare(
+            'INSERT INTO payroll_run_persons
+                (supplier_id, revision_id, period_start, employee_id, status,
+                 result_json, result_hash, gross_minor, payable_minor)
+             VALUES (?, ?, "2026-06-01", ?, "calculated", ?, ?, 0, 30000)'
+        )->execute([
+            $this->supplierId,
+            $revisionId,
+            $this->employeeId,
+            $personJson,
+            hash('sha256', $personJson),
+        ]);
 
         return $runId;
     }

@@ -92,6 +92,10 @@ const exportJob = ref<PayrollPeriodExportJob | null>(null)
 const rerunningExportJob = ref(false)
 let loadSequence = 0
 let batchPollTimer: ReturnType<typeof setTimeout> | null = null
+/** Kdy se naposledy stáhl seznam položek dávky a jak často se smí za běhu obnovit. */
+let batchItemsLoadedAt = 0
+const BATCH_ITEMS_REFRESH_MS = 10_000
+const BATCH_WORKER_GRACE_MS = 30_000
 let annualBatchPollTimer: ReturnType<typeof setTimeout> | null = null
 let exportPollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -831,7 +835,10 @@ async function loadAllBatchItems(batchId: number): Promise<void> {
     nextOffset += page.items.length
     if (page.items.length === 0) break
   }
-  if (documentBatch.value?.id === batchId) documentBatchItems.value = items
+  if (documentBatch.value?.id === batchId) {
+    documentBatchItems.value = items
+    batchItemsLoadedAt = Date.now()
+  }
 }
 
 /*
@@ -862,11 +869,24 @@ async function loadDocumentBatch(loadItems = false): Promise<void> {
     const current = await payrollApi.documentBatch(batchId)
     if (documentBatch.value?.id !== batchId) return
     documentBatch.value = current
-    const changed = previous === null
+    /*
+     * Průběh nesou stav a počty dávky. Seznam položek se za běhu nestahuje při
+     * každém přírůstku hotových pásek (u 150 osob to byly všechny položky
+     * každých 2,5 s, dohromady stovky kB), ale jen když se změní stav dávky
+     * nebo počet chyb (položku jde zopakovat) a jinak nejvýš jednou za
+     * BATCH_ITEMS_REFRESH_MS, ať řádky za průběhem nezůstanou stát.
+     */
+    const decisive = previous === null
       || previous.status !== current.status
-      || previous.succeeded_count !== current.succeeded_count
       || previous.failed_count !== current.failed_count
-    if (loadItems || changed) await loadAllBatchItems(batchId)
+    const progressed = previous !== null && previous.succeeded_count !== current.succeeded_count
+    if (loadItems || decisive
+      || (progressed && Date.now() - batchItemsLoadedAt >= BATCH_ITEMS_REFRESH_MS)
+    ) {
+      await loadAllBatchItems(batchId)
+    }
+    // Fronta se rozběhla: příští zaseknutí smí tlačítko nabídnout znovu.
+    if (!current.worker_stalled) batchWorkerStartedAt.value = null
     if (current.status === 'completed') {
       toast.success(t('payroll.documents.batch_complete'))
       await load()
@@ -880,13 +900,27 @@ async function loadDocumentBatch(loadItems = false): Promise<void> {
 }
 
 const startingBatchWorker = ref(false)
+/**
+ * Kdy se zpracování naposledy spustilo ručně. Server hlásí frontu jako stojící
+ * ještě chvíli po spuštění, takže tlačítko zůstávalo aktivní a šlo zmáčknout
+ * podruhé. Po úspěšném spuštění se proto na BATCH_WORKER_GRACE_MS zamkne;
+ * když se fronta do té doby nerozběhne, nabídne se znovu.
+ */
+const batchWorkerStartedAt = ref<number | null>(null)
+
+function batchWorkerBusy(): boolean {
+  return startingBatchWorker.value
+    || (batchWorkerStartedAt.value !== null
+      && Date.now() - batchWorkerStartedAt.value < BATCH_WORKER_GRACE_MS)
+}
 
 async function startBatchWorker(): Promise<void> {
   const batchId = documentBatch.value?.id
-  if (!batchId || startingBatchWorker.value) return
+  if (!batchId || batchWorkerBusy()) return
   startingBatchWorker.value = true
   try {
     await payrollApi.runDocumentBatch(batchId)
+    batchWorkerStartedAt.value = Date.now()
     toast.success(t('payroll.documents.batch_worker_started'))
     await loadDocumentBatch(true)
   } catch (error) {
@@ -1268,14 +1302,18 @@ onBeforeUnmount(() => {
         <button
           type="button"
           :class="[btnFilled('warning'), 'whitespace-nowrap']"
-          :disabled="startingBatchWorker"
+          :disabled="batchWorkerBusy()"
           data-test="document-batch-start-worker"
           @click="startBatchWorker()"
         >
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path :d="ICONS.play" />
           </svg>
-          {{ t(startingBatchWorker ? 'payroll.documents.batch_worker_starting' : 'payroll.documents.batch_worker_start') }}
+          {{ t(startingBatchWorker
+            ? 'payroll.documents.batch_worker_starting'
+            : batchWorkerBusy()
+              ? 'payroll.documents.batch_worker_running'
+              : 'payroll.documents.batch_worker_start') }}
         </button>
       </div>
       <div v-if="documentBatch.bundle_document_id" class="mt-3 flex flex-wrap items-center gap-3">

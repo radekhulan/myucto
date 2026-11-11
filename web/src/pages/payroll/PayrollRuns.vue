@@ -15,16 +15,12 @@ import {
   type PayrollRunReadinessBulkKind,
   type PayrollRunReadinessFinding,
   type PayrollRunRevisionHistory,
-  type PayrollRunResultPerson,
   type PayrollRunValidation,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { payrollAbsenceApi } from '@/api/payrollAbsences'
 import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
-import PayrollPayslipHourlyBreakdown from '@/components/payroll/PayrollPayslipHourlyBreakdown.vue'
-import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
-import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
-import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
+import PayrollRunPeopleTable from '@/components/payroll/PayrollRunPeopleTable.vue'
 import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, btnOutlineSmWrap, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate, formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
@@ -65,6 +61,19 @@ const loading = ref(false)
  */
 const loadFailed = ref(false)
 const saving = ref(false)
+/**
+ * Příkaz běhu, na jehož odpověď se čeká. Výpočet, schválení i oprava jsou jeden
+ * synchronní požadavek, u větší firmy na desítky sekund; samotné zašedlé
+ * tlačítko vypadalo jako zamrzlá stránka.
+ */
+const runningCommand = ref<{ runId: number, command: PayrollRunCommand } | null>(null)
+const COMMANDS_WITH_PROGRESS_TEXT = new Set<PayrollRunCommand>([
+  'lock_and_calculate', 'calculate', 'refresh_inputs', 'approve', 'reopen', 'post', 'prepare_payments',
+])
+
+function commandProgressLabel(command: PayrollRunCommand): string {
+  return t(`payroll.runs.command_progress.${COMMANDS_WITH_PROGRESS_TEXT.has(command) ? command : 'other'}`)
+}
 /*
  * Období drží URL, ne jen stav komponenty. Účetní zpracovává mzdy zpětně — v září
  * dělá srpen — a bez toho ji každé obnovení stránky, návrat z detailu i sdílený
@@ -124,12 +133,12 @@ const paymentDateTouched = ref(false)
 const runs = ref<PayrollRun[]>([])
 const personNames = ref<Record<number, string>>({})
 /**
- * Osobní rozpad běhu (`result_snapshot.people`) je ta objemná část výsledku a
- * seznam ho úmyslně neposílá — server by ho jinak musel načíst pro všechny běhy
- * firmy najednou. Drží se proto stranou a dotahuje se pro jeden rozbalený běh.
+ * U kterých běhů je rozbalený přehled osob. Výsledky osob seznam běhů neposílá;
+ * stránkuje a dotahuje si je `PayrollRunPeopleTable` sama.
  */
-const breakdowns = ref<Record<number, PayrollRunResultPerson[]>>({})
-const breakdownLoading = ref<Record<number, boolean>>({})
+const breakdownOpen = ref<Record<number, boolean>>({})
+/** Číselník jmen se stahuje jednou, ne při každém obnovení seznamu běhů. */
+let personNamesLoaded = false
 const histories = ref<Record<number, PayrollRunHistory>>({})
 const historyOpen = ref<Record<number, boolean>>({})
 const historyLoading = ref<Record<number, boolean>>({})
@@ -998,7 +1007,7 @@ async function load() {
   try {
     const [page, people] = await Promise.all([
       payrollApi.runsPage(period.value, { limit: pageSize, offset: offset.value }),
-      payrollApi.peopleOptions().catch(() => null),
+      personNamesLoaded ? Promise.resolve(null) : payrollApi.peopleOptions().catch(() => null),
     ])
     runs.value = page.runs
     total.value = page.total
@@ -1016,8 +1025,11 @@ async function load() {
     ) {
       paymentDate.value = suggestedPaymentDate.value
     }
-    // Rozpad patří ke konkrétní revizi; po přenačtení seznamu už nemusí platit.
-    breakdowns.value = {}
+    // Otevřený přehled osob zůstává; při změně revize se přenačte sám.
+    breakdownOpen.value = Object.fromEntries(
+      Object.entries(breakdownOpen.value)
+        .filter(([id]) => page.runs.some(run => String(run.id) === id && run.result_snapshot)),
+    )
     histories.value = {}
     historyOpen.value = {}
     historyFailed.value = {}
@@ -1025,6 +1037,16 @@ async function load() {
       personNames.value = Object.fromEntries(
         people.map(person => [person.id, person.full_name]),
       )
+      personNamesLoaded = true
+    }
+    // Nález jmenuje osobu, kterou číselník ještě nezná (založená mezitím
+    // jinde): příští načtení si jména stáhne znovu.
+    if (personNamesLoaded && page.runs.some(run => run.validations.some(validation =>
+      validation.entity_type === 'employee'
+      && validation.entity_id !== null
+      && personNames.value[validation.entity_id] === undefined))
+    ) {
+      personNamesLoaded = false
     }
   } catch {
     // Seznam běhů se nechává být: „za období nebyl spuštěn žádný běh" je
@@ -1043,29 +1065,14 @@ function goToPage(nextPage: number) {
   void load()
 }
 
-/**
- * Dotáhne osobní rozpad jednoho běhu. Opakované kliknutí rozpad schová, aby si
- * uživatel mohl seznam zase zpřehlednit; jednou stažená data se drží v paměti.
- */
-async function toggleBreakdown(run: PayrollRun) {
-  if (breakdowns.value[run.id] !== undefined) {
-    const { [run.id]: _removed, ...rest } = breakdowns.value
-    breakdowns.value = rest
+/** Rozbalí nebo schová přehled osob jednoho běhu. */
+function toggleBreakdown(run: PayrollRun) {
+  if (breakdownOpen.value[run.id]) {
+    const { [run.id]: _removed, ...rest } = breakdownOpen.value
+    breakdownOpen.value = rest
     return
   }
-  breakdownLoading.value = { ...breakdownLoading.value, [run.id]: true }
-  try {
-    const detail = await payrollApi.run(run.id)
-    breakdowns.value = {
-      ...breakdowns.value,
-      [run.id]: detail.result_snapshot?.people ?? [],
-    }
-  } catch {
-    toast.error(t('payroll.runs.breakdown_failed'))
-  } finally {
-    const { [run.id]: _pending, ...rest } = breakdownLoading.value
-    breakdownLoading.value = rest
-  }
+  breakdownOpen.value = { ...breakdownOpen.value, [run.id]: true }
 }
 
 const HISTORY_TOTAL_KEYS: PayrollRunHistoryTotalKey[] = [
@@ -1371,6 +1378,7 @@ async function submitCommand(
   reason?: string,
 ) {
   saving.value = true
+  runningCommand.value = { runId: run.id, command }
   delete commandBlockers.value[run.id]
   try {
     const response = await payrollApi.commandRun(
@@ -1440,6 +1448,7 @@ async function submitCommand(
     }
   } finally {
     saving.value = false
+    runningCommand.value = null
   }
 }
 
@@ -2377,6 +2386,23 @@ onMounted(load)
           {{ run.delete_blocker }}
         </p>
 
+        <p
+          v-if="runningCommand?.runId === run.id"
+          :data-testid="`payroll-run-${run.id}-command-progress`"
+          class="mt-4 flex items-start gap-3 rounded-lg border border-payroll-200 bg-payroll-50 p-3 text-sm text-payroll-800"
+          role="status"
+          aria-live="polite"
+        >
+          <svg class="mt-0.5 h-4 w-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
+            <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+          </svg>
+          <span>
+            <span class="font-medium">{{ commandProgressLabel(runningCommand.command) }}</span>
+            {{ t('payroll.runs.command_progress.hint') }}
+          </span>
+        </p>
+
         <div
           v-if="commandBlockers[run.id]"
           :data-testid="`payroll-run-${run.id}-blocker`"
@@ -2492,19 +2518,13 @@ onMounted(load)
             type="button"
             :data-testid="`payroll-run-${run.id}-breakdown-toggle`"
             :class="btnOutline('neutral')"
-            :disabled="breakdownLoading[run.id]"
+            :aria-expanded="!!breakdownOpen[run.id]"
             @click="toggleBreakdown(run)"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.chart" />
             </svg>
-            {{
-              breakdownLoading[run.id]
-                ? t('common.loading')
-                : breakdowns[run.id]
-                  ? t('payroll.runs.breakdown_hide')
-                  : t('payroll.runs.breakdown_show')
-            }}
+            {{ breakdownOpen[run.id] ? t('payroll.runs.breakdown_hide') : t('payroll.runs.breakdown_show') }}
           </button>
           <button
             type="button"
@@ -2662,31 +2682,13 @@ onMounted(load)
           </div>
         </section>
 
-        <PayrollPayslipHourlyBreakdown
-          v-if="breakdowns[run.id]?.length"
-          :people="breakdowns[run.id]"
-          :person-names="personNames"
-        />
-
-        <PayrollIncomeTaxBreakdown
-          v-if="breakdowns[run.id]?.length"
-          :people="breakdowns[run.id]"
-          :person-names="personNames"
-        />
-
-        <PayrollInsuranceBreakdown
-          v-if="breakdowns[run.id]?.length"
+        <PayrollRunPeopleTable
+          v-if="breakdownOpen[run.id] && run.result_snapshot"
+          :run-id="run.id"
           :revision-id="run.revision_id"
-          :people="breakdowns[run.id]"
-          :person-names="personNames"
-        />
-
-        <PayrollNetPayBreakdown
-          v-if="breakdowns[run.id]?.length"
-          :revision-id="run.revision_id"
+          :period="run.period_start.slice(0, 7)"
           :approved="run.revision_status === 'approved'"
-          :people="breakdowns[run.id]"
-          :person-names="personNames"
+          :refresh-key="run.row_version"
         />
 
         <!--

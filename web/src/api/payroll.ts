@@ -7847,7 +7847,81 @@ export interface PayrollRunResultSnapshot {
     enforcement_withheld_minor?: number | null
     payable_after_enforcement_minor?: number
   }
-  people?: PayrollRunResultPerson[]
+  /** Počet osob v revizi; jen v detailu běhu. Výsledky osob nese `runPeople()`. */
+  person_count?: number | null
+}
+
+export type PayrollRunPeopleSortKey =
+  | 'name'
+  | 'gross_minor'
+  | 'insurance_minor'
+  | 'tax_minor'
+  | 'net_minor'
+  | 'payable_minor'
+
+export interface PayrollRunPersonEmployment {
+  id: number
+  code: string
+  relation_type: string
+}
+
+/** Řádek přehledu osob ve spočítaném běhu; částky v haléřích. */
+export interface PayrollRunPersonRow {
+  employee_id: number
+  full_name: string
+  result_status: 'calculated' | 'manual_review' | 'error' | null
+  gross_minor: number | null
+  employee_social_minor: number | null
+  employee_health_minor: number | null
+  insurance_minor: number | null
+  advance_tax_minor: number | null
+  withholding_tax_minor: number | null
+  tax_minor: number | null
+  tax_bonus_minor: number | null
+  net_minor: number | null
+  payable_minor: number | null
+  employments: PayrollRunPersonEmployment[]
+  findings: { blockers: number, warnings: number }
+  has_finding: boolean
+}
+
+export interface PayrollRunPeopleTotals {
+  gross_minor: number
+  insurance_minor: number
+  tax_minor: number
+  tax_bonus_minor: number
+  net_minor: number
+  payable_minor: number
+}
+
+export interface PayrollRunPeoplePage {
+  run_id: number
+  period_start: string
+  revision_id: number | null
+  revision_no: number | null
+  revision_status: string | null
+  items: PayrollRunPersonRow[]
+  total: number
+  limit: number
+  offset: number
+  sort: PayrollRunPeopleSortKey
+  dir: 'asc' | 'desc'
+  /** Součty za celý zúžený výběr; `null` u běhu bez výsledku. */
+  totals: PayrollRunPeopleTotals | null
+}
+
+export interface PayrollRunPersonDetail {
+  run_id: number
+  period_start: string
+  revision_id: number
+  revision_no: number
+  revision_status: string
+  person: {
+    employee_id: number
+    full_name: string
+    employments: PayrollRunPersonEmployment[]
+  }
+  result: PayrollRunResultPerson
 }
 
 /**
@@ -10908,7 +10982,7 @@ export const payrollApi = {
     ).then(response => response.data.item),
   /**
    * Stránka seznamu běhů. `result_snapshot` nese jen `totals` — osobní rozpad
-   * v seznamu není, ten se dotahuje přes `run()` pro jeden konkrétní běh.
+   * v seznamu není, ten stránkuje `runPeople()` pro jeden konkrétní běh.
    * Bez `limit` platí serverový výchozí strop, ne „všechno".
    */
   runsPage: (period?: string, page?: { limit?: number, offset?: number }) =>
@@ -10923,10 +10997,33 @@ export const payrollApi = {
     api.get<PayrollRunsPage>('/payroll/runs', {
       params: period ? { period } : undefined,
     }).then(response => response.data.runs),
-  /** Jeden běh i s osobním rozpadem ve `result_snapshot.people`. */
+  /** Jeden běh se souhrnem výsledku; výsledky osob nese `runPeople()`. */
   run: (runId: number) =>
     api.get<{ run: PayrollRun }>(`/payroll/runs/${runId}`)
       .then(response => response.data.run),
+  /** Stránka přehledu osob ve spočítaném běhu; řadí, hledá a stránkuje server. */
+  runPeople: (runId: number, params: {
+    limit?: number
+    offset?: number
+    sort?: PayrollRunPeopleSortKey
+    dir?: 'asc' | 'desc'
+    q?: string
+    findings?: boolean
+  } = {}) =>
+    api.get<PayrollRunPeoplePage>(`/payroll/runs/${runId}/people`, {
+      params: {
+        ...(params.limit === undefined ? {} : { limit: params.limit }),
+        ...(params.offset === undefined ? {} : { offset: params.offset }),
+        ...(params.sort === undefined ? {} : { sort: params.sort }),
+        ...(params.dir === undefined ? {} : { dir: params.dir }),
+        ...(params.q ? { q: params.q } : {}),
+        ...(params.findings ? { findings: 1 } : {}),
+      },
+    }).then(response => response.data),
+  /** Celý výsledek jedné osoby v aktuální revizi běhu (rozpad výpočtu). */
+  runPerson: (runId: number, employeeId: number) =>
+    api.get<PayrollRunPersonDetail>(`/payroll/runs/${runId}/people/${employeeId}`)
+      .then(response => response.data),
   /** Lehká auditní historie bez vstupních a výsledkových snapshotů. */
   runHistory: (runId: number) =>
     api.get<{ history: PayrollRunHistory }>(`/payroll/runs/${runId}/history`)

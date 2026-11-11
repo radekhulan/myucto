@@ -28747,7 +28747,7 @@ paths:
     get:
       tags: [Payroll]
       summary: Detail mzdového běhu
-      description: Vrací aktuální revizi, výsledkový snapshot a jednotlivé validační příčiny s entitou a odkazem k nápravě, ale nenabízí žádný stavový příkaz. Více příčin může mít stejný kategorizační kód validace. U hodinových nároků obsahuje people[].payslip_document zmrazený rozpis v3 s množstvím, sazbami a rozdílem opravy. Starší měsíční dokumenty v2 zůstávají beze změny.
+      description: Vrací hlavičku běhu, aktuální revizi, souhrn výsledku (součty, zákonný souhrn zaměstnavatele, počet osob) a jednotlivé validační příčiny s entitou a odkazem k nápravě, ale nenabízí žádný stavový příkaz. Více příčin může mít stejný kategorizační kód validace. Výsledky jednotlivých osob detail nenese; stránkovaně je vrací `/payroll/runs/{id}/people`, celý výsledek jedné osoby `/payroll/runs/{id}/people/{employeeId}`. Součet exekučních srážek je bez oprávnění k exekucím `null`.
       responses:
         '200':
           description: Detail běhu
@@ -28758,6 +28758,65 @@ paths:
                 required: [run]
                 properties:
                   run: { $ref: '#/components/schemas/PayrollRun' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/payroll/runs/{id}/people:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [Payroll]
+      summary: Výsledky mzdového běhu po osobách
+      description: Stránkovaný přehled osob aktuální revize běhu s částkami v haléřích. Řazení, hledání i stránkování probíhají na serveru. Běh bez výsledku (koncept, zamčené vstupy) vrací prázdný seznam a `totals` null. Pouze čtení.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: sort, in: query, description: Sloupec řazení. `name` řadí česky podle příjmení a jména., schema: { type: string, enum: [name, gross_minor, insurance_minor, tax_minor, net_minor, payable_minor], default: name } }
+        - { name: dir, in: query, schema: { type: string, enum: [asc, desc], default: asc } }
+        - { name: q, in: query, description: Hledání v jméně osoby a v osobním čísle (kódu) jejích pracovních vztahů v běhu., schema: { type: string, maxLength: 100 } }
+        - { name: findings, in: query, description: Hodnota 1 zúží přehled na osoby s nálezem kontroly běhu nebo se zákonným výsledkem k ručnímu posouzení., schema: { type: string, enum: ['1'] } }
+      responses:
+        '200':
+          description: Stránka osob běhu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PayrollRunPeoplePage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/payroll/runs/{id}/people/{employeeId}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      - { name: employeeId, in: path, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [Payroll]
+      summary: Výsledek jedné osoby v mzdovém běhu
+      description: Celý výsledek osoby v aktuální revizi běhu tak, jak ho nese výsledkový snímek (rozpis pásky, zákonný výsledek, srážky). U hodinových nároků obsahuje result.payslip_document zmrazený rozpis v3 s množstvím, sazbami a rozdílem opravy; starší měsíční dokumenty v2 zůstávají beze změny. Bez oprávnění k exekucím zůstane z bloku srážek jen sražená částka. Pouze čtení.
+      responses:
+        '200':
+          description: Výsledek osoby
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, revision_id, person, result]
+                properties:
+                  run_id: { type: integer, format: int64 }
+                  period_start: { type: string, format: date }
+                  revision_id: { type: integer, format: int64 }
+                  revision_no: { type: integer }
+                  revision_status: { type: string }
+                  person:
+                    type: object
+                    required: [employee_id, full_name, employments]
+                    properties:
+                      employee_id: { type: integer, format: int64 }
+                      full_name: { type: string }
+                      employments:
+                        type: array
+                        items: { $ref: '#/components/schemas/PayrollRunPersonEmployment' }
+                  result: { $ref: '#/components/schemas/PayrollRunPersonResult' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
@@ -44805,20 +44864,98 @@ components:
         validations:
           type: array
           items: { $ref: '#/components/schemas/PayrollRunValidation' }
+        hidden_validation_count: { type: integer, minimum: 0, description: Počet kontrol běhu, které jsou trvale skryté a ve `validations` nejsou. }
 
     PayrollRunResultSnapshot:
       type: [object, "null"]
       additionalProperties: true
+      description: Souhrn výsledku aktuální revize. Seznam běhů vrací jen `totals` se třemi součty; detail běhu navíc zákonný souhrn zaměstnavatele a počet osob. Výsledky jednotlivých osob tu nejsou, viz `/payroll/runs/{id}/people`.
       properties:
-        people:
+        totals:
+          type: object
+          additionalProperties: true
+          properties:
+            cash_payable_minor: { type: [integer, "null"] }
+            enforcement_withheld_minor: { type: [integer, "null"], description: Bez oprávnění k exekucím null. }
+            payable_after_enforcement_minor: { type: [integer, "null"] }
+        statutory: { type: object, additionalProperties: true, description: Zákonný souhrn zaměstnavatele bez výsledků osob. Jen v detailu běhu. }
+        person_count: { type: [integer, "null"], minimum: 0, description: Počet osob v revizi. Jen v detailu běhu. }
+
+    PayrollRunPersonEmployment:
+      type: object
+      required: [id, code, relation_type]
+      properties:
+        id: { type: integer, format: int64 }
+        code: { type: string, description: Osobní číslo pracovního vztahu. }
+        relation_type: { type: string }
+
+    PayrollRunPersonRow:
+      type: object
+      required: [employee_id, full_name, gross_minor, employments, findings, has_finding]
+      description: Částky v haléřích. Osoba bez zákonného výsledku má jen `gross_minor`, ostatní částky jsou null.
+      properties:
+        employee_id: { type: integer, format: int64 }
+        full_name: { type: string }
+        result_status: { type: [string, "null"], enum: [calculated, manual_review, error, null] }
+        gross_minor: { type: [integer, "null"], description: Hrubá mzda, peněžní i nepeněžní příjem. }
+        employee_social_minor: { type: [integer, "null"] }
+        employee_health_minor: { type: [integer, "null"] }
+        insurance_minor: { type: [integer, "null"], description: Pojistné zaměstnance, sociální a zdravotní dohromady. }
+        advance_tax_minor: { type: [integer, "null"] }
+        withholding_tax_minor: { type: [integer, "null"] }
+        tax_minor: { type: [integer, "null"], description: Záloha na daň a srážková daň dohromady. }
+        tax_bonus_minor: { type: [integer, "null"] }
+        net_minor: { type: [integer, "null"], description: Čistá mzda před srážkami. }
+        payable_minor: { type: [integer, "null"], description: Částka k výplatě po srážkách a exekucích. }
+        employments:
           type: array
-          description: Osobní rozpad vrací detail běhu, seznam běhů jej nenačítá.
-          items:
-            type: object
-            additionalProperties: true
-            properties:
-              employee_id: { type: integer, format: int64 }
-              payslip_document: { $ref: '#/components/schemas/PayrollPayslipDocument' }
+          items: { $ref: '#/components/schemas/PayrollRunPersonEmployment' }
+        findings:
+          type: object
+          required: [blockers, warnings]
+          properties:
+            blockers: { type: integer, minimum: 0 }
+            warnings: { type: integer, minimum: 0, description: Varování bez schválené výjimky; trvale skrytá varování se nepočítají. }
+        has_finding: { type: boolean }
+
+    PayrollRunPeoplePage:
+      type: object
+      required: [run_id, items, total, limit, offset, sort, dir]
+      properties:
+        run_id: { type: integer, format: int64 }
+        period_start: { type: string, format: date }
+        revision_id: { type: [integer, "null"], format: int64 }
+        revision_no: { type: [integer, "null"] }
+        revision_status: { type: [string, "null"] }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/PayrollRunPersonRow' }
+        total: { type: integer, minimum: 0, description: Počet osob po zúžení hledáním a filtrem. }
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        offset: { type: integer, minimum: 0 }
+        sort: { type: string }
+        dir: { type: string, enum: [asc, desc] }
+        totals:
+          type: [object, "null"]
+          description: Součty za celý zúžený výběr, ne jen za stránku. Null u běhu bez výsledku.
+          properties:
+            gross_minor: { type: integer }
+            insurance_minor: { type: integer }
+            tax_minor: { type: integer }
+            tax_bonus_minor: { type: integer }
+            net_minor: { type: integer }
+            payable_minor: { type: integer }
+
+    PayrollRunPersonResult:
+      type: object
+      additionalProperties: true
+      description: Výsledek osoby ze zmrazeného výsledkového snímku revize.
+      properties:
+        employee_id: { type: integer, format: int64 }
+        payable_after_enforcement_minor: { type: integer }
+        payslip_document: { $ref: '#/components/schemas/PayrollPayslipDocument' }
+        statutory: { type: object, additionalProperties: true }
+        enforcement: { type: object, additionalProperties: true }
 
     PayrollPayslipDocument:
       type: object

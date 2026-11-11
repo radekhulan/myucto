@@ -313,39 +313,70 @@ final class PayrollEmployeeDeletionRepository
      */
     public function canDelete(int $supplierId, int $employeeId): ?PayrollDeletionDecision
     {
-        $stmt = $this->db->pdo()->prepare(self::decisionSql());
-        $stmt->execute([$supplierId, $employeeId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!is_array($row)) {
-            return null;
-        }
+        return $this->canDeleteMany($supplierId, [$employeeId])[$employeeId] ?? null;
+    }
 
-        foreach (self::BLOCKERS as $alias => $blocker) {
-            if ((int) $row["blocker_{$alias}"] > 0) {
-                return PayrollDeletionDecision::blocked($blocker['code'], $blocker['message']);
+    /**
+     * Rozhodnutí o smazatelnosti pro víc osob najednou. Seznam zaměstnanců ho
+     * potřebuje pro každý řádek stránky; dotaz na osobu z něj dělal N+1
+     * (25 osob na stránce = 25 až 75 dotazů). Teď je to jeden dotaz na
+     * blokátory osob, jeden na blokátory jejich vztahů a nejvýš po jednom na
+     * druh blokátoru kvůli hlášce, bez ohledu na velikost stránky.
+     *
+     * Osoba, která v tenantu není, ve výsledku chybí.
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,PayrollDeletionDecision>
+     */
+    public function canDeleteMany(int $supplierId, array $employeeIds): array
+    {
+        $employeeIds = array_values(array_unique($employeeIds));
+        if ($employeeIds === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            self::decisionSql(implode(', ', array_fill(0, count($employeeIds), '?'))),
+        );
+        $stmt->execute([$supplierId, ...$employeeIds]);
+
+        $decisions = [];
+        $unblocked = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $employeeId = (int) $row['employee_id'];
+            foreach (self::BLOCKERS as $alias => $blocker) {
+                if ((int) $row["blocker_{$alias}"] > 0) {
+                    $decisions[$employeeId] = PayrollDeletionDecision::blocked(
+                        $blocker['code'],
+                        $blocker['message'],
+                    );
+                    continue 2;
+                }
             }
+            $unblocked[$employeeId] = $row;
         }
 
         // Osoba jde smazat právě tehdy, když jdou smazat všechny její vztahy.
-        // Blokující vztah hledáme jedním dotazem — seznam zaměstnanců počítá
-        // `can_delete` pro každý řádek a dotaz na vztah by z něj udělal N+1.
-        $blocking = $this->employments->firstBlockingEmployment($supplierId, $employeeId);
-        if ($blocking !== null) {
-            return PayrollDeletionDecision::blockedByEmployment(
-                $blocking['code_key'],
-                "Pracovní vztah {$blocking['code']} nejde smazat, a proto nejde smazat "
-                . 'ani zaměstnanec. ' . $blocking['message'],
-                $blocking['id'],
-                $blocking['code'],
-            );
+        $blocking = $this->employments->firstBlockingEmployments($supplierId, array_keys($unblocked));
+        foreach ($unblocked as $employeeId => $row) {
+            if (isset($blocking[$employeeId])) {
+                $employment = $blocking[$employeeId];
+                $decisions[$employeeId] = PayrollDeletionDecision::blockedByEmployment(
+                    $employment['code_key'],
+                    "Pracovní vztah {$employment['code']} nejde smazat, a proto nejde smazat "
+                    . 'ani zaměstnanec. ' . $employment['message'],
+                    $employment['id'],
+                    $employment['code'],
+                );
+                continue;
+            }
+            $cascade = [];
+            foreach (array_keys(self::CASCADE) as $alias) {
+                $cascade[$alias] = (int) $row["cascade_{$alias}"];
+            }
+            $decisions[$employeeId] = PayrollDeletionDecision::allowed($cascade);
         }
 
-        $cascade = [];
-        foreach (array_keys(self::CASCADE) as $alias) {
-            $cascade[$alias] = (int) $row["cascade_{$alias}"];
-        }
-
-        return PayrollDeletionDecision::allowed($cascade);
+        return $decisions;
     }
 
     /**
@@ -627,9 +658,9 @@ final class PayrollEmployeeDeletionRepository
         return $result;
     }
 
-    private static function decisionSql(): string
+    private static function decisionSql(string $placeholders): string
     {
-        $columns = [];
+        $columns = ['employee.id AS employee_id'];
         foreach (self::BLOCKERS as $alias => $blocker) {
             $columns[] = self::countExpression($blocker['tables']) . " AS blocker_{$alias}";
         }
@@ -639,7 +670,7 @@ final class PayrollEmployeeDeletionRepository
 
         return 'SELECT ' . implode(",\n       ", $columns)
             . "\n  FROM payroll_employees employee"
-            . "\n WHERE employee.supplier_id = ? AND employee.id = ?";
+            . "\n WHERE employee.supplier_id = ? AND employee.id IN ({$placeholders})";
     }
 
     /**

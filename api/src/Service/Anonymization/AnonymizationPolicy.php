@@ -645,7 +645,7 @@ final class AnonymizationPolicy
         'payroll_run_commands' => ['command_name' => 'keep', 'from_status' => 'keep', 'idempotency_key_hash' => 'keep', 'request_hash' => 'keep', 'result_json' => 'json', 'to_status' => 'keep'],
         'payroll_run_employments' => ['input_hash' => 'keep', 'input_json' => 'json', 'result_hash' => 'keep', 'result_json' => 'json'],
         'payroll_run_events' => ['event_type' => 'keep', 'from_status' => 'keep', 'metadata_json' => 'json', 'reason' => 'text', 'to_status' => 'keep'],
-        'payroll_run_persons' => ['result_hash' => 'keep', 'result_json' => 'json'],
+        'payroll_run_persons' => ['result_hash' => 'keep', 'result_json' => 'json', 'result_status' => 'keep'],
         'payroll_run_revisions' => ['idempotency_key_hash' => 'keep', 'input_snapshot_hash' => 'keep', 'input_snapshot_json' => 'json', 'result_snapshot_hash' => 'keep', 'result_snapshot_json' => 'json', 'ruleset_manifest_hash' => 'keep', 'schema_version' => 'keep'],
         'payroll_run_validations' => ['code' => 'keep', 'entity_type' => 'keep', 'message' => 'text', 'override_reason' => 'text', 'remediation_path' => 'keep', 'subject_ids_json' => 'keep'],
         'payroll_shifts' => ['series_key' => 'keep', 'timezone_name' => 'keep'],

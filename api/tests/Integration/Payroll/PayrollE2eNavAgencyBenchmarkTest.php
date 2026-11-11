@@ -18,10 +18,15 @@ use PHPUnit\Framework\TestCase;
  *
  *   MYINVOICE_PAYROLL_AGENCY_BENCHMARK=150 php api/vendor/bin/phpunit -c api/phpunit.xml --filter PayrollE2eNavAgencyBenchmarkTest
  *
- * Vypíše dobu a počet SQL dotazů (`Questions` relace) každého kroku. Pro
+ * Vypíše dobu, počet SQL dotazů (`Questions` relace) a přírůstek špičky paměti
+ * PHP každého kroku (výpočet, schválení a příprava JMHZ jsou jeden synchronní
+ * požadavek, takže rozhoduje `max_execution_time` a `memory_limit`). Pro
  * odhalení N+1 se pouští dvakrát s různým N (např. 30 a 150) a porovná se
  * přírůstek dotazů na vztah. Data jsou syntetická, vše běží v transakci
  * nad `_test` databází a na konci se vrátí.
+ *
+ * `MYINVOICE_PAYROLL_AGENCY_BENCHMARK_TOP=8` navíc u každého kroku vypíše osm
+ * nejčastěji opakovaných připravených dotazů (hledání dotazů v cyklu).
  */
 #[Group('integration')]
 #[Group('performance')]
@@ -49,7 +54,7 @@ final class PayrollE2eNavAgencyBenchmarkTest extends TestCase
 
     public function testAgencyMonthTimingsAndQueryCounts(): void
     {
-        $size = min(500, (int) getenv('MYINVOICE_PAYROLL_AGENCY_BENCHMARK'));
+        $size = min(2000, (int) getenv('MYINVOICE_PAYROLL_AGENCY_BENCHMARK'));
         $officeId = $this->createOffice('BEN', 'Syntetická účtárna měření', '1100001237');
         $this->configureSocialInsuranceOutput($officeId);
         $this->configureHealthInsuranceOutput();
@@ -65,8 +70,13 @@ final class PayrollE2eNavAgencyBenchmarkTest extends TestCase
         if (getenv('MYINVOICE_PAYROLL_AGENCY_BENCHMARK_MARK') === '1') {
             fwrite(STDERR, 'CONNECTION ' . $this->db->pdo()->query('SELECT CONNECTION_ID()')->fetchColumn() . "\n");
         }
-        $metrics['probable_bulk'] = $this->measure(fn () => $this->container->get(ProbableEarningBulkService::class)
-            ->apply($this->supplierId, 2026, 2, 15_000, 'Sjednaná sazba 150 Kč za hodinu.', $employmentIds, $this->actors[0], null, null));
+        // Hromadná akce bere nejvýš 500 vztahů na jedno volání.
+        $metrics['probable_bulk'] = $this->measure(function () use ($employmentIds): void {
+            foreach (array_chunk($employmentIds, 500) as $chunk) {
+                $this->container->get(ProbableEarningBulkService::class)
+                    ->apply($this->supplierId, 2026, 2, 15_000, 'Sjednaná sazba 150 Kč za hodinu.', $chunk, $this->actors[0], null, null);
+            }
+        });
 
         $readiness = $this->container->get(PayrollRunReadinessService::class);
         $metrics['preflight'] = $this->measure(fn () => $readiness->inspect($this->supplierId, self::PERIOD_START, self::PAYDAY, $officeId));
@@ -97,8 +107,15 @@ final class PayrollE2eNavAgencyBenchmarkTest extends TestCase
         self::assertSame('dry_run_valid', $tested['body']['status'] ?? null);
 
         $lines = [sprintf('Agentura %d DPP, období %s:', $size, self::PERIOD)];
-        foreach ($metrics as $step => [$seconds, $queries]) {
-            $lines[] = sprintf('  %-14s %8.2f s  %7d SQL  %6.1f SQL/vztah', $step, $seconds, $queries, $queries / $size);
+        foreach ($metrics as $step => [$seconds, $queries, $peakBytes]) {
+            $lines[] = sprintf(
+                '  %-14s %8.2f s  %7d SQL  %6.1f SQL/vztah  paměť kroku %4d MB',
+                $step,
+                $seconds,
+                $queries,
+                $queries / $size,
+                (int) round($peakBytes / 1_048_576),
+            );
         }
         fwrite(STDERR, implode("\n", $lines) . "\n");
         if (getenv('MYINVOICE_PAYROLL_AGENCY_BENCHMARK_MARK') === '1') {
@@ -130,19 +147,38 @@ final class PayrollE2eNavAgencyBenchmarkTest extends TestCase
         }
     }
 
-    /** @return array{0:float,1:int} sekundy, počet SQL dotazů */
+    /** @return array{0:float,1:int,2:int} sekundy, počet SQL dotazů, přírůstek špičky paměti PHP v bajtech */
     private function measure(callable $step): array
     {
         if (getenv('MYINVOICE_PAYROLL_AGENCY_BENCHMARK_MARK') === '1') {
             // Značka kroku pro obecný log serveru (hledání opakovaných dotazů).
             $this->db->pdo()->query("SELECT 'NAV_STEP'");
         }
+        $top = (int) getenv('MYINVOICE_PAYROLL_AGENCY_BENCHMARK_TOP');
+        if ($top > 0) {
+            PayrollBenchmarkCountingStatement::$counts = [];
+            $this->db->pdo()->setAttribute(PDO::ATTR_STATEMENT_CLASS, [PayrollBenchmarkCountingStatement::class]);
+        }
         $before = $this->questions();
+        // Přírůstek paměti kroku nad tím, co už drží testovací proces (kontejner,
+        // fixtury); v HTTP požadavku k němu přibude jen základ aplikace.
+        gc_collect_cycles();
+        memory_reset_peak_usage();
+        $memoryBefore = memory_get_usage();
         $started = hrtime(true);
         $step();
         $seconds = (hrtime(true) - $started) / 1e9;
+        $queries = $this->questions() - $before - 1;
+        if ($top > 0) {
+            $this->db->pdo()->setAttribute(PDO::ATTR_STATEMENT_CLASS, [\PDOStatement::class]);
+            arsort(PayrollBenchmarkCountingStatement::$counts);
+            foreach (array_slice(PayrollBenchmarkCountingStatement::$counts, 0, $top, true) as $sql => $count) {
+                fwrite(STDERR, sprintf("    %5d× %s\n", $count, mb_substr((string) preg_replace('/\s+/', ' ', $sql), 0, 170)));
+            }
+            fwrite(STDERR, "    ---\n");
+        }
 
-        return [$seconds, $this->questions() - $before - 1];
+        return [$seconds, $queries, max(0, memory_get_peak_usage() - $memoryBefore)];
     }
 
     private function questions(): int
@@ -171,5 +207,21 @@ final class PayrollE2eNavAgencyBenchmarkTest extends TestCase
         $this->createApprovedInput($person, $componentId, 360_000, 'bench-' . $person['employment_id'], self::PERIOD_START);
 
         return $person['employment_id'];
+    }
+}
+
+/** Počítá spuštění připravených dotazů podle jejich textu (jen pro měření výše). */
+final class PayrollBenchmarkCountingStatement extends \PDOStatement
+{
+    /** @var array<string,int> */
+    public static array $counts = [];
+
+    protected function __construct() {}
+
+    public function execute(?array $params = null): bool
+    {
+        self::$counts[$this->queryString] = (self::$counts[$this->queryString] ?? 0) + 1;
+
+        return parent::execute($params);
     }
 }

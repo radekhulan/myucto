@@ -4212,7 +4212,60 @@
       "breakdown_show": "Zobrazit rozpad podle zaměstnanců",
       "breakdown_hide": "Skrýt rozpad podle zaměstnanců",
       "breakdown_failed": "Rozpad podle zaměstnanců se nepodařilo načíst. Zkuste to prosím znovu.",
+      "people_table": {
+        "title": "Zaměstnanci v běhu",
+        "subtitle": "Výsledek výpočtu po osobách. Kliknutím na záhlaví sloupce řadíte; u osoby otevřete detail výpočtu daně, pojistného a čisté mzdy.",
+        "search": "Hledat jméno nebo osobní číslo",
+        "only_findings": "Jen s nálezem",
+        "count": "žádný zaměstnanec | 1 zaměstnanec | {n} zaměstnanci | {n} zaměstnanců",
+        "columns": {
+          "name": "Zaměstnanec",
+          "gross_minor": "Hrubá mzda",
+          "insurance_minor": "Pojistné zaměstnance",
+          "tax_minor": "Daň",
+          "net_minor": "Čistá mzda",
+          "payable_minor": "K výplatě",
+          "finding": "Nález",
+          "actions": "Akce"
+        },
+        "tax_kind": {
+          "advance": "záloha",
+          "withholding": "srážková daň",
+          "mixed": "záloha a srážková daň"
+        },
+        "tax_bonus": "daňový bonus {amount}",
+        "finding": {
+          "none": "Bez nálezu",
+          "error": "Chyba výpočtu",
+          "manual_review": "K ručnímu posouzení",
+          "blockers": "bez blokace | 1 blokace | {n} blokace | {n} blokací",
+          "warnings": "bez varování | 1 varování | {n} varování | {n} varování"
+        },
+        "actions": {
+          "detail": "Detail výpočtu",
+          "detail_hide": "Skrýt detail",
+          "payslip": "Výplatní páska"
+        },
+        "empty": "Běh zatím nemá výsledky po osobách.",
+        "no_results": "Hledání neodpovídá žádný zaměstnanec tohoto běhu.",
+        "retry": "Zkusit znovu",
+        "totals": "Celkem | Celkem za 1 osobu | Celkem za {n} osoby | Celkem za {n} osob",
+        "totals_narrowed": "Výběr | Výběr, 1 osoba | Výběr, {n} osoby | Výběr, {n} osob",
+        "detail_title": "Výpočet mzdy: {name}",
+        "detail_load_failed": "Detail výpočtu se nepodařilo načíst. Zkuste to prosím znovu."
+      },
       "save_failed": "Mzdový běh se nepodařilo vytvořit.",
+      "command_progress": {
+        "lock_and_calculate": "Zamykám vstupy a počítám mzdy…",
+        "calculate": "Počítám mzdy…",
+        "refresh_inputs": "Obnovuji podklady běhu…",
+        "approve": "Schvaluji běh a zapisuji roční kumulace…",
+        "reopen": "Zakládám opravnou revizi…",
+        "post": "Účtuji mzdy…",
+        "prepare_payments": "Připravuji platby…",
+        "other": "Provádím krok…",
+        "hint": "U větší firmy může krok trvat desítky sekund. Stránku nechte otevřenou; opakované kliknutí ani obnovení stránky krok nespustí podruhé."
+      },
       "command_done": "Stav mzdového běhu byl změněn.",
       "command_failed": "Příkaz mzdového běhu se nepodařilo provést.",
       "payments_unsettled": "Běh zatím není skutečně uhrazený. V agendě Mzdové příkazy a úhrady spárujte všechny částky s bankovními pohyby nebo zaúčtovanými pokladními doklady a vyřešte případné vratky či storna.",
@@ -5570,6 +5623,7 @@
       "batch_stalled_hint": "Dokumenty generuje úloha na pozadí (cron-payroll-document-worker), která se na této instalaci nespouští. Zpracování můžete spustit ručně; trvale ho zajistí úloha nastavená v Systém → Plánované úlohy.",
       "batch_worker_start": "Spustit zpracování",
       "batch_worker_starting": "Spouštím…",
+      "batch_worker_running": "Zpracování běží…",
       "batch_worker_started": "Zpracování dávky je spuštěné.",
       "batch_worker_start_failed": "Zpracování dávky se nepodařilo spustit.",
       "batch_bundle_ready": "Měsíční ZIP vznikl až po úspěšném dokončení všech osob.",
@@ -9198,6 +9252,7 @@
         "load_failed": "Měsíční přehled se nenačetl. Zkuste to prosím znovu.",
         "prepare_failed": "Podání se nepodařilo připravit. Zkuste to prosím znovu.",
         "preparing": "Připravuji…",
+        "preparing_progress": "Připravuji hlášení. U větší firmy to může trvat desítky sekund; stránku nechte otevřenou.",
         "empty": "Za zvolené období nemá firma žádnou otevřenou položku.",
         "unknown": "neznámo",
         "not_applicable": "netýká se",

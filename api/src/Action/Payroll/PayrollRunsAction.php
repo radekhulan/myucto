@@ -581,8 +581,10 @@ final class PayrollRunsAction
             return null;
         }
         try {
-            $revision = $this->runs->currentRevision($supplierId, $runId);
-            if (!is_array($revision['input_snapshot'] ?? null)) {
+            // Jen vstupní snímek: výsledkový (u 150 osob další megabajty) se
+            // s podklady neporovnává.
+            $revision = $this->runs->currentInputSnapshot($supplierId, $runId);
+            if ($revision === null) {
                 return null;
             }
 
@@ -590,7 +592,7 @@ final class PayrollRunsAction
                 ...$this->sourceDrift
                     ->detect($supplierId, $revision['input_snapshot'])
                     ->toArray(),
-                'snapshot_created_at' => (string) $revision['created_at'],
+                'snapshot_created_at' => $revision['created_at'],
             ];
         } catch (\Throwable) {
             return null;
@@ -812,7 +814,8 @@ final class PayrollRunsAction
 
     /**
      * Detail běhu s CELÝM výsledkovým snapshotem — objemná data, která seznam
-     * záměrně neposílá. Frontend si je dotahuje pro jeden rozbalený běh.
+     * záměrně neposílá. Nese souhrn výsledku a nálezy kontrol; výsledky osob
+     * stránkuje {@see PayrollRunPeopleAction}.
      *
      * @param array<string,string> $args
      */
@@ -834,20 +837,29 @@ final class PayrollRunsAction
         if ($run === null) {
             return Json::error($response, 'not_found', 'Mzdový běh neexistuje.', 404);
         }
+        $revisionId = ($run['revision_id'] ?? null) === null
+            ? null
+            : (int) $run['revision_id'];
         $run['payment_coverage'] = $this->autoSettlement->coverageSummary(
             $this->currentSupplierId($request),
-            ($run['revision_id'] ?? null) === null
-                ? null
-                : (int) $run['revision_id'],
+            $revisionId,
         );
-        // Snímek nese u každé osoby celý vstup výpočtu srážek. Obecné `payroll`
-        // READ na něj nestačí, platí totéž co pro exekuční a insolvenční agendu.
+        // Nálezy kontrol revize, stejně zúžené o trvale skrytá varování jako
+        // v seznamu běhů.
+        $filtered = $this->warningSuppressions
+            ->activeSet($this->currentSupplierId($request))
+            ->filterRows($revisionId === null
+                ? []
+                : $this->runs->validations($this->currentSupplierId($request), $revisionId));
+        $run['validations'] = $filtered['visible'];
+        $run['hidden_validation_count'] = $filtered['hidden_count'];
+        // Výsledky osob detail nenese (stránkuje je PayrollRunPeopleAction),
+        // zbývá souhrn. Součet exekučních srážek se bez práva na agendu
+        // nevrací, stejně jako v seznamu.
         $snapshot = $run['result_snapshot'] ?? null;
-        $run['result_snapshot'] = PayrollEnforcementDisclosure::redactRunSnapshot(
-            is_array($snapshot) ? $snapshot : null,
-            PayrollEnforcementDisclosure::canSeeEnforcement($request),
-            PayrollEnforcementDisclosure::canSeeInsolvency($request),
-        );
+        if (is_array($snapshot) && !PayrollEnforcementDisclosure::canSeeEnforcement($request)) {
+            $run['result_snapshot'] = PayrollEnforcementDisclosure::redactRunTotals($snapshot);
+        }
 
         return Json::ok($response, ['run' => $run]);
     }
@@ -1245,37 +1257,27 @@ final class PayrollRunsAction
     }
 
     /**
-     * Revize v odpovědi příkazu nese oba snímky. Výsledný se zúží stejně jako
-     * v detailu běhu; vstupní nese podklady srážek všech osob a žádná obrazovka
-     * ho z odpovědi nečte, takže ho volající bez práv k exekucím a insolvencím
-     * nedostane vůbec.
+     * Revize v odpovědi příkazu: hlavička, stav, otisky a souhrn výsledku bez
+     * osob ({@see PayrollRunRepository::revisionSummary()}). Oba snímky dělaly
+     * z odpovědi na jedno kliknutí megabajty (u 150 osob přes 10 MB) a žádná
+     * obrazovka je z ní nečetla. Součet exekučních srážek se bez práva na
+     * agendu nevrací, stejně jako v seznamu běhů.
      *
      * @param array<string,mixed>|null $revision
      * @return array<string,mixed>|null
      */
     private static function disclosedRevision(?array $revision, Request $request): ?array
     {
-        if ($revision === null) {
+        $summary = PayrollRunRepository::revisionSummary($revision);
+        if ($summary === null) {
             return null;
         }
-        $enforcement = PayrollEnforcementDisclosure::canSeeEnforcement($request);
-        $insolvency = PayrollEnforcementDisclosure::canSeeInsolvency($request);
-        if ($enforcement && $insolvency) {
-            return $revision;
+        $snapshot = $summary['result_snapshot'] ?? null;
+        if (is_array($snapshot) && !PayrollEnforcementDisclosure::canSeeEnforcement($request)) {
+            $summary['result_snapshot'] = PayrollEnforcementDisclosure::redactRunTotals($snapshot);
         }
-        $snapshot = $revision['result_snapshot'] ?? null;
-        $revision['result_snapshot'] = PayrollEnforcementDisclosure::redactRunSnapshot(
-            is_array($snapshot) ? $snapshot : null,
-            $enforcement,
-            $insolvency,
-        );
-        if (array_key_exists('input_snapshot', $revision)) {
-            $revision['input_snapshot'] = null;
-        }
-        // Surové JSON sloupce nesou totéž v nezúžené podobě.
-        unset($revision['result_snapshot_json'], $revision['input_snapshot_json']);
 
-        return $revision;
+        return $summary;
     }
 
     private function authorize(

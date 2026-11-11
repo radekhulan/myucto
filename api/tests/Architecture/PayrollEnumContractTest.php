@@ -80,6 +80,9 @@ final class PayrollEnumContractTest extends TestCase
         // Zaokrouhlení krácené mzdy a náhrad v nastavení zaměstnavatele
         'payroll.ts::PayrollWageRounding'
             => 'enum:MyInvoice\Service\Payroll\Calculation\PayrollWageRounding',
+        // Řazení přehledu osob ve spočítaném běhu (`sort` z URL)
+        'payroll.ts::PayrollRunPeopleSortKey'
+            => 'const:MyInvoice\Repository\Payroll\PayrollRunPeopleRepository::SORT_KEYS',
         // Zaúčtování mzdového předpisu souhrnně, nebo po zaměstnancích
         'payroll.ts::PayrollPostingGranularity'
             => 'const:MyInvoice\Service\Payroll\PayrollEmployerSettingsValidator::POSTING_GRANULARITIES',
