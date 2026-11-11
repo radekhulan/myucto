@@ -4075,6 +4075,9 @@
         "workplace_not_verified": "the existing workplace is not verified"
       },
       "excluded_title": "Excluded ({count})",
+      "unverified_title": "Place of work filled in but not verified ({count})",
+      "unverified_hint": "These employments already have a place of work, but the ČSSZ codebook did not verify it, so the bulk fill will not overwrite it and JMHZ still reports it as missing. Pick the municipality from the codebook on the employment card.",
+      "unverified_value": "filled in as \"{place}\" (municipality code {code})",
       "apply": "Fill in workplace for {count} employments",
       "applied_toast": "The workplace was filled in for {count} employments.",
       "result_title": "Fill-in result",

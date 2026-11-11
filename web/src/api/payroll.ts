@@ -1093,7 +1093,18 @@ export interface PayrollWorkplaceBulkPreview {
   }
   suggestions: PayrollWorkplaceBulkSuggestion[]
   missing_employment_ids: number[]
+  /** Pracoviště vyplněné, ale číselníkem neověřené: hromadně se nepřepisuje, opravuje se na kartě. */
+  unverified: PayrollWorkplaceBulkUnverified[]
   items: PayrollWorkplaceBulkPreviewItem[]
+}
+
+export interface PayrollWorkplaceBulkUnverified {
+  employment_id: number
+  employee_id: number
+  full_name: string
+  employment_code: string
+  work_place: string | null
+  municipality_code: string | null
 }
 
 export interface PayrollWorkplaceBulkResult {
@@ -1105,6 +1116,7 @@ export interface PayrollWorkplaceBulkResult {
   applied: Array<{ employment_id: number }>
   skipped: Array<{ employment_id: number, reason: string }>
   failed: Array<{ employment_id: number, message: string }>
+  unverified: PayrollWorkplaceBulkUnverified[]
 }
 
 export type PayrollTermsBulkMode = 'fill' | 'overwrite'

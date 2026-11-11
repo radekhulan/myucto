@@ -4075,6 +4075,9 @@
         "workplace_not_verified": "existující pracoviště není ověřené"
       },
       "excluded_title": "Vyřazeno ({count})",
+      "unverified_title": "Pracoviště vyplněné, ale neověřené ({count})",
+      "unverified_hint": "Tyto vztahy už pracoviště mají, jen ho číselník ČSSZ neověřil, takže ho hromadné doplnění nepřepíše a JMHZ ho dál hlásí jako chybějící. Na kartě vztahu vyberte obec z číselníku.",
+      "unverified_value": "vyplněno „{place}“ (kód obce {code})",
       "apply": "Doplnit pracoviště {count} vztahům",
       "applied_toast": "Pracoviště bylo doplněno u {count} pracovních vztahů.",
       "result_title": "Výsledek doplnění",

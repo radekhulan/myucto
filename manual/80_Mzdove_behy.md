@@ -218,7 +218,11 @@ konce první dohody), doplní se za něj navazující údaj od měsíce doplněn
    údaje pracoviště.** v testu JMHZ, klikněte na **Doplnit pracoviště**.
 2. Zvolte pracoviště z nabídky (ve firmě už ověřená, nejčastější první), nebo
    jinou obec vyhledejte v číselníku.
-3. Klikněte na **Doplnit pracoviště N vztahům**.
+3. Klikněte na **Doplnit pracoviště N vztahům**. Vztah, který už pracoviště
+   vyplněné má, ale číselník ho neověřil (například jen „Praha"), se
+   nepřepíše. Dialog ho před uložením i ve výsledku uvede v seznamu
+   **Pracoviště vyplněné, ale neověřené** s odkazem na kartu vztahu, kde
+   obec vyberete z číselníku.
 4. Doplněné údaje dostanete do běhu novou revizí: schválený běh vraťte
    k opravě, otevřete novou revizi, spočítejte, schvalte a hlášení připravte
    znovu.

@@ -64,6 +64,7 @@ final class PayrollEmploymentWorkplaceBulkFill
         $summary = ['employments' => 0, 'missing' => 0, 'verified' => 0, 'invalid' => 0, 'excluded' => 0];
         $suggestions = [];
         $missing = [];
+        $unverified = [];
         $items = [];
         $reported = $this->reported($supplierId, $rows);
         foreach ($rows as $row) {
@@ -72,6 +73,9 @@ final class PayrollEmploymentWorkplaceBulkFill
             $summary[$assessment['state']]++;
             if ($assessment['state'] === 'missing') {
                 $missing[] = (int) $row['id'];
+            }
+            if ($assessment['state'] === 'invalid') {
+                $unverified[] = self::unverifiedItem($row);
             }
             if ($assessment['state'] === 'verified') {
                 $key = $row['jmhz_workplace_municipality_code'] . '|' . $row['jmhz_workplace_country_code'];
@@ -108,7 +112,29 @@ final class PayrollEmploymentWorkplaceBulkFill
             'summary' => $summary,
             'suggestions' => $suggestions,
             'missing_employment_ids' => $missing,
+            // Vyplněné, ale číselníkem neověřené pracoviště („Praha") se
+            // hromadně nepřepisuje. Musí ale být vidět jménem, jinak účetní
+            // neví, proč JMHZ dál hlásí chybějící pracoviště.
+            'unverified' => $unverified,
             'items' => $items,
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array{employment_id:int,employee_id:int,full_name:string,employment_code:string,work_place:?string,municipality_code:?string}
+     */
+    private static function unverifiedItem(array $row): array
+    {
+        return [
+            'employment_id' => (int) $row['id'],
+            'employee_id' => (int) $row['employee_id'],
+            'full_name' => (string) $row['full_name'],
+            'employment_code' => (string) $row['code'],
+            'work_place' => is_string($row['work_place']) ? $row['work_place'] : null,
+            'municipality_code' => is_string($row['jmhz_workplace_municipality_code'])
+                ? $row['jmhz_workplace_municipality_code']
+                : null,
         ];
     }
 
@@ -166,6 +192,7 @@ final class PayrollEmploymentWorkplaceBulkFill
         $applied = [];
         $skipped = [];
         $failed = [];
+        $unverified = [];
         foreach ($ids as $employmentId) {
             $row = $this->rows($supplierId, $monthStart, $monthEnd, [$employmentId])[0] ?? null;
             if ($row === null) {
@@ -184,6 +211,9 @@ final class PayrollEmploymentWorkplaceBulkFill
                     'employment_id' => $employmentId,
                     'reason' => $assessment['reason'] ?? $assessment['state'],
                 ];
+                if ($assessment['state'] === 'invalid') {
+                    $unverified[] = self::unverifiedItem($row);
+                }
                 continue;
             }
             try {
@@ -248,6 +278,7 @@ final class PayrollEmploymentWorkplaceBulkFill
             'applied' => $applied,
             'skipped' => $skipped,
             'failed' => $failed,
+            'unverified' => $unverified,
         ];
     }
 

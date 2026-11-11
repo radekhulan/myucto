@@ -159,10 +159,20 @@ final class PayrollEmploymentWorkplaceBulkFillTest extends TestCase
         $preview = $this->bulk->preview($this->supplierId, '2026-06-01', null);
         self::assertSame('invalid', $preview['items'][0]['state']);
         self::assertSame([], $preview['missing_employment_ids']);
+        // Nepřepíše se, ale náhled ho jmenuje i s vyplněným textem.
+        self::assertSame([[
+            'employment_id' => $employmentId,
+            'employee_id' => $this->employeeId,
+            'full_name' => 'Syntetický Pracovník',
+            'employment_code' => 'BULK-2',
+            'work_place' => 'Praha',
+            'municipality_code' => self::PRAGUE,
+        ]], $preview['unverified']);
 
         $result = $this->bulk->apply($this->supplierId, '2026-06-01', self::PRAGUE, 'CZ', [$employmentId], $this->userId, null, null);
         self::assertSame(0, $result['counts']['applied']);
         self::assertSame('workplace_not_verified', $result['skipped'][0]['reason']);
+        self::assertSame([$employmentId], array_column($result['unverified'], 'employment_id'));
         self::assertSame('Praha', $this->term($employmentId)['work_place']);
     }
 
