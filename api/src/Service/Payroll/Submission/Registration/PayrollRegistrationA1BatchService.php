@@ -293,7 +293,13 @@ final readonly class PayrollRegistrationA1BatchService
         ];
     }
 
-    /** @return array{earliest_registration_on:string,due_on:string,derived:bool,overdue:bool}|null */
+    /**
+     * `earliest_registration_on` je jediný den, od kterého jde přihlášku
+     * připravit a podat ({@see PayrollRegistrationEarliestFiling}); do té
+     * doby je `too_early` a vztah se k přípravě nenabízí.
+     *
+     * @return array{earliest_registration_on:string,due_on:string,derived:bool,overdue:bool,too_early:bool}|null
+     */
     private function deadline(?string $startOn, bool $afterPreRegistration, string $today): ?array
     {
         if ($startOn === null) {
@@ -307,11 +313,16 @@ final readonly class PayrollRegistrationA1BatchService
             return null;
         }
 
+        $earliest = $afterPreRegistration || !$window->derived
+            ? $window->earliestRegistrationOn
+            : PayrollRegistrationEarliestFiling::earliestOn($startOn);
+
         return [
-            'earliest_registration_on' => $window->earliestRegistrationOn,
+            'earliest_registration_on' => $earliest,
             'due_on' => $window->dueOn,
             'derived' => $window->derived,
             'overdue' => $window->dueOn < $today,
+            'too_early' => $window->derived && $today < $earliest,
         ];
     }
 

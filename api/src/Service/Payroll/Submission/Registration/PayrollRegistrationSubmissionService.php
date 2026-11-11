@@ -809,7 +809,15 @@ final readonly class PayrollRegistrationSubmissionService
         $specVersion = $form === 'REGZEC27'
             ? JmhzSpecVersion::V2027
             : JmhzSpecVersion::V2026;
-        $this->assertFormAccepted($form, $environment, $decisiveOn);
+        // U přihlášky k budoucímu nástupu rozhoduje jediný den pro obě
+        // pravidla (osm dnů před nástupem, příjem REGZEC27); hlásí ho kontrola
+        // okna jednou větou, brána ročníku by k němu přidala druhé datum.
+        $registersBeforeStart = $event === null
+            && in_array($interaction->interaction, self::REGISTERING_INTERACTIONS, true)
+            && PayrollRegistrationEarliestFiling::tooEarly($effectiveOn, $this->today());
+        if (!$registersBeforeStart) {
+            $this->assertFormAccepted($form, $environment, $decisiveOn);
+        }
         $payload = $this->payload(
             $snapshot,
             $interaction,
@@ -1106,20 +1114,17 @@ final readonly class PayrollRegistrationSubmissionService
         ) {
             return;
         }
+        // Přihlášku k budoucímu nástupu sem volající nepustí: její jediný den
+        // hlásí {@see PayrollRegistrationEarliestFiling}. Zbývají události
+        // (odhláška, změna) s rozhodným datem v roce 2027.
         throw new PayrollRegistrationXmlException(
             'registration_regzec27_not_yet_accepted',
-            "Událost s rozhodným datem {$decisiveOn} se hlásí formulářem REGZEC27"
-                . ' (specifikace JMHZ 2027), který ostrá ČSSZ přijímá až od'
-                . ' 23. 12. 2026. Starší formulář REGZEC25 ČSSZ pro takovou událost'
-                . ' odmítne. Podání připravte a odešlete 23. 12. 2026 nebo později;'
-                . ' přihlášku s nástupem v lednu 2027 stihnete i tak, pokud ji'
-                . ' podáte nejpozději před nástupem. Chcete-li přihlásit'
-                . ' zaměstnance s českým občanstvím dřív, podejte částečné'
-                . ' přihlášení PREZEC (nejdřív osm dnů před nástupem).'
-                . ' U zahraničního zaměstnance částečné přihlášení nelze'
-                . ' (§ 19 odst. 2 zákona č. 323/2025 Sb.): přihlášku podejte'
-                . ' 23. 12. 2026 nebo později, vždy před nástupem, při nástupu'
-                . ' 1. 1. 2027 nejpozději téhož dne před začátkem práce.',
+            'Událost s rozhodným datem '
+                . (new \DateTimeImmutable($decisiveOn))->format('j. n. Y')
+                . ' se hlásí formulářem REGZEC27 (specifikace JMHZ 2027), který'
+                . ' ostrá ČSSZ přijímá až od 23. 12. 2026. Starší formulář REGZEC25'
+                . ' ČSSZ pro takovou událost odmítne. Podání připravte a odešlete'
+                . ' 23. 12. 2026 nebo později.',
         );
     }
 

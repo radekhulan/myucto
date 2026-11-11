@@ -130,7 +130,7 @@ final class PayrollE2eRegA1BatchTest extends TestCase
             'employment_id',
         );
         self::assertSame('skipped', $results[$early]['status'], CanonicalJson::encode($results));
-        self::assertStringContainsString('22.11.2026', (string) $results[$early]['message']);
+        self::assertStringContainsString('22. 11. 2026', (string) $results[$early]['message']);
         self::assertSame('prepared', $results[$late]['status'], CanonicalJson::encode($results));
         $xml = $this->regArtifactXml((int) $results[$late]['submission_id']);
         self::assertSame('http://schemas.cssz.cz/REGZEC/2025', $this->regAssertXsdValid($xml));

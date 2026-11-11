@@ -5592,6 +5592,8 @@ export interface PayrollRegistrationA1Candidate {
     due_on: string
     derived: boolean
     overdue: boolean
+    /** Okno přihlášky se ještě neotevřelo; půjde podat od `earliest_registration_on`. */
+    too_early?: boolean
   } | null
   warnings: Array<{
     code: string

@@ -136,4 +136,40 @@ describe('PayrollRegistrationA1BatchPanel', () => {
       .toContain('payroll.registrationA1.result.prepared')
     expect(m.candidates).toHaveBeenCalledTimes(2)
   })
+
+  /*
+   * Nástup 1. 1. 2027 viděný 11. 11. 2026: přihlášku jde podat nejdřív osm
+   * dnů před nástupem. Řádek řekne od kdy a k přípravě se zatím nenabídne.
+   */
+  it('u budoucího nástupu řekne, od kdy půjde přihlášku podat, a zatím ji nenabídne', async () => {
+    m.candidates.mockResolvedValue({
+      from: '2026-11-01',
+      to: '2027-01-31',
+      today: '2026-11-11',
+      items: [
+        candidate({
+          employment_id: 7,
+          start_date: '2027-01-01',
+          deadline: {
+            earliest_registration_on: '2026-12-24',
+            due_on: '2027-01-01',
+            derived: true,
+            overdue: false,
+            too_early: true,
+          },
+        }),
+      ],
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const deadline = wrapper.get('[data-test="registration-a1-deadline-7"]').text()
+    expect(deadline).toContain('payroll.registrationA1.deadline.from')
+    expect(deadline).toContain('24. 12. 2026')
+    expect(deadline).toContain('01. 01. 2027')
+    expect((wrapper.get('[data-test="registration-a1-select-7"]').element as HTMLInputElement).disabled)
+      .toBe(true)
+    expect((wrapper.get('[data-test="registration-a1-select-all"]').element as HTMLInputElement).disabled)
+      .toBe(true)
+  })
 })

@@ -2421,6 +2421,61 @@ describe('EmploymentRegistrationPanel', () => {
     expect(wrapper.get('[data-test="registration-a1-toggle"]').text()).toContain('a1.hide')
   })
 
+  /*
+   * Nástup daleko v budoucnu: náhled částečného přihlášení neprojde a volba
+   * částečná / plná se dřív ukázala až po úspěšném náhledu. Účetní se má
+   * dozvědět jediné datum, dostat se k profilu A1 a mít volbu režimu po ruce.
+   */
+  it('na přihlášku je brzy: ukáže volbu režimu, cestu k profilu A1 a nehlásí chybu údajů', async () => {
+    m.preview.mockRejectedValue(rejection(
+      'registration_prezec_start_window_invalid',
+      'Přihlášku zaměstnance s nástupem 1. 1. 2027 půjde připravit a podat nejdřív 24. 12. 2026.',
+    ))
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-test="registration-mode"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    const notice = wrapper.get('[data-test="registration-error"]')
+    expect(notice.text()).toContain('nejdřív 24. 12. 2026')
+    expect(notice.attributes('role')).toBe('status')
+    expect(wrapper.find('[data-test="registration-mode"]').exists()).toBe(true)
+
+    // Plná registrace má totéž okno: přepnutí pošle zvolený režim a server
+    // odpoví týmž dnem, žádná druhá rada.
+    m.preview.mockRejectedValue(rejection(
+      'registration_regzec_a1_start_window_invalid',
+      'Přihlášku zaměstnance s nástupem 1. 1. 2027 půjde připravit a podat nejdřív 24. 12. 2026.',
+    ))
+    await wrapper.get('[data-test="registration-mode"]').setValue('full')
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    expect(m.preview).toHaveBeenLastCalledWith(5, 'production', null, 'full')
+    expect(wrapper.get('[data-test="registration-error"]').text()).toContain('nejdřív 24. 12. 2026')
+    expect(wrapper.find('[data-test="registration-mode"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="registration-error-open-a1"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="registration-a1-toggle"]').text()).toContain('a1.hide')
+  })
+
+  it('jiná chyba částečného přihlášení také nabídne plnou registraci', async () => {
+    m.preview.mockRejectedValue(rejection(
+      'registration_prezec_foreign_requires_full_registration',
+      'PREZEC se podává jen zaměstnanci s českým státním občanstvím.',
+    ))
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-error"]').attributes('role')).toBe('alert')
+    expect(wrapper.find('[data-test="registration-mode"]').exists()).toBe(true)
+  })
+
   it('UI-26: po uložení kmenových dat se profil A1 načte znovu', async () => {
     const wrapper = mountPanel()
     await flushPromises()

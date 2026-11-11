@@ -12736,6 +12736,7 @@
       "deadline": {
         "due": "by {date}",
         "overdue": "overdue (by {date})",
+        "from": "can be filed from {from}, due by {date}",
         "not_derived": "deadline not derived by the app, file without delay",
         "unknown": "no start date",
         "after_p1": "after an accepted limited registration (P1)"
@@ -14309,7 +14310,9 @@
       "registration_schema_unavailable": "This ČSSZ form cannot be prepared by this version of the application. Only REGZEC25 registrations and notices and partial PREZEC26 registrations are supported - file others through the ČSSZ portal.",
       "registration_spec_version_unavailable": "The event must be reported on a ČSSZ form under the JMHZ 2027 specification, which this version of the application cannot prepare. The filing is not prepared.",
       "registration_spec_version_mismatch": "The registration filing uses a different form vintage than the decisive event date requires (boundary 1 January 2027). Prepare the filing again.",
-      "registration_regzec27_not_yet_accepted": "This filing is reported on form REGZEC27, which the production ČSSZ accepts only from 23 December 2026. Prepare and send the filing on 23 December 2026 or later. Employees with Czech citizenship can be partially registered earlier via PREZEC (at the earliest eight days before they start). Partial registration is not possible for a foreign employee: file the registration on 23 December 2026 or later, always before they start work; if they start on 1 January 2027, file it that day at the latest, before work begins.",
+      "registration_regzec27_not_yet_accepted": "This filing is reported on form REGZEC27, which the production ČSSZ accepts only from 23 December 2026. ČSSZ rejects the older REGZEC25 form for such an event. Prepare and send the filing on 23 December 2026 or later.",
+      "registration_prezec_start_window_invalid": "It is too early to file this employee registration. It can be prepared and filed at the earliest eight days before the start date (for start dates from 1 January 2027 not before 23 December 2026), both the partial (PREZEC) and the full (REGZEC) one, and on the start date at the latest. You can already fill in and save the A1 registration profile on the employment card; the filing will then only be prepared and sent. The employment is also listed under Payroll → Submissions → Registrations to file (A1), with the date from which it can be filed (set the list period so that it includes the start date).",
+      "registration_regzec_a1_start_window_invalid": "It is too early to file this employee registration. It can be prepared and filed at the earliest eight days before the start date (for start dates from 1 January 2027 not before 23 December 2026), both the partial (PREZEC) and the full (REGZEC) one. You can already fill in and save the A1 registration profile on the employment card; the filing will then only be prepared and sent. The employment is also listed under Payroll → Submissions → Registrations to file (A1), with the date from which it can be filed (set the list period so that it includes the start date).",
       "registration_regzec25_value_from_2027": "The data contain a codebook value that ČSSZ accepts only for events from 1 January 2027. Choose another value for an earlier date.",
       "registration_regzec27_change_in_future": "A change or correction cannot be filed with a future effective date. Prepare the filing on the day it takes effect at the earliest.",
       "registration_regzec27_orientation_number_too_long": "From 1 January 2027 the orientation number may have at most four characters in every address.",
