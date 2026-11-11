@@ -100,7 +100,12 @@ a již uzavřenou revizi nepřepíše.
    a měsíční hlášení půjde připravit až po skončení měsíce), a které hodnoty
    nového roku ještě nejsou vyhlášené. Týká-li se nález víc osob, než se do
    přehledu vejde, odkaz **Zobrazit všech N osob v seznamu zaměstnanců**
-   otevře seznam zúžený právě na ně.
+   otevře seznam zúžený právě na ně. Nález má v kontrole před zahájením
+   stejnou závažnost jako po výpočtu: chybějící přihláška ČSSZ nebo
+   oznámení zdravotní pojišťovně je mezi nálezy, kvůli kterým běh nepůjde
+   schválit, dokud se nepodá nebo neschválí výjimka (podáno mimo aplikaci).
+   Chybějící docházka schválení nezastaví, doplnění po zamknutí vstupů ale
+   stojí opravnou revizi.
 5. Zůstal-li některý vstup v konceptu, běh to ohlásí jako blokaci. Klikněte
    přímo u ní na **Schválit vše**. Na jinou obrazovku nemusíte. Tentýž
    problém se neopakuje jako vztah bez mzdových vstupů ani jako chybějící

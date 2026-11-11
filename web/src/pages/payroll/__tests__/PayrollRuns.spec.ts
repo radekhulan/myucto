@@ -2025,6 +2025,43 @@ describe('PayrollRuns', () => {
   })
 
   /*
+   * Chybějící přihláška ČSSZ byla před během „neomezuje běh" a po výpočtu
+   * varování s povinnou výjimkou. Teď má v obou místech stejnou závažnost.
+   */
+  it('nález s povinnou výjimkou řekne už před během, že schválení počká na výjimku', async () => {
+    m.runs.mockResolvedValue([])
+    m.readiness.mockReturnValue({
+      period_start: '2026-10-01',
+      payment_date: '2026-11-10',
+      office_id: null,
+      ready: true,
+      has_findings: true,
+      findings: [{
+        code: 'employment_social_registration_missing',
+        severity: 'warning',
+        impact: 'approval',
+        scope: 'setup',
+        message: 'Syntetický Brigádník: k pracovnímu vztahu chybí přihláška u ČSSZ.',
+        remediation_path: null,
+        count: 1,
+        entity_total: 1,
+        entities: [{ entity_type: 'employment', entity_id: 3, label: 'Syntetický Brigádník' }],
+        requires_override: true,
+        bulk_actions: [],
+      }],
+    } satisfies PayrollRunReadiness)
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="run-readiness-override-employment_social_registration_missing"]').text())
+      .toContain('payroll.runs.override.awaiting')
+    expect(wrapper.get('[data-testid="run-readiness-employment_social_registration_missing"]').classes())
+      .toContain('bg-danger-50')
+    wrapper.unmount()
+  })
+
+  /*
    * Zaměstnanec založený až po schválení měsíce v běhu tiše chyběl: stránka
    * běhu se nezměnila a osoba zůstala bez mzdy i bez měsíčního hlášení.
    */

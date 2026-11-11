@@ -1951,6 +1951,9 @@ onMounted(load)
                 <p>
                   <span v-if="findingCount(finding) > 1" class="font-semibold" :data-test="`run-readiness-count-${finding.code}`">{{ findingCount(finding) }}× </span>{{ finding.message }}
                 </p>
+                <p v-if="finding.requires_override" class="mt-1 text-xs" :data-test="`run-readiness-override-${finding.code}`">
+                  {{ t('payroll.runs.override.awaiting') }}
+                </p>
                 <p
                   v-if="findingEntityLabels(finding).length"
                   class="mt-1 text-xs font-semibold"
@@ -3258,6 +3261,9 @@ onMounted(load)
             >
               <p>
                 <span v-if="findingCount(finding) > 1" class="font-semibold">{{ findingCount(finding) }}× </span>{{ finding.message }}
+              </p>
+              <p v-if="finding.requires_override" class="mt-1 text-xs">
+                {{ t('payroll.runs.override.awaiting') }}
               </p>
               <p v-if="findingEntityLabels(finding).length" class="mt-1 text-xs font-semibold">
                 {{ t('payroll.runs.readiness.affected', {
