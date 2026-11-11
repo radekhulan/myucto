@@ -566,8 +566,10 @@ final class PayrollRunsAction
             return null;
         }
         try {
-            $revision = $this->runs->currentRevision($supplierId, $runId);
-            if (!is_array($revision['input_snapshot'] ?? null)) {
+            // Jen vstupní snímek: výsledkový (u 150 osob další megabajty) se
+            // s podklady neporovnává.
+            $revision = $this->runs->currentInputSnapshot($supplierId, $runId);
+            if ($revision === null) {
                 return null;
             }
 
@@ -575,7 +577,7 @@ final class PayrollRunsAction
                 ...$this->sourceDrift
                     ->detect($supplierId, $revision['input_snapshot'])
                     ->toArray(),
-                'snapshot_created_at' => (string) $revision['created_at'],
+                'snapshot_created_at' => $revision['created_at'],
             ];
         } catch (\Throwable) {
             return null;

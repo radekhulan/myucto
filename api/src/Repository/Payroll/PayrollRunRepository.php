@@ -1265,6 +1265,37 @@ final class PayrollRunRepository
         return $row === false ? null : self::castRevision($row);
     }
 
+    /**
+     * Vstupní snímek aktuální revize a čas jejího vzniku, bez výsledkového
+     * snímku. Seznam běhů ho potřebuje u otevřeného běhu k porovnání podkladů
+     * ({@see \MyInvoice\Service\Payroll\Run\PayrollRunSourceDriftDetector});
+     * číst a dekódovat kvůli tomu i megabajtový výsledek by bylo zbytečné.
+     *
+     * @return array{input_snapshot:array<string,mixed>,created_at:string}|null
+     */
+    public function currentInputSnapshot(int $supplierId, int $runId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT revision.input_snapshot_json, revision.created_at
+               FROM payroll_runs run
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id
+                AND revision.run_id = run.id
+                AND revision.revision_no = run.current_revision_no
+              WHERE run.supplier_id = ? AND run.id = ?'
+        );
+        $stmt->execute([$supplierId, $runId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $snapshot = json_decode((string) $row['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+
+        return is_array($snapshot)
+            ? ['input_snapshot' => $snapshot, 'created_at' => (string) $row['created_at']]
+            : null;
+    }
+
     /** @return array<string,mixed>|null */
     public function revision(int $supplierId, int $revisionId): ?array
     {

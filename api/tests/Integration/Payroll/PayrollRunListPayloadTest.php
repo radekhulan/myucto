@@ -159,6 +159,27 @@ final class PayrollRunListPayloadTest extends TestCase
         self::assertSame(2, $this->runs->detail($this->supplierId, $runId)['result_snapshot']['person_count']);
     }
 
+    /**
+     * Porovnání podkladů otevřeného běhu potřebuje jen vstupní snímek. Dřív si
+     * kvůli němu seznam načetl a dekódoval celou revizi i s výsledkem.
+     */
+    public function testCurrentInputSnapshotMatchesTheRevisionWithoutLoadingTheResult(): void
+    {
+        $input = $this->inputSnapshot(withPayoutAccounts: true);
+        $runId = $this->seedRun('2030-08-01', $input, ['totals' => ['cash_payable_minor' => 1], 'people' => []]);
+
+        $lean = $this->runs->currentInputSnapshot($this->supplierId, $runId);
+        $full = $this->runs->currentRevision($this->supplierId, $runId);
+
+        self::assertNotNull($lean);
+        self::assertNotNull($full);
+        self::assertSame(['input_snapshot', 'created_at'], array_keys($lean));
+        self::assertSame($input, $lean['input_snapshot']);
+        self::assertSame($full['input_snapshot'], $lean['input_snapshot']);
+        self::assertSame((string) $full['created_at'], $lean['created_at']);
+        self::assertNull($this->runs->currentInputSnapshot($this->supplierId, $runId + 1_000_000));
+    }
+
     /** Revize bez spočítaného výsledku nemá `result_snapshot` vůbec, ne prázdné totals. */
     public function testRunWithoutResultHasNullSnapshot(): void
     {
