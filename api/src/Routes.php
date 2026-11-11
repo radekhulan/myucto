@@ -2578,6 +2578,8 @@ final class Routes
             $g->get('/time/average-candidates', [PayrollAbsenceAction::class, 'averageCandidates']);
             $g->post('/time/averages/bulk', [PayrollAbsenceAction::class, 'createAutomaticAverages']);
             $g->post('/time/averages/probable-from-rate', [PayrollAbsenceAction::class, 'fillProbableFromRate']);
+            // Pravděpodobný výdělek zadaný účetní vybraným vztahům (podmínky + průměr).
+            $g->post('/time/averages/probable-bulk', [PayrollAbsenceAction::class, 'setProbableEarningBulk']);
             $g->post('/time/averages', [PayrollAbsenceAction::class, 'createAverage']);
             $g->post('/time/averages/{id:[0-9]+}/approve', [PayrollAbsenceAction::class, 'approveAverage']);
             $g->delete('/time/averages/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteAverage']);

@@ -226,6 +226,18 @@ final class RequestAuthorization
     }
 
     /**
+     * Hromadné nastavení pravděpodobného výdělku (§ 355 ZP) zapisuje průměr
+     * (`payroll.time.write`) i podmínky pracovního vztahu, jako oprava na kartě
+     * vztahu (`payroll.employment.write`). Bez druhého práva by šlo hromadnou
+     * akcí měnit podmínky, které role na kartě měnit nesmí.
+     */
+    public static function canSetProbableEarningInBulk(Request $request): bool
+    {
+        return self::allows($request, 'payroll.time.write', AccessLevel::WRITE)
+            && self::allows($request, 'payroll.employment.write', AccessLevel::WRITE);
+    }
+
+    /**
      * Úprava vystavené faktury (?force=1) včetně jejího výkazu: správce firmy, nebo interní
      * role s právem `invoices.edit_issued`. Uzavřené účetní období dál přebíjí jen správce
      * ({@see \MyInvoice\Http\GuardsDocumentLock}) a skladová pojistka platí pro všechny.

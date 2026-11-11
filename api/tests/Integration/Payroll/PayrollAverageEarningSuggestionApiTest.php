@@ -415,8 +415,13 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         self::assertSame('probable', $snapshot['source_kind']);
         self::assertSame(75_000, (int) $snapshot['average_hourly_minor']);
 
-        // Založený průměr se nepřepisuje: druhé potvrzení téhož návrhu projít nesmí.
-        self::assertSame(422, $this->call('createAutomaticAverages', 'POST', $request)['status']);
+        // Založený průměr se nepřepisuje: druhé potvrzení téhož návrhu nic
+        // nezaloží a vztah se vrátí jako přeskočený s důvodem.
+        $again = $this->call('createAutomaticAverages', 'POST', $request);
+        self::assertSame(201, $again['status']);
+        self::assertSame([], $again['body']['averages']);
+        self::assertSame($this->employmentId, $again['body']['skipped'][0]['employment_id']);
+        self::assertContains('average_already_exists', $again['body']['skipped'][0]['blockers']);
     }
 
     public function testBulkRefusesInputsChangedSinceThePreview(): void

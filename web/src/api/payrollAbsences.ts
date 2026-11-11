@@ -257,9 +257,42 @@ export interface AverageEarningCandidate {
     status: 'manual_review' | 'approved'
     source_kind: 'actual' | 'probable'
     average_hourly_minor: number
+    /** Odkud byl pravděpodobný výdělek vzat (u skutečného průměru `null`). */
+    probable_source?: AverageEarningCandidate['probable_source']
   } | null
   /** Běh rozhodného období se po schválení průměru opravil a průměr na něj nesedí. */
   existing_outdated?: boolean
+  relation_type?: string
+}
+
+/** Vztah, který hromadné schválení návrhů přeskočilo (návrh nebyl připravený). */
+export interface AverageBulkSkipped {
+  employment_id: number
+  employee_id: number
+  employee_name: string
+  employment_code: string
+  blockers: string[]
+}
+
+/** Řádek výsledku „Nastavit pravděpodobný výdělek vybraným". */
+export interface ProbableBulkRow {
+  employment_id: number
+  employee_id: number | null
+  employee_name: string | null
+  employment_code: string | null
+  warnings?: Array<{ code: string, params: Record<string, string>, message: string }>
+  snapshot_id?: number
+  superseded_average_hourly_minor?: number | null
+  code?: string
+  message?: string
+  params?: Record<string, string>
+}
+
+export interface ProbableBulkResult {
+  counts: { applied: number, unchanged: number, failed: number }
+  applied: ProbableBulkRow[]
+  unchanged: ProbableBulkRow[]
+  failed: ProbableBulkRow[]
 }
 
 export interface AverageEarningCandidatesPage {
@@ -464,8 +497,20 @@ export const payrollAbsenceApi = {
     year: number
     quarter: number
     items: Array<{ employment_id: number, input_version: string }>
-  }) => api.post<{ averages: AverageSnapshot[] }>('/payroll/time/averages/bulk', payload)
-    .then(response => response.data.averages),
+  }) => api.post<{ averages: AverageSnapshot[], skipped?: AverageBulkSkipped[] }>('/payroll/time/averages/bulk', payload)
+    .then(response => ({ averages: response.data.averages, skipped: response.data.skipped ?? [] })),
+  /**
+   * Pravděpodobný výdělek (§ 355 odst. 2 ZP) zadaný účetní vybraným vztahům:
+   * oprava podmínek vztahu a nová schválená revize průměru za čtvrtletí.
+   */
+  setProbableBulk: (payload: {
+    year: number
+    quarter: number
+    probable_hourly_minor: number
+    rationale: string
+    employment_ids: number[]
+  }) => api.post<ProbableBulkResult>('/payroll/time/averages/probable-bulk', payload)
+    .then(response => response.data),
   /**
    * Doplní pravděpodobný výdělek ze sjednané hodinové sazby vztahům měsíce,
    * kterým chybí schválený průměr (automatický záznam, opravitelný revizí).
