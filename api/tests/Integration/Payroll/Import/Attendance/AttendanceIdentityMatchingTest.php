@@ -103,6 +103,55 @@ final class AttendanceIdentityMatchingTest extends TestCase
         self::assertSame(2, $this->scalar('SELECT COUNT(*) FROM payroll_import_links WHERE supplier_id = ? AND key_kind = "name"'));
     }
 
+    /**
+     * Sdílené osobní číslo, které náhled k párování nepoužil, nesmí import
+     * převzít jako kód vztahu (agentura s DPP: tři vztahy přejmenované na „1“).
+     */
+    public function testSharedPersonalNumberIsNotAdoptedAsEmploymentCode(): void
+    {
+        $alfa = $this->hire('Alfa', 'První', 'ZAM-1', AttendanceFixture::birthNumber('1990-05-01', 'female', 1));
+        $beta = $this->hire('Beta', 'Druhá', 'ZAM-2', AttendanceFixture::birthNumber('1991-06-02', 'female', 2));
+        $gama = $this->hire('Gama', 'Třetí', 'ZAM-3', AttendanceFixture::birthNumber('1993-07-03', 'female', 3));
+        $file = $this->file([
+            ['1', 'První Alfa', $this->digits(AttendanceFixture::birthNumber('1990-05-01', 'female', 1)), 8],
+            ['1', 'Druhá Beta', $this->digits(AttendanceFixture::birthNumber('1991-06-02', 'female', 2)), 6],
+            ['G7', 'Třetí Gama', $this->digits(AttendanceFixture::birthNumber('1993-07-03', 'female', 3)), 4],
+        ]);
+
+        $persons = $this->preview($file);
+        self::assertTrue($persons['alfa prvni']['number_ambiguous'] ?? false);
+        self::assertTrue($persons['beta druha']['number_ambiguous'] ?? false);
+        self::assertArrayNotHasKey('number_ambiguous', $persons['gama treti']);
+
+        $result = $this->service->apply(
+            $this->supplierId, self::PERIOD, [$file], null, [], false, false, $this->userId,
+            profileId: $this->profileId, adoptPersonalNumbers: true,
+        );
+        self::assertSame(1, $result['personal_numbers_adopted']);
+        self::assertSame([], $result['personal_number_conflicts']);
+        $codes = $this->db->pdo()->prepare('SELECT id, code FROM payroll_employments WHERE supplier_id = ?');
+        $codes->execute([$this->supplierId]);
+        $codes = $codes->fetchAll(PDO::FETCH_KEY_PAIR);
+        self::assertSame('ZAM-1', $codes[$alfa['employment_id']]);
+        self::assertSame('ZAM-2', $codes[$beta['employment_id']]);
+        self::assertSame('G7', $codes[$gama['employment_id']]);
+    }
+
+    public function testPersonCreatedFromBirthNumberGetsBirthDate(): void
+    {
+        $file = $this->file([['N1', 'Nová Osoba', $this->digits(AttendanceFixture::birthNumber('2002-02-14', 'male', 4)), 5]]);
+
+        $created = $this->service->persons($this->supplierId, self::PERIOD, [[
+            'person_key' => 'nova osoba', 'full_name' => 'Osoba Nová', 'first_name' => 'Osoba', 'last_name' => 'Nová',
+            'relation_type' => 'dpp', 'planned_start_on' => '2026-04-01', 'personal_number' => 'N1', 'activate' => true,
+        ]], $this->userId, null, null, [$file], null, $this->profileId)['results'][0];
+
+        self::assertSame('created', $created['status'], (string) $created['message']);
+        $stmt = $this->db->pdo()->prepare('SELECT birth_date FROM payroll_employees WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$this->supplierId, $created['employee_id']]);
+        self::assertSame('2002-02-14', $stmt->fetchColumn());
+    }
+
     public function testBirthNumberWinsOverStoredPersonalNumberLinkAndConflictStopsTheRow(): void
     {
         $alfaNumber = AttendanceFixture::birthNumber('1990-05-01', 'female', 1);
@@ -243,6 +292,28 @@ final class AttendanceIdentityMatchingTest extends TestCase
         );
         $stmt->execute([$this->supplierId, $alfa['employment_id']]);
         self::assertSame(6, (int) $stmt->fetchColumn());
+    }
+
+    /**
+     * Sloupec složky, který je v celém souboru prázdný, souhrn neohlásí ani
+     * nenabídne založit (agentura s DPP: „založí složku ODMENA_MIMORADNA").
+     */
+    public function testEmptyComponentColumnIsNotReported(): void
+    {
+        $sheet = fn (?int $bonus): array => AttendanceFixture::file('bonus-' . (string) $bonus . '.xlsx', AttendanceFixture::xlsx([
+            AttendanceMyUctoSampleProfile::SHEET => ['rows' => [
+                1 => ['A' => 'Osobní číslo', 'B' => 'Příjmení a jméno', 'C' => 'Druh vztahu', 'D' => 'Odpracováno (hod)', 'E' => 'Mimořádná odměna (Kč)'],
+                2 => ['A' => 'A1', 'B' => 'První Alfa', 'C' => 'DPP', 'D' => 8, 'E' => $bonus],
+            ]],
+        ]));
+        $codes = fn (?int $bonus): array => array_column(
+            $this->service->preview($this->supplierId, self::PERIOD, [$sheet($bonus)], null, $this->profileId)['component_checks'],
+            'status',
+            'component_code',
+        );
+
+        self::assertArrayNotHasKey('ODMENA_MIMORADNA', $codes(null));
+        self::assertSame('will_create', $codes(500)['ODMENA_MIMORADNA'] ?? null);
     }
 
     public function testTemplateCarriesWorkedDaysColumn(): void

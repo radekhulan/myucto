@@ -245,6 +245,22 @@ final class PayrollPersonCreateValidatorTest extends TestCase
         self::assertArrayNotHasKey('birth_number', $result['employee']);
     }
 
+    /**
+     * Osoba založená s rodným číslem dostane i datum narození z něj (import
+     * docházky agentury s DPP zakládal osoby s `birth_date = NULL`). Zadané
+     * datum má přednost.
+     */
+    public function testBirthDateIsDerivedFromBirthNumberWhenMissing(): void
+    {
+        $derived = self::validator()->validate(['birth_number' => '9004121236'] + self::baseInput());
+        self::assertSame('1990-04-12', $derived['employee']['birth_date']);
+
+        $female = self::validator()->validate(['birth_number' => '0155120009'] + self::baseInput());
+        self::assertSame('2001-05-12', $female['employee']['birth_date']);
+
+        self::assertNull(self::validator()->validate(self::baseInput())['employee']['birth_date']);
+    }
+
     public function testBirthNumberStaysOptional(): void
     {
         self::assertNull(self::validator()->validate(self::baseInput())['birth_number']);

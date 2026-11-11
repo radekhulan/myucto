@@ -108,6 +108,7 @@ final class PayrollPersonCreateValidator
         $birthNumber = $birthNumber === ''
             ? null
             : CzechBirthNumber::normalize($birthNumber);
+        $birthDate ??= $birthNumber === null ? null : CzechBirthNumber::birthDate($birthNumber);
 
         $monthlyGross = $input['monthly_gross'] ?? null;
         if ($monthlyGross !== null

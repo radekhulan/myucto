@@ -75,8 +75,14 @@ const createComponents = ref(true)
 const adoptPersonalNumbers = ref(true)
 const adoptMonthlyWage = ref(false)
 const createDeductions = ref(true)
-// Výchozí stav drží backend: bez volby se souhrn nezapisuje ani neschvaluje.
+// Podklady s hodinami nebo odpracovanými dny zapisují souhrn výchozí, jinak
+// by dny chyběly pro průměr i měsíční hlášení. Schvaluje se jen na volbu.
 const writeTimeSummary = ref(false)
+const carriesTime = computed(() => (preview.value?.summary.metrics ?? 0) > 0 || (preview.value?.summary.worked_days ?? 0) > 0)
+watch(carriesTime, (value, previous) => {
+  if (!value) writeTimeSummary.value = false
+  else if (!previous) writeTimeSummary.value = true
+})
 const approveCleanTimeMonths = ref(false)
 const materializeAbsenceCompensations = ref(false)
 watch(writeTimeSummary, value => { if (!value) materializeAbsenceCompensations.value = false })
@@ -116,6 +122,9 @@ const links = computed(() => preview.value ? buildAttendanceLinks(preview.value.
 const fileErrors = computed(() => (preview.value?.files ?? []).filter(file => file.error))
 const willCreate = computed(() => preview.value ? componentsToCreate(preview.value.component_checks) : [])
 const adoptableWages = computed(() => adoptableWageChanges(preview.value?.wage_changes))
+const ambiguousNumbers = computed(() => [...new Set((preview.value?.persons ?? [])
+  .filter(person => person.number_ambiguous && person.personal_number)
+  .map(person => person.personal_number as string))])
 // Výchozí zapnuto jen tehdy, když je co převzít. Opakované načtení náhledu
 // (třeba po založení osob) volbu účetní nepřepíše, dokud změny nezmizí.
 watch(() => adoptableWages.value.length, (count, previous) => {
@@ -179,6 +188,9 @@ const deductionCount = computed(() => preview.value?.summary.deductions ?? 0)
 const missingEmploymentCount = computed(() =>
   preview.value ? personsWithoutEmploymentCount(preview.value.persons, manualLinks.value) : 0)
 const showAutoCreateOption = computed(() => props.canCreatePersons && creatableMissingPersons.value.length > 0)
+const summaryCreateKeys = computed(() => autoCreateMissingPersons.value && showAutoCreateOption.value
+  ? creatableMissingPersons.value.map(person => person.key)
+  : [])
 const applyButtonLabel = computed(() => {
   if (applyPhase.value === 'creating') return t('payroll_imports.attendance.summary.phase_creating')
   if (applyPhase.value === 'importing') return t('payroll_imports.attendance.summary.phase_importing')
@@ -543,7 +555,7 @@ async function approveTimeMonths() {
           <h3 class="font-semibold text-neutral-900">{{ t('payroll_imports.attendance.summary.title') }}</h3>
           <p class="max-w-3xl text-sm text-neutral-500">{{ t('payroll_imports.attendance.summary.intro') }}</p>
         </div>
-        <AttendanceSummaryStep :preview="preview" :manual-links="manualLinks" />
+        <AttendanceSummaryStep :preview="preview" :manual-links="manualLinks" :create-keys="summaryCreateKeys" />
 
         <section class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div v-if="willCreate.length" class="mb-4 rounded-lg border border-primary-500/20 bg-surface p-3 text-sm" data-testid="attendance-create-components">
@@ -597,7 +609,7 @@ async function approveTimeMonths() {
             </label>
             <label class="flex items-start gap-2 text-sm text-neutral-800">
               <input v-model="adoptPersonalNumbers" type="checkbox" data-testid="attendance-adopt-personal-numbers" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
-              <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.adopt_personal_numbers') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.adopt_personal_numbers_hint') }}</span></span>
+              <span><span class="font-medium">{{ t('payroll_imports.attendance.summary.adopt_personal_numbers') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance.summary.adopt_personal_numbers_hint') }}</span><span v-if="ambiguousNumbers.length" class="mt-0.5 block text-xs text-warning-700" data-testid="attendance-adopt-ambiguous">{{ t('payroll_imports.attendance.summary.adopt_personal_numbers_ambiguous', { numbers: ambiguousNumbers.join(', ') }, ambiguousNumbers.length) }}</span></span>
             </label>
             <label v-if="adoptableWages.length" class="flex items-start gap-2 text-sm text-neutral-800">
               <input v-model="adoptMonthlyWage" type="checkbox" data-testid="attendance-adopt-monthly-wage" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
@@ -640,7 +652,7 @@ async function approveTimeMonths() {
             </label>
             <label class="flex items-start gap-2 text-sm text-neutral-800">
               <input v-model="writeTimeSummary" type="checkbox" data-testid="attendance-write-time-summary" class="mt-0.5 rounded border-neutral-300 text-payroll-600" :disabled="!canWrite || busy !== null">
-              <span><span class="font-medium">{{ t('payroll_imports.attendance_time.options.write_summary') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance_time.options.write_summary_hint') }}</span></span>
+              <span><span class="font-medium">{{ t('payroll_imports.attendance_time.options.write_summary') }}</span><span class="mt-0.5 block text-xs text-neutral-600">{{ t('payroll_imports.attendance_time.options.write_summary_hint') }}</span><span v-if="carriesTime && !writeTimeSummary" class="mt-0.5 block text-xs font-medium text-warning-700" data-testid="attendance-write-time-summary-off">{{ t('payroll_imports.attendance_time.options.write_summary_off') }}</span></span>
             </label>
             <label class="ml-6 flex items-start gap-2 text-sm text-neutral-800">
               <input v-model="approveCleanTimeMonths" type="checkbox" data-testid="attendance-approve-clean-time-months" class="mt-0.5 rounded border-neutral-300 text-payroll-600"

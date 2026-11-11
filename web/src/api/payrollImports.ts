@@ -514,6 +514,8 @@ export interface AttendancePerson {
   key: string
   display_name: string
   personal_number: string | null
+  /** Osobní číslo má ve firmě nebo v podkladech víc osob: k párování se nepoužilo a nepřevezme se. */
+  number_ambiguous?: boolean
   birth_number_masked: string | null
   relation_label: string | null
   department: string | null
