@@ -70,6 +70,7 @@ final class PayrollE2eHppRemediationLinkCoverageTest extends TestCase
      * @var array<string,string>
      */
     private const DYNAMIC_PATHS = [
+        'count($entities)===1?$entities[0][\'remediation_path\']:$guidance[\'remediation_path\']' => 'PayrollRunIssueGuidance::describe(payout_rule_missing): kryje testDynamicPathHelpersLeadToExistingPages přes katalog návodů',
         '$blocker[\'remediation\']' => 'PayrollHourlyWageMaterializer: literály kryje testEveryPathLiteralLeadsToAnExistingPage',
         '$hourlyLink' => 'literály v PayrollRunSnapshotBuilder',
         'self::hourlyBlockerLink((string) $blocker[\'code\'], $periodStart, $employmentId, $hourlyLink, (array) ($blocker[\'context\'] ?? []))' => 'testDynamicPathHelpersLeadToExistingPages',
