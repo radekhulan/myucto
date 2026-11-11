@@ -957,6 +957,12 @@ už evidence vede, se nepřepisuje. Volba vyžaduje oprávnění k zápisu osob.
 Nečitelná hodnota osobu nezastaví: u osoby se objeví upozornění a hodnota se
 nezapíše. Co se zapsat nepodařilo, vypíše výsledek importu s důvodem.
 
+Totéž funguje i s vlastním sešitem firmy. V **Mapování sloupců** je pro tyto
+údaje (a pro hodinovou sazbu, konec dohody a číslo účtu) skupina významů
+**Registrace ČSSZ**, kterou přiřadíte vlastním sloupcům profilu. Sloupec
+pojmenovaný stejně jako v šabloně Vzoru MyÚčto (např. Státní občanství, PSČ,
+CZ-ISCO, Místo výkonu práce) import navrhne sám.
+
 **Správa profilů mapování.** Seznam profilů firmy v záložce **Mapování
 sloupců** nabízí **Nový profil** a **Import JSON**. Profil uložený jako
 soubor JSON (dříve vytvořený tlačítkem **Export JSON**, třeba z jiné firmy)

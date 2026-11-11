@@ -24,7 +24,7 @@ final class AttendanceMyUctoSampleProfile
 {
     public const KEY = 'myucto';
     public const NAME = 'Vzor MyÚčto';
-    public const VERSION = 3;
+    public const VERSION = 4;
 
     public const SHEET = 'Podklady';
     public const GUIDE_SHEET = 'Návod';
@@ -118,25 +118,25 @@ final class AttendanceMyUctoSampleProfile
                 ['1000000005/0100', null]),
             // Údaje pro registraci ČSSZ (AttendanceRegistrationData): nové osobě
             // se zapíšou při založení, existující jen doplní, co v evidenci chybí.
-            $column('Ulice', ['ulice'], 'address_street', self::FORMAT_TEXT,
+            $column('Ulice', ['ulice', 'ulice a číslo*', 'ulice trvalého pobytu*'], 'address_street', self::FORMAT_TEXT,
                 'Ulice adresy trvalého pobytu (u obce bez ulic název obce nebo části). Adresa se zapíše, jen když je vyplněná ulice, obec i PSČ.',
                 ['Ukázková', null]),
             $column('Číslo domu', ['číslo domu*', 'číslo popisné*'], 'address_house_number', self::FORMAT_TEXT,
                 'Číslo popisné, případně s orientačním za lomítkem (12/3).',
                 ['12', null]),
-            $column('Obec', ['obec'], 'address_city', self::FORMAT_TEXT,
+            $column('Obec', ['obec', 'obec trvalého pobytu*', 'obec bydliště*', 'město'], 'address_city', self::FORMAT_TEXT,
                 'Obec adresy trvalého pobytu.',
                 ['Praha', null]),
-            $column('PSČ', ['psč'], 'address_postal_code', self::FORMAT_TEXT,
+            $column('PSČ', ['psč*'], 'address_postal_code', self::FORMAT_TEXT,
                 'Poštovní směrovací číslo, s mezerou nebo bez (110 00).',
                 ['110 00', null]),
-            $column('Stát', ['stát'], 'address_country', self::FORMAT_TEXT,
+            $column('Stát', ['stát', 'stát trvalého pobytu*', 'stát bydliště*'], 'address_country', self::FORMAT_TEXT,
                 'Dvoupísmenný kód státu adresy (CZ, SK, UA…). Prázdný znamená CZ.',
                 ['CZ', null]),
-            $column('Státní občanství', ['státní občanství*', 'občanství*'], 'citizenship', self::FORMAT_TEXT,
+            $column('Státní občanství', ['státní občanství*', 'občanství*', 'státní příslušnost*'], 'citizenship', self::FORMAT_TEXT,
                 'Dvoupísmenný kód státu občanství (CZ, SK, UA…).',
                 ['CZ', null]),
-            $column('CZ-ISCO', ['cz-isco*', 'cz isco*'], 'cz_isco_code', self::FORMAT_TEXT,
+            $column('CZ-ISCO', ['cz-isco*', 'cz isco*', 'isco*', 'kód zaměstnání*'], 'cz_isco_code', self::FORMAT_TEXT,
                 'Kód zaměstnání podle klasifikace CZ-ISCO (pět číslic). Uloží se do podmínek vztahu.',
                 ['43111', null]),
             $column('Druh činnosti', ['druh činnosti*'], 'activity_code', self::FORMAT_TEXT,
