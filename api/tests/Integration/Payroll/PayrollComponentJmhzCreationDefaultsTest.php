@@ -279,12 +279,10 @@ final class PayrollComponentJmhzCreationDefaultsTest extends TestCase
         );
         for ($i = 1; $i <= 30; ++$i) {
             $insert->execute([$this->supplierId, sprintf('Syntetický Zaměstnanec %02d', $i)]);
+            $this->employmentFor((int) $this->db->pdo()->lastInsertId(), sprintf('SYN-GAP-%02d', $i), '2026-01-01', null, 'active');
         }
 
-        $service = $this->container->get(PayrollRunReadinessService::class);
-        self::assertInstanceOf(PayrollRunReadinessService::class, $service);
-        $method = new \ReflectionMethod($service, 'personDataGapFinding');
-        $finding = $method->invoke($service, $this->supplierId);
+        $finding = $this->personDataGapFinding(self::PERIOD);
 
         self::assertIsArray($finding);
         self::assertSame('person_data_gap', $finding['code']);
@@ -292,6 +290,70 @@ final class PayrollComponentJmhzCreationDefaultsTest extends TestCase
         self::assertSame(30, $finding['entity_total']);
         self::assertCount(25, $finding['entities']);
         self::assertStringContainsString('a dalších 5', $finding['message']);
+    }
+
+    /**
+     * Kontrola běhu hodnotí údaje k období běhu, ne k dnešku. Dohoda skončená
+     * v únoru s rezidencí, prohlášením i pojišťovnou zapsanými jen na únor za
+     * únor nic nedluží; u každé osoby nález jmenuje, CO chybí.
+     */
+    public function testPersonDataGapsAreEvaluatedForTheRunPeriodAndNameTheGap(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, employment_type,
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, "Syntetická Dohoda Únor", "employee", "dpp", 0, 0, 0, 0, 0, 0)',
+        )->execute([$this->supplierId]);
+        $employeeId = (int) $pdo->lastInsertId();
+        $this->employmentFor($employeeId, 'SYN-DPP-UNOR', '2026-02-01', '2026-02-28', 'ended');
+        $pdo->prepare(
+            'INSERT INTO payroll_person_tax_residences
+                (supplier_id, employee_id, residence, country_code, effective_from, effective_to, evidence_reference)
+             VALUES (?, ?, "czech-resident", "CZ", "2026-02-01", "2026-02-28", "synthetic:residence")',
+        )->execute([$this->supplierId, $employeeId]);
+
+        $february = $this->entityFor($this->personDataGapFinding('2026-02-01'), $employeeId);
+        self::assertNotNull($february, 'Únorová dohoda patří do únorové kontroly.');
+        self::assertNotContains('tax_residence', $february['gaps'], 'Rezidence platná v únoru za únor nechybí.');
+        self::assertContains('health_insurance', $february['gaps']);
+        self::assertStringContainsString('zdravotní pojišťovna', $february['message']);
+        self::assertStringStartsWith('/payroll/people?person=' . $employeeId . '&panel=', $february['remediation_path']);
+
+        // Za červen už dohoda neběží: v kontrole červnového běhu nemá co dělat.
+        self::assertNull($this->entityFor($this->personDataGapFinding(self::PERIOD), $employeeId));
+    }
+
+    /** @return array<string,mixed>|null */
+    private function personDataGapFinding(string $periodStart): ?array
+    {
+        $service = $this->container->get(PayrollRunReadinessService::class);
+        self::assertInstanceOf(PayrollRunReadinessService::class, $service);
+
+        return (new \ReflectionMethod($service, 'personDataGapFinding'))->invoke($service, $this->supplierId, $periodStart);
+    }
+
+    /** @return array<string,mixed>|null */
+    private function entityFor(?array $finding, int $employeeId): ?array
+    {
+        foreach ($finding['entities'] ?? [] as $entity) {
+            if ($entity['entity_id'] === $employeeId) {
+                return $entity;
+            }
+        }
+
+        return null;
+    }
+
+    private function employmentFor(int $employeeId, string $code, string $start, ?string $end, string $status): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status, start_date, actual_start_date, end_date, is_primary)
+             VALUES (?, ?, ?, "employment", ?, ?, ?, ?, 1)',
+        )->execute([$this->supplierId, $employeeId, $code, $status, $start, $start, $end]);
     }
 
     /**

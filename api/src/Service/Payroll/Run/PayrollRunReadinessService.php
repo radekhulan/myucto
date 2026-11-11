@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
+use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
 use PDO;
 
 /**
@@ -213,7 +214,7 @@ final class PayrollRunReadinessService
             }
         }
 
-        $peopleFinding = $this->personDataGapFinding($supplierId);
+        $peopleFinding = $this->personDataGapFinding($supplierId, $periodStart);
         if ($peopleFinding !== null) {
             $findings[] = $peopleFinding;
         }
@@ -305,11 +306,15 @@ final class PayrollRunReadinessService
      *   count:int,entities:list<array{entity_type:string,entity_id:?int}>
      * }|null
      */
-    private function personDataGapFinding(int $supplierId): ?array
+    private function personDataGapFinding(int $supplierId, string $periodStart): ?array
     {
         try {
-            $gaps = $this->people->activeWithBlockingDataGaps(
+            // K období běhu, ne k dnešku: dohoda skončená v únoru s údaji
+            // zapsanými na únor za únor nic nedluží.
+            $gaps = $this->people->blockingDataGapsForPeriod(
                 $supplierId,
+                $periodStart,
+                (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d'),
                 self::MAX_ENTITIES,
             );
         } catch (\Throwable) {
@@ -322,8 +327,12 @@ final class PayrollRunReadinessService
             return null;
         }
 
-        $names = array_map(
-            static fn (array $person): string => $person['full_name'],
+        $named = array_map(
+            static fn (array $person): string => sprintf(
+                '%s (%s)',
+                $person['full_name'],
+                implode(', ', array_map(self::gapLabel(...), $person['gaps'])),
+            ),
             $people,
         );
         // Jmen je nejvýš MAX_ENTITIES, počet je ale celkový — „25×" u firmy,
@@ -333,11 +342,11 @@ final class PayrollRunReadinessService
         return self::finding(
             'person_data_gap',
             sprintf(
-                'Chybí zákonné údaje u těchto zaměstnanců: %s%s. Bez nich se '
-                . 'nedá podat hlášení ani spočítat odvody. Otevřete Mzdy → '
-                . 'Zaměstnanci, zapněte filtr „Mám doplnit údaje" a doplňte je; '
-                . 'karta osoby nahoře vypíše, co konkrétně chybí.',
-                implode(', ', $names),
+                'Za období %s chybí zákonné údaje u těchto zaměstnanců: %s%s. Bez nich se '
+                . 'nedá podat hlášení ani spočítat odvody. Odkaz u osoby otevře místo, kde '
+                . 'se údaj doplňuje.',
+                substr($periodStart, 0, 7),
+                implode('; ', $named),
                 $hidden > 0 ? sprintf(' a dalších %d', $hidden) : '',
             ),
             '/payroll/people?filter=blocking_data',
@@ -347,10 +356,48 @@ final class PayrollRunReadinessService
                     'entity_type' => 'employee',
                     'entity_id' => $person['id'],
                     'label' => $person['full_name'],
+                    'message' => sprintf(
+                        '%s: chybí %s.',
+                        $person['full_name'],
+                        implode(', ', array_map(self::gapLabel(...), $person['gaps'])),
+                    ),
+                    'gaps' => $person['gaps'],
+                    'remediation_path' => self::gapPath($person['id'], $person['gaps'][0] ?? null),
                 ],
                 $people,
             ),
         );
+    }
+
+    /** Název chybějícího údaje do věty nálezu (klíče {@see PayrollPersonDataGapCatalog}). */
+    private static function gapLabel(string $key): string
+    {
+        return match ($key) {
+            'employment' => 'pracovní vztah',
+            'name' => 'jméno a příjmení',
+            'identifier' => 'rodné číslo nebo EČP',
+            'residence' => 'adresa trvalého pobytu',
+            'health_insurance' => 'zdravotní pojišťovna',
+            'tax_residence' => 'daňová rezidence',
+            'payout_account' => 'ověřený výplatní účet',
+            'contact' => 'kontakt',
+            'citizenship' => 'státní občanství',
+            'birth_date' => 'datum narození',
+            'tax_declaration' => 'stav daňového prohlášení',
+            default => $key,
+        };
+    }
+
+    private static function gapPath(int $personId, ?string $key): string
+    {
+        $query = ['person' => $personId];
+        if ($key !== null) {
+            $gap = PayrollPersonDataGapCatalog::describe($key);
+            if ($gap['panel'] !== null) $query['panel'] = $gap['panel'];
+            if ($gap['field'] !== null) $query['field'] = $gap['field'];
+        }
+
+        return '/payroll/people?' . http_build_query($query);
     }
 
     /**

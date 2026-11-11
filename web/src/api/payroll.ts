@@ -7772,7 +7772,8 @@ export interface PayrollRunReadinessFinding {
   /** Skutečný počet dotčených záznamů; `entities` je na serveru oříznutý. */
   entity_total?: number
   /** `label` je lidský název konkrétní věci — nález MUSÍ jmenovat, čeho se týká. */
-  entities: { entity_type: string, entity_id: number | null, label: string | null, message?: string, remediation_path?: string | null }[]
+  /** `gaps` = klíče chybějících údajů osoby (`PayrollPersonDataGapKey`) u nálezu `person_data_gap`. */
+  entities: { entity_type: string, entity_id: number | null, label: string | null, message?: string, remediation_path?: string | null, gaps?: string[] }[]
   /** Jde nález trvale skrýt; `subject_ids` jsou VŠECHNY dotčené osoby (vztahy). */
   hideable?: boolean
   subject_type?: PayrollWarningSubjectType | null
