@@ -112,7 +112,7 @@ final class PayrollRunPeopleApiTest extends TestCase
         self::assertSame(['name', 'asc'], [$page['sort'], $page['dir']]);
         // Česká abeceda: Černá, Dvořák, Chalupová, Šafránek.
         self::assertSame(
-            [$this->id('B'), $this->id('C'), $this->id('D'), $this->id('A')],
+            [$this->employeeIdOf('B'), $this->employeeIdOf('C'), $this->employeeIdOf('D'), $this->employeeIdOf('A')],
             array_column($page['items'], 'employee_id'),
         );
 
@@ -129,7 +129,7 @@ final class PayrollRunPeopleApiTest extends TestCase
         ];
         $byEmployee = array_column($page['items'], null, 'employee_id');
         foreach ($expected as $key => $amounts) {
-            $item = $byEmployee[$this->id($key)];
+            $item = $byEmployee[$this->employeeIdOf($key)];
             self::assertSame(
                 $amounts,
                 [$item['gross_minor'], $item['insurance_minor'], $item['tax_minor'], $item['net_minor'], $item['payable_minor']],
@@ -139,10 +139,10 @@ final class PayrollRunPeopleApiTest extends TestCase
             self::assertSame($this->persons[$key]['employment_id'], $item['employments'][0]['id']);
             self::assertSame('dpp', $item['employments'][0]['relation_type']);
         }
-        self::assertSame(54_000, $byEmployee[$this->id('A')]['withholding_tax_minor']);
-        self::assertSame(0, $byEmployee[$this->id('A')]['advance_tax_minor']);
-        self::assertSame(225_000, $byEmployee[$this->id('C')]['advance_tax_minor']);
-        self::assertSame('Běla Černá', $byEmployee[$this->id('B')]['full_name']);
+        self::assertSame(54_000, $byEmployee[$this->employeeIdOf('A')]['withholding_tax_minor']);
+        self::assertSame(0, $byEmployee[$this->employeeIdOf('A')]['advance_tax_minor']);
+        self::assertSame(225_000, $byEmployee[$this->employeeIdOf('C')]['advance_tax_minor']);
+        self::assertSame('Běla Černá', $byEmployee[$this->employeeIdOf('B')]['full_name']);
         self::assertSame(
             [
                 'gross_minor' => 3_720_100,
@@ -163,27 +163,27 @@ final class PayrollRunPeopleApiTest extends TestCase
     {
         $first = $this->page(['sort' => 'net_minor', 'dir' => 'desc', 'limit' => '2']);
         self::assertSame(4, $first['total']);
-        self::assertSame([$this->id('D'), $this->id('C')], array_column($first['items'], 'employee_id'));
+        self::assertSame([$this->employeeIdOf('D'), $this->employeeIdOf('C')], array_column($first['items'], 'employee_id'));
         $second = $this->page(['sort' => 'net_minor', 'dir' => 'desc', 'limit' => '2', 'offset' => '2']);
-        self::assertSame([$this->id('B'), $this->id('A')], array_column($second['items'], 'employee_id'));
+        self::assertSame([$this->employeeIdOf('B'), $this->employeeIdOf('A')], array_column($second['items'], 'employee_id'));
 
         // Stejná částka: pořadí drží příjmení (Dvořák před Chalupová).
         $gross = $this->page(['sort' => 'gross_minor', 'dir' => 'asc']);
         self::assertSame(
-            [$this->id('B'), $this->id('A'), $this->id('C'), $this->id('D')],
+            [$this->employeeIdOf('B'), $this->employeeIdOf('A'), $this->employeeIdOf('C'), $this->employeeIdOf('D')],
             array_column($gross['items'], 'employee_id'),
         );
         $tax = $this->page(['sort' => 'tax_minor', 'dir' => 'desc', 'limit' => '1']);
-        self::assertSame([$this->id('C')], array_column($tax['items'], 'employee_id'));
+        self::assertSame([$this->employeeIdOf('C')], array_column($tax['items'], 'employee_id'));
         // A i B mají pojistné nulové, rozhoduje příjmení (Černá před Šafránek).
         $insurance = $this->page(['sort' => 'insurance_minor', 'dir' => 'asc', 'limit' => '2']);
-        self::assertSame([$this->id('B'), $this->id('A')], array_column($insurance['items'], 'employee_id'));
+        self::assertSame([$this->employeeIdOf('B'), $this->employeeIdOf('A')], array_column($insurance['items'], 'employee_id'));
         $byNameDescending = $this->page(['sort' => 'name', 'dir' => 'desc', 'limit' => '1']);
-        self::assertSame([$this->id('A')], array_column($byNameDescending['items'], 'employee_id'));
+        self::assertSame([$this->employeeIdOf('A')], array_column($byNameDescending['items'], 'employee_id'));
 
         // Hledání podle jména (bez ohledu na velikost písmen) zužuje i součty.
         $byName = $this->page(['q' => 'dvoř']);
-        self::assertSame([$this->id('C')], array_column($byName['items'], 'employee_id'));
+        self::assertSame([$this->employeeIdOf('C')], array_column($byName['items'], 'employee_id'));
         self::assertSame(1, $byName['total']);
         self::assertSame(1_500_000, $byName['totals']['gross_minor']);
         // Hledání podle osobního čísla vztahu.
@@ -193,8 +193,8 @@ final class PayrollRunPeopleApiTest extends TestCase
         );
         self::assertNotSame('', $code);
         $byCode = $this->page(['q' => $code]);
-        self::assertContains($this->id('D'), array_column($byCode['items'], 'employee_id'));
-        self::assertSame($code, array_column($byCode['items'], null, 'employee_id')[$this->id('D')]['employments'][0]['code']);
+        self::assertContains($this->employeeIdOf('D'), array_column($byCode['items'], 'employee_id'));
+        self::assertSame($code, array_column($byCode['items'], null, 'employee_id')[$this->employeeIdOf('D')]['employments'][0]['code']);
         // Zástupné znaky jsou hledaný text.
         self::assertSame(0, $this->page(['q' => '%'])['total']);
         self::assertSame(0, $this->page(['q' => 'neexistuje'])['total']);
@@ -223,17 +223,17 @@ final class PayrollRunPeopleApiTest extends TestCase
         self::assertIsString($unsigned, 'Souhrn nepodepsaných prohlášení v běhu chybí.');
         $subjects = array_map('intval', json_decode($unsigned, true, flags: JSON_THROW_ON_ERROR));
         sort($subjects);
-        $expected = [$this->id('A'), $this->id('C')];
+        $expected = [$this->employeeIdOf('A'), $this->employeeIdOf('C')];
         sort($expected);
         self::assertSame($expected, $subjects);
 
         foreach (['A', 'C'] as $key) {
-            self::assertTrue($all[$this->id($key)]['has_finding'], "Osoba {$key} má mít příznak nálezu.");
-            self::assertGreaterThanOrEqual(1, $all[$this->id($key)]['findings']['warnings']);
+            self::assertTrue($all[$this->employeeIdOf($key)]['has_finding'], "Osoba {$key} má mít příznak nálezu.");
+            self::assertGreaterThanOrEqual(1, $all[$this->employeeIdOf($key)]['findings']['warnings']);
         }
         foreach (['B', 'D'] as $key) {
-            self::assertFalse($all[$this->id($key)]['has_finding'], "Osoba {$key} nález nemá.");
-            self::assertSame(['blockers' => 0, 'warnings' => 0], $all[$this->id($key)]['findings']);
+            self::assertFalse($all[$this->employeeIdOf($key)]['has_finding'], "Osoba {$key} nález nemá.");
+            self::assertSame(['blockers' => 0, 'warnings' => 0], $all[$this->employeeIdOf($key)]['findings']);
         }
 
         $flagged = $this->page(['findings' => '1']);
@@ -246,7 +246,7 @@ final class PayrollRunPeopleApiTest extends TestCase
 
     public function testPersonDetailReturnsTheSameResultAsTheRevisionSnapshot(): void
     {
-        $employeeId = $this->id('C');
+        $employeeId = $this->employeeIdOf('C');
         $response = $this->people->detail(
             $this->request('GET', "/api/payroll/runs/{$this->runId}/people/{$employeeId}"),
             new Response(),
@@ -434,7 +434,7 @@ final class PayrollRunPeopleApiTest extends TestCase
         return $this->json($response);
     }
 
-    private function id(string $key): int
+    private function employeeIdOf(string $key): int
     {
         return $this->persons[$key]['employee_id'];
     }

@@ -133,20 +133,22 @@ final class PayrollRunPeopleRepository
         $search = trim($search);
         if ($search !== '') {
             // Kód je osobní číslo pracovního vztahu; hledá se jen mezi vztahy,
-            // se kterými osoba do této revize vstoupila.
+            // se kterými osoba do této revize vstoupila. Poddotaz má firmu
+            // i revizi jako konstanty (ne odkazem na vnější řádek), aby šel po
+            // `uq_payroll_run_employment_owner` jen přes vztahy této revize
+            // a neprocházel vztahy všech revizí firmy.
             $where .= ' AND (' . $name . " LIKE ? ESCAPE '" . self::LIKE_ESCAPE . "'"
-                . ' OR EXISTS (
-                        SELECT 1
+                . ' OR person.employee_id IN (
+                        SELECT search_run.employee_id
                           FROM payroll_run_employments search_run
                           JOIN payroll_employments search_employment
                             ON search_employment.supplier_id = search_run.supplier_id
                            AND search_employment.id = search_run.employment_id
-                         WHERE search_run.supplier_id = person.supplier_id
-                           AND search_run.revision_id = person.revision_id
-                           AND search_run.employee_id = person.employee_id
+                         WHERE search_run.supplier_id = ?
+                           AND search_run.revision_id = ?
                            AND search_employment.code LIKE ? ESCAPE \'' . self::LIKE_ESCAPE . '\'))';
             $like = '%' . self::escapeLike($search) . '%';
-            array_push($params, $like, $like);
+            array_push($params, $like, $supplierId, $revisionId, $like);
         }
         if ($flaggedEmployeeIds !== null) {
             $flagged = 'person.result_status IN ("manual_review", "error")';
