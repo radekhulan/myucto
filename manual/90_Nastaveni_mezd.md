@@ -907,7 +907,8 @@ docházkový systém.
 **Částky s haléři.** Měsíční hlášení (JMHZ) vykazuje výdělek v celých korunách.
 Má-li částka složky zařazené do hlášení haléře (provize, příplatek za víkend),
 nabídne souhrn volbu **Zaokrouhlit částky s haléři nahoru na celé koruny**
-s jejich počtem. Za měsíce vykazované přes JMHZ je zapnutá. Tabulka pak ukazuje
+s jejich počtem. Je zapnutá za každý měsíc, za který jde připravit měsíční
+hlášení, tedy i za měsíce před zákonným startem JMHZ. Tabulka pak ukazuje
 zaokrouhlenou částku a pod ní původní hodnotu a vstupy vzniknou už
 zaokrouhlené. Zaokrouhluje se vždy nahoru, ve prospěch zaměstnance (§ 142
 odst. 2 zákoníku práce). Bez volby by takové vstupy zablokovaly mzdový běh

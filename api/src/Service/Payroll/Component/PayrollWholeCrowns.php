@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Component;
 
-use MyInvoice\Service\Payroll\Submission\PayrollStatutoryAgendaCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 
 /**
  * Mzdové vstupy v celých korunách pro měsíční hlášení (JMHZ).
@@ -69,9 +69,14 @@ final class PayrollWholeCrowns
         return $jmhzTreatment === 'included';
     }
 
-    /** Hlídat celé koruny má smysl jen za měsíc, který se vykazuje přes JMHZ. */
+    /**
+     * Celé koruny se hlídají za každý měsíc, za který jde připravit měsíční
+     * hlášení — tedy stejně jako příprava, ne od zákonného startu JMHZ
+     * (1. 4. 2026): firmy připravují a mrazí hlášení i za 01/2026 a 02/2026
+     * a příprava za únor haléře odmítla.
+     */
     public static function jmhzPeriod(string $periodStart): bool
     {
-        return PayrollStatutoryAgendaCatalog::jmhzApplies($periodStart);
+        return JmhzSpecVersion::monthlyReportPreparable($periodStart);
     }
 }
