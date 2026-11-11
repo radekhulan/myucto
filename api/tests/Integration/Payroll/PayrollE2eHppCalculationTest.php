@@ -312,6 +312,50 @@ final class PayrollE2eHppCalculationTest extends TestCase
     }
 
     /**
+     * Nástup 15. 4. 2026 na zkrácený úvazek 20 h, mzda za duben 10 000 Kč:
+     * minimum ZP se krátí na dny trvání zaměstnání (§ 3 odst. 8 zák.
+     * č. 592/1992 Sb.), tedy 22 400 × 16/30 = 11 946,67 Kč.
+     *
+     * Ruční přepočet: ZP celkem 13,5 % z 11 946,67 = 1 612,80 → 1 613;
+     * zaměstnavatel 2/3 ze skutečného základu 1 350 = 900, zaměstnanec
+     * zbytek 713 (450 + dopočet 263); SP 710; záloha 1 500 − 2 570 → 0;
+     * čistá 10 000 − 710 − 713 = 8 577.
+     */
+    public function testMidMonthEntryProratesHealthMinimum(): void
+    {
+        $person = $this->hire(
+            'Syntetická Nástupní',
+            'female',
+            '1992-09-09',
+            weeklyHours: 20,
+            workload: 5_000,
+            healthTopUpResponsibility: 'employee',
+            publishShifts: false,
+        );
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employments SET start_date = "2026-04-15", actual_start_date = "2026-04-15" WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $person['employment_id']]);
+        $pdo->prepare('UPDATE payroll_employment_terms SET effective_from = "2026-04-15", planned_start_on = "2026-04-15", actual_start_on = "2026-04-15" WHERE supplier_id = ? AND employment_id = ?')
+            ->execute([$this->supplierId, $person['employment_id']]);
+        $worked = array_values(array_filter(self::workdays(self::PERIOD), static fn (string $day): bool => $day >= '2026-04-15'));
+        $this->approveMonth($person['employment_id'], $worked, 240);
+        $this->pay($person, 1_000_000);
+
+        $result = $this->submission('mid-month-entry');
+
+        $this->assertPayroll($result['person'], [
+            'social' => 71_000,
+            'health_employee' => 71_300,
+            'health_employer' => 90_000,
+            'health_top_up' => 26_300,
+            'advance' => 0,
+            'child_credit' => 0,
+            'bonus' => 0,
+            'net' => 857_700,
+        ]);
+    }
+
+    /**
      * @return array{employee_id:int,employment_id:int,name:string,average_id:?int,sequence:int}
      */
     private function hire(
