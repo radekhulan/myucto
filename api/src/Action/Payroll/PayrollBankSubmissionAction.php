@@ -65,7 +65,7 @@ final class PayrollBankSubmissionAction
     {
         if ($denied = $this->denied($request, $response, AccessLevel::WRITE)) return $denied;
         $userId = $this->userId($request);
-        if ($userId === null) return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        if ($userId === null) return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         try {
             return Json::ok($response, $this->signatures->startSignature($this->currentSupplierId($request), (int) $args['batchId'],
                 'payroll', $userId))->withHeader('Cache-Control', 'no-store');

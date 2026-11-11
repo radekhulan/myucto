@@ -132,7 +132,7 @@ final class OtherItemScheduleService
             if ($autoPost === true) self::assertConfirmedSource($source);
             $schedule = $this->get($supplierId, $id);
             if (!$allowAutoPost && ($autoPost === true || $status === 'active' && ($autoPost ?? $schedule['auto_post']))) {
-                throw new OtherItemException('forbidden', 'Pro automatické účtování nemáš oprávnění.', 403);
+                throw new OtherItemException('forbidden', 'Pro automatické účtování nemáte oprávnění.', 403);
             }
             $stmt = $pdo->prepare('UPDATE other_item_schedules SET status = ?, auto_post = COALESCE(?, auto_post)
                 WHERE supplier_id = ? AND id = ?');
@@ -173,7 +173,7 @@ final class OtherItemScheduleService
             $schedule = $stmt->fetch(PDO::FETCH_ASSOC);
             if ($schedule === false) throw new OtherItemException('schedule_not_found', 'Rozvrh nebyl nalezen.', 404);
             if ($schedule['auto_post'] && !$allowAutoPost) {
-                throw new OtherItemException('forbidden', 'Pro automatické účtování nemáš oprávnění.', 403);
+                throw new OtherItemException('forbidden', 'Pro automatické účtování nemáte oprávnění.', 403);
             }
             if ($schedule['status'] !== 'active') {
                 throw new OtherItemException('schedule_paused', 'Pozastavený rozvrh nelze generovat.', 409);

@@ -33,7 +33,7 @@ final class PayrollMonthlyOverviewAction
             AccessLevel::READ,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $period = trim((string) ($request->getQueryParams()['period'] ?? ''));
         try {

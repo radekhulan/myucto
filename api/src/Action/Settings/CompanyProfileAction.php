@@ -51,7 +51,7 @@ final class CompanyProfileAction
             static fn (string $s): bool => RequestAuthorization::allows($request, CompanyProfileFormat::SECTION_PERMISSIONS[$s], AccessLevel::READ),
         ));
         if ($sections === []) {
-            return Json::error($response, 'forbidden', 'Pro export profilu firmy nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro export profilu firmy nemáte oprávnění.', 403);
         }
         try {
             $profile = $this->exporter->export($supplierId, $sections);
@@ -104,7 +104,7 @@ final class CompanyProfileAction
                 }
             }
             if ($missing !== []) {
-                return Json::error($response, 'forbidden', 'Profil mění nastavení, ke kterému nemáš oprávnění: '
+                return Json::error($response, 'forbidden', 'Profil mění nastavení, ke kterému nemáte oprávnění: '
                     . implode(', ', array_keys($missing)) . '.', 403, ['missing_permissions' => array_keys($missing)]);
             }
             $result = $this->importer->import($supplierId, $profile, $dryRun, $only, self::userId($request));

@@ -275,7 +275,7 @@ final class DomainLoginService
 
         $member = in_array((int) $row['supplier_id'], $this->memberships->allowedSupplierIds($userId), true);
         if (!$member && !$this->roles->isSuperadmin($userId)) {
-            throw new DomainLoginException('forbidden_supplier', 'K portálu této firmy nemáš oprávnění.', 403);
+            throw new DomainLoginException('forbidden_supplier', 'K portálu této firmy nemáte oprávnění.', 403);
         }
         $row['superadmin_without_membership'] = !$member;
         return $row;

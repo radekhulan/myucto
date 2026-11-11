@@ -402,7 +402,7 @@ final class SettingsAction
     public function createSupplier(Request $request, Response $response): Response
     {
         if (!RequestAuthorization::canCreateSupplier($request)) {
-            return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

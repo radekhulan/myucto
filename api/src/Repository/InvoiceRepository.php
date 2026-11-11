@@ -1413,6 +1413,23 @@ final class InvoiceRepository
                     "Rodičovský doklad #$parentInvoiceId neexistuje nebo patří jiné firmě."
                 );
             }
+            // Dobropis drobnému zákazníkovi k zjednodušenému dokladu je zjednodušený
+            // opravný daňový doklad (§ 45 odst. 2 ZDPH), stejně jako dobropis z faktury
+            // (CancelInvoiceAction). Výslovně poslaná hodnota má přednost.
+            if (!array_key_exists('is_simplified', $data)
+                && ($data['invoice_type'] ?? 'invoice') === 'credit_note'
+                && !empty($client['simplified_only'])
+                && $this->supportsSimplified()
+            ) {
+                $original = $pdo->prepare('SELECT invoice_type, is_simplified FROM invoices WHERE id = ?');
+                $original->execute([$parentInvoiceId]);
+                $originalRow = $original->fetch(PDO::FETCH_ASSOC) ?: [];
+                if (\MyInvoice\Service\Invoice\InvoiceIssueTaxGate::creditNoteInheritsSimplified(
+                    $originalRow + ['client_simplified_only' => true],
+                )) {
+                    $data['is_simplified'] = true;
+                }
+            }
         }
         $brandingProfileId = empty($client['branding_profiles_enabled']) ? null : (array_key_exists('branding_profile_id', $data)
             ? $this->resolveBrandingProfileId($data['branding_profile_id'], $supplierId)

@@ -37,18 +37,18 @@ final class ListInvoicesAction
         $filter = (array) ($q['filter'] ?? []);
         if (($filter['include_dimensions'] ?? null) === '1'
             && !RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         if ((($filter['include_journal_notes'] ?? null) === '1'
             || ($filter['include_posting_accounts'] ?? null) === '1'
             || in_array($q['sort_key'] ?? '', ['journal_notes', 'debit_accounts', 'credit_accounts'], true))
             && !RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         if (($filter['include_document_tags'] ?? null) === '1'
             && !RequestAuthorization::allows($request, 'documents', AccessLevel::READ)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         $filters = InvoiceListFilters::issued($request);

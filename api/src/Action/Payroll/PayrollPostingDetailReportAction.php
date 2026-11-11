@@ -111,7 +111,7 @@ final class PayrollPostingDetailReportAction
         if (!$this->requirePermission($request, $response, 'payroll.reports', AccessLevel::READ, $error)
             || !$this->requirePayrollEnabled($request, $response, $this->access, $error)
         ) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         return null;

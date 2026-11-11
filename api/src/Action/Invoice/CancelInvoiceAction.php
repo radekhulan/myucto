@@ -453,6 +453,14 @@ final class CancelInvoiceAction
             ]);
             $creditNoteId = (int) $pdo->lastInsertId();
 
+            // Drobný zákazník bez adresy (#310): dobropis k zjednodušenému dokladu vzniká
+            // rovnou jako zjednodušený opravný daňový doklad (§ 45 odst. 2 ZDPH), jinou
+            // opravu mu brána vystavení nepustí (InvoiceIssueTaxGate). Běžnému odběrateli
+            // se příznak nedědí: je plátci znám, opravný doklad nese jeho označení.
+            if (\MyInvoice\Service\Invoice\InvoiceIssueTaxGate::creditNoteInheritsSimplified($invoice)) {
+                $pdo->prepare('UPDATE invoices SET is_simplified = 1 WHERE id = ?')->execute([$creditNoteId]);
+            }
+
             // Zkopíruj položky se zápornými quantities — zachovává vat_classification_code
             // (dobropis má jít na stejné DPH řádky jako originální faktura, ale se zápornými hodnotami)
             // Sloupce se skládají místo ručně psaných variant SQL — guard na příznak

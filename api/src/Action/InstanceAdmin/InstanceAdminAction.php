@@ -263,7 +263,7 @@ final class InstanceAdminAction
         if ($this->managed->isManaged()) return Json::error($response, 'not_found', 'Správa instance není na této instalaci dostupná.', 404);
         if (RequestAuthorization::canManageInstance($request)
             && (!$superadminOnly || RequestAuthorization::isSuperadmin($request))) return null;
-        return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáš oprávnění.', 403);
+        return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáte oprávnění.', 403);
     }
 
     private function guardSupplier(Request $request, Response $response, array $args): ?Response
@@ -271,7 +271,7 @@ final class InstanceAdminAction
         if (($denied = $this->guard($request, $response)) !== null) return $denied;
         $id = (int) ($args['id'] ?? 0);
         if ($id <= 0 || (!RequestAuthorization::isSuperadmin($request) && !$this->suppliers->allows($this->userId($request), $id))) {
-            return Json::error($response, 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden_supplier', 'K této firmě nemáte oprávnění.', 403);
         }
         $stmt = $this->db->pdo()->prepare('SELECT id FROM supplier WHERE id = ?');
         $stmt->execute([$id]);

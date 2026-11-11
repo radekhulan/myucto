@@ -145,7 +145,7 @@ final class PayrollWageStatementAction
         if (!$this->requirePermission($request, $response, 'payroll.documents', $level, $error)
             || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)
         ) {
-            return self::private($error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403));
+            return self::private($error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403));
         }
 
         return null;

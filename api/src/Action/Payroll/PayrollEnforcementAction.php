@@ -426,7 +426,7 @@ final class PayrollEnforcementAction
                 return $error ?? Json::error(
                     $response,
                     'forbidden',
-                    'Pro tuto akci nemáš oprávnění.',
+                    'Pro tuto akci nemáte oprávnění.',
                     403,
                 );
             }
@@ -622,7 +622,7 @@ final class PayrollEnforcementAction
                 return $error ?? Json::error(
                     $response,
                     'forbidden',
-                    'Pro výběr rozhodnutí oddlužení nemáš oprávnění k dokumentům.',
+                    'Pro výběr rozhodnutí oddlužení nemáte oprávnění k dokumentům.',
                     403,
                 );
             }
@@ -915,7 +915,7 @@ final class PayrollEnforcementAction
             return $error ?? Json::error(
                 $response,
                 'forbidden',
-                'Pro tuto akci nemáš oprávnění.',
+                'Pro tuto akci nemáte oprávnění.',
                 403,
             );
         }

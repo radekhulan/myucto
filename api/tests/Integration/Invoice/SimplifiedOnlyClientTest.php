@@ -28,7 +28,9 @@ use Slim\Psr7\Response as Psr7Response;
  *
  * Karta smí mít jen jméno a e-mail nebo telefon. Plátce takovému odběrateli vystaví jen
  * zjednodušený daňový doklad (§ 30 ZDPH) do limitu 10 000 Kč s daní; běžnou fakturu
- * (§ 29 odst. 1 písm. c) ani doklad nad limitem brána nepustí.
+ * (§ 29 odst. 1 písm. c) ani doklad nad limitem brána nepustí. Dobropis jen jako zjednodušený
+ * opravný daňový doklad k jeho zjednodušenému dokladu (§ 45 odst. 2 ZDPH) a nejvýše do částky,
+ * která z původního dokladu zbývá opravit.
  */
 #[Group('integration')]
 final class SimplifiedOnlyClientTest extends TestCase
@@ -234,6 +236,125 @@ final class SimplifiedOnlyClientTest extends TestCase
         $this->autoIssue->run($id, $this->userId, '127.0.0.1', 'phpunit');
     }
 
+    // ── dobropis (§ 45 odst. 2 ZDPH) ────────────────────────────────────────
+
+    public function testCreditNoteDraftViaApiInheritsSimplifiedFlag(): void
+    {
+        $small = $this->smallClient();
+        $original = $this->issuedOriginal($small, simplified: true, total: 1000);
+        $regularOriginal = $this->issuedOriginal($this->regularClient(), simplified: true, total: 1000);
+
+        $id = $this->createDraft(['client_id' => $small, 'invoice_type' => 'credit_note', 'parent_invoice_id' => $original]);
+        $regular = $this->createDraft([
+            'client_id' => (int) $this->invoices->find($regularOriginal)['client_id'],
+            'invoice_type' => 'credit_note', 'parent_invoice_id' => $regularOriginal,
+        ]);
+
+        self::assertTrue($this->invoices->find($id)['is_simplified']);
+        self::assertFalse($this->invoices->find($regular)['is_simplified'], 'Známému odběrateli se příznak nedědí.');
+    }
+
+    public function testCreditNoteWithoutOriginalIsRefused(): void
+    {
+        $id = $this->draft($this->smallClient(), simplified: true, total: -500, type: 'credit_note');
+
+        $result = $this->issueDraft($id);
+
+        self::assertSame(422, $result['status']);
+        self::assertSame('simplified_only_client_credit_note_requires_simplified_original', $result['code']);
+        self::assertStringContainsString('doplňte na kartě odběratele adresu', (string) $result['message']);
+    }
+
+    public function testCreditNoteForRegularOriginalIsRefused(): void
+    {
+        $small = $this->smallClient();
+        $original = $this->issuedOriginal($small, simplified: false, total: 1000);
+        $id = $this->draft($small, simplified: true, total: -500, type: 'credit_note', parentId: $original);
+
+        $result = $this->issueDraft($id);
+
+        self::assertSame(422, $result['status']);
+        self::assertSame('simplified_only_client_credit_note_requires_simplified_original', $result['code']);
+    }
+
+    public function testCreditNoteForAnotherClientsOriginalIsRefused(): void
+    {
+        $original = $this->issuedOriginal($this->smallClient(), simplified: true, total: 1000);
+        $id = $this->draft($this->smallClient(), simplified: true, total: -500, type: 'credit_note', parentId: $original);
+
+        self::assertSame('simplified_only_client_credit_note_requires_simplified_original', $this->issueDraft($id)['code']);
+    }
+
+    public function testRegularCreditNoteForSimplifiedOnlyClientIsRefused(): void
+    {
+        $small = $this->smallClient();
+        $original = $this->issuedOriginal($small, simplified: true, total: 1000);
+        $id = $this->draft($small, simplified: false, total: -500, type: 'credit_note', parentId: $original);
+
+        $result = $this->issueDraft($id);
+
+        self::assertSame(422, $result['status']);
+        self::assertSame('simplified_only_client_requires_simplified', $result['code']);
+    }
+
+    public function testCreditNoteOverOriginalAmountIsRefused(): void
+    {
+        $small = $this->smallClient();
+        $original = $this->issuedOriginal($small, simplified: true, total: 1000);
+        $over = $this->draft($small, simplified: true, total: -1200, type: 'credit_note', parentId: $original);
+
+        $result = $this->issueDraft($over);
+
+        self::assertSame(422, $result['status']);
+        self::assertSame('simplified_only_client_credit_note_over_original', $result['code']);
+        self::assertStringContainsString('zbývá 1 000,00 Kč', (string) $result['message']);
+    }
+
+    public function testEarlierCreditNotesReduceWhatRemainsToCorrect(): void
+    {
+        $small = $this->smallClient();
+        $original = $this->issuedOriginal($small, simplified: true, total: 1000);
+        $earlier = $this->draft($small, simplified: true, total: -600, type: 'credit_note', parentId: $original);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'issued', varsymbol = ? WHERE id = ?")
+            ->execute(['DOB' . $earlier, $earlier]);
+        $rest = $this->draft($small, simplified: true, total: -400, type: 'credit_note', parentId: $original);
+        $over = $this->draft($small, simplified: true, total: -401, type: 'credit_note', parentId: $original);
+
+        self::assertNull($this->gate->simplifiedOnlyClientRejection($this->invoices->find($rest)));
+        self::assertSame(
+            'simplified_only_client_credit_note_over_original',
+            $this->gate->simplifiedOnlyClientRejection($this->invoices->find($over))['code'] ?? null,
+        );
+    }
+
+    public function testRegularClientCreditNoteIsUnaffected(): void
+    {
+        $regular = $this->regularClient();
+        $original = $this->issuedOriginal($regular, simplified: false, total: 12100);
+        $id = $this->draft($regular, simplified: false, total: -12100, type: 'credit_note', parentId: $original);
+        $orphan = $this->draft($regular, simplified: false, total: -500, type: 'credit_note');
+
+        self::assertSame(200, $this->issueDraft($id)['status']);
+        self::assertNull($this->gate->simplifiedOnlyClientRejection($this->invoices->find($orphan)));
+    }
+
+    public function testSimplifiedCreditNoteUnderOriginalIsIssued(): void
+    {
+        $small = $this->smallClient();
+        $original = $this->issuedOriginal($small, simplified: true, total: 1210);
+        $id = $this->draft($small, simplified: true, total: -1210, type: 'credit_note', parentId: $original);
+
+        self::assertSame(200, $this->issueDraft($id)['status']);
+    }
+
+    public function testNonVatPayerCreditNoteForSimplifiedOnlyClientIsUnaffected(): void
+    {
+        $this->setVatPayerAt($this->db->pdo(), $this->supplierId, '1900-01-01', false);
+        $id = $this->draft($this->smallClient(), simplified: false, total: -12100, type: 'credit_note', vat: false);
+
+        self::assertNull($this->gate->simplifiedOnlyClientRejection($this->invoices->find($id)));
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
 
     private function smallClient(): int
@@ -297,20 +418,26 @@ final class SimplifiedOnlyClientTest extends TestCase
         return (int) ($json['data']['id'] ?? $json['id'] ?? 0);
     }
 
-    private function draft(int $clientId, bool $simplified, float $total, string $type = 'invoice', bool $vat = true): int
-    {
+    private function draft(
+        int $clientId,
+        bool $simplified,
+        float $total,
+        string $type = 'invoice',
+        bool $vat = true,
+        ?int $parentId = null,
+    ): int {
         $base = $vat ? round($total / 1.21, 2) : $total;
         $tax = round($total - $base, 2);
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO invoices
-                (supplier_id, client_id, invoice_type, issue_date, tax_date, due_date,
+                (supplier_id, client_id, invoice_type, parent_invoice_id, issue_date, tax_date, due_date,
                  currency_id, reverse_charge, client_snapshot, supplier_snapshot, is_simplified,
                  total_without_vat, total_vat, total_with_vat, status, vat_classification_code, created_by)
-             VALUES (?, ?, ?, "2099-01-05", ?, "2099-01-05", ?, 0, "{}", "{}", ?,
+             VALUES (?, ?, ?, ?, "2099-01-05", ?, "2099-01-05", ?, 0, "{}", "{}", ?,
                      ?, ?, ?, "draft", "1", ?)'
         )->execute([
-            $this->supplierId, $clientId, $type, $type === 'proforma' ? null : '2099-01-05',
+            $this->supplierId, $clientId, $type, $parentId, $type === 'proforma' ? null : '2099-01-05',
             $this->currencyId, $simplified ? 1 : 0, $base, $tax, $total, $this->userId,
         ]);
         $id = (int) $pdo->lastInsertId();
@@ -320,6 +447,15 @@ final class SimplifiedOnlyClientTest extends TestCase
                  vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index)
              VALUES (?, "Drobný prodej", 1, ?, ?, ?, ?, ?, ?, 1)'
         )->execute([$id, $base, $this->vatRateId, $vat ? 21.00 : 0.00, $base, $tax, $total]);
+
+        return $id;
+    }
+
+    private function issuedOriginal(int $clientId, bool $simplified, float $total): int
+    {
+        $id = $this->draft($clientId, $simplified, $total);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'issued', varsymbol = ? WHERE id = ?")
+            ->execute(['ZD' . $id, $id]);
 
         return $id;
     }

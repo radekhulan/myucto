@@ -209,13 +209,13 @@ final class OtherItemAction
             $existing = $this->service->get($supplierId, $id);
             if ($existing['journal_entry_id'] !== null
                 && !$this->requirePermission($request, $response, 'accounting.journal.post', AccessLevel::WRITE, $err)) {
-                throw new OtherItemException('forbidden', 'Pro storno zaúčtovaného dokladu nemáš oprávnění.', 403);
+                throw new OtherItemException('forbidden', 'Pro storno zaúčtovaného dokladu nemáte oprávnění.', 403);
             }
             // Položka ze zůstatku nese předpis v řádku zápisu; storno mění saldokonto stejně
             // jako zrušení rozpadu zápisu, proto potřebuje i právo zápisu do deníku.
             if ($existing['journal_entry_id'] === null && $this->service->hasJournalOrigin($supplierId, $id)
                 && !$this->requirePermission($request, $response, 'accounting.journal.write', AccessLevel::WRITE, $err)) {
-                throw new OtherItemException('forbidden', 'Pro storno položky ze zůstatku zápisu nemáš oprávnění.', 403);
+                throw new OtherItemException('forbidden', 'Pro storno položky ze zůstatku zápisu nemáte oprávnění.', 403);
             }
             $body = (array) ($request->getParsedBody() ?? []);
             $item = $this->service->reverse($supplierId, $id, (string) ($body['reason'] ?? ''),
@@ -256,7 +256,7 @@ final class OtherItemAction
         $canReadBank = RequestAuthorization::allows($request, 'bank', AccessLevel::READ);
         $canReadCash = RequestAuthorization::allows($request, 'cash', AccessLevel::READ);
         if (!$canReadBank && !$canReadCash) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $q = $request->getQueryParams();
         return $this->run($response, function () use ($request, $args, $q, $canReadBank, $canReadCash): array {
@@ -272,7 +272,7 @@ final class OtherItemAction
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::READ, $err)) return $err;
         if (RequestAuthorization::isClientType($request)
             || !RequestAuthorization::allows($request, 'bank', AccessLevel::READ)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $q = $request->getQueryParams();
         $txId = (int) ($q['bank_transaction_id'] ?? 0);
@@ -289,7 +289,7 @@ final class OtherItemAction
     {
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
         if (RequestAuthorization::isClientType($request) || !$this->canManagePayment($request, 'bank')) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $txId = (int) (((array) ($request->getParsedBody() ?? []))['bank_transaction_id'] ?? 0);
         if ($txId <= 0) {
@@ -318,7 +318,7 @@ final class OtherItemAction
         $cashId = (int) ($body['cash_document_id'] ?? 0);
         if (($bankId > 0 && $cashId <= 0 && !$this->canManagePayment($request, 'bank'))
             || ($cashId > 0 && $bankId <= 0 && !$this->canManagePayment($request, 'cash'))) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         return $this->run($response, function () use ($request, $args) {
             $id = (int) $args['id'];
@@ -348,7 +348,7 @@ final class OtherItemAction
             }
             $source = $allocation['bank_transaction_id'] !== null ? 'bank' : 'cash';
             if (!$this->canManagePayment($request, $source)) {
-                throw new OtherItemException('forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+                throw new OtherItemException('forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
             }
             $item = $this->service->unallocate($supplierId, $id, $allocationId);
             $this->log($request, 'other_item.payment_unallocated', $id);

@@ -84,7 +84,7 @@ final class CreateTokenAction
         // defense-in-depth pro případ změny pravidel; fail-open BC větev membershipu
         // níže by jinak pro klienta bez řádků byla eskalace).
         if (RequestAuthorization::isClientType($request)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
@@ -127,7 +127,7 @@ final class CreateTokenAction
             // (bound PAT jinak firmu forcuje). Bez membershipu = BC (bez omezení).
             $allowed = $this->memberships->allowedSupplierIds($userId);
             if (($user['is_superadmin'] ?? false) !== true && !in_array($supplierId, $allowed, true)) {
-                return Json::error($response, 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
+                return Json::error($response, 'forbidden_supplier', 'K této firmě nemáte oprávnění.', 403);
             }
         }
 

@@ -205,7 +205,7 @@ final class PayrollJmhzIdentityAction
             return $this->noStore(Json::error(
                 $response,
                 'forbidden',
-                'Pro tuto akci nemáš oprávnění.',
+                'Pro tuto akci nemáte oprávnění.',
                 403,
             ));
         } catch (\OutOfBoundsException $exception) {

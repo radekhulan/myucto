@@ -253,7 +253,7 @@ final class BankRuleTemplateAdminAction
     private function guard(Request $request, Response $response, AccessLevel $minimum, ?Response &$err): bool
     {
         if (!RequestAuthorization::allows($request, 'bank.rules', $minimum)) {
-            $err = Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáš oprávnění.', 403);
+            $err = Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáte oprávnění.', 403);
             return false;
         }
         $err = null;

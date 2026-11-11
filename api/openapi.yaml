@@ -3366,7 +3366,11 @@ paths:
             drobný zákazník bez adresy (`simplified_only`) a doklad není zjednodušená faktura
             (`simplified_only_client_requires_simplified`) nebo přesahuje limit § 30 odst. 1
             (`simplified_only_client_over_limit`; řešením je doplnit kartu odběratele, nebo
-            snížit prodej), nebo
+            snížit prodej); dobropis takovému odběrateli jde jen jako zjednodušený opravný
+            daňový doklad (§ 45 odst. 2 ZDPH) k jeho vystavenému zjednodušenému dokladu
+            (`simplified_only_client_credit_note_requires_simplified_original`) a nejvýše do
+            částky, která z původního dokladu zbývá opravit
+            (`simplified_only_client_credit_note_over_original`), nebo
             kalendář nesplňuje podmínky § 31 a § 31a ZDPH: nemá rozpis plateb
             (`payment_schedule_missing`), součet základu, DPH nebo celkové částky rozpisu
             nesedí na doklad (`payment_schedule_mismatch`), splátkovému kalendáři chybí nájemní
