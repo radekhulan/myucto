@@ -929,12 +929,16 @@ final class JmhzScenario1DocumentResolver
             );
             // EDV ID 10221 (C_COKR + Luhn) jako u registrací: ČSSZ by hlášení
             // s takovým symbolem odmítla, takže se dokument nesestaví.
-            if (CsszEmployerVariableSymbol::invalidReason($variableSymbol) !== null) {
-                $blockers[] = $this->blocker(
+            $invalidReason = CsszEmployerVariableSymbol::invalidReason($variableSymbol);
+            if ($invalidReason !== null) {
+                // Symbol je vyplněný, jen neplatný: hláška to musí říct i s důvodem,
+                // ne „chybí údaj", jinak účetní hledá prázdné pole.
+                $blockers[] = new JmhzScenario1Blocker(
                     'jmhz_office_variable_symbol_invalid',
                     'office',
                     $registration['id'],
                     ['10221'],
+                    self::invalidVariableSymbolMessage($variableSymbol, $invalidReason),
                 );
             }
         }
@@ -2736,18 +2740,12 @@ final class JmhzScenario1DocumentResolver
         }
 
         $status = $frozen['other_household_caregiver_status'] ?? null;
-        if (!in_array($status, ['none', 'present'], true)) {
-            // 10453 je povinná položka bloku. `unknown` = otázku nikdo
-            // nezodpověděl, `inconsistent` = nároky si u téže domácnosti
-            // odporují; obojí musí rozhodnout účetní na kartě osoby.
-            $blockers[] = $this->blocker(
-                $status === 'inconsistent'
-                    ? 'jmhz_scenario1_child_credit_caregiver_inconsistent'
-                    : 'jmhz_scenario1_child_credit_caregiver_unknown',
-                'person',
-                $employeeId,
-                ['10453'],
-            );
+        // 10453 je povinná položka bloku. Pravidlo sdílí s kontrolou před
+        // během ({@see JmhzPreparationSnapshotBuilder::childCaregiverIssueCode()}),
+        // aby nezodpovězenou otázku ohlásila už před schválením mzdy.
+        $caregiverIssue = JmhzPreparationSnapshotBuilder::childCaregiverIssueCode($frozen);
+        if ($caregiverIssue !== null) {
+            $blockers[] = $this->blocker($caregiverIssue, 'person', $employeeId, ['10453']);
 
             return null;
         }
@@ -4134,6 +4132,15 @@ final class JmhzScenario1DocumentResolver
         if (($evidence['report_year'] ?? null) !== $reportYear
             || !self::validCollectiveAgreementTypes($types)
         ) {
+            // Tutéž příčinu už jmenuje nález přípravy i s místem opravy (roční
+            // údaje zaměstnavatele). Druhý, obecný nález na revizi by vedle něj
+            // stál jako další krok s radou „dokončete zvýrazněný krok" v běhu,
+            // kde se nic takového nedoplňuje.
+            foreach ($blockers as $existing) {
+                if ($existing->code === 'jmhz_employer_annual_collective_agreement_missing') {
+                    return [];
+                }
+            }
             $blockers[] = $this->blocker(self::SOURCE_MISSING_2027, 'revision', $revisionId, ['10214']);
 
             return [];
@@ -4398,6 +4405,16 @@ final class JmhzScenario1DocumentResolver
     }
 
     /** @param list<string> $attributeIds */
+    /**
+     * Věta o neplatném variabilním symbolu registrace. Sdílí ji příprava
+     * hlášení i kontrola před během, aby obě místa říkala totéž.
+     */
+    public static function invalidVariableSymbolMessage(string $variableSymbol, string $reason): string
+    {
+        return 'Variabilní symbol zaměstnavatele u ČSSZ „' . $variableSymbol . '" u mzdové účtárny je vyplněný, '
+            . 'ale neplatný: ' . $reason . '. ČSSZ by hlášení s ním odmítla.';
+    }
+
     private function blocker(
         string $code,
         string $entityType,

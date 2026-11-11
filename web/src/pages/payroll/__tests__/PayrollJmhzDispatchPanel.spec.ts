@@ -353,4 +353,66 @@ describe('PayrollJmhzDispatchPanel', () => {
     expect(wrapper.find('[data-test="jmhz-dispatch-confirm-7:3"]').exists()).toBe(false)
     expect(m.sendTransport).not.toHaveBeenCalled()
   })
+
+  /**
+   * B3: období, které nejde sestavit (číselníky 2027) nebo ještě neskončilo.
+   * Dřív se tlačítka zhasínala jen podle evidované povinnosti, takže u období
+   * bez povinnosti zůstala aktivní a klik skončil chybou.
+   */
+  it('podle závory přípravy zneaktivní obě tlačítka i bez evidované povinnosti', async () => {
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: {
+        environment: 'production',
+        previews: [preview],
+        obligations: [],
+        preparationGate: {
+          code: 'jmhz_spec_version_unavailable',
+          message: 'Číselník obcí a států ještě nebyl vyhlášen. Termín podání je 22. 2. 2027.',
+          available_from: null,
+        },
+      },
+    })
+
+    expect((wrapper.get('[data-test="jmhz-dispatch-isds-7:3"]').element as HTMLButtonElement).disabled).toBe(true)
+    expect((wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.text()).toContain('22. 2. 2027')
+    await wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').trigger('click')
+    expect(wrapper.find('[data-test="jmhz-dispatch-confirm-7:3"]').exists()).toBe(false)
+    expect(m.freezePreparation).not.toHaveBeenCalled()
+  })
+
+  it('už zmrazené podání závora přípravy neblokuje', async () => {
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: {
+        environment: 'test',
+        previews: [preview],
+        obligations: [obligation({ latest_submission: { id: 88, status: 'ready', row_version: 1 } as never })],
+        preparationGate: { code: 'jmhz_period_not_finished', message: 'Období ještě neskončilo.', available_from: '2026-08-01' },
+      },
+    })
+
+    expect((wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  /**
+   * M13: zpráva do datové schránky se potvrzením neodešle, jen se zmrazí
+   * a zařadí do fronty. Potvrzení to musí říct, ne se ptát „Opravdu odeslat?".
+   */
+  it('u datové schránky se ptá na přípravu zprávy, u VREP na odeslání', async () => {
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: { environment: 'production', previews: [preview], obligations: [obligation()] },
+    })
+
+    await wrapper.get('[data-test="jmhz-dispatch-isds-7:3"]').trigger('click')
+    let confirm = wrapper.get('[data-test="jmhz-dispatch-confirm-7:3"]').text()
+    expect(confirm).toContain('jmhz_dispatch_confirm_title_isds')
+    expect(confirm).toContain('jmhz_dispatch_confirm_prepare')
+    expect(confirm).not.toContain('jmhz_dispatch_confirm_irreversible')
+
+    await wrapper.get('[data-test="jmhz-dispatch-confirm-no-7:3"]').trigger('click')
+    await wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]').trigger('click')
+    confirm = wrapper.get('[data-test="jmhz-dispatch-confirm-7:3"]').text()
+    expect(confirm).toContain('jmhz_dispatch_confirm_send')
+    expect(confirm).toContain('jmhz_dispatch_confirm_irreversible')
+  })
 })

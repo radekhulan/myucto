@@ -156,6 +156,46 @@ final class PayrollSubmissionOverviewActionTest extends TestCase
     }
 
     /**
+     * Sloupec „Kanál" u hlášení, které ještě neodešlo, říká cestu, kterou
+     * fronta podání opravdu použije (bez podpisového certifikátu datová
+     * schránka), ne plán z doby založení povinnosti. Měsíční přehled nad ním
+     * to počítá stejně, takže si oba řádky neodporují. Odpověď nese i závoru
+     * přípravy hlášení JMHZ pro panel odeslání.
+     */
+    public function testUnsentJmhzNamesTheChannelTheQueueWillUse(): void
+    {
+        $this->obligations->register(
+            $this->supplierId,
+            'JMHZ25',
+            'payroll_run',
+            'payroll_run:1',
+            '2026-08-01',
+            '2026-08-31',
+            'regular',
+            'vrep_apep',
+            'jmhz_preparation_snapshot',
+            'jmhz_preparation:1',
+            str_repeat('b', 64),
+            '2026-09-01',
+            '2026-09-21',
+            'calendar_days',
+            'overview-test-ruleset',
+            str_repeat('c', 64),
+            'overview-jmhz-channel',
+            environment: 'production',
+        );
+
+        $body = $this->json(($this->action)(
+            $this->request()->withQueryParams(['environment' => 'production', 'period' => '2026-08']),
+            new Response(),
+        ));
+
+        self::assertSame('vrep_apep', $body['items'][0]['preferred_channel']);
+        self::assertSame('isds', $body['items'][0]['planned_channel']);
+        self::assertArrayHasKey('jmhz_preparation_gate', $body);
+    }
+
+    /**
      * Registrace, OZUSPOJ a dávky nemocenského mají předmět
      * `payroll_employment:{id}`. Přehled podání u nich dřív ukázal „—";
      * teď jméno osoby a id pro proklik na její kartu, stejně jako fronta.

@@ -773,6 +773,38 @@ final class PayrollPeopleRepository
     }
 
     /**
+     * Názvy mzdových účtáren „Název (kód)" pro nálezy a hlášky. Nález na
+     * účtárně bez názvu posílal účetní hádat, které z účtáren se týká.
+     *
+     * @param list<int> $ids
+     * @return array<int,string>
+     */
+    public function officeLabels(int $supplierId, array $ids): array
+    {
+        $ids = array_values(array_unique($ids));
+        if ($ids === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, code, name
+               FROM payroll_offices
+              WHERE supplier_id = ? AND id IN (' . $placeholders . ')'
+        );
+        $stmt->execute([$supplierId, ...$ids]);
+        $labels = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $code = (string) ($row['code'] ?? '');
+            $name = (string) ($row['name'] ?? '');
+            $labels[(int) $row['id']] = $code === '' || $name === ''
+                ? ($name !== '' ? $name : $code)
+                : sprintf('%s (%s)', $name, $code);
+        }
+
+        return $labels;
+    }
+
+    /**
      * Účinná jména osob podle id zaměstnance.
      *
      * @param list<int> $ids

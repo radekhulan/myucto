@@ -43,7 +43,8 @@ describe('navigace nálezů měsíčního hlášení', () => {
       blocker({ code: 'jmhz_december_ozp_annual_source_missing', remediation: { kind: 'employer_annual', field: null }, entity_type: 'office' }),
       null,
       context,
-    )).toEqual({ name: 'payroll-settings', query: { tab: 'submissions' }, hash: '#jmhz-employer-annual-evidence' })
+    // Roční údaje zaměstnavatele se vedou po letech: odkaz nese rok hlášeného období.
+    )).toEqual({ name: 'payroll-settings', query: { tab: 'submissions', year: '2026' }, hash: '#jmhz-employer-annual-evidence' })
     expect(jmhzRemediationTarget(
       blocker({ code: 'jmhz_deferred_annual_settlement_income_present', remediation: { kind: 'deferred_income', field: null } }),
       7,

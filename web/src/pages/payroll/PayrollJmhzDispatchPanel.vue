@@ -8,6 +8,7 @@ import {
   payrollApi,
   type PayrollJmhzFreezeBlocker,
   type PayrollJmhzIsdsEnqueueResult,
+  type PayrollJmhzPreparationGate,
   type PayrollJmhzPvpojPreview,
   type PayrollJmhzTransportPoll,
   type PayrollRegzelEnvironment,
@@ -25,6 +26,13 @@ const props = defineProps<{
   environment: PayrollRegzelEnvironment
   previews: PayrollJmhzPvpojPreview[]
   obligations: PayrollSubmissionOverviewItem[]
+  /**
+   * Proč hlášení za období teď nejde zmrazit ani odeslat (období neskončilo,
+   * ročník hlášení aplikace ještě neumí sestavit). Platí i bez evidované
+   * povinnosti: dřív se tlačítka zhasínala jen podle ní, takže u období, kde
+   * povinnost ještě nevznikla, zůstala aktivní a klik skončil chybou.
+   */
+  preparationGate?: PayrollJmhzPreparationGate | null
 }>()
 
 const emit = defineEmits<{ refresh: [] }>()
@@ -204,6 +212,11 @@ function obligation(preview: PayrollJmhzPvpojPreview): PayrollSubmissionOverview
 
 function unavailableReason(preview: PayrollJmhzPvpojPreview): string | null {
   const item = obligation(preview)
+  // Už zmrazené podání se odeslat smí; závora se týká jen hlášení, které by
+  // se teprve mrazilo.
+  if (props.preparationGate && item?.latest_submission?.status !== 'ready') {
+    return props.preparationGate.message
+  }
   if (!item) return null
   if (props.environment === 'production' && item.deadline.phase === 'not_open') {
     return t(auth.submissionTestEnvironmentAllowed
@@ -409,7 +422,9 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
           :data-test="`jmhz-dispatch-confirm-${key(preview)}`"
         >
           <p class="text-sm font-medium text-warning-900">
-            {{ t('payroll.submissions.overview.jmhz_dispatch_confirm_title') }}
+            {{ t(state(preview).confirming === 'vrep'
+              ? 'payroll.submissions.overview.jmhz_dispatch_confirm_title'
+              : 'payroll.submissions.overview.jmhz_dispatch_confirm_title_isds') }}
           </p>
           <p class="mt-1 text-sm text-warning-800">
             {{ t(state(preview).confirming === 'vrep'
@@ -423,7 +438,9 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
             }) }}
           </p>
           <p class="mt-1 text-xs text-warning-700">
-            {{ t('payroll.submissions.overview.jmhz_dispatch_confirm_irreversible') }}
+            {{ t(state(preview).confirming === 'vrep'
+              ? 'payroll.submissions.overview.jmhz_dispatch_confirm_irreversible'
+              : 'payroll.submissions.overview.jmhz_dispatch_confirm_isds_note') }}
           </p>
           <div class="mt-3 flex flex-wrap gap-2">
             <button
@@ -432,7 +449,9 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
               :data-test="`jmhz-dispatch-confirm-yes-${key(preview)}`"
               @click="dispatch(preview, state(preview).confirming ?? 'vrep')"
             >
-              {{ t('payroll.submissions.overview.jmhz_dispatch_confirm_send') }}
+              {{ t(state(preview).confirming === 'vrep'
+                ? 'payroll.submissions.overview.jmhz_dispatch_confirm_send'
+                : 'payroll.submissions.overview.jmhz_dispatch_confirm_prepare') }}
             </button>
             <button
               type="button"

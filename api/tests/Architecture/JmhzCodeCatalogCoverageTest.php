@@ -98,6 +98,8 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
         'jmhz_submission_correction' => 'enum',
         'jmhz_takeover_detail' => 'other',
         // Zařazení dohody o srážce do atributu JMHZ 10350 až 10353 (sloupec dohody).
+        // Klíč odpovědi přehledu podání a testu hlášení (závora přípravy, JmhzPreparationGate).
+        'jmhz_preparation_gate' => 'key',
         'jmhz_target' => 'table',
         'jmhz_temporary_assignment_status' => 'field',
         'jmhz_transport' => 'key',

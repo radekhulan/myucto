@@ -6,12 +6,15 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationGate;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchGate;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectResolver;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDeliveryProof;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionManualAcceptanceReader;
@@ -31,6 +34,8 @@ final class PayrollSubmissionOverviewAction
         private readonly PayrollDispatchCapabilityCatalog $capabilities,
         private readonly PayrollObligationSubjectResolver $subjects,
         private readonly PayrollSubmissionManualAcceptanceReader $manualAcceptances,
+        private readonly JmhzPreparationGate $jmhzGate,
+        private readonly PayrollSigningProfileRepository $signingProfiles,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -176,6 +181,9 @@ final class PayrollSubmissionOverviewAction
             ))),
         );
 
+        $signingReady = $this->signingProfiles->find($supplierId, $environment) !== null;
+        $gate = new PayrollDispatchGate();
+
         // Posouzení termínu u ZOBRAZENÝCH řádků — tady kvůli tomu, co uživatel
         // u řádku vidí, ne kvůli souhrnu.
         foreach ($items as $index => &$item) {
@@ -197,6 +205,26 @@ final class PayrollSubmissionOverviewAction
             $item['dispatch_channel'] = isset(
                 $outboxes[(int) ($item['latest_submission']['id'] ?? 0)],
             ) ? 'isds' : null;
+            /*
+             * Kudy podání odejde, DOKUD neodešlo: tatáž volba jako při
+             * odeslání frontou a jako sloupec „Jakou cestou" měsíčního
+             * přehledu ({@see PayrollDispatchGate::channels()}). Bez ní řádek
+             * ukazoval plán z doby založení povinnosti („VREP / APEP"),
+             * zatímco přehled nad ním správně říkal „datová schránka".
+             */
+            $capability = $this->capabilities->forAgenda((string) $item['agenda_code']);
+            $latestStatus = $item['latest_submission']['status'] ?? null;
+            $item['planned_channel'] = null;
+            if ($capability->isDispatchable()
+                && ($latestStatus === null || in_array($latestStatus, ['validated', 'prepared', 'ready'], true))
+            ) {
+                $mode = $gate->channels($capability, $environment, $signingReady)['default'];
+                $item['planned_channel'] = match (true) {
+                    str_starts_with($mode, 'vrep_') => 'vrep_apep',
+                    str_starts_with($mode, 'isds_') => 'isds',
+                    default => null,
+                };
+            }
         }
         unset($item);
 
@@ -207,6 +235,11 @@ final class PayrollSubmissionOverviewAction
             'agenda_group' => $agendaGroup,
             'summary' => $summary,
             'deadline_summary' => $deadlineSummary,
+            // Proč hlášení JMHZ za tohle období teď nejde zmrazit ani odeslat
+            // (období neskončilo, ročník nejde sestavit); `null` = jde. Panel
+            // odeslání podle toho zneaktivní tlačítka i tam, kde povinnost
+            // ještě není v evidenci.
+            'jmhz_preparation_gate' => $this->jmhzGate->blocked($periodStart),
             'items' => $items,
             'total' => $page['total'],
             'limit' => $limit,

@@ -13,6 +13,7 @@ import {
 import {
   payrollApi,
   type PayrollHealthPaymentOverview,
+  type PayrollJmhzPreparationGate,
   type PayrollJmhzPvpojOffice,
   type PayrollJmhzPvpojPreview,
   type PayrollRegzelEnvironment,
@@ -125,6 +126,8 @@ const EMPTY_DEADLINE_SUMMARY: Record<PayrollSubmissionDeadlinePhase, number> = {
 const deadlineSummary = ref<Record<PayrollSubmissionDeadlinePhase, number>>({
   ...EMPTY_DEADLINE_SUMMARY,
 })
+/** Proč hlášení JMHZ za zvolené období teď nejde zmrazit ani odeslat (ze serveru). */
+const jmhzPreparationGate = ref<PayrollJmhzPreparationGate | null>(null)
 const healthOverviews = ref<PayrollHealthPaymentOverview[]>([])
 const jmhzPreviews = ref<PayrollJmhzPvpojPreview[]>([])
 const jmhzApprovedRuns = ref<PayrollRun[]>([])
@@ -742,6 +745,7 @@ async function load() {
     items.value = response.items
     total.value = response.total
     deadlineSummary.value = response.deadline_summary
+    jmhzPreparationGate.value = response.jmhz_preparation_gate ?? null
     await Promise.all([
       loadHealthOverviews(),
       loadJmhzPreviews(),
@@ -750,6 +754,7 @@ async function load() {
     items.value = []
     total.value = 0
     deadlineSummary.value = { ...EMPTY_DEADLINE_SUMMARY }
+    jmhzPreparationGate.value = null
     healthOverviews.value = []
     jmhzPreviews.value = []
     jmhzApprovedRuns.value = []
@@ -1160,7 +1165,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
                       {{ t('payroll.submissions.overview.no_authority_result') }}
                     </span>
                   </td>
-                  <td v-if="tbl.isVisible('channel')" class="px-4 py-3 text-neutral-700">{{ submissionChannelLabel(item.dispatch_channel ?? item.preferred_channel) }}</td>
+                  <td v-if="tbl.isVisible('channel')" class="px-4 py-3 text-neutral-700">{{ submissionChannelLabel(item.dispatch_channel ?? item.planned_channel ?? item.preferred_channel) }}</td>
                   <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                     <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
                       {{ submissionStatusLabel(item.status) }}
@@ -1226,7 +1231,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
                       -->
                       <RouterLink
                         v-else
-                        :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' } }"
+                        :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' }, query: { period } }"
                         :class="btnOutlineSm('neutral')"
                         data-test="submission-not-prepared"
                       >
@@ -1293,7 +1298,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
               </div>
               <div>
                 <dt class="text-neutral-500">{{ t('payroll.submissions.overview.channel_label') }}</dt>
-                <dd class="mt-0.5 text-neutral-800">{{ submissionChannelLabel(item.dispatch_channel ?? item.preferred_channel) }}</dd>
+                <dd class="mt-0.5 text-neutral-800">{{ submissionChannelLabel(item.dispatch_channel ?? item.planned_channel ?? item.preferred_channel) }}</dd>
               </div>
             </dl>
             <button
@@ -1343,7 +1348,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
             </button>
             <RouterLink
               v-else
-              :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' } }"
+              :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' }, query: { period } }"
               class="mt-4"
               :class="btnOutline('neutral')"
               data-test="submission-not-prepared"
@@ -1723,6 +1728,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
         :environment="environment"
         :previews="jmhzPreviews"
         :obligations="items"
+        :preparation-gate="jmhzPreparationGate"
         @refresh="load"
       />
 

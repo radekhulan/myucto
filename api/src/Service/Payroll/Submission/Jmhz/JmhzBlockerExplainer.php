@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
+use MyInvoice\Service\Payroll\Run\PayrollRunReadinessImpact;
 
 final class JmhzBlockerExplainer
 {
@@ -15,7 +16,23 @@ final class JmhzBlockerExplainer
      * Nálezy, u kterých konkrétní věta zdroje (např. „Místo výkonu práce
      * „Praha" neodpovídá úřednímu názvu…") má přednost před obecným důvodem.
      */
-    private const MESSAGE_FIRST_CODES = ['jmhz_workplace_codebooks_unverified'];
+    private const MESSAGE_FIRST_CODES = [
+        'jmhz_workplace_codebooks_unverified',
+        // Přesný důvod, proč ČSSZ symbol odmítne (kontrolní číslice, kód okresu),
+        // zná {@see \MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol::invalidReason()}.
+        'jmhz_office_variable_symbol_invalid',
+    ];
+
+    /**
+     * Věta pro nálezy, jejichž údaj hlášení čte ze schváleného běhu
+     * ({@see PayrollRunReadinessImpact::jmhzBlockerNeedsRevision()}). Bez ní
+     * účetní údaj opraví v nastavení nebo na kartě a hlášení se zastaví znovu
+     * na tomtéž. Tlačítka běhu se jmenují „Vyžádat opravu" a „Otevřít opravu".
+     */
+    public const REVISION_HINT = 'Tento údaj hlášení přebírá ze schváleného mzdového běhu, samotná '
+        . 'oprava údaje proto nestačí. Po opravě otevřete Mzdy → Mzdové běhy, u běhu tohoto měsíce '
+        . 'zvolte „Vyžádat opravu" a „Otevřít opravu", mzdy přepočítejte, běh znovu schvalte '
+        . 'a hlášení připravte znovu.';
 
     /** @var array<string,string>|null */
     private static ?array $attributeNames = null;
@@ -68,6 +85,29 @@ final class JmhzBlockerExplainer
         'jmhz_verified_boolean_missing' => 'Údaj o příspěvku APZ, funkčních požitcích nebo dočasném přidělení má v evidenci neplatnou hodnotu.',
         'jmhz_work_month_not_approved' => 'Pracovní doba za vykazovaný měsíc není schválená.',
         'jmhz_workplace_codebooks_unverified' => 'Chybí ověřené číselníkové údaje pracoviště.',
+        'jmhz_office_variable_symbol_invalid' => 'Variabilní symbol zaměstnavatele u ČSSZ uložený u mzdové účtárny '
+            . 'je vyplněný, ale neplatný (kontrolní číslice nebo kód okresní správy); ČSSZ by hlášení s ním odmítla.',
+        'jmhz_office_variable_symbol_missing' => 'Mzdová účtárna nemá ve schváleném běhu variabilní symbol '
+            . 'zaměstnavatele u ČSSZ v podatelném tvaru (deset číslic).',
+        'social_security_variable_symbol_missing' => 'Mzdová účtárna nemá ve schváleném běhu variabilní symbol '
+            . 'zaměstnavatele u ČSSZ v podatelném tvaru (deset číslic).',
+        'jmhz_office_variable_symbol_mismatch' => 'Variabilní symbol v přehledu o výši pojistného neodpovídá '
+            . 'variabilnímu symbolu mzdové účtárny ve schváleném běhu.',
+        'office_registration_history_missing' => 'Mzdová účtárna nemá pro vykazovaný měsíc účinnou registraci '
+            . 'u ČSSZ (variabilní symbol s datem, od kdy platí).',
+        'office_registration_snapshot_mismatch' => 'Pracovní vztahy téže mzdové účtárny nesou ve schváleném běhu '
+            . 'různé registrace u ČSSZ.',
+        'jmhz_employment_without_office' => 'Pracovní vztah nemá přiřazenou mzdovou účtárnu, takže není určeno, '
+            . 'pod kterým variabilním symbolem u ČSSZ se za něj hlásí.',
+        'jmhz_average_hourly_earning_invalid' => 'Průměrný hodinový výdělek (10345) má neplatnou hodnotu: '
+            . 'hlášení přijímá jen kladnou částku na dvě desetinná místa.',
+        'jmhz_average_hourly_earning_mismatch' => 'Průměrný hodinový výdělek ve schváleném běhu neodpovídá '
+            . 'schválenému průměru za čtvrtletí vykazovaného měsíce.',
+        'jmhz_average_hourly_earning_unverified' => 'Průměrný hodinový výdělek za čtvrtletí vykazovaného měsíce '
+            . 'je založený, ale není schválený.',
+        'jmhz_apz_instrument_missing' => 'U pracovního vztahu je uvedený příspěvek aktivní politiky zaměstnanosti, '
+            . 'ale chybí jeho druh (nástroj APZ).',
+        'jmhz_child_claim_invalid' => 'Nárok na daňové zvýhodnění na dítě nemá přiřazené dítě nebo pořadí dítěte.',
         'jmhz_workplace_codebooks_not_published' => 'Číselník obcí a států pro vykazovaný rok ještě nebyl vyhlášen, '
             . 'proto nejde ověřit místo výkonu práce (obec, kód obce a stát) ani u správně vyplněného pracoviště.',
         'jmhz_employer_annual_collective_agreement_missing' => 'Za rok hlášení chybí roční údaje zaměstnavatele: typy kolektivních smluv (10214).',
@@ -187,11 +227,39 @@ final class JmhzBlockerExplainer
             . 'zaokrouhlení haléřů nestanoví, proto ho aplikace sama nezaokrouhlí.',
     ];
 
+    /**
+     * Variabilní symbol se nevyplňuje v řádku účtárny: je v dialogu „Spravovat
+     * účinné registrace" (registrace s datem, od kdy platí). Rada „doplňte
+     * zvýrazněná pole" posílala hledat pole, které na stránce není.
+     */
+    private const OFFICE_REGISTRATION_ACTION = 'Otevřete Mzdy → Nastavení mezd → Zaměstnavatel a účtárny, '
+        . 'u mzdové účtárny zvolte „Spravovat účinné registrace" a uložte variabilní symbol z rozhodnutí '
+        . 'o registraci zaměstnavatele u OSSZ.';
+
     /** @var array<string,string> */
     private const ACTIONS = [
         'jmhz_employer_annual_collective_agreement_missing' => 'Otevřete Mzdy → Nastavení mezd → Podání → Roční údaje zaměstnavatele pro JMHZ, vyplňte údaje za rok hlášení a uložte. Potom přípravu hlášení spusťte znovu.',
         'jmhz_employer_annual_ownership_missing' => 'Otevřete Mzdy → Nastavení mezd → Podání → Roční údaje zaměstnavatele pro JMHZ, vyplňte údaje za rok hlášení a uložte. Potom přípravu hlášení spusťte znovu.',
         'jmhz_employer_annual_ozp_summary_missing' => 'Otevřete Mzdy → Nastavení mezd → Podání → Roční údaje zaměstnavatele pro JMHZ, vyplňte údaje za rok hlášení a uložte. Potom přípravu hlášení spusťte znovu.',
+        'jmhz_office_variable_symbol_invalid' => self::OFFICE_REGISTRATION_ACTION,
+        'jmhz_office_variable_symbol_missing' => self::OFFICE_REGISTRATION_ACTION,
+        'social_security_variable_symbol_missing' => self::OFFICE_REGISTRATION_ACTION,
+        'jmhz_office_variable_symbol_mismatch' => self::OFFICE_REGISTRATION_ACTION,
+        'office_registration_history_missing' => self::OFFICE_REGISTRATION_ACTION,
+        'office_registration_snapshot_mismatch' => 'Otevřete Mzdy → Mzdové běhy, u běhu tohoto měsíce zvolte '
+            . '„Vyžádat opravu" a „Otevřít opravu" a mzdy přepočítejte; nová revize převezme jednu účinnou registraci účtárny.',
+        'jmhz_employment_without_office' => 'Otevřete Mzdy → Zaměstnanci a na kartě pracovního vztahu '
+            . 'v podmínkách vyberte mzdovou účtárnu.',
+        'jmhz_average_hourly_earning_invalid' => 'Otevřete Mzdy → Absence a průměry → Průměrný výdělek, '
+            . 'průměr za čtvrtletí opravte a schvalte.',
+        'jmhz_average_hourly_earning_mismatch' => 'Otevřete Mzdy → Absence a průměry → Průměrný výdělek '
+            . 'a zkontrolujte schválený průměr za čtvrtletí.',
+        'jmhz_average_hourly_earning_unverified' => 'Otevřete Mzdy → Absence a průměry → Průměrný výdělek '
+            . 'a průměr za čtvrtletí schvalte.',
+        'jmhz_apz_instrument_missing' => 'Otevřete Mzdy → Zaměstnanci, na kartě pracovního vztahu v části '
+            . 'Evidence pro ČSSZ vyberte u příspěvku APZ jeho druh a uložte.',
+        'jmhz_child_claim_invalid' => 'Otevřete Mzdy → Zaměstnanci → Vyživované osoby, u nároku vyberte dítě '
+            . 'a jeho pořadí a uložte.',
         'jmhz_scenario1_scope_unsupported' => 'Zkontrolujte druhy činnosti v přípravě a nepodporované vztahy zpracujte individuálně.',
         'jmhz_scenario2_evidence_gap' => 'Tento scénář zatím zpracujte individuálně podle podkladů ČSSZ; hodnoty nelze bezpečně doplnit odhadem.',
         'component_jmhz_mapping_missing' => 'Otevřete Mzdy → Mzdové složky a doplňte zařazení. '
@@ -277,7 +345,7 @@ final class JmhzBlockerExplainer
         'jmhz_primary_employment_unresolved' => 'Otevřete Mzdy → Zaměstnanci a na kartě pracovního vztahu '
             . 'označte právě jeden vztah osoby jako hlavní; ostatní souběžné vztahy nechte jako vedlejší.',
         'jmhz_scenario1_concurrent_participation_unsupported' => 'Otevřete Mzdy → Mzdové běhy, u běhu '
-            . 'tohoto měsíce zvolte „Otevřít opravu" a mzdy spočítejte znovu, výpočet pojistné rozdělí '
+            . 'tohoto měsíce zvolte „Vyžádat opravu" a „Otevřít opravu" a mzdy spočítejte znovu, výpočet pojistné rozdělí '
             . 'po vztazích. Novou revizi schvalte a hlášení připravte znovu.',
         'jmhz_temporary_assignment_user_missing' => 'Otevřete Mzdy → Zaměstnanci, na kartě pracovního '
             . 'vztahu v části Evidence pro ČSSZ u dočasného přidělení vyplňte IČO uživatele, nebo u '
@@ -319,7 +387,7 @@ final class JmhzBlockerExplainer
         PayrollPeopleRepository $people,
         int $supplierId,
     ): string {
-        $ids = ['employment' => [], 'person' => []];
+        $ids = ['employment' => [], 'person' => [], 'office' => []];
         foreach ($blockers as $blocker) {
             if ($blocker->entityId === null) {
                 continue;
@@ -333,6 +401,7 @@ final class JmhzBlockerExplainer
         return self::describe($blockers, [
             'employment' => $people->employmentLabels($supplierId, $ids['employment']),
             'person' => $people->personLabels($supplierId, $ids['person']),
+            'office' => $people->officeLabels($supplierId, $ids['office']),
         ]);
     }
 
@@ -366,8 +435,8 @@ final class JmhzBlockerExplainer
         $descriptions = [];
         foreach ($groups as $group) {
             $blocker = $group['blocker'];
-            $reason = self::reason($blocker->code, $blocker->message);
-            $action = self::action($blocker->code, $blocker->entityType);
+            $reason = self::reason($blocker->code, $blocker->message, $blocker->attributeIds, $blocker->entityType);
+            $action = self::action($blocker->code, $blocker->entityType, $blocker->attributeIds);
             $fields = in_array($blocker->code, self::FIELD_LISTING_CODES, true)
                 ? self::fields(array_keys($group['attributes']))
                 : '';
@@ -376,8 +445,25 @@ final class JmhzBlockerExplainer
                 . self::affected($group['entities'], $labels)
                 . ' ' . $action;
         }
+        // Jednou za celou hlášku: věta platí pro všechny takové nálezy stejně.
+        foreach ($blockers as $blocker) {
+            if (self::needsRevision($blocker)) {
+                $descriptions[] = self::REVISION_HINT;
+                break;
+            }
+        }
 
         return implode(' ', $descriptions);
+    }
+
+    /** Čte hlášení dotčený údaj ze schváleného běhu, takže oprava stojí opravnou revizi? */
+    public static function needsRevision(JmhzScenario1Blocker $blocker): bool
+    {
+        return PayrollRunReadinessImpact::jmhzBlockerNeedsRevision(
+            $blocker->code,
+            $blocker->entityType,
+            $blocker->attributeIds,
+        );
     }
 
     /**
@@ -395,11 +481,15 @@ final class JmhzBlockerExplainer
     /**
      * Důvod nálezu. Konkrétní věta zdroje (např. serializéru formuláře) má
      * přednost před obecnou „chybí zákonný údaj" - obecná věta nic neřekne.
+     *
+     * @param list<string> $attributeIds dotčené atributy; u nálezu s rozpadem
+     *        podle atributu ({@see JmhzBlockerCatalog::remediationFor()}) určí důvod
      */
-    public static function reason(string $code, ?string $message = null): string
+    public static function reason(string $code, ?string $message = null, array $attributeIds = [], string $entityType = ''): string
     {
-        if (in_array($code, self::MESSAGE_FIRST_CODES, true) && $message !== null && trim($message) !== '') {
-            return trim($message);
+        $specific = self::specificReason($code, $message, $attributeIds, $entityType);
+        if ($specific !== null) {
+            return $specific;
         }
         $reason = self::REASONS[$code] ?? null;
         if ($reason !== null) {
@@ -410,6 +500,36 @@ final class JmhzBlockerExplainer
         }
 
         return 'Chybí zákonný údaj potřebný pro měsíční hlášení.';
+    }
+
+    /**
+     * Důvod přesnější než obecný popisek kódu: konkrétní věta zdroje
+     * ({@see self::MESSAGE_FIRST_CODES}) nebo důvod podle dotčeného atributu
+     * u kódu, který kryje různé údaje. Klient podle toho pozná, že má ukázat
+     * větu serveru, a ne svůj obecný popisek kódu.
+     *
+     * @param list<string> $attributeIds
+     */
+    public static function specificReason(string $code, ?string $message = null, array $attributeIds = [], string $entityType = ''): ?string
+    {
+        if (in_array($code, self::MESSAGE_FIRST_CODES, true) && $message !== null && trim($message) !== '') {
+            return trim($message);
+        }
+        if ($code !== 'jmhz_2027_source_missing') {
+            return null;
+        }
+        // Jeden kód pro různé údaje; co chybí, říká dotčený atribut.
+        $kind = JmhzBlockerCatalog::remediationFor($code, $entityType, $attributeIds);
+
+        return match ($kind['field'] ?? $kind['kind']) {
+            'jmhz_workplace_street', 'jmhz_workplace_house_number', 'jmhz_workplace_orientation_number',
+            'jmhz_workplace_postal_code', 'jmhz_workplace_address_point_code'
+                => 'Chybí adresa místa výkonu práce (číslo popisné a PSČ), kterou hlášení od ledna 2027 vyžaduje.',
+            'jmhz_state_prosecutor' => 'Není vyplněno, zda jde o státního zástupce; hlášení od ledna 2027 ten údaj vyžaduje.',
+            'statutory_evidence' => 'Chybí den podpisu prohlášení poplatníka, který hlášení od ledna 2027 vyžaduje.',
+            'employer_annual' => self::REASONS['jmhz_employer_annual_collective_agreement_missing'],
+            default => null,
+        };
     }
 
     /**
@@ -433,6 +553,7 @@ final class JmhzBlockerExplainer
                 'statutory_evidence' => 'Hlášení od ledna 2027 vyžaduje den podpisu prohlášení poplatníka. '
                     . 'Otevřete Mzdy → Zaměstnanci, v zákonné evidenci osoby doplňte u prohlášení datum podpisu, '
                     . 'uložte a obnovte podklady mzdového běhu.',
+                'employer_annual' => self::ACTIONS['jmhz_employer_annual_collective_agreement_missing'],
                 default => null,
             };
             if ($specific !== null) {
@@ -448,7 +569,7 @@ final class JmhzBlockerExplainer
         return match ($entityType) {
             'component' => 'Otevřete Mzdy → Mzdové složky a zkontrolujte zvýrazněná pole.',
             'employment', 'person', 'employee' => 'Otevřete Mzdy → Zaměstnanci a doplňte zvýrazněná pole.',
-            'office' => 'Otevřete Nastavení mezd → Mzdové účtárny a doplňte zvýrazněná pole.',
+            'office' => 'Otevřete Mzdy → Nastavení mezd → Zaměstnavatel a účtárny a zkontrolujte údaje mzdové účtárny.',
             'run', 'revision', 'preparation' => 'Otevřete Mzdy → Mzdové běhy a dokončete zvýrazněný krok.',
             default => 'Otevřete test JMHZ a pokračujte od zvýrazněné skupiny údajů.',
         };

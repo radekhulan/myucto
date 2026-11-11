@@ -747,6 +747,33 @@ final class PayrollRunReadinessService
                 [$names[$left['entity_id']] ?? '', $left['entity_id'], $left['message']]
                 <=> [$names[$right['entity_id']] ?? '', $right['entity_id'], $right['message']],
         );
+        /*
+         * JEDNO číslo pro nadpis nálezu, větu i tlačítka hromadné opravy:
+         * počet OSOB. Dřív měla osoba se dvěma chybějícími údaji dva řádky,
+         * nadpis nesl počet řádků, věta počet osob a dialog hromadné opravy
+         * zase osoby, takže „3×" vedle „u 2 osob" vypadalo jako chyba součtu.
+         * Osoba je proto v nálezu jednou, se všemi svými větami; odkaz vede
+         * na společné místo opravy. Záznam, který na osobu nemíří, zůstává
+         * sám za sebe.
+         */
+        $folded = [];
+        foreach ($details as $index => $detail) {
+            $key = $detail['entity_type'] === 'employee' && $detail['entity_id'] !== null
+                ? 'employee:' . $detail['entity_id']
+                : 'other:' . $index;
+            if (!isset($folded[$key])) {
+                $folded[$key] = $detail;
+                continue;
+            }
+            if (!str_contains((string) $folded[$key]['message'], (string) $detail['message'])) {
+                $folded[$key]['message'] .= ' ' . $detail['message'];
+            }
+            $folded[$key]['remediation_path'] = self::sharedPersonPath(
+                $folded[$key]['remediation_path'],
+                $detail['remediation_path'],
+            );
+        }
+        $details = array_values($folded);
         $people = [];
         foreach ($details as $detail) {
             if ($detail['entity_type'] === 'employee' && $detail['entity_id'] !== null) {
@@ -755,21 +782,26 @@ final class PayrollRunReadinessService
         }
         $named = array_slice(array_values($people), 0, self::MAX_ENTITIES);
         $hidden = count($people) - count($named);
+        $subjects = count($details);
+        // Hromadnou opravu radí jen tam, kde ji má kdo využít.
+        $bulkHints = array_values(array_filter([
+            $statutoryPeople !== [] ? 'daňovou rezidenci doplní Mzdy → Zaměstnanci → Další funkce → Doplnit výchozí zákonné údaje' : null,
+            $insurerPeople !== [] ? 'pojišťovnu Mzdy → Zaměstnanci → Další funkce → Přiřadit zdravotní pojišťovnu hromadně' : null,
+        ]));
 
         return [...self::finding(
             'statutory_calculation_manual_review',
             sprintf(
-                'Zákonný výpočet zastaví u %d osob chybějící nebo neověřené údaje v zákonné '
+                'Zákonný výpočet zastaví %s chybějící nebo neověřené údaje v zákonné '
                 . 'evidenci: %s%s. Mzdu spočítat půjde jen zčásti a běh nepůjde schválit. '
-                . 'Odkaz u každé osoby otevře místo opravy; daňovou rezidenci doplní Mzdy → '
-                . 'Zaměstnanci → Další funkce → Doplnit výchozí zákonné údaje, pojišťovnu '
-                . 'Přiřadit zdravotní pojišťovnu hromadně.',
-                count($people),
+                . 'Odkaz u každé osoby otevře místo opravy%s.',
+                count($people) === 1 ? 'u 1 osoby' : sprintf('u %d osob', count($people)),
                 implode(', ', $named),
                 $hidden > 0 ? sprintf(' a dalších %d', $hidden) : '',
+                $bulkHints === [] ? '' : '; ' . implode(', ', $bulkHints),
             ),
             '/payroll/people?filter=blocking_data',
-            count($details),
+            $subjects,
             array_map(
                 static fn (array $detail): array => [
                     'entity_type' => $detail['entity_type'],
@@ -786,6 +818,33 @@ final class PayrollRunReadinessService
             'statutory_defaults' => count($statutoryPeople),
             'health_insurer' => count($insurerPeople),
         ]];
+    }
+
+    /**
+     * Odkaz pro osobu s víc chybějícími údaji: stejné místo zůstává, různá
+     * pole téhož panelu vedou na panel a různé panely na kartu osoby.
+     */
+    private static function sharedPersonPath(?string $left, ?string $right): ?string
+    {
+        if ($left === null || $right === null || $left === $right) {
+            return $left ?? $right;
+        }
+        $leftQuery = [];
+        $rightQuery = [];
+        parse_str((string) parse_url($left, PHP_URL_QUERY), $leftQuery);
+        parse_str((string) parse_url($right, PHP_URL_QUERY), $rightQuery);
+        $path = (string) parse_url($left, PHP_URL_PATH);
+        if ($path !== (string) parse_url($right, PHP_URL_PATH)) {
+            return $left;
+        }
+        $shared = [];
+        foreach (['person', 'employment', 'panel'] as $key) {
+            if (isset($leftQuery[$key]) && ($leftQuery[$key] === ($rightQuery[$key] ?? null))) {
+                $shared[$key] = $leftQuery[$key];
+            }
+        }
+
+        return $shared === [] ? $path : $path . '?' . http_build_query($shared);
     }
 
     /**

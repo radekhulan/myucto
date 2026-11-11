@@ -63,6 +63,68 @@ final class JmhzBlockerExplainerTest extends TestCase
         self::assertStringNotContainsString('Osoba 11', $message);
     }
 
+    /**
+     * Neplatný variabilní symbol účtárny: hláška nesmí říkat „chybí" ani
+     * posílat na „zvýrazněná pole". Řekne přesný důvod, kde se symbol
+     * opravuje, a že hlášení ho čte ze schváleného běhu (opravná revize).
+     */
+    public function testInvalidOfficeVariableSymbolNamesReasonPlaceAndRevision(): void
+    {
+        $detail = 'Variabilní symbol zaměstnavatele u ČSSZ „1100000012" u mzdové účtárny je vyplněný, '
+            . 'ale neplatný: nesouhlasí kontrolní číslice. ČSSZ by hlášení s ním odmítla.';
+        $message = JmhzBlockerExplainer::describe(
+            [new JmhzScenario1Blocker('jmhz_office_variable_symbol_invalid', 'office', 4, ['10221'], $detail)],
+            ['office' => [4 => 'Syntetická účtárna (FIX)']],
+        );
+
+        self::assertStringStartsWith($detail, $message);
+        self::assertStringContainsString('Dotčeno: 1 mzdová účtárna (Syntetická účtárna (FIX)).', $message);
+        self::assertStringContainsString('„Spravovat účinné registrace"', $message);
+        self::assertStringEndsWith(JmhzBlockerExplainer::REVISION_HINT, $message);
+        self::assertStringNotContainsString('Chybí zákonný údaj', $message);
+        self::assertStringNotContainsString('zvýrazněná pole', $message);
+    }
+
+    /** Věta o opravné revizi stojí jednou a jen u údaje čteného ze schváleného běhu. */
+    public function testRevisionHintIsSaidOnceAndOnlyForFrozenSources(): void
+    {
+        $frozen = JmhzBlockerExplainer::describe([
+            new JmhzScenario1Blocker('jmhz_scenario1_child_credit_caregiver_unknown', 'person', 5, ['10453']),
+            new JmhzScenario1Blocker('jmhz_average_hourly_earning_missing', 'employment', 7, ['10345']),
+        ]);
+        self::assertSame(1, substr_count($frozen, JmhzBlockerExplainer::REVISION_HINT));
+
+        $live = JmhzBlockerExplainer::describe([
+            new JmhzScenario1Blocker('component_jmhz_mapping_missing', 'component', 3),
+            new JmhzScenario1Blocker('jmhz_identity_oic_missing', 'employment', 7),
+        ]);
+        self::assertStringNotContainsString('Vyžádat opravu', $live);
+    }
+
+    /** Kódy, které dřív měly jen obecné „Chybí zákonný údaj". */
+    public function testFormerlyGenericCodesNameWhatIsWrongAndWhere(): void
+    {
+        foreach ([
+            'jmhz_employment_without_office' => 'employment',
+            'jmhz_average_hourly_earning_mismatch' => 'employment',
+            'jmhz_average_hourly_earning_invalid' => 'employment',
+            'jmhz_average_hourly_earning_unverified' => 'employment',
+            'jmhz_apz_instrument_missing' => 'employment',
+            'jmhz_child_claim_invalid' => 'person',
+            'jmhz_office_variable_symbol_missing' => 'office',
+            'jmhz_office_variable_symbol_mismatch' => 'office',
+            'social_security_variable_symbol_missing' => 'office',
+            'office_registration_history_missing' => 'office',
+        ] as $code => $entityType) {
+            self::assertNotSame(
+                'Chybí zákonný údaj potřebný pro měsíční hlášení.',
+                JmhzBlockerExplainer::reason($code),
+                $code,
+            );
+            self::assertStringNotContainsString('zvýrazněn', JmhzBlockerExplainer::action($code, $entityType), $code);
+        }
+    }
+
     public function testUnknownBlockerStillHasActionableCzechFallback(): void
     {
         $message = JmhzBlockerExplainer::describe([

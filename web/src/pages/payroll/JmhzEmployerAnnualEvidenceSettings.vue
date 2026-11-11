@@ -26,7 +26,25 @@ function defaultReportYear(): number {
   return Math.max(2026, year)
 }
 
-const reportYear = ref(defaultReportYear())
+/**
+ * Rok z odkazu (`?year=RRRR`). Blokace hlášení vede na rok HLÁŠENÉHO období:
+ * dřív se formulář otevřel na výchozím roce, který bývá vyplněný, a účetní
+ * musela rok přepsat ručně a znovu načíst, aby viděla, co opravdu chybí.
+ *
+ * Čte se z adresy, ne přes router: sekce je vložená do nastavení mezd a její
+ * testy router nemají.
+ */
+function requestedReportYear(): number | null {
+  if (typeof window === 'undefined') return null
+  const query = Object.fromEntries(new URLSearchParams(window.location.search))
+  const year = Number(query.year)
+
+  return Number.isInteger(year) && year >= 2026 && year <= 2100 ? year : null
+}
+
+const reportYear = ref(requestedReportYear() ?? defaultReportYear())
+/** Od roku 2027 nese hlášení typy kolektivních smluv každý měsíc, ne jen v prosinci. */
+const monthlyFrom2027 = computed(() => reportYear.value >= 2027)
 const view = ref<PayrollJmhzEmployerAnnualEvidenceView | null>(null)
 const loading = ref(false)
 const saving = ref(false)
@@ -199,7 +217,9 @@ onMounted(load)
           {{ t('payroll.employer.jmhz_annual.title') }}
         </h2>
         <p class="mt-1 max-w-3xl text-sm text-neutral-500">
-          {{ t('payroll.employer.jmhz_annual.subtitle') }}
+          {{ t(monthlyFrom2027
+            ? 'payroll.employer.jmhz_annual.subtitle_2027'
+            : 'payroll.employer.jmhz_annual.subtitle') }}
         </p>
       </div>
       <div class="flex flex-wrap items-end gap-2">
@@ -253,7 +273,9 @@ onMounted(load)
 
       <fieldset ref="collectiveField" class="mt-4" tabindex="-1">
         <legend class="text-sm font-medium text-neutral-800">
-          {{ t('payroll.employer.jmhz_annual.collective_types') }}
+          {{ t(monthlyFrom2027
+            ? 'payroll.employer.jmhz_annual.collective_types_2027'
+            : 'payroll.employer.jmhz_annual.collective_types') }}
         </legend>
         <div class="mt-2 grid gap-2 lg:grid-cols-2">
           <label

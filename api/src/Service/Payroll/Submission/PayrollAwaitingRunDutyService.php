@@ -62,7 +62,14 @@ final readonly class PayrollAwaitingRunDutyService
         }
         $months = [];
         if ($period !== null) {
-            if ($period >= $lower && $period <= $current) {
+            /*
+             * Výslovně zvolený měsíc se ukáže i tehdy, když teprve nastane.
+             * Mzdový běh za budoucí měsíc založit jde a kontrola před ním má
+             * stejně jako u minulého měsíce říct, že z jeho schválení vznikne
+             * hlášení a do kdy. Dřív byl přehled u budoucího měsíce prázdný.
+             * Souhrn bez zvoleného měsíce dál hlídá jen měsíce do dneška.
+             */
+            if ($period >= $lower) {
                 $months[] = $period;
             }
         } else {

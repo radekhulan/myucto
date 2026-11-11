@@ -397,6 +397,9 @@ final class JmhzBlockerCatalog
         'jmhz_mapping_not_allowed' => 'components',
         'jmhz_negative_or_deferred_income_unsupported' => 'components',
         'jmhz_obligation_missing' => 'runs',
+        // Období ještě neskončilo: nic se neopravuje, hlášení půjde připravit
+        // od prvního dne následujícího měsíce ({@see JmhzPreparationGate}).
+        'jmhz_period_not_finished' => 'manual',
         'jmhz_office_variable_symbol_invalid' => 'office',
         'jmhz_office_variable_symbol_mismatch' => 'office',
         'jmhz_office_variable_symbol_missing' => 'office',
@@ -782,6 +785,8 @@ final class JmhzBlockerCatalog
         '10587' => ['employment_terms', 'jmhz_state_prosecutor'],
         // Den podpisu prohlášení poplatníka (10575): zákonná evidence osoby.
         '10575' => ['statutory_evidence', null],
+        // Typy kolektivních smluv (10214): roční údaje zaměstnavatele.
+        '10214' => ['employer_annual', null],
     ];
 
     /**

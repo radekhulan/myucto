@@ -210,23 +210,50 @@ Lhůta: 20. den následujícího měsíce (na pracovní den se posouvá).
 5. V panelu **Test měsíčního hlášení JMHZ** klikněte na **Otestovat XML**.
    Nic se neodesílá. U každého nálezu je tlačítko, které otevře místo opravy.
    Opravte data, případně přepočtěte mzdový běh, a test spusťte znovu.
+   Test jde spustit i před koncem měsíce: je-li obsah v pořádku, řekne to
+   a uvede den, od kdy půjde hlášení připravit.
 6. Jeden zaměstnanec s neúplnými daty nemusí blokovat ostatní: u jeho nálezu
    klikněte na **Odložit z hlášení** a zadejte důvod (viz
    [§ 85.14.10](#851410-odlozeni-vztahu-z-radneho-hlaseni)).
 7. Přepněte na záložku **Měsíc**. U řádku JMHZ klikněte na **Připravit
    a odeslat**. Chcete-li hlášení jen zmrazit a odeslat později, klikněte na
    **Jen připravit** a později na **Odeslat**. Všechna podání měsíce najednou
-   odešle **Připravit a odeslat vše**.
+   odešle **Připravit a odeslat vše**. **Jen připravit** sestaví XML ze
+   schválené mzdy, ověří ho a zmrazí jako podání k odeslání; úřadu se nic
+   nepošle. Odeslání se nedá vzít zpět.
 8. Potvrďte odeslání do ostrého prostředí. JMHZ odejde přes VREP ČSSZ hned,
    podepsané vaším certifikátem.
 9. Aplikace se ČSSZ na výsledek doptává sama. Stav sledujte na záložce
    **Odesláno**.
 
 Nejde-li hlášení při odeslání nebo zmrazení připravit, aplikace pod chybou
-vypíše nálezy seskupené podle důvodu a u každého jméno zaměstnance. Tlačítko
-**Opravit** otevře přímo pole, které chybí (karta zaměstnance, roční zúčtování,
-průměry). Na stránce otevřené tímto odkazem je nahoře tlačítko **Zpět na
-přípravu JMHZ**, které vás vrátí tam, kde jste skončili.
+vypíše nálezy seskupené podle důvodu a u každého jméno zaměstnance nebo název
+mzdové účtárny. Tlačítko **Opravit** otevře přímo místo, kde se údaj opravuje
+(karta zaměstnance, roční zúčtování, průměry, nastavení mezd). Na stránce
+otevřené tímto odkazem je nahoře tlačítko **Zpět na přípravu JMHZ**, které vás
+vrátí tam, kde jste skončili.
+
+**Údaj převzatý ze schváleného mzdového běhu.** Hlášení se sestavuje ze
+schválené mzdy. Část údajů do ní vstupuje při zamknutí vstupů: podmínky
+pracovního vztahu včetně pracoviště, zákonná evidence osoby a nároky na děti,
+průměrný výdělek, docházka, nepřítomnosti a variabilní symbol mzdové účtárny.
+U takového nálezu oprava údaje sama nestačí. Aplikace to u nálezu říká
+a nabízí tlačítko **Otevřít mzdový běh k opravě**: v běhu zvolte **Vyžádat
+opravu** a **Otevřít opravu**, mzdy přepočítejte, běh znovu schvalte a hlášení
+připravte znovu. Je-li údaj v evidenci už opravený, nález nese štítek
+**už opraveno, zbývá opravná revize**. Nejlevnější je tyhle údaje doplnit před
+výpočtem: kontrola před mzdovým během je hlásí předem, včetně neplatného
+variabilního symbolu účtárny a nezodpovězené otázky, zda děti vyživuje i jiná
+osoba. Údaje čtené až při přípravě hlášení (zařazení mzdových složek,
+identifikátory přidělené ČSSZ, roční údaje zaměstnavatele, žádost o roční
+zúčtování) opravnou revizi nepotřebují a projeví se při dalším pokusu.
+
+**Kdy hlášení připravit nejde.** Měsíční hlášení se podává až za uplynulý
+kalendářní měsíc. Před jeho koncem jsou tlačítka **Připravit a odeslat**
+a **Jen připravit** neaktivní a u řádku stojí den, od kdy to půjde. Stejně se
+chová období, jehož hlášení aplikace zatím neumí sestavit (hlášení za rok,
+pro který ještě nevyšel číselník obcí a států): u řádku je důvod, co dělat
+a termín podání.
 
 **Jak poznáte, že je hotovo:** Na záložce **Odesláno** má podání za období
 štítek **Přijato** a v panelu **Zákonné termíny** je JMHZ za měsíc **Splněno**.
@@ -1426,7 +1453,8 @@ další kliknutí proto nevytvoří jiné podání pod stejnou identitou. Ostré
 podání je zablokované do začátku zákonné lhůty, testovací prostředí lze
 použít k bezpečnému testu celého toku.
 
-- **Odeslat přes ISDS** připraví datovou zprávu pro doloženou schránku ČSSZ.
+- **Připravit zprávu do datové schránky** hlášení zmrazí a připraví datovou
+  zprávu pro doloženou schránku ČSSZ. Potvrzením se úřadu nic neposílá.
   Je-li aktivní odesílací brána, MyÚčto před přesměrováním vysvětlí
   přihlášení a pošle uživatele přímo do ISDS. Přihlašovací údaje aplikace
   nevidí ani neukládá a zpráva odejde až po schválení konceptu uživatelem

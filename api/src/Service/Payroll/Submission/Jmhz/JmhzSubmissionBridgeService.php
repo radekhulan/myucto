@@ -94,6 +94,11 @@ final readonly class JmhzSubmissionBridgeService
         private ?PayrollRegistrationChangeSettlement $registrationSettlement = null,
         /** Jména dotčených osob v hlášce o blokaci; bez něj zůstane jen počet. */
         private ?PayrollPeopleRepository $people = null,
+        /**
+         * Rozliší u nálezu čteného ze schváleného běhu, jestli je údaj už
+         * opravený a zbývá jen opravná revize. Volitelný jako ostatní rozšíření.
+         */
+        private ?JmhzFrozenSourceAdvisor $frozenSource = null,
     ) {}
 
     /**
@@ -211,21 +216,30 @@ final readonly class JmhzSubmissionBridgeService
         // verze 2027 ještě není, ne nálezy, po jejichž opravě by skončila tady.
         $candidatePeriod = $resolution->candidate?->payload['scope']['period_start'] ?? null;
         if (is_string($candidatePeriod) && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $candidatePeriod) === 1) {
-            JmhzSpecPackageCatalog::requireBuildable(JmhzSpecVersion::forPeriodStart($candidatePeriod));
+            // Totéž platí pro období, které ještě neskončilo: katalog kontrol by
+            // ho zastavil až po zaevidování povinnosti a výčtem kontrol 43, 44
+            // a 90. Závora to řekne jednou větou a nic nezaloží.
+            (new JmhzPreparationGate($this->deadlines, $this->clock))->assertOpen($candidatePeriod);
         }
         if ($resolution->status() !== 'resolved') {
+            $payload = JmhzBlockerRemediationPath::payload(
+                $resolution->blockers,
+                $this->people,
+                $supplierId,
+                is_string($candidatePeriod) ? $candidatePeriod : null,
+            );
+            $candidateRun = $resolution->candidate?->payload['scope']['run_id'] ?? null;
+            if ($this->frozenSource !== null && is_int($candidateRun) && $candidateRun > 0) {
+                $payload = $this->frozenSource->annotate($supplierId, $candidateRun, $payload);
+            }
             throw new JmhzXmlException(
                 'jmhz_submission_preparation_blocked',
                 'Příprava JMHZ není úplná, podání se nezakládá: '
                     . ($this->people === null
                         ? JmhzBlockerExplainer::describe($resolution->blockers)
-                        : JmhzBlockerExplainer::describeNamed($resolution->blockers, $this->people, $supplierId)),
-                JmhzBlockerRemediationPath::payload(
-                    $resolution->blockers,
-                    $this->people,
-                    $supplierId,
-                    is_string($candidatePeriod) ? $candidatePeriod : null,
-                ),
+                        : JmhzBlockerExplainer::describeNamed($resolution->blockers, $this->people, $supplierId))
+                    . self::alreadyFixedSentence($payload),
+                $payload,
             );
         }
         $document = $resolution->requireResolvedDocument();
@@ -659,6 +673,20 @@ final readonly class JmhzSubmissionBridgeService
                 'Dokument JMHZ nenese platné vykazované období.',
             );
         }
+        // Povinnost z dřívější přípravy, která se nezmrazila (podání k ní
+        // nevzniklo): nová příprava za totéž období ji převezme. Jinak by ji
+        // pojistka jediného řádného hlášení odmítla jako druhé řádné, přestože
+        // se za období nic nepodalo.
+        $unfiled = $this->submissionRepository->findUnfiledRegularObligationId(
+            $supplierId,
+            $environment,
+            self::AGENDA_CODE,
+            self::runReference($runId, $officeId),
+            $periodStart,
+        );
+        if ($unfiled !== null) {
+            return $unfiled;
+        }
         $window = $this->deadlines->forPeriod($periodStart);
         $officeKey = $officeId === null ? 'all' : (string) $officeId;
         $registered = $this->obligations->register(
@@ -1015,6 +1043,36 @@ final readonly class JmhzSubmissionBridgeService
             'submission' => "jmhz25-submission:{$fingerprint}",
             'artifact' => "jmhz25-artifact:{$fingerprint}",
         ];
+    }
+
+    /**
+     * Věta pro případ, kdy účetní údaj už opravila a hlášení se přesto
+     * zastavilo: bez ní nepozná, jestli se oprava neuložila, nebo jen chybí
+     * opravná revize běhu.
+     *
+     * @param list<array<string,mixed>> $payload
+     */
+    private static function alreadyFixedSentence(array $payload): string
+    {
+        $fixed = 0;
+        $open = 0;
+        foreach ($payload as $row) {
+            if (($row['needs_revision'] ?? false) !== true) {
+                continue;
+            }
+            if (($row['fixed_in_source'] ?? null) === true) {
+                ++$fixed;
+            } elseif (($row['fixed_in_source'] ?? null) === false) {
+                ++$open;
+            }
+        }
+        if ($fixed === 0) {
+            return '';
+        }
+
+        return $open === 0
+            ? ' Údaj je v evidenci už opravený, schválený mzdový běh ale nese původní hodnotu: zbývá jen opravná revize běhu.'
+            : ' Část údajů je v evidenci už opravená, schválený mzdový běh ale nese původní hodnoty.';
     }
 
     private static function describeControls(

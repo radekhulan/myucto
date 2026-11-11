@@ -1583,8 +1583,8 @@ final class JmhzScenario1ControlEvaluator
         }
         [$year, $month] = $period;
         $reported = sprintf('%04d-%02d', $year, $month);
-        $current = substr($context->evaluatedOn, 0, 7);
-        if (strcmp($reported, $current) >= 0) {
+        // Totéž pravidlo jako závora přípravy hlášení, aby se nerozešly.
+        if (!JmhzPreparationGate::periodFinished($reported, $context->evaluatedOn)) {
             return [JmhzControlVerdict::failed(
                 JmhzAttributeProjection::PART_SUBMISSION,
                 null,

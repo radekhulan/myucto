@@ -27,7 +27,12 @@ vi.mock('@/api/dataBox', () => ({
 vi.mock('@/api/payrollSicknessCases', () => ({
   payrollSicknessCasesApi: { prepare: m.prepareSickness },
 }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: m.push }) }))
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: m.push }),
+  // Seznam nálezů blokace (JmhzFreezeBlockerList) skládá odkazy s návratem.
+  useRoute: () => ({ fullPath: '/payroll/submissions/monthly?period=2026-08' }),
+  RouterLink: { props: ['to'], template: '<a :data-to="typeof to === \'string\' ? to : JSON.stringify(to)"><slot /></a>' },
+}))
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({ locale: { value: 'cs' },
@@ -912,5 +917,164 @@ describe('PayrollMonthlyChecklistPanel', () => {
     const link = wrapper.get('[data-test="monthly-checklist-external-link"]')
     expect(link.text()).toContain('payroll.external_jmhz.open_history')
     expect(link.attributes('data-to')).toContain('external-submissions')
+  })
+
+  function jmhzDutyItem(overrides: Record<string, unknown> = {}) {
+    return {
+      ...agendaDutyItem(),
+      key: 'agenda_duty:JMHZ25:5',
+      agenda_code: 'JMHZ25',
+      agenda_label: 'JMHZ25',
+      subject: null,
+      action: {
+        kind: 'generate',
+        label: 'Připravit',
+        path: '/payroll/submissions/jmhz',
+        reason: null,
+        prepare: { agenda_code: 'JMHZ25', period: '2026-08', insurer_code: null },
+        prepare_blocked: null,
+      },
+      ...overrides,
+    }
+  }
+
+  /**
+   * B1 + B2: blokace přípravy JMHZ. Chyba i nálezy s odkazy zůstanou u řádku,
+   * i když se po načtení přehledu klíč řádku změní (povinnost se mezitím
+   * zapsala do evidence), a nález čtený ze schváleného běhu říká, že je
+   * potřeba opravná revize, s odkazem na mzdový běh měsíce.
+   */
+  it('blokaci přípravy ukáže u řádku i po změně klíče a nabídne opravu běhu', async () => {
+    m.monthlyChecklist
+      .mockResolvedValueOnce(baseResponse({ items: [jmhzDutyItem()] }))
+      .mockResolvedValue(baseResponse({ items: [jmhzDutyItem({ key: 'submission:9', source: 'submission' })] }))
+    m.prepareItem.mockRejectedValue({
+      response: { data: { error: {
+        code: 'conflict',
+        message: 'Příprava JMHZ není úplná, podání se nezakládá: variabilní symbol je vyplněný, ale neplatný.',
+        details: { blockers: [{
+          code: 'jmhz_office_variable_symbol_invalid',
+          entity_type: 'office',
+          entity_id: 4,
+          attribute_ids: ['10221'],
+          reason: 'Variabilní symbol je vyplněný, ale neplatný: nesouhlasí kontrolní číslice.',
+          label: 'Syntetická účtárna (FIX)',
+          remediation_path: '/payroll/settings?tab=employer#payroll-employer-offices',
+          needs_revision: true,
+          revision_path: '/payroll/runs?period=2026-08',
+          fixed_in_source: false,
+        }] },
+      } } },
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('tbody [data-test="monthly-checklist-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(m.monthlyChecklist).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('tbody [data-test="monthly-checklist-prepare-error"]').text())
+      .toContain('vyplněný, ale neplatný')
+    const group = wrapper.get('tbody [data-test="jmhz-freeze-blocker-group-jmhz_office_variable_symbol_invalid"]')
+    expect(group.text()).toContain('Syntetická účtárna (FIX)')
+    expect(group.get('[data-test="jmhz-freeze-blocker-fix"]').attributes('data-to'))
+      .toContain('/payroll/settings?tab=employer')
+    expect(group.get('[data-test="jmhz-freeze-blocker-revision"]').text())
+      .toContain('payroll.jmhz_gate.freeze_blockers.revision_hint')
+    expect(group.get('[data-test="jmhz-freeze-blocker-revision-link"]').attributes('data-to'))
+      .toContain('/payroll/runs?period=2026-08')
+    expect(group.find('[data-test="jmhz-freeze-blocker-fixed"]').exists()).toBe(false)
+  })
+
+  it('u údaje už opraveného v evidenci řekne, že zbývá jen opravná revize', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({ items: [jmhzDutyItem()] }))
+    m.prepareItem.mockRejectedValue({
+      response: { data: { error: {
+        code: 'conflict',
+        message: 'Příprava JMHZ není úplná.',
+        details: { blockers: [{
+          code: 'jmhz_scenario1_child_credit_caregiver_unknown',
+          entity_type: 'person',
+          entity_id: 7,
+          attribute_ids: ['10453'],
+          reason: 'Není zodpovězeno, zda tytéž děti vyživuje i jiná osoba.',
+          label: 'Syntetická Rodičovská',
+          remediation_path: '/payroll/people?person=7&panel=dependants',
+          needs_revision: true,
+          revision_path: '/payroll/runs?period=2026-08',
+          fixed_in_source: true,
+        }] },
+      } } },
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('tbody [data-test="monthly-checklist-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('tbody [data-test="jmhz-freeze-blocker-fixed"]').text())
+      .toContain('payroll.jmhz_gate.freeze_blockers.fixed_in_source')
+    expect(wrapper.get('tbody [data-test="jmhz-freeze-blocker-revision"]').text())
+      .toContain('payroll.jmhz_gate.freeze_blockers.revision_only')
+  })
+
+  /**
+   * B2 + B3: období, které ještě neskončilo, nebo ročník, který aplikace
+   * neumí sestavit. Tlačítka jsou neaktivní, hromadné akce řádek nepokryjí
+   * a u řádku stojí věta proč a od kdy.
+   */
+  it('zneaktivní přípravu, když ji teď spustit nejde, a řekne proč', async () => {
+    const reason = 'Období 08/2026 ještě neskončilo. Připravit ho půjde od 1. 9. 2026.'
+    m.monthlyChecklist.mockResolvedValue(baseResponse({
+      items: [jmhzDutyItem({
+        action: {
+          kind: 'generate',
+          label: 'Připravit',
+          path: '/payroll/submissions/jmhz',
+          reason,
+          prepare: { agenda_code: 'JMHZ25', period: '2026-08', insurer_code: null },
+          prepare_blocked: { code: 'jmhz_period_not_finished', message: reason, available_from: '2026-09-01' },
+        },
+      })],
+    }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.get('tbody [data-test="monthly-checklist-prepare"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('tbody [data-test="monthly-checklist-prepare-send"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('tbody [data-test="monthly-checklist-prepare-blocked"]').text()).toContain('od 1. 9. 2026')
+    expect(wrapper.find('[data-test="monthly-checklist-send-all"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="monthly-checklist-prepare-all"]').exists()).toBe(false)
+    await wrapper.get('tbody [data-test="monthly-checklist-prepare"]').trigger('click')
+    expect(m.prepareItem).not.toHaveBeenCalled()
+  })
+
+  /**
+   * M12: „Jen připravit" nic neodesílá, takže nesmí přepsat tlačítka odeslání
+   * na „Připravuji a odesílám…". Průběh se ukáže na tlačítku, na které se kliklo.
+   */
+  it('při „Jen připravit" neukáže na tlačítkách odeslání, že se odesílá', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({ items: [jmhzDutyItem()] }))
+    let finish: (value: { submission_ids: number[] }) => void = () => {}
+    m.prepareItem.mockReturnValue(new Promise((resolve) => { finish = resolve }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('tbody [data-test="monthly-checklist-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('tbody [data-test="monthly-checklist-prepare"]').text())
+      .toContain('payroll.submissions.monthly_checklist.preparing')
+    expect(wrapper.get('tbody [data-test="monthly-checklist-prepare-send"]').text())
+      .toContain('payroll.submissions.monthly_checklist.send.prepare_and_send')
+    expect(wrapper.get('[data-test="monthly-checklist-send-all"]').text())
+      .not.toContain('payroll.submissions.monthly_checklist.send.working')
+
+    finish({ submission_ids: [11] })
+    await flushPromises()
+    // M13: příprava podání zmrazí a nic neodešle; obrazovka to řekne.
+    expect(wrapper.get('[data-test="monthly-checklist-prepare-all-summary"]').text())
+      .toContain('payroll.submissions.monthly_checklist.send.prepared_one')
   })
 })
