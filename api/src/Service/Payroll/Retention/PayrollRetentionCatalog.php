@@ -237,6 +237,7 @@ final class PayrollRetentionCatalog
                 'payroll_inputs',
                 'payroll_run_employments',
                 'payroll_run_persons',
+                'payroll_run_exclusions',
                 // Odložení vztahu z řádného hlášení visí na revizi běhu (ne na
                 // řádku osoby), takže lhůtu běhu musí nést samo.
                 'payroll_jmhz_deferrals',
