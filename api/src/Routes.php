@@ -2083,6 +2083,18 @@ final class Routes
                 [PayrollJmhzDeferralAction::class, 'create'],
             );
             $g->post(
+                '/submissions/jmhz-deferrals/bulk',
+                [PayrollJmhzDeferralAction::class, 'createMany'],
+            );
+            $g->post(
+                '/submissions/jmhz-deferrals/carry-over',
+                [PayrollJmhzDeferralAction::class, 'carryOver'],
+            );
+            $g->post(
+                '/submissions/jmhz-deferrals/complete-all',
+                [PayrollJmhzDeferralAction::class, 'completeAll'],
+            );
+            $g->post(
                 '/submissions/jmhz-deferrals/{id:[0-9]+}/revoke',
                 [PayrollJmhzDeferralAction::class, 'revoke'],
             );

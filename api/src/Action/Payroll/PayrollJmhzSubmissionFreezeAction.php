@@ -72,6 +72,7 @@ final class PayrollJmhzSubmissionFreezeAction
                 $this->userId($request),
                 $officeId,
                 ($body['confirm_late_discount'] ?? false) === true,
+                ($body['confirm_registration_settling'] ?? false) === true,
             );
         } catch (JmhzXmlException $exception) {
             return Json::error(
@@ -79,7 +80,7 @@ final class PayrollJmhzSubmissionFreezeAction
                 JmhzSubmissionBridgeService::clientErrorCode($exception),
                 $exception->getMessage(),
                 409,
-                $exception->blockers === [] ? [] : ['details' => ['blockers' => $exception->blockers]],
+                $exception->clientDetails(),
             );
         } catch (\DomainException $exception) {
             return Json::error($response, 'conflict', $exception->getMessage(), 409);

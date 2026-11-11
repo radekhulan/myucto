@@ -8,6 +8,7 @@ import {
   payrollApi,
   type PayrollJmhzControlFinding,
   type PayrollJmhzControlReport,
+  type PayrollJmhzDeferralContext,
   type PayrollJmhzPvpojOffice,
   type PayrollJmhzXmlDryRun,
   type PayrollJmhzXmlDryRunBlocker,
@@ -29,6 +30,7 @@ import {
 } from './jmhzBlockerRemediation'
 import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
 import PayrollJmhzDeferralList from './PayrollJmhzDeferralList.vue'
+import JmhzBulkDefer from './JmhzBulkDefer.vue'
 
 const workplaceBulkDialogRun = ref<PayrollRun | null>(null)
 
@@ -580,6 +582,44 @@ function canDefer(blocker: PayrollJmhzXmlDryRunBlocker, entityId: number | null)
     && deferralEmploymentId(blocker, entityId) !== null
 }
 
+function bulkDeferral(payrollRun: PayrollRun): PayrollJmhzDeferralContext | null {
+  const result = state(payrollRun)?.result
+  const revision = revisionId(payrollRun)
+  if (!result || revision === null) return null
+  const people = new Set<string>()
+  let firm = 0
+  for (const blocker of result.blockers) {
+    if (blocker.deferrable !== true || blocker.entity_id === null) {
+      firm++
+      continue
+    }
+    const employee = blocker.entity_type === 'employment'
+      ? remediationEmployments.value.find(item => item.id === blocker.entity_id)?.employee_id ?? `employment:${blocker.entity_id}`
+      : blocker.entity_id
+    people.add(String(employee))
+  }
+  if (people.size === 0) return null
+  return {
+    preparation_id: result.preparation_id,
+    environment: 'test',
+    office_id: selectedOffice.value[revision] ?? null,
+    employment_ids: null,
+    count: people.size,
+    firm_blocker_count: firm,
+  }
+}
+
+async function afterBulkDefer(payrollRun: PayrollRun) {
+  const revision = revisionId(payrollRun)
+  if (revision === null) return
+  deferralRefresh.value = { ...deferralRefresh.value, [revision]: (deferralRefresh.value[revision] ?? 0) + 1 }
+  await run(payrollRun)
+}
+
+async function afterDeferralChange(payrollRun: PayrollRun) {
+  if (state(payrollRun)?.result) await run(payrollRun)
+}
+
 function askDefer(payrollRun: PayrollRun, blocker: PayrollJmhzXmlDryRunBlocker, entityId: number, index: number) {
   const revision = revisionId(payrollRun)
   const employmentId = deferralEmploymentId(blocker, entityId)
@@ -970,6 +1010,13 @@ async function copyXml(payrollRun: PayrollRun) {
                   }, visibleBlockers(state(payrollRun)!.result!).length),
                 }) }}
             </p>
+            <JmhzBulkDefer
+              v-if="canWrite && bulkDeferral(payrollRun)"
+              class="mt-3"
+              :context="bulkDeferral(payrollRun)!"
+              :can-write="canWrite"
+              @deferred="afterBulkDefer(payrollRun)"
+            />
             <ul class="mt-3 space-y-3 text-sm text-warning-700">
               <li
                 v-for="group in groupedBlockers(visibleBlockers(state(payrollRun)!.result!))"
@@ -1245,6 +1292,9 @@ async function copyXml(payrollRun: PayrollRun) {
           :environment="environment"
           :can-write="canWrite"
           :refresh-key="deferralRefresh[payrollRun.revision_id] ?? 0"
+          :preparation-id="state(payrollRun)?.result?.preparation_id ?? null"
+          :office-id="selectedOffice[payrollRun.revision_id] ?? null"
+          @changed="afterDeferralChange(payrollRun)"
         />
 
         <p

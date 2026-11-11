@@ -65,6 +65,7 @@ final readonly class PayrollMonthlyAgendaPreparationService
         ?string $insurerCode,
         ?int $userId,
         bool $lateDiscountConfirmed = false,
+        bool $registrationSettlingConfirmed = false,
     ): array {
         if (!in_array($environment, ['production', 'test'], true)) {
             throw new \InvalidArgumentException(
@@ -81,6 +82,7 @@ final readonly class PayrollMonthlyAgendaPreparationService
                 (int) $duty['revision_id'],
                 $userId,
                 $lateDiscountConfirmed,
+                $registrationSettlingConfirmed,
             ),
             HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW =>
                 $this->prepareHealthPaymentOverview(
@@ -103,9 +105,10 @@ final readonly class PayrollMonthlyAgendaPreparationService
      * podání za všechny účtárny. Připravit jen jednu a tvářit se, že je
      * hotovo, by bylo horší než nepřipravit nic.
      *
-     * Účtárna bez použitelného variabilního symbolu se přeskočit NESMÍ tiše:
-     * kdyby na ni podání chybělo, přehled by ji už znovu nenabídl (povinnost
-     * by z pramene agendových povinností vypadla kvůli sesterskému řádku).
+     * Účtárna bez použitelného variabilního symbolu nezastaví ostatní, ale
+     * přeskočit se NESMÍ tiše: přehled by ji už znovu nenabídl (povinnost
+     * vypadne kvůli sesterskému řádku), proto ji výsledek vypíše ve varování
+     * a podá se z obrazovky JMHZ po doplnění symbolu.
      *
      * @return array{
      *   agenda_code:string,period:string,insurer_code:?string,
@@ -119,6 +122,7 @@ final readonly class PayrollMonthlyAgendaPreparationService
         int $revisionId,
         ?int $userId,
         bool $lateDiscountConfirmed,
+        bool $registrationSettlingConfirmed,
     ): array {
         // Období, které ještě neskončilo, nebo ročník, který aplikace sestavit
         // neumí: příprava skončí jednou větou a nic se nezaloží.
@@ -134,6 +138,7 @@ final readonly class PayrollMonthlyAgendaPreparationService
                 (int) $preparation['id'],
                 $userId,
                 $lateDiscountConfirmed,
+                $registrationSettlingConfirmed,
             );
         } catch (JmhzXmlException $blocked) {
             /*
@@ -167,6 +172,7 @@ final readonly class PayrollMonthlyAgendaPreparationService
                 (int) $fresh['id'],
                 $userId,
                 $lateDiscountConfirmed,
+                $registrationSettlingConfirmed,
             );
         }
     }
@@ -185,24 +191,10 @@ final readonly class PayrollMonthlyAgendaPreparationService
         int $preparationId,
         ?int $userId,
         bool $lateDiscountConfirmed,
+        bool $registrationSettlingConfirmed,
     ): array {
-        $offices = $this->jmhzOffices->offices($supplierId, $revisionId);
-        $blocked = array_values(array_filter(
-            $offices,
-            static fn (array $office): bool => ($office['submittable'] ?? false) !== true,
-        ));
-        if ($blocked !== []) {
-            throw new \DomainException(
-                'Mzdová účtárna '
-                . implode(', ', array_map(
-                    static fn (array $office): string => (string) $office['name'],
-                    $blocked,
-                ))
-                . ' nemá desetimístný variabilní symbol u ČSSZ, takže za ni '
-                . 'hlášení zmrazit nejde. Doplňte ho v Mzdy → Nastavení '
-                . 'zaměstnavatele → Mzdové účtárny.',
-            );
-        }
+        ['offices' => $offices, 'skipped' => $blocked, 'warning' => $missingSymbol]
+            = self::partitionOffices($this->jmhzOffices->offices($supplierId, $revisionId));
 
         $submissionIds = [];
         // Běh bez účtárny (jednoúčtárenská firma) drží původní tvar reference
@@ -216,6 +208,7 @@ final readonly class PayrollMonthlyAgendaPreparationService
                 $userId,
                 $office === null ? null : (int) $office['office_id'],
                 $lateDiscountConfirmed,
+                $registrationSettlingConfirmed,
             );
             $submissionIds[] = (int) $frozen['submission_id'];
         }
@@ -227,6 +220,57 @@ final readonly class PayrollMonthlyAgendaPreparationService
             'prepared' => count($submissionIds),
             'submission_ids' => $submissionIds,
             'path' => '/payroll/submissions/jmhz',
+            'skipped_offices' => array_map(
+                static fn (array $office): array => [
+                    'office_id' => (int) $office['office_id'],
+                    'name' => (string) $office['name'],
+                ],
+                $blocked,
+            ),
+            'warning' => $missingSymbol,
+        ];
+    }
+
+    /**
+     * Účtárny, za které se hlášení zmrazí, a ty, které nemají variabilní
+     * symbol ČSSZ. Nemá-li ho žádná, příprava skončí výjimkou.
+     *
+     * @param list<array<string,mixed>> $offices
+     * @return array{offices:list<array<string,mixed>>,skipped:list<array<string,mixed>>,warning:?string}
+     */
+    public static function partitionOffices(array $offices): array
+    {
+        $blocked = array_values(array_filter(
+            $offices,
+            static fn (array $office): bool => ($office['submittable'] ?? false) !== true,
+        ));
+        if ($blocked === []) {
+            return ['offices' => $offices, 'skipped' => [], 'warning' => null];
+        }
+        $partial = count($blocked) < count($offices);
+        $message = 'Mzdová účtárna '
+            . implode(', ', array_map(
+                static fn (array $office): string => (string) $office['name'],
+                $blocked,
+            ))
+            . ' nemá desetimístný variabilní symbol u ČSSZ, takže za ni '
+            . 'hlášení zmrazit nejde. Doplňte ho v Mzdy → Nastavení '
+            . 'zaměstnavatele → Mzdové účtárny.'
+            . ($partial
+                ? ' Hlášení za ostatní účtárny se připravilo; za tuto ho po doplnění '
+                    . 'symbolu připravte v Mzdy → Podání → JMHZ.'
+                : '');
+        if (!$partial) {
+            throw new \DomainException($message);
+        }
+
+        return [
+            'offices' => array_values(array_filter(
+                $offices,
+                static fn (array $office): bool => ($office['submittable'] ?? false) === true,
+            )),
+            'skipped' => $blocked,
+            'warning' => $message,
         ];
     }
 

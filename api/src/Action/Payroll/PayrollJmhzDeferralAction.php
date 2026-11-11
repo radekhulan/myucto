@@ -111,6 +111,150 @@ final class PayrollJmhzDeferralAction
         return $this->ok($response, $result, $result['created'] ? 201 : 200);
     }
 
+    /**
+     * „Odložit všechny dotčené": jedním důvodem odloží každou osobu přípravy
+     * s nálezem, kvůli kterému lze odložit (nebo jen zadané vztahy).
+     */
+    public function createMany(Request $request, Response $response): Response
+    {
+        if (($denied = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $environment = self::environment($body['environment'] ?? null);
+        $preparationId = self::positive($body['preparation_id'] ?? null);
+        $reason = is_string($body['reason'] ?? null) ? $body['reason'] : '';
+        $officeId = self::narrowingId($body, 'office');
+        $employmentIds = null;
+        if (array_key_exists('employment_ids', $body) && $body['employment_ids'] !== null) {
+            $employmentIds = [];
+            foreach (is_array($body['employment_ids']) ? $body['employment_ids'] : [false] as $value) {
+                $id = self::positive($value);
+                if ($id === null) {
+                    $employmentIds = false;
+                    break;
+                }
+                $employmentIds[] = $id;
+            }
+        }
+        if ($environment === null || $preparationId === null || $employmentIds === false || $employmentIds === []
+            || ($officeId !== null && $officeId <= 0)
+        ) {
+            return $this->invalid(
+                $response,
+                'validation_failed',
+                'Příprava, pracovní vztahy nebo prostředí odložení nejsou platné.',
+            );
+        }
+        $supplierId = $this->currentSupplierId($request);
+        try {
+            $result = $this->deferrals->deferMany(
+                $supplierId,
+                $environment,
+                $preparationId,
+                $employmentIds,
+                $reason,
+                (int) $this->userId($request),
+                $officeId,
+            );
+        } catch (JmhzXmlException | JmhzPreparationSnapshotException $exception) {
+            return $this->invalid($response, $exception->validationCode, $exception->getMessage());
+        } catch (\InvalidArgumentException $exception) {
+            return $this->invalid($response, 'validation_failed', $exception->getMessage());
+        }
+        foreach ($result['deferral_ids'] as $deferralId) {
+            $this->audit($request, $supplierId, 'payroll.jmhz_deferral.created', $deferralId, [
+                'bulk' => true,
+                'employment_ids' => $result['employment_ids'],
+                'source_revision_id' => $result['source_revision_id'],
+                'preparation_id' => $preparationId,
+                'environment' => $environment,
+                'reason' => trim($reason),
+            ]);
+        }
+
+        return $this->ok($response, $result, $result['created'] ? 201 : 200);
+    }
+
+    /** Převezme trvající odložení z dřívější revize běhu do revize přípravy. */
+    public function carryOver(Request $request, Response $response): Response
+    {
+        if (($denied = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $environment = self::environment($body['environment'] ?? null);
+        $preparationId = self::positive($body['preparation_id'] ?? null);
+        $officeId = self::narrowingId($body, 'office');
+        if ($environment === null || $preparationId === null || ($officeId !== null && $officeId <= 0)) {
+            return $this->invalid($response, 'validation_failed', 'Příprava nebo prostředí nejsou platné.');
+        }
+        $supplierId = $this->currentSupplierId($request);
+        try {
+            $result = $this->deferrals->carryOver(
+                $supplierId,
+                $environment,
+                $preparationId,
+                (int) $this->userId($request),
+                $officeId,
+            );
+        } catch (JmhzXmlException | JmhzPreparationSnapshotException $exception) {
+            return $this->invalid($response, $exception->validationCode, $exception->getMessage());
+        } catch (\InvalidArgumentException $exception) {
+            return $this->invalid($response, 'validation_failed', $exception->getMessage());
+        }
+        foreach ($result['deferral_ids'] as $deferralId) {
+            $this->audit($request, $supplierId, 'payroll.jmhz_deferral.carried_over', $deferralId, [
+                'carried_from_deferral_id' => $result['carried_from'][$deferralId] ?? null,
+                'source_revision_id' => $result['source_revision_id'],
+                'preparation_id' => $preparationId,
+                'environment' => $environment,
+            ]);
+        }
+
+        return $this->ok($response, $result, $result['created'] ? 201 : 200);
+    }
+
+    /** „Doplnit všechny odložené" jedním opravným hlášením za registraci. */
+    public function completeAll(Request $request, Response $response): Response
+    {
+        if (($denied = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $revisionId = self::positive($body['revision'] ?? null);
+        $environment = self::environment($body['environment'] ?? null);
+        if ($revisionId === null || $environment === null) {
+            return $this->invalid($response, 'validation_failed', 'Revize nebo prostředí nejsou platné.');
+        }
+        $supplierId = $this->currentSupplierId($request);
+        try {
+            $result = $this->deferrals->completeAll(
+                $supplierId,
+                $revisionId,
+                $environment,
+                (int) $this->userId($request),
+            );
+        } catch (JmhzXmlException | JmhzPreparationSnapshotException $exception) {
+            return $this->invalid($response, $exception->validationCode, $exception->getMessage());
+        } catch (\InvalidArgumentException $exception) {
+            return $this->invalid($response, 'validation_failed', $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return Json::error($response, 'conflict', $exception->getMessage(), 409);
+        }
+        foreach ($result['submissions'] as $submission) {
+            $this->audit($request, $supplierId, 'payroll.jmhz_deferral.completed', (int) ($submission['submission_id'] ?? 0), [
+                'bulk' => true,
+                'environment' => $environment,
+                'correction_submission_id' => $submission['submission_id'] ?? null,
+                'preparation_id' => $result['preparation_id'],
+                'employment_ids' => $result['completed_employment_ids'],
+            ]);
+        }
+
+        return $this->ok($response, $result, 201);
+    }
+
     /** @param array{id:string} $args */
     public function revoke(Request $request, Response $response, array $args): Response
     {

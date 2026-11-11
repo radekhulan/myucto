@@ -24,7 +24,10 @@ const props = withDefaults(defineProps<{
   canWrite: boolean
   /** Zvýšením si rodič vyžádá nové načtení (po odložení z testu hlášení). */
   refreshKey?: number
-}>(), { refreshKey: 0 })
+  /** Příprava aktuální revize, do které lze převzít trvající odložení. */
+  preparationId?: number | null
+  officeId?: number | null
+}>(), { refreshKey: 0, preparationId: null, officeId: null })
 
 const emit = defineEmits<{ changed: [] }>()
 const { t, te, locale } = useI18n()
@@ -34,7 +37,8 @@ const loading = ref(false)
 const loadError = ref('')
 const busyId = ref<number | null>(null)
 const actionError = ref('')
-const success = ref<{ kind: 'completed' | 'revoked', id: number } | null>(null)
+const success = ref<{ kind: 'completed' | 'revoked' | 'carried' | 'completed_all', id: number } | null>(null)
+const bulkBusy = ref<'carry' | 'complete' | null>(null)
 const revokingId = ref<number | null>(null)
 const revokeReason = ref('')
 const showRevokeValidation = ref(false)
@@ -101,6 +105,47 @@ async function confirmRevoke(row: PayrollJmhzDeferral) {
   }
 }
 
+const carryOverCount = computed(() => list.value?.carry_over_count ?? 0)
+const completableCount = computed(() => list.value?.completable_count ?? rows.value.filter(row => row.can_complete).length)
+
+async function carryOver() {
+  if (!props.canWrite || props.preparationId === null || bulkBusy.value !== null) return
+  bulkBusy.value = 'carry'
+  actionError.value = ''
+  success.value = null
+  try {
+    const result = await payrollApi.carryOverJmhzDeferrals({
+      environment: props.environment,
+      preparationId: props.preparationId,
+      officeId: props.officeId,
+    })
+    success.value = { kind: 'carried', id: result.employment_ids.length }
+    await load()
+    emit('changed')
+  } catch (exception) {
+    actionError.value = jmhzErrorMessage(t, te, locale.value, exception, 'payroll.jmhz_gate.deferral.carry_failed')
+  } finally {
+    bulkBusy.value = null
+  }
+}
+
+async function completeAll() {
+  if (!props.canWrite || bulkBusy.value !== null) return
+  bulkBusy.value = 'complete'
+  actionError.value = ''
+  success.value = null
+  try {
+    const result = await payrollApi.completeAllJmhzDeferrals(props.revisionId, props.environment)
+    success.value = { kind: 'completed_all', id: result.completed_employment_ids.length }
+    await load()
+    emit('changed')
+  } catch (exception) {
+    actionError.value = jmhzErrorMessage(t, te, locale.value, exception, 'payroll.jmhz_gate.deferral.complete_failed')
+  } finally {
+    bulkBusy.value = null
+  }
+}
+
 async function complete(row: PayrollJmhzDeferral) {
   if (!props.canWrite || busyId.value !== null) return
   busyId.value = row.id
@@ -154,6 +199,35 @@ async function complete(row: PayrollJmhzDeferral) {
         ? t('payroll.jmhz_gate.deferral.obligation_overdue', { count: openRows.length, date: formatDate(list.due_on) })
         : t('payroll.jmhz_gate.deferral.obligation', { count: openRows.length, date: formatDate(list.due_on) }) }}
     </p>
+
+    <div v-if="canWrite && (carryOverCount > 0 && preparationId !== null || completableCount > 1)" class="mt-2 flex flex-wrap gap-2">
+      <button
+        v-if="carryOverCount > 0 && preparationId !== null"
+        type="button"
+        :class="btnOutline('warning')"
+        :disabled="bulkBusy !== null || busyId !== null"
+        data-test="jmhz-deferral-carry-over"
+        @click="carryOver"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.cycle" />
+        </svg>
+        {{ bulkBusy === 'carry' ? t('common.loading') : t('payroll.jmhz_gate.deferral.carry_over', { count: carryOverCount }) }}
+      </button>
+      <button
+        v-if="completableCount > 1"
+        type="button"
+        :class="btnFilled('primary')"
+        :disabled="bulkBusy !== null || busyId !== null"
+        data-test="jmhz-deferral-complete-all"
+        @click="completeAll"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.send" />
+        </svg>
+        {{ bulkBusy === 'complete' ? t('common.loading') : t('payroll.jmhz_gate.deferral.complete_all', { count: completableCount }) }}
+      </button>
+    </div>
 
     <ul class="mt-2 space-y-2">
       <li
@@ -274,7 +348,11 @@ async function complete(row: PayrollJmhzDeferral) {
     >
       {{ success.kind === 'completed'
         ? t('payroll.jmhz_gate.deferral.completed', { id: success.id })
-        : t('payroll.jmhz_gate.deferral.revoked') }}
+        : success.kind === 'carried'
+          ? t('payroll.jmhz_gate.deferral.carried', { count: success.id })
+          : success.kind === 'completed_all'
+            ? t('payroll.jmhz_gate.deferral.completed_all', { count: success.id })
+            : t('payroll.jmhz_gate.deferral.revoked') }}
     </p>
     <p
       v-if="actionError"

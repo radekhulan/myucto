@@ -2,10 +2,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorCode, apiErrorMessage, externalJmhzSubmissionTarget } from '@/api/errors'
-import { PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION } from '@/api/payrollTransportCodes'
+import { PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION, PAYROLL_JMHZ_REGISTRATION_SETTLING } from '@/api/payrollTransportCodes'
 import {
   PAYROLL_QUEUE_BATCH_SIZE,
   payrollApi,
+  type PayrollJmhzDeferralContext,
   type PayrollJmhzFreezeBlocker,
   type PayrollMonthlyChecklistItem,
   type PayrollMonthlyChecklistResponse,
@@ -34,7 +35,8 @@ import { useReceiptFollowUp } from '@/composables/useReceiptFollowUp'
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 import JmhzFreezeBlockerList from './JmhzFreezeBlockerList.vue'
-import { freezeBlockersFromError } from './jmhzFreezeBlockers'
+import JmhzRegistrationSettlingConfirm from './JmhzRegistrationSettlingConfirm.vue'
+import { deferralContextFromError, freezeBlockersFromError } from './jmhzFreezeBlockers'
 
 /*
  * Měsíční přehled říká, CO se za měsíc podává, a umí to rovnou připravit
@@ -106,6 +108,9 @@ const preparing = ref('')
 const prepareError = ref<Record<string, string>>({})
 /** Varování kontroly 290 čekající na potvrzení, klíčované položkou. */
 const lateDiscount = ref<Record<string, string>>({})
+const settling = ref<Record<string, string>>({})
+const prepareDeferral = ref<Record<string, PayrollJmhzDeferralContext | null>>({})
+const prepareWarnings = ref<string[]>([])
 /** Proklik k chybě přípravy (měsíc podaný předchozím programem → přehled převzatých podání). */
 const prepareErrorTarget = ref<Record<string, ReturnType<typeof externalJmhzSubmissionTarget>>>({})
 
@@ -352,6 +357,7 @@ function channelLabel(item: PayrollMonthlyChecklistItem): string {
 async function prepareOne(
   item: PayrollMonthlyChecklistItem,
   confirmLateDiscount = false,
+  confirmSettling = false,
 ): Promise<number[] | null> {
   const request = item.action.prepare
   if (!request || prepareBlocked(item)) return null
@@ -360,12 +366,19 @@ async function prepareOne(
   prepareError.value = { ...prepareError.value, [errorKey]: '' }
   prepareBlockers.value = { ...prepareBlockers.value, [errorKey]: [] }
   lateDiscount.value = { ...lateDiscount.value, [errorKey]: '' }
+  settling.value = { ...settling.value, [errorKey]: '' }
+  prepareDeferral.value = { ...prepareDeferral.value, [errorKey]: null }
   prepareErrorTarget.value = { ...prepareErrorTarget.value, [errorKey]: null }
   try {
     const result = await payrollApi.prepareMonthlyChecklistItem(
       props.environment,
-      confirmLateDiscount ? { ...request, confirm_late_discount: true } : request,
+      {
+        ...request,
+        ...(confirmLateDiscount ? { confirm_late_discount: true } : {}),
+        ...(confirmSettling ? { confirm_registration_settling: true } : {}),
+      },
     )
+    if (result.warning) prepareWarnings.value = [...prepareWarnings.value, result.warning]
     return result.submission_ids ?? []
   } catch (exception) {
     // Kontrola 290: hlášení po splatnosti se slevou. Nezakazuje, ale chce
@@ -377,8 +390,17 @@ async function prepareOne(
       }
       return null
     }
+    if (apiErrorCode(exception) === PAYROLL_JMHZ_REGISTRATION_SETTLING) {
+      settling.value = {
+        ...settling.value,
+        [errorKey]: apiErrorMessage(exception, t('payroll.jmhz_gate.settling.title')),
+      }
+      prepareDeferral.value = { ...prepareDeferral.value, [errorKey]: deferralContextFromError(exception) }
+      return null
+    }
     prepareErrorTarget.value = { ...prepareErrorTarget.value, [errorKey]: externalJmhzSubmissionTarget(exception) }
     prepareBlockers.value = { ...prepareBlockers.value, [errorKey]: freezeBlockersFromError(exception) }
+    prepareDeferral.value = { ...prepareDeferral.value, [errorKey]: deferralContextFromError(exception) }
     prepareError.value = {
       ...prepareError.value,
       [errorKey]: apiErrorMessage(
@@ -402,6 +424,7 @@ async function prepareAll() {
   flowBusy.value = true
   flowKind.value = 'prepare'
   prepareAllSummary.value = ''
+  prepareWarnings.value = []
   let prepared = 0
   let failed = 0
   try {
@@ -436,13 +459,14 @@ async function prepareAll() {
 }
 
 /** „Jen připravit" a potvrzení kontroly 290: připraví a zůstane na místě. */
-async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = false) {
+async function prepare(item: PayrollMonthlyChecklistItem, confirmLateDiscount = false, confirmSettling = false) {
   if (flowBusy.value) return
   flowBusy.value = true
   flowKind.value = 'prepare'
   prepareAllSummary.value = ''
+  prepareWarnings.value = []
   try {
-    const ids = await prepareOne(item, confirmLateDiscount)
+    const ids = await prepareOne(item, confirmLateDiscount, confirmSettling)
     // Příprava podání už zmrazí: ať je vidět, že vzniklo a že nic neodešlo.
     if (ids !== null) {
       prepareAllSummary.value = t('payroll.submissions.monthly_checklist.send.prepared_one')
@@ -736,7 +760,7 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
 
     <template v-else-if="response">
       <div
-        v-if="bulkItems.length || prepareAllItems.length || prepareAllSummary || databoxOutboxIds.length || sendSummary || followUpActive || receiptStats.pending"
+        v-if="bulkItems.length || prepareAllItems.length || prepareAllSummary || prepareWarnings.length || databoxOutboxIds.length || sendSummary || followUpActive || receiptStats.pending"
         class="rounded-xl border border-primary-500/30 bg-primary-50 p-4 text-sm shadow-sm"
         data-test="monthly-checklist-send-bar"
       >
@@ -791,6 +815,15 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
         </p>
         <p v-if="prepareAllSummary" class="mt-2 text-neutral-800" data-test="monthly-checklist-prepare-all-summary">
           {{ prepareAllSummary }}
+        </p>
+        <p
+          v-for="(warning, index) in prepareWarnings"
+          :key="index"
+          class="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-2 text-warning-900"
+          role="alert"
+          data-test="monthly-checklist-prepare-warning"
+        >
+          {{ warning }}
         </p>
         <p v-if="sendSummary" class="mt-2 text-neutral-800" data-test="monthly-checklist-send-summary">
           {{ sendSummary }}
@@ -1066,6 +1099,19 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
                       class="ml-auto max-w-md text-left"
                       :blockers="prepareBlockers[prepareKey(item)]!"
                       :period="item.period"
+                      :deferral="prepareDeferral[prepareKey(item)]"
+                      :can-write="true"
+                    />
+                    <JmhzRegistrationSettlingConfirm
+                      v-if="settling[prepareKey(item)]"
+                      class="ml-auto mt-2 max-w-md text-left"
+                      :message="settling[prepareKey(item)]!"
+                      :busy="preparing === item.key"
+                      :deferral="prepareDeferral[prepareKey(item)]"
+                      :can-write="true"
+                      test-id="monthly-checklist-settling"
+                      @confirm="prepare(item, false, true)"
+                      @cancel="settling = { ...settling, [prepareKey(item)]: '' }"
                     />
                     <PayrollLateDiscountConfirm
                       v-if="lateDiscount[prepareKey(item)]"
@@ -1213,6 +1259,19 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
                   v-if="prepareBlockers[prepareKey(item)]?.length"
                   :blockers="prepareBlockers[prepareKey(item)]!"
                   :period="item.period"
+                  :deferral="prepareDeferral[prepareKey(item)]"
+                  :can-write="true"
+                />
+                <JmhzRegistrationSettlingConfirm
+                  v-if="settling[prepareKey(item)]"
+                  class="mt-2"
+                  :message="settling[prepareKey(item)]!"
+                  :busy="preparing === item.key"
+                  :deferral="prepareDeferral[prepareKey(item)]"
+                  :can-write="true"
+                  test-id="monthly-checklist-settling-mobile"
+                  @confirm="prepare(item, false, true)"
+                  @cancel="settling = { ...settling, [prepareKey(item)]: '' }"
                 />
                 <PayrollLateDiscountConfirm
                   v-if="lateDiscount[prepareKey(item)]"
