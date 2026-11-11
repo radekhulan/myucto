@@ -2486,6 +2486,13 @@ final class PayrollInputRepository
     /**
      * Vstup zmrazený v revizi mzdového běhu se nesmí utrhnout od snapshotu,
      * který na něj ukazuje — ani zrušením konceptu, ani stornem benefitu.
+     *
+     * Revize ZRUŠENÉHO běhu se nepočítá: zrušení běhu je přesně ta cesta,
+     * kterou hláška zamčeného vstupu ({@see PayrollInputLockGuidance}) radí,
+     * aby šel vstup opravit („Zrušit běh", opravit, „Začít z opravených
+     * vstupů"). Revize zrušeného běhu se neschválí ani nezaúčtuje a vstup
+     * z ní nikam neodchází; kdyby ho dál držela, oprava haléřů nebo částky
+     * by po zrušení běhu skončila ve slepé uličce.
      */
     private function assertNotFrozenInApprovedRevision(
         PDO $pdo,
@@ -2502,6 +2509,7 @@ final class PayrollInputRepository
               WHERE revision.supplier_id = ?
                 AND run.period_start = ?
                 AND revision.status <> "abandoned"
+                AND run.status <> "cancelled"
                 AND NOT EXISTS (
                     SELECT 1
                       FROM payroll_run_revisions open_correction
