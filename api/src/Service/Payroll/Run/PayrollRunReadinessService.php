@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
+use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementStatute;
 use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
@@ -80,6 +82,9 @@ final class PayrollRunReadinessService
         private readonly PayrollHistoricalPeriodService $historicalPeriods,
         // Trvale skrytá varování se do předběžné kontroly nepočítají.
         private readonly PayrollWarningSuppressionService $warningSuppressions,
+        // Žádosti o roční zúčtování, které čekají na provedení — tentýž dotaz
+        // jako termín „provést roční zúčtování" v přehledu lhůt.
+        private readonly PayrollDeadlineOverviewRepository $deadlines,
     ) {}
 
     /**
@@ -133,6 +138,21 @@ final class PayrollRunReadinessService
                 'ready' => false,
                 'has_findings' => true,
                 'findings' => [$moduleStartFinding],
+            ];
+        }
+
+        // Rok bez legislativní sady: běh nejde založit a jiné nálezy nemají
+        // smysl (snímek by se nepostavil a skončil obecným „obnovte stránku").
+        try {
+            $this->snapshotBuilder->assertRulesetCoverage($periodStart);
+        } catch (\DomainException $e) {
+            return [
+                'period_start' => $periodStart,
+                'payment_date' => $paymentDate,
+                'office_id' => $officeId,
+                'ready' => false,
+                'has_findings' => true,
+                'findings' => [self::finding('ruleset_year_unavailable', $e->getMessage(), '/payroll/rulesets', 1, [])],
             ];
         }
 
@@ -212,6 +232,14 @@ final class PayrollRunReadinessService
             $declarationFinding = self::taxDeclarationFinding($snapshot->data);
             if ($declarationFinding !== null) {
                 $findings[] = $declarationFinding;
+            }
+            $settlementFinding = $this->annualSettlementPendingFinding(
+                $supplierId,
+                $periodStart,
+                $snapshot->data,
+            );
+            if ($settlementFinding !== null) {
+                $findings[] = $settlementFinding;
             }
             /*
              * Nálezy, které se dosud ozvaly až u ZMRAZENÍ měsíčního hlášení.
@@ -317,7 +345,9 @@ final class PayrollRunReadinessService
             $code === 'tax_declaration_not_signed_summary',
             $code === 'tax_declaration_evidence_missing' => [[
                 'kind' => 'declaration_signed',
-                'count' => $count,
+                // Souhrnné varování je JEDNA validace za všechny osoby; počet na
+                // tlačítku musí odpovídat tomu, komu dialog podpis zapíše.
+                'count' => $declarationIds === [] ? $count : count($declarationIds),
                 ...($declarationIds === [] ? [] : ['employee_ids' => $declarationIds]),
             ]],
             $code === 'employments_past_agreed_end' => [['kind' => 'closure', 'count' => $count]],
@@ -405,6 +435,100 @@ final class PayrollRunReadinessService
                 array_slice($affected, 0, self::MAX_ENTITIES),
             ),
         ), 'bulk_employee_ids' => array_column($affected, 'id')];
+    }
+
+    /**
+     * Osoby běhu, které o roční zúčtování za minulý rok požádaly, ale
+     * zúčtování ještě neproběhlo.
+     *
+     * ── Co bylo špatně ──────────────────────────────────────────────────────
+     * Přeplatek ze zúčtování vyplácí běh za leden až březen
+     * ({@see AnnualSettlementStatute::payoutWindowTaxYear()}). Po březnu ho
+     * do žádného běhu modul nepustí. Nevyřízenou žádost ukázal jen přehled
+     * lhůt; kontrola před během o ní mlčela, takže březnová mzda šla
+     * schválit bez přeplatku a zaměstnanec o něj tiše přišel.
+     *
+     * ── Pravidlo ────────────────────────────────────────────────────────────
+     * § 38ch odst. 4 ZDP (ve znění do 31. 12. 2026, pro rok 2026 podle čl. VII
+     * bodu 6 zák. č. 360/2025 Sb.): plátce zúčtování provede nejpozději do
+     * 31. března; § 38ch odst. 5: přeplatek vrátí „nejpozději při zúčtování
+     * mzdy za březen". V lednu a únoru je to informace (vyplatit jde ještě
+     * v dalším měsíci), v březnu varování: po schválení běhu jde přeplatek
+     * vyplatit už jen opravnou revizí. Mzdu ostatních to nezastaví.
+     *
+     * Kdo musí podat přiznání, tomu se zúčtování neprovádí; vynechává ho
+     * týž dotaz jako přehled lhůt
+     * ({@see PayrollDeadlineOverviewRepository::annualSettlementsToPerform()}).
+     *
+     * @param array<string,mixed> $snapshotData
+     * @return array<string,mixed>|null
+     */
+    private function annualSettlementPendingFinding(
+        int $supplierId,
+        string $periodStart,
+        array $snapshotData,
+    ): ?array {
+        $taxYear = AnnualSettlementStatute::payoutWindowTaxYear($periodStart);
+        if ($taxYear === null) {
+            return null;
+        }
+        $names = [];
+        foreach ((array) ($snapshotData['people'] ?? []) as $person) {
+            $employee = is_array($person) ? ($person['employee'] ?? null) : null;
+            if (is_array($employee) && is_int($employee['id'] ?? null)) {
+                $names[$employee['id']] = (string) ($employee['full_name'] ?? '');
+            }
+        }
+        if ($names === []) {
+            return null;
+        }
+        $pending = [];
+        foreach ($this->deadlines->annualSettlementsToPerform($supplierId, [$taxYear]) as $row) {
+            if (isset($names[$row['employee_id']])) {
+                $pending[$row['employee_id']] = $names[$row['employee_id']] !== ''
+                    ? $names[$row['employee_id']]
+                    : $row['full_name'];
+            }
+        }
+        if ($pending === []) {
+            return null;
+        }
+        ksort($pending, SORT_NUMERIC);
+
+        $lastPayout = $periodStart === AnnualSettlementStatute::payoutPeriodStart($taxYear)->format('Y-m-d');
+        $deadline = AnnualSettlementStatute::settlementDeadline($taxYear)->format('j. n. Y');
+        $labels = array_values($pending);
+        $named = implode(', ', array_slice($labels, 0, 10)) . (count($labels) > 10 ? ' a další' : '');
+        $message = sprintf(
+            'O roční zúčtování za rok %d požádal(a), ale zúčtování ještě neproběhlo: %s. '
+            . 'Proveďte ho v Mzdy → Roční zúčtování nejpozději do %s; přeplatek se vyplatí '
+            . 'v nejbližším běhu po provedení, nejpozději ve mzdě za březen (§ 38ch odst. 4 a 5 ZDP). ',
+            $taxYear,
+            $named,
+            $deadline,
+        ) . ($lastPayout
+            ? 'Tohle je poslední běh, ve kterém se přeplatek vyplatí. Proveďte zúčtování před '
+                . 'zamknutím vstupů; po schválení běhu ho vyplatí už jen opravná revize. '
+                . 'Mzdu ostatních to nezastaví.'
+            : 'Mzdový běh tím omezený není.');
+        $entities = [];
+        foreach (array_slice($pending, 0, self::MAX_ENTITIES, true) as $employeeId => $label) {
+            $entities[] = [
+                'entity_type' => 'employee',
+                'entity_id' => $employeeId,
+                'label' => $label,
+                'remediation_path' => '/payroll/annual-settlement?'
+                    . http_build_query(['year' => $taxYear, 'person' => $employeeId]),
+            ];
+        }
+
+        return self::finding(
+            $lastPayout ? 'annual_settlement_pending_last_payout' : 'annual_settlement_pending',
+            $message,
+            '/payroll/annual-settlement?' . http_build_query(['year' => $taxYear, 'state' => 'unsettled']),
+            count($pending),
+            $entities,
+        );
     }
 
     /**

@@ -38,6 +38,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate } from '@/composables/useFormat'
 import DateInput from '@/components/ui/DateInput.vue'
+import { ozuspojRemediation, type SubmissionRemediation } from './payrollRemediation'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -61,6 +62,8 @@ const informedOn = ref<Record<number, string>>({})
 const rejectionReason = ref<Record<number, string>>({})
 const previewXml = ref<{ id: number, xml: string } | null>(null)
 const error = ref('')
+// Proklik na místo nápravy (důvod slevy, kód OSSZ, VS účtárny), zná-li ho kód chyby.
+const errorRemediation = ref<SubmissionRemediation | null>(null)
 const success = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
@@ -95,6 +98,11 @@ function message(cause: unknown, fallback: string): string {
   return fallback
 }
 
+function remediationOf(cause: unknown, employment: number | null | undefined): SubmissionRemediation | null {
+  const code = isAxiosError(cause) ? cause.response?.data?.error?.code : null
+  return ozuspojRemediation(typeof code === 'string' ? code : null, employment)
+}
+
 async function load(): Promise<void> {
   loading.value = true
   error.value = ''
@@ -121,8 +129,9 @@ async function loadEmployments(id: number): Promise<void> {
   }
 }
 
-async function run(action: () => Promise<unknown>, ok: string): Promise<void> {
+async function run(action: () => Promise<unknown>, ok: string, employment: number | null = null): Promise<void> {
   error.value = ''
+  errorRemediation.value = null
   success.value = ''
   try {
     await action()
@@ -130,6 +139,7 @@ async function run(action: () => Promise<unknown>, ok: string): Promise<void> {
     await load()
   } catch (cause) {
     error.value = message(cause, t('payroll.discountIntents.errors.actionFailed'))
+    errorRemediation.value = remediationOf(cause, employment)
   }
 }
 
@@ -145,6 +155,7 @@ async function create(): Promise<void> {
       employee_informed_on: employeeInformedOn.value || null,
     }),
     t('payroll.discountIntents.created'),
+    employmentId.value,
   )
   creating.value = false
 }
@@ -157,6 +168,7 @@ async function prepare(
   await run(
     () => payrollDiscountIntentsApi.prepare(item.id, environment.value, kind),
     t('payroll.discountIntents.prepared'),
+    item.employment_id,
   )
   busyId.value = null
 }
@@ -167,6 +179,7 @@ async function preview(
 ): Promise<void> {
   busyId.value = item.id
   error.value = ''
+  errorRemediation.value = null
   try {
     const response = await payrollDiscountIntentsApi.preview(
       item.id,
@@ -176,6 +189,7 @@ async function preview(
     previewXml.value = { id: item.id, xml: response.xml }
   } catch (cause) {
     error.value = message(cause, t('payroll.discountIntents.errors.actionFailed'))
+    errorRemediation.value = remediationOf(cause, item.employment_id)
   } finally {
     busyId.value = null
   }
@@ -430,7 +444,19 @@ onMounted(async () => {
       class="rounded-xl border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
       role="alert"
     >
-      {{ error }}
+      <p>{{ error }}</p>
+      <RouterLink
+        v-if="errorRemediation"
+        :to="errorRemediation.path"
+        data-test="discount-intents-error-remediation"
+        class="mt-2 whitespace-nowrap"
+        :class="btnOutlineSm('warning')"
+      >
+        <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.edit" />
+        </svg>
+        {{ t(errorRemediation.actionKey) }}
+      </RouterLink>
     </div>
 
     <div

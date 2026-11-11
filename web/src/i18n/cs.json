@@ -9835,6 +9835,7 @@
           "jmhz_verified_boolean_missing": "Chybí potvrzení některé povinné volby ano/ne.",
           "jmhz_work_month_not_approved": "Pracovní doba za měsíc není schválená.",
           "jmhz_workplace_codebooks_unverified": "Chybí ověřené číselníkové údaje pracoviště.",
+          "jmhz_workplace_codebooks_not_published": "Číselník obcí a států pro vykazovaný rok ještě nebyl vyhlášen, místo výkonu práce proto nejde ověřit.",
           "jmhz_preparation_not_ready": "Zdroje hlášení nejsou úplné.",
           "jmhz_ordinary_evidence_missing": "Chybí potvrzení právních skutečností běžného profilu.",
           "jmhz_attribute_10116_unresolved": "Není potvrzeno, zda se ze mzdy vykazují zákonné nebo smluvní srážky.",
@@ -12994,7 +12995,7 @@
         "foreignCase": "Zahraniční případ (rozhodnutí mimo ČR a SR)",
         "slovakCase": "Slovenský případ (NEMPRI ho hlásí jako zahraniční, HZUPN jako český)",
         "additionalNote": "Další sdělení pro OSSZ",
-        "decisionNumberHint": "Číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře) je u nemocenského, ošetřovného a dlouhodobého ošetřovného povinné; bez něj ČSSZ podání nespáruje. Nemusí ho mít jen zahraniční případ. Opravné podání nahradí dřívější podání se stejným číslem rozhodnutí.",
+        "decisionNumberHint": "Číslo rozhodnutí (u eNeschopenky a eOČR číslo z rozhodnutí lékaře) je u nemocenského, ošetřovného, dlouhodobého ošetřovného a peněžité pomoci v mateřství (kromě převzetí dítěte do péče, u PPM končí písmenem M) povinné; bez něj ČSSZ podání nespáruje. Nemusí ho mít jen zahraniční případ. Opravné podání nahradí dřívější podání se stejným číslem rozhodnutí.",
         "smallScopeIncome": "Příjem ze zaměstnání malého rozsahu nebo DPP (Kč)",
         "smallScopeIncomeHint": "Vyplňte jen u zaměstnání malého rozsahu a u dohody o provedení práce: započitatelný příjem z měsíce, v němž událost vznikla, v celých korunách. Oznámení se pak podává až po skončení tohoto měsíce.",
         "applicationHint": "Údaje opište ze žádosti, kterou vám zaměstnanec předal. Zaměstnavatel žádost přijímá a předává ČSSZ (§ 97 odst. 1 zákona o nemocenském pojištění).",
@@ -13070,6 +13071,9 @@
         "where": "Oprava u osoby {name}:",
         "personCard": "Otevřít kartu osoby",
         "reconciliation": "Otevřít kontrolu převodu mezd",
+        "employmentTerms": "Upravit podmínky vztahu",
+        "payrollRuns": "Otevřít mzdové běhy",
+        "employerSettings": "Otevřít nastavení zaměstnavatele",
         "editCase": "Upravit případ"
       },
       "codebooks": {
@@ -13295,6 +13299,9 @@
         "retry": "Spustit test znovu",
         "manual": "Zpracovat ručně",
         "support": "Kontaktovat podporu"
+      },
+      "code_steps": {
+        "jmhz_workplace_codebooks_not_published": "Údaje pracoviště neměňte, oprava na kartě vztahu ani hromadné doplnění nepomůže. Číselník obcí a států vydává Ministerstvo financí vyhláškou zpravidla v prosinci předchozího roku. Hlášení za tento měsíc připravíte po jeho vyhlášení a aktualizaci aplikace (běh za měsíc spočítaný dřív pak otevřete k opravě a spočítáte znovu, částky se nezmění); mzdy za měsíc můžete spočítat a schválit už teď."
       },
       "steps": {
         "employment_terms": "Opravte údaj v podmínkách pracovního vztahu na kartě zaměstnance. Údaj zmrazený ve mzdovém běhu se projeví až po přepočtu běhu, potom hlášení připravte znovu.",
@@ -13953,7 +13960,7 @@
         "jmhz_snapshot_hash_mismatch": "Otisk zmrazené přípravy JMHZ nesouhlasí s uloženými daty. Připravte hlášení znovu.",
         "jmhz_spec_version_mismatch": "Datová věta hlášení je v jiném ročníku specifikace, než jaký platí pro její vykazované období. Takové podání by ČSSZ odmítla; obraťte se na podporu.",
         "jmhz_spec_version_period_invalid": "Vykazované období nebo datum události podání není platné datum, takže nejde určit ročník specifikace. Zkontrolujte období a připravte podání znovu.",
-        "jmhz_spec_version_unavailable": "Podání za období od 01/2027 (registrace s událostí od 1. 1. 2027) se řídí specifikací JMHZ 2027, kterou tahle verze aplikace zatím neumí sestavit. Hlášení, opravy i storna za období do 12/2026 připravíte jako dosud.",
+        "jmhz_spec_version_unavailable": "Hlášení za období od 01/2027 se řídí specifikací JMHZ 2027. Číselník obcí a států pro rok 2027 ještě nebyl vyhlášen, takže místo výkonu práce nejde ověřit a hlášení se nezmrazí ani neodešle. Připravíte ho po vyhlášení číselníku a aktualizaci aplikace. Hlášení, opravy i storna za období do 12/2026 podáte jako dosud; registrace zaměstnanců (REGZEC) se tím neblokují.",
         "jmhz_spec_version_unknown": "Zmrazené podání nese neznámý ročník specifikace JMHZ, proto se nesestaví ani neodešle. Obraťte se na podporu.",
         "jmhz_snapshot_invalid": "Uložená příprava JMHZ má neplatný formát a nelze ji načíst. Připravte hlášení znovu.",
         "jmhz_snapshot_missing": "Chybí uložená příprava JMHZ potřebná pro toto hlášení. Připravte hlášení znovu.",
@@ -14011,6 +14018,7 @@
         "jmhz_work_month_not_approved": "Pracovní doba za vykazovaný měsíc není schválená.",
         "jmhz_work_summary_v2_missing": "Chybí schválený pracovní souhrn měsíce.",
         "jmhz_workplace_codebooks_unverified": "Chybí ověřené číselníkové údaje pracoviště.",
+        "jmhz_workplace_codebooks_not_published": "Číselník obcí a států pro vykazovaný rok ještě nebyl vyhlášen, místo výkonu práce proto nejde ověřit.",
         "jmhz_xml_2027_attribute_missing": "Hlášení za období od ledna 2027 potřebuje údaje, které příprava zatím nenese (výčet atributů je ve zprávě). Připravte hlášení znovu; pokud problém přetrvá, obraťte se na podporu.",
         "jmhz_xml_2027_value_inconsistent": "Údaje mzdy neodpovídají pravidlům hlášení 2027 (například výsledek ročního zúčtování, souběh příjmu pro zálohu a příjmu podle § 6 odst. 4). Zkontrolujte mzdový běh a připravte hlášení znovu.",
         "jmhz_xml_attribute_unresolved": "Zmrazený dokument JMHZ nemá doložený požadovaný atribut a nesmí se doplnit automaticky nulou ani nepravdou. Připravte a zmrazte hlášení znovu; pokud problém přetrvá, obraťte se na podporu.",
@@ -14455,7 +14463,10 @@
         "average": "Doplnit průměr tohoto vztahu",
         "takeover": "Otevřít kontrolu převodu mezd",
         "eldp_form": "Upravit formulář evidenčního listu",
-        "form": "Opravit ve formuláři výše"
+        "form": "Opravit ve formuláři výše",
+        "institution_accounts": "Otevřít platební účty institucí",
+        "employer_registration": "Otevřít registraci zaměstnavatele",
+        "employer_offices": "Otevřít účtárny zaměstnavatele"
       },
       "eldp": {
         "period": "Vykazované období: {period}.",

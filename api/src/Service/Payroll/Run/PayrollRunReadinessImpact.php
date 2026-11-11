@@ -78,6 +78,8 @@ final class PayrollRunReadinessImpact
          * podkladů by účetní poslalo opravovat data, která se nikdy počítat nebudou.
          */
         'period_before_module_start' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
+        // Rok bez legislativní sady: běh nejde ani založit (PayrollRunSnapshotBuilder::assertRulesetCoverage).
+        'ruleset_year_unavailable' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
         // Snímek běhu bez nich nevznikne
         // ({@see PayrollRunSnapshotFixableException}), běh tedy nejde zahájit.
         'employer_policy_invalid' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
@@ -133,6 +135,10 @@ final class PayrollRunReadinessImpact
         // Schválený průměr vstupuje do zmrazeného snímku vstupů běhu. Schválený
         // po výpočtu revize ho hlášení nevidí a oprava stojí opravnou revizi.
         'jmhz_average_hourly_earning_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // § 38ch odst. 5 ZDP: březen je poslední běh, který přeplatek ze
+        // zúčtování vyplatí. Zúčtování provedené po schválení vyplatí jen
+        // opravná revize běhu.
+        'annual_settlement_pending_last_payout' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
 
         // ── Skupina 1: doplní se kdykoli, na výpočet to nemá vliv ────────────
         'run_without_employments' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
@@ -141,6 +147,9 @@ final class PayrollRunReadinessImpact
         // Aktivní vztah po sjednaném konci: běh ho vezme jako trvající, ale
         // ukončit se dá kdykoli a hromadně.
         'employments_past_agreed_end' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
+        // Žádost o roční zúčtování čeká na provedení; v lednu a únoru se
+        // přeplatek ještě vyplatí v některém z dalších běhů.
+        'annual_settlement_pending' => [self::IMPACT_ANYTIME, self::SCOPE_MONTHLY],
         'institution_account_unverified' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
         'employment_without_office' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
         'employment_social_registration_missing' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],

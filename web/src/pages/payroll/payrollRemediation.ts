@@ -216,3 +216,44 @@ export function averageEarningsTarget(employmentId: number, year?: number | null
     && Number.isInteger(quarter) && Number(quarter) >= 1 && Number(quarter) <= 4
     ? `${base}&year=${year}&quarter=${quarter}` : base
 }
+
+export interface SubmissionRemediation { path: string, actionKey: string }
+
+const HEALTH_PAYER_CODES = [
+  'zp_payer_account_missing',
+  'zp_payer_number_missing',
+  'zp_payer_number_invalid',
+  'zp_payer_business_id_missing',
+  'zp_payer_accounting_unit_invalid',
+]
+
+/**
+ * Proklik k chybě přípravy přehledu o platbě pojistného (PPZ). Číslo plátce
+ * a platební účet pojišťovny se zadávají v záložce Platební účty institucí;
+ * ostatní kódy nápravu na jiném místě nemají a zůstávají jen u textu.
+ */
+export function healthOverviewRemediation(code: string | null | undefined): SubmissionRemediation | null {
+  return code && HEALTH_PAYER_CODES.includes(code)
+    ? { path: '/payroll/settings?tab=institutions', actionKey: 'payroll.remediation.actions.institution_accounts' }
+    : null
+}
+
+/**
+ * Proklik k chybě záměru OZUSPOJ: důvod slevy podle § 7a odst. 1 je
+ * v podmínkách vztahu, kód OSSZ v registraci zaměstnavatele a variabilní
+ * symbol ČSSZ u účtárny.
+ */
+export function ozuspojRemediation(code: string | null | undefined, employmentId: number | null | undefined): SubmissionRemediation | null {
+  if (code === 'ozuspoj_discount_reason_missing' || code === 'ozuspoj_discount_reason_age_not_met') {
+    return Number.isInteger(employmentId) && Number(employmentId) > 0
+      ? { path: `/payroll/people?employment=${employmentId}&panel=employment_terms&field=social_part_time_discount_reason`, actionKey: 'payroll.remediation.actions.terms' }
+      : null
+  }
+  if (code === 'ozuspoj_ossz_code_missing' || code === 'ozuspoj_ossz_code_not_in_codebook') {
+    return { path: '/payroll/settings?tab=employer#payroll-employer-registration', actionKey: 'payroll.remediation.actions.employer_registration' }
+  }
+  if (code === 'ozuspoj_variable_symbol_missing') {
+    return { path: '/payroll/settings?tab=employer#payroll-employer-offices', actionKey: 'payroll.remediation.actions.employer_offices' }
+  }
+  return null
+}

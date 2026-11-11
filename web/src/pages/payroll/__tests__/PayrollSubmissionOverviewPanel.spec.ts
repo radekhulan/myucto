@@ -210,6 +210,55 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     expect(m.downloadSubmissionArtifact).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ mime_type: 'application/json' }))
   })
 
+  /*
+   * Chybějící číslo plátce / platební účet pojišťovny: hláška říkala jen
+   * „Založte ho v Mzdy, Nastavení zaměstnavatele…“. Pod ní musí být proklik
+   * přímo do záložky Platební účty institucí.
+   */
+  it('chyba přípravy přehledu ZP nese proklik na platební účty institucí', async () => {
+    m.runs.mockResolvedValue([{ revision_status: 'approved', revision_id: 12 }])
+    m.healthPaymentOverviews.mockResolvedValue({
+      items: [{
+        schema_reference: 'payroll-health-payment-overview.v1',
+        document_kind: 'internal_health_payment_overview',
+        official_submission: { supported: false, reason_code: 'internal' },
+        supplier_id: 1,
+        run_id: 1,
+        revision_id: 12,
+        revision_no: 1,
+        period: '2026-03',
+        currency_code: 'CZK',
+        insurer: { code: '207' },
+        source: { statutory_result_id: 1, statutory_result_hash: 'a', ruleset_id: 'r', ruleset_hash: 'h' },
+        totals: {
+          person_count: 1,
+          assessment_base_minor_units: 3000000,
+          employee_contribution_minor_units: 135000,
+          employer_contribution_minor_units: 270000,
+          total_contribution_minor_units: 405000,
+        },
+        people: [],
+        sha256: 'x',
+        filename: 'internal.json',
+      }],
+    })
+    m.prepareHealthOverview.mockRejectedValue(Object.assign(new Error('fail'), {
+      response: { data: { error: { code: 'zp_payer_account_missing', message: 'Firma nemá platební účet pojišťovny.' } } },
+    }))
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, {
+      props: { mode: 'health' },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="to"><slot /></a>' } } },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="health-overview-download"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="health-overview-error"]').text()).toContain('platební účet')
+    expect(wrapper.get('[data-test="health-overview-error-remediation"]').attributes('data-to'))
+      .toBe('/payroll/settings?tab=institutions')
+  })
+
   /**
    * Kanál `mobile_key` musí nabídnout tlačítko rovnou na kartě — ne jen
    * přesměrovat do odchozí fronty, kde by účetní musela hledat, co dál.

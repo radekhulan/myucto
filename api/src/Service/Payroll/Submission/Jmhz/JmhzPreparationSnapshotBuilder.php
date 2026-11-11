@@ -249,6 +249,7 @@ final class JmhzPreparationSnapshotBuilder
                         is_string($selection['evidence']['scenario_key'] ?? null)
                             ? $selection['evidence']['scenario_key']
                             : null,
+                        JmhzExternalCodebookCatalog::publishedForPeriod($periodStart, $periodEnd),
                     );
                     if (in_array(
                         $deferredType,
@@ -1559,11 +1560,28 @@ final class JmhzPreparationSnapshotBuilder
      * chybějící pracoviště jejich hlášení nezastaví. Bez zařazení scénáře
      * (`null`) se kontroluje vše jako dřív.
      */
-    private function inspectTerm(array $term, int $employmentId, array &$issues, ?string $scenarioKey = null): array
-    {
+    private function inspectTerm(
+        array $term,
+        int $employmentId,
+        array &$issues,
+        ?string $scenarioKey = null,
+        bool $codebooksPublished = true,
+    ): array {
         $carriesPosition = $scenarioKey === null || $this->scenarioRequiresAttribute($scenarioKey, '10229');
         if ($carriesPosition && ($term['jmhz_external_codebooks_verified_for_period'] ?? null) !== true) {
-            $issues[] = $this->issue('jmhz_workplace_codebooks_unverified', 'employment', $employmentId, ['10229', '10230', '10231']);
+            /*
+             * Číselník obcí a států pro vykazovaný měsíc v aplikaci vůbec
+             * není (období od 01/2027 do vyhlášení číselníku pro rok 2027):
+             * pracoviště nejde ověřit ani se správným kódem a oprava na kartě
+             * vztahu nepomůže. Jiný kód, aby účetní nedostala radu „doplňte
+             * obec", která nic nevyřeší.
+             */
+            $issues[] = $this->issue(
+                $codebooksPublished ? 'jmhz_workplace_codebooks_unverified' : 'jmhz_workplace_codebooks_not_published',
+                'employment',
+                $employmentId,
+                ['10229', '10230', '10231'],
+            );
         }
         $defaultInterpretations = [];
         foreach ($carriesPosition ? self::DEFAULTED_TRISTATES : [] as $field => $attributeId) {

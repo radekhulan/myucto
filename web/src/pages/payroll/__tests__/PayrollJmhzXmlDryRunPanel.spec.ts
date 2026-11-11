@@ -137,6 +137,39 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
 
     expect(wrapper.find('[data-test="workplace-bulk-dialog"]').exists()).toBe(true)
   })
+  /*
+   * Za období od 01/2027 chybí číselník obcí a států úplně. Hromadné doplnění
+   * by vrátilo zavádějící „obec neplatí" i pro správný kód, takže ho panel
+   * nenabízí a místo obecného kroku „podejte ručně" řekne, že se čeká na
+   * vyhlášení číselníku.
+   */
+  it('nevyhlášený číselník obcí nenabízí hromadné doplnění ani odkaz', async () => {
+    m.dryRun.mockResolvedValue({ status: 'blocked', preparation_id: 77, official_submission: { supported: false, reason: 'Lokální test.' }, blockers: [
+      {
+        code: 'jmhz_workplace_codebooks_not_published',
+        entity_type: 'employment',
+        entity_id: 12,
+        attribute_ids: ['10229', '10230', '10231'],
+        remediation: { kind: 'manual', field: null },
+      },
+    ] })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [{ ...run, period_start: '2027-01-01' }] as never[] },
+      global: { stubs: {
+        RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
+        teleport: true,
+      } },
+    })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="jmhz-dry-run-workplace-bulk"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="jmhz-dry-run-remediation"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="jmhz-dry-run-blocker-label"]').text())
+      .toBe('payroll.jmhz_gate.codes.jmhz_workplace_codebooks_not_published')
+    expect(wrapper.get('[data-test="jmhz-dry-run-blocker-step"]').text())
+      .toBe('payroll.jmhz_gate.code_steps.jmhz_workplace_codebooks_not_published')
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)

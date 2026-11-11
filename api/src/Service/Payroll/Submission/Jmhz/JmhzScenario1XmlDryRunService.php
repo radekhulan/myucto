@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Report\EpoEnvelope;
+use Psr\Clock\ClockInterface;
 
 /**
  * Lokální test podání. Sestaví XML běžného měsíčního hlášení z ověřeného
@@ -26,6 +27,12 @@ final readonly class JmhzScenario1XmlDryRunService
         private JmhzSubmissionGuidFactory $guids,
         private JmhzScenario1ControlValidator $controls,
         private JmhzDeadlinePolicy $deadlines,
+        /*
+         * Tytéž hodiny jako zmrazení (JmhzSubmissionBridgeService): test XML
+         * a „Odeslat" musí vyhodnotit kontrolu 90 a datum vyplnění ke stejnému
+         * dni, jinak test slibuje něco, co zmrazení odmítne (a naopak).
+         */
+        private ClockInterface $clock,
     ) {}
 
     /**
@@ -104,7 +111,7 @@ final readonly class JmhzScenario1XmlDryRunService
             JmhzSubmissionEnvelope::create(
                 $this->guids->next(),
                 $this->formGuids($document),
-                PayrollSubmissionCalendar::filledAt(),
+                PayrollSubmissionCalendar::filledAt($this->clock->now()),
                 self::PRODUCT_NAME,
                 EpoEnvelope::appVersion() ?? '0',
             ),
@@ -117,7 +124,10 @@ final readonly class JmhzScenario1XmlDryRunService
         foreach ($result['packages'] as $package) {
             $reports[] = $this->controls->validate(
                 $package['xml'],
-                JmhzControlContext::today(schemaValidated: true),
+                new JmhzControlContext(
+                    PayrollSubmissionCalendar::today($this->clock->now()),
+                    schemaValidated: true,
+                ),
             );
         }
         $controls = $reports[0];
