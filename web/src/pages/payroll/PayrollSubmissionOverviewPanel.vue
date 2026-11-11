@@ -39,6 +39,7 @@ import { btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/bu
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate, formatDateTime, formatPeriod } from '@/composables/useFormat'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
+import { healthOverviewRemediation } from './payrollRemediation'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -79,6 +80,10 @@ const {
 const loading = ref(true)
 const error = ref('')
 const healthError = ref('')
+// Proklik k chybě přípravy přehledu ZP (číslo plátce, platební účet pojišťovny).
+const healthErrorCode = ref<string | null>(null)
+const healthErrorRemediation = computed(() =>
+  healthError.value === '' ? null : healthOverviewRemediation(healthErrorCode.value))
 
 /**
  * Nadpis karty je název pojišťovny, ne její kód — „111" účetní s pojišťovnou
@@ -443,6 +448,7 @@ async function downloadArtifact(
 async function loadHealthOverviews() {
   healthOverviews.value = []
   healthError.value = ''
+  healthErrorCode.value = null
   if (props.mode !== 'health') return
   try {
     const runs = await payrollApi.runs(period.value)
@@ -562,6 +568,11 @@ async function downloadJmhz(preview: PayrollJmhzPvpojPreview) {
   }
 }
 
+function healthErrorCodeOf(exception: unknown): string | null {
+  const code = (exception as { response?: { data?: { error?: { code?: unknown } } } })?.response?.data?.error?.code
+  return typeof code === 'string' ? code : null
+}
+
 async function prepareHealth(overview: PayrollHealthPaymentOverview): Promise<HealthPreparedOverview> {
   return payrollHealthNotificationApi.preparePaymentOverview(
     overview.revision_id,
@@ -587,6 +598,7 @@ async function officialHealthArtifact(prepared: HealthPreparedOverview) {
 
 async function downloadHealth(overview: PayrollHealthPaymentOverview) {
   healthError.value = ''
+  healthErrorCode.value = null
   healthBatchError.value = ''
   downloadingHealthKey.value = healthOverviewKey(overview)
   try {
@@ -598,6 +610,7 @@ async function downloadHealth(overview: PayrollHealthPaymentOverview) {
       exception,
       t('payroll.submissions.overview.health_download_failed'),
     )
+    healthErrorCode.value = healthErrorCodeOf(exception)
   } finally {
     downloadingHealthKey.value = null
   }
@@ -612,6 +625,7 @@ async function sendHealthViaDataBox(overview: PayrollHealthPaymentOverview) {
   // Jednotlivé a dávkové odeslání jsou dvě větve téhož; kdyby si každá držela
   // vlastní hlášku, zůstaly by na stránce viset dvě identické červené lišty.
   healthError.value = ''
+  healthErrorCode.value = null
   healthBatchError.value = ''
   const key = healthOverviewKey(overview)
   sendingHealthKey.value = key
@@ -638,6 +652,7 @@ async function sendHealthViaDataBox(overview: PayrollHealthPaymentOverview) {
       exception,
       t('payroll.submissions.overview.health_send_failed'),
     )
+    healthErrorCode.value = healthErrorCodeOf(exception)
   } finally {
     sendingHealthKey.value = null
   }
@@ -671,6 +686,7 @@ async function sendSelectedHealthViaDataBox() {
   if (!confirmed) return
   healthBatchError.value = ''
   healthError.value = ''
+  healthErrorCode.value = null
   healthBatchQueuedIds.value = []
   healthBatchTransport.value = null
   healthBatchSentResults.value = null
@@ -849,14 +865,26 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
           </p>
         </div>
 
-        <p
+        <div
           v-if="healthError"
           class="m-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
           role="alert"
           data-test="health-overview-error"
         >
-          {{ healthError }}
-        </p>
+          <p>{{ healthError }}</p>
+          <RouterLink
+            v-if="healthErrorRemediation"
+            :to="healthErrorRemediation.path"
+            class="mt-2 whitespace-nowrap"
+            :class="btnOutlineSm('warning')"
+            data-test="health-overview-error-remediation"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.edit" />
+            </svg>
+            {{ t(healthErrorRemediation.actionKey) }}
+          </RouterLink>
+        </div>
 
         <div v-if="healthOverviews.length === 0 && !healthError" class="p-6 text-sm text-neutral-500">
           {{ t('payroll.submissions.overview.health_empty') }}

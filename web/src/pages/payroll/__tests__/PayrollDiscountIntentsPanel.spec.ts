@@ -312,4 +312,29 @@ describe('PayrollDiscountIntentsPanel', () => {
     await wrapper.get('[data-test="discount-intent-preview-close-1"]').trigger('click')
     expect(wrapper.find('[data-test="discount-intent-preview-1"]').exists()).toBe(false)
   })
+
+  /*
+   * Chyba náhledu „chybí kód OSSZ“ říkala jen „Doplňte ho v Nastavení mezd“.
+   * Pod hláškou musí být proklik přímo na registraci zaměstnavatele.
+   */
+  it('chyba záměru nese proklik na místo nápravy', async () => {
+    m.list.mockResolvedValue([intent({ status: 'draft' })])
+    m.preview.mockRejectedValue(Object.assign(new Error('fail'), {
+      isAxiosError: true,
+      response: { data: { error: { code: 'ozuspoj_ossz_code_missing', message: 'Zaměstnavatel nemá vyplněný kód OSSZ.' } } },
+    }))
+
+    const wrapper = mount(PayrollDiscountIntentsPanel, {
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="to"><slot /></a>' } } },
+    })
+    await flushPromises()
+    const preview = wrapper.findAll('button')
+      .find(button => button.text().includes('payroll.discountIntents.actions.preview'))
+    await preview?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="discount-intents-error"]').text()).toContain('kód OSSZ')
+    expect(wrapper.get('[data-test="discount-intents-error-remediation"]').attributes('data-to'))
+      .toBe('/payroll/settings?tab=employer#payroll-employer-registration')
+  })
 })

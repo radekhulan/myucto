@@ -14458,7 +14458,10 @@
         "average": "Complete this employment’s average earnings",
         "takeover": "Open payroll takeover review",
         "eldp_form": "Edit the record sheet form",
-        "form": "Fix it in the form above"
+        "form": "Fix it in the form above",
+        "institution_accounts": "Open institution payment accounts",
+        "employer_registration": "Open employer registration",
+        "employer_offices": "Open employer payroll offices"
       },
       "eldp": {
         "period": "Reporting period: {period}.",

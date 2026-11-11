@@ -14458,7 +14458,10 @@
         "average": "Doplnit průměr tohoto vztahu",
         "takeover": "Otevřít kontrolu převodu mezd",
         "eldp_form": "Upravit formulář evidenčního listu",
-        "form": "Opravit ve formuláři výše"
+        "form": "Opravit ve formuláři výše",
+        "institution_accounts": "Otevřít platební účty institucí",
+        "employer_registration": "Otevřít registraci zaměstnavatele",
+        "employer_offices": "Otevřít účtárny zaměstnavatele"
       },
       "eldp": {
         "period": "Vykazované období: {period}.",
