@@ -4079,7 +4079,7 @@
         "later_terms": "novější podmínky vztahu už pracoviště mění",
         "employment_closed": "pracovní vztah je ukončený",
         "employment_reported": "vztah je ukončený a za jeho měsíc je hlášení JMHZ zmrazené nebo podané: vraťte ukončení, opravte údaje a podejte opravné hlášení",
-        "period_settled": "období je už vyúčtované",
+        "period_settled": "opravovaná verze podmínek zasahuje do vyúčtovaného měsíce bez otevřené opravy běhu; otevřete opravy všech dotčených vyúčtovaných měsíců, oprava jen vybraného měsíce nestačí",
         "workplace_not_verified": "existující pracoviště není ověřené"
       },
       "excluded_title": "Vyřazeno ({count})",
@@ -4095,7 +4095,7 @@
         "failed": "Selhalo"
       },
       "failed_title": "Nepovedlo se doplnit ({count})",
-      "recalculate_notice": "Mzdový běh, u kterého jste pracoviště doplnili, je nutné znovu přepočítat a schválit novou revizi, aby se nová hodnota promítla do hlášení."
+      "recalculate_notice": "Po doplnění pracoviště v otevřené revizi běhu zvolte Obnovit podklady, mzdy znovu přepočítejte a schvalte novou revizi, aby se opravené údaje promítly do hlášení. U schváleného běhu nejdřív vyžádejte a otevřete opravu."
     },
     "bulk_closure": {
       "open": "Ukončit skončené dohody",
@@ -9191,9 +9191,11 @@
       "office_select": "Vyberte účtárnu",
       "office_empty": "Zaměstnavatel zatím nemá žádnou aktivní účtárnu - založte ji v Nastavení mezd.",
       "office_missing_warning": "Vztah nemá mzdovou účtárnu. Odvod sociálního pojistného nepůjde vykázat a mzdový běh se u tohoto vztahu zastaví. Vyberte ji v poli Mzdová účtárna u vztahu a uložte.",
+      "workplace_missing_warning": "Chybí obec nebo stát pracoviště pro JMHZ. V Dalších údajích vyberte Obec pracoviště z číselníku, doplňte stát a uložte podmínky vztahu.",
+      "workplace_complete": "Doplnit pracoviště",
       "terms_basics_hint": "Vyplňte, co se opravdu mění. Hvězdičkou je označené jen to, bez čeho zápis neprojde - zbytek je nepovinný.",
       "terms_advanced_title": "Další údaje",
-      "terms_advanced_hint": "Evidence pro JMHZ, režimy pojištění a daně, sazbové kategorie a slevy. Běžný pracovní poměr tu nemá co vyplňovat.",
+      "terms_advanced_hint": "Pracoviště a další evidence pro JMHZ, režimy pojištění a daně, sazbové kategorie a slevy.",
       "change_reason_hint": "Nepovinné. Objeví se v časové ose vztahu."
     },
     "transport_delivery": {

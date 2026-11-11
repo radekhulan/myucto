@@ -249,6 +249,12 @@ const selectedOfficeOption = computed(
 /** Vztah bez účtárny — upozornění, ne zákaz: doplní se rovnou v základních údajích. */
 const officeMissing = computed(() => props.employment.office_id === null)
 
+const workplaceMissing = computed(() => termsForm.value !== null
+  && ['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(props.employment.relation_type)
+  && ['planned', 'preregistered', 'active', 'suspended', 'ended'].includes(props.employment.status)
+  && jmhzFormHint.value === null
+  && (!termsForm.value.jmhz_workplace_municipality_code || !termsForm.value.jmhz_workplace_country_code))
+
 /**
  * Podrobnosti (JMHZ evidence, režimy pojištění a daně, sazbové kategorie § 5a
  * a slevy § 7a) se otevřou samy jen tam, kde je někdo vyplnil. Běžný pracovní
@@ -2321,6 +2327,23 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
           </div>
         </div>
       </section>
+
+      <div
+        v-if="workplaceMissing"
+        class="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-800"
+        data-test="employment-workplace-missing"
+      >
+        <p class="flex-1">{{ t('payroll.people.workplace_missing_warning') }}</p>
+        <button
+          type="button"
+          :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"
+          data-test="employment-workplace-complete"
+          @click="revealTermsField(termsForm.jmhz_workplace_municipality_code ? 'jmhz_workplace_country_code' : 'jmhz_workplace_municipality_code')"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+          {{ t('payroll.people.workplace_complete') }}
+        </button>
+      </div>
 
       <!--
         DALŠÍ ÚDAJE — evidence pro podání a výjimečné režimy.

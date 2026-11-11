@@ -4079,7 +4079,7 @@
         "later_terms": "later employment terms already change the workplace",
         "employment_closed": "the employment has ended",
         "employment_reported": "the employment has ended and a JMHZ report for its month is frozen or submitted: revert the termination, correct the details and file a corrective report",
-        "period_settled": "the period is already settled",
+        "period_settled": "the terms being corrected also cover a settled month without an open payroll correction; open corrections for every affected settled month, correcting only the selected month is not enough",
         "workplace_not_verified": "the existing workplace is not verified"
       },
       "excluded_title": "Excluded ({count})",
@@ -4095,7 +4095,7 @@
         "failed": "Failed"
       },
       "failed_title": "Could not be filled in ({count})",
-      "recalculate_notice": "The payroll run for which you filled in the workplace needs to be recalculated and approved as a new revision for the new value to be reflected in the report."
+      "recalculate_notice": "After filling in the workplace in an open payroll revision, choose Refresh inputs, recalculate payroll and approve the new revision so the corrected data appears in the report. For an approved run, first request and open a correction."
     },
     "bulk_closure": {
       "open": "End finished agreements",
@@ -9191,9 +9191,11 @@
       "office_select": "Select an office",
       "office_empty": "The employer has no active payroll office yet — create one in payroll settings.",
       "office_missing_warning": "This employment has no payroll office. Social insurance cannot be reported and the payroll run will stop on it. Select it in the Payroll office field of the employment and save.",
+      "workplace_missing_warning": "The workplace municipality or country for JMHZ is missing. In More details, select the workplace municipality from the codebook, fill in the country and save the employment terms.",
+      "workplace_complete": "Fill in workplace",
       "terms_basics_hint": "Fill in what actually changes. Only fields the save cannot go through without are marked with an asterisk; everything else is optional.",
       "terms_advanced_title": "More details",
-      "terms_advanced_hint": "JMHZ evidence, insurance and tax regimes, rate categories and discounts. An ordinary employment needs none of it.",
+      "terms_advanced_hint": "Place of work and other JMHZ evidence, insurance and tax regimes, rate categories and discounts.",
       "change_reason_hint": "Optional. Shows up in the employment timeline."
     },
     "transport_delivery": {

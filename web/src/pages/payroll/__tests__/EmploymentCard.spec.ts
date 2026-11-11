@@ -576,6 +576,56 @@ describe('EmploymentCard', () => {
     expect('effective_from' in payload).toBe(false)
   })
 
+  it('na chybějící obec pracoviště upozorní před rozbalením dalších údajů a dovede na pole', async () => {
+    const wrapper = await mountCard()
+
+    expect(wrapper.get('[data-test="employment-workplace-missing"]').text())
+      .toContain('payroll.people.workplace_missing_warning')
+    expect(wrapper.get('[data-test="terms-advanced"]').attributes('open')).toBeUndefined()
+
+    await wrapper.get('[data-test="employment-workplace-complete"]').trigger('click')
+    await flushPromises()
+
+    expect(revealField).toHaveBeenCalledWith('[data-test="jmhz-municipality"]', expect.anything())
+    expect(wrapper.get('[data-test="terms-advanced"]').attributes('open')).toBeDefined()
+
+    const municipality = selectByTest(wrapper, 'jmhz-municipality')
+    municipality.vm.$emit('search', 'Praha')
+    await flushPromises()
+    municipality.vm.$emit('update:modelValue', '554782')
+    await flushPromises()
+    expect(wrapper.find('[data-test="employment-workplace-missing"]').exists()).toBe(false)
+  })
+
+  it('při chybějícím státu pracoviště dovede na stát a u úplného pracoviště nevaruje', async () => {
+    const stored = employment()
+    stored.terms[0]!.jmhz_workplace_municipality_code = '554782'
+    const wrapper = await mountCard(stored)
+
+    expect(wrapper.find('[data-test="employment-workplace-missing"]').exists()).toBe(true)
+    await wrapper.get('[data-test="employment-workplace-complete"]').trigger('click')
+    await flushPromises()
+    expect(revealField).toHaveBeenCalledWith('[data-test="jmhz-country"]', expect.anything())
+
+    await wrapper.get('[data-test="jmhz-country"]').setValue('CZ')
+    expect(wrapper.find('[data-test="employment-workplace-missing"]').exists()).toBe(false)
+  })
+
+  it.each([
+    ['11', null],
+    ['12', null],
+    ['13', null],
+    ['14', null],
+    ['1', '2'],
+  ])('u formuláře bez vykonávané pozice nevaruje na pracoviště (%s/%s)', async (activity, detail) => {
+    const stored = employment()
+    stored.terms[0]!.activity_code = activity
+    stored.terms[0]!.jmhz_relationship_detail_code = detail
+    const wrapper = await mountCard(stored)
+
+    expect(wrapper.find('[data-test="employment-workplace-missing"]').exists()).toBe(false)
+  })
+
   it('novou verzi založí, jen když si ji uživatel vybere — a vyžádá si datum', async () => {
     vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const stored = employment()
