@@ -1019,6 +1019,11 @@ final class InvoicePdfRenderer
         if (!empty($invoice['is_simplified']) && ($invoice['invoice_type'] ?? '') === 'invoice' && $isVatPayer) {
             return $locale === 'en' ? 'Simplified tax document' : 'Zjednodušený daňový doklad';
         }
+        // § 45 odst. 2 ZDPH: opravný doklad k zjednodušenému dokladu drobného zákazníka
+        // smí vynechat označení odběratele; titulek vysvětlí proč.
+        if (!empty($invoice['is_simplified']) && ($invoice['invoice_type'] ?? '') === 'credit_note' && $isVatPayer) {
+            return $locale === 'en' ? 'Simplified credit note (tax adjustment)' : 'Zjednodušený opravný daňový doklad';
+        }
         return $labels[$locale][$invoice['invoice_type']] ?? $labels['cs'][$invoice['invoice_type']] ?? '';
     }
 

@@ -531,9 +531,12 @@ final class UpdateInvoiceAction
         }
         // Drobný zákazník bez adresy (#310): vystavený doklad nesmí úpravou přestat být
         // zjednodušeným ani přejít na takovou kartu jako běžná faktura. Limit hlídá
-        // simplifiedRejection() výše, proto se tu částka neposílá.
+        // simplifiedRejection() výše, proto se tu částka neposílá. U dobropisu brána
+        // ověří vazbu na zjednodušený původní doklad (§ 45 odst. 2 ZDPH).
         if ($existing['status'] !== 'draft') {
             $rejected = $this->taxGate->simplifiedOnlyClientRejection([
+                'id'            => (int) $existing['id'],
+                'parent_invoice_id' => $existing['parent_invoice_id'] ?? null,
                 'client_id'     => (int) ($body['client_id'] ?? $existing['client_id']),
                 'supplier_id'   => (int) $existing['supplier_id'],
                 'invoice_type'  => (string) ($body['invoice_type'] ?? $existing['invoice_type']),
