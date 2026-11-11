@@ -327,16 +327,33 @@ final class JmhzExternalCodebookCatalog
 
     /**
      * Věta pro účetní, proč pracoviště za měsíc neprošlo CISOB: neplatný kód
-     * obce, nebo místo výkonu práce jiné než úřední název. `null` = příčinu
-     * neznáme konkrétně (chybí kód, číselník měsíc nepokrývá) a stačí obecné
-     * vysvětlení nálezu `jmhz_workplace_codebooks_unverified`.
+     * obce, místo výkonu práce jiné než úřední název, nebo měsíc, na který
+     * připnuté číselníky nesahají (leden 2027 před vyhlášením číselníků obcí
+     * a států na rok 2027). `null` = chybí kód obce a stačí obecné vysvětlení
+     * nálezu `jmhz_workplace_codebooks_unverified` s odkazem na pole.
+     *
+     * Nepokrytý měsíc účetní na kartě vztahu nespraví: obecná rada „doplňte
+     * zvýrazněná pole" by ji poslala měnit údaje, které jsou v pořádku.
      */
     public function workplaceMismatchMessage(?string $municipalityCode, ?string $workPlace, string $periodStart): ?string
     {
         $periodEnd = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
-        if ($municipalityCode === null || $municipalityCode === ''
-            || !$this->coversDate($periodStart) || !$this->coversDate($periodEnd)
+        if ($municipalityCode !== null && $municipalityCode !== ''
+            && (!$this->coversDate($periodStart) || !$this->coversDate($periodEnd))
         ) {
+            $month = (int) substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4);
+
+            return sprintf(
+                'Číselníky obcí a států ČSSZ (CISOB, CZEMALFA) pro %s tato verze aplikace ještě nemá, '
+                    . 'protože pro rok %s zatím nebyly vyhlášené. Pracoviště proto nejde ověřit a hlášení '
+                    . 'za %s se zatím nesestaví. Údaje na kartě pracovního vztahu neměňte; po aktualizaci '
+                    . 'aplikace s novými číselníky obnovte podklady mzdového běhu a hlášení připravte znovu.',
+                $month,
+                substr($periodStart, 0, 4),
+                $month,
+            );
+        }
+        if ($municipalityCode === null || $municipalityCode === '') {
             return null;
         }
         $official = $this->findMunicipality($municipalityCode, $periodStart)['label'] ?? null;
