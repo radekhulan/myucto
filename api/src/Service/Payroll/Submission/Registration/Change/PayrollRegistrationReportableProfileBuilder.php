@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Registration\Change;
 
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEmploymentStatusCodebook;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelationshipDetailPolicy;
 
 /**
@@ -150,6 +151,10 @@ final class PayrollRegistrationReportableProfileBuilder
         ] as $field) {
             $values["employment.{$field}"] = $this->text($employment[$field] ?? null);
         }
+        // 2219 z iSMS ČSÚ je tisková chyba za 2119 (viz PayrollRegistrationEmploymentStatusCodebook).
+        $values['employment.employment_status_code'] = PayrollRegistrationEmploymentStatusCodebook::normalize(
+            $values['employment.employment_status_code'],
+        );
         foreach (['small_scale', 'continuous_operation', 'leadership'] as $field) {
             $values["employment.{$field}"] = $this->bool($employment[$field] ?? null);
         }

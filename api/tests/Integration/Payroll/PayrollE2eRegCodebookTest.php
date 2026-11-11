@@ -149,6 +149,39 @@ final class PayrollE2eRegCodebookTest extends TestCase
     }
 
     /**
+     * Postavení v zaměstnání (ID 10249): REGZEC27 nese 2119 stejně jako
+     * REGZEC25 (EDV REGZEC27 1.5.0.3, list „CIS Klasif. postavení v zaměst").
+     * Rozpracovaný profil s kódem 2219 (tisková chyba sdělení ČSÚ
+     * č. 401/2024 Sb., kterou aplikace 3. až 11. 11. 2026 nabízela) se při
+     * čtení převede na 2119 a přihláška s ním odejde bez ručního zásahu.
+     */
+    public function testStoredStatusCode2219IsReadAndSentAs2119In2027(): void
+    {
+        $this->regToday('2026-12-28');
+        [, $employmentId] = $this->regPerson('Postavení', 'Opravené', 49, 'employment', '2027-01-04');
+        $profile = $this->regA1Profile('2027-01-04');
+        $profile['employment']['employment_status_code'] = '2219';
+        $profile['employment']['position_name'] = null;
+        $this->regSaveA1Profile($employmentId, $profile, 'draft');
+
+        $view = $this->json(($this->registration)->a1Profile(
+            $this->request('GET', "/api/payroll/submissions/registration/{$employmentId}/a1-profile"),
+            new \Slim\Psr7\Response(),
+            ['employmentId' => (string) $employmentId],
+        ));
+        self::assertSame('2119', $view['profile']['employment']['employment_status_code']);
+
+        $profile['employment']['position_name'] = 'Účetní';
+        $saved = $this->regSaveA1Profile($employmentId, $profile);
+        self::assertSame('2119', $saved['employment']['employment_status_code']);
+        $prepared = $this->regPrepare($employmentId, ['registration_mode' => 'full']);
+        $xml = $this->regArtifactXml((int) $prepared['submission_id']);
+        self::assertSame('http://schemas.cssz.cz/REGZEC/2027', $this->regAssertXsdValid($xml));
+        self::assertStringContainsString('relat="2119"', $xml);
+        self::assertStringNotContainsString('2219', $xml);
+    }
+
+    /**
      * @param list<array<string,mixed>> $problems
      * @return array<string,mixed>|null
      */

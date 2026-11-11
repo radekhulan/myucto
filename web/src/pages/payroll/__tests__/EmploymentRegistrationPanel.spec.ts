@@ -131,7 +131,7 @@ function jmhzOptions() {
       ],
       employment_status_codes: [
         { code: '1111', label: 'Zaměstnanci v pracovním poměru na dobu neurčitou' },
-        { code: '2219', label: 'Zaměstnavatelé – fyzické osoby jinde neuvedené' },
+        { code: '2119', label: 'Zaměstnavatelé – fyzické osoby jinde neuvedené' },
       ],
     },
   }
@@ -1586,7 +1586,7 @@ describe('EmploymentRegistrationPanel', () => {
     expect(after.text()).toContain('vyslání zaměstnavatelem')
   })
 
-  it('offers employment status codes from the ČSÚ codebook for a start from 1 January 2027', async () => {
+  it('offers the 2027 employment status codes (EDV REGZEC27, list with 2119) for a start from 1 January 2027', async () => {
     const statusCodes = async (startOn: string) => {
       const suggested = a1Suggested()
       m.a1Profile.mockResolvedValue(a1View({
@@ -1605,7 +1605,8 @@ describe('EmploymentRegistrationPanel', () => {
     expect(before).not.toContain('2219')
 
     const after = await statusCodes('2027-01-04')
-    expect(after).toContain('2219')
+    expect(after).toContain('2119')
+    expect(after).not.toContain('2219')
     expect(after).not.toContain('1341')
   })
 

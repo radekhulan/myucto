@@ -825,7 +825,9 @@ final class PayrollRegistrationA1SnapshotBuilder
      */
     private function employmentStatus(array $input): ?string
     {
-        $value = $this->optionalText($input, 'employment_status_code', 16);
+        $value = PayrollRegistrationEmploymentStatusCodebook::normalize(
+            $this->optionalText($input, 'employment_status_code', 16),
+        );
         if ($value === null) {
             return null;
         }

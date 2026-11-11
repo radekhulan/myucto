@@ -7,18 +7,22 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 /**
- * Národní klasifikace postavení v zaměstnání (NKPZ) ze ČSÚ pro REGZEC 2027.
+ * Národní klasifikace postavení v zaměstnání (NKPZ) z iSMS ČSÚ, jen reference.
  *
  * Datový slovník JMHZ 1.4.1.6 nesl NKPZ vloženou, slovník 1.5.0.3 ji vede jen
- * jako externí referenci „CIS Klasif. postavení v zaměstn" bez položek. Zdrojem
- * pro rozhodné datum od 1. 1. 2027 je proto oficiální číselník ČSÚ 80145
- * (sdělení č. 401/2024 Sb.), připnutý otiskem exportu i manifestu.
+ * jako externí referenci „CIS Klasif. postavení v zaměstn" bez položek. Tady
+ * je připnutý (otiskem exportu i manifestu) číselník ČSÚ 80145 podle sdělení
+ * č. 401/2024 Sb.
  *
  * Vložená verze ze slovníku 1.4.1.6 se od ČSÚ liší v jediném listu: slovník
  * má 2119 „Zaměstnavatelé – fyzické osoby jinde neuvedené", sdělení 401/2024
- * Sb. i iSMS ČSÚ mají kód 2219. Pro 2026 zůstává vložená verze (tu ČSSZ ke
- * slovníku 1.4.1.6 vydala), pro 2027 platí ČSÚ. Porovnání a postup obnovy
- * jsou v api/resources/payroll/nkpz/README.md.
+ * Sb. i iSMS ČSÚ mají kód 2219. Kód 2219 je tisková chyba přílohy sdělení
+ * (stojí uvnitř bloku 211 fyzických osob, systematická část NKPZ ČSÚ i EDV
+ * REGZEC27 1.5.0.3 a číselník MPSV DS_CIS_Klasifikace_postaveni_v_zamestnani
+ * mají 2119). Podání proto tuhle třídu NEPOUŽÍVÁ: postavení v zaměstnání
+ * pro oba ročníky bere {@see PayrollRegistrationEmploymentStatusCodebook}
+ * z výčtu EDV. Třída zůstává jako reference a hlídač příchodu nového sdělení
+ * ČSÚ. Porovnání a postup obnovy jsou v api/resources/payroll/nkpz/README.md.
  */
 final class PayrollRegistrationNkpzClassification
 {

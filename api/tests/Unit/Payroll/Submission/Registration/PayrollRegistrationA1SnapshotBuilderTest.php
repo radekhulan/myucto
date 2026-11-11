@@ -477,18 +477,21 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
     }
 
     /**
-     * REGZEC 2027 bere NKPZ z číselníku ČSÚ (slovník 1.5.0.3 ji nevkládá),
-     * REGZEC 2025 ze slovníku 1.4.1.6. Liší se list 2119 proti 2219.
+     * Oba ročníky berou výčet EDV s listem 2119. Uložený kód 2219 (tisková
+     * chyba sdělení ČSÚ č. 401/2024 Sb. převzatá do iSMS) se při čtení
+     * převede na 2119, takže vadou není ani v jednom ročníku; neznámý kód ano.
      */
     public function testEmploymentStatusCodebookFollowsVintage(): void
     {
         $builder = new PayrollRegistrationA1SnapshotBuilder();
         $scope2027 = ['effective_on' => '2027-01-15'] + self::scope();
         foreach ([
-            ['2219', self::scope(), true],
+            ['2219', self::scope(), false],
             ['2119', self::scope(), false],
             ['2219', $scope2027, false],
-            ['2119', $scope2027, true],
+            ['2119', $scope2027, false],
+            ['2229', self::scope(), true],
+            ['2229', $scope2027, true],
         ] as [$code, $scope, $problem]) {
             $source = self::source('1', '1');
             $source['employment']['employment_status_code'] = $code;

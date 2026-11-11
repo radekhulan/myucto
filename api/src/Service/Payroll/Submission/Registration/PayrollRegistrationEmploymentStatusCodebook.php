@@ -18,11 +18,18 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
  * nabídka i kontrola pracují jen s listy o čtyřech číslicích. U druhu
  * činnosti 15 a 16 je číselník podle EDV omezený na 1341 a 1342.
  *
- * Zdroj se volí podle ročníku věty (rozhodné datum, {@see JmhzSpecVersion}):
- * REGZEC 2025 bere vloženou verzi slovníku 1.4.1.6, REGZEC 2027 oficiální
- * číselník ČSÚ ({@see PayrollRegistrationNkpzClassification}), protože
- * slovník 1.5.0.3 NKPZ vede jen jako externí referenci. Verze se liší v listu
- * 2119 (slovník) proti 2219 (ČSÚ, sdělení č. 401/2024 Sb.).
+ * REGZEC 2025 i REGZEC 2027 berou TÝŽ výčet (vložený ve slovníku 1.4.1.6),
+ * tedy list 2119 „Zaměstnavatelé – fyzické osoby jinde neuvedené". Závazný
+ * zdroj pro REGZEC27 je EDV 1.5.0.3 (ČSSZ/MPSV), list „CIS Klasif. postavení
+ * v zaměst", řádek 41: 2119, kód 2219 v něm není; shodně živý číselník MPSV
+ * DS_CIS_Klasifikace_postaveni_v_zamestnani (developers.mpsv.cz/api/codebook,
+ * aktualizace 9. 9. 2026), na
+ * který odkazují Pokyny k vyplnění REGZEC (ID 10249), a systematická část
+ * NKPZ ČSÚ (nkpz_systematicka_cast.xlsx, řádek 42). Kód 2219 v příloze
+ * sdělení ČSÚ č. 401/2024 Sb. je tisková chyba, kterou převzala iSMS ČSÚ
+ * (číselník 80145) a zařadila ji pod 221; aplikace ji proto nepoužívá
+ * ({@see PayrollRegistrationNkpzClassification} zůstává jen referencí).
+ * Výčet EDV 1.4.0.6 a 1.5.0.3 je řádek po řádku shodný.
  */
 final class PayrollRegistrationEmploymentStatusCodebook
 {
@@ -68,12 +75,25 @@ final class PayrollRegistrationEmploymentStatusCodebook
         return JmhzSpecVersion::forRegistrationEventDate($decisiveDate);
     }
 
-    /** @return array<string,string> */
+    /**
+     * Výčet pro ročník věty. Oba ročníky mají podle EDV stejný (viz docblock
+     * třídy); parametr zůstává, kdyby se v dalším EDV rozešly.
+     *
+     * @return array<string,string>
+     */
     private static function entriesFor(JmhzSpecVersion $version): array
     {
-        return $version === JmhzSpecVersion::V2027
-            ? PayrollRegistrationNkpzClassification::leaves()
-            : self::entries();
+        return self::entries();
+    }
+
+    /**
+     * Kód, který se v uloženém profilu nebo změně mohl objevit z ČSÚ iSMS:
+     * 2219 je tisková chyba sdělení č. 401/2024 Sb. za 2119 (EDV 1.5.0.3,
+     * číselník MPSV). Čtení ho převede, aby se nemusela měnit data.
+     */
+    public static function normalize(?string $code): ?string
+    {
+        return $code === '2219' ? '2119' : $code;
     }
 
     /**

@@ -2838,6 +2838,16 @@ final readonly class PayrollRegistrationIdentityService
                 'Autoritativní profil REGZEC A1 nemá platný objekt.',
             );
         }
+        // Profil uložený 3. až 11. 11. 2026 pro nástup v roce 2027 mohl nést
+        // kód 2219 z iSMS ČSÚ; je to tisková chyba za 2119 (EDV REGZEC27
+        // 1.5.0.3). Převádí se při čtení, data se nemění.
+        if (is_array($profile['employment'] ?? null)
+            && is_string($profile['employment']['employment_status_code'] ?? null)
+        ) {
+            $profile['employment']['employment_status_code'] = PayrollRegistrationEmploymentStatusCodebook::normalize(
+                $profile['employment']['employment_status_code'],
+            );
+        }
 
         return $profile;
     }
