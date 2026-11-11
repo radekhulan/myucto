@@ -796,6 +796,59 @@ describe('EmploymentCard', () => {
     expect(wrapper.find('[data-test="terms-end-recurring-base"]').exists()).toBe(false)
   })
 
+  describe('sazba u vztahu s importovanou mzdou', () => {
+    function importedWageError() {
+      return { response: { status: 422, data: { error: {
+        code: 'validation_failed',
+        message: 'Mzda se k vztahu importuje jako částka; hodinový výpočet ze směn by další import zablokoval.',
+        details: { field: 'remuneration_type', code: 'hourly_rate_imported_wage' },
+      } } } }
+    }
+
+    async function submitHourly() {
+      const wrapper = await mountCard()
+      await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
+      await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200')
+      await wrapper.get('[data-test="terms-remuneration-basis"]').setValue('Syntetická dohoda')
+      await wrapper.get('[data-test="save-mode-correct"]').setValue()
+      await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+      await flushPromises()
+      return wrapper
+    }
+
+    it('vysvětlí střet s importem a s potvrzením uložení zopakuje s příznakem', async () => {
+      vi.mocked(payrollApi.correctEmploymentTerms).mockReset()
+      vi.mocked(payrollApi.correctEmploymentTerms)
+        .mockRejectedValueOnce(importedWageError())
+        .mockResolvedValueOnce({ employment: employment(), warnings: [] })
+      const wrapper = await submitHourly()
+
+      expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls[0]![2]).not.toHaveProperty('confirm_imported_wage_switch')
+      const offer = wrapper.get('[data-test="terms-imported-wage"]')
+      expect(offer.text()).toContain('payroll.people.remuneration.imported_wage_hint')
+      expect(offer.text()).toContain('payroll.people.remuneration.imported_wage_keep')
+
+      await wrapper.get('[data-test="terms-imported-wage-confirm"]').trigger('click')
+      await flushPromises()
+      expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls[1]![2])
+        .toMatchObject({ remuneration_type: 'hourly', confirm_imported_wage_switch: true })
+    })
+
+    it('volba pravděpodobného výdělku vrátí odměňování a sazbu neuloží', async () => {
+      vi.mocked(payrollApi.correctEmploymentTerms).mockReset()
+      vi.mocked(payrollApi.correctEmploymentTerms).mockRejectedValueOnce(importedWageError())
+      const wrapper = await submitHourly()
+
+      await wrapper.get('[data-test="terms-imported-wage-probable"]').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.find('[data-test="terms-imported-wage"]').exists()).toBe(false)
+      expect((wrapper.get('[data-test="terms-remuneration-type"]').element as HTMLSelectElement).value).not.toBe('hourly')
+      expect(wrapper.find('[data-test="terms-probable-earning-hourly"]').exists()).toBe(true)
+      expect(vi.mocked(payrollApi.correctEmploymentTerms)).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it.each(['', '0', '-1', '180.555', '10000000.01', 'nesjednáno'])('odmítne neplatnou hodinovou sazbu %s před uložením', async (rate) => {
     const wrapper = await mountCard()
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')

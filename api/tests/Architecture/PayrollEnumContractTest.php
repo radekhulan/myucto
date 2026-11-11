@@ -204,6 +204,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure::GROUPS',
         'payroll.ts::PayrollBulkClosureAction'
             => 'const:MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure::ACTIONS',
+        'payroll.ts::PayrollTermsBulkMode'
+            => 'const:MyInvoice\Service\Payroll\PayrollEmploymentTermsBulkEdit::MODES',
         'payrollImports.ts::AttendanceSampleKey'
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfiles::KEYS',
         'payrollImports.ts::AttendanceProfileComponentKind'

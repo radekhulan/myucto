@@ -12,6 +12,7 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
+use MyInvoice\Repository\Payroll\PayrollHourlyWageCollisionGuard;
 use MyInvoice\Repository\Payroll\PayrollMealEntitlementBasisLockedException;
 use MyInvoice\Repository\Payroll\PayrollTermsSettledException;
 use MyInvoice\Security\AccessLevel;
@@ -41,6 +42,7 @@ final class PayrollEmploymentAction
         private readonly IpMatcher $ipMatcher,
         private readonly PayrollEmploymentDeletionRepository $deletion,
         private readonly PayrollEmploymentMergeService $merge,
+        private readonly PayrollHourlyWageCollisionGuard $wageGuard,
         private readonly ?PayrollRulesetProvider $rulesets = null,
     ) {}
 
@@ -133,6 +135,7 @@ final class PayrollEmploymentAction
                 $body,
                 true,
             );
+            $current = $this->employments->currentTerms($supplierId, $employmentId);
             $terms = $this->validator->terms(
                 $body,
                 // Uložený kód CZ-ISCO smí projít, i když v číselníku není —
@@ -148,9 +151,10 @@ final class PayrollEmploymentAction
                 $this->employments->currentRelationType($supplierId, $employmentId),
                 // Číselníkové kontroly polí, která se proti uložené verzi
                 // nemění, uložení neblokují — vrátí se jako varování.
-                $this->employments->currentTerms($supplierId, $employmentId),
+                $current,
                 $warnings,
             );
+            $this->assertHourlySwitchKeepsImports($supplierId, $employmentId, $current, $terms, $body);
             $employment = $this->employments->addTerms(
                 $supplierId,
                 $employmentId,
@@ -223,6 +227,7 @@ final class PayrollEmploymentAction
             if (!$correctEffectiveFrom) {
                 $body['effective_from'] = $current;
             }
+            $currentTerms = $this->employments->currentTerms($supplierId, $employmentId);
             $terms = $this->validator->terms(
                 $body,
                 $this->employments->currentCzIscoCode($supplierId, $employmentId),
@@ -231,9 +236,10 @@ final class PayrollEmploymentAction
                     $employmentId,
                 ),
                 $this->employments->currentRelationType($supplierId, $employmentId),
-                $this->employments->currentTerms($supplierId, $employmentId),
+                $currentTerms,
                 $warnings,
             );
+            $this->assertHourlySwitchKeepsImports($supplierId, $employmentId, $currentTerms, $terms, $body);
             $employment = $this->employments->correctTerms(
                 $supplierId,
                 $employmentId,
@@ -680,6 +686,53 @@ final class PayrollEmploymentAction
         }
 
         return [...$current, ...$body];
+    }
+
+    /**
+     * Přechod na hodinové odměňování u vztahu, kterému se mzda importuje jako
+     * hotová částka (typicky docházka), by tiše zablokoval každý další import:
+     * {@see PayrollHourlyWageCollisionGuard::externalInputs()} ho pak odmítne.
+     * Bez výslovného `confirm_imported_wage_switch` se proto přechod neuloží
+     * a odpověď nabídne náhradu: pravděpodobný výdělek. Detekce je táž jako
+     * v hromadné úpravě podmínek.
+     *
+     * @param array<string,mixed>|null $current
+     * @param array<string,mixed> $terms
+     * @param array<string,mixed> $body
+     */
+    private function assertHourlySwitchKeepsImports(
+        int $supplierId,
+        int $employmentId,
+        ?array $current,
+        array $terms,
+        array $body,
+    ): void {
+        if ($terms['remuneration_type'] !== 'hourly'
+            || ($current['remuneration_type'] ?? null) === 'hourly'
+        ) {
+            return;
+        }
+        $confirmed = $body['confirm_imported_wage_switch'] ?? false;
+        if (!is_bool($confirmed)) {
+            throw new PayrollFieldValidationException(
+                'Pole confirm_imported_wage_switch musí být boolean.',
+                'confirm_imported_wage_switch',
+            );
+        }
+        if ($confirmed || $this->wageGuard->employmentsBlockingHourlySwitch(
+            $supplierId,
+            [$employmentId],
+            (string) $terms['effective_from'],
+        ) === []) {
+            return;
+        }
+        throw new PayrollFieldValidationException(
+            'Mzda se k vztahu importuje jako částka; hodinový výpočet ze směn by další import zablokoval. '
+                . 'Nastavte místo sazby pravděpodobný výdělek, nebo potvrďte, že mzdu budete nově počítat '
+                . 'z odpracovaných směn a import hodinové mzdy ukončíte.',
+            'remuneration_type',
+            'hourly_rate_imported_wage',
+        );
     }
 
     /**

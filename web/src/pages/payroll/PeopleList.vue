@@ -71,6 +71,7 @@ import PayrollDeclarationSignBulkDialog from '@/components/payroll/PayrollDeclar
 import PayrollHealthInsurerBulkDialog from '@/components/payroll/PayrollHealthInsurerBulkDialog.vue'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
 import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
+import PayrollTermsBulkEditDialog from '@/components/payroll/PayrollTermsBulkEditDialog.vue'
 import PayrollBulkClosureDialog from '@/components/payroll/PayrollBulkClosureDialog.vue'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 import { providePersonCardSave } from './personCardSave'
@@ -196,6 +197,7 @@ const bulkQueryPeriod = typeof route.query.period === 'string' && /^\d{4}-(0[1-9
   : null
 const statutoryBulkEffectiveOn = `${bulkQueryPeriod ?? payrollWorkingPeriod()}-01`
 const workplaceBulkOpen = ref(false)
+const termsBulkOpen = ref(false)
 const bulkClosureOpen = ref(false)
 // Počet vztahů k ukončení na tlačítku; výpadek náhledu tlačítko neschová.
 const bulkClosureCount = ref<number | null>(null)
@@ -644,6 +646,15 @@ const peopleBulkActions = computed<ActionItem[]>(() => [
     variant: 'warning',
     show: canWriteEmployment.value,
     run: () => { workplaceBulkOpen.value = true },
+  },
+  {
+    key: 'terms-bulk',
+    label: t('payroll.people.terms_bulk_action'),
+    icon: 'edit',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canWriteEmployment.value,
+    run: () => { termsBulkOpen.value = true },
   },
 ])
 
@@ -1963,6 +1974,13 @@ onMounted(async () => {
       :period-start="statutoryBulkEffectiveOn"
       :employment-ids="null"
       @close="workplaceBulkOpen = false"
+      @applied="load"
+    />
+
+    <PayrollTermsBulkEditDialog
+      v-if="termsBulkOpen"
+      :period-start="statutoryBulkEffectiveOn"
+      @close="termsBulkOpen = false"
       @applied="load"
     />
 
