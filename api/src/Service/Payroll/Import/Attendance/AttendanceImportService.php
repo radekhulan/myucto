@@ -24,6 +24,7 @@ use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\Payroll\Absence\ImportAbsenceCompensationRates;
 use MyInvoice\Service\Payroll\Absence\PayrollImportAbsenceCompensationMaterializer;
 use MyInvoice\Service\Payroll\Component\PayrollInputImportService;
+use MyInvoice\Service\Payroll\Employment\PayrollOpenAgreements;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportWriter;
 use MyInvoice\Service\Payroll\Net\DeductionAgreementStatus;
 use MyInvoice\Service\Payroll\Net\DeductionAgreementTerms;
@@ -122,6 +123,8 @@ final class AttendanceImportService
         private readonly PayrollPersonProfileRepository $personProfiles,
         private readonly PayrollPersonAccountVerificationService $accountVerification,
         private readonly DemoMode $demo,
+        private readonly AttendanceOpenAgreementMatcher $openAgreementMatcher,
+        private readonly PayrollOpenAgreements $openAgreements,
     ) {
     }
 
@@ -567,6 +570,9 @@ final class AttendanceImportService
                     $data[(string) $person['key']][$field] = trim($value);
                 }
             }
+            if (is_array($person['open_agreement'] ?? null)) {
+                $data[(string) $person['key']]['_open_agreement'] = $person['open_agreement'];
+            }
         }
 
         return $data;
@@ -611,10 +617,17 @@ final class AttendanceImportService
                 if (!is_array($item)) {
                     throw new \InvalidArgumentException('Údaje osoby nemají platný tvar.');
                 }
+                $open = $personData[$key]['_open_agreement'] ?? null;
+                unset($personData[$key]['_open_agreement']);
                 foreach ($personData[$key] ?? [] as $field => $value) {
                     if (in_array($item[$field] ?? null, [null, ''], true)) {
                         $item[$field] = $value;
                     }
+                }
+                $reused = $this->reuseOpenAgreement($supplierId, $item, is_array($open) ? $open : null, $userId, $ip, $userAgent);
+                if ($reused !== null) {
+                    $results[] = ['person_key' => $key, 'status' => 'reused'] + $reused;
+                    continue;
                 }
                 $created = $this->license->mutatePayrollEmployees(
                     fn (): array => $this->createPerson($supplierId, $item, $today, $userId, $ip, $userAgent),
@@ -1122,6 +1135,7 @@ final class AttendanceImportService
         }
         unset($person);
         $persons = $this->withAgreementHours($supplierId, $periodStart, $persons, $matched['options']);
+        $persons = $this->openAgreementMatcher->annotate($supplierId, $periodStart, $persons);
 
         $codes = [];
         foreach ($mapped['sheets'] as $sheet) {
@@ -1658,6 +1672,75 @@ final class AttendanceImportService
         }
 
         return $result;
+    }
+
+    /**
+     * Otevřená DPP místo nové ({@see PayrollOpenAgreements}). Volba
+     * `use_open_agreement` nese id dohody, `create_new_agreement` výslovné
+     * založení nové. Když náhled u osoby otevřenou dohodu našel a volba chybí,
+     * nová DPP se nezaloží: výchozí je použít tu otevřenou.
+     *
+     * @param array<string,mixed> $item
+     * @param array<string,mixed>|null $open dohoda, kterou k osobě našel náhled
+     * @return array{employee_id:int,employment_id:int,message:string}|null null = zakládá se nová osoba
+     */
+    private function reuseOpenAgreement(
+        int $supplierId,
+        array $item,
+        ?array $open,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): ?array {
+        if (($item['relation_type'] ?? null) !== 'dpp' || ($item['create_new_agreement'] ?? false) === true) {
+            return null;
+        }
+        $chosen = $item['use_open_agreement'] ?? null;
+        if ($chosen === null) {
+            if ($open === null || ($open['reusable'] ?? false) !== true) {
+                return null;
+            }
+            throw new \InvalidArgumentException(
+                "Osoba už má otevřenou DPP {$open['code']}. Použijte ji, nebo výslovně zvolte založení nové dohody. "
+                . PayrollOpenAgreements::GUIDANCE,
+            );
+        }
+        if (!is_int($chosen) || $chosen <= 0) {
+            throw new \InvalidArgumentException('Otevřená dohoda k použití není platná.');
+        }
+        if ($open !== null && (int) $open['employment_id'] !== $chosen) {
+            throw new \InvalidArgumentException('Vybraná dohoda nepatří osobě z podkladů. Načtěte náhled znovu.');
+        }
+        $start = is_string($item['planned_start_on'] ?? null) ? $item['planned_start_on'] : '';
+        if (!\MyInvoice\Http\IsoDate::isValid($start)) {
+            throw new \InvalidArgumentException('Nástup nové dohody není platné datum.');
+        }
+        [$end] = self::fixedTermEnd($item['fixed_term_end_on'] ?? null, $start);
+        $reused = $this->openAgreements->reuse(
+            $supplierId,
+            $chosen,
+            $open === null ? null : (int) $open['employee_id'],
+            $start,
+            $end,
+            $userId,
+            $ip,
+            $userAgent,
+        );
+        $this->saveLinks(
+            $supplierId,
+            is_string($item['personal_number'] ?? null) ? $item['personal_number'] : '',
+            AttendanceText::personKey((string) ($item['full_name'] ?? '')),
+            $reused['employee_id'],
+            $reused['employment_id'],
+            $userId,
+        );
+
+        return [
+            'employee_id' => $reused['employee_id'],
+            'employment_id' => $reused['employment_id'],
+            'message' => 'Použila se otevřená dohoda, nová DPP se nezaložila'
+                . ($reused['extended_to'] === null ? '.' : ' a sjednaný konec se prodloužil do ' . self::czechDate($reused['extended_to']) . '.'),
+        ];
     }
 
     /**

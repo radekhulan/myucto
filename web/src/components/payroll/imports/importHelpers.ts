@@ -18,6 +18,7 @@ import type {
   AttendanceUnit,
   AttendanceUnrecognizedColumn,
   ImportFilePayload,
+  PayrollOpenAgreement,
   RegistrationEmploymentOption,
   RegistrationOpeningBalance,
   RegistrationPair,
@@ -938,11 +939,20 @@ export function personCreateDetails(
   return details
 }
 
+/**
+ * Otevřená DPP osoby, kterou jde použít místo nové dohody. Výchozí je ji
+ * použít; `newAgreementKeys` jsou osoby, u kterých uživatel zvolil novou.
+ */
+export function reusableOpenAgreement(person: AttendancePerson, relationType: RegistrationRelationType): PayrollOpenAgreement | null {
+  return relationType === 'dpp' && person.open_agreement?.reusable ? person.open_agreement : null
+}
+
 export function buildPersonsPayload(
   persons: AttendancePerson[],
   drafts: Record<string, PersonDraft>,
   defaults: PersonCreateDefaults,
   relationTypeFor?: (person: AttendancePerson) => RegistrationRelationType,
+  newAgreementKeys: ReadonlySet<string> = new Set(),
 ): AttendancePersonCreate[] {
   return persons.map(person => {
     const draft = drafts[person.key] ?? splitDisplayName(person.display_name)
@@ -950,13 +960,18 @@ export function buildPersonsPayload(
     const lastName = draft.last_name.trim()
     const weekly = (person.weekly_hours ?? '').trim() || defaults.weekly_hours.trim()
     const wage = parseLocaleNumber(person.monthly_wage) ?? NaN
+    const relationType = relationTypeFor ? relationTypeFor(person) : defaults.relation_type
+    const open = reusableOpenAgreement(person, relationType)
     return {
       person_key: person.key,
       full_name: [firstName, lastName].filter(Boolean).join(' ') || person.display_name,
       first_name: firstName,
       last_name: lastName,
       birth_number: null,
-      relation_type: relationTypeFor ? relationTypeFor(person) : defaults.relation_type,
+      relation_type: relationType,
+      ...(open === null ? {} : newAgreementKeys.has(person.key)
+        ? { create_new_agreement: true }
+        : { use_open_agreement: open.employment_id }),
       weekly_hours: weekly === '' ? null : weekly.replace(',', '.'),
       monthly_gross: Number.isFinite(wage) && wage > 0 ? Math.round(wage) : null,
       // Nástup z poznámky v podkladech je přesnější než jednotný den pro celou dávku.

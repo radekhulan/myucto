@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
-import type { AttendancePerson } from '@/api/payrollImports'
+import type { AttendancePerson, AttendancePersonCreate } from '@/api/payrollImports'
 
 vi.mock('vue-router', async () => {
   const { defineComponent: define, h: render } = await import('vue')
@@ -88,5 +88,33 @@ describe('AttendancePersonsStep — náhled zakládání osob', () => {
       { person_key: 'alena', hourly_rate: '180,50', fixed_term_end_on: '31. 12. 2026', planned_start_on: '2026-06-15' },
       { person_key: 'bela', hourly_rate: 'dle dohody', fixed_term_end_on: null },
     ])
+  })
+
+  it('u osoby s otevřenou DPP nabídne použít ji a jako výchozí pošle její použití', async () => {
+    const eva = person('eva', {
+      display_name: 'Ukázková Eva',
+      open_agreement: {
+        employment_id: 77, employee_id: 5, employee_name: 'Eva Ukázková', code: 'B001', status: 'active',
+        start_date: '2026-05-01', end_date: '2026-06-30', reusable: true, extend_to: '2026-12-31',
+      },
+    })
+    const wrapper = mount(AttendancePersonsStep, {
+      props: { persons: [eva], options: [], manualLinks: {}, period: '2026-06', canCreate: true },
+    })
+    await wrapper.findAll('input[type="checkbox"]')[0].setValue(true)
+
+    const box = wrapper.get('[data-testid="attendance-open-agreement"]')
+    expect(box.text()).toContain('payroll_imports.attendance.persons.open_agreement.guidance')
+    expect(box.text()).toContain('payroll_imports.attendance.persons.open_agreement.reuse_extend')
+    expect((wrapper.get('[data-testid="attendance-open-agreement-reuse"]').element as HTMLInputElement).checked).toBe(true)
+
+    await wrapper.get('[data-testid="attendance-create-submit"]').trigger('click')
+    expect(wrapper.emitted('create')?.[0]?.[0]).toMatchObject([{ person_key: 'eva', relation_type: 'dpp', use_open_agreement: 77 }])
+
+    await wrapper.get('[data-testid="attendance-open-agreement-new"]').setValue(true)
+    await wrapper.get('[data-testid="attendance-create-submit"]').trigger('click')
+    const payload = (wrapper.emitted('create')?.[1]?.[0] ?? []) as AttendancePersonCreate[]
+    expect(payload).toMatchObject([{ person_key: 'eva', create_new_agreement: true }])
+    expect(payload?.[0]).not.toHaveProperty('use_open_agreement')
   })
 })

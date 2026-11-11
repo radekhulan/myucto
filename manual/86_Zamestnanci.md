@@ -103,6 +103,27 @@ má stav **Aktivní** a v checklistu nástupu jsou registrace splněné.
 > ([§ 86.9.1](#8691-hromadne-ukonceni-skoncenych-dohod)). Když nějaké čekají,
 > je přímo nad seznamem s jejich počtem, jinak v **Další funkce**.
 
+### 86.3.1 Další DPP osoby, která má otevřenou dohodu
+
+Brigádníkovi se vyplatí sjednat jednu dlouhodobou DPP (třeba do konce roku)
+místo nové dohody ke každé akci. Jedna dohoda znamená jednu registraci u ČSSZ,
+každou novou je potřeba znovu přihlásit a po skončení odhlásit.
+
+Když osobě přidáváte DPP akcí **Přidat pracovní vztah** a osoba už má otevřenou
+DPP (plánovanou, aktivní nebo přerušenou, bez konce nebo s koncem v den nástupu
+nové dohody či později), aplikace novou dohodu hned nezaloží. Formulář ukáže
+otevřenou dohodu a nabídne:
+
+- **Použít dohodu …**: nová DPP nevznikne. Má-li nová dohoda pozdější
+  sjednaný konec, otevřené dohodě se konec prodlouží (tlačítko pak říká, do
+  kdy). Použít jde jen dohodu, která nástup nové už pokrývá.
+- **Přesto založit novou DPP**: například souběžná druhá dohoda na jinou
+  činnost.
+
+Otevřená DPP, která začíná až po nástupu nové, zakládání nezastaví. Aplikace ji
+po uložení jen připomene; jde-li o tutéž dohodu, posuňte její nástup a novou
+zrušte.
+
 ## 86.4 Krok za krokem: zákonná evidence osoby
 
 Zákonná evidence nese právní skutečnosti, ze kterých vychází výpočet daně

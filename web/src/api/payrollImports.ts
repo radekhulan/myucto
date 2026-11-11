@@ -1,6 +1,8 @@
 import { api } from './client'
 import { downloadApiFile } from '@/utils/downloadFile'
-import type { PayrollAgreementAnnualHours } from './payroll'
+import type { PayrollAgreementAnnualHours, PayrollOpenAgreement } from './payroll'
+
+export type { PayrollOpenAgreement }
 
 /** Soubor přenášený v JSON těle; obsah je base64 bez prefixu `data:`. */
 export interface ImportFilePayload {
@@ -541,8 +543,11 @@ export interface AttendancePerson {
   reference: { gross_minor: number | null; net_minor: number | null; hours: string | null }
   /** Roční hodiny na DPP po započtení importované docházky; jen u osob přiřazených na DPP. */
   dpp_annual_hours?: PayrollAgreementAnnualHours & { imported_minutes: number }
+  /** Otevřená DPP osoby, která v období nemá vztah (jen u osob k založení). */
+  open_agreement?: PayrollOpenAgreement | null
   warnings: string[]
 }
+
 
 export interface AttendanceComponentCheck {
   component_code: string
@@ -766,12 +771,16 @@ export interface AttendancePersonCreate {
   fixed_term_end_on?: string | null
   personal_number: string | null
   activate: boolean
+  /** Otevřená DPP osoby, která se použije místo nové dohody. */
+  use_open_agreement?: number | null
+  /** Výslovně nová DPP vedle otevřené dohody. */
+  create_new_agreement?: boolean
 }
 
 export interface AttendancePersonsResult {
   results: {
     person_key: string
-    status: 'created' | 'failed'
+    status: 'created' | 'reused' | 'failed'
     employee_id: number | null
     employment_id: number | null
     message: string | null

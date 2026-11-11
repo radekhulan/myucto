@@ -23,6 +23,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollFieldValidationException;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Absence\MinimumWageFloor;
+use MyInvoice\Service\Payroll\Employment\PayrollOpenAgreements;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
@@ -41,6 +42,7 @@ final class PayrollEmploymentAction
         private readonly IpMatcher $ipMatcher,
         private readonly PayrollEmploymentDeletionRepository $deletion,
         private readonly PayrollEmploymentMergeService $merge,
+        private readonly PayrollOpenAgreements $openAgreements,
         private readonly ?PayrollRulesetProvider $rulesets = null,
     ) {}
 
@@ -101,10 +103,78 @@ final class PayrollEmploymentAction
         }
         $warnings = [];
         try {
+            $body = $this->body($request);
+            $supplierId = $this->currentSupplierId($request);
+            $employeeId = (int) $args['id'];
+            $data = $this->validator->create($body, $warnings);
+            if ($data['relation_type'] === 'dpp') {
+                $start = (string) $data['terms']['planned_start_on'];
+                $end = $data['terms']['fixed_term_end_on'];
+                $reuseId = $body['use_open_agreement'] ?? null;
+                if ($reuseId !== null) {
+                    if (!is_int($reuseId) || $reuseId <= 0) {
+                        throw new \InvalidArgumentException('Otevřená dohoda k použití není platná.');
+                    }
+                    $reused = $this->openAgreements->reuse(
+                        $supplierId,
+                        $reuseId,
+                        $employeeId,
+                        $start,
+                        $end,
+                        $this->userId($request),
+                        $this->ip($request),
+                        $request->getHeaderLine('User-Agent'),
+                    );
+                    $employment = null;
+                    foreach ($this->employments->listForEmployee($supplierId, $employeeId) as $row) {
+                        if ((int) $row['id'] === $reused['employment_id']) {
+                            $employment = $row;
+                        }
+                    }
+
+                    return Json::ok($response, [
+                        'employment' => $employment,
+                        'reused' => true,
+                        'extended_to' => $reused['extended_to'],
+                        'warnings' => [],
+                    ]);
+                }
+                // Další DPP vedle otevřené, kterou jde použít, jen na výslovné
+                // potvrzení — viz PayrollOpenAgreements. Otevřená dohoda, která
+                // začíná až po nástupu nové, se jen ohlásí.
+                if (($body['confirm_new_agreement'] ?? false) !== true) {
+                    $open = $this->openAgreements->openFor($supplierId, $employeeId, $start);
+                    $reusable = array_filter(
+                        $open,
+                        static fn (array $agreement): bool => PayrollOpenAgreements::reusableFor($agreement, $start),
+                    );
+                    foreach ($reusable === [] ? $open : [] as $agreement) {
+                        $warnings[] = [
+                            'field' => 'planned_start_on',
+                            'code' => 'open_agreement_later',
+                            'message' => "Osoba má otevřenou DPP {$agreement['code']}, která začíná až "
+                                . PayrollOpenAgreements::czechDate((string) $agreement['start_date'])
+                                . '. Jde-li o tutéž dohodu, posuňte její nástup a novou zrušte.',
+                        ];
+                    }
+                    if ($reusable !== []) {
+                        return Json::error(
+                            $response,
+                            'open_agreement_exists',
+                            'Osoba už má otevřenou dohodu o provedení práce. ' . PayrollOpenAgreements::GUIDANCE,
+                            409,
+                            ['open_agreements' => array_map(
+                                static fn (array $agreement): array => PayrollOpenAgreements::describe($agreement, $start, $end),
+                                $open,
+                            )],
+                        );
+                    }
+                }
+            }
             $employment = $this->employments->create(
-                $this->currentSupplierId($request),
-                (int) $args['id'],
-                $this->validator->create($this->body($request), $warnings),
+                $supplierId,
+                $employeeId,
+                $data,
                 $this->userId($request),
                 $this->ip($request),
                 $request->getHeaderLine('User-Agent'),

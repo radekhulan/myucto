@@ -134,6 +134,35 @@ final class PayrollAttendanceImportRepository
         );
     }
 
+    /**
+     * Blind-index rodných čísel vybraných osob jedním dotazem.
+     *
+     * @param list<int> $employeeIds
+     * @return array<string,list<int>> otisk => osoby
+     */
+    public function birthNumberHashes(int $supplierId, array $employeeIds): array
+    {
+        $employeeIds = array_values(array_unique(array_filter($employeeIds, static fn (int $id): bool => $id > 0)));
+        if ($employeeIds === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee_id, value_hash
+               FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND identifier_type = "birth_number"
+                AND employee_id IN (' . implode(',', array_fill(0, count($employeeIds), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, ...$employeeIds]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (is_string($row['value_hash'] ?? null) && $row['value_hash'] !== '') {
+                $result[$row['value_hash']][] = PayrollTimeValue::int($row['employee_id'] ?? null, 'employee_id');
+            }
+        }
+
+        return $result;
+    }
+
     /** @return array{id:int,row_version:int,status:string}|null */
     public function latestEmploymentOfEmployee(int $supplierId, int $employeeId): ?array
     {

@@ -621,6 +621,35 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(m.toastWarning).toHaveBeenCalledWith(expect.stringContaining('Místo výkonu práce neodpovídá CISOB.'))
   })
 
+  it('další DPP vedle otevřené dohody nabídne použít otevřenou a odešle volbu', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    m.createEmployment
+      .mockRejectedValueOnce({ response: { status: 409, data: { error: {
+        code: 'open_agreement_exists', message: 'Osoba už má otevřenou dohodu.',
+        open_agreements: [{
+          employment_id: 77, employee_id: 1, employee_name: 'Alfa Aktivní', code: 'DPP-1', status: 'active',
+          start_date: '2026-06-01', end_date: '2026-06-30', reusable: true, extend_to: '2026-09-30',
+        }],
+      } } } })
+      .mockResolvedValueOnce({ employment: { id: 77, employee_id: 1, relation_type: 'dpp', code: 'DPP-1' }, warnings: [], reused: true, extended_to: '2026-09-30' })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.toastError).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="new-employment-open-agreement"]').text()).toContain('payroll.people.open_agreement.guidance')
+    expect(wrapper.find('[data-test="new-employment-confirm-new"]').exists()).toBe(true)
+    await wrapper.get('[data-test="new-employment-reuse-77"]').trigger('click')
+    await flushPromises()
+    expect(m.createEmployment).toHaveBeenLastCalledWith(1, expect.objectContaining({ use_open_agreement: 77 }))
+    expect(m.toastSuccess).toHaveBeenCalledWith(expect.stringContaining('payroll.people.open_agreement.reused_extended'))
+    expect(wrapper.find('[data-test="new-employment-form"]').exists()).toBe(false)
+  })
+
   it('podklad sjednání nabízí jen u hodinového režimu nového vztahu', async () => {
     m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
     const wrapper = mountPage()

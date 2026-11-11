@@ -87,7 +87,7 @@ const approveTimeBlockedReason = computed(() => {
 })
 const autoCreateMissingPersons = ref(true)
 const autoCreateResult = ref<AttendancePersonsResult | null>(null)
-const autoCreateNotes = computed(() => (autoCreateResult.value?.results ?? []).filter(item => item.status === 'created' && item.message))
+const autoCreateNotes = computed(() => (autoCreateResult.value?.results ?? []).filter(item => item.status !== 'failed' && item.message))
 
 // U chyb musí být vidět, u koho vznikly — anonymní seznam hlášek nejde vyřešit.
 function personLabel(key: string): string {
@@ -289,7 +289,8 @@ async function createPersons(payload: AttendancePersonCreate[]) {
   try {
     const response = await createPersonsInChunks(payload)
     createResults.value = response
-    const created = response.results.filter(item => item.status === 'created').length
+    // Použitá otevřená dohoda je úspěch stejně jako založená osoba.
+    const created = response.results.filter(item => item.status !== 'failed').length
     const failed = response.results.length - created
     if (failed > 0) toast.warning(t('payroll_imports.attendance.persons.created', { created, failed }))
     else toast.success(t('payroll_imports.attendance.persons.created', { created, failed }))

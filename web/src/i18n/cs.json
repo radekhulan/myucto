@@ -7000,6 +7000,17 @@
       "add_employment": "Přidat pracovní vztah",
       "employment_created": "Pracovní vztah byl založen.",
       "employment_created_with_warnings": "Pracovní vztah byl založen. Zkontrolujte na kartě vztahu: {messages}",
+      "open_agreement": {
+        "title": "Osoba už má otevřenou dohodu o provedení práce.",
+        "item": "DPP {code} od {start} do {end}",
+        "no_end": "neurčita",
+        "guidance": "Jedna dlouhodobá DPP znamená jednu registraci u ČSSZ. Každou novou dohodu je potřeba znovu přihlásit a po skončení odhlásit, proto je výhodnější použít otevřenou dohodu a případně jí prodloužit konec.",
+        "reuse": "Použít dohodu {code}",
+        "reuse_extend": "Použít dohodu {code} a prodloužit konec do {date}",
+        "create_new": "Přesto založit novou DPP",
+        "reused": "Použila se otevřená dohoda {code}, nová DPP se nezaložila.",
+        "reused_extended": "Použila se otevřená dohoda {code} s koncem prodlouženým do {date}, nová DPP se nezaložila."
+      },
       "code": "Osobní číslo",
       "relation_type": "Typ vztahu",
       "initial_terms": "Počáteční smluvní podmínky",
@@ -36317,6 +36328,15 @@
         "last_name": "Příjmení",
         "swap_names": "Prohodit jméno a příjmení",
         "remove_from_create": "Nezakládat",
+        "open_agreement": {
+          "legend": "Otevřená dohoda osoby {name}",
+          "title": "Osoba má otevřenou DPP {code} od {start} do {end}.",
+          "no_end": "neurčita",
+          "guidance": "Jedna dlouhodobá DPP znamená jednu registraci u ČSSZ. Každou novou dohodu je potřeba znovu přihlásit a po skončení odhlásit.",
+          "reuse": "Použít otevřenou dohodu",
+          "reuse_extend": "Použít otevřenou dohodu a prodloužit konec do {date}",
+          "create_new": "Založit novou dohodu"
+        },
         "details": {
           "start_on": "Nástup",
           "agreed_end_on": "Konec dohody",

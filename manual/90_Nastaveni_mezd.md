@@ -839,6 +839,17 @@ týká jen osob s osobním nebo rodným číslem; osoba bez čísel bývá jinak
 jméno někoho z evidence. Uvádějí-li podklady ukončení, osoba dostane upozornění;
 import vztah neukončuje.
 
+**Otevřená DPP osoby.** Osobu, kterou import v měsíci nenašel, hledá také mezi
+neukončenými DPP firmy (uložená vazba, osobní číslo, rodné číslo, jméno). Má-li
+otevřenou DPP (bez konce nebo s koncem v den nástupu či později), náhled to
+u osoby napíše a při zakládání nabídne **Použít otevřenou dohodu** (výchozí
+volba), případně s prodloužením konce do **Konce dohody** z podkladů, nebo
+**Založit novou dohodu**. Jedna dlouhodobá DPP znamená jednu registraci u ČSSZ;
+nová dohoda ke každé akci znamená novou přihlášku i odhlášku. Otevřenou dohodu,
+která začíná až po nástupu z podkladů, použít nejde; náhled jen poradí posunout
+její nástup na kartě vztahu. Ruční zakládání vztahu se chová stejně
+(viz [§ 86.3.1](86_Zamestnanci.md#8631-dalsi-dpp-osoby-ktera-ma-otevrenou-dohodu)).
+
 **Roční limit DPP.** U osoby přiřazené na dohodu o provedení práce náhled sečte
 odpracované hodiny za celý kalendářní rok včetně importovaného měsíce a jiných
 DPP téže osoby; uložený souhrn importovaného měsíce nahradí hodiny z podkladů.
