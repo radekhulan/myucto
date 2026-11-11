@@ -344,6 +344,12 @@ hodinový způsob odměňování zůstávají podporované.
 > hlášení. Změnu adresy, jména nebo pojišťovny ale ohlásíte do 8 dnů, viz
 > [§ 85.8](85_Podani_a_hlaseni.md#858-krok-za-krokem-zmena-udaju-zamestnance-a3).
 
+Na kartě vztahu jsou u **Účast na sociálním pojištění**, **Účast na
+zdravotním pojištění** a **Daňový režim** povolené jen volby, se kterými výpočet
+počítá (automaticky, záloha). Ostatní jsou vypnuté s vysvětlením. Má-li vztah
+z dřívějška uloženou nepodporovanou volbu, karta ji ukáže s upozorněním, že
+mzdu zastaví; vraťte ji na výchozí hodnotu.
+
 ### 86.6.1 Hromadná úprava podmínek vybraných vztahů
 
 Máte-li desítky brigádníků na DPP se stejnou sazbou, profesí nebo pracovištěm,
@@ -368,6 +374,12 @@ nemusíte otevírat kartu každého vztahu.
    - **Druh činnosti** nabízí jen kódy, které k zvolenému druhu vztahu patří.
      Při výběru „Všechny druhy" se nenabízí.
    - **Místo výkonu práce** je obec z číselníku ČSSZ a stát pracoviště.
+   - **Vrátit účast na pojištění na „automaticky“ a daň na „zálohu“** se
+     nabídne, když některý vztah má ruční přepsání účasti nebo daňového
+     režimu (štítek **ruční přepsání účasti/daně**). Výpočet ruční přepsání
+     nepodporuje a mzdu takového vztahu vždy zastaví; zákonné zařazení
+     (účast podle druhu vztahu a příjmu, srážková daň podle § 6 odst. 4 ZDP)
+     si odvodí sám.
 4. Zvolte režim. **Doplnit jen prázdné údaje** (výchozí) nesahá na údaj, který
    vztah už má. **Přepsat vyplněné údaje** ho nahradí.
 5. Klikněte na **Upravit … vztahů**. Výsledek ukáže po řádcích, co se upravilo,

@@ -329,9 +329,11 @@ hlášením najdete v [Přechodu mezd v průběhu roku](113_Prechod_mezd_v_prube
 | Schválení odmítnuto s výzvou k obnovení | Od zmrazení snímku přibyly nebo se změnily schválené podklady | Klikněte na **Obnovit podklady** a přepočítejte ([§ 80.6](#806-krok-za-krokem-obnoveni-podkladu-rozpracovaneho-behu)). |
 | Přepočet nevzal opravený údaj | **Přepočítat** počítá ze zmrazeného snímku | **Obnovit podklady**, u schváleného běhu **Vyžádat opravu**. |
 | Datum výplaty se neuloží | Je později než poslední den následujícího měsíce (§ 141 odst. 1 zákoníku práce) | Zadejte skutečné datum výplaty v zákonné lhůtě. |
-| Rozpad daně ukazuje **Vyžaduje ruční kontrolu** | Chybí ověřené prohlášení, rezidence nebo nárok na dítě | Opravte podklad na kartě osoby a vytvořte novou revizi výpočtu. |
+| Rozpad daně ukazuje **Vyžaduje ruční kontrolu** | Prohlášení je vedené jako neověřené, u podepsaného chybí rezidence, nebo chybí nárok na dítě | Opravte podklad na kartě osoby a vytvořte novou revizi výpočtu. Chybějící záznam o prohlášení výpočet nezastaví ([§ 80.11.13](#801113-zakonne-vychozi-stavy-ve-vypoctu)). |
 | Nedokončený zákonný výpočet u většiny lidí po importu | Osoby nemají rezidenci ani příslušnost k pojištění | **Doplnit výchozí údaje (N osob)** ([§ 80.7](#807-krok-za-krokem-doplneni-zakonnych-udaju-po-importu)). |
-| Výpočet zdravotního pojištění skončí chybou | Osoba nemá zdravotní pojišťovnu (hlášení JMHZ ji nenese) | **Zdravotní pojišťovny hromadně**. |
+| Výpočet zdravotního pojištění skončí chybou | Osoba nemá zdravotní pojišťovnu (hlášení JMHZ ji nenese) a v měsíci jí vzniká účast na pojištění | U nálezu klikněte na **Zdravotní pojišťovny hromadně**. Dohodu bez účasti výpočet bez pojišťovny spočítá. |
+| Varování o chybějících počátečních ročních úhrnech | Mzdy roku jste převzali v jeho průběhu | Naimportujte počáteční stavy v `Mzdy → Importy → JMHZ`. Výpočet zatím pokračuje od nuly ([§ 80.11.13](#801113-zakonne-vychozi-stavy-ve-vypoctu)). |
+| Varování, že příspěvek na stravování je celý zdaněný | Stravné MPSV na nový rok ještě nevyšlo | Po vyhlášení vyhlášky dorovnejte osvobozenou část opravou vstupu. |
 | Test JMHZ hlásí **Chybí ověřené číselníkové údaje pracoviště.** | Vztah nemá místo výkonu práce z číselníku ČSSZ | **Doplnit pracoviště**, pak nová revize běhu. |
 | Schválení zablokováno kvůli pravidlům | Legislativní pravidla pro období nejsou aktivní nebo úplná | Nechte aktivovat pravidla v `Mzdy → Legislativní pravidla mezd`. |
 | Čistá mzda jedné osoby vyšla záporně | Typicky doplatek zdravotního pojištění v měsíci bez peněžního příjmu | Nejde o chybu, vznikla pohledávka za zaměstnancem ([§ 80.11.4](#80114-zaporna-cista-mzda)). |
@@ -526,6 +528,12 @@ Náhled bere všechny osoby, které by vzal mzdový běh za daný měsíc, a uk�
   povolení k pobytu nebo práci, cizí legislativa, formulář A1, zahraniční
   pojištění nebo daňový režim, zahraniční údaj v evidenci), chybějící
   pracovní vztah v měsíci nebo vztah ukončený ve schváleném období,
+- cizince, kterým brání jen občanství nebo povolení k pobytu. Žijí-li
+  a pracují v Česku bez formuláře A1 (typicky agentura s občany Ukrajiny
+  a Slovenska), zaškrtněte **Potvrzuji, že … cizinců … tu žije a pracuje bez
+  formuláře A1**. Doplní se jim česká daňová rezidence (§ 2 odst. 2 ZDP)
+  a česká příslušnost k pojištění (čl. 11 nařízení 883/2004) s poznámkou
+  o potvrzení. Adresa v cizině, A1 nebo cizí režim zůstávají vyloučením,
 - osoby bez zdravotní pojišťovny s odkazem na **Zdravotní pojišťovny
   hromadně**; výchozí stav pojišťovnu nezná, takže ji tato akce nedoplní,
 - osoby bez prohlášení poplatníka.
@@ -584,9 +592,15 @@ je na požádání rozbalí.
 
 Skrytí platí pro všechny další i už existující běhy, dokud ho neobnovíte.
 **Skrýt tento typ ve firmě** platí i pro nové osoby. Skrytá varování se
-nepočítají do kontrol. Souhrnné varování o počtu osob s nepodepsaným
-prohlášením se po skrytí části osob ukáže se sníženým počtem a zmizí, až jsou
-skryté všechny dotčené osoby.
+nepočítají do kontrol. Souhrnná varování o počtu osob (nepodepsané
+prohlášení, rezidence u nepodepsaných, chybějící zdravotní pojišťovna nebo
+příslušnost k sociálnímu pojištění) se po skrytí části osob ukážou se sníženým
+počtem a zmizí, až jsou skryté všechny dotčené osoby.
+
+Varování o chybějící registraci u ČSSZ u dohody bez účasti na pojištění jde
+skrýt po vztazích: použijte ho, když jste registraci podali mimo aplikaci
+(například **Skrýt u vybraných** pro všech 300 dohod najednou). U vztahu
+s účastí na pojištění je to varování s výjimkou a skrýt nejde.
 
 Přehled skrytí v `Mzdy → Nastavení mezd`, záložce **Skrytá varování**, je
 seskupený podle typu, s tím, kdo a kdy varování skryl a proč. Obnovit jde
@@ -653,6 +667,34 @@ vznikl i zanikl v původním programu a jeho účetní obraz je v knihách
 z převodu. Otevřený závazek by trvale znečistil saldo dávno zaplacenými
 částkami. Pro měsíce, které počítá MyÚčto, fungují mzdové příkazy, úhrady
 i saldo dál přes [mzdové příkazy a úhrady](82_Platby_a_uhrady.md).
+
+### 80.11.13 Zákonné výchozí stavy ve výpočtu
+
+Výpočet nechce víc údajů, než vyžaduje zákon. Kde zákon určuje výchozí stav,
+počítá s ním a běh na chybějící údaj jen upozorní souhrnným varováním
+s odkazem na hromadnou opravu:
+
+- **Bez záznamu o prohlášení poplatníka** se osoba počítá jako nepodepsaná
+  (§ 38k ZDP): bez slev a u dohody nebo zaměstnání malého rozsahu pod
+  rozhodnou částkou se daní zvlášť sazbou 15 % (§ 6 odst. 4 ZDP). Zastaví jen
+  prohlášení vedené jako neověřené.
+- **Daňová rezidence** u nepodepsaného prohlášení výpočet nezastaví: bez
+  podpisu se slevy neuplatní a daň je stejná u rezidenta i nerezidenta.
+  Doplňte ji před potvrzením o příjmech nebo podpisem prohlášení.
+- **Zdravotní pojišťovna a příslušnost k sociálnímu pojištění** u dohody:
+  dohoda bez práce v měsíci nebo s příjmem pod rozhodnou částkou účast
+  nezakládá, pojistné nevzniká a výpočet doběhne. Vznikne-li účast, výpočet
+  osobu zastaví. U pracovního poměru se chybějící údaj hlásí jako dřív.
+  Kód pojišťovny vyžaduje registrace u ČSSZ (kód 999, není-li znám)
+  a příslušnost měsíční hlášení JMHZ; to hlídají jejich kontroly.
+- **Počáteční roční úhrny** při převzetí mezd v průběhu roku: záloha, srážka
+  i slevy jsou měsíční, daň se proto počítá od nuly. Sociální pojištění
+  zastaví jen příjem, který mohl dosáhnout ročního maximálního vyměřovacího
+  základu (měsíční základ krát počet měsíců roku). Úhrny potřebuje roční
+  zúčtování a potvrzení o příjmech.
+- **Příspěvek na stravování** před vyhláškou o stravném na nový rok se
+  schválí jako celý zdanitelný a pojistný příjem s poznámkou; osvobozenou
+  část dorovnejte opravou po vyhlášení.
 
 ## 80.12 Související kapitoly
 
