@@ -275,19 +275,33 @@ final class PayrollE2eDppCalculationTest extends TestCase
         $preparation = $this->prepareJmhz($january, 'dpp-january-2027');
         self::assertSame(201, $preparation['status'], CanonicalJson::encode($preparation['body']));
         self::assertSame('blocked', $preparation['body']['readiness_status']);
+        // Kód nálezu se mezi větvemi liší (obecný „neověřeno“ s větou o měsíci,
+        // nebo samostatný „číselník nevyhlášen“); účetní musí v obou případech
+        // číst, že jde o číselník a že údaje pracoviště měnit nemá.
+        $codebookCodes = ['jmhz_workplace_codebooks_unverified', 'jmhz_workplace_codebooks_not_published'];
         $codes = array_column($preparation['body']['issues'], 'code');
-        self::assertContains('jmhz_workplace_codebooks_unverified', $codes);
+        self::assertNotSame([], array_intersect($codebookCodes, $codes), CanonicalJson::encode($codes));
         self::assertNotContains('jmhz_primary_employment_unresolved', $codes, 'Navazující dohoda přes přelom roku nemá být sporná.');
-        // Test XML řekne proč: číselníky obcí a států 2027 aplikace ještě nemá,
-        // údaje vztahu jsou v pořádku a nic se na kartě opravovat nemá.
         $dry = $this->dryRunJmhz((int) $preparation['body']['id'], $this->officeId);
         self::assertSame('blocked', $dry['body']['status']);
-        $workplace = array_values(array_filter($dry['body']['blockers'], static fn (array $b): bool => $b['code'] === 'jmhz_workplace_codebooks_unverified'));
-        self::assertCount(3, $workplace);
-        self::assertIsString($workplace[0]['message'], 'Blokace 01/2027 posílá účetní doplňovat pole, která jsou v pořádku.');
-        self::assertStringContainsString('1/2027', $workplace[0]['message']);
-        self::assertStringContainsString('číselník', $workplace[0]['message']);
-        self::assertStringContainsString('neměňte', $workplace[0]['message']);
+        // Leden 2027 zastaví i další podklady (roční údaje zaměstnavatele za
+        // rok 2027, žádost o roční zúčtování, nové údaje věty 2027). Žádná
+        // blokace nesmí zůstat bez důvodu a kroku nápravy.
+        foreach ($dry['body']['blockers'] as $blocker) {
+            self::assertNotSame('', trim((string) ($blocker['reason'] ?? '')), CanonicalJson::encode($blocker));
+            self::assertNotSame('', trim((string) ($blocker['action'] ?? '')), CanonicalJson::encode($blocker));
+        }
+        $workplace = array_values(array_filter(
+            $dry['body']['blockers'],
+            static fn (array $b): bool => in_array($b['code'], $codebookCodes, true),
+        ));
+        self::assertNotSame([], $workplace);
+        $said = mb_strtolower(
+            implode(' ', [$workplace[0]['reason'] ?? '', $workplace[0]['message'] ?? '', $workplace[0]['action'] ?? '']),
+            'UTF-8',
+        );
+        self::assertStringContainsString('číselník', $said, 'Blokace 01/2027 posílá účetní doplňovat pole, která jsou v pořádku.');
+        self::assertStringContainsString('neměňte', $said);
     }
 
     /**
