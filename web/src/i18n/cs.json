@@ -7619,6 +7619,13 @@
           "later_than_entitled": "Podle dne podpisu náleží sleva už od {month} (§ 38k ZDP). Za měsíce uzavřené schválenou mzdou ji dorovná roční zúčtování.",
           "next_year": "Prohlášení podepsané po lhůtě platí až od dalšího roku (§ 38k odst. 7 ZDP)."
         },
+        "declaration_start": {
+          "employment_start": "Podpis {signed} je do 30 dnů po nástupu {entry}, prohlášení proto platí už od měsíce nástupu: {month} (§ 38k odst. 1 a 4 ZDP).",
+          "year_start": "Podpis {signed} je v roční lhůtě do 15. února, prohlášení proto platí od ledna: {month} (§ 38k odst. 4 ZDP).",
+          "following_month": "Podpis {signed} je po lhůtě 30 dnů od nástupu i po roční lhůtě do 15. února, prohlášení proto platí až od měsíce po podpisu: {month} (§ 38k odst. 7 ZDP).",
+          "frozen": "Mzdy do {day} jsou ale schválené a samy se nepřepočítají, proto je předvyplněno {open}. Slevu za uzavřené měsíce dorovná roční zúčtování. Chcete-li ji promítnout hned, nastavte „Platí od“ na {month} a otevřete opravu běhu za dotčené měsíce.",
+          "closed_period": "Začátek záznamu leží v období uzavřeném schválenou mzdou (do {day}). Schválená mzda se sama nepřepočítá: aby se prohlášení za tyto měsíce projevilo, otevřete opravu mzdového běhu. Bez opravy slevu dorovná až roční zúčtování."
+        },
         "current_from": "platí od {day}",
         "current_none": "k vybranému měsíci nic neplatí",
         "history": "Historie a záznamy - zatím žádný | Historie a záznamy (1) | Historie a záznamy ({count}) | Historie a záznamy ({count})",

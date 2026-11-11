@@ -1046,6 +1046,23 @@ export interface PayrollHealthInsurerBulkResult {
   failed: Array<{ employee_id: number, message: string }>
 }
 
+/**
+ * Od kterého měsíce platí prohlášení podepsané dne `signed_on` (§ 38k ZDP).
+ * `legal_from` je měsíc podle zákona, `open_from` první měsíc od něj, který
+ * není uzavřený schválenou mzdou; liší-li se, je `frozen` true.
+ */
+export interface PayrollTaxDeclarationStart {
+  signed_on: string
+  tax_year: number
+  legal_from: string
+  basis: 'employment_start' | 'year_start' | 'following_month' | 'after_frozen_period'
+  /** Nástup, ke kterému se podpis vztahuje (lhůta 30 dnů), jinak `null`. */
+  entry: string | null
+  open_from: string
+  frozen: boolean
+  frozen_through: string | null
+}
+
 export interface PayrollTaxDeclarationCheck {
   id: number
   /** Zákonný první měsíc; `null` = prohlášení platí až od dalšího roku. */
@@ -8904,6 +8921,16 @@ export const payrollApi = {
       `/payroll/people/${employeeId}/statutory-evidence`,
       { params: { effective_on: effectiveOn } },
     ).then(response => response.data.evidence),
+  /**
+   * První měsíc prohlášení poplatníka podepsaného daného dne (§ 38k ZDP).
+   * Pravidlo drží server (nástupy osoby, lhůty, hranice schválené mzdy);
+   * formulář se jen ptá a nic neodvozuje sám.
+   */
+  taxDeclarationStart: (employeeId: number, signedOn: string) =>
+    api.get<{ start: PayrollTaxDeclarationStart }>(
+      `/payroll/people/${employeeId}/statutory-evidence/tax-declaration-start`,
+      { params: { signed_on: signedOn } },
+    ).then(response => response.data.start),
   saveStatutoryEvidence: (
     employeeId: number,
     payload: PayrollStatutoryEvidencePayload,

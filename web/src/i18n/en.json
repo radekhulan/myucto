@@ -7619,6 +7619,13 @@
           "later_than_entitled": "Based on the signing date the credit is due already from {month} (§ 38k of the Income Tax Act). The annual tax settlement makes it up for months closed by an approved payroll.",
           "next_year": "A declaration signed after the deadline applies only from the next year (§ 38k(7) of the Income Tax Act)."
         },
+        "declaration_start": {
+          "employment_start": "The signature on {signed} is within 30 days of the start on {entry}, so the declaration applies from the month of the start: {month} (Section 38k(1) and (4) of the Income Tax Act).",
+          "year_start": "The signature on {signed} is within the annual deadline of 15 February, so the declaration applies from January: {month} (Section 38k(4) of the Income Tax Act).",
+          "following_month": "The signature on {signed} is after the 30 days from the start and after the annual deadline of 15 February, so the declaration applies from the month after the signature: {month} (Section 38k(7) of the Income Tax Act).",
+          "frozen": "The payroll up to {day} is approved and is not recalculated by itself, so {open} is prefilled. The credit for the closed months is settled by the annual settlement. To apply it right away, set \"Valid from\" to {month} and open a correction of the payroll run for the affected months.",
+          "closed_period": "The record starts in a period closed by approved payroll (up to {day}). Approved payroll is not recalculated by itself: for the declaration to take effect in those months, open a correction of the payroll run. Without a correction the credit is settled only by the annual settlement."
+        },
         "current_from": "valid from {day}",
         "current_none": "nothing applies to the selected month",
         "history": "History and records — none yet | History and records (1) | History and records ({count}) | History and records ({count})",

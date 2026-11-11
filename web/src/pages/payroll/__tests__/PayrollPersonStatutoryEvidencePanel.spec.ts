@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   saveStatutoryEvidence: vi.fn(),
   employerSettings: vi.fn(),
   commandRun: vi.fn(),
+  taxDeclarationStart: vi.fn(),
   canWrite: vi.fn(() => true),
   success: vi.fn(),
   error: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('@/api/payroll', () => ({
     saveStatutoryEvidence: mocks.saveStatutoryEvidence,
     employerSettings: mocks.employerSettings,
     commandRun: mocks.commandRun,
+    taxDeclarationStart: mocks.taxDeclarationStart,
   },
 }))
 
@@ -59,6 +61,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 
 import { defineComponent, h } from 'vue'
 import CountrySelect from '@/components/ui/CountrySelect.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 import { providePersonCardSave, type PersonCardSaveRegistry } from '@/pages/payroll/personCardSave'
 import { resetDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultInsurer'
 import PayrollPersonStatutoryEvidencePanel from '@/pages/payroll/PayrollPersonStatutoryEvidencePanel.vue'
@@ -800,6 +803,98 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     expect(personId).toBe(17)
     // Nedotčené kolekce musí odejít taky — tělo popisuje cílový stav.
     expect(payload.sections.health_coverages).toEqual([])
+  })
+
+  /*
+   * Formulář dřív předvyplnil „Platí od" prvním neuzavřeným měsícem a den
+   * podpisu ho nezměnil. Měsíc teď odvodí server (§ 38k ZDP) a formulář ho
+   * dosadí a vysvětlí; pravidlo se ve frontendu neopisuje.
+   */
+  function dateInput(wrapper: Awaited<ReturnType<typeof startEditing>>, testId: string) {
+    const found = wrapper.findAllComponents(DateInput)
+      .find(component => component.find(`[data-test="${testId}"]`).exists())
+    expect(found, testId).toBeDefined()
+    return found!
+  }
+
+  it('den podpisu prohlášení určí „Platí od" podle odpovědi serveru a vysvětlí proč', async () => {
+    mocks.taxDeclarationStart.mockResolvedValue({
+      signed_on: '2027-01-10',
+      tax_year: 2026,
+      legal_from: '2026-12-01',
+      basis: 'employment_start',
+      entry: '2026-12-15',
+      open_from: '2026-12-01',
+      frozen: false,
+      frozen_through: null,
+    })
+    const wrapper = await startEditing()
+    await wrapper.get('[data-test="add-tax_declarations"]').trigger('click')
+    await wrapper.get('[data-test="tax_declarations-0-status"]').setValue('signed')
+    expect(mocks.taxDeclarationStart).not.toHaveBeenCalled()
+
+    dateInput(wrapper, 'tax_declarations-0-signed_on').vm.$emit('change', '2027-01-10')
+    await flushPromises()
+
+    expect(mocks.taxDeclarationStart).toHaveBeenCalledWith(17, '2027-01-10')
+    expect(dateInput(wrapper, 'tax_declarations-0-effective_from').props('modelValue')).toBe('2026-12-01')
+    const explanation = wrapper.get('[data-test="declaration-start-0"]').text()
+    expect(explanation).toContain('payroll.people.statutory_evidence.declaration_start.employment_start')
+    expect(wrapper.find('[data-test="declaration-start-frozen-0"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="declaration-closed-period-0"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
+    await flushPromises()
+    expect(savedRow('tax_declarations')).toMatchObject({
+      status: 'signed',
+      signed_on: '2027-01-10',
+      effective_from: '2026-12-01',
+    })
+  })
+
+  it('zákonný měsíc uzavřený schválenou mzdou předvyplní první otevřený a ruční přepis do uzavřeného období upozorní na opravu běhu', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence({ frozen_through: '2027-01-31' }))
+    mocks.taxDeclarationStart.mockResolvedValue({
+      signed_on: '2027-01-10',
+      tax_year: 2026,
+      legal_from: '2026-12-01',
+      basis: 'employment_start',
+      entry: '2026-12-15',
+      open_from: '2027-02-01',
+      frozen: true,
+      frozen_through: '2027-01-31',
+    })
+    const wrapper = await startEditing()
+    await wrapper.get('[data-test="add-tax_declarations"]').trigger('click')
+    await wrapper.get('[data-test="tax_declarations-0-status"]').setValue('signed')
+    dateInput(wrapper, 'tax_declarations-0-signed_on').vm.$emit('change', '2027-01-10')
+    await flushPromises()
+
+    expect(dateInput(wrapper, 'tax_declarations-0-effective_from').props('modelValue')).toBe('2027-02-01')
+    expect(wrapper.get('[data-test="declaration-start-frozen-0"]').text())
+      .toContain('payroll.people.statutory_evidence.declaration_start.frozen')
+    expect(wrapper.find('[data-test="declaration-closed-period-0"]').exists()).toBe(false)
+
+    // Účetní začátek ručně přepíše do uzavřeného prosince.
+    dateInput(wrapper, 'tax_declarations-0-effective_from').vm.$emit('update:modelValue', '2026-12-01')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="declaration-closed-period-0"]').text())
+      .toContain('payroll.people.statutory_evidence.declaration_start.closed_period')
+  })
+
+  it('selhání dotazu na začátek prohlášení nechá „Platí od" beze změny', async () => {
+    mocks.taxDeclarationStart.mockRejectedValue(new Error('network'))
+    const wrapper = await startEditing()
+    await wrapper.get('[data-test="add-tax_declarations"]').trigger('click')
+    await wrapper.get('[data-test="tax_declarations-0-status"]').setValue('signed')
+    const before = dateInput(wrapper, 'tax_declarations-0-effective_from').props('modelValue')
+
+    dateInput(wrapper, 'tax_declarations-0-signed_on').vm.$emit('change', '2027-01-10')
+    await flushPromises()
+
+    expect(dateInput(wrapper, 'tax_declarations-0-effective_from').props('modelValue')).toBe(before)
+    expect(wrapper.find('[data-test="declaration-start-0"]').exists()).toBe(false)
   })
 
   it('nabídka důvodů se řídí zvoleným stavem, ne jen názvem pole', async () => {
