@@ -6790,7 +6790,7 @@
       },
       "data_gap_summary": {
         "blocking_title": "Nic nechybí | Chybí 1 údaj, bez kterého měsíc neprojde | Chybí {count} údaje, bez kterých měsíc neprojde | Chybí {count} údajů, bez kterých měsíc neprojde",
-        "blocking_hint": "Bez nich se nedá podat hlášení ani spočítat odvody. Kartu ale uložíte i tak a doplnit je můžete kdykoli.",
+        "blocking_hint": "Mzdy se spočítají i bez nich, ale nepůjde podat přihlášku ani měsíční hlášení. Kartu uložíte i tak a doplnit je můžete kdykoli.",
         "advisory_title": "Nic nechybí | Zbývá doplnit 1 údaj | Zbývají doplnit {count} údaje | Zbývá doplnit {count} údajů",
         "advisory_hint": "Nic z toho měsíc nezastaví. Doplňte je, až bude čas.",
         "open": "Doplnit →"
@@ -10130,6 +10130,8 @@
         "detail_action": "Detail",
         "not_prepared_action": "Kde to připravit",
         "external_action": "Podáno mimo aplikaci",
+        "bulk_external_hint": "Po termínu je {count} povinností bez podání v aplikaci. Co jste podali jinde (například přihlášky na ePortálu ČSSZ), označíte hromadně jako vyřízené mimo aplikaci v panelu Zákonné termíny.",
+        "bulk_external_action": "Hromadně v Zákonných termínech",
         "external_title": "Podáno mimo aplikaci",
         "external_hint": "Hlášení jste odeslali na portálu úřadu, ne z aplikace. Povinnost se uzavře jako splněná; stav podání zůstane, protože aplikace ho neodeslala.",
         "external_filed_on": "Den podání na portálu",
@@ -24100,6 +24102,7 @@
     "no_items": "Žádné položky.",
     "expandable_list": {
       "show_all": "Zobrazit všech {count}",
+      "show_listed": "Zobrazit vypsaných {count} z {total}",
       "collapse": "Sbalit seznam",
       "search": "Hledat podle jména nebo os. čísla",
       "search_label": "Hledat v seznamu",
@@ -36898,6 +36901,7 @@
         "save_links_hint": "Příští import stejné osoby spáruje automaticky podle osobního čísla nebo jména.",
         "adopt_personal_numbers": "Převzít osobní čísla z podkladů",
         "adopt_personal_numbers_hint": "Vztahy s automatickým číslem (1, ZAM-7…) dostanou osobní číslo z podkladů; ručně zadané číslo se nepřepisuje.",
+        "adopt_personal_numbers_ambiguous": "Osobní číslo {numbers} má víc osob, k párování se nepoužilo a nepřevezme se. | Osobní čísla {numbers} má víc osob, k párování se nepoužila a nepřevezmou se.",
         "adopt_monthly_wage": "Převzít měsíční mzdu z podkladů ({count} změn)",
         "adopt_monthly_wage_hint": "Zapíše se jen u osob bez překážky v tabulce Měsíční mzda z podkladů. Chybějící mzda se doplní do platných podmínek vztahu, jiná mzda založí novou verzi podmínek od prvního dne období.",
         "fill_registration": "Doplnit chybějící údaje pro registraci ČSSZ ({count} osob)",
@@ -36910,6 +36914,8 @@
         "rate_wage_formula": "{hours} h × {rate}",
         "rate_wages_title": "Mzda ze sazby a odpracovaných hodin",
         "rate_wages_computed": "Podklady u části osob nemají částku mzdy, jen hodiny a hodinovou sazbu. Import mzdu dopočte jako sazba × odpracované hodiny a vytvoří z ní mzdový vstup (složka Hodinová mzda podle docházky). Osob: {count}, celkem {amount}.",
+        "rate_wages_skipped": " Přeskočené osoby ({count}) vstup nedostanou a do součtu nejsou započtené.",
+        "amount_skipped": "dalších {amount} u přeskočených osob se nepřenese",
         "rate_wages_no_hours": "Mzda nevznikne u osob, které mají sazbu, ale v podkladech ne odpracované hodiny (počet: {count}). Důvod je u osoby v tabulce níže.",
         "rate_wages_hourly_terms": "Mzda nevznikne u osob, jejichž vztah má na kartě hodinové odměňování (počet: {count}): z importovaného souhrnu hodin ho mzdový běh nespočítá. Postup je u osoby v tabulce níže.",
         "probable_from_amount": "{rate}/h (odměna {amount} za {hours} h)",
@@ -37012,6 +37018,7 @@
       "options": {
         "write_summary": "Zapsat souhrn docházky do pracovních měsíců",
         "write_summary_hint": "Hodiny z podkladů se uloží jako souhrn pracovního měsíce každého vztahu, ze kterého vychází měsíční hlášení ČSSZ. Opravná dávka souhrn otevřeného měsíce nahradí, schválený měsíc nezmění.",
+        "write_summary_off": "Bez zápisu souhrnu se odpracované hodiny a dny z podkladů do pracovních měsíců neuloží: budou chybět pro průměr na náhrady i pro měsíční hlášení a měsíce nepůjde schválit.",
         "approve_clean": "Bezchybné měsíce rovnou schválit",
         "approve_clean_hint": "Schválí se jen měsíce, u kterých souhrn nic netvrdí bez podkladu. Ostatní se ve výsledku vypíšou po lidech s důvodem a odkazem na nápravu.",
         "approve_needs_summary": "Schválení stojí na zapsaném souhrnu. Nejdřív zapněte zápis souhrnu do pracovních měsíců.",

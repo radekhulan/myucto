@@ -6790,7 +6790,7 @@
       },
       "data_gap_summary": {
         "blocking_title": "Nothing missing | 1 item is missing that the month cannot go through without | {count} items are missing that the month cannot go through without",
-        "blocking_hint": "Filings cannot be submitted and contributions cannot be calculated without them. You can still save the card and add them any time.",
+        "blocking_hint": "Payroll is calculated without them, but the registration and the monthly report cannot be filed. You can still save the card and add them any time.",
         "advisory_title": "Nothing missing | 1 item left to add | {count} items left to add",
         "advisory_hint": "None of this stops the month. Add them when there is time.",
         "open": "Add →"
@@ -10130,6 +10130,8 @@
         "detail_action": "Detail",
         "not_prepared_action": "Where to prepare it",
         "external_action": "Filed outside the app",
+        "bulk_external_hint": "{count} obligations are past due with no filing in the application. Anything you filed elsewhere (for example registrations on the ČSSZ ePortal) can be marked in bulk as handled outside the application in the Statutory deadlines panel.",
+        "bulk_external_action": "Bulk in Statutory deadlines",
         "external_title": "Filed outside the app",
         "external_hint": "You filed the report on the authority's portal, not from the app. The obligation is closed as fulfilled; the submission status stays as it is, because the app never sent it.",
         "external_filed_on": "Date filed on the portal",
@@ -24100,6 +24102,7 @@
     "no_items": "No items.",
     "expandable_list": {
       "show_all": "Show all {count}",
+      "show_listed": "Show the {count} listed of {total}",
       "collapse": "Collapse list",
       "search": "Search by name or personal number",
       "search_label": "Search the list",
@@ -36898,6 +36901,7 @@
         "save_links_hint": "The next import matches the same person automatically by personal number or name.",
         "adopt_personal_numbers": "Adopt personal numbers from the source files",
         "adopt_personal_numbers_hint": "Employments with an automatic number (1, ZAM-7…) get the personal number from the source files; a manually entered number is never overwritten.",
+        "adopt_personal_numbers_ambiguous": "Personal number {numbers} is shared by several people; it was not used for matching and will not be adopted. | Personal numbers {numbers} are shared by several people; they were not used for matching and will not be adopted.",
         "adopt_monthly_wage": "Adopt the monthly wage from the source files ({count} changes)",
         "adopt_monthly_wage_hint": "Only people without an obstacle in the Monthly wage from source files table are written. A missing wage is added to the current employment terms; a different wage creates a new version of the terms from the first day of the period.",
         "fill_registration": "Fill in missing social security registration data ({count} people)",
@@ -36910,6 +36914,8 @@
         "rate_wage_formula": "{hours} h × {rate}",
         "rate_wages_title": "Wage from the rate and hours worked",
         "rate_wages_computed": "For some people the data has no wage amount, only hours and an hourly rate. The import calculates the wage as rate × hours worked and creates a payroll input from it (component Hourly wage from attendance). People: {count}, total {amount}.",
+        "rate_wages_skipped": " Skipped people ({count}) get no input and are not included in the total.",
+        "amount_skipped": "another {amount} for skipped people will not be transferred",
         "rate_wages_no_hours": "No wage is created for people who have a rate but no hours worked in the data (count: {count}). The reason is shown next to the person in the table below.",
         "rate_wages_hourly_terms": "No wage is created for people whose employment has hourly remuneration on the card (count: {count}): the payroll run cannot calculate it from an imported hours summary. The steps are shown next to the person in the table below.",
         "probable_from_amount": "{rate}/h (pay {amount} for {hours} h)",
@@ -37012,6 +37018,7 @@
       "options": {
         "write_summary": "Write the attendance summary into work months",
         "write_summary_hint": "Hours from the files are stored as the work month summary of each employment, which the monthly ČSSZ report is based on. A corrective batch replaces the summary of an open month and leaves an approved month unchanged.",
+        "write_summary_off": "Without the summary, worked hours and days from the source files are not stored in the work months: they will be missing for the average earnings and the monthly report, and the months cannot be approved.",
         "approve_clean": "Approve clean months right away",
         "approve_clean_hint": "Only months whose summary claims nothing without a source are approved. The others are listed in the result by person, with the reason and a link to fix it.",
         "approve_needs_summary": "Approval builds on the written summary. Turn on writing the summary into work months first.",

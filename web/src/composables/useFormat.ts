@@ -158,6 +158,17 @@ export function formatPeriod(period: string | null | undefined): string {
 }
 
 /**
+ * Období `RRRR-MM` jako „02/2026" — do vět s předložkou („od 02/2026"), kde
+ * by název měsíce v 1. pádě („od únor 2026") byl chybně.
+ */
+export function formatPeriodNumeric(period: string | null | undefined): string {
+  if (!period) return '—'
+  const [y, m] = period.split('-').map(Number)
+  if (!y || !m || m < 1 || m > 12) return period
+  return `${String(m).padStart(2, '0')}/${y}`
+}
+
+/**
  * Rozsah měsíců `RRRR-MM` jako „leden–červenec 2026", přes přelom roku
  * „prosinec 2025–únor 2026", jeden měsíc jako „leden 2026".
  */

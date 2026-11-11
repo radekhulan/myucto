@@ -120,6 +120,12 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
             ->preview($this->supplierId, self::PERIOD_START, null);
         self::assertSame($statutoryPreview['summary']['ready'], $bulk['statutory_defaults'] ?? null, 'Dialog výchozích údajů nabídne jiný počet osob.');
         self::assertEqualsCanonicalizing($statutoryIds, $statutoryPreview['ready_employee_ids']);
+        // Dialog z tlačítka dostane tytéž osoby, takže počty tlačítka a dialogu sedí.
+        $statutoryAction = array_column($statutory['bulk_actions'], null, 'kind')['statutory_defaults'];
+        self::assertEqualsCanonicalizing($statutoryIds, $statutoryAction['employee_ids'] ?? []);
+        $narrowed = $this->container->get(PayrollStatutoryEvidenceBulkDefaults::class)
+            ->preview($this->supplierId, self::PERIOD_START, $statutoryAction['employee_ids']);
+        self::assertSame($statutoryAction['count'], $narrowed['summary']['ready']);
         $insurerPreview = $this->container->get(PayrollHealthInsurerBulkAssignment::class)->preview($this->supplierId, self::PERIOD_START);
         self::assertSame(count($insurerPreview['people']), $bulk['health_insurer'] ?? null, 'Dialog pojišťovny nabídne jiný počet osob.');
         self::assertEqualsCanonicalizing($insurerIds, array_column($insurerPreview['people'], 'employee_id'));

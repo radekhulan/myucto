@@ -25,7 +25,7 @@ import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToa
 import PayrollRunPeopleTable from '@/components/payroll/PayrollRunPeopleTable.vue'
 import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, btnOutlineSmWrap, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatDate, formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
+import { formatDate, formatDateTime, formatMoneyMinor as money, formatPeriod, formatPeriodNumeric } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -2195,7 +2195,7 @@ onMounted(() => { void load() })
                     :data-test="`run-readiness-bulk-action-${action.kind}`"
                   >
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="READINESS_BULK_ICONS[action.kind]" /></svg>
-                    {{ t(`payroll.runs.readiness.bulk.${action.kind}`, { count: action.count, period: formatPeriod(readinessBulkPeriod()) }) }}
+                    {{ t(`payroll.runs.readiness.bulk.${action.kind}`, { count: action.count, period: formatPeriodNumeric(readinessBulkPeriod()) }) }}
                   </RouterLink>
                 </div>
                 <div

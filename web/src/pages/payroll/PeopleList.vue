@@ -259,12 +259,15 @@ const healthInsurerBulkOpen = ref(false)
 const declarationSignBulkOpen = ref(false)
 // Nález kontroly běhu posílá i osoby, kterých se týká (`?employees=1,2`);
 // bez nich dialog nabídne všechny osoby roku.
-const declarationSignEmployeeIds = computed<number[] | null>(() => {
+function bulkEmployeeIds(kind: string): number[] | null {
   const raw = route.query.employees
-  if (route.query.bulk !== 'declaration_signed' || typeof raw !== 'string') return null
+  if (route.query.bulk !== kind || typeof raw !== 'string') return null
   const ids = raw.split(',').map(Number).filter(id => Number.isInteger(id) && id > 0)
   return ids.length > 0 ? ids : null
-})
+}
+const declarationSignEmployeeIds = computed(() => bulkEmployeeIds('declaration_signed'))
+// Z nálezu kontroly běhu: dialog výchozích údajů nabídne tytéž osoby jako tlačítko.
+const statutoryBulkEmployeeIds = ref<number[] | null>(bulkEmployeeIds('statutory_defaults'))
 const canWriteEmployment = computed(() => auth.canWrite('payroll.employment.write'))
 const canQuickEditPerson = computed(() =>
   auth.canWrite('payroll.person.write')
@@ -281,6 +284,7 @@ function openBulkFromQuery(bulk: unknown) {
     statutoryBulkOpen.value = false
     declarationSignBulkOpen.value = true
   } else if (bulk === 'statutory_defaults' && canCreatePerson.value) {
+    statutoryBulkEmployeeIds.value = bulkEmployeeIds('statutory_defaults')
     openWithBulkPeriod(() => { statutoryBulkOpen.value = true })
   } else if (bulk === 'health_insurer' && canQuickEditPerson.value) {
     openWithBulkPeriod(() => { healthInsurerBulkOpen.value = true })
@@ -294,6 +298,19 @@ function openBulkFromQuery(bulk: unknown) {
 }
 openBulkFromQuery(route.query.bulk)
 watch(() => route.query.bulk, openBulkFromQuery)
+// `?bulk=` je jednorázový povel: po zavření dialogu z adresy zmizí, jinak by
+// druhý proklik na tentýž odkaz adresu nezměnil a dialog se znovu neotevřel.
+watch(
+  () => statutoryBulkOpen.value || declarationSignBulkOpen.value || healthInsurerBulkOpen.value
+    || workplaceBulkOpen.value || bulkClosureOpen.value,
+  (open, wasOpen) => {
+    if (open || !wasOpen || (route.query.bulk === undefined && route.query.employees === undefined)) return
+    const query = { ...route.query }
+    delete query.bulk
+    delete query.employees
+    void router.replace({ query })
+  },
+)
 const relationTypes: PayrollRelationType[] = [
   'employment',
   'small_scale_employment',
@@ -2094,9 +2111,9 @@ onMounted(async () => {
     <PayrollStatutoryBulkDefaultsDialog
       v-if="statutoryBulkOpen"
       :effective-on="statutoryBulkEffectiveOn"
-      :employee-ids="null"
+      :employee-ids="statutoryBulkEmployeeIds"
       period-editable
-      @close="statutoryBulkOpen = false"
+      @close="statutoryBulkOpen = false; statutoryBulkEmployeeIds = null"
       @applied="load"
     />
 

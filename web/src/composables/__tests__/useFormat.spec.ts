@@ -11,6 +11,7 @@ import {
   formatNumber,
   formatPercent,
   formatPeriod,
+  formatPeriodNumeric,
   formatUtcDateTime,
   isOverdue,
 } from '@/composables/useFormat'
@@ -95,6 +96,15 @@ describe('locale-aware number formatting', () => {
 
     i18n.global.locale.value = 'en'
     expect(formatCompactNumber(8_000_000)).toBe('8.0M')
+  })
+})
+
+describe('formatPeriodNumeric', () => {
+  it('do vět s předložkou dá MM/RRRR místo měsíce v 1. pádě („od únor")', () => {
+    expect(formatPeriodNumeric('2026-02')).toBe('02/2026')
+    expect(formatPeriodNumeric('2026-11')).toBe('11/2026')
+    expect(formatPeriodNumeric('nesmysl')).toBe('nesmysl')
+    expect(formatPeriodNumeric(null)).toBe('—')
   })
 })
 

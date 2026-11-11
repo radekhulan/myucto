@@ -220,6 +220,31 @@ final class PayrollRunReadinessPredictionTest extends TestCase
         }
     }
 
+    /**
+     * Agentura s DPP: „chybí jméno a příjmení" u osob, jejichž jméno je na
+     * kartě vidět. Hlášení bere křestní jméno a příjmení z identity platné
+     * v období; nález říká, že identita začíná až později. Mzdy to nezdrží.
+     */
+    public function testMissingNameExplainsIdentityStartingLater(): void
+    {
+        [$laterId] = $this->employment('Syntetická Pozdní identita');
+        [$noneId] = $this->employment('Syntetický Bez identity');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_identity_history (supplier_id, employee_id, full_name, first_name, last_name, effective_from)
+             VALUES (?, ?, "Syntetická Pozdní identita", "Syntetická", "Pozdní identita", "2026-03-16")'
+        )->execute([$this->supplierId, $laterId]);
+
+        $result = $this->readiness->inspect($this->supplierId, '2026-02-01', '2026-03-10');
+        $finding = self::finding($result['findings'], 'person_data_gap');
+        self::assertNotNull($finding, json_encode(array_column($result['findings'], 'code')));
+        self::assertSame('anytime', $finding['impact']);
+        self::assertStringNotContainsString('spočítat odvody', $finding['message']);
+        self::assertStringContainsString('Mzdy se spočítají i bez nich', $finding['message']);
+        $messages = array_column($finding['entities'], 'message', 'entity_id');
+        self::assertStringContainsString('identita je zapsaná až od 16. 3. 2026', $messages[$laterId]);
+        self::assertStringContainsString('křestní jméno a příjmení zvlášť', $messages[$noneId]);
+    }
+
     public function testPeopleListRejectsRunFindingFilterWithoutFindingOrPeriod(): void
     {
         foreach ([

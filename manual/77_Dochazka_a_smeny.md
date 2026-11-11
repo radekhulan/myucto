@@ -61,6 +61,15 @@ přepnout vztah s hodinami z importu na hodinové odměňování bez výslovnéh
 potvrzení.
 Podrobnosti jsou v [Zaměstnancích](86_Zamestnanci.md#866-krok-za-krokem-zmena-mzdy-uvazku-nebo-podminek-vztahu).
 
+Nesou-li podklady odpracované hodiny nebo dny, je volba **Zapsat souhrn
+docházky do pracovních měsíců** v kroku Souhrn zapnutá. Bez ní se hodiny
+a dny do pracovních měsíců neuloží a chybí pro průměr na náhrady i pro
+měsíční hlášení. Schválený měsíc import nezmění. Volba **Převzít osobní
+čísla z podkladů** přeskočí číslo, které má ve firmě nebo v podkladech víc
+osob (například „1“); takové číslo se nepoužije ani k párování. Součty
+v souhrnu počítají jen osoby, které vstup opravdu dostanou. Složku, jejíž
+sloupec je v celém souboru prázdný, import nehlásí ani nezakládá.
+
 Nahoře na stránce je průvodce **Jak zpracovat měsíc** se třemi kroky:
 odpracovaný čas, nepřítomnosti a schválení měsíce všem.
 

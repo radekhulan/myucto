@@ -363,7 +363,7 @@ final class PayrollRunReadinessService
             static function (array $finding): array {
                 $bulkActions = self::bulkActions($finding);
                 $requiresOverride = ($finding['requires_override'] ?? false) === true;
-                unset($finding['gap_totals'], $finding['bulk_employee_ids'], $finding['bulk_totals'], $finding['requires_override']);
+                unset($finding['gap_totals'], $finding['bulk_employee_ids'], $finding['bulk_totals'], $finding['bulk_ids'], $finding['requires_override']);
 
                 return $finding + [
                     'hideable' => false,
@@ -473,9 +473,13 @@ final class PayrollRunReadinessService
             /** @var array<string,int> $totals */
             $totals = $finding['bulk_totals'] ?? [];
             $actions = [];
+            /** @var array<string,list<int>> $ids */
+            $ids = $finding['bulk_ids'] ?? [];
             foreach (['statutory_defaults', 'health_insurer'] as $kind) {
                 if (($totals[$kind] ?? 0) > 0) {
-                    $actions[] = ['kind' => $kind, 'count' => $totals[$kind]];
+                    // Dialog se zúží na tytéž osoby, aby sliboval stejný počet jako tlačítko.
+                    $actions[] = ['kind' => $kind, 'count' => $totals[$kind]]
+                        + (($ids[$kind] ?? []) === [] ? [] : ['employee_ids' => $ids[$kind]]);
                 }
             }
 
@@ -994,6 +998,8 @@ final class PayrollRunReadinessService
         ), 'bulk_totals' => [
             'statutory_defaults' => count($statutoryPeople),
             'health_insurer' => count($insurerPeople),
+        ], 'bulk_ids' => [
+            'statutory_defaults' => array_map('intval', array_keys($statutoryPeople)),
         ]];
     }
 
@@ -1322,12 +1328,16 @@ final class PayrollRunReadinessService
             return null;
         }
 
+        $periodEnd = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+        $laterNames = $this->laterIdentityStarts($supplierId, $people, $periodEnd);
+        $labels = static fn (array $person): string => implode(', ', array_map(
+            static fn (string $gap): string => $gap === 'name'
+                ? self::nameGapLabel($laterNames[(int) $person['id']] ?? null)
+                : self::gapLabel($gap),
+            $person['gaps'],
+        ));
         $named = array_map(
-            static fn (array $person): string => sprintf(
-                '%s (%s)',
-                $person['full_name'],
-                implode(', ', array_map(self::gapLabel(...), $person['gaps'])),
-            ),
+            static fn (array $person): string => sprintf('%s (%s)', $person['full_name'], $labels($person)),
             $people,
         );
         // Jmen je nejvýš MAX_ENTITIES, počet je ale celkový — „25×" u firmy,
@@ -1338,8 +1348,9 @@ final class PayrollRunReadinessService
         return ['gap_totals' => $gaps['gap_totals'] ?? []] + self::finding(
             'person_data_gap',
             sprintf(
-                'Za období %s chybí zákonné údaje u těchto zaměstnanců: %s%s. Bez nich se '
-                . 'nedá podat hlášení ani spočítat odvody. Odkaz u osoby otevře místo, kde '
+                'Za období %s chybí zákonné údaje u těchto zaměstnanců: %s%s. Mzdy se '
+                . 'spočítají i bez nich, ale bez nich nepůjde podat přihlášku ani měsíční '
+                . 'hlášení; doplňte je před podáním. Odkaz u osoby otevře místo, kde '
                 . 'se údaj doplňuje.',
                 substr($periodStart, 0, 7),
                 implode('; ', $named),
@@ -1352,17 +1363,65 @@ final class PayrollRunReadinessService
                     'entity_type' => 'employee',
                     'entity_id' => $person['id'],
                     'label' => $person['full_name'],
-                    'message' => sprintf(
-                        '%s: chybí %s.',
-                        $person['full_name'],
-                        implode(', ', array_map(self::gapLabel(...), $person['gaps'])),
-                    ),
+                    'message' => sprintf('%s: chybí %s.', $person['full_name'], $labels($person)),
                     'gaps' => $person['gaps'],
                     'remediation_path' => self::gapPath($person['id'], $person['gaps'][0] ?? null),
                 ],
                 $people,
             ),
         );
+    }
+
+    /**
+     * Jméno je na kartě vidět (`full_name`), hlášení ale bere křestní jméno
+     * a příjmení z historie identity platné v období. Chybí-li, bývá identita
+     * zapsaná až od pozdějšího nástupu.
+     */
+    private static function nameGapLabel(?string $laterFrom): string
+    {
+        if ($laterFrom === null) {
+            return 'křestní jméno a příjmení zvlášť v identitě osoby (z ní je bere hlášení)';
+        }
+        [$year, $month, $day] = array_map('intval', explode('-', $laterFrom));
+
+        return sprintf(
+            'křestní jméno a příjmení v identitě platné za období (identita je zapsaná až od %d. %d. %d)',
+            $day,
+            $month,
+            $year,
+        );
+    }
+
+    /**
+     * Nejbližší pozdější začátek úplné identity u osob, kterým v období chybí jméno.
+     *
+     * @param list<array{id:int|string,gaps:list<string>}> $people
+     * @return array<int,string>
+     */
+    private function laterIdentityStarts(int $supplierId, array $people, string $periodEnd): array
+    {
+        $ids = array_values(array_map(
+            static fn (array $person): int => (int) $person['id'],
+            array_filter($people, static fn (array $person): bool => in_array('name', $person['gaps'], true)),
+        ));
+        if ($ids === []) {
+            return [];
+        }
+        try {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT employee_id, MIN(effective_from) FROM payroll_person_identity_history
+                  WHERE supplier_id = ? AND employee_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')
+                    AND first_name IS NOT NULL AND first_name <> \'\'
+                    AND last_name IS NOT NULL AND last_name <> \'\'
+                    AND effective_from > ?
+                  GROUP BY employee_id',
+            );
+            $stmt->execute([$supplierId, ...$ids, $periodEnd]);
+
+            return array_map('strval', $stmt->fetchAll(\PDO::FETCH_KEY_PAIR));
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     /** Název chybějícího údaje do věty nálezu (klíče {@see PayrollPersonDataGapCatalog}). */
