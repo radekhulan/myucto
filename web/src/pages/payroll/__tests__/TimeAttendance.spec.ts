@@ -159,6 +159,25 @@ afterEach(() => {
 })
 
 describe('TimeAttendance', () => {
+  it('posune editor přidání času z řádku do zobrazení', async () => {
+    m.timeMonth.mockResolvedValue({ items: [row(12, 'Syntetická Osoba')], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    const original = HTMLElement.prototype.scrollIntoView
+    const scrollIntoView = vi.fn()
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    try {
+      await openRowEditor(wrapper)
+      const editor = wrapper.get('[data-test="time-editor-timezone"]').element.closest('section')
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+      expect(scrollIntoView.mock.contexts[0]).toBe(editor)
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+      wrapper.unmount()
+    }
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)

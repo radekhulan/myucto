@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
@@ -58,7 +58,9 @@ import { healthPaymentStatus, localToday } from './healthPaymentStatus'
  */
 const props = defineProps<{
   mode: PayrollSubmissionAgendaGroup
+  submissionId?: number | null
 }>()
+const emit = defineEmits<{ 'close-submission': [] }>()
 
 const { locale, t } = useI18n()
 const {
@@ -163,6 +165,7 @@ const jmhzBlockedOffices = ref<Array<{
   message: string
 }>>([])
 const detail = ref<PayrollSubmissionDetail | null>(null)
+const detailPanel = ref<HTMLElement | null>(null)
 const detailLoadingId = ref<number | null>(null)
 const detailError = ref('')
 /* Detail se kreslí u svého řádku, takže je potřeba vědět, který to je. */
@@ -399,16 +402,25 @@ function readableBytes(bytes: number): string {
 async function openDetail(item: PayrollSubmissionOverviewItem) {
   if (!item.latest_submission || detailLoadingId.value !== null) return
   if (expandedId.value === item.id) {
-    closeDetail()
+    closeDetail(true)
     return
   }
+  await openSubmission(item.latest_submission.id, item.id)
+}
+
+async function openSubmission(submissionId: number, obligationId: number | null = null) {
   detailError.value = ''
   artifactDownloadError.value = ''
-  expandedId.value = item.id
+  expandedId.value = obligationId
   detail.value = null
-  detailLoadingId.value = item.latest_submission.id
+  detailLoadingId.value = submissionId
   try {
-    detail.value = await payrollApi.submissionDetail(item.latest_submission.id)
+    detail.value = await payrollApi.submissionDetail(submissionId)
+    expandedId.value = detail.value.submission.obligation_id
+    if (obligationId === null) {
+      await nextTick()
+      detailPanel.value?.scrollIntoView?.({ block: 'start' })
+    }
   } catch (exception) {
     detail.value = null
     detailError.value = apiErrorMessage(
@@ -423,10 +435,11 @@ async function openDetail(item: PayrollSubmissionOverviewItem) {
 /** Detail podání po ručním přijetí: přenačte se seznam i otevřený detail. */
 async function afterManualAcceptance(item: PayrollSubmissionOverviewItem | undefined) {
   await load()
-  if (item) await openDetail(item)
+  if (item && expandedId.value !== item.id) await openDetail(item)
 }
 
-function closeDetail() {
+function closeDetail(clearRequest = false) {
+  if (clearRequest) emit('close-submission')
   expandedId.value = null
   detail.value = null
   detailError.value = ''
@@ -772,6 +785,7 @@ async function load() {
     loading.value = false
     loadedOnce.value = true
   }
+  if (props.submissionId) await openSubmission(props.submissionId)
 }
 
 function goToPage(nextPage: number) {
@@ -783,6 +797,9 @@ function goToPage(nextPage: number) {
 watch([environment, period, () => props.mode], () => {
   offset.value = 0
   void load()
+})
+watch(() => props.submissionId, id => {
+  if (id && !loading.value) void openSubmission(id)
 })
 onMounted(load)
 // Po odeslání v jiném okně (datová schránka, fronta) se obsah jen zašedne
@@ -1405,6 +1422,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
 
       <section
         v-if="detail"
+        ref="detailPanel"
         class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm"
         data-test="submission-detail"
       >
@@ -1446,7 +1464,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
               />
             </div>
           </div>
-          <button type="button" :class="btnOutline('neutral')" @click="closeDetail">
+          <button type="button" :class="btnOutline('neutral')" @click="closeDetail(true)">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.x" />
             </svg>

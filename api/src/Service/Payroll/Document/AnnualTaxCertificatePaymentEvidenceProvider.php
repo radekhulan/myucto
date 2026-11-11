@@ -278,7 +278,10 @@ final class AnnualTaxCertificatePaymentEvidenceProvider
             ) {
                 throw new \DomainException(sprintf(
                     'Čistá mzda nebyla podle neměnné evidence plně vyplacena '
-                    . 'do %s.',
+                    . 'do %s. V Mzdy > Platby > Spárování úhrad vyberte '
+                    . 'platbu zaměstnance a spárujte skutečnou úhradu '
+                    . 's bankovním pohybem nebo zaúčtovaným pokladním dokladem. '
+                    . 'Poté vytvořte potvrzení znovu. Samotný export plateb úhradu nedokládá.',
                     self::displayDate($cutoff),
                 ));
             }

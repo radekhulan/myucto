@@ -106,6 +106,25 @@ async function mountReadOnly(items: PayrollInstitutionAccount[] = [account()]) {
 }
 
 describe('HealthInsurerAccounts', () => {
+  it('posune nový účet instituce do zobrazení', async () => {
+    const wrapper = await mountComponent()
+    const original = HTMLElement.prototype.scrollIntoView
+    const scrollIntoView = vi.fn()
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    try {
+      await wrapper.findAll('button')
+        .find(button => button.text() === 'payroll.employer.health_accounts.add')!.trigger('click')
+      await flushPromises()
+      const editor = wrapper.get('[data-testid="health-account-create"]')
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+      expect(scrollIntoView.mock.contexts[0]).toBe(editor.element)
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+      wrapper.unmount()
+    }
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     m.routeHash = ''

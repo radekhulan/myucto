@@ -27,7 +27,7 @@
  * odeslání". Doložený kanál je datová schránka, takže tlačítko stojí přímo
  * u připraveného podání.
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
 import { personalNumberLabel } from './employmentLifecycleUi'
@@ -123,6 +123,7 @@ const receiptReason = ref<Record<string, string>>({})
 const draftDloLeave = ref<PayrollSicknessWorkInterval[]>([])
 const draftDloShifts = ref<PayrollSicknessWorkInterval[]>([])
 const error = ref('')
+const errorSection = ref<HTMLElement | null>(null)
 const success = ref('')
 
 /**
@@ -618,6 +619,7 @@ async function preview(
     previewXml.value = null
     error.value = message(err)
     errorCase.value = item
+    void nextTick(() => errorSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }))
   } finally {
     busyId.value = null
   }
@@ -1151,7 +1153,7 @@ onMounted(() => void load())
       />
     </div>
 
-    <div v-if="error" class="rounded-lg bg-red-50 p-3 text-sm text-red-700" data-test="sickness-case-error-box">
+    <div v-if="error" ref="errorSection" class="scroll-mt-24 rounded-lg bg-red-50 p-3 text-sm text-red-700" data-test="sickness-case-error-box">
       <p class="whitespace-pre-line" data-test="sickness-case-error">{{ error }}</p>
       <div v-if="errorFix" class="mt-2 flex flex-wrap items-center gap-2" data-test="sickness-case-error-fix">
         <span class="text-xs">

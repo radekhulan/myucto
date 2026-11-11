@@ -1148,7 +1148,20 @@ pojišťovně se odvozují od **skutečného** nástupu, jinak od plánovaného.
 
 ### 86.12.9 Sjednané podmínky, souběhy a srážková daň
 
-Každé uložení změny podmínek založí další účinný interval a předchozí uzavře
+Chybí-li u pracovního poměru, zaměstnání malého rozsahu, DPP nebo DPČ obec
+nebo stát pracoviště pro formulář JMHZ s vykonávanou pozicí, karta vztahu
+na to upozorní i při sbalených dalších údajích. Tlačítko **Doplnit pracoviště**
+otevře přímo chybějící pole.
+Obec vyberte z číselníku, doplňte stát a uložte podmínky.
+
+Zpětná oprava platné verze podmínek i hromadné doplnění pracoviště vyžadují
+otevřenou opravu všech vyúčtovaných měsíců, do kterých tato verze zasahuje.
+Otevření opravy dubna nestačí, pokud stejná verze platí i ve vyúčtovaném
+březnu. Po změně se otevřená revize označí jako zastaralá: zvolte
+**Obnovit podklady**, mzdy znovu přepočítejte a novou revizi schvalte.
+Změnu platnou až do budoucna uložte jako novou verzi podmínek.
+
+Uložení nové verze podmínek založí další účinný interval a předchozí uzavře
 dnem před novou účinností; starší mzdové období tak pozdější změna nepřepíše.
 Historie drží uzavření smlouvy, plánovaný a skutečný nástup a dobu určitou,
 úvazek, týdenní hodiny, místo práce, pravidelné pracoviště, CZ-ISCO a druh
@@ -1501,6 +1514,15 @@ zákoníku práce; ve formuláři potvrzení je volba zamčená) a založí se
 proplacení dovolené a odstupné jako vstupy posledního běhu. Schválení A2
 i vydání potvrzení odmítne údaj, který záznamu odporuje. Bez záznamu se obě
 místa vyplňují ručně.
+
+Blok **Navazující úkony po skončení** nabízí odkazy na **Podání > ELDP**
+s předvybranou osobou, vztahem a rokem skončení, na **Dokumenty při skončení
+vztahu** s potvrzením o zaměstnání a pro Úřad práce a na roční **Dokumenty**
+s potvrzením o zdanitelných příjmech. Odkazy samy dokumenty nevytvářejí.
+U sbaleného skončeného vztahu nejprve otevřete jeho detail. Pokud daňové
+potvrzení hlásí nedoloženou úhradu mzdy, v **Mzdy > Platby > Spárování úhrad**
+spárujte skutečnou úhradu s bankovním pohybem nebo zaúčtovaným pokladním
+dokladem a pak potvrzení vytvořte znovu. Export plateb úhradu nedokládá.
 
 #### Způsob a důvod skončení
 

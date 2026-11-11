@@ -35,6 +35,7 @@ final class PayrollRunCalculationPipeline
         ?int $supplierId = null,
         ?int $revisionId = null,
         ?int $actorUserId = null,
+        bool $persist = true,
     ): array
     {
         $snapshot = self::object($snapshot, 'snapshot');
@@ -52,7 +53,7 @@ final class PayrollRunCalculationPipeline
             $baseResult = $result;
             $result['statutory'] = $this->statutory->calculateAndPersist(
                 $supplierId ?? throw new \LogicException('Chybí firma zákonného výpočtu.'),
-                $revisionId ?? throw new \LogicException('Chybí revize zákonného výpočtu.'),
+                $revisionId ?? ($persist ? throw new \LogicException('Chybí revize zákonného výpočtu.') : 0),
                 $actorUserId,
                 $snapshot,
                 $result,
@@ -63,6 +64,7 @@ final class PayrollRunCalculationPipeline
                         $netBeforeDeductions,
                         $statutoryShares,
                     ),
+                $persist,
             );
             $result = $this->attachStatutoryPeople($result);
         }

@@ -389,6 +389,35 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         self::assertSame('Vyřídí se v kartě zaměstnance.', $item['channel']['note']);
     }
 
+    public function testEldpChecklistOpensStatementForThePersonEmploymentAndEndYear(): void
+    {
+        $deadline = $this->checklistItem('eldp_submission');
+        $deadline['employment_end_date'] = '2025-12-31';
+        $service = $this->service(deadlineItems: [$deadline]);
+
+        $item = $this->onlyItem($service, 'checklist');
+
+        self::assertSame(
+            '/payroll/submissions/eldp?person=3&employment=4&year=2025',
+            $item['action']['path'],
+        );
+        self::assertSame('Otevřít evidenční listy', $item['action']['label']);
+        self::assertStringNotContainsString('kartě zaměstnance', $item['document']['note']);
+        self::assertStringNotContainsString('kartě zaměstnance', $item['channel']['note']);
+    }
+
+    public function testTerminationChecklistOpensExitDocumentsForTheCorrectEmployment(): void
+    {
+        $service = $this->service(deadlineItems: [$this->checklistItem('termination_document')]);
+
+        $item = $this->onlyItem($service, 'checklist');
+
+        self::assertSame(
+            '/payroll/people?person=3&employment=4&panel=exit_documents',
+            $item['action']['path'],
+        );
+    }
+
     /**
      * REGZEC nemá žádnou odesílací cestu (appka umí jen náhled) — kanál je
      * proto „netýká se", ne „neznámo". Důvod zůstává v `action.reason`.

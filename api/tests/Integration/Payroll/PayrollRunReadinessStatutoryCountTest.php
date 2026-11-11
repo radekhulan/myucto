@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
+use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -32,6 +34,65 @@ final class PayrollRunReadinessStatutoryCountTest extends TestCase
     protected function tearDown(): void
     {
         $this->tearDownPayrollFullFlow();
+    }
+
+    public function testMissingPayoutRuleWarnsBeforeRunOnlyForPeopleWhoNeedIt(): void
+    {
+        $officeId = $this->createOffice('PAY', 'Syntetická účtárna', '1100001237');
+        $this->configureSocialInsuranceOutput($officeId);
+        $this->configureHealthInsuranceOutput();
+        $componentId = $this->createComponent('MZDA_MESICNI_PAY', 'base_wage', 'regular');
+        $missing = $this->createEmployment($officeId, 'Syntetická Bez pravidla', 1, 'hpp', 'employment', 40, 10_000, true, self::PERIOD_START);
+        $zero = $this->createEmployment($officeId, 'Syntetická Nulová', 2, 'dpp', 'dpp', 10, 2_500, false, self::PERIOD_START);
+        $cash = $this->createEmployment($officeId, 'Syntetická Hotovost', 3, 'hpp', 'employment', 40, 10_000, true, self::PERIOD_START);
+        $overdrawn = $this->createEmployment($officeId, 'Syntetická Záporná', 4, 'hpp', 'employment', 40, 10_000, true, self::PERIOD_START, healthTopUpResponsibility: 'employee');
+        $workdays = self::workdays(self::PERIOD);
+        foreach ([$missing, $zero, $cash, $overdrawn] as $person) {
+            $this->publishShifts($person['employment_id'], $workdays);
+            self::assertSame(200, $this->approveTimeMonth($person['employment_id'], self::PERIOD, $workdays)->getStatusCode());
+            $this->createApprovedInput($person, $componentId, in_array($person, [$zero, $overdrawn], true) ? 0 : 4_500_000, 'pay-' . $person['employee_id'], self::PERIOD_START);
+        }
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payout_rules
+                (supplier_id, employee_id, allocation_reference, destination_kind, allocation_kind)
+             VALUES (?, ?, "synthetic-cash", "cash", "remainder")'
+        )->execute([$this->supplierId, $cash['employee_id']]);
+
+        $readiness = $this->container->get(PayrollRunReadinessService::class);
+        $result = $readiness->inspect($this->supplierId, self::PERIOD_START, self::PAYDAY);
+        $finding = array_column($result['findings'], null, 'code')['payout_rule_missing'] ?? null;
+        self::assertNotNull($finding);
+        self::assertSame('warning', $finding['severity']);
+        self::assertSame('revision', $finding['impact']);
+        self::assertSame('setup', $finding['scope']);
+        self::assertSame(1, $finding['count']);
+        self::assertSame([$missing['employee_id']], array_column($finding['entities'], 'entity_id'));
+        self::assertSame('Syntetická Bez pravidla', $finding['entities'][0]['label']);
+        self::assertSame(
+            "/payroll/people?person={$missing['employee_id']}&panel=accounts",
+            $finding['entities'][0]['remediation_path'],
+        );
+        self::assertStringContainsString('přípravu plateb', $finding['message']);
+        self::assertStringContainsString('opravnou revizi', $finding['message']);
+        self::assertTrue($result['ready']);
+        self::assertSame(
+            [$missing['employee_id']],
+            $readiness->findingEmployeeIds($this->supplierId, self::PERIOD_START, self::PAYDAY, 'payout_rule_missing'),
+        );
+        $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
+            ->build($this->supplierId, self::PERIOD_START, self::PAYDAY);
+        $preview = $this->container->get(PayrollRunCalculationPipeline::class)
+            ->calculate($snapshot->data, $this->supplierId, persist: false);
+        self::assertSame('calculated', $preview['statutory']['status']);
+        $people = array_column($preview['people'], null, 'employee_id');
+        self::assertGreaterThan(0, $people[$missing['employee_id']]['payable_after_enforcement_minor']);
+        self::assertSame(0, $people[$zero['employee_id']]['payable_after_enforcement_minor']);
+        self::assertLessThan(0, $people[$overdrawn['employee_id']]['payable_after_enforcement_minor']);
+        foreach (['payroll_runs', 'payroll_run_revisions', 'payroll_statutory_results', 'payroll_payment_liabilities'] as $table) {
+            $statement = $this->db->pdo()->prepare("SELECT COUNT(*) FROM {$table} WHERE supplier_id = ?");
+            $statement->execute([$this->supplierId]);
+            self::assertSame(0, (int) $statement->fetchColumn(), $table);
+        }
     }
 
     /**

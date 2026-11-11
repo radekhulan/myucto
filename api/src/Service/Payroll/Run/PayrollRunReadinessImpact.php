@@ -97,6 +97,7 @@ final class PayrollRunReadinessImpact
         // V běhu je to varování bez povinné výjimky: schválit jde, ale
         // doplnění po zamknutí vstupů stojí opravnou revizi.
         'time_month_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'hourly_claim_component_conflict' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
         // Vztah bez schválené složky výpočet neprojde (zákonný výpočet skončí
         // ruční kontrolou „chybí schválená mzdová složka"), i když snímek sám
         // to hlásí jen jako varování. Cesta ven: zadat složku, případně 0 Kč.
@@ -123,6 +124,7 @@ final class PayrollRunReadinessImpact
         'dpc_weekly_average_exceeded' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'dpc_weekly_average_manual_review_required' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'recurring_component_without_input' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'payout_rule_missing' => [self::IMPACT_REVISION, self::SCOPE_SETUP],
         'missing_effective_employment_term' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'part_time_discount_intent_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'part_time_discount_transitional_window' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],

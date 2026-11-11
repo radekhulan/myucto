@@ -161,9 +161,33 @@ final class PayrollRunPaymentPreparationService
      */
     private function assertPayoutRules(array $inputSnapshot, array $withoutPayout = []): void
     {
+        $missing = array_column(self::missingPayoutRules($inputSnapshot, $withoutPayout), 'label');
+        if ($missing === []) {
+            return;
+        }
+        sort($missing, SORT_STRING);
+
+        throw new \DomainException(sprintf(
+            count($missing) === 1
+                ? 'Platby nelze připravit: %s nemá nastavené výplatní pravidlo, '
+                    . 'takže není kam poslat čistou mzdu. Doplňte mu výplatní '
+                    . 'pravidlo v kartě zaměstnance, pak u mzdového běhu '
+                    . 'vyžádejte opravu a znovu ho spočítejte - do zmrazených '
+                    . 'podkladů se nové pravidlo dostane až novou revizí.'
+                : 'Platby nelze připravit: výplatní pravidlo chybí těmto lidem: %s. '
+                    . 'Není kam poslat jejich čistou mzdu. Doplňte jim výplatní '
+                    . 'pravidlo v kartě zaměstnance, pak u mzdového běhu '
+                    . 'vyžádejte opravu a znovu ho spočítejte - do zmrazených '
+                    . 'podkladů se nová pravidla dostanou až novou revizí.',
+            implode(', ', $missing),
+        ));
+    }
+
+    public static function missingPayoutRules(array $inputSnapshot, array $withoutPayout = []): array
+    {
         $people = $inputSnapshot['people'] ?? null;
         if (!is_array($people)) {
-            return;
+            return [];
         }
         $missing = [];
         foreach ($people as $person) {
@@ -183,28 +207,15 @@ final class PayrollRunPaymentPreparationService
                 continue;
             }
             $name = $employee['full_name'] ?? null;
-            $missing[] = is_string($name) && trim($name) !== ''
-                ? trim($name)
-                : "zaměstnanec č. {$employeeId}";
+            $missing[] = [
+                'entity_type' => 'employee',
+                'entity_id' => $employeeId,
+                'label' => is_string($name) && trim($name) !== ''
+                    ? trim($name)
+                    : "zaměstnanec č. {$employeeId}",
+            ];
         }
-        if ($missing === []) {
-            return;
-        }
-        sort($missing, SORT_STRING);
 
-        throw new \DomainException(sprintf(
-            count($missing) === 1
-                ? 'Platby nelze připravit: %s nemá nastavené výplatní pravidlo, '
-                    . 'takže není kam poslat čistou mzdu. Doplňte mu výplatní '
-                    . 'pravidlo v kartě zaměstnance, pak u mzdového běhu '
-                    . 'vyžádejte opravu a znovu ho spočítejte — do zmrazených '
-                    . 'podkladů se nové pravidlo dostane až novou revizí.'
-                : 'Platby nelze připravit: výplatní pravidlo chybí těmto lidem: %s. '
-                    . 'Není kam poslat jejich čistou mzdu. Doplňte jim výplatní '
-                    . 'pravidlo v kartě zaměstnance, pak u mzdového běhu '
-                    . 'vyžádejte opravu a znovu ho spočítejte — do zmrazených '
-                    . 'podkladů se nová pravidla dostanou až novou revizí.',
-            implode(', ', $missing),
-        ));
+        return $missing;
     }
 }

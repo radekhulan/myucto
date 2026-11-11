@@ -541,7 +541,7 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
       .toContain('payroll.submissions.overview.mobile_key_batch.sent_summary')
   })
 
-  it('ukáže v detailu lidské stavy a technický kód problému oddělí od hlavní zprávy', async () => {
+  it.each([false, true])('ukáže detail po otevření odkazem (%s) i tlačítkem a oddělí technický kód', async (fromLink) => {
     m.submissionOverview.mockResolvedValue({
       items: [{
         id: 7,
@@ -651,11 +651,23 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     })
 
     const wrapper = mount(PayrollSubmissionOverviewPanel, {
-      props: { mode: 'other' },
+      props: { mode: 'other', submissionId: fromLink ? 56 : null },
     })
     await flushPromises()
+    if (!fromLink) {
+      await wrapper.findAll('[data-test="submission-detail-open"]')[0]!.trigger('click')
+      await flushPromises()
+    }
+    expect(wrapper.find('[data-test="submission-detail"]').exists()).toBe(true)
+
     await wrapper.findAll('[data-test="submission-detail-open"]')[0]!.trigger('click')
     await flushPromises()
+    expect(wrapper.find('[data-test="submission-detail"]').exists()).toBe(false)
+    expect(wrapper.emitted('close-submission')).toHaveLength(1)
+    await wrapper.setProps({ submissionId: null })
+    await wrapper.setProps({ submissionId: 56 })
+    await flushPromises()
+    expect(m.submissionDetail).toHaveBeenLastCalledWith(56)
 
     const detail = wrapper.get('[data-test="submission-detail"]')
     expect(detail.text()).toContain('payroll.submissions.overview.submission_kind.correction')

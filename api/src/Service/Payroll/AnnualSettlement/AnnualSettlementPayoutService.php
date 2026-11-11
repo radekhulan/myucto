@@ -58,6 +58,11 @@ final class AnnualSettlementPayoutService
         );
     }
 
+    public function pendingPayoutsForPeriod(int $supplierId, string $periodStart): array
+    {
+        return $this->settlements->payableOutcomesForPeriod($supplierId, 0, $periodStart);
+    }
+
     /**
      * Zapíše, čím se doplatek vyplatil.
      *

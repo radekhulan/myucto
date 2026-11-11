@@ -1051,10 +1051,16 @@ Jsou na to tři cesty a liší se tím, co po nich zůstane:
 | **Smazat pokus** | u pokusu v historii na záložce **Odesláno** | Řádek z historie zmizí úplně. Zůstane po něm jen záznam v auditním logu. |
 | **Potvrdit opakování** | u pokusu „Možná doručeno“ (fronta i **Odesláno**) | Po dohledání protokolu uvolní odeslání téhož dokumentu se stejným GUID. Pokus zůstane v historii i s důvodem. |
 
+**Schválení opravné revize.** Neodeslaná JMHZ a přehledy zdravotních pojišťoven
+ze starších revizí stejného běhu se při schválení opravy automaticky zruší.
+Zůstávají v historii ve stavu **Včas zrušeno** a nelze je odeslat. Připravte je
+znovu z opraveného běhu. Podání, která už byla odeslána, mají pokus o odeslání
+nebo čekají v odchozí frontě datové schránky, se tím nemění. Zrušení se eviduje
+v historii mzdového běhu.
+
 **Zrušit přípravu.** Připravené řádné měsíční hlášení, které se ještě neodesílalo,
-má na záložce **K odeslání** tlačítko **Zrušit přípravu**. Použijte ho po opravě
-mzdy: za jedno období smí existovat jen jedno řádné hlášení, takže nové hlášení
-z opravené mzdy jde připravit až po zrušení původního. Aplikace se zeptá na důvod
+má na záložce **K odeslání** tlačítko **Zrušit přípravu**. Přípravu tak můžete
+zrušit i ručně. Aplikace se zeptá na důvod
 a zrušením potvrzujete, že hlášení neodešlo ani ručně přes ePortál ČSSZ ze
 staženého souboru (druhé řádné hlášení za totéž období by úřad odmítl). Zrušené
 hlášení i s důvodem zůstane v historii. Odeslané hlášení zrušit nejde; změny se

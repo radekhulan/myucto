@@ -3236,6 +3236,163 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame($locked->revision['id'], $replayed->revision['id']);
     }
 
+    public function testWorkplaceCorrectionOnCardAndInBulkMarksOpenCorrectionAsStale(): void
+    {
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $originalSnapshot = $approved->revision['input_snapshot_json'];
+        $settled = $this->runs->updateRun(
+            $this->supplierId, $runId, (int) $approved->run['row_version'],
+            'paid', null, $this->actors[0],
+        );
+        $requested = $this->service->requestCorrection(
+            $this->supplierId, $runId, (int) $settled['row_version'],
+            'workplace-request', $this->actors[2], 'Doplnění pracoviště.',
+        );
+        $reopened = $this->service->reopen(
+            $this->supplierId, $runId, (int) $requested->run['row_version'],
+            'workplace-reopen', $this->actors[1], 'Doplnění pracoviště.',
+        );
+        self::assertSame('snapshot', $reopened->revision['status']);
+        self::assertSame('correction', $reopened->revision['revision_kind']);
+
+        $response = $this->correctEmploymentTerms(['weekly_hours' => '37.50']);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $listed = $this->listedRun($runId);
+        self::assertSame(1, $listed['source_drift']['employment_terms_changed']);
+        self::assertContains('refresh_inputs', $listed['available_commands']);
+
+        $refreshed = $this->service->refreshInputs(
+            $this->supplierId, $runId, (int) $reopened->run['row_version'],
+            'workplace-refresh-card', $this->actors[0],
+        );
+        self::assertSame(0, $this->listedRun($runId)['source_drift']['total']);
+        $calculated = $this->service->calculate(
+            $this->supplierId, $runId, (int) $refreshed->run['row_version'],
+            'workplace-calculate', $this->actors[0],
+        );
+        self::assertSame('calculated', $calculated->revision['status']);
+        $response = $this->correctEmploymentTerms(['weekly_hours' => '35.00']);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(1, $this->listedRun($runId)['source_drift']['employment_terms_changed']);
+        $refreshed = $this->service->refreshInputs(
+            $this->supplierId, $runId, (int) $calculated->run['row_version'],
+            'workplace-refresh-calculated', $this->actors[0],
+        );
+        $calculated = $this->service->calculate(
+            $this->supplierId, $runId, (int) $refreshed->run['row_version'],
+            'workplace-recalculate', $this->actors[0],
+        );
+        $reviewed = $this->service->review(
+            $this->supplierId, $runId, (int) $calculated->run['row_version'],
+            'workplace-review', $this->actors[1],
+        );
+
+        $bulk = $this->container->get(\MyInvoice\Service\Payroll\PayrollEmploymentWorkplaceBulkFill::class);
+        $preview = $bulk->preview($this->supplierId, '2026-06-01', [$this->employmentId]);
+        self::assertSame([$this->employmentId], $preview['missing_employment_ids']);
+        $result = $bulk->apply(
+            $this->supplierId, '2026-06-01', '554782', 'CZ', [$this->employmentId],
+            $this->actors[0], null, null,
+        );
+        self::assertSame(['applied' => 1, 'skipped' => 0, 'failed' => 0], $result['counts'], json_encode($result));
+        $listed = $this->listedRun($runId);
+        self::assertSame(1, $listed['source_drift']['employment_terms_changed']);
+        self::assertContains('refresh_inputs', $listed['available_commands']);
+        self::assertSame('reviewed', $reviewed->revision['status']);
+        self::assertSame($originalSnapshot, $this->runs->revision($this->supplierId, (int) $approved->revision['id'])['input_snapshot_json']);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('settledRunStatuses')]
+    public function testSettledTermsWithoutCorrectionReturnConflictWithCorrectionInstructions(string $status): void
+    {
+        $approved = $this->approveInitialRun();
+        $this->runs->updateRun(
+            $this->supplierId, (int) $approved->run['id'], (int) $approved->run['row_version'],
+            $status, null, $this->actors[0],
+        );
+
+        $response = $this->correctEmploymentTerms(['jmhz_workplace_municipality_code' => '554782', 'work_place' => 'Hlavní město Praha', 'jmhz_workplace_country_code' => 'CZ']);
+        self::assertSame(409, $response->getStatusCode());
+        $error = $this->json($response)['error'];
+        self::assertSame('payroll_terms_settled', $error['code']);
+        self::assertStringContainsString('6/2026', $error['message']);
+        self::assertStringContainsString('otevřete opravu', $error['message']);
+
+        $bulk = $this->container->get(\MyInvoice\Service\Payroll\PayrollEmploymentWorkplaceBulkFill::class);
+        self::assertSame('period_settled', $bulk->preview($this->supplierId, '2026-06-01', [$this->employmentId])['items'][0]['reason']);
+        $result = $bulk->apply($this->supplierId, '2026-06-01', '554782', 'CZ', [$this->employmentId], $this->actors[0], null, null);
+        self::assertSame(['applied' => 0, 'skipped' => 1, 'failed' => 0], $result['counts']);
+        $terms = $this->container->get(\MyInvoice\Repository\Payroll\PayrollEmploymentRepository::class)->currentTerms($this->supplierId, $this->employmentId);
+        self::assertNull($terms['jmhz_workplace_municipality_code']);
+    }
+
+    public static function settledRunStatuses(): array
+    {
+        return [['posted'], ['payment_ready'], ['paid'], ['closed']];
+    }
+
+    public function testOpenCorrectionDoesNotUnlockAnotherSettledMonthOfTheSameTerms(): void
+    {
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $requested = $this->service->requestCorrection(
+            $this->supplierId, $runId, (int) $approved->run['row_version'],
+            'workplace-other-month-request', $this->actors[2], 'Doplnění pracoviště.',
+        );
+        $this->service->reopen(
+            $this->supplierId, $runId, (int) $requested->run['row_version'],
+            'workplace-other-month-reopen', $this->actors[1], 'Doplnění pracoviště.',
+        );
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_runs (supplier_id, period_start, payment_date, status, current_revision_no)
+             VALUES (?, "2026-05-01", "2026-06-15", "paid", 1)',
+        )->execute([$this->supplierId]);
+        $settledRunId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, status, schema_version, ruleset_manifest_hash,
+                 input_snapshot_json, input_snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, 1, "approved", "test", ?, "{}", ?, ?)',
+        )->execute([$this->supplierId, $settledRunId, str_repeat('a', 64), str_repeat('b', 64), random_bytes(32)]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_run_employments (supplier_id, revision_id, employee_id, employment_id, input_json, input_hash)
+             VALUES (?, ?, ?, ?, "{}", ?)',
+        )->execute([$this->supplierId, $revisionId, $this->employeeId, $this->employmentId, str_repeat('c', 64)]);
+
+        $response = $this->correctEmploymentTerms(['weekly_hours' => '37.50']);
+        self::assertSame(409, $response->getStatusCode());
+        $error = $this->json($response)['error'];
+        self::assertSame('payroll_terms_settled', $error['code']);
+        self::assertStringContainsString('5/2026', $error['message']);
+        self::assertStringContainsString('Otevřená oprava jiného měsíce nestačí', $error['message']);
+        self::assertStringContainsString('Obnovit podklady', $error['message']);
+        $bulk = $this->container->get(\MyInvoice\Service\Payroll\PayrollEmploymentWorkplaceBulkFill::class);
+        self::assertSame('period_settled', $bulk->preview($this->supplierId, '2026-06-01', [$this->employmentId])['items'][0]['reason']);
+        self::assertSame(0, $this->listedRun($runId)['source_drift']['total']);
+    }
+
+    private function correctEmploymentTerms(array $changes): Response
+    {
+        $repository = $this->container->get(\MyInvoice\Repository\Payroll\PayrollEmploymentRepository::class);
+        $body = \MyInvoice\Service\Payroll\PayrollEmploymentTermsBody::fromCurrent(
+            $repository->currentTerms($this->supplierId, $this->employmentId),
+            'Syntetická oprava podmínek.',
+        );
+        $body['row_version'] = (int) $this->scalar('SELECT row_version FROM payroll_employments WHERE supplier_id = ? AND id = ?', [$this->supplierId, $this->employmentId]);
+        return $this->container->get(\MyInvoice\Action\Payroll\PayrollEmploymentAction::class)->correctTerms(
+            (new ServerRequestFactory())->createServerRequest('PATCH', "/api/payroll/employments/{$this->employmentId}/terms/current")
+                ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->actors[0], 'role' => 'accountant'])
+                ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+                ->withParsedBody([...$body, ...$changes]),
+            new Response(),
+            ['id' => (string) $this->employmentId],
+        );
+    }
+
     public function testCorrectionCreatesNewRevisionAndPreservesApprovedHistory(): void
     {
         $approved = $this->approveInitialRun();

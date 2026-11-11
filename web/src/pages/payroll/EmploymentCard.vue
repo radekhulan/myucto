@@ -249,6 +249,12 @@ const selectedOfficeOption = computed(
 /** Vztah bez účtárny — upozornění, ne zákaz: doplní se rovnou v základních údajích. */
 const officeMissing = computed(() => props.employment.office_id === null)
 
+const workplaceMissing = computed(() => termsForm.value !== null
+  && ['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(props.employment.relation_type)
+  && ['planned', 'preregistered', 'active', 'suspended', 'ended'].includes(props.employment.status)
+  && jmhzFormHint.value === null
+  && (!termsForm.value.jmhz_workplace_municipality_code || !termsForm.value.jmhz_workplace_country_code))
+
 /**
  * Podrobnosti (JMHZ evidence, režimy pojištění a daně, sazbové kategorie § 5a
  * a slevy § 7a) se otevřou samy jen tam, kde je někdo vyplnil. Běžný pracovní
@@ -326,7 +332,7 @@ const expanded = ref(!isClosed.value)
 const cardRoot = ref<HTMLElement | null>(null)
 
 async function focusSection(panel: string, field?: string): Promise<void> {
-  if (!['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income', 'termination', 'opening_balances'].includes(panel)) return
+  if (!['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income', 'termination', 'exit_documents', 'opening_balances'].includes(panel)) return
   expanded.value = true
   await nextTick()
   const root = cardRoot.value
@@ -336,6 +342,7 @@ async function focusSection(panel: string, field?: string): Promise<void> {
     : panel === 'opening_balances' ? '[data-test="opening-balances-needed"]'
     : panel === 'deferred_income' ? '[data-test="deferred-income"]'
     : panel === 'termination' ? '[data-test="employment-termination"]'
+    : panel === 'exit_documents' ? '[data-test="employment-exit-documents"]'
     : panel === 'employment_terms' ? '[data-test="terms-office"]'
     : panel === 'jmhz_profile' ? '[data-test="jmhz-ordinary-profile"]'
     : panel === 'registration' ? '[data-test="employment-registration"]'
@@ -2322,6 +2329,23 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         </div>
       </section>
 
+      <div
+        v-if="workplaceMissing"
+        class="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-800"
+        data-test="employment-workplace-missing"
+      >
+        <p class="flex-1">{{ t('payroll.people.workplace_missing_warning') }}</p>
+        <button
+          type="button"
+          :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"
+          data-test="employment-workplace-complete"
+          @click="revealTermsField(termsForm.jmhz_workplace_municipality_code ? 'jmhz_workplace_country_code' : 'jmhz_workplace_municipality_code')"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+          {{ t('payroll.people.workplace_complete') }}
+        </button>
+      </div>
+
       <!--
         DALŠÍ ÚDAJE — evidence pro podání a výjimečné režimy.
         Dřív to byla jedna mřížka dvaceti polí bez hierarchie a „neobvyklé
@@ -3118,6 +3142,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       v-if="employment.end_date && (employment.status === 'ended' || employment.status === 'archived')"
       :employment-id="employment.id"
       :can-write="canWrite"
+      :can-read-documents="canReadDocuments === true"
       @loaded="terminationOverview = $event"
     />
     <EmploymentRegistrationPanel
@@ -3166,6 +3191,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
 
     <EmploymentExitDocumentsPanel
       v-if="employment.end_date && canReadDocuments"
+      data-test="employment-exit-documents"
       :employment="employment"
       :can-write="canWriteDocuments === true"
       :termination-reason-kind="terminationOverview?.derived?.unemployment_office_kind ?? null"

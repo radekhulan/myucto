@@ -194,6 +194,13 @@ svátek či ve ztíženém prostředí.
 **Jak poznáte, že je hotovo:** Zásada je v části **Platná zásada** a měsíc
 s prací ve svátek nebo ve ztíženém prostředí jde schválit.
 
+Datum **Platí od** je povinné a vyplňujete ho výslovně podle sjednání.
+Nepoužitou zásadu lze tlačítkem **Opravit zásadu** upravit včetně začátku
+platnosti, i v seznamu starších verzí. Změna zachová návaznost sousedních
+verzí. Pokud do dotčeného období zasahuje zmrazená nebo schválená revize
+mzdového běhu tohoto vztahu, oprava se odmítne. Použitou zásadu měňte
+novou verzí od dosud nezmrazeného období.
+
 ## 77.6 Krok za krokem: náhradní volno za přesčas
 
 1. V `Mzdy → Absence a dovolená` zapište den čerpání jako absenci druhu

@@ -68,6 +68,7 @@ final class PayrollRunStatutoryCalculationService
         array $snapshot,
         array $baseResult,
         ?callable $voluntaryDeductionCapacities = null,
+        bool $persist = true,
     ): array {
         $period = self::object($snapshot['statutory_period'] ?? null, 'statutory_period');
         $inactive = [];
@@ -100,11 +101,9 @@ final class PayrollRunStatutoryCalculationService
         // vyplácejí s touhle mzdou. Nejsou vstupem výpočtu — nevstupují do
         // žádného základu — ale musí být v běhu, jinak by se přeplatek
         // zaměstnanci nikdy nevrátil a odvod záloh by se o něj nesnížil.
-        $annualSettlements = $this->annualSettlements?->payoutsForRevision(
-            $supplierId,
-            $revisionId,
-            $periodStart,
-        ) ?? [];
+        $annualSettlements = ($persist
+            ? $this->annualSettlements?->payoutsForRevision($supplierId, $revisionId, $periodStart)
+            : $this->annualSettlements?->pendingPayoutsForPeriod($supplierId, $periodStart)) ?? [];
 
         $bundle = $this->inputs->assemble($snapshot);
         if ($bundle->globalIssues() !== []) {
@@ -297,7 +296,7 @@ final class PayrollRunStatutoryCalculationService
         // z nich firemní souhrny. S vyřazenou osobou se proto neukládá nic —
         // stejně jako dřív u zablokovaného výpočtu; revize jde znovu spočítat,
         // až se evidence doplní.
-        if ($blocked === [] && $social !== null && $health !== null) {
+        if ($persist && $blocked === [] && $social !== null && $health !== null) {
             $ids = $this->persister->persist(
                 $supplierId,
                 $revisionId,

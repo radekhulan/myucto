@@ -584,15 +584,17 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     await wrapper.get('[data-test="jmhz-defer-confirm"]').trigger('click')
     await flushPromises()
 
-    // Odklad jde do prostředí panelu (výchozí produkce), ne natvrdo do testu.
     expect(m.defer).toHaveBeenCalledWith({
-      environment: 'production',
+      environment: 'test',
       preparationId: 77,
       employmentId: 12,
       officeId: 4,
       reason: 'Průměr se doplní do konce měsíce.',
     })
     expect(m.freeze).toHaveBeenCalledTimes(2)
+    expect(m.freeze).toHaveBeenLastCalledWith(18, expect.any(String), 'test')
+    expect(m.dryRun).toHaveBeenLastCalledWith(77, 'test', 4)
+    expect(m.deferrals).toHaveBeenLastCalledWith(18, 'production')
     expect(wrapper.find('[data-test="jmhz-defer-form"]').exists()).toBe(false)
   })
 

@@ -1098,6 +1098,36 @@ final readonly class PayrollMonthlyChecklistService
      */
     private function checklistDescription(array $item): array
     {
+        if ((string) $item['title'] === 'eldp_submission') {
+            $description = $this->submissionAgendaDescription(
+                EldpStatementService::AGENDA_CODE,
+                '',
+                ['automatic' => false, 'channel' => 'other', 'reason' => null],
+            );
+            $query = [
+                'person' => (int) $item['employee_id'],
+                'employment' => (int) $item['employment_id'],
+            ];
+            if (!empty($item['employment_end_date'])) {
+                $query['year'] = (int) substr((string) $item['employment_end_date'], 0, 4);
+            }
+            $description['action']['path'] .= '?' . http_build_query($query);
+
+            return $description + [
+                'agenda_code' => (string) $item['title'],
+                'agenda_label' => (string) $item['title'],
+                'status' => 'pending',
+            ];
+        }
+
+        $path = (string) $item['title'] === 'termination_document'
+            ? '/payroll/people?' . http_build_query([
+                'person' => (int) $item['employee_id'],
+                'employment' => (int) $item['employment_id'],
+                'panel' => 'exit_documents',
+            ])
+            : $item['path'];
+
         return [
             'agenda_code' => (string) $item['title'],
             'agenda_label' => (string) $item['title'],
@@ -1110,7 +1140,7 @@ final readonly class PayrollMonthlyChecklistService
             'action' => [
                 'kind' => 'generate',
                 'label' => 'Otevřít kartu zaměstnance',
-                'path' => $item['path'],
+                'path' => $path,
                 'reason' => null,
             ],
         ];

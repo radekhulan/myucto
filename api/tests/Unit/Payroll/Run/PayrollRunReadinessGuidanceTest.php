@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Payroll\Run;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\Run\PayrollRunIssueGuidance;
 use MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe;
+use MyInvoice\Service\Payroll\Run\PayrollRunPaymentPreparationService;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessImpact;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotFixableException;
@@ -18,6 +19,51 @@ use PHPUnit\Framework\TestCase;
 
 final class PayrollRunReadinessGuidanceTest extends TestCase
 {
+    public function testReadinessAndPaymentPreparationUseTheSameMissingPayoutRuleSelection(): void
+    {
+        $person = static fn (int $id, array $rules): array => [
+            'employee' => ['id' => $id, 'full_name' => "Syntetická osoba {$id}"],
+            'payout_rules' => $rules,
+        ];
+        $snapshot = ['people' => [
+            $person(1, []),
+            $person(2, []),
+            $person(3, []),
+            $person(4, [['destination_kind' => 'cash']]),
+            $person(5, [['destination_kind' => 'bank']]),
+            $person(6, [['destination_kind' => 'partner_settlement']]),
+        ]];
+        $withoutPayout = [2 => true, 3 => true];
+
+        self::assertSame(
+            [1],
+            array_column(PayrollRunPaymentPreparationService::missingPayoutRules($snapshot, $withoutPayout), 'entity_id'),
+        );
+        try {
+            self::invoke(PayrollRunPaymentPreparationService::class, 'assertPayoutRules', [$snapshot, $withoutPayout]);
+            self::fail('Příprava plateb musí odmítnout stejnou osobu jako předběžná kontrola.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('Syntetická osoba 1 nemá', $exception->getMessage());
+            foreach (range(2, 6) as $id) {
+                self::assertStringNotContainsString("Syntetická osoba {$id}", $exception->getMessage());
+            }
+        }
+        array_shift($snapshot['people']);
+        self::invoke(PayrollRunPaymentPreparationService::class, 'assertPayoutRules', [$snapshot, $withoutPayout]);
+    }
+
+    public function testMissingPayoutRuleWarnsAboutPaymentPreparationAndLinksToAccounts(): void
+    {
+        self::assertSame(
+            ['impact' => 'revision', 'scope' => 'setup', 'severity' => 'warning'],
+            PayrollRunReadinessImpact::describe('payout_rule_missing'),
+        );
+        $guidance = PayrollRunIssueGuidance::describe('payout_rule_missing', 42);
+        self::assertSame('/payroll/people?person=42&panel=accounts', $guidance['remediation_path']);
+        self::assertStringContainsString('přípravu plateb', $guidance['message']);
+        self::assertStringContainsString('opravnou revizi', $guidance['message']);
+    }
+
     public function testGroupedFindingsKeepEachAffectedRelationshipAndDestination(): void
     {
         $first = new PayrollRunValidation('warning', 'time_month_missing', 'employment', 11, 'Vztah první nemá docházku.', '/payroll/time?employment=11');
