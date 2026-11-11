@@ -359,6 +359,7 @@ final class PayrollTaxDeclarationBulkSignTest extends TestCase
             'effective_from' => '2026-05-01',
             'effective_to' => null,
             'evidence_note' => null,
+            'signed_on' => self::SIGNED_ON,
         ];
         $this->repository->save(
             $this->supplierId,

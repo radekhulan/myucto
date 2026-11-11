@@ -15,7 +15,9 @@ use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationEffectiveMonth;
 use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use PDO;
+use Psr\Clock\ClockInterface;
 
 /**
  * Hromadný zápis podepsaných prohlášení poplatníka (§ 38k ZDP).
@@ -71,6 +73,7 @@ final class PayrollTaxDeclarationBulkSign
         private readonly PayrollPersonStatutoryEvidenceRepository $evidence,
         private readonly PayrollApprovedPeriodFreeze $freeze,
         private readonly ActivityLogger $activityLogger,
+        private readonly ClockInterface $clock,
     ) {}
 
     /**
@@ -166,7 +169,7 @@ final class PayrollTaxDeclarationBulkSign
         if ($ids === []) {
             throw new InvalidArgumentException('Vyberte aspoň jednu osobu.');
         }
-        $today = (new DateTimeImmutable('today'))->format('j. n. Y');
+        $today = (new DateTimeImmutable(PayrollSubmissionCalendar::today($this->clock->now())))->format('j. n. Y');
         $note = sprintf(
             self::NOTE,
             (new DateTimeImmutable($signed))->format('j. n. Y'),
@@ -271,6 +274,7 @@ final class PayrollTaxDeclarationBulkSign
                 $from,
                 $this->yearEnd($taxYear),
                 $note,
+                $signedOn,
             )['rows'];
             $this->evidence->save(
                 $supplierId,
@@ -374,7 +378,7 @@ final class PayrollTaxDeclarationBulkSign
                 $result[$employeeId] = ['state' => $state] + $base;
                 continue;
             }
-            $plan = $this->plannedRows($declarations[$employeeId] ?? [], $from, $this->yearEnd($taxYear), '');
+            $plan = $this->plannedRows($declarations[$employeeId] ?? [], $from, $this->yearEnd($taxYear), '', $signedOn);
             $ready = $plan['state'] === 'ready';
             $result[$employeeId] = [
                 'state' => $plan['state'],
@@ -407,7 +411,7 @@ final class PayrollTaxDeclarationBulkSign
      * @param list<array<string,mixed>> $rows
      * @return array{state:string,change:?string,current_status:?string,effective_to:?string,rows:list<array<string,mixed>>}
      */
-    private function plannedRows(array $rows, string $from, string $yearEnd, string $note): array
+    private function plannedRows(array $rows, string $from, string $yearEnd, string $note, string $signedOn): array
     {
         usort(
             $rows,
@@ -476,6 +480,10 @@ final class PayrollTaxDeclarationBulkSign
             'effective_from' => $from,
             'effective_to' => $to,
             'evidence_note' => $note,
+            // Den podpisu nese i hromadný zápis jako karta: od 01/2027 ho
+            // hlásí JMHZ (10575, IN16) a editor podle něj ověřuje první
+            // měsíc věty (§ 38k ZDP, TaxDeclarationEffectiveMonth::check).
+            'signed_on' => $signedOn,
         ];
 
         $planned = [];
@@ -523,11 +531,16 @@ final class PayrollTaxDeclarationBulkSign
         if (!is_string($signedOn) || !IsoDate::isValid($signedOn)) {
             throw new InvalidArgumentException('Datum podpisu musí být platné datum RRRR-MM-DD.');
         }
-        if ($signedOn > (new DateTimeImmutable('today'))->format('Y-m-d')) {
+        if ($signedOn > PayrollSubmissionCalendar::today($this->clock->now())) {
             throw new InvalidArgumentException('Datum podpisu nesmí být v budoucnosti.');
         }
         $signedYear = (int) substr($signedOn, 0, 4);
-        if ($signedYear > $taxYear) {
+        // Kdo nastoupil v posledních 30 dnech roku, podepisuje prohlášení na
+        // ten rok ještě v lednu dalšího roku a platí mu od měsíce nástupu
+        // (§ 38k odst. 1 věta poslední a odst. 4 ZDP: „do 30 dnů po vstupu
+        // do zaměstnání“). Stávajícím zaměstnancům takový podpis do roku už
+        // nepatří; to rozliší TaxDeclarationEffectiveMonth (`after_year_end`).
+        if ($signedYear > $taxYear + 1) {
             throw new InvalidArgumentException(sprintf(
                 'Prohlášení na rok %d nelze podepsat až po jeho skončení.',
                 $taxYear,
