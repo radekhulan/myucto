@@ -37,8 +37,10 @@ use UnexpectedValueException;
  *
  * Zápis jde VŽDY přes PayrollPersonStatutoryEvidenceRepository::save(), tedy
  * přes tentýž validátor, zmrazení období, souvislost řady i activity log jako
- * karta osoby. Sekce, která u osoby má jakýkoli řádek, se nechává být —
- * existující věta se nikdy nepřepisuje ani neukončuje.
+ * karta osoby. Sekce, která osobu od začátku doplnění pokrývá, se nechává
+ * být — existující věta se nikdy nepřepisuje ani neukončuje. Skončila-li
+ * poslední věta dřív, doplní se za ni navazující věta bez konce, takže
+ * pokryje i další dohodu osoby.
  */
 final class PayrollStatutoryEvidenceBulkDefaults
 {
@@ -375,12 +377,15 @@ final class PayrollStatutoryEvidenceBulkDefaults
             $sections[$key] = $rows;
         }
         foreach ($additions as $key) {
-            if ($sections[$key] !== []) {
-                throw new \LogicException(
-                    "Sekce {$key} už řádek má — hromadné doplnění do ní psát nesmí.",
-                );
+            foreach ($sections[$key] as $row) {
+                $to = $row['effective_to'] ?? null;
+                if (!is_string($to) || $to === '' || $to >= $effectiveFrom) {
+                    throw new \LogicException(
+                        "Sekce {$key} už od {$effectiveFrom} řádek má — hromadné doplnění do ní psát nesmí.",
+                    );
+                }
             }
-            $sections[$key] = [$this->defaultRow($key, $effectiveFrom, $today)];
+            $sections[$key][] = $this->defaultRow($key, $effectiveFrom, $today);
         }
 
         return ['sections' => $sections];
@@ -525,6 +530,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
         $foreign = [];
         $employments = [];
         $counts = [];
+        $coveredThrough = [];
         foreach (array_chunk($employeeIds, self::CHUNK_SIZE) as $chunk) {
             $in = implode(', ', array_fill(0, count($chunk), '?'));
             foreach ($this->rows(
@@ -566,7 +572,8 @@ final class PayrollStatutoryEvidenceBulkDefaults
             foreach ([...self::DEFAULT_SECTIONS, self::DECLARATION_SECTION, 'health_coverages'] as $section) {
                 foreach ($this->rows(
                     sprintf(
-                        "SELECT employee_id, COUNT(*) AS row_count
+                        "SELECT employee_id, COUNT(*) AS row_count,
+                                MAX(COALESCE(effective_to, '9999-12-31')) AS covered_through
                            FROM %s
                           WHERE supplier_id = ? AND employee_id IN ({$in})
                           GROUP BY employee_id",
@@ -575,6 +582,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
                     [$supplierId, ...$chunk],
                 ) as $row) {
                     $counts[$section][(int) $row['employee_id']] = (int) $row['row_count'];
+                    $coveredThrough[$section][(int) $row['employee_id']] = (string) $row['covered_through'];
                 }
             }
         }
@@ -590,6 +598,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
                 array_keys($foreign[$employeeId] ?? []),
                 $employments[$employeeId] ?? [],
                 $counts,
+                $coveredThrough,
                 $monthStart,
                 $frozenThrough,
             );
@@ -685,6 +694,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
      * @param list<string> $foreignElements
      * @param list<array<string,mixed>> $employments
      * @param array<string,array<int,int>> $counts
+     * @param array<string,array<int,string>> $coveredThrough poslední den, který sekce pokrývá
      * @return array<string,mixed>
      */
     private function assessPerson(
@@ -695,6 +705,7 @@ final class PayrollStatutoryEvidenceBulkDefaults
         array $foreignElements,
         array $employments,
         array $counts,
+        array $coveredThrough,
         string $monthStart,
         ?string $frozenThrough,
     ): array {
@@ -724,7 +735,14 @@ final class PayrollStatutoryEvidenceBulkDefaults
 
         $sections = [];
         foreach (self::DEFAULT_SECTIONS as $section) {
-            if (($counts[$section][$employeeId] ?? 0) > 0) {
+            // Věta, která skončila před začátkem doplnění (rezidence k 28. 2.
+            // u osoby s další dohodou od 19. 3.), sekci nepokrývá: doplní se
+            // navazující věta bez konce, existující se nemění. Jinak by se
+            // tatáž osoba hlásila jako hotová a běh za březen by údaj postrádal.
+            if (($counts[$section][$employeeId] ?? 0) > 0
+                && ($effectiveFrom === null
+                    || ($coveredThrough[$section][$employeeId] ?? '9999-12-31') >= $effectiveFrom)
+            ) {
                 $sections[$section] = ['state' => 'exists', 'reason' => null];
                 continue;
             }

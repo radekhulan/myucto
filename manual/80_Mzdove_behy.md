@@ -200,6 +200,10 @@ pro JMHZ. Aplikace nabízí tři hromadné akce.
 4. Údaje uložte a pokračujte krokem, který nabídne dialog (**Spočítat mzdy**,
    **Obnovit podklady**, nová revize nebo **Vyžádat opravu**).
 
+Doplněné údaje platí bez konce, takže pokryjí i další dohodu téže osoby.
+Existující údaj se nemění. Skončil-li dřív (například rezidence zapsaná jen do
+konce první dohody), doplní se za něj navazující údaj od měsíce doplnění.
+
 **Zdravotní pojišťovny:**
 
 1. V `Mzdy → Zaměstnanci → Další funkce` klikněte na **Zdravotní pojišťovny hromadně**
