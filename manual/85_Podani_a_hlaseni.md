@@ -1859,7 +1859,11 @@ předpokládaném dni nástupu z P1; nastoupí-li zaměstnanec později, aplikac
 nepřipraví a vede k podání P2 a nového přihlášení s novým předpokládaným
 dnem. Cizinec se přihlašuje vždy plnou registrací před zahájením práce, volba
 se u něj neukazuje. Dřív než osm dnů před nástupem aplikace přihlášku
-nepřipraví a napíše, od kterého dne to jde.
+nepřipraví, částečnou ani plnou, a napíše jediný den, od kterého to jde. Do té
+doby můžete vyplnit a uložit profil A1, podání se pak jen připraví a odešle.
+Vztah je s tímto dnem vidět i v **Přihlášky k podání (A1)**, kde se k přípravě
+nabídne, až se okno otevře. Volba částečné nebo plné registrace zůstane po
+ruce, i když náhled neprojde.
 
 **Události od 1. 1. 2027 (REGZEC27).** Ročník formuláře REGZEC určuje
 rozhodné datum události: nástup (A1), skončení (A2) a den platnosti (A5 až A7)
@@ -1887,7 +1891,8 @@ vztahu odmítne a napíše proč.
 
 Plnou registraci
 s nástupem v lednu 2027 aplikace připraví nejdřív 23. 12. 2026 a vždy nejvýš
-osm dnů před nástupem. Částečné přihlášení PREZEC se ročníkem nemění.
+osm dnů před nástupem; platí pozdější z obou dnů, u nástupu 1. 1. 2027 tedy
+24. 12. 2026. Částečné přihlášení PREZEC se ročníkem nemění.
 U cizince ze státu mimo EHP chce REGZEC27 navíc platnost pobytu (od a do)
 a číslo orientační má u všech adres nejvýš čtyři znaky.
 

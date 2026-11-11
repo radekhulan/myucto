@@ -1983,10 +1983,15 @@ final class PayrollRegistrationActionTest extends TestCase
             ['employmentId' => (string) $this->employmentId],
         );
         self::assertSame(422, $production->getStatusCode(), (string) $production->getBody());
-        self::assertSame('registration_regzec27_not_yet_accepted', $this->json($production)['error']['code']);
-        // Cizinec nemůže být přihlášen částečně (§ 19 odst. 2 z. 323/2025 Sb.).
+        // Jediný den pro obě pravidla (osm dnů před nástupem, příjem REGZEC27
+        // od 23. 12. 2026): 22. 12. rozhoduje pozdější z nich, 27. 12. 2026.
+        self::assertSame('registration_regzec_a1_start_window_invalid', $this->json($production)['error']['code']);
         self::assertStringContainsString(
-            'U zahraničního zaměstnance částečné přihlášení nelze',
+            'nejdřív 27. 12. 2026',
+            (string) $this->json($production)['error']['message'],
+        );
+        self::assertStringNotContainsString(
+            '23. 12. 2026 nebo později',
             (string) $this->json($production)['error']['message'],
         );
         self::assertSame(0, $this->countSubmissions());
@@ -3637,7 +3642,7 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
         $error = $this->json($response)['error'];
         self::assertSame('registration_regzec_a1_start_window_invalid', $error['code']);
-        self::assertStringContainsString('24.08.2026', $error['message']);
+        self::assertStringContainsString('24. 8. 2026', $error['message']);
     }
 
     public function testLateRegistrationDoesNotBypassIncompleteA1Guard(): void

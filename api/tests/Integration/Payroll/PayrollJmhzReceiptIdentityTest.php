@@ -89,6 +89,7 @@ final class PayrollJmhzReceiptIdentityTest extends TestCase
             $identityRepository,
             $sensitive,
             \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry::defaults(),
+            new \MyInvoice\Service\ActivityLogger($connection),
         );
         $this->submissions = new PayrollSubmissionService(
             $repository,

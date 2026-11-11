@@ -195,16 +195,23 @@ final readonly class PayrollRegistrationXmlValidator
                     'Datum vyhotovení podání',
                 );
                 $days = (int) $prepared->diff($start)->format('%r%a');
-                if ($days < 0 || $days > 8) {
+                if ($days > PayrollRegistrationEarliestFiling::DAYS_BEFORE_START) {
+                    // Plná registrace má totéž okno, radit ji tu by byla
+                    // slepá ulička: obě cesty dostanou týž den.
+                    $this->invalid(
+                        'registration_prezec_start_window_invalid',
+                        PayrollRegistrationEarliestFiling::tooEarlyMessage(
+                            $start->format('Y-m-d'),
+                        ),
+                    );
+                }
+                if ($days < 0) {
                     $this->invalid(
                         'registration_prezec_start_window_invalid',
                         'Částečné přihlášení před nástupem (PREZEC P1) jde '
-                            . 'podat nejdřív osm dnů před nástupem a nejpozději '
-                            . 'v den nástupu. Mezi vyhotovením ('
-                            . $prepared->format('d.m.Y') . ') a nástupem ('
-                            . $start->format('d.m.Y') . ') je ' . $days
-                            . ' dnů. Buď s podáním počkejte, nebo podejte rovnou '
-                            . 'plnou registraci REGZEC.',
+                            . 'podat nejpozději v den nástupu a nástup ('
+                            . $start->format('j. n. Y') . ') už proběhl. '
+                            . 'Podejte plnou registraci REGZEC.',
                     );
                 }
                 // EDV 1.4.0.6, kontrola "Rodné číslo x Předpokládané datum
@@ -223,7 +230,7 @@ final readonly class PayrollRegistrationXmlValidator
                     $this->invalid(
                         'registration_prezec_underage',
                         'Zaměstnanci je k předpokládanému datu nástupu ('
-                            . $start->format('d.m.Y') . ') méně než '
+                            . $start->format('j. n. Y') . ') méně než '
                             . PayrollRegistrationMinimumAge::YEARS . ' let, takže '
                             . 'ČSSZ částečné přihlášení zamítne na vstupu. '
                             . 'Zkontrolujte rodné číslo na kartě osoby a datum '
@@ -440,15 +447,12 @@ final readonly class PayrollRegistrationXmlValidator
             'Datum vyhotovení podání',
         );
         $days = (int) $prepared->diff($start)->format('%r%a');
-        if ($days > 8) {
+        if ($days > PayrollRegistrationEarliestFiling::DAYS_BEFORE_START) {
             $this->invalid(
                 'registration_regzec_a1_start_window_invalid',
-                'Přihlášku zaměstnance (REGZEC A1) jde podat nejdřív osm dnů '
-                    . 'před nástupem. Mezi vyhotovením ('
-                    . $prepared->format('d.m.Y') . ') a nástupem ('
-                    . $start->format('d.m.Y') . ') je ' . $days . ' dnů — '
-                    . 'přihlášku připravte nejdřív '
-                    . $start->modify('-8 days')->format('d.m.Y') . '.',
+                PayrollRegistrationEarliestFiling::tooEarlyMessage(
+                    $start->format('Y-m-d'),
+                ),
             );
         }
     }
@@ -479,11 +483,11 @@ final readonly class PayrollRegistrationXmlValidator
         if ($days > 8) {
             $this->invalid(
                 'registration_a3_start_window_invalid',
-                'Nový den nástupu (' . $startDate->format('d.m.Y') . ') je '
+                'Nový den nástupu (' . $startDate->format('j. n. Y') . ') je '
                     . 'o ' . $days . ' dnů později než datum vyhotovení podání ('
-                    . $prepared->format('d.m.Y') . '); ČSSZ připouští nejvýš '
+                    . $prepared->format('j. n. Y') . '); ČSSZ připouští nejvýš '
                     . 'osm dnů dopředu. Podání připravte nejdřív '
-                    . $startDate->modify('-8 days')->format('d.m.Y') . '.',
+                    . $startDate->modify('-8 days')->format('j. n. Y') . '.',
             );
         }
     }

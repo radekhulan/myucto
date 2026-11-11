@@ -37,7 +37,11 @@ import {
   registrationMissingItems,
 } from './registrationMissingItems'
 import { registrationA1FieldLabel } from './registrationA1FieldLabels'
-import { registrationRemediation } from './registrationRemediation'
+import {
+  registrationErrorBeforeStart,
+  registrationRemediation,
+  registrationTooEarly,
+} from './registrationRemediation'
 import { usePersonCardSaveSection } from './personCardSave'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
@@ -2196,6 +2200,12 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
     errorProblems.value = registrationMissingItems(exception)
     const code = apiErrorCode(exception)
     errorCode.value = code
+    // Náhled před nástupem neprošel (brzy, nebo částečné přihlášení nejde):
+    // volba částečná / plná se dřív ukázala až po úspěšném náhledu, takže
+    // rada „podejte plnou registraci" neměla v obrazovce kam vést.
+    if (selectedEventId.value === null && registrationErrorBeforeStart(code)) {
+      beforeStartChoice.value = true
+    }
     if (code === 'registration_already_prepared' || code === 'registration_already_filed') {
       void loadCurrentRegistration()
     }
@@ -5067,8 +5077,11 @@ async function copyXml(): Promise<void> {
 
     <div
       v-if="error"
-      class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
-      role="alert"
+      class="mt-3 rounded-lg border p-3 text-sm"
+      :class="registrationTooEarly(errorCode)
+        ? 'border-info-500/30 bg-info-50 text-info-700'
+        : 'border-danger-500/30 bg-danger-50 text-danger-700'"
+      :role="registrationTooEarly(errorCode) ? 'status' : 'alert'"
       data-test="registration-error"
     >
       <p>{{ error }}</p>

@@ -44,7 +44,15 @@ const error = ref('')
 const success = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
-const selectable = computed(() => items.value.filter(item => item.complete))
+/*
+ * Vztah, jehož okno přihlášky se ještě neotevřelo, se k přípravě nenabízí:
+ * server by ho odmítl a řádek říká, od kdy půjde podat.
+ */
+function preparable(item: PayrollRegistrationA1Candidate): boolean {
+  return item.complete && item.deadline?.too_early !== true
+}
+
+const selectable = computed(() => items.value.filter(preparable))
 const allSelected = computed(
   () => selectable.value.length > 0
     && selectable.value.every(item => selected.value.includes(item.employment_id)),
@@ -74,6 +82,12 @@ function deadlineText(item: PayrollRegistrationA1Candidate): string {
   if (item.deadline === null) return t('payroll.registrationA1.deadline.unknown')
   if (!item.deadline.derived) return t('payroll.registrationA1.deadline.not_derived')
   const date = formatDate(item.deadline.due_on)
+  if (item.deadline.too_early === true) {
+    return t('payroll.registrationA1.deadline.from', {
+      from: formatDate(item.deadline.earliest_registration_on),
+      date,
+    })
+  }
   return item.deadline.overdue
     ? t('payroll.registrationA1.deadline.overdue', { date })
     : t('payroll.registrationA1.deadline.due', { date })
@@ -116,7 +130,7 @@ async function load(): Promise<void> {
     from.value = data.from
     to.value = data.to
     selected.value = selected.value.filter(id =>
-      data.items.some(item => item.employment_id === id && item.complete))
+      data.items.some(item => item.employment_id === id && preparable(item)))
   } catch (exception) {
     error.value = apiErrorMessage(exception, t('payroll.registrationA1.load_failed'))
   } finally {
@@ -317,7 +331,7 @@ onMounted(() => {
               <input
                 type="checkbox"
                 :checked="selected.includes(item.employment_id)"
-                :disabled="!item.complete || !canWrite"
+                :disabled="!preparable(item) || !canWrite"
                 :aria-label="t('payroll.registrationA1.select_one', { name: item.employee_name })"
                 :data-test="`registration-a1-select-${item.employment_id}`"
                 @change="toggle(item.employment_id)"

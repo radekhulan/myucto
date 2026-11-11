@@ -12,8 +12,8 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Ručně opsané OIČ a ID PPV u brigádníka s více dohodami: posun platnosti
- * OIČ dozadu, OIČ k pozdější dohodě, kolize s jiným OIČ a OIČ převzaté
- * z protokolu ČSSZ.
+ * OIČ dozadu, OIČ k pozdější dohodě a kolize s jiným OIČ. OIČ převzaté
+ * z protokolu ČSSZ kryje {@see PayrollE2eReg2IdentityTest}.
  */
 #[Group('integration')]
 #[Group('payroll-full-flow')]
@@ -62,41 +62,13 @@ final class PayrollE2eRegIdentityTest extends TestCase
         $earlier = $this->regAdditionalEmployment($employeeId, 'DPP-E', 'dpp', '2026-02-02', '2026-02-27', 'ended');
 
         try {
-            $this->assign($earlier, '1000000020', '200000000000000000084', '2026-02-02');
+            $this->assign($earlier, '1000000023', '200000000000000000084', '2026-02-02');
             self::fail('Jiné OIČ téže osoby se zapsalo.');
-        } catch (\InvalidArgumentException|\DomainException $exception) {
-            self::assertStringContainsString('OIČ', $exception->getMessage());
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('jinou hodnotu', $exception->getMessage());
         }
         self::assertSame('2026-06-01', $this->personValidFrom($employeeId));
         self::assertNull($this->regIdentifier($earlier, 'id_ppv'));
-    }
-
-    /**
-     * OIČ z přijaté přihlášky (protokol ČSSZ) platí od nástupu pozdější
-     * dohody. K dřívější dohodě účetní opíše totéž OIČ: převzaté z protokolu
-     * aplikace záměrně nepřepisuje (k rozhodnutí: posunout jeho platnost
-     * dozadu?) a hláška radí zadat původní den. Hodnota OIČ je v evidenci
-     * jedinečná, druhý řádek se stejným číslem vzniknout nemůže.
-     */
-    public function testSameOicOnEarlierAgreementWithTrustedLaterOicStaysConflict(): void
-    {
-        [$employeeId, $later] = $this->regPerson('Protokol', 'Pozdější', 85, 'dpp', '2026-11-16');
-        $this->regSaveA1Profile($later, $this->regA1Profile('2026-11-16', 'T'));
-        $this->regReceipt(
-            $this->regPrepare($later, ['registration_mode' => 'full']),
-            'accepted',
-            '1000000012',
-            '200000000000000000085',
-        );
-        $earlier = $this->regAdditionalEmployment($employeeId, 'DPP-E', 'dpp', '2026-06-01', '2026-06-30', 'ended');
-
-        try {
-            $this->assign($earlier, '1000000012', '200000000000000000086', '2026-06-01');
-            self::fail('Převzaté OIČ se tiše posunulo.');
-        } catch (\DomainException $exception) {
-            self::assertStringContainsString('původní den', $exception->getMessage());
-        }
-        self::assertSame('2026-11-16', $this->personValidFrom($employeeId));
     }
 
     private function assign(int $employmentId, string $oic, string $idPpv, string $validFrom): void

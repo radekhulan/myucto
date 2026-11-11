@@ -3611,6 +3611,15 @@ export interface PayrollJmhzIdentityStatus {
   on_date: string
   person_external_identifier: PayrollJmhzExternalIdentifierStatus | null
   employment_external_identifier: PayrollJmhzExternalIdentifierStatus | null
+  /**
+   * Přihláška vztahu, která je na cestě, když některé číslo chybí:
+   * `queued` = připravená ve frontě, `awaiting_result` = čeká na protokol ČSSZ.
+   */
+  pending_registration?: {
+    submission_id: number
+    state: 'queued' | 'awaiting_result'
+    submitted_on: string | null
+  } | null
 }
 
 export interface PayrollJmhzRevealedIdentifier {
@@ -5583,6 +5592,8 @@ export interface PayrollRegistrationA1Candidate {
     due_on: string
     derived: boolean
     overdue: boolean
+    /** Okno přihlášky se ještě neotevřelo; půjde podat od `earliest_registration_on`. */
+    too_early?: boolean
   } | null
   warnings: Array<{
     code: string

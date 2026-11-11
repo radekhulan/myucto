@@ -587,6 +587,57 @@ final class PayrollRegistrationIdentityRepository
     }
 
     /**
+     * Základní přihláška vztahu (A1 / P1), která je na cestě: připravená ve
+     * frontě, nebo odeslaná a čekající na protokol ČSSZ. Podání událostí
+     * (A2 až A8) sem nepatří, identifikátory přiděluje jen přihláška.
+     *
+     * @return array{submission_id:int,status:string,submitted_at:?string}|null
+     */
+    public function registrationOnItsWay(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT submission.id, submission.status, submission.submitted_at
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+              WHERE part.supplier_id = ?
+                AND part.environment = ?
+                AND part.subject_reference = ?
+                AND part.agenda_code IN (\'REGZEC25\', \'PREZEC26\')
+                AND part.source_entity_type = \'payroll_employment\'
+                AND submission.submission_kind = \'regular\'
+                AND submission.status IN (
+                      \'validated\', \'prepared\', \'ready\',
+                      \'submitted\', \'processing\', \'waiting_for_identity\'
+                    )
+              ORDER BY submission.id DESC
+              LIMIT 1'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            "payroll_employment:{$employmentId}",
+        ]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'submission_id' => (int) $row['id'],
+            'status' => (string) $row['status'],
+            'submitted_at' => $row['submitted_at'] === null
+                ? null
+                : (string) $row['submitted_at'],
+        ];
+    }
+
+    /**
      * Smazání pracovního řádku profilu.
      *
      * Používá se jen k NAHRAZENÍ rozpracovaného profilu (smaž starý, vlož
@@ -1300,6 +1351,65 @@ final class PayrollRegistrationIdentityRepository
         $statement->execute([$supplierId, $externalId]);
 
         return $statement->rowCount() === 1;
+    }
+
+    /**
+     * Posune začátek platnosti OIČ osoby na dřívější den. Mění se jen
+     * `valid_from`: hodnota, původ (`source_kind`) ani odkaz na protokol
+     * ČSSZ zůstávají, takže číslo převzaté z protokolu je dál doložené týmž
+     * protokolem. Starší věta historie, do které by posun zasáhl, znamená
+     * rozpor v evidenci a posun se odmítne.
+     */
+    public function backdatePersonExternalId(
+        int $supplierId,
+        int $externalId,
+        int $expectedRowVersion,
+        string $validFrom,
+        ?int $updatedBy,
+    ): void {
+        $overlap = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_person_external_ids moved
+               JOIN payroll_person_external_ids older
+                 ON older.supplier_id = moved.supplier_id
+                AND older.employee_id = moved.employee_id
+                AND older.environment = moved.environment
+                AND older.identifier_type = moved.identifier_type
+                AND older.id <> moved.id
+                AND older.valid_to IS NOT NULL
+                AND older.valid_to >= ?
+              WHERE moved.supplier_id = ? AND moved.id = ?
+              LIMIT 1'
+        );
+        $overlap->execute([$validFrom, $supplierId, $externalId]);
+        if ($overlap->fetchColumn() !== false) {
+            throw new \DomainException(
+                'Osobní identifikační číslo od ČSSZ (OIČ) má v evidenci starší '
+                . 'ukončenou větu, do které by dřívější začátek platnosti '
+                . 'zasáhl. Zadejte den až po jejím konci.',
+            );
+        }
+        $statement = $this->db->pdo()->prepare(
+            'UPDATE payroll_person_external_ids
+                SET valid_from = ?, updated_by = ?, row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND row_version = ?
+                AND valid_to IS NULL AND valid_from > ?'
+        );
+        $statement->execute([
+            $validFrom,
+            $updatedBy,
+            $supplierId,
+            $externalId,
+            $expectedRowVersion,
+            $validFrom,
+        ]);
+        if ($statement->rowCount() !== 1) {
+            throw new \DomainException(
+                'Osobní identifikační číslo od ČSSZ (OIČ) se mezitím změnilo, '
+                . 'takže jeho platnost nejde bezpečně posunout. Otevřete '
+                . 'kartu vztahu znovu a zápis zopakujte.',
+            );
+        }
     }
 
     /** Je na identifikátor navázaná rozpracovaná úloha ztotožnění? */

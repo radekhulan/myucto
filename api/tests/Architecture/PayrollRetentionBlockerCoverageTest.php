@@ -37,6 +37,11 @@ use ReflectionClass;
  *
  * Důvod se píše sem, do hodnoty allowlistu, ne do commit message: seznam bez
  * napsaného důvodu se za rok stane seznamem, na který se nikdo neptá.
+ *
+ * ── Výjimka blokátoru, ne tabulky ─────────────────────────────────────────────
+ * Blokátor, který tabulku používá jen jako nosič podmínky nad jinou evidencí,
+ * dostává výjimku na svůj symbol (`ALLOWED_BLOCKER_WITHOUT_CATEGORY`). Tabulka
+ * tím výjimku nezíská: sáhne-li po ní další blokátor, guard ji ohlásí znovu.
  */
 final class PayrollRetentionBlockerCoverageTest extends TestCase
 {
@@ -62,16 +67,50 @@ final class PayrollRetentionBlockerCoverageTest extends TestCase
             . 'nebo anonymizací osoby, blokátor chrání jen ruční smazání.',
     ];
 
+    /**
+     * Výjimky udělené KONKRÉTNÍMU blokátoru, ne tabulce.
+     *
+     * Blokátor s podmínkou `where` někdy tabulku jen používá jako nosič: řádek
+     * v ní má každý vztah, blokuje až podmínka nad jinou evidencí. Výjimka pro
+     * celou tabulku by pak kryla i každý další blokátor, který by po ní sáhl
+     * z jiného důvodu. Klíčem je proto symbol `Třída::alias` a výjimka platí
+     * jen tehdy, když tabulku neblokuje nic jiného.
+     *
+     * @var array<string,array<string,string>> symbol blokátoru => [tabulka => důvod]
+     */
+    private const ALLOWED_BLOCKER_WITHOUT_CATEGORY = [
+        PayrollEmploymentDeletionRepository::class . '::registration_submission' => [
+            'payroll_employment_terms' =>
+                'Podmínky vztahu jsou jen nosič: blokuje podmínka nad přihláškou ČSSZ ve frontě '
+                . 'podání (payroll_submission_parts nemá employment_id, váže se přes '
+                . 'subject_reference). Lhůtu té přihlášky drží sledované tabulky kategorie '
+                . 'pension_evidence: přihláška A1 nevznikne bez profilu '
+                . 'payroll_registration_a1_profiles a přijatá zapíše payroll_person_external_ids '
+                . 'a payroll_employment_external_ids. Blokátor sám je přechodný: zrušená nebo '
+                . 'odmítnutá přihláška nedrží, po uplynutí lhůty jde osoba do anonymizace '
+                . '(dokládá PayrollE2eReg2RetentionTest). Předběžné přihlášení P1 profil A1 '
+                . 'nemá a drží jen do vyřízení: po přijetí následuje plná přihláška A1.',
+        ],
+    ];
+
     public function testEveryBlockingTableHasARetentionCategoryOrAWrittenReason(): void
     {
         $tracked = PayrollRetentionCatalog::trackedTables();
 
         $uncovered = [];
-        foreach ($this->blockingTables() as $table) {
+        foreach ($this->blockingSources() as $table => $sources) {
             if (in_array($table, $tracked, true)) {
                 continue;
             }
             if (array_key_exists($table, self::ALLOWED_WITHOUT_CATEGORY)) {
+                continue;
+            }
+            $unexplained = array_filter(
+                $sources,
+                static fn (string $source): bool
+                    => !isset(self::ALLOWED_BLOCKER_WITHOUT_CATEGORY[$source][$table]),
+            );
+            if ($unexplained === []) {
                 continue;
             }
             $uncovered[] = $table;
@@ -90,7 +129,13 @@ final class PayrollRetentionBlockerCoverageTest extends TestCase
 
     public function testEveryWrittenReasonCarriesAnActualExplanation(): void
     {
-        foreach (self::ALLOWED_WITHOUT_CATEGORY as $table => $reason) {
+        $reasons = self::ALLOWED_WITHOUT_CATEGORY;
+        foreach (self::ALLOWED_BLOCKER_WITHOUT_CATEGORY as $source => $tables) {
+            foreach ($tables as $table => $reason) {
+                $reasons["{$source} / {$table}"] = $reason;
+            }
+        }
+        foreach ($reasons as $table => $reason) {
             self::assertGreaterThan(
                 80,
                 mb_strlen(trim($reason)),
@@ -116,6 +161,16 @@ final class PayrollRetentionBlockerCoverageTest extends TestCase
                 . 'ať nekryje tabulku, která se pod tím jménem objeví znovu.',
             );
         }
+        $sources = $this->blockingSources();
+        foreach (self::ALLOWED_BLOCKER_WITHOUT_CATEGORY as $source => $tables) {
+            foreach (array_keys($tables) as $table) {
+                self::assertContains(
+                    $source,
+                    $sources[$table] ?? [],
+                    "Výjimka blokátoru {$source} pro {$table} přežila blokátor, který vysvětlovala.",
+                );
+            }
+        }
     }
 
     /**
@@ -133,6 +188,20 @@ final class PayrollRetentionBlockerCoverageTest extends TestCase
                 . 'tvrzení je mrtvé a nejde poznat které.',
             );
         }
+        foreach (self::ALLOWED_BLOCKER_WITHOUT_CATEGORY as $source => $tables) {
+            foreach (array_keys($tables) as $table) {
+                self::assertNotContains(
+                    $table,
+                    $tracked,
+                    "Tabulka {$table} je v katalogu i mezi výjimkami blokátoru {$source}.",
+                );
+                self::assertArrayNotHasKey(
+                    $table,
+                    self::ALLOWED_WITHOUT_CATEGORY,
+                    "Tabulka {$table} má výjimku pro celou tabulku i pro blokátor {$source}.",
+                );
+            }
+        }
     }
 
     /**
@@ -144,6 +213,17 @@ final class PayrollRetentionBlockerCoverageTest extends TestCase
      * @return list<string>
      */
     private function blockingTables(): array
+    {
+        return array_keys($this->blockingSources());
+    }
+
+    /**
+     * Blokující tabulky a symboly, které přes ně blokují (`Třída::alias`
+     * blokátoru, nebo `Třída::GUARD_ONLY`).
+     *
+     * @return array<string,list<string>> tabulka => symboly
+     */
+    private function blockingSources(): array
     {
         $tables = [];
         foreach (
@@ -160,22 +240,21 @@ final class PayrollRetentionBlockerCoverageTest extends TestCase
             );
             /** @var array<string,array{tables:list<string>}> $blockers */
             $blockers = $constants['BLOCKERS'];
-            foreach ($blockers as $blocker) {
+            foreach ($blockers as $alias => $blocker) {
                 foreach ($blocker['tables'] as $table) {
-                    $tables[] = $table;
+                    $tables[$table][] = "{$class}::{$alias}";
                 }
             }
 
             /** @var list<string> $guardOnly */
             $guardOnly = $constants['GUARD_ONLY'] ?? [];
             foreach ($guardOnly as $table) {
-                $tables[] = $table;
+                $tables[$table][] = "{$class}::GUARD_ONLY";
             }
         }
 
         self::assertNotEmpty($tables, 'Guard nenašel ani jeden blokátor — sonda je slepá.');
-        $tables = array_values(array_unique($tables));
-        sort($tables);
+        ksort($tables);
 
         return $tables;
     }
