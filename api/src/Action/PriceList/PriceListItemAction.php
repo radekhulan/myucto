@@ -477,7 +477,7 @@ final class PriceListItemAction
 
     private function forbidden(Response $response): Response
     {
-        return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáš oprávnění k ceníku.', 403);
+        return Json::error($response, 'forbidden_permission', 'Pro tuto akci nemáte oprávnění k ceníku.', 403);
     }
 
     private function log(Request $request, string $action, int $entityId, array $details): void

@@ -54,7 +54,7 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
             if (!RequestAuthorization::isSessionAuth($request)
                 || !InstanceAdminRoutePolicy::allows($request->getMethod(), $path)) {
                 return Json::error($this->responseFactory->createResponse(403),
-                    'forbidden_permission', 'Pro tuto akci nemáš oprávnění.', 403);
+                    'forbidden_permission', 'Pro tuto akci nemáte oprávnění.', 403);
             }
             return $handler->handle($request->withAttribute(self::ATTR_CURRENT_ID, 0));
         }

@@ -188,6 +188,8 @@ final class ErrorCatalog
         'Podklady registru se od náhledu změnily. Vytvořte nový náhled.' => 'The registry inputs changed after the preview. Create a new preview.',
         'Podíl vyžaduje nezáporný celočíselný čitatel a kladný jmenovatel.' => 'A fraction requires a nonnegative integer numerator and a positive denominator.',
         'Pro potvrzení právních podkladů nemáte oprávnění.' => 'You do not have permission to confirm legal evidence.',
+        'Pro tuto akci nemáte oprávnění.' => 'You do not have permission for this action.',
+        'Pro tuto akci nemáte oprávnění k ceníku.' => 'You do not have price list permission for this action.',
         'Profil mezitím změnil jiný uživatel. Načtěte aktuální stav.' => 'Another user changed the profile. Reload its current state.',
         'Registr SVJ vyžaduje účetní rámec podle vyhlášky 504 k datu účinnosti.' => 'The property registry requires the Decree 504 accounting framework on the effective date.',
         'Registr mezitím změnil jiný uživatel. Načtěte aktuální stav.' => 'Another user changed the registry. Reload its current state.',

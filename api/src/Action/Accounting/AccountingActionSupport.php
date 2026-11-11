@@ -95,7 +95,7 @@ trait AccountingActionSupport
     protected function requirePermission(Request $request, Response $response, string $permission, AccessLevel $minimum, ?Response &$err): bool
     {
         if (!RequestAuthorization::allows($request, $permission, $minimum)) {
-            $err = Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            $err = Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
             return false;
         }
         $err = null;

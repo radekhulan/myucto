@@ -560,8 +560,14 @@ aplikace a `node.exe` musí této identitě umožnit čtení a spuštění.
 
 Server odešle celý katalog dostupný pro schválený rozsah přístupu v jedné
 odpovědi. Asistent může v konkrétní konverzaci nabídnout jen nástroje relevantní
-pro aktuální úkol. Katalog se zatím nefiltruje podle jednotlivých práv role.
-Nástroj mimo její oprávnění se může zobrazit, ale API jeho volání odmítne.
+pro aktuální úkol. U interních rolí mimo správce firmy server nabídne jen
+nástroje, jejichž všechny API operace vaše role smí aspoň v jedné z vašich
+firem; počítá se i role přidělená pro konkrétní firmu. Například přehled
+pohledávek a závazků podle stáří (`aging_receivables`, `aging_payables`)
+vyžaduje čtení přehledu firem, bez něj asistent použije seznam neuhrazených
+vydaných nebo přijatých faktur. Skrytý nástroj vrátí při přímém volání chybu
+oprávnění. Superadmin a správce firmy dostávají celý katalog. Práva ke konkrétní
+firmě API ověřuje při každém volání.
 
 Pro online připojení **nevytváříte ani nekopírujete API token** a na svém zařízení
 neinstalujete Node ani soubor `.mjs`. Každé volání ověřuje aktuální členství ve

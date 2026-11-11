@@ -123,7 +123,7 @@ final class InvoiceOtherItemLinkAction
             && RequestAuthorization::allows($request, 'other_items', AccessLevel::READ)) {
             return null;
         }
-        return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
     }
 
     private function respondWithInvoice(Response $response, int $supplierId, int $id): Response

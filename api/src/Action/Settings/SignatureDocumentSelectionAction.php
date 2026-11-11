@@ -53,7 +53,7 @@ final class SignatureDocumentSelectionAction
     public function put(Request $request, Response $response, array $args): Response
     {
         if (!$this->canWrite($request)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         $entityType = $this->entityType((string) ($args['entity_type'] ?? ''));
@@ -121,7 +121,7 @@ final class SignatureDocumentSelectionAction
     public function delete(Request $request, Response $response, array $args): Response
     {
         if (!$this->canWrite($request)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         $entityType = $this->entityType((string) ($args['entity_type'] ?? ''));
