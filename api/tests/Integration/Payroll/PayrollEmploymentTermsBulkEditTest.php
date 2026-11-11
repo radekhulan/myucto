@@ -541,6 +541,13 @@ final class PayrollEmploymentTermsBulkEditTest extends TestCase
             hash('sha256', 'idempotency' . $source['id'], true),
             $this->userId,
         ]);
+        \MyInvoice\Tests\Support\JmhzFrozenSubmissionFixture::freeze(
+            $pdo,
+            $this->supplierId,
+            (string) $source['period_start'],
+            hash('sha256', 'snapshot'),
+            $this->userId,
+        );
     }
 
     /** @param array<string,mixed> $body */

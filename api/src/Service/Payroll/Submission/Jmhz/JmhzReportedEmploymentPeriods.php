@@ -35,6 +35,17 @@ final class JmhzReportedEmploymentPeriods
                    AND preparation.run_id = ' . $revisionAlias . '.run_id
                    AND preparation.source_revision_id = ' . $revisionAlias . '.id
                    AND preparation.environment = "production"
+                   -- Zmrazená = z přípravy vzniklo podání. Samotné „Připravit"
+                   -- (i zablokované) je jen náhled; dřív zamklo opravy údajů,
+                   -- které ten blokátor právě žádal doplnit.
+                   AND EXISTS (
+                       SELECT 1
+                         FROM payroll_submissions frozen
+                        WHERE frozen.supplier_id = preparation.supplier_id
+                          AND frozen.environment = preparation.environment
+                          AND frozen.source_snapshot_hash = preparation.snapshot_fingerprint
+                          AND frozen.status <> "cancelled_in_time"
+                   )
             )
             OR EXISTS (
                 SELECT 1

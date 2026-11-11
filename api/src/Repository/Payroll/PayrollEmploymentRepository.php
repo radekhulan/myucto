@@ -2605,6 +2605,13 @@ final class PayrollEmploymentRepository
             // Prázdnou účtárnu doplní resolveOffice() výchozí; to není změna.
             $ignored[] = 'office_id';
         }
+        if (($employment['actual_start_date'] ?? null) !== null
+            && ($data['actual_start_on'] ?? null) === (string) $employment['actual_start_date']
+        ) {
+            // Skutečný nástup převezme oprava ze vztahu sama (correctTerms());
+            // verze z importu ho mívá prázdný. Není to změna od účetní.
+            $ignored[] = 'actual_start_on';
+        }
         $blocked = [];
         foreach (array_keys($this->diff($previous, $data)) as $field) {
             if (!array_key_exists($field, $previous)

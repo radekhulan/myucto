@@ -424,6 +424,13 @@ final class PayrollProbableEarningBulkApiTest extends TestCase
             hash('sha256', 'idempotency' . $revisionId, true),
             $this->userId,
         ]);
+        \MyInvoice\Tests\Support\JmhzFrozenSubmissionFixture::freeze(
+            $pdo,
+            $this->supplierId,
+            $periodStart,
+            hash('sha256', 'snapshot'),
+            $this->userId,
+        );
     }
 
     /**

@@ -13,6 +13,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentTermsBody;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollEmploymentWorkplaceBulkFill;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use MyInvoice\Tests\Support\JmhzFrozenSubmissionFixture;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -272,8 +273,50 @@ final class PayrollEmploymentWorkplaceBulkFillTest extends TestCase
         )->execute([$endOn, $this->supplierId, $employmentId]);
     }
 
-    /** Schválený běh za měsíc a z něj ostrá zmrazená příprava JMHZ. */
-    private function frozenJmhz(int $employmentId, string $periodStart): void
+    /**
+     * Ukončený vztah, za jehož měsíc je jen PŘIPRAVENÉ (nezmrazené) hlášení —
+     * typicky zablokované právě chybějícím pracovištěm. Příprava dřív platila
+     * za zmrazenou a hromadné doplnění, na které blokátor odkazuje, vztah
+     * vyřadilo s výzvou k opravnému hlášení.
+     */
+    public function testPreparedButNotFrozenJmhzKeepsEndedEmploymentFillable(): void
+    {
+        $employmentId = $this->createEmployment('BULK-PREPARED', true);
+        $this->endEmployment($employmentId, '2026-06-30');
+        $this->frozenJmhz($employmentId, '2026-06-01', false);
+
+        $preview = $this->bulk->preview($this->supplierId, '2026-06-01', null);
+        self::assertSame('missing', $preview['items'][0]['state'], json_encode($preview['items'][0]));
+
+        $result = $this->bulk->apply($this->supplierId, '2026-06-01', self::PRAGUE, 'CZ', [$employmentId], $this->userId, null, null);
+        self::assertSame(1, $result['counts']['applied'], json_encode($result, JSON_UNESCAPED_UNICODE));
+    }
+
+    /**
+     * Verze podmínek z importu bez skutečného nástupu u ukončeného vztahu,
+     * který nástup má. Oprava ho do verze převezme sama a strážce ukončeného
+     * vztahu to bral jako změnu od účetní: hromadné doplnění pracoviště
+     * skončilo „měníte i actual_start_on" u každé takové dohody.
+     */
+    public function testEndedEmploymentWithImportedTermsWithoutActualStartIsFillable(): void
+    {
+        $employmentId = $this->createEmployment('BULK-NOSTART', true);
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employments SET actual_start_date = '2026-06-01' WHERE supplier_id = ? AND id = ?",
+        )->execute([$this->supplierId, $employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET actual_start_on = NULL WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $this->endEmployment($employmentId, '2026-06-30');
+
+        $result = $this->bulk->apply($this->supplierId, '2026-06-01', self::PRAGUE, 'CZ', [$employmentId], $this->userId, null, null);
+
+        self::assertSame(['applied' => 1, 'skipped' => 0, 'failed' => 0], $result['counts'], json_encode($result['failed'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(self::PRAGUE, $this->term($employmentId)['jmhz_workplace_municipality_code']);
+    }
+
+    /** Schválený běh za měsíc a z něj ostrá příprava JMHZ, volitelně zmrazená do podání. */
+    private function frozenJmhz(int $employmentId, string $periodStart, bool $frozen = true): void
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -313,6 +356,9 @@ final class PayrollEmploymentWorkplaceBulkFillTest extends TestCase
             hash('sha256', 'idempotency' . $revisionId, true),
             $this->userId,
         ]);
+        if ($frozen) {
+            JmhzFrozenSubmissionFixture::freeze($pdo, $this->supplierId, $periodStart, hash('sha256', 'snapshot'), $this->userId);
+        }
     }
 
     public function testMunicipalityOutsideTheCodebookIsRefused(): void
