@@ -126,8 +126,9 @@ final readonly class JmhzSubmissionBridgeService
             self::EXTERNAL_SUBMISSION_CODE,
             sprintf(
                 'Za období %s už %s měsíční hlášení podal předchozí mzdový program (%s%s). Druhé řádné hlášení za stejný '
-                . 'měsíc ČSSZ zamítne (kontrola č. 22 katalogu kontrol), proto se nepřipraví. Opravu za tento měsíc pošlete '
-                . 'jako opravné podání z programu, který hlášení podal. Pokud záznam neodpovídá (hlášení ve skutečnosti '
+                . 'měsíc ČSSZ zamítne (kontrola č. 22 katalogu kontrol), proto se nepřipraví. Opravné hlášení za tento měsíc '
+                . 'navážete v Mzdy → Podání → JMHZ, oddíl Oprava měsíce podaného předchozím programem (původní XML nebo '
+                . 'GUID podání a formulářů). Pokud záznam neodpovídá (hlášení ve skutečnosti '
                 . 'neodešlo), odeberte ho v Mzdy → Podání → JMHZ, oddíl Podání předchozím programem, a přípravu zopakujte.',
                 substr($period, 5, 2) . '/' . substr($period, 0, 4),
                 $sent['submission_type'] === 'O' ? 'opravné' : 'řádné',

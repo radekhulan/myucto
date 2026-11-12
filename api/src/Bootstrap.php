@@ -519,6 +519,11 @@ final class Bootstrap
                     $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReceiptIdentityService::class),
                     $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionManualAcceptanceRepository::class),
                 ),
+            \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService::class =>
+                \DI\autowire()->constructorParameter(
+                    'externalRoots',
+                    \DI\get(\MyInvoice\Repository\Payroll\JmhzExternalRootRepository::class),
+                ),
             // Ruční potvrzení přijetí je u resolveru volitelné (testy ho staví
             // bez něj); autowiring by volitelný parametr nevyplnil spolehlivě.
             \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormLedgerResolver::class

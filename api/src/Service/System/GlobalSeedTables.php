@@ -480,7 +480,7 @@ final class GlobalSeedTables
         'payroll_food_service_tip_months', 'payroll_generated_document_hidden',
         'payroll_generated_documents', 'payroll_identity_resolution_tasks', 'payroll_import_links',
         'payroll_imported_jmhz_protocols', 'payroll_input_import_rows', 'payroll_input_imports',
-        'payroll_inputs', 'payroll_insolvency_payment_instructions', 'payroll_jmhz_deferral_submissions',
+        'payroll_inputs', 'payroll_insolvency_payment_instructions', 'payroll_jmhz_deferral_submissions', 'payroll_jmhz_external_roots',
         'payroll_jmhz_deferrals', 'payroll_jmhz_eldp_evidence_snapshots',
         'payroll_jmhz_eldp_idempotency_claims', 'payroll_jmhz_employer_annual_evidence',
         'payroll_jmhz_ordinary_evidence_idempotency_claims', 'payroll_jmhz_ordinary_evidence_snapshots',

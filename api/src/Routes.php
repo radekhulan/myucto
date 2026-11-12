@@ -135,6 +135,7 @@ use MyInvoice\Action\Payroll\PayrollJmhzPost20Action;
 use MyInvoice\Action\Payroll\PayrollJmhzIdentityAction;
 use MyInvoice\Action\Payroll\PayrollJmhzProtocolImportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzExternalSubmissionAction;
+use MyInvoice\Action\Payroll\PayrollJmhzExternalRootAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPreparationAction;
@@ -2438,6 +2439,18 @@ final class Routes
             $g->delete(
                 '/submissions/jmhz-external/attestations/{id:[0-9]+}',
                 [PayrollJmhzExternalSubmissionAction::class, 'revokeAttestation'],
+            );
+            $g->get(
+                '/submissions/jmhz-external-roots',
+                [PayrollJmhzExternalRootAction::class, 'list'],
+            );
+            $g->get(
+                '/submissions/jmhz-external-roots/candidates',
+                [PayrollJmhzExternalRootAction::class, 'candidates'],
+            );
+            $g->post(
+                '/submissions/jmhz-external-roots',
+                [PayrollJmhzExternalRootAction::class, 'attach'],
             );
             $g->get(
                 '/submissions/{submissionId:[0-9]+}',

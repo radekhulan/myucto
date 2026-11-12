@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Repository\Payroll\JmhzDeferralRepository;
+use MyInvoice\Repository\Payroll\JmhzExternalRootRepository;
 use MyInvoice\Repository\Payroll\JmhzPreparationSnapshotRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
@@ -39,6 +40,7 @@ final readonly class JmhzContentCorrectionSubmissionService
         private ClockInterface $clock,
         private JmhzDeadlinePolicy $deadlines,
         private JmhzDeferralRepository $deferrals,
+        private ?JmhzExternalRootRepository $externalRoots = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -140,7 +142,10 @@ final readonly class JmhzContentCorrectionSubmissionService
             $environment,
             $regularSubmissionId,
         );
-        $changed = $this->changedAcceptedForms($supplierId, $environment, $resolution, $identity, $current, $set);
+        $root = $this->externalRoots?->forSubmission($supplierId, $environment, $regularSubmissionId);
+        $changed = ($root['mode'] ?? null) === JmhzExternalCorrectionRootService::MODE_GUIDS
+            ? []
+            : $this->changedAcceptedForms($supplierId, $environment, $resolution, $identity, $current, $set);
         $rows = [];
         foreach ($current as $externalId => $row) {
             $externalId = (string) $externalId;
@@ -165,6 +170,7 @@ final readonly class JmhzContentCorrectionSubmissionService
             'submission_id' => $regularSubmissionId,
             'preparation_id' => $preparationId,
             'submission_guid' => $identity->submissionGuid,
+            'external_root' => $root === null ? null : ['mode' => $root['mode'], 'period' => $root['period']],
             'document_sha256' => $document->sha256(),
             'forms' => $rows,
             // Vztahy, které se teď opravit nedají: jejich nález opravu
@@ -736,7 +742,7 @@ final readonly class JmhzContentCorrectionSubmissionService
     }
 
     /** @return array<string,array{employee_id:int,employment_id:int,person_external_identifier:string}> */
-    private static function currentForms(JmhzScenario1NormalizedDocument $document): array
+    public static function currentForms(JmhzScenario1NormalizedDocument $document): array
     {
         $forms = [];
         $people = $document->payload['people'] ?? null;
@@ -953,7 +959,9 @@ final readonly class JmhzContentCorrectionSubmissionService
             // (ČSSZ pro ně zřídila schránku iie254d). Opravovat jde hlášení
             // odeslané kteroukoli z nich; kanál opravy se volí znovu při
             // odeslání, stejně jako u řádného.
-            || !in_array($root['channel'], self::ROOT_CHANNELS, true)
+            || !(in_array($root['channel'], self::ROOT_CHANNELS, true)
+                || ($root['channel'] === 'other'
+                    && $this->externalRoots?->forSubmission($supplierId, $environment, $regularSubmissionId) !== null))
         ) {
             throw new \DomainException('Řádné podání nebylo nalezeno ve stejné firmě a prostředí.');
         }
