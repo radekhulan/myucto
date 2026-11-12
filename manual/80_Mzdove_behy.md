@@ -112,9 +112,13 @@ kontrolu před během z [§ 80.3](#803-krok-za-krokem-spocitat-a-schvalit-mzdy);
 po zamknutí vstupů místo ní kontroly běhu, které brání schválení. Krok 1
 a 2 jsou výřez téže kontroly, krok 4 ji shrnuje celou. Krok 6 přebírá
 souhrn měsíčního přehledu podání ([kapitola 85](85_Podani_a_hlaseni.md)).
-Krok 3 počítá přihlášky A1 za zvolený měsíc; hromadná příprava se otevírá
-na svém výchozím období, proto v ní rozsah nastavte podle textu
-v průvodci.
+Krok 3 počítá přihlášky A1 za zvolený měsíc. Odkaz otevře hromadnou
+přípravu se stejným měsícem v adrese; rozsah **Období od** a **Období do**
+v ní si ověřte.
+
+Celý měsíc pro stovky lidí, včetně hromadných akcí v každém kroku,
+orientačních časů a kontrolního seznamu, popisuje kapitola
+[Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md).
 
 ## 80.3 Krok za krokem: spočítat a schválit mzdy
 
@@ -833,3 +837,5 @@ s odkazem na hromadnou opravu:
   [Dokumenty a výstupy](83_Dokumenty_a_vystupy.md),
   [Podání a hlášení](85_Podani_a_hlaseni.md).
 - [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md).
+- [Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md):
+  měsíc agentury s DPP a větší firmy krok za krokem.

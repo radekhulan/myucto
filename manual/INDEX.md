@@ -150,6 +150,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 93. [Retenční lhůty](93_Retencni_lhuty.md)
 94. [Výmaz osobních údajů](94_Vymaz_osobnich_udaju.md)
 113. [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md)
+122. [Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md)
 
 ### Firma
 

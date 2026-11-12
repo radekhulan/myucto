@@ -52,6 +52,9 @@ Kapitolu otevřete, když:
 | 10 | Připravit a odeslat JMHZ a přehledy zdravotním pojišťovnám, nakonec měsíc uzavřít | `Mzdy → Podání a hlášení`, viz [§ 85.3](85_Podani_a_hlaseni.md#853-krok-za-krokem-mesicni-hlaseni-jmhz) |
 
 Podrobný postup je v [§ 75.4](#754-krok-za-krokem-zpracovani-mzdoveho-mesice).
+Zpracováváte-li stovky lidí (agentura s brigádníky na DPP a DPČ, větší firma
+s docházkovým systémem), projděte měsíc podle kapitoly
+[Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md).
 
 ### 75.1.2 Průběžně
 
@@ -667,3 +670,7 @@ Nastavení:
 21. [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md)
 22. [Mzdová rekapitulace](64_Mzdy.md)
 23. [Řešení problémů](999_Reseni_problemu.md)
+
+Postup pro stovky lidí:
+
+24. [Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md)

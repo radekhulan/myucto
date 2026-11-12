@@ -107,6 +107,8 @@ má stav **Aktivní** a v checklistu nástupu jsou registrace splněné.
 > Skončené dohody ukončíte najednou akcí **Ukončit skončené dohody**
 > ([§ 86.9.1](#8691-hromadne-ukonceni-skoncenych-dohod)). Když nějaké čekají,
 > je přímo nad seznamem s jejich počtem, jinak v **Další funkce**.
+> Jak hromadné akce použít v měsíci se stovkami lidí, popisuje kapitola
+> [Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md).
 
 ### 86.3.1 Další DPP osoby, která má otevřenou dohodu
 
@@ -1722,3 +1724,4 @@ Podání, které aplikace nepodporuje, dokončete ručně.
 - [Dokumenty a výstupy](83_Dokumenty_a_vystupy.md): zápočtový list a potvrzení
 - [Srážky a exekuce](88_Srazky_a_exekuce.md) a [Dohody o srážkách](87_Dohody_o_srazkach.md)
 - [Výmaz osobních údajů](94_Vymaz_osobnich_udaju.md)
+- [Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md): hromadné nástroje v pořadí měsíce
