@@ -94,6 +94,7 @@ import {
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate, formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
 import DateInput from '@/components/ui/DateInput.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
 type Tab = 'catalog' | 'recurring' | 'inputs' | 'risky_savings' | 'import'
 
@@ -1821,9 +1822,16 @@ async function cancelMatchingInputs() {
  * `inputs_not_whole_crowns`). Server bere jen vstupy, které by měsíční
  * hlášení odmítlo; co nezměnil, zůstane pod lištou s důvodem.
  */
-async function roundInputsWholeCrowns() {
+const roundConfirmOpen = ref(false)
+
+function askRoundInputsWholeCrowns() {
   if (batchDisabledInRange.value) return
-  if (!window.confirm(t('payroll.components.inputs.round_whole_crowns_confirm'))) return
+  roundConfirmOpen.value = true
+}
+
+async function roundInputsWholeCrowns() {
+  roundConfirmOpen.value = false
+  if (batchDisabledInRange.value) return
   inputError.value = ''
   inputBatchFailures.value = []
   saving.value = true
@@ -2502,7 +2510,7 @@ onMounted(load)
                 {{ t('payroll.components.inputs.export_pdf') }}
               </button>
               <span v-if="batchProgress !== null" role="status" class="text-xs text-neutral-500">{{ t('payroll.components.inputs.batch_progress', { done: batchProgress }) }}</span>
-              <button v-if="canWrite && summaryTotal > 0 && !batchDisabledInRange" type="button" data-testid="payroll-inputs-round-whole-crowns" :class="[btnOutline('warning'), 'whitespace-nowrap']" :disabled="saving" :title="t('payroll.components.inputs.round_whole_crowns_hint')" @click="roundInputsWholeCrowns">
+              <button v-if="canWrite && summaryTotal > 0 && !batchDisabledInRange" type="button" data-testid="payroll-inputs-round-whole-crowns" :class="[btnOutline('warning'), 'whitespace-nowrap']" :disabled="saving" :title="t('payroll.components.inputs.round_whole_crowns_hint')" @click="askRoundInputsWholeCrowns">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.coin" /></svg>
                 {{ t('payroll.components.inputs.round_whole_crowns') }}
               </button>
@@ -2665,5 +2673,15 @@ onMounted(load)
         </section>
       </section>
     </template>
+    <ConfirmDialog
+      v-if="roundConfirmOpen"
+      :title="t('payroll.components.inputs.round_whole_crowns')"
+      :message="t('payroll.components.inputs.round_whole_crowns_confirm')"
+      :confirm-label="t('payroll.components.inputs.round_whole_crowns_ok')"
+      variant="warning"
+      :busy="saving"
+      @confirm="roundInputsWholeCrowns"
+      @cancel="roundConfirmOpen = false"
+    />
   </div>
 </template>

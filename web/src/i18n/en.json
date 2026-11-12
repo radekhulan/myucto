@@ -5493,6 +5493,7 @@
         "round_whole_crowns": "Round inputs up to whole crowns",
         "round_whole_crowns_hint": "The monthly employer report states earnings in whole crowns. Inputs with hellers in the period are rounded up, in the employee's favour.",
         "round_whole_crowns_confirm": "Round inputs with hellers in this period up to whole crowns? Drafts and approved inputs not yet locked by a payroll run will change.",
+        "round_whole_crowns_ok": "Round up",
         "round_whole_crowns_done": "Inputs rounded: {count}. Left unchanged: {skipped}.",
         "round_whole_crowns_none": "No inputs in this period have hellers that the monthly report would reject.",
         "round_whole_crowns_failed": "The inputs could not be rounded.",

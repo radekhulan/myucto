@@ -5493,6 +5493,7 @@
         "round_whole_crowns": "Zaokrouhlit vstupy na celé koruny nahoru",
         "round_whole_crowns_hint": "Měsíční hlášení vykazuje výdělek v celých korunách. Vstupy s haléři v období se zaokrouhlí nahoru, ve prospěch zaměstnance.",
         "round_whole_crowns_confirm": "Zaokrouhlit haléřové vstupy období nahoru na celé koruny? Změní se koncepty i schválené vstupy, které ještě nejsou uzamčené během.",
+        "round_whole_crowns_ok": "Zaokrouhlit",
         "round_whole_crowns_done": "Zaokrouhleno vstupů: {count}. Nezměněno: {skipped}.",
         "round_whole_crowns_none": "V období nejsou vstupy s haléři, které by měsíční hlášení odmítlo.",
         "round_whole_crowns_failed": "Vstupy se nepodařilo zaokrouhlit.",

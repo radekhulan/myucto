@@ -120,6 +120,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 })
 
 import PayrollComponents from '@/pages/payroll/PayrollComponents.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
 async function openMinimumCatalogEditor(existing = false) {
   const wrapper = mount(PayrollComponents)
@@ -645,9 +646,24 @@ describe('PayrollComponents', () => {
    * haléřové vstupy období (zúžené na vztah z odkazu) zaokrouhlí nahoru
    * a co server nezměnil, zůstane pod lištou s důvodem.
    */
+  it('does not round inputs when the confirmation dialog is cancelled', async () => {
+    m.routeQuery = { employment: '12', period: '2026-05' }
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="payroll-inputs-round-whole-crowns"]').trigger('click')
+    await flushPromises()
+    wrapper.findComponent(ConfirmDialog).vm.$emit('cancel')
+    await flushPromises()
+
+    expect(wrapper.findComponent(ConfirmDialog).exists()).toBe(false)
+    expect(m.roundInputsWholeCrowns).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('rounds inputs of the period up to whole crowns and lists what stayed', async () => {
     m.routeQuery = { employment: '12', period: '2026-05' }
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const confirm = vi.spyOn(window, 'confirm')
     m.roundInputsWholeCrowns.mockResolvedValue({
       rounded: [{ id: 9, employee_name: 'Syntetická osoba', component_name: 'Provize', from_minor: 123450, to_minor: 123500 }],
       skipped: [{ id: 10, employee_name: 'Syntetická osoba', component_name: 'Provize', amount_minor: 50050, reason: 'Uzamčeno během.' }],
@@ -657,7 +673,14 @@ describe('PayrollComponents', () => {
 
     await wrapper.get('[data-testid="payroll-inputs-round-whole-crowns"]').trigger('click')
     await flushPromises()
+    expect(m.roundInputsWholeCrowns).not.toHaveBeenCalled()
+    const dialog = wrapper.findComponent(ConfirmDialog)
+    expect(dialog.exists()).toBe(true)
+    dialog.vm.$emit('confirm')
+    await flushPromises()
 
+    expect(confirm).not.toHaveBeenCalled()
+    expect(wrapper.findComponent(ConfirmDialog).exists()).toBe(false)
     expect(m.roundInputsWholeCrowns).toHaveBeenCalledWith({ period: '2026-05', employment_id: 12 })
     expect(wrapper.get('[data-testid="payroll-inputs-batch-failures"]').text())
       .toContain('Syntetická osoba · Provize: Uzamčeno během.')
