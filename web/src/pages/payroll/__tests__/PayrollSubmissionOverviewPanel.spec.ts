@@ -814,7 +814,7 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'other' } })
     await flushPromises()
 
-    expect(wrapper.get('[data-test="submission-bulk-external-hint"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="submission-bulk-external-hint"]').exists()).toBe(true)
   })
 })
 
