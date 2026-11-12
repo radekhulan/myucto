@@ -402,7 +402,7 @@ final class CreditRefundConcurrencyTest extends TestCase
                 return;
             }
             $currentStatement = trim((string) preg_replace('/\s+/', ' ', (string) ($state['current_statement'] ?? '')));
-            $periodWait = preg_match('/^SELECT id, ?status FROM accounting_periods WHERE supplier_id = (?:\?|[0-9]+) ORDER BY starts_on, ?id FOR UPDATE$/iD', $currentStatement) === 1;
+            $periodWait = preg_match('/^SELECT id, ?status FROM accounting_periods WHERE supplier_id = (?:\?|\'?[0-9]+\'?) ORDER BY starts_on, ?id FOR UPDATE$/iD', $currentStatement) === 1;
             if ($periodWait || preg_match('/(?:FROM|UPDATE)\s+(?:purchase_)?invoices\b/i', $currentStatement) === 1) {
                 $statementSince ??= microtime(true);
                 if (microtime(true) - $statementSince >= 0.25) {
