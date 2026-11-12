@@ -387,6 +387,64 @@ export interface LeaveEntitlementCandidatesPage {
   offset: number
 }
 
+/** Náhrada mzdy spočítaná z jiného než dnes schváleného průměru čtvrtletí. */
+export interface CompensationRecalculationItem {
+  input_id: number
+  input_status: 'approved' | 'locked'
+  period: string
+  employee_id: number
+  employment_id: number
+  full_name: string
+  component_code: string
+  component_name: string
+  kind: 'leave' | 'import' | 'obstacle' | 'other'
+  quantity_milliunits: number | null
+  minutes: number | null
+  amount_minor: number
+  old_average_hourly_minor: number | null
+  new_average_hourly_minor: number | null
+  new_amount_minor: number | null
+  /** `recalculate`/`replace` = přepočte se, `manual` = jen výpis, `blocked` = schválený běh. */
+  action: 'recalculate' | 'replace' | 'manual' | 'blocked'
+  reason: string | null
+  next_step: 'request_correction' | 'reopen' | null
+  run_id: number | null
+  run_status: string | null
+}
+
+export interface CompensationRecalculationPeriod {
+  period: string
+  availability: 'ready' | 'request_correction' | 'reopen'
+  reason: string | null
+  runs: Array<{ id: number, status: string, row_version: number, availability: string, refresh: boolean }>
+  counts: { recalculate: number, manual: number, blocked: number }
+  difference_minor: number
+  items: CompensationRecalculationItem[]
+}
+
+export interface CompensationRecalculationPreview {
+  periods: CompensationRecalculationPeriod[]
+  can_apply: boolean
+  can_approve: boolean
+  can_refresh: boolean
+}
+
+export interface CompensationRecalculationResult {
+  period: string
+  recalculated: Array<{
+    input_id: number
+    new_input_id: number
+    new_status: string
+    employment_id: number
+    full_name: string
+    component_name: string
+    amount_minor: number
+    new_amount_minor: number
+  }>
+  manual: CompensationRecalculationItem[]
+  refreshed_runs: Array<{ id: number, status: string, row_version: number }>
+}
+
 export const payrollAbsenceApi = {
   context: () =>
     api.get<{ employments: PayrollAbsenceEmployment[] }>('/payroll/time/context')
@@ -563,5 +621,22 @@ export const payrollAbsenceApi = {
     api.post<{ created: AverageSnapshot[]; candidates: number }>('/payroll/time/averages/probable-from-rate', {
       period,
       ...(officeId === null ? {} : { office_id: officeId }),
+    }).then(response => response.data),
+  /** Náhled přepočtu náhrad z nového průměru (jen čte). */
+  compensationRecalculationPreview: (periods: string[], employmentIds: number[] | null = null) =>
+    api.get<CompensationRecalculationPreview>('/payroll/time/compensation-recalculation', {
+      params: {
+        periods: periods.join(','),
+        ...(employmentIds === null ? {} : { employment_ids: employmentIds.join(',') }),
+      },
+    }).then(response => response.data),
+  /** Přepočet náhrad jednoho období; jen vstupy, které účetní viděla v náhledu. */
+  applyCompensationRecalculation: (payload: {
+    period: string
+    employment_ids: number[] | null
+    input_ids: number[]
+  }, idempotencyKey: string) =>
+    api.post<CompensationRecalculationResult>('/payroll/time/compensation-recalculation', payload, {
+      headers: { 'Idempotency-Key': idempotencyKey },
     }).then(response => response.data),
 }

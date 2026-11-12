@@ -44,6 +44,7 @@ import type { PayrollRegzelEnvironment, PayrollStatutoryBulkResult } from '@/api
 import DateInput from '@/components/ui/DateInput.vue'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
 import PayrollHideWarningDialog from '@/components/payroll/PayrollHideWarningDialog.vue'
+import PayrollCompensationRecalculationDialog from '@/components/payroll/PayrollCompensationRecalculationDialog.vue'
 import {
   evidenceRefreshCommand,
   firstHealthCoverageReviewId,
@@ -161,6 +162,7 @@ const pendingDelete = ref<PayrollRun | null>(null)
 const pendingApprove = ref<PayrollRun | null>(null)
 const commandReason = ref('')
 const averageCorrectionRunId = ref<number | null>(null)
+const compensationRecalculationRun = ref<PayrollRun | null>(null)
 const commandError = ref('')
 const commandBlockers = ref<Record<number, string>>({})
 const commandBlockerLinks = ref<Record<number, string>>({})
@@ -792,6 +794,18 @@ function averageChangeCommand(run: PayrollRun): PayrollRunCommand | null {
   return action !== null && visibleCommands(run).includes(action) ? action : null
 }
 
+const COMPENSATION_RECALCULATION_STATUSES = new Set(['inputs_locked', 'calculated', 'reviewed', 'reopened'])
+
+function canRecalculateCompensations(run: PayrollRun): boolean {
+  return canWrite.value
+    && (run.average_change?.compensation_count ?? 0) > 0
+    && COMPENSATION_RECALCULATION_STATUSES.has(run.status)
+}
+
+async function onCompensationsRecalculated() {
+  await load({ silent: true })
+}
+
 async function fixAverageChange(run: PayrollRun) {
   const command = averageChangeCommand(run)
   if (command === null) return
@@ -1255,6 +1269,7 @@ function historyEventLabel(event: PayrollRunHistoryEvent): string {
     'validation_override',
     'validation_override_revoked',
     'validation_overrides_carried',
+    'compensation_recalculated',
     'exclude_employee',
     'include_employee',
   ])
@@ -2676,6 +2691,18 @@ onMounted(() => { void load() })
             <p v-else-if="run.average_change.action !== null" data-test="payroll-run-average-change-forbidden">
               {{ t('payroll.runs.average_change.action_forbidden') }}
             </p>
+            <button
+              v-if="canRecalculateCompensations(run)"
+              type="button"
+              class="cursor-pointer whitespace-nowrap"
+              :class="btnOutlineSm('warning')"
+              :disabled="saving"
+              :data-testid="`payroll-run-${run.id}-compensation-recalculation`"
+              @click="compensationRecalculationRun = run"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+              {{ t('payroll.runs.average_change.recalculate_compensations') }}
+            </button>
           </div>
         </div>
         <!--
@@ -3959,6 +3986,14 @@ onMounted(() => { void load() })
         </div>
       </form>
     </Modal>
+
+    <PayrollCompensationRecalculationDialog
+      v-if="compensationRecalculationRun"
+      :periods="[compensationRecalculationRun.period_start.slice(0, 7)]"
+      :employment-ids="compensationRecalculationRun.average_change?.employments.map(item => item.employment_id) ?? null"
+      @close="compensationRecalculationRun = null"
+      @done="onCompensationsRecalculated"
+    />
 
     <PayrollHideWarningDialog
       v-if="pendingHide"

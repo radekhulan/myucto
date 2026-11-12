@@ -220,11 +220,17 @@ o opravu vezměte zpět.
 > starého průměru s částkou z nového průměru. Tlačítko **Otevřít opravu
 > a obnovit podklady** vyžádá opravu (důvod je předvyplněný), otevře ji
 > a běh přepočítá. Schválení zůstává na vás. Náhrady mají pevnou částku, proto
-> je v otevřené opravě zadejte znovu (dovolenou znovu schvalte, import podkladů
-> použijte znovu) a běh přepočítejte; upozornění zmizí, až žádná náhrada
-> nepochází ze starého průměru. U spočítaného neschváleného běhu se ukáže
-> **Průměr pro náhrady se změnil po výpočtu** s tlačítkem **Obnovit podklady
-> a přepočítat**.
+> je v otevřené opravě přepočítejte tlačítkem **Přepočítat náhrady z nového
+> průměru**: náhled ukáže osobu, náhradu, starou a novou částku, po potvrzení se
+> dovolená zadaná s daty a náhrady z importu hodin přepočítají, překážky
+> s dorovnáním a další náhrady se vypíšou k ruční úpravě
+> ([§ 76.4](76_Absence_a_dovolena.md#764-krok-za-krokem-prumerny-vydelek-pro-nahrady)).
+> Podklady běhu se pak obnoví a běh spočítejte znovu; upozornění zmizí, až žádná
+> náhrada nepochází ze starého průměru. Ve schváleném běhu ani ve vyžádané opravě
+> přepočet nic nezmění, jen navede na **Vyžádat opravu** / **Otevřít opravu**.
+> U spočítaného neschváleného běhu se ukáže **Průměr pro náhrady se změnil po
+> výpočtu** s tlačítky **Obnovit podklady a přepočítat** a **Přepočítat náhrady
+> z nového průměru**.
 
 ## 80.6 Krok za krokem: obnovení podkladů rozpracovaného běhu
 

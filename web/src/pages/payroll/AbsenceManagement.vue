@@ -14,6 +14,7 @@ import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchS
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import Modal from '@/components/ui/Modal.vue'
+import PayrollCompensationRecalculationDialog from '@/components/payroll/PayrollCompensationRecalculationDialog.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
@@ -224,6 +225,17 @@ const selectedReadyAverageCandidates = computed(() => averageCandidates.value.fi
  * Vybrat jde pak i řádek bez připraveného návrhu, právě ten se tím opraví.
  */
 const canSetProbable = computed(() => canWrite.value && auth.canWrite('payroll.employment.write'))
+const canRecalculateCompensations = computed(() => auth.canWrite('payroll.inputs.write'))
+const compensationRecalculation = ref<{ periods: string[], employmentIds: number[] | null } | null>(null)
+
+function quarterPeriods(year: number, quarter: number): string[] {
+  return [0, 1, 2].map(offset => `${year}-${String((quarter - 1) * 3 + 1 + offset).padStart(2, '0')}`)
+}
+
+function openCompensationRecalculation(year: number, quarter: number, employmentIds: number[] | null) {
+  if (!Number.isInteger(year) || !Number.isInteger(quarter) || quarter < 1 || quarter > 4) return
+  compensationRecalculation.value = { periods: quarterPeriods(year, quarter), employmentIds }
+}
 const probableForm = reactive({ amount_czk: '' as string | number, rationale: '' })
 const probableError = ref('')
 const probableResult = ref<ProbableBulkResult | null>(null)
@@ -2395,6 +2407,26 @@ onMounted(async () => {
             </div>
           </div>
         </div>
+        <div
+          v-if="canRecalculateCompensations"
+          class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3"
+          data-test="compensation-recalculation-bulk"
+        >
+          <div class="min-w-0 flex-1">
+            <h3 class="text-sm font-semibold text-neutral-900">{{ t('payroll.compensation_recalculation.title') }}</h3>
+            <p class="mt-1 max-w-prose text-xs text-neutral-500">{{ t('payroll.compensation_recalculation.bulk_hint', { quarter: `Q${bulkAverageQuarter}/${bulkAverageYear}` }) }}</p>
+          </div>
+          <button
+            type="button"
+            :class="btnOutline('warning')"
+            class="whitespace-nowrap"
+            data-test="compensation-recalculation-open"
+            @click="openCompensationRecalculation(bulkAverageYear, bulkAverageQuarter, null)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+            {{ t('payroll.compensation_recalculation.open') }}
+          </button>
+        </div>
         <div v-if="canSetProbable" class="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3" data-test="probable-bulk">
           <h3 class="text-sm font-semibold text-neutral-900">{{ t('payroll_absence.averages.probable_bulk.title') }}</h3>
           <p class="mt-1 text-xs text-neutral-500">{{ t('payroll_absence.averages.probable_bulk.hint') }}</p>
@@ -2717,6 +2749,17 @@ onMounted(async () => {
           <p class="mt-1 text-sm text-neutral-500">{{ t(`payroll_absence.average_status.${item.status}`) }}</p>
           <p v-if="item.worked_duration_units !== undefined || item.worked_minutes !== undefined" class="mt-1 text-sm text-neutral-500" data-test="average-snapshot-worked">{{ t('payroll_absence.averages.worked_minutes') }}: {{ item.worked_duration_units == null ? minutes(item.worked_minutes ?? null) : formatPayrollDuration(item.worked_duration_units) }}</p>
           <button v-if="canWrite && item.status === 'manual_review'" :class="btnFilled('success')" class="mt-4" :disabled="saving" @click="approveAverage(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('payroll_absence.actions.approve') }}</button>
+          <button
+            v-if="canRecalculateCompensations && item.status === 'approved'"
+            type="button"
+            :class="btnOutline('warning')"
+            class="mt-4 whitespace-nowrap"
+            data-test="average-compensation-recalculation"
+            @click="openCompensationRecalculation(item.applicable_year, item.applicable_quarter, [item.employment_id])"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+            {{ t('payroll.compensation_recalculation.open') }}
+          </button>
         </article>
       </section>
     </template>
@@ -2947,6 +2990,13 @@ onMounted(async () => {
       </section>
     </template>
     </template>
+
+    <PayrollCompensationRecalculationDialog
+      v-if="compensationRecalculation"
+      :periods="compensationRecalculation.periods"
+      :employment-ids="compensationRecalculation.employmentIds"
+      @close="compensationRecalculation = null"
+    />
 
     <Modal
       v-if="bulkApprovalOpen"
