@@ -10,6 +10,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogHashChain;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentKeyRing;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -38,6 +41,8 @@ final class AnonymizationService
 
     private const PAGE = 1000;
 
+    public const WIPED_CIPHERTEXT_PREFIX = 'enc:v2:0000000000000000:';
+
     /** @var array<string, array<string,string>> */
     private array $cache = [];
 
@@ -49,6 +54,19 @@ final class AnonymizationService
 
     private ?PayrollSensitiveData $sensitive = null;
 
+    private ?PayrollSensitiveData $revealer = null;
+
+    /** @var array<int, array{date:?string, sex:?string}> */
+    private array $birthFacts = [];
+
+    /** @var array<string,true> */
+    private array $syntheticBirthNumbers = [];
+
+    private int $synthesized = 0;
+
+    /** @var list<int> */
+    private array $unreadableA1Profiles = [];
+
     private ?string $passwordHash = null;
 
     public function __construct(private readonly Config $config) {}
@@ -56,7 +74,7 @@ final class AnonymizationService
     /**
      * @param callable(string):void $log
      * @return array{
-     *   tables:int, truncated:int, changed_rows:array<string,int>, dictionary:int,
+     *   tables:int, truncated:int, changed_rows:array<string,int>, dictionary:int, synthesized:int,
      *   leaks:array<string,int>, users:list<array{id:int,email:string,name:string}>,
      *   files:?array{files:int,bytes:int}, dump:?string, seconds:float
      * }
@@ -69,7 +87,7 @@ final class AnonymizationService
         $this->prepareTarget($pdo, $options, $log);
 
         $log('Kontrola pokrytí struktury politikou anonymizace…');
-        $problems = $this->coverageProblems($pdo, $options->source);
+        $problems = $this->coverageProblems($pdo, $options->source, $options->olderSource);
         if ($problems !== []) {
             throw new \RuntimeException("Politika anonymizace nepokrývá strukturu zdrojové databáze:\n  " . implode("\n  ", $problems));
         }
@@ -120,7 +138,7 @@ final class AnonymizationService
      * dalších databází. Cílem nesmí být databáze, se kterou instance pracuje.
      *
      * @param callable(string):void $log
-     * @return array{truncated:int, changed_rows:array<string,int>, dictionary:int, archives:int, submissions:int}
+     * @return array{truncated:int, changed_rows:array<string,int>, dictionary:int, synthesized:int, archives:int, submissions:int}
      */
     public function anonymizeCopy(AnonymizationOptions $options, callable $log): array
     {
@@ -155,7 +173,7 @@ final class AnonymizationService
      *
      * @param list<string> $systemVersioned
      * @param callable(string):void $log
-     * @return array{report:array{truncated:int, changed_rows:array<string,int>, dictionary:int}, archives:int, transport:array{count:int, root:?string}}
+     * @return array{report:array{truncated:int, changed_rows:array<string,int>, dictionary:int, synthesized:int}, archives:int, transport:array{count:int, root:?string}}
      */
     private function transform(PDO $pdo, AnonymizationOptions $options, array $systemVersioned, callable $log): array
     {
@@ -183,8 +201,14 @@ final class AnonymizationService
         }
         finally { $captureConnection->close(); }
         $report = $this->anonymize($pdo, $options, $log, $protectedRows);
+        $this->rewrapDocumentKeys($pdo, $options);
+        $this->restoreOfficialWorkplaces($pdo, $options);
         $log('Vypínám odchozí integrace…');
+        $present = $options->olderSource ? $this->columnMeta($pdo, $options->target) : [];
         foreach (AnonymizationPolicy::POST_SQL as $sql) {
+            if ($options->olderSource && preg_match('/^UPDATE\s+(\w+)\s+SET\s+(\w+)\s*=/i', $sql, $m) === 1 && !isset($present[$m[1]][$m[2]])) {
+                continue;
+            }
             $pdo->exec($sql);
         }
         LegacyCostCenterCloneScrubber::run($pdo, $this->scrubber);
@@ -240,7 +264,7 @@ final class AnonymizationService
 
     /**
      * @param callable(string):void $log
-     * @return array{truncated:int, changed_rows:array<string,int>, dictionary:int}
+     * @return array{truncated:int, changed_rows:array<string,int>, dictionary:int, synthesized:int}
      */
     private function anonymize(PDO $pdo, AnonymizationOptions $options, callable $log, ?CloneProtectedRows $protectedRows = null): array
     {
@@ -251,20 +275,29 @@ final class AnonymizationService
         $scrubber = $this->scrubber = new TextScrubber($this->pseudonymizer);
         $this->cache = [];
         $this->cacheSize = 0;
-        $targetConfig = $this->targetConfig($options->target);
+        $targetConfig = $this->keyedConfig($options->target, $options->targetKeysPath);
+        $sourceConfig = $this->keyedConfig($options->target, $options->sourceKeysPath);
         $this->sensitive = new PayrollSensitiveData(new SecretEncryption($targetConfig), $targetConfig);
+        $this->revealer = new PayrollSensitiveData(new SecretEncryption($sourceConfig), $sourceConfig);
         $this->passwordHash = $options->password !== null && $options->password !== ''
-            ? (new PasswordHasher($this->config))->hash($options->password)
+            ? (new PasswordHasher($targetConfig))->hash($options->password)
             : password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT);
+        $this->synthesized = 0;
+        $this->unreadableA1Profiles = [];
+        $this->syntheticBirthNumbers = [];
+        $this->birthFacts = $this->birthFacts($pdo);
 
         $this->preserveAccounts($pdo);
 
+        $meta = $this->columnMeta($pdo, $options->target);
         $log('Vyprazdňuji relace, tokeny a fronty…');
         foreach (array_keys(AnonymizationPolicy::TRUNCATE) as $table) {
+            if ($options->olderSource && !isset($meta[$table])) {
+                continue;
+            }
             $pdo->exec('DELETE FROM ' . DatabaseCloner::quote($table));
         }
 
-        $meta = $this->columnMeta($pdo, $options->target);
         $keys = $this->primaryKeys($pdo, $options->target);
         $changed = [];
         $phases = [
@@ -278,6 +311,9 @@ final class AnonymizationService
             $log("Pseudonymizace — {$label}…");
             foreach ($tables as $table => $columns) {
                 $selected = array_filter($columns, $inPhase);
+                if ($options->olderSource) {
+                    $selected = array_intersect_key($selected, $meta[$table] ?? []);
+                }
                 if ($selected === []) {
                     continue;
                 }
@@ -288,10 +324,18 @@ final class AnonymizationService
             }
         }
 
+        if ($this->unreadableA1Profiles !== []) {
+            $log(sprintf('Mažu nečitelné profily registrace A1 (%d), v kopii se vyplní znovu…', count($this->unreadableA1Profiles)));
+            foreach (array_chunk($this->unreadableA1Profiles, self::PAGE) as $ids) {
+                $pdo->exec('DELETE FROM payroll_registration_a1_profiles WHERE id IN (' . implode(',', $ids) . ')');
+            }
+        }
+
         return [
             'truncated' => count(AnonymizationPolicy::TRUNCATE),
             'changed_rows' => $changed,
             'dictionary' => $this->pseudonymizer->dictionary()->count(),
+            'synthesized' => $this->synthesized,
         ];
     }
 
@@ -320,6 +364,11 @@ final class AnonymizationService
                 $needed[] = $spec['entity'];
                 if ($spec['type_column'] !== null) {
                     $needed[] = $spec['type_column'];
+                }
+                foreach ([$spec['masked'], 'employee_id', 'birth_date', 'other_caregiver_birth_date'] as $context) {
+                    if ($context !== null && isset($meta[$context])) {
+                        $needed[] = $context;
+                    }
                 }
             }
         }
@@ -447,7 +496,7 @@ final class AnonymizationService
                 continue;
             }
             $new = match ($strategy) {
-                'wipe' => ($meta[$column]['nullable'] ?? true) ? null : (($meta[$column]['json'] ?? false) ? '{}' : ''),
+                'wipe' => ($meta[$column]['nullable'] ?? true) ? null : (($meta[$column]['json'] ?? false) ? '{}' : (str_starts_with($old, 'enc:v2:') ? self::WIPED_CIPHERTEXT_PREFIX . base64_encode(random_bytes(44)) : '')),
                 'token' => self::randomToken($old),
                 'password' => $this->passwordHash,
                 'blob_pdf' => $old === '' ? $old : PlaceholderFiles::pdf(),
@@ -507,10 +556,12 @@ final class AnonymizationService
     }
 
     /**
-     * Šifrovaná mzdová hodnota: dešifrovat klíčem instance, nahradit pseudonymem
-     * a zapečetit znovu (šifrový text, vyhledávací otisk i maska). Když se
-     * originál dešifrovat nedá (jiný klíč), dostane řádek vymyšlenou hodnotu —
-     * starý šifrový text v kopii nezůstane nikdy.
+     * Šifrovaná mzdová hodnota: dešifrovat klíči zdroje (výchozí klíče instance),
+     * nahradit pseudonymem a zapečetit znovu klíči cíle (šifrový text, vyhledávací
+     * otisk i maska). Když se originál dešifrovat nedá (jiný klíč), dostane řádek
+     * vymyšlenou hodnotu: rodné číslo s datem narození a pohlavím z karty osoby
+     * a platnou kontrolní číslicí, účet s kódem banky z masky. Starý šifrový text
+     * v kopii nezůstane nikdy.
      *
      * @param array<string,mixed> $row
      * @return array<string,string>
@@ -536,24 +587,35 @@ final class AnonymizationService
             default => throw new \RuntimeException("Neznámý typ šifrované hodnoty: {$type}"),
         };
         $sensitive = $this->sensitive ?? throw new \LogicException('Šifrování není připravené.');
+        $revealer = $this->revealer ?? $sensitive;
         try {
-            $plain = $sensitive->reveal($ciphertext, $field, $supplierId, $entityId, PayrollRevealPurpose::ANONYMIZATION);
+            $plain = $revealer->reveal($ciphertext, $field, $supplierId, $entityId, PayrollRevealPurpose::ANONYMIZATION);
         } catch (\Throwable) {
             $plain = null;
         }
         $scrubber = $this->scrubber ?? throw new \LogicException('Pseudonymizace není připravená.');
+        $pseudo = null;
         if ($plain === null || trim($plain) === '') {
+            $this->synthesized++;
             $seed = substr(hash('sha256', $ciphertext), 0, 12);
+            $masked = $spec['masked'] !== null ? (string) ($row[$spec['masked']] ?? '') : '';
+            $bank = preg_match('~/(\d{4})$~', $masked, $m) === 1 ? $m[1] : '0100';
+            if ($kind === 'birth_number') {
+                $pseudo = $this->syntheticBirthNumber($row, $seed);
+            }
+            if ($field === PayrollSensitiveField::REGISTRATION_A1_PROFILE && isset($row['id'])) {
+                $this->unreadableA1Profiles[] = (int) $row['id'];
+            }
             $plain = match ($kind) {
-                'birth_number' => '800101' . sprintf('%04d', hexdec(substr($seed, 0, 4)) % 10000),
-                'bank_account' => (string) (100000 + hexdec(substr($seed, 0, 5)) % 900000) . '/0100',
+                'birth_number' => (string) $pseudo,
+                'bank_account' => (string) (100000 + hexdec(substr($seed, 0, 5)) % 900000) . '/' . $bank,
                 'email' => 'x' . $seed . '@example.cz',
                 'phone' => '+420 6' . sprintf('%08d', hexdec(substr($seed, 0, 6)) % 100_000_000),
                 'json' => '{}',
                 default => 'X' . strtoupper($seed),
             };
         }
-        $pseudo = $kind === 'json' ? $scrubber->scrubJson($plain) : $scrubber->byStrategy($kind, $plain);
+        $pseudo ??= $kind === 'json' ? $scrubber->scrubJson($plain) : $scrubber->byStrategy($kind, $plain);
         $sealed = $sensitive->seal($pseudo, $field, $supplierId, $entityId);
         $out = [$column => $sealed->ciphertext];
         $out[$spec['hash']] = $sealed->lookupHash;
@@ -564,6 +626,93 @@ final class AnonymizationService
         return $out;
     }
 
+    /** @param array<string,mixed> $row */
+    private function syntheticBirthNumber(array $row, string $seed): string
+    {
+        $facts = $this->birthFacts[(int) ($row['employee_id'] ?? 0)] ?? ['date' => null, 'sex' => null];
+        $own = $row['birth_date'] ?? $row['other_caregiver_birth_date'] ?? null;
+        $date = $own !== null ? (string) $own : $facts['date'];
+        $sex = $own !== null ? null : $facts['sex'];
+        if ($date === null || preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $date, $m) !== 1) {
+            $m = ['', '1980', '01', '01'];
+        }
+        $year = (int) $m[1];
+        $female = $sex !== null ? $sex === 'female' : hexdec($seed[0]) % 2 === 1;
+        $head = sprintf('%02d%02d%02d', $year % 100, (int) $m[2] + ($female ? 50 : 0), (int) $m[3]);
+        for ($attempt = 0; $attempt < 2000; $attempt++) {
+            $base = $head . sprintf('%03d', hexdec(substr(hash('sha256', $seed . "\0" . $attempt), 0, 6)) % 1000);
+            if ($year >= 1954) {
+                $check = ((int) $base) % 11;
+                if ($check === 10) {
+                    continue;
+                }
+                $base .= $check;
+            }
+            if (!isset($this->syntheticBirthNumbers[$base])) {
+                $this->syntheticBirthNumbers[$base] = true;
+
+                return $base;
+            }
+        }
+
+        throw new \RuntimeException("Pro datum narození {$m[1]}-{$m[2]}-{$m[3]} došla volná rodná čísla.");
+    }
+
+    /** @return array<int, array{date:?string, sex:?string}> */
+    private function birthFacts(PDO $pdo): array
+    {
+        $facts = [];
+        try {
+            foreach ($pdo->query('SELECT id, birth_date FROM payroll_employees WHERE birth_date IS NOT NULL')->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $facts[(int) $row['id']] = ['date' => (string) $row['birth_date'], 'sex' => null];
+            }
+            foreach ($pdo->query('SELECT employee_id, birth_date, sex FROM payroll_person_identity_history ORDER BY effective_from, id')->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $id = (int) $row['employee_id'];
+                $facts[$id] = [
+                    'date' => $row['birth_date'] !== null ? (string) $row['birth_date'] : ($facts[$id]['date'] ?? null),
+                    'sex' => $row['sex'] !== null ? (string) $row['sex'] : ($facts[$id]['sex'] ?? null),
+                ];
+            }
+        } catch (\PDOException) {
+            return $facts;
+        }
+
+        return $facts;
+    }
+
+    private function restoreOfficialWorkplaces(PDO $pdo, AnonymizationOptions $options): void
+    {
+        try {
+            $rows = $pdo->query('SELECT id, work_place, jmhz_workplace_municipality_code FROM ' . DatabaseCloner::quote($options->source)
+                . '.payroll_employment_terms WHERE work_place IS NOT NULL AND jmhz_workplace_municipality_code IS NOT NULL')->fetchAll(PDO::FETCH_ASSOC);
+        } catch (\PDOException) {
+            return;
+        }
+        $catalog = new JmhzExternalCodebookCatalog(new JmhzSpecPackageCatalog());
+        $official = [];
+        $update = $pdo->prepare('UPDATE payroll_employment_terms SET work_place = ? WHERE id = ?');
+        foreach ($rows as $row) {
+            $name = (string) $row['work_place'];
+            $code = (string) $row['jmhz_workplace_municipality_code'];
+            $official[$code . "\0" . $name] ??= in_array(['code' => $code, 'label' => $name], $catalog->searchKnownMunicipalities($name, 50), true);
+            if ($official[$code . "\0" . $name]) {
+                $update->execute([$name, (int) $row['id']]);
+            }
+        }
+    }
+
+    private function rewrapDocumentKeys(PDO $pdo, AnonymizationOptions $options): void
+    {
+        $encryption = new SecretEncryption($this->keyedConfig($options->target, $options->targetKeysPath));
+        $update = $pdo->prepare('UPDATE payroll_document_data_keys SET wrapped_key = ? WHERE supplier_id = ? AND subject_id = ?');
+        $rows = $pdo->query('SELECT supplier_id, subject_id FROM payroll_document_data_keys WHERE destroyed_at IS NULL')->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            $supplierId = (int) $row['supplier_id'];
+            $subjectId = (int) $row['subject_id'];
+            $update->execute([PayrollDocumentKeyRing::wrapFreshKey($encryption, $supplierId, $subjectId), $supplierId, $subjectId]);
+        }
+    }
+
     private function preserveAccounts(PDO $pdo): void
     {
         foreach (AnonymizationPolicy::PRESERVED_ACCOUNT_SQL as $sql) {
@@ -571,7 +720,7 @@ final class AnonymizationService
                 $this->pseudonymizer->preserveAccount((string) $account);
             }
         }
-        $sensitive = $this->sensitive;
+        $sensitive = $this->revealer;
         if ($sensitive === null) {
             return;
         }
@@ -730,7 +879,7 @@ final class AnonymizationService
     }
 
     /** @return list<string> */
-    private function coverageProblems(PDO $pdo, string $source): array
+    private function coverageProblems(PDO $pdo, string $source, bool $olderSource = false): array
     {
         $views = array_keys(array_filter((new DatabaseCloner($pdo))->tableTypes($source), static fn (string $type): bool => $type === 'VIEW'));
         $stmt = $pdo->prepare(
@@ -757,7 +906,7 @@ final class AnonymizationService
             ];
         }
 
-        return AnonymizationPolicyAudit::problems($tables, $foreignKeys);
+        return AnonymizationPolicyAudit::problems($tables, $foreignKeys, $olderSource);
     }
 
     /** @return array<string, array<string, array{nullable:bool, type:string, max:?int, json:bool}>> */
@@ -835,6 +984,49 @@ final class AnonymizationService
         $pdo->exec("SET SESSION time_zone = '+00:00'");
 
         return $pdo;
+    }
+
+    private function keyedConfig(string $target, ?string $keysPath): Config
+    {
+        $config = $this->targetConfig($target);
+        if ($keysPath === null) {
+            return $config;
+        }
+        $data = $config->all();
+        foreach (self::keyOverrides($keysPath) as $key => $value) {
+            $data['app'][$key] = $value;
+        }
+
+        return new Config($data, $config->dataDir());
+    }
+
+    /** @return array<string, string|list<string>> */
+    public static function keyOverrides(string $path): array
+    {
+        if (!is_file($path) || !is_readable($path)) {
+            throw new \InvalidArgumentException("Soubor s klíči {$path} neexistuje nebo nejde číst.");
+        }
+        $loaded = (static fn (string $file): mixed => require $file)($path);
+        $app = is_array($loaded) && is_array($loaded['app'] ?? null) ? $loaded['app'] : null;
+        if ($app === null) {
+            throw new \InvalidArgumentException("Soubor s klíči {$path} musí vracet ['app' => [...]].");
+        }
+        $keys = [];
+        foreach (['pepper', 'secret_encryption_key', 'payroll_hash_key'] as $key) {
+            if (array_key_exists($key, $app)) {
+                if (!is_string($app[$key])) {
+                    throw new \InvalidArgumentException("Klíč app.{$key} v {$path} musí být řetězec.");
+                }
+                $keys[$key] = $app[$key];
+            }
+        }
+        if ($keys === []) {
+            throw new \InvalidArgumentException("Soubor s klíči {$path} neobsahuje žádný klíč.");
+        }
+        $previous = $app['secret_encryption_previous_keys'] ?? [];
+        $keys['secret_encryption_previous_keys'] = is_array($previous) ? array_values(array_filter($previous, 'is_string')) : [];
+
+        return $keys;
     }
 
     private function targetConfig(string $target): Config

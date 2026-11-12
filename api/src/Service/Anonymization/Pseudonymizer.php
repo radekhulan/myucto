@@ -697,6 +697,36 @@ final class Pseudonymizer
         return strlen($hit) < strlen($trimmed) ? str_pad($hit, strlen($trimmed), '0', STR_PAD_LEFT) : $hit;
     }
 
+    public function csszVariableSymbol(string $value): string
+    {
+        $trimmed = trim($value);
+        if (preg_match('/^\d{10}$/D', $trimmed) !== 1) {
+            return $trimmed === '' ? $value : $this->shapeDigits($trimmed);
+        }
+        $prefix = substr($trimmed, 0, str_starts_with($trimmed, '1868') ? 4 : 3);
+        $pseudo = $this->unique('cssz_vs', $trimmed, function (int $attempt) use ($trimmed, $prefix): string {
+            $body = $prefix . self::digitsFrom($this->hmac('cssz_vs', $trimmed, $attempt), 9 - strlen($prefix), false);
+
+            return $body . self::luhnCheckDigit($body);
+        });
+        $this->dictionary->add($trimmed, $pseudo, 6);
+
+        return $pseudo;
+    }
+
+    public static function luhnCheckDigit(string $body): string
+    {
+        $sum = 0;
+        $double = true;
+        for ($i = strlen($body) - 1; $i >= 0; $i--) {
+            $digit = (int) $body[$i] * ($double ? 2 : 1);
+            $sum += $digit > 9 ? $digit - 9 : $digit;
+            $double = !$double;
+        }
+
+        return (string) ((10 - $sum % 10) % 10);
+    }
+
     /**
      * Uživatelský název souboru — pseudonym se zachovanou příponou.
      */

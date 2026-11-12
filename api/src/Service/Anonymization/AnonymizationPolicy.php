@@ -23,6 +23,8 @@ namespace MyInvoice\Service\Anonymization;
  *  - `account_key`   odvozený klíč účtu (jen číslice) — týž pseudonym jako účet
  *  - `symbol`        VS/SS: změní se jen, je-li celý symbol pseudonymizovaný
  *                    identifikátor (IČO, RČ, účet); čísla faktur zůstanou
+ *  - `cssz_variable_symbol` VS zaměstnavatele u ČSSZ: kód okresní správy zůstane,
+ *                    zbytek pseudonym s platnou kontrolní číslicí (Luhn)
  *  - `wipe`          tajemství, šifrované archivy, tokeny, IP adresy — NULL
  *                    (u NOT NULL prázdná hodnota, u JSON `{}`)
  *  - `token`         náhodný nový token stejné délky (unikátní odkazy)
@@ -494,7 +496,7 @@ final class AnonymizationPolicy
         'payroll_document_batch_attempts' => ['error_code' => 'keep', 'error_message' => 'text', 'lease_token' => 'keep'],
         'payroll_document_batch_items' => ['last_error_code' => 'keep', 'last_error_message' => 'text', 'lease_token' => 'keep', 'source_snapshot_hash' => 'keep'],
         'payroll_document_batches' => ['idempotency_key_hash' => 'keep', 'source_snapshot_hash' => 'keep'],
-        'payroll_document_data_keys' => ['destroy_reason' => 'text', 'key_algorithm' => 'keep', 'wrapped_key' => 'wipe'],
+        'payroll_document_data_keys' => ['destroy_reason' => 'text', 'key_algorithm' => 'keep', 'wrapped_key' => 'keep'],
         'payroll_eldp_manual_completions' => ['authority_reference' => 'text', 'confirmation_mime_type' => 'keep', 'confirmation_sha256' => 'keep', 'evidence_manifest_json' => 'json', 'evidence_sha256' => 'keep', 'idempotency_key_hash' => 'keep', 'request_fingerprint' => 'keep'],
         'payroll_eldp_statement_claims' => ['confirmation_fingerprint' => 'keep', 'idempotency_key_hash' => 'keep'],
         'payroll_eldp_statement_sources' => ['input_snapshot_hash' => 'keep', 'result_snapshot_hash' => 'keep'],
@@ -579,8 +581,8 @@ final class AnonymizationPolicy
         'payroll_monthly_records' => ['breakdown' => 'json', 'retired_reason' => 'text'],
         'payroll_net_results' => ['result_hash' => 'keep', 'result_json' => 'json'],
         'payroll_obligations' => ['agenda_code' => 'keep', 'idempotency_key_hash' => 'keep', 'request_fingerprint' => 'keep', 'source_event_hash' => 'keep', 'source_event_reference' => 'text', 'source_event_type' => 'keep', 'subject_reference' => 'text'],
-        'payroll_office_registration_versions' => ['social_security_variable_symbol' => 'symbol', 'source_reference' => 'text'],
-        'payroll_offices' => ['code' => 'keep', 'name' => 'keep', 'social_security_variable_symbol' => 'symbol', 'test_social_security_variable_symbol' => 'symbol'],
+        'payroll_office_registration_versions' => ['social_security_variable_symbol' => 'cssz_variable_symbol', 'source_reference' => 'text'],
+        'payroll_offices' => ['code' => 'keep', 'name' => 'keep', 'social_security_variable_symbol' => 'cssz_variable_symbol', 'test_social_security_variable_symbol' => 'cssz_variable_symbol'],
         'payroll_operational_reconciliation_issue_events' => ['source_hash' => 'keep', 'source_snapshot_json' => 'json'],
         'payroll_operational_reconciliation_issues' => ['category' => 'keep', 'issue_key' => 'text', 'source_hash' => 'keep', 'source_snapshot_json' => 'json'],
         'payroll_overtime_averaging_periods' => ['basis' => 'keep', 'collective_agreement_reference' => 'text', 'note' => 'text'],
@@ -854,7 +856,7 @@ final class AnonymizationPolicy
         'party_name', 'person_name', 'first_name', 'last_name', 'street', 'city', 'zip', 'address',
         'ico', 'dic', 'birth_number', 'email', 'phone', 'bank_account', 'iban', 'card_last4',
         'data_box', 'web', 'host', 'login', 'shape', 'shape_digits', 'file_name', 'file_path',
-        'wipe', 'token', 'password', 'blob_pdf', 'blob_text',
+        'wipe', 'token', 'password', 'blob_pdf', 'blob_text', 'cssz_variable_symbol',
     ];
 
     /** Odvozené klíče a symboly — potřebují hotové mapování ze strukturovaného průchodu. */

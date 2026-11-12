@@ -1216,6 +1216,7 @@ anonymizovaná kopie.
 | IČO, DIČ | jiné, platné podle kontrolní číslice; DIČ navazuje na nové IČO |
 | rodná čísla | datum narození a pohlaví zůstávají, koncovka je jiná a číslo platné |
 | čísla účtů, IBAN | jiná platná čísla, kód banky a předčíslí zůstávají |
+| variabilní symbol zaměstnavatele u ČSSZ | kód okresní správy zůstává, zbytek jiný s platnou kontrolní číslicí |
 | e-maily, telefony, datové schránky | vymyšlené (e-maily v doméně `example.invalid`) |
 | texty dokladů, poznámky, protokoly převodů, auditní stopa | tatáž jména a čísla nahrazená týmiž pseudonymy |
 | přílohy a výpisy uložené v databázi | zástupný soubor (prázdné PDF, obrázek 1×1 px, text) |
@@ -1247,6 +1248,24 @@ používejte ji jen na vývojovém stroji.
 - Šifrované mzdové údaje jsou znovu zapečetěné klíčem instance, na které
   příkaz běžel. Testovací instance s jiným `secret_encryption_key` je
   nerozšifruje.
+- **Kopie pro jinou instanci (přešifrování):** `--target-keys=SOUBOR` zapečetí
+  mzdové údaje (rodná čísla, účty, kontakty, profily registrace A1) klíči
+  testovací instance a stejným pepperem zahashuje heslo z `--password`.
+  `--source-keys=SOUBOR` určí klíče, kterými jsou údaje zdroje šifrované
+  (výchozí jsou klíče instance). Oba soubory vrací
+  `['app' => ['secret_encryption_key' => …, 'pepper' => …, 'payroll_hash_key' => …,
+  'secret_encryption_previous_keys' => []]]`; z konfigurace se převezmou jen
+  tyto klíče.
+- Co klíčem zdroje dešifrovat nejde (například kopie produkce bez jejího
+  klíče), dostane vymyšlenou hodnotu: rodné číslo s datem narození a pohlavím
+  z karty osoby a platnou kontrolní číslicí, účet s kódem banky z masky.
+  Nečitelné profily registrace A1 se v kopii smažou a vyplní se znovu na
+  kartě vztahu. Počet nahrazených hodnot příkaz vypíše. Datové klíče
+  mzdových dokumentů dostanou kopie nové, zabalené klíčem cíle.
+- `--older-source` dovolí kopii ze zálohy starší verze aplikace: tabulky a
+  sloupce, které v ní ještě nejsou, se přeskočí. Kopii pak doplní
+  `php api/bin/migrate.php`. Neznámý textový sloupec ve zdroji kopii i tak
+  zastaví.
 - Archivní snímky podání (mzdová podání, EPO) jsou smazané, jejich otisky
   zůstaly - archiv podání v kopii proto hlásí nečitelné snímky. Auditní stopa
   je po pseudonymizaci zapečetěná znovu a dokazuje jen integritu kopie.

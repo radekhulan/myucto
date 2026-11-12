@@ -53,6 +53,14 @@ Anonymizovaná kopie databáze pro testovací instanci.
   --dump-bin=CESTA     mariadb-dump / mysqldump (výchozí: mariadb-dump z PATH)
   --seed=TEXT          reprodukovatelné pseudonymy mezi běhy (jinak náhodný klíč;
                        se známým seedem jde pseudonym zpětně dohledat — jen pro vývoj)
+  --source-keys=SOUBOR klíče, kterými jsou šifrované údaje zdroje (PHP soubor vracející
+                       ['app' => [secret_encryption_key, pepper, payroll_hash_key,
+                       secret_encryption_previous_keys]]); výchozí: klíče instance
+  --target-keys=SOUBOR klíče testovací instance, pro kterou kopie vzniká (stejný tvar);
+                       šifrované mzdové údaje se zapečetí jimi. Co nejde dešifrovat,
+                       nahradí vymyšlená hodnota (rodné číslo podle data narození z karty)
+  --older-source       zdroj je dump starší verze aplikace: tabulky a sloupce politiky,
+                       které v něm ještě nejsou, se přeskočí (kopii pak doplní migrate.php)
   --help
 
 TXT;
@@ -85,6 +93,9 @@ $options = new AnonymizationOptions(
     filesOut: $string('files-out'),
     dumpPath: $string('dump'),
     dumpBinary: $string('dump-bin'),
+    sourceKeysPath: $string('source-keys'),
+    targetKeysPath: $string('target-keys'),
+    olderSource: isset($opts['older-source']),
 );
 
 set_time_limit(0);
@@ -112,12 +123,16 @@ if ($report['leaks'] !== []) {
         $log("    {$column}: {$count}");
     }
 }
+if ($report['synthesized'] > 0) {
+    $log("  nečitelných šifrovaných hodnot nahrazeno vymyšlenými: {$report['synthesized']}");
+}
 $log('  Uživatelé kopie (přihlašovací e-mail):');
 foreach ($report['users'] as $user) {
     $log("    #{$user['id']} {$user['email']} ({$user['name']})");
 }
 if ($options->password === null) {
-    $log('  Hesla jsou nepoužitelná — nastav je: MYINVOICE_DB_NAME=' . $options->target . ' php api/bin/set-password.php <e-mail>');
+    $log('  Hesla jsou nepoužitelná — nastav je: MYINVOICE_DB_NAME=' . $options->target . ' php api/bin/set-password.php <e-mail>'
+        . ($options->targetKeysPath !== null ? ' (v instanci s klíči z --target-keys, heslo závisí na pepperu)' : ''));
 }
 if ($report['files'] !== null) {
     $log("  zástupných souborů: {$report['files']['files']}");
