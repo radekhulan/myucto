@@ -15001,6 +15001,37 @@
         "revoke": "Vzít potvrzení zpět",
         "revoke_consequence": "Měsíc {period} se znovu objeví mezi převzatými měsíci bez hlášení."
       }
+    },
+    "jmhz_external_root": {
+      "title": "Oprava měsíce podaného předchozím programem",
+      "intro": "Řádné hlášení za měsíc podal jiný program? Převezměte ho z původního XML nebo zadejte GUID podání a formulářů. Opravné hlášení pak připravíte v MyÚčtu tlačítkem „Opravit hodnoty hlášení“. Nic se tím neodesílá.",
+      "open": "Navázat opravu",
+      "show": "Otevřít podání",
+      "forms": "formulářů: {count}",
+      "mode": {
+        "original_xml": "z původního XML",
+        "guid_reference": "z GUID"
+      },
+      "dialog_title": "Navázat opravu na hlášení předchozího programu",
+      "dialog_intro": "Vyberte schválený mzdový běh za měsíc, za který řádné hlášení podal předchozí program. MyÚčto podání převezme jako přijaté (bez odeslání) a opravné hlášení ponese jeho GUID a GUID původních formulářů.",
+      "run": "Mzdový běh",
+      "run_placeholder": "Vyberte běh",
+      "revision": "revize {no}",
+      "mode_label": "Jak doložíte původní hlášení",
+      "mode_xml_hint": "Nahrát původní XML řádného hlášení (ověří se XSD, typ R, období a variabilní symbol).",
+      "mode_guids_hint": "Zadat GUID podání a GUID formulářů z protokolu ČSSZ. Obsah původního hlášení pak neznáme, opravují se celé formuláře.",
+      "file": "Soubor XML",
+      "submission_guid": "GUID podání",
+      "loading": "Načítám vztahy…",
+      "employee": "Zaměstnanec",
+      "id_ppv": "ID PPV",
+      "form_guid": "GUID formuláře",
+      "confirm": "Potvrzuji, že vztahy se zadaným GUID byly v původním řádném hlášení. Vztah bez GUID oprava doplní řádným formulářem.",
+      "note": "Čím je podání doložené",
+      "note_placeholder": "Např. program, datum podání a číslo protokolu ČSSZ",
+      "submit": "Převzít podání",
+      "load_failed": "Nepodařilo se načíst převzatá hlášení.",
+      "save_failed": "Podání se nepodařilo převzít."
     }
   },
   "foreign_income": {

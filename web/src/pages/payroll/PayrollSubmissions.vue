@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { formatDateTime } from '@/composables/useFormat'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -28,6 +28,7 @@ import PayrollStatutoryObligationsPanel from './PayrollStatutoryObligationsPanel
 import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
 import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 import PayrollExternalJmhzSubmissionsPanel from './PayrollExternalJmhzSubmissionsPanel.vue'
+import PayrollJmhzExternalCorrectionRoot from './PayrollJmhzExternalCorrectionRoot.vue'
 import PayrollSubmissionQueuePanel from './PayrollSubmissionQueuePanel.vue'
 import PayrollRegistrationCompletionPanel from './PayrollRegistrationCompletionPanel.vue'
 import PayrollRegistrationA1BatchPanel from './PayrollRegistrationA1BatchPanel.vue'
@@ -421,6 +422,12 @@ const requestedSubmissionId = computed(() => {
 
 function clearRequestedSubmission() {
   if (requestedSubmissionId.value !== null) void router.replace({ query: { ...route.query, submission: undefined } })
+}
+
+async function openExternalRoot(payload: { submissionId: number; period: string }) {
+  overviewPeriod.value = payload.period
+  await nextTick()
+  void router.replace({ query: { ...route.query, period: payload.period, submission: String(payload.submissionId) } })
 }
 
 watch([requestedSubmissionId, activeTab], ([id, tab]) => {
@@ -999,6 +1006,7 @@ function rememberDetails(tab: string, event: Event) {
             z jiného programu panel neuvidí.
           -->
           <PayrollExternalJmhzSubmissionsPanel :environment="environment" />
+          <PayrollJmhzExternalCorrectionRoot :environment="environment" @open-submission="openExternalRoot" />
           <PayrollSubmissionOverviewPanel
             v-model:environment="environment"
             v-model:period="overviewPeriod"

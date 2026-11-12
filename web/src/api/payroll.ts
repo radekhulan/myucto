@@ -12141,6 +12141,69 @@ export const payrollApi = {
       `/payroll/submissions/jmhz-external/attestations/${id}`,
       { params: { environment } },
     ).then(response => response.data),
+  /** Řádná hlášení předchozího programu převzatá jako kořen opravného JMHZ. */
+  jmhzExternalRoots: (environment: PayrollJmhzTransportEnvironment) =>
+    api.get<{ environment: PayrollJmhzTransportEnvironment; items: PayrollJmhzExternalRoot[] }>(
+      '/payroll/submissions/jmhz-external-roots',
+      { params: { environment } },
+    ).then(response => response.data),
+  /** Vztahy schválené revize, ke kterým lze zadat GUID formulářů původního hlášení. */
+  jmhzExternalRootCandidates: (
+    revisionId: number,
+    officeId: number | null,
+    environment: PayrollJmhzTransportEnvironment,
+  ) =>
+    api.get<PayrollJmhzExternalRootCandidates>(
+      '/payroll/submissions/jmhz-external-roots/candidates',
+      { params: { environment, revision_id: revisionId, ...(officeId === null ? {} : { office: officeId }) } },
+    ).then(response => response.data),
+  /** Převezme řádné hlášení předchozího programu z původního XML nebo ze zadaných GUID. */
+  attachJmhzExternalRoot: (payload: PayrollJmhzExternalRootRequest, environment: PayrollJmhzTransportEnvironment) =>
+    api.post<PayrollJmhzExternalRoot & { created: boolean }>(
+      '/payroll/submissions/jmhz-external-roots',
+      { ...payload, environment },
+    ).then(response => response.data),
+}
+
+export type PayrollJmhzExternalRootMode = 'original_xml' | 'guid_reference'
+
+export interface PayrollJmhzExternalRoot {
+  id: number
+  environment: PayrollJmhzTransportEnvironment
+  submission_id: number
+  mode: PayrollJmhzExternalRootMode
+  submission_guid: string
+  period: string
+  form_count: number
+  unmatched_form_count: number
+  original_sha256: string | null
+  note: string
+  created_by: number
+  created_at: string
+  submission_status: string
+}
+
+export interface PayrollJmhzExternalRootCandidates {
+  preparation_id: number
+  period: string
+  variable_symbol: string
+  employments: Array<{
+    employment_id: number
+    employee_id: number
+    employee_name: string | null
+    employment_external_identifier: string
+  }>
+}
+
+export interface PayrollJmhzExternalRootRequest {
+  revision_id: number
+  office: number | null
+  mode: PayrollJmhzExternalRootMode
+  note: string
+  xml_base64?: string
+  submission_guid?: string
+  forms?: Array<{ employment_id: number; form_guid: string }>
+  forms_confirmed?: boolean
 }
 
 /** Podání ČSSZ předchozím mzdovým programem (historie převzatých podání). */

@@ -15001,6 +15001,37 @@
         "revoke": "Revoke confirmation",
         "revoke_consequence": "The month {period} will reappear among taken-over months without a report."
       }
+    },
+    "jmhz_external_root": {
+      "title": "Correction of a month filed by the previous program",
+      "intro": "Was the regular report for a month filed by another program? Take it over from the original XML or enter the submission and form GUIDs. Then prepare the corrective report in MyÚčto with “Correct report values”. Nothing is sent.",
+      "open": "Link a correction",
+      "show": "Open submission",
+      "forms": "forms: {count}",
+      "mode": {
+        "original_xml": "from original XML",
+        "guid_reference": "from GUIDs"
+      },
+      "dialog_title": "Link a correction to a report of the previous program",
+      "dialog_intro": "Select the approved payroll run for the month whose regular report the previous program filed. MyÚčto takes the submission over as accepted (without sending) and the corrective report carries its GUID and the GUIDs of the original forms.",
+      "run": "Payroll run",
+      "run_placeholder": "Select a run",
+      "revision": "revision {no}",
+      "mode_label": "How you document the original report",
+      "mode_xml_hint": "Upload the original XML of the regular report (XSD, type R, period and variable symbol are checked).",
+      "mode_guids_hint": "Enter the submission GUID and form GUIDs from the ČSSZ protocol. The original content is then unknown, whole forms are corrected.",
+      "file": "XML file",
+      "submission_guid": "Submission GUID",
+      "loading": "Loading relationships…",
+      "employee": "Employee",
+      "id_ppv": "ID PPV",
+      "form_guid": "Form GUID",
+      "confirm": "I confirm that the relationships with the given GUID were in the original regular report. A relationship without a GUID is added by the correction as a regular form.",
+      "note": "How the submission is documented",
+      "note_placeholder": "E.g. program, filing date and ČSSZ protocol number",
+      "submit": "Take over submission",
+      "load_failed": "Failed to load the taken-over reports.",
+      "save_failed": "The submission could not be taken over."
     }
   },
   "foreign_income": {

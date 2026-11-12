@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Repository\Payroll\JmhzExternalRootRepository;
+use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
@@ -50,21 +51,28 @@ final readonly class JmhzExternalCorrectionRootService
         private PayrollSubmissionManualAcceptanceService $acceptances,
         private JmhzDeadlinePolicy $deadlines,
         private ClockInterface $clock,
+        private PayrollPeopleRepository $people,
     ) {}
 
     /**
      * Vztahy aktuální schválené revize, ke kterým lze zadat GUID formulářů.
      *
-     * @return array{preparation_id:int,period:string,variable_symbol:string,employments:list<array{employment_id:int,employee_id:int,employment_external_identifier:string}>}
+     * @return array{preparation_id:int,period:string,variable_symbol:string,employments:list<array{employment_id:int,employee_id:int,employee_name:?string,employment_external_identifier:string}>}
      */
     public function candidates(int $supplierId, string $environment, int $revisionId, ?int $officeId, int $userId): array
     {
         [$preparationId, , $document] = $this->current($supplierId, $environment, $revisionId, $officeId, $userId);
+        $forms = JmhzContentCorrectionSubmissionService::currentForms($document);
+        $names = $this->people->namesForTenant(
+            $supplierId,
+            array_values(array_unique(array_column($forms, 'employee_id'))),
+        );
         $employments = [];
-        foreach (JmhzContentCorrectionSubmissionService::currentForms($document) as $externalId => $form) {
+        foreach ($forms as $externalId => $form) {
             $employments[] = [
                 'employment_id' => $form['employment_id'],
                 'employee_id' => $form['employee_id'],
+                'employee_name' => $names[$form['employee_id']] ?? null,
                 'employment_external_identifier' => (string) $externalId,
             ];
         }

@@ -1717,6 +1717,30 @@ JMHZ po opravě mzdových údajů a vytvoří skutečné obsahové opravné hlá
 Aplikace vytvoří nový neměnný artefakt s vazbou na původní podání. Chybně
 uplatněné slevy za období lze opravit jen do 20. dne následujícího měsíce.
 
+**Oprava měsíce podaného předchozím programem.** Opravné hlášení se váže na
+řádné: nese stejný GUID podání a každý opravený formulář GUID formuláře, ve
+kterém byl vztah nahlášen poprvé (Pravidla podání JMHZ). Řádné hlášení za
+měsíc, který podal jiný program, proto nejdřív převezměte. Na stránce
+`Mzdy → Podání a hlášení`, záložka **JMHZ**, rozbalte **Podrobnosti** a
+v oddílu **Oprava měsíce podaného předchozím programem** klikněte na **Navázat
+opravu**. Vyberte schválený mzdový běh za měsíc a jeden ze dvou způsobů:
+
+- **Nahrát původní XML** řádného hlášení. Aplikace ověří XSD ČSSZ, že jde
+  o řádné hlášení (typ R), že období odpovídá běhu a variabilní symbol
+  registraci účtárny. Datová věta JMHZ IČO nenese, zaměstnavatele určuje
+  právě variabilní symbol. Formuláře se párují se vztahy podle ID PPV.
+- **Zadat GUID** podání a GUID formulářů vztahů, které v původním hlášení byly
+  (najdete je v protokolu ČSSZ). Je potřeba potvrdit, že vztahy v hlášení
+  byly. Obsah původního hlášení pak aplikace nezná, oprava proto posílá celé
+  formuláře vybraných vztahů a neukazuje, co se změnilo.
+
+Do poznámky uveďte, čím je podání a jeho přijetí doložené. Aplikace podání
+převezme jako přijaté řádné hlášení (nic neodešle) a otevře ho v přehledu.
+Opravu pak připravíte běžně tlačítkem **Opravit hodnoty hlášení**: opravený
+formulář má typ O a GUID původního formuláře, vztah, který v původním hlášení
+nebyl, se doplní řádným formulářem. Druhé řádné hlášení za takový měsíc
+aplikace nezaloží.
+
 Příprava storna ani opravy sama nic neodešle. Nový artefakt se na záložce
 **Odesláno** ukáže v oddílu **Připravená podání čekají na odeslání** se svým
 přesným číslem, druhem a vazbou na původní hlášení. Odtud jej odešlete
