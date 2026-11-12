@@ -17,6 +17,7 @@ use MyInvoice\Routes;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Service\Auth\ApiTokenService;
+use MyInvoice\Tests\Support\BankProposalFixture;
 use MyInvoice\Tests\Support\ChargeIssuanceFixture;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -40,6 +41,7 @@ use Slim\Psr7\Factory\StreamFactory;
 final class SystemWriteTokenTest extends TestCase
 {
     use ChargeIssuanceFixture;
+    use BankProposalFixture;
 
     private const AMOUNT = 1000.0;
     private const CLOSED_YEAR = 2094;
@@ -229,6 +231,7 @@ final class SystemWriteTokenTest extends TestCase
             self::assertNotContains($code, ['token_write_forbidden', 'token_endpoint_forbidden', 'session_required',
                 'insufficient_scope', 'forbidden_permission', 'forbidden', 'framework_scope_denied'], $method . ' ' . $path . ' ' . json_encode($res['body'], JSON_UNESCAPED_UNICODE));
             self::assertFalse($res['status'] === 404 && ($res['body']['error']['message'] ?? '') === 'Route not found', $method . ' ' . $path);
+            self::assertLessThan(500, $res['status'], $method . ' ' . $path . ' ' . json_encode($res['body'], JSON_UNESCAPED_UNICODE));
         }
     }
 
@@ -393,6 +396,76 @@ final class SystemWriteTokenTest extends TestCase
         }
     }
 
+    /** Úhrada jednotky přes /api/v1 tokenem s plným zápisem: párování z banky, náhled, potvrzení, storno. */
+    public function testPropertyUnitPaymentFlowOnV1(): void
+    {
+        $this->boot(true);
+        $f = $this->issuanceFixture($this->db);
+        $this->supplierId = (int) $f['supplier'];
+        $plain = $this->token(false);
+        $token = $this->token(true);
+        $v1 = '/api/v1/property/payments';
+        $ok = static fn (array $res): string => json_encode($res['body'], JSON_UNESCAPED_UNICODE);
+
+        $case = $this->postedDebts($this->db, $f, ['U05']);
+        $total = $case['totals']['U05'];
+        $tx = $this->incoming($this->db, $this->supplierId, bcdiv($total, '100', 2), ['variable_symbol' => '0000000005']);
+        self::assertSame(1, $this->proposalService($this->db)->afterImport($this->supplierId, [$tx]));
+
+        $queue = $this->call($token, 'GET', $v1 . '/bank-proposals');
+        self::assertSame(200, $queue['status'], $ok($queue));
+        self::assertContains($tx, array_column($queue['body']['items'], 'bank_transaction_id'));
+        $proposal = $this->call($token, 'GET', $v1 . '/bank-proposals/' . $tx);
+        self::assertSame(200, $proposal['status'], $ok($proposal));
+        self::assertSame('identified', $proposal['body']['status']);
+
+        $plan = $this->call($token, 'POST', $v1 . '/bank-proposals/' . $tx . '/plan', []);
+        self::assertSame(200, $plan['status'], $ok($plan));
+        self::assertSame('proposal', $plan['body']['status']);
+        self::assertNull($plan['body']['review']);
+        $request = $plan['body']['request'];
+        self::assertSame([$case['debts']['U05']], $request['parts'][0]['request']['debts']);
+
+        $denied = $this->call($plain, 'POST', $v1 . '/confirm', ['request' => $request, 'preview_hash' => $plan['body']['preview']['preview_hash'], 'idempotency_key' => 'sw-payment']);
+        self::assertSame(403, $denied['status']);
+        self::assertSame('token_write_forbidden', $denied['body']['error']['code'] ?? null);
+
+        $preview = $this->call($token, 'POST', $v1 . '/preview', $request);
+        self::assertSame(200, $preview['status'], $ok($preview));
+        self::assertSame('ready', $preview['body']['status']);
+        $confirmBody = ['request' => $request, 'preview_hash' => $preview['body']['preview_hash'], 'idempotency_key' => 'sw-payment'];
+
+        $this->lockUntil('2026-02-28');
+        $locked = $this->call($token, 'POST', $v1 . '/confirm', $confirmBody);
+        self::assertSame(409, $locked['status'], $ok($locked));
+        self::assertSame('property_payment_target_date_locked', $locked['body']['error']['code'] ?? null);
+        self::assertSame('identified', $this->call($token, 'GET', $v1 . '/bank-proposals/' . $tx)['body']['status']);
+        $this->db->pdo()->prepare('UPDATE accounting_supplier_settings SET locked_until = NULL WHERE supplier_id = ?')->execute([$this->supplierId]);
+
+        $confirmed = $this->call($token, 'POST', $v1 . '/confirm', $confirmBody);
+        self::assertSame(200, $confirmed['status'], $ok($confirmed));
+        self::assertSame($total, $confirmed['body']['settled_cents']);
+        self::assertGreaterThan(0, (int) $confirmed['body']['journal_entry_id']);
+        $operationId = (int) $confirmed['body']['parts'][0]['operation_id'];
+
+        $used = $this->call($token, 'GET', $v1 . '/bank-proposals/' . $tx);
+        self::assertSame('used', $used['body']['status'], $ok($used));
+        $history = $this->call($token, 'GET', $v1 . '/history');
+        self::assertSame(200, $history['status'], $ok($history));
+        self::assertContains((int) $confirmed['body']['id'], array_column($history['body']['items'], 'id'));
+
+        $operation = $this->call($token, 'GET', $v1 . '/operations/' . $operationId);
+        self::assertSame(200, $operation['status'], $ok($operation));
+        $version = (int) ($operation['body']['row_version'] ?? $operation['body']['item']['row_version'] ?? 0);
+        self::assertGreaterThan(0, $version, $ok($operation));
+        $reversed = $this->call($token, 'POST', $v1 . '/operations/' . $operationId . '/reverse', ['expected_version' => $version,
+            'accounting_date' => '2026-02-15', 'reason' => 'Syntetické storno úhrady', 'idempotency_key' => 'sw-payment-reverse']);
+        self::assertSame(200, $reversed['status'], $ok($reversed));
+        self::assertNotSame($operationId, $reversed['body']['id']);
+        $after = $this->call($token, 'GET', $v1 . '/operations/' . $operationId);
+        self::assertSame('reversed', $after['body']['status'], $ok($after));
+    }
+
     /** @return list<array{0:string,1:string}> */
     private static function v1Operations(): array
     {
@@ -440,6 +513,78 @@ final class SystemWriteTokenTest extends TestCase
             ['GET', '/property/payments/bank-proposals/' . $id],
             ['POST', '/property/payments/bank-proposals/' . $id . '/plan'],
             ['POST', '/property/payments/operations/' . $id . '/reverse'],
+            ['GET', '/property/profile'],
+            ['POST', '/property/profile'],
+            ['GET', '/property/summary'],
+            ['GET', '/property/export'],
+            ['POST', '/property/import/preview'],
+            ['POST', '/property/import/apply'],
+            ['POST', '/property/charges/issues/' . $id . '/evidence'],
+            ['GET', '/property/service-settlements'],
+            ['GET', '/property/service-settlements/catalog/s3'],
+            ['GET', '/property/service-settlements/' . $id],
+            ['GET', '/property/service-settlements/' . $id . '/dossier'],
+            ['GET', '/property/service-settlements/' . $id . '/deadlines'],
+            ['GET', '/property/service-settlements/' . $id . '/disposition'],
+            ['GET', '/property/service-settlements/' . $id . '/current'],
+            ['POST', '/property/service-settlements/prepare'],
+            ['POST', '/property/service-settlements'],
+            ['POST', '/property/service-settlements/' . $id . '/preview'],
+            ['POST', '/property/service-settlements/' . $id . '/apply'],
+            ['POST', '/property/service-settlements/applications/' . $id . '/reverse'],
+            ['POST', '/property/service-settlements/' . $id . '/dossier-events'],
+            ['POST', '/property/service-settlements/' . $id . '/objections'],
+            ['POST', '/property/service-settlements/objections/' . $id . '/resolve'],
+            ['GET', '/property/service-lifecycles'],
+            ['GET', '/property/service-lifecycles/' . $id],
+            ['GET', '/property/service-lifecycles/choices'],
+            ['GET', '/property/service-lifecycles/sources/invoices'],
+            ['GET', '/property/service-lifecycles/policies'],
+            ['POST', '/property/service-lifecycles/policies'],
+            ['POST', '/property/service-lifecycles/preview/start'],
+            ['POST', '/property/service-lifecycles/commands/start'],
+            ['GET', '/property/funds'],
+            ['GET', '/property/funds/balances'],
+            ['GET', '/property/funds/choices'],
+            ['GET', '/property/funds/sources/costs'],
+            ['POST', '/property/funds/preview'],
+            ['POST', '/property/funds/commands'],
+            ['GET', '/property/openings'],
+            ['POST', '/property/openings/preview'],
+            ['POST', '/property/openings/confirm'],
+            ['POST', '/property/openings/revise'],
+            ['GET', '/property/receivables/context'],
+            ['GET', '/property/receivables/certificates/' . $id],
+            ['POST', '/property/receivables/transfers/preview'],
+            ['POST', '/property/receivables/transfers/confirm'],
+            ['POST', '/property/receivables/certificates/preview'],
+            ['POST', '/property/receivables/certificates/issue'],
+            ['GET', '/property/payments/operations'],
+            ['GET', '/property/payments/operations/' . $id],
+            ['GET', '/property/payments/parties'],
+            ['GET', '/property/payments/correction-options'],
+            ['GET', '/property/payments/card'],
+            ['GET', '/property/payments/bank-accounts'],
+            ['GET', '/property/payments/accessory-candidates'],
+            ['GET', '/property/payments/reservations/' . $id . '/abo-export'],
+            ['GET', '/property/payments/source'],
+            ['GET', '/property/payments/bank-links'],
+            ['POST', '/property/payments/debts/register'],
+            ['POST', '/property/payments/debts/' . $id . '/accessories'],
+            ['POST', '/property/payments/credits/' . $id . '/reserve'],
+            ['POST', '/property/payments/reservations/' . $id . '/cancel'],
+            ['POST', '/property/payments/reservations/abo/preview'],
+            ['POST', '/property/payments/reservations/abo/confirm'],
+            ['POST', '/property/payments/reservations/abo/' . $id . '/download'],
+            ['POST', '/property/payments/reservations/' . $id . '/cancel-submission'],
+            ['POST', '/property/payments/reservations/' . $id . '/release-unexecuted'],
+            ['POST', '/property/payments/setoffs/preview'],
+            ['POST', '/property/payments/setoffs/confirm'],
+            ['POST', '/property/payments/corrections/preview'],
+            ['POST', '/property/payments/corrections/confirm'],
+            ['POST', '/property/payments/corrections/' . $id . '/reverse'],
+            ['POST', '/property/payments/source-revisions/preview'],
+            ['POST', '/property/payments/source-revisions/confirm'],
         ];
     }
 
