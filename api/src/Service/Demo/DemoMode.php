@@ -21,6 +21,13 @@ use MyInvoice\Service\System\ManagedModeGuard;
  */
 final class DemoMode
 {
+    /**
+     * E-maily účtů, kterým ukázka vydá API token přihlášením heslem
+     * (`POST /api/v1/auth/password-token`), typicky účet pro review mobilní aplikace.
+     * Prázdný seznam (výchozí) = výjimka vypnutá, ukázka token heslem nevydá nikomu.
+     */
+    public const KEY_PASSWORD_TOKEN_EMAILS = 'demo.password_token_emails';
+
     public function __construct(private readonly Config $config) {}
 
     public function enabled(): bool
@@ -29,5 +36,30 @@ final class DemoMode
             ManagedModeGuard::KEY_DEMO_ENABLED,
             (bool) $this->config->get('demo.enabled', false),
         );
+    }
+
+    /**
+     * Seznam z konfigurace normalizovaný na malá písmena bez okrajových mezer.
+     * Přijme pole i řetězec oddělený čárkami.
+     *
+     * @return list<string>
+     */
+    public function passwordTokenEmails(): array
+    {
+        $value = $this->config->get(self::KEY_PASSWORD_TOKEN_EMAILS, []);
+        $items = is_array($value) ? $value : explode(',', (string) $value);
+        $emails = [];
+        foreach ($items as $item) {
+            $email = mb_strtolower(trim((string) $item));
+            if ($email !== '') {
+                $emails[] = $email;
+            }
+        }
+        return array_values(array_unique($emails));
+    }
+
+    public function allowsPasswordToken(string $email): bool
+    {
+        return in_array(mb_strtolower(trim($email)), $this->passwordTokenEmails(), true);
     }
 }

@@ -8,6 +8,7 @@ use MyInvoice\Action\Auth\Tokens\CreateTokenAction;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Middleware\RateLimitMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Security\EffectiveRole;
@@ -19,6 +20,7 @@ use MyInvoice\Service\Auth\LoginPolicyService;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\MfaRecoveryCodeService;
 use MyInvoice\Service\Auth\PasswordLoginVerifier;
+use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseSeatLimitExceeded;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -92,6 +94,13 @@ final class PasswordTokenAction
         if ($retryAfter !== null) {
             return Json::error($response, 'rate_limited', 'Příliš mnoho pokusů. Zkus to později.', 429)
                 ->withHeader('Retry-After', (string) $retryAfter);
+        }
+
+        // Veřejná ukázka vydá token jen účtům z `demo.password_token_emails` (účet pro review
+        // mobilní aplikace). Ostatní dostanou stejnou odpověď jako jiné zápisy ukázky, a to
+        // dřív, než se ověří heslo: ukázka nesmí pomáhat hádat hesla ostatních účtů.
+        if ($this->demoEnabled($request) && !(new DemoMode($this->config))->allowsPasswordToken($email)) {
+            return Json::error($response, 'demo_read_only', DemoReadOnlyMiddleware::READ_ONLY_MESSAGE, 403);
         }
 
         // Vynucený poskytovatel identity heslo nepřijímá (stejně jako LoginAction).
@@ -279,6 +288,16 @@ final class PasswordTokenAction
             403,
             ['methods' => [$method]],
         );
+    }
+
+    /**
+     * Ukázkový režim: atribut z {@see DemoReadOnlyMiddleware}, bez middleware (testy, jiné
+     * zapojení) přímo konfigurace se zámkem spravované instalace.
+     */
+    private function demoEnabled(Request $request): bool
+    {
+        return $request->getAttribute(DemoReadOnlyMiddleware::ATTR_ENABLED) === true
+            || (new DemoMode($this->config))->enabled();
     }
 
     /**

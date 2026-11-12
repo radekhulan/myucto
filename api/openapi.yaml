@@ -4504,6 +4504,8 @@ paths:
         zadá stejné údaje jako ve webu a dostane osobní API token s rozsahem
         `read_write`, bez vazby na firmu a s výchozí platností 90 dní. Token je
         ve webu v seznamu API tokenů pod názvem `device_name` a jde tam zrušit.
+        U účtu s více firmami volí firmu každého požadavku hlavička
+        `X-Supplier-Id` (u účtu s jednou firmou není potřeba).
 
         Druhý faktor jako ve webu: se zapnutým TOTP vrátí první volání
         `totp_required` a token vznikne až s `totp` (nebo `recovery_code`).
@@ -4518,6 +4520,11 @@ paths:
         heslo vrací stejnou odpověď. Volání bez hlavičky `Origin` (nativní
         aplikace) nepotřebuje CSRF token; s hlavičkou `Origin` musí odpovídat
         adrese instalace.
+
+        Ukázková instalace (`demo.enabled`) token heslem vydá jen účtům
+        z `demo.password_token_emails` (například účet pro review mobilní
+        aplikace); ostatní dostanou `403 demo_read_only` ještě před ověřením
+        hesla.
       security: []
       requestBody:
         required: true

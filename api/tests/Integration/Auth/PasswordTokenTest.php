@@ -128,6 +128,46 @@ final class PasswordTokenTest extends TestCase
         self::assertSame(0, $this->tokenCount($email));
     }
 
+    public function testDemoWithoutExceptionRefusesToken(): void
+    {
+        [, $email] = $this->createUser();
+
+        $res = $this->invoke(['email' => $email, 'password' => self::PASSWORD], $this->action(['demo' => ['enabled' => true]]));
+
+        self::assertSame(403, $res->getStatusCode());
+        self::assertSame('demo_read_only', $this->decode($res)['error']['code'] ?? null);
+        self::assertSame(0, $this->tokenCount($email));
+    }
+
+    public function testDemoIssuesTokenToListedReviewAccount(): void
+    {
+        [, $email] = $this->createUser();
+        // Seznam porovnává bez ohledu na velikost písmen a okrajové mezery.
+        $action = $this->action(['demo' => ['enabled' => true, 'password_token_emails' => ['  ' . strtoupper($email) . ' ']]]);
+
+        $res = $this->invoke(['email' => $email, 'password' => self::PASSWORD], $action);
+
+        self::assertSame(201, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame(1, $this->tokenCount($email));
+    }
+
+    public function testDemoRefusesOtherAccountsBeforeCheckingPassword(): void
+    {
+        [, $listed] = $this->createUser();
+        [, $other] = $this->createUser();
+        $action = $this->action(['demo' => ['enabled' => true, 'password_token_emails' => [$listed]]]);
+
+        $wrong = $this->invoke(['email' => $other, 'password' => 'Spatne-Heslo-2026'], $action);
+        $right = $this->invoke(['email' => $other, 'password' => self::PASSWORD], $action);
+
+        // Správné i špatné heslo jiného účtu dostane stejnou odpověď a nepřibude pokus v zámku.
+        self::assertSame(403, $wrong->getStatusCode());
+        self::assertSame($this->decode($wrong), $this->decode($right));
+        self::assertSame('demo_read_only', $this->decode($right)['error']['code'] ?? null);
+        self::assertSame(0, $this->loginAttempts($other));
+        self::assertSame(0, $this->tokenCount($other));
+    }
+
     public function testFailedAttemptsLockTheEndpointTogetherWithWebLogin(): void
     {
         [, $email] = $this->createUser();
@@ -357,6 +397,13 @@ final class PasswordTokenTest extends TestCase
         $stmt = $this->db->pdo()->prepare('SELECT * FROM api_tokens WHERE id = ?');
         $stmt->execute([$id]);
         return (array) $stmt->fetch(\PDO::FETCH_ASSOC);
+    }
+
+    private function loginAttempts(string $email): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM login_attempts WHERE email = ?');
+        $stmt->execute([$email]);
+        return (int) $stmt->fetchColumn();
     }
 
     private function tokenCount(string $email): int
