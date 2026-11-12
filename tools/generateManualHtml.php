@@ -74,6 +74,7 @@ function mdToHtml(string $md, array &$tocOut, string $imgUrlBase): string {
     $tableAligns = [];
     $inCodeBlock = false;
     $codeBlockLines = [];
+    $codeLang = '';
 
     $flushParagraph = function () use (&$paragraph, &$html) {
         if ($paragraph) {
@@ -154,14 +155,19 @@ function mdToHtml(string $md, array &$tocOut, string $imgUrlBase): string {
             continue;
         }
         // Code blocks
-        if (preg_match('/^```/', trim($line))) {
+        if (preg_match('/^```\s*(\S*)(.*)$/', trim($line), $fence)) {
             if (!$inCodeBlock) {
                 $flushParagraph(); $flushList(); $flushBlockquote(); $flushTable();
                 $inCodeBlock = true; $codeBlockLines = [];
+                $codeLang = strtolower($fence[1]);
             } else {
                 $inCodeBlock = false;
                 $code = htmlspecialchars(implode("\n", $codeBlockLines), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                $html .= "<pre class=\"code-block\"><code>$code</code></pre>\n";
+                // Diagram mermaid vykreslí stránka manuálu v prohlížeči; bez skriptu zůstane čitelný zdroj.
+                // Výška z `height=` platí jen pro PDF, na obrazovce se stránka posouvá.
+                $html .= $codeLang === 'mermaid'
+                    ? "<pre class=\"code-block mermaid\">$code</pre>\n"
+                    : "<pre class=\"code-block\"><code>$code</code></pre>\n";
                 $codeBlockLines = [];
             }
             continue;

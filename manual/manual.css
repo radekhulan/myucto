@@ -482,6 +482,14 @@ a:hover { text-decoration: underline; }
     max-width: 100%;
 }
 .content pre.code-block code { background: transparent; color: inherit; padding: 0; }
+.content pre.code-block.mermaid-rendered {
+    background: var(--surface);
+    border-color: var(--border);
+    color: inherit;
+    text-align: center;
+    white-space: normal;
+}
+.content pre.code-block.mermaid-rendered svg { height: auto; max-width: 100%; }
 .content blockquote {
     margin: 0 auto 16px;
     padding: 11px 16px;
