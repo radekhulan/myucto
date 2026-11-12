@@ -294,6 +294,16 @@ final class PayrollDocumentKeyRing
         return $decoded;
     }
 
+    public static function wrapFreshKey(SecretEncryption $encryption, int $supplierId, int $subjectId): string
+    {
+        self::assertIdentity($supplierId, $subjectId);
+
+        return $encryption->encryptFor(
+            base64_encode(random_bytes(self::KEY_BYTES)),
+            self::context($supplierId, $subjectId),
+        );
+    }
+
     private static function context(int $supplierId, int $subjectId): string
     {
         return self::CONTEXT_PREFIX . ':' . $supplierId . ':' . $subjectId;

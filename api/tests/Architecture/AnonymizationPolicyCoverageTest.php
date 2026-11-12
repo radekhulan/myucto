@@ -49,6 +49,24 @@ final class AnonymizationPolicyCoverageTest extends TestCase
         self::assertStringContainsString('brand_new_table', $problems);
     }
 
+    public function testOlderSourceToleratesMissingPolicyTablesButNotUndecidedColumns(): void
+    {
+        $snapshot = SchemaSnapshot::load(dirname(__DIR__, 3) . '/' . SchemaSnapshot::RELATIVE_PATH);
+        self::assertNotNull($snapshot);
+        [$tables, $foreignKeys] = AnonymizationPolicyAudit::fromSnapshot($snapshot);
+        unset($tables['clients']);
+        $column = array_key_first(AnonymizationPolicy::COLUMNS['supplier']);
+        unset($tables['supplier'][$column]);
+
+        $strict = implode("\n", AnonymizationPolicyAudit::problems($tables, $foreignKeys));
+        self::assertStringContainsString('clients: tabulka v politice ve struktuře neexistuje', $strict);
+        self::assertStringContainsString("supplier.{$column}: sloupec v politice ve struktuře neexistuje", $strict);
+        self::assertSame([], AnonymizationPolicyAudit::problems($tables, $foreignKeys, true));
+
+        $tables['supplier']['secret_nickname'] = 'varchar(100) NULL DEFAULT NULL';
+        self::assertStringContainsString('supplier.secret_nickname', implode("\n", AnonymizationPolicyAudit::problems($tables, $foreignKeys, true)));
+    }
+
     public function testBooleanWorkReportDisplayOptionsArePreserved(): void
     {
         self::assertSame('keep', AnonymizationPolicy::COLUMNS['supplier']['work_report_display_options']);

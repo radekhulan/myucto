@@ -171,6 +171,7 @@ final class TextScrubber
             'shape' => $this->pseudonymizer->shape($value),
             'shape_digits' => $this->pseudonymizer->shapeDigits($value),
             'symbol' => $this->pseudonymizer->symbol($value),
+            'cssz_variable_symbol' => $this->pseudonymizer->csszVariableSymbol($value),
             'file_name' => $this->pseudonymizer->fileName($value),
             'file_path' => $this->pseudonymizer->filePath($value),
             'text' => $this->scrub($value),
