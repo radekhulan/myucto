@@ -383,6 +383,7 @@ final class PayrollEmploymentRepository
             $employmentId = (int) $this->db->pdo()->lastInsertId();
             $this->logReleasedPrimaries($supplierId, $employeeId, $releasedPrimaries, $employmentId, $primaryFrom, $userId);
             $this->insertTerms($supplierId, $employmentId, $data['terms'], $userId);
+            $this->alignIdentityStart($supplierId, $employeeId);
             $this->insertEvent(
                 $supplierId,
                 $employmentId,
@@ -701,6 +702,7 @@ final class PayrollEmploymentRepository
             if ($update->rowCount() !== 1) {
                 throw new PayrollEmploymentConflictException($expectedVersion);
             }
+            $this->alignIdentityStart($supplierId, (int) $employment['employee_id']);
 
             $diff = $this->diff($previous, $data);
             /*
@@ -868,6 +870,7 @@ final class PayrollEmploymentRepository
             if ($update->rowCount() !== 1) {
                 throw new PayrollEmploymentConflictException($expectedVersion);
             }
+            $this->alignIdentityStart($supplierId, (int) $employment['employee_id']);
 
             $diff = $this->diff($previous, $data);
             $this->insertEvent(
@@ -1631,6 +1634,7 @@ final class PayrollEmploymentRepository
                 $userId,
             );
             $this->alignCreatedEvent($supplierId, $employmentId, $effectiveOn);
+            $this->alignIdentityStart($supplierId, (int) $employment['employee_id']);
             if ($target === 'ended') {
                 $this->ensureChecklist(
                     $supplierId,
@@ -1810,6 +1814,52 @@ final class PayrollEmploymentRepository
         foreach (['payroll_person_tax_residences', 'payroll_person_social_jurisdictions', 'payroll_person_health_coverage_history'] as $table) {
             $this->moveEarliestRows($supplierId, $table, 'effective_from', ['employee_id' => $employeeId], [], $current, $newStart);
         }
+        $this->alignIdentityStart($supplierId, $employeeId);
+    }
+
+    /**
+     * Identita osoby (jméno, datum narození) platí od začátku jejího prvního
+     * vztahu, ne od vztahu, se kterým byla osoba založena.
+     *
+     * Osoba založená s dohodou od března dostala identitu od března. Když jí
+     * pak přibyl vztah od února (import docházky, další dohoda), únorové
+     * hlášení JMHZ nemělo jméno a kontrola hlásila mezeru, kterou účetní
+     * neuměla opravit jinak než ručně v historii identity. Nejstarší verze se
+     * proto protáhne k nejstaršímu nástupu. Pozdější verze (změna jména) ani
+     * identitu, která nástupu předchází, to nemění.
+     */
+    private function alignIdentityStart(int $supplierId, int $employeeId): void
+    {
+        $pdo = $this->db->pdo();
+        $start = $pdo->prepare(
+            "SELECT MIN(COALESCE(actual_start_date, start_date))
+               FROM payroll_employments
+              WHERE supplier_id = ? AND employee_id = ? AND status <> 'no_show'"
+        );
+        $start->execute([$supplierId, $employeeId]);
+        $firstStart = $start->fetchColumn();
+        if (!is_string($firstStart) || $firstStart === '') {
+            return;
+        }
+        $firstStart = substr($firstStart, 0, 10);
+        $identity = $pdo->prepare(
+            'SELECT id, effective_from
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ?
+              ORDER BY effective_from, id
+              LIMIT 1
+              FOR UPDATE'
+        );
+        $identity->execute([$supplierId, $employeeId]);
+        $earliest = $identity->fetch(PDO::FETCH_ASSOC);
+        if ($earliest === false || (string) $earliest['effective_from'] <= $firstStart) {
+            return;
+        }
+        $pdo->prepare(
+            'UPDATE payroll_person_identity_history
+                SET effective_from = ?, row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND effective_from = ?'
+        )->execute([$firstStart, $supplierId, (int) $earliest['id'], (string) $earliest['effective_from']]);
     }
 
     /**

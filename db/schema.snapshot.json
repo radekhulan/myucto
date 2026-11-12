@@ -1192,7 +1192,8 @@
         "2286_payroll_component_employer_contribution_non_monetary.sql",
         "2287_payroll_run_live_period_slot.sql",
         "2288_payroll_run_exclusions.sql",
-        "2289_payroll_snapshot_column_compression.sql"
+        "2289_payroll_snapshot_column_compression.sql",
+        "2290_payroll_identity_from_first_employment.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
