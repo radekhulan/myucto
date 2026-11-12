@@ -19,6 +19,7 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationCodeboo
  * @phpstan-type RegistrationSteps array{
  *   terms?:array<string,string>,
  *   identity_facts?:array<string,string>,
+ *   birth_surname?:string,
  *   addresses?:array<string,array<string,string>>,
  *   tax_residence?:array{residence:string,country_code:string,identifier:?string},
  *   a1_profile?:array<string,mixed>
@@ -36,7 +37,10 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationCodeboo
  *   workplace:bool,
  *   tax_residence:bool,
  *   tax_declaration:bool,
- *   a1_profile:bool
+ *   a1_profile:bool,
+ *   birth_surname?:bool,
+ *   birth_place?:bool,
+ *   birth_country?:bool
  * }
  */
 final class AttendanceRegistrationData
@@ -79,13 +83,31 @@ final class AttendanceRegistrationData
             }
         }
 
+        $facts = [];
         if ($text('citizenship') !== '') {
             $citizenship = self::country($text('citizenship'));
             if ($citizenship === null) {
                 $warnings[] = self::countryWarning('Státní občanství', $text('citizenship'), 'nezapíše se');
             } else {
-                $steps['identity_facts'] = ['citizenship_country_code' => $citizenship];
+                $facts['citizenship_country_code'] = $citizenship;
             }
+        }
+        if ($text('birth_place') !== '') {
+            $facts['birth_place'] = mb_substr($text('birth_place'), 0, 128);
+        }
+        if ($text('birth_country') !== '') {
+            $birthCountry = self::country($text('birth_country'));
+            if ($birthCountry === null) {
+                $warnings[] = self::countryWarning('Stát narození', $text('birth_country'), 'nezapíše se');
+            } else {
+                $facts['birth_country_code'] = $birthCountry;
+            }
+        }
+        if ($facts !== []) {
+            $steps['identity_facts'] = $facts;
+        }
+        if ($text('birth_surname') !== '') {
+            $steps['birth_surname'] = mb_substr($text('birth_surname'), 0, 191);
         }
 
         $terms = [];
@@ -194,11 +216,110 @@ final class AttendanceRegistrationData
                 $warnings[] = "Vzdělání „{$text('education_code')}“ není kód KKOV (např. K, M, R); do profilu registrace se nezapíše.";
             }
         }
+        $a1Employment = self::a1Employment($text, $warnings);
+        if ($a1Employment !== []) {
+            if (!isset($a1Employment['workplace_city']) && isset($terms['work_place'])) {
+                $a1Employment['workplace_city'] = mb_substr($text('workplace'), 0, 255);
+            }
+            $a1['employment'] = [...($a1['employment'] ?? []), ...$a1Employment];
+        }
+        if (isset($steps['addresses']['residence']) && $text('address_house_number') !== '') {
+            $house = self::houseNumber($text('address_house_number'));
+            if ($house !== null) {
+                $a1['permanent_address'] = [
+                    'street' => mb_substr($text('address_street'), 0, 255),
+                    'house_number' => $house['house_number'],
+                    'orientation_number' => $house['orientation_number'],
+                ];
+            }
+        }
         if ($a1 !== []) {
             $steps['a1_profile'] = $a1;
         }
 
         return ['steps' => $steps, 'declaration' => $declaration, 'warnings' => $warnings];
+    }
+
+    /**
+     * Údaje varianty A1-OST, které aplikace v podmínkách vztahu nevede
+     * (režim práce, nepřetržitý provoz, obec pracoviště, název pozice,
+     * vedoucí pozice). Zapíšou se jen do profilu registrace A1.
+     *
+     * @param callable(string):string $text
+     * @param list<string> $warnings
+     * @return array<string,string|bool>
+     */
+    private static function a1Employment(callable $text, array &$warnings): array
+    {
+        $employment = [];
+        $mode = $text('work_mode_code');
+        if ($mode !== '') {
+            $code = self::workMode($mode);
+            if ($code === null) {
+                $warnings[] = "Režim práce „{$mode}“ není kód 1 až 4 (1 = jednosměnný, 2 = dvousměnný, 3 = vícesměnný, 4 = neuvedeno); do profilu registrace se nezapíše.";
+            } else {
+                $employment['work_mode_code'] = $code;
+            }
+        }
+        foreach (['continuous_operation' => 'Nepřetržitý provoz', 'leadership' => 'Vedoucí pozice'] as $field => $label) {
+            $value = $text($field);
+            if ($value === '') {
+                continue;
+            }
+            $flag = self::flag($value);
+            if ($flag === null) {
+                $warnings[] = "{$label} „{$value}“ není ano ani ne; do profilu registrace se nezapíše.";
+            } else {
+                $employment[$field] = $flag;
+            }
+        }
+        foreach (['workplace_city', 'position_name'] as $field) {
+            if ($text($field) !== '') {
+                $employment[$field] = mb_substr($text($field), 0, 255);
+            }
+        }
+
+        return $employment;
+    }
+
+    public static function workMode(string $value): ?string
+    {
+        $normalized = AttendanceText::normalize($value);
+        if (in_array($normalized, PayrollRegistrationCodebooks::WORK_MODE, true)) {
+            return $normalized;
+        }
+
+        return match (true) {
+            str_starts_with($normalized, 'jedno') => '1',
+            str_starts_with($normalized, 'dvou') => '2',
+            str_starts_with($normalized, 'vice'), str_starts_with($normalized, 'tri') => '3',
+            str_starts_with($normalized, 'neuveden') => '4',
+            default => null,
+        };
+    }
+
+    public static function flag(string $value): ?bool
+    {
+        $normalized = AttendanceText::normalize($value);
+        if (in_array($normalized, self::YES, true)) {
+            return true;
+        }
+
+        return in_array($normalized, self::NO, true) ? false : null;
+    }
+
+    /**
+     * Číslo popisné a orientační z „12" nebo „12/3" pro adresu profilu A1.
+     *
+     * @return array{house_number:string,orientation_number:?string}|null
+     */
+    public static function houseNumber(string $value): ?array
+    {
+        if (preg_match('/^\s*(\d{1,4})\s*(?:\/\s*(\d{1,4}[a-zA-Z]?))?\s*$/D', $value, $match) !== 1) {
+            return null;
+        }
+
+        return ['house_number' => $match[1], 'orientation_number' => ($match[2] ?? '') === '' ? null : $match[2]];
     }
 
     /**
@@ -214,8 +335,25 @@ final class AttendanceRegistrationData
         if ($state['residence_address']) {
             unset($steps['addresses']);
         }
-        if ($state['citizenship'] !== null) {
-            unset($steps['identity_facts']);
+        if (isset($steps['identity_facts'])) {
+            $facts = $steps['identity_facts'];
+            if ($state['citizenship'] !== null) {
+                unset($facts['citizenship_country_code']);
+            }
+            if ($state['birth_place'] ?? false) {
+                unset($facts['birth_place']);
+            }
+            if ($state['birth_country'] ?? false) {
+                unset($facts['birth_country_code']);
+            }
+            if ($facts === []) {
+                unset($steps['identity_facts']);
+            } else {
+                $steps['identity_facts'] = $facts;
+            }
+        }
+        if ($state['birth_surname'] ?? false) {
+            unset($steps['birth_surname']);
         }
         if (isset($steps['terms'])) {
             $terms = $steps['terms'];
@@ -239,6 +377,11 @@ final class AttendanceRegistrationData
         }
         if ($state['a1_profile']) {
             unset($steps['a1_profile']);
+        } elseif (isset($steps['a1_profile']['permanent_address']) && !isset($steps['addresses'])) {
+            unset($steps['a1_profile']['permanent_address']);
+            if ($steps['a1_profile'] === []) {
+                unset($steps['a1_profile']);
+            }
         }
 
         return [
@@ -270,6 +413,9 @@ final class AttendanceRegistrationData
         if (isset($steps['identity_facts']['citizenship_country_code'])) {
             $items[] = ['key' => 'citizenship', 'value' => $steps['identity_facts']['citizenship_country_code']];
         }
+        if (isset($steps['birth_surname']) || isset($steps['identity_facts']['birth_place'])) {
+            $items[] = ['key' => 'birth', 'value' => (string) ($steps['identity_facts']['birth_country_code'] ?? '')];
+        }
         $terms = $steps['terms'] ?? [];
         foreach (['cz_isco_code', 'activity_code'] as $field) {
             if (isset($terms[$field])) {
@@ -287,6 +433,24 @@ final class AttendanceRegistrationData
         }
         if (isset($steps['a1_profile']['employment']['employment_status_code'])) {
             $items[] = ['key' => 'employment_status_code', 'value' => (string) $steps['a1_profile']['employment']['employment_status_code']];
+        }
+        $a1Employment = $steps['a1_profile']['employment'] ?? [];
+        if (isset($a1Employment['work_mode_code'])) {
+            $items[] = ['key' => 'work_mode_code', 'value' => (string) $a1Employment['work_mode_code']];
+        }
+        if (isset($a1Employment['position_name'])) {
+            $items[] = ['key' => 'position_name', 'value' => (string) $a1Employment['position_name']];
+        }
+        if (isset($a1Employment['workplace_city'])) {
+            $items[] = ['key' => 'workplace_city', 'value' => (string) $a1Employment['workplace_city']];
+        }
+        foreach (['continuous_operation', 'leadership'] as $field) {
+            if (isset($a1Employment[$field])) {
+                $items[] = ['key' => $field, 'value' => $a1Employment[$field] ? 'ano' : 'ne'];
+            }
+        }
+        if (isset($steps['a1_profile']['permanent_address']['house_number'])) {
+            $items[] = ['key' => 'house_number', 'value' => ''];
         }
         if (isset($steps['a1_profile']['facts']['highest_education_code'])) {
             $items[] = ['key' => 'education_code', 'value' => (string) $steps['a1_profile']['facts']['highest_education_code']];

@@ -2209,6 +2209,10 @@ final class Routes
                 [\MyInvoice\Action\Payroll\PayrollRegistrationA1BatchAction::class, 'prepare'],
             );
             $g->post(
+                '/submissions/registration-a1/defaults',
+                [\MyInvoice\Action\Payroll\PayrollRegistrationA1BatchAction::class, 'defaults'],
+            );
+            $g->post(
                 '/submissions/registration-transport/{submissionId:[0-9]+}',
                 [PayrollRegistrationTransportAction::class, 'send'],
             );

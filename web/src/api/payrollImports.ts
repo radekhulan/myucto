@@ -392,6 +392,8 @@ export type AttendanceMeaning =
   | 'address_street' | 'address_house_number' | 'address_city' | 'address_postal_code' | 'address_country'
   | 'citizenship' | 'cz_isco_code' | 'activity_code' | 'workplace' | 'tax_residence' | 'tax_declaration'
   | 'tax_declaration_from' | 'education_code' | 'employment_status_code'
+  | 'birth_surname' | 'birth_place' | 'birth_country' | 'work_mode_code' | 'continuous_operation'
+  | 'workplace_city' | 'position_name' | 'leadership'
   | 'worked_hours' | 'overtime_hours' | 'night_hours' | 'weekend_hours' | 'holiday_work_hours'
   | 'afternoon_hours' | 'fund_hours'
   | 'vacation_hours' | 'holiday_hours' | 'sick_hours' | 'doctor_hours' | 'care_hours'
@@ -603,7 +605,9 @@ export interface AttendanceProbableEarningChange extends AttendanceProbableEarni
 
 /** Údaj pro registraci ČSSZ v náhledu, viz AttendanceRegistrationData::display() na serveru. */
 export interface AttendanceRegistrationItem {
-  key: 'address' | 'citizenship' | 'cz_isco_code' | 'activity_code' | 'workplace' | 'tax_residence' | 'tax_declaration' | 'employment_status_code' | 'education_code'
+  key: 'address' | 'citizenship' | 'birth' | 'cz_isco_code' | 'activity_code' | 'workplace' | 'tax_residence' | 'tax_declaration'
+    | 'work_mode_code' | 'position_name' | 'workplace_city' | 'continuous_operation' | 'leadership' | 'house_number'
+    | 'employment_status_code' | 'education_code'
   value: string
 }
 

@@ -9,6 +9,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationA1BatchService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationA1DefaultsService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -27,6 +28,7 @@ final class PayrollRegistrationA1BatchAction
     public function __construct(
         private readonly PayrollRegistrationA1BatchService $batch,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollRegistrationA1DefaultsService $defaults,
     ) {}
 
     public function candidates(Request $request, Response $response): Response
@@ -68,6 +70,34 @@ final class PayrollRegistrationA1BatchAction
             $this->environment($request),
             $ids,
             $userId,
+        ));
+    }
+
+    public function defaults(Request $request, Response $response): Response
+    {
+        $denied = $this->authorize($request, $response, AccessLevel::WRITE);
+        if ($denied !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $ids = $body['employment_ids'] ?? null;
+        $values = $body['defaults'] ?? [];
+        if (!is_array($ids) || !array_is_list($ids) || !is_array($values)) {
+            return $this->noStore(Json::error(
+                $response,
+                'validation_failed',
+                'Vyberte pracovní vztahy a údaje, které se jim mají nastavit.',
+                422,
+            ));
+        }
+
+        return $this->run($response, fn (): array => $this->defaults->apply(
+            $this->currentSupplierId($request),
+            $ids,
+            $values,
+            ($body['overwrite'] ?? false) === true,
+            ($body['split_house_number'] ?? false) === true,
+            $this->userId($request),
         ));
     }
 

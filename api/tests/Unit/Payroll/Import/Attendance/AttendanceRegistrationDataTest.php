@@ -56,6 +56,7 @@ final class AttendanceRegistrationDataTest extends TestCase
             'a1_profile' => [
                 'employment' => ['employment_status_code' => '1111'],
                 'facts' => ['highest_education_code' => 'M'],
+                'permanent_address' => ['street' => 'Ukázková', 'house_number' => '12', 'orientation_number' => '3'],
             ],
         ], $plan['steps']);
         self::assertSame(['signed_on' => '2026-06-01'], $plan['declaration']);

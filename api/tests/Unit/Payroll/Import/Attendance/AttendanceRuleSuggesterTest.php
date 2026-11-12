@@ -32,7 +32,8 @@ final class AttendanceRuleSuggesterTest extends TestCase
         yield ['Druh poměru', 'relation_label', null];
         yield ['Oddělení', 'department', null];
         yield ['Středisko', 'cost_center', null];
-        yield ['Název pozice', 'position', null];
+        yield ['Název pozice', 'position_name', null];
+        yield ['Pozice', 'position', null];
         yield ['Týdenní fond', 'weekly_hours', null];
         yield ['Nástup/ukončení', 'start_end_note', null];
         yield ['Fond prac. doby', 'fund_hours', null];

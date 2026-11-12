@@ -24,7 +24,7 @@ final class AttendanceMyUctoSampleProfile
 {
     public const KEY = 'myucto';
     public const NAME = 'Vzor MyÚčto';
-    public const VERSION = 5;
+    public const VERSION = 6;
 
     public const SHEET = 'Podklady';
     public const GUIDE_SHEET = 'Návod';
@@ -161,6 +161,7 @@ final class AttendanceMyUctoSampleProfile
             $column('Postavení v zaměstnání', ['postavení v zaměstnání*'], 'employment_status_code', self::FORMAT_TEXT,
                 'Čtyřmístný kód klasifikace postavení v zaměstnání (NKPZ) pro ČSSZ. Uloží se do profilu registrace.',
                 [null, null]),
+            ...self::a1Columns($column),
             $column('Odpracováno (hod)', ['odpracováno*'], 'worked_hours', self::FORMAT_HOURS,
                 'Všechny odpracované hodiny v měsíci včetně noci, víkendu, svátku a přesčasu.',
                 [42.5, 60]),
@@ -200,6 +201,43 @@ final class AttendanceMyUctoSampleProfile
             $column('Srážka z čisté mzdy (Kč)', ['srážka z čisté mzdy*'], 'net_other_deduction', self::FORMAT_AMOUNT,
                 'Částka, která se strhne z čisté mzdy (např. za stravu nebo zálohu). Import pro ni založí dohodu o srážce na daný měsíc.',
                 [null, 500]),
+        ];
+    }
+
+    /**
+     * Povinné údaje přihlášky A1, které jinde v šabloně nejsou. Sdílí je
+     * šablona importu dohod.
+     *
+     * @param callable $column
+     * @return list<array<string,mixed>>
+     */
+    public static function a1Columns(callable $column): array
+    {
+        return [
+            $column('Rodné příjmení', ['rodné příjmení*'], 'birth_surname', self::FORMAT_TEXT,
+                'Příjmení při narození (pro přihlášku ČSSZ). Zapíše se na kartu osoby, jen když tam chybí.',
+                ['Ukázková', null]),
+            $column('Místo narození', ['místo narození*', 'obec narození*'], 'birth_place', self::FORMAT_TEXT,
+                'Obec narození (pro přihlášku ČSSZ).',
+                ['Praha', null]),
+            $column('Stát narození', ['stát narození*'], 'birth_country', self::FORMAT_TEXT,
+                'Dvoupísmenný kód státu narození (CZ, SK, UA…).',
+                ['CZ', null]),
+            $column('Režim práce', ['režim práce*', 'pracovní režim*'], 'work_mode_code', self::FORMAT_TEXT,
+                'Pro přihlášku ČSSZ: 1 = jednosměnný, 2 = dvousměnný, 3 = vícesměnný, 4 = neuvedeno. Uloží se do profilu registrace.',
+                ['1', null]),
+            $column('Nepřetržitý provoz', ['nepřetržitý provoz*'], 'continuous_operation', self::FORMAT_TEXT,
+                'Ano, když osoba pracuje v nepřetržitém provozu, jinak ne. Uloží se do profilu registrace.',
+                ['ne', null]),
+            $column('Obec pracoviště', ['obec pracoviště*'], 'workplace_city', self::FORMAT_TEXT,
+                'Obec pracoviště pro přihlášku ČSSZ. Prázdná = obec ze sloupce Místo výkonu práce.',
+                [null, null]),
+            $column('Název pozice', ['název pozice*', 'název pracovní pozice*'], 'position_name', self::FORMAT_TEXT,
+                'Název pracovní pozice podle smlouvy (např. Promotér). Uloží se do profilu registrace.',
+                ['Promotérka', null]),
+            $column('Vedoucí pozice', ['vedoucí pozice*'], 'leadership', self::FORMAT_TEXT,
+                'Ano u vedoucího zaměstnance, jinak ne. Uloží se do profilu registrace.',
+                ['ne', null]),
         ];
     }
 
