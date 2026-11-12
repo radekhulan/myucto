@@ -39,7 +39,6 @@ const props = defineProps<{
    * jiné výsledky pod stejným číslem revize.
    */
   refreshKey?: number
-  /** Běh v otevřené revizi dovolí osobu vyřadit (s důvodem v dialogu běhu). */
   canExclude?: boolean
 }>()
 

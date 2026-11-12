@@ -140,4 +140,41 @@ final class PayrollRunReadinessStatutoryCountTest extends TestCase
             self::assertSame(1, $action['count'], $action['kind']);
         }
     }
+
+    /**
+     * Vztah bez schválené složky hlásí samostatná skupina (vztah bez vstupů,
+     * neschválené vstupy). Skupina zákonné evidence ho nesmí počítat podruhé:
+     * kontrola u agentury hlásila „53×", ale výchozí údaje nabízela 31 osobám.
+     */
+    public function testStatutoryManualReviewSkipsPeopleMissingOnlyComponent(): void
+    {
+        $officeId = $this->createOffice('CMP', 'Syntetická účtárna', '1100001237');
+        $this->configureSocialInsuranceOutput($officeId);
+        $this->configureHealthInsuranceOutput();
+        $componentId = $this->createComponent('MZDA_MESICNI_CMP', 'base_wage', 'regular');
+        $statutory = $this->createEmployment($officeId, 'Syntetická Bez rezidence', 1, 'hpp', 'employment', 40, 10_000, true, self::PERIOD_START);
+        $withoutInput = $this->createEmployment($officeId, 'Syntetická Bez složky', 2, 'dpp', 'dpp', 10, 2_500, false, self::PERIOD_START);
+        $workdays = self::workdays(self::PERIOD);
+        foreach ([$statutory, $withoutInput] as $person) {
+            $this->publishShifts($person['employment_id'], $workdays);
+            self::assertSame(200, $this->approveTimeMonth($person['employment_id'], self::PERIOD, $workdays)->getStatusCode());
+        }
+        $this->createApprovedInput($statutory, $componentId, 4_500_000, 'cmp-base', self::PERIOD_START);
+        $this->db->pdo()->prepare('DELETE FROM payroll_person_tax_residences WHERE supplier_id = ? AND employee_id = ?')
+            ->execute([$this->supplierId, $statutory['employee_id']]);
+
+        $findings = array_column(
+            $this->container->get(PayrollRunReadinessService::class)
+                ->inspect($this->supplierId, self::PERIOD_START, self::PAYDAY)['findings'],
+            null,
+            'code',
+        );
+        $finding = $findings['statutory_calculation_manual_review'] ?? null;
+        self::assertNotNull($finding);
+        self::assertSame([$statutory['employee_id']], array_column($finding['entities'], 'entity_id'), CanonicalJson::encode($finding['entities']));
+        self::assertSame(1, $finding['count']);
+        self::assertStringNotContainsString('Syntetická Bez složky', $finding['message']);
+        self::assertArrayHasKey('employment_without_inputs', $findings);
+        self::assertSame([$withoutInput['employment_id']], array_column($findings['employment_without_inputs']['entities'], 'entity_id'));
+    }
 }

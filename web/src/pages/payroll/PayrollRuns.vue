@@ -1548,7 +1548,6 @@ async function approveDraftInputsBeforeStart(run: PayrollRun) {
   await recheckReadiness()
 }
 
-/** Konkrétní potvrzení u příkazů, po kterých se běh sám přepočítá. */
 function commandDoneMessage(
   command: PayrollRunCommand,
   extra: { payment_date?: string },
@@ -1732,11 +1731,6 @@ function askExclude(run: PayrollRun, validation: DisplayValidation): void {
   commandError.value = ''
 }
 
-/**
- * Vyřadit osobu jde i přímo z tabulky osob běhu (sporné hodiny, chybějící
- * podklad), ne jen z nálezu ruční kontroly. Opravná revize ji nenabízí:
- * osobu ze schválené revize server z opravy vyřadit nedovolí.
- */
 function canExcludePeople(run: PayrollRun): boolean {
   return run.revision_kind !== 'correction'
     && run.revision_status !== 'approved'

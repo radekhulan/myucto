@@ -89,6 +89,7 @@ final class PayrollRunReadinessService
         'tax_declaration_evidence_missing',
         'tax_declaration_evidence_unverified',
         'employment_term_missing',
+        'payroll_component_missing',
     ];
 
     /** Sekce zákonné evidence, které doplní hromadné výchozí údaje. */

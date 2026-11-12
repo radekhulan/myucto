@@ -169,11 +169,6 @@ function matchesAgenda(code: string | null): boolean {
 
 const items = computed(() => (response.value?.items ?? []).filter(item => matchesAgenda(item.agenda_code)))
 
-/*
- * Povinnosti po termínu, ke kterým v aplikaci nic nevzniklo (typicky přihlášky
- * dohod podané dřív jiným programem). Po jedné se neodškrtávají: hromadné
- * „vyřízeno mimo aplikaci" je v panelu Zákonné termíny na přehledu mezd.
- */
 const unpreparedOverdueCount = computed(() => items.value
   .filter(item => !item.done && item.is_overdue && item.submission_id === null)
   .length)
