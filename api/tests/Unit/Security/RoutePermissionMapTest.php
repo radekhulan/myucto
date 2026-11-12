@@ -469,6 +469,7 @@ final class RoutePermissionMapTest extends TestCase
         self::assertSame(RoutePermissionMap::ADMIN_PLUS, $map->match('GET', '/api/suppliers/carry-over')?->kind);
         self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('PUT', '/api/suppliers/7')?->kind);
         self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('DELETE', '/api/suppliers/7')?->kind);
+        self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('GET', '/api/suppliers/7/delete-preview')?->kind);
     }
 
     /** Metoda mimo pravidlo nesmí propadnout na permission větev (GET nespouští import). */

@@ -109,8 +109,10 @@ final class ResetStorageScopeTest extends TestCase
     public function testDeleteCompanyUsesTheScope(): void
     {
         $source = (string) file_get_contents(dirname(__DIR__, 4) . '/bin/delete-company.php');
+        $service = (string) file_get_contents(dirname(__DIR__, 4) . '/src/Service/System/CompanyPurgeService.php');
 
-        self::assertStringContainsString('ResetStorageScope::supplierPaths(', $source);
+        self::assertStringContainsString('CompanyPurgeService::class', $source);
+        self::assertStringContainsString('ResetStorageScope::supplierPaths(', $service);
     }
 
     public function testResetScriptUsesTheScope(): void

@@ -1253,6 +1253,7 @@ final class Routes
                 [PayrollPostingReconciliationAction::class, 'get'],
             );
             $g->get('/runs', [PayrollRunsAction::class, 'list']);
+            $g->get('/month-guide', \MyInvoice\Action\Payroll\PayrollMonthGuideAction::class);
             $g->get('/reports/annual/{year:[0-9]{4}}', [PayrollAnnualReportAction::class, 'show']);
             // Náklady na zaměstnance po dimenzi — nad cílovými alokacemi
             // účetního můstku, ne nad deníkem (ten se po zaměstnanci neúčtuje).
@@ -2648,6 +2649,15 @@ final class Routes
             $g->post('/time/averages', [PayrollAbsenceAction::class, 'createAverage']);
             $g->post('/time/averages/{id:[0-9]+}/approve', [PayrollAbsenceAction::class, 'approveAverage']);
             $g->delete('/time/averages/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteAverage']);
+            // Přepočet náhrad z nového průměru: náhled a výslovné potvrzení účetní.
+            $g->get(
+                '/time/compensation-recalculation',
+                [\MyInvoice\Action\Payroll\PayrollCompensationRecalculationAction::class, 'preview'],
+            );
+            $g->post(
+                '/time/compensation-recalculation',
+                [\MyInvoice\Action\Payroll\PayrollCompensationRecalculationAction::class, 'apply'],
+            );
             $g->get('/time/leave-ledger', [PayrollAbsenceAction::class, 'leaveLedger']);
             $g->post('/time/leave-ledger', [PayrollAbsenceAction::class, 'createLeaveEntry']);
             $g->delete('/time/leave-ledger/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteLeaveEntry']);
@@ -3853,6 +3863,7 @@ final class Routes
         $app->get    ('/api/suppliers/{id:[0-9]+}',         [SettingsAction::class, 'getSupplierById']);
         $app->put    ('/api/suppliers/{id:[0-9]+}',         [SettingsAction::class, 'updateSupplierById']);
         $app->delete ('/api/suppliers/{id:[0-9]+}',         [SettingsAction::class, 'deleteSupplierById']);
+        $app->get    ('/api/suppliers/{id:[0-9]+}/delete-preview', [SettingsAction::class, 'deleteSupplierPreview']);
 
         // Settings (M6) — aktuální supplier (z X-Supplier-Id)
         $app->get ('/api/settings/supplier',                [SettingsAction::class, 'getSupplier']);

@@ -58,7 +58,7 @@ final class PropertyDeletionHooksTest extends TestCase
     }
 
 
-    public function testSupplierProfileHistoryRequiresFriendlyDependencyRefusal(): void
+    public function testSupplierWithProfileHistoryIsDeletedCompletely(): void
     {
         $db = $this->connections[0];
         $pdo = $db->pdo();
@@ -71,11 +71,12 @@ final class PropertyDeletionHooksTest extends TestCase
         $container->set(Connection::class, $db);
         $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('DELETE', '/api/settings/suppliers/' . $supplier)
             ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session')
-            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $actor, 'role' => 'admin']);
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $actor, 'role' => 'admin'])
+            ->withParsedBody(['confirm' => (string) $pdo->query("SELECT COALESCE(NULLIF(TRIM(ic), ''), TRIM(company_name)) FROM supplier WHERE id = " . $supplier)->fetchColumn()]);
         $response = $container->get(\MyInvoice\Action\Settings\SettingsAction::class)->deleteSupplierById($request, new \Slim\Psr7\Response(), ['id' => $supplier]);
-        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
-        self::assertSame('has_dependencies', json_decode((string) $response->getBody(), true)['error']['code']);
-        self::assertCount(1, (new PropertyProfileRepository($db))->history($supplier));
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame([], (new PropertyProfileRepository($db))->history($supplier));
+        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM supplier WHERE id = ' . $supplier)->fetchColumn());
     }
 
     public function testClientHistoryAddedAfterSnapshotRequiresFriendlyRefusal(): void

@@ -374,6 +374,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/settings/accident-insurance-rates$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/accident-insurance-rate-schedule$#', 'payroll.settings', AccessLevel::READ],
         ['GET', '#^/api/payroll/runs$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/month-guide$#', 'payroll', AccessLevel::READ],
         // Převzatý mzdový běh (PAM-17/PAM-18). Stavět a rušit ho smí tentýž,
         // kdo zakládá běžný běh — je to práce se vstupy roku přechodu, ne
         // výpočet ani schválení, kterým převzatý běh vůbec neprochází.
@@ -1222,7 +1223,8 @@ final class RoutePermissionMap
             || ($method === 'GET' && $path === '/api/suppliers/carry-over')) {
             return new RoutePermission(self::ADMIN_PLUS);
         }
-        if ($method !== 'GET' && preg_match('#^/api/suppliers(/[0-9]+)?$#', $path) === 1) {
+        if (($method !== 'GET' && preg_match('#^/api/suppliers(/[0-9]+)?$#', $path) === 1)
+            || ($method === 'GET' && preg_match('#^/api/suppliers/[0-9]+/delete-preview$#D', $path) === 1)) {
             return new RoutePermission(self::SUPERADMIN);
         }
         // Klientský archiv je úzká alternativa k internímu čtení výkazů.

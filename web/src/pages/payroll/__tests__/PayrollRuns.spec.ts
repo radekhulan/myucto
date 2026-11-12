@@ -28,6 +28,7 @@ const m = vi.hoisted(() => ({
   monthlyChecklist: vi.fn(),
   hideWarning: vi.fn(),
   fillProbable: vi.fn(),
+  compensationPreview: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
 }))
@@ -76,7 +77,7 @@ vi.mock('@/api/payroll', () => ({
   },
 }))
 vi.mock('@/api/payrollAbsences', () => ({
-  payrollAbsenceApi: { fillProbableFromRate: m.fillProbable },
+  payrollAbsenceApi: { fillProbableFromRate: m.fillProbable, compensationRecalculationPreview: m.compensationPreview },
 }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: m.canWrite }),
@@ -2288,6 +2289,33 @@ describe('PayrollRuns', () => {
     expect(readonlyBox.find('[data-testid="payroll-run-15-average-change-fix"]').exists()).toBe(false)
     expect(readonlyBox.find('[data-test="payroll-run-average-change-forbidden"]').exists()).toBe(true)
     readonly.unmount()
+  })
+
+  it('otevřená oprava nabídne přepočet náhrad z nového průměru, schválený běh ne', async () => {
+    m.compensationPreview.mockResolvedValue({ periods: [], can_apply: true, can_approve: true, can_refresh: true })
+    m.runs.mockResolvedValue([run({
+      status: 'reopened',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'cancel'],
+      average_change: { ...averageChange(null, false), average_changed_count: 0 },
+    })])
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-compensation-recalculation"]').trigger('click')
+    await flushPromises()
+    expect(m.compensationPreview).toHaveBeenCalledWith(['2026-08'], [71])
+    wrapper.unmount()
+
+    m.runs.mockResolvedValue([run({
+      status: 'approved',
+      can_delete: false,
+      available_commands: ['post', 'request_correction'],
+      average_change: averageChange('request_correction', true),
+    })])
+    const approved = mount(PayrollRuns)
+    await flushPromises()
+    expect(approved.find('[data-testid="payroll-run-15-compensation-recalculation"]').exists()).toBe(false)
+    approved.unmount()
   })
 
   it('změněný schválený průměr čtvrtletí vypíše jako samostatný řádek změn podkladů', async () => {
