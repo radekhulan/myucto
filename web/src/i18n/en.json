@@ -25543,7 +25543,19 @@
     "dic": "VAT ID",
     "clients": "Clients",
     "invoices": "Invoices",
-    "delete_confirm": "Delete supplier? Only possible if no clients or invoices.",
+    "delete_dialog": {
+      "title": "Delete company {name}",
+      "warning_title": "This cannot be undone.",
+      "warning": "Everything the company has in the application will be deleted: documents, the accounting journal, payroll and personnel records, filings, HOA data, documents, settings and files in storage. The data can only be recovered from a backup. Make sure you have it stored elsewhere before deleting.",
+      "summary": "{rows} rows in {tables} registers and {files} storage items will be deleted.",
+      "protected": "{count} of them are append-only registers (payroll, filings, HOA) that cannot be deleted otherwise.",
+      "is_last": "This is the last company of the installation, it cannot be deleted.",
+      "type_ic": "To confirm, type the company ID: {value}",
+      "type_name": "The company has no company ID. To confirm, type its exact name: {value}",
+      "submit": "Permanently delete company",
+      "deleting": "Deleting…",
+      "done": "Company {name} has been deleted."
+    },
     "create_title": "New supplier",
     "create_hint": "After creation, default CZK + EUR currencies are auto-seeded. Fill in bank account info in Settings after switching to the new supplier.",
     "carry_over": {

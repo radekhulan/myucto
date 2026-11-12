@@ -9,9 +9,9 @@ declare(strict_types=1);
  *   php api/bin/delete-company.php --id=7 --confirm=12345678   # smazat (potvrzení IČO firmy)
  *   php api/bin/delete-company.php --id=7 --confirm=12345678 --files
  *
- * Hodí se pro zopakování převodu do čisté firmy nebo úklid zkušební firmy. Nastavení
- * aplikace firmu smaže jen prázdnou; tento nástroj smaže i doklady, deník, mzdy a vše
- * ostatní. Nelze to vrátit - před smazáním si udělejte zálohu databáze.
+ * Hodí se pro zopakování převodu do čisté firmy nebo úklid zkušební firmy. Stejnou službu
+ * ({@see CompanyPurgeService}) používá smazání firmy v aplikaci. Smaže doklady, deník,
+ * mzdy a vše ostatní. Nelze to vrátit - před smazáním si udělejte zálohu databáze.
  *
  * Co se maže, nástroj zjistí ze struktury databáze, takže nepotřebuje seznam tabulek:
  * řádky každé tabulky se sloupcem `supplier_id` dané firmy a nakonec řádek firmy
@@ -22,7 +22,7 @@ declare(strict_types=1);
  * zastaví a vše se vrátí. Maže se v jedné transakci.
  *
  * Deník je verzovaný (`SYSTEM VERSIONED`): smazané zápisy zůstanou jen v historii verzí,
- * běžné dotazy aplikace je nevidí. Tabulky jen pro přidávání (mzdy, podání, audit) mají
+ * běžné dotazy aplikace je nevidí. Auditní stopa `activity_log` (zřetězená hashem) zůstává. Tabulky jen pro přidávání (mzdy, podání, audit) mají
  * trigger, který mazání zakáže. Má-li v nich firma řádky, nástroj bez `--immutable`
  * skončí a vypíše je; s ním triggery na dobu mazání odstraní a pak obnoví (DDL
  * transakci ukončí, proto se obnovují i při chybě).
@@ -42,9 +42,8 @@ if (PHP_SAPI !== 'cli') {
 require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;
-use MyInvoice\Infrastructure\Config\RuntimePaths;
-use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Service\System\ResetStorageScope;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\System\CompanyPurgeService;
 
 $opts = [];
 foreach (array_slice($argv ?? [], 1) as $arg) {
@@ -77,275 +76,61 @@ if ($supplierId <= 0) {
     exit(2);
 }
 
-/**
- * Tabulky firmy (sloupec `supplier_id`) seřazené tak, aby odkazující tabulka šla před
- * tou, na kterou odkazuje; `supplier` je poslední.
- *
- * @return list<string>
- */
-function companyTables(PDO $pdo, string $schema): array
-{
-    $stmt = $pdo->prepare(
-        "SELECT c.TABLE_NAME FROM information_schema.COLUMNS c
-           JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
-          WHERE c.TABLE_SCHEMA = ? AND c.COLUMN_NAME = 'supplier_id' AND t.TABLE_TYPE IN ('BASE TABLE', 'SYSTEM VERSIONED') ORDER BY c.TABLE_NAME"
-    );
-    $stmt->execute([$schema]);
-    $tables = array_fill_keys($stmt->fetchAll(PDO::FETCH_COLUMN), true);
-    $fks = $pdo->prepare(
-        'SELECT DISTINCT TABLE_NAME, REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE
-          WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME IS NOT NULL'
-    );
-    $fks->execute([$schema, $schema]);
-    $referencing = [];
-    foreach ($fks->fetchAll(PDO::FETCH_ASSOC) as $fk) {
-        if ($fk['TABLE_NAME'] !== $fk['REFERENCED_TABLE_NAME'] && isset($tables[$fk['TABLE_NAME']], $tables[$fk['REFERENCED_TABLE_NAME']])) {
-            $referencing[$fk['REFERENCED_TABLE_NAME']][] = $fk['TABLE_NAME'];
-        }
-    }
-    $order = [];
-    $state = [];
-    $visit = function (string $table) use (&$visit, &$order, &$state, $referencing): void {
-        if (isset($state[$table])) {
-            return;
-        }
-        $state[$table] = true;
-        foreach ($referencing[$table] ?? [] as $child) {
-            $visit($child);
-        }
-        $order[] = $table;
-    };
-    foreach (array_keys($tables) as $table) {
-        $visit($table);
-    }
-    return [...$order, 'supplier'];
-}
-
-/**
- * Podřízené tabulky bez `supplier_id`, které na řádky firmy odkazují vazbou bez
- * `ON DELETE CASCADE` (např. položky platebního příkazu na fakturu). Databáze je
- * sama nesmaže a mazání rodiče zablokují, proto se mažou předem podle rodiče.
- *
- * @param list<string> $tables
- * @return list<array{table:string,column:string,parent:string,parent_column:string}>
- */
-function restrictedChildren(PDO $pdo, string $schema, array $tables): array
-{
-    $stmt = $pdo->prepare(
-        "SELECT k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME
-           FROM information_schema.KEY_COLUMN_USAGE k
-           JOIN information_schema.REFERENTIAL_CONSTRAINTS r
-             ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME AND r.TABLE_NAME = k.TABLE_NAME
-          WHERE k.TABLE_SCHEMA = ? AND k.REFERENCED_TABLE_SCHEMA = ? AND r.DELETE_RULE IN ('RESTRICT', 'NO ACTION')
-            AND NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS c
-                             WHERE c.TABLE_SCHEMA = k.TABLE_SCHEMA AND c.TABLE_NAME = k.TABLE_NAME AND c.COLUMN_NAME = 'supplier_id')
-          ORDER BY k.TABLE_NAME, k.COLUMN_NAME"
-    );
-    $stmt->execute([$schema, $schema]);
-    $company = array_fill_keys($tables, true);
-    $out = [];
-    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-        if (isset($company[$r['REFERENCED_TABLE_NAME']]) && $r['TABLE_NAME'] !== 'supplier') {
-            $out[] = ['table' => $r['TABLE_NAME'], 'column' => $r['COLUMN_NAME'],
-                'parent' => $r['REFERENCED_TABLE_NAME'], 'parent_column' => $r['REFERENCED_COLUMN_NAME']];
-        }
-    }
-    return $out;
-}
-
-/**
- * Zbytek, který se navzájem drží v cyklu vazeb (řádek firmy odkazuje na svou výchozí
- * měnu, měna na firmu). Tabulky firmy se smažou s vypnutou kontrolou cizích klíčů,
- * řádek firmy až po jejím zapnutí - vazby cizích tabulek na firmu (uživatel s firmou
- * jako výchozí, `SET NULL`) tak databáze odpojí sama. Nakonec se ověří, že žádný jiný
- * řádek databáze neodkazuje na smazaný řádek; jinak výjimka a celá transakce zpět.
- *
- * @param list<string> $tables
- * @param array<string,string> $errors
- */
-function deleteCycle(PDO $pdo, string $schema, array $tables, Closure $where, array $errors): int
-{
-    $fks = $pdo->prepare(
-        'SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
-          WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME IN (' . implode(', ', array_fill(0, count($tables), '?')) . ')'
-    );
-    $fks->execute([$schema, $schema, ...$tables]);
-    $refs = $fks->fetchAll(PDO::FETCH_ASSOC);
-    $orphans = static function () use ($pdo, $refs): int {
-        $n = 0;
-        foreach ($refs as $r) {
-            $n += (int) $pdo->query(sprintf(
-                'SELECT COUNT(*) FROM `%1$s` c WHERE c.`%2$s` IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `%3$s` p WHERE p.`%4$s` = c.`%2$s`)',
-                $r['TABLE_NAME'], $r['COLUMN_NAME'], $r['REFERENCED_TABLE_NAME'], $r['REFERENCED_COLUMN_NAME']
-            ))->fetchColumn();
-        }
-        return $n;
-    };
-    $before = $orphans();
-    $deleted = 0;
-    $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
-    try {
-        foreach (array_diff($tables, ['supplier']) as $table) {
-            $deleted += (int) $pdo->exec("DELETE FROM `{$table}` WHERE {$where($table)}");
-        }
-    } finally {
-        $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
-    }
-    if (in_array('supplier', $tables, true)) {
-        $deleted += (int) $pdo->exec("DELETE FROM `supplier` WHERE {$where('supplier')}");
-    }
-    if ($orphans() !== $before) {
-        throw new RuntimeException('Na řádky firmy odkazují jiná data, smazání nejde dokončit: ' . implode(' | ', $errors));
-    }
-    echo sprintf("  cyklus vazeb (%s) smazán s ověřením, že nezůstal žádný odkaz\n", implode(', ', $tables));
-    return $deleted;
-}
-
 try {
-    $pdo = Bootstrap::buildContainer()->get(Connection::class)->pdo();
-    $schema = (string) $pdo->query('SELECT DATABASE()')->fetchColumn();
-    $company = $pdo->prepare('SELECT id, company_name, ic FROM supplier WHERE id = ?');
-    $company->execute([$supplierId]);
-    $row = $company->fetch(PDO::FETCH_ASSOC);
-    if ($row === false) {
-        fwrite(STDERR, "Firma {$supplierId} v databázi {$schema} není.\n");
-        exit(1);
+    $container = Bootstrap::buildContainer();
+    $service = $container->get(CompanyPurgeService::class);
+    $plan = $service->preview($supplierId, isset($opts['files']));
+    $ico = $plan['supplier']['ic'];
+    echo sprintf("Databáze %s, firma %d: %s (IČO %s)\n", $plan['schema'], $supplierId, $plan['supplier']['company_name'], $ico !== '' ? $ico : '-');
+    foreach ($plan['children'] as $child) {
+        echo sprintf("  %-48s %8d  (podřízené řádky přes %s)\n", $child['table'], $child['rows'], $child['via']);
     }
-    $ico = trim((string) $row['ic']);
-    echo sprintf("Databáze %s, firma %d: %s (IČO %s)\n", $schema, $supplierId, $row['company_name'], $ico !== '' ? $ico : '-');
-
-    $where = static fn (string $table): string => $table === 'supplier' ? '`id` = ' . $supplierId : '`supplier_id` = ' . $supplierId;
-    $counts = [];
-    $allTables = companyTables($pdo, $schema);
-    foreach ($allTables as $table) {
-        $n = (int) $pdo->query("SELECT COUNT(*) FROM `{$table}` WHERE {$where($table)}")->fetchColumn();
-        if ($n > 0) {
-            $counts[$table] = $n;
-        }
-    }
-    $children = [];
-    foreach (restrictedChildren($pdo, $schema, $allTables) as $child) {
-        $childWhere = sprintf('`%s` IN (SELECT `%s` FROM `%s` WHERE %s)',
-            $child['column'], $child['parent_column'], $child['parent'], $where($child['parent']));
-        $n = (int) $pdo->query("SELECT COUNT(*) FROM `{$child['table']}` WHERE {$childWhere}")->fetchColumn();
-        if ($n > 0) {
-            $children[] = ['table' => $child['table'], 'where' => $childWhere, 'via' => $child['parent']];
-            echo sprintf("  %-48s %8d  (podřízené řádky přes %s)\n", $child['table'], $n, $child['parent']);
-        }
-    }
-    $listed = $counts;
+    $listed = $plan['counts'];
     arsort($listed);
     foreach ($listed as $table => $n) {
         echo sprintf("  %-48s %8d\n", $table, $n);
     }
-    echo sprintf("Celkem %d řádků v %d tabulkách, podřízené řádky smaže databáze vazbou.\n", array_sum($counts), count($counts));
-
-    $files = [];
-    if (isset($opts['files'])) {
-        $files = ResetStorageScope::supplierPaths(RuntimePaths::storage(''), $supplierId);
-        foreach ($files as $path) {
-            echo '  úložiště: ' . $path . "\n";
-        }
+    echo sprintf("Celkem %d řádků v %d tabulkách, podřízené řádky smaže databáze vazbou.\n", $plan['total'], count($plan['counts']));
+    foreach ($plan['files'] as $path) {
+        echo '  úložiště: ' . $path . "\n";
     }
-
-    $guards = [];
-    if ($counts !== []) {
-        $stmt = $pdo->prepare(
-            "SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE FROM information_schema.TRIGGERS
-              WHERE TRIGGER_SCHEMA = ? AND EVENT_MANIPULATION = 'DELETE' AND ACTION_TIMING = 'BEFORE'"
-        );
-        $stmt->execute([$schema]);
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $t) {
-            if (isset($counts[$t['EVENT_OBJECT_TABLE']])) {
-                $guards[$t['TRIGGER_NAME']] = $t['EVENT_OBJECT_TABLE'];
-            }
-        }
-    }
-    foreach ($guards as $trigger => $table) {
+    foreach ($plan['guards'] as $trigger => $table) {
         echo sprintf("  trigger %s hlídá mazání v %s\n", $trigger, $table);
     }
 
     if (!isset($opts['confirm'])) {
         echo "\nNáhled - nic se nesmazalo. Smazání: --confirm=<IČO firmy>"
-            . ($guards !== [] ? ' --immutable' : '') . ".\n";
+            . ($plan['guards'] !== [] ? ' --immutable' : '') . ".\n";
         exit(0);
     }
     if ($ico === '' || (string) $opts['confirm'] !== $ico) {
         fwrite(STDERR, "--confirm musí být IČO firmy ({$ico}).\n");
         exit(2);
     }
-    if ($guards !== [] && !isset($opts['immutable'])) {
+    if ($plan['guards'] !== [] && !isset($opts['immutable'])) {
         fwrite(STDERR, "Firma má řádky v tabulkách jen pro přidávání (viz triggery výše). Smazání s nimi: přidejte --immutable.\n");
         exit(2);
     }
 
-    // Triggery se odstraní před transakcí (DDL by ji ukončilo) a obnoví se vždy.
-    $restore = [];
-    foreach (array_keys($guards) as $trigger) {
-        $create = $pdo->query('SHOW CREATE TRIGGER `' . str_replace('`', '``', $trigger) . '`')->fetch(PDO::FETCH_ASSOC);
-        $restore[$trigger] = (string) ($create['SQL Original Statement'] ?? '');
-        if ($restore[$trigger] === '') {
-            throw new RuntimeException("Definici triggeru {$trigger} nejde načíst, smazání se nespustí.");
-        }
+    $result = $service->purge($supplierId, isset($opts['immutable']), isset($opts['files']));
+    if ($result['cycle'] !== []) {
+        echo sprintf("  cyklus vazeb (%s) smazán s ověřením, že nezůstal žádný odkaz\n", implode(', ', $result['cycle']));
     }
-    foreach (array_keys($restore) as $trigger) {
-        $pdo->exec('DROP TRIGGER `' . str_replace('`', '``', $trigger) . '`');
+    if ($result['triggers'] > 0) {
+        echo sprintf("Obnoveno %d triggerů.\n", $result['triggers']);
     }
-    try {
-        $pdo->beginTransaction();
-        try {
-            $deleted = 0;
-            foreach ($children as $child) {
-                $deleted += (int) $pdo->exec("DELETE FROM `{$child['table']}` WHERE {$child['where']}");
-            }
-            $pending = array_keys($counts);
-            // Řádek, na který ještě odkazuje jiný řádek firmy vazbou RESTRICT, se smaže
-            // v dalším průchodu; selhaný příkaz InnoDB vrátí sám, transakce běží dál.
-            for ($pass = 0; $pending !== [] && $pass < 10; $pass++) {
-                $failed = [];
-                foreach ($pending as $table) {
-                    try {
-                        $deleted += (int) $pdo->exec("DELETE FROM `{$table}` WHERE {$where($table)}");
-                    } catch (PDOException $e) {
-                        if ((int) ($e->errorInfo[1] ?? 0) !== 1451) {
-                            throw $e;
-                        }
-                        $failed[$table] = $e->getMessage();
-                    }
-                }
-                if ($failed !== [] && count($failed) === count($pending)) {
-                    $deleted += deleteCycle($pdo, $schema, array_keys($failed), $where, $failed);
-                    $failed = [];
-                }
-                $pending = array_keys($failed);
-            }
-            if ($pending !== []) {
-                throw new RuntimeException('Smazání nejde dokončit, zbývají tabulky: ' . implode(', ', $pending));
-            }
-            $pdo->commit();
-        } catch (Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            throw $e;
-        }
-    } finally {
-        foreach ($restore as $trigger => $sql) {
-            $pdo->exec($sql);
-        }
-        if ($restore !== []) {
-            echo sprintf("Obnoveno %d triggerů.\n", count($restore));
-        }
+    echo sprintf("Smazáno %d řádků v tabulkách firmy (bez podřízených řádků smazaných vazbou).\n", $result['deleted']);
+    if ($result['files'] > 0) {
+        echo sprintf("Smazáno %d položek úložiště (%d souborů).\n", $result['files'], $result['files_removed']);
     }
-    echo sprintf("Smazáno %d řádků v tabulkách firmy (bez podřízených řádků smazaných vazbou).\n", $deleted);
-
-    $removed = 0;
-    foreach ($files as $path) {
-        $removed += ResetStorageScope::remove($path);
-    }
-    if ($files !== []) {
-        echo sprintf("Smazáno %d položek úložiště (%d souborů).\n", count($files), $removed);
-    }
+    $container->get(ActivityLogger::class)->log('supplier.deleted', null, 'supplier', $supplierId, [
+        'source' => 'cli',
+        'company_name' => $plan['supplier']['company_name'],
+        'ic' => $ico,
+        'rows' => $plan['total'],
+        'tables' => count($plan['counts']),
+        'files' => $result['files_removed'],
+    ]);
     exit(0);
 } catch (Throwable $e) {
     fwrite(STDERR, 'Chyba: ' . $e->getMessage() . "\n");

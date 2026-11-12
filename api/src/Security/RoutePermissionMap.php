@@ -1222,7 +1222,8 @@ final class RoutePermissionMap
             || ($method === 'GET' && $path === '/api/suppliers/carry-over')) {
             return new RoutePermission(self::ADMIN_PLUS);
         }
-        if ($method !== 'GET' && preg_match('#^/api/suppliers(/[0-9]+)?$#', $path) === 1) {
+        if (($method !== 'GET' && preg_match('#^/api/suppliers(/[0-9]+)?$#', $path) === 1)
+            || ($method === 'GET' && preg_match('#^/api/suppliers/[0-9]+/delete-preview$#D', $path) === 1)) {
             return new RoutePermission(self::SUPERADMIN);
         }
         // Klientský archiv je úzká alternativa k internímu čtení výkazů.

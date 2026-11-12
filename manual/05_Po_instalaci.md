@@ -156,7 +156,9 @@ php api/bin/delete-company.php --id=7 --confirm=<IČO>   # smaže firmu se všem
 před zopakováním převodu do čisté firmy. Smazání potvrzuje IČO firmy a běží v jedné
 transakci. `--files` smaže i soubory firmy v úložišti. Má-li firma mzdová podání
 nebo jiné záznamy jen pro přidávání, je potřeba `--immutable`. Smazání nejde vrátit,
-proto si předem zálohujte databázi.
+proto si předem zálohujte databázi. Stejně maže firmu i aplikace (`Systém → Firmy`,
+viz [§ 95.11](95_Multi_supplier.md#9511-krok-za-krokem-smazat-firmu)); auditní log
+(`activity_log`) zůstává zachovaný v obou případech.
 
 > [!WARNING]
 > `reset.php` maže **uživatelská data**, ne instalaci. Globální číselníky (země, sazby
