@@ -3840,7 +3840,9 @@
       "result": "Doplněno: {applied}. Nedoplněno: {skipped}.",
       "load_failed": "Náhled výplatních pravidel se nepodařilo načíst.",
       "apply_failed": "Výplatní pravidla se nepodařilo doplnit.",
-      "retry": "Zkusit znovu"
+      "retry": "Zkusit znovu",
+      "none_missing": "Všechny osoby s trvajícím vztahem už výplatní pravidlo mají.",
+      "truncated": "Náhled ukazuje prvních {count} osob bez pravidla. Po doplnění otevřete nabídku znovu pro další."
     },
     "health_insurer_bulk": {
       "known_later": "Pojišťovna je u osoby zapsaná až od {period}, předvyplněno k potvrzení.",
@@ -6743,6 +6745,7 @@
       "filter": "Zobrazení",
       "quick_inputs": "Měsíční zadání mezd",
       "statutory_bulk_action": "Doplnit výchozí zákonné údaje",
+      "payout_defaults_action": "Výplatní pravidla z karet osob",
       "declaration_sign_bulk_action": "Podepsaná prohlášení hromadně",
       "workplace_bulk_action": "Doplnit místo výkonu práce",
       "terms_bulk_action": "Upravit podmínky vybraných vztahů",
@@ -9260,6 +9263,9 @@
         "valid_from": "Platí od",
         "valid_from_required": "Vyplňte datum, od kterého zásada platí.",
         "valid_from_locked": "Změna data nesmí zasáhnout do zmrazeného nebo schváleného období ani překročit sousední verzi.",
+        "move_start": "Posunout začátek",
+        "move_start_save": "Uložit začátek",
+        "start_moved": "Začátek zásady příplatků byl posunut.",
         "valid_to": "Ukončit platnost k",
         "valid_to_hint": "Nepovinné. Vyplněním se zásada uzavře; od dalšího dne platí zákonný výchozí stav, takže u svátku náhradní volno a u ztíženého prostředí chybějící podklad.",
         "valid_to_invalid": "Konec platnosti nesmí předcházet začátku platnosti zásady.",

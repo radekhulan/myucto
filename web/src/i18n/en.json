@@ -3840,7 +3840,9 @@
       "result": "Added: {applied}. Not added: {skipped}.",
       "load_failed": "The payout rule preview could not be loaded.",
       "apply_failed": "The payout rules could not be added.",
-      "retry": "Try again"
+      "retry": "Try again",
+      "none_missing": "Everyone with an ongoing employment already has a payout rule.",
+      "truncated": "The preview shows the first {count} people without a rule. Open the action again afterwards for the rest."
     },
     "health_insurer_bulk": {
       "known_later": "The insurer is recorded for this person only from {period}; prefilled for confirmation.",
@@ -6743,6 +6745,7 @@
       "filter": "View",
       "quick_inputs": "Monthly payroll entry",
       "statutory_bulk_action": "Fill in default statutory data",
+      "payout_defaults_action": "Payout rules from person cards",
       "declaration_sign_bulk_action": "Signed declarations in bulk",
       "workplace_bulk_action": "Fill in place of work",
       "terms_bulk_action": "Edit terms of selected employments",
@@ -9260,6 +9263,9 @@
         "valid_from": "Valid from",
         "valid_from_required": "Enter the date from which the policy applies.",
         "valid_from_locked": "Changing the date must not affect a frozen or approved period or cross an adjacent version.",
+        "move_start": "Move start",
+        "move_start_save": "Save start",
+        "start_moved": "The surcharge policy start was moved.",
         "valid_to": "End validity on",
         "valid_to_hint": "Optional. Filling it in closes the policy; from the next day the statutory default applies, so compensatory time off for holidays and a missing basis for a difficult environment.",
         "valid_to_invalid": "The end of validity cannot precede the start of the policy.",

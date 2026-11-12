@@ -276,6 +276,180 @@ final class PayrollEmploymentSurchargePolicyApiTest extends TestCase
         self::assertSame(['row_version' => 1, 'valid_to' => null], $stored->fetch(\PDO::FETCH_ASSOC));
     }
 
+    /** B2-08: začátek verze, podle které se nepočítalo, jde posunout i s hranicí předchozí verze. */
+    public function testMovingStartShiftsTheJoinedPreviousBoundaryBothWays(): void
+    {
+        $first = $this->create(['valid_from' => '2026-01-01']);
+        $second = $this->create(['valid_from' => '2026-04-01']);
+
+        $later = $this->moveStart((int) $second['id'], '2026-04-15', 1);
+        self::assertSame(200, $later->getStatusCode(), (string) $later->getBody());
+        self::assertSame(['2026-01-01', '2026-04-14', 3], $this->stored((int) $first['id']));
+        self::assertSame(['2026-04-15', null, 2], $this->stored((int) $second['id']));
+
+        $earlier = $this->moveStart((int) $second['id'], '2026-03-01', 2);
+        self::assertSame(200, $earlier->getStatusCode(), (string) $earlier->getBody());
+        self::assertSame(['2026-01-01', '2026-02-28', 4], $this->stored((int) $first['id']));
+        self::assertSame(['2026-03-01', null, 3], $this->stored((int) $second['id']));
+        self::assertSame('2026-03-01', (string) $this->json($earlier)['policy']['valid_from']);
+    }
+
+    public function testMovingStartRefusesToSwallowThePreviousVersion(): void
+    {
+        $this->create(['valid_from' => '2026-01-01']);
+        $second = $this->create(['valid_from' => '2026-04-01']);
+
+        foreach (['2026-01-01', '2025-12-01'] as $date) {
+            $response = $this->moveStart((int) $second['id'], $date, 1);
+            self::assertSame(422, $response->getStatusCode(), $date);
+        }
+        $first = $this->moveStart((int) $second['id'], 'not-a-date', 1);
+        self::assertSame(422, $first->getStatusCode());
+        self::assertSame(['2026-04-01', null, 1], $this->stored((int) $second['id']));
+    }
+
+    public function testClosedVersionInTheMiddleMovesOnlyItsStart(): void
+    {
+        $first = $this->create(['valid_from' => '2026-01-01']);
+        $middle = $this->create(['valid_from' => '2026-04-01']);
+        $last = $this->create(['valid_from' => '2026-07-01']);
+
+        $moved = $this->moveStart((int) $middle['id'], '2026-05-01', 2);
+        self::assertSame(200, $moved->getStatusCode(), (string) $moved->getBody());
+        self::assertSame(['2026-01-01', '2026-04-30', 3], $this->stored((int) $first['id']));
+        self::assertSame(['2026-05-01', '2026-06-30', 3], $this->stored((int) $middle['id']));
+        self::assertSame(['2026-07-01', null, 1], $this->stored((int) $last['id']));
+
+        foreach (['2026-07-01', '2026-08-01'] as $date) {
+            $beyond = $this->moveStart((int) $middle['id'], $date, 3);
+            self::assertSame(422, $beyond->getStatusCode(), $date);
+        }
+        self::assertSame(['2026-05-01', '2026-06-30', 3], $this->stored((int) $middle['id']));
+    }
+
+    public function testGapBeforeTheVersionStaysAGapAndIsNotOverlapped(): void
+    {
+        $first = $this->create(['valid_from' => '2026-01-01']);
+        $closed = $this->action->close(
+            $this->request('POST')->withParsedBody(['valid_to' => '2026-02-28', 'row_version' => 1]),
+            new Response(),
+            $this->args((int) $first['id']),
+        );
+        self::assertSame(200, $closed->getStatusCode());
+        $second = $this->create(['valid_from' => '2026-04-01']);
+
+        $overlap = $this->moveStart((int) $second['id'], '2026-02-15', 1);
+        self::assertSame(422, $overlap->getStatusCode());
+
+        $later = $this->moveStart((int) $second['id'], '2026-05-01', 1);
+        self::assertSame(200, $later->getStatusCode(), (string) $later->getBody());
+        self::assertSame(['2026-01-01', '2026-02-28', 2], $this->stored((int) $first['id']));
+
+        $intoGap = $this->moveStart((int) $second['id'], '2026-03-01', 2);
+        self::assertSame(200, $intoGap->getStatusCode(), (string) $intoGap->getBody());
+        self::assertSame(['2026-01-01', '2026-02-28', 2], $this->stored((int) $first['id']));
+        self::assertSame(['2026-03-01', null, 3], $this->stored((int) $second['id']));
+    }
+
+    public function testFrozenMonthKeepsItsPolicyAndOnlyUnfrozenDaysMove(): void
+    {
+        $first = $this->create(['valid_from' => '2026-01-01']);
+        $second = $this->create(['valid_from' => '2026-04-01']);
+        $this->freezeMonth('2026-03-01', 'approved');
+
+        $intoFrozen = $this->moveStart((int) $second['id'], '2026-03-20', 1);
+        self::assertSame(409, $intoFrozen->getStatusCode());
+        self::assertSame('surcharge_policy_history_locked', $this->json($intoFrozen)['error']['code']);
+        self::assertStringContainsString('03/2026', $this->json($intoFrozen)['error']['message']);
+
+        $afterFrozen = $this->moveStart((int) $second['id'], '2026-04-15', 1);
+        self::assertSame(200, $afterFrozen->getStatusCode(), (string) $afterFrozen->getBody());
+        self::assertSame(['2026-01-01', '2026-04-14', 3], $this->stored((int) $first['id']));
+    }
+
+    public function testVersionUsedByARevisionCannotMoveUnlessTheRevisionWasDropped(): void
+    {
+        $this->create(['valid_from' => '2026-01-01']);
+        $second = $this->create(['valid_from' => '2026-04-01']);
+        $this->freezeMonth('2026-05-01', 'snapshot');
+
+        $used = $this->moveStart((int) $second['id'], '2026-04-10', 1);
+        self::assertSame(409, $used->getStatusCode());
+        self::assertSame(['2026-04-01', null, 1], $this->stored((int) $second['id']));
+    }
+
+    public function testAbandonedRevisionDoesNotFreezeTheVersion(): void
+    {
+        $this->create(['valid_from' => '2026-01-01']);
+        $second = $this->create(['valid_from' => '2026-04-01']);
+        $this->freezeMonth('2026-05-01', 'abandoned');
+
+        $dropped = $this->moveStart((int) $second['id'], '2026-04-10', 1);
+        self::assertSame(200, $dropped->getStatusCode(), (string) $dropped->getBody());
+    }
+
+    public function testCancelledRunDoesNotFreezeTheVersion(): void
+    {
+        $this->create(['valid_from' => '2026-01-01']);
+        $second = $this->create(['valid_from' => '2026-04-01']);
+        $this->freezeMonth('2026-04-01', 'snapshot');
+        $this->db->pdo()->prepare('UPDATE payroll_runs SET status = "cancelled" WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+
+        $moved = $this->moveStart((int) $second['id'], '2026-04-10', 1);
+        self::assertSame(200, $moved->getStatusCode(), (string) $moved->getBody());
+    }
+
+    public function testMovingStartChecksRowVersion(): void
+    {
+        $this->create(['valid_from' => '2026-01-01']);
+        $second = $this->create(['valid_from' => '2026-04-01']);
+
+        $stale = $this->moveStart((int) $second['id'], '2026-04-10', 7);
+        self::assertSame(409, $stale->getStatusCode());
+        self::assertSame('row_version_conflict', $this->json($stale)['error']['code']);
+        self::assertSame(1, $this->json($stale)['error']['current_row_version']);
+        self::assertSame(['2026-04-01', null, 1], $this->stored((int) $second['id']));
+    }
+
+    private function moveStart(int $policyId, string $validFrom, int $rowVersion): ResponseInterface
+    {
+        return $this->action->moveStart(
+            $this->request('POST')->withParsedBody(['valid_from' => $validFrom, 'row_version' => $rowVersion]),
+            new Response(),
+            $this->args($policyId),
+        );
+    }
+
+    /** @return array{0:string,1:?string,2:int} */
+    private function stored(int $policyId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT valid_from, valid_to, row_version FROM payroll_employment_surcharge_policies WHERE supplier_id = ? AND id = ?'
+        );
+        $statement->execute([$this->supplierId, $policyId]);
+        $row = $statement->fetch(\PDO::FETCH_ASSOC);
+
+        return [(string) $row['valid_from'], $row['valid_to'] === null ? null : (string) $row['valid_to'], (int) $row['row_version']];
+    }
+
+    private function freezeMonth(string $periodStart, string $revisionStatus): void
+    {
+        $pdo = $this->db->pdo();
+        $payment = (new \DateTimeImmutable($periodStart))->modify('+1 month')->format('Y-m-15');
+        $pdo->prepare('INSERT INTO payroll_runs (supplier_id, period_start, payment_date, status, current_revision_no)
+            VALUES (?, ?, ?, ?, 1)')->execute([$this->supplierId, $periodStart, $payment, $revisionStatus === 'approved' ? 'approved' : 'inputs_locked']);
+        $run = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO payroll_run_revisions
+            (supplier_id, run_id, revision_no, status, schema_version, ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash, idempotency_key_hash, superseded_at)
+            VALUES (?, ?, 1, ?, "test", ?, "{}", ?, ?, ?)')
+            ->execute([$this->supplierId, $run, $revisionStatus, str_repeat('a', 64), hash('sha256', '{}'), random_bytes(32), $revisionStatus === 'abandoned' ? date('Y-m-d H:i:s') : null]);
+        $revision = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO payroll_run_employments (supplier_id, revision_id, employee_id, employment_id, period_start, input_json, input_hash)
+            SELECT supplier_id, ?, employee_id, id, ?, "{}", ? FROM payroll_employments WHERE supplier_id = ? AND id = ?')
+            ->execute([$revision, $periodStart, hash('sha256', '{}'), $this->supplierId, $this->employmentId]);
+    }
+
     private static function hourlyMetadata(): array
     {
         return ['included_overtime' => ['agreement_kind' => 'contract', 'agreement_reference' => 'Syntetická smlouva',

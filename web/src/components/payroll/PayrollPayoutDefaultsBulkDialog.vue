@@ -11,8 +11,9 @@ import { useToast } from '@/composables/useToast'
 import Modal from '@/components/ui/Modal.vue'
 import { BTN_DISABLED_NOTE, btnFilled, btnOutline, btnOutlineSm, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
 
+// `null` = osoby bez výplatního pravidla určí server (nabídka v Zaměstnancích).
 const props = defineProps<{
-  employeeIds: number[]
+  employeeIds: number[] | null
 }>()
 
 const emit = defineEmits<{
@@ -24,6 +25,7 @@ const { t, te } = useI18n()
 const toast = useToast()
 
 const rows = ref<PayrollPayoutDefaultsPreviewRow[]>([])
+const truncated = ref(false)
 const loading = ref(false)
 const loadError = ref('')
 const applying = ref(false)
@@ -51,9 +53,12 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    rows.value = await payrollApi.payoutDefaultsPreview(props.employeeIds)
+    const preview = await payrollApi.payoutDefaultsPreview(props.employeeIds)
+    rows.value = preview.people
+    truncated.value = preview.truncated
   } catch (error) {
     rows.value = []
+    truncated.value = false
     loadError.value = apiErrorMessage(error, t('payroll.payout_defaults_bulk.load_failed'))
   } finally {
     loading.value = false
@@ -100,7 +105,18 @@ onMounted(load)
         </button>
       </div>
 
+      <p
+        v-else-if="!result && employeeIds === null && rows.length === 0"
+        class="rounded-lg bg-neutral-50 p-3 text-sm text-neutral-600"
+        data-test="payout-defaults-none"
+      >
+        {{ t('payroll.payout_defaults_bulk.none_missing') }}
+      </p>
+
       <template v-else-if="!result">
+        <p v-if="truncated" class="text-xs text-neutral-500" data-test="payout-defaults-truncated">
+          {{ t('payroll.payout_defaults_bulk.truncated', { count: rows.length }) }}
+        </p>
         <div class="grid grid-cols-2 gap-3">
           <article class="rounded-lg bg-success-50 p-3">
             <p class="text-xs text-success-700">{{ t('payroll.payout_defaults_bulk.ready') }}</p>

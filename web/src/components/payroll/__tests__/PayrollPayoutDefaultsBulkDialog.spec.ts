@@ -18,7 +18,7 @@ vi.mock('@/composables/useToast', () => ({
 
 import PayrollPayoutDefaultsBulkDialog from '../PayrollPayoutDefaultsBulkDialog.vue'
 
-function mountDialog(employeeIds: number[]) {
+function mountDialog(employeeIds: number[] | null) {
   const i18n = createI18n({ legacy: false, locale: 'cs', messages: { cs } })
   return mount(PayrollPayoutDefaultsBulkDialog, {
     props: { employeeIds },
@@ -32,11 +32,11 @@ function mountDialog(employeeIds: number[]) {
 describe('PayrollPayoutDefaultsBulkDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    m.preview.mockResolvedValue([
+    m.preview.mockResolvedValue({ truncated: false, people: [
       { employee_id: 1, full_name: 'Syntetická Hotovost', payout_method: 'cash', applicable: true, destination_kind: 'cash', blocked_reason: null },
       { employee_id: 2, full_name: 'Syntetický Účet', payout_method: 'bank', applicable: true, destination_kind: 'bank', blocked_reason: null },
       { employee_id: 3, full_name: 'Syntetická Bez účtu', payout_method: 'bank', applicable: false, destination_kind: null, blocked_reason: 'Zaměstnanec nemá ověřený výplatní účet.' },
-    ])
+    ] })
     m.apply.mockResolvedValue({ applied: [1, 2], skipped: [] })
   })
 
@@ -61,13 +61,34 @@ describe('PayrollPayoutDefaultsBulkDialog', () => {
   })
 
   it('bez osoby, které jde pravidlo odvodit, doplnění nenabídne', async () => {
-    m.preview.mockResolvedValue([
+    m.preview.mockResolvedValue({ truncated: false, people: [
       { employee_id: 3, full_name: 'Syntetická Bez účtu', payout_method: 'bank', applicable: false, destination_kind: null, blocked_reason: 'Zaměstnanec nemá ověřený výplatní účet.' },
-    ])
+    ] })
     const wrapper = mountDialog([3])
     await flushPromises()
 
     expect(wrapper.get('[data-test="payout-defaults-apply"]').attributes('disabled')).toBeDefined()
     expect(m.apply).not.toHaveBeenCalled()
+  })
+
+  it('z nabídky Zaměstnanců si osoby bez pravidla určí server', async () => {
+    m.preview.mockResolvedValue({ truncated: true, people: [
+      { employee_id: 1, full_name: 'Syntetická Hotovost', payout_method: 'cash', applicable: true, destination_kind: 'cash', blocked_reason: null },
+    ] })
+    const wrapper = mountDialog(null)
+    await flushPromises()
+
+    expect(m.preview).toHaveBeenCalledWith(null)
+    expect(wrapper.get('[data-test="payout-defaults-ready"]').text()).toBe('1')
+    expect(wrapper.find('[data-test="payout-defaults-truncated"]').exists()).toBe(true)
+  })
+
+  it('když pravidlo nikomu nechybí, řekne to', async () => {
+    m.preview.mockResolvedValue({ truncated: false, people: [] })
+    const wrapper = mountDialog(null)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="payout-defaults-none"]').text()).toContain('Všechny osoby')
+    expect(wrapper.get('[data-test="payout-defaults-apply"]').attributes('disabled')).toBeDefined()
   })
 })

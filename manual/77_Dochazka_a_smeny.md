@@ -195,10 +195,15 @@ svátek či ve ztíženém prostředí.
 s prací ve svátek nebo ve ztíženém prostředí jde schválit.
 
 Datum **Platí od** je povinné a vyplňujete ho výslovně podle sjednání.
-Nepoužitou zásadu lze tlačítkem **Opravit zásadu** upravit včetně začátku
-platnosti, i v seznamu starších verzí. Změna zachová návaznost sousedních
-verzí. Pokud do dotčeného období zasahuje zmrazená nebo schválená revize
-mzdového běhu tohoto vztahu, oprava se odmítne. Použitou zásadu měňte
+Začátek platnosti zásady, podle které se ještě nepočítalo, jde posunout:
+u platné zásady v **Opravit zásadu**, u starší verze odkazem **Posunout
+začátek** v seznamu starších verzí. Navazovala-li předchozí verze (končila
+den před začátkem), posune se její konec s ním, takže mezi verzemi nevznikne
+den bez zásady ani den se dvěma. Byla-li předchozí verze ukončena dřív, zůstane
+mezera a nový začátek do předchozí verze zasáhnout nesmí. Konec posouvané
+verze ani následující verze se nemění. Pokud by posun zasáhl do měsíce, za
+který už mzdový běh tohoto vztahu zmrazil podklady (zamknutý, spočítaný nebo
+schválený, ne zrušený), odmítne se s uvedením měsíce. Použitou zásadu měňte
 novou verzí od dosud nezmrazeného období.
 
 ## 77.6 Krok za krokem: náhradní volno za přesčas
@@ -508,7 +513,9 @@ vztahu; počet vlivů jde přepsat i u jednotlivého zápisu docházky.
 
 Zásady se **verzují podle platnosti**: nová kolektivní smlouva je nová verze
 od data účinnosti, stará zůstává v historii a mzdy spočítané podle ní se
-nemění. Opravit jde jen verzi, která právě platí a nemá konec platnosti.
+nemění. Sazby a režimy jde opravit jen u verze, která právě platí a nemá
+konec platnosti; začátek platnosti jde posunout u každé verze, podle které se
+ještě nepočítalo ([§ 77.5](#775-krok-za-krokem-sjednani-priplatku-u-pracovniho-vztahu)).
 Vyplněním **Ukončit platnost k** se zásada uzavře a od dalšího dne platí
 zákonný výchozí stav.
 

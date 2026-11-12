@@ -12,6 +12,7 @@ vi.mock('@/api/payroll', () => ({
     createEmploymentSurchargePolicy: vi.fn(),
     updateEmploymentSurchargePolicy: vi.fn(),
     closeEmploymentSurchargePolicy: vi.fn(),
+    moveEmploymentSurchargePolicyStart: vi.fn(),
   },
 }))
 
@@ -261,7 +262,6 @@ describe('EmploymentSurchargePolicyPanel', () => {
     await wrapper.find('[data-test="surcharge-policy-edit"]').trigger('click')
     const validFrom = wrapper.get('[data-test="surcharge-policy-valid-from"]')
     expect((validFrom.element as HTMLInputElement).value).toBe('01. 01. 2026')
-    expect(validFrom.attributes('disabled')).toBeDefined()
 
     await wrapper.find('[data-test="surcharge-policy-rate-overtime"]').setValue('35')
     await wrapper.find('[data-test="surcharge-policy-form"]').trigger('submit')
@@ -277,6 +277,49 @@ describe('EmploymentSurchargePolicyPanel', () => {
       .not.toHaveProperty('valid_from')
     expect(payrollApi.createEmploymentSurchargePolicy).not.toHaveBeenCalled()
     expect(payrollApi.closeEmploymentSurchargePolicy).not.toHaveBeenCalled()
+    expect(payrollApi.moveEmploymentSurchargePolicyStart).not.toHaveBeenCalled()
+  })
+
+  it('posunutý začátek otevřené verze pošle zvlášť a opravu s verzí z odpovědi', async () => {
+    vi.mocked(payrollApi.employmentSurchargePolicies).mockResolvedValue(response([{ ...policy(), valid_from: '2026-04-01' }]))
+    vi.mocked(payrollApi.moveEmploymentSurchargePolicyStart)
+      .mockResolvedValue({ ...policy(), valid_from: '2026-04-15', row_version: 2 })
+    const wrapper = await mountPanel()
+
+    await wrapper.find('[data-test="surcharge-policy-edit"]').trigger('click')
+    await wrapper.find('[data-test="surcharge-policy-valid-from"]').setValue('2026-04-15')
+    await wrapper.find('[data-test="surcharge-policy-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(payrollApi.moveEmploymentSurchargePolicyStart).toHaveBeenCalledWith(10, 5, { valid_from: '2026-04-15', row_version: 1 })
+    expect(payrollApi.updateEmploymentSurchargePolicy).toHaveBeenCalledWith(10, 5, expect.objectContaining({ row_version: 2 }))
+  })
+
+  it('u starší verze posune začátek a chybu serveru ukáže u ní', async () => {
+    const older = { ...policy(), id: 4, valid_from: '2026-01-01', valid_to: '2026-03-31', row_version: 3 }
+    const current = { ...policy(), valid_from: '2026-04-01' }
+    vi.mocked(payrollApi.employmentSurchargePolicies).mockResolvedValue(response([current, older]))
+    vi.mocked(payrollApi.moveEmploymentSurchargePolicyStart).mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { status: 409, data: { error: { code: 'surcharge_policy_history_locked', message: 'Mzdový běh za 02/2026 už podle ní počítal.' } } },
+    })
+    const wrapper = await mountPanel()
+
+    await wrapper.get('[data-test="surcharge-policy-move-4"]').trigger('click')
+    await wrapper.get('[data-test="surcharge-policy-move-date"]').setValue('2026-02-01')
+    await wrapper.get('[data-test="surcharge-policy-move-save"]').trigger('click')
+    await flushPromises()
+
+    expect(payrollApi.moveEmploymentSurchargePolicyStart).toHaveBeenCalledWith(10, 4, { valid_from: '2026-02-01', row_version: 3 })
+    expect(wrapper.get('[data-test="surcharge-policy-move-error"]').text()).toContain('02/2026')
+
+    vi.mocked(payrollApi.moveEmploymentSurchargePolicyStart).mockResolvedValueOnce({ ...older, valid_from: '2026-02-15' })
+    await wrapper.get('[data-test="surcharge-policy-move-date"]').setValue('2026-02-15')
+    await wrapper.get('[data-test="surcharge-policy-move-save"]').trigger('click')
+    await flushPromises()
+
+    expect(toastMocks.success).toHaveBeenCalledWith('payroll.people.surcharge_policy.start_moved')
+    expect(wrapper.find('[data-test="surcharge-policy-move-form-4"]').exists()).toBe(false)
   })
 
   it('ukončí platnost jedním Uložit a použije verzi z odpovědi opravy', async () => {
