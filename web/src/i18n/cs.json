@@ -5007,7 +5007,7 @@
         "active_hint": "Tyto osoby revize nepočítá. Až údaje doplníte, vraťte je do běhu, nebo je doplaťte opravou po schválení.",
         "include": "Vrátit do běhu",
         "settled_title": "Bez mzdy v tomto běhu: {count}",
-        "settled_hint": "Schválená revize šla bez těchto osob. Doplatek: doplňte chybějící údaje, klikněte na „Vyžádat opravu“ a „Otevřít opravu“; opravná revize je už obsahuje. Měsíční hlášení za ně podejte opravným hlášením JMHZ."
+        "settled_hint": "Schválená revize šla bez těchto osob. Doplatek: doplňte chybějící údaje, klikněte na „Vyžádat opravu“ a „Otevřít opravu“; opravná revize je už obsahuje. Příprava JMHZ za měsíc je z řádného hlášení odloží sama (důvod vyřazení), hlášení za ostatní tak jde zmrazit. Po schválení opravné revize je doplníte v Mzdová podání → JMHZ tlačítkem „Doplnit všechny odložené“."
       },
       "permission_names": {
         "payroll_reopen": "Odemknout schválený mzdový běh",
@@ -14295,6 +14295,7 @@
         "jmhz_special_scenarios_resolution_blocked": "Normalizovaný dokument zvláštních scénářů JMHZ není úplný; jde o technickou chybu, kterou musí posoudit podpora.",
         "jmhz_special_scenarios_source_version_unsupported": "Příprava JMHZ byla vytvořena starší verzí sestavovače a nelze pro ni bezpečně určit zvláštní scénář. Připravte hlášení znovu.",
         "jmhz_registration_change_settling": "Čerstvá změna údajů zaměstnance (do 48 h)",
+        "jmhz_payroll_run_excluded": "Osoba vyřazená z mzdového běhu, formulář doplní opravné hlášení po opravě běhu",
         "jmhz_submission_artifact_mismatch": "Otisk uloženého artefaktu podání neodpovídá zmrazenému XML JMHZ. Zmrazte hlášení znovu z přípravy.",
         "jmhz_submission_component_identity_missing": "Ve zmrazeném podání JMHZ chybí identifikace pracovního vztahu. Zmrazte hlášení znovu z přípravy.",
         "jmhz_submission_components_missing": "Řádné podání neobsahuje žádný pracovní vztah, který by šlo opravit.",

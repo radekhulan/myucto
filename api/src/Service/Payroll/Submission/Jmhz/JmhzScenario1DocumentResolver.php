@@ -1144,13 +1144,37 @@ final class JmhzScenario1DocumentResolver
             }
         }
         $excluded = [];
+        $absent = [];
         foreach ($exclusion->employmentIds as $employmentId) {
             if (isset($officeEmploymentIds[$employmentId])) {
                 $excluded[$employmentId] = true;
+            } elseif ($exclusion->purpose === JmhzFormExclusion::PURPOSE_DEFERRAL) {
+                $absent[$employmentId] = true;
             }
         }
         if ($excluded === []) {
-            return $full;
+            if ($absent === []) {
+                return $full;
+            }
+            $payload = $full->candidate->payload;
+            $absentIds = array_keys($absent);
+            sort($absentIds, SORT_NUMERIC);
+            $provenance = $this->object($payload['provenance'] ?? null);
+            $provenance['form_exclusion'] = [
+                'purpose' => $exclusion->purpose,
+                'employment_ids' => $absentIds,
+                'employee_ids' => [],
+                'deferral_ids' => $exclusion->deferralIds,
+                'summary_excluded_employee_ids' => [],
+            ];
+            $payload['provenance'] = $provenance;
+
+            return new JmhzScenario1Resolution(
+                new JmhzScenario1NormalizedDocument($payload),
+                $full->blockers,
+                $full->excludedBlockers,
+                $exclusion,
+            );
         }
 
         $guards = [];
@@ -1242,7 +1266,7 @@ final class JmhzScenario1DocumentResolver
         $employer = $this->object($payload['employer'] ?? null);
         $employer['summary_totals'] = $this->employerTaxTotals($summaryPeople);
         $payload['employer'] = $employer;
-        $excludedIds = array_keys($excluded);
+        $excludedIds = array_keys($excluded + $absent);
         sort($excludedIds, SORT_NUMERIC);
         $excludedEmployeeIds = array_keys($excludedEmployees);
         sort($excludedEmployeeIds, SORT_NUMERIC);

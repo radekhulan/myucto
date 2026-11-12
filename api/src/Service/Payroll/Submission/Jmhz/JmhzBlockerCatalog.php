@@ -647,6 +647,7 @@ final class JmhzBlockerCatalog
         'jmhz_submission_components_missing' => 'correction',
         'jmhz_submission_components_unreadable' => 'retry',
         'jmhz_registration_change_settling' => 'retry',
+        'jmhz_payroll_run_excluded' => 'runs',
         'jmhz_submission_controls_failed' => 'submission',
         'jmhz_submission_form_type_invalid' => 'retry',
         'jmhz_submission_frozen_identity_invalid' => 'retry',

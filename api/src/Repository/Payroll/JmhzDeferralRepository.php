@@ -325,6 +325,49 @@ final class JmhzDeferralRepository
     }
 
     /**
+     * Vztahy osob, které účetní vyřadila z mzdového běhu a schválená revize
+     * šla bez nich: v měsíci trvají, ale revize za ně nemá výsledek.
+     *
+     * @return list<array{run_id:int,period_start:string,employee_id:int,employment_id:int,office_id:?int,reason:string,excluded_by:?int}>
+     */
+    public function settledRunExclusions(int $supplierId, int $revisionId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT revision.run_id, run.period_start, exclusion.employee_id,
+                    employment.id AS employment_id, employment.office_id,
+                    exclusion.reason, exclusion.excluded_by
+               FROM payroll_run_exclusions exclusion
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = exclusion.supplier_id
+                AND revision.id = exclusion.settled_revision_id
+                AND revision.run_id = exclusion.run_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = exclusion.supplier_id
+                AND employment.employee_id = exclusion.employee_id
+              WHERE exclusion.supplier_id = ? AND exclusion.settled_revision_id = ?
+                AND exclusion.lifted_at IS NULL
+                AND (run.office_id IS NULL OR employment.office_id = run.office_id)
+                AND COALESCE(employment.actual_start_date, employment.start_date) <= LAST_DAY(run.period_start)
+                AND (employment.end_date IS NULL OR employment.end_date >= run.period_start)
+              ORDER BY employment.id',
+        );
+        $statement->execute([$supplierId, $revisionId]);
+
+        return array_values(array_map(static fn (array $row): array => [
+            'run_id' => (int) $row['run_id'],
+            'period_start' => (string) $row['period_start'],
+            'employee_id' => (int) $row['employee_id'],
+            'employment_id' => (int) $row['employment_id'],
+            'office_id' => $row['office_id'] === null ? null : (int) $row['office_id'],
+            'reason' => (string) $row['reason'],
+            'excluded_by' => $row['excluded_by'] === null ? null : (int) $row['excluded_by'],
+        ], $statement->fetchAll(PDO::FETCH_ASSOC)));
+    }
+
+    /**
      * @param list<mixed> $parameters
      * @return list<array<string,mixed>>
      */

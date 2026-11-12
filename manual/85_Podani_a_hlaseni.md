@@ -1400,6 +1400,14 @@ JMHZ tlačítko **Odložit všechny dotčené (N)**. Jeden důvod platí pro vš
 odloží se každá osoba s nálezem, který odložit jde. Totéž tlačítko je i v testu
 hlášení. Odložit jde i vztah s přijatou změnou údajů (A3) mladší než 48 hodin.
 
+**Osoba vyřazená z mzdového běhu.** Vyřadíte-li osobu z běhu (kap. 80) a běh
+schválíte bez ní, příprava JMHZ za měsíc ji odloží sama. Důvod odložení je
+„Vyřazena z mzdového běhu:“ a důvod vyřazení, nález **Osoba vyřazená
+z mzdového běhu**. Řádné hlášení za ostatní pak jde zmrazit a vazba na něj
+zůstane jako nesplněná povinnost. Až osobu doplatíte opravou běhu (opravná
+revize ji zase obsahuje) a ČSSZ řádné hlášení přijme, doplňte ji tlačítkem
+**Doplnit všechny odložené jedním opravným hlášením (N)**.
+
 **Oprava běhu před podáním.** Odložení patří k revizi běhu. Opravíte-li běh
 dřív, než řádné hlášení zmrazíte, nabídne seznam **Odložené vztahy**
 tlačítko **Převzít trvající odložení do aktuální revize (N)**. Převezmou se

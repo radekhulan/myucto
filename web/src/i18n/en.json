@@ -5007,7 +5007,7 @@
         "active_hint": "The revision does not calculate these people. Once their data are complete, return them to the run, or pay them through a correction after approval.",
         "include": "Return to run",
         "settled_title": "Without pay in this run: {count}",
-        "settled_hint": "The approved revision went without these people. To pay them: complete the missing data, click “Request correction” and “Open correction”; the correction revision includes them again. File the monthly report for them with a corrective JMHZ report."
+        "settled_hint": "The approved revision went without these people. To pay them: complete the missing data, click “Request correction” and “Open correction”; the correction revision includes them again. The JMHZ preparation for the month defers them from the regular report on its own (with the exclusion reason), so the report for the others can be frozen. After the correction revision is approved, add them in Payroll submissions → JMHZ with “Complete all deferred”."
       },
       "permission_names": {
         "payroll_reopen": "Unlock approved payroll run",
@@ -14295,6 +14295,7 @@
         "jmhz_special_scenarios_resolution_blocked": "The normalized special-scenarios JMHZ document is incomplete; this is a technical issue for support to investigate.",
         "jmhz_special_scenarios_source_version_unsupported": "The JMHZ preparation was built by an older builder version and its special scenario cannot be safely determined. Prepare the report again.",
         "jmhz_registration_change_settling": "Recent change of employee data (within 48 h)",
+        "jmhz_payroll_run_excluded": "Person excluded from the payroll run, the form is completed by a corrective report after the run is corrected",
         "jmhz_submission_artifact_mismatch": "The stored artifact's fingerprint does not match the frozen JMHZ XML. Freeze the report again from the preparation.",
         "jmhz_submission_component_identity_missing": "The frozen JMHZ submission is missing the employment identification. Freeze the report again from the preparation.",
         "jmhz_submission_components_missing": "The regular submission does not contain any employment that could be corrected.",

@@ -58,6 +58,7 @@ final readonly class JmhzPreparationSnapshotService
         private JmhzAnnualEvidenceService $annualEvidence,
         private JmhzEmployerAnnualEvidenceService $employerAnnualEvidence,
         private PayrollDependantJmhzIdentityRepository $childIdentities,
+        private JmhzRunExclusionDeferral $runExclusions,
     ) {}
 
     public function loadVerified(
@@ -144,7 +145,7 @@ final readonly class JmhzPreparationSnapshotService
         }
         $idempotencyHash = hash('sha256', $idempotencyKey, true);
 
-        return $this->repository->transaction(function () use (
+        $result = $this->repository->transaction(function () use (
             $supplierId,
             $sourceRevisionId,
             $environment,
@@ -366,6 +367,9 @@ final readonly class JmhzPreparationSnapshotService
             $this->verifyStored($stored);
             return $this->result($stored, true);
         });
+        $this->runExclusions->deferExcluded($supplierId, $result, $createdBy);
+
+        return $result;
     }
 
     /**

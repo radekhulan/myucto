@@ -737,6 +737,88 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
     }
 
     /**
+     * Osoba vyřazená z mzdového běhu: schválená revize ji nemá, příprava JMHZ
+     * ji sama odloží s důvodem vyřazení, řádné hlášení za ostatní se zmrazí
+     * a po opravné revizi s osobou ji doplní „Doplnit všechny odložené".
+     */
+    public function testRunExcludedPersonIsDeferredFromRegularAndCompletedAfterCorrection(): void
+    {
+        $first = $this->hire('Adam Včasný', 'male', '1980-02-02');
+        $second = $this->hire('Běla Včasná', 'female', '1985-03-03');
+        $excluded = $this->hire('Cyril Vyřazený', 'male', '1990-04-04');
+        foreach ([$first, $second, $excluded] as $person) {
+            $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+            $this->pay($person, 4_000_000);
+        }
+        $run = $this->runs->createRun($this->supplierId, self::PERIOD_START, self::PAYDAY, $this->officeId, $this->actors[0]);
+        $runId = (int) $run['id'];
+        $locked = $this->runs->lockInputs($this->supplierId, $runId, (int) $run['row_version'], 'exclusion-lock', $this->actors[0]);
+        $out = $this->runs->excludeEmployee($this->supplierId, $runId, (int) $locked->run['row_version'], 'exclusion-exclude', $this->actors[0], $excluded['employee_id'], 'Chybí podklady k nemoci, doplatek opravou.');
+        $calculated = $this->runs->calculate($this->supplierId, $runId, (int) $out->run['row_version'], 'exclusion-calc', $this->actors[0]);
+        self::assertSame([], $this->blockingValidations((int) $calculated->revision['id']));
+        $reviewed = $this->runs->review($this->supplierId, $runId, (int) $calculated->run['row_version'], 'exclusion-review', $this->actors[0]);
+        $approved = $this->runs->approve($this->supplierId, $runId, (int) $reviewed->run['row_version'], 'exclusion-approve', $this->actors[0]);
+        $revisionId = (int) $approved->revision['id'];
+
+        $preparation = $this->prepareJmhz($revisionId, 'exclusion');
+        self::assertSame(201, $preparation['status'], CanonicalJson::encode($preparation['body']));
+        $preparationId = (int) $preparation['body']['id'];
+        $listed = $this->listJmhzDeferrals($revisionId);
+        self::assertSame(200, $listed['status']);
+        self::assertCount(1, $listed['body']['deferrals']);
+        $deferral = $listed['body']['deferrals'][0];
+        self::assertSame($excluded['employment_id'], $deferral['employment_id']);
+        self::assertSame('pending', $deferral['state']);
+        self::assertSame('Vyřazena z mzdového běhu: Chybí podklady k nemoci, doplatek opravou.', $deferral['reason']);
+        self::assertSame(['jmhz_payroll_run_excluded'], $deferral['blocker_codes']);
+        $replayed = $this->prepareJmhz($revisionId, 'exclusion-again');
+        self::assertContains($replayed['status'], [200, 201]);
+        self::assertCount(1, $this->listJmhzDeferrals($revisionId)['body']['deferrals'], 'Opakovaná příprava odložení nezdvojí.');
+
+        $tested = $this->dryRunJmhz($preparationId, $this->officeId);
+        self::assertSame('dry_run_valid', $tested['body']['status'], CanonicalJson::encode($tested['body']['controls'] ?? $tested['body']));
+        self::assertSame([$excluded['employment_id']], $tested['body']['deferred']['employment_ids']);
+        $xml = (string) preg_replace('/>\s+</', '><', (string) $tested['body']['xml']);
+        self::assertSame(2, substr_count($xml, '</formularOsoby>'));
+
+        $frozen = $this->freezeJmhzSubmission($preparationId, $this->officeId);
+        self::assertSame(201, $frozen['status'], CanonicalJson::encode($frozen['body']));
+        $regularId = (int) $frozen['body']['submission_id'];
+        $listed = $this->listJmhzDeferrals($revisionId);
+        self::assertSame('omitted', $listed['body']['deferrals'][0]['state']);
+        self::assertSame($regularId, $listed['body']['deferrals'][0]['regular_submission_id']);
+        $this->acceptJmhzSubmission($regularId, 'partially_accepted');
+
+        $corrected = $this->correctPayrollRun($approved->run, 'exclusion-fix', 'Doplatek osoby vyřazené z běhu.');
+        self::assertSame('approved', $corrected->run['status']);
+        self::assertSame(1, (int) $this->scalar(
+            'SELECT COUNT(*) FROM payroll_run_persons WHERE supplier_id = ? AND revision_id = ? AND employee_id = ?',
+            [$this->supplierId, (int) $corrected->revision['id'], $excluded['employee_id']],
+        ));
+        self::assertSame(1, $this->listJmhzDeferrals($revisionId)['body']['completable_count']);
+
+        $completed = $this->completeAllJmhzDeferrals($revisionId);
+        self::assertSame(201, $completed['status'], CanonicalJson::encode($completed['body']));
+        self::assertSame([$excluded['employment_id']], $completed['body']['completed_employment_ids']);
+        $frozenReader = $this->container->get(JmhzFrozenPayloadReader::class);
+        self::assertInstanceOf(JmhzFrozenPayloadReader::class, $frozenReader);
+        $correction = (string) preg_replace(
+            '/>\s+</',
+            '><',
+            $frozenReader->bytes($this->supplierId, 'test', (int) $completed['body']['submissions'][0]['submission_id']),
+        );
+        self::assertStringContainsString('<typPodani>O</typPodani>', $correction);
+        self::assertSame(1, substr_count($correction, '</formularOsoby>'));
+        self::assertStringContainsString('<form:idPpv>' . self::syntheticPpv($excluded['sequence']) . '</form:idPpv>', $correction);
+        $newPreparation = $this->prepareJmhz((int) $corrected->revision['id'], 'exclusion-after-fix');
+        self::assertContains($newPreparation['status'], [200, 201]);
+        self::assertSame(0, (int) $this->scalar(
+            'SELECT COUNT(*) FROM payroll_jmhz_deferrals WHERE supplier_id = ? AND source_revision_id = ?',
+            [$this->supplierId, (int) $corrected->revision['id']],
+        ), 'Opravná revize osobu obsahuje, nová příprava ji neodkládá.');
+    }
+
+    /**
      * Audit #2: zmrazení v ostrém provozu zastaví dva vztahy bez průměru.
      * Chyba nabídne odložení všech dotčených; jeden důvod je odloží oba
      * a řádné hlášení za zbytek se zmrazí.
