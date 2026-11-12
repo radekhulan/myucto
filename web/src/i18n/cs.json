@@ -25543,7 +25543,19 @@
     "dic": "DIČ",
     "clients": "Klientů",
     "invoices": "Faktur",
-    "delete_confirm": "Smazat dodavatele? Lze jen pokud nemá klienty ani faktury.",
+    "delete_dialog": {
+      "title": "Smazat firmu {name}",
+      "warning_title": "Smazání je nevratné.",
+      "warning": "Smaže se všechno, co firma v aplikaci má: doklady, účetní deník, mzdy a personalistika, podání, SVJ, dokumenty, nastavení i soubory v úložišti. Data nepůjde obnovit jinak než ze zálohy. Před smazáním si ověřte, že je máte uložena jinde.",
+      "summary": "Smaže se {rows} řádků v {tables} evidencích a {files} položek úložiště.",
+      "protected": "Z toho {count} evidencí jen pro přidávání (mzdy, podání, SVJ), které se jinak smazat nedají.",
+      "is_last": "Je to poslední firma instalace, tu smazat nelze.",
+      "type_ic": "Pro potvrzení opište IČO firmy: {value}",
+      "type_name": "Firma nemá IČO. Pro potvrzení opište přesný název firmy: {value}",
+      "submit": "Nevratně smazat firmu",
+      "deleting": "Mažu…",
+      "done": "Firma {name} byla smazána."
+    },
     "create_title": "Nový dodavatel",
     "create_hint": "Po vytvoření se automaticky založí výchozí měny CZK + EUR. Bankovní spojení vyplňte v Nastavení po přepnutí na nového dodavatele.",
     "carry_over": {

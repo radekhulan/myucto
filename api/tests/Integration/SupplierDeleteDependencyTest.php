@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Cache\RedisFactory;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\ApiTokenService;
+use MyInvoice\Tests\Support\PropertyChargeFixture;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -16,13 +17,9 @@ use Slim\App;
 use Slim\Psr7\Factory\ServerRequestFactory;
 
 /**
- * Audit C3 (critical) — mazání firmy nesmí osiřet účetní data.
- *
- * Původní deleteSupplierById kontroloval závislosti jen na clients+invoices a pak
- * mazal se SET FOREIGN_KEY_CHECKS=0 → firma s deníkem, přijatými fakturami,
- * majetkem, pokladnou či skladem šla smazat a všechna účetní data zůstala v DB
- * osiřelá (neplatný supplier_id). Tento test reprodukuje díru: firma s majetkem
- * a pokladnou se dřív dala smazat, teď musí vrátit 409 a data zůstat netknutá.
+ * Smazání firmy v aplikaci projde VŽDY (rozhodnutí vlastníka produktu): firma s doklady,
+ * deníkem, mzdami (tabulky jen pro přidávání), exekucemi i SVJ se smaže úplně, bez
+ * osiřelých řádků a s obnovenými ochrannými triggery. Pojistkou je opsání IČO (názvu).
  *
  * In-process request přes celou pipeline (Bootstrap::buildApp() → $app->handle()),
  * autentizace admin bearer PAT. Fixtures se po sobě uklízí.
@@ -30,6 +27,8 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 #[Group('integration')]
 final class SupplierDeleteDependencyTest extends TestCase
 {
+    use PropertyChargeFixture;
+
     private Connection $db;
     private Config $config;
     private ApiTokenService $svc;
@@ -102,21 +101,10 @@ final class SupplierDeleteDependencyTest extends TestCase
         $pdo = $this->db->pdo();
 
         if ($this->supplierC > 0 && !$this->supplierCDeleted) {
-            // Best-effort úklid firmy C i s daty. FK kontrola je vypnutá JEN kvůli tabulkám
-            // s RESTRICT FK; samotný DELETE FROM supplier musí proběhnout se ZAPNUTOU
-            // kontrolou, jinak se nespustí ON DELETE CASCADE a zbytek dat firmy zůstane
-            // v databázi osiřelý (viz ForeignKeyChecksGuardTest).
             try {
-                $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
-                foreach (['accounting_account_definition_history', 'assets', 'cash_registers', 'accounting_supplier_settings',
-                          'invoice_counters', 'currencies', 'activity_log',
-                          'payment_orders', 'document_folders', 'document_tags', 'work_report_links', 'gopay_settings'] as $t) {
-                    $pdo->prepare("DELETE FROM `$t` WHERE supplier_id = ?")->execute([$this->supplierC]);
-                }
-            } finally {
-                $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+                (new \MyInvoice\Service\System\CompanyPurgeService($this->db))->purge($this->supplierC, true, true);
+            } catch (\Throwable) {
             }
-            $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->supplierC]);
         }
 
         if ($this->userIds !== []) {
@@ -133,152 +121,190 @@ final class SupplierDeleteDependencyTest extends TestCase
 
     // ---------------------------------------------------------------- tests
 
-    public function testDeleteBlockedWhenSupplierHasAccountingData(): void
+    public function testCompanyWithAccountingPayrollAndEnforcementIsPurgedCompletely(): void
     {
         $pdo = $this->db->pdo();
-
-        // Firma C vede majetek a pokladnu — přesně scénář, který dřív (clients=0,
-        // invoices=0) prošel a osiřel data.
-        $pdo->prepare(
-            "INSERT INTO assets (supplier_id, inventory_number, name, input_price, acquisition_date)
-             VALUES (?, 'INV-C3-001', 'Testovací notebook', 30000.00, '2026-01-01')"
-        )->execute([$this->supplierC]);
-        $assetId = (int) $pdo->lastInsertId();
-
-        $pdo->prepare("INSERT INTO cash_registers (supplier_id, name) VALUES (?, 'Hlavní pokladna')")
-            ->execute([$this->supplierC]);
-
-        $token = $this->mkAdminToken();
-        $res = $this->request('DELETE', '/api/suppliers/' . $this->supplierC, $token);
-
-        self::assertSame(409, $res->getStatusCode(), 'Firma s majetkem/pokladnou nesmí jít smazat');
-        $body = $this->json($res);
-        self::assertSame('has_dependencies', $body['error']['code'] ?? null);
-        $msg = (string) ($body['error']['message'] ?? '');
-        self::assertStringContainsString('majetek', $msg, '409 musí vyjmenovat blokující kategorie');
-        self::assertStringContainsString('pokladny', $msg);
-
-        // Data zůstala netknutá — firma i majetek dál existují.
-        self::assertSame(
-            1,
-            (int) $pdo->query('SELECT COUNT(*) FROM supplier WHERE id = ' . $this->supplierC)->fetchColumn(),
-            'Firma po odmítnutém smazání musí zůstat'
-        );
-        self::assertSame(
-            1,
-            (int) $pdo->query('SELECT COUNT(*) FROM assets WHERE id = ' . $assetId)->fetchColumn(),
-            'Majetek nesmí být osiřen/smazán'
-        );
-    }
-
-    public function testDeleteBlockedWhenSupplierHasPaymentOrders(): void
-    {
-        // Doplňkový nález (security-review po C3): payment_orders nemá FK na supplier
-        // vůbec — bez blokace by DELETE FROM supplier tiše osiřel příkazy k úhradě.
-        $pdo = $this->db->pdo();
-        $pdo->prepare(
-            "INSERT INTO payment_orders (supplier_id, payment_date, total_amount, item_count)
-             VALUES (?, '2026-01-01', 1000.00, 1)"
-        )->execute([$this->supplierC]);
-
-        $token = $this->mkAdminToken();
-        $res = $this->request('DELETE', '/api/suppliers/' . $this->supplierC, $token);
-
-        self::assertSame(409, $res->getStatusCode(), 'Firma s příkazem k úhradě nesmí jít smazat');
-        $body = $this->json($res);
-        self::assertStringContainsString('příkazy k úhradě', (string) ($body['error']['message'] ?? ''));
-        self::assertSame(
-            1,
-            (int) $pdo->query('SELECT COUNT(*) FROM payment_orders WHERE supplier_id = ' . $this->supplierC)->fetchColumn(),
-            'Příkaz k úhradě nesmí zůstat osiřelý ani smazaný bez firmy'
-        );
-    }
-
-    public function testDatedAccountDefinitionsBlockSupplierDeletionWithoutAConstraintError(): void
-    {
-        $token=$this->mkAdminToken();
-        $container=Bootstrap::buildContainer();
-        $container->set(Connection::class,$this->db);
-        $container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierC);
-        $chart=$container->get(\MyInvoice\Repository\ChartOfAccountsRepository::class);
-        $account=$chart->findByCode($this->supplierC,'511');
-        $definitions=new \MyInvoice\Repository\AccountDefinitionRepository($this->db);
-        $definitions->change($this->supplierC,(int)$account['id'],'2026-01-01',['name'=>'Synthetic dated account definition'],$definitions->stateHash($this->supplierC,(int)$account['id']),$this->userIds[0],'Synthetic account configuration evidence');
-        $before=$this->db->pdo()->query('SELECT * FROM accounting_account_definition_history WHERE supplier_id='.$this->supplierC.' ORDER BY id')->fetchAll(\PDO::FETCH_ASSOC);
-        self::assertNotEmpty($before);
-        self::assertSame(0,(int)$this->db->pdo()->query('SELECT COUNT(*) FROM journal_entries WHERE supplier_id='.$this->supplierC)->fetchColumn());
-        $res=$this->request('DELETE','/api/suppliers/'.$this->supplierC,$token);
-        self::assertSame(409,$res->getStatusCode());
-        self::assertSame('has_dependencies',$this->json($res)['error']['code']??null);
-        self::assertSame($before,$this->db->pdo()->query('SELECT * FROM accounting_account_definition_history WHERE supplier_id='.$this->supplierC.' ORDER BY id')->fetchAll(\PDO::FETCH_ASSOC));
-        self::assertSame(1,(int)$this->db->pdo()->query('SELECT COUNT(*) FROM supplier WHERE id='.$this->supplierC)->fetchColumn());
-    }
-
-    public function testGoPaySettingsWithChartAccountDoNotDependOnCascadeOrder(): void
-    {
-        $token = $this->mkAdminToken();
+        $pdo->prepare("UPDATE supplier SET ic = '00000027', taxpayer_type = 'po' WHERE id = ?")->execute([$this->supplierC]);
+        $pdo->prepare("INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
+             VALUES (?, 'EUR', 'EUR', '€', 'euro', 'euro', 2, 1, 0)")->execute([$this->supplierC]);
+        $admin = $this->superadminId();
         $container = Bootstrap::buildContainer();
         $container->set(Connection::class, $this->db);
-        $container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierC);
-        $account = $container->get(\MyInvoice\Repository\ChartOfAccountsRepository::class)->findByCode($this->supplierC, '221');
-        $pdo = $this->db->pdo();
-        $pdo->prepare('INSERT INTO gopay_settings (supplier_id, gopay_account_id) VALUES (?, ?)')
-            ->execute([$this->supplierC, (int) $account['id']]);
+        $generated = $container->get(\MyInvoice\Service\Sample\SampleDataGenerator::class)->generate($this->supplierC, $admin);
+        self::assertGreaterThan(0, $generated['invoices']);
+        self::assertGreaterThan(0, $generated['journal_entries']);
+        self::assertGreaterThan(0, $generated['payroll_runs']);
+        $employee = (int) $pdo->query('SELECT id FROM payroll_employees WHERE supplier_id = ' . $this->supplierC . ' ORDER BY id LIMIT 1')->fetchColumn();
+        $pdo->prepare("INSERT INTO payroll_enforcement_cases (supplier_id, employee_id, case_key, case_kind, effective_from) VALUES (?, ?, 'synthetic-case', 'enforcement', '2026-01-01')")
+            ->execute([$this->supplierC, $employee]);
+        $file = \MyInvoice\Infrastructure\Config\RuntimePaths::storage('invoices') . '/sup-' . $this->supplierC . '/synthetic.pdf';
+        @mkdir(dirname($file), 0770, true);
+        file_put_contents($file, '%PDF-synthetic');
 
-        $res = $this->request('DELETE', '/api/suppliers/' . $this->supplierC, $token);
+        $preview = $this->json($this->request('GET', '/api/suppliers/' . $this->supplierC . '/delete-preview', $this->mkAdminToken()));
+        self::assertSame('ic', $preview['confirm_with'] ?? null);
+        self::assertGreaterThan(100, $preview['total_rows'] ?? 0);
+        self::assertGreaterThan(0, $preview['protected_tables'] ?? 0);
+        $tables = array_column($preview['tables'] ?? [], 'rows', 'table');
+        self::assertArrayHasKey('journal_entries', $tables);
+        self::assertArrayHasKey('payroll_enforcement_cases', $tables);
+
+        $triggers = $this->triggers();
+        $orphans = $this->orphanCount();
+        $res = $this->request('DELETE', '/api/suppliers/' . $this->supplierC, $this->mkAdminToken(), ['confirm' => '00000027']);
 
         self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
         $this->supplierCDeleted = true;
-        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM gopay_settings WHERE supplier_id = ' . $this->supplierC)->fetchColumn());
-        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM chart_of_accounts WHERE supplier_id = ' . $this->supplierC)->fetchColumn());
+        self::assertSame([], $this->remainingRows($this->supplierC));
+        self::assertSame($orphans, $this->orphanCount(), 'Smazání firmy nesmí nechat osiřelé řádky');
+        self::assertSame($triggers, $this->triggers(), 'Ochranné triggery musí po smazání existovat');
+        self::assertFileDoesNotExist($file);
+        $audit = $pdo->query("SELECT supplier_id, payload FROM activity_log WHERE action = 'supplier.deleted' AND entity_type = 'supplier' AND entity_id = " . $this->supplierC)
+            ->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($audit);
+        self::assertNull($audit['supplier_id']);
+        $payload = json_decode((string) $audit['payload'], true);
+        self::assertSame('00000027', $payload['ic']);
+        self::assertGreaterThan(100, $payload['rows']);
+        self::assertGreaterThan(0, $payload['protected_tables']);
     }
 
-    public function testEmptySupplierWithMetadataCleansUpWithoutOrphans(): void
+    public function testCompanyWithSvjHistoryIsPurgedCompletely(): void
     {
-        // Doplňkový nález: work_report_links/document_folders/document_tags nemají FK
-        // na supplier — bez explicitního úklidu by po úspěšném smazání zůstaly osiřelé.
+        $fixture = $this->chargeFixture($this->db);
+        $supplier = (int) $fixture['supplier'];
         $pdo = $this->db->pdo();
-        $pdo->prepare("INSERT INTO document_folders (supplier_id, name) VALUES (?, 'Test')")
-            ->execute([$this->supplierC]);
-        $pdo->prepare("INSERT INTO document_tags (supplier_id, name) VALUES (?, 'test-tag')")
-            ->execute([$this->supplierC]);
+        $name = (string) $pdo->query('SELECT company_name FROM supplier WHERE id = ' . $supplier)->fetchColumn();
+        $ic = trim((string) $pdo->query('SELECT ic FROM supplier WHERE id = ' . $supplier)->fetchColumn());
+        self::assertGreaterThan(0, (int) $pdo->query('SELECT COUNT(*) FROM property_revisions WHERE supplier_id = ' . $supplier)->fetchColumn());
+        self::assertGreaterThan(0, (int) $pdo->query('SELECT COUNT(*) FROM unit_charge_components WHERE supplier_id = ' . $supplier)->fetchColumn());
 
-        $token = $this->mkAdminToken();
-        $res = $this->request('DELETE', '/api/suppliers/' . $this->supplierC, $token);
+        $triggers = $this->triggers();
+        $orphans = $this->orphanCount();
+        $res = $this->request('DELETE', '/api/suppliers/' . $supplier, $this->mkAdminToken(), ['confirm' => $ic !== '' ? $ic : $name]);
 
-        self::assertSame(200, $res->getStatusCode());
-        $this->supplierCDeleted = true;
-
-        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM document_folders WHERE supplier_id = ' . $this->supplierC)->fetchColumn());
-        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM document_tags WHERE supplier_id = ' . $this->supplierC)->fetchColumn());
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame([], $this->remainingRows($supplier));
+        self::assertSame($orphans, $this->orphanCount());
+        self::assertSame($triggers, $this->triggers());
     }
 
-    public function testEmptySupplierDeletesAndCascadesWithoutOrphans(): void
+    public function testWrongConfirmationIsRejectedAndNothingIsDeleted(): void
     {
         $pdo = $this->db->pdo();
-
-        // CASCADE dítě, které dřív FK_CHECKS=0 osiřel — po opravě se musí kaskádově smazat.
-        $pdo->prepare('INSERT INTO accounting_supplier_settings (supplier_id) VALUES (?)')
-            ->execute([$this->supplierC]);
-
+        $pdo->prepare("INSERT INTO cash_registers (supplier_id, name) VALUES (?, 'Hlavní pokladna')")->execute([$this->supplierC]);
         $token = $this->mkAdminToken();
-        $res = $this->request('DELETE', '/api/suppliers/' . $this->supplierC, $token);
 
-        self::assertSame(200, $res->getStatusCode(), 'Prázdnou firmu musí jít smazat');
-        self::assertTrue((bool) ($this->json($res)['deleted'] ?? false));
+        foreach ([null, ['confirm' => ''], ['confirm' => '__TEST C3 supplie'], ['confirm' => '12345678']] as $body) {
+            $res = $this->request('DELETE', '/api/suppliers/' . $this->supplierC, $token, $body);
+            self::assertSame(422, $res->getStatusCode(), (string) $res->getBody());
+            self::assertSame('confirmation_mismatch', $this->json($res)['error']['code'] ?? null);
+        }
+        self::assertSame(1, (int) $pdo->query('SELECT COUNT(*) FROM supplier WHERE id = ' . $this->supplierC)->fetchColumn());
+        self::assertSame(1, (int) $pdo->query('SELECT COUNT(*) FROM cash_registers WHERE supplier_id = ' . $this->supplierC)->fetchColumn());
+
+        $res = $this->request('DELETE', '/api/suppliers/' . $this->supplierC, $token, ['confirm' => ' __TEST C3 supplier ']);
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
         $this->supplierCDeleted = true;
+        self::assertSame([], $this->remainingRows($this->supplierC));
+    }
 
-        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM supplier WHERE id = ' . $this->supplierC)->fetchColumn());
-        self::assertSame(
-            0,
-            (int) $pdo->query('SELECT COUNT(*) FROM currencies WHERE supplier_id = ' . $this->supplierC)->fetchColumn(),
-            'Currencies firmy nesmí zůstat osiřelé'
-        );
-        self::assertSame(
-            0,
-            (int) $pdo->query('SELECT COUNT(*) FROM accounting_supplier_settings WHERE supplier_id = ' . $this->supplierC)->fetchColumn(),
-            'CASCADE dítě se musí smazat s firmou (FK kontrola byla u DELETE supplier zapnutá)'
-        );
+    public function testLastCompanyCannotBeDeleted(): void
+    {
+        $pdo = $this->db->pdo();
+        $token = $this->mkAdminToken();
+        $this->app();
+        $pdo->prepare('CREATE TEMPORARY TABLE supplier_last_copy AS SELECT * FROM supplier WHERE id = ?')->execute([$this->supplierC]);
+        $pdo->exec('CREATE TEMPORARY TABLE supplier AS SELECT * FROM supplier_last_copy');
+        try {
+            $res = $this->request('DELETE', '/api/suppliers/' . $this->supplierC, $token, ['confirm' => '__TEST C3 supplier']);
+        } finally {
+            $pdo->exec('DROP TEMPORARY TABLE supplier');
+            $pdo->exec('DROP TEMPORARY TABLE supplier_last_copy');
+        }
+        self::assertSame(409, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('cannot_delete_last', $this->json($res)['error']['code'] ?? null);
+        self::assertSame(1, (int) $pdo->query('SELECT COUNT(*) FROM supplier WHERE id = ' . $this->supplierC)->fetchColumn());
+    }
+
+    public function testDatedAccountDefinitionsAndGoPaySettingsDoNotBlockDeletion(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $container->set(Connection::class, $this->db);
+        $container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierC);
+        $chart = $container->get(\MyInvoice\Repository\ChartOfAccountsRepository::class);
+        $account = $chart->findByCode($this->supplierC, '511');
+        $definitions = new \MyInvoice\Repository\AccountDefinitionRepository($this->db);
+        $token = $this->mkAdminToken();
+        $definitions->change($this->supplierC, (int) $account['id'], '2026-01-01', ['name' => 'Synthetic dated account definition'],
+            $definitions->stateHash($this->supplierC, (int) $account['id']), $this->userIds[0], 'Synthetic account configuration evidence');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO gopay_settings (supplier_id, gopay_account_id) VALUES (?, ?)')
+            ->execute([$this->supplierC, (int) $chart->findByCode($this->supplierC, '221')['id']]);
+        $pdo->prepare('INSERT INTO accounting_supplier_settings (supplier_id) VALUES (?)')->execute([$this->supplierC]);
+        $pdo->prepare("INSERT INTO payment_orders (supplier_id, payment_date, total_amount, item_count) VALUES (?, '2026-01-01', 1000.00, 1)")
+            ->execute([$this->supplierC]);
+        $pdo->prepare("INSERT INTO document_folders (supplier_id, name) VALUES (?, 'Test')")->execute([$this->supplierC]);
+
+        $res = $this->request('DELETE', '/api/suppliers/' . $this->supplierC, $token, ['confirm' => '__TEST C3 supplier']);
+
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        $this->supplierCDeleted = true;
+        self::assertSame([], $this->remainingRows($this->supplierC));
+    }
+
+    public function testBlockedPurgeRollsBackEverythingAndRestoresTriggers(): void
+    {
+        $pdo = $this->db->pdo();
+        $actor = $this->superadminId();
+        $pdo->prepare("INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, '1900-01-01', 'cz_504')")
+            ->execute([$this->supplierC]);
+        (new \MyInvoice\Repository\Property\PropertyProfileRepository($this->db))->save($this->supplierC, ['expected_revision' => 0,
+            'effective_from' => '2026-01-01T00:00:00+01:00', 'enabled' => true, 'reason' => 'Synthetic profile', 'title_ref' => 'Synthetic deed',
+            'idempotency_key' => 'profile'], $actor);
+        $other = (int) $pdo->query('SELECT id FROM supplier WHERE id <> ' . $this->supplierC . ' ORDER BY id LIMIT 1')->fetchColumn();
+        $country = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ'")->fetchColumn();
+        $pdo->prepare('INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email, currency_default_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+            ->execute([$other, 'Synthetic foreign reference', 'Synthetic', 'Synthetic', '10000', $country, 'foreign-ref@example.test', $this->currencyC]);
+        $foreignClient = (int) $pdo->lastInsertId();
+        $profiles = (int) $pdo->query('SELECT COUNT(*) FROM property_module_profiles WHERE supplier_id = ' . $this->supplierC)->fetchColumn();
+        self::assertGreaterThan(0, $profiles);
+        $triggers = $this->triggers();
+
+        try {
+            $res = $this->request('DELETE', '/api/suppliers/' . $this->supplierC, $this->mkAdminToken(), ['confirm' => '__TEST C3 supplier']);
+        } finally {
+            $pdo->prepare('DELETE FROM clients WHERE id = ?')->execute([$foreignClient]);
+        }
+
+        self::assertSame(409, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('purge_blocked', $this->json($res)['error']['code'] ?? null);
+        self::assertSame($triggers, $this->triggers());
+        self::assertSame(1, (int) $pdo->query('SELECT COUNT(*) FROM supplier WHERE id = ' . $this->supplierC)->fetchColumn());
+        self::assertSame(1, (int) $pdo->query('SELECT COUNT(*) FROM currencies WHERE id = ' . $this->currencyC)->fetchColumn());
+        self::assertSame($profiles, (int) $pdo->query('SELECT COUNT(*) FROM property_module_profiles WHERE supplier_id = ' . $this->supplierC)->fetchColumn());
+    }
+
+    public function testInterruptedPurgeRestoresTriggersOnNextRun(): void
+    {
+        $pdo = $this->db->pdo();
+        $trigger = 'trg_pr_audit_delete';
+        $create = $pdo->query('SHOW CREATE TRIGGER `' . $trigger . '`')->fetch(\PDO::FETCH_ASSOC);
+        $file = \MyInvoice\Infrastructure\Config\RuntimePaths::storage('company-purge') . '/triggers-' . $this->schema() . '.json';
+        @mkdir(dirname($file), 0770, true);
+        file_put_contents($file, json_encode(['schema' => $this->schema(), 'triggers' => [$trigger => [
+            'sql' => $create['SQL Original Statement'], 'sql_mode' => $create['sql_mode']]]]));
+        $pdo->exec('DROP TRIGGER `' . $trigger . '`');
+        try {
+            $restored = (new \MyInvoice\Service\System\CompanyPurgeService($this->db))->restorePendingTriggers();
+        } finally {
+            if (!in_array($trigger, $this->triggers(), true)) {
+                $pdo->exec((string) $create['SQL Original Statement']);
+            }
+            @unlink($file);
+        }
+        self::assertSame(1, $restored);
+        self::assertContains($trigger, $this->triggers());
     }
 
     // ------------------------------------------------------------- fixtures
@@ -306,12 +332,18 @@ final class SupplierDeleteDependencyTest extends TestCase
         return $this->app ??= Bootstrap::buildApp();
     }
 
-    private function request(string $method, string $path, string $bearer): ResponseInterface
+    /** @param array<string,mixed>|null $body */
+    private function request(string $method, string $path, string $bearer, ?array $body = null): ResponseInterface
     {
         $req = (new ServerRequestFactory())
             ->createServerRequest($method, $path, ['REMOTE_ADDR' => '127.0.0.1'])
             ->withHeader('Accept', 'application/json')
             ->withHeader('Authorization', 'Bearer ' . $bearer);
+        if ($body !== null) {
+            $req = $req->withHeader('Content-Type', 'application/json');
+            $req->getBody()->write((string) json_encode($body));
+            $req->getBody()->rewind();
+        }
         return $this->app()->handle($req);
     }
 
@@ -319,5 +351,68 @@ final class SupplierDeleteDependencyTest extends TestCase
     {
         $decoded = json_decode((string) $res->getBody(), true);
         return is_array($decoded) ? $decoded : [];
+    }
+
+    /** @return array<string,int> tabulka => počet řádků firmy, které po smazání zbyly */
+    private function remainingRows(int $supplierId): array
+    {
+        $pdo = $this->db->pdo();
+        $left = [];
+        $tables = $pdo->query("SELECT c.TABLE_NAME FROM information_schema.COLUMNS c JOIN information_schema.TABLES t
+              ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
+             WHERE c.TABLE_SCHEMA = DATABASE() AND c.COLUMN_NAME = 'supplier_id' AND t.TABLE_TYPE IN ('BASE TABLE', 'SYSTEM VERSIONED')")
+            ->fetchAll(\PDO::FETCH_COLUMN);
+        foreach ($tables as $table) {
+            if (in_array($table, \MyInvoice\Service\System\CompanyPurgeService::RETAINED_TABLES, true)) {
+                continue;
+            }
+            $n = (int) $pdo->query("SELECT COUNT(*) FROM `{$table}` WHERE supplier_id = {$supplierId}")->fetchColumn();
+            if ($n > 0) {
+                $left[$table] = $n;
+            }
+        }
+        if ((int) $pdo->query('SELECT COUNT(*) FROM supplier WHERE id = ' . $supplierId)->fetchColumn() > 0) {
+            $left['supplier'] = 1;
+        }
+        return $left;
+    }
+
+    /** Řádky, jejichž cizí klíč ukazuje na neexistující řádek (přes všechny vazby schématu). */
+    private function orphanCount(): int
+    {
+        $pdo = $this->db->pdo();
+        $refs = $pdo->query('SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME, CONSTRAINT_NAME
+              FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_SCHEMA = DATABASE()
+             ORDER BY TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION')->fetchAll(\PDO::FETCH_ASSOC);
+        $constraints = [];
+        foreach ($refs as $r) {
+            $constraints[$r['TABLE_NAME'] . '|' . $r['CONSTRAINT_NAME']][] = $r;
+        }
+        $n = 0;
+        foreach ($constraints as $columns) {
+            $notNull = implode(' AND ', array_map(static fn (array $c): string => "c.`{$c['COLUMN_NAME']}` IS NOT NULL", $columns));
+            $join = implode(' AND ', array_map(static fn (array $c): string => "p.`{$c['REFERENCED_COLUMN_NAME']}` = c.`{$c['COLUMN_NAME']}`", $columns));
+            $n += (int) $pdo->query(sprintf('SELECT COUNT(*) FROM `%s` c WHERE %s AND NOT EXISTS (SELECT 1 FROM `%s` p WHERE %s)',
+                $columns[0]['TABLE_NAME'], $notNull, $columns[0]['REFERENCED_TABLE_NAME'], $join))->fetchColumn();
+        }
+        return $n;
+    }
+
+    /** @return list<string> */
+    private function triggers(): array
+    {
+        return $this->db->pdo()->query('SELECT TRIGGER_NAME FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() ORDER BY TRIGGER_NAME')
+            ->fetchAll(\PDO::FETCH_COLUMN);
+    }
+
+    private function schema(): string
+    {
+        return (string) $this->db->pdo()->query('SELECT DATABASE()')->fetchColumn();
+    }
+
+    private function superadminId(): int
+    {
+        $this->mkAdminToken();
+        return $this->userIds[array_key_last($this->userIds)];
     }
 }

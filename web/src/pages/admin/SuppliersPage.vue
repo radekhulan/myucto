@@ -24,6 +24,7 @@ import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SupplierUrgency from '@/components/supplier/SupplierUrgency.vue'
+import SupplierDeleteDialog from '@/components/supplier/SupplierDeleteDialog.vue'
 import { useSupplierSwitch } from '@/composables/useSupplierSwitch'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
@@ -430,20 +431,21 @@ async function saveSupplier() {
   }
 }
 
-async function removeSupplier(s: SupplierListItem) {
-  if (s.clients_count > 0 || s.invoices_count > 0) return
-  if (!confirm(t('supplier.delete_confirm'))) return
-  try {
-    await suppliersApi.delete(s.id)
-    toast.success(t('common.deleted'))
-    await loadSuppliers()
-    await auth.refresh()
-    if (supplierStore.currentSupplierId === s.id) {
-      const first = suppliers.value[0]
-      if (first) await switchTo(first.id)
-    }
-  } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('common.error'))
+const deleting = ref<SupplierListItem | null>(null)
+
+function removeSupplier(s: SupplierListItem) {
+  deleting.value = s
+}
+
+async function onSupplierDeleted(id: number) {
+  const name = deleting.value?.company_name ?? ''
+  deleting.value = null
+  toast.success(t('supplier.delete_dialog.done', { name }))
+  await loadSuppliers()
+  await auth.refresh()
+  if (supplierStore.currentSupplierId === id) {
+    const first = suppliers.value[0]
+    if (first) await switchTo(first.id)
   }
 }
 
@@ -550,7 +552,7 @@ async function switchSupplier(id: number) {
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
                       {{ t('supplier.switch') }}
                     </button>
-                    <button v-if="auth.isSuperadmin" @click="removeSupplier(s)" :disabled="s.clients_count > 0 || s.invoices_count > 0 || supplierStore.availableSuppliers.length <= 1"
+                    <button v-if="auth.isSuperadmin" @click="removeSupplier(s)" :disabled="supplierStore.availableSuppliers.length <= 1"
                       :class="btnOutlineSm('danger')">
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
                       {{ t('common.delete') }}
@@ -594,7 +596,7 @@ async function switchSupplier(id: number) {
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
               {{ t('supplier.switch') }}
             </button>
-            <button v-if="auth.isSuperadmin" @click="removeSupplier(s)" :disabled="s.clients_count > 0 || s.invoices_count > 0 || supplierStore.availableSuppliers.length <= 1"
+            <button v-if="auth.isSuperadmin" @click="removeSupplier(s)" :disabled="supplierStore.availableSuppliers.length <= 1"
               :class="btnOutlineSm('danger')" class="whitespace-nowrap ml-auto">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
               {{ t('common.delete') }}
@@ -815,5 +817,6 @@ async function switchSupplier(id: number) {
         </form>
       </div>
     </div>
+    <SupplierDeleteDialog v-if="deleting" :supplier="deleting" @close="deleting = null" @deleted="onSupplierDeleted" />
   </div>
 </template>

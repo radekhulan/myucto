@@ -336,25 +336,33 @@ vidíte v přehledu jen ty. Systémový superadmin vidí všechny firmy v instal
 ## 95.11 Krok za krokem: smazat firmu
 
 1. Otevřete `Systém → Firmy`.
-2. Jako superadmin klikněte u firmy na **Smazat** a potvrďte.
+2. Jako superadmin klikněte u firmy na **Smazat**.
+3. Přečtěte si varování a náhled: kolik řádků v kolika evidencích a kolik souborů se smaže.
+4. Do pole opište IČO firmy (firma bez IČO: její přesný název) a klikněte na **Nevratně smazat firmu**.
+   Tlačítko je aktivní až po přesné shodě.
 
-**Jak poznáte, že je hotovo:** Firma zmizí ze seznamu.
-
-Firmu, která žádná data nemá (čerstvě založená, nikdy nepoužitá), aplikace smaže rovnou. Posledního zbývajícího
-dodavatele instalace smazat nejde vůbec („Posledního supplier nelze smazat", vždy musí zůstat aspoň jeden).
+**Jak poznáte, že je hotovo:** Firma zmizí ze seznamu a aplikace ohlásí „Firma … byla smazána".
 
 > [!WARNING]
-> Firmu s účetními daty aplikace nedovolí smazat. Před smazáním zkontroluje evidence s účetními a mzdovými daty
-> (klienti, vydané i přijaté faktury, účetní deník, pokladní doklady a pokladny, majetek, sklad - karty, doklady
-> i sklady, dokumenty, přiznání k dani z příjmů, daňová posouzení a zdroje financování neziskové organizace,
-> registr SVJ, podané daňové výkazy, příkazy k úhradě, bankovní výpisy, mzdové běhy, exekuce a insolvence
-> zaměstnanců). Má-li firma v kterékoli z nich
-> data, smazání skončí chybou s výčtem, co brání: „Firmu nelze smazat - obsahuje účetní data: vydané faktury,
-> účetní deník. Data nejdřív odstraňte, nebo firmu archivujte." Žádné tlačítko „archivovat" ve skutečnosti
-> neexistuje, text v hlášce je jen doporučení nechat firmu neaktivní. Jediná reálná cesta ke smazání firmy
-> s účetní historií je napřed fyzicky odstranit její data ve všech kontrolovaných tabulkách (typicky přes
-> IT nebo podporu), ne přes aplikaci. Bankovní výpisy a transakce se nekontrolují (nemají přímou vazbu na
-> firmu), ale u firmy s bankovními daty prakticky existují i zaúčtované doklady, takže na ně blok narazí stejně.
+> Smazání firmy je nevratné a projde vždy, i když firma má doklady, účetní deník, mzdy a personalistiku,
+> exekuce, podání, SVJ, dokumenty nebo bankovní výpisy. Smaže se všechno, co firma v aplikaci má, včetně
+> evidencí jen pro přidávání (mzdy, podání, SVJ) a souborů firmy v úložišti (PDF faktur, přílohy, archivy,
+> podpisové profily, loga). Zákonné archivační povinnosti (účetní záznamy, mzdové listy, podání) tím
+> nezanikají: odpovědnost za to, že data máte uložená jinde (záloha, export, archiv), nesete vy.
+
+Co ještě platí:
+
+- Posledního zbývajícího dodavatele instalace smazat nejde („Posledního supplier nelze smazat", vždy musí
+  zůstat aspoň jeden).
+- Maže se v jedné transakci. Když se něco nepovede, nesmaže se nic a aplikace ohlásí důvod.
+- Evidence jen pro přidávání chrání v databázi triggery. Aplikace je na dobu mazání dočasně odstraní a hned
+  potom vždy obnoví (i po chybě). Databázový účet aplikace k tomu potřebuje právo `TRIGGER`; bez něj smazání
+  skončí srozumitelnou chybou a nic se nesmaže.
+- Zůstane jen auditní stopa: v auditním logu instance záznam `supplier.deleted` (kdo, kdy, IČO, název, počty
+  řádků) a dřívější auditní záznamy firmy, protože auditní log je zřetězený a jeho řádky se nemažou. Smazané
+  zápisy verzovaného účetního deníku zůstávají jen v historii verzí databáze, aplikace je nezobrazuje.
+- Správce serveru může totéž udělat z příkazové řádky: `php api/bin/delete-company.php --id=<id>` (náhled),
+  pak `--confirm=<IČO> --immutable --files`.
 
 ## 95.12 Když něco nejde
 
@@ -363,10 +371,10 @@ dodavatele instalace smazat nejde vůbec („Posledního supplier nelze smazat",
 |---|---|---|
 | Přepínač dodavatele chybí | Máte přístup k jediné firmě | Požádejte admina o přístup k dalším firmám (`Systém → Uživatelé`). |
 | Položka **Přehled firem** v menu chybí | Přístup jen k jedné firmě, nebo role klient | Viz [§ 95.2](#952-nez-zacnete). |
-| Firmu nelze smazat, hláška vyjmenuje účetní data | Firma má data v některé z kontrolovaných tabulek | Viz varování v [§ 95.11](#9511-krok-za-krokem-smazat-firmu). |
-| Tlačítko **Smazat** je neaktivní | Firma má klienty nebo vydané faktury | Data nejprve odstraňte. |
-| Potvrzovací dialog tvrdí „Lze jen pokud nemá klienty ani faktury", ale smazání přesto selže | Dialog je zjednodušený a neúplný: i firma bez klientů a faktur může mít pokladnu, majetek nebo sklad | Zkontrolujte také pokladny, majetek a sklad. |
-| „Firmu nelze smazat, na její data odkazují jiné záznamy" | Na data firmy odkazuje záznam, který kontrola předem nevyjmenovává | Firmu ponechte neaktivní, nebo kontaktujte podporu. |
+| Tlačítko **Nevratně smazat firmu** je neaktivní | Opsané IČO (název) se neshoduje, nebo jde o poslední firmu | Opište IČO přesně; firmu bez IČO potvrďte přesným názvem včetně velikosti písmen. |
+| „Databázový účet aplikace nemá právo TRIGGER…" | Bez práva `TRIGGER` nejde dočasně vypnout ochranu evidencí jen pro přidávání | Požádejte správce databáze o přidělení práva `TRIGGER`. Nic se nesmazalo. |
+| „Smazání nejde dokončit, na data firmy stále odkazují záznamy…" | Na data firmy odkazuje záznam jiné firmy (např. klient jiné firmy s měnou smazávané firmy) | Odkaz v druhé firmě změňte a smazání zopakujte. Nic se nesmazalo. |
+| „Právě probíhá mazání jiné firmy" | Firmy se mažou jedna po druhé | Zkuste to za chvíli znovu. |
 | Posledního dodavatele nelze smazat | Musí zůstat aspoň jeden | Založte jinou firmu a smažte původní. |
 | Nahrání SVG loga selže: „SVG konverze není dostupná" | Server nemá PHP rozšíření `imagick` ani `rsvg-convert` | Viz [§ 95.13.4](#95134-branding-podrobnosti), nebo nahrajte PNG či JPG. |
 | Vystavení hlásí chybu 409 po změně číselného cyklu | Číslo už v evidenci existuje | Upravte šablonu, viz varování v [§ 95.13.3](#95133-ciselne-rady-faktur). |
