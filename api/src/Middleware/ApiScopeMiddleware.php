@@ -25,7 +25,8 @@ use Slim\Psr7\Factory\ResponseFactory;
  *      GET / HEAD                 → vyžaduje `read` (každý token splňuje)
  *      POST / PUT / PATCH / DELETE → vyžaduje `read_write`
  *    Nad rámec toho je účetní a daňová vrstva ({@see self::BEARER_READ_ONLY})
- *    pro token jednosměrná — zápis odmítne i `read_write`. Výjimkou jsou
+ *    pro token jednosměrná — zápis odmítne i `read_write` (`token_write_forbidden`,
+ *    i u zápisové cesty mimo allowlist, např. SVJ). Výjimkou jsou
  *    koncepty ostatních pohledávek a závazků a analytické účty osnovy
  *    ({@see self::BEARER_WRITE_EXCEPTIONS}).
  *
@@ -364,6 +365,9 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         //    aby integrátor dostal jasný signál; samotná existence interních cest
         //    není tajemství — jsou zdokumentované jako session-only).
         if (!$this->isBearerAllowed($path)) {
+            if (!in_array($method, self::READ_METHODS, true) && $this->isReadOnlyForBearer($path) && !$this->isSessionOnly($path)) {
+                return $this->writeForbidden();
+            }
             $response = $this->responseFactory->createResponse(403);
             return Json::error(
                 $response,
@@ -391,14 +395,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         //     Kontrola je PŘED scope kontrolou schválně: token s právem zápisu by
         //     jinak prošel a hláška „nemáte scope" by lhala o důvodu odmítnutí.
         if ($this->isReadOnlyForBearer($path) && !$this->isBearerWriteException($method, $path)) {
-            $response = $this->responseFactory->createResponse(403);
-            return Json::error(
-                $response,
-                'token_write_forbidden',
-                'Tato část API je přes token dostupná pouze ke čtení. '
-                . 'Zaúčtování, mzdové běhy, uzávěrky a podání lze řídit jen z webového rozhraní.',
-                403,
-            );
+            return $this->writeForbidden();
         }
 
         $apiToken = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);
@@ -427,12 +424,32 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         return false;
     }
 
-    private function isBearerAllowed(string $path): bool
+    private function writeForbidden(): Response
+    {
+        return Json::error(
+            $this->responseFactory->createResponse(403),
+            'token_write_forbidden',
+            'Tato část API je přes token dostupná pouze ke čtení. '
+            . 'Zaúčtování, mzdové běhy, uzávěrky a podání lze řídit jen z webového rozhraní '
+            . 'nebo tokenem s plným zápisem (system_write).',
+            403,
+        );
+    }
+
+    private function isSessionOnly(string $path): bool
     {
         foreach (self::BEARER_SESSION_ONLY as $pattern) {
             if (preg_match($pattern, $path) === 1) {
-                return false;
+                return true;
             }
+        }
+        return false;
+    }
+
+    private function isBearerAllowed(string $path): bool
+    {
+        if ($this->isSessionOnly($path)) {
+            return false;
         }
 
         foreach (self::BEARER_ALLOWED as $pattern) {

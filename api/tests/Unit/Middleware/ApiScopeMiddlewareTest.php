@@ -841,6 +841,41 @@ final class ApiScopeMiddlewareTest extends TestCase
         self::assertSame(403, $this->middleware()->process($this->bearer('DELETE', '/api/invoices/7/receipt-link', 'read'), $this->okHandler())->getStatusCode());
     }
     /**
+     * Zápis do read-only vrstvy mimo allowlist (SVJ) hlásí běžnému tokenu `token_write_forbidden`,
+     * čtení mimo allowlist a session-only cesty dál `token_endpoint_forbidden` (#371).
+     */
+    public function testPlainTokenWriteOutsideAllowlistReportsWriteForbidden(): void
+    {
+        foreach ([
+            ['POST', '/api/property/houses'],
+            ['POST', '/api/property/units'],
+            ['POST', '/api/property/objects/5/revisions'],
+            ['POST', '/api/property/objects/5/revisions/7/confirm'],
+            ['POST', '/api/property/charges/components'],
+            ['POST', '/api/property/charges/versions'],
+            ['POST', '/api/property/charges/issues/preview'],
+            ['POST', '/api/property/charges/issues/batches/5/post'],
+            ['POST', '/api/property/charges/issues/5/reverse'],
+            ['POST', '/api/property/payments/confirm'],
+            ['POST', '/api/property/payments/bank-proposals/5/plan'],
+        ] as [$method, $path]) {
+            $denied = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            self::assertSame(403, $denied->getStatusCode(), $path);
+            self::assertSame('token_write_forbidden', $this->errorCode($denied), $path);
+        }
+        foreach ([
+            ['GET', '/api/property/houses'],
+            ['GET', '/api/property/charges/issues/context'],
+            ['POST', '/api/accounting/payroll/post'],
+            ['POST', '/api/purchase-invoices/renumber'],
+        ] as [$method, $path]) {
+            $denied = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            self::assertSame(403, $denied->getStatusCode(), $path);
+            self::assertSame('token_endpoint_forbidden', $this->errorCode($denied), $method . ' ' . $path);
+        }
+    }
+
+    /**
      * Token s plným zápisem (#371) projde read-only účetní vrstvou, session-only cestami
      * i SVJ zápisem; přihlášení, správu tokenů, licence, instance a přístupové údaje ne.
      * Bez příznaku (nebo s příznakem, který AuthMiddleware nepotvrdil) zůstává 403.

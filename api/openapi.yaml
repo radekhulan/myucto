@@ -125,6 +125,17 @@ info:
     (`403 forbidden_permission`). Zda příznak platí, vrací `GET /auth/api-me`
     v `token.system_write`.
 
+    Operace, které běžný token nezavolá a token s plným zápisem ano, jsou ve spec
+    zdokumentované s odpovědí 403 (`token_write_forbidden` u zápisu,
+    `token_endpoint_forbidden` u čtení mimo veřejný subset): zaúčtování a storno
+    ostatních pohledávek a závazků (`post`, `reverse`, `repost`, `schedules/{id}/generate`,
+    `auto_post`), interních dokladů, `POST/DELETE /invoices/{id}/book`,
+    `/bank-transactions/{id}/post|unpost` a celá agenda SVJ mimo katalog: registr
+    (`/property/houses|units|services`, `/property/objects/{id}/revisions`, potvrzení
+    revize), složky předpisu a verze sazeb (`/property/charges/components|preview|versions`),
+    vydání, zaúčtování dávky a storno předpisů (`/property/charges/issues/**`), zápis
+    a storno úhrad a párování bankovních plateb jednotek (`/property/payments/**`).
+
     Ani takový token nesmí:
 
     - přebít uzavřené, uzavírané ani k datu zamčené účetní období (`?force=1` → `409 period_closed`),
@@ -1283,6 +1294,653 @@ paths:
                 $ref: '#/components/schemas/PropertyCatalogSummary'
         '403':
           $ref: '#/components/responses/FrameworkScopeForbidden'
+  /api/v1/property/houses:
+    get:
+      tags: [Accounting]
+      summary: Domy SVJ v registru (úplná data, plný zápis)
+      description: |
+        Úplná interní podoba registru k okamžiku `as_of` (včetně čekajících revizí). Slouží integraci, která do registru
+        zapisuje: dává `id` a `current_revision` pro `expected_revision`. Jen v relaci nebo tokenem s plným zápisem
+        (`system_write`); běžný token dostane 403 `token_endpoint_forbidden` a čte kurátorovanou projekci
+        `GET /property/catalog/houses`. Právo `property` (čtení), agenda jen pro SVJ.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/PropertyAsOf'
+        - $ref: '#/components/parameters/PropertyKnownAt'
+      responses:
+        '200': { description: Domy, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyRegistryList' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+    post:
+      tags: [Accounting]
+      summary: Založí dům SVJ (první revize registru)
+      description: |
+        Zápis registru stejnou validací jako ve webovém rozhraní. `expected_revision` musí být 0, `code` je jedinečný
+        kód v registru firmy. `status=confirmed` (potvrzený právní podklad) vyžaduje právo `property.registry.confirm`,
+        jinak vznikne čekající revize (`pending`). Idempotentní podle `idempotency_key` (stejný požadavek vrátí
+        stejný výsledek, jiný obsah 409 `property_idempotency_conflict`).
+        Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403 `token_write_forbidden`.
+        Právo `property.registry.manage` (zápis).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyHouseCreate' } } }
+      responses:
+        '200': { description: Založený objekt a číslo revize, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyRegistryWriteResult' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/units:
+    get:
+      tags: [Accounting]
+      summary: Jednotky SVJ v registru včetně vlastnických účastí (plný zápis)
+      description: |
+        Úplná interní podoba jednotek k okamžiku `as_of`: vlastnické účasti, role osob, platební identifikátory
+        a služby. Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403
+        `token_endpoint_forbidden`. Právo `property` (čtení), agenda jen pro SVJ.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/PropertyAsOf'
+        - $ref: '#/components/parameters/PropertyKnownAt'
+      responses:
+        '200': { description: Jednotky, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyRegistryList' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+    post:
+      tags: [Accounting]
+      summary: Založí jednotku SVJ s vlastnickými účastmi
+      description: |
+        `parent_id` je dům. Vlastnické účasti (`state.ownerships`) musí dát součtem přesně jeden celek
+        (422 `property_ownership_incomplete`), `kind=single` jen jako jediná skupina, společné jmění manželů
+        (`marital_community`) má dva členy. Osoby (`members`, `roles[].client_id`) jsou kontakty firmy.
+        Ostatní pravidla jako u domu (`expected_revision` 0, `status`, idempotence).
+        Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403 `token_write_forbidden`.
+        Právo `property.registry.manage` (zápis).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyUnitCreate' } } }
+      responses:
+        '200': { description: Založený objekt a číslo revize, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyRegistryWriteResult' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '404': { description: 'Dům nebyl nalezen (`property_not_found`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/services:
+    get:
+      tags: [Accounting]
+      summary: Služby SVJ v registru (plný zápis)
+      description: |
+        Úplná interní podoba číselníku služeb k okamžiku `as_of`. Jen v relaci nebo tokenem s plným zápisem
+        (`system_write`); běžný token 403 `token_endpoint_forbidden`. Právo `property` (čtení), agenda jen pro SVJ.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/PropertyAsOf'
+        - $ref: '#/components/parameters/PropertyKnownAt'
+      responses:
+        '200': { description: Služby, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyRegistryList' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+    post:
+      tags: [Accounting]
+      summary: Založí službu SVJ
+      description: |
+        Ostatní pravidla jako u domu (`expected_revision` 0, `status`, idempotence). `measure_label` je povinný
+        jen pro `measure=other`. Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403
+        `token_write_forbidden`. Právo `property.registry.manage` (zápis).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyServiceCreate' } } }
+      responses:
+        '200': { description: Založený objekt a číslo revize, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyRegistryWriteResult' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/objects/{id}:
+    get:
+      tags: [Accounting]
+      summary: Detail objektu registru SVJ s historií revizí a účastníky
+      description: |
+        Dům, jednotka nebo služba k okamžiku `as_of` s úplnou historií revizí (`history`, včetně čekajících
+        s `status=pending`, jejichž `id` potvrzuje `.../revisions/{revisionId}/confirm`) a kontakty osob z vlastnických
+        účastí a rolí (`parties`). Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403
+        `token_endpoint_forbidden`. Právo `property` (čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - $ref: '#/components/parameters/PropertyAsOf'
+        - $ref: '#/components/parameters/PropertyKnownAt'
+      responses:
+        '200': { description: Objekt registru, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyRegistryObject' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/objects/{id}/revisions:
+    post:
+      tags: [Accounting]
+      summary: Zapíše novou revizi objektu registru (změna jednotky, vlastnických účastí, domu nebo služby)
+      description: |
+        Celý nový stav objektu (`state` podle druhu objektu) s účinností od `effective_from`. `expected_revision`
+        je aktuální `current_revision` objektu (jinak 409 `property_revision_conflict`); `code` a `parent_id` se
+        revizí nemění. Převod vlastnické účasti se zapisuje jako nová revize jednotky s novým seznamem `ownerships`.
+        `status=confirmed` vyžaduje `property.registry.confirm`. Jen v relaci nebo tokenem s plným zápisem
+        (`system_write`); běžný token 403 `token_write_forbidden`. Právo `property.registry.manage` (zápis).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyRegistryRevisionInput' } } }
+      responses:
+        '200': { description: Objekt a číslo nové revize, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyRegistryWriteResult' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/objects/{id}/revisions/{revisionId}/confirm:
+    post:
+      tags: [Accounting]
+      summary: Potvrdí čekající revizi objektu registru doloženým právním podkladem
+      description: |
+        Vyřeší čekající revizi (`revisionId` z `history` s `status=pending`) potvrzenou revizí se stejným stavem.
+        `effective_from` musí odpovídat účinnosti čekající revize (jinak 409 `property_pending_not_found`),
+        `expected_revision` je aktuální `current_revision`. Jen v relaci nebo tokenem s plným zápisem
+        (`system_write`); běžný token 403 `token_write_forbidden`. Právo `property.registry.confirm` (zápis).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: path, name: revisionId, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyRegistryConfirmInput' } } }
+      responses:
+        '200': { description: Objekt a číslo potvrzující revize, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyRegistryWriteResult' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/charges/context:
+    get:
+      tags: [Accounting]
+      summary: Podklady registru domu pro výpočet předpisu (jednotky, atributy, služby)
+      description: |
+        Zmrazený výřez registru domu k okamžiku `as_of`, ze kterého počítá náhled verze sazeb: jednotky s atributy
+        (`share`, `floor_area`, ...), přiřazené služby a otisky revizí. Jen v relaci nebo tokenem s plným zápisem
+        (`system_write`); běžný token 403 `token_endpoint_forbidden`. Právo `property` (čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: house_id, required: true, schema: { type: integer } }
+        - $ref: '#/components/parameters/PropertyAsOf'
+      responses:
+        '200': { description: Podklady registru, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyChargeRegistryContext' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/charges/components:
+    get:
+      tags: [Accounting]
+      summary: Složky předpisu záloh SVJ
+      description: |
+        Složky předpisu (dlouhodobá záloha, správa, zálohy na služby, příspěvky) včetně `capabilities` (smí zakládat
+        nebo potvrzovat). Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403
+        `token_endpoint_forbidden` a čte `GET /property/catalog/charges/components`. Právo `property` (čtení).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      responses:
+        '200': { description: Složky, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyChargeComponentList' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+    post:
+      tags: [Accounting]
+      summary: Založí složku předpisu
+      description: |
+        `kind=service_advance` vyžaduje aktivní službu (`service_id`), ostatní druhy `service_id: null`. `code` je
+        jedinečný (409 `property_charge_code_conflict`), `account_code` prázdný nebo aktivní účet osnovy
+        (409 `property_charge_account_missing`). Idempotentní podle `idempotency_key`. Jen v relaci nebo tokenem
+        s plným zápisem (`system_write`); běžný token 403 `token_write_forbidden`. Právo `property.charges.manage` (zápis).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyChargeComponentInput' } } }
+      responses:
+        '200': { description: Složka, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyChargeComponent' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/charges/preview:
+    post:
+      tags: [Accounting]
+      summary: Náhled výpočtu verze sazeb (předpisu záloh) bez uložení
+      description: |
+        Spočítá rozpis sazeb na jednotky ze zmrazeného registru k `basis_at` (musí se rovnat `effective_from`)
+        a vrátí `preview_hash`, který potvrzuje `POST /property/charges/versions`. Nic neukládá. Jen v relaci nebo
+        tokenem s plným zápisem (`system_write`); běžný token 403 `token_write_forbidden`. Právo
+        `property.charges.manage` (zápis).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyChargeVersionRequest' } } }
+      responses:
+        '200': { description: Náhled a jeho otisk, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyPreviewEnvelope' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/charges/versions:
+    get:
+      tags: [Accounting]
+      summary: Verze sazeb domu (předpisy záloh) a verze platná k okamžiku
+      description: |
+        Všechny verze domu (`items`) a verze účinná k `as_of` (`selected`) v úplné podobě s požadavkem a náhledem.
+        Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403 `token_endpoint_forbidden`
+        a čte `GET /property/catalog/charges/versions`. Právo `property` (čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: house_id, required: true, schema: { type: integer } }
+        - $ref: '#/components/parameters/PropertyAsOf'
+        - $ref: '#/components/parameters/PropertyKnownAt'
+      responses:
+        '200': { description: Verze, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyChargeVersionRecordList' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+    post:
+      tags: [Accounting]
+      summary: Uloží verzi sazeb (předpis záloh) z potvrzeného náhledu
+      description: |
+        Znovu spočítá náhled pod zámkem; jiný `preview_hash` vrátí 409 `property_charge_preview_stale` (podklady se
+        mezitím změnily, vytvořte nový náhled). `request.expected_revision` je počet dosavadních verzí domu.
+        Idempotentní podle `idempotency_key`. Nic neúčtuje. Jen v relaci nebo tokenem s plným zápisem
+        (`system_write`); běžný token 403 `token_write_forbidden`. Právo `property.charges.confirm` (zápis).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyChargeVersionSave' } } }
+      responses:
+        '200': { description: Uložená verze, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyChargeVersionRecord' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/charges/versions/{id}:
+    get:
+      tags: [Accounting]
+      summary: Detail verze sazeb v úplné podobě
+      description: |
+        Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403 `token_endpoint_forbidden`
+        a čte `GET /property/catalog/charges/versions/{id}`. Právo `property` (čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Verze, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyChargeVersionRecord' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/property/charges/issues:
+    get:
+      tags: [Accounting]
+      summary: Vydané předpisy jednotek (úplná podoba se snímkem)
+      description: |
+        Vydané předpisy včetně snímku výpočtu, dlužníků a stavu (`draft`, `posted`, `reversed`, `cancelled`)
+        a `capabilities` (smí vydat, zaúčtovat, stornovat). Jen v relaci nebo tokenem s plným zápisem
+        (`system_write`); běžný token 403 `token_endpoint_forbidden` a čte `GET /property/catalog/charges/issues`.
+        Právo `property` (čtení).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      responses:
+        '200': { description: Předpisy, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyIssuedChargeList' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+    post:
+      tags: [Accounting]
+      summary: Vydá předpisy jednotkám z potvrzeného náhledu (dávka konceptů)
+      description: |
+        Vytvoří dávku předpisů ve stavu `draft` (bez zápisu do deníku). Náhled se pod zámkem přepočítá; jiný
+        `preview_hash` vrátí 409 `property_charge_issue_preview_stale`, souběžná změna registru
+        `property_charge_issue_revision_conflict`. Idempotentní podle `idempotency_key`. Zaúčtování je samostatný
+        krok `POST /property/charges/issues/batches/{id}/post`. Jen v relaci nebo tokenem s plným zápisem
+        (`system_write`); běžný token 403 `token_write_forbidden`. Právo `property.charges.issue` (zápis).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyIssueSave' } } }
+      responses:
+        '200': { description: Dávka vydaných předpisů, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyIssueBatch' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/charges/issues/context:
+    get:
+      tags: [Accounting]
+      summary: Podklady pro vydání předpisu z verze sazeb
+      description: |
+        Verze sazeb, jednotky s revizemi (`expected_revision` jednotek), osoby, účty osnovy, dimenze, dosavadní
+        předpisy a rodiny případů pro sestavení požadavku `POST /property/charges/issues/preview`. Jen v relaci nebo
+        tokenem s plným zápisem (`system_write`); běžný token 403 `token_endpoint_forbidden`. Právo `property` (čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: version_id, required: true, schema: { type: integer } }
+        - $ref: '#/components/parameters/PropertyAsOf'
+      responses:
+        '200': { description: Podklady, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyIssueContext' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/charges/issues/preview:
+    post:
+      tags: [Accounting]
+      summary: Náhled vydání předpisů bez uložení
+      description: |
+        Sestaví snímky předpisů jednotek (částky po složkách, dlužníci, kontace, doručení) a vrátí `preview_hash` pro
+        `POST /property/charges/issues`. Nic neukládá. Jen v relaci nebo tokenem s plným zápisem (`system_write`);
+        běžný token 403 `token_write_forbidden`. Právo `property.charges.issue` (zápis).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyIssueRequest' } } }
+      responses:
+        '200': { description: Náhled a jeho otisk, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyPreviewEnvelope' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/charges/issues/{id}:
+    get:
+      tags: [Accounting]
+      summary: Detail vydaného předpisu s doloženými událostmi
+      description: |
+        Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403 `token_endpoint_forbidden`
+        a čte `GET /property/catalog/charges/issues/{id}`. Právo `property` (čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Předpis a události
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [charge, evidence]
+                properties:
+                  charge: { $ref: '#/components/schemas/PropertyIssuedCharge' }
+                  evidence: { type: array, items: { type: object, additionalProperties: true } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/property/charges/issues/batches/{id}:
+    get:
+      tags: [Accounting]
+      summary: Dávka vydaných předpisů
+      description: |
+        Požadavek dávky a její předpisy s `row_version` pro zaúčtování. Jen v relaci nebo tokenem s plným zápisem
+        (`system_write`); běžný token 403 `token_endpoint_forbidden`. Právo `property` (čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Dávka, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyIssueBatch' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/property/charges/issues/batches/{id}/post:
+    post:
+      tags: [Accounting]
+      summary: Zaúčtuje dávku vydaných předpisů do deníku
+      description: |
+        Zaúčtuje všechny koncepty dávky (předpis pohledávky za vlastníky) a podle `debt_registration` zapíše dluhy
+        do evidence úhrad jednotek (`automatic`, výchozí; `manual` = dluhy zapíšete sami). `expected` jsou všechny
+        předpisy dávky s aktuálním `row_version`; jinak 409. Pojistky období platí i pro token s plným zápisem:
+        uzavřené účetní období 422 `period_not_open`, datum v zamčeném období 422 `date_locked`, bez přebití.
+        Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403 `token_write_forbidden`.
+        Právo `property.charges.post` (zápis).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyIssuePostInput' } } }
+      responses:
+        '200': { description: Dávka se zaúčtovanými předpisy, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyIssueBatch' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PostingRejected' }
+
+  /api/v1/property/charges/issues/{id}/reverse:
+    post:
+      tags: [Accounting]
+      summary: Stornuje vydaný předpis (zaúčtovaný protizápisem, koncept zrušením)
+      description: |
+        Zaúčtovaný předpis stornuje protizápisem k `accounting_date`, koncept zruší. `row_version` je aktuální verze
+        předpisu, předpis s aktivním nástupcem odmítne 409 `property_charge_issue_successor_active`. Pojistky období
+        platí i pro token s plným zápisem (422 `period_not_open`, `date_locked`). Idempotentní podle
+        `idempotency_key`. Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403
+        `token_write_forbidden`. Právo `property.charges.reverse` (zápis).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyIssueReversalInput' } } }
+      responses:
+        '200': { description: Stornovaný předpis, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyIssuedCharge' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PostingRejected' }
+
+  /api/v1/property/payments/context:
+    get:
+      tags: [Accounting]
+      summary: Podklady pro zápis úhrad jednotek
+      description: |
+        Kandidátní bankovní a pokladní platby, pokladny, jednotky, dimenze a `capabilities` (`manage`, `post`,
+        `reverse`, `bank`, `cash`). Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403
+        `token_endpoint_forbidden`. Právo `property` (čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/PropertyAsOf'
+      responses:
+        '200': { description: Podklady, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyPaymentWorkflowContext' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/payments/candidates:
+    get:
+      tags: [Accounting]
+      summary: Bankovní nebo pokladní platby k zápisu úhrady (stránkování kurzorem)
+      description: |
+        Platby s dosud nerozděleným zůstatkem (`available_cents`). Jen v relaci nebo tokenem s plným zápisem
+        (`system_write`); běžný token 403 `token_endpoint_forbidden`. Právo `property` (čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: kind, required: true, schema: { type: string, enum: [bank, cash] } }
+        - { in: query, name: after_id, schema: { type: integer, default: 0 } }
+        - { in: query, name: limit, schema: { type: integer, default: 25 } }
+        - { in: query, name: q, schema: { type: string }, description: Hledání v protistraně, popisu a symbolech }
+        - { in: query, name: id, schema: { type: integer }, description: Jen jedna konkrétní platba }
+      responses:
+        '200': { description: Stránka kandidátů, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyPaymentCandidatePage' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/payments/history:
+    get:
+      tags: [Accounting]
+      summary: Zapsané úhrady jednotek (stránkování od nejnovějších)
+      description: |
+        Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403 `token_endpoint_forbidden`
+        a čte `GET /property/catalog/payments/history`. Právo `property` (čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: before_id, schema: { type: integer, default: 0 } }
+        - { in: query, name: limit, schema: { type: integer, default: 100 } }
+      responses:
+        '200':
+          description: Stránka zápisů
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: { type: array, items: { type: object, additionalProperties: true } }
+                  next_cursor: { type: [integer, 'null'] }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/payments/preview:
+    post:
+      tags: [Accounting]
+      summary: Náhled zápisu úhrady (rozdělení platby na dluhy jednotek, přeplatky a vratky)
+      description: |
+        Rozdělí bankovní nebo pokladní platbu (`source`) na části: úhrada dluhů jednotky (`allocation`, pořadí
+        započtení podle zákona nebo doložené volby dlužníka) a vrácení přeplatku (`refund`). Vrátí `preview_hash`
+        a `source_etag` pro `POST /property/payments/confirm`. Nic neukládá. Jen v relaci nebo tokenem s plným
+        zápisem (`system_write`); běžný token 403 `token_write_forbidden`. Právo `property.payments.manage` (zápis).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PropertyPaymentWorkflowRequest' } } }
+      responses:
+        '200': { description: Náhled, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyPaymentWorkflowPreview' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/payments/confirm:
+    post:
+      tags: [Accounting]
+      summary: Zapíše a zaúčtuje úhradu jednotky z potvrzeného náhledu
+      description: |
+        Náhled se pod zámkem přepočítá; jiný `preview_hash` vrátí 409. Zapíše úhrady a zápis do deníku.
+        Bankovní zdroj navíc vyžaduje právo `bank.post`, pokladní `cash.document.write`. Pojistky období platí
+        i pro token s plným zápisem (422 `period_not_open`, `date_locked`). Idempotentní podle `idempotency_key`.
+        Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný token 403 `token_write_forbidden`.
+        Právo `property.payments.post` (zápis).
+      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request, preview_hash, idempotency_key]
+              properties:
+                request: { $ref: '#/components/schemas/PropertyPaymentWorkflowRequest' }
+                preview_hash: { type: string, maxLength: 64 }
+                idempotency_key: { $ref: '#/components/schemas/PropertyIdempotencyKey' }
+      responses:
+        '200': { description: Zapsaná úhrada, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyPaymentWorkflowResult' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PostingRejected' }
+
+  /api/v1/property/payments/bank-proposals:
+    get:
+      tags: [Accounting]
+      summary: Fronta návrhů párování příchozích bankovních plateb na jednotky
+      description: |
+        Rozpoznání plátce a jednotky podle variabilního a specifického symbolu, účtu plátce, SIPO a textu
+        (`identified`, `review_required`, `unidentified`). Jen v relaci nebo tokenem s plným zápisem
+        (`system_write`); běžný token 403 `token_endpoint_forbidden`. Právo `property` (čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: after_id, schema: { type: integer, default: 0 } }
+        - { in: query, name: limit, schema: { type: integer, default: 25 } }
+        - { in: query, name: status, schema: { type: string, enum: [identified, review_required, unidentified] } }
+      responses:
+        '200': { description: Stránka návrhů, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyBankProposalPage' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/payments/bank-proposals/{id}:
+    get:
+      tags: [Accounting]
+      summary: Návrh párování jedné bankovní platby (id bankovní transakce)
+      description: |
+        Uložený i aktuálně spočtený návrh, nebo `status=used` s vazbou na zapsanou úhradu. Jen v relaci nebo tokenem
+        s plným zápisem (`system_write`); běžný token 403 `token_endpoint_forbidden`. Právo `property` (čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer }, description: ID bankovní transakce }
+      responses:
+        '200': { description: Návrh, content: { application/json: { schema: { type: object, additionalProperties: true, required: [bank_transaction_id, status], properties: { bank_transaction_id: { type: integer }, status: { type: string, enum: [used, identified, review_required, unidentified] } } } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/payments/bank-proposals/{id}/plan:
+    post:
+      tags: [Accounting]
+      summary: Sestaví z návrhu párování požadavek a náhled úhrady
+      description: |
+        Z rozpoznané jednotky a dlužníka (volitelně přepsaných v těle) sestaví `request` a `preview` pro
+        `POST /property/payments/confirm`; u nejasného případu vrátí `review` s důvodem. Nic neukládá. Jen v relaci
+        nebo tokenem s plným zápisem (`system_write`); běžný token 403 `token_write_forbidden`. Právo
+        `property.payments.manage` (zápis).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer }, description: ID bankovní transakce }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                unit_id: { type: integer }
+                debtor_id: { type: integer }
+                payer_id: { type: integer }
+      responses:
+        '200': { description: Plán úhrady, content: { application/json: { schema: { $ref: '#/components/schemas/PropertyBankProposalPlan' } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PropertyInvalid' }
+
+  /api/v1/property/payments/operations/{id}/reverse:
+    post:
+      tags: [Accounting]
+      summary: Stornuje zapsanou úhradu jednotky
+      description: |
+        Storno operace úhrady protizápisem k `accounting_date`. `expected_version` je aktuální `row_version`
+        operace. Pojistky období platí i pro token s plným zápisem (422 `period_not_open`, `date_locked`).
+        Idempotentní podle `idempotency_key`. Jen v relaci nebo tokenem s plným zápisem (`system_write`); běžný
+        token 403 `token_write_forbidden`. Právo `property.payments.reverse` (zápis).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_version, accounting_date, reason, idempotency_key]
+              properties:
+                expected_version: { type: integer }
+                accounting_date: { type: string, format: date }
+                reason: { type: string, maxLength: 4000 }
+                idempotency_key: { $ref: '#/components/schemas/PropertyIdempotencyKey' }
+      responses:
+        '200':
+          description: Stornovaná operace
+          content: { application/json: { schema: { type: object, required: [id, row_version], properties: { id: { type: integer }, row_version: { type: integer } } } } }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/PropertyConflict' }
+        '422': { $ref: '#/components/responses/PostingRejected' }
+
   /api/v1/accounting/catalog/nonprofit-membership/roles:
     get:
       tags:
@@ -6203,7 +6861,9 @@ paths:
         (2 řádky, ABS(amount)). Saldokontní účty na ne-bankovní straně jsou zakázané
         (H2). Volitelný `create_rule` založí pravidlo (vždy mode=suggest) v téže transakci.
         Pro rozúčtování na víc řádků pošli `lines` — protiúčty z `debit_account_code`
-        a `credit_account_code` se pak neuplatní.
+        a `credit_account_code` se pak neuplatní. Účetní úkon: běžný API token 403
+        `token_write_forbidden`, token s plným zápisem (`system_write`) jako uživatel
+        v aplikaci; uzavřené období ani zámek k datu nepřebije (`period_not_open`, `date_locked`).
       requestBody:
         required: true
         content:
@@ -6254,10 +6914,11 @@ paths:
                       count: { type: integer }
                       period_months: { type: integer }
                       last_seen: { type: [string, "null"] }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
         '409':
           description: Transakce už je zaúčtovaná (already_posted)
         '422':
-          description: Chybná kontace (rule_account_forbidden / account_not_found / foreign_currency …)
+          description: Chybná kontace (rule_account_forbidden / account_not_found / foreign_currency …), uzavřené období (period_not_open) nebo zamčené datum (date_locked)
 
   /api/v1/bank-transactions/{id}/unpost:
     parameters:
@@ -6269,6 +6930,9 @@ paths:
     post:
       tags: [Bank]
       summary: Zrušení zaúčtování transakce (storno + detach)
+      description: |
+        Účetní úkon: běžný API token 403 `token_write_forbidden`, token s plným zápisem
+        (`system_write`) jako uživatel v aplikaci. Storno do uzavřeného období odmítne i jemu.
       responses:
         '200':
           description: OK
@@ -6279,10 +6943,11 @@ paths:
                 properties:
                   reversed: { type: boolean }
                   reversal_entry_id: { type: integer }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
         '404':
           description: K transakci není zaúčtovaný zápis (not_found)
         '409':
-          description: Storno do uzavřeného období (period_closed)
+          description: Storno do uzavřeného období (period_closed), platí i pro token s plným zápisem
 
   /api/v1/bank-transactions/{id}/ai-suggest:
     parameters:
@@ -19174,20 +19839,21 @@ paths:
     post:
       tags: [Accounting]
       summary: Potvrdí doklad; v podvojném účetnictví jej zaúčtuje
-      description: Přes API token nedostupné (403 token_write_forbidden), zaúčtování dělá účetní ve webovém rozhraní.
+      description: Právo other_items write a v podvojném účetnictví accounting.journal.post write. Běžný API token 403 token_write_forbidden; token s plným zápisem (system_write) jako uživatel v aplikaci. Uzavřené období ani zamčené datum token nepřebije (422 period_not_open, date_locked).
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
         '200': { description: Potvrzený nebo zaúčtovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '422': { $ref: '#/components/responses/PostingRejected' }
         '409': { description: 'Doklad není koncept, nebo číslo z řady už nese jiný doklad — upravte prefix nebo čítač řady (`other_items.error.not_draft|document_no_taken`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/accounting/other-items/{id}/reverse:
     post:
       tags: [Accounting]
       summary: Stornuje zaúčtovaný nebo zruší potvrzený doklad
-      description: Přes API token nedostupné (403 token_write_forbidden).
+      description: Běžný API token 403 token_write_forbidden; token s plným zápisem (system_write) jako uživatel v aplikaci. Storno do uzavřeného nebo zamčeného období token nepřebije (422 period_not_open, date_locked).
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -19196,13 +19862,14 @@ paths:
         content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3 }, entry_date: { type: string, format: date } } } } }
       responses:
         '200': { description: Stornovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '422': { $ref: '#/components/responses/PostingRejected' }
 
   /api/v1/accounting/other-items/{id}/repost:
     post:
       tags: [Accounting]
       summary: Přeúčtuje potvrzený doklad stornem původního a novým zápisem
-      description: Přes API token nedostupné (403 token_write_forbidden).
+      description: Alespoň jeden účet se musí změnit (422 other_items.error.unchanged_accounts). Běžný API token 403 token_write_forbidden; token s plným zápisem (system_write) jako uživatel v aplikaci. Uzavřené období ani zamčené datum token nepřebije (422 period_not_open, date_locked).
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -19225,7 +19892,8 @@ paths:
                 reason: { type: string, minLength: 3 }
       responses:
         '200': { description: Přeúčtovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
+        '422': { $ref: '#/components/responses/PostingRejected' }
 
   /api/v1/accounting/other-items/{id}/counterparty-account:
     put:
@@ -19349,7 +20017,7 @@ paths:
     delete:
       tags: [Accounting]
       summary: Zruší opakování
-      description: Už vytvořené položky zůstávají jako samostatné doklady. Přes API token nedostupné (403 token_write_forbidden).
+      description: Už vytvořené položky zůstávají jako samostatné doklady. Běžný API token 403 token_write_forbidden; token s plným zápisem (system_write) jako uživatel v aplikaci.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -19362,7 +20030,7 @@ paths:
     post:
       tags: [Accounting]
       summary: Idempotentně vytvoří položky do zadaného data
-      description: Při auto_post potvrdí nebo zaúčtuje také již vytvořené aktivní koncepty, nejdříve v den jejich vzniku a nejvýše do through. Budoucí termíny zůstávají koncepty; uzavřené období nebo zamčené datum se neobchází. Při chybě se běh rozvrhu vrátí. Automatický rozvrh v podvojném účetnictví vyžaduje accounting.journal.post write. Přes API token nedostupné (403 token_write_forbidden), protože u automatického rozvrhu zaúčtuje.
+      description: Při auto_post potvrdí nebo zaúčtuje také již vytvořené aktivní koncepty, nejdříve v den jejich vzniku a nejvýše do through. Budoucí termíny zůstávají koncepty; uzavřené období nebo zamčené datum se neobchází. Při chybě se běh rozvrhu vrátí. Automatický rozvrh v podvojném účetnictví vyžaduje accounting.journal.post write. Běžný API token 403 token_write_forbidden, protože u automatického rozvrhu zaúčtuje; token s plným zápisem (system_write) jako uživatel v aplikaci.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -19371,14 +20039,14 @@ paths:
         content: { application/json: { schema: { type: object, required: [through], properties: { through: { type: string, format: date } } } } }
       responses:
         '200': { description: Identifikátory nových a právě zaúčtovaných nebo potvrzených položek a rozvrh, content: { application/json: { schema: { type: object, properties: { created_ids: { type: array, items: { type: integer } }, posted_ids: { type: array, items: { type: integer } }, schedule: { $ref: '#/components/schemas/OtherItemSchedule' } } } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/other-items/schedules/{id}/status:
     put:
       tags: [Accounting]
       summary: Aktivuje nebo pozastaví opakování a nastaví automatické účtování
-      description: Zapnutí automatického účtování nebo obnovení automatického rozvrhu v podvojném účetnictví vyžaduje accounting.journal.post write. Pozastavení a vypnutí automatiky nevyžaduje právo účtování. API token se scope read_write smí rozvrh pozastavit, obnovit rozvrh bez automatiky a automatiku vypnout; zapnout automatiku nebo obnovit automatický rozvrh nesmí (403 other_items.error.auto_post_session_only).
+      description: Zapnutí automatického účtování nebo obnovení automatického rozvrhu v podvojném účetnictví vyžaduje accounting.journal.post write. Pozastavení a vypnutí automatiky nevyžaduje právo účtování. API token se scope read_write smí rozvrh pozastavit, obnovit rozvrh bez automatiky a automatiku vypnout; zapnout automatiku nebo obnovit automatický rozvrh nesmí (403 other_items.error.auto_post_session_only). Token s plným zápisem (system_write) smí i to, jako uživatel v aplikaci.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -19393,7 +20061,7 @@ paths:
     post:
       tags: [Accounting]
       summary: Založí opakování z existujícího dokladu
-      description: Zapnutí auto_post v podvojném účetnictví vyžaduje accounting.journal.post write. API token se scope read_write smí založit jen rozvrh bez automatiky; auto_post true vrátí 403 other_items.error.auto_post_session_only.
+      description: Zapnutí auto_post v podvojném účetnictví vyžaduje accounting.journal.post write. API token se scope read_write smí založit jen rozvrh bez automatiky; auto_post true vrátí 403 other_items.error.auto_post_session_only. Token s plným zápisem (system_write) smí zapnout auto_post jako uživatel v aplikaci.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: item_id, required: true, schema: { type: integer } }
@@ -19583,13 +20251,14 @@ paths:
         Vydá číslo z řady ID (sdílené s ručními zápisy) a zapíše ruční zápis (`source_type = manual`) se stejnou validací
         jako `POST /accounting/journal`: MD = D (nevyrovnaný koncept 422 `internal_documents.error.unbalanced`), účty
         z účtové osnovy, otevřené období a zámek k datu (`period_not_open`, `date_locked`). Vazby na doklady se přenesou
-        do vazeb zápisu. Přes API token nedostupné (403 token_write_forbidden). Právo `accounting.journal.post`.
+        do vazeb zápisu. Běžný API token 403 `token_write_forbidden`; token s plným zápisem (`system_write`) jako
+        uživatel v aplikaci, uzavřené období ani zámek k datu nepřebije. Právo `accounting.journal.post`.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
         '200': { description: Zaúčtovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/InternalDocument' } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
         '409': { description: 'Doklad není koncept (`internal_documents.error.not_draft`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { description: 'Nevyrovnaný doklad (`internal_documents.error.unbalanced`), neplatný účet, uzavřené období (`period_not_open`) nebo zamčené datum (`date_locked`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -19597,7 +20266,7 @@ paths:
     post:
       tags: [Accounting]
       summary: Stornuje zaúčtovaný doklad protizápisem
-      description: Storno zápisu deníku stejným mechanismem jako `POST /accounting/journal/{id}/reverse`. Přes API token nedostupné. Právo `accounting.journal.post`.
+      description: Storno zápisu deníku stejným mechanismem jako `POST /accounting/journal/{id}/reverse`. Běžný API token 403 `token_write_forbidden`; token s plným zápisem (`system_write`) jako uživatel v aplikaci. Právo `accounting.journal.post`.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -19606,7 +20275,7 @@ paths:
         content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3, maxLength: 500 }, entry_date: { type: string, format: date } } } } }
       responses:
         '200': { description: Stornovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/InternalDocument' } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
         '409': { description: 'Doklad není zaúčtovaný (`internal_documents.error.not_posted`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { description: 'Chybí důvod (`internal_documents.error.reason_required`), neplatné datum nebo storno do uzavřeného či zamčeného období (`period_not_open`, `date_locked`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -26616,9 +27285,12 @@ paths:
         Epic F6 (§4.6) — pro tax_evidence firmy bez journalu/období je `booked_at`
         jediný mechanismus zámku pro roli client. Idempotentní — existující
         `booked_at`/`booked_by` se nepřepisuje. Koncept (`status=draft`) nelze
-        zaúčtovat (`not_draft`, 409).
+        zaúčtovat (`not_draft`, 409). Účetní úkon: běžný API token 403
+        `token_write_forbidden`, token s plným zápisem (`system_write`) jako uživatel
+        v aplikaci (právo zaúčtovat, jinak `forbidden_permission`).
       responses:
         '200': { description: 'OK — vrací fakturu vč. stavu zámku' }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Koncept nelze označit jako zaúčtovaný (not_draft)' }
     delete:
@@ -26627,8 +27299,11 @@ paths:
       description: |
         Smaže `booked_at`/`booked_by`. Pokud má doklad aktivní (nestornovaný) posted
         zápis v deníku, vrací `still_posted` (409) — nejdřív je nutné zápis stornovat.
+        Běžný API token 403 `token_write_forbidden`, token s plným zápisem (`system_write`)
+        jako uživatel v aplikaci.
       responses:
         '200': { description: 'OK — vrací fakturu vč. stavu zámku' }
+        '403': { $ref: '#/components/responses/SystemWriteRequired' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Doklad má aktivní účetní zápis — nejdřív stornovat v deníku (still_posted)' }
   /api/v1/purchase-invoices/{id}/source:
@@ -36160,6 +36835,20 @@ components:
         podle vyhlášky 504 volbu neuplatní. Výchozí `0` = výkaz z deníku beze změny.
       schema: { type: integer, enum: [0, 1], default: 0 }
 
+    PropertyAsOf:
+      in: query
+      name: as_of
+      required: true
+      description: Rozhodný okamžik ISO 8601 včetně času a offsetu (např. `2026-01-01T00:00:00+01:00`); samotné datum vrací 422 `property_invalid_instant`.
+      schema: { type: string, format: date-time }
+
+    PropertyKnownAt:
+      in: query
+      name: known_at
+      required: false
+      description: Volitelný okamžik tehdejší znalosti se stejným formátem jako `as_of`.
+      schema: { type: string, format: date-time }
+
   responses:
     Unauthorized:
       description: Neplatný nebo chybějící token (`invalid_token`), nebo token vydaný ze sezení, které vynucené přihlášení přes Microsoft Entra ID nepřipouští (`sso_required`)
@@ -36205,7 +36894,661 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
 
+    SystemWriteRequired:
+      description: |
+        Operace je pro API token dostupná jen s plným zápisem (`system_write`). Běžný token dostane
+        `token_write_forbidden` (zápis) nebo `token_endpoint_forbidden` (čtení mimo veřejný subset).
+        V relaci i s plným zápisem pak jen chybějící oprávnění role (`forbidden`, `forbidden_permission`)
+        nebo `framework_scope_denied` (agenda SVJ jen pro společenství vlastníků jednotek).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PropertyInvalid:
+      description: |
+        Neplatný vstup agendy SVJ: `property_invalid_input` (pole v `error.details.field`), `property_invalid_instant`
+        (okamžik bez času nebo offsetu), `property_invalid_ownership`, `property_ownership_incomplete` a další
+        věcná pravidla agendy (`property_*`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PropertyConflict:
+      description: |
+        Souběžná změna nebo nesoulad s uloženým stavem: `property_revision_conflict` (zastaralé `expected_revision`
+        nebo `row_version`), `property_idempotency_conflict` (stejný `idempotency_key` s jiným obsahem),
+        `*_preview_stale` (podklady náhledu se změnily, vytvořte nový náhled), `property_code_conflict`
+        a další konflikty agendy (`property_*`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    PostingRejected:
+      description: |
+        Zápis do deníku odmítnut. Pojistky období platí i pro token s plným zápisem (`system_write`) a nelze je
+        přebít: `period_not_open` (účetní období není otevřené nebo chybí), `date_locked` (datum je v zamčeném
+        období). Dále věcná validace operace (u agendy SVJ `property_invalid_input` a další `property_*`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
   schemas:
+    PropertyIdempotencyKey:
+      type: string
+      pattern: ^[A-Za-z0-9_.-]{1,80}$
+      description: Klíč opakovatelnosti požadavku. Stejný klíč se stejným obsahem vrátí původní výsledek, s jiným obsahem 409 `property_idempotency_conflict`.
+    PropertyInstant:
+      type: string
+      format: date-time
+      pattern: ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$
+      description: Okamžik ISO 8601 včetně času a offsetu.
+    PropertyHouseState:
+      type: object
+      additionalProperties: false
+      required: [name, active, address, declaration_ref, share_scope, registry_complete]
+      properties:
+        name: { type: string, maxLength: 190 }
+        active: { type: boolean }
+        address:
+          type: object
+          additionalProperties: false
+          required: [street, city, postal_code, country]
+          properties:
+            street: { type: string, maxLength: 190 }
+            city: { type: string, maxLength: 190 }
+            postal_code: { type: string, maxLength: 190 }
+            country: { type: string, pattern: '^[A-Z]{2}$' }
+        declaration_ref: { type: string, maxLength: 2000, description: Odkaz na prohlášení vlastníka }
+        share_scope: { type: string, pattern: '^[A-Za-z0-9_.-]{1,80}$', description: Okruh, ve kterém se podíly jednotek sčítají do celku }
+        registry_complete: { type: boolean, description: Registr domu je úplný (všechny jednotky zapsané) }
+    PropertyServiceState:
+      type: object
+      additionalProperties: false
+      required: [name, active, measure]
+      properties:
+        name: { type: string, maxLength: 190 }
+        active: { type: boolean }
+        measure: { type: string, enum: [person, unit, m2, m3, kwh, other] }
+        measure_label: { type: string, maxLength: 80, description: Povinný jen pro `measure=other` }
+    PropertyOwnershipGroup:
+      type: object
+      additionalProperties: false
+      required: [group_key, kind, share, members, title_ref]
+      description: Vlastnická účast. Součet `share` všech skupin jednotky je přesně 1/1; členové SJM podíl nenásobí.
+      properties:
+        group_key: { type: string, pattern: '^[A-Za-z0-9_.-]{1,80}$' }
+        kind: { type: string, enum: [single, coownership_share, marital_community], description: '`single` jen jako jediná skupina, `marital_community` (SJM) má dva členy, ostatní jednoho' }
+        share: { $ref: '#/components/schemas/PropertyPublicRational' }
+        members: { type: array, minItems: 1, maxItems: 2, items: { type: integer, minimum: 1 }, description: ID kontaktů firmy }
+        title_ref: { type: string, maxLength: 2000, description: Nabývací titul }
+    PropertyUnitRole:
+      type: object
+      additionalProperties: false
+      required: [client_id, role, title_ref]
+      properties:
+        client_id: { type: integer, minimum: 1 }
+        role: { type: string, enum: [payer, representative, delivery] }
+        scopes:
+          type: array
+          description: Jen u `representative`
+          items: { type: string, enum: [communication, delivery, voting, payment_instruction, setoff, refund_instruction] }
+        title_ref: { type: string, maxLength: 2000 }
+    PropertyUnitIdentifier:
+      type: object
+      additionalProperties: false
+      required: [kind, value, source, title_ref]
+      description: Platební identifikátor jednotky pro párování plateb (VS a SS jen číslice, nejvýše 10).
+      properties:
+        kind: { type: string, enum: [vs, ss, account, text, sipo_link] }
+        value: { type: string, maxLength: 190 }
+        payment_scope: { type: string, default: supplier, pattern: '^[A-Za-z0-9_.-]{1,80}$' }
+        source: { type: string, enum: [manual, import] }
+        title_ref: { type: string, maxLength: 2000 }
+    PropertyUnitState:
+      type: object
+      additionalProperties: false
+      required: [unit_no, kind, active, attributes, ownerships]
+      properties:
+        unit_no: { type: string, maxLength: 80 }
+        kind: { type: string, enum: [apartment, non_residential, garage, studio, other] }
+        active: { type: boolean }
+        attributes:
+          type: object
+          description: Přesné zlomky podle klíče (nejvýše 30). Povinný `share` (podíl na společných částech, větší než 0 a nejvýše 1), dále např. `floor_area`, `persons`.
+          required: [share]
+          maxProperties: 30
+          additionalProperties: { $ref: '#/components/schemas/PropertyPublicRational' }
+        ownerships: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/PropertyOwnershipGroup' } }
+        roles: { type: array, items: { $ref: '#/components/schemas/PropertyUnitRole' } }
+        identifiers: { type: array, items: { $ref: '#/components/schemas/PropertyUnitIdentifier' } }
+        services: { type: array, items: { type: integer, minimum: 1 }, description: ID služeb z registru }
+    PropertyRegistryMutation:
+      type: object
+      required: [expected_revision, effective_from, status, state, reason, title_ref, idempotency_key]
+      properties:
+        expected_revision: { type: integer, minimum: 0, description: Při založení 0, u revize aktuální `current_revision` objektu }
+        effective_from: { $ref: '#/components/schemas/PropertyInstant' }
+        effective_to: { anyOf: [{ $ref: '#/components/schemas/PropertyInstant' }, { type: 'null' }] }
+        status: { type: string, enum: [pending, confirmed], description: '`confirmed` vyžaduje právo `property.registry.confirm`' }
+        reason: { type: string, maxLength: 4000 }
+        title_ref: { type: string, maxLength: 2000 }
+        idempotency_key: { $ref: '#/components/schemas/PropertyIdempotencyKey' }
+    PropertyHouseCreate:
+      allOf:
+        - $ref: '#/components/schemas/PropertyRegistryMutation'
+        - type: object
+          required: [code]
+          properties:
+            code: { type: string, pattern: '^[A-Za-z0-9_.-]{1,80}$' }
+            state: { $ref: '#/components/schemas/PropertyHouseState' }
+    PropertyUnitCreate:
+      allOf:
+        - $ref: '#/components/schemas/PropertyRegistryMutation'
+        - type: object
+          required: [code, parent_id]
+          properties:
+            code: { type: string, pattern: '^[A-Za-z0-9_.-]{1,80}$' }
+            parent_id: { type: integer, minimum: 1, description: ID domu }
+            state: { $ref: '#/components/schemas/PropertyUnitState' }
+    PropertyServiceCreate:
+      allOf:
+        - $ref: '#/components/schemas/PropertyRegistryMutation'
+        - type: object
+          required: [code]
+          properties:
+            code: { type: string, pattern: '^[A-Za-z0-9_.-]{1,80}$' }
+            state: { $ref: '#/components/schemas/PropertyServiceState' }
+    PropertyRegistryRevisionInput:
+      allOf:
+        - $ref: '#/components/schemas/PropertyRegistryMutation'
+        - type: object
+          description: Bez `code` a `parent_id`; `state` podle druhu objektu.
+          properties:
+            state:
+              oneOf:
+                - $ref: '#/components/schemas/PropertyHouseState'
+                - $ref: '#/components/schemas/PropertyUnitState'
+                - $ref: '#/components/schemas/PropertyServiceState'
+    PropertyRegistryConfirmInput:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, effective_from, reason, title_ref, idempotency_key]
+      properties:
+        expected_revision: { type: integer, minimum: 0 }
+        effective_from: { $ref: '#/components/schemas/PropertyInstant' }
+        reason: { type: string, maxLength: 4000 }
+        title_ref: { type: string, maxLength: 2000 }
+        idempotency_key: { $ref: '#/components/schemas/PropertyIdempotencyKey' }
+    PropertyRegistryWriteResult:
+      type: object
+      required: [id, revision]
+      properties:
+        id: { type: integer, description: ID objektu registru }
+        revision: { type: integer, description: Číslo zapsané revize (nové `current_revision`) }
+    PropertyRegistryRevisionRecord:
+      type: object
+      additionalProperties: true
+      required: [id, revision, status, effective_from, effective_to, recorded_at, state]
+      properties:
+        id: { type: integer }
+        revision: { type: integer }
+        status: { type: string, enum: [pending, confirmed] }
+        effective_from: { type: string, format: date-time }
+        effective_to: { type: [string, 'null'], format: date-time }
+        recorded_at: { type: string, format: date-time }
+        state:
+          oneOf:
+            - $ref: '#/components/schemas/PropertyHouseState'
+            - $ref: '#/components/schemas/PropertyUnitState'
+            - $ref: '#/components/schemas/PropertyServiceState'
+        reason: { type: string }
+        title_ref: { type: string }
+        resolves_revision_id: { type: [integer, 'null'] }
+        state_hash: { type: string }
+    PropertyRegistryObject:
+      type: object
+      additionalProperties: true
+      required: [id, code, kind, parent_id, current_revision, revision]
+      properties:
+        id: { type: integer }
+        code: { type: string }
+        kind: { type: string, enum: [house, unit, service] }
+        parent_id: { type: [integer, 'null'] }
+        current_revision: { type: integer, description: Hodnota pro `expected_revision` další revize }
+        dimension_value_id: { type: [integer, 'null'] }
+        revision: { anyOf: [{ $ref: '#/components/schemas/PropertyRegistryRevisionRecord' }, { type: 'null' }], description: Revize účinná k `as_of` }
+        pending_revision_ids: { type: array, items: { type: integer } }
+        ownership_review_required: { type: boolean }
+        as_of: { type: string, format: date-time }
+        history: { type: array, items: { $ref: '#/components/schemas/PropertyRegistryRevisionRecord' }, description: Jen v detailu objektu }
+        parties:
+          type: array
+          description: Jen v detailu objektu; kontakty z vlastnických účastí a rolí
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              company_name: { type: string }
+              first_name: { type: [string, 'null'] }
+              last_name: { type: [string, 'null'] }
+    PropertyRegistryList:
+      type: object
+      required: [items, as_of, known_at]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PropertyRegistryObject' } }
+        as_of: { type: string, format: date-time }
+        known_at: { type: [string, 'null'], format: date-time }
+    PropertyChargeRegistryContext:
+      type: object
+      additionalProperties: true
+      required: [as_of, house, units, services]
+      properties:
+        as_of: { type: string, format: date-time }
+        house: { type: object, additionalProperties: true, properties: { id: { type: integer }, name: { type: string }, registry_complete: { type: boolean } } }
+        units:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              id: { type: integer }
+              code: { type: string }
+              unit_no: { type: string }
+              attributes: { type: object, additionalProperties: { $ref: '#/components/schemas/PropertyPublicRational' } }
+              services: { type: array, items: { type: integer } }
+              revision_id: { type: integer }
+              state_hash: { type: string }
+        services: { type: array, items: { type: object, properties: { id: { type: integer }, name: { type: string } } } }
+    PropertyChargeComponentList:
+      type: object
+      required: [items, capabilities]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PropertyChargeComponent' } }
+        capabilities: { type: object, properties: { manage: { type: boolean }, confirm: { type: boolean } } }
+    PropertyChargeComponentInput:
+      type: object
+      additionalProperties: false
+      required: [code, name, kind, effective_at, idempotency_key]
+      properties:
+        code: { type: string, pattern: '^[A-Za-z0-9_.-]{1,80}$' }
+        name: { type: string, maxLength: 190 }
+        kind: { type: string, enum: [long_term_advance, admin_advance, service_advance, contribution, other] }
+        service_id: { type: [integer, 'null'], description: Povinné jen pro `service_advance`, jinak `null` }
+        account_code: { type: string, pattern: '^([0-9A-Za-z.]{3,10})?$', description: Prázdný řetězec, nebo aktivní účet osnovy }
+        effective_at: { $ref: '#/components/schemas/PropertyInstant' }
+        idempotency_key: { $ref: '#/components/schemas/PropertyIdempotencyKey' }
+    PropertyChargeRateInput:
+      type: object
+      additionalProperties: false
+      required: [component_id, unit_ids, method, mode, amount, rounding, legal_basis, scope_ref, correction]
+      properties:
+        component_id: { type: integer, minimum: 1, description: Každá složka nejvýše jednou }
+        unit_ids: { type: array, minItems: 1, maxItems: 1000, items: { type: integer, minimum: 1 } }
+        method: { type: string, enum: [unit, floor_area, share, person, equal] }
+        mode: { type: string, enum: [rate_per_basis, total_budget] }
+        amount: { type: string, description: Částka v Kč desetinným řetězcem; u `total_budget` celé haléře. Záporná jen s `correction=true`. }
+        rounding: { type: string, enum: [aggregate_half_up_largest_remainder_unit_id_v1] }
+        legal_basis: { type: string, enum: [management_share, declaration_override, own_administration_equal, service_decision, other_documented, historical_documented], description: '`historical_documented` jen pro účinnost před 1. 7. 2020 (a tam povinně)' }
+        scope_ref: { type: string, maxLength: 2000 }
+        correction: { type: boolean }
+        correction_reason: { type: string, maxLength: 2000, description: Povinné při `correction=true` }
+    PropertyChargeVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [house_id, expected_revision, effective_from, basis_at, basis_policy, period_policy, frequency, decision_ref, decided_at, reason, rates]
+      properties:
+        house_id: { type: integer, minimum: 1 }
+        expected_revision: { type: integer, minimum: 0, description: Počet dosavadních verzí domu }
+        effective_from: { $ref: '#/components/schemas/PropertyInstant' }
+        effective_to: { anyOf: [{ $ref: '#/components/schemas/PropertyInstant' }, { type: 'null' }] }
+        basis_at: { $ref: '#/components/schemas/PropertyInstant' }
+        basis_policy: { type: string, enum: [fixed_registry_snapshot] }
+        period_policy: { type: string, enum: [no_automatic_proration] }
+        frequency: { type: string, enum: [monthly, quarterly, annual, one_off] }
+        decision_ref: { type: string, maxLength: 2000, description: Rozhodnutí orgánu SVJ }
+        decided_at: { $ref: '#/components/schemas/PropertyInstant' }
+        reason: { type: string, maxLength: 4000 }
+        rates: { type: array, minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/PropertyChargeRateInput' } }
+    PropertyChargeVersionSave:
+      type: object
+      additionalProperties: false
+      required: [request, preview_hash, idempotency_key]
+      properties:
+        request: { $ref: '#/components/schemas/PropertyChargeVersionRequest' }
+        preview_hash: { type: string, pattern: '^[a-f0-9]{64}$' }
+        idempotency_key: { $ref: '#/components/schemas/PropertyIdempotencyKey' }
+    PropertyPreviewEnvelope:
+      type: object
+      additionalProperties: true
+      required: [preview_hash]
+      description: Náhled (`preview`, u vydání předpisů `snapshot`) a jeho otisk pro potvrzující volání.
+      properties:
+        preview: { type: object, additionalProperties: true }
+        snapshot: { type: object, additionalProperties: true }
+        preview_hash: { type: string, pattern: '^[a-f0-9]{64}$' }
+    PropertyChargeVersionRecord:
+      type: object
+      additionalProperties: true
+      required: [id, revision_no, effective_from, effective_to, recorded_at, request, preview, preview_hash]
+      properties:
+        id: { type: integer }
+        revision_no: { type: integer }
+        effective_from: { type: string, format: date-time }
+        effective_to: { type: [string, 'null'], format: date-time }
+        recorded_at: { type: string, format: date-time }
+        request: { $ref: '#/components/schemas/PropertyChargeVersionRequest' }
+        preview: { type: object, additionalProperties: true, description: Výpočet po jednotkách a složkách }
+        preview_hash: { type: string }
+    PropertyChargeVersionRecordList:
+      type: object
+      required: [items, selected, as_of, known_at]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PropertyChargeVersionRecord' } }
+        selected: { anyOf: [{ $ref: '#/components/schemas/PropertyChargeVersionRecord' }, { type: 'null' }] }
+        as_of: { type: string, format: date-time }
+        known_at: { type: [string, 'null'], format: date-time }
+    PropertyCaseIdentity:
+      type: object
+      additionalProperties: false
+      required: [schema, case_ref, occurrence_ref, title_ref, decision_ref, decided_on, evidence_ref]
+      properties:
+        schema: { type: integer, enum: [1] }
+        case_ref: { type: string }
+        occurrence_ref: { type: string }
+        title_ref: { type: string }
+        decision_ref: { type: string }
+        decided_on: { type: string, format: date }
+        evidence_ref: { type: string }
+    PropertyLiabilityGroup:
+      type: object
+      required: [group_key, role, mode, basis, members, extent, evidence_ref, legal_reason, valid_from]
+      properties:
+        group_key: { type: string }
+        role: { type: string, enum: [debtor, guarantor] }
+        mode: { type: string, enum: [individual, solidary], description: '`individual` jeden člen, `solidary` aspoň dva' }
+        basis: { type: string, enum: [individual_title, sjm_713, joint_act_1127, documented_title] }
+        members: { type: array, items: { type: integer, minimum: 1 } }
+        extent: { $ref: '#/components/schemas/PropertyPublicRational' }
+        evidence_ref: { type: string }
+        legal_reason: { type: string }
+        valid_from: { $ref: '#/components/schemas/PropertyInstant' }
+        valid_to: { anyOf: [{ $ref: '#/components/schemas/PropertyInstant' }, { type: 'null' }] }
+    PropertyIssueUnit:
+      type: object
+      additionalProperties: false
+      required: [unit_id, expected_revision, previous_charge_id, liability_groups, notices]
+      properties:
+        unit_id: { type: integer, minimum: 1 }
+        expected_revision: { type: integer, minimum: 0, description: Revize jednotky z podkladů vydání }
+        previous_charge_id: { type: [integer, 'null'], description: '`null` právě u `issue_mode=initial`' }
+        liability_groups: { type: array, items: { $ref: '#/components/schemas/PropertyLiabilityGroup' } }
+        notices:
+          type: array
+          description: Oznámení záloh na služby po složkách (`mode` `initial`, `unchanged`, `change`; doručení `deliveries`)
+          items:
+            type: object
+            additionalProperties: false
+            required: [component_id, notice]
+            properties:
+              component_id: { type: integer, minimum: 1 }
+              notice: { type: object, additionalProperties: true, required: [mode, title_ref], properties: { mode: { type: string, enum: [initial, unchanged, change] }, title_ref: { type: string } } }
+        case_distinction: { type: object, additionalProperties: true }
+    PropertyIssueAccount:
+      type: object
+      additionalProperties: false
+      required: [component_id, receivable_account, counter_account, basis_ref]
+      properties:
+        component_id: { type: integer, minimum: 1 }
+        receivable_account: { type: string, pattern: '^[0-9A-Za-z.]{3,10}$' }
+        counter_account: { type: string, pattern: '^[0-9A-Za-z.]{3,10}$' }
+        basis_ref: { type: string, maxLength: 2000 }
+        settlement_due_on: { type: [string, 'null'], format: date }
+        dimensions: { type: object, additionalProperties: { type: integer, minimum: 1 }, description: ID typu dimenze → ID hodnoty }
+    PropertyIssueRequest:
+      type: object
+      additionalProperties: false
+      required: [version_id, source_key, title, issue_mode, period_from, period_to, claim_origin_at, issued_at, accounting_date, due_date, reason, units, accounts]
+      properties:
+        version_id: { type: integer, minimum: 1, description: Verze sazeb }
+        source_key: { type: string, pattern: '^[A-Za-z0-9_.-]{1,80}$' }
+        title: { type: string, enum: [prescription, extra_contribution] }
+        issue_mode: { type: string, enum: [initial, replacement, difference] }
+        period_from: { type: string, format: date }
+        period_to: { type: string, format: date }
+        claim_origin_at: { $ref: '#/components/schemas/PropertyInstant' }
+        issued_at: { $ref: '#/components/schemas/PropertyInstant' }
+        accounting_date: { type: string, format: date }
+        due_date: { type: string, format: date }
+        reason: { type: string, maxLength: 4000 }
+        units: { type: array, minItems: 1, maxItems: 1000, items: { $ref: '#/components/schemas/PropertyIssueUnit' } }
+        accounts: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/PropertyIssueAccount' } }
+        case_identity: { $ref: '#/components/schemas/PropertyCaseIdentity' }
+    PropertyIssueSave:
+      type: object
+      additionalProperties: false
+      required: [request, preview_hash, idempotency_key]
+      properties:
+        request: { $ref: '#/components/schemas/PropertyIssueRequest' }
+        preview_hash: { type: string, pattern: '^[a-f0-9]{64}$' }
+        idempotency_key: { $ref: '#/components/schemas/PropertyIdempotencyKey' }
+    PropertyIssuedCharge:
+      type: object
+      additionalProperties: true
+      required: [id, batch_id, unit_id, status, row_version, amount_cents]
+      properties:
+        id: { type: integer }
+        batch_id: { type: integer }
+        unit_id: { type: integer }
+        source_key: { type: string }
+        revision_no: { type: integer }
+        status: { type: string, enum: [draft, posted, reversed, cancelled] }
+        row_version: { type: integer }
+        period_from: { type: string, format: date }
+        period_to: { type: string, format: date }
+        due_date: { type: string, format: date }
+        amount_cents: { type: string, pattern: '^-?[0-9]+$' }
+        snapshot_hash: { type: string }
+        journal_entry_id: { type: [integer, 'null'] }
+        reversal_entry_id: { type: [integer, 'null'] }
+        snapshot: { type: object, additionalProperties: true, description: Snímek výpočtu, dlužníků a kontace }
+    PropertyIssuedChargeList:
+      type: object
+      required: [items, capabilities]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PropertyIssuedCharge' } }
+        capabilities: { type: object, properties: { issue: { type: boolean }, post: { type: boolean }, reverse: { type: boolean } } }
+    PropertyIssueBatch:
+      type: object
+      additionalProperties: true
+      required: [id, request, charges, preview_hash]
+      properties:
+        id: { type: integer }
+        request: { $ref: '#/components/schemas/PropertyIssueRequest' }
+        charges: { type: array, items: { $ref: '#/components/schemas/PropertyIssuedCharge' } }
+        preview_hash: { type: string }
+    PropertyIssueContext:
+      type: object
+      additionalProperties: true
+      required: [as_of, version, units, parties, accounts, dimensions, history]
+      properties:
+        as_of: { type: string, format: date-time }
+        version: { $ref: '#/components/schemas/PropertyChargeVersionRecord' }
+        units: { type: array, items: { $ref: '#/components/schemas/PropertyRegistryObject' } }
+        parties: { type: array, items: { type: object, additionalProperties: true } }
+        accounts: { type: array, items: { type: object, properties: { account_code: { type: string }, name: { type: string }, account_type: { type: string } } } }
+        dimensions: { type: array, items: { type: object, additionalProperties: true } }
+        history: { type: array, items: { $ref: '#/components/schemas/PropertyIssuedCharge' } }
+        case_families: { type: array, items: { type: object, additionalProperties: true } }
+    PropertyIssuePostInput:
+      type: object
+      additionalProperties: false
+      required: [expected]
+      properties:
+        expected:
+          type: array
+          maxItems: 1000
+          description: Všechny předpisy dávky s aktuálním `row_version`
+          items: { type: object, required: [id, row_version], properties: { id: { type: integer }, row_version: { type: integer } } }
+        debt_registration: { type: string, enum: [automatic, manual], default: automatic }
+    PropertyIssueReversalInput:
+      type: object
+      additionalProperties: false
+      required: [row_version, accounting_date, effective_at, reason, evidence_ref, idempotency_key]
+      properties:
+        row_version: { type: integer }
+        accounting_date: { type: string, format: date }
+        effective_at: { $ref: '#/components/schemas/PropertyInstant' }
+        reason: { type: string }
+        evidence_ref: { type: string }
+        idempotency_key: { $ref: '#/components/schemas/PropertyIdempotencyKey' }
+    PropertyPaymentCandidate:
+      type: object
+      additionalProperties: true
+      required: [kind, id, date, amount, currency, direction, available_cents]
+      properties:
+        kind: { type: string, enum: [bank, cash] }
+        id: { type: integer }
+        date: { type: string, format: date }
+        amount: { type: string }
+        currency: { type: string }
+        direction: { type: string, enum: [in, out] }
+        partner_name: { type: [string, 'null'] }
+        description: { type: [string, 'null'] }
+        variable_symbol: { type: [string, 'null'] }
+        specific_symbol: { type: [string, 'null'] }
+        existing_owner: { type: boolean }
+        available_cents: { type: string }
+    PropertyPaymentCandidatePage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PropertyPaymentCandidate' } }
+        next_cursor: { type: [integer, 'null'] }
+        coverage: { type: object, additionalProperties: true }
+    PropertyPaymentWorkflowContext:
+      type: object
+      additionalProperties: true
+      required: [as_of, candidates, units, capabilities]
+      properties:
+        as_of: { type: string, format: date-time }
+        candidates: { type: array, items: { $ref: '#/components/schemas/PropertyPaymentCandidate' } }
+        candidate_coverage: { type: object, additionalProperties: true }
+        registers: { type: array, items: { type: object, properties: { id: { type: integer }, name: { type: string }, currency_code: { type: string } } } }
+        units: { type: array, items: { $ref: '#/components/schemas/PropertyRegistryObject' } }
+        dimensions: { type: array, items: { type: object, additionalProperties: true } }
+        capabilities:
+          type: object
+          properties:
+            manage: { type: boolean }
+            post: { type: boolean }
+            reverse: { type: boolean }
+            bank: { type: boolean }
+            cash: { type: boolean }
+    PropertyPaymentPart:
+      type: object
+      additionalProperties: true
+      required: [kind, amount_cents, accounting_date, reason]
+      description: |
+        Část platby. `allocation` (úhrada dluhů `debts` s fakty platby `payment`: plátce, dlužník, okamžik přijetí,
+        případně doložená volba dluhů, upomínky a rozdělení jistiny a příslušenství; nebo zápis přeplatku
+        `credit_entitlement`), `refund` (vrácení z rezervace `reservation_id` s `expected_reservation_version`).
+      properties:
+        kind: { type: string, enum: [allocation, refund] }
+        amount_cents: { type: string, pattern: '^[0-9]+$' }
+        accounting_date: { type: string, format: date }
+        reason: { type: string }
+        debts: { type: array, items: { type: integer } }
+        payment: { type: object, additionalProperties: true, properties: { payer_id: { type: integer }, debtor_id: { type: integer }, received_at: { type: string, format: date-time } } }
+        credit_entitlement: { type: object, additionalProperties: true }
+        reservation_id: { type: integer }
+        expected_reservation_version: { type: integer }
+        cash_receipt: { type: object, additionalProperties: true }
+        clearing_selection: { type: array, items: { type: object, properties: { key: { type: string }, amount_cents: { type: string } } } }
+    PropertyPaymentWorkflowRequest:
+      type: object
+      additionalProperties: false
+      required: [source, clearing_cells, parts]
+      properties:
+        source:
+          description: Existující bankovní nebo pokladní platba (`kind`, `id`), nebo koncept nového pokladního dokladu (`kind=cash`, `draft`)
+          type: object
+          additionalProperties: false
+          required: [kind]
+          properties:
+            kind: { type: string, enum: [bank, cash] }
+            id: { type: integer }
+            draft:
+              type: object
+              properties:
+                register_id: { type: integer }
+                doc_type: { type: string, enum: [in, out] }
+                issue_date: { type: string, format: date }
+                partner_name: { type: string }
+                description: { type: string }
+                total_amount: { type: string }
+        clearing_cells:
+          type: array
+          items: { type: object, required: [key, amount_cents], properties: { key: { type: string }, amount_cents: { type: string }, dimensions: { type: object, additionalProperties: { type: integer } } } }
+        parts:
+          type: array
+          items:
+            type: object
+            required: [key, request]
+            properties:
+              key: { type: string }
+              request: { $ref: '#/components/schemas/PropertyPaymentPart' }
+    PropertyPaymentWorkflowPreview:
+      type: object
+      additionalProperties: true
+      required: [status, preview_hash, source_etag, source, snapshot]
+      properties:
+        status: { type: string, enum: [ready] }
+        preview_hash: { type: string }
+        source_etag: { type: string }
+        source: { type: object, additionalProperties: true }
+        snapshot: { type: object, additionalProperties: true }
+    PropertyPaymentWorkflowResult:
+      type: object
+      additionalProperties: true
+      required: [id, status, source, settled_cents, available_cents, journal_entry_id, parts]
+      properties:
+        id: { type: integer }
+        status: { type: string }
+        source: { type: object, properties: { kind: { type: string }, id: { type: integer } } }
+        settled_cents: { type: string }
+        available_cents: { type: string }
+        journal_entry_id: { type: integer }
+        parts: { type: array, items: { type: object, properties: { part_key: { type: string }, operation_id: { type: integer } } } }
+    PropertyBankProposalPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            required: [bank_transaction_id, status, unit_id, score, row_version]
+            properties:
+              bank_transaction_id: { type: integer }
+              status: { type: string, enum: [identified, review_required, unidentified] }
+              unit_id: { type: [integer, 'null'] }
+              score: { type: number }
+              row_version: { type: integer }
+              updated_at: { type: string }
+              resolution: { type: object, additionalProperties: true }
+              transaction: { type: object, additionalProperties: true }
+        next_cursor: { type: [integer, 'null'] }
+    PropertyBankProposalPlan:
+      type: object
+      additionalProperties: true
+      required: [status, bank_transaction_id]
+      description: '`used` = platba už má zapsanou úhradu (`link`); `proposal` = `request` a `preview` pro potvrzení, nebo `review` s důvodem ruční kontroly.'
+      properties:
+        status: { type: string, enum: [used, proposal] }
+        bank_transaction_id: { type: integer }
+        link: { type: object, additionalProperties: true }
+        resolution: { type: object, additionalProperties: true }
+        request: { anyOf: [{ $ref: '#/components/schemas/PropertyPaymentWorkflowRequest' }, { type: 'null' }] }
+        preview: { anyOf: [{ $ref: '#/components/schemas/PropertyPaymentWorkflowPreview' }, { type: 'null' }] }
+        review: { type: [object, 'null'], additionalProperties: true }
+        remaining_cents: { type: string }
     PayrollJmhzExternalRoot:
       type: object
       properties:

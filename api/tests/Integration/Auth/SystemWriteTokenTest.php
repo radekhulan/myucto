@@ -193,6 +193,256 @@ final class SystemWriteTokenTest extends TestCase
             json_encode($post['body'], JSON_UNESCAPED_UNICODE));
     }
 
+    /** Veřejné operace zařazené do /api/v1 (#371, část 2): běžný token je zapsat nesmí. */
+    public function testPublicV1WritesWithoutFlagAreWriteForbidden(): void
+    {
+        $this->boot(true);
+        $this->supplierId = (int) $this->chargeFixture($this->db)['supplier'];
+        $token = $this->token(false);
+        foreach (self::v1Operations() as [$method, $path]) {
+            if ($method === 'GET') {
+                continue;
+            }
+            $res = $this->call($token, $method, '/api/v1' . $path, []);
+            self::assertSame(403, $res['status'], $method . ' ' . $path);
+            self::assertSame('token_write_forbidden', $res['body']['error']['code'] ?? null, $method . ' ' . $path);
+        }
+        foreach (self::v1Operations() as [$method, $path]) {
+            if ($method !== 'GET' || !str_starts_with($path, '/property/')) {
+                continue;
+            }
+            $res = $this->call($token, $method, '/api/v1' . $path);
+            self::assertSame(403, $res['status'], $method . ' ' . $path);
+            self::assertSame('token_endpoint_forbidden', $res['body']['error']['code'] ?? null, $method . ' ' . $path);
+        }
+    }
+
+    /** Token s plným zápisem projde u každé zdokumentované operace bránami tokenu i relace. */
+    public function testPublicV1OperationsPassTokenGatesWithSystemWrite(): void
+    {
+        $this->boot(true);
+        $this->supplierId = (int) $this->chargeFixture($this->db)['supplier'];
+        $token = $this->token(true);
+        foreach (self::v1Operations() as [$method, $path]) {
+            $res = $this->call($token, $method, '/api/v1' . $path, $method === 'GET' ? null : []);
+            $code = $res['body']['error']['code'] ?? null;
+            self::assertNotContains($code, ['token_write_forbidden', 'token_endpoint_forbidden', 'session_required',
+                'insufficient_scope', 'forbidden_permission', 'forbidden', 'framework_scope_denied'], $method . ' ' . $path . ' ' . json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+            self::assertFalse($res['status'] === 404 && ($res['body']['error']['message'] ?? '') === 'Route not found', $method . ' ' . $path);
+        }
+    }
+
+    public function testOtherItemsLifecycleOnV1(): void
+    {
+        $this->boot(true);
+        $plain = $this->token(false);
+        $token = $this->token(true);
+
+        $other = $this->otherItemDraft();
+        $res = $this->call($token, 'POST', '/api/v1/accounting/other-items/' . $other . '/post', []);
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('posted', $this->otherItemStatus($other));
+
+        $res = $this->call($plain, 'POST', '/api/v1/accounting/other-items/' . $other . '/schedule', ['frequency' => 'monthly', 'auto_post' => true]);
+        self::assertSame(403, $res['status']);
+        self::assertSame('other_items.error.auto_post_session_only', $res['body']['error']['code'] ?? null);
+        $res = $this->call($token, 'POST', '/api/v1/accounting/other-items/' . $other . '/schedule', ['frequency' => 'monthly', 'auto_post' => true]);
+        self::assertSame(201, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        $schedule = (int) $res['body']['id'];
+        $res = $this->call($token, 'POST', '/api/v1/accounting/other-items/schedules/' . $schedule . '/generate', ['through' => $this->date]);
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+
+        $res = $this->call($token, 'POST', '/api/v1/accounting/other-items/' . $other . '/repost',
+            ['entry_date' => $this->date, 'reason' => 'Syntetické přeúčtování', 'counter_account_code' => '211']);
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        $res = $this->call($token, 'POST', '/api/v1/accounting/other-items/' . $other . '/reverse', ['reason' => 'Syntetické storno']);
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertNotSame('posted', $this->otherItemStatus($other));
+
+        $this->lockUntil($this->date);
+        $locked = $this->otherItemDraft();
+        $res = $this->call($token, 'POST', '/api/v1/accounting/other-items/' . $locked . '/post', []);
+        self::assertSame(422, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('date_locked', $res['body']['error']['code'] ?? null);
+        self::assertSame('draft', $this->otherItemStatus($locked));
+    }
+
+    public function testInvoiceBookOnV1(): void
+    {
+        $this->boot(true);
+        $plain = $this->token(false);
+        $token = $this->token(true);
+        $invoice = $this->invoice('issued', $this->date, 'SW' . random_int(10000000, 99999999));
+        $booked = fn (): ?string => $this->db->pdo()->query("SELECT booked_at FROM invoices WHERE id = $invoice")->fetchColumn() ?: null;
+
+        foreach (['POST', 'DELETE'] as $method) {
+            $res = $this->call($plain, $method, '/api/v1/invoices/' . $invoice . '/book', []);
+            self::assertSame(403, $res['status'], $method);
+            self::assertSame('token_write_forbidden', $res['body']['error']['code'] ?? null, $method);
+        }
+        $res = $this->call($token, 'POST', '/api/v1/invoices/' . $invoice . '/book', []);
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertNotNull($booked());
+        $res = $this->call($token, 'DELETE', '/api/v1/invoices/' . $invoice . '/book', []);
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertNull($booked());
+    }
+
+    /** SVJ přes /api/v1: registr, složka, verze sazeb, vydání, zaúčtování dávky a storno; zamčené datum platí. */
+    public function testPropertyAgendaOnV1(): void
+    {
+        $this->boot(true);
+        $f = $this->issuanceFixture($this->db);
+        $this->supplierId = (int) $f['supplier'];
+        $token = $this->token(true);
+        $v1 = '/api/v1/property';
+        $at = '2026-01-01T00:00:00+01:00';
+        $meta = ['effective_from' => $at, 'effective_to' => null, 'reason' => 'Syntetický registr', 'title_ref' => 'Syntetické prohlášení'];
+        $ok = static fn (array $res): string => json_encode($res['body'], JSON_UNESCAPED_UNICODE);
+
+        $service = $this->call($token, 'POST', $v1 . '/services', $meta + ['code' => 'SWHEAT', 'expected_revision' => 0, 'status' => 'confirmed',
+            'idempotency_key' => 'sw-service', 'state' => ['name' => 'Syntetické teplo', 'active' => true, 'measure' => 'm2', 'measure_label' => '']]);
+        self::assertSame(200, $service['status'], $ok($service));
+        $house = $this->call($token, 'POST', $v1 . '/houses', $meta + ['code' => 'SWH', 'expected_revision' => 0, 'status' => 'confirmed',
+            'idempotency_key' => 'sw-house', 'state' => ['name' => 'Syntetický dům', 'active' => true,
+                'address' => ['street' => 'Syntetická 1', 'city' => 'Syntetické', 'postal_code' => '10000', 'country' => 'CZ'],
+                'declaration_ref' => 'Syntetické prohlášení', 'share_scope' => 'SWH', 'registry_complete' => false]]);
+        self::assertSame(200, $house['status'], $ok($house));
+        $owner = (int) $f['clients'][1];
+        $unitState = ['unit_no' => 'SW1', 'kind' => 'apartment', 'active' => true, 'attributes' => ['share' => ['num' => '1', 'den' => '2']],
+            'ownerships' => [['group_key' => 'OWNER', 'kind' => 'single', 'share' => ['num' => '1', 'den' => '1'], 'members' => [$owner], 'title_ref' => 'Syntetický titul']],
+            'roles' => [], 'identifiers' => [['kind' => 'vs', 'value' => '9001', 'payment_scope' => 'supplier', 'source' => 'manual', 'title_ref' => 'Syntetický titul']],
+            'services' => [(int) $service['body']['id']]];
+        $unit = $this->call($token, 'POST', $v1 . '/units', $meta + ['code' => 'SWU1', 'parent_id' => (int) $house['body']['id'], 'expected_revision' => 0,
+            'status' => 'confirmed', 'idempotency_key' => 'sw-unit', 'state' => $unitState]);
+        self::assertSame(200, $unit['status'], $ok($unit));
+        $unitId = (int) $unit['body']['id'];
+
+        $unitState['ownerships'] = [
+            ['group_key' => 'A', 'kind' => 'coownership_share', 'share' => ['num' => '1', 'den' => '2'], 'members' => [$owner], 'title_ref' => 'Syntetická smlouva'],
+            ['group_key' => 'B', 'kind' => 'coownership_share', 'share' => ['num' => '1', 'den' => '2'], 'members' => [(int) $f['clients'][2]], 'title_ref' => 'Syntetická smlouva'],
+        ];
+        $later = '2026-02-01T00:00:00+01:00';
+        $pending = $this->call($token, 'POST', $v1 . '/objects/' . $unitId . '/revisions', ['effective_from' => $later, 'effective_to' => null,
+            'reason' => 'Převod podílu', 'title_ref' => 'Syntetická smlouva', 'expected_revision' => (int) $unit['body']['revision'],
+            'status' => 'pending', 'idempotency_key' => 'sw-unit-rev', 'state' => $unitState]);
+        self::assertSame(200, $pending['status'], $ok($pending));
+        $detail = $this->call($token, 'GET', $v1 . '/objects/' . $unitId . '?as_of=' . rawurlencode($later));
+        self::assertSame(200, $detail['status'], $ok($detail));
+        $pendingId = (int) (array_values(array_filter($detail['body']['history'], static fn (array $r): bool => $r['status'] === 'pending'))[0]['id'] ?? 0);
+        self::assertGreaterThan(0, $pendingId);
+        $confirm = $this->call($token, 'POST', $v1 . '/objects/' . $unitId . '/revisions/' . $pendingId . '/confirm', ['effective_from' => $later,
+            'reason' => 'Doloženo', 'title_ref' => 'Syntetický výpis', 'expected_revision' => (int) $pending['body']['revision'], 'idempotency_key' => 'sw-unit-confirm']);
+        self::assertSame(200, $confirm['status'], $ok($confirm));
+        $units = $this->call($token, 'GET', $v1 . '/units?as_of=' . rawurlencode($later));
+        self::assertSame(200, $units['status'], $ok($units));
+        self::assertContains($unitId, array_column($units['body']['items'], 'id'));
+
+        $component = $this->call($token, 'POST', $v1 . '/charges/components', ['code' => 'SWREP', 'name' => 'Syntetická oprava', 'kind' => 'other',
+            'service_id' => null, 'account_code' => '', 'effective_at' => $at, 'idempotency_key' => 'sw-component']);
+        self::assertSame(200, $component['status'], $ok($component));
+        self::assertSame(200, $this->call($token, 'GET', $v1 . '/charges/components')['status']);
+        $context = $this->call($token, 'GET', $v1 . '/charges/context?house_id=' . $f['house']['id'] . '&as_of=' . rawurlencode($at));
+        self::assertSame(200, $context['status'], $ok($context));
+
+        $versionRequest = self::chargeRequest($f);
+        $versionRequest['expected_revision'] = 1;
+        $versionRequest['effective_from'] = $versionRequest['basis_at'] = '2027-01-01T00:00:00+01:00';
+        $versionRequest['decided_at'] = '2026-12-15T18:00:00+01:00';
+        $versionPreview = $this->call($token, 'POST', $v1 . '/charges/preview', $versionRequest);
+        self::assertSame(200, $versionPreview['status'], $ok($versionPreview));
+        $version = $this->call($token, 'POST', $v1 . '/charges/versions', ['request' => $versionRequest,
+            'preview_hash' => $versionPreview['body']['preview_hash'], 'idempotency_key' => 'sw-version']);
+        self::assertSame(200, $version['status'], $ok($version));
+        self::assertSame(200, $this->call($token, 'GET', $v1 . '/charges/versions/' . $version['body']['id'])['status']);
+        self::assertSame(200, $this->call($token, 'GET', $v1 . '/charges/versions?house_id=' . $f['house']['id'] . '&as_of=' . rawurlencode($at))['status']);
+
+        $issueContext = $this->call($token, 'GET', $v1 . '/charges/issues/context?version_id=' . $f['issue_request']['version_id'] . '&as_of=' . rawurlencode($at));
+        self::assertSame(200, $issueContext['status'], $ok($issueContext));
+        $preview = $this->call($token, 'POST', $v1 . '/charges/issues/preview', $f['issue_request']);
+        self::assertSame(200, $preview['status'], $ok($preview));
+        $batch = $this->call($token, 'POST', $v1 . '/charges/issues', ['request' => $f['issue_request'],
+            'preview_hash' => $preview['body']['preview_hash'], 'idempotency_key' => 'sw-issue']);
+        self::assertSame(200, $batch['status'], $ok($batch));
+        $batchId = (int) $batch['body']['id'];
+        $expected = array_map(static fn (array $c): array => ['id' => $c['id'], 'row_version' => $c['row_version']], $batch['body']['charges']);
+
+        $this->lockUntil('2026-01-31');
+        $locked = $this->call($token, 'POST', $v1 . '/charges/issues/batches/' . $batchId . '/post', ['expected' => $expected]);
+        self::assertSame(422, $locked['status'], $ok($locked));
+        self::assertContains($locked['body']['error']['code'] ?? null, ['date_locked', 'period_not_open']);
+        self::assertSame(0, (int) $this->db->pdo()->query("SELECT COUNT(*) FROM unit_charges WHERE batch_id = $batchId AND status = 'posted'")->fetchColumn());
+        $this->db->pdo()->prepare('UPDATE accounting_supplier_settings SET locked_until = NULL WHERE supplier_id = ?')->execute([$this->supplierId]);
+
+        $posted = $this->call($token, 'POST', $v1 . '/charges/issues/batches/' . $batchId . '/post', ['expected' => $expected]);
+        self::assertSame(200, $posted['status'], $ok($posted));
+        self::assertSame(['posted'], array_values(array_unique(array_column($posted['body']['charges'], 'status'))));
+        self::assertSame(200, $this->call($token, 'GET', $v1 . '/charges/issues/batches/' . $batchId)['status']);
+        $charge = $posted['body']['charges'][0];
+        self::assertSame(200, $this->call($token, 'GET', $v1 . '/charges/issues/' . $charge['id'])['status']);
+        $reversed = $this->call($token, 'POST', $v1 . '/charges/issues/' . $charge['id'] . '/reverse', ['row_version' => $charge['row_version'],
+            'accounting_date' => '2026-03-01', 'effective_at' => '2026-03-01T00:00:00+01:00', 'reason' => 'Syntetické storno',
+            'evidence_ref' => 'Syntetický podklad', 'idempotency_key' => 'sw-reverse']);
+        self::assertSame(200, $reversed['status'], $ok($reversed));
+        self::assertSame('reversed', $reversed['body']['status']);
+        self::assertSame(200, $this->call($token, 'GET', $v1 . '/charges/issues')['status']);
+
+        foreach (['/payments/context?as_of=' . rawurlencode('2026-03-01T00:00:00+01:00'), '/payments/candidates?kind=bank', '/payments/history', '/payments/bank-proposals'] as $path) {
+            $res = $this->call($token, 'GET', $v1 . $path);
+            self::assertSame(200, $res['status'], $path . ' ' . $ok($res));
+        }
+    }
+
+    /** @return list<array{0:string,1:string}> */
+    private static function v1Operations(): array
+    {
+        $id = '999999999';
+        return [
+            ['POST', '/accounting/other-items/' . $id . '/post'],
+            ['POST', '/accounting/other-items/' . $id . '/reverse'],
+            ['POST', '/accounting/other-items/' . $id . '/repost'],
+            ['POST', '/accounting/other-items/schedules/' . $id . '/generate'],
+            ['POST', '/accounting/internal-documents/' . $id . '/post'],
+            ['POST', '/invoices/' . $id . '/book'],
+            ['DELETE', '/invoices/' . $id . '/book'],
+            ['POST', '/bank-transactions/' . $id . '/post'],
+            ['POST', '/bank-transactions/' . $id . '/unpost'],
+            ['GET', '/property/houses'],
+            ['POST', '/property/houses'],
+            ['GET', '/property/units'],
+            ['POST', '/property/units'],
+            ['GET', '/property/services'],
+            ['POST', '/property/services'],
+            ['GET', '/property/objects/' . $id],
+            ['POST', '/property/objects/' . $id . '/revisions'],
+            ['POST', '/property/objects/' . $id . '/revisions/' . $id . '/confirm'],
+            ['GET', '/property/charges/context'],
+            ['GET', '/property/charges/components'],
+            ['POST', '/property/charges/components'],
+            ['GET', '/property/charges/versions'],
+            ['POST', '/property/charges/versions'],
+            ['GET', '/property/charges/versions/' . $id],
+            ['POST', '/property/charges/preview'],
+            ['GET', '/property/charges/issues'],
+            ['POST', '/property/charges/issues'],
+            ['GET', '/property/charges/issues/context'],
+            ['GET', '/property/charges/issues/' . $id],
+            ['GET', '/property/charges/issues/batches/' . $id],
+            ['POST', '/property/charges/issues/preview'],
+            ['POST', '/property/charges/issues/batches/' . $id . '/post'],
+            ['POST', '/property/charges/issues/' . $id . '/reverse'],
+            ['GET', '/property/payments/context'],
+            ['GET', '/property/payments/candidates'],
+            ['GET', '/property/payments/history'],
+            ['POST', '/property/payments/preview'],
+            ['POST', '/property/payments/confirm'],
+            ['GET', '/property/payments/bank-proposals'],
+            ['GET', '/property/payments/bank-proposals/' . $id],
+            ['POST', '/property/payments/bank-proposals/' . $id . '/plan'],
+            ['POST', '/property/payments/operations/' . $id . '/reverse'],
+        ];
+    }
+
     /** Uzavřené období token nepřebije ani jako správce a ani s plným zápisem. */
     public function testClosedPeriodCannotBeForcedNorReopened(): void
     {
