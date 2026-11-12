@@ -1525,7 +1525,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             self::assertCount(2, $exception->blockers);
             [$annual, $average] = $exception->blockers;
             self::assertSame('jmhz_annual_request_source_missing', $annual['code']);
-            self::assertSame('/payroll/annual-settlement?person=11', $annual['remediation_path']);
+            self::assertSame('/payroll/annual-settlement?state=request_undecided&person=11', $annual['remediation_path']);
             self::assertArrayHasKey('label', $annual);
             self::assertSame(
                 '/payroll/absences?employment=22&tab=averages',
