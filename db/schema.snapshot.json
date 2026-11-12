@@ -1193,7 +1193,8 @@
         "2287_payroll_run_live_period_slot.sql",
         "2288_payroll_run_exclusions.sql",
         "2289_payroll_snapshot_column_compression.sql",
-        "2290_payroll_identity_from_first_employment.sql"
+        "2290_payroll_identity_from_first_employment.sql",
+        "2291_payroll_jmhz_external_roots.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -15861,6 +15862,41 @@
                 "chk_payroll_jmhz_employer_annual_schema": "`schema_reference` = 'payroll-jmhz-employer-annual-evidence.v1'",
                 "chk_payroll_jmhz_employer_annual_spec_hash": "`spec_manifest_sha256` regexp '^[0-9a-f]{64}$'",
                 "chk_payroll_jmhz_employer_annual_year": "`report_year` between 2026 and 2100"
+            }
+        },
+        "payroll_jmhz_external_roots": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NOT NULL",
+                "environment": "enum('production','test') NOT NULL",
+                "form_count": "int(10) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "mode": "enum('original_xml','guid_reference') NOT NULL",
+                "note": "varchar(1000) NOT NULL",
+                "original_sha256": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "period": "char(7) NOT NULL COLLATE ascii_bin",
+                "submission_guid": "char(36) NOT NULL COLLATE ascii_bin",
+                "submission_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "unmatched_form_count": "int(10) unsigned NOT NULL DEFAULT 0"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_payroll_jmhz_external_root_creator": "BTREE (created_by)",
+                "idx_payroll_jmhz_external_root_period": "BTREE (supplier_id, environment, period)",
+                "uq_payroll_jmhz_external_root_submission": "UNIQUE BTREE (supplier_id, environment, submission_id)"
+            },
+            "foreign_keys": {
+                "fk_payroll_jmhz_external_root_creator": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_payroll_jmhz_external_root_submission": "(supplier_id, environment, submission_id) -> payroll_submissions (supplier_id, environment, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_payroll_jmhz_external_root_guid": "`submission_guid` regexp '^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$'",
+                "chk_payroll_jmhz_external_root_original": "`mode` = 'original_xml' = (`original_sha256` is not null)",
+                "chk_payroll_jmhz_external_root_period": "`period` regexp '^[0-9]{4}-(0[1-9]|1[0-2])$'"
             }
         },
         "payroll_jmhz_field_requirements": {
