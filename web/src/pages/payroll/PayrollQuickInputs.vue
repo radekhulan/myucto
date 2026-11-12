@@ -1211,7 +1211,7 @@ const savePartialNote = computed<string | null>(() => {
   const skipped = rows.value.filter(rowInvalid).length
   if (skipped > 0) return t('payroll.quick_inputs.save_partial_invalid', { count: skipped })
   if (conflictRowCount.value > 0) {
-    return t('payroll.quick_inputs.save_partial_conflict', { count: conflictRowCount.value })
+    return t('payroll.quick_inputs.save_partial_conflict', { count: conflictRowCount.value }, conflictRowCount.value)
   }
   if (pendingElsewhere.value.length > 0) {
     return t('payroll.quick_inputs.save_pending_pages', { count: pendingElsewhere.value.length })
