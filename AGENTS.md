@@ -10,7 +10,7 @@ doklady, multi-supplier), daňová evidence i podvojné účetnictví s uzávěr
 DPH/KH/SH a EPO podání, banka, majetek, sklad a e-shop, mzdy a jejich podání,
 CRM, AI vytěžení dokladů, REST API a MCP server.
 Backend PHP 8.5 + Slim 4, frontend Vue 3 + TypeScript + Vite + Tailwind,
-databáze MariaDB 11.8+.
+databáze MariaDB 11.8 LTS (minimum) a 12.3.
 
 ## Layout repozitáře
 
@@ -34,7 +34,15 @@ podklady, data, konfigurace) v kódu, testech ani dokumentaci neodkazuj.
 - Namespace `MyInvoice\` a interní identifikátory (env vary, cookie/localStorage/Redis
   klíče) se **NEpřejmenovávají**: změna by rozbila běžící instalace. Branding
   „MyÚčto" patří jen do textů viditelných uživateli (UI, e-maily, dokumentace, loga).
-- DB baseline a minimální podporovaná verze je **MariaDB 11.8 LTS**.
+- DB baseline a minimální podporovaná verze je **MariaDB 11.8 LTS**, podporovaná je i **MariaDB 12.3**
+  (server Velín). Kód, SQL i migrace musí fungovat na obou; CI běží na 11.8, rozdíly ověřuj lokálně na 12.3.
+  - **Nová klíčová slova:** MariaDB 12 přidává funkce a klíčová slova (např. `TO_DATE`), která jako název
+    sloupce, aliasu nebo tabulky bez zpětných uvozovek skončí chybou syntaxe 1064. Nové identifikátory
+    nepojmenovávej podle SQL funkcí a klíčových slov; existující takové názvy vždy uzavírej do zpětných
+    uvozovek (`` `to_date` ``). Seznam klíčových slov serveru: `information_schema.KEYWORDS`.
+  - Další rozdíly 12.3 proti 11.8 (pořadí kaskády `ON DELETE CASCADE`, názvy automatických cizích klíčů
+    `1`, `2` místo `<tabulka>_ibfk_N`, text chyby 1568): nespoléhej na pořadí kaskády ani na jména FK
+    a chyby rozpoznávej podle kódu (`errorInfo[1]`), ne podle textu.
 
 ## Příkazy
 
@@ -65,7 +73,7 @@ php tools/generateManualHtml.php
 ### Migrace
 - Nová migrace = nový číslovaný soubor v `db/migrations/`, spouští se **výhradně** přes `php api/bin/migrate.php`.
 - Každá migrace musí být **idempotentní** (opakovatelně spustitelná): používej nativní MariaDB `IF [NOT] EXISTS` (`ADD COLUMN IF NOT EXISTS`, `CREATE TABLE IF NOT EXISTS`, …), ne PREPARE/EXECUTE triky.
-- Cílová DB je MariaDB 11.8+: v SQL preferuj **window functions a CTE** před vnořenými subselecty; nepoužívej `SQL_CALC_FOUND_ROWS`.
+- Cílová DB je MariaDB 11.8+ a 12.3: v SQL preferuj **window functions a CTE** před vnořenými subselecty; nepoužívej `SQL_CALC_FOUND_ROWS`.
 - **Číslo je vždy nejbližší volné, nikdy „s rezervou".** Nové číslo = nejvyšší existující + 1. Nepřeskakuj na kulaté číslo, nenech si mezeru „pro jistotu" a nevolej po vlastním rozsahu — souvislá řada je jediný způsob, jak je poznat pořadí. Sáhne-li po číslech víc agentů naráz, kolizi řeší ten, kdo integruje: přečísluje na nejbližší volné, přejmenuje řádek v tabulce `migrations` v lokálních DB a opraví odkazy na název souboru v testech.
 - Migrace se eviduje **podle názvu souboru** (`migrations.filename`), takže přejmenování ji spustí znovu. Právě proto musí být idempotentní. Přečíslovat jde jen migraci, která ještě není nasazená u zákazníků; u nasazené se číslo nemění nikdy.
 - **Po každé nové migraci přegeneruj otisk struktury** `db/schema.snapshot.json` z čisté databáze postavené z migrací (`api/bin/schema-snapshot.php`, postup v jeho hlavičce). Podle otisku kontroluje Diagnostika strukturu databáze instalací; hlídá to `SchemaSnapshotCoverageTest` a v CI `check-schema.php --strict`.
