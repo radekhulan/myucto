@@ -63,6 +63,16 @@ const applyError = ref('')
 const result = ref<PayrollStatutoryBulkResult | null>(null)
 
 const effectiveOn = computed(() => `${period.value}-01`)
+const frozenApplies = computed(() => {
+  const frozen = preview.value?.frozen_through
+  return typeof frozen === 'string' && frozen >= effectiveOn.value
+})
+const validFrom = computed(() => {
+  const frozen = preview.value?.frozen_through
+  if (!frozenApplies.value || typeof frozen !== 'string') return effectiveOn.value
+  const [year, month] = frozen.slice(0, 7).split('-').map(Number)
+  return month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, '0')}-01`
+})
 const applyIds = computed(() => preview.value ? bulkApplyEmployeeIds(preview.value, recordUnsigned.value, confirmForeign.value) : [])
 const names = computed(() => new Map((preview.value?.people ?? []).map(person => [person.employee_id, person.full_name])))
 const discountObstacles = computed(() => preview.value ? discountObstacleCounts(preview.value) : [])
@@ -184,15 +194,15 @@ onMounted(loadPreview)
       <template v-else-if="preview && !result">
         <p class="text-xs text-neutral-500">
           {{ employeeIds === null
-            ? t('payroll.statutory_bulk.scope_run', { period: formatPeriod(period) })
-            : t('payroll.statutory_bulk.scope_selection', { count: employeeIds.length }) }}
+            ? t('payroll.statutory_bulk.scope_run', { period: formatPeriod(period), from: formatDate(validFrom) })
+            : t('payroll.statutory_bulk.scope_selection', { count: employeeIds.length, from: formatDate(validFrom) }) }}
         </p>
         <p
-          v-if="preview.frozen_through"
+          v-if="frozenApplies && preview.frozen_through"
           class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
           data-test="statutory-bulk-frozen"
         >
-          {{ t('payroll.statutory_bulk.frozen', { date: formatDate(preview.frozen_through) }) }}
+          {{ t('payroll.statutory_bulk.frozen', { date: formatDate(preview.frozen_through), from: formatDate(validFrom) }) }}
         </p>
 
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">

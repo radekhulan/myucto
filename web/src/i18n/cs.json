@@ -3914,9 +3914,9 @@
       "intro": "Osobám bez cizího prvku doplní chybějící údaje, které plynou z toho, že s cizinou nemají nic společného: daňovou rezidenci v Česku, českou příslušnost k pojištění bez formuláře A1 a u osob mladších 60 let neuplatňování slevy pracujícího důchodce. Existující záznam se nikdy nepřepíše. Zdravotní pojišťovnu hromadně nedoplníme, zná ji jen registrace nebo zaměstnanec.",
       "period": "Údaje platí od měsíce",
       "reload": "Načíst náhled znovu",
-      "scope_run": "Náhled zahrnuje všechny osoby, které by vzal mzdový běh za {period}.",
-      "scope_selection": "Náhled zahrnuje vybrané osoby ({count}).",
-      "frozen": "Mzdy jsou schválené do {date}. Do schváleného období se nezapisuje, údaje začnou platit až od dalšího měsíce.",
+      "scope_run": "Náhled zahrnuje všechny osoby, které by vzal mzdový běh za {period}. Údaje budou platit od {from}.",
+      "scope_selection": "Náhled zahrnuje vybrané osoby ({count}). Údaje budou platit od {from}.",
+      "frozen": "Mzdy jsou schválené do {date}. Do schváleného období se nezapisuje, proto údaje začnou platit až od {from}.",
       "load_failed": "Náhled doplnění se nepodařilo načíst.",
       "retry": "Zkusit znovu",
       "summary": {

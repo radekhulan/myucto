@@ -3914,9 +3914,9 @@
       "intro": "For people without a foreign element, fills in the missing data that follows from having no ties abroad: Czech tax residence, Czech insurance jurisdiction without an A1 form and, for people under 60, the working pensioner discount not claimed. An existing record is never overwritten. The health insurer is never filled in bulk; only the registration or the employee knows it.",
       "period": "Data valid from month",
       "reload": "Reload preview",
-      "scope_run": "The preview covers everyone the payroll run for {period} would include.",
-      "scope_selection": "The preview covers the selected people ({count}).",
-      "frozen": "Payroll is approved up to {date}. Nothing is written into an approved period; the data takes effect from the following month.",
+      "scope_run": "The preview covers everyone the payroll run for {period} would include. The data takes effect from {from}.",
+      "scope_selection": "The preview covers the selected people ({count}). The data takes effect from {from}.",
+      "frozen": "Payroll is approved up to {date}. Nothing is written into an approved period, so the data takes effect only from {from}.",
       "load_failed": "The fill-in preview could not be loaded.",
       "retry": "Try again",
       "summary": {
