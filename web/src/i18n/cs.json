@@ -2189,7 +2189,8 @@
     "property_issuance": "Vydání předpisů",
     "internal_documents": "Interní doklady",
     "quick_internal_document": "Interní doklad",
-    "payroll_month_guide": "Průvodce měsícem"
+    "payroll_month_guide": "Průvodce měsícem",
+    "email_documents": "Doklady z e-mailu"
   },
   "migration_nonprofit_notice": {
     "title": "Převod pro neziskové organizace nebyl ověřen",
@@ -15529,7 +15530,19 @@
       "needs_information": "Čeká na doplnění",
       "processed": "Zpracováno",
       "rejected": "Odmítnuto"
-    }
+    },
+    "role_title": "Tady účetní zpracovává došlé doklady",
+    "role_text": "Příchozí doklady jsou pracovní fronta účetní: z dokladu tu vytěžíte přijatou fakturu, vyžádáte si doplnění, nebo ho odmítnete. Klient sem nechodí. Své doklady předává v sekci Dokumenty → Předat doklady účetní a odtud se objeví tady.",
+    "role_link_portal": "Předat doklady účetní",
+    "role_link_email": "Doklady z e-mailu",
+    "filter_source": "Zdroj",
+    "source": {
+      "portal": "Od klienta (portál)",
+      "document_request": "Na vyžádání",
+      "staff": "Nahráno ručně",
+      "email": "E-mail"
+    },
+    "portal_after_submit": "Doklady pak zpracuje vaše účetní. Stav každého dokladu uvidíte v seznamu níže."
   },
   "portfolio": {
     "title": "Přehled firem",
@@ -43665,5 +43678,75 @@
       "bank_account": "Řada bankovních zápisů se mění u bankovního účtu.",
       "none": "Tvar čísla této řady se nemění."
     }
+  },
+  "purchase_email": {
+    "title": "Doklady z e-mailu",
+    "subtitle": "Faktury, které vám dodavatelé posílají e-mailem, si aplikace sama vyzvedne ze schránky a připraví k zpracování.",
+    "setup_action": "Nastavit e-mailovou schránku",
+    "open_inbox": "Zobrazit doklady z e-mailu",
+    "status_title": "Přehled",
+    "status_failed": "Přehled se nepodařilo načíst.",
+    "retry": "Zkusit znovu",
+    "empty_title": "E-mailová schránka zatím není nastavená",
+    "empty_admin": "Nastavte schránku, do které vám dodavatelé posílají faktury. Postup najdete níže.",
+    "empty_other": "Schránku nastavuje správce firmy v Peníze → Bankovní účty, záložka Bankovní avíza a PDF z e-mailu. Postup, který mu můžete předat, najdete níže.",
+    "state_label": "Stav",
+    "state_active": "Doklady se načítají",
+    "state_invoices_off": "Faktury se nenačítají",
+    "state_disabled": "Schránka je vypnutá",
+    "last_scan_label": "Poslední načtení",
+    "last_scan_never": "Zatím neproběhlo",
+    "received_label": "Načteno za {days} dní",
+    "waiting_label": "Čeká na zpracování",
+    "accounts_title": "Schránky",
+    "account_ok": "V pořádku",
+    "account_error": "Chyba",
+    "account_disabled": "Vypnuto",
+    "account_invoices_off": "Faktury vypnuté",
+    "last_error": "Poslední načtení skončilo chybou: {message}",
+    "invoices_off_hint": "Schránka je nastavená, ale nemá zapnuté Načítat PDF faktury z příloh. Faktury z ní proto do Příchozích dokladů nepřijdou.",
+    "no_setup_permission": "Nastavení schránky mění správce firmy.",
+    "about_title": "K čemu to je",
+    "about": [
+      "Do firemní schránky vám chodí faktury od dodavatelů jako přílohy e-mailů. Místo ručního stahování a nahrávání si je aplikace ze schránky vyzvedne sama.",
+      "Každou PDF přílohu posoudí. Když jde o doklad pro vaši firmu, založí ho v Nákup → Příchozí doklady. Tam ho účetní zkontroluje, vytěží a zaúčtuje stejně jako doklad od klienta. Nic se samo nezaúčtuje.",
+      "Stejná schránka umí načítat i bankovní avíza a PDF výpisy. Ty do Příchozích dokladů nejdou, ukládají se rovnou do bankovních pohybů."
+    ],
+    "steps_title": "Jak to nastavit",
+    "steps": [
+      "Připravte e-mailovou adresu jen na doklady, například faktury{'@'}vasefirma.cz, nebo si do ní nastavte přeposílání faktur z jiné schránky. Tuto adresu pak dejte dodavatelům.",
+      "Zjistěte přístup ke schránce přes IMAP: server, port, uživatelské jméno a heslo. U Microsoft 365 se přihlašuje přes účet Microsoft. Údaje vám dá poskytovatel e-mailu nebo správce.",
+      "Klikněte na Nastavit e-mailovou schránku (Peníze → Bankovní účty, záložka Bankovní avíza a PDF z e-mailu) a založte Nový IMAP účet. Vyplňte údaje, vyberte složku a ověřte spojení tlačítkem Test.",
+      "U účtu zapněte Načítat PDF faktury z příloh a účet aktivujte. Pokud do schránky nechodí bankovní avíza, vypněte Načítat bankovní avíza.",
+      "Volitelně nastavte, co se má s e-mailem stát po zpracování: označit, přesunout do jiné složky, nebo nechat beze změny. Aplikace e-maily nemaže.",
+      "Hotovo. Nové doklady se objeví v Nákup → Příchozí doklady se zdrojem E-mail."
+    ],
+    "formats_title": "Co aplikace převezme",
+    "formats": [
+      "PDF faktury, zálohové faktury, dobropisy, účtenky a další doklady, v jejichž textu je IČO, DIČ nebo název vaší firmy.",
+      "PDF s vloženým ISDOC (strojově čitelná faktura) převezme vždy a údaje z něj se pak načtou přesně.",
+      "Přílohy do 20 MB, nejvýše 20 příloh z jedné zprávy."
+    ],
+    "formats_not_title": "Co nepřevezme",
+    "formats_not": [
+      "Samostatné soubory ISDOC a XML a obrázky (JPG, PNG). Ty nahrajte do Příchozích dokladů ručně.",
+      "Skenované PDF bez textu, protože v něm aplikace vaši firmu nenajde. Také ho nahrajte ručně.",
+      "Doklady pro jinou firmu a e-maily, které neprojdou ověřením odesílatele (DKIM/DMARC)."
+    ],
+    "when_title": "Jak často a co se stane s e-mailem",
+    "when": [
+      "Schránka se prochází automaticky zhruba každých 30 minut. Správce může načtení spustit i hned tlačítkem Spustit scan v nastavení schránky.",
+      "Při každém načtení se projdou nejnovější zprávy (výchozí limit je 50). Jednou posouzená příloha se znovu nezpracuje, takže stejný doklad nevznikne dvakrát.",
+      "Z e-mailu se nic neúčtuje. Vznikne jen doklad v Příchozích dokladech a originál PDF se uloží do Dokumentů, složka Příchozí doklady."
+    ],
+    "result_title": "Kde najdete výsledek",
+    "result": "Načtené doklady jsou v Nákup → Příchozí doklady. Ve filtru Zdroj zvolte E-mail. Jak dopadla každá příloha, i ta nepřevzatá, vidí správce v Peníze → Bankovní účty, záložka Bankovní avíza a PDF z e-mailu v tabulce PDF doklady z příloh.",
+    "troubles_title": "Typické potíže",
+    "troubles": [
+      "Poslední načtení skončilo chybou: v nastavení schránky zkontrolujte přihlašovací údaje a spojení ověřte tlačítkem Test.",
+      "Faktura nepřišla: v textu PDF chybí IČO, DIČ nebo název vaší firmy, nebo jde o sken bez textu. Nahrajte ji do Příchozích dokladů ručně.",
+      "E-mail byl odmítnut kvůli ověření odesílatele: přijímací server nepřidává výsledek kontroly DKIM/DMARC. Správce upraví ověření autenticity u schránky.",
+      "Nenačítají se žádné nebo jen staré zprávy: zkontrolujte vybranou složku a datum Zpracovat od data."
+    ]
   }
 }

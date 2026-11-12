@@ -152,11 +152,35 @@ export const portalPurchaseInvoiceSubmissionsApi = {
   downloadUrl: (id: number) => fileUrl(`/portal/purchase-invoice-submissions/${id}/download`),
 }
 
+export type PurchaseInvoiceSubmissionSource = PurchaseInvoiceSubmission['submitted_via']
+
+export interface EmailIntakeAccount {
+  id: number
+  name: string
+  enabled: boolean
+  ingest_pdf_invoices: boolean
+  ingest_pdf_statements: boolean
+  distribute_to_suppliers: boolean
+  last_scan_at: string | null
+  last_scan_status: 'ok' | 'error' | null
+  last_scan_message: string | null
+}
+
+export interface EmailIntakeStatus {
+  accounts: EmailIntakeAccount[]
+  active: boolean
+  days: number
+  received: number
+  waiting: number
+}
+
 export const purchaseInvoiceSubmissionsApi = {
-  list: (status?: PurchaseInvoiceSubmissionStatus) =>
+  list: (status?: PurchaseInvoiceSubmissionStatus, via?: PurchaseInvoiceSubmissionSource) =>
     api.get<PurchaseInvoiceSubmissionPage>('/purchase-invoice-submissions', {
-      params: status ? { status } : undefined,
+      params: status || via ? { ...(status ? { status } : {}), ...(via ? { via } : {}) } : undefined,
     }).then(r => r.data),
+  emailStatus: () =>
+    api.get<EmailIntakeStatus>('/purchase-invoice-submissions/email-status').then(r => r.data),
   /**
    * Doklad, který přišel mimo portál (e-mailem, papírově) — účetní ho vloží do fronty sama.
    * `distribute` pošle každý soubor do firmy podle odběratele (jen firmy s právem na příchozí doklady).

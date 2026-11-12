@@ -34,6 +34,7 @@ final class PurchaseInvoiceSubmissionAction
     use SubmitsDocumentOriginals;
 
     private const STATUSES = ['submitted', 'processing', 'needs_information', 'processed', 'rejected'];
+    private const SOURCES = ['portal', 'document_request', 'staff', 'email'];
 
     public function __construct(
         private readonly PurchaseInvoiceSubmissionRepository $submissions,
@@ -302,12 +303,15 @@ final class PurchaseInvoiceSubmissionAction
         $q = $request->getQueryParams();
         $status = isset($q['status']) && in_array((string) $q['status'], self::STATUSES, true)
             ? (string) $q['status'] : null;
+        $via = isset($q['via']) && in_array((string) $q['via'], self::SOURCES, true)
+            ? (string) $q['via'] : null;
         $supplierId = SupplierGuard::currentId($request);
         $page = $this->submissions->paginate(
             $supplierId,
             $status,
             (int) ($q['limit'] ?? 50),
             (int) ($q['offset'] ?? 0),
+            $via,
         );
         $page['items'] = $this->submissionDimensions->attach($supplierId, $page['items']);
         $page['items'] = $this->withMoveSuggestions($request, $supplierId, $page['items']);

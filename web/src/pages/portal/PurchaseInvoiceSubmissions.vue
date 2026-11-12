@@ -266,6 +266,7 @@ onBeforeUnmount(() => { context++; loadRequest++; dimensionRequest++ })
     <header>
       <h1 class="text-2xl font-semibold">{{ t('purchase_submissions.portal_title') }}</h1>
       <p class="text-sm text-neutral-500 mt-1">{{ t('purchase_submissions.portal_subtitle') }}</p>
+      <p class="text-sm text-neutral-500" data-testid="portal-after-submit">{{ t('purchase_submissions.portal_after_submit') }}</p>
     </header>
 
     <section v-if="auth.canWrite('documents.submit')" class="bg-surface border border-primary-500/30 rounded-lg shadow-sm p-5 space-y-4">

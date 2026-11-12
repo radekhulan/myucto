@@ -444,6 +444,8 @@ Hlavičku `Authentication-Results` si umí do těla zprávy vložit kdokoli. Dů
 
 Do schránky, kam chodí bankovní avíza, obvykle posílají faktury i dodavatelé. Přepínač **Načítat PDF faktury z příloh** proto u daného IMAP účtu zapne druhou, nezávislou větev zpracování: u každé nové zprávy se projdou PDF přílohy a ty, které projdou rozpoznáním, se založí jako podání ve frontě [Nákup → Příchozí doklady](23_Prijate_faktury.md).
 
+Jak načítání funguje a kolik dokladů z e-mailu přišlo, ukazuje stránka `Nákup → Doklady z e-mailu` ([§ 23.11.26](23_Prijate_faktury.md#231126-doklady-z-e-mailu)).
+
 Příloha projde, jen když splní **obě** podmínky:
 
 1. **Je to doklad** - v textu PDF je označení dokladu: faktura, daňový doklad, zálohová faktura, dobropis, účtenka, vyúčtování, splátkový kalendář, invoice.

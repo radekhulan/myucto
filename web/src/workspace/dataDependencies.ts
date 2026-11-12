@@ -98,7 +98,7 @@ const ROUTE_RULES: readonly RouteRule[] = [
   [/^invoices(?:\/\d+)?$/, ['sales']],
   [/^purchase-invoices\/(?:export|import|ai-import|renumber|payment-orders)$/, ['purchases'], 'manual'],
   [/^purchase-invoices\/\d+\/edit$/, ['purchases', 'clients'], 'manual'],
-  [/^(?:purchase-invoices(?:\/\d+|\/incoming)?|purchase-approvals)$/, ['purchases']],
+  [/^(?:purchase-invoices(?:\/\d+|\/incoming|\/email)?|purchase-approvals)$/, ['purchases']],
   [/^recurring\/\d+\/edit$/, ['recurring', 'clients'], 'manual'],
   [/^recurring(?:\/\d+)?$/, ['recurring']],
   [/^clients\/\d+\/edit$/, ['clients'], 'manual'],

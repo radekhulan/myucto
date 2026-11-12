@@ -790,6 +790,7 @@ final class Routes
         // scan-inbox je admin/accountant only (check v Action).
         $app->get    ('/api/purchase-invoice-submissions', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction::class, 'list']);
         $app->post   ('/api/purchase-invoice-submissions', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction::class, 'upload']);
+        $app->get    ('/api/purchase-invoice-submissions/email-status', \MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceEmailStatusAction::class);
         $app->post   ('/api/purchase-invoice-submissions/dimensions', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction::class, 'bulkDimensions']);
         $app->get    ('/api/purchase-invoice-submissions/{id:[0-9]+}', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionAction::class, 'get']);
         $app->get    ('/api/purchase-invoice-submissions/{id:[0-9]+}/preview', [\MyInvoice\Action\PurchaseInvoice\PurchaseInvoiceSubmissionFileAction::class, 'staffPreview']);

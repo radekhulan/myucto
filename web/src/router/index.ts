@@ -121,7 +121,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   // Export/Import vydaných (reorg UX 2026-07) — nav pod Prodej, viz AppLayout.vue.
   'invoices-export': ['invoices'], 'invoices-import': ['invoices'],
   'purchase-invoices': ['purchase_invoices'], 'purchase-invoices-payment-orders': ['purchase_invoices.payment_orders'],
-  'purchase-invoice-submissions': ['documents.inbox'],
+  'purchase-invoice-submissions': ['documents.inbox'], 'purchase-invoices-email': ['documents.inbox'],
   // Schvalovací schránka (F6): oprávnění lze přidělit i roli readonly, bez zápisu přijatých faktur.
   'purchase-approvals': ['purchase_invoices.approve'],
   'purchase-invoice-new': ['purchase_invoices.create', 'write'], 'purchase-invoice-detail': ['purchase_invoices'], 'purchase-invoice-edit': ['purchase_invoices', 'write'],

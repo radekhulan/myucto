@@ -514,6 +514,7 @@ const navSections = computed<NavSection[]>(() => {
         // 1) Doklady a jejich pořízení.
         { to: '/purchase-invoices',          label: t('nav.purchase_invoices'),  icon: ICONS.purchase, newTo: '/purchase-invoices/new' },
         { to: '/purchase-invoices/incoming', label: t('nav.incoming_documents'), icon: ICONS.documents, permission: 'documents.inbox' as PermissionKey },
+        { to: '/purchase-invoices/email', label: t('nav.email_documents'), icon: ICONS.email, permission: 'documents.inbox' as PermissionKey },
         // AI import přijaté faktury (§12b) — denní operativa účetní (nahrát PDF → draft PF);
         // nastavení AI brány (klíče, DPA) zůstává v adminu (Firma → AI nastavení).
         // Samostatné oprávnění extrakce zrcadlí backend; readonly ji nevidí.

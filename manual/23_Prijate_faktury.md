@@ -32,6 +32,7 @@ Oproti vystaveným fakturám se liší takto:
 |---|---|---|
 | průběžně | Zadat nově došlé faktury | `Nákup → Přijaté faktury`, postup v [§ 23.3](#233-krok-za-krokem-zadat-prijatou-fakturu) |
 | průběžně | Zpracovat doklady z fronty (portál, e-mail) | `Nákup → Příchozí doklady`, postup v [§ 23.5](#235-krok-za-krokem-zpracovat-prichozi-doklady) |
+| jednou | Nastavit načítání faktur z e-mailové schránky | `Nákup → Doklady z e-mailu`, postup v [§ 23.11.26](#231126-doklady-z-e-mailu) |
 | před splatností | Zaplatit faktury, hromadně nebo přes QR | [§ 23.6](#236-krok-za-krokem-zaplatit-fakturu), hromadně [Platební příkazy](26_Platebni_prikazy.md) |
 | po přijetí a uhrazení | Zaúčtovat doklady do deníku | detail faktury nebo seznam, postup v [§ 23.7](#237-krok-za-krokem-zauctovat-fakturu) |
 | po uzávěrce měsíce | Předat doklady účetní | [Export přijatých](24_Export_prijatych.md) |
@@ -147,7 +148,7 @@ upravit bez administrátorského zásahu.
 
 ## 23.5 Krok za krokem: zpracovat příchozí doklady
 
-1. Otevřete `Nákup → Příchozí doklady`.
+1. Otevřete `Nákup → Příchozí doklady`. Stránka je pracovní fronta účetní. Klient sem nechodí, doklady předává v `Dokumenty → Předat doklady účetní` a odtud se objeví tady.
 2. Doklady do fronty dostanete z klientského portálu, e-mailem nebo je nahrajete sami tlačítkem **Nahrát do fronty**. Vedle něj je tlačítko **Vyfotit**: na telefonu a tabletu vyfotí doklad fotoaparátem, na počítači s připojenou kamerou otevře živý náhled z webkamery (bez kamery se tlačítko na počítači neukáže). Na fotce doklad najde a navrhne ořez (rohy jdou v náhledu posunout, ořez jde vypnout a nahrát celou fotku), doklad narovná a zmenší (zhruba do 150 kB) a po potvrzení ho nahraje stejně jako ostatní soubory. Ořez i zmenšení proběhnou v prohlížeči, fotka nikam jinam neodchází. Nejlépe se doklad najde na tmavém podkladu. Stejné tlačítko je u nahrání přílohy v editoru nové přijaté faktury. Stejná obrazovka s návrhem ořezu se otevře i na fotku, kterou vyberete ze souborů nebo přetáhnete do nahrávacího pole — ořez v ní jde vypnout a nahrát celou fotku. U více fotek najednou nabídne **Přeskočit ořez u ostatních**, které zbývající fotky nahraje beze změny. Na počítači se při výběru více než tří fotek ořez nenabízí.
 3. U dokladu zvolte, jak ho zpracovat: vytěžit přes ISDOC nebo AI, přepsat ručně, odmítnout, nebo klienta požádat o náhradu.
 4. Patří-li doklad jiné vaší firmě, klikněte na **Přesunout do …** u navržené firmy, nebo na **Přesunout do jiné firmy** a firmu vyberte.
@@ -429,6 +430,13 @@ Do fronty vede několik cest:
 | **Nahrát do fronty** přímo na stránce Příchozí doklady, až 5000 souborů najednou, nahrávají se postupně a tlačítko ukazuje průběh | účetní u dokladů, které přišly mimo portál (e-mailem, papírově) |
 | **Nahrát účtenku** u platby kartou bez dokladu, když není AI nebo vytěžení selže | účetní, doklad je rovnou navázaný na platbu kartou |
 | Příloha e-mailu z IMAP schránky, i ze schránky jiné firmy, která rozděluje doklady mezi firmy ([§ 30.11.19](30_Bankovni_ucty.md#301119-jedna-schranka-pro-vice-firem)) | automaticky při skenu schránky |
+
+Filtrem **Zdroj** nad seznamem zobrazíte jen doklady z jedné cesty: **Od klienta (portál)**, **Na vyžádání**,
+**Nahráno ručně** nebo **E-mail**. Odkaz ze stránky `Nákup → Doklady z e-mailu` otevře frontu rovnou se zdrojem E-mail.
+
+Stránka je určená účetní. Nahoře to připomíná informační rámeček s odkazem na předání dokladů klientem
+(`Dokumenty → Předat doklady účetní`, vidí ho jen uživatel s právem předávat doklady) a na stránku
+[Doklady z e-mailu](#231126-doklady-z-e-mailu).
 
 Účetní tak nemusí čekat na klienta: co dostane e-mailem nebo naskenuje, vloží do fronty sama a zpracuje to stejným
 postupem. Při zapnutých dimenzích jde při nahrání zvolit i středisko (a další dimenze), propíše se do hlavičky
@@ -1305,6 +1313,63 @@ aplikace řekne, že shodný doklad existuje a je stornovaný, a nabídne:
 Při vytěžení (AI import), skenování složky a zpracování příchozích dokladů se stornovaný doklad za duplikát nepovažuje: ze
 stejného souboru nebo se stejným číslem vznikne nový doklad. Nestornovaný doklad se stejným souborem nebo číslem a datem
 import dál zastaví a ukáže jeho číslo.
+
+### 23.11.26 Doklady z e-mailu
+
+Stránka `Nákup → Doklady z e-mailu` vysvětluje, jak si aplikace sama vyzvedává faktury z e-mailové schránky,
+a ukazuje, jak načítání právě funguje. Vidí ji každý, kdo má oprávnění k příchozím dokladům.
+
+**K čemu to je.** Dodavatelé posílají faktury jako přílohy e-mailů. Když firma nastaví IMAP schránku a zapne u ní
+**Načítat PDF faktury z příloh**, aplikace schránku zhruba každých 30 minut projde, posoudí PDF přílohy
+a doklady pro vaši firmu založí v `Nákup → Příchozí doklady` se zdrojem **E-mail**. Tam je účetní zpracuje stejně
+jako doklady z portálu. Z e-mailu se nic samo nezaúčtuje. Stejná schránka může načítat i bankovní avíza a PDF
+výpisy, ty se ale ukládají do banky, ne do příchozích dokladů.
+
+**Postup nastavení:**
+
+1. Připravte e-mailovou adresu jen na doklady (například `faktury@vasefirma.cz`), nebo si do ní nastavte přeposílání
+   faktur z jiné schránky. Adresu dejte dodavatelům.
+2. Zjistěte přístup ke schránce přes IMAP: server, port, uživatelské jméno a heslo. U Microsoft 365 se přihlašuje přes
+   účet Microsoft ([§ 96.7.1](96_Nastaveni.md#9671-pripojeni-schranky-microsoft-365-pres-imap)).
+3. Na stránce klikněte na **Nastavit e-mailovou schránku**. Otevře se `Peníze → Bankovní účty`, záložka
+   **Bankovní avíza a PDF z e-mailu**. Založte **Nový IMAP účet**, vyplňte údaje, vyberte složku a spojení ověřte
+   tlačítkem **Test** ([§ 30.7](30_Bankovni_ucty.md#307-krok-za-krokem-nacitani-bankovnich-aviz-z-e-mailu)).
+4. Zapněte **Načítat PDF faktury z příloh** a účet aktivujte. Nechodí-li do schránky bankovní avíza, vypněte
+   **Načítat bankovní avíza**.
+5. Volitelně nastavte, co se má s e-mailem po zpracování stát (označit, přesunout do složky, nechat beze změny).
+   Aplikace e-maily nemaže.
+
+Tlačítko **Nastavit e-mailovou schránku** vidí jen správce firmy s právem zápisu k importu banky. Ostatní uživatelé
+na stránce najdou jen vysvětlení a přehled, nastavení jim zařídí správce.
+
+**Přehled na stránce:**
+
+| Údaj | Význam |
+|---|---|
+| **Stav** | **Doklady se načítají** (schránka je aktivní a má zapnuté načítání faktur), **Faktury se nenačítají** (aktivní schránka bez načítání faktur), **Schránka je vypnutá** |
+| **Poslední načtení** | Kdy se schránka naposledy prošla. Skončilo-li načtení chybou, stránka ji vypíše. |
+| **Načteno za 30 dní** | Počet dokladů, které z e-mailu dorazily do příchozích dokladů této firmy za posledních 30 dní |
+| **Čeká na zpracování** | Doklady z e-mailu, které ve frontě ještě nikdo nezpracoval |
+
+Tlačítko **Zobrazit doklady z e-mailu** otevře příchozí doklady filtrované na zdroj E-mail. Má-li firma víc schránek,
+stránka u každé ukáže čas posledního načtení a stav. Bez nastavené schránky ukáže jen vysvětlení a postup.
+
+**Co aplikace převezme:** PDF faktury, zálohové faktury, dobropisy, účtenky a další doklady, v jejichž textu je
+IČO, DIČ nebo název vaší firmy, a vždy PDF s vloženým ISDOC. Přílohy do 20 MB, nejvýše 20 z jedné zprávy.
+
+**Co nepřevezme:** samostatné soubory ISDOC a XML, obrázky (JPG, PNG), skenované PDF bez textu, doklady pro jinou
+firmu a e-maily, které neprojdou ověřením odesílatele (DKIM/DMARC). Takové doklady nahrajte do příchozích dokladů ručně.
+Pravidla rozpoznání jsou v [§ 30.11.10](30_Bankovni_ucty.md#301110-nacitani-pdf-faktur-z-priloh).
+
+**Typické potíže:**
+
+<!-- cols: 34 66 -->
+| Co vidíte | Co udělat |
+|---|---|
+| Poslední načtení skončilo chybou | V nastavení schránky zkontrolujte přihlašovací údaje a spojení ověřte tlačítkem **Test**. |
+| Stav **Faktury se nenačítají** | U IMAP účtu zapněte **Načítat PDF faktury z příloh**. |
+| Faktura nepřišla | V textu PDF chybí IČO, DIČ nebo název vaší firmy, nebo jde o sken bez textu. Výsledek každé přílohy vidí správce v tabulce **PDF doklady z příloh**. Doklad nahrajte ručně. |
+| Nenačítají se žádné nebo jen staré zprávy | Zkontrolujte vybranou složku a **Zpracovat od data**. |
 
 ## 23.12 Související kapitoly
 

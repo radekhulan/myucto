@@ -18,11 +18,11 @@ vi.mock('@/stores/supplier', async () => {
   m.supplier = reactive(m.supplier)
   return { useSupplierStore: () => m.supplier }
 })
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: m.canWrite }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: m.canWrite, canRead: () => true }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: m.success, error: m.error, warning: vi.fn() }) }))
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: Error) => e.message }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }), useRoute: () => ({ query: {} }) }))
 vi.mock('@/composables/useDimensions', () => ({
   useDimensions: () => ({ canEdit: { value: false }, documentTypes: { value: [] }, load: vi.fn() }),
 }))

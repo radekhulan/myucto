@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   purchaseInvoiceSubmissionsApi,
   type PurchaseInvoiceSubmission,
   type PurchaseInvoiceSubmissionKindHint,
+  type PurchaseInvoiceSubmissionSource,
   type PurchaseInvoiceSubmissionStatus,
   type SubmissionMoveTargets,
   type SubmissionUploadResult,
@@ -28,6 +29,7 @@ import type { DimensionMap } from '@/api/dimensions'
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
 const toast = useToast()
@@ -37,6 +39,11 @@ const preview = useSidePreview('purchase_invoices', 'inbox_preview_open', { defa
 const items = ref<PurchaseInvoiceSubmission[]>([])
 const selected = ref<PurchaseInvoiceSubmission | null>(null)
 const status = ref<PurchaseInvoiceSubmissionStatus | ''>('submitted')
+const SOURCES: PurchaseInvoiceSubmissionSource[] = ['portal', 'document_request', 'staff', 'email']
+const initialSource = String(route.query.source ?? '')
+const source = ref<PurchaseInvoiceSubmissionSource | ''>(
+  (SOURCES as string[]).includes(initialSource) ? initialSource as PurchaseInvoiceSubmissionSource : '',
+)
 const reason = ref('')
 const loading = ref(true)
 const acting = ref(false)
@@ -61,6 +68,7 @@ const ALLOWED_FILES = '.pdf,.jpg,.jpeg,.png,.isdoc,.xml,.isdocx,application/pdf,
 const MAX_FILE_BYTES = 50 * 1024 * 1024
 
 const canWrite = computed(() => auth.canWrite('documents.inbox'))
+const canOpenPortal = computed(() => auth.canRead('documents.submit'))
 const canCreateInvoice = computed(() => auth.canWrite('purchase_invoices.create'))
 const canDelete = computed(() => auth.canWrite('documents.inbox.delete'))
 /** U dokladu, který si účetní nahrála sama, není komu psát „co doplnit". */
@@ -288,7 +296,7 @@ async function load(keepSelection = true) {
   loading.value = true
   error.value = ''
   try {
-    const page = await purchaseInvoiceSubmissionsApi.list(status.value || undefined)
+    const page = await purchaseInvoiceSubmissionsApi.list(status.value || undefined, source.value || undefined)
     if (currentContext !== context || request !== loadRequest) return
     items.value = page.items
     const present = new Set(items.value.map(i => i.id))
@@ -523,7 +531,7 @@ function kindLabel(item: PurchaseInvoiceSubmission): string {
 }
 
 onMounted(() => { void load(false); void dims.load() })
-watch(status, () => { selected.value = null; checkedIds.value = new Set(); void load(false) })
+watch([status, source], () => { selected.value = null; checkedIds.value = new Set(); void load(false) })
 watch(() => selected.value?.id, () => { reason.value = ''; moveOpen.value = false; moveTargets.value = null })
 watch(() => supplierStore.currentSupplierId, () => {
   context++
@@ -543,18 +551,43 @@ onBeforeUnmount(() => { context++; loadRequest++ })
         <h1 class="text-2xl font-semibold">{{ t('purchase_submissions.inbox_title') }}</h1>
         <p class="text-sm text-neutral-500 mt-1">{{ t('purchase_submissions.inbox_subtitle') }}</p>
       </div>
-      <label class="text-sm text-neutral-700 whitespace-nowrap">
-        <span class="mr-2">{{ t('purchase_submissions.filter_status') }}</span>
-        <select v-model="status" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface">
-          <option value="">{{ t('common.all') }}</option>
-          <option value="submitted">{{ t('purchase_submissions.status.submitted') }}</option>
-          <option value="processing">{{ t('purchase_submissions.status.processing') }}</option>
-          <option value="needs_information">{{ t('purchase_submissions.status.needs_information') }}</option>
-          <option value="processed">{{ t('purchase_submissions.status.processed') }}</option>
-          <option value="rejected">{{ t('purchase_submissions.status.rejected') }}</option>
-        </select>
-      </label>
+      <div class="flex flex-wrap items-center gap-3">
+        <label class="text-sm text-neutral-700 whitespace-nowrap">
+          <span class="mr-2">{{ t('purchase_submissions.filter_source') }}</span>
+          <select v-model="source" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface" data-testid="inbox-source">
+            <option value="">{{ t('common.all') }}</option>
+            <option v-for="s in SOURCES" :key="s" :value="s">{{ t(`purchase_submissions.source.${s}`) }}</option>
+          </select>
+        </label>
+        <label class="text-sm text-neutral-700 whitespace-nowrap">
+          <span class="mr-2">{{ t('purchase_submissions.filter_status') }}</span>
+          <select v-model="status" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option value="submitted">{{ t('purchase_submissions.status.submitted') }}</option>
+            <option value="processing">{{ t('purchase_submissions.status.processing') }}</option>
+            <option value="needs_information">{{ t('purchase_submissions.status.needs_information') }}</option>
+            <option value="processed">{{ t('purchase_submissions.status.processed') }}</option>
+            <option value="rejected">{{ t('purchase_submissions.status.rejected') }}</option>
+          </select>
+        </label>
+      </div>
     </header>
+
+    <div class="flex items-start gap-2 rounded-md bg-primary-50 border border-primary-200 px-3 py-2.5 text-sm text-primary-800" data-testid="inbox-role-info">
+      <svg class="w-5 h-5 flex-shrink-0 mt-0.5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
+      <div class="min-w-0 space-y-1">
+        <p class="font-medium">{{ t('purchase_submissions.role_title') }}</p>
+        <p>{{ t('purchase_submissions.role_text') }}</p>
+        <p class="flex flex-wrap gap-x-4 gap-y-1">
+          <RouterLink v-if="canOpenPortal" to="/portal/purchase-invoice-submissions" class="text-primary-700 underline hover:text-primary-900" data-testid="inbox-role-portal">
+            {{ t('purchase_submissions.role_link_portal') }}
+          </RouterLink>
+          <RouterLink to="/purchase-invoices/email" class="text-primary-700 underline hover:text-primary-900" data-testid="inbox-role-email">
+            {{ t('purchase_submissions.role_link_email') }}
+          </RouterLink>
+        </p>
+      </div>
+    </div>
 
     <section v-if="canWrite" class="bg-surface border border-primary-500/30 rounded-lg shadow-sm p-5 space-y-4">
       <div class="flex items-start gap-3">

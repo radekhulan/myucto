@@ -47,6 +47,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'purchase-invoices',                 name: 'purchase-invoices',        component: () => import('@/pages/purchase-invoices/InvoiceList.vue'), meta: {  } },
       { path: 'purchase-approvals',                 name: 'purchase-approvals',       component: () => import('@/pages/purchase-invoices/Approvals.vue'), meta: { requiresSupplier: true } },
       { path: 'purchase-invoices/incoming',        name: 'purchase-invoice-submissions', component: () => import('@/pages/purchase-invoices/IncomingDocuments.vue'), meta: { requiresSupplier: true } },
+      { path: 'purchase-invoices/email',           name: 'purchase-invoices-email', component: () => import('@/pages/purchase-invoices/EmailDocuments.vue'), meta: { requiresSupplier: true } },
       // Export/Import přijatých (reorg UX 2026-07) — nav pod Nákup; sdílená stránka
       // DataExchange.vue jen vybere ExportPurchase/ImportPurchase dle props.
       {

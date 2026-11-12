@@ -64,7 +64,7 @@ final class PurchaseInvoiceSubmissionRepository
     public function __construct(private readonly Connection $db) {}
 
     /** @return array{items:list<array<string,mixed>>,total:int} */
-    public function paginate(int $supplierId, ?string $status, int $limit, int $offset): array
+    public function paginate(int $supplierId, ?string $status, int $limit, int $offset, ?string $via = null): array
     {
         $where = ' WHERE s.supplier_id = ?';
         $params = [$supplierId];
@@ -74,6 +74,10 @@ final class PurchaseInvoiceSubmissionRepository
         } elseif ($status !== null && $status !== '') {
             $where .= ' AND s.status = ?';
             $params[] = $status;
+        }
+        if ($via !== null && $via !== '') {
+            $where .= ' AND s.submitted_via = ?';
+            $params[] = $via;
         }
 
         $limit = max(1, min(100, $limit));
@@ -90,6 +94,37 @@ final class PurchaseInvoiceSubmissionRepository
         return [
             'items' => array_map([$this, 'hydrate'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []),
             'total' => (int) $count->fetchColumn(),
+        ];
+    }
+
+    /**
+     * Doklady převzaté z e-mailu: kolik jich přišlo od `$since` a kolik čeká na
+     * zpracování. Výčet stavů drží dotaz na indexu fronty (firma, stav, převzetí).
+     *
+     * @return array{received:int,waiting:int}
+     */
+    public function emailIntakeStats(int $supplierId, string $since): array
+    {
+        $received = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM purchase_invoice_submissions s
+              WHERE s.supplier_id = ?
+                AND s.status IN ('submitted','processing','needs_information','processed','rejected')
+                AND s.created_at >= ?
+                AND s.submitted_via = 'email'"
+        );
+        $received->execute([$supplierId, $since]);
+
+        $waiting = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM purchase_invoice_submissions s
+              WHERE s.supplier_id = ?
+                AND (s.status = 'submitted' OR " . self::STALE_PROCESSING_SQL . ")
+                AND s.submitted_via = 'email'"
+        );
+        $waiting->execute([$supplierId]);
+
+        return [
+            'received' => (int) $received->fetchColumn(),
+            'waiting' => (int) $waiting->fetchColumn(),
         ];
     }
 

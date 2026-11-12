@@ -2189,7 +2189,8 @@
     "property_charges": "Charge components and rates",
     "internal_documents": "Internal documents",
     "quick_internal_document": "Internal document",
-    "payroll_month_guide": "Month guide"
+    "payroll_month_guide": "Month guide",
+    "email_documents": "Documents from email"
   },
   "migration_nonprofit_notice": {
     "title": "Data transfer has not been verified for non-profit organisations",
@@ -15529,7 +15530,19 @@
       "needs_information": "Awaiting information",
       "processed": "Processed",
       "rejected": "Rejected"
-    }
+    },
+    "role_title": "This is where the accountant processes received documents",
+    "role_text": "Incoming documents are the accountant's work queue: here you extract a purchase invoice from a document, ask for missing details, or reject it. Clients do not work here. They hand over their documents in Documents → Send documents to accountant, and the documents then appear here.",
+    "role_link_portal": "Send documents to accountant",
+    "role_link_email": "Documents from email",
+    "filter_source": "Source",
+    "source": {
+      "portal": "From client (portal)",
+      "document_request": "On request",
+      "staff": "Uploaded manually",
+      "email": "Email"
+    },
+    "portal_after_submit": "Your accountant will then process the documents. You can see the status of each document in the list below."
   },
   "portfolio": {
     "title": "Companies overview",
@@ -43665,5 +43678,75 @@
       "bank_account": "The bank entry series is changed on the bank account.",
       "none": "The format of this series does not change."
     }
+  },
+  "purchase_email": {
+    "title": "Documents from email",
+    "subtitle": "Invoices your suppliers send by email are collected from the mailbox automatically and prepared for processing.",
+    "setup_action": "Set up email mailbox",
+    "open_inbox": "Show documents from email",
+    "status_title": "Overview",
+    "status_failed": "The overview could not be loaded.",
+    "retry": "Try again",
+    "empty_title": "No email mailbox is set up yet",
+    "empty_admin": "Set up the mailbox your suppliers send invoices to. See the steps below.",
+    "empty_other": "The mailbox is set up by the company administrator in Money → Bank accounts, tab Bank notices and PDFs from e-mail. You can pass the steps below to them.",
+    "state_label": "Status",
+    "state_active": "Collecting documents",
+    "state_invoices_off": "Invoices are not collected",
+    "state_disabled": "Mailbox is disabled",
+    "last_scan_label": "Last check",
+    "last_scan_never": "Not yet",
+    "received_label": "Received in {days} days",
+    "waiting_label": "Waiting for processing",
+    "accounts_title": "Mailboxes",
+    "account_ok": "OK",
+    "account_error": "Error",
+    "account_disabled": "Disabled",
+    "account_invoices_off": "Invoices off",
+    "last_error": "The last check failed: {message}",
+    "invoices_off_hint": "The mailbox is set up but Import PDF invoices from attachments is off, so its invoices will not reach Incoming documents.",
+    "no_setup_permission": "The mailbox settings are managed by the company administrator.",
+    "about_title": "What it is for",
+    "about": [
+      "Suppliers send invoices to your company mailbox as email attachments. Instead of downloading and uploading them by hand, the app collects them from the mailbox itself.",
+      "Each PDF attachment is checked. If it is a document for your company, it is added to Purchases → Incoming documents. There the accountant reviews, extracts and posts it just like a document from a client. Nothing is posted automatically.",
+      "The same mailbox can also load bank notices and PDF statements. Those do not go to Incoming documents but straight to bank transactions."
+    ],
+    "steps_title": "How to set it up",
+    "steps": [
+      "Prepare an email address just for documents, for example invoices{'@'}yourcompany.com, or forward invoices to it from another mailbox. Give this address to your suppliers.",
+      "Get IMAP access to the mailbox: server, port, user name and password. Microsoft 365 uses a Microsoft sign-in. Your email provider or administrator will give you the details.",
+      "Click Set up email mailbox (Money → Bank accounts, tab Bank notices and PDFs from e-mail) and create a New IMAP account. Fill in the details, choose the folder and check the connection with Test.",
+      "Turn on Import PDF invoices from attachments and activate the account. If no bank notices arrive in the mailbox, turn off Read bank notifications.",
+      "Optionally choose what happens to the email after processing: flag it, move it to another folder or leave it as it is. The app never deletes emails.",
+      "Done. New documents appear in Purchases → Incoming documents with the source Email."
+    ],
+    "formats_title": "What the app collects",
+    "formats": [
+      "PDF invoices, advance invoices, credit notes, receipts and other documents whose text contains your company ID, VAT ID or company name.",
+      "PDFs with embedded ISDOC (machine-readable invoice) are always collected and their data is then read exactly.",
+      "Attachments up to 20 MB, at most 20 attachments per message."
+    ],
+    "formats_not_title": "What it does not collect",
+    "formats_not": [
+      "Standalone ISDOC and XML files and images (JPG, PNG). Upload them to Incoming documents by hand.",
+      "Scanned PDFs without text, because the app cannot find your company in them. Upload them by hand too.",
+      "Documents for another company and emails that fail sender verification (DKIM/DMARC)."
+    ],
+    "when_title": "How often, and what happens to the email",
+    "when": [
+      "The mailbox is checked automatically about every 30 minutes. An administrator can also start a check right away with Run scan in the mailbox settings.",
+      "Each check goes through the newest messages (50 by default). An attachment that has been assessed once is not processed again, so the same document is never created twice.",
+      "Nothing is posted from email. Only a document in Incoming documents is created and the original PDF is stored in Documents, folder Incoming documents."
+    ],
+    "result_title": "Where to find the result",
+    "result": "Collected documents are in Purchases → Incoming documents. Choose Email in the Source filter. The result for every attachment, including skipped ones, is visible to the administrator in Money → Bank accounts, tab Bank notices and PDFs from e-mail in the PDF documents from attachments table.",
+    "troubles_title": "Common problems",
+    "troubles": [
+      "The last check failed: check the sign-in details in the mailbox settings and verify the connection with Test.",
+      "An invoice did not arrive: the PDF text lacks your company ID, VAT ID or name, or it is a scan without text. Upload it to Incoming documents by hand.",
+      "An email was rejected by sender verification: the receiving server does not add the DKIM/DMARC result. The administrator adjusts the authenticity check for the mailbox.",
+      "No messages or only old ones are loaded: check the selected folder and the Process from date setting."
+    ]
   }
 }

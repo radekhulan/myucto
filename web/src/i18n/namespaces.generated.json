@@ -149,6 +149,7 @@
     "propertySetup",
     "publicReceipt",
     "public_holidays",
+    "purchase_email",
     "purchase_invoice",
     "purchase_submissions",
     "recovery_codes",
@@ -438,6 +439,9 @@
       "dimensions",
       "purchase_invoice",
       "purchase_submissions"
+    ],
+    "purchase-invoices-email": [
+      "purchase_email"
     ],
     "purchase-invoices-export": [
       "aiGateway",
