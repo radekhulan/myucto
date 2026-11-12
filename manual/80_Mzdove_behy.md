@@ -243,11 +243,17 @@ období. U schváleného běhu vede cesta přes **Vyžádat opravu**
 
 Jedna osoba v ruční kontrole (chybí zdravotní pojišťovna, podmínky vztahu nebo
 hodnoty pro srážky) zastaví schválení celého běhu. Nechcete-li kvůli ní
-odkládat výplatu ostatním:
+odkládat výplatu ostatním, nebo chcete osobu vyřadit z jiného důvodu (sporné
+hodiny, chybějící podklad):
 
-1. U blokace osoby v kontrolách běhu klikněte na **Vyřadit osobu z běhu**.
-2. Napište důvod (co chybí a kdy se doplní) a potvrďte. Běh dostane novou
-   revizi bez této osoby a hned se přepočítá.
+1. U blokace osoby v kontrolách běhu klikněte na **Vyřadit osobu z běhu**,
+   nebo v tabulce **Zaměstnanci v běhu** (tlačítko **Zobrazit rozpad podle
+   zaměstnanců** na kartě spočítaného běhu) klikněte u osoby na **Vyřadit
+   z běhu**. Tabulka tlačítko nabízí jen v běžné revizi, která ještě není
+   schválená.
+2. Napište důvod (aspoň 10 znaků: co chybí a kdy se doplní) a potvrďte. Běh
+   dostane novou revizi bez této osoby a hned se přepočítá; potvrzení uvede
+   číslo nové revize.
 3. Schvalte běh obvyklým postupem.
 4. Až údaje doplníte, klikněte na **Vyžádat opravu** a **Otevřít opravu**.
    Opravná revize osobu zase obsahuje; po schválení dostane mzdu za stejné
@@ -286,6 +292,10 @@ pro JMHZ. Aplikace nabízí tři hromadné akce.
 **Výchozí zákonná evidence** (daňová rezidence, příslušnost k pojištění):
 
 1. U blokace na kartě běhu klikněte na **Doplnit výchozí údaje (N osob)**.
+   Tlačítko v kontrole před během nabídne všechny osoby běhu, kterým se
+   výchozí údaj doplní: ty, kterým chybějící údaj zastaví výpočet, i ty, kterým
+   chybí jen údaj pro měsíční hlášení JMHZ (například příslušnost k pojištění
+   u dohody bez účasti). Platnost je předvyplněná od měsíce běhu.
    Totéž je v `Mzdy → Zaměstnanci → Další funkce` pod **Doplnit výchozí zákonné údaje**;
    tam zvolíte měsíc, od kterého údaje platí. Předvyplněný je měsíc nejstaršího
    mzdového běhu, který ještě není schválený (z kontroly běhu měsíc běhu).

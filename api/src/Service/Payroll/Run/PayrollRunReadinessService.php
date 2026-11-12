@@ -18,6 +18,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
 use MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\PayrollOpeningBalanceService;
+use MyInvoice\Service\Payroll\PayrollStatutoryEvidenceBulkDefaults;
 use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry;
@@ -135,6 +136,7 @@ final class PayrollRunReadinessService
         // Nulové počáteční úhrny, které doplní založení běhu.
         private readonly PayrollOpeningBalanceService $openingBalances,
         private readonly PayrollRunCalculationPipeline $calculation,
+        private readonly PayrollStatutoryEvidenceBulkDefaults $statutoryBulk,
     ) {}
 
     /**
@@ -360,6 +362,9 @@ final class PayrollRunReadinessService
         if ($pendingValuesFinding !== null) {
             $findings[] = $pendingValuesFinding;
         }
+        if ($snapshot !== null) {
+            $findings = $this->withRunStatutoryDefaults($supplierId, $periodStart, $snapshot->data, $findings);
+        }
         // Jednotný tvar nálezu: co nepochází z katalogu skrytí, skrýt nejde.
         $findings = array_map(
             static function (array $finding): array {
@@ -454,6 +459,46 @@ final class PayrollRunReadinessService
             1,
             [],
         );
+    }
+
+    /**
+     * @param array<string,mixed> $snapshotData
+     * @param list<array<string,mixed>> $findings
+     * @return list<array<string,mixed>>
+     */
+    private function withRunStatutoryDefaults(int $supplierId, string $periodStart, array $snapshotData, array $findings): array
+    {
+        if (!in_array('statutory_calculation_manual_review', array_column($findings, 'code'), true)) {
+            return $findings;
+        }
+        $runPeople = [];
+        foreach ((array) ($snapshotData['people'] ?? []) as $person) {
+            $id = is_array($person) && is_array($person['employee'] ?? null) ? (int) ($person['employee']['id'] ?? 0) : 0;
+            if ($id > 0) {
+                $runPeople[$id] = $id;
+            }
+        }
+        if ($runPeople === []) {
+            return $findings;
+        }
+        try {
+            $ready = $this->statutoryBulk->preview($supplierId, $periodStart, array_values($runPeople))['ready_employee_ids'];
+        } catch (\Throwable) {
+            return $findings;
+        }
+        $ready = array_values(array_map('intval', (array) $ready));
+        foreach ($findings as &$finding) {
+            if (($finding['code'] ?? null) !== 'statutory_calculation_manual_review') {
+                continue;
+            }
+            $ids = array_values(array_unique([...($finding['bulk_ids']['statutory_defaults'] ?? []), ...$ready]));
+            sort($ids);
+            $finding['bulk_ids']['statutory_defaults'] = $ids;
+            $finding['bulk_totals']['statutory_defaults'] = count($ids);
+        }
+        unset($finding);
+
+        return $findings;
     }
 
     /**

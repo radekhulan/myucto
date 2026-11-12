@@ -312,7 +312,7 @@ zaokrouhluje nahoru. Vstup s haléři u složky zařazené do hlášení (typick
 provize nebo příplatek z importu docházky) proto mzdový běh hlásí jako blokující
 kontrolu ještě před schválením, s výčtem vstupů a odkazem sem. Tlačítko
 zaokrouhlí haléřové vstupy období (případně jen zúženého vztahu) nahoru, a to
-koncepty i schválené vstupy; schválené jen uživatel s právem schvalovat vstupy.
+koncepty i schválené vstupy, až je potvrdíte v dialogu; schválené jen uživatel s právem schvalovat vstupy.
 Dva vstupy téže složky, jejichž součet vyjde na celé koruny, nemění. Vstupy
 uzamčené během, vypočtené vstupy (hodinová mzda, pravidelná složka, náhrada)
 a vstupy navázané na vyúčtování cesty zůstanou beze změny a pod lištou je
