@@ -6,6 +6,11 @@ const m = vi.hoisted(() => ({
   prepare: vi.fn(),
   defaults: vi.fn(),
   canWrite: vi.fn(() => true),
+  query: {} as Record<string, string>,
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: m.query }),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -72,6 +77,7 @@ function mountPanel() {
 describe('PayrollRegistrationA1BatchPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.query = {}
     m.canWrite.mockReturnValue(true)
     m.candidates.mockResolvedValue({
       from: '2026-11-01',
@@ -210,5 +216,19 @@ describe('PayrollRegistrationA1BatchPanel', () => {
     const wrapper = mountPanel()
     await flushPromises()
     expect(wrapper.find('[data-test="registration-a1-defaults"]').exists()).toBe(false)
+  })
+
+  it('opens on the period from the link (period=YYYY-MM)', async () => {
+    m.query = { period: '2026-02' }
+    mountPanel()
+    await flushPromises()
+    expect(m.candidates).toHaveBeenCalledWith('test', { from: '2026-02-01', to: '2026-02-28' })
+  })
+
+  it('prefers explicit from and to in the link and ignores malformed values', async () => {
+    m.query = { from: '2026-12-01', to: 'konec', period: '2026-11' }
+    mountPanel()
+    await flushPromises()
+    expect(m.candidates).toHaveBeenCalledWith('test', { from: '2026-12-01', to: '2026-11-30' })
   })
 })

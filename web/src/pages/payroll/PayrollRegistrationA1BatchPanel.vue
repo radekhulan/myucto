@@ -10,6 +10,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import {
   payrollApi,
   type PayrollRegistrationA1Defaults,
@@ -23,6 +24,7 @@ import { useAuthStore } from '@/stores/auth'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate } from '@/composables/useFormat'
 import DateInput from '@/components/ui/DateInput.vue'
+import { payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 
 type BatchResult = PayrollRegistrationA1BatchResult['results'][number]
 
@@ -31,6 +33,7 @@ const SKIP_CODES = ['id_ppv', 'live_registration', 'predecessor', 'profile_incom
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const route = useRoute()
 const environment = defineModel<PayrollRegzelEnvironment>('environment', {
   default: 'production',
 })
@@ -38,8 +41,26 @@ const environment = defineModel<PayrollRegzelEnvironment>('environment', {
 const loading = ref(true)
 const busy = ref(false)
 const items = ref<PayrollRegistrationA1Candidate[]>([])
-const from = ref('')
-const to = ref('')
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+const ISO_MONTH = /^(\d{4})-(\d{2})$/
+
+function periodFromQuery(): { from: string, to: string } {
+  const queryFrom = payrollQueryValue(route.query, 'from')
+  const queryTo = payrollQueryValue(route.query, 'to')
+  const month = ISO_MONTH.exec(payrollQueryValue(route.query, 'period') ?? '')
+  const monthFrom = month ? `${month[1]}-${month[2]}-01` : ''
+  const monthTo = month
+    ? `${month[1]}-${month[2]}-${String(new Date(Number(month[1]), Number(month[2]), 0).getDate()).padStart(2, '0')}`
+    : ''
+  return {
+    from: queryFrom !== null && ISO_DATE.test(queryFrom) ? queryFrom : monthFrom,
+    to: queryTo !== null && ISO_DATE.test(queryTo) ? queryTo : monthTo,
+  }
+}
+
+const initialPeriod = periodFromQuery()
+const from = ref(initialPeriod.from)
+const to = ref(initialPeriod.to)
 const selected = ref<number[]>([])
 const results = ref<Array<BatchResult & { employee_id: number, employee_name: string }>>([])
 const error = ref('')
