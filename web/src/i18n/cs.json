@@ -28261,6 +28261,8 @@
     "imap_auth_microsoft365": "Microsoft 365 (OAuth 2.0)",
     "imap_auth_microsoft365_short": "Microsoft 365",
     "imap_oauth_mailbox": "Adresa schránky",
+    "imap_oauth_help": "Microsoft 365 se připojuje přes aplikaci, kterou si zaregistrujete ve svém Microsoft Entra (Azure AD). Správce vaší organizace jí v Exchange Online povolí přístup ke schránce a sem zadáte její Tenant ID, Client ID a Client Secret. Bez vlastní registrace aplikace zvolte přihlášení heslem.",
+    "imap_oauth_help_link": "Návod: registrace aplikace v Microsoft Entra a Exchange",
     "imap_oauth_tenant_id": "Tenant ID",
     "imap_oauth_client_id": "Client ID",
     "imap_oauth_client_secret": "Client Secret",

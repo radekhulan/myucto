@@ -28261,6 +28261,8 @@
     "imap_auth_microsoft365": "Microsoft 365 (OAuth 2.0)",
     "imap_auth_microsoft365_short": "Microsoft 365",
     "imap_oauth_mailbox": "Mailbox address",
+    "imap_oauth_help": "Microsoft 365 connects through an app you register in your own Microsoft Entra (Azure AD). Your organisation admin grants it access to the mailbox in Exchange Online, and you enter its Tenant ID, Client ID and Client Secret here. Without your own app registration, choose password sign-in.",
+    "imap_oauth_help_link": "Guide: registering the app in Microsoft Entra and Exchange",
     "imap_oauth_tenant_id": "Tenant ID",
     "imap_oauth_client_id": "Client ID",
     "imap_oauth_client_secret": "Client Secret",

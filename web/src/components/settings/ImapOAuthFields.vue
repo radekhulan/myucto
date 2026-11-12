@@ -20,6 +20,11 @@ withDefaults(defineProps<{
 </script>
 
 <template>
+  <div class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800" data-test="imap-oauth-help">
+    <p>{{ t('settings.imap_oauth_help') }}</p>
+    <a href="/manual?ch=96_Nastaveni#9671-pripojeni-schranky-microsoft-365-pres-imap" target="_blank" rel="noopener"
+      class="mt-1 inline-block font-medium text-primary-700 underline">{{ t('settings.imap_oauth_help_link') }}</a>
+  </div>
   <label :class="labelClass">
     {{ t('settings.imap_oauth_tenant_id') }}<RequiredMark />
     <input v-model.trim="tenantId" required maxlength="36" spellcheck="false" :class="inputClass" />
