@@ -7698,7 +7698,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '500':
-          description: Smazání selhalo, transakce vrácena. `trigger_restore_failed`: ochranné triggery se nepodařilo obnovit (obnoví se při dalším pokusu).
+          description: 'Smazání selhalo, transakce vrácena. `trigger_restore_failed`: ochranné triggery se nepodařilo obnovit (obnoví se při dalším pokusu).'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
