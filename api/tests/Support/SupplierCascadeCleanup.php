@@ -29,15 +29,20 @@ final class SupplierCascadeCleanup
                     throw $e;
                 }
                 $cleared[$parent] = true;
-                $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
-                try {
-                    $pdo->prepare('DELETE FROM `' . $parent . '` WHERE supplier_id = ?')->execute([$supplierId]);
-                } finally {
-                    $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
-                }
+                self::clearParent($pdo, $parent, $supplierId);
             }
         }
         throw new \RuntimeException('Dodavatele ' . $supplierId . ' se nepodařilo smazat.');
+    }
+
+    public static function clearParent(PDO $pdo, string $parent, int $supplierId): void
+    {
+        $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            $pdo->prepare('DELETE FROM `' . $parent . '` WHERE supplier_id = ?')->execute([$supplierId]);
+        } finally {
+            $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+        }
     }
 
     private static function restrictingParent(PDOException $e): ?string
