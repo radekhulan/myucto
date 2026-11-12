@@ -247,8 +247,13 @@ final class PayrollMonthGuide
             }
             foreach (is_array($finding['bulk_actions'] ?? null) ? $finding['bulk_actions'] : [] as $action) {
                 $kind = (string) ($action['kind'] ?? '');
-                if ($kind !== '') {
-                    $bulk[$kind] = ($bulk[$kind] ?? 0) + (int) ($action['count'] ?? 0);
+                if ($kind === '') {
+                    continue;
+                }
+                $bulk[$kind] ??= ['kind' => $kind, 'count' => 0, 'employee_ids' => []];
+                $bulk[$kind]['count'] += (int) ($action['count'] ?? 0);
+                foreach (is_array($action['employee_ids'] ?? null) ? $action['employee_ids'] : [] as $id) {
+                    $bulk[$kind]['employee_ids'][(int) $id] = (int) $id;
                 }
             }
         }
@@ -265,11 +270,10 @@ final class PayrollMonthGuide
             'facts' => [
                 'source' => $readiness === null ? null : 'readiness',
                 'by_impact' => $byImpact,
-                'bulk_actions' => array_map(
-                    static fn (string $kind, int $count): array => ['kind' => $kind, 'count' => $count],
-                    array_keys($bulk),
-                    array_values($bulk),
-                ),
+                'bulk_actions' => array_values(array_map(
+                    static fn (array $action): array => ['employee_ids' => array_values($action['employee_ids'])] + $action,
+                    $bulk,
+                )),
                 'findings' => $stoppingFindings,
             ],
         ];

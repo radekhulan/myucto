@@ -802,6 +802,7 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         // 1) Měsíční sled — přehled je rozcestník, zbytek jde v pořadí kroků.
         { to: '/payroll', label: t('nav.payroll_overview'), icon: ICONS.users, permission: 'payroll' as PermissionKey },
+        { to: '/payroll/month-guide', label: t('nav.payroll_month_guide'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
         { to: '/payroll/absences', label: t('nav.payroll_absences'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
         { to: '/payroll/time', label: t('nav.payroll_time'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
         { to: '/payroll/travel', label: t('nav.payroll_travel'), icon: ICONS.logbook, permission: 'payroll' as PermissionKey },

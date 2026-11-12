@@ -31,7 +31,7 @@ final class PayrollMonthGuideTest extends TestCase
         self::assertSame('people_gaps', $steps['people']['action']);
         self::assertSame(['blocking' => 1, 'approval' => 4, 'revision' => 1, 'anytime' => 1], $steps['check']['facts']['by_impact']);
         self::assertSame(5, $steps['check']['remaining']);
-        self::assertSame([['kind' => 'health_insurer', 'count' => 7]], $steps['check']['facts']['bulk_actions']);
+        self::assertSame([['employee_ids' => [], 'kind' => 'health_insurer', 'count' => 7]], $steps['check']['facts']['bulk_actions']);
         self::assertCount(3, $steps['check']['facts']['findings']);
         self::assertSame('waiting', $steps['run']['state']);
         self::assertSame('inputs', $guide['current_step']);

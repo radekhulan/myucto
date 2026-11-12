@@ -1959,6 +1959,7 @@
     "section_taxes": "Taxes",
     "section_payroll": "Payroll",
     "payroll_overview": "Payroll overview",
+    "payroll_month_guide": "Month guide",
     "payroll_runs": "Payroll runs",
     "payroll_payments": "Payroll payment orders",
     "payroll_posting_reconciliation": "Payroll posting reconciliation",
@@ -14990,6 +14991,123 @@
         "failed": "The filing could not be confirmed.",
         "revoke": "Revoke confirmation",
         "revoke_consequence": "The month {period} will reappear among taken-over months without a report."
+      }
+    },
+    "month_guide": {
+      "title": "Payroll month guide",
+      "subtitle": "The monthly payroll close in seven steps. Each step shows what is done and what is left, and its main button takes you to the screen where the work is done. The guide itself neither calculates nor sends anything.",
+      "period": "Period",
+      "load_failed": "The month guide could not be loaded.",
+      "retry": "Try again",
+      "refresh": "Refresh status",
+      "loading": "Loading the month status…",
+      "progress": "{done} of {total} steps done",
+      "all_done": "The month is complete: payroll is approved, submissions are fulfilled and payments are settled.",
+      "current": "Next up",
+      "open_guide": "Month guide",
+      "remaining": "{count} left | {count} left",
+      "state": {
+        "done": "Done",
+        "todo": "{count} missing | {count} missing",
+        "todo_plain": "To do",
+        "waiting": "Not yet",
+        "unavailable": "No access"
+      },
+      "unavailable_hint": "You have no permission for the data of this step. Ask the company administrator for access to payroll submissions.",
+      "steps": {
+        "inputs": {
+          "title": "Month inputs",
+          "hint": "Attendance, payroll inputs and absences for the month. An agency with many agreements fills them fastest with an attendance import, a small company with the quick monthly input."
+        },
+        "people": {
+          "title": "New people and agreements",
+          "hint": "People and agreements created from an import and the data the month cannot go through without (insurer, tax declaration, payout method)."
+        },
+        "registrations": {
+          "title": "CSSA registrations and insurer notices",
+          "hint": "Employee registrations (A1) are prepared in bulk and leave from the To send queue. Mark what you filed elsewhere as filed outside the app."
+        },
+        "check": {
+          "title": "Pre-run check",
+          "hint": "What stops the calculation or approval. Bulk fixes open the existing dialog in the employee list."
+        },
+        "run": {
+          "title": "Calculation and approval",
+          "hint": "Create the payroll run, calculate the payroll and approve it.",
+          "waiting": "The run cannot be created while the pre-run check reports a blocking finding."
+        },
+        "submissions": {
+          "title": "JMHZ and other monthly submissions",
+          "hint": "The employer's monthly report, insurer statements and other duties of the month. You can test the JMHZ report or defer it before sending.",
+          "waiting": "Reports are prepared from the approved run. Approve the payroll first."
+        },
+        "payments": {
+          "title": "Payments and payslips",
+          "hint": "Payment orders, matching payments with the bank statement and issuing payslips.",
+          "waiting": "Payments and payslips come from the approved run."
+        }
+      },
+      "action": {
+        "time": "Open attendance",
+        "attendance_import": "Import attendance",
+        "absences": "Decide absences",
+        "quick_inputs": "Open monthly inputs",
+        "runs": "Open checks in Payroll runs",
+        "people_gaps": "Fill in missing data",
+        "people": "Open employees",
+        "registration_a1": "Prepare registrations in bulk",
+        "health": "Open insurer notices",
+        "create_run": "Create and calculate the run",
+        "run": "Open the payroll run",
+        "monthly_checklist": "Open the monthly submissions overview",
+        "payments": "Open payroll payments"
+      },
+      "secondary": {
+        "quick_inputs": "Quick monthly input",
+        "attendance_import": "Attendance import",
+        "people_import": "Create people from attendance import",
+        "queue": "To send queue",
+        "external": "Filed outside the app ({count})",
+        "jmhz": "JMHZ test XML and deferral",
+        "documents": "Payslips and documents"
+      },
+      "facts": {
+        "batches": "Attendance imports for the month: {count} (people: {persons})",
+        "no_batches": "There is no attendance import for the month yet.",
+        "stopping": "Of which stop approval: {count}",
+        "a1": "A1 registrations for {from} - {to}: {total} (ready {preparable}, incomplete {incomplete}, too early {too_early}, overdue {overdue})",
+        "a1_range": "The bulk preparation opens on its default period; set the range {from} - {to} there for this month.",
+        "hoz": "Open notices to health insurers: {count}",
+        "by_impact": "Stops: {stop} · costs a correction revision: {revision} · can be filled any time: {anytime}",
+        "run_blockers": "Run checks blocking approval: {count}",
+        "readiness_unknown": "The pre-run check could not finish. Open Payroll runs, it runs again there.",
+        "status": "Run status: {status}",
+        "no_run": "There is no payroll run for the month yet.",
+        "checklist": "Fulfilled {done} of {total} (to send {send}, to prepare {generate}, manual {manual}, awaiting result {waiting})",
+        "jmhz": "JMHZ: fulfilled {done} of {total}",
+        "coverage": "Settled payments: {settled} of {total}",
+        "documents": "Documents for the month: {count}"
+      },
+      "code": {
+        "time_month_not_approved": "Attendance not approved",
+        "time_month_missing": "Attendance missing",
+        "draft_inputs_present": "Unapproved payroll inputs",
+        "employment_without_inputs": "No pay in the month",
+        "hourly_claim_component_conflict": "Hourly claim and component overlap",
+        "recurring_component_without_input": "Recurring component without input",
+        "absence_pending_decision": "Absence awaiting decision",
+        "inputs_on_unstarted_employment": "Inputs on an employment not yet started",
+        "person_data_gap": "Missing personal data",
+        "payout_rule_missing": "Payout method missing",
+        "tax_declaration_evidence_missing": "Tax declaration evidence missing",
+        "tax_declaration_not_signed_summary": "Unsigned tax declaration",
+        "tax_residence_missing_unsigned_summary": "Tax residence missing",
+        "health_coverage_missing_summary": "Health insurer missing",
+        "social_jurisdiction_missing_summary": "Social insurance jurisdiction missing",
+        "annual_accumulator_missing_summary": "Annual totals missing",
+        "employments_past_agreed_end": "Agreements past agreed end",
+        "statutory_calculation_manual_review": "Manual statutory review",
+        "other": "Other findings"
       }
     }
   },
