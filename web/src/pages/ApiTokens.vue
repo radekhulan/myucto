@@ -46,6 +46,7 @@ const form = ref({
   // Least-privilege i tady: mzdovou evidenci podání token nedostane, dokud
   // ji člověk vědomě nezaškrtne.
   allow_payroll_submission_docs: false,
+  allow_issued_invoice_edit: false,
   totp_code: '',
 })
 
@@ -64,6 +65,8 @@ const ipForm = ref({ cidr: '', note: '' })
 const revealed = ref<CreateTokenResult | null>(null)
 const copied = ref(false)
 const confirmCopied = ref(false)
+
+const issuedEditAvailable = computed(() => form.value.supplier_id !== null && form.value.scope === 'read_write')
 
 const needsTotp = computed(() => auth.user?.totp_enabled === true)
 const canManageTokens = computed(() => auth.canWrite('profile.tokens'))
@@ -98,6 +101,7 @@ function openCreate() {
     expires_at: '',
     never_expires: false,
     allow_payroll_submission_docs: false,
+    allow_issued_invoice_edit: false,
     totp_code: '',
   }
   createError.value = ''
@@ -173,6 +177,7 @@ async function submitCreate() {
       expires_at: form.value.expires_at || null,
       never_expires: canNeverExpire.value && !form.value.expires_at && form.value.never_expires,
       allow_payroll_submission_docs: form.value.allow_payroll_submission_docs,
+      allow_issued_invoice_edit: issuedEditAvailable.value && form.value.allow_issued_invoice_edit,
       totp_code: !proof && hasValidTotp ? form.value.totp_code : undefined,
       step_up_token: proof || undefined,
     }
@@ -384,7 +389,7 @@ onMounted(() => {
       </div>
       <button
         v-if="canManageTokens"
-        @click="openCreate"
+        @click="openCreate" data-token-new
         class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-md"
       >
         + {{ t('api_tokens.new') }}
@@ -437,6 +442,11 @@ onMounted(() => {
                   class="px-2 py-0.5 rounded text-xs font-medium bg-warning-50 text-warning-600"
                   :title="t('api_tokens.payroll_docs_desc')">
                   {{ t('api_tokens.payroll_docs_badge') }}
+                </span>
+                <span v-if="tk.allow_issued_invoice_edit" data-token-issued-edit-badge
+                  class="px-2 py-0.5 rounded text-xs font-medium bg-warning-50 text-warning-600"
+                  :title="t('api_tokens.issued_edit_desc')">
+                  {{ t('api_tokens.issued_edit_badge') }}
                 </span>
                 <button v-if="canManageTokens && !tk.is_revoked && tk.scope === 'read_write'" type="button"
                   @click="toggleEetExternal(tk)" data-token-eet-external
@@ -622,6 +632,22 @@ onMounted(() => {
             </span>
           </label>
 
+          <div class="text-sm">
+            <label class="flex items-start gap-2" :class="issuedEditAvailable ? '' : 'opacity-60'">
+              <input type="checkbox" v-model="form.allow_issued_invoice_edit" :disabled="!issuedEditAvailable"
+                class="mt-0.5" data-token-issued-edit />
+              <span>
+                <strong>{{ t('api_tokens.issued_edit') }}</strong>
+                <span class="text-neutral-500"> - {{ t('api_tokens.issued_edit_desc') }}</span>
+                <span v-if="!issuedEditAvailable" class="block text-xs text-neutral-500">{{ t('api_tokens.issued_edit_unavailable') }}</span>
+              </span>
+            </label>
+            <p v-if="issuedEditAvailable && form.allow_issued_invoice_edit" data-token-issued-edit-warning
+              class="mt-2 rounded-md border border-warning-500/40 bg-warning-50 p-2 text-xs text-warning-700">
+              {{ t('api_tokens.issued_edit_warning') }}
+            </p>
+          </div>
+
           <label class="block text-sm">
             <span class="text-neutral-700 font-medium">{{ t('api_tokens.col_expires') }} <span class="text-neutral-400">{{ t('common.optional') }}</span></span>
             <DateInput v-model="form.expires_at" :disabled="form.never_expires"
@@ -684,7 +710,7 @@ onMounted(() => {
             class="cursor-pointer h-10 px-4 border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">
             {{ t('common.cancel') }}
           </button>
-          <button @click="submitCreate" :disabled="createBusy || passkeyBusy || (ssoEnforcement.strong.value && !ssoVerified)"
+          <button @click="submitCreate" data-token-submit :disabled="createBusy || passkeyBusy || (ssoEnforcement.strong.value && !ssoVerified)"
             class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
             {{ createBusy ? '…' : t('api_tokens.create') }}
           </button>

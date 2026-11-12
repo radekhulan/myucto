@@ -10,6 +10,8 @@ export interface ApiToken {
   scope: 'read' | 'read_write'
   /** Smí v Dokumentech vidět evidenci mzdových podání (doručenky, protokoly). */
   allow_payroll_submission_docs: boolean
+  /** Smí vynuceně upravit vystavenou vydanou fakturu (PUT ?force=1), přísněji než správce. */
+  allow_issued_invoice_edit?: boolean
   /** Úhrady faktur z tokenu bez okolností platby eviduje EET externí systém (e-shop). */
   eet_external_by_default?: boolean
   last_used_at: string | null
@@ -90,6 +92,11 @@ export interface CreateTokenPayload {
    * exekuce, insolvence, výplatní pásky — zůstává jen pro přihlášenou relaci.
    */
   allow_payroll_submission_docs?: boolean
+  /**
+   * Vynucená úprava vystavené vydané faktury přes API. Jen token vázaný na firmu
+   * se zápisem a jen od správce firmy nebo role s právem upravit vystavenou fakturu.
+   */
+  allow_issued_invoice_edit?: boolean
   totp_code?: string
   step_up_token?: string
 }

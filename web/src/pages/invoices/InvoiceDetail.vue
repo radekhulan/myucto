@@ -863,6 +863,11 @@ function payloadText(payload: any): string {
         })
         return `${t('invoice.changed_label')}: ${names.join(', ')}`
       }
+      if (k === 'via_api_token') return null
+      if (k === 'api_token' && v && typeof v === 'object') {
+        const tok = v as { name?: string; prefix?: string }
+        return t('invoice.via_api_token', { name: tok.name ?? '', prefix: tok.prefix ?? '' })
+      }
       // Důvod nevyřízeného poděkování za úhradu (PaymentThanksMailer skip reasons).
       if (k === 'reason' && typeof v === 'string') {
         const key = `invoice.payment_thanks_reasons.${v}`
@@ -871,6 +876,7 @@ function payloadText(payload: any): string {
       }
       return k + '=' + (typeof v === 'object' ? JSON.stringify(v) : String(v))
     })
+    .filter((part): part is string => part !== null)
     .join(' · ')
 }
 
