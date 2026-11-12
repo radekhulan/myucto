@@ -15186,7 +15186,6 @@
         "no_batches": "Za měsíc zatím není žádný import docházky.",
         "stopping": "Z toho zastaví schválení: {count}",
         "a1": "Přihlášky A1 za {from} - {to}: {total} (připravit lze {preparable}, neúplné {incomplete}, zatím brzy {too_early}, po termínu {overdue})",
-        "a1_range": "Hromadná příprava se otevře na výchozím období; pro tento měsíc v ní nastavte rozsah {from} - {to}.",
         "hoz": "Otevřená oznámení zdravotním pojišťovnám: {count}",
         "by_impact": "Zastaví: {stop} · stojí opravnou revizi: {revision} · doplní se kdykoli: {anytime}",
         "run_blockers": "Kontroly běhu, které brání schválení: {count}",

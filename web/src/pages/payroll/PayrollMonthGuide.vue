@@ -163,7 +163,6 @@ function factLines(step: PayrollMonthGuideStep): string[] {
         const a1 = facts.registration_a1
         const range = { from: formatDate(a1.from), to: formatDate(a1.to) }
         lines.push(t('payroll.month_guide.facts.a1', { ...a1, ...range }))
-        if (a1.total > 0) lines.push(t('payroll.month_guide.facts.a1_range', range))
       }
       if (facts.hoz_open !== null && facts.hoz_open !== undefined) {
         lines.push(t('payroll.month_guide.facts.hoz', { count: facts.hoz_open }))

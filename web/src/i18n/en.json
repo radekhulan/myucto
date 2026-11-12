@@ -15186,7 +15186,6 @@
         "no_batches": "There is no attendance import for the month yet.",
         "stopping": "Of which stop approval: {count}",
         "a1": "A1 registrations for {from} - {to}: {total} (ready {preparable}, incomplete {incomplete}, too early {too_early}, overdue {overdue})",
-        "a1_range": "The bulk preparation opens on its default period; set the range {from} - {to} there for this month.",
         "hoz": "Open notices to health insurers: {count}",
         "by_impact": "Stops: {stop} · costs a correction revision: {revision} · can be filled any time: {anytime}",
         "run_blockers": "Run checks blocking approval: {count}",
