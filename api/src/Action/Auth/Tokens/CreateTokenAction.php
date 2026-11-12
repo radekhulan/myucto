@@ -46,9 +46,6 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class CreateTokenAction
 {
-    /** Výchozí životnost tokenu, když volající expiraci neuvede. */
-    private const DEFAULT_EXPIRY_DAYS = 90;
-
     /** Horní strop explicitní expirace — delší = fakticky věčný token. */
     private const MAX_EXPIRY_DAYS = 730;
 
@@ -197,7 +194,7 @@ final class CreateTokenAction
         // Věčný token je teď vědomá volba (`never_expires`) a pro read_write ho
         // smí zvolit jen superadmin. Formát: ISO-8601 nebo YYYY-MM-DD.
         $now = new \DateTimeImmutable();
-        $expiresAt = $now->modify('+' . self::DEFAULT_EXPIRY_DAYS . ' days');
+        $expiresAt = $now->modify('+' . ApiTokenService::DEFAULT_EXPIRY_DAYS . ' days');
 
         if ($expiresRaw !== '') {
             try {
@@ -388,9 +385,10 @@ final class CreateTokenAction
 
     /**
      * Token se zápisem by podle parametru licence zabral další licenční místo.
-     * Token jen pro čtení jde vytvořit vždy.
+     * Token jen pro čtení jde vytvořit vždy. Sdílí ji výměna hesla za token
+     * (PasswordTokenAction).
      */
-    private static function seatLimitError(Response $response): Response
+    public static function seatLimitError(Response $response): Response
     {
         return Json::error(
             $response,

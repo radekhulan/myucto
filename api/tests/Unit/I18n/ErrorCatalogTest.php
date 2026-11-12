@@ -43,6 +43,17 @@ final class ErrorCatalogTest extends TestCase
         self::assertSame([], $informal, 'Aplikace uživateli vyká, obecná chyba oprávnění také.');
     }
 
+    public function testPasswordTokenErrorsHaveEnglishTranslations(): void
+    {
+        foreach ([
+            'Příliš mnoho neúspěšných pokusů. Zkuste to znovu za několik minut.',
+            'Instalace vyžaduje dvoufázové ověření. Nastavte si ho ve webu a pak se přihlaste znovu.',
+            'Účet se ověřuje způsobem, který přihlášení heslem přes API nepodporuje. Vytvořte si API token ve webu.',
+        ] as $message) {
+            self::assertNotSame($message, ErrorCatalog::lookup($message, 'en'), $message);
+        }
+    }
+
     public function testCanonicalHostnameConflictHasEnglishTranslation(): void
     {
         self::assertSame(

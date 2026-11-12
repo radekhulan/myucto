@@ -52,6 +52,7 @@ final class AuthMiddleware implements MiddlewareInterface
         '/api/auth/setup-crpdph-lookup',
         '/api/auth/setup-sample',
         '/api/auth/login',
+        '/api/auth/password-token',
         '/api/auth/webauthn/login/options',
         '/api/auth/webauthn/login/verify',
         '/api/auth/domain-context',
@@ -110,6 +111,7 @@ final class AuthMiddleware implements MiddlewareInterface
         'POST' => [
             '/api/auth/oidc/apple/callback',
             '/api/auth/login',
+            '/api/auth/password-token',
             '/api/auth/webauthn/login/options',
             '/api/auth/webauthn/login/verify',
             '/api/auth/domain-login/start',

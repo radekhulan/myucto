@@ -17,7 +17,7 @@ final class RoutePermissionMap
     private const PUBLIC_PATHS = [
         '/api/health', '/api/version', '/api/openapi.yaml', '/api/docs', '/api/reference', '/api/scalar',
         '/api/auth/setup-status', '/api/auth/setup-preflight', '/api/auth/setup', '/api/auth/setup-ares-lookup',
-        '/api/auth/setup-crpdph-lookup', '/api/auth/login',
+        '/api/auth/setup-crpdph-lookup', '/api/auth/login', '/api/auth/password-token',
         '/api/auth/webauthn/login/options', '/api/auth/webauthn/login/verify',
         '/api/auth/forgot', '/api/auth/reset', '/api/auth/domain-context',
         '/api/auth/domain-login/start', '/api/auth/domain-login/exchange', '/api/csrf-token',
