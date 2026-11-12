@@ -657,6 +657,37 @@ final class StatementAccountResolutionTest extends TestCase
         self::assertSame('monthly_api_statement', json_decode((string) $deleted->getBody(), true)['error']['code']);
     }
 
+    /**
+     * Import z MyÚčta přenese měsíční výpis API, ale ne jeho evidenci (`bank_api_months`,
+     * vazby podkladů). Další načtení z banky pak zakládalo měsíc znovu a padalo
+     * na duplicitním otisku výpisu.
+     */
+    public function testProjectionAdoptsMonthlyStatementWithoutMonthEvidence(): void
+    {
+        $account = self::ACCOUNT;
+        $this->registerCurrency('CZK', $account, '2250');
+        $apiId = $this->insertStatement('bank_api', $account, '2250', '2099-08-31', 100.0, 'orphan-month');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id = ?')->execute([$this->supplierId, $apiId]);
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-08-15', 100, 'CZK')")->execute([$apiId]);
+        $monthly = new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo);
+        $pdo->beginTransaction();
+        $monthId = $monthly->projectAccount($this->supplierId, $account, '2250', 'CZK')[$apiId][0];
+        $pdo->commit();
+        $this->statementIds[] = $monthId;
+
+        $pdo->prepare('DELETE FROM bank_transaction_imports WHERE statement_id = ?')->execute([$monthId]);
+        $pdo->prepare('DELETE FROM bank_api_evidence_months WHERE monthly_statement_id = ?')->execute([$monthId]);
+        $pdo->prepare('DELETE FROM bank_api_months WHERE statement_id = ?')->execute([$monthId]);
+
+        $pdo->beginTransaction();
+        $mapping = $monthly->projectAccount($this->supplierId, $account, '2250', 'CZK');
+        $pdo->commit();
+        self::assertSame([$apiId => [$monthId]], $mapping);
+        self::assertSame([$monthId], $monthly->monthIds($apiId, $this->supplierId));
+        self::assertSame(1, (int) $pdo->query('SELECT transaction_count FROM bank_statements WHERE id = ' . $monthId)->fetchColumn());
+    }
+
     public static function pdfEvidenceCases(): array
     {
         return [['gpc', false], ['bank_api', false], ['gpc', true]];
