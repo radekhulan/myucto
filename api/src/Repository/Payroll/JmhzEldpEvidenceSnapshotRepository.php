@@ -155,6 +155,23 @@ final class JmhzEldpEvidenceSnapshotRepository
         );
     }
 
+    /** @return list<array<string,mixed>> */
+    public function findByRevisionForUpdate(int $supplierId, string $environment, int $revisionId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_jmhz_eldp_evidence_snapshots
+              WHERE supplier_id = ? AND environment = ? AND source_revision_id = ?
+              ORDER BY employment_id
+              FOR UPDATE',
+        );
+        $statement->execute([$supplierId, $environment, $revisionId]);
+
+        return array_values(array_map(
+            static fn (array $row): array => self::cast($row),
+            $statement->fetchAll(PDO::FETCH_ASSOC),
+        ));
+    }
+
     /** @return array<string,mixed>|null */
     public function find(int $supplierId, string $environment, int $id): ?array
     {
@@ -199,9 +216,16 @@ final class JmhzEldpEvidenceSnapshotRepository
         $statement = $this->db->pdo()->prepare($sql);
         $statement->execute($parameters);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
-        if ($row === false) {
-            return null;
-        }
+
+        return $row === false ? null : self::cast($row);
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function cast(array $row): array
+    {
         foreach ([
             'id', 'supplier_id', 'run_id', 'source_revision_id', 'employee_id',
             'employment_id', 'section_count', 'evidence_snapshot_id',

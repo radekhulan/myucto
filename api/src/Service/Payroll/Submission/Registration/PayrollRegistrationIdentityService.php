@@ -875,143 +875,186 @@ final readonly class PayrollRegistrationIdentityService
             $environment,
             $onDate,
         ): array {
-            $employment = $this->repository->lockEmployment(
+            $this->lockSnapshotScope(
                 $supplierId,
+                $employeeId,
                 $employmentId,
+                $environment,
+                $onDate,
             );
-            if ($employment === null
-                || $employment['employee_id'] !== $employeeId
-            ) {
+            return $this->snapshotSourceLocked(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                $environment,
+                $onDate,
+            )[0];
+        });
+    }
+
+    /**
+     * Zámek vztahu a kontrola rozsahu a otevřených úkolů identity před
+     * čtením podkladů registrace.
+     */
+    private function lockSnapshotScope(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $environment,
+        string $onDate,
+    ): void {
+        $employment = $this->repository->lockEmployment(
+            $supplierId,
+            $employmentId,
+        );
+        if ($employment === null
+            || $employment['employee_id'] !== $employeeId
+        ) {
+            throw new PayrollRegistrationIdentitySnapshotException(
+                'registration_identity_employment_scope_mismatch',
+                self::EMPLOYMENT_FOREIGN,
+            );
+        }
+        if ($employment['start_date'] === null) {
+            throw new PayrollRegistrationIdentitySnapshotException(
+                'registration_identity_employment_scope_mismatch',
+                self::fieldMessage(
+                    'contract_start_on',
+                    'chybí. Bez dne nástupu nejde určit, jaká podoba '
+                    . 'údajů se má na ČSSZ poslat.',
+                ),
+            );
+        }
+        if ($onDate < $employment['start_date']
+            || ($employment['end_date'] !== null
+                && $onDate > $employment['end_date'])
+        ) {
+            throw new PayrollRegistrationIdentitySnapshotException(
+                'registration_identity_employment_scope_mismatch',
+                self::DATE_OUTSIDE_EMPLOYMENT,
+            );
+        }
+        $tasks = $this->repository->activeResolutionTaskKinds(
+            $supplierId,
+            $employmentId,
+            $environment,
+            true,
+        );
+        if ($tasks !== []) {
+            throw new PayrollRegistrationIdentitySnapshotException(
+                'registration_identity_unresolved',
+                self::UNRESOLVED_IDENTITY,
+            );
+        }
+    }
+
+    /**
+     * Zbytek {@see self::sensitiveSnapshotSourceAt()} po zámku vztahu a kontrole
+     * otevřených úkolů identity; vrací i uložené ID PPV pro sdílení se čtením
+     * identifikátorů JMHZ.
+     *
+     * @return array{0:array<string,mixed>,1:array<string,mixed>|null}
+     */
+    private function snapshotSourceLocked(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $environment,
+        string $onDate,
+    ): array {
+        $person = $this->sensitiveIdentityAtInternal(
+            $supplierId,
+            $employeeId,
+            $onDate,
+            true,
+        );
+        $storedExternal = $this->repository->externalIdAt(
+            $supplierId,
+            $employmentId,
+            $environment,
+            'id_ppv',
+            $onDate,
+            true,
+        );
+        $external = null;
+        if ($storedExternal !== null) {
+            if ($storedExternal['employee_id'] !== $employeeId) {
                 throw new PayrollRegistrationIdentitySnapshotException(
-                    'registration_identity_employment_scope_mismatch',
-                    self::EMPLOYMENT_FOREIGN,
-                );
-            }
-            if ($employment['start_date'] === null) {
-                throw new PayrollRegistrationIdentitySnapshotException(
-                    'registration_identity_employment_scope_mismatch',
-                    self::fieldMessage(
-                        'contract_start_on',
-                        'chybí. Bez dne nástupu nejde určit, jaká podoba '
-                        . 'údajů se má na ČSSZ poslat.',
+                    'registration_identity_id_ppv_scope_mismatch',
+                    self::fieldNote(
+                        'employment_external_identifier',
+                        'míří u téhle firmy na jinou osobu, takže by '
+                        . 'podání odešlo na cizího zaměstnance. Opravte '
+                        . 'přiřazení na kartě pracovního vztahu.',
                     ),
                 );
             }
-            if ($onDate < $employment['start_date']
-                || ($employment['end_date'] !== null
-                    && $onDate > $employment['end_date'])
-            ) {
-                throw new PayrollRegistrationIdentitySnapshotException(
-                    'registration_identity_employment_scope_mismatch',
-                    self::DATE_OUTSIDE_EMPLOYMENT,
+            $plaintext = $this->sensitiveData->reveal(
+                $storedExternal['value_ciphertext'],
+                PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                $supplierId,
+                $storedExternal['id'],
+                PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
+            );
+            $hash = $this->sensitiveData->lookupHash(
+                $plaintext,
+                PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            );
+            if (!hash_equals($storedExternal['value_hash'], $hash)) {
+                throw new \RuntimeException(
+                    'Otisk ID PPV neodpovídá ciphertextu.',
                 );
             }
-            $tasks = $this->repository->activeResolutionTaskKinds(
-                $supplierId,
-                $employmentId,
-                $environment,
-                true,
-            );
-            if ($tasks !== []) {
-                throw new PayrollRegistrationIdentitySnapshotException(
-                    'registration_identity_unresolved',
-                    self::UNRESOLVED_IDENTITY,
-                );
-            }
-            $person = $this->sensitiveIdentityAtInternal(
-                $supplierId,
-                $employeeId,
-                $onDate,
-                true,
-            );
-            $storedExternal = $this->repository->externalIdAt(
-                $supplierId,
-                $employmentId,
-                $environment,
-                'id_ppv',
-                $onDate,
-                true,
-            );
-            $external = null;
-            if ($storedExternal !== null) {
-                if ($storedExternal['employee_id'] !== $employeeId) {
-                    throw new PayrollRegistrationIdentitySnapshotException(
-                        'registration_identity_id_ppv_scope_mismatch',
-                        self::fieldNote(
-                            'employment_external_identifier',
-                            'míří u téhle firmy na jinou osobu, takže by '
-                            . 'podání odešlo na cizího zaměstnance. Opravte '
-                            . 'přiřazení na kartě pracovního vztahu.',
-                        ),
-                    );
-                }
-                $plaintext = $this->sensitiveData->reveal(
-                    $storedExternal['value_ciphertext'],
-                    PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
-                    $supplierId,
-                    $storedExternal['id'],
-                    PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
-                );
-                $hash = $this->sensitiveData->lookupHash(
-                    $plaintext,
-                    PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
-                    $supplierId,
-                );
-                if (!hash_equals($storedExternal['value_hash'], $hash)) {
-                    throw new \RuntimeException(
-                        'Otisk ID PPV neodpovídá ciphertextu.',
-                    );
-                }
-                $external = [
-                    'id' => $storedExternal['id'],
-                    'employee_id' => $storedExternal['employee_id'],
-                    'employment_id' => $storedExternal['employment_id'],
-                    'environment' => $storedExternal['environment'],
-                    'identifier_type' =>
-                        $storedExternal['identifier_type'],
-                    'value' => $plaintext,
-                    'valid_from' => $storedExternal['valid_from'],
-                    'valid_to' => $storedExternal['valid_to'],
-                    'source_kind' => $storedExternal['source_kind'],
-                    'source_receipt_id' =>
-                        $storedExternal['source_receipt_id'],
-                    'source_reference_hash' =>
-                        $storedExternal['source_reference_hash'],
-                    'row_version' => $storedExternal['row_version'],
-                ];
-            }
-
-            $result = [
-                'identity' => $person['identity'],
-                'identifiers' => $person['identifiers'],
-                'identifier_sources' => $person['identifier_sources'],
-                'employment_external_identifier' => $external,
-                'resolution' => [
-                    'person_identity' => 'resolved',
-                    'employment_external_id' => $external === null
-                        ? 'not_assigned'
-                        : 'resolved',
-                ],
+            $external = [
+                'id' => $storedExternal['id'],
+                'employee_id' => $storedExternal['employee_id'],
+                'employment_id' => $storedExternal['employment_id'],
+                'environment' => $storedExternal['environment'],
+                'identifier_type' =>
+                    $storedExternal['identifier_type'],
+                'value' => $plaintext,
+                'valid_from' => $storedExternal['valid_from'],
+                'valid_to' => $storedExternal['valid_to'],
+                'source_kind' => $storedExternal['source_kind'],
+                'source_receipt_id' =>
+                    $storedExternal['source_receipt_id'],
+                'source_reference_hash' =>
+                    $storedExternal['source_reference_hash'],
+                'row_version' => $storedExternal['row_version'],
             ];
-            $a1Stored = $this->repository->latestA1Profile(
-                $supplierId,
-                $employeeId,
-                $employmentId,
-                true,
-            );
-            if ($a1Stored !== null
-                && $a1Stored['effective_on'] === $onDate
-            ) {
-                $result['regzec_a1'] = array_merge(
-                    $this->decodeA1Profile($a1Stored),
-                    ['source' => $this->a1Source($a1Stored)],
-                );
-                $result['employer_protected_labor_market'] =
-                    $this->repository->protectedLaborMarket($supplierId);
-            }
+        }
 
-            return $result;
-        });
+        $result = [
+            'identity' => $person['identity'],
+            'identifiers' => $person['identifiers'],
+            'identifier_sources' => $person['identifier_sources'],
+            'employment_external_identifier' => $external,
+            'resolution' => [
+                'person_identity' => 'resolved',
+                'employment_external_id' => $external === null
+                    ? 'not_assigned'
+                    : 'resolved',
+            ],
+        ];
+        $a1Stored = $this->repository->latestA1Profile(
+            $supplierId,
+            $employeeId,
+            $employmentId,
+            true,
+        );
+        if ($a1Stored !== null
+            && $a1Stored['effective_on'] === $onDate
+        ) {
+            $result['regzec_a1'] = array_merge(
+                $this->decodeA1Profile($a1Stored),
+                ['source' => $this->a1Source($a1Stored)],
+            );
+            $result['employer_protected_labor_market'] =
+                $this->repository->protectedLaborMarket($supplierId);
+        }
+
+        return [$result, $storedExternal];
     }
 
     /**
@@ -1092,28 +1135,125 @@ final readonly class PayrollRegistrationIdentityService
                     self::UNRESOLVED_IDENTITY,
                 );
             }
-            $person = $this->repository->personExternalIdAt(
+            return $this->jmhzIdentityLocked(
                 $supplierId,
                 $employeeId,
+                $employmentId,
                 $environment,
-                'ik_mpsv',
                 $onDate,
-                true,
+                $requireTrustedReceipt,
+                $manualIdentifiersConfirmed,
             );
-            if ($person === null) {
-                throw new PayrollRegistrationIdentitySnapshotException(
-                    'jmhz_identity_oic_missing',
-                    self::fieldNote(
-                        'person_external_identifier',
-                        $this->missingIdentifierNote(
-                            $supplierId,
-                            $employmentId,
-                            $environment,
-                        ),
-                    ),
+        });
+    }
+
+    /**
+     * Identita vztahu pro přípravu měsíčního hlášení: totéž co
+     * {@see self::sensitiveSnapshotSourceAt()} a po něm
+     * {@see self::sensitiveJmhzIdentityAt()}, jen s jedním zámkem vztahu,
+     * jednou kontrolou úkolů identity a jedním čtením ID PPV. Chyby podkladů
+     * registrace se vyhazují jako u prvního čtení; chyba identifikátorů JMHZ
+     * se vrací v `identifier_error`, protože příprava ji posuzuje zvlášť.
+     *
+     * @return array{source:array<string,mixed>,jmhz:array<string,mixed>|null,identifier_error:\DomainException|null}
+     */
+    public function sensitivePreparationIdentityAt(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $environment,
+        string $onDate,
+    ): array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employeeId, 'Osoba');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $this->environment($environment);
+        $this->date($onDate, 'Rozhodné datum');
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employeeId,
+            $employmentId,
+            $environment,
+            $onDate,
+        ): array {
+            $this->lockSnapshotScope(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                $environment,
+                $onDate,
+            );
+            [$source, $storedExternal] = $this->snapshotSourceLocked(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                $environment,
+                $onDate,
+            );
+            try {
+                $jmhz = $this->jmhzIdentityLocked(
+                    $supplierId,
+                    $employeeId,
+                    $employmentId,
+                    $environment,
+                    $onDate,
+                    false,
+                    false,
+                    true,
+                    $storedExternal,
                 );
+            } catch (\DomainException $exception) {
+                return ['source' => $source, 'jmhz' => null, 'identifier_error' => $exception];
             }
-            $employmentExternal = $this->repository->externalIdAt(
+
+            return ['source' => $source, 'jmhz' => $jmhz, 'identifier_error' => null];
+        });
+    }
+
+    /**
+     * Zbytek {@see self::sensitiveJmhzIdentityAt()} po zámku vztahu a kontrole
+     * otevřených úkolů identity.
+     *
+     * @param array<string,mixed>|null $storedEmploymentExternal uložené ID PPV,
+     *        platí jen s `$knownEmploymentExternal`
+     * @return array<string,mixed>
+     */
+    private function jmhzIdentityLocked(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $environment,
+        string $onDate,
+        bool $requireTrustedReceipt,
+        bool $manualIdentifiersConfirmed,
+        bool $knownEmploymentExternal = false,
+        ?array $storedEmploymentExternal = null,
+    ): array {
+        $person = $this->repository->personExternalIdAt(
+            $supplierId,
+            $employeeId,
+            $environment,
+            'ik_mpsv',
+            $onDate,
+            true,
+        );
+        if ($person === null) {
+            throw new PayrollRegistrationIdentitySnapshotException(
+                'jmhz_identity_oic_missing',
+                self::fieldNote(
+                    'person_external_identifier',
+                    $this->missingIdentifierNote(
+                        $supplierId,
+                        $employmentId,
+                        $environment,
+                    ),
+                ),
+            );
+        }
+        $employmentExternal = $knownEmploymentExternal
+            ? $storedEmploymentExternal
+            : $this->repository->externalIdAt(
                 $supplierId,
                 $employmentId,
                 $environment,
@@ -1121,65 +1261,64 @@ final readonly class PayrollRegistrationIdentityService
                 $onDate,
                 true,
             );
-            if ($employmentExternal === null) {
-                throw new PayrollRegistrationIdentitySnapshotException(
-                    'jmhz_identity_id_ppv_missing',
-                    self::fieldNote(
-                        'employment_external_identifier',
-                        $this->missingIdentifierNote(
-                            $supplierId,
-                            $employmentId,
-                            $environment,
-                        ),
-                    ),
-                );
-            }
-            $personIdentifier = $this->revealExternalIdentifier(
-                $person,
-                PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
-                $supplierId,
-            );
-            $employmentIdentifier = $this->revealExternalIdentifier(
-                $employmentExternal,
-                PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
-                $supplierId,
-            );
-            self::oic($personIdentifier['value']);
-            self::idPpv($employmentIdentifier['value']);
-            $provenance = null;
-            if ($requireTrustedReceipt) {
-                $provenance = [
-                    'person' => $this->assertTrustedReceiptSource(
-                        $personIdentifier,
+        if ($employmentExternal === null) {
+            throw new PayrollRegistrationIdentitySnapshotException(
+                'jmhz_identity_id_ppv_missing',
+                self::fieldNote(
+                    'employment_external_identifier',
+                    $this->missingIdentifierNote(
                         $supplierId,
-                        $environment,
-                        $employeeId,
                         $employmentId,
-                        'ik_mpsv',
-                        'registration_a2_oic_provenance_invalid',
-                        'person_external_identifier',
-                        $manualIdentifiersConfirmed,
-                    ),
-                    'employment' => $this->assertTrustedReceiptSource(
-                        $employmentIdentifier,
-                        $supplierId,
                         $environment,
-                        $employeeId,
-                        $employmentId,
-                        'id_ppv',
-                        'registration_a2_id_ppv_provenance_invalid',
-                        'employment_external_identifier',
-                        $manualIdentifiersConfirmed,
                     ),
-                ];
-            }
+                ),
+            );
+        }
+        $personIdentifier = $this->revealExternalIdentifier(
+            $person,
+            PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+            $supplierId,
+        );
+        $employmentIdentifier = $this->revealExternalIdentifier(
+            $employmentExternal,
+            PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+            $supplierId,
+        );
+        self::oic($personIdentifier['value']);
+        self::idPpv($employmentIdentifier['value']);
+        $provenance = null;
+        if ($requireTrustedReceipt) {
+            $provenance = [
+                'person' => $this->assertTrustedReceiptSource(
+                    $personIdentifier,
+                    $supplierId,
+                    $environment,
+                    $employeeId,
+                    $employmentId,
+                    'ik_mpsv',
+                    'registration_a2_oic_provenance_invalid',
+                    'person_external_identifier',
+                    $manualIdentifiersConfirmed,
+                ),
+                'employment' => $this->assertTrustedReceiptSource(
+                    $employmentIdentifier,
+                    $supplierId,
+                    $environment,
+                    $employeeId,
+                    $employmentId,
+                    'id_ppv',
+                    'registration_a2_id_ppv_provenance_invalid',
+                    'employment_external_identifier',
+                    $manualIdentifiersConfirmed,
+                ),
+            ];
+        }
 
-            return [
-                'environment' => $environment,
-                'person_external_identifier' => $personIdentifier,
-                'employment_external_identifier' => $employmentIdentifier,
-            ] + ($provenance === null ? [] : ['provenance' => $provenance]);
-        });
+        return [
+            'environment' => $environment,
+            'person_external_identifier' => $personIdentifier,
+            'employment_external_identifier' => $employmentIdentifier,
+        ] + ($provenance === null ? [] : ['provenance' => $provenance]);
     }
 
     /**

@@ -278,6 +278,7 @@ final readonly class JmhzOrdinaryEvidenceService
         string $sourceKind,
         ?array $ozpWage = null,
         ?int $riskShiftCount = null,
+        bool $knownAbsent = false,
     ): array {
         if ($supplierId <= 0 || $revisionId <= 0 || $confirmedBy <= 0 || $employmentId <= 0) {
             throw new \InvalidArgumentException('Firma, revize, vztah a potvrzující uživatel musí být kladná čísla.');
@@ -318,6 +319,7 @@ final readonly class JmhzOrdinaryEvidenceService
             $sourceKind,
             $ozpWage,
             $riskShiftCount,
+            $knownAbsent,
         ): array {
             $source = $lockedSource ?? $this->repository->lockSource($supplierId, $revisionId);
             if ($source === null) {
@@ -409,7 +411,7 @@ final readonly class JmhzOrdinaryEvidenceService
                 'source_revision_id' => $revisionId,
                 'source_manifest_sha256' => $manifestHash,
             ]));
-            $existing = $this->repository->findByScopeForUpdate(
+            $existing = $knownAbsent ? null : $this->repository->findByScopeForUpdate(
                 $supplierId,
                 $revisionId,
                 $employeeId,
@@ -520,6 +522,7 @@ final readonly class JmhzOrdinaryEvidenceService
                             null,
                             null,
                             'derived_from_frozen_payroll_sources',
+                            knownAbsent: true,
                         );
                     } catch (JmhzOrdinaryEvidenceException $exception) {
                         if (!in_array($exception->validationCode, [

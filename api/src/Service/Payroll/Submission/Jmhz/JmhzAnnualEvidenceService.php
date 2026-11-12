@@ -64,29 +64,25 @@ final readonly class JmhzAnnualEvidenceService
         // Úhrn měsíčních bonusů za minulý rok (10577) vykazuje až verze 2027.
         $withBonusTotal = JmhzSpecVersion::forPeriod($reportYear, 1) === JmhzSpecVersion::V2027;
         $snapshots = [];
-        foreach (array_values(array_unique($employeeIds)) as $employeeId) {
+        $uniqueIds = array_values(array_unique($employeeIds));
+        foreach ($uniqueIds as $employeeId) {
             if ($employeeId <= 0) {
                 throw new \InvalidArgumentException('Identita zaměstnance pro roční údaje JMHZ není platná.');
             }
-            $request = $this->settlements->findRequest(
-                $supplierId,
-                $employeeId,
-                $taxYear,
-                true,
-            );
-            $outcome = $this->settlements->findOutcome(
-                $supplierId,
-                $employeeId,
-                $taxYear,
-                true,
-            );
+        }
+        $settlementRows = $this->settlements->findManyForYear($supplierId, $uniqueIds, $taxYear, true);
+        $certificatePurpose = PayrollDocumentKind::TaxableIncomeWithholdingCertificate->value;
+        $latestDocuments = $this->documents->latestForEmployees(
+            $supplierId,
+            $uniqueIds,
+            $taxYear,
+            array_values(array_unique([AnnualSettlementSnapshotBuilder::PURPOSE, $certificatePurpose])),
+        );
+        foreach ($uniqueIds as $employeeId) {
+            $request = $settlementRows['requests'][$employeeId] ?? null;
+            $outcome = $settlementRows['outcomes'][$employeeId] ?? null;
             if ($outcome === null
-                && $this->documents->latest(
-                    $supplierId,
-                    $employeeId,
-                    $taxYear,
-                    AnnualSettlementSnapshotBuilder::PURPOSE,
-                ) !== null
+                && isset($latestDocuments[$employeeId][AnnualSettlementSnapshotBuilder::PURPOSE])
             ) {
                 throw new \DomainException(
                     'Neměnná revize ročního zúčtování nemá odpovídající rejstříkový výsledek.',
@@ -99,9 +95,8 @@ final readonly class JmhzAnnualEvidenceService
                 $outcome,
             );
             $withholding = $this->certificateSnapshot(
-                $supplierId,
-                $employeeId,
                 $taxYear,
+                $latestDocuments[$employeeId][$certificatePurpose] ?? null,
             );
             $snapshots[$employeeId] = [
                 'tax_year' => $taxYear,
@@ -396,13 +391,12 @@ final readonly class JmhzAnnualEvidenceService
     }
 
     /** @return array<string,mixed>|null */
+    /** @param array<string,mixed>|null $revision poslední revize potvrzení za rok */
     private function certificateSnapshot(
-        int $supplierId,
-        int $employeeId,
         int $taxYear,
+        ?array $revision,
     ): ?array {
         $purpose = PayrollDocumentKind::TaxableIncomeWithholdingCertificate->value;
-        $revision = $this->documents->latest($supplierId, $employeeId, $taxYear, $purpose);
         if ($revision === null) {
             return null;
         }

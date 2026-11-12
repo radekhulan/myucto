@@ -446,6 +446,7 @@ final readonly class JmhzPreparationSnapshotService
         $eldpSource = $createdBy === null
             ? null
             : $this->eldpEvidence->lockSourceForPreparation($supplierId, $sourceRevisionId);
+        $eldpStored = null;
         foreach ($people as $person) {
             if (!is_array($person) || array_is_list($person)) {
                 continue;
@@ -467,6 +468,11 @@ final readonly class JmhzPreparationSnapshotService
                     ? $employment['id']
                     : 0;
                 if ($employeeId > 0 && $employmentId > 0) {
+                    $eldpStored ??= $this->eldpEvidence->storedForPreparation(
+                        $supplierId,
+                        $environment,
+                        $sourceRevisionId,
+                    );
                     $eldpState = $this->eldpEvidence->ensureForPreparation(
                         $supplierId,
                         $environment,
@@ -474,6 +480,7 @@ final readonly class JmhzPreparationSnapshotService
                         $employmentId,
                         $createdBy,
                         $eldpSource,
+                        $eldpStored,
                     );
                     $eldp = $eldpState['snapshot'];
                     if ($eldp !== null) {
@@ -842,7 +849,7 @@ final readonly class JmhzPreparationSnapshotService
         string $periodEnd,
     ): array|string {
         try {
-            $identity = $this->identities->sensitiveSnapshotSourceAt(
+            $resolved = $this->identities->sensitivePreparationIdentityAt(
                 $supplierId,
                 $employeeId,
                 $employmentId,
@@ -854,16 +861,10 @@ final readonly class JmhzPreparationSnapshotService
                 ? $exception->validationCode
                 : 'jmhz_identity_incomplete';
         }
-
-        try {
-            $jmhz = $this->identities->sensitiveJmhzIdentityAt(
-                $supplierId,
-                $employeeId,
-                $employmentId,
-                $environment,
-                $periodEnd,
-            );
-        } catch (PayrollRegistrationIdentitySnapshotException $exception) {
+        $identity = $resolved['source'];
+        $jmhz = $resolved['jmhz'];
+        $exception = $resolved['identifier_error'];
+        if ($exception instanceof PayrollRegistrationIdentitySnapshotException) {
             if (!in_array(
                 $exception->validationCode,
                 self::IDENTIFIERS_NOT_ASSIGNED_YET,
@@ -885,7 +886,8 @@ final readonly class JmhzPreparationSnapshotService
                 'person_external_identifier' => null,
                 'jmhz_employment_external_identifier' => null,
             ];
-        } catch (\DomainException) {
+        }
+        if ($exception !== null || $jmhz === null) {
             return 'jmhz_identity_incomplete';
         }
 

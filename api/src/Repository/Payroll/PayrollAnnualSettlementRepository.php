@@ -359,6 +359,52 @@ final class PayrollAnnualSettlementRepository
     }
 
     /** @return array<string,mixed>|null */
+    /**
+     * Žádosti a výsledky ročního zúčtování za rok pro víc osob najednou
+     * (stejné zámky jako {@see self::findRequest()} a {@see self::findOutcome()}).
+     *
+     * @param list<int> $employeeIds
+     * @return array{requests:array<int,array<string,mixed>>,outcomes:array<int,array<string,mixed>>}
+     */
+    public function findManyForYear(
+        int $supplierId,
+        array $employeeIds,
+        int $taxYear,
+        bool $forUpdate = false,
+    ): array {
+        $requests = [];
+        $outcomes = [];
+        foreach (array_chunk(array_values(array_unique($employeeIds)), 500) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $statement = $this->db->pdo()->prepare(
+                'SELECT * FROM payroll_annual_settlement_requests
+                  WHERE supplier_id = ? AND tax_year = ? AND employee_id IN (' . $in . ')'
+                . ($forUpdate ? ' FOR UPDATE' : '')
+            );
+            $statement->execute([$supplierId, $taxYear, ...$chunk]);
+            foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $request = self::castRequest($row);
+                $request['other_household_caregivers'] = $this->otherCaregiversForRequest(
+                    $supplierId,
+                    (int) $request['id'],
+                    $forUpdate,
+                );
+                $requests[(int) $row['employee_id']] = $request;
+            }
+            $statement = $this->db->pdo()->prepare(
+                'SELECT * FROM payroll_annual_settlement_outcomes
+                  WHERE supplier_id = ? AND tax_year = ? AND employee_id IN (' . $in . ')'
+                . ($forUpdate ? ' FOR UPDATE' : '')
+            );
+            $statement->execute([$supplierId, $taxYear, ...$chunk]);
+            foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $outcomes[(int) $row['employee_id']] = self::castOutcome($row);
+            }
+        }
+
+        return ['requests' => $requests, 'outcomes' => $outcomes];
+    }
+
     public function findOutcome(
         int $supplierId,
         int $employeeId,
