@@ -110,6 +110,39 @@ info:
     odpovědností, kde chyba znamená opravné podání. Provádějí se výhradně
     z webového rozhraní.
 
+    ## Plný zápis tokenem (system_write)
+
+    Token s příznakem `allow_system_write` (zapíná se jen při založení tokenu se
+    zápisem v přihlášené relaci se step-upem a jen na instalaci s
+    `api.allow_system_write_tokens`) jedná ve všech agendách jako jeho uživatel
+    přihlášený ve webovém rozhraní. Neplatí pro něj omezení popsaná výše ani
+    `403 token_endpoint_forbidden` u cest jen pro webové rozhraní: smí zaúčtovat
+    a stornovat doklady (`/invoices/{id}/book`, `/purchase-invoices/{id}/transition`
+    na `booked`, `/bank-transactions/{id}/post`, `/accounting/**` včetně ostatních
+    pohledávek a závazků, interních dokladů a uzávěrek), pracovat s mzdami a s celou
+    agendou SVJ (`/property/**`). Funguje na `/api/v1/...` i na stejných cestách bez
+    verze. Platí jen oprávnění uživatele tokenu a firma, na kterou je token vázaný
+    (`403 forbidden_permission`). Zda příznak platí, vrací `GET /auth/api-me`
+    v `token.system_write`.
+
+    Ani takový token nesmí:
+
+    - přebít uzavřené, uzavírané ani k datu zamčené účetní období (`?force=1` → `409 period_closed`),
+    - měnit částky, data ani položky v období s podaným přiznáním k DPH, kontrolním nebo
+      souhrnným hlášením či OSS přiznáním (`409 period_filed`), ani jako správce firmy,
+    - potvrdit zásah do zamčeného data (`ack_locked=1` se ignoruje), posunout zámek účtování
+      zpět přes podané nebo uzavřené období (`409 period_lock_filed_vat`,
+      `409 period_lock_closed_period`) a znovu otevřít uzavřené období (`409 period_closed`),
+    - přihlášení, MFA, heslo, relace a správa tokenů (`/auth/**` kromě `api-me`), správa
+      uživatelů, rolí a instance, licence, připojení MCP a přístupové údaje firmy
+      (podpisové certifikáty, datové schránky, napojení bank, přihlašovací domény, SMTP
+      profily, klíče AI) → `403 token_endpoint_forbidden`,
+    - úkony vyžadující čerstvé ověření člověkem (step-up MFA, podpis plateb v bance).
+
+    Každé zapisující volání se zapíše do historie aktivit (`api_token.system_write_call`
+    s `via_system_write_token`, id, názvem a prefixem tokenu) a v logu volání má token
+    rozsah `system_write`.
+
     ## Endpointy dostupné jen z webového rozhraní
 
     Několik zdokumentovaných cest token nezavolá vůbec — odpoví
@@ -3229,7 +3262,8 @@ paths:
           name: force
           description: |
             Vynucená úprava vystavené faktury. Z aplikace správce nebo role s `invoices.edit_issued`,
-            přes API token jen se schopností `allow_issued_invoice_edit`.
+            přes API token jen se schopností `allow_issued_invoice_edit` nebo s plným zápisem
+            (`system_write`, podle práv uživatele tokenu).
           schema: { type: integer, enum: [1] }
       requestBody:
         required: true
@@ -3253,8 +3287,8 @@ paths:
         '403':
           description: |
             Doklad je uzamčený pro roli (`document_locked`), nebo API token bez schopnosti
-            `allow_issued_invoice_edit` žádá vynucenou úpravu vystaveného dokladu či přebití
-            uzavřeného období (`token_write_forbidden`).
+            `allow_issued_invoice_edit` a bez plného zápisu (`system_write`) žádá vynucenou
+            úpravu vystaveného dokladu či přebití uzavřeného období (`token_write_forbidden`).
             Role bez práva zaúčtovat mění částky, DPH nebo položky zaúčtované vystavené faktury,
             což by přeúčtovalo deník (`journal_post_forbidden`).
           content:
@@ -3273,6 +3307,9 @@ paths:
             nebo zamčené účetní období, staré i nové datum), `period_filed` (u EU plnění navíc i podané
             souhrnné hlášení, platí i pro vlastníka správce) a `invoice_has_payments` (faktura má úhradu,
             zálohu, zápočet nebo platební doklad; opravuje se dobropisem).
+            API token s plným zápisem (`system_write`): `period_closed` při `force=1` v uzavřeném,
+            uzavíraném nebo zamčeném období a `period_filed` v podaném období (i souhrnné hlášení),
+            obojí i pro vlastníka správce.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6336,7 +6373,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6369,7 +6407,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6420,7 +6459,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6462,7 +6502,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6493,7 +6534,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6512,7 +6554,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6550,7 +6593,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6576,7 +6620,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6602,7 +6647,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6754,7 +6800,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6784,7 +6831,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6815,7 +6863,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6833,7 +6882,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6865,7 +6915,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6895,7 +6946,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -6922,7 +6974,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -7095,7 +7148,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -9235,7 +9289,9 @@ paths:
             Admin override pro nedraftové doklady — dovolí upravit `received`,
             `booked` i `paid`. Nedotknutelný zůstává jen `cancelled`: storno je
             auditní stopa a needituje se. Je to účetní úkon (zaúčtovaný doklad se
-            přeúčtuje), takže přes API token vrací 403 `token_write_forbidden`.
+            přeúčtuje), takže přes API token vrací 403 `token_write_forbidden`; token
+            s plným zápisem (`system_write`) ho provede jako uživatel v aplikaci, ale
+            uzavřené, uzavírané ani zamčené období nepřebije (409 `period_closed`).
           schema: { type: boolean }
         - in: query
           name: force_mode
@@ -9283,7 +9339,9 @@ paths:
             Doklad není editovatelný (`not_editable`) — nedraftový bez `force=1`,
             nebo stornovaný. Uzamčené období u účetní role hlásí `document_locked`.
             Finanční změnu nekonceptu v podaném období DPH (období odpočtu nebo nové DUZP)
-            provede jen správce firmy, jinak `period_filed`.
+            provede jen správce firmy v aplikaci, jinak `period_filed` (i API token s plným
+            zápisem). Token s plným zápisem dostane při `force=1` v uzavřeném, uzavíraném
+            nebo zamčeném období `period_closed`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -9493,7 +9551,8 @@ paths:
       summary: Přechod stavu (state machine draft → received → booked → paid; + cancelled)
       description: |
         `target=booked` je ruční zaúčtování dokladu, tedy účetní úkon: přes API token
-        vrací 403 `token_write_forbidden` a provádí se v aplikaci. Ostatní přechody
+        vrací 403 `token_write_forbidden` a provádí se v aplikaci (token s plným zápisem
+        `system_write` ho provede jako uživatel v aplikaci). Ostatní přechody
         token smí; automatické zaúčtování při přijetí (`received`), které má firma
         zapnuté, proběhne stejně jako z aplikace.
 
@@ -9539,7 +9598,7 @@ paths:
                         type: array
                         description: Jen s `approval_requested`; aktuální schválení dokladu po hodnotách dimenze.
                         items: { $ref: '#/components/schemas/PurchaseInvoiceApproval' }
-        '403': { description: 'Klientský účet (`forbidden_transition`), nebo `target=booked` přes API token (`token_write_forbidden`)' }
+        '403': { description: 'Klientský účet (`forbidden_transition`), nebo `target=booked` přes API token bez plného zápisu (`token_write_forbidden`)' }
         '409': { description: Invalid transition }
 
   /api/v1/purchase-invoices/{id}/pdf:
@@ -12230,7 +12289,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -17733,7 +17793,8 @@ paths:
 
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
 
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
 
             '
           content:
@@ -25939,7 +26000,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -26010,7 +26072,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -26067,7 +26130,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -26102,7 +26166,8 @@ paths:
           description: |
             Zápis přes API token (`token_write_forbidden`). Účetní a daňová vrstva
             je přes token jednosměrná — čtení ano, zápis jen z webového rozhraní,
-            a to i tokenu se scope `read_write`.
+            a to i tokenu se scope `read_write`. Token s plným zápisem (`system_write`)
+            jedná jako uživatel v aplikaci a 403 dostane jen bez oprávnění.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -48471,6 +48536,13 @@ components:
                     (`PUT /api/v1/invoices/{id}?force=1`) za přísnějších podmínek
                     než správce v aplikaci. Jen token vázaný na firmu se zápisem;
                     nastavuje se jen při vytváření tokenu.
+                system_write:
+                  type: boolean
+                  description: |
+                    Platí pro token plný zápis jako pro přihlášeného uživatele
+                    (příznak `allow_system_write`)? `true` jen když ho token má
+                    a instalace ho povoluje (`api.allow_system_write_tokens`);
+                    bez povolení instalace se token chová jako běžný.
                 expires_at: { type: [string, "null"], format: date-time }
             - { type: "null" }
 
