@@ -153,6 +153,13 @@ final class AttendanceMyUctoSampleProfileTest extends TestCase
             'tax_declaration' => 'ano',
             'tax_declaration_from' => '2026-06-01',
             'education_code' => 'M',
+            'birth_surname' => 'Ukázková',
+            'birth_place' => 'Praha',
+            'birth_country' => 'CZ',
+            'work_mode_code' => '1',
+            'continuous_operation' => 'ne',
+            'position_name' => 'Promotérka',
+            'leadership' => 'ne',
         ], $eva['_registration']);
 
         $adam = $persons['adam prikladny'];

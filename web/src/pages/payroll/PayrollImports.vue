@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import RegistrationImportPanel from '@/components/payroll/imports/RegistrationImportPanel.vue'
 import AttendanceImportPanel from '@/components/payroll/imports/AttendanceImportPanel.vue'
+import AgreementImportPanel from '@/components/payroll/imports/AgreementImportPanel.vue'
 import AttendanceMappingPanel from '@/components/payroll/imports/AttendanceMappingPanel.vue'
 import PohodaOicImportPanel from '@/components/payroll/imports/PohodaOicImportPanel.vue'
 import TakeoverWagesPanel from '@/components/payroll/imports/TakeoverWagesPanel.vue'
@@ -16,7 +17,7 @@ import { createAttendanceWorkspace, provideAttendanceWorkspace } from '@/compone
 import { createMigrationWorkspace, provideMigrationWorkspace } from '@/components/payroll/imports/migrationWorkspace'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
-type Tab = 'registration' | 'attendance' | 'mapping' | 'pohoda_oic' | 'takeover' | 'reconciliation' | 'posting_map'
+type Tab = 'registration' | 'agreements' | 'attendance' | 'mapping' | 'pohoda_oic' | 'takeover' | 'reconciliation' | 'posting_map'
 
 /**
  * Pořadí = dvě skupiny, oddělené v liště čárou.
@@ -29,7 +30,7 @@ type Tab = 'registration' | 'attendance' | 'mapping' | 'pohoda_oic' | 'takeover'
  * (Kontrola a Kontace), případně když se teprve převádí (Převzaté mzdy).
  */
 const TABS: readonly Tab[] = [
-  'registration', 'attendance', 'mapping', 'pohoda_oic',
+  'registration', 'agreements', 'attendance', 'mapping', 'pohoda_oic',
   'takeover', 'reconciliation', 'posting_map',
 ]
 const MIGRATION_TABS: readonly Tab[] = ['takeover', 'reconciliation', 'posting_map']
@@ -159,6 +160,7 @@ onMounted(() => {
     <!-- v-show: rozpracovaný průvodce ani neuložený profil nesmí zmizet jen kvůli přepnutí záložky. -->
     <template v-if="canSeeImports">
       <RegistrationImportPanel v-show="renderedTab === 'registration'" :can-write="canWritePersons" />
+      <AgreementImportPanel v-show="renderedTab === 'agreements'" :can-write="canWritePersons" />
       <AttendanceImportPanel
         v-show="renderedTab === 'attendance'"
         :can-write="canWriteInputs"

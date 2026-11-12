@@ -88,7 +88,7 @@ final class AttendanceRegistrationDataTest extends TestCase
         self::assertSame('not_found', $person['match']['status']);
         self::assertArrayNotHasKey('_registration', $person, 'Adresu z podkladů klient celou nedostane.');
         self::assertSame(
-            ['address', 'citizenship', 'cz_isco_code', 'workplace', 'tax_residence', 'tax_declaration', 'education_code'],
+            ['address', 'citizenship', 'cz_isco_code', 'workplace', 'tax_residence', 'tax_declaration', 'house_number', 'education_code'],
             array_column($person['registration'] ?? [], 'key'),
         );
         self::assertStringNotContainsString('Ukázková', json_encode($person, JSON_UNESCAPED_UNICODE) ?: '');

@@ -13052,6 +13052,28 @@
         "predecessor": "The previous program filed the registration.",
         "profile_incomplete": "The registration profile is incomplete, the registration was not prepared.",
         "not_found": "The employment was not found or has already ended."
+      },
+      "defaults": {
+        "intro": "{count} relationships in the period have an incomplete A1 profile. You can set the shared data the app does not keep elsewhere (work mode, continuous operation, position, workplace municipality, managerial position) at once.",
+        "open": "Set shared A1 data",
+        "close": "Hide",
+        "work_mode": "Work mode",
+        "continuous_operation": "Continuous operation",
+        "leadership": "Managerial position",
+        "position_name": "Position title",
+        "workplace_city": "Workplace municipality",
+        "keep": "Keep",
+        "work_modes": {
+          "1": "Single shift",
+          "2": "Two shifts",
+          "3": "Multiple shifts",
+          "4": "Not stated"
+        },
+        "split_house_number": "Split the house number from the street (“Dlouhá 12/3” → street, descriptive and orientation number) where the profile lacks it",
+        "overwrite": "Overwrite values already filled in the profile",
+        "apply": "Set for {count} relationships",
+        "done": "Done: complete profile {verified}, still incomplete {draft}, skipped {skipped}, errors {failed}. Remaining issues are shown in the rows below.",
+        "failed": "The shared A1 data could not be set."
       }
     },
     "healthInsurerNotice": {
@@ -36459,6 +36481,7 @@
     "tabs": {
       "label": "Import type",
       "registration": "JMHZ",
+      "agreements": "Agreements",
       "attendance": "Attendance",
       "mapping": "Column mapping",
       "pohoda_oic": "OIČ from POHODA",
@@ -36883,6 +36906,14 @@
       "tax_declaration_from": "Declaration from",
       "education_code": "Education (KKOV)",
       "employment_status_code": "Employment status (NKPZ)",
+      "birth_surname": "Birth surname",
+      "birth_place": "Place of birth",
+      "birth_country": "Country of birth",
+      "work_mode_code": "Work mode (A1)",
+      "continuous_operation": "Continuous operation (A1)",
+      "workplace_city": "Workplace municipality (A1)",
+      "position_name": "Position title (A1)",
+      "leadership": "Managerial position (A1)",
       "worked_hours": "Worked",
       "worked_days": "Worked days",
       "overtime_hours": "Overtime",
@@ -37019,7 +37050,14 @@
         "tax_residence": "Tax residence",
         "tax_declaration": "Declaration from",
         "employment_status_code": "Employment status",
-        "education_code": "Education"
+        "education_code": "Education",
+        "birth": "Birth",
+        "work_mode_code": "Work mode",
+        "position_name": "Position",
+        "workplace_city": "Workplace municipality",
+        "continuous_operation": "Continuous operation",
+        "leadership": "Managerial position",
+        "house_number": "House number"
       },
       "persons": {
         "title": "People",
@@ -37477,7 +37515,70 @@
       }
     },
     "no_access_title": "No import is available",
-    "no_access_description": "You have no permission for payroll data imports or for migrating from another payroll program."
+    "no_access_description": "You have no permission for payroll data imports or for migrating from another payroll program.",
+    "agreements": {
+      "title": "Agreement import",
+      "hint": "Bulk agreements without attendance: one row = one agreement or employment, not tied to a month. A person already on record (by birth number, saved link or personal number) gets only the new agreement; a new person gets a card and the agreement. Filled registration data are enough for bulk preparation of A1 registrations.",
+      "no_permission": "Only a user allowed to write payroll persons can create persons and agreements.",
+      "drop_hint": "Drop an XLSX or CSV file based on the agreement template here",
+      "preview": "Load preview",
+      "refresh_preview": "Reload preview",
+      "template": "Download XLSX template",
+      "template_hint": "Template with headers, two sample rows and a column guide",
+      "preview_failed": "The agreement import preview could not be loaded.",
+      "apply_failed": "The agreements could not be created.",
+      "applied": "Agreements created: {created}, already existing: {existing}, skipped: {skipped}.",
+      "applied_with_errors": "Agreements created: {created}, errors: {failed}, skipped: {skipped}. Check the result.",
+      "summary": {
+        "persons": "Persons",
+        "new_persons": "New persons",
+        "existing_persons": "On record",
+        "confirm": "To confirm",
+        "create": "Agreements to create",
+        "exists": "Already exist",
+        "errors": "Errors"
+      },
+      "persons_title": "Persons and agreements from the file",
+      "no_rows": "The file contains no agreement rows.",
+      "existing": "On record: {name}",
+      "new_person": "New person",
+      "confirm_legend": "Match by name and date of birth",
+      "confirm_hint": "{name} with the same name and date of birth is on record. Is it the same person?",
+      "confirm_existing": "Yes, create only the agreements",
+      "confirm_new": "No, create a new person",
+      "status": {
+        "create": "Will be created",
+        "exists": "Already exists",
+        "duplicate": "Repeated row",
+        "error": "Error"
+      },
+      "outcome": {
+        "created": "Created",
+        "existing": "Already existed",
+        "skipped": "Skipped",
+        "failed": "Error"
+      },
+      "relation": {
+        "dpp": "DPP",
+        "dpc": "DPČ",
+        "employment": "Employment",
+        "small_scale_employment": "Small-scale employment"
+      },
+      "open_ended": "from {date}, indefinite",
+      "source_row": "{sheet}, row {row}",
+      "apply_hint": "Only rows marked “Will be created” are created. Agreements the person already has and rows with errors are skipped; you can upload the same file again after fixing it.",
+      "apply": "Create agreements ({count})",
+      "applying": "Creating… {done} of {total} persons",
+      "reason": {
+        "no_files": "Upload a file first.",
+        "nothing": "The preview has no agreement to create.",
+        "unconfirmed": "Decide for {count} persons whether they are the person on record."
+      },
+      "result_title": "Result",
+      "result_summary": "Created {created}, already existing {existing}, skipped {skipped}, errors {failed}.",
+      "next_a1": "Prepare social security registrations in bulk in",
+      "next_a1_link": "Payroll submissions → Registrations to file (A1)"
+    }
   },
   "pamica": {
     "title": "Migration from PAMICA",

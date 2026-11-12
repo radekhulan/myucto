@@ -74,6 +74,14 @@ final class AttendanceMeaning
         'tax_declaration_from',
         'education_code',
         'employment_status_code',
+        'birth_surname',
+        'birth_place',
+        'birth_country',
+        'work_mode_code',
+        'continuous_operation',
+        'workplace_city',
+        'position_name',
+        'leadership',
     ];
 
     /** Měsíční souhrny hodin, které jdou do evidence dávky. */

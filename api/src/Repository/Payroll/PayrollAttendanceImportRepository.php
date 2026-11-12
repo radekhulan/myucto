@@ -142,7 +142,7 @@ final class PayrollAttendanceImportRepository
      * Pár dotazů přes IN, ne dotaz za osobu.
      *
      * @param list<array{employee_id:int,employment_id:int}> $pairs
-     * @return array<int,array{residence_address:bool,citizenship:?string,cz_isco_code:?string,activity_code:?string,workplace:bool,tax_residence:bool,tax_declaration:bool,a1_profile:bool}> podle vztahu
+     * @return array<int,array{residence_address:bool,citizenship:?string,cz_isco_code:?string,activity_code:?string,workplace:bool,tax_residence:bool,tax_declaration:bool,a1_profile:bool,birth_surname:bool,birth_place:bool,birth_country:bool}> podle vztahu
      */
     public function registrationState(int $supplierId, array $pairs, string $onDate, int $year): array
     {
@@ -168,8 +168,8 @@ final class PayrollAttendanceImportRepository
             [$supplierId, ...$employees, $onDate, $onDate],
         );
         $stmt = $pdo->prepare(
-            "SELECT employee_id, citizenship_country_code FROM (
-                SELECT employee_id, citizenship_country_code,
+            "SELECT employee_id, citizenship_country_code, birth_surname, birth_place, birth_country_code FROM (
+                SELECT employee_id, citizenship_country_code, birth_surname, birth_place, birth_country_code,
                        ROW_NUMBER() OVER (PARTITION BY employee_id ORDER BY effective_from DESC, id DESC) AS position
                   FROM payroll_person_identity_history
                  WHERE supplier_id = ? AND employee_id IN ({$inEmployees}) AND effective_from <= ?
@@ -177,9 +177,16 @@ final class PayrollAttendanceImportRepository
         );
         $stmt->execute([$supplierId, ...$employees, $onDate]);
         $citizenship = [];
+        $birth = [];
+        $filled = static fn (mixed $value): bool => is_string($value) && trim($value) !== '';
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $value = $row['citizenship_country_code'];
             $citizenship[(int) $row['employee_id']] = is_string($value) && $value !== '' ? $value : null;
+            $birth[(int) $row['employee_id']] = [
+                'birth_surname' => $filled($row['birth_surname']),
+                'birth_place' => $filled($row['birth_place']),
+                'birth_country' => $filled($row['birth_country_code']),
+            ];
         }
         $stmt = $pdo->prepare(
             "SELECT employment_id, cz_isco_code, activity_code, work_place, jmhz_workplace_municipality_code FROM (
@@ -224,6 +231,7 @@ final class PayrollAttendanceImportRepository
                 'tax_residence' => isset($residences[$pair['employee_id']]),
                 'tax_declaration' => isset($declarations[$pair['employee_id']]),
                 'a1_profile' => isset($profiles[$pair['employment_id']]),
+                ...($birth[$pair['employee_id']] ?? ['birth_surname' => false, 'birth_place' => false, 'birth_country' => false]),
             ];
         }
 

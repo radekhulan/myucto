@@ -764,6 +764,33 @@ final class AttendanceImportService
         return ['results' => $results];
     }
 
+    /**
+     * Jedna dohoda z importu dohod: osobě z evidence (`$existing` jako
+     * {@see AttendanceOpenAgreementMatcher} `existing_person`) jen nový vztah,
+     * jinak karta osoby i vztah. Stejné zakládání jako krok Osoby importu
+     * docházky, včetně údajů pro registraci a uložené vazby.
+     *
+     * @param array<string,mixed> $item
+     * @param array<string,mixed>|null $existing
+     * @return array{employee_id:int,employment_id:int,message:?string}
+     */
+    public function createAgreement(
+        int $supplierId,
+        array $item,
+        ?array $existing,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
+
+        return $this->license->mutatePayrollEmployees(
+            fn (): array => $existing === null
+                ? $this->createPerson($supplierId, $item, $today, $userId, $ip, $userAgent)
+                : $this->createEmploymentForExisting($supplierId, $item, $existing, $today, $userId, $ip, $userAgent),
+        );
+    }
+
     /** @return list<array<string,mixed>> */
     public function batches(int $supplierId, ?string $period): array
     {

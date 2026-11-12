@@ -392,6 +392,8 @@ export type AttendanceMeaning =
   | 'address_street' | 'address_house_number' | 'address_city' | 'address_postal_code' | 'address_country'
   | 'citizenship' | 'cz_isco_code' | 'activity_code' | 'workplace' | 'tax_residence' | 'tax_declaration'
   | 'tax_declaration_from' | 'education_code' | 'employment_status_code'
+  | 'birth_surname' | 'birth_place' | 'birth_country' | 'work_mode_code' | 'continuous_operation'
+  | 'workplace_city' | 'position_name' | 'leadership'
   | 'worked_hours' | 'overtime_hours' | 'night_hours' | 'weekend_hours' | 'holiday_work_hours'
   | 'afternoon_hours' | 'fund_hours'
   | 'vacation_hours' | 'holiday_hours' | 'sick_hours' | 'doctor_hours' | 'care_hours'
@@ -603,7 +605,9 @@ export interface AttendanceProbableEarningChange extends AttendanceProbableEarni
 
 /** Údaj pro registraci ČSSZ v náhledu, viz AttendanceRegistrationData::display() na serveru. */
 export interface AttendanceRegistrationItem {
-  key: 'address' | 'citizenship' | 'cz_isco_code' | 'activity_code' | 'workplace' | 'tax_residence' | 'tax_declaration' | 'employment_status_code' | 'education_code'
+  key: 'address' | 'citizenship' | 'birth' | 'cz_isco_code' | 'activity_code' | 'workplace' | 'tax_residence' | 'tax_declaration'
+    | 'work_mode_code' | 'position_name' | 'workplace_city' | 'continuous_operation' | 'leadership' | 'house_number'
+    | 'employment_status_code' | 'education_code'
   value: string
 }
 
@@ -1004,7 +1008,89 @@ export interface PohodaOicApplyResult {
   summary: { applied: number; failed: number; skipped: number }
 }
 
+// ─── Dohody (jen smlouvy, bez docházky) ───────────────────────────────────────
+
+export type AgreementImportStatus = 'create' | 'exists' | 'duplicate' | 'error'
+export type AgreementImportOutcome = 'created' | 'existing' | 'skipped' | 'failed'
+export type AgreementRelationType = 'dpp' | 'dpc' | 'employment' | 'small_scale_employment'
+
+export interface AgreementImportAgreement {
+  key: string
+  sheet: string
+  row: number
+  relation_type: AgreementRelationType | null
+  relation_label: string | null
+  start_on: string | null
+  end_on: string | null
+  status: AgreementImportStatus
+  note: string | null
+  errors: string[]
+  warnings: string[]
+  registration: AttendanceRegistrationItem[]
+}
+
+export interface AgreementImportPerson {
+  key: string
+  display_name: string
+  personal_number: string | null
+  birth_number_masked: string | null
+  birth_date: string | null
+  existing_person: {
+    employee_id: number
+    employee_name: string
+    matched_by: string
+    requires_confirmation: boolean
+  } | null
+  warnings: string[]
+  errors: string[]
+  agreements: AgreementImportAgreement[]
+}
+
+export interface AgreementImportPreview {
+  persons: AgreementImportPerson[]
+  files: { name: string; rows: number; error: string | null }[]
+  summary: {
+    persons: number
+    new_persons: number
+    existing_persons: number
+    confirm: number
+    create: number
+    exists: number
+    errors: number
+  }
+}
+
+export interface AgreementImportResult {
+  results: {
+    person_key: string
+    row_key: string
+    display_name: string
+    relation_type: AgreementRelationType | null
+    start_on: string | null
+    outcome: AgreementImportOutcome
+    employee_id: number | null
+    employment_id: number | null
+    message: string | null
+  }[]
+  counts: Record<AgreementImportOutcome, number>
+}
+
+export const AGREEMENT_TEMPLATE_FILENAME = 'dohody-myucto.xlsx'
+
 export const payrollImportsApi = {
+  previewAgreements: (files: ImportFilePayload[]) =>
+    api.post<AgreementImportPreview>('/payroll/imports/agreements/preview', { files })
+      .then(response => response.data),
+  applyAgreements: (payload: {
+    files: ImportFilePayload[]
+    confirmations: Record<string, number | 'new'>
+    person_keys: string[]
+  }) =>
+    api.post<AgreementImportResult>('/payroll/imports/agreements/apply', payload)
+      .then(response => response.data),
+  downloadAgreementTemplate: () =>
+    downloadApiFile('/payroll/imports/agreements/template', AGREEMENT_TEMPLATE_FILENAME),
+
   previewRegistrations: (payload: RegistrationPreviewPayload) =>
     api.post<RegistrationPreview>('/payroll/imports/registrations/preview', payload)
       .then(response => response.data),

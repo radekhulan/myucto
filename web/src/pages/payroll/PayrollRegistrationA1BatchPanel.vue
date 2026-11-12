@@ -10,8 +10,11 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import {
   payrollApi,
+  type PayrollRegistrationA1Defaults,
+  type PayrollRegistrationA1DefaultsResult,
   type PayrollRegistrationA1BatchResult,
   type PayrollRegistrationA1Candidate,
   type PayrollRegzelEnvironment,
@@ -21,6 +24,7 @@ import { useAuthStore } from '@/stores/auth'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate } from '@/composables/useFormat'
 import DateInput from '@/components/ui/DateInput.vue'
+import { payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 
 type BatchResult = PayrollRegistrationA1BatchResult['results'][number]
 
@@ -29,6 +33,7 @@ const SKIP_CODES = ['id_ppv', 'live_registration', 'predecessor', 'profile_incom
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const route = useRoute()
 const environment = defineModel<PayrollRegzelEnvironment>('environment', {
   default: 'production',
 })
@@ -36,8 +41,26 @@ const environment = defineModel<PayrollRegzelEnvironment>('environment', {
 const loading = ref(true)
 const busy = ref(false)
 const items = ref<PayrollRegistrationA1Candidate[]>([])
-const from = ref('')
-const to = ref('')
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+const ISO_MONTH = /^(\d{4})-(\d{2})$/
+
+function periodFromQuery(): { from: string, to: string } {
+  const queryFrom = payrollQueryValue(route.query, 'from')
+  const queryTo = payrollQueryValue(route.query, 'to')
+  const month = ISO_MONTH.exec(payrollQueryValue(route.query, 'period') ?? '')
+  const monthFrom = month ? `${month[1]}-${month[2]}-01` : ''
+  const monthTo = month
+    ? `${month[1]}-${month[2]}-${String(new Date(Number(month[1]), Number(month[2]), 0).getDate()).padStart(2, '0')}`
+    : ''
+  return {
+    from: queryFrom !== null && ISO_DATE.test(queryFrom) ? queryFrom : monthFrom,
+    to: queryTo !== null && ISO_DATE.test(queryTo) ? queryTo : monthTo,
+  }
+}
+
+const initialPeriod = periodFromQuery()
+const from = ref(initialPeriod.from)
+const to = ref(initialPeriod.to)
 const selected = ref<number[]>([])
 const results = ref<Array<BatchResult & { employee_id: number, employee_name: string }>>([])
 const error = ref('')
@@ -104,6 +127,62 @@ function resultText(result: BatchResult): string {
     return t(`payroll.registrationA1.skip.${result.code}`)
   }
   return result.message ?? ''
+}
+
+const incomplete = computed(() => items.value.filter(item => item.profile_status !== 'verified'))
+const defaultsOpen = ref(false)
+const defaultsForm = ref({
+  work_mode_code: '1',
+  continuous_operation: 'no' as 'yes' | 'no' | '',
+  workplace_city: '',
+  position_name: '',
+  leadership: 'no' as 'yes' | 'no' | '',
+  overwrite: false,
+  split_house_number: true,
+})
+const defaultsResult = ref<PayrollRegistrationA1DefaultsResult | null>(null)
+const canApplyDefaults = computed(() => canWrite.value && !busy.value && incomplete.value.length > 0)
+
+function flag(value: 'yes' | 'no' | ''): boolean | null {
+  return value === '' ? null : value === 'yes'
+}
+
+async function applyDefaults(): Promise<void> {
+  if (!canApplyDefaults.value) return
+  busy.value = true
+  error.value = ''
+  success.value = ''
+  defaultsResult.value = null
+  const form = defaultsForm.value
+  const defaults: PayrollRegistrationA1Defaults = {
+    work_mode_code: form.work_mode_code || null,
+    continuous_operation: flag(form.continuous_operation),
+    workplace_city: form.workplace_city.trim() || null,
+    position_name: form.position_name.trim() || null,
+    leadership: flag(form.leadership),
+  }
+  try {
+    const ids = incomplete.value.map(item => item.employment_id)
+    const merged: PayrollRegistrationA1DefaultsResult = { results: [], counts: { verified: 0, draft: 0, skipped: 0, failed: 0 } }
+    for (let offset = 0; offset < ids.length; offset += 200) {
+      const response = await payrollApi.setRegistrationA1Defaults({
+        employment_ids: ids.slice(offset, offset + 200),
+        defaults,
+        overwrite: form.overwrite,
+        split_house_number: form.split_house_number,
+      })
+      merged.results.push(...response.results)
+      for (const key of Object.keys(merged.counts) as Array<keyof typeof merged.counts>) {
+        merged.counts[key] += response.counts[key] ?? 0
+      }
+    }
+    defaultsResult.value = merged
+    await load()
+  } catch (exception) {
+    error.value = apiErrorMessage(exception, t('payroll.registrationA1.defaults.failed'))
+  } finally {
+    busy.value = false
+  }
 }
 
 function toggle(id: number): void {
@@ -291,6 +370,66 @@ onMounted(() => {
             : t('payroll.registrationA1.submit', { count: selected.length }) }}
         </button>
       </div>
+    </div>
+
+    <div v-if="canWrite && incomplete.length > 0" class="rounded-xl border border-warning-500/30 bg-warning-50 p-4 text-sm" data-test="registration-a1-defaults">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="max-w-prose text-neutral-800">{{ t('payroll.registrationA1.defaults.intro', { count: incomplete.length }) }}</p>
+        <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" data-test="registration-a1-defaults-toggle" @click="defaultsOpen = !defaultsOpen">
+          {{ t(defaultsOpen ? 'payroll.registrationA1.defaults.close' : 'payroll.registrationA1.defaults.open') }}
+        </button>
+      </div>
+      <form v-if="defaultsOpen" class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" @submit.prevent="applyDefaults">
+        <label class="text-xs font-medium text-neutral-700">
+          {{ t('payroll.registrationA1.defaults.work_mode') }}
+          <select v-model="defaultsForm.work_mode_code" class="mt-1 block w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="registration-a1-defaults-work-mode">
+            <option value="">{{ t('payroll.registrationA1.defaults.keep') }}</option>
+            <option v-for="code in ['1', '2', '3', '4']" :key="code" :value="code">{{ t(`payroll.registrationA1.defaults.work_modes.${code}`) }}</option>
+          </select>
+        </label>
+        <label class="text-xs font-medium text-neutral-700">
+          {{ t('payroll.registrationA1.defaults.continuous_operation') }}
+          <select v-model="defaultsForm.continuous_operation" class="mt-1 block w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+            <option value="">{{ t('payroll.registrationA1.defaults.keep') }}</option>
+            <option value="no">{{ t('common.no') }}</option>
+            <option value="yes">{{ t('common.yes') }}</option>
+          </select>
+        </label>
+        <label class="text-xs font-medium text-neutral-700">
+          {{ t('payroll.registrationA1.defaults.leadership') }}
+          <select v-model="defaultsForm.leadership" class="mt-1 block w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+            <option value="">{{ t('payroll.registrationA1.defaults.keep') }}</option>
+            <option value="no">{{ t('common.no') }}</option>
+            <option value="yes">{{ t('common.yes') }}</option>
+          </select>
+        </label>
+        <label class="text-xs font-medium text-neutral-700">
+          {{ t('payroll.registrationA1.defaults.position_name') }}
+          <input v-model="defaultsForm.position_name" type="text" maxlength="255" class="mt-1 block w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="registration-a1-defaults-position">
+        </label>
+        <label class="text-xs font-medium text-neutral-700">
+          {{ t('payroll.registrationA1.defaults.workplace_city') }}
+          <input v-model="defaultsForm.workplace_city" type="text" maxlength="255" class="mt-1 block w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+        </label>
+        <div class="space-y-1 text-xs text-neutral-700 sm:col-span-2 lg:col-span-3">
+          <label class="flex items-center gap-2">
+            <input v-model="defaultsForm.split_house_number" type="checkbox">
+            {{ t('payroll.registrationA1.defaults.split_house_number') }}
+          </label>
+          <label class="flex items-center gap-2">
+            <input v-model="defaultsForm.overwrite" type="checkbox">
+            {{ t('payroll.registrationA1.defaults.overwrite') }}
+          </label>
+        </div>
+        <div class="sm:col-span-2 lg:col-span-3">
+          <button type="submit" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="!canApplyDefaults" data-test="registration-a1-defaults-apply">
+            {{ busy ? t('common.loading') : t('payroll.registrationA1.defaults.apply', { count: incomplete.length }) }}
+          </button>
+        </div>
+      </form>
+      <p v-if="defaultsResult" class="mt-3 text-neutral-800" role="status" data-test="registration-a1-defaults-result">
+        {{ t('payroll.registrationA1.defaults.done', defaultsResult.counts) }}
+      </p>
     </div>
 
     <div v-if="loading" class="h-40 animate-pulse rounded-xl bg-neutral-100" />
