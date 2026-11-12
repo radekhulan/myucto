@@ -123,6 +123,43 @@ describe('PayrollMonthlyChecklistPanel', () => {
     )
   })
 
+  it('u více povinností po termínu bez podání odkáže na hromadné vyřízení mimo aplikaci', async () => {
+    const overdue = (id: number, overrides: Record<string, unknown> = {}) => ({
+      ...agendaDutyItem(),
+      key: `checklist:REGZEC:${id}`,
+      source: 'checklist',
+      agenda_code: 'REGZEC',
+      subject: `Syntetická dohoda ${id}`,
+      phase: 'overdue',
+      days_to_due: -278,
+      is_overdue: true,
+      submission_id: null,
+      ...overrides,
+    })
+    m.monthlyChecklist.mockResolvedValue(baseResponse({
+      items: [overdue(1), overdue(2), overdue(3, { submission_id: 9 }), overdue(4, { done: true })],
+    }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const hint = wrapper.get('[data-test="monthly-checklist-bulk-external-hint"]')
+    expect(hint.text()).toContain('payroll.submissions.overview.bulk_external_hint 2')
+    expect(hint.get('[data-test="monthly-checklist-bulk-external-link"]').attributes('data-to'))
+      .toBe(JSON.stringify({ name: 'payroll-dashboard', hash: '#payroll-deadlines' }))
+  })
+
+  it('jednu povinnost po termínu hromadně nenabízí', async () => {
+    m.monthlyChecklist.mockResolvedValue(baseResponse({
+      items: [{ ...agendaDutyItem(), phase: 'overdue', is_overdue: true, submission_id: null }],
+    }))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="monthly-checklist-bulk-external-hint"]').exists()).toBe(false)
+  })
+
   it('zobrazí prázdný stav, když firma za období nemá žádnou položku', async () => {
     m.monthlyChecklist.mockResolvedValue(baseResponse())
 

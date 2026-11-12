@@ -780,6 +780,42 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     expect(hint.text()).toContain('payroll.submissions.overview.bulk_external_hint')
     expect(hint.find('[data-test="submission-bulk-external-link"]').exists()).toBe(true)
   })
+
+  it('povinnost po termínu pozná i podle is_overdue, když fáze chybí', async () => {
+    const overdue = (id: number) => ({
+      id,
+      environment: 'production',
+      agenda_code: 'SYNTH',
+      agenda_group: 'other',
+      subject_type: 'employment',
+      subject_reference: `employment:${id}`,
+      subject_label: `Syntetická dohoda ${id}`,
+      period_start: '2026-02-01',
+      period_end: '2026-02-28',
+      obligation_kind: 'event',
+      preferred_channel: 'isds',
+      status: 'open',
+      row_version: 1,
+      earliest_submission_on: '2026-02-01',
+      due_on: '2026-02-08',
+      calendar_basis: 'calendar_days',
+      deadline: { days_to_due: -277, is_action_required: true, is_overdue: true },
+      latest_submission: null,
+    })
+    m.submissionOverview.mockResolvedValue({
+      items: [overdue(1), overdue(2), overdue(3)],
+      total: 3,
+      deadline_summary: {
+        not_open: 0, open: 0, due_soon: 0, due_today: 0, overdue: 0,
+        awaiting_result: 0, fulfilled: 0, action_required: 3, cancelled: 0,
+      },
+    })
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'other' } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="submission-bulk-external-hint"]').exists()).toBe(true)
+  })
 })
 
 
