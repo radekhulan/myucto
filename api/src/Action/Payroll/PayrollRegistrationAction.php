@@ -498,7 +498,7 @@ final class PayrollRegistrationAction
         AccessLevel $level,
         string $permission = 'payroll.submissions',
     ): ?Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

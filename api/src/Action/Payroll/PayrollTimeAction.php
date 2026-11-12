@@ -1023,7 +1023,7 @@ final class PayrollTimeAction
         AccessLevel $level,
         bool $allowBearer = false,
     ): ?Response {
-        if (!$allowBearer && !RequestAuthorization::isSessionAuth($request)) {
+        if (!$allowBearer && !RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Docházka je dostupná pouze z přihlášené relace.');
         }
         $error = null;

@@ -119,7 +119,7 @@ final class PayrollRegistrationImportAction
 
     private function authorize(Request $request, Response $response, bool $writesEmployments): ?Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

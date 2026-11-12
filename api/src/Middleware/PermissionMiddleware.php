@@ -126,7 +126,7 @@ final class PermissionMiddleware implements MiddlewareInterface
             if (RequestAuthorization::roleUsesClientTaxSubmissionScope($role)
                 && (!ClientTaxSubmissionPolicy::allowsRoute($method, $path)
                     || (preg_match('#^/api/reports/submissions(?:/|$)#D', $path) === 1
-                        && !RequestAuthorization::isSessionAuth($request)))) {
+                        && !RequestAuthorization::actsAsSession($request)))) {
                 return $this->forbidden($request);
             }
             // Agendy NNO/504 a SVJ: oprávnění nestačí, firma musí být tou organizací.

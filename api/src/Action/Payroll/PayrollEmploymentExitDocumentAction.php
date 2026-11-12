@@ -277,7 +277,7 @@ final class PayrollEmploymentExitDocumentAction
         Request $request,
         Response $response,
     ): ?Response {
-        if (RequestAuthorization::isSessionAuth($request)) {
+        if (RequestAuthorization::actsAsSession($request)) {
             return null;
         }
 

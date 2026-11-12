@@ -33,7 +33,7 @@ final class AnnualTaxCertificateAction
         Response $response,
         array $args,
     ): Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         if (!$this->requirePermission(

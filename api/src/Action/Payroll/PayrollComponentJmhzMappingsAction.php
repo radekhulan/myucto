@@ -194,7 +194,7 @@ final class PayrollComponentJmhzMappingsAction
 
     private function authorize(Request $request, Response $response, AccessLevel $level): ?Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

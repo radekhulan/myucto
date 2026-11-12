@@ -291,7 +291,7 @@ final class PayrollEmploymentAction
             if (!is_bool($correctEffectiveFrom)) {
                 throw new \InvalidArgumentException('Pole correct_effective_from musí být boolean.');
             }
-            if (!RequestAuthorization::isSessionAuth($request)) {
+            if (!RequestAuthorization::actsAsSession($request)) {
                 $correctEffectiveFrom = false;
             }
             if (!$correctEffectiveFrom) {
@@ -635,7 +635,7 @@ final class PayrollEmploymentAction
         bool $allowBearer = false,
     ): ?Response
     {
-        if (!$allowBearer && RequestAuthorization::isBearerAuth($request)) {
+        if (!$allowBearer && !RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;
@@ -656,7 +656,7 @@ final class PayrollEmploymentAction
 
     private function authorizeRead(Request $request, Response $response): ?Response
     {
-        if (RequestAuthorization::isBearerAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;
@@ -685,7 +685,7 @@ final class PayrollEmploymentAction
         array $body,
         bool $newTerms,
     ): array {
-        if (!RequestAuthorization::isBearerAuth($request)) {
+        if (RequestAuthorization::actsAsSession($request)) {
             return $this->withStoredTerms($supplierId, $employmentId, $body);
         }
         $allowed = [

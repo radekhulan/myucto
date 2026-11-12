@@ -152,7 +152,7 @@ final class PayrollComponentsAction
         AccessLevel $level,
         bool $allowBearer = false,
     ): ?Response {
-        if (!$allowBearer && !RequestAuthorization::isSessionAuth($request)) {
+        if (!$allowBearer && !RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

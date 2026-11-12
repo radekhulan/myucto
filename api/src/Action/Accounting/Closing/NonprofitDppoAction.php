@@ -61,7 +61,7 @@ final class NonprofitDppoAction
     private function acceptanceView(Request $q,int $s):array
     {
         return$this->acceptances->state($s)+['history'=>$this->acceptances->history($s,20),
-            'can_change'=>RequestAuthorization::isSessionAuth($q)&&RequestAuthorization::canAcceptNonprofitDppoCalculation($q)];
+            'can_change'=>RequestAuthorization::actsAsSession($q)&&RequestAuthorization::canAcceptNonprofitDppoCalculation($q)];
     }
     private function profileCapabilities(Request $q,int $s,array $period,bool $gather):array
     {
@@ -106,10 +106,10 @@ final class NonprofitDppoAction
         });
     }
     private function capabilities(Request $q):array
-    {return['can_confirm'=>RequestAuthorization::isSessionAuth($q)&&RequestAuthorization::allows($q,'accounting.periods.close',AccessLevel::WRITE),'session_only'=>true,'can_edit_reduction'=>RequestAuthorization::isSessionAuth($q)&&RequestAuthorization::allows($q,'reports',AccessLevel::WRITE)];}
+    {return['can_confirm'=>RequestAuthorization::actsAsSession($q)&&RequestAuthorization::allows($q,'accounting.periods.close',AccessLevel::WRITE),'session_only'=>true,'can_edit_reduction'=>RequestAuthorization::actsAsSession($q)&&RequestAuthorization::allows($q,'reports',AccessLevel::WRITE)];}
     private function handle(Request $q,Response $r,bool $write,callable $work):Response
     {
-        if(!$write&&!RequestAuthorization::isSessionAuth($q))return Json::error($r,'token_endpoint_forbidden','API token má přístup pouze k veřejnému API (/api/v1). Tento endpoint je dostupný jen z webového rozhraní.',403);
+        if(!$write&&!RequestAuthorization::actsAsSession($q))return Json::error($r,'token_endpoint_forbidden','API token má přístup pouze k veřejnému API (/api/v1). Tento endpoint je dostupný jen z webového rozhraní.',403);
         if($write&&($deny=SessionOnlyAccountingAct::deny($q,$r,'Potvrzení právního profilu nebo použití daňové úspory'))!==null)return$deny;
         $allowed=$write?$this->requireClose($q,$r,$error):$this->requirePermission($q,$r,'accounting',AccessLevel::READ,$error);if(!$allowed)return$error;
         try{return Json::ok($r,$work($this->currentSupplierId($q)));}catch(TaxReturnException|NonprofitTaxAssessmentException|PostingException $e){return Json::error($r,$e->errorCode,$e->getMessage(),$e->httpStatus);}

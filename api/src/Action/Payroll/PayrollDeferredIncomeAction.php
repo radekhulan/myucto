@@ -111,7 +111,7 @@ final class PayrollDeferredIncomeAction
         string $permission,
         AccessLevel $level,
     ): ?Response {
-        if (RequestAuthorization::isBearerAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

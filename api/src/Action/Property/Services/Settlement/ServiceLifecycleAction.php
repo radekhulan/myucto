@@ -76,7 +76,7 @@ final class ServiceLifecycleAction
     }
     private function run(Request $q,Response $r,string $permission,bool $write,callable $work): Response
     {
-        if(!RequestAuthorization::isSessionAuth($q))return Json::sessionRequired($r);
+        if(!RequestAuthorization::actsAsSession($q))return Json::sessionRequired($r);
         if(!RequestAuthorization::allows($q,$permission,$write?AccessLevel::WRITE:AccessLevel::READ))return Json::error($r,'forbidden','Pro tuto operaci nemáte oprávnění.',403);
         try{return Json::ok($r,$work(PropertyInput::id($this->currentSupplierId($q),'supplier_id')));}
         catch(PropertyException|\MyInvoice\Service\Property\Opening\OpeningException|\MyInvoice\Service\Property\Payments\PaymentException|\MyInvoice\Service\Property\Charges\Issuance\IssuanceException|\MyInvoice\Service\Property\Receivables\ReceivableException $e){return Json::error($r,$e->errorCode,$e->getMessage(),$e->httpStatus);}

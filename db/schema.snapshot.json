@@ -1195,7 +1195,8 @@
         "2289_payroll_snapshot_column_compression.sql",
         "2290_payroll_identity_from_first_employment.sql",
         "2291_payroll_jmhz_external_roots.sql",
-        "2292_api_token_issued_invoice_edit.sql"
+        "2292_api_token_issued_invoice_edit.sql",
+        "2293_api_token_system_write.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -2511,6 +2512,7 @@
             "columns": {
                 "allow_issued_invoice_edit": "tinyint(1) NOT NULL DEFAULT 0",
                 "allow_payroll_submission_docs": "tinyint(1) NOT NULL DEFAULT 0",
+                "allow_system_write": "tinyint(1) NOT NULL DEFAULT 0",
                 "audience": "enum('api','mcp') NOT NULL DEFAULT 'api'",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "eet_external_by_default": "tinyint(1) NOT NULL DEFAULT 0",

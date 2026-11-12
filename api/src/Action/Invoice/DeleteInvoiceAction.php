@@ -219,7 +219,7 @@ final class DeleteInvoiceAction
             // Zápis v uzamčeném období (po podání přiznání k DPH) se nepřeskakuje tichým
             // stornem: bez potvrzení vrátí varování, s ním se smaže zápis i faktura naráz.
             if ($forceDelete && !$allUnposted) {
-                $lockedAck = ($request->getQueryParams()[JournalEntryDeletionRules::ACK_LOCKED_PARAM] ?? '') === '1';
+                $lockedAck = RequestAuthorization::acknowledgesLockedPeriod($request);
                 $purge = $this->journalPurge->purge(
                     $supplierId, 'invoice', $deleteIds, $reverseMeta, 'invoice_force_delete', $lockedAck,
                 );

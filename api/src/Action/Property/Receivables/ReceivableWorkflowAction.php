@@ -17,7 +17,7 @@ final class ReceivableWorkflowAction
         return $this->run($r,$s,'property',false,function(int $supplier)use($r):array{
             $q=$r->getQueryParams();PropertyInput::fields($q,['unit_id','as_of','known_at']);
             $result=$this->read->context($supplier,$this->id($q['unit_id']??null),PropertyInput::text($q['as_of']??null,'as_of',100),PropertyInput::text($q['known_at']??null,'known_at',100));
-            $result['capabilities']=[];foreach(['manage','confirm','certificates'] as $key)$result['capabilities'][$key]=RequestAuthorization::isSessionAuth($r)&&RequestAuthorization::allows($r,'property.receivables.'.$key,AccessLevel::WRITE);
+            $result['capabilities']=[];foreach(['manage','confirm','certificates'] as $key)$result['capabilities'][$key]=RequestAuthorization::actsAsSession($r)&&RequestAuthorization::allows($r,'property.receivables.'.$key,AccessLevel::WRITE);
             return $result;
         });
     }
@@ -28,7 +28,7 @@ final class ReceivableWorkflowAction
     public function certificate(Request $r,Response $s,array $args):Response{return $this->run($r,$s,'property',false,fn(int $supplier)=>$this->certificates->find($supplier,$this->id($args['id']??null)));}
     private function run(Request $r,Response $s,string $permission,bool $write,callable $work):Response
     {
-        if($write&&!RequestAuthorization::isSessionAuth($r))return Json::sessionRequired($s);
+        if($write&&!RequestAuthorization::actsAsSession($r))return Json::sessionRequired($s);
         if(!RequestAuthorization::allows($r,'property',AccessLevel::READ)||!RequestAuthorization::allows($r,$permission,$write?AccessLevel::WRITE:AccessLevel::READ))return Json::error($s,'forbidden','Pro tuto operaci nemáte oprávnění.',403);
         try{return Json::ok($s,$work($this->currentSupplierId($r)));}
         catch(PropertyException|\MyInvoice\Service\Property\Payments\PaymentException|\MyInvoice\Service\Property\Charges\Issuance\IssuanceException $e){return Json::error($s,$e->errorCode,$e->getMessage(),$e->httpStatus,['details'=>$e->details]);}

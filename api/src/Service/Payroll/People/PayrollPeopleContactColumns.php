@@ -40,7 +40,7 @@ final class PayrollPeopleContactColumns
 
     public static function allowed(Request $request): bool
     {
-        return RequestAuthorization::isSessionAuth($request)
+        return RequestAuthorization::actsAsSession($request)
             && RequestAuthorization::allows($request, self::PERMISSION, AccessLevel::READ);
     }
 

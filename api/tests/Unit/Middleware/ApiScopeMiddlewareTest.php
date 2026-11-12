@@ -840,6 +840,75 @@ final class ApiScopeMiddlewareTest extends TestCase
         self::assertSame(204, $this->middleware()->process($this->bearer('POST', '/api/invoices/7/receipt-link', 'read_write'), $this->okHandler())->getStatusCode());
         self::assertSame(403, $this->middleware()->process($this->bearer('DELETE', '/api/invoices/7/receipt-link', 'read'), $this->okHandler())->getStatusCode());
     }
+    /**
+     * Token s plným zápisem (#371) projde read-only účetní vrstvou, session-only cestami
+     * i SVJ zápisem; přihlášení, správu tokenů, licence, instance a přístupové údaje ne.
+     * Bez příznaku (nebo s příznakem, který AuthMiddleware nepotvrdil) zůstává 403.
+     */
+    public function testSystemWriteTokenActsAsSessionExceptSecuritySurfaces(): void
+    {
+        $open = [
+            ['POST', '/api/accounting/other-items/5/post'],
+            ['POST', '/api/accounting/other-items/5/reverse'],
+            ['POST', '/api/invoices/5/book'],
+            ['POST', '/api/bank-transactions/5/post'],
+            ['POST', '/api/property/charges/issues/batches/5/post'],
+            ['POST', '/api/property/houses'],
+            ['POST', '/api/payroll/runs/5/approve'],
+            ['PUT', '/api/settings/client/invoice-defaults'],
+            ['POST', '/api/purchase-invoices/renumber'],
+            ['GET', '/api/auth/api-me'],
+        ];
+        foreach ($open as [$method, $path]) {
+            $response = $this->middleware()->process($this->systemWrite($method, $path), $this->okHandler());
+            self::assertSame(204, $response->getStatusCode(), $method . ' ' . $path);
+
+            $plain = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            if ($path !== '/api/auth/api-me') {
+                self::assertSame(403, $plain->getStatusCode(), 'bez příznaku ' . $method . ' ' . $path);
+            }
+            $unconfirmed = $this->bearer($method, $path, 'read_write')->withAttribute(
+                AuthMiddleware::ATTR_API_TOKEN,
+                ['scope' => 'read_write', 'allow_system_write' => true],
+            );
+            if ($path !== '/api/auth/api-me') {
+                self::assertSame(403, $this->middleware()->process($unconfirmed, $this->okHandler())->getStatusCode(),
+                    'nepotvrzený příznak ' . $method . ' ' . $path);
+            }
+        }
+
+        $closed = [
+            ['POST', '/api/auth/tokens'],
+            ['DELETE', '/api/auth/tokens/5'],
+            ['POST', '/api/auth/change-password'],
+            ['POST', '/api/auth/totp/setup'],
+            ['GET', '/api/auth/me'],
+            ['POST', '/api/auth/webauthn/register/options'],
+            ['GET', '/api/admin/users'],
+            ['POST', '/api/admin/roles'],
+            ['GET', '/api/instance-admin/status'],
+            ['POST', '/api/license/activate'],
+            ['GET', '/api/mcp/grants'],
+            ['POST', '/api/settings/signing/profiles'],
+            ['POST', '/api/settings/databox'],
+            ['POST', '/api/settings/domains'],
+            ['PUT', '/api/settings/ai-assist'],
+        ];
+        foreach ($closed as [$method, $path]) {
+            $response = $this->middleware()->process($this->systemWrite($method, $path), $this->okHandler());
+            self::assertSame(403, $response->getStatusCode(), $method . ' ' . $path);
+            self::assertSame('token_endpoint_forbidden', $this->errorCode($response));
+        }
+    }
+
+    private function systemWrite(string $method, string $path): ServerRequestInterface
+    {
+        return $this->bearer($method, $path, 'read_write')->withAttribute(
+            AuthMiddleware::ATTR_API_TOKEN,
+            ['scope' => 'read_write', 'allow_system_write' => true, 'system_write' => true],
+        );
+    }
+
     private function middleware(): ApiScopeMiddleware
     {
         return new ApiScopeMiddleware(new ResponseFactory());

@@ -577,6 +577,18 @@ return [
         'payroll_document_public_per_min_per_ip' => 30,      // zabezpečený odkaz na mzdový dokument (stav + stažení PDF)
         'payroll_document_public_post_per_min_per_ip' => 5,  // request-code (ODESÍLÁ e-mail) + verify; přísnější, za odkazem je výplatní páska
     ],
+    'api' => [
+        // Plný zápis API tokenem (příznak tokenu `system_write`): token se chová jako
+        // přihlášený uživatel ve webovém rozhraní ve všech agendách, včetně zaúčtování,
+        // storen, uzávěrek, mezd a SVJ. Platí jen oprávnění uživatele tokenu; přihlášení,
+        // MFA, heslo, správa tokenů, licence a správa instance zůstávají tokenu
+        // nedostupné a uzavřené ani podané období token nepřebije.
+        // false = příznak nejde zapnout a už vydané tokeny s příznakem se chovají jako
+        // běžné tokeny. Zapínejte vědomě, jen když integraci, které token dáváte, věříte
+        // jako člověku s tímtéž účtem.
+        // ENV varianta: MYINVOICE_API_ALLOW_SYSTEM_WRITE_TOKENS=1
+        'allow_system_write_tokens' => false,
+    ],
 
     // ── Doručování mzdových dokumentů zaměstnancům ────────────────────────────────
     // Výplatní páska se zaměstnanci NEPOSÍLÁ jako příloha, ale jako zabezpečený

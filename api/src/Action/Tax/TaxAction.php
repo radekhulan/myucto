@@ -88,7 +88,7 @@ final class TaxAction
             'year'            => $year,
             // Profil nese rodná čísla jen maskovaná; API token a MCP z rodiny dostanou
             // jen to, z čeho se počítá sleva a zvýhodnění (H28).
-            'profile'         => RequestAuthorization::isSessionAuth($request)
+            'profile'         => RequestAuthorization::actsAsSession($request)
                 ? $publicProfile
                 : TaxFamilyIdentifierService::bearerProfile($publicProfile),
             'is_vat_payer'    => $isVat,
@@ -192,7 +192,7 @@ final class TaxAction
      */
     public function revealFamily(Request $request, Response $response): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         if (!RequestAuthorization::allows($request, TaxFamilyIdentifierService::PERMISSION, AccessLevel::WRITE)) {

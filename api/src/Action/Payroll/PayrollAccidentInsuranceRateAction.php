@@ -220,7 +220,7 @@ final class PayrollAccidentInsuranceRateAction
     private function guard(Request $request, Response $response, AccessLevel $level): ?Response
     {
         $error = null;
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         if (!$this->requirePermission($request, $response, 'payroll.settings', $level, $error)) {

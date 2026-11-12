@@ -63,7 +63,8 @@ final class SessionOnlyGuardContractTest extends TestCase
             [],
             $offenders,
             "Tyhle soubory čtou AuthMiddleware::ATTR_METHOD napřímo. Použij\n"
-            . "RequestAuthorization::isSessionAuth() pro bránu, nebo isBearerAuth()\n"
+            . "RequestAuthorization::actsAsSession() pro bránu agendy, isSessionAuth()\n"
+            . "pro bránu přihlášení a přístupových údajů, nebo isBearerAuth()\n"
             . "tam, kde kanál jen mění chování:\n  " . implode("\n  ", $offenders),
         );
     }
@@ -107,7 +108,8 @@ final class SessionOnlyGuardContractTest extends TestCase
         );
 
         self::assertStringContainsString(
-            '$isSession = RequestAuthorization::isSessionAuth($request);',
+            // Relace, nebo token s plným zápisem (#371), který jedná jako uživatel v aplikaci.
+            '$isSession = RequestAuthorization::actsAsSession($request);',
             $src,
             'Zdroj pravdy o relaci zmizel — příznaky níž pak nemají na čem stát.',
         );

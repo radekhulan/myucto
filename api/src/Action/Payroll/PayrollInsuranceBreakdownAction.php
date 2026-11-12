@@ -32,7 +32,7 @@ final class PayrollInsuranceBreakdownAction
     /** @param array{revisionId:string,employeeId:string} $args */
     public function detail(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

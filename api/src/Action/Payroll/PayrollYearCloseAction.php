@@ -103,7 +103,7 @@ final class PayrollYearCloseAction
         ?Response &$error,
     ): bool
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             $error = Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
             return false;
         }

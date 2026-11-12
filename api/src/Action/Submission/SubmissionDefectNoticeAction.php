@@ -149,7 +149,7 @@ final class SubmissionDefectNoticeAction
         if ($this->userId($request) <= 0) {
             return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         }
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Datová schránka se obsluhuje jen z webového rozhraní.');
         }
 

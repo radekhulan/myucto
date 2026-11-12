@@ -128,7 +128,7 @@ final class OtherItemScheduleAction
      */
     private function assertAutoPostChannel(Request $request): void
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             throw new OtherItemException('auto_post_session_only',
                 'Automatické účtování opakování lze zapnout jen ve webovém rozhraní. Přes API token vzniknou pouze koncepty.', 403);
         }

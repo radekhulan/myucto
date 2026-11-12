@@ -39,7 +39,7 @@ final class PaymentOrderAction
     public function archive(Request $request, Response $response, array $args): Response
     {
         if ($err = $this->denied($request, $response, AccessLevel::WRITE)) return $err;
-        if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
+        if (!RequestAuthorization::actsAsSession($request)) return Json::sessionRequired($response);
         $body = $request->getParsedBody();
         if (!is_array($body) || ($body['bank_cancellation_confirmed'] ?? null) !== true) {
             return Json::error($response, 'bank_cancellation_confirmation_required', 'Potvrďte zrušení dávky v bance.', 422);

@@ -131,6 +131,7 @@ final class CreateTokenStepUpTest extends TestCase
             $this->createStub(MfaProtectedOperationService::class),
             $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
             $this->createStub(\MyInvoice\Security\CrossSupplierAuthorization::class),
+            new \MyInvoice\Service\Auth\SystemWriteTokenFeature(new \MyInvoice\Infrastructure\Config\Config([])),
         );
     }
 

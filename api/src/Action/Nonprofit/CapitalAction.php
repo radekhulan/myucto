@@ -41,7 +41,7 @@ final class CapitalAction
     }
     private function handle(Request $request,Response $response,bool $write,callable $work):Response
     {
-        if($write&&!RequestAuthorization::isSessionAuth($request))return Json::error($response,'nonprofit_capital_session_only','Potvrzení kapitálových zdrojů vyžaduje přihlášenou relaci.',403);
+        if($write&&!RequestAuthorization::actsAsSession($request))return Json::error($response,'nonprofit_capital_session_only','Potvrzení kapitálových zdrojů vyžaduje přihlášenou relaci.',403);
         if($write?!$this->requireClose($request,$response,$error):!$this->requirePermission($request,$response,'accounting',AccessLevel::READ,$error))return $error;
         try{return Json::ok($response,$work($this->currentSupplierId($request)));}catch(CapitalException|PostingException $e){return Json::error($response,$e->errorCode,$e->getMessage(),$e->httpStatus);}
     }

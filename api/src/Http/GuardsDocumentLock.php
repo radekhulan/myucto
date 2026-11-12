@@ -18,6 +18,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   non-client + inClosedPeriod && !(admin && ?force=1) → 409 'period_closed'
  *   admin + ?force=1 + inClosedPeriod                   → null + ActivityLogger warning
  *   admin + ?force=1 + inClosedPeriod přes API token    → 403 'token_write_forbidden'
+ *   token s plným zápisem + ?force=1 v uzavřeném,
+ *     uzavíraném i k datu zamčeném období               → 409 'period_closed' (i správce)
  *   client + ?force=1                                   → force IGNOROVÁN (M6)
  *   jinak                                               → null (pokračuj)
  *
@@ -48,14 +50,23 @@ trait GuardsDocumentLock
             return null;
         }
 
+        $force = !empty($request->getQueryParams()['force']);
+        // Token s plným zápisem (#371) jedná jako uživatel v aplikaci, ale uzavřené, uzavírané
+        // ani k datu zamčené období vynucením nepřebije nikdy, ani jako správce firmy.
+        if (!$clientOnly && $force && RequestAuthorization::isSystemWriteToken($request)
+            && ($lock->inClosedPeriod || $lock->inClosingPeriod || $lock->dateLocked)) {
+            return self::periodClosedForToken($response);
+        }
+
         if ($clientOnly || !$lock->inClosedPeriod) {
             return null;
         }
 
-        if (RequestAuthorization::isCompanyAdmin($request) && !empty($request->getQueryParams()['force'])) {
+        if (RequestAuthorization::isCompanyAdmin($request) && $force) {
             // Přebití uzavřeného období je účetní úkon; token ho neprovede ani jako admin.
-            if ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Úprava dokladu v uzavřeném účetním období')) {
-                return $deny;
+            if (!RequestAuthorization::mayOverridePeriodProtection($request)) {
+                return SessionOnlyAccountingAct::deny($request, $response, 'Úprava dokladu v uzavřeném účetním období')
+                    ?? self::periodClosedForToken($response);
             }
             $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
             $this->logger->log(
@@ -72,5 +83,15 @@ trait GuardsDocumentLock
         }
 
         return Json::error($response, 'period_closed', 'Doklad spadá do uzavřeného účetního období.', 409);
+    }
+
+    private static function periodClosedForToken(Response $response): Response
+    {
+        return Json::error(
+            $response,
+            'period_closed',
+            'Doklad spadá do uzavřeného, uzavíraného nebo zamčeného účetního období; přes API token ho nelze přebít.',
+            409,
+        );
     }
 }

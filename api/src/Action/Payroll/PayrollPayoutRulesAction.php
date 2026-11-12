@@ -271,7 +271,7 @@ final class PayrollPayoutRulesAction
         Response $response,
         AccessLevel $level,
     ): ?Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

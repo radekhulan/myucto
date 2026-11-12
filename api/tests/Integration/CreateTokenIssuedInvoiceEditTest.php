@@ -128,6 +128,7 @@ final class CreateTokenIssuedInvoiceEditTest extends TestCase
             $protected,
             $policy,
             $cross,
+            new \MyInvoice\Service\Auth\SystemWriteTokenFeature(new \MyInvoice\Infrastructure\Config\Config([])),
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/auth/tokens', ['REMOTE_ADDR' => '203.0.113.92'])

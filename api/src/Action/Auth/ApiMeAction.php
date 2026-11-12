@@ -20,7 +20,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   - supplier: { id, company_name, display_name } — efektivní scope tokenu/session
  *   - auth_method: 'bearer' | 'session'
  *   - token: { id, prefix, scope, allow_payroll_submission_docs, allow_issued_invoice_edit,
- *              expires_at } | null
+ *              system_write, expires_at } | null
  *     (jen pro bearer)
  */
 final class ApiMeAction
@@ -65,6 +65,8 @@ final class ApiMeAction
                     RequestAuthorization::tokenAllowsPayrollSubmissionDocs($request),
                 'allow_issued_invoice_edit' =>
                     RequestAuthorization::tokenAllowsIssuedInvoiceEdit($request),
+                // Plný zápis platí, jen když ho token má a instance ho povoluje.
+                'system_write' => RequestAuthorization::isSystemWriteToken($request),
                 'expires_at' => $tok['expires_at'] ?? null,
             ];
         }

@@ -44,6 +44,79 @@ final class RequestAuthorization
     }
 
     /**
+     * Je požadavek ověřený API tokenem s plným zápisem (`system_write`, #371)?
+     *
+     * Příznak platí jen na instanci s `api.allow_system_write_tokens` a jen pro token
+     * se zápisem; o tom rozhoduje jednou AuthMiddleware
+     * ({@see \MyInvoice\Service\Auth\SystemWriteTokenFeature::appliesTo()}).
+     */
+    public static function isSystemWriteToken(Request $request): bool
+    {
+        if (!self::isBearerAuth($request)) {
+            return false;
+        }
+        $token = $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_API_TOKEN);
+
+        return is_array($token) && ($token['system_write'] ?? false) === true;
+    }
+
+    /**
+     * Smí požadavek do agend jako přihlášený uživatel ve webovém rozhraní?
+     *
+     * Brána omezení specifických pro API token (session-only agendy, účetní úkony,
+     * zúžené tělo požadavku): přihlášená relace, nebo token s plným zápisem
+     * ({@see isSystemWriteToken()}). Oprávnění uživatele (RBAC, firma) platí dál.
+     *
+     * ⚠️ Nepatří na přihlášení, MFA, heslo, správu tokenů a relací, licenci, správu
+     * instance ani na úložiště přístupových údajů (certifikáty, podpisy, datové
+     * schránky, napojení bank). Tam zůstává {@see isSessionAuth()}. Pojistky
+     * uzavřeného a podaného období drží {@see mayOverridePeriodProtection()}.
+     */
+    public static function actsAsSession(Request $request): bool
+    {
+        return self::isSessionAuth($request) || self::isSystemWriteToken($request);
+    }
+
+    /**
+     * Smí požadavek přebít ochranu uzavřeného nebo podaného období? Přebití
+     * uzavřeného (uzavíraného, k datu zamčeného) účetního období přes `?force=1`,
+     * změna částek v podaném DPH, KH, SH nebo OSS, potvrzení zásahu do zamčeného
+     * data (`ack_locked`), posun zámku zpět přes chráněné období a znovuotevření
+     * uzavřeného období jsou jen pro člověka v aplikaci. API token je nepřebije
+     * nikdy, ani s plným zápisem a ani jako správce firmy. Role se ověřuje zvlášť.
+     *
+     * Odmítá se kanál tokenu, ne „všechno mimo relaci": vnitřní požadavky bez způsobu
+     * ověření (úlohy na pozadí, výpočty nad rolí) se rozhodují jen podle role jako dřív.
+     */
+    public static function mayOverridePeriodProtection(Request $request): bool
+    {
+        return !self::isBearerAuth($request);
+    }
+
+    /**
+     * Smí uživatel z přihlášené relace založit token s plným zápisem (#371)? Token
+     * dostane jen práva uživatele, ale obejde pojistky kanálu, a o tom za firmu
+     * rozhoduje její správce. Token bez vazby na firmu sahá do všech firem uživatele,
+     * proto ho s plným zápisem zakládá jen superadmin. U vázaného tokenu se ptá
+     * požadavek zúžený na tu firmu ({@see CrossSupplierAuthorization::scopedRequest()}).
+     */
+    public static function canGrantSystemWriteToken(Request $request, bool $supplierBound): bool
+    {
+        return self::isSessionAuth($request)
+            && ($supplierBound ? self::isCompanyAdmin($request) : self::isSuperadmin($request));
+    }
+
+    /**
+     * Potvrdil požadavek vědomý zásah do uzamčeného data (`?ack_locked=1`, typicky po
+     * podání přiznání k DPH)? Potvrzení platí jen z přihlášené relace, token ho nemá.
+     */
+    public static function acknowledgesLockedPeriod(Request $request): bool
+    {
+        return self::mayOverridePeriodProtection($request)
+            && ($request->getQueryParams()[\MyInvoice\Service\Accounting\JournalEntryDeletionRules::ACK_LOCKED_PARAM] ?? '') === '1';
+    }
+
+    /**
      * Je to syntetický požadavek úlohy na pozadí (cron, fronta), ne požadavek
      * přihlášeného člověka? Takový požadavek nevzniká z HTTP, skládá ho jen kód
      * přes {@see asBackground()}.
@@ -314,7 +387,7 @@ final class RequestAuthorization
      */
     public static function canChangeFiledVatPeriod(Request $request): bool
     {
-        return self::isCompanyAdmin($request);
+        return self::mayOverridePeriodProtection($request) && self::isCompanyAdmin($request);
     }
 
     /**
@@ -336,8 +409,9 @@ final class RequestAuthorization
      */
     public static function canUnlockProtectedPeriods(Request $request): bool
     {
-        return self::allows($request, 'accounting.periods.manage', AccessLevel::WRITE)
-            || self::canChangeFiledVatPeriod($request);
+        return self::mayOverridePeriodProtection($request)
+            && (self::allows($request, 'accounting.periods.manage', AccessLevel::WRITE)
+                || self::canChangeFiledVatPeriod($request));
     }
 
     /**
@@ -389,7 +463,7 @@ final class RequestAuthorization
     public static function canReadTaxSubmissions(Request $request): bool
     {
         return self::usesClientTaxSubmissionScope($request)
-            ? self::isSessionAuth($request) && self::allows($request, 'reports.submissions', AccessLevel::READ)
+            ? self::actsAsSession($request) && self::allows($request, 'reports.submissions', AccessLevel::READ)
             : self::allows($request, 'reports', AccessLevel::READ);
     }
 
@@ -494,7 +568,7 @@ final class RequestAuthorization
      */
     public static function canViewEetAttemptXml(Request $request): bool
     {
-        return self::isSessionAuth($request) && self::allows($request, 'eet.correct', AccessLevel::WRITE);
+        return self::actsAsSession($request) && self::allows($request, 'eet.correct', AccessLevel::WRITE);
     }
 
     /**
@@ -505,7 +579,7 @@ final class RequestAuthorization
      */
     public static function allowsReadSideEffects(Request $request, string $permission): bool
     {
-        return self::isSessionAuth($request) && self::allows($request, $permission, AccessLevel::WRITE);
+        return self::actsAsSession($request) && self::allows($request, $permission, AccessLevel::WRITE);
     }
 
     public static function allows(
@@ -516,7 +590,7 @@ final class RequestAuthorization
         self::$catalog ??= new PermissionCatalog();
         self::$checker ??= new PermissionChecker(self::$catalog);
         if (in_array($permission, ['reports.submissions', 'reports.submit'], true)
-            && !self::isSessionAuth($request)
+            && !self::actsAsSession($request)
             && self::roleUsesClientTaxSubmissionScope(self::effectiveRole($request))
         ) {
             return false;

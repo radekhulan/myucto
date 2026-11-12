@@ -33,17 +33,17 @@ final class CatalogJobAccessPolicy
             return RequestAuthorization::allows($request, 'stock', $write ? AccessLevel::WRITE : AccessLevel::READ);
         }
         if (str_starts_with($kind, 'stock_opening_import_') || str_starts_with($kind, 'stock_history_import_')) {
-            return (!$write || RequestAuthorization::isSessionAuth($request))
+            return (!$write || RequestAuthorization::actsAsSession($request))
                 && (!$write || $kind !== 'stock_history_import_rollback' || RequestAuthorization::canRollbackStockHistoryImport($request))
                 && RequestAuthorization::allows($request, 'stock.documents.write', AccessLevel::WRITE);
         }
         if ($kind === 'integration_reconcile') {
-            return (!$write || RequestAuthorization::isSessionAuth($request))
+            return (!$write || RequestAuthorization::actsAsSession($request))
                 && RequestAuthorization::allows($request, 'eshop.integrations', $write ? AccessLevel::WRITE : AccessLevel::READ);
         }
         if (str_starts_with($kind, 'catalog_bulk_') || str_starts_with($kind, 'catalog_import_') || str_starts_with($kind, 'price_matrix_')
             || str_starts_with($kind, 'product_content_transfer_')) {
-            if ($write && !RequestAuthorization::isSessionAuth($request)) {
+            if ($write && !RequestAuthorization::actsAsSession($request)) {
                 return false;
             }
             return RequestAuthorization::allows($request, 'eshop.write', AccessLevel::WRITE)

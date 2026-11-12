@@ -33,7 +33,7 @@ final class PaymentOperationsAction
     {
         return $this->run($request,$response,'property',false,function(int $supplier)use($request):array{
             $q=$request->getQueryParams();$kind=(string)($q['kind']??'');$permission=$kind==='bank'?'bank.post':'cash.document.write';
-            $allowNative=RequestAuthorization::isSessionAuth($request)&&RequestAuthorization::allows($request,$permission,AccessLevel::WRITE);
+            $allowNative=RequestAuthorization::actsAsSession($request)&&RequestAuthorization::allows($request,$permission,AccessLevel::WRITE);
             $search=is_string($q['q']??null)?$q['q']:'';
             $id=isset($q['id'])?$this->integer($q,'id'):null;
             return $this->sources->candidates($supplier,$kind,$this->integer($q,'after_id',0),$this->integer($q,'limit',25),$allowNative,$search,$id);
@@ -130,7 +130,7 @@ final class PaymentOperationsAction
     }
     private function run(Request $request,Response $response,string $permission,bool $write,callable $work):Response
     {
-        if($write&&!RequestAuthorization::isSessionAuth($request))return Json::sessionRequired($response);
+        if($write&&!RequestAuthorization::actsAsSession($request))return Json::sessionRequired($response);
         if(!RequestAuthorization::allows($request,$permission,$write?AccessLevel::WRITE:AccessLevel::READ))return Json::error($response,'forbidden','Pro tuto operaci nemáte oprávnění.',403);
         try{return Json::ok($response,$work($this->currentSupplierId($request)));}
         catch(PaymentException|\MyInvoice\Service\Property\Opening\OpeningException|PropertyException|\MyInvoice\Service\Property\Receivables\ReceivableException|\MyInvoice\Service\Property\Charges\Issuance\IssuanceException $e){return Json::error($response,$e->errorCode,$e->getMessage(),$e->httpStatus,['details'=>$e->details]);}

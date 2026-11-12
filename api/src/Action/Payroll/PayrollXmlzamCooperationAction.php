@@ -179,7 +179,7 @@ final class PayrollXmlzamCooperationAction
         AccessLevel $minimum = AccessLevel::WRITE,
     ): ?Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Součinnost XMLZAM vyžaduje přihlášenou uživatelskou relaci.');
         }
         if (!$this->requirePermission(

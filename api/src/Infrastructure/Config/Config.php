@@ -306,6 +306,7 @@ final class Config
     {
         return [
             'invoices' => ['overdue_includes_today' => false, 'public_links' => true],
+            'api' => ['allow_system_write_tokens' => false],
             'epo_test' => false,
             'epo' => [
                 // Bundle se nasazuje spolu s aplikací, takže výchozí instalace ověří pečeť
@@ -490,6 +491,7 @@ final class Config
             'MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM' => ['accounting.default_entry_form', 'string'],
             'MYINVOICE_ACCOUNTING_SAVE_AND_POST' => ['accounting.save_and_post', 'bool'],
             'MYINVOICE_INVOICE_PUBLIC_LINKS' => ['invoices.public_links', 'bool'],
+            'MYINVOICE_API_ALLOW_SYSTEM_WRITE_TOKENS' => ['api.allow_system_write_tokens', 'bool'],
             'MYINVOICE_APP_URL'     => ['app.url', 'string'],
             'MYINVOICE_DOMAINS_ENABLED' => ['domains.enabled', 'bool'],
             'MYINVOICE_APP_MANAGED'  => ['app.managed', 'bool'],

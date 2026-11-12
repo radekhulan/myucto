@@ -16,7 +16,7 @@ final class DocumentViewerResolver
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = self::userId($user['id'] ?? null);
-        $isSession = RequestAuthorization::isSessionAuth($request);
+        $isSession = RequestAuthorization::actsAsSession($request);
         $canViewPayrollEnforcementEvidence =
             $isSession
             && RequestAuthorization::allows(

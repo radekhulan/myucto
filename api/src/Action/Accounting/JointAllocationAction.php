@@ -105,7 +105,7 @@ final class JointAllocationAction
     private function run(Request $request, Response $response, bool $write, callable $work): Response
     {
         if (!$this->requirePermission($request, $response, 'accounting', $write ? AccessLevel::WRITE : AccessLevel::READ, $err)) return $err;
-        if ($write && !RequestAuthorization::isSessionAuth($request)) {
+        if ($write && !RequestAuthorization::actsAsSession($request)) {
             return Json::error($response, 'allocation_session_only', 'Společné alokace lze měnit pouze z webového rozhraní.', 403);
         }
         try {

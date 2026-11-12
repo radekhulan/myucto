@@ -147,7 +147,7 @@ final class PayrollPersonSensitiveRevealAction
         Response $response,
         ?Response &$error,
     ): bool {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             $error = Json::sessionRequired($response);
             return false;
         }

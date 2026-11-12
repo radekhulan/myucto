@@ -499,12 +499,14 @@ final class UpdateInvoiceAction
         // s právem upravit vystavenou fakturu v něm nezmění částky, data ani položky, a to ani
         // přesunem data do podaného období. Oprava podaného období jde opravným nebo dodatečným
         // tvrzením. Stejná brána jako import vystaveného dokladu a hromadná změna OSS.
+        // API token (i s plným zápisem, #371) podané období nepřebije nikdy, ani jako správce.
+        $viaToken = !RequestAuthorization::mayOverridePeriodProtection($request);
         if ($existing['status'] !== 'draft'
             && $isForce
-            && ($tokenForce || !RequestAuthorization::canChangeFiledVatPeriod($request))
+            && ($viaToken || !RequestAuthorization::canChangeFiledVatPeriod($request))
             && self::financialFieldsChanged($body, $existing) !== []
-            && ($filed = $this->filedPeriodOf($existing, $body, $tokenForce && $this->entersSummaryReport($existing, $body))) !== null) {
-            if ($tokenForce) {
+            && ($filed = $this->filedPeriodOf($existing, $body, $viaToken && $this->entersSummaryReport($existing, $body))) !== null) {
+            if ($viaToken) {
                 return Json::error(
                     $response,
                     'period_filed',

@@ -284,6 +284,12 @@ final class AuthMiddleware implements MiddlewareInterface
 
             $this->apiTokens->touch($tokenRow['id'], $ip);
 
+            // Plný zápis (#371) platí jen na instanci, která ho povoluje; jinak se token
+            // s příznakem chová jako běžný. Rozhoduje se tady jednou, brány čtou jen
+            // {@see \MyInvoice\Security\RequestAuthorization::isSystemWriteToken()}.
+            $tokenRow['system_write'] = (new \MyInvoice\Service\Auth\SystemWriteTokenFeature($this->config))
+                ->appliesTo($tokenRow);
+
             $request = $request
                 ->withAttribute(self::ATTR_USER, $user)
                 ->withAttribute(self::ATTR_API_TOKEN, $tokenRow)

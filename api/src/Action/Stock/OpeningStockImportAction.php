@@ -97,7 +97,7 @@ final class OpeningStockImportAction
         if (!$this->requirePermission($request, $response, 'stock.documents.write', AccessLevel::WRITE, $error)) {
             return $error;
         }
-        if ($request->getMethod() !== 'GET' && !RequestAuthorization::isSessionAuth($request)) {
+        if ($request->getMethod() !== 'GET' && !RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $supplierId = $this->currentSupplierId($request);

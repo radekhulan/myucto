@@ -29,6 +29,11 @@ use Slim\Psr7\Factory\ResponseFactory;
  *    koncepty ostatních pohledávek a závazků a analytické účty osnovy
  *    ({@see self::BEARER_WRITE_EXCEPTIONS}).
  *
+ * Token s plným zápisem (`system_write`, #371, jen na instanci s
+ * `api.allow_system_write_tokens`) allowlist, read-only vrstvu ani výjimky nepoužívá:
+ * smí všechny cesty kromě {@see self::SYSTEM_WRITE_FORBIDDEN} a platí jen oprávnění
+ * jeho uživatele (PermissionMiddleware a akce), stejně jako v přihlášené relaci.
+ *
  * Session auth (browser SPA) tímto MW není dotčen — uživatel má plná práva své role.
  *
  * Běží AŽ PO AuthMiddleware (potřebuje načtený api_token attribute).
@@ -294,6 +299,29 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         ['PUT', '#^/api/accounting/dimensions/documents/other-items/[0-9]+$#'],
     ];
 
+    /**
+     * Cesty nedostupné ani tokenu s plným zápisem (`system_write`): přihlášení, MFA,
+     * heslo, relace a správa tokenů (`/api/auth/*` kromě `api-me`), správa uživatelů,
+     * rolí a instance, licence, připojení MCP a úložiště přístupových údajů firmy
+     * (podpisové certifikáty, datové schránky, napojení bank, přihlašovací domény,
+     * SMTP profily, klíče AI). Token nesmí rozšířit vlastní přístup ani bezpečnostní
+     * nastavení účtu; to dělá člověk v aplikaci.
+     *
+     * @var list<string>
+     */
+    private const SYSTEM_WRITE_FORBIDDEN = [
+        '#^/api/auth(?!/api-me$)(/|$)#',
+        '#^/api/admin(/|$)#',
+        '#^/api/instance-admin(/|$)#',
+        '#^/api/license(/|$)#',
+        '#^/api/managed(/|$)#',
+        '#^/api/maintenance(/|$)#',
+        '#^/api/mcp(/|$)#',
+        '#^/api/oauth(/|$)#',
+        '#^/api/settings/(domains|signing|pdf-signing|certificates|email-profiles|databox|isds-gateway|bank-connections|ai-assist)(/|$)#',
+        '#^/api/settings/client/signing(/|$)#',
+    ];
+
     public function __construct(
         private readonly ResponseFactory $responseFactory,
     ) {}
@@ -315,6 +343,20 @@ final class ApiScopeMiddleware implements MiddlewareInterface
                 'token_endpoint_forbidden', 'Endpoint není součástí klientského MCP.', 403);
         }
         if ($path === '/mcp') {
+            return $handler->handle($request);
+        }
+
+        if (RequestAuthorization::isSystemWriteToken($request)) {
+            if (self::isSystemWriteForbidden($path)) {
+                return Json::error(
+                    $this->responseFactory->createResponse(403),
+                    'token_endpoint_forbidden',
+                    'Přihlášení, MFA, heslo, správa tokenů, licence, správa instance a přístupové údaje '
+                        . 'jsou dostupné jen z webového rozhraní, ani token s plným zápisem k nim nemá přístup.',
+                    403,
+                );
+            }
+
             return $handler->handle($request);
         }
 
@@ -373,6 +415,16 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         }
 
         return $handler->handle($request);
+    }
+
+    public static function isSystemWriteForbidden(string $path): bool
+    {
+        foreach (self::SYSTEM_WRITE_FORBIDDEN as $pattern) {
+            if (preg_match($pattern, $path) === 1) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function isBearerAllowed(string $path): bool
