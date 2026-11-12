@@ -8,7 +8,7 @@
     "build": "npm run check:i18n && npm run check:i18n-map && npm run check:routes && npm run check:manual && npm run type-check:app && vite build",
     "build:image": "npm run check:i18n && npm run check:i18n-map && npm run check:routes && npm run check:manual && vite build",
     "preview": "vite preview",
-    "type-check": "node --max-old-space-size=6144 ./node_modules/vue-tsc/bin/vue-tsc.js --noEmit",
+    "type-check": "node --max-old-space-size=10240 ./node_modules/vue-tsc/bin/vue-tsc.js --noEmit",
     "type-check:app": "node --max-old-space-size=6144 ./node_modules/vue-tsc/bin/vue-tsc.js --noEmit -p tsconfig.app.json",
     "check:i18n": "node scripts/check-i18n.mjs",
     "check:i18n-map": "node tests/i18n-map.test.mjs",
