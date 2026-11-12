@@ -560,6 +560,10 @@ return [
             'credit_note' => '7{YY}{MM}{CCC}',       // např. 72604001 (prefix 7 = dobropis)
         ],
     ],
+    // Ukázková instalace (`demo.enabled`): e-maily účtů, kterým ukázka vydá API token
+    // přihlášením heslem (POST /api/v1/auth/password-token), typicky účet pro review
+    // mobilní aplikace. Prázdný seznam = výjimka vypnutá. Ostatní zápisy dál blokuje.
+    // 'demo' => ['password_token_emails' => ['review@example.com']],
     'rate_limits' => [
         // Limity nad rámec brute_force (ten řeší jen login). Klíč = max požadavků v daném okně.
         'login_per_min_per_ip'      => 10,           // doplněk k brute_force; ochrana proti spamu z 1 IP (i výměna hesla za API token)

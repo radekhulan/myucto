@@ -201,10 +201,29 @@ final class DemoReadOnlyMiddlewareTest extends TestCase
         self::assertTrue($called, 'With demo disabled the request should reach the handler.');
     }
 
-    private function middleware(bool $enabled): DemoReadOnlyMiddleware
+    public function testPasswordTokenIsBlockedWithoutReviewAccountException(): void
+    {
+        $response = $this->middleware(true)->process($this->request('POST', '/api/v1/auth/password-token'), $this->handler());
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertStringContainsString('demo_read_only', (string) $response->getBody());
+    }
+
+    public function testPasswordTokenPassesWithReviewAccountException(): void
+    {
+        // E-mail ze seznamu kontroluje akce (middleware tělo nečte); ostatní zápisy dál neprojdou.
+        $middleware = $this->middleware(true, ['password_token_emails' => ['review@example.com']]);
+
+        self::assertSame(204, $middleware->process($this->request('POST', '/api/auth/password-token'), $this->handler())->getStatusCode());
+        self::assertSame(403, $middleware->process($this->request('POST', '/api/invoices'), $this->handler())->getStatusCode());
+        self::assertSame(403, $middleware->process($this->request('POST', '/api/auth/change-password'), $this->handler())->getStatusCode());
+    }
+
+    /** @param array<string,mixed> $demo */
+    private function middleware(bool $enabled, array $demo = []): DemoReadOnlyMiddleware
     {
         return new DemoReadOnlyMiddleware(
-            new Config(['demo' => ['enabled' => $enabled]]),
+            new Config(['demo' => ['enabled' => $enabled] + $demo]),
             new RoutePermissionMap(),
             new ResponseFactory(),
         );
