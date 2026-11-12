@@ -3187,9 +3187,11 @@ paths:
         vystavenou vydanou fakturu upravit s `force=1`, ale přísněji než správce v aplikaci.
         Uzavřené, uzavírané nebo k datu zamčené účetní období (staré i nové datum) vrací
         vždy 409 `period_closed`, `force_mode` se neuplatní. Podané přiznání k DPH, kontrolní
-        hlášení, souhrnné hlášení nebo OSS přiznání vrací při změně částek, dat nebo položek
-        vždy 409 `period_filed`, i když je vlastník tokenu správce. Změna `invoice_type` nebo
-        `varsymbol` vrací 422 `token_force_renumber_forbidden`. Faktura s úhradou, zálohou,
+        hlášení nebo OSS přiznání (a u faktury, která vstupuje do souhrnného hlášení, tedy EU
+        plnění s kódem 20, 22 nebo 31, i podané souhrnné hlášení) vrací při změně částek, dat
+        nebo položek vždy 409 `period_filed`, i když je vlastník tokenu správce. Změna
+        `invoice_type` nebo `varsymbol` vrací 422 `token_force_renumber_forbidden`, nastavení,
+        změna nebo zrušení `cash_register_id` 422 `token_force_cash_register_forbidden`. Faktura s úhradou, zálohou,
         zápočtem nebo platebním dokladem vrací 409 `invoice_has_payments` (opravuje se
         dobropisem). Zaúčtovanou fakturu v otevřeném období token přeúčtuje jen tehdy, když
         vlastník tokenu má `accounting.journal.post` (jinak 403 `journal_post_forbidden`).
@@ -3268,8 +3270,8 @@ paths:
             `period_filed`: role, která není správcem, mění částky, data nebo položky v období,
             za které už je podané přiznání k DPH, kontrolní hlášení nebo OSS přiznání.
             API token se schopností `allow_issued_invoice_edit`: `period_closed` (uzavřené, uzavírané
-            nebo zamčené účetní období, staré i nové datum), `period_filed` (navíc i podané souhrnné
-            hlášení, platí i pro vlastníka správce) a `invoice_has_payments` (faktura má úhradu,
+            nebo zamčené účetní období, staré i nové datum), `period_filed` (u EU plnění navíc i podané
+            souhrnné hlášení, platí i pro vlastníka správce) a `invoice_has_payments` (faktura má úhradu,
             zálohu, zápočet nebo platební doklad; opravuje se dobropisem).
           content:
             application/json:
@@ -3278,7 +3280,8 @@ paths:
           description: |
             `items: []` by nedraftový doklad připravilo o všechny položky (`no_items`), nebo API token
             se schopností `allow_issued_invoice_edit` mění typ dokladu či číslo
-            (`token_force_renumber_forbidden`).
+            (`token_force_renumber_forbidden`) nebo inkaso do pokladny `cash_register_id`
+            (`token_force_cash_register_forbidden`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

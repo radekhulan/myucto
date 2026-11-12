@@ -212,7 +212,7 @@ final class TokenIssuedInvoiceForceEditTest extends TestCase
 
     public function testFiledVatReturnAndControlStatementRejectFinancialChange(): void
     {
-        foreach (['dphdp3' => 'B', 'dphkh1' => 'B', 'dphshv' => 'R'] as $form => $variant) {
+        foreach (['dphdp3' => 'B', 'dphkh1' => 'B'] as $form => $variant) {
             $this->db->pdo()->exec("DELETE FROM tax_submissions WHERE supplier_id = {$this->supplierId} AND period_year = " . self::FILED_YEAR);
             $this->filed($form, $variant, 5);
 
@@ -230,6 +230,39 @@ final class TokenIssuedInvoiceForceEditTest extends TestCase
         $notes = $this->issuedInvoice(self::FILED_YEAR . '-05-10');
         $res = $this->call($notes, $this->noteBody());
         self::assertSame(200, $res['status'], 'Neúčetní změna v podaném období projde: ' . json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+    }
+
+    public function testFiledSummaryReportBlocksOnlyEuSupplies(): void
+    {
+        $this->filed('dphshv', 'R', 5);
+        $euClient = $this->euClient();
+
+        $old = $this->issuedInvoice(self::FILED_YEAR . '-05-10', $euClient, '22');
+        $res = $this->call($old, ['items' => [$this->item(3000.0) + ['vat_classification_code' => '22']]]);
+        $this->assertRejected($res, 409, 'period_filed', $old, 'EU plnění, staré datum');
+        self::assertStringContainsString('souhrnné hlášení', (string) ($res['body']['error']['message'] ?? ''));
+
+        $new = $this->issuedInvoice(self::FILED_YEAR . '-07-10', $euClient, '22');
+        $date = self::FILED_YEAR . '-05-20';
+        $res = $this->call($new, ['issue_date' => $date, 'tax_date' => $date, 'due_date' => $date]);
+        $this->assertRejected($res, 409, 'period_filed', $new, 'EU plnění, nové datum');
+
+        $domestic = $this->issuedInvoice(self::FILED_YEAR . '-05-10');
+        $res = $this->call($domestic, ['items' => [$this->item(3000.0)]] + $this->noteBody());
+        self::assertSame(200, $res['status'], 'Tuzemskou fakturu podané SH neblokuje: ' . json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertEqualsWithDelta(3000.0, (float) $this->invoiceRow($domestic)['total_without_vat'], 0.001);
+    }
+
+    public function testCashRegisterChangeIsRejected(): void
+    {
+        $id = $this->issuedInvoice($this->date);
+
+        $res = $this->call($id, ['payment_method' => 'cash', 'cash_register_id' => 999999] + $this->noteBody());
+        $this->assertRejected($res, 422, 'token_force_cash_register_forbidden', $id);
+        self::assertNull($this->invoiceRow($id)['cash_register_id'] ?? null);
+
+        $res = $this->call($id, ['cash_register_id' => null] + $this->noteBody());
+        self::assertSame(200, $res['status'], 'Nezměněná (prázdná) volba pokladny projde: ' . json_encode($res['body'], JSON_UNESCAPED_UNICODE));
     }
 
     public function testPostedInvoiceRepostsOnlyWithJournalPostRight(): void
@@ -305,17 +338,17 @@ final class TokenIssuedInvoiceForceEditTest extends TestCase
         self::assertSame(0, $this->auditCount('invoice.force_updated', $id), $context);
     }
 
-    private function issuedInvoice(string $date): int
+    private function issuedInvoice(string $date, ?int $clientId = null, string $code = '1'): int
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO invoices (supplier_id, invoice_type, client_id, varsymbol, issue_date, tax_date, due_date,
                                    currency_id, language, reverse_charge, total_without_vat, total_vat, total_with_vat,
                                    status, vat_classification_code, created_by)
-             VALUES (?, "invoice", ?, ?, ?, ?, DATE_ADD(?, INTERVAL 14 DAY), ?, "cs", 0, 1000, 0, 1000, "issued", "1", ?)'
+             VALUES (?, "invoice", ?, ?, ?, ?, DATE_ADD(?, INTERVAL 14 DAY), ?, "cs", ?, 1000, 0, 1000, "issued", ?, ?)'
         )->execute([
-            $this->supplierId, $this->clientId, 'TF' . random_int(10000000, 99999999),
-            $date, $date, $date, $this->czkId, $this->userId,
+            $this->supplierId, $clientId ?? $this->clientId, 'TF' . random_int(10000000, 99999999),
+            $date, $date, $date, $this->czkId, $code === '1' ? 0 : 1, $code, $this->userId,
         ]);
         $id = (int) $pdo->lastInsertId();
         $pdo->prepare(
@@ -326,6 +359,24 @@ final class TokenIssuedInvoiceForceEditTest extends TestCase
         )->execute([$id, $this->vatRateId]);
 
         return $id;
+    }
+
+    private function euClient(): int
+    {
+        $pdo = $this->db->pdo();
+        $deId = (int) ($pdo->query("SELECT id FROM countries WHERE iso2 = 'DE' LIMIT 1")->fetchColumn() ?: 0);
+        if ($deId === 0) {
+            $this->markTestSkipped('Chybí země DE.');
+        }
+        $pdo->prepare('UPDATE countries SET is_eu = 1 WHERE id = ?')->execute([$deId]);
+        $pdo->prepare(
+            'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, dic,
+                                  main_email, language, currency_default_id, is_vendor, is_customer, is_vat_payer)
+             VALUES (?, "EU Kunde GmbH (PHPUnit)", "Teststr. 1", "Berlin", "10115", ?, "DE123456789",
+                     "eu-kunde@example.test", "en", ?, 0, 1, 1)'
+        )->execute([$this->supplierId, $deId, $this->czkId]);
+
+        return (int) $pdo->lastInsertId();
     }
 
     /** @return array<string,mixed> */

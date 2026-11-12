@@ -503,7 +503,7 @@ final class UpdateInvoiceAction
             && $isForce
             && ($tokenForce || !RequestAuthorization::canChangeFiledVatPeriod($request))
             && self::financialFieldsChanged($body, $existing) !== []
-            && ($filed = $this->filedPeriodOf($existing, $body, $tokenForce)) !== null) {
+            && ($filed = $this->filedPeriodOf($existing, $body, $tokenForce && $this->entersSummaryReport($existing, $body))) !== null) {
             if ($tokenForce) {
                 return Json::error(
                     $response,
@@ -1092,6 +1092,42 @@ final class UpdateInvoiceAction
     }
 
     /**
+     * Vstupuje faktura před úpravou nebo po ní do souhrnného hlášení? Stejné pravidlo
+     * jako sestavení SH ({@see \MyInvoice\Service\Report\SouhrnneHlaseniBuilder::entersSummaryReport()}):
+     * kód plnění řádku (položka, jinak hlavička, u RC bez kódu „22") a země odběratele.
+     */
+    private function entersSummaryReport(array $existing, array $body): bool
+    {
+        $countries = $this->db->pdo()->prepare(
+            'SELECT co.iso2, COALESCE(co.is_eu, 0) FROM clients c LEFT JOIN countries co ON co.id = c.country_id
+              WHERE c.id = ? AND c.supplier_id = ?'
+        );
+        $states = [
+            [$existing, (array) ($existing['items'] ?? [])],
+            [$body + $existing, DocumentItemsPayload::replaces($body) ? (array) $body['items'] : (array) ($existing['items'] ?? [])],
+        ];
+        foreach ($states as [$doc, $items]) {
+            $countries->execute([(int) ($doc['client_id'] ?? 0), (int) $existing['supplier_id']]);
+            $row = $countries->fetch(\PDO::FETCH_NUM);
+            $iso2 = $row !== false && $row[0] !== null ? (string) $row[0] : null;
+            $isEu = $row !== false && (int) $row[1] === 1;
+            $header = ($doc['vat_classification_code'] ?? '') !== '' ? (string) $doc['vat_classification_code']
+                : (($existing['vat_classification_code'] ?? '') !== '' ? (string) $existing['vat_classification_code'] : null);
+            $fallback = !empty($doc['reverse_charge']) ? '22' : null;
+            foreach ($items === [] ? [[]] : $items as $item) {
+                $code = is_array($item) && ($item['vat_classification_code'] ?? '') !== ''
+                    ? (string) $item['vat_classification_code']
+                    : ($header ?? $fallback);
+                if (\MyInvoice\Service\Report\SouhrnneHlaseniBuilder::entersSummaryReport($code, $iso2, $isEu)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Uzavřené, uzavírané i k datu zamčené období token nepřebije (#355).
      */
     private static function lockedForToken(\MyInvoice\Service\Accounting\DocumentLock $lock): bool
@@ -1105,6 +1141,16 @@ final class UpdateInvoiceAction
      */
     private function denyTokenForce(Response $response, array $body, array $existing): ?Response
     {
+        if (array_key_exists('cash_register_id', $body)
+            && (int) ($body['cash_register_id'] ?? 0) !== (int) ($existing['cash_register_id'] ?? 0)) {
+            return Json::error(
+                $response,
+                'token_force_cash_register_forbidden',
+                'Přes API token nelze u vystavené faktury nastavit, změnit ani zrušit inkaso do pokladny; '
+                    . 'pokladní doklad je úhrada.',
+                422,
+            );
+        }
         $typeChanged = array_key_exists('invoice_type', $body)
             && (string) $body['invoice_type'] !== '' && (string) $body['invoice_type'] !== (string) $existing['invoice_type'];
         $numberChanged = array_key_exists('varsymbol', $body)

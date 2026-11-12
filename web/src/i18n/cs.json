@@ -23607,7 +23607,7 @@
     "issued_edit": "Úprava vystavených faktur přes API (force)",
     "issued_edit_badge": "úprava vystavených faktur",
     "issued_edit_desc": "Povolí tokenu opravit už vystavenou vydanou fakturu (PUT s force=1), třeba po změně objednávky. Úprava se zapíše do historie faktury s názvem tokenu.",
-    "issued_edit_warning": "Token nesmí: měnit doklad v uzavřeném nebo zamčeném účetním období, měnit částky, data ani položky v období s podaným přiznáním k DPH, kontrolním či souhrnným hlášením nebo OSS, měnit typ ani číslo dokladu a upravit fakturu s úhradou, zálohou nebo zápočtem (ta se opravuje dobropisem). Zaúčtovanou fakturu přeúčtuje jen s vaším právem zaúčtovat.",
+    "issued_edit_warning": "Token nesmí: měnit doklad v uzavřeném nebo zamčeném účetním období, měnit částky, data ani položky v období s podaným přiznáním k DPH, kontrolním hlášením nebo OSS (u EU plnění i souhrnným hlášením), měnit typ ani číslo dokladu, měnit inkaso do pokladny a upravit fakturu s úhradou, zálohou nebo zápočtem (ta se opravuje dobropisem). Zaúčtovanou fakturu přeúčtuje jen s vaším právem zaúčtovat.",
     "issued_edit_unavailable": "Jen pro token vázaný na jednu firmu s právem zápisu.",
     "scope_read_write_desc": "Plné API - vytvářet faktury, klienty, vystavovat doklady.",
     "expires_never": "Nikdy",
