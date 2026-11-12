@@ -154,7 +154,7 @@ final class MembershipListRepository
         $sql = '';
         $params = [];
         foreach (MembershipListFilter::searchWords($filter['search']) as $word) {
-            $like = '%' . strtr($word, ['=' => '==', '%' => '=%', '_' => '=_']) . '%';
+            $like = MembershipListFilter::containsPattern($word);
             $sql .= " AND (m.member_number LIKE ? ESCAPE '=' OR c.company_name LIKE ? ESCAPE '=' OR c.first_name LIKE ? ESCAPE '=' OR c.last_name LIKE ? ESCAPE '=')";
             array_push($params, $like, $like, $like, $like);
         }

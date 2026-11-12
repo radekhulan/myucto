@@ -11,6 +11,28 @@ use PHPUnit\Framework\TestCase;
 
 final class MembershipChargeRequestTest extends TestCase
 {
+    public function testVariableSymbolPreservesLeadingZerosAndLegacyRequestShape(): void
+    {
+        $request = $this->validRequest();
+        self::assertArrayNotHasKey('variable_symbol', MembershipChargeRequest::issue($request));
+        $request['variable_symbol'] = '0012345678';
+        self::assertSame('0012345678', MembershipChargeRequest::issue($request)['variable_symbol']);
+    }
+
+    #[DataProvider('invalidVariableSymbols')]
+    public function testInvalidVariableSymbolIsNotSilentlyTruncatedOrStripped(mixed $symbol): void
+    {
+        $request = $this->validRequest();
+        $request['variable_symbol'] = $symbol;
+        $this->expectException(MembershipException::class);
+        MembershipChargeRequest::issue($request);
+    }
+
+    public static function invalidVariableSymbols(): iterable
+    {
+        foreach (['', '12345678901', '12-34', ' 123', 'člen1', null, 123, [], '0', '0000000000'] as $value) yield [$value];
+    }
+
     #[DataProvider('invalidAmounts')]
     public function testInvalidAmountShapeAndRangeUseMembershipValidation(mixed $amount, bool $include): void
     {

@@ -14,7 +14,18 @@ final class MembershipReceivablePaymentAdapter
     {
         $claim = $this->balances->claim($supplier, $claimId)
             ?? throw new MembershipException('nonprofit_membership_claim_not_found', 'Pohledávka členského příspěvku nebyla nalezena.', 404);
+        return $this->targetFromClaim($supplier, $claim);
+    }
+
+    /** Dávkově načtený řádek stejného kontraktu jako MembershipBalanceRepository::claim(). */
+    public function targetFromClaim(int $supplier, array $claim): array
+    {
+        if (!isset($claim['supplier_id']) || (int) $claim['supplier_id'] !== $supplier) {
+            throw new MembershipException('nonprofit_membership_claim_not_found', 'Pohledávka nepatří této organizaci.', 404);
+        }
         // Bez platného pohledávkového řádku (receiptValiditySql) by cíl ukazoval na řádek 0 nebo vadnou pohledávku.
+        // Bankovní párování takový předpis vyřadí už ve výběru (MembershipBankMatchRepository::claimsSql); zde jde
+        // o kontrakt cíle úhrady pro každého volajícího, nejen pro banku.
         if ($claim['reversal_claim_id'] !== null || $claim['reversed_by'] !== null || $claim['posted_at'] === null
             || (int) $claim['receipt_valid'] !== 1) {
             throw new MembershipException('nonprofit_membership_claim_not_payable', 'Pohledávka už není platným cílem úhrady.', 409);
@@ -35,7 +46,7 @@ final class MembershipReceivablePaymentAdapter
                 'account_id' => $claim['account_id'],
             ],
             'accepted_payment_source_types' => ['bank', 'cash'],
-            'pairing_contract' => 'journal_line_pairings.exact_single_membership_claim.v1',
+            'pairing_contract' => 'journal_line_pairings.membership_claims.v2',
         ];
     }
 }

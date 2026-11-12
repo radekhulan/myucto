@@ -35,6 +35,8 @@ use MyInvoice\Tests\Support\OwnedTestDatabaseCleanup;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use MyInvoice\Tests\Support\CloneSandbox;
+use MyInvoice\Service\Anonymization\AnonymizationOptions;
+use MyInvoice\Service\Anonymization\AnonymizationService;
 
 final class MembershipCloneScrubberTest extends TestCase
 {
@@ -76,6 +78,7 @@ final class MembershipCloneScrubberTest extends TestCase
                 'classification' => $this->classification, 'is_active' => true, 'row_version' => 0,
             ]);
             $request = $this->chargeRequest($memberId);
+            $request['variable_symbol'] = '0012345678';
             $request['rate_id'] = $rate['id'];
             $preview = $charges->previewIssue($supplier, $request);
             $issued = $charges->confirmIssue($supplier, $request, $preview['expected_case_version'], $preview['preview_hash'], 'private-issue', $actor);
@@ -167,6 +170,8 @@ final class MembershipCloneScrubberTest extends TestCase
             $commandRequest->execute([$supplier, $operation['command_id']]);
             $command = json_decode((string) $commandRequest->fetchColumn(), true, flags: JSON_THROW_ON_ERROR);
             self::assertSame($rate['id'], $command['request']['rate_id']);
+            self::assertNotSame('0012345678', $command['request']['variable_symbol']);
+            self::assertSame($scrubber->byStrategy('symbol', '0012345678'), $command['request']['variable_symbol']);
             self::assertArrayNotHasKey('rate_id', $operation['proof']);
             self::assertSame('Synthetic standard', (new \MyInvoice\Repository\Nonprofit\Membership\MembershipRateRepository($target))->find($supplier, $rate['id'])['name']);
             self::assertSame(NonprofitTaxRules::hash([
@@ -266,6 +271,72 @@ final class MembershipCloneScrubberTest extends TestCase
                 if ($target instanceof Connection && $target->pdo()->inTransaction()) $target->pdo()->rollBack();
                 $hashMap->drop();
             }
+            if ($target instanceof Connection) $target->close();
+            CloneSandbox::release($server, $schema);
+        }
+    }
+
+    /**
+     * Celá anonymizace kopie (fáze strukturovaných hodnot před symboly): VS předpisu a bankovní platby
+     * dostane stejný pseudonym jádra, takže párování podle VS v kopii funguje; krátký VS zůstává.
+     */
+    public function testAnonymizedCopyKeepsVariableSymbolMatchBetweenChargeAndBankPayment(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $config = $container->get(Config::class);
+        $sourceSchema = (string) $container->get(Connection::class)->pdo()->query('SELECT DATABASE()')->fetchColumn();
+        self::assertStringEndsWith('_test', $sourceSchema);
+        $server = new PDO('mysql:host=' . $config->get('db.host') . ';port=' . $config->get('db.port', 3306) . ';charset=utf8mb4',
+            $config->get('db.user'), $config->get('db.pass', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $schema = CloneSandbox::acquire($server, $sourceSchema);
+        $target = null;
+        try {
+            $oldName = getenv('MYINVOICE_DB_NAME');
+            $oldMysqlName = getenv('MYSQL_DATABASE');
+            putenv('MYINVOICE_DB_NAME=' . $schema);
+            putenv('MYSQL_DATABASE=' . $schema);
+            try {
+                $targetContainer = Connection::withoutSharedTestConnection(fn () => Bootstrap::buildContainer());
+                $target = $targetContainer->get(Connection::class);
+                $posting = $targetContainer->get(PostingService::class);
+            } finally {
+                $oldName === false ? putenv('MYINVOICE_DB_NAME') : putenv('MYINVOICE_DB_NAME=' . $oldName);
+                $oldMysqlName === false ? putenv('MYSQL_DATABASE') : putenv('MYSQL_DATABASE=' . $oldMysqlName);
+            }
+            [$supplier, $memberId, , $actor, $charges] = $this->fixture($target, $posting);
+            $cases = [];
+            foreach (['long' => '0012345678', 'short' => '00123'] as $key => $symbol) {
+                $request = $this->chargeRequest($memberId);
+                $request['title_key'] = 'synthetic-vs-' . $key;
+                $request['variable_symbol'] = $symbol;
+                $preview = $charges->previewIssue($supplier, $request);
+                $cases[$key] = (int) $charges->confirmIssue($supplier, $request, $preview['expected_case_version'], $preview['preview_hash'], 'vs-' . $key, $actor)['case']['id'];
+            }
+            $pdo = $target->pdo();
+            $pdo->prepare("INSERT INTO bank_statements(supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date,imported_by)
+                VALUES(?,'synthetic-clone-vs.gpc',?,'1000000005','0100','CZK','2026-02-01',?)")->execute([$supplier, hash('sha256', 'clone-vs'), $actor]);
+            $statement = (int) $pdo->lastInsertId();
+            $payments = [];
+            foreach (['long' => '12345678', 'short' => '123'] as $key => $symbol) {
+                $pdo->prepare("INSERT INTO bank_transactions(statement_id,posted_at,amount,currency,description,match_status,variable_symbol)
+                    VALUES(?,'2026-02-01','200.00','CZK','Synthetic clone payment','unmatched',?)")->execute([$statement, $symbol]);
+                $payments[$key] = (int) $pdo->lastInsertId();
+            }
+            $target->close();
+            $target = null;
+
+            (new AnonymizationService($config))->anonymizeCopy(
+                new AnonymizationOptions(source: $schema, target: $schema, seed: 'membership-vs'), static function (): void {});
+
+            $value = fn (string $sql): string => (string) $server->query(str_replace('{s}', DatabaseCloner::quote($schema), $sql))->fetchColumn();
+            $case = fn (string $key): string => $value('SELECT variable_symbol FROM {s}.nonprofit_membership_charge_cases WHERE id=' . $cases[$key]);
+            $bank = fn (string $key): string => $value('SELECT variable_symbol FROM {s}.bank_transactions WHERE id=' . $payments[$key]);
+            self::assertNotSame('0012345678', $case('long'));
+            self::assertStringStartsWith('00', $case('long'), 'Vodicí nuly VS předpisu zůstávají.');
+            self::assertSame(ltrim($case('long'), '0'), $bank('long'), 'Klíč VS předpisu a platby musí v kopii zůstat shodný.');
+            self::assertSame('00123', $case('short'), 'Krátký VS by jako náhodné číslo přepsal výskyty v textech, zůstává.');
+            self::assertSame('123', $bank('short'));
+        } finally {
             if ($target instanceof Connection) $target->close();
             CloneSandbox::release($server, $schema);
         }

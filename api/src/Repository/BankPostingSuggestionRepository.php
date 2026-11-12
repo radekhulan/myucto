@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Bank\BankTransactionSort;
 use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
+use MyInvoice\Service\Bank\OtherItemPaymentMatchReader;
 use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
 use PDO;
 use PDOException;
@@ -866,7 +867,8 @@ final class BankPostingSuggestionRepository
 
         $matchedPurchasesByTx = PurchasePaymentMatchReader::byTransactions($pdo, $supplierId, $txIds);
         $matchedOtherItemsByTx = \MyInvoice\Service\Bank\OtherItemPaymentMatchReader::byTransactions($pdo, $supplierId, $txIds);
-        $items = array_map(static function (array $row) use ($matchedByTx, $matchedPurchasesByTx, $matchedOtherItemsByTx): array {
+        $matchedMembershipByTx = OtherItemPaymentMatchReader::membershipByTransactions($pdo, $supplierId, $txIds);
+        $items = array_map(static function (array $row) use ($matchedByTx, $matchedPurchasesByTx, $matchedOtherItemsByTx, $matchedMembershipByTx): array {
             return [
                 'id' => (int) $row['id'],
                 'source' => (string) $row['transaction_source'],
@@ -892,6 +894,10 @@ final class BankPostingSuggestionRepository
                 'matched_invoices' => $matchedByTx[(int) $row['id']] ?? [],
                 'matched_purchase_invoices' => $matchedPurchasesByTx[(int) $row['id']] ?? [],
                 'matched_other_items' => $matchedOtherItemsByTx[(int) $row['id']] ?? [],
+                'matched_membership_claims' => array_map(static function (array $claim): array {
+                    unset($claim['pairing_id'], $claim['entry_id']);
+                    return $claim;
+                }, $matchedMembershipByTx[(int) $row['id']] ?? []),
                 'match_status' => (string) $row['match_status'],
                 'ignore_note' => $row['ignore_note'] === null ? null : (string) $row['ignore_note'],
                 'ignore_origin' => $row['ignore_origin'] === null ? null : (string) $row['ignore_origin'],

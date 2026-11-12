@@ -15,13 +15,10 @@ final class MembershipListFilter
         // Chybějící rok znamená aktuální rok; prázdný řetězec z adresy i null z JSON těla znamenají „bez roku“.
         $year = array_key_exists('year', $query) ? ($query['year'] ?? '') : (int) $today->format('Y');
         $status = $query['payment_status'] ?? 'all';
-        if (!is_string($search) || !mb_check_encoding($search, 'UTF-8') || mb_strlen(trim($search)) > 160 || !is_string($title)
-            || !in_array($status, ['all', 'paid', 'unpaid', 'unproven', 'none'], true)) {
+        $search = self::search($search);
+        if ($search === null || !is_string($title) || !in_array($status, ['all', 'paid', 'unpaid', 'unproven', 'none'], true)) {
             self::invalid();
         }
-        // Unicode mezery (i pevná) oddělují slova jako obyčejná; samé mezery znamenají bez hledání.
-        // Počet slov omezuje délka 160 znaků.
-        $search = implode(' ', self::searchWords($search));
         $title = trim($title);
         if ($title !== '') {
             $title = MembershipChargeRequest::key($title, 'titulu');
@@ -42,10 +39,30 @@ final class MembershipListFilter
         return ['search' => $search, 'title_key' => $title, 'year' => $year, 'payment_status' => $status];
     }
 
+    /**
+     * Hledání členů pro seznam i bankovní párování: platné UTF-8 nejvýše 160 znaků, slova oddělená i Unicode
+     * mezerami (pevnou), bez opakování. Samé mezery znamenají bez hledání; počet slov omezuje délka.
+     *
+     * @return ?string normalizované hledání, null pro neplatný vstup
+     */
+    public static function search(mixed $search): ?string
+    {
+        if (!is_string($search) || !mb_check_encoding($search, 'UTF-8') || mb_strlen(trim($search)) > 160) {
+            return null;
+        }
+        return implode(' ', self::searchWords($search));
+    }
+
     /** @return list<string> slova hledání bez opakování, stejná pro seznam i ověření výběru */
     public static function searchWords(string $search): array
     {
         return array_values(array_unique(preg_split('/[\s\p{Z}]+/u', $search, -1, PREG_SPLIT_NO_EMPTY) ?: []));
+    }
+
+    /** Vzor „obsahuje“ pro `LIKE ? ESCAPE '='`: %, _ a = z hledání platí doslova. */
+    public static function containsPattern(string $word): string
+    {
+        return '%' . strtr($word, ['=' => '==', '%' => '=%', '_' => '=_']) . '%';
     }
 
     private static function invalid(): never

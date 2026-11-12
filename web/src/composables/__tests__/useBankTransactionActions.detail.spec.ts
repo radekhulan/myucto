@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 const supplier = reactive({ currentSupplierId: 1 })
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => supplier }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: mocks.canRead, isClientRole: mocks.isClientRole, canWrite: mocks.canWrite }) }))
+vi.mock('@/api/membershipBank', () => ({ membershipBankApi: { candidates: vi.fn().mockResolvedValue({ candidates: [], next_after_id: null }) } }))
 vi.mock('@/api/bank', () => ({ bankApi: mocks.bank }))
 vi.mock('@/api/invoices', () => ({ invoicesApi: {} }))
 vi.mock('@/api/purchaseInvoices', () => ({ purchaseInvoicesApi: {} }))
@@ -25,7 +26,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: mocks.toast, error: mocks.toast, info: mocks.toast }) }))
 vi.mock('@/composables/useHotkey', () => ({ useHotkey: (_key: string, callback: () => void) => { mocks.escape = callback } }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
-vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: Error) => e.message }))
+vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: Error) => e.message, apiErrorCode: () => undefined }))
 
 const wrappers: ReturnType<typeof mount>[] = []
 function setup() {

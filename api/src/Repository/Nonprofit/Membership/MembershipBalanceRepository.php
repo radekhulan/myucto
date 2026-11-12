@@ -17,9 +17,9 @@ final class MembershipBalanceRepository
         $limit = max(1, min(101, $limit));
         $valid = self::receiptValiditySql();
         $q = $this->db->pdo()->prepare(
-            "SELECT c.id claim_id,c.case_id,c.operation_id,c.member_id,c.client_id,c.amount_cents,
+            "SELECT c.id claim_id,c.supplier_id,c.case_id,c.operation_id,c.member_id,c.client_id,c.amount_cents,
                     r.id reversal_claim_id,o.accounting_date,o.due_date,o.journal_entry_id,o.receivable_line_id,
-                    l.line_no,l.account_id,e.posted_at,e.reversed_by,{$valid} receipt_valid,cc.title_key,cc.period_from,cc.period_to
+                    l.line_no,l.account_id,e.posted_at,e.reversed_by,{$valid} receipt_valid,cc.title_key,cc.period_from,cc.period_to,cc.variable_symbol
                FROM nonprofit_membership_charge_claims c FORCE INDEX(ix_nmclaim_member)
                JOIN nonprofit_membership_charge_operations o
                  ON o.supplier_id=c.supplier_id AND o.id=c.operation_id AND o.operation='issue'
@@ -43,9 +43,9 @@ final class MembershipBalanceRepository
     {
         $valid = self::receiptValiditySql();
         $q = $this->db->pdo()->prepare(
-            "SELECT c.id claim_id,c.case_id,c.operation_id,c.member_id,c.client_id,c.amount_cents,
+            "SELECT c.id claim_id,c.supplier_id,c.case_id,c.operation_id,c.member_id,c.client_id,c.amount_cents,
                     r.id reversal_claim_id,o.accounting_date,o.due_date,o.journal_entry_id,o.receivable_line_id,
-                    l.line_no,l.account_id,e.posted_at,e.reversed_by,{$valid} receipt_valid,cc.title_key,cc.period_from,cc.period_to
+                    l.line_no,l.account_id,e.posted_at,e.reversed_by,{$valid} receipt_valid,cc.title_key,cc.period_from,cc.period_to,cc.variable_symbol
                FROM nonprofit_membership_charge_claims c
                JOIN nonprofit_membership_charge_operations o
                  ON o.supplier_id=c.supplier_id AND o.id=c.operation_id AND o.operation='issue'
@@ -127,6 +127,8 @@ final class MembershipBalanceRepository
                     SUM(l.id IS NULL OR e.posted_at IS NULL OR e.reversed_by IS NOT NULL OR l.is_red_storno<>0
                         OR l.currency_code IS NOT NULL OR l.amount_foreign IS NOT NULL OR l.fx_rate IS NOT NULL
                         OR l.account_id<>r.account_id
+                        OR (mo.id IS NOT NULL AND (mc.id IS NULL OR cc.id IS NULL OR cc.head_operation_id<>mo.id
+                            OR l.side<>'debit' OR ROUND(l.signed_amount*100)<>mc.amount_cents))
                         OR (mo.id IS NULL AND NOT ((e.source_type='bank' AND bs.id IS NOT NULL)
                                                    OR (e.source_type='cash' AND cd.id IS NOT NULL)))) invalid_count,
                     SUM(mo.id IS NOT NULL) membership_claim_count,
@@ -138,6 +140,10 @@ final class MembershipBalanceRepository
                     AND l.line_no=i.line_no AND l.account_id=i.account_id
           LEFT JOIN nonprofit_membership_charge_operations mo
                  ON mo.supplier_id=l.supplier_id AND mo.receivable_line_id=l.id AND mo.operation='issue'
+          LEFT JOIN nonprofit_membership_charge_claims mc
+                 ON mc.supplier_id=mo.supplier_id AND mc.operation_id=mo.id AND mc.kind='issue'
+          LEFT JOIN nonprofit_membership_charge_cases cc
+                 ON cc.supplier_id=mo.supplier_id AND cc.id=mo.case_id
           LEFT JOIN bank_transactions bt ON e.source_type='bank' AND bt.id=e.source_id
           LEFT JOIN bank_statements bs ON bs.id=bt.statement_id
                     AND " . BankStatementOwnershipResolver::sqlForColumn('i.supplier_id') . "
@@ -190,7 +196,7 @@ final class MembershipBalanceRepository
 
     private function claimRow(array $row): array
     {
-        foreach (['claim_id', 'case_id', 'operation_id', 'member_id', 'client_id', 'amount_cents', 'journal_entry_id', 'receivable_line_id', 'line_no', 'account_id'] as $field) $row[$field] = (int) $row[$field];
+        foreach (['claim_id', 'supplier_id', 'case_id', 'operation_id', 'member_id', 'client_id', 'amount_cents', 'journal_entry_id', 'receivable_line_id', 'line_no', 'account_id'] as $field) $row[$field] = (int) $row[$field];
         $row['reversal_claim_id'] = $row['reversal_claim_id'] === null ? null : (int) $row['reversal_claim_id'];
         $row['reversed_by'] = $row['reversed_by'] === null ? null : (int) $row['reversed_by'];
         return $row;

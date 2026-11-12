@@ -4503,9 +4503,10 @@ final class PostingService
      * analytiku, se nepřerazítkuje a vrátí `needs_repost` + `account_change`.
      *
      * @param array<int,?int> $released
+     * @param list<int> $releaseDefaultLines viz {@see DimensionStamper::restamp()}
      * @return array{lines:int, needs_repost:bool, account_change:bool}
      */
-    public function restampDimensions(int $supplierId, string $sourceType, int $sourceId, bool $keepLineTypes = false, array $released = []): array
+    public function restampDimensions(int $supplierId, string $sourceType, int $sourceId, bool $keepLineTypes = false, array $released = [], array $releaseDefaultLines = []): array
     {
         return $this->dimensionStamper()->restamp(
             $supplierId,
@@ -4514,6 +4515,7 @@ final class PostingService
             $keepLineTypes,
             $released,
             $this->singleAnalyticMap($supplierId),
+            $releaseDefaultLines,
         );
     }
 

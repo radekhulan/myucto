@@ -29,6 +29,18 @@ final class MembershipListFilterTest extends TestCase
         self::assertCount(9, MembershipListFilter::searchWords(MembershipListFilter::parse($query + ['search' => 'a b c d e f g h i'])['search']));
     }
 
+    /** Seznam členů i hledání v bankovním párování validují a normalizují hledání stejným pravidlem. */
+    public function testSharedSearchRuleForListAndBankPairing(): void
+    {
+        self::assertSame('Jan Novák', MembershipListFilter::search("\u{00A0}Jan\u{2009}Novák Jan "));
+        self::assertSame('', MembershipListFilter::search(" \u{00A0}"));
+        self::assertSame(str_repeat('ž', 160), MembershipListFilter::search(' ' . str_repeat('ž', 160) . ' '));
+        self::assertNull(MembershipListFilter::search(str_repeat('ž', 161)));
+        self::assertNull(MembershipListFilter::search("Jan \xFF"));
+        self::assertNull(MembershipListFilter::search(['Jan']));
+        self::assertNull(MembershipListFilter::search(null));
+    }
+
     public function testExplicitNullYearFromJsonBodyMeansNoYearLikeEmptyQueryValue(): void
     {
         $query = ['title_key' => 'SYNTHETIC', 'payment_status' => 'all'];

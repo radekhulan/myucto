@@ -179,11 +179,25 @@ describe('Membership member detail', () => {
     const w = mounted()
     await flushPromises()
     expect(w.find('[data-claim="34"] [data-action="reverse-claim"]').exists()).toBe(false)
-    await w.get('[data-claim="32"] [data-action="reverse-claim"]').trigger('click')
+    await w.get('[data-claim="31"] [data-action="reverse-claim"]').trigger('click')
     const flow = w.findComponent(ReverseFlow)
     expect(flow.exists()).toBe(true)
-    expect(flow.props('claim')).toMatchObject({ claim_id: 32, case_id: 72 })
+    expect(flow.props('claim')).toMatchObject({ claim_id: 31, case_id: 71 })
     expect(flow.props('member')).toEqual({ id: 9, member_number: 'M-1', label: 'Synthetic member' })
+    w.unmount()
+  })
+
+  it('disables reversal of a claim matched in the ledger and explains why, like other receivables', async () => {
+    const w = mounted()
+    await flushPromises()
+    for (const id of ['32', '33']) {
+      const button = w.get(`[data-claim="${id}"] [data-action="reverse-claim"]`)
+      expect(button.attributes('disabled')).toBeDefined()
+      expect(button.attributes('title')).toBe('Předpis je spárovaný v saldokontu. Nejprve zrušte jeho párování.')
+      await button.trigger('click')
+    }
+    expect(w.findComponent(ReverseFlow).exists()).toBe(false)
+    expect(w.get('[data-claim="31"] [data-action="reverse-claim"]').attributes('disabled')).toBeUndefined()
     w.unmount()
   })
 

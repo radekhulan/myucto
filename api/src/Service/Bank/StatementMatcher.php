@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Bank;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ClientBankAccountRepository;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\AdvanceDrawLinks;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
@@ -17,6 +18,7 @@ use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Mail\PaymentThanksMailer;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipBankPaymentGuard;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
@@ -407,7 +409,7 @@ final class StatementMatcher
                 }
             });
         } catch (\MyInvoice\Service\Accounting\OtherItemException
-            | \MyInvoice\Service\Accounting\PostingException
+            | PostingException
             | \MyInvoice\Service\Accounting\Closing\ClosingException) {
             return ['status' => 'unmatched', 'reason' => \MyInvoice\Service\Accounting\OtherItemAutoMatcher::RESULT_CANDIDATES]
                 + array_diff_key($result, ['reason' => true]);
@@ -436,7 +438,9 @@ final class StatementMatcher
             if ($supplierId === 0) $supplierId = $this->discoverSupplier($row);
             try {
                 if ($supplierId > 0) (new BankTransactionContext($this->db))->mutableTransaction($supplierId, $transactionId);
-            } catch (\MyInvoice\Service\Accounting\PostingException $e) {
+            } catch (PostingException $e) {
+                // Členskou vazbu ukazuje řádek pohybu sám; důvod se k neměnnému pohybu nezapisuje.
+                if ($e->errorCode === 'nonprofit_membership_payment_in_use') return ['status' => 'unmatched', 'reason' => 'membership_settled'];
                 if ($e->errorCode !== 'property_payment_source_immutable') throw $e;
                 return self::propertyPaymentResult();
             }
@@ -604,7 +608,11 @@ final class StatementMatcher
                 return $result;
             } catch (\Throwable $e) {
                 $this->rollBackIfOpen($pdo, $e);
-                if ($e instanceof \MyInvoice\Service\Accounting\PostingException && $e->errorCode === 'property_payment_source_immutable') return self::propertyPaymentResult();
+                if ($e instanceof PostingException && $e->errorCode === 'property_payment_source_immutable') return self::propertyPaymentResult();
+                // Pohyb uhradil členský předpis: jeden takový nesmí shodit přepárování celého výpisu.
+                if ($e instanceof PostingException && $e->errorCode === 'nonprofit_membership_payment_in_use') {
+                    return ['status' => 'unmatched', 'reason' => 'membership_settled'];
+                }
                 throw $e;
             }
         });
@@ -1561,7 +1569,28 @@ final class StatementMatcher
             'SELECT 1 FROM bank_transfer_matches WHERE out_transaction_id = ? OR in_transaction_id = ? LIMIT 1'
         );
         $stmt->execute([$transactionId, $transactionId]);
-        return $stmt->fetchColumn() !== false ? 'own_transfer_matched' : null;
+        if ($stmt->fetchColumn() !== false) {
+            return 'own_transfer_matched';
+        }
+        // Členská úhrada nechává pohyb `unmatched` (vazba je jen v párování deníku), proto ji
+        // matcher musí poznat sám, jinak by tutéž platbu podle VS použil ještě na fakturu.
+        // SSOT podmínky je MembershipBankPaymentGuard::entryUsedSql (sdílí ji NonInvoiceBankTransactionScope).
+        // Firmu volající neznají. Hledá se jen ve firmách s členskými předpisy (volné čtení indexu
+        // předpisů), u každé po idx_je_supplier_source; instance bez členství tak nečte deník vůbec.
+        // Platí pro příchozí úhrady i pro odchozí vratku spárovanou v členském okruhu; TAKEN_ELSEWHERE_SQL
+        // členský okruh nezná, proto tato kontrola běží v takenElsewhereReason pro každý pohyb.
+        // Jednotkové testy nad SQLite (viz claimTransaction) členský modul ani deník nemají.
+        if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'mysql') {
+            return null;
+        }
+        $stmt = $pdo->prepare(
+            "SELECT STRAIGHT_JOIN 1 FROM (SELECT DISTINCT supplier_id FROM nonprofit_membership_charge_claims) ms
+               JOIN journal_entries je FORCE INDEX(idx_je_supplier_source) ON je.supplier_id = ms.supplier_id AND je.source_type = 'bank'
+                AND je.source_id = ? AND je.reversed_by IS NULL
+              WHERE " . MembershipBankPaymentGuard::entryUsedSql('je') . ' LIMIT 1'
+        );
+        $stmt->execute([$transactionId]);
+        return $stmt->fetchColumn() !== false ? 'membership_settled' : null;
     }
 
     private ?\MyInvoice\Service\Bank\Card\CardPaymentCandidates $cardCandidatesInstance = null;

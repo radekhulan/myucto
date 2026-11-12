@@ -781,7 +781,7 @@ final class AnonymizationService
     private function leakCheck(PDO $pdo, AnonymizationOptions $options): array
     {
         $keys = $this->primaryKeys($pdo, $options->target);
-        $skip = ['keep', 'text', 'json', 'wipe', 'token', 'password', 'blob_pdf', 'blob_text', 'file_path', 'symbol', 'sealed_companion', 'city', 'zip'];
+        $skip = ['keep', 'text', 'json', 'wipe', 'token', 'password', 'blob_pdf', 'blob_text', 'file_path', 'symbol', 'payment_symbol', 'sealed_companion', 'city', 'zip'];
         $leaks = [];
         foreach (AnonymizationPolicy::COLUMNS as $table => $columns) {
             $pk = array_column($keys[$table] ?? [], 'name');

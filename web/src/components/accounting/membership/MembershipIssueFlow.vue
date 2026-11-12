@@ -27,6 +27,8 @@ const props = defineProps<{
   member: { id: number; member_number: string; label: string }
   history: MemberRevision[]; periods: AccountingPeriod[]
   batchMode?: boolean; batchBusy?: boolean; initialRequest?: Omit<MembershipIssueRequest, 'member_id'>
+  /** VS načtených předpisů podle titulu a období (`titul|od|do`); opakovaný předpis po stornu převezme VS případu. */
+  caseSymbols?: Record<string, string>
 }>()
 const emit = defineEmits<{ done: []; close: []; lock: [locked: boolean]; batchRequest: [request: MembershipIssueRequest] }>()
 const { t, te } = useI18n()
@@ -36,10 +38,15 @@ const initializing = ref(!!props.batchMode && !!props.initialRequest)
 
 const form = reactive({
   periodId: 0, accountingDate: '', dueDate: '', periodFrom: '', periodTo: '', titleKey: '', amount: '',
+  variableSymbol: '',
   receivable: null as string | null, revenue: null as string | null,
   titleReference: '', evidence: '', reason: '', nonreciprocal: false,
   activityValueId: null as number | null, activityKindValueId: null as number | null, taxRegimeValueId: null as number | null,
 })
+// Jen nápověda: hodnotu volí server (VS dřívějšího předpisu případu, číselné členské číslo, jinak vygenerovaný).
+const memberVariableSymbol = computed(() => /^[0-9]{1,10}$/.test(props.member.member_number) && !/^0+$/.test(props.member.member_number) ? props.member.member_number : '')
+// Jen nápověda: server u známého případu (titul a období) použije jeho dřívější VS, jinak členské číslo.
+const defaultVariableSymbol = computed(() => props.caseSymbols?.[`${form.titleKey.trim()}|${form.periodFrom}|${form.periodTo}`] ?? memberVariableSymbol.value)
 const accounts = ref<ChartAccount[]>([])
 const revenueAccounts = ref<string[]>([])
 const rateMonths = ref(0)
@@ -150,6 +157,7 @@ const problems = computed(() => {
   if (datesOk && form.dueDate < form.accountingDate) add('issueDueBeforeDate')
   if (!titleKeyPattern.test(form.titleKey)) add('issueTitleKeyInvalid')
   if (amountDecimal(form.amount) === null) add('issueAmountInvalid')
+  if (!props.batchMode && form.variableSymbol !== '' && (!/^[0-9]{1,10}$/.test(form.variableSymbol) || /^0+$/.test(form.variableSymbol))) add('issueVariableSymbolInvalid')
   if (!form.receivable || !form.revenue || form.receivable === form.revenue) add('issueAccountsInvalid')
   if (classState.value === 'idle' || classState.value === 'loading') add('classificationLoading')
   else if (classState.value === 'error') add('classificationError')
@@ -208,6 +216,7 @@ const started = computed(() => [form.titleKey, form.amount, form.reason, form.ti
 function buildRequest(): MembershipIssueRequest {
   return {
     ...(appliedRate.value ? { rate_id: appliedRate.value.id } : {}),
+    ...(!props.batchMode && form.variableSymbol !== '' ? { variable_symbol: form.variableSymbol } : {}),
     member_id: props.member.id, title_key: form.titleKey, period_from: form.periodFrom, period_to: form.periodTo,
     accounting_date: form.accountingDate, due_date: form.dueDate, amount: amountDecimal(form.amount) ?? '',
     receivable_account: form.receivable ?? '', revenue_account: form.revenue ?? '',
@@ -295,6 +304,9 @@ watch(() => form.periodFrom, from => {
   if (props.batchMode && rateMonths.value) form.periodTo = membershipRatePeriodEnd(from, rateMonths.value) ?? ''
 })
 watch(() => form.periodId, () => { clampDates(); void loadProfile() })
+watch([() => props.supplier, () => props.member.id, () => props.member.member_number], () => {
+  form.variableSymbol = ''
+})
 watch([form, () => latestProfile.value?.id ?? 0, () => props.member.id], () => commit.touch(), { deep: true, flush: 'sync' })
 watch(() => props.supplier, () => {
   initializing.value = false
@@ -442,6 +454,10 @@ const actions = computed<ActionItem[]>(() => [
       </div>
       <label :class="formLabel">{{ t('nonprofitMembership.accountingDate') }}<DateInput :class="dateInput" v-model="form.accountingDate" required :min="chosenPeriod?.starts_on" :max="chosenPeriod?.ends_on" data-field="accounting-date" /></label>
       <label :class="formLabel">{{ t('nonprofitMembership.dueDate') }}<DateInput :class="dateInput" v-model="form.dueDate" required data-field="due-date" /></label>
+      <label v-if="!batchMode" :class="formLabel">{{ t('nonprofitMembership.variableSymbol') }}
+        <input v-model="form.variableSymbol" :class="field" inputmode="numeric" pattern="[0-9]{1,10}" maxlength="10" data-field="variable-symbol" :placeholder="defaultVariableSymbol" />
+        <span class="text-sm text-neutral-500">{{ t('nonprofitMembership.issueVariableSymbolHelp') }}</span>
+      </label>
       <label :class="formLabel">{{ t('nonprofitMembership.periodFrom') }}<DateInput :class="dateInput" v-model="form.periodFrom" required data-field="period-from" /></label>
       <label :class="formLabel">{{ t('nonprofitMembership.periodTo') }}<DateInput :class="dateInput" v-model="form.periodTo" :disabled="batchMode" required data-field="period-to" /></label>
       <p v-if="!batchMode && form.accountingDate && revisionAtDate && revisionAtDate.status !== 'active'" class="text-sm text-warning-700 sm:col-span-2" data-section="issue-status-warning">{{ t('nonprofitMembership.issueMemberNotActive', { status: t(`nonprofitMembership.status_${revisionAtDate.status}`) }) }}</p>
@@ -487,6 +503,7 @@ const actions = computed<ActionItem[]>(() => [
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.amount') }}</dt><dd class="whitespace-nowrap tabular-nums" data-field="review-amount">{{ formatMoney(frozenRequest.amount) }}</dd></div>
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.accountingDate') }}</dt><dd>{{ formatDate(frozenRequest.accounting_date) }}</dd></div>
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.dueDate') }}</dt><dd>{{ formatDate(frozenRequest.due_date) }}</dd></div>
+        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.variableSymbol') }}</dt><dd data-field="review-variable-symbol">{{ commit.review.value.variable_symbol ?? '—' }}</dd></div>
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.caseVersion') }}</dt><dd data-field="review-case">{{ commit.review.value.expected_case_version === 0 ? t('nonprofitMembership.caseNew') : t('nonprofitMembership.caseExisting') }}</dd></div>
       </dl>
       <div class="overflow-x-auto">

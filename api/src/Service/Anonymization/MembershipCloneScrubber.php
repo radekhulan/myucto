@@ -486,6 +486,9 @@ final class MembershipCloneScrubber
     {
         $request['request']['reason'] = $scrubber->scrub((string) $request['request']['reason']);
         if ($request['operation'] === 'issue') {
+            if (isset($request['request']['variable_symbol'])) {
+                $request['request']['variable_symbol'] = $scrubber->byStrategy('payment_symbol', $request['request']['variable_symbol']);
+            }
             $request['request']['legal_title'] = self::legalBasis($scrubber, $request['request']['legal_title']);
             $request['request']['classification'] = [
                 'activity_value_id' => $proof['classification']['activity']['value_id'],

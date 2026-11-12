@@ -30,6 +30,8 @@ Zvolte **Nový předpis příspěvku**. Pokud firmě nebo zvolenému období chy
 
 Vyberte otevřené účetní období, účetní datum, splatnost a období, za které příspěvek náleží. Vyplňte označení příspěvku (například `CP-2027`), částku, pohledávkový a výnosový účet z rozvrhu, odkaz na titul a doložení částky. Jakmile začnete formulář vyplňovat, vypíše pod sebou všechno, co ještě chybí.
 
+Variabilní symbol u jednotlivého předpisu můžete před náhledem zadat. Když pole necháte prázdné, použije se symbol dřívějšího předpisu stejného titulu a období (například po stornu), jinak číselné členské číslo do deseti číslic a pro jiné členské číslo se vytvoří číselný symbol. Symbol ze samých nul zadat nejde. V náhledu i detailu předpisu ho zkontrolujte. Hromadný předpis určí symbol každému členovi samostatně. Stejný symbol může mít více předpisů, například v různých letech, proto sám neurčuje, který příspěvek platba hradí.
+
 Stejné označení nejde u člena předepsat dvakrát na překrývající se období. Po stornu předpisu lze stejné označení a období předepsat znovu. Členství musí být aktivní k účetnímu datu a po celé období příspěvku, od prvního do posledního dne. Pokud není, formulář na to upozorní ještě před náhledem a náhled skončí chybou.
 
 Výnos se účtuje na účet povolený rolí přijatých členských příspěvků; ve výchozím nastavení jde o účet 684 nebo jeho analytiku. Když období příspěvku přesahuje rozvahový den účetního období, náhled to oznámí a krok uzávěrky **Časové rozlišení** odloží část připadající na další období na účet 384 a v dalším období ji rozpustí.
@@ -79,7 +81,17 @@ Změna filtrů zruší zaškrtnuté členy pro novou dávku a oznámí to. Obnov
 
 Pohledávky se zobrazují po stránkách. Přehled rozlišuje předepsanou částku a zůstatek k úhradě. Úhrada je doložená teprve přes skutečné párování s nativním bankovním nebo pokladním dokladem; předpis bez spárované úhrady má zůstatek ve výši celé částky.
 
-Párování se nedělá na této stránce. Otevřete opis účtu pohledávky v hlavní knize, přepněte na **Otevřené položky - párování** a spojte řádek předpisu s řádkem platby do okruhu ([kap. 55.8.5.1](55_Hlavni_kniha.md)). Úhrada se prokáže jen u okruhu, ve kterém je jediná pohledávka z této evidence.
+U příchozí korunové platby v bance otevřete **Spárovat**. Sekce **Členské příspěvky** nabídne nejdřív předpisy se shodným variabilním symbolem a potom nespárované předpisy se shodnou částkou; u každého je štítek důvodu shody. Předpis bez variabilního symbolu se podle částky nabídne, jen dokud nemá žádnou úhradu; jinak ho dohledejte vyhledáním. Vyhledávání umožňuje dohledat konkrétního člena podle čísla, názvu, jména či příjmení. Zadáte-li víc slov (například celé jméno), musí se najít každé z nich, na pořadí nezáleží. Předpisy jednoho příspěvku najdete také zadáním jeho označení (například `CP-2027`); označení se hledá jako celý zadaný text a rozlišuje velká a malá písmena. Variabilní symbol se ve vyhledávání nehledá; předpis s jiným variabilním symbolem, než uvedl plátce, dohledejte podle člena. Další výsledky načtete přes **Další předpisy**. Plátce nemusí být člen, například když platí rodič nebo organizace. Při více odpovídajících předpisech není žádný vybraný automaticky.
+
+Zaškrtněte konkrétní předpisy a zkontrolujte členy, období a součet před potvrzením **Spárovat vybrané příspěvky**. Jeden předpis může být uhrazen částečně. Pro několik předpisů musí platba přesně odpovídat jejich otevřeným částkám a předpisy musí mít stejný účet pohledávky i stejné dimenze. Bankovní pohyb se nerozděluje. Již částečně hrazené předpisy párujte samostatně. Přeplatek zde nelze přiřadit.
+
+Úhrada převezme dimenze předpisu, takže pohledávka je vyrovnaná i ve výkazech podle dimenzí. Typy dimenzí, které předpis určuje, dostane stejně jako u úhrady faktury celý bankovní zápis, včetně řádku banky. Dimenze, které pohyb dostal při zaúčtování automaticky (výchozí hodnoty firmy či bankovního účtu, pravidlo zaúčtování bankovního pohybu, pravidlo dimenzí pro účet pohledávky), se z řádku pohledávky po spárování odeberou, pokud je předpis neurčuje; na řádku banky zůstanou. Předpis se vystavuje bez pravidel dimenzí pro účet pohledávky. Párování zaúčtuje nezaúčtovaný pohyb rovnou s dimenzemi předpisu, takže povinné pravidlo pro typ dimenze, který předpis nese, projde. Povinné pravidlo bez výchozí hodnoty pro jiný typ dimenze zaúčtování odmítne; doplňte pravidlu výchozí hodnotu, z řádku úhrady se po spárování odebere. Má-li řádek pohledávky dimenze odlišné od předpisu zadané ručně nebo ze staršího zaúčtování, párování se odmítne; upravte dimenze pohybu, nebo ho odúčtujte a spárujte znovu, případně spárujte jiný předpis.
+
+Je-li pohyb zaúčtovaný na jiný účet než účet pohledávky předpisu (například pravidlem zaúčtování), nebo by dimenze předpisu přesunuly jiný řádek jeho zaúčtování na jiný analytický účet, pohyb odúčtujte a spárujte znovu. Párování ho pak zaúčtuje samo jediným řádkem úhrady proti účtu pohledávky.
+
+Spárovaný bankovní pohyb je zamčený: nelze změnit jeho zaúčtování ani dimenze, odúčtovat ho ani ho přiřadit jiné položce. Párování zrušíte v opisu účtu pohledávky v přehledu **Otevřené položky - párování** ([kap. 55.8.5.1](55_Hlavni_kniha.md)); potom je pohyb opět volný. Zamčená je i platba, kterou jste s předpisem spárovali ručně v saldokontu, také u stornovaného předpisu, s nímž byla platba ručně spárována.
+
+Párovat lze také ručně, doporučujeme ale párování v bance: ruční párování v saldokontu (ani použití návrhů párování) dimenze úhrady na předpis nepřevede a pohledávka pak může zůstat po dimenzi nevyrovnaná. Otevřete opis účtu pohledávky v hlavní knize, přepněte na **Otevřené položky - párování** a spojte řádky předpisů s řádkem platby do okruhu ([kap. 55.8.5.1](55_Hlavni_kniha.md)). Vyrovnaný okruh s více platnými členskými pohledávkami prokazuje úhradu všech. Částečně uhrazený společný okruh zůstává nejednoznačný, protože nelze určit uhrazené členy. Zrušte jeho párování a platbu spárujte znovu: s předpisy, jejichž součet jí přesně odpovídá, nebo s jedním předpisem jako částečnou úhradu.
 
 U poškozených důkazů nebo nejednoznačného párování se částka nevydává za potvrzený dluh. Opravte párování v opisu účtu pohledávky.
 
@@ -88,6 +100,8 @@ Kontrola vybraného účetního období pod seznamem členů porovnává člensk
 ## 120.4 Storno a opakování požadavku
 
 Storno zahajte z konkrétní pohledávky. Zvolte účetní datum v otevřeném období a doložte důvod. Náhled vychází z původní potvrzené operace. Po výslovném potvrzení vznikne navazující storno; původní pohledávka i její historie zůstávají dohledatelné.
+
+Předpis spárovaný v saldokontu (obvykle s úhradou) stornovat nejde, stejně jako ostatní pohledávky. Nejprve zrušte jeho párování. U společné platby více členů se tím uvolní i předpisy ostatních členů; ty pak spárujte znovu.
 
 Při nejistém výsledku odeslání obnovte přehled nebo opakujte stejný zmrazený požadavek. Stejný požadavek se stejným identifikátorem nevytvoří druhý předpis. Před založením nového požadavku ověřte, zda se původní operace již nezapsala.
 

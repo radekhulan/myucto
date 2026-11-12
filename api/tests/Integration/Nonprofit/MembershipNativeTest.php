@@ -841,10 +841,160 @@ final class MembershipNativeTest extends TestCase
         }
     }
 
+    #[DataProvider('collectivePayments')]
+    public function testCollectivePaymentHasTheSameResultInDetailAndList(string $amount, string $status): void
+    {
+        $first = $this->member('SYN-COLLECTIVE-1', 'collective-first');
+        $second = $this->member('SYN-COLLECTIVE-2', 'collective-second');
+        $one = $this->issue($first['id'], 'collective-first');
+        $two = $this->issue($second['id'], 'collective-second');
+        $this->payClaims([$one, $two], $amount, 'collective');
+        $reconciliation = new MembershipReconciliationService($this->balances);
+        $list = array_column($this->listRows(), null, 'id');
+        foreach ([$first, $second] as $member) {
+            $settlement = $reconciliation->memberBalance($this->supplier, $member['id'])['items'][0]['settlement'];
+            self::assertSame($status, $settlement['status']);
+            self::assertSame($status === 'settled' ? 2000000 : null, $settlement['paid_cents']);
+            self::assertSame($status === 'settled' ? 0 : null, $settlement['open_cents']);
+            if ($amount === '20000.00') self::assertSame('collective_partial_payment', $settlement['evidence']);
+            self::assertSame($status === 'settled' ? 'paid' : 'unproven', $list[$member['id']]['contribution']['status']);
+            self::assertSame($status === 'settled' ? '2000000' : null, $list[$member['id']]['contribution']['paid_cents']);
+            self::assertSame($status === 'settled' ? '0' : null, $list[$member['id']]['contribution']['open_cents']);
+        }
+    }
+
+    public static function collectivePayments(): iterable
+    {
+        yield 'úplná úhrada obou členů' => ['40000.00', 'settled'];
+        yield 'částečná úhrada neurčuje člena' => ['20000.00', 'ambiguous'];
+        yield 'přeplatek se nesmí rozdělit' => ['40001.00', 'ambiguous'];
+    }
+
+    public function testReissueWithoutExplicitSymbolKeepsTheManualSymbolOfTheCase(): void
+    {
+        $member = $this->member('12', 'reissue-symbol');
+        $request = ['variable_symbol' => '777'] + $this->request($member['id']);
+        $preview = $this->charges->previewIssue($this->supplier, $request);
+        $issued = $this->charges->confirmIssue($this->supplier, $request, $preview['expected_case_version'], $preview['preview_hash'], 'reissue-symbol-1', $this->actor);
+        $reverse = ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic cancellation'];
+        $preview = $this->charges->previewReverse($this->supplier, $reverse);
+        $this->charges->confirmReverse($this->supplier, $reverse, $preview['expected_case_version'], $preview['preview_hash'], 'reissue-symbol-rev', $this->actor);
+        // Bez VS v požadavku platí VS případu, ne výchozí členské číslo „12“.
+        $again = $this->request($member['id']);
+        $preview = $this->charges->previewIssue($this->supplier, $again);
+        self::assertSame('777', $preview['variable_symbol']);
+        $reissued = $this->charges->confirmIssue($this->supplier, $again, $preview['expected_case_version'], $preview['preview_hash'], 'reissue-symbol-2', $this->actor);
+        self::assertSame($issued['case']['id'], $reissued['case']['id']);
+        self::assertSame('777', (string) $this->pdo->query('SELECT variable_symbol FROM nonprofit_membership_charge_cases WHERE id=' . (int) $issued['case']['id'])->fetchColumn());
+    }
+
+    public function testReissueOfCaseWithoutSymbolGetsTheDefaultSymbol(): void
+    {
+        // Případ z doby před VS (migrace 2298) nemá variable_symbol; opětovné vystavení ho doplní výchozím.
+        $member = $this->member('34', 'legacy-symbol');
+        $issued = $this->issue($member['id'], 'legacy-symbol');
+        $this->pdo->prepare('UPDATE nonprofit_membership_charge_cases SET variable_symbol=NULL,row_version=row_version+1 WHERE supplier_id=? AND id=?')
+            ->execute([$this->supplier, $issued['case']['id']]);
+        $reverse = ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic cancellation'];
+        $preview = $this->charges->previewReverse($this->supplier, $reverse);
+        $this->charges->confirmReverse($this->supplier, $reverse, $preview['expected_case_version'], $preview['preview_hash'], 'legacy-symbol-rev', $this->actor);
+        $again = $this->request($member['id']);
+        $preview = $this->charges->previewIssue($this->supplier, $again);
+        self::assertSame('34', $preview['variable_symbol']);
+        $this->charges->confirmIssue($this->supplier, $again, $preview['expected_case_version'], $preview['preview_hash'], 'legacy-symbol-2', $this->actor);
+        self::assertSame('34', (string) $this->pdo->query('SELECT variable_symbol FROM nonprofit_membership_charge_cases WHERE id=' . (int) $issued['case']['id'])->fetchColumn());
+    }
+
+    public function testReversalOfClaimLeftAloneInItsPairingIsAllowedAndClearsThePairing(): void
+    {
+        $member = $this->member('SYN-REV-ALONE', 'rev-alone');
+        $issued = $this->issue($member['id'], 'rev-alone');
+        $this->payClaims([$issued], '20000.00', 'rev-alone');
+        $entry = (int) $issued['operation']['journal_entry_id'];
+        $pairing = (int) $this->pdo->query("SELECT pairing_id FROM journal_line_pairing_items WHERE supplier_id={$this->supplier} AND entry_id=$entry")->fetchColumn();
+        // Uživatel odebral v saldokontu z okruhu platbu; pohledávka v něm zůstala sama a úhradu už nedokládá.
+        $this->pdo->prepare('DELETE FROM journal_line_pairing_items WHERE supplier_id=? AND pairing_id=? AND entry_id<>?')->execute([$this->supplier, $pairing, $entry]);
+        $reverse = ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic cancellation'];
+        $preview = $this->charges->previewReverse($this->supplier, $reverse);
+        $reversed = $this->charges->confirmReverse($this->supplier, $reverse, $preview['expected_case_version'], $preview['preview_hash'], 'rev-alone', $this->actor);
+        self::assertSame('reverse', $reversed['operation']['operation']);
+        self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM journal_line_pairing_items WHERE supplier_id={$this->supplier} AND pairing_id=$pairing")->fetchColumn());
+    }
+
+    public function testReversalOfClaimInCollectivePaymentIsRejectedUntilPairingIsCancelled(): void
+    {
+        $first = $this->member('SYN-REV-COLLECTIVE-1', 'rev-collective-first');
+        $second = $this->member('SYN-REV-COLLECTIVE-2', 'rev-collective-second');
+        $one = $this->issue($first['id'], 'rev-collective-first');
+        $two = $this->issue($second['id'], 'rev-collective-second');
+        $reverse = ['case_id' => $two['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic cancellation'];
+        // Náhled vznikl před párováním; potvrzení musí stav ověřit znovu pod zámkem.
+        $preview = $this->charges->previewReverse($this->supplier, $reverse);
+        $this->payClaims([$one, $two], '40000.00', 'rev-collective');
+        try {
+            $this->charges->confirmReverse($this->supplier, $reverse, $preview['expected_case_version'], $preview['preview_hash'], 'rev-collective', $this->actor);
+            self::fail('Storno předpisu ze společné úhrady prošlo a nechalo by platbu v okruhu bez protějšku.');
+        } catch (MembershipException $e) {
+            self::assertSame('nonprofit_membership_claim_paired', $e->errorCode);
+        }
+        $reconciliation = new MembershipReconciliationService($this->balances);
+        foreach ([$first, $second] as $member) {
+            self::assertSame('settled', $reconciliation->memberBalance($this->supplier, $member['id'])['items'][0]['settlement']['status']);
+        }
+        self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM nonprofit_membership_charge_operations WHERE supplier_id={$this->supplier} AND operation='reverse'")->fetchColumn());
+    }
+
+    #[DataProvider('membershipNumbersForPayment')]
+    public function testVariableSymbolIsStablePaymentMetadataOutsideFinancialProof(string $number, ?string $expected): void
+    {
+        $member = $this->member($number, 'symbol-member');
+        $request = $this->request($member['id']);
+        $preview = $this->charges->previewIssue($this->supplier, $request);
+        $symbol = $preview['variable_symbol'];
+        self::assertMatchesRegularExpression('/^[0-9]{1,10}$/D', $symbol);
+        if ($expected !== null) self::assertSame($expected, $symbol);
+        self::assertSame($symbol, $this->charges->previewIssue($this->supplier, $request)['variable_symbol']);
+        $explicit = $request + ['variable_symbol' => '00045'];
+        $changed = $this->charges->previewIssue($this->supplier, $explicit);
+        self::assertSame($preview['proof'], $changed['proof']);
+        self::assertSame($preview['journal_plan'], $changed['journal_plan']);
+        self::assertNotSame($preview['preview_hash'], $changed['preview_hash']);
+        try {
+            $this->charges->confirmIssue($this->supplier, $explicit, 0, $preview['preview_hash'], 'symbol-stale', $this->actor);
+            self::fail('Změněný VS musí vyžadovat nový náhled.');
+        } catch (MembershipException $error) {
+            self::assertSame('nonprofit_membership_preview_stale', $error->errorCode);
+        }
+        $issued = $this->charges->confirmIssue($this->supplier, $explicit, 0, $changed['preview_hash'], 'symbol-issue', $this->actor);
+        self::assertSame('00045', $issued['case']['variable_symbol']);
+        self::assertSame('45', $issued['case']['variable_symbol_match_key']);
+        self::assertArrayNotHasKey('variable_symbol', $issued['operation']['proof']);
+        $again = $this->charges->confirmIssue($this->supplier, $explicit, 0, $changed['preview_hash'], 'symbol-issue', $this->actor);
+        self::assertTrue($again['idempotent_replay']);
+        self::assertSame($issued['operation']['record_hash'], $again['operation']['record_hash']);
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_membership_charge_operations WHERE supplier_id=' . $this->supplier)->fetchColumn());
+    }
+
+    public static function membershipNumbersForPayment(): iterable
+    {
+        yield 'číselné s vodicími nulami' => ['0012345678', '0012345678'];
+        yield 'nečíselné' => ['SYN-MEMBER-VS', null];
+        yield 'delší než deset číslic' => ['12345678901', null];
+    }
+
     private function payClaim(array $issued, string $amount, string $key): void
     {
-        $claim = (new MembershipChargeRepository($this->db))->claimForOperation($this->supplier, $issued['operation']['id']);
-        $target = (new MembershipReceivablePaymentAdapter($this->balances))->target($this->supplier, $claim['id']);
+        $this->payClaims([$issued], $amount, $key);
+    }
+
+    private function payClaims(array $issuedClaims, string $amount, string $key): void
+    {
+        $targets = [];
+        foreach ($issuedClaims as $issued) {
+            $claim = (new MembershipChargeRepository($this->db))->claimForOperation($this->supplier, $issued['operation']['id']);
+            $targets[] = (new MembershipReceivablePaymentAdapter($this->balances))->target($this->supplier, $claim['id']);
+        }
+        $target = $targets[0];
         $this->pdo->prepare("INSERT INTO bank_statements(supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date,imported_by) VALUES(?,'synthetic-list.gpc',?,'1000000005','0100','CZK','2026-02-01',?)")
             ->execute([$this->supplier, hash('sha256', 'synthetic list ' . $key . $this->supplier), $this->actor]);
         $statement = (int) $this->pdo->lastInsertId();
@@ -856,7 +1006,7 @@ final class MembershipNativeTest extends TestCase
         $q = $this->pdo->prepare("SELECT line_no FROM journal_entry_lines WHERE supplier_id=? AND entry_id=? AND account_id=?");
         $q->execute([$this->supplier, $entry, $target['journal_line']['account_id']]);
         (new JournalLinePairingRepository($this->db))->create($this->supplier, $target['journal_line']['account_id'], [
-            $target['journal_line'], ['entry_id' => $entry, 'line_no' => (int) $q->fetchColumn(), 'account_id' => $target['journal_line']['account_id']],
+            ...array_column($targets, 'journal_line'), ['entry_id' => $entry, 'line_no' => (int) $q->fetchColumn(), 'account_id' => $target['journal_line']['account_id']],
         ], 'Synthetic list native payment', 'manual', $this->actor);
     }
 
@@ -919,7 +1069,7 @@ final class MembershipNativeTest extends TestCase
         try {
             $this->charges->previewIssue($this->supplier, $new);
             self::fail('A retired classification value was accepted for a new charge.');
-        } catch (\MyInvoice\Service\Nonprofit\Membership\MembershipException $error) {
+        } catch (MembershipException $error) {
             self::assertSame('nonprofit_membership_classification_invalid', $error->errorCode);
         }
     }
@@ -943,7 +1093,7 @@ final class MembershipNativeTest extends TestCase
         try {
             $this->charges->confirmIssue($this->supplier, $this->request($member['id']), 0, $issued['preview_hash'], 'issue-proof-' . $mutation, $this->actor);
             self::fail('Changed dimension proof was accepted: ' . $mutation);
-        } catch (\MyInvoice\Service\Nonprofit\Membership\MembershipException $error) {
+        } catch (MembershipException $error) {
             self::assertSame('nonprofit_membership_ledger_mismatch', $error->errorCode, $mutation);
         }
     }
@@ -1106,7 +1256,7 @@ final class MembershipNativeTest extends TestCase
         ], ['entry_date' => '2026-02-01', 'description' => 'Synthetic native bank payment', 'posted' => true, 'posted_by' => $this->actor]);
         $q->execute([$this->supplier, $payment]);
         $paymentLine = $q->fetch(PDO::FETCH_ASSOC);
-        $pairings->create($this->supplier, $target['journal_line']['account_id'], [
+        $paymentPairing = $pairings->create($this->supplier, $target['journal_line']['account_id'], [
             ['entry_id' => $target['journal_line']['entry_id'], 'line_no' => $target['journal_line']['line_no'], 'account_id' => $target['journal_line']['account_id']],
             ['entry_id' => $payment, 'line_no' => (int) $paymentLine['line_no'], 'account_id' => (int) $paymentLine['account_id']],
         ], 'Synthetic exact membership payment', 'manual', $this->actor);
@@ -1118,8 +1268,19 @@ final class MembershipNativeTest extends TestCase
         self::assertSame('2000000', $this->listRows()[0]['contribution']['paid_cents']);
         self::assertSame('0', $this->listRows()[0]['contribution']['open_cents']);
 
-        $preview = $this->charges->previewReverse($this->supplier, ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic approved cancellation']);
-        $reversed = $this->charges->confirmReverse($this->supplier, ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic approved cancellation'],
+        // Jako ostatní pohledávky: předpis se spárovanou úhradou nejde stornovat, nejdřív se zruší párování.
+        $reverse = ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic approved cancellation'];
+        try {
+            $this->charges->previewReverse($this->supplier, $reverse);
+            self::fail('Náhled storna přijal předpis se spárovanou úhradou.');
+        } catch (MembershipException $e) {
+            self::assertSame('nonprofit_membership_claim_paired', $e->errorCode);
+            self::assertSame(409, $e->httpStatus);
+        }
+        self::assertTrue($pairings->delete($this->supplier, $paymentPairing));
+
+        $preview = $this->charges->previewReverse($this->supplier, $reverse);
+        $reversed = $this->charges->confirmReverse($this->supplier, $reverse,
             $preview['expected_case_version'], $preview['preview_hash'], 'reverse-payment', $this->actor);
         self::assertSame('reverse', $reversed['operation']['operation']);
         self::assertSame('reversed', $reconciliation->claimSettlement($this->supplier, $claimId)['settlement']['status']);

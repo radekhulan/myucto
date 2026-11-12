@@ -170,6 +170,7 @@ final class TextScrubber
             'cost_center' => $this->pseudonymizer->costCenter($value),
             'shape' => $this->pseudonymizer->shape($value),
             'shape_digits' => $this->pseudonymizer->shapeDigits($value),
+            'payment_symbol' => $this->pseudonymizer->paymentSymbol($value),
             'symbol' => $this->pseudonymizer->symbol($value),
             'cssz_variable_symbol' => $this->pseudonymizer->csszVariableSymbol($value),
             'file_name' => $this->pseudonymizer->fileName($value),

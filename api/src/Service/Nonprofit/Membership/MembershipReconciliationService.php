@@ -85,7 +85,13 @@ final class MembershipReconciliationService
             return ['status' => 'unreconciled', 'paid_cents' => 0, 'open_cents' => $claim['amount_cents'], 'pairing_id' => null, 'evidence' => 'no_native_pairing'];
         }
         $net = $evidence['net_cents'];
-        if ($evidence['invalid_count'] !== 0 || $evidence['membership_claim_count'] !== 1 || $net < 0 || $net > $claim['amount_cents']) {
+        if ($evidence['invalid_count'] === 0 && $evidence['membership_claim_count'] > 1 && $net > 0) {
+            return ['status' => 'ambiguous', 'paid_cents' => null, 'open_cents' => null,
+                'pairing_id' => $evidence['pairing_id'], 'evidence' => 'collective_partial_payment'];
+        }
+        if ($evidence['invalid_count'] !== 0 || $evidence['membership_claim_count'] < 1
+            || ($evidence['membership_claim_count'] > 1 && $net !== 0)
+            || $net < 0 || $net > $claim['amount_cents']) {
             return ['status' => 'ambiguous', 'paid_cents' => null, 'open_cents' => null, 'pairing_id' => $evidence['pairing_id'], 'evidence' => 'pairing_not_exact_native_payment'];
         }
         return [
@@ -105,7 +111,9 @@ final class MembershipReconciliationService
     {
         return "CASE WHEN c.posted_at IS NULL OR c.reversed_by IS NOT NULL OR c.receipt_valid=0 THEN 'ambiguous'
           WHEN p.claim_id IS NULL THEN 'unreconciled'
-          WHEN p.invalid_count<>0 OR p.membership_claim_count<>1 OR p.net_cents<0 OR p.net_cents>c.amount_cents THEN 'ambiguous'
+          WHEN p.invalid_count<>0 OR p.membership_claim_count<1
+            OR (p.membership_claim_count>1 AND p.net_cents<>0)
+            OR p.net_cents<0 OR p.net_cents>c.amount_cents THEN 'ambiguous'
           WHEN p.net_cents=0 THEN 'settled' ELSE 'partially_settled' END";
     }
 }

@@ -264,11 +264,11 @@ final class OtherItemBankMatchService
      * @return array{id:int,amount:float,variable_symbol:?string,counterparty_account:?string,
      *     counterparty_bank:?string,posted_at:?string,used_amount:float,locked_item_ids:list<int>}|null
      */
-    private function freeTransaction(int $supplierId, int $txId, bool $lock): ?array
+    public function freeTransaction(int $supplierId, int $txId, bool $lock, bool $membershipReplay = false): ?array
     {
         if ($lock && $this->bankPosting->lockTransaction($supplierId, $txId) === null) return null;
         $stmt = $this->db->pdo()->prepare(
-            'SELECT bt.id, bt.amount, bt.variable_symbol, bt.counterparty_account, bt.counterparty_bank, bt.posted_at,
+            'SELECT bt.id, bt.amount, ROUND(bt.amount*100) amount_cents, bt.variable_symbol, bt.counterparty_account, bt.counterparty_bank, bt.posted_at,
                     COALESCE(a.used_amount, 0) used_amount,
                     (SELECT GROUP_CONCAT(DISTINCT previous.other_item_id) FROM other_item_allocations previous
                       WHERE previous.supplier_id = bs.supplier_id AND previous.bank_transaction_id = bt.id
@@ -281,7 +281,7 @@ final class OtherItemBankMatchService
                       GROUP BY bank_transaction_id) a
                  ON a.bank_transaction_id = bt.id
               WHERE bt.id = ? AND bt.amount <> 0
-                AND ' . OtherItemService::freeBankPaymentSql()
+                AND ' . OtherItemService::freeBankPaymentSql($membershipReplay)
         );
         $stmt->execute([$supplierId, $supplierId, $txId, $txId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -289,6 +289,7 @@ final class OtherItemBankMatchService
         return [
             'id' => (int) $row['id'],
             'amount' => (float) $row['amount'],
+            'amount_cents' => (string) $row['amount_cents'],
             'variable_symbol' => $row['variable_symbol'] !== null ? (string) $row['variable_symbol'] : null,
             'counterparty_account' => $row['counterparty_account'] !== null ? (string) $row['counterparty_account'] : null,
             'counterparty_bank' => $row['counterparty_bank'] !== null ? (string) $row['counterparty_bank'] : null,

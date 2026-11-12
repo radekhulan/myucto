@@ -40,6 +40,8 @@ const anyLocked = computed(() => locks.value.revision || locks.value.issue || lo
 const member = computed(() => ({ id: props.memberId, member_number: identity.value?.member_number ?? '', label: props.label }))
 
 const issued = computed(() => claims.value.filter(c => c.reversal_claim_id === null).reduce((sum, c) => sum + c.amount_cents, 0))
+const caseSymbols = computed(() => Object.fromEntries(claims.value.filter(c => c.variable_symbol)
+  .map(c => [`${c.title_key}|${c.period_from}|${c.period_to}`, c.variable_symbol as string])))
 const needsReview = computed(() => claims.value.filter(c => c.settlement.status === 'ambiguous').length)
 // Stejně jako řádek seznamu: s předpisem k prověření je zůstatek neurčený.
 const openTotal = computed(() => needsReview.value ? null : claims.value.reduce((sum, c) => sum + (c.settlement.open_cents ?? 0), 0))
@@ -166,7 +168,7 @@ const actions = computed<ActionItem[]>(() => [
 
     <MembershipIssueFlow
       v-if="canManage && issueOpen"
-      :supplier="supplier" :can-manage="canManage" :member="member" :history="history" :periods="periods"
+      :supplier="supplier" :can-manage="canManage" :member="member" :history="history" :periods="periods" :case-symbols="caseSymbols"
       @done="finished(t('nonprofitMembership.issueDone'))" @close="issueOpen = false" @lock="locks.issue = $event"
     />
     <MembershipReverseFlow
@@ -190,6 +192,7 @@ const actions = computed<ActionItem[]>(() => [
       <div v-for="claim in claims" :key="claim.claim_id" class="grid gap-3 rounded border border-neutral-200 p-3 sm:grid-cols-[1fr_1fr_auto]" data-section="claim-row" :data-claim="claim.claim_id">
         <div class="min-w-0 space-y-1 text-sm">
           <p class="break-words font-medium">{{ claim.title_key }}</p>
+          <p v-if="claim.variable_symbol" class="text-neutral-500" data-field="claim-variable-symbol">{{ t('nonprofitMembership.variableSymbol') }}: {{ claim.variable_symbol }}</p>
           <p class="text-neutral-500" data-field="claim-period">{{ formatDateRange(claim.period_from, claim.period_to) }}</p>
           <p data-field="claim-amounts"><span class="whitespace-nowrap font-medium tabular-nums">{{ formatMoneyMinor(claim.amount_cents) }}</span> · {{ t('nonprofitMembership.accountingDate') }} {{ formatDate(claim.accounting_date) }} · {{ t('nonprofitMembership.dueDate') }} {{ formatDate(claim.due_date) }}</p>
         </div>
@@ -198,7 +201,7 @@ const actions = computed<ActionItem[]>(() => [
           <button type="button" :class="btnIconSm('neutral')" :title="t('nonprofitMembership.refreshClaim')" :aria-label="t('nonprofitMembership.refreshClaim')" data-action="refresh-claim" :disabled="loading || anyLocked" @click="refreshClaim(claim)">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
           </button>
-          <button v-if="canManage && claim.reversal_claim_id === null" type="button" :class="btnOutlineSm('danger')" data-action="reverse-claim" :disabled="anyLocked" @click="startReverse(claim)">
+          <button v-if="canManage && claim.reversal_claim_id === null" type="button" :class="btnOutlineSm('danger')" data-action="reverse-claim" :disabled="anyLocked || claim.settlement.pairing_id !== null" :title="claim.settlement.pairing_id !== null ? t('nonprofitMembership.reversePaired') : undefined" @click="startReverse(claim)">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>{{ t('nonprofitMembership.reverse') }}
           </button>
         </div>

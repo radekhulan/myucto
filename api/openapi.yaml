@@ -3642,6 +3642,8 @@ paths:
         Výsledek neopravňuje k finanční mutaci. Detail vrací stejnou obálku jako seznam. Úhrady vycházejí pouze ze
         současných nativních bankovních a pokladních párování. Předpis bez spárované úhrady (unreconciled) má celou
         částku otevřenou; null vrací jen neprůkazný podklad (ambiguous). Historické datum úhrad se nepřijímá.
+        Vyrovnaný okruh s více platnými členskými pohledávkami prokazuje úhradu všech; částečně uhrazený společný
+        okruh zůstává nejednoznačný a částky jsou null.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: query
@@ -8102,6 +8104,7 @@ paths:
       tags: [Bank]
       summary: Detail výpisu vč. stránkovaných transakcí
       description: Mzdová úhrada vrací vazbu na existující zaúčtování v posting. Filtr zaúčtování a počty zahrnují bankovní i mzdové zápisy; pohyb se neúčtuje podruhé.
+        Členské úhrady označuje resolution=membership; podrobné matched_membership_claims jsou jen v přihlášené relaci nebo přes token s plným zápisem (system_write; přes běžný API token prázdné) a vyžadují čtení účetnictví, neklientskou roli a licenci.
       parameters:
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 5, maximum: 200, default: 50 } }
@@ -28902,6 +28905,7 @@ paths:
         protiúčty, `period_closed`) vyplňuje jen firma v podvojném účetnictví,
         jinak `posting` nese nejvýš mzdové párování. Filtr a řazení podle
         zaúčtování se mimo podvojné účetnictví ignorují.
+        Členské úhrady nesou resolution=membership; matched_membership_claims je přes běžný API token (bez plného zápisu), bez čtení účetnictví, bez licence nebo pro klientskou roli prázdné.
       parameters:
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
@@ -54793,8 +54797,11 @@ components:
       properties:
         resolution:
           type: [string, "null"]
-          enum: [payroll, transfer, outside_saldo, null]
-          description: Bezpečné označení jiného vypořádání pohybu pro klientské zobrazení bez účetních detailů.
+          enum: [payroll, transfer, outside_saldo, membership, null]
+          description: |
+            Bezpečné označení jiného vypořádání pohybu pro klientské zobrazení bez účetních detailů.
+            Neklientská role dostane resolution, match_available a ignore_available jen u pohybu použitého
+            členskou úhradou (resolution=membership, obě dostupnosti false); u ostatních pohybů tato pole chybí.
         match_available:
           type: boolean
           description: Dostupnost párování pohybu pro klienta; samotná akce navíc vyžaduje odpovídající oprávnění.
@@ -54854,6 +54861,21 @@ components:
               side: { type: string, enum: [receivable, payable] }
               partner_name: { type: [string, "null"], description: Partner, případně název položky. }
               amount: { type: number, format: float, description: Přiřazená částka v CZK. }
+        matched_membership_claims:
+          type: array
+          description: Členské pohledávky v nativním okruhu bankovního řádku; částka je hodnota pohledávky,
+            nikoli podíl platby. Přes běžný API token (bez plného zápisu), bez čtení účetnictví, bez licence a pro klientské role je pole prázdné.
+            match_status popisuje jen faktury, použitý pohyb označuje resolution=membership.
+          items:
+            type: object
+            additionalProperties: false
+            required: [claim_id, member_id, member_number, title_key, amount_cents]
+            properties:
+              claim_id: { type: integer, minimum: 1 }
+              member_id: { type: integer, minimum: 1 }
+              member_number: { type: string, description: Číslo člena pro odkaz na přehled příspěvků. }
+              title_key: { type: string }
+              amount_cents: { type: string, pattern: '^[0-9]+$' }
         matched_varsymbol: { type: [string, "null"] }
         matched_invoice_amount: { type: [number, "null"], format: float }
         client_id: { type: [integer, "null"] }
@@ -70390,6 +70412,8 @@ components:
         paid_cents je "0" a open_cents je celá částka předpisu. Ambiguous označuje
         neprůkazný účetní podklad nebo vadné párování; tehdy jsou paid_cents i open_cents null.
         Reversed má open_cents "0". Úhrady se odvozují pouze z nativního párování banky a pokladny.
+        Úplná úhrada všech platných členských pohledávek ve společném okruhu je settled;
+        částečná úhrada nebo přeplatek takového okruhu je ambiguous bez rozdělení částky mezi členy.
       additionalProperties: false
       required:
       - status

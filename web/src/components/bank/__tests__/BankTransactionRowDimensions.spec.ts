@@ -17,7 +17,9 @@ vi.mock('@/composables/useDimensions', () => ({
     load: () => Promise.resolve(),
   }),
 }))
-vi.mock('vue-router', () => ({ useRouter: () => ({}), RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } }))
+vi.mock('vue-router', () => ({ useRouter: () => ({}), RouterLink: {
+  props: ['to'], template: `<a :href="typeof to === 'string' ? to : undefined" :data-to="JSON.stringify(to)"><slot /></a>`,
+} }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: () => true, canWrite: () => true }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
@@ -125,6 +127,23 @@ describe('BankTransactionRow — dimenze pohybu', () => {
     await flushPromises()
     expect(wrapper.findComponent(DimensionChips).exists()).toBe(false)
     expect(dimensionAction(wrapper)?.show).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each(['desktop', 'mobile'] as const)('členskou platbu označí a odkáže na evidenci (%s)', async layout => {
+    const row = tx()
+    row.amount = 500
+    row.matched_membership_claims = [{ claim_id: 8, member_id: 3, member_number: 'SYN-M-3', title_key: 'SYN-2026', amount_cents: '50000' }]
+    const wrapper = mountRow(layout, row)
+    await flushPromises()
+    expect(wrapper.text()).toContain('bank.match_status.membership')
+    expect(wrapper.text()).not.toContain('bank.membership_candidates')
+    expect(wrapper.text()).not.toContain('bank.match_status.unmatched')
+    // Odkaz otevře přehled příspěvků hledaný podle člena a titulu, ne celý seznam.
+    expect(JSON.parse(wrapper.get('[data-test="tx-membership-claim"] a').attributes('data-to') ?? 'null')).toEqual({
+      name: 'accounting-nonprofit-membership', query: { search: 'SYN-M-3', title_key: 'SYN-2026', year: '' },
+    })
+    expect(wrapper.text()).toContain('SYN-2026')
     wrapper.unmount()
   })
 })

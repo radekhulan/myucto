@@ -11,6 +11,16 @@ final class RequestAuthorization
     private static ?PermissionCatalog $catalog = null;
     private static ?PermissionChecker $checker = null;
 
+    /** Členské pohledávky ani bankovní výběr nejsou přístupné klientské roli ani tokenu bez plného zápisu. */
+    public static function canMatchMembershipBank(Request $request, bool $write): bool
+    {
+        return self::actsAsSession($request) && !self::isClientType($request)
+            && self::allows($request, 'bank', AccessLevel::READ)
+            && self::allows($request, 'accounting', AccessLevel::READ)
+            && (!$write || (self::allows($request, 'bank.match', AccessLevel::WRITE)
+                && self::allows($request, 'accounting.journal.post', AccessLevel::WRITE)));
+    }
+
     /** MCP se uděluje samostatně; interní role zachovávají přístup přes správu tokenů. */
     public static function canUseMcp(Request $request, AccessLevel $minimum = AccessLevel::READ): bool
     {

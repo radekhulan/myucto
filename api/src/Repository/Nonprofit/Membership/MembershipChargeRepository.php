@@ -59,10 +59,10 @@ final class MembershipChargeRepository
         return array_map($this->caseRow(...), $q->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    public function insertCase(int $supplier, int $member, string $title, string $from, string $to, int $actor): array
+    public function insertCase(int $supplier, int $member, string $title, string $from, string $to, int $actor, ?string $variableSymbol = null): array
     {
-        $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_membership_charge_cases(supplier_id,member_id,title_key,period_from,period_to,created_by,created_at) VALUES(?,?,?,?,?,?,UTC_TIMESTAMP(6))');
-        $q->execute([$supplier, $member, $title, $from, $to, $actor]);
+        $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_membership_charge_cases(supplier_id,member_id,title_key,period_from,period_to,created_by,variable_symbol,created_at) VALUES(?,?,?,?,?,?,?,UTC_TIMESTAMP(6))');
+        $q->execute([$supplier, $member, $title, $from, $to, $actor, $variableSymbol]);
         return $this->caseById($supplier, (int) $this->db->pdo()->lastInsertId(), true) ?? throw new \LogicException('Inserted charge case disappeared.');
     }
 
@@ -132,10 +132,10 @@ final class MembershipChargeRepository
         return $this->operation((int) $row['supplier_id'], (int) $this->db->pdo()->lastInsertId(), true) ?? throw new \LogicException('Inserted membership operation disappeared.');
     }
 
-    public function advanceHead(int $supplier, int $case, ?int $expectedHead, int $expectedVersion, int $operation): array
+    public function advanceHead(int $supplier, int $case, ?int $expectedHead, int $expectedVersion, int $operation, ?string $variableSymbol = null): array
     {
-        $q = $this->db->pdo()->prepare('UPDATE nonprofit_membership_charge_cases SET head_operation_id=?,row_version=row_version+1 WHERE supplier_id=? AND id=? AND row_version=? AND head_operation_id<=>?');
-        $q->execute([$operation, $supplier, $case, $expectedVersion, $expectedHead]);
+        $q = $this->db->pdo()->prepare('UPDATE nonprofit_membership_charge_cases SET head_operation_id=?,variable_symbol=COALESCE(?,variable_symbol),row_version=row_version+1 WHERE supplier_id=? AND id=? AND row_version=? AND head_operation_id<=>?');
+        $q->execute([$operation, $variableSymbol, $supplier, $case, $expectedVersion, $expectedHead]);
         if ($q->rowCount() !== 1) throw new MembershipException('nonprofit_membership_case_changed', 'Účetní případ se mezitím změnil.', 409);
         return $this->caseById($supplier, $case, true) ?? throw new \LogicException('Updated charge case disappeared.');
     }

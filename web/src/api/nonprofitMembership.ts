@@ -28,6 +28,7 @@ export interface MemberRevisionInput { status: MemberStatus; effective_from: str
 
 export interface ClaimSettlement { status: SettlementStatus; paid_cents: number | null; open_cents: number | null; pairing_id: number | null; evidence: string }
 export interface ClaimRow {
+  variable_symbol?: string | null
   claim_id: number; case_id: number; operation_id: number; member_id: number; client_id: number; amount_cents: number
   reversal_claim_id: number | null; accounting_date: string; due_date: string; journal_entry_id: number; receivable_line_id: number
   line_no: number; account_id: number; posted_at: string | null; reversed_by: number | null
@@ -53,6 +54,7 @@ export interface MembershipClassification { activity_value_id: number; activity_
 
 /** Přesná množina klíčů, kterou přijímá MembershipChargeRequest::issue. */
 export interface MembershipIssueRequest {
+  variable_symbol?: string
   rate_id?: number
   member_id: number; title_key: string; period_from: string; period_to: string; accounting_date: string; due_date: string
   amount: string; receivable_account: string; revenue_account: string; title_reference: string; evidence: string
@@ -78,6 +80,7 @@ export interface JournalPlanLine {
   dimensions?: Record<number, number>; dimension_origins?: Record<number, ClassificationOrigin>
 }
 export interface MembershipPreview {
+  variable_symbol?: string | null
   request: Record<string, unknown>; case_id: number | null; expected_case_version: number; preview_hash: string
   case: { id: number; row_version: number } | null
   proof?: {

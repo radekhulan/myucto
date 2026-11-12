@@ -237,6 +237,10 @@ final class DimensionStamper
      * které doklad neurčuje — ruční středisko na řádku odpisu tak uložení karty nesmaže.
      * Typ z `$released` (typ => hodnota, null = rozpad), který doklad určoval dřív a teď
      * už ne, se z řádku odebere, jen když tam pořád je tatáž hodnota (resp. rozpad).
+     * Na řádcích z `$releaseDefaultLines` se navíc uvolní hodnoty, které nezadal uživatel
+     * ({@see defaultValues()}); posuzuje se původ přečtený pod zámkem řádků, takže ruční hodnota
+     * uložená souběžně se neztratí. `$released` i `$releaseDefaultLines` platí jen s `$keepLineTypes`;
+     * bez něj řádek dostane dimenze dokladu celé a nic se nezachovává.
      *
      * `account_change` = dimenze by změnila analytický účet (účtotvorná dimenze) —
      * dotčené řádky se nepřerazítkovaly a doklad potřebuje přeúčtovat. Posuzují se
@@ -245,20 +249,21 @@ final class DimensionStamper
      *
      * @param array<int,?int> $released
      * @param array<string,string> $singleAnalytics syntetika => jediná analytika (přesměr PostingService)
+     * @param list<int> $releaseDefaultLines id řádků, z nichž se uvolní výchozí (neruční) hodnoty
      * @return array{lines:int, needs_repost:bool, account_change:bool}
      */
-    public function restamp(int $supplierId, string $sourceType, int $sourceId, bool $keepLineTypes = false, array $released = [], array $singleAnalytics = []): array
+    public function restamp(int $supplierId, string $sourceType, int $sourceId, bool $keepLineTypes = false, array $released = [], array $singleAnalytics = [], array $releaseDefaultLines = []): array
     {
         $keepLineTypes = $keepLineTypes || in_array($sourceType, self::KEEP_LINE_TYPES, true);
         if (!isset(self::SOURCES[$sourceType]) || !$this->enabled($supplierId)) {
             return ['lines' => 0, 'needs_repost' => false, 'account_change' => false];
         }
         return (new DimensionPeriodGuard($this->db))->transaction(
-            fn (): array => $this->restampLocked($supplierId, $sourceType, $sourceId, $keepLineTypes, $released, $singleAnalytics),
+            fn (): array => $this->restampLocked($supplierId, $sourceType, $sourceId, $keepLineTypes, $released, $singleAnalytics, $releaseDefaultLines),
         );
     }
 
-    private function restampLocked(int $supplierId, string $sourceType, int $sourceId, bool $keepLineTypes, array $released, array $singleAnalytics): array
+    private function restampLocked(int $supplierId, string $sourceType, int $sourceId, bool $keepLineTypes, array $released, array $singleAnalytics, array $releaseDefaultLines): array
     {
         $pdo = $this->db->pdo();
         $guard = new DimensionPeriodGuard($this->db);
@@ -338,7 +343,14 @@ final class DimensionStamper
             if ($bankRule !== null) {
                 $restamped = self::fillBankAccount($restamped, $bankRule, $this->lineAccountCodes($supplierId, $restamped), $this->transferCodes($supplierId));
             }
-            $restamped = $this->rules()->applyDefaults($supplierId, $sourceType, $sourceId, $restamped, $entryDate);
+            // Řádek z `$releaseDefaultLines` řídí doklad, který ho hradí (členský předpis): výchozí hodnota
+            // pravidla by na něj přidala typ, který doklad nenese, a saldokonto by se po dimenzi nevyrovnalo.
+            $ruleFree = $keepLineTypes ? array_flip($releaseDefaultLines) : [];
+            $restamped = array_merge(
+                $this->rules()->applyDefaults($supplierId, $sourceType, $sourceId,
+                    array_values(array_filter($restamped, static fn (array $l): bool => !isset($ruleFree[(int) $l['id']]))), $entryDate),
+                array_values(array_filter($restamped, static fn (array $l): bool => isset($ruleFree[(int) $l['id']]))),
+            );
             if ($bankAccount !== null) {
                 $restamped = self::fillBankAccount($restamped, $bankAccount, $this->lineAccountCodes($supplierId, $restamped), $this->transferCodes($supplierId));
             }
@@ -353,7 +365,9 @@ final class DimensionStamper
                     $originalSplits[$lineId] ?? [],
                     array_map('intval', (array) ($line['dimensions'] ?? [])),
                     (array) ($line['dimension_splits'] ?? []),
-                    $released,
+                    in_array($lineId, $releaseDefaultLines, true)
+                        ? $released + self::defaultValues($originalDims[$lineId] ?? [], $originalOrigins[$lineId] ?? [])
+                        : $released,
                 );
                 unset($restamped[$i]['dimensions'], $restamped[$i]['dimension_splits']);
                 if ($dims !== []) {
@@ -435,6 +449,20 @@ final class DimensionStamper
             }
         }
         return ['lines' => $changed, 'needs_repost' => $needsRepost, 'account_change' => $accountChange];
+    }
+
+    /**
+     * Dimenze řádku, které nezadal uživatel (výchozí hodnota účtu, pravidla, modulu), ve tvaru
+     * `$released`. Ruční (`explicit`) a nezjištěný původ (`unknown`, starší data) se nevrací.
+     *
+     * @param array<int,int> $dims typ => hodnota
+     * @param array<int,array<string,mixed>> $origins typ => původ
+     * @return array<int,int>
+     */
+    public static function defaultValues(array $dims, array $origins): array
+    {
+        return array_filter($dims, static fn (int $typeId): bool
+            => !in_array($origins[$typeId]['origin'] ?? 'unknown', ['explicit', 'unknown'], true), ARRAY_FILTER_USE_KEY);
     }
 
     /**

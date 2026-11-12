@@ -129,11 +129,12 @@ export interface BankTransaction {
   matched_purchase_invoices?: MatchedPurchaseInvoice[]
   /** Ostatní pohledávky a závazky, kterým je pohyb přiřazen (match_status zůstává unmatched). */
   matched_other_items?: MatchedOtherItem[]
+  matched_membership_claims?: Array<{ claim_id: number; member_id: number; member_number: string; title_key: string; amount_cents: string }>
   ignore_origin?: string | null
   ignore_note?: string | null
   /** Avízo, jehož pohyb převzal oficiální výpis (jen detail výpisu). */
   notice_superseded?: boolean
-  resolution?: 'payroll' | 'transfer' | 'outside_saldo' | null
+  resolution?: 'payroll' | 'transfer' | 'outside_saldo' | 'membership' | null
   match_available?: boolean
   ignore_available?: boolean
   match_status: MatchStatus
