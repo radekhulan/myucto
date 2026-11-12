@@ -128,7 +128,7 @@ describe('AgreementImportPanel', () => {
     expect(m.preview).toHaveBeenCalledTimes(2)
   })
 
-  it('creates agreements in chunks of 100 persons and skips persons without anything to create', async () => {
+  it('creates agreements in chunks of 50 persons and skips persons without anything to create', async () => {
     const persons = Array.from({ length: 150 }, (_, index) => person(`osoba-${index + 1}`))
     persons.push(person('chyba', { errors: ['Chybí jméno nebo příjmení osoby.'] }))
     m.preview.mockResolvedValue(preview(persons))
@@ -136,10 +136,9 @@ describe('AgreementImportPanel', () => {
     await wrapper.get('[data-testid="agreement-apply"]').trigger('click')
     await vi.waitFor(() => expect(wrapper.find('[data-testid="agreement-result"]').exists()).toBe(true))
 
-    expect(m.apply).toHaveBeenCalledTimes(2)
-    expect(m.apply.mock.calls[0][0].person_keys).toHaveLength(100)
-    expect(m.apply.mock.calls[1][0].person_keys).toHaveLength(50)
+    expect(m.apply).toHaveBeenCalledTimes(3)
+    expect(m.apply.mock.calls.map(call => call[0].person_keys.length)).toEqual([50, 50, 50])
     expect(m.apply.mock.calls.flatMap(call => call[0].person_keys)).not.toContain('chyba')
-    expect(wrapper.get('[data-testid="agreement-result"]').text()).toContain('"created":2')
+    expect(wrapper.get('[data-testid="agreement-result"]').text()).toContain('"created":3')
   })
 })

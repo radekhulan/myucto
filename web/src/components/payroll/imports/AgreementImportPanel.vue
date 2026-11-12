@@ -23,7 +23,7 @@ const props = defineProps<{ canWrite: boolean }>()
 const { t } = useI18n()
 const toast = useToast()
 
-const CHUNK = 100
+const CHUNK = 50
 const SUMMARY_ITEMS = ['persons', 'new_persons', 'existing_persons', 'confirm', 'create', 'exists', 'errors'] as const
 const STATUS_CLASS: Record<AgreementImportStatus, string> = {
   create: 'bg-success-50 text-success-700',

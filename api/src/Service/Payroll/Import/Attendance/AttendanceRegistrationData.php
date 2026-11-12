@@ -220,6 +220,11 @@ final class AttendanceRegistrationData
         if ($a1Employment !== []) {
             if (!isset($a1Employment['workplace_city']) && isset($terms['work_place'])) {
                 $a1Employment['workplace_city'] = mb_substr($text('workplace'), 0, 255);
+            } elseif (!isset($a1Employment['workplace_city']) && isset($terms['jmhz_workplace_municipality_code'])) {
+                $name = $codebooks?->municipalityName($terms['jmhz_workplace_municipality_code'], $start);
+                if ($name !== null) {
+                    $a1Employment['workplace_city'] = mb_substr($name, 0, 255);
+                }
             }
             $a1['employment'] = [...($a1['employment'] ?? []), ...$a1Employment];
         }
