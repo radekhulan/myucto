@@ -343,7 +343,7 @@ final class DimensionAction
      */
     private function assertTokenMayTagDocument(Request $request, int $supplierId, string $docType, int $docId): void
     {
-        if (RequestAuthorization::actsAsSession($request)) {
+        if (!RequestAuthorization::isRestrictedBearer($request)) {
             return;
         }
         if ($docType !== 'other_item') {

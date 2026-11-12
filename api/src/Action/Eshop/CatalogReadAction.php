@@ -72,7 +72,7 @@ final class CatalogReadAction
         try {
             $token = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);
             $allowCosts = RequestAuthorization::allows($request, 'stock.items.write', AccessLevel::WRITE)
-                && (RequestAuthorization::actsAsSession($request) || ($token['scope'] ?? '') === 'read_write');
+                && (!RequestAuthorization::isRestrictedBearer($request) || ($token['scope'] ?? '') === 'read_write');
             $result = $prices ? $this->catalog->prices($supplierId, $body)
                 : $this->catalog->products($supplierId, $body, $allowCosts);
             return Json::ok($response, $result);

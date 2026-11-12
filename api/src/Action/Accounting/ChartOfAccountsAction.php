@@ -193,7 +193,7 @@ final class ChartOfAccountsAction
         }
         // Syntetika je z šablony osnovy a míří na ni automatické kontace; její
         // vypnutí přes token by zastavilo účtování dokladů celé firmy.
-        if (!empty($existing['is_synthetic']) && !RequestAuthorization::actsAsSession($request)) {
+        if (!empty($existing['is_synthetic']) && RequestAuthorization::isRestrictedBearer($request)) {
             return Json::error($response, 'token_write_forbidden',
                 'Syntetický účet lze přes API token jen číst; přes token se upravují jen analytické účty.', 403);
         }

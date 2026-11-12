@@ -61,6 +61,17 @@ final class RequestAuthorization
     }
 
     /**
+     * Je požadavek ověřený API tokenem BEZ plného zápisu? Protějšek {@see isBearerAuth()}
+     * pro místa, která podle kanálu jen mění chování (zúžené tělo, přeskočení kroku):
+     * token s plným zápisem (#371) se tam chová jako relace, požadavek bez způsobu
+     * ověření (úloha na pozadí, vnitřní volání) jako dřív.
+     */
+    public static function isRestrictedBearer(Request $request): bool
+    {
+        return self::isBearerAuth($request) && !self::isSystemWriteToken($request);
+    }
+
+    /**
      * Smí požadavek do agend jako přihlášený uživatel ve webovém rozhraní?
      *
      * Brána omezení specifických pro API token (session-only agendy, účetní úkony,

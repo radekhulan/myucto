@@ -635,7 +635,7 @@ final class PayrollEmploymentAction
         bool $allowBearer = false,
     ): ?Response
     {
-        if (!$allowBearer && !RequestAuthorization::actsAsSession($request)) {
+        if (!$allowBearer && RequestAuthorization::isRestrictedBearer($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;
@@ -656,7 +656,7 @@ final class PayrollEmploymentAction
 
     private function authorizeRead(Request $request, Response $response): ?Response
     {
-        if (!RequestAuthorization::actsAsSession($request)) {
+        if (RequestAuthorization::isRestrictedBearer($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;
@@ -685,7 +685,7 @@ final class PayrollEmploymentAction
         array $body,
         bool $newTerms,
     ): array {
-        if (RequestAuthorization::actsAsSession($request)) {
+        if (!RequestAuthorization::isRestrictedBearer($request)) {
             return $this->withStoredTerms($supplierId, $employmentId, $body);
         }
         $allowed = [

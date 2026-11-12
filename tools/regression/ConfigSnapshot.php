@@ -36,6 +36,8 @@ final class ConfigSnapshot
         '7d8b12267e92f7ed0f347cedf1e19c8d3ef8149882caeb73ce1a7f1098ee5667',
         // accounting.save_and_post a jeho ENV; DB, údaje ani runtime cesty beze změny.
         'f895751b4f374e3e91d0620f2cf1a4db0ae7e14da7e38c773d83c36fd7693288',
+        // api.allow_system_write_tokens a jeho ENV; DB, údaje ani runtime cesty beze změny.
+        'b21b33782fa0f0fdb2ce28afce54e6693afb4f8cdfa7e0c9a3aada758512c023',
     ];
 
     private static ?Config $config = null;
