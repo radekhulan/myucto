@@ -22,6 +22,7 @@ final class PayrollMonthGuide
         'recurring_component_without_input',
         'absence_pending_decision',
         'inputs_on_unstarted_employment',
+        'inputs_not_whole_crowns',
     ];
 
     private const PEOPLE_CODES = [
@@ -175,6 +176,9 @@ final class PayrollMonthGuide
         }
         if (isset($codes['absence_pending_decision'])) {
             return 'absences';
+        }
+        if (isset($codes['inputs_not_whole_crowns'])) {
+            return 'round_inputs';
         }
 
         return 'quick_inputs';
@@ -440,7 +444,9 @@ final class PayrollMonthGuide
     /** @param array<string,mixed> $finding */
     private static function findingCount(array $finding): int
     {
-        return max((int) ($finding['count'] ?? 0), (int) ($finding['entity_total'] ?? 0));
+        $subjects = is_array($finding['subject_ids'] ?? null) ? count($finding['subject_ids']) : 0;
+
+        return max((int) ($finding['count'] ?? 0), (int) ($finding['entity_total'] ?? 0), $subjects);
     }
 
     /** @param array<string,mixed> $validation */

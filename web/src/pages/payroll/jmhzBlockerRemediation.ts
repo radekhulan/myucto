@@ -199,6 +199,7 @@ export function annualSettlementRequestTarget(
   period: string | null | undefined,
   employeeIds: number[] = [],
   preselect = true,
+  returnTo: string | null = null,
 ): RouteLocationRaw {
   const year = period && /^\d{4}-/.test(period) ? { year: String(Number(period.slice(0, 4)) - 1) } : {}
   const ids = [...new Set(employeeIds.filter(id => Number.isInteger(id) && id > 0))]
@@ -209,6 +210,7 @@ export function annualSettlementRequestTarget(
       state: 'request_undecided',
       ...(ids.length > 0 ? { employees: ids.join(',') } : {}),
       ...(preselect ? { select: 'all' } : {}),
+      ...(returnTo ? { return: returnTo } : {}),
     },
   }
 }

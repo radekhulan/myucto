@@ -451,7 +451,7 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     expect(links).toHaveLength(1)
     expect(JSON.parse(links[0]!.attributes('data-to')!)).toEqual({
       name: 'payroll-annual-settlement',
-      query: { year: '2025', state: 'request_undecided', employees: '21,22,23', select: 'all' },
+      query: { year: '2025', state: 'request_undecided', employees: '21,22,23', select: 'all', return: '/' },
     })
     expect(links[0]!.text()).toContain('jmhz_dry_run_action_codes.jmhz_annual_request_source_missing')
   })

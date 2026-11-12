@@ -6874,7 +6874,7 @@
         "blocking_title": "Nothing missing | 1 item is missing that the month cannot go through without | {count} items are missing that the month cannot go through without",
         "blocking_hint": "Payroll is calculated without them, but the registration and the monthly report cannot be filed. You can still save the card and add them any time.",
         "advisory_title": "Nothing missing | 1 item left to add | {count} items left to add",
-        "advisory_hint": "None of this stops the month. Add them when there is time.",
+        "advisory_hint": "These details do not stop the month, add them when there is time. Data for the statutory payroll calculation is checked separately in the Statutory records section.",
         "open": "Add →"
       },
       "next_step": {
@@ -15162,6 +15162,7 @@
         "attendance_import": "Import attendance",
         "absences": "Decide absences",
         "quick_inputs": "Open monthly inputs",
+        "round_inputs": "Round inputs to whole crowns",
         "runs": "Open checks in Payroll runs",
         "people_gaps": "Fill in missing data",
         "people": "Open employees",
@@ -15206,6 +15207,7 @@
         "recurring_component_without_input": "Recurring component without input",
         "absence_pending_decision": "Absence awaiting decision",
         "inputs_on_unstarted_employment": "Inputs on an employment not yet started",
+        "inputs_not_whole_crowns": "Inputs with hellers",
         "person_data_gap": "Missing personal data",
         "payout_rule_missing": "Payout method missing",
         "tax_declaration_evidence_missing": "Tax declaration evidence missing",

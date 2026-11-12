@@ -6874,7 +6874,7 @@
         "blocking_title": "Nic nechybí | Chybí 1 údaj, bez kterého měsíc neprojde | Chybí {count} údaje, bez kterých měsíc neprojde | Chybí {count} údajů, bez kterých měsíc neprojde",
         "blocking_hint": "Mzdy se spočítají i bez nich, ale nepůjde podat přihlášku ani měsíční hlášení. Kartu uložíte i tak a doplnit je můžete kdykoli.",
         "advisory_title": "Nic nechybí | Zbývá doplnit 1 údaj | Zbývají doplnit {count} údaje | Zbývá doplnit {count} údajů",
-        "advisory_hint": "Nic z toho měsíc nezastaví. Doplňte je, až bude čas.",
+        "advisory_hint": "Kvůli těmto údajům se měsíc nezastaví, doplňte je, až bude čas. Údaje pro zákonný výpočet mzdy hlídá zvlášť oddíl Zákonná evidence.",
         "open": "Doplnit →"
       },
       "next_step": {
@@ -15162,6 +15162,7 @@
         "attendance_import": "Importovat docházku",
         "absences": "Rozhodnout nepřítomnosti",
         "quick_inputs": "Otevřít měsíční vstupy",
+        "round_inputs": "Zaokrouhlit vstupy na celé koruny",
         "runs": "Otevřít kontroly v Mzdových bězích",
         "people_gaps": "Doplnit chybějící údaje",
         "people": "Otevřít zaměstnance",
@@ -15206,6 +15207,7 @@
         "recurring_component_without_input": "Pravidelná složka bez vstupu",
         "absence_pending_decision": "Nepřítomnost čeká na rozhodnutí",
         "inputs_on_unstarted_employment": "Vstupy u nenastoupeného vztahu",
+        "inputs_not_whole_crowns": "Haléře ve vstupech",
         "person_data_gap": "Chybějící údaje osob",
         "payout_rule_missing": "Chybí způsob výplaty",
         "tax_declaration_evidence_missing": "Chybí doklad k prohlášení",

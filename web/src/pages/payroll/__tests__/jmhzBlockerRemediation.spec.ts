@@ -99,6 +99,10 @@ describe('navigace nálezů měsíčního hlášení', () => {
       name: 'payroll-annual-settlement',
       query: { year: '2025', state: 'request_undecided' },
     })
+    expect(annualSettlementRequestTarget('2026-02', [3], true, '/payroll/submissions/jmhz?period=2026-02')).toEqual({
+      name: 'payroll-annual-settlement',
+      query: { year: '2025', state: 'request_undecided', employees: '3', select: 'all', return: '/payroll/submissions/jmhz?period=2026-02' },
+    })
   })
 
   it('nález složky otevře její zařazení do JMHZ v číselníku, ne Mzdové vstupy', () => {

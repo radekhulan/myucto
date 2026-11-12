@@ -400,7 +400,8 @@ function annualRequestGroupTarget(group: BlockerGroup, payrollRun: PayrollRun): 
       .map(id => remediationEmployments.value.find(item => item.id === id)?.employee_id ?? null)
       .filter((id): id is number => id !== null)
     : group.entityIds
-  return annualSettlementRequestTarget(payrollRun.period_start.slice(0, 7), employeeIds)
+  const here = typeof window === 'undefined' ? null : `${window.location.pathname}${window.location.search}`
+  return annualSettlementRequestTarget(payrollRun.period_start.slice(0, 7), employeeIds, true, here)
 }
 
 function blockerGroupTarget(group: BlockerGroup, payrollRun: PayrollRun): RouteLocationRaw | null {

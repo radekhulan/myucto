@@ -860,6 +860,8 @@ final readonly class JmhzPreparationSnapshotService
             return $exception instanceof PayrollRegistrationIdentitySnapshotException
                 ? $exception->validationCode
                 : 'jmhz_identity_incomplete';
+        } catch (\InvalidArgumentException) {
+            return 'jmhz_identity_incomplete';
         }
         $identity = $resolved['source'];
         $jmhz = $resolved['jmhz'];

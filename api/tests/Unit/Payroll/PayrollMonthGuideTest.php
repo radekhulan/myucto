@@ -37,6 +37,33 @@ final class PayrollMonthGuideTest extends TestCase
         self::assertSame('inputs', $guide['current_step']);
     }
 
+    public function testWholeCrownInputsStopTheInputsStepAndOfferRounding(): void
+    {
+        $guide = PayrollMonthGuide::build(self::facts(readiness: ['findings' => [
+            self::finding('inputs_not_whole_crowns', 'approval', 'monthly', 12),
+        ]]));
+        $steps = array_column($guide['steps'], null, 'key');
+
+        self::assertSame('todo', $steps['inputs']['state']);
+        self::assertSame(12, $steps['inputs']['remaining']);
+        self::assertSame(12, $steps['inputs']['facts']['stopping']);
+        self::assertSame('round_inputs', $steps['inputs']['action']);
+        self::assertSame('inputs', $guide['current_step']);
+    }
+
+    public function testSummaryFindingsCountTheirPeople(): void
+    {
+        $summary = array_replace(
+            self::finding('tax_declaration_not_signed_summary', 'revision', 'monthly', 1),
+            ['subject_type' => 'employee', 'subject_ids' => [3, 5, 8, 13]],
+        );
+        $guide = PayrollMonthGuide::build(self::facts(readiness: ['findings' => [$summary]]));
+        $steps = array_column($guide['steps'], null, 'key');
+
+        self::assertSame([['code' => 'tax_declaration_not_signed_summary', 'count' => 4]], $steps['people']['facts']['codes']);
+        self::assertSame(4, $steps['people']['remaining']);
+    }
+
     public function testLockedRunUsesRunValidationsInsteadOfReadiness(): void
     {
         $guide = PayrollMonthGuide::build(self::facts(

@@ -2786,7 +2786,7 @@ describe('PayrollRuns', () => {
       const action = wrapper.get('[data-test="run-readiness-bulk-action-annual_settlement_request"]')
       expect(JSON.parse(action.attributes('data-to')!)).toEqual({
         name: 'payroll-annual-settlement',
-        query: { year: '2025', state: 'request_undecided', select: 'all' },
+        query: { year: '2025', state: 'request_undecided', select: 'all', return: '/payroll/runs?period=2026-02' },
       })
       expect(action.text()).toContain('payroll.runs.readiness.bulk.annual_settlement_request')
       wrapper.unmount()
@@ -2824,7 +2824,7 @@ describe('PayrollRuns', () => {
       const safe = wrapper.get('[data-test="run-readiness-bulk-action-annual_settlement_request_safe"]')
       expect(JSON.parse(safe.attributes('data-to')!)).toEqual({
         name: 'payroll-annual-settlement',
-        query: { year: '2025', state: 'request_undecided', employees: '4,9', select: 'all' },
+        query: { year: '2025', state: 'request_undecided', employees: '4,9', select: 'all', return: '/payroll/runs?period=2026-02' },
       })
       expect(safe.text()).toContain('payroll.runs.readiness.bulk.annual_settlement_request_safe')
       const rest = wrapper.get('[data-test="run-readiness-bulk-action-annual_settlement_request"]')

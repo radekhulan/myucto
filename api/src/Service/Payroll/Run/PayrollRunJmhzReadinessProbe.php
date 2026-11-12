@@ -109,6 +109,13 @@ final class PayrollRunJmhzReadinessProbe
         } catch (\Throwable $e) {
             // Fail-soft. Kontrola, která spadne, nesmí zastavit práci — vrátí
             // nález a pustí dál.
+            error_log(sprintf(
+                'Předběžná kontrola JMHZ firmy %d za %s selhala: %s',
+                $supplierId,
+                $periodStart,
+                $e->getMessage(),
+            ));
+
             return [[
                 'code' => 'jmhz_readiness_check_failed',
                 'severity' => 'info',

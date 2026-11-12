@@ -1485,7 +1485,7 @@ function readinessBulkTarget(action: { kind: PayrollRunReadinessBulkKind, employ
   if (kind === 'annual_settlement_request' || kind === 'annual_settlement_request_safe') {
     // Hromadné „nepožádal" je výběr na stránce Ročního zúčtování zúžený na
     // osoby hlášení. Osoby bez prohlášení (bezpečná skupina) se rovnou vyberou.
-    return annualSettlementRequestTarget(bulkPeriod, action.employee_ids, true)
+    return annualSettlementRequestTarget(bulkPeriod, action.employee_ids, true, route.fullPath)
   }
   // Nález nese osoby, kterých se týká — dialog se jimi zúží, ne na celý rok.
   // `back`: po zavření dialogu zpět do běhu, ne na seznam zaměstnanců.

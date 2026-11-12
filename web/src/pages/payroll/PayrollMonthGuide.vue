@@ -77,6 +77,7 @@ function primaryTarget(step: PayrollMonthGuideStep): RouteLocationRaw | null {
     case 'attendance_import': return { name: 'payroll-imports', query: { tab: 'attendance' } }
     case 'absences': return { name: 'payroll-absences', query: periodQuery() }
     case 'quick_inputs': return { name: 'payroll-quick-inputs', query: periodQuery() }
+    case 'round_inputs': return { name: 'payroll-components', query: { tab: 'inputs', ...periodQuery() } }
     case 'people_gaps': return { name: 'payroll-people', query: { filter: 'blocking_data' } }
     case 'people': return { name: 'payroll-people' }
     case 'registration_a1': return { name: 'payroll-submissions-tab', params: { tab: 'registration_a1' }, query: { ...periodQuery(), environment: environment.value } }
@@ -96,7 +97,7 @@ function primaryLabel(step: PayrollMonthGuideStep): string {
 
 function bulkTarget(kind: PayrollRunReadinessBulkKind, employeeIds: number[] | undefined): RouteLocationRaw {
   if (kind === 'annual_settlement_request' || kind === 'annual_settlement_request_safe') {
-    return annualSettlementRequestTarget(period.value, employeeIds, true)
+    return annualSettlementRequestTarget(period.value, employeeIds, true, route.fullPath)
   }
   const employees = employeeIds?.length ? { employees: employeeIds.join(',') } : {}
   return { name: 'payroll-people', query: { bulk: kind, period: period.value, ...employees, back: route.fullPath } }
