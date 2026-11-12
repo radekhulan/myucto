@@ -6,6 +6,7 @@ import { apiErrorMessage } from '@/api/errors'
 import FieldNote from '@/components/ui/FieldNote.vue'
 import { apiErrorField } from './payrollFieldFeedback'
 import PayrollJmhzReturnBar from './PayrollJmhzReturnBar.vue'
+import { safeReturnPath } from './jmhzFreezeBlockers'
 import {
   payrollApi,
   type PayrollEmployment,
@@ -283,7 +284,15 @@ const canQuickEditPerson = computed(() =>
  * proklik po importu JMHZ, z doplnění evidence i z nálezu kontroly běhu.
  * Každý dialog se otevře jen s tím právem, se kterým ho nabízí i nabídka.
  */
+/**
+ * Kam se vrátit po zavření hromadného dialogu otevřeného odkazem (`?back=`).
+ * Z kontroly mzdového běhu vedlo „Zavřít" na seznam zaměstnanců a účetní
+ * hledala cestu zpět do běhu.
+ */
+const bulkBackPath = ref<string | null>(null)
+
 function openBulkFromQuery(bulk: unknown) {
+  bulkBackPath.value = typeof bulk === 'string' ? safeReturnPath(route.query.back) : null
   if (bulk === 'declaration_signed' && canCreatePerson.value) {
     statutoryBulkOpen.value = false
     declarationSignBulkOpen.value = true
@@ -311,10 +320,18 @@ watch(
   () => statutoryBulkOpen.value || declarationSignBulkOpen.value || healthInsurerBulkOpen.value
     || workplaceBulkOpen.value || bulkClosureOpen.value || payoutDefaultsOpen.value,
   (open, wasOpen) => {
-    if (open || !wasOpen || (route.query.bulk === undefined && route.query.employees === undefined)) return
+    if (open || !wasOpen) return
+    const back = bulkBackPath.value
+    bulkBackPath.value = null
+    if (back !== null) {
+      void router.push(back)
+      return
+    }
+    if (route.query.bulk === undefined && route.query.employees === undefined) return
     const query = { ...route.query }
     delete query.bulk
     delete query.employees
+    delete query.back
     void router.replace({ query })
   },
 )

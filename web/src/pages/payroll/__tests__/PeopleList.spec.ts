@@ -1245,6 +1245,47 @@ describe('PeopleList toolbar and shared employee creation', () => {
     wrapper.unmount()
   })
 
+  /*
+   * „Zavřít" v dialogu Ukončit skončené dohody otevřeném z běhu vedlo na seznam
+   * zaměstnanců. S `back` se po zavření vrací tam, odkud proklik přišel.
+   */
+  it('zavření hromadného dialogu z běhu vrátí zpět do běhu', async () => {
+    m.routeQuery.bulk = 'closure'
+    m.routeQuery.period = '2026-02'
+    m.routeQuery.back = '/payroll/runs?period=2026-02'
+    const stubs = {
+      ActionBar: true,
+      RouterLink: true,
+      EmploymentCard: true,
+      PayrollPersonQuickEdit: true,
+      PayrollPersonProfilePanel: true,
+      PayrollPersonStatutoryEvidencePanel: true,
+      PayrollBulkClosureDialog: {
+        emits: ['close'],
+        template: '<button type="button" data-test="closure-bulk-close" @click="$emit(\'close\')" />',
+      },
+    }
+    const wrapper = mount(PeopleList, { global: { stubs } })
+    await flushPromises()
+    await wrapper.get('[data-test="closure-bulk-close"]').trigger('click')
+    await flushPromises()
+
+    expect(m.routerPush).toHaveBeenCalledWith('/payroll/runs?period=2026-02')
+    expect(m.routerReplace).not.toHaveBeenCalledWith(expect.objectContaining({ query: expect.anything() }))
+    wrapper.unmount()
+
+    // Cizí adresa v `back` se nepoužije; bez návratu se jen uklidí povel z adresy.
+    m.routerPush.mockClear()
+    m.routeQuery.back = 'https://example.invalid/'
+    const external = mount(PeopleList, { global: { stubs } })
+    await flushPromises()
+    await external.get('[data-test="closure-bulk-close"]').trigger('click')
+    await flushPromises()
+    expect(m.routerPush).not.toHaveBeenCalled()
+    expect(m.routerReplace).toHaveBeenCalledWith({ query: { period: '2026-02' } })
+    external.unmount()
+  })
+
   it('proklik z kontroly běhu otevře hromadná výplatní pravidla pro osoby nálezu', async () => {
     m.routeQuery.bulk = 'payout_defaults'
     m.routeQuery.employees = '7,9'

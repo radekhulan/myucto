@@ -128,6 +128,10 @@ const EMPTY_DEADLINE_SUMMARY: Record<PayrollSubmissionDeadlinePhase, number> = {
 const deadlineSummary = ref<Record<PayrollSubmissionDeadlinePhase, number>>({
   ...EMPTY_DEADLINE_SUMMARY,
 })
+/** Povinnosti období, které ještě nemají řádek v evidenci (měsíční přehled je hlásí „Nepřipraveno"). */
+const unpreparedSummary = ref<Record<PayrollSubmissionDeadlinePhase, number>>({
+  ...EMPTY_DEADLINE_SUMMARY,
+})
 /** Proč hlášení JMHZ za zvolené období teď nejde zmrazit ani odeslat (ze serveru). */
 const jmhzPreparationGate = ref<PayrollJmhzPreparationGate | null>(null)
 const healthOverviews = ref<PayrollHealthPaymentOverview[]>([])
@@ -202,12 +206,18 @@ const detailHost = computed<HTMLElement | null>(
  */
 const counts = computed(() => {
   const phases = deadlineSummary.value
+  const unprepared = unpreparedSummary.value
+  // Nepřipravená povinnost (bez řádku v evidenci) je taky povinnost období.
+  // Bez ní souhrn ukazoval „Celkem 0", zatímco řádek nad ním hlásil měsíc
+  // jako „Nepřipraveno".
+  const unpreparedOpen = unprepared.not_open + unprepared.open + unprepared.due_soon + unprepared.due_today
+  const unpreparedAttention = unprepared.overdue + unprepared.action_required
   return {
-    total: total.value,
-    open: phases.not_open + phases.open + phases.due_soon + phases.due_today,
+    total: total.value + unpreparedOpen + unpreparedAttention,
+    open: phases.not_open + phases.open + phases.due_soon + phases.due_today + unpreparedOpen,
     submitted: phases.awaiting_result,
     fulfilled: phases.fulfilled,
-    attention: phases.overdue + phases.action_required,
+    attention: phases.overdue + phases.action_required + unpreparedAttention,
   }
 })
 
@@ -769,6 +779,7 @@ async function load() {
     items.value = response.items
     total.value = response.total
     deadlineSummary.value = response.deadline_summary
+    unpreparedSummary.value = { ...EMPTY_DEADLINE_SUMMARY, ...(response.unprepared_deadline_summary ?? {}) }
     jmhzPreparationGate.value = response.jmhz_preparation_gate ?? null
     await Promise.all([
       loadHealthOverviews(),
@@ -778,6 +789,7 @@ async function load() {
     items.value = []
     total.value = 0
     deadlineSummary.value = { ...EMPTY_DEADLINE_SUMMARY }
+    unpreparedSummary.value = { ...EMPTY_DEADLINE_SUMMARY }
     jmhzPreparationGate.value = null
     healthOverviews.value = []
     jmhzPreviews.value = []
@@ -1127,7 +1139,7 @@ useWindowRefresh(load, () => !loading.value && expandedId.value === null && sett
           <dt class="text-xs font-medium text-neutral-500">
             {{ t(`payroll.submissions.overview.summary.${entry}`) }}
           </dt>
-          <dd class="mt-1 text-2xl font-semibold text-neutral-900">
+          <dd class="mt-1 text-2xl font-semibold text-neutral-900" :data-test="`submission-summary-${entry}`">
             {{ counts[entry] }}
           </dd>
         </div>

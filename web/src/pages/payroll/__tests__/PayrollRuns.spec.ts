@@ -36,7 +36,7 @@ const m = vi.hoisted(() => ({
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: m.push, replace: m.replace }),
   // Období si stránka drží v URL, ať přežije obnovení i sdílený odkaz.
-  useRoute: () => ({ query: {} }),
+  useRoute: () => ({ query: {}, fullPath: '/payroll/runs?period=2026-02' }),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -2749,7 +2749,7 @@ describe('PayrollRuns', () => {
       const statutory = wrapper.get('[data-test="run-readiness-bulk-action-statutory_defaults"]')
       expect(JSON.parse(statutory.attributes('data-to')!)).toEqual({
         name: 'payroll-people',
-        query: { bulk: 'statutory_defaults', period: '2026-02', employees: '7,8,9' },
+        query: { bulk: 'statutory_defaults', period: '2026-02', employees: '7,8,9', back: '/payroll/runs?period=2026-02' },
       })
       expect(statutory.text()).toContain('payroll.runs.readiness.bulk.statutory_defaults')
       expect(wrapper.find('[data-test="run-readiness-bulk-action-health_insurer"]').exists()).toBe(true)
@@ -2864,7 +2864,7 @@ describe('PayrollRuns', () => {
       const action = wrapper.get('[data-test="run-readiness-bulk-action-payout_defaults"]')
       expect(JSON.parse(action.attributes('data-to')!)).toEqual({
         name: 'payroll-people',
-        query: { bulk: 'payout_defaults', period: '2026-02', employees: '21,22' },
+        query: { bulk: 'payout_defaults', period: '2026-02', employees: '21,22', back: '/payroll/runs?period=2026-02' },
       })
       wrapper.unmount()
     })
@@ -2898,7 +2898,7 @@ describe('PayrollRuns', () => {
       const action = wrapper.get('[data-test="run-readiness-bulk-action-declaration_signed"]')
       expect(JSON.parse(action.attributes('data-to')!)).toEqual({
         name: 'payroll-people',
-        query: { bulk: 'declaration_signed', period: '2026-02', employees: '14,15' },
+        query: { bulk: 'declaration_signed', period: '2026-02', employees: '14,15', back: '/payroll/runs?period=2026-02' },
       })
       wrapper.unmount()
     })

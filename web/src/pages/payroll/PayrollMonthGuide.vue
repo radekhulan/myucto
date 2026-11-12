@@ -99,7 +99,7 @@ function bulkTarget(kind: PayrollRunReadinessBulkKind, employeeIds: number[] | u
     return annualSettlementRequestTarget(period.value, employeeIds, true)
   }
   const employees = employeeIds?.length ? { employees: employeeIds.join(',') } : {}
-  return { name: 'payroll-people', query: { bulk: kind, period: period.value, ...employees } }
+  return { name: 'payroll-people', query: { bulk: kind, period: period.value, ...employees, back: route.fullPath } }
 }
 
 function secondaryLinks(step: PayrollMonthGuideStep): GuideLink[] {

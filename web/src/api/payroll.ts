@@ -3882,6 +3882,8 @@ export interface PayrollSubmissionOverviewResponse {
     other: number
   }
   deadline_summary: Record<PayrollSubmissionDeadlinePhase, number>
+  /** Povinnosti období bez řádku v evidenci (ještě nepřipravené), podle fáze lhůty. */
+  unprepared_deadline_summary?: Record<PayrollSubmissionDeadlinePhase, number>
   /** Proč hlášení JMHZ za období teď nejde zmrazit ani odeslat; `null` = jde. */
   jmhz_preparation_gate?: PayrollJmhzPreparationGate | null
   items: PayrollSubmissionOverviewItem[]

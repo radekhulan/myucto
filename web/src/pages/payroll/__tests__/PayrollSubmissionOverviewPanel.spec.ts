@@ -743,6 +743,30 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     expect(wrapper.find('[data-test="submission-bulk-external-hint"]').exists()).toBe(false)
   })
 
+  /*
+   * Měsíční přehled nad panelem hlásil únor „Nepřipraveno", souhrn panelu
+   * „Celkem 0": povinnost bez řádku v evidenci se do souhrnu nepočítala.
+   */
+  it('souhrn započítá i povinnost období, která ještě není připravená', async () => {
+    const empty = {
+      not_open: 0, open: 0, due_soon: 0, due_today: 0, overdue: 0,
+      awaiting_result: 0, fulfilled: 0, action_required: 0, cancelled: 0,
+    }
+    m.submissionOverview.mockResolvedValue({
+      items: [],
+      total: 0,
+      deadline_summary: empty,
+      unprepared_deadline_summary: { ...empty, overdue: 1 },
+    })
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'jmhz' } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="submission-summary-total"]').text()).toBe('1')
+    expect(wrapper.get('[data-test="submission-summary-attention"]').text()).toBe('1')
+    expect(wrapper.get('[data-test="submission-summary-open"]').text()).toBe('0')
+  })
+
   it('u desítek povinností po termínu bez podání odkáže na hromadné vyřízení v Zákonných termínech', async () => {
     const overdue = (id: number) => ({
       id,

@@ -342,7 +342,7 @@ final class PayrollSubmissionRepository
         ?string $agendaGroup = null,
     ): array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT obligation.status,
+            'SELECT obligation.status, obligation.agenda_code, obligation.subject_reference,
                     deadline.earliest_submission_on, deadline.due_on,
                     latest_submission.status AS submission_status'
             . self::OVERVIEW_FROM
@@ -361,6 +361,8 @@ final class PayrollSubmissionRepository
             $row = self::associativeRow($row, 'souhrn mzdových podání');
             $rows[] = [
                 'status' => self::string($row, 'status'),
+                'agenda_code' => self::string($row, 'agenda_code'),
+                'subject_reference' => self::string($row, 'subject_reference'),
                 'earliest_submission_on' => self::string(
                     $row,
                     'earliest_submission_on',

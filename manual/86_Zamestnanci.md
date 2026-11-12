@@ -591,6 +591,9 @@ dohod** níže se nic neděje samo, rozhodujete vy.
 5. Výsledek ukáže počet provedených a u každého vztahu, který se nepovedl,
    důvod (například vztah mezitím změnil někdo jiný). Ostatní vztahy se tím
    nezastaví.
+6. Dialog otevřený tlačítkem z kontroly mzdového běhu nebo z průvodce měsícem
+   vás po **Zavřít** vrátí zpět tam, odkud jste přišli. Stejně se vracejí
+   i ostatní hromadné opravy otevřené z kontroly běhu.
 
 Každý vztah se ukončí stejně jako tlačítkem **Ukončit** na jeho kartě: projde
 stejnými kontrolami, zapíše se do časové osy a založí výstupní checklist.
