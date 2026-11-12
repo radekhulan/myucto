@@ -4278,6 +4278,12 @@
         "hint": "U větší firmy může krok trvat desítky sekund. Stránku nechte otevřenou; opakované kliknutí ani obnovení stránky krok nespustí podruhé."
       },
       "command_done": "Stav mzdového běhu byl změněn.",
+      "command_toast": {
+        "excluded": "{name}: osoba je z běhu vyřazená.",
+        "included": "{name}: osoba je zpět v běhu.",
+        "payment_date": "Datum výplaty je {date}.",
+        "recalculated": "{done} Běh je přepočítaný (revize {revision})."
+      },
       "command_failed": "Příkaz mzdového běhu se nepodařilo provést.",
       "payments_unsettled": "Běh zatím není skutečně uhrazený. V agendě Mzdové příkazy a úhrady spárujte všechny částky s bankovními pohyby nebo zaúčtovanými pokladními doklady a vyřešte případné vratky či storna.",
       "incoming_refund_unresolved": "Běh zatím není zcela vypořádaný a obsahuje nejméně jednu příchozí opravnou vratku. Běžné odchozí úhrady nejprve spárujte v agendě Mzdové příkazy a úhrady. Příchozí vratku nelze vložit do odchozí dávky a aktuální agenda ji zatím neumí připojit k mzdovému závazku bez takové dávky; nevytvářejte proto falešnou odchozí platbu.",
@@ -4973,7 +4979,8 @@
       },
       "exclusion": {
         "exclude": "Vyřadit osobu z běhu",
-        "hint": "{name} se z tohoto běhu vyřadí: běh dostane novou revizi bez této osoby a ostatním se mzda spočítá a schválí jako obvykle. Osoba nedostane výplatní pásku ani mzdu v tomto běhu a nebude ve schválené revizi. Mzdu jí doplatíte opravou běhu za stejné období (Vyžádat opravu, Otevřít opravu), až doplníte chybějící údaje. Do měsíčního hlášení JMHZ se pak dostane opravným hlášením. Uveďte, co chybí a kdy se doplní.",
+        "exclude_short": "Vyřadit z běhu",
+        "hint": "{name} se z tohoto běhu vyřadí: běh dostane novou revizi bez této osoby a ostatním se mzda spočítá a schválí jako obvykle. Osoba nedostane výplatní pásku ani mzdu v tomto běhu a nebude ve schválené revizi. Mzdu jí doplatíte opravou běhu za stejné období (Vyžádat opravu, Otevřít opravu), až doplníte chybějící údaje nebo vyjasníte podklady. Do měsíčního hlášení JMHZ se pak dostane opravným hlášením. Uveďte důvod (aspoň 10 znaků), např. co chybí a kdy se doplní.",
         "active_title": "Z běhu vyřazeno: {count}",
         "active_hint": "Tyto osoby revize nepočítá. Až údaje doplníte, vraťte je do běhu, nebo je doplaťte opravou po schválení.",
         "include": "Vrátit do běhu",

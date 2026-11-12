@@ -1548,11 +1548,27 @@ async function approveDraftInputsBeforeStart(run: PayrollRun) {
   await recheckReadiness()
 }
 
+/** Konkrétní potvrzení u příkazů, po kterých se běh sám přepočítá. */
+function commandDoneMessage(
+  command: PayrollRunCommand,
+  extra: { payment_date?: string },
+  label: string | undefined,
+): string | null {
+  if (command === 'exclude_employee') return t('payroll.runs.command_toast.excluded', { name: label ?? '' })
+  if (command === 'include_employee') return t('payroll.runs.command_toast.included', { name: label ?? '' })
+  if (command === 'change_payment_date' && extra.payment_date) {
+    return t('payroll.runs.command_toast.payment_date', { date: formatDate(extra.payment_date) })
+  }
+  return null
+}
+
 async function submitCommand(
   run: PayrollRun,
   command: PayrollRunCommand,
   reason?: string,
   extra: { payment_date?: string, employee_id?: number, employment_id?: number } = {},
+  label?: string,
+  donePrefix?: string,
 ) {
   saving.value = true
   runningCommand.value = { runId: run.id, command }
@@ -1566,11 +1582,20 @@ async function submitCommand(
       crypto.randomUUID(),
     )
     const outcome = response.outcome?.outcome ?? null
-    toast.success(
-      outcome === null
-        ? t('payroll.runs.command_done')
-        : t(`payroll.runs.outcome.${outcome}`),
-    )
+    const doneMessage = commandDoneMessage(command, extra, label)
+    const recalculates = ['refresh_inputs', 'reopen', 'change_payment_date', 'exclude_employee', 'include_employee'].includes(command)
+    if (donePrefix !== undefined && command === 'calculate') {
+      toast.success(t('payroll.runs.command_toast.recalculated', {
+        done: donePrefix,
+        revision: response.run?.revision_no ?? response.run?.current_revision_no ?? '',
+      }))
+    } else if (doneMessage === null) {
+      toast.success(
+        outcome === null
+          ? t('payroll.runs.command_done')
+          : t(`payroll.runs.outcome.${outcome}`),
+      )
+    }
     pendingCommand.value = null
     commandReason.value = ''
     commandError.value = ''
@@ -1588,15 +1613,16 @@ async function submitCommand(
      * další krok je přepočet. Udělá se rovnou, ať účetní nemačká dvě tlačítka
      * za sebou a neplete si „obnoveno" se „spočítáno".
      */
-    if (['refresh_inputs', 'reopen', 'change_payment_date', 'exclude_employee', 'include_employee'].includes(command)) {
+    if (recalculates) {
       const fresh = reloadedRun(run)
       if (fresh !== null && fresh.available_commands.includes('calculate')
         && auth.canWrite('payroll.calculate')
       ) {
-        await submitCommand(fresh, 'calculate')
+        await submitCommand(fresh, 'calculate', undefined, {}, undefined, doneMessage ?? undefined)
         return
       }
     }
+    if (doneMessage !== null) toast.success(doneMessage)
     if (command === 'prepare_payments'
       && outcome !== 'payments_not_applicable'
     ) {
@@ -1671,7 +1697,7 @@ async function confirmCommand() {
   }
   if (pending.target?.employee_id) extra.employee_id = pending.target.employee_id
   if (pending.target?.employment_id) extra.employment_id = pending.target.employment_id
-  await submitCommand(pending.run, pending.command, reason || undefined, extra)
+  await submitCommand(pending.run, pending.command, reason || undefined, extra, pending.target?.label)
 }
 
 /**
@@ -1706,8 +1732,30 @@ function askExclude(run: PayrollRun, validation: DisplayValidation): void {
   commandError.value = ''
 }
 
+/**
+ * Vyřadit osobu jde i přímo z tabulky osob běhu (sporné hodiny, chybějící
+ * podklad), ne jen z nálezu ruční kontroly. Opravná revize ji nenabízí:
+ * osobu ze schválené revize server z opravy vyřadit nedovolí.
+ */
+function canExcludePeople(run: PayrollRun): boolean {
+  return run.revision_kind !== 'correction'
+    && run.revision_status !== 'approved'
+    && run.available_commands.includes('exclude_employee')
+    && commandPermitted('exclude_employee')
+}
+
+function askExcludePerson(run: PayrollRun, person: { employee_id: number, full_name: string }): void {
+  pendingCommand.value = {
+    run,
+    command: 'exclude_employee',
+    target: { employee_id: person.employee_id, label: person.full_name },
+  }
+  commandReason.value = ''
+  commandError.value = ''
+}
+
 async function includeExcluded(run: PayrollRun, exclusion: PayrollRunExclusion): Promise<void> {
-  await submitCommand(run, 'include_employee', undefined, { employee_id: exclusion.employee_id })
+  await submitCommand(run, 'include_employee', undefined, { employee_id: exclusion.employee_id }, exclusion.full_name)
 }
 
 function activeExclusions(run: PayrollRun): PayrollRunExclusion[] {
@@ -3085,6 +3133,8 @@ onMounted(() => { void load() })
           :period="run.period_start.slice(0, 7)"
           :approved="run.revision_status === 'approved'"
           :refresh-key="run.row_version"
+          :can-exclude="canExcludePeople(run)"
+          @exclude="askExcludePerson(run, $event)"
         />
 
         <!--

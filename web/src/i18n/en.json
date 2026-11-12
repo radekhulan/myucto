@@ -4278,6 +4278,12 @@
         "hint": "For a larger company the step can take tens of seconds. Keep the page open; clicking again or reloading the page will not run the step twice."
       },
       "command_done": "Payroll run status was changed.",
+      "command_toast": {
+        "excluded": "{name}: the person is excluded from the run.",
+        "included": "{name}: the person is back in the run.",
+        "payment_date": "The payment date is {date}.",
+        "recalculated": "{done} The run is recalculated (revision {revision})."
+      },
       "command_failed": "Payroll run command failed.",
       "payments_unsettled": "The run has not actually been paid in full yet. Under Payroll payment orders and settlement, match every amount to a bank transaction or posted cash document and resolve any refunds or reversals.",
       "incoming_refund_unresolved": "The run is not fully settled and contains at least one incoming correction refund. First match all ordinary outgoing payments under Payroll payment orders and settlement. The incoming refund cannot be added to an outgoing batch, and the current workflow cannot yet link it to the payroll liability without such a batch; do not create a false outgoing payment.",
@@ -4973,7 +4979,8 @@
       },
       "exclusion": {
         "exclude": "Exclude person from run",
-        "hint": "{name} will be excluded from this run: the run gets a new revision without this person and everyone else is calculated and approved as usual. The person gets no payslip or pay in this run and will not be in the approved revision. Pay them later through a correction of the run for the same period (Request correction, Open correction) once the missing data are completed. They get into the monthly JMHZ report through a corrective report. State what is missing and when it will be completed.",
+        "exclude_short": "Exclude from run",
+        "hint": "{name} will be excluded from this run: the run gets a new revision without this person and everyone else is calculated and approved as usual. The person gets no payslip or pay in this run and will not be in the approved revision. Pay them later through a correction of the run for the same period (Request correction, Open correction) once the missing data are completed or the source documents are clarified. They get into the monthly JMHZ report through a corrective report. State a reason of at least 10 characters, e.g. what is missing and when it will be completed.",
         "active_title": "Excluded from run: {count}",
         "active_hint": "The revision does not calculate these people. Once their data are complete, return them to the run, or pay them through a correction after approval.",
         "include": "Return to run",

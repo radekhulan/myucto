@@ -39,6 +39,12 @@ const props = defineProps<{
    * jiné výsledky pod stejným číslem revize.
    */
   refreshKey?: number
+  /** Běh v otevřené revizi dovolí osobu vyřadit (s důvodem v dialogu běhu). */
+  canExclude?: boolean
+}>()
+
+const emit = defineEmits<{
+  exclude: [person: { employee_id: number, full_name: string }]
 }>()
 
 const PAGE_SIZE = 25
@@ -390,6 +396,16 @@ onBeforeUnmount(() => {
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.download" /></svg>
                     {{ t('payroll.runs.people_table.actions.payslip') }}
                   </RouterLink>
+                  <button
+                    v-if="canExclude"
+                    type="button"
+                    :class="btnOutlineSm('warning')"
+                    :data-testid="`payroll-run-person-${person.employee_id}-exclude`"
+                    @click="emit('exclude', { employee_id: person.employee_id, full_name: person.full_name })"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+                    {{ t('payroll.runs.exclusion.exclude_short') }}
+                  </button>
                 </div>
               </td>
             </tr>
@@ -452,6 +468,16 @@ onBeforeUnmount(() => {
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.download" /></svg>
               {{ t('payroll.runs.people_table.actions.payslip') }}
             </RouterLink>
+            <button
+              v-if="canExclude"
+              type="button"
+              :class="btnOutlineSm('warning')"
+              :data-testid="`payroll-run-person-mobile-${person.employee_id}-exclude`"
+              @click="emit('exclude', { employee_id: person.employee_id, full_name: person.full_name })"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+              {{ t('payroll.runs.exclusion.exclude_short') }}
+            </button>
           </div>
         </article>
         <dl
