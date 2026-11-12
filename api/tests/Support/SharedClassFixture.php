@@ -80,7 +80,11 @@ trait SharedClassFixture
                 $pdo->prepare('DELETE FROM `' . $table . '` WHERE ' . ($table === 'supplier' ? 'id' : 'supplier_id') . '=?')->execute([$supplier]);
                 return;
             } catch (\PDOException $e) {
-                if ($depth > 16 || (int) ($e->errorInfo[1] ?? 0) !== 1451 || preg_match('/`[^`]+`\.`([^`]+)`, CONSTRAINT/', (string) $e->getMessage(), $m) !== 1) throw $e;
+                if ($depth > 16 || (int) ($e->errorInfo[1] ?? 0) !== 1451 || preg_match('/`[^`]+`\.`([^`]+)`, CONSTRAINT `[^`]+` FOREIGN KEY \([^)]*\) REFERENCES `([^`]+)`/', (string) $e->getMessage(), $m) !== 1) throw $e;
+                if ($table === 'supplier' && $m[2] !== 'supplier') {
+                    SupplierCascadeCleanup::delete($pdo, $supplier);
+                    return;
+                }
                 self::deleteFixtureRows($pdo, $m[1], $supplier, $depth + 1);
             }
         }

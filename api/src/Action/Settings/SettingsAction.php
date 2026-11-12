@@ -1421,6 +1421,9 @@ final class SettingsAction
             'documents'          => 'dokumenty (DMS)',
             'income_tax_returns' => 'přiznání k dani z příjmů',
             'nonprofit_tax_assessments' => 'potvrzená daňová posouzení',
+            'nonprofit_funding_revisions' => 'evidenci zdrojů financování',
+            'payroll_runs'       => 'mzdové běhy',
+            'payroll_enforcement_cases' => 'exekuce a insolvence zaměstnanců',
             'property_objects' => 'registr domů, jednotek a služeb',
             'property_module_profiles' => 'potvrzené profily SVJ',
             'unit_charge_components' => 'složky předpisů SVJ',
@@ -1478,6 +1481,7 @@ final class SettingsAction
                     'import_jobs',
                     'crm_monthly_summary',
                     'recurring_invoice_templates',
+                    'gopay_settings',
                     // Metadata bez FK na supplier — bez explicitního smazání by po
                     // úspěšném DELETE (dependency check výše prošel) zůstaly osiřelé
                     // (audit C3 doauditováno, doplňkový nález security-review).
@@ -1497,6 +1501,9 @@ final class SettingsAction
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
+            if ($e instanceof \PDOException && (int) ($e->errorInfo[1] ?? 0) === 1451) {
+                return Json::error($response, 'has_dependencies', 'Firmu nelze smazat, na její data odkazují jiné záznamy. Firmu archivujte.', 409);
+            }
             return Json::internalError($response, 'delete_failed', 'Smazání selhalo: ' . $e->getMessage(), 500);
         }
 

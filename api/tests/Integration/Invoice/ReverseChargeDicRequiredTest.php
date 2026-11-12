@@ -176,7 +176,7 @@ final class ReverseChargeDicRequiredTest extends TestCase
      * Vystavení dokladu. Vrací kód chyby, nebo `passed_validation`.
      *
      * Vlastní zaúčtování se uvnitř testovací transakce dokončit NEDÁ — akce si nastavuje
-     * úroveň izolace, což MariaDB v otevřené transakci odmítne. Pro tenhle test to nevadí,
+     * úroveň izolace, což MariaDB v otevřené transakci odmítne (chyba 1568; text hlášky se mezi 11.8 a 12.3 liší). Pro tenhle test to nevadí,
      * naopak: dojít až tam znamená, že validace § 29 doklad PUSTILA, což je přesně to, co
      * pozitivní případy dokazují. Chybu tedy nepolykám, jen ji odliším od zamítnutí.
      *
@@ -192,7 +192,7 @@ final class ReverseChargeDicRequiredTest extends TestCase
         try {
             $res = ($this->action)($req, new Psr7Response(), ['id' => (string) $id]);
         } catch (\PDOException $e) {
-            if (str_contains($e->getMessage(), 'Transaction characteristics')) {
+            if ((int) ($e->errorInfo[1] ?? 0) === 1568) {
                 return ['status' => 0, 'code' => 'passed_validation'];
             }
             throw $e;

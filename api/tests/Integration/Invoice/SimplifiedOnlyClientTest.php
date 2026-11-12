@@ -473,7 +473,7 @@ final class SimplifiedOnlyClientTest extends TestCase
         } catch (\PDOException $e) {
             // Vystavení po validaci pokračuje vlastní transakcí, kterou uvnitř testovací
             // transakce dokončit nelze. Daňové brány už proběhly.
-            if (str_contains($e->getMessage(), 'Transaction characteristics')
+            if ((int) ($e->errorInfo[1] ?? 0) === 1568
                 || str_contains($e->getMessage(), 'already an active transaction')) {
                 return ['status' => 200, 'code' => null, 'message' => null];
             }

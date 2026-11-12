@@ -357,8 +357,7 @@ final class AccountingFrameworkServiceTest extends TestCase
             }
             $writer->close();
             $pdo->exec('SET SESSION innodb_snapshot_isolation = ' . $originalSnapshotIsolation);
-            $pdo->prepare('DELETE FROM supplier WHERE id IN (?, ?)')
-                ->execute([$this->supplierId, $this->otherSupplierId]);
+            \MyInvoice\Tests\Support\SupplierCascadeCleanup::delete($pdo, $this->supplierId, $this->otherSupplierId);
         }
     }
 
@@ -411,8 +410,7 @@ final class AccountingFrameworkServiceTest extends TestCase
             }
             $writer->close();
             $pdo->exec('SET SESSION innodb_snapshot_isolation = ' . $originalSnapshotIsolation);
-            $pdo->prepare('DELETE FROM supplier WHERE id IN (?, ?)')
-                ->execute([$this->supplierId, $this->otherSupplierId]);
+            \MyInvoice\Tests\Support\SupplierCascadeCleanup::delete($pdo, $this->supplierId, $this->otherSupplierId);
         }
     }
 
@@ -503,8 +501,7 @@ PHP;
             if (is_file($controlFile)) {
                 unlink($controlFile);
             }
-            $pdo->prepare('DELETE FROM supplier WHERE id IN (?, ?)')
-                ->execute([$this->supplierId, $this->otherSupplierId]);
+            \MyInvoice\Tests\Support\SupplierCascadeCleanup::delete($pdo, $this->supplierId, $this->otherSupplierId);
         }
     }
 
@@ -576,8 +573,7 @@ PHP;
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            $pdo->prepare('DELETE FROM supplier WHERE id IN (?, ?)')
-                ->execute([$this->supplierId, $this->otherSupplierId]);
+            \MyInvoice\Tests\Support\SupplierCascadeCleanup::delete($pdo, $this->supplierId, $this->otherSupplierId);
         }
     }
 

@@ -66,7 +66,7 @@ final class ClosingLegal504Test extends TestCase
             foreach (['activity_log', 'journal_entries', 'invoice_payments', 'invoices', 'clients'] as $table) {
                 $this->db->pdo()->prepare('DELETE FROM ' . $table . ' WHERE supplier_id=?')->execute([$this->supplier]);
             }
-            $this->db->pdo()->prepare('DELETE FROM supplier WHERE id=?')->execute([$this->supplier]);
+            \MyInvoice\Tests\Support\SupplierCascadeCleanup::delete($this->db->pdo(), $this->supplier);
         }
         $this->db->pdo()->exec('SET SESSION innodb_snapshot_isolation=' . $this->originalIsolation);
         $this->db->pdo()->exec('SET @myucto_fail_legal_step=NULL');

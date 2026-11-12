@@ -344,9 +344,11 @@ Firmu, která žádná data nemá (čerstvě založená, nikdy nepoužitá), apl
 dodavatele instalace smazat nejde vůbec („Posledního supplier nelze smazat", vždy musí zůstat aspoň jeden).
 
 > [!WARNING]
-> Firmu s účetními daty aplikace nedovolí smazat. Před smazáním zkontroluje čtrnáct tabulek (klienti, vydané
-> i přijaté faktury, účetní deník, pokladní doklady a pokladny, majetek, sklad - karty, doklady i sklady,
-> dokumenty, přiznání k dani z příjmů, podané daňové výkazy, příkazy k úhradě). Má-li firma v kterékoli z nich
+> Firmu s účetními daty aplikace nedovolí smazat. Před smazáním zkontroluje evidence s účetními a mzdovými daty
+> (klienti, vydané i přijaté faktury, účetní deník, pokladní doklady a pokladny, majetek, sklad - karty, doklady
+> i sklady, dokumenty, přiznání k dani z příjmů, daňová posouzení a zdroje financování neziskové organizace,
+> registr SVJ, podané daňové výkazy, příkazy k úhradě, bankovní výpisy, mzdové běhy, exekuce a insolvence
+> zaměstnanců). Má-li firma v kterékoli z nich
 > data, smazání skončí chybou s výčtem, co brání: „Firmu nelze smazat - obsahuje účetní data: vydané faktury,
 > účetní deník. Data nejdřív odstraňte, nebo firmu archivujte." Žádné tlačítko „archivovat" ve skutečnosti
 > neexistuje, text v hlášce je jen doporučení nechat firmu neaktivní. Jediná reálná cesta ke smazání firmy
@@ -364,6 +366,7 @@ dodavatele instalace smazat nejde vůbec („Posledního supplier nelze smazat",
 | Firmu nelze smazat, hláška vyjmenuje účetní data | Firma má data v některé z kontrolovaných tabulek | Viz varování v [§ 95.11](#9511-krok-za-krokem-smazat-firmu). |
 | Tlačítko **Smazat** je neaktivní | Firma má klienty nebo vydané faktury | Data nejprve odstraňte. |
 | Potvrzovací dialog tvrdí „Lze jen pokud nemá klienty ani faktury", ale smazání přesto selže | Dialog je zjednodušený a neúplný: i firma bez klientů a faktur může mít pokladnu, majetek nebo sklad | Zkontrolujte také pokladny, majetek a sklad. |
+| „Firmu nelze smazat, na její data odkazují jiné záznamy" | Na data firmy odkazuje záznam, který kontrola předem nevyjmenovává | Firmu ponechte neaktivní, nebo kontaktujte podporu. |
 | Posledního dodavatele nelze smazat | Musí zůstat aspoň jeden | Založte jinou firmu a smažte původní. |
 | Nahrání SVG loga selže: „SVG konverze není dostupná" | Server nemá PHP rozšíření `imagick` ani `rsvg-convert` | Viz [§ 95.13.4](#95134-branding-podrobnosti), nebo nahrajte PNG či JPG. |
 | Vystavení hlásí chybu 409 po změně číselného cyklu | Číslo už v evidenci existuje | Upravte šablonu, viz varování v [§ 95.13.3](#95133-ciselne-rady-faktur). |

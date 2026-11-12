@@ -79,7 +79,7 @@ final class NonprofitTaxAssessmentTest extends TestCase
         if ($this->committed) {
             $this->pdo->prepare('DELETE FROM activity_log WHERE supplier_id = ?')->execute([$this->supplier]);
             $this->pdo->prepare('DELETE FROM journal_entries WHERE supplier_id = ?')->execute([$this->supplier]);
-            $this->pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->supplier]);
+            \MyInvoice\Tests\Support\SupplierCascadeCleanup::delete($this->pdo, $this->supplier);
         }
     }
 
@@ -469,7 +469,7 @@ final class NonprofitTaxAssessmentTest extends TestCase
         } catch (\PDOException $e) {
             self::assertSame('23000', $e->getCode());
         }
-        $this->pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->supplier]);
+        \MyInvoice\Tests\Support\SupplierCascadeCleanup::delete($this->pdo, $this->supplier);
         self::assertSame([], $this->repository->history($this->supplier, $this->period));
     }
 
