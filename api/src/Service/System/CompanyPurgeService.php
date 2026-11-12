@@ -6,6 +6,7 @@ namespace MyInvoice\Service\System;
 
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\SchemaMetadata;
 use MyInvoice\Infrastructure\Database\TriggerMetadata;
 use PDO;
 use PDOException;
@@ -41,7 +42,12 @@ final class CompanyPurgeService
     private const LOCK = 'myucto_company_purge';
     private const MAX_PASSES = 10;
 
-    public function __construct(private readonly Connection $db) {}
+    private readonly SchemaMetadata $schema;
+
+    public function __construct(private readonly Connection $db, ?SchemaMetadata $schema = null)
+    {
+        $this->schema = $schema ?? new SchemaMetadata($db);
+    }
 
     /**
      * @return array{
@@ -67,7 +73,7 @@ final class CompanyPurgeService
         }
 
         $where = self::where($supplierId);
-        $tables = $this->companyTables($pdo, $schema);
+        $tables = $this->companyTables();
         $counts = [];
         foreach ($tables as $table) {
             $n = (int) $pdo->query("SELECT COUNT(*) FROM `{$table}` WHERE {$where($table)}")->fetchColumn();
@@ -76,7 +82,7 @@ final class CompanyPurgeService
             }
         }
         $children = [];
-        foreach ($this->restrictedChildren($pdo, $schema, $tables) as $child) {
+        foreach ($this->restrictedChildren($tables) as $child) {
             $childWhere = sprintf('`%s` IN (SELECT `%s` FROM `%s` WHERE %s)',
                 $child['column'], $child['parent_column'], $child['parent'], $where($child['parent']));
             $n = (int) $pdo->query("SELECT COUNT(*) FROM `{$child['table']}` WHERE {$childWhere}")->fetchColumn();
@@ -91,7 +97,7 @@ final class CompanyPurgeService
             $touched[$child['table']] = $child['rows'];
         }
         if ($touched !== []) {
-            foreach (TriggerMetadata::read($pdo, $schema) as $t) {
+            foreach ($this->schema->triggers() as $t) {
                 if ($t['EVENT_MANIPULATION'] === 'DELETE' && $t['ACTION_TIMING'] === 'BEFORE' && isset($touched[$t['EVENT_OBJECT_TABLE']])) {
                     $guards[(string) $t['TRIGGER_NAME']] = (string) $t['EVENT_OBJECT_TABLE'];
                 }
@@ -244,7 +250,7 @@ final class CompanyPurgeService
                     if ($failed !== [] && count($failed) === count($pending)) {
                         $cycleTables = array_values(array_unique(array_column(array_filter($failed, static fn (array $j): bool => $j['own']), 'table')));
                         if ($cycleTables !== []) {
-                            $deleted += $this->deleteCycle($pdo, $plan['schema'], $cycleTables, $where, $errors);
+                            $deleted += $this->deleteCycle($pdo, $cycleTables, $where, $errors);
                             $cycle = $cycleTables;
                             $failed = array_values(array_filter($failed, static fn (array $j): bool => !$j['own']));
                         }
@@ -381,22 +387,17 @@ final class CompanyPurgeService
      *
      * @return list<string>
      */
-    private function companyTables(PDO $pdo, string $schema): array
+    private function companyTables(): array
     {
-        $stmt = $pdo->prepare(
-            "SELECT c.TABLE_NAME FROM information_schema.COLUMNS c
-               JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
-              WHERE c.TABLE_SCHEMA = ? AND c.COLUMN_NAME = 'supplier_id' AND t.TABLE_TYPE IN ('BASE TABLE', 'SYSTEM VERSIONED') ORDER BY c.TABLE_NAME"
-        );
-        $stmt->execute([$schema]);
-        $tables = array_diff_key(array_fill_keys($stmt->fetchAll(PDO::FETCH_COLUMN), true), array_fill_keys(self::RETAINED_TABLES, true));
-        $fks = $pdo->prepare(
-            'SELECT DISTINCT TABLE_NAME, REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE
-              WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME IS NOT NULL'
-        );
-        $fks->execute([$schema, $schema]);
+        $tables = array_diff_key(array_fill_keys($this->schema->tablesWithColumn('supplier_id'), true), array_fill_keys(self::RETAINED_TABLES, true));
         $referencing = [];
-        foreach ($fks->fetchAll(PDO::FETCH_ASSOC) as $fk) {
+        $seen = [];
+        foreach ($this->schema->localForeignKeys() as $fk) {
+            $pair = $fk['TABLE_NAME'] . "\0" . $fk['REFERENCED_TABLE_NAME'];
+            if (isset($seen[$pair])) {
+                continue;
+            }
+            $seen[$pair] = true;
             if ($fk['TABLE_NAME'] !== $fk['REFERENCED_TABLE_NAME'] && isset($tables[$fk['TABLE_NAME']], $tables[$fk['REFERENCED_TABLE_NAME']])) {
                 $referencing[$fk['REFERENCED_TABLE_NAME']][] = $fk['TABLE_NAME'];
             }
@@ -426,22 +427,15 @@ final class CompanyPurgeService
      * @param list<string> $tables
      * @return list<array{table: string, column: string, parent: string, parent_column: string}>
      */
-    private function restrictedChildren(PDO $pdo, string $schema, array $tables): array
+    private function restrictedChildren(array $tables): array
     {
-        $stmt = $pdo->prepare(
-            "SELECT k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME
-               FROM information_schema.KEY_COLUMN_USAGE k
-               JOIN information_schema.REFERENTIAL_CONSTRAINTS r
-                 ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME AND r.TABLE_NAME = k.TABLE_NAME
-              WHERE k.TABLE_SCHEMA = ? AND k.REFERENCED_TABLE_SCHEMA = ? AND r.DELETE_RULE IN ('RESTRICT', 'NO ACTION')
-                AND NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS c
-                                 WHERE c.TABLE_SCHEMA = k.TABLE_SCHEMA AND c.TABLE_NAME = k.TABLE_NAME AND c.COLUMN_NAME = 'supplier_id')
-              ORDER BY k.TABLE_NAME, k.COLUMN_NAME"
-        );
-        $stmt->execute([$schema, $schema]);
+        $rows = array_values(array_filter($this->schema->localForeignKeys(), fn (array $fk): bool
+            => in_array($fk['DELETE_RULE'], ['RESTRICT', 'NO ACTION'], true) && !$this->schema->hasColumn($fk['TABLE_NAME'], 'supplier_id')));
+        usort($rows, static fn (array $a, array $b): int => SchemaMetadata::compareNames($a['TABLE_NAME'], $b['TABLE_NAME'])
+            ?: SchemaMetadata::compareNames($a['COLUMN_NAME'], $b['COLUMN_NAME']));
         $company = array_fill_keys($tables, true);
         $out = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        foreach ($rows as $r) {
             if (isset($company[$r['REFERENCED_TABLE_NAME']]) && $r['TABLE_NAME'] !== 'supplier') {
                 $out[] = ['table' => (string) $r['TABLE_NAME'], 'column' => (string) $r['COLUMN_NAME'],
                     'parent' => (string) $r['REFERENCED_TABLE_NAME'], 'parent_column' => (string) $r['REFERENCED_COLUMN_NAME']];
@@ -459,14 +453,10 @@ final class CompanyPurgeService
      * @param list<string> $tables
      * @param array<string, string> $errors
      */
-    private function deleteCycle(PDO $pdo, string $schema, array $tables, \Closure $where, array $errors): int
+    private function deleteCycle(PDO $pdo, array $tables, \Closure $where, array $errors): int
     {
-        $fks = $pdo->prepare(
-            'SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
-              WHERE TABLE_SCHEMA = ? AND REFERENCED_TABLE_SCHEMA = ? AND REFERENCED_TABLE_NAME IN (' . implode(', ', array_fill(0, count($tables), '?')) . ')'
-        );
-        $fks->execute([$schema, $schema, ...$tables]);
-        $refs = $fks->fetchAll(PDO::FETCH_ASSOC);
+        $refs = array_values(array_filter($this->schema->localForeignKeys(),
+            static fn (array $fk): bool => in_array($fk['REFERENCED_TABLE_NAME'], $tables, true)));
         $orphans = static function () use ($pdo, $refs): int {
             $n = 0;
             foreach ($refs as $r) {

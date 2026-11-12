@@ -69,11 +69,11 @@ final class PayrollKeyRotationServiceTest extends TestCase
             }
         }
         $pdo = $this->db->pdo();
-        $trigger = $pdo->query(
-            "SELECT ACTION_STATEMENT FROM information_schema.TRIGGERS
-              WHERE TRIGGER_SCHEMA = DATABASE()
-                AND TRIGGER_NAME = 'trg_payroll_annual_revision_immutable_update'",
-        )->fetchColumn();
+        $trigger = array_column(
+            \MyInvoice\Infrastructure\Database\TriggerMetadata::read($pdo, (string) $pdo->query('SELECT DATABASE()')->fetchColumn()),
+            'ACTION_STATEMENT',
+            'TRIGGER_NAME',
+        )['trg_payroll_annual_revision_immutable_update'] ?? null;
         if (!is_string($trigger) || !str_contains($trigger, 'payroll_key_rewrap')) {
             self::fail('Chybí migrace 1915 (výjimka pro přebalení v append-only triggerech).');
         }
