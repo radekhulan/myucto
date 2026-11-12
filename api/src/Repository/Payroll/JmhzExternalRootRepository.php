@@ -9,7 +9,7 @@ use PDO;
 
 /**
  * Řádná podání předchozího programu převzatá jako kořen opravného JMHZ
- * (migrace 2289).
+ * (migrace 2291).
  */
 final class JmhzExternalRootRepository
 {

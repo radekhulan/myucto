@@ -2670,9 +2670,9 @@ export interface PayrollEmploymentSurchargePolicyPayload
 /**
  * Oprava OTEVŘENÉ verze zásady.
  *
- * `valid_from` tu chybí schválně: účinnost je hranice proti předchozí, uzavřené
- * verzi, jejíž konec je z ní odvozený. Jiná účinnost znamená novou verzi, ne
- * opravu — server hodnotu z těla ignoruje.
+ * `valid_from` tu chybí schválně: server ho z opravy ignoruje. Začátek
+ * nepoužité verze se posouvá vlastní operací
+ * (`moveEmploymentSurchargePolicyStart`), která posune i hranici předchozí verze.
  */
 export interface PayrollEmploymentSurchargePolicyUpdatePayload
   extends Record<string, unknown>, PayrollSurchargeFixedHourlyFields {
@@ -4195,6 +4195,53 @@ export interface PayrollMonthlyChecklistPreparationResult {
   /** Mzdové účtárny bez variabilního symbolu ČSSZ, za které se hlášení nepřipravilo. */
   skipped_offices?: { office_id: number, name: string }[]
   warning?: string | null
+}
+
+export type PayrollMonthGuideStepKey = 'inputs' | 'people' | 'registrations' | 'check' | 'run' | 'submissions' | 'payments'
+export type PayrollMonthGuideStepState = 'done' | 'todo' | 'waiting' | 'unavailable'
+
+export interface PayrollMonthGuideCodeCount {
+  code: string
+  count: number
+}
+
+export interface PayrollMonthGuideStep {
+  key: PayrollMonthGuideStepKey
+  state: PayrollMonthGuideStepState
+  remaining: number
+  action: string | null
+  facts: {
+    codes?: PayrollMonthGuideCodeCount[]
+    stopping?: number
+    attendance_batches?: { count: number, persons: number } | null
+    registration_a1?: {
+      total: number
+      preparable: number
+      incomplete: number
+      overdue: number
+      too_early: number
+      from: string
+      to: string
+    } | null
+    hoz_open?: number | null
+    unprepared_overdue?: number | null
+    source?: 'readiness' | 'run' | null
+    by_impact?: Record<'blocking' | 'approval' | 'revision' | 'anytime', number> | null
+    bulk_actions?: { kind: PayrollRunReadinessBulkKind, count: number, employee_ids?: number[] }[]
+    findings?: { code: string, impact: string, message: string, count: number }[]
+    status?: PayrollRun['status'] | null
+    summary?: PayrollMonthlyChecklistResponse['summary']
+    jmhz?: { total: number, done: number } | null
+    coverage?: { liability_count: number, uncovered_count: number } | null
+    documents_total?: number | null
+  } | null
+}
+
+export interface PayrollMonthGuideResponse {
+  period: string
+  current_step: PayrollMonthGuideStepKey | null
+  runs: { id: number, status: PayrollRun['status'], office_id: number | null, approve_blocker_count: number }[]
+  steps: PayrollMonthGuideStep[]
 }
 
 export interface PayrollMonthlyChecklistResponse {
@@ -5782,6 +5829,25 @@ export interface PayrollRegistrationA1BatchResult {
     code: string | null
     message: string | null
   }>
+}
+
+export interface PayrollRegistrationA1Defaults {
+  work_mode_code?: string | null
+  continuous_operation?: boolean | null
+  workplace_city?: string | null
+  position_name?: string | null
+  leadership?: boolean | null
+}
+
+export interface PayrollRegistrationA1DefaultsResult {
+  results: Array<{
+    employment_id: number
+    status: 'verified' | 'draft' | 'skipped' | 'failed'
+    changed: string[]
+    message: string | null
+    problems: Array<{ field: string | null, code: string, message: string }>
+  }>
+  counts: Record<'verified' | 'draft' | 'skipped' | 'failed', number>
 }
 
 /** Varování před podáním, které podání neblokuje (překryv 603/604). */
@@ -9231,9 +9297,9 @@ export const payrollApi = {
       payload,
     ).then(response => response.data.evidence),
   /** Náhled hromadného doplnění výchozí zákonné evidence; `employee_ids: null` = osoby běhu za měsíc. */
-  payoutDefaultsPreview: (employeeIds: number[]) =>
-    api.post<{ people: PayrollPayoutDefaultsPreviewRow[] }>('/payroll/payout-rules/defaults/preview', { employee_ids: employeeIds })
-      .then(response => response.data.people),
+  payoutDefaultsPreview: (employeeIds: number[] | null) =>
+    api.post<{ people: PayrollPayoutDefaultsPreviewRow[], truncated?: boolean }>('/payroll/payout-rules/defaults/preview', { employee_ids: employeeIds })
+      .then(response => ({ people: response.data.people, truncated: response.data.truncated === true })),
   payoutDefaultsApply: (employeeIds: number[]) =>
     api.post<PayrollPayoutDefaultsBulkResult>('/payroll/payout-rules/defaults/apply', { employee_ids: employeeIds })
       .then(response => response.data),
@@ -9954,6 +10020,10 @@ export const payrollApi = {
    * jakou cestou, do kdy a co s tím — přes VŠECHNY agendy i to, co appka
    * jen počítá nebo drží jako úkol bez podání (viz {@see PayrollMonthlyChecklistItem}).
    */
+  monthGuide: (period: string, environment: PayrollRegzelEnvironment = 'production') =>
+    api.get<PayrollMonthGuideResponse>('/payroll/month-guide', {
+      params: { period, environment },
+    }).then(response => response.data),
   monthlyChecklist: (environment: PayrollRegzelEnvironment, period: string) =>
     api.get<PayrollMonthlyChecklistResponse>('/payroll/submissions/monthly-checklist', {
       params: { environment, period },
@@ -10473,6 +10543,15 @@ export const payrollApi = {
     '/payroll/submissions/registration-a1',
     { params: { environment, ...period } },
   ).then(response => response.data),
+  setRegistrationA1Defaults: (payload: {
+    employment_ids: number[]
+    defaults: PayrollRegistrationA1Defaults
+    overwrite: boolean
+    split_house_number: boolean
+  }) => api.post<PayrollRegistrationA1DefaultsResult>(
+    '/payroll/submissions/registration-a1/defaults',
+    payload,
+  ).then(response => response.data),
   prepareRegistrationA1Batch: (payload: {
     environment: PayrollJmhzTransportEnvironment
     employment_ids: number[]
@@ -10836,6 +10915,14 @@ export const payrollApi = {
     payload: PayrollEmploymentSurchargePolicyUpdatePayload,
   ) => api.put<{ policy: PayrollEmploymentSurchargePolicy }>(
     `/payroll/employments/${employmentId}/surcharge-policies/${policyId}`,
+    payload,
+  ).then(response => response.data.policy),
+  moveEmploymentSurchargePolicyStart: (
+    employmentId: number,
+    policyId: number,
+    payload: { valid_from: string, row_version: number },
+  ) => api.post<{ policy: PayrollEmploymentSurchargePolicy }>(
+    `/payroll/employments/${employmentId}/surcharge-policies/${policyId}/valid-from`,
     payload,
   ).then(response => response.data.policy),
   closeEmploymentSurchargePolicy: (

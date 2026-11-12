@@ -6,6 +6,7 @@ export const PAYROLL_MANUAL_CHAPTERS: PayrollManualChapterRule[] = [
   [/^\/payroll\/travel(?:\/|$)/, '78_Cestovni_nahrady'],
   [/^\/payroll\/quick-inputs(?:\/|$)/, '79_Rychly_mesicni_vstup'],
   [/^\/payroll\/runs(?:\/|$)/, '80_Mzdove_behy'],
+  [/^\/payroll\/month-guide(?:\/|$)/, '80_Mzdove_behy'],
   [/^\/payroll\/posting-reconciliation(?:\/|$)/, '81_Shoda_uctovani_mezd'],
   [/^\/payroll\/posting-detail(?:\/|$)/, '81_Shoda_uctovani_mezd'],
   [/^\/payroll\/payments(?:\/|$)/, '82_Platby_a_uhrady'],

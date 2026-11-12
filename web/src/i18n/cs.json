@@ -2188,7 +2188,8 @@
     "property_funds": "Zálohy a příjmy vlastníků",
     "property_issuance": "Vydání předpisů",
     "internal_documents": "Interní doklady",
-    "quick_internal_document": "Interní doklad"
+    "quick_internal_document": "Interní doklad",
+    "payroll_month_guide": "Průvodce měsícem"
   },
   "migration_nonprofit_notice": {
     "title": "Převod pro neziskové organizace nebyl ověřen",
@@ -3839,7 +3840,9 @@
       "result": "Doplněno: {applied}. Nedoplněno: {skipped}.",
       "load_failed": "Náhled výplatních pravidel se nepodařilo načíst.",
       "apply_failed": "Výplatní pravidla se nepodařilo doplnit.",
-      "retry": "Zkusit znovu"
+      "retry": "Zkusit znovu",
+      "none_missing": "Všechny osoby s trvajícím vztahem už výplatní pravidlo mají.",
+      "truncated": "Náhled ukazuje prvních {count} osob bez pravidla. Po doplnění otevřete nabídku znovu pro další."
     },
     "health_insurer_bulk": {
       "known_later": "Pojišťovna je u osoby zapsaná až od {period}, předvyplněno k potvrzení.",
@@ -4460,7 +4463,8 @@
           "change_payment_date": "Změněno datum výplaty",
           "exclude_employee": "Osoba vyřazena z běhu",
           "include_employee": "Osoba vrácena do běhu",
-          "validation_overrides_carried": "Výjimky převzaté z předchozí revize"
+          "validation_overrides_carried": "Výjimky převzaté z předchozí revize",
+          "compensation_recalculated": "Náhrady přepočítané z nového průměru"
         }
       },
       "validation": {
@@ -4906,7 +4910,7 @@
         "average_removed": "průměr {from}/h, dnes žádný schválený",
         "compensation": "{component} {amount}, z nového průměru {expected}",
         "compensation_unknown": "{component} {amount}, přepočítejte ručně",
-        "compensation_body": "Náhrady mají pevnou částku z původního průměru a samy se nepřepočítají (rozdíl {difference}). V otevřené opravě zrušte vstup náhrady a zadejte ho znovu (dovolenou znovu schvalte, import podkladů použijte znovu), pak běh přepočítejte.",
+        "compensation_body": "Náhrady mají pevnou částku z původního průměru a samy se nepřepočítají (rozdíl {difference}). V otevřeném běhu nebo otevřené opravě je přepočítá tlačítko „Přepočítat náhrady z nového průměru“; u schváleného běhu nejdřív otevřete opravu.",
         "body_request_correction": "Schválený běh nese náhrady a průměr pro měsíční hlášení (10345) ze starého průměru. Otevřete opravu: nová revize převezme aktuální podklady a běh se přepočítá. Schválení zůstává na vás. Podané hlášení pak opravte opravným hlášením.",
         "body_reopen": "Oprava je vyžádaná. Otevřete ji: nová revize převezme aktuální podklady a běh se přepočítá.",
         "body_refresh_inputs": "Běh je spočítaný ze starého průměru a bez obnovy podkladů ho schválit nejde. Obnovte podklady a běh se přepočítá.",
@@ -4915,7 +4919,8 @@
         "action_reopen": "Otevřít opravu a obnovit podklady",
         "action_refresh_inputs": "Obnovit podklady a přepočítat",
         "action_forbidden": "Opravu běhu a obnovu podkladů může udělat uživatel s právy kontrolovat, odemknout a vypočítat mzdy.",
-        "reason": "Průměr pro náhrady se změnil po schválení"
+        "reason": "Průměr pro náhrady se změnil po schválení",
+        "recalculate_compensations": "Přepočítat náhrady z nového průměru"
       },
       "missing_employments": {
         "title": "V běhu nechybí žádný vztah | V běhu chybí {count} pracovní vztah, který do období patří | V běhu chybí {count} pracovní vztahy, které do období patří | V běhu chybí {count} pracovních vztahů, které do období patří",
@@ -6740,6 +6745,7 @@
       "filter": "Zobrazení",
       "quick_inputs": "Měsíční zadání mezd",
       "statutory_bulk_action": "Doplnit výchozí zákonné údaje",
+      "payout_defaults_action": "Výplatní pravidla z karet osob",
       "declaration_sign_bulk_action": "Podepsaná prohlášení hromadně",
       "workplace_bulk_action": "Doplnit místo výkonu práce",
       "terms_bulk_action": "Upravit podmínky vybraných vztahů",
@@ -9257,6 +9263,9 @@
         "valid_from": "Platí od",
         "valid_from_required": "Vyplňte datum, od kterého zásada platí.",
         "valid_from_locked": "Změna data nesmí zasáhnout do zmrazeného nebo schváleného období ani překročit sousední verzi.",
+        "move_start": "Posunout začátek",
+        "move_start_save": "Uložit začátek",
+        "start_moved": "Začátek zásady příplatků byl posunut.",
         "valid_to": "Ukončit platnost k",
         "valid_to_hint": "Nepovinné. Vyplněním se zásada uzavře; od dalšího dne platí zákonný výchozí stav, takže u svátku náhradní volno a u ztíženého prostředí chybějící podklad.",
         "valid_to_invalid": "Konec platnosti nesmí předcházet začátku platnosti zásady.",
@@ -13043,6 +13052,28 @@
         "predecessor": "Přihlášku podal předchozí program.",
         "profile_incomplete": "Profil registrace není úplný, přihláška se nepřipravila.",
         "not_found": "Vztah nebyl nalezen nebo už skončil."
+      },
+      "defaults": {
+        "intro": "Neúplný profil A1 má {count} vztahů v období. Společné údaje, které aplikace jinde nevede (režim práce, nepřetržitý provoz, pozice, obec pracoviště, vedoucí pozice), jim můžete nastavit najednou.",
+        "open": "Nastavit společné údaje A1",
+        "close": "Skrýt",
+        "work_mode": "Režim práce",
+        "continuous_operation": "Nepřetržitý provoz",
+        "leadership": "Vedoucí pozice",
+        "position_name": "Název pozice",
+        "workplace_city": "Obec pracoviště",
+        "keep": "Neměnit",
+        "work_modes": {
+          "1": "Jednosměnný",
+          "2": "Dvousměnný",
+          "3": "Vícesměnný",
+          "4": "Neuvedeno"
+        },
+        "split_house_number": "Číslo domu oddělit z ulice („Dlouhá 12/3“ → ulice, číslo popisné a orientační), kde v profilu chybí",
+        "overwrite": "Přepsat i údaje, které už v profilu vyplněné jsou",
+        "apply": "Nastavit u {count} vztahů",
+        "done": "Hotovo: úplný profil {verified}, stále neúplný {draft}, přeskočeno {skipped}, chyba {failed}. Zbývající vady jsou u řádků níže.",
+        "failed": "Společné údaje A1 se nepodařilo nastavit."
       }
     },
     "healthInsurerNotice": {
@@ -15032,6 +15063,156 @@
       "submit": "Převzít podání",
       "load_failed": "Nepodařilo se načíst převzatá hlášení.",
       "save_failed": "Podání se nepodařilo převzít."
+    },
+    "compensation_recalculation": {
+      "title": "Přepočítat náhrady z nového průměru",
+      "open": "Přepočítat náhrady z nového průměru",
+      "hint": "Náhrady mzdy mají pevnou částku z průměru, který platil při jejich zadání. Tady vidíte náhrady spočítané ze staršího průměru a částku z dnes schváleného průměru. Po potvrzení se dovolená zadaná s daty a náhrady z importu hodin přepočítají (původní vstup se zruší a vznikne nový), ostatní náhrady je potřeba upravit ručně. Schválený mzdový běh se nemění.",
+      "bulk_hint": "Najde v měsících {quarter} náhrady spočítané ze staršího průměru, ukáže starou a novou částku a po potvrzení je přepočítá. Schválený běh nemění, navede na opravu.",
+      "loading": "Načítám náhrady…",
+      "empty": "Všechny náhrady jsou spočítané z dnes schváleného průměru.",
+      "load_failed": "Náhled náhrad se nepodařilo načíst.",
+      "apply_failed": "Náhrady se nepodařilo přepočítat.",
+      "amount_change": "{from} → {to}",
+      "average_change": "průměr {from}/h → {to}/h",
+      "period_ready": "Přepočte se náhrad: {count}, rozdíl {difference}. Otevřený běh za měsíc se po přepočtu vrátí k výpočtu (obnoví se podklady).",
+      "open_runs": "Otevřít mzdové běhy",
+      "columns": {
+        "person": "Osoba",
+        "compensation": "Náhrada",
+        "amount": "Stará → nová částka",
+        "action": "Co se stane"
+      },
+      "action": {
+        "recalculate": "přepočítá se částka dovolené",
+        "replace": "stornuje se a založí znovu",
+        "manual": "ručně",
+        "blocked": "běh je schválený"
+      },
+      "confirm": "Přepočítat ({count})",
+      "forbidden": "Přepočítat náhrady smí uživatel s právem zapisovat mzdové vstupy.",
+      "refresh_forbidden": "Náhrady jsou v otevřeném mzdovém běhu a po přepočtu je potřeba obnovit podklady. To smí uživatel s právem Spočítat mzdy.",
+      "drafts_hint": "Nemáte právo schvalovat mzdové vstupy, nové náhrady proto vzniknou jako koncepty ke schválení.",
+      "done": "{period}: přepočítaných náhrad {count}.",
+      "done_drafts": "Nové náhrady čekají na schválení v Mzdových vstupech.",
+      "done_refreshed": "Podklady běhu se obnovily, běh spočítejte znovu."
+    },
+    "month_guide": {
+      "title": "Průvodce měsícem mezd",
+      "subtitle": "Měsíční uzávěrka mezd v sedmi krocích. U každého kroku vidíte, co je hotové a co zbývá, a hlavní tlačítko vás pošle na obrazovku, kde se to udělá. Průvodce sám nic nepočítá ani neodesílá.",
+      "period": "Období",
+      "load_failed": "Průvodce měsícem se nepodařilo načíst.",
+      "retry": "Zkusit znovu",
+      "refresh": "Obnovit stav",
+      "loading": "Načítám stav měsíce…",
+      "progress": "Hotovo {done} z {total} kroků",
+      "all_done": "Měsíc je kompletní: mzdy jsou schválené, podání splněná a platby doložené.",
+      "current": "Teď na řadě",
+      "open_guide": "Průvodce měsícem",
+      "remaining": "zbývá {count} | zbývá {count} | zbývají {count} | zbývá {count}",
+      "state": {
+        "done": "Hotovo",
+        "todo": "Chybí {count} | Chybí {count} | Chybí {count} | Chybí {count}",
+        "todo_plain": "K udělání",
+        "waiting": "Zatím nelze",
+        "unavailable": "Bez oprávnění"
+      },
+      "unavailable_hint": "K údajům tohoto kroku nemáte oprávnění. Požádejte správce firmy o přístup k podáním mezd.",
+      "steps": {
+        "inputs": {
+          "title": "Podklady měsíce",
+          "hint": "Docházka, mzdové vstupy a nepřítomnosti za měsíc. Agentura s mnoha dohodami je nejrychleji naplní importem docházky, malá firma rychlým měsíčním vstupem."
+        },
+        "people": {
+          "title": "Noví lidé a dohody",
+          "hint": "Lidé a dohody založené z importu a údaje, bez kterých měsíc neprojde (pojišťovna, prohlášení, způsob výplaty)."
+        },
+        "registrations": {
+          "title": "Registrace ČSSZ a oznámení ZP",
+          "hint": "Přihlášky zaměstnanců (A1) připravíte hromadně, odejdou ve frontě K odeslání. Co jste podali jinde, označte jako podané mimo aplikaci."
+        },
+        "check": {
+          "title": "Kontrola před během",
+          "hint": "Co zastaví výpočet nebo schválení. Hromadné opravy otevřou hotový dialog v seznamu zaměstnanců."
+        },
+        "run": {
+          "title": "Výpočet a schválení",
+          "hint": "Založte mzdový běh, spočítejte mzdy a schvalte je.",
+          "waiting": "Běh nejde založit, dokud kontrola před během hlásí blokující nález."
+        },
+        "submissions": {
+          "title": "JMHZ a další měsíční podání",
+          "hint": "Měsíční hlášení zaměstnavatele, přehledy pojišťovnám a další povinnosti měsíce. Hlášení JMHZ si před odesláním můžete otestovat nebo ho odložit.",
+          "waiting": "Hlášení se připravují ze schváleného běhu. Nejdřív schvalte mzdy."
+        },
+        "payments": {
+          "title": "Platby a výplatní pásky",
+          "hint": "Platební příkazy, spárování úhrad s výpisem a vydání výplatních pásek.",
+          "waiting": "Platby a pásky vzniknou ze schváleného běhu."
+        }
+      },
+      "action": {
+        "time": "Otevřít docházku",
+        "attendance_import": "Importovat docházku",
+        "absences": "Rozhodnout nepřítomnosti",
+        "quick_inputs": "Otevřít měsíční vstupy",
+        "runs": "Otevřít kontroly v Mzdových bězích",
+        "people_gaps": "Doplnit chybějící údaje",
+        "people": "Otevřít zaměstnance",
+        "registration_a1": "Připravit přihlášky hromadně",
+        "health": "Otevřít oznámení pojišťovnám",
+        "create_run": "Založit a spočítat běh",
+        "run": "Otevřít mzdový běh",
+        "monthly_checklist": "Otevřít měsíční přehled podání",
+        "payments": "Otevřít platby mezd"
+      },
+      "secondary": {
+        "quick_inputs": "Rychlý měsíční vstup",
+        "attendance_import": "Import docházky",
+        "people_import": "Založit lidi z importu docházky",
+        "queue": "Fronta K odeslání",
+        "external": "Podáno mimo aplikaci ({count})",
+        "jmhz": "Test XML a odložení JMHZ",
+        "documents": "Výplatní pásky a dokumenty"
+      },
+      "facts": {
+        "batches": "Importy docházky za měsíc: {count} (osob: {persons})",
+        "no_batches": "Za měsíc zatím není žádný import docházky.",
+        "stopping": "Z toho zastaví schválení: {count}",
+        "a1": "Přihlášky A1 za {from} - {to}: {total} (připravit lze {preparable}, neúplné {incomplete}, zatím brzy {too_early}, po termínu {overdue})",
+        "a1_range": "Hromadná příprava se otevře na výchozím období; pro tento měsíc v ní nastavte rozsah {from} - {to}.",
+        "hoz": "Otevřená oznámení zdravotním pojišťovnám: {count}",
+        "by_impact": "Zastaví: {stop} · stojí opravnou revizi: {revision} · doplní se kdykoli: {anytime}",
+        "run_blockers": "Kontroly běhu, které brání schválení: {count}",
+        "readiness_unknown": "Kontrolu před během se nepodařilo dokončit. Otevřete Mzdové běhy, tam se spustí znovu.",
+        "status": "Stav běhu: {status}",
+        "no_run": "Za měsíc zatím není mzdový běh.",
+        "checklist": "Splněno {done} z {total} (k odeslání {send}, k přípravě {generate}, ručně {manual}, čeká na výsledek {waiting})",
+        "jmhz": "JMHZ: splněno {done} z {total}",
+        "coverage": "Doložené úhrady: {settled} z {total}",
+        "documents": "Dokumentů za měsíc: {count}"
+      },
+      "code": {
+        "time_month_not_approved": "Neschválená docházka",
+        "time_month_missing": "Chybí docházka",
+        "draft_inputs_present": "Neschválené mzdové vstupy",
+        "employment_without_inputs": "Bez mzdy v měsíci",
+        "hourly_claim_component_conflict": "Souběh hodinového nároku a složky",
+        "recurring_component_without_input": "Pravidelná složka bez vstupu",
+        "absence_pending_decision": "Nepřítomnost čeká na rozhodnutí",
+        "inputs_on_unstarted_employment": "Vstupy u nenastoupeného vztahu",
+        "person_data_gap": "Chybějící údaje osob",
+        "payout_rule_missing": "Chybí způsob výplaty",
+        "tax_declaration_evidence_missing": "Chybí doklad k prohlášení",
+        "tax_declaration_not_signed_summary": "Nepodepsané prohlášení poplatníka",
+        "tax_residence_missing_unsigned_summary": "Chybí daňová rezidence",
+        "health_coverage_missing_summary": "Chybí zdravotní pojišťovna",
+        "social_jurisdiction_missing_summary": "Chybí příslušnost k pojištění",
+        "annual_accumulator_missing_summary": "Chybí roční úhrny",
+        "employments_past_agreed_end": "Dohody po sjednaném konci",
+        "statutory_calculation_manual_review": "Ruční kontrola zákonného výpočtu",
+        "other": "Další nálezy"
+      }
     }
   },
   "foreign_income": {
@@ -25584,7 +25765,19 @@
     "dic": "DIČ",
     "clients": "Klientů",
     "invoices": "Faktur",
-    "delete_confirm": "Smazat dodavatele? Lze jen pokud nemá klienty ani faktury.",
+    "delete_dialog": {
+      "title": "Smazat firmu {name}",
+      "warning_title": "Smazání je nevratné.",
+      "warning": "Smaže se všechno, co firma v aplikaci má: doklady, účetní deník, mzdy a personalistika, podání, SVJ, dokumenty, nastavení i soubory v úložišti. Data nepůjde obnovit jinak než ze zálohy. Před smazáním si ověřte, že je máte uložena jinde.",
+      "summary": "Smaže se {rows} řádků v {tables} evidencích a {files} položek úložiště.",
+      "protected": "Z toho {count} evidencí jen pro přidávání (mzdy, podání, SVJ), které se jinak smazat nedají.",
+      "is_last": "Je to poslední firma instalace, tu smazat nelze.",
+      "type_ic": "Pro potvrzení opište IČO firmy: {value}",
+      "type_name": "Firma nemá IČO. Pro potvrzení opište přesný název firmy: {value}",
+      "submit": "Nevratně smazat firmu",
+      "deleting": "Mažu…",
+      "done": "Firma {name} byla smazána."
+    },
     "create_title": "Nový dodavatel",
     "create_hint": "Po vytvoření se automaticky založí výchozí měny CZK + EUR. Bankovní spojení vyplňte v Nastavení po přepnutí na nového dodavatele.",
     "carry_over": {
@@ -25630,7 +25823,8 @@
     "street": "Ulice + č.p.",
     "zip": "PSČ",
     "city": "Město",
-    "email": "E-mail"
+    "email": "E-mail",
+    "delete_confirm": "Smazat dodavatele? Lze jen pokud nemá klienty ani faktury."
   },
   "type": {
     "invoice": "Faktura",
@@ -36328,6 +36522,7 @@
     "tabs": {
       "label": "Druh importu",
       "registration": "JMHZ",
+      "agreements": "Dohody",
       "attendance": "Docházka",
       "mapping": "Mapování sloupců",
       "pohoda_oic": "OIČ z POHODY",
@@ -36752,6 +36947,14 @@
       "tax_declaration_from": "Prohlášení od",
       "education_code": "Vzdělání (KKOV)",
       "employment_status_code": "Postavení v zaměstnání (NKPZ)",
+      "birth_surname": "Rodné příjmení",
+      "birth_place": "Místo narození",
+      "birth_country": "Stát narození",
+      "work_mode_code": "Režim práce (A1)",
+      "continuous_operation": "Nepřetržitý provoz (A1)",
+      "workplace_city": "Obec pracoviště (A1)",
+      "position_name": "Název pozice (A1)",
+      "leadership": "Vedoucí pozice (A1)",
       "worked_hours": "Odpracováno",
       "worked_days": "Odpracované dny",
       "overtime_hours": "Přesčas",
@@ -36888,7 +37091,14 @@
         "tax_residence": "Daňová rezidence",
         "tax_declaration": "Prohlášení od",
         "employment_status_code": "Postavení v zaměstnání",
-        "education_code": "Vzdělání"
+        "education_code": "Vzdělání",
+        "birth": "Narození",
+        "work_mode_code": "Režim práce",
+        "position_name": "Pozice",
+        "workplace_city": "Obec pracoviště",
+        "continuous_operation": "Nepřetržitý provoz",
+        "leadership": "Vedoucí pozice",
+        "house_number": "Číslo domu"
       },
       "persons": {
         "title": "Osoby",
@@ -37346,7 +37556,70 @@
       }
     },
     "no_access_title": "Žádný import není dostupný",
-    "no_access_description": "K importům mzdových podkladů ani k agendě přechodu z jiného mzdového programu nemáte oprávnění."
+    "no_access_description": "K importům mzdových podkladů ani k agendě přechodu z jiného mzdového programu nemáte oprávnění.",
+    "agreements": {
+      "title": "Import dohod",
+      "hint": "Hromadné uzavření dohod bez docházky: jeden řádek souboru = jedna dohoda nebo pracovní poměr, bez vazby na měsíc. Osobě, která už v evidenci je (podle rodného čísla, uložené vazby nebo osobního čísla), se založí jen nová dohoda, nové osobě karta i dohoda. Vyplněné údaje pro registraci stačí k hromadné přípravě přihlášek A1.",
+      "no_permission": "Zakládat osoby a dohody může jen uživatel s právem zápisu osob ve mzdách.",
+      "drop_hint": "Přetáhněte sem soubor XLSX nebo CSV se šablonou dohod",
+      "preview": "Načíst náhled",
+      "refresh_preview": "Načíst náhled znovu",
+      "template": "Stáhnout šablonu XLSX",
+      "template_hint": "Šablona s hlavičkami, dvěma ukázkovými řádky a návodem ke sloupcům",
+      "preview_failed": "Náhled importu dohod se nepodařilo načíst.",
+      "apply_failed": "Dohody se nepodařilo založit.",
+      "applied": "Založeno dohod: {created}, už existovalo: {existing}, přeskočeno: {skipped}.",
+      "applied_with_errors": "Založeno dohod: {created}, chyb: {failed}, přeskočeno: {skipped}. Zkontrolujte výsledek.",
+      "summary": {
+        "persons": "Osoby",
+        "new_persons": "Nové osoby",
+        "existing_persons": "V evidenci",
+        "confirm": "K potvrzení",
+        "create": "Dohody k založení",
+        "exists": "Už existují",
+        "errors": "Chyby"
+      },
+      "persons_title": "Osoby a dohody ze souboru",
+      "no_rows": "Soubor neobsahuje žádné řádky s dohodami.",
+      "existing": "V evidenci: {name}",
+      "new_person": "Nová osoba",
+      "confirm_legend": "Shoda podle jména a data narození",
+      "confirm_hint": "V evidenci je {name} se stejným jménem a datem narození. Je to tatáž osoba?",
+      "confirm_existing": "Ano, založit jí jen dohody",
+      "confirm_new": "Ne, založit novou osobu",
+      "status": {
+        "create": "Založí se",
+        "exists": "Už existuje",
+        "duplicate": "Opakovaný řádek",
+        "error": "Chyba"
+      },
+      "outcome": {
+        "created": "Založeno",
+        "existing": "Už existovalo",
+        "skipped": "Přeskočeno",
+        "failed": "Chyba"
+      },
+      "relation": {
+        "dpp": "DPP",
+        "dpc": "DPČ",
+        "employment": "Pracovní poměr",
+        "small_scale_employment": "Zaměstnání malého rozsahu"
+      },
+      "open_ended": "od {date}, na dobu neurčitou",
+      "source_row": "{sheet}, řádek {row}",
+      "apply_hint": "Založí se jen řádky ve stavu „Založí se“. Dohody, které osoba už má, ani řádky s chybou se nezakládají; stejný soubor můžete po opravě nahrát znovu.",
+      "apply": "Založit dohody ({count})",
+      "applying": "Zakládám… {done} z {total} osob",
+      "reason": {
+        "no_files": "Nejdřív nahrajte soubor.",
+        "nothing": "V náhledu není žádná dohoda k založení.",
+        "unconfirmed": "Rozhodněte u {count} osob, zda jde o osobu z evidence."
+      },
+      "result_title": "Výsledek založení",
+      "result_summary": "Založeno {created}, už existovalo {existing}, přeskočeno {skipped}, chyb {failed}.",
+      "next_a1": "Přihlášky k pojištění připravíte hromadně v části",
+      "next_a1_link": "Mzdová podání → Přihlášky k podání (A1)"
+    }
   },
   "pamica": {
     "title": "Přechod z PAMICA",

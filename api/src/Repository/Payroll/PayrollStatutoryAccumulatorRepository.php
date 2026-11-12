@@ -1089,6 +1089,49 @@ final class PayrollStatutoryAccumulatorRepository
     }
 
     /**
+     * Osoby, které mají za rok aktuální (nenahrazený) počáteční stav aspoň
+     * jednoho z uvedených druhů kumulace. Dávková obdoba {@see openingBalance()}.
+     *
+     * @param list<string> $calculationKinds
+     * @param list<int> $employeeIds
+     * @return list<int>
+     */
+    public function employeesWithCurrentOpening(
+        int $supplierId,
+        int $year,
+        array $calculationKinds,
+        array $employeeIds,
+    ): array {
+        $found = [];
+        if ($calculationKinds === []) {
+            return [];
+        }
+        $kinds = implode(', ', array_fill(0, count($calculationKinds), '?'));
+        foreach (array_chunk(array_values(array_unique($employeeIds)), 500) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT DISTINCT opening.employee_id
+                   FROM payroll_statutory_accumulator_openings opening
+                  WHERE opening.supplier_id = ?
+                    AND opening.tax_year = ?
+                    AND opening.calculation_kind IN (' . $kinds . ')
+                    AND opening.employee_id IN (' . implode(', ', array_fill(0, count($chunk), '?')) . ')
+                    AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_statutory_accumulator_openings successor
+                       WHERE successor.supplier_id = opening.supplier_id
+                         AND successor.replaces_opening_id = opening.id
+                    )'
+            );
+            $stmt->execute([$supplierId, $year, ...$calculationKinds, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $employeeId) {
+                $found[] = (int) $employeeId;
+            }
+        }
+
+        return $found;
+    }
+
+    /**
      * Období roku, za která už zaměstnanec má schválený zákonný výsledek.
      *
      * Není to zámek — je to seznam měsíců, které se počítaly NAD tehdejším

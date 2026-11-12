@@ -24,6 +24,7 @@
 | jednou při zavádění | Potvrdit profil REGZEL | záložka **Podání**, [§ 90.9](#909-krok-za-krokem-profil-regzel-a-rocni-udaje-pro-jmhz) |
 | jednou při přechodu | Převzít zaměstnance a historii z JMHZ a registrací | `Mzdy → Importy`, záložka **JMHZ**, [§ 90.10](#9010-krok-za-krokem-import-zamestnancu-z-jmhz-a-registraci) |
 | každý měsíc | Nahrát docházku | záložka **Docházka**, [§ 90.11](#9011-krok-za-krokem-mesicni-import-dochazky) |
+| před akcí, hromadně | Uzavřít dohody bez docházky | záložka **Dohody**, [§ 90.11.1](#90111-krok-za-krokem-import-dohod-bez-dochazky) |
 | před prosincovým JMHZ | Vyplnit roční údaje zaměstnavatele | záložka **Podání**, **Roční údaje zaměstnavatele pro JMHZ** |
 | při změně | Nový účet instituce, nová sazba, nová politika | příslušná záložka, vždy jako nový záznam s účinností |
 
@@ -259,6 +260,45 @@ na kartě pracovního vztahu.
 
 **Jak poznáte, že je hotovo:** V historii importů je dávka za měsíc a v mzdových
 vstupech jsou návrhy z ní.
+
+
+### 90.11.1 Krok za krokem: import dohod bez docházky
+
+Hromadné uzavření dohod (typicky DPP před akcí) a příprava přihlášek ČSSZ bez
+vazby na měsíc. Potřebujete oprávnění k zápisu osob.
+
+1. Otevřete `Mzdy → Importy`, záložku **Dohody**, a klikněte na **Stáhnout
+   šablonu XLSX**. List **Dohody** má jeden řádek na jednu dohodu nebo pracovní
+   poměr, list **Návod** popisuje sloupce. Dva ukázkové řádky smažte.
+2. Vyplňte povinné **Příjmení**, **Jméno** (nebo jeden sloupec **Příjmení
+   a jméno**), **Druh vztahu** (DPP, DPČ, HPP) a **Nástup**. Dále **Rodné
+   číslo** jako text, **Konec dohody**, **Hodinová sazba**, **Měsíční odměna**,
+   **Zdravotní pojišťovna**, **Číslo účtu** a údaje pro registraci a přihlášku
+   A1 se stejnými sloupci jako šablona docházky (viz § 90.14.11). Jedna osoba
+   může mít víc řádků, každý je samostatná dohoda.
+3. Nahrajte soubor a klikněte na **Načíst náhled**. U každé osoby je vidět,
+   zda je **Nová osoba**, nebo **V evidenci** (podle rodného čísla, uložené
+   vazby importu nebo jednoznačného osobního čísla), a u každé dohody stav
+   **Založí se**, **Už existuje**, **Opakovaný řádek** nebo **Chyba** s důvodem.
+4. Osobu bez rodného čísla, která má v evidenci shodu jménem a datem narození,
+   potvrďte: **Ano, založit jí jen dohody**, nebo **Ne, založit novou osobu**.
+5. Klikněte na **Založit dohody**. Zakládá se po 50 osobách, tlačítko ukazuje
+   průběh. Výsledek vypíše založené, existující, přeskočené a chybné řádky.
+
+Osoba z evidence dostane jen nový pracovní vztah, nová karta ani druhé rodné
+číslo nevznikne; účet a pojišťovnu má z karty. Nová osoba dostane kartu
+i vztah. Dohoda s nástupem dnes nebo dřív je aktivní, budoucí zůstane
+plánovaná. Údaje pro registraci se nové osobě zapíší celé, existující jen ty,
+které jí chybí.
+
+**Opakovaný import.** Dohodu, kterou osoba už má (stejný druh vztahu platný
+ke dni nástupu z řádku), import nezaloží znovu. Stejný soubor nahraný podruhé
+proto nic nového nezaloží a po opravě chybných řádků ho můžete nahrát celý
+znovu. Řádek, který v souboru opakuje dřívější dohodu téže osoby, se přeskočí.
+
+**Jak poznáte, že je hotovo:** Výsledek nehlásí chyby a v náhledu načteném
+znovu jsou všechny dohody **Už existuje**. Pak připravte přihlášky v
+`Mzdy → Podání a hlášení → Mimořádná podání ▾ → Přihlášky k podání (A1)`.
 
 ## 90.12 Krok za krokem: OIČ z POHODY
 
@@ -563,8 +603,8 @@ uživatel s právem schvalovat mzdové běhy.
 ### 90.14.10 Import JMHZ: registrace a měsíční hlášení
 
 `Mzdy → Importy` leží v menu za Nastavením mezd a slouží k převzetí dat při
-zavádění mezd i v běžném měsíci. Záložky **JMHZ**, **Docházka**, **Mapování
-sloupců** a **OIČ z POHODY** pracují stejně: nahrajete soubory, prohlédnete
+zavádění mezd i v běžném měsíci. Záložky **JMHZ**, **Dohody**, **Docházka**,
+**Mapování sloupců** a **OIČ z POHODY** pracují stejně: nahrajete soubory, prohlédnete
 náhled a teprve tlačítkem **Použít** se něco zapíše. Soubory se na serveru
 neukládají, při použití se náhled spočítá znovu. Záložky přechodu z jiného
 programu (**Převzaté mzdy**, **Kontrola převzetí**, **Kontace z převzetí**) se
@@ -963,7 +1003,7 @@ každý sloupec šablony.
 | Skupina | Sloupce |
 |---|---|
 | Osoba | Osobní číslo, Příjmení a jméno (povinné), Rodné číslo, Datum narození, Zdravotní pojišťovna (kód), Druh vztahu (HPP, DPP, DPČ), Nástup, Týdenní úvazek, Měsíční mzda, Hodinová sazba (Kč/h), Konec dohody, Číslo účtu |
-| Registrace ČSSZ | Ulice, Číslo domu, Obec, PSČ, Stát, Státní občanství, CZ-ISCO, Druh činnosti, Místo výkonu práce, Daňová rezidence, Prohlášení poplatníka, Prohlášení od, Vzdělání, Postavení v zaměstnání |
+| Registrace ČSSZ | Ulice, Číslo domu, Obec, PSČ, Stát, Státní občanství, CZ-ISCO, Druh činnosti, Místo výkonu práce, Daňová rezidence, Prohlášení poplatníka, Prohlášení od, Vzdělání, Postavení v zaměstnání, Rodné příjmení, Místo narození, Stát narození, Režim práce, Nepřetržitý provoz, Obec pracoviště, Název pozice, Vedoucí pozice |
 | Hodiny a dny | Odpracováno; Odpracované dny; z toho noc, víkend, svátek, přesčas; Dovolená, Nemoc, Lékař |
 | Peníze (Kč za měsíc) | Hodinová mzda celkem, Odměna, Mimořádná odměna, Srážka z čisté mzdy |
 
@@ -1002,7 +1042,19 @@ a slouží k tomu, aby šlo osobu přihlásit k ČSSZ bez dopisování karet:
   **Prohlášení od** (bez něj ke dni nástupu). První měsíc slevy určí stejně
   jako hromadný zápis prohlášení podle § 38k ZDP;
 - **Vzdělání** (kód KKOV, např. M) a **Postavení v zaměstnání** (čtyřmístný kód
-  NKPZ) jdou do profilu registrace.
+  NKPZ) jdou do profilu registrace;
+- **Rodné příjmení** se zapíše na kartu osoby, **Místo narození** a **Stát
+  narození** (kód státu) do údajů pro registraci zaměstnance;
+- povinné údaje přihlášky A1, které aplikace jinde nevede, jdou do profilu
+  registrace A1: **Režim práce** (1 jednosměnný, 2 dvousměnný, 3 vícesměnný,
+  4 neuvedeno; stačí i slovo „jednosměnný"), **Nepřetržitý provoz** a **Vedoucí
+  pozice** (ano, ne), **Název pozice** a **Obec pracoviště** (prázdná = obec
+  z Místa výkonu práce). **Číslo domu** se v profilu A1 rozdělí na číslo popisné
+  a orientační („12/3").
+
+S vyplněnými sloupci má nová osoba po založení ověřený profil A1 a přihlášku
+jde připravit hromadně bez ručního vyplňování karty (viz
+[Podání a hlášení § 85.5](85_Podani_a_hlaseni.md#855-krok-za-krokem-nastup-zamestnance)).
 
 Nové osobě se všechno zapíše při založení a náhled zakládání to u ní ukáže.
 U osoby, která už v evidenci je, ukáže souhrn jen chybějící údaje a volba

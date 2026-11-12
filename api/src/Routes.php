@@ -1162,6 +1162,9 @@ final class Routes
             $g->post('/imports/attendance/profiles/import', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'importProfile']);
             $g->post('/imports/attendance/profiles/sample', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'restoreSampleProfile']);
             $g->get('/imports/attendance/template', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'template']);
+            $g->post('/imports/agreements/preview', [\MyInvoice\Action\Payroll\PayrollAgreementImportAction::class, 'preview']);
+            $g->post('/imports/agreements/apply', [\MyInvoice\Action\Payroll\PayrollAgreementImportAction::class, 'apply']);
+            $g->get('/imports/agreements/template', [\MyInvoice\Action\Payroll\PayrollAgreementImportAction::class, 'template']);
             // Dodatečné hromadné schválení pracovních měsíců z použité dávky docházky.
             $g->post('/time/imports/attendance/{id:[0-9]+}/apply', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'approveTimeMonths']);
             $g->get('/payments/liabilities', [PayrollPaymentAction::class, 'listLiabilities']);
@@ -1251,6 +1254,7 @@ final class Routes
                 [PayrollPostingReconciliationAction::class, 'get'],
             );
             $g->get('/runs', [PayrollRunsAction::class, 'list']);
+            $g->get('/month-guide', \MyInvoice\Action\Payroll\PayrollMonthGuideAction::class);
             $g->get('/reports/annual/{year:[0-9]{4}}', [PayrollAnnualReportAction::class, 'show']);
             // Náklady na zaměstnance po dimenzi — nad cílovými alokacemi
             // účetního můstku, ne nad deníkem (ten se po zaměstnanci neúčtuje).
@@ -2210,6 +2214,10 @@ final class Routes
                 [\MyInvoice\Action\Payroll\PayrollRegistrationA1BatchAction::class, 'prepare'],
             );
             $g->post(
+                '/submissions/registration-a1/defaults',
+                [\MyInvoice\Action\Payroll\PayrollRegistrationA1BatchAction::class, 'defaults'],
+            );
+            $g->post(
                 '/submissions/registration-transport/{submissionId:[0-9]+}',
                 [PayrollRegistrationTransportAction::class, 'send'],
             );
@@ -2620,6 +2628,12 @@ final class Routes
                 '/employments/{id:[0-9]+}/surcharge-policies/{policyId:[0-9]+}/close',
                 [PayrollEmploymentSurchargePolicyAction::class, 'close'],
             );
+            // Posun začátku verze, podle které se ještě nepočítalo; hranice
+            // s předchozí verzí se posune s ním.
+            $g->post(
+                '/employments/{id:[0-9]+}/surcharge-policies/{policyId:[0-9]+}/valid-from',
+                [PayrollEmploymentSurchargePolicyAction::class, 'moveStart'],
+            );
             $g->get('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'list']);
             $g->post('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'create']);
             // Procentní rozpad vztahu na víc hodnot jednoho typu (70 / 30) — celý
@@ -2654,6 +2668,15 @@ final class Routes
             $g->post('/time/averages', [PayrollAbsenceAction::class, 'createAverage']);
             $g->post('/time/averages/{id:[0-9]+}/approve', [PayrollAbsenceAction::class, 'approveAverage']);
             $g->delete('/time/averages/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteAverage']);
+            // Přepočet náhrad z nového průměru: náhled a výslovné potvrzení účetní.
+            $g->get(
+                '/time/compensation-recalculation',
+                [\MyInvoice\Action\Payroll\PayrollCompensationRecalculationAction::class, 'preview'],
+            );
+            $g->post(
+                '/time/compensation-recalculation',
+                [\MyInvoice\Action\Payroll\PayrollCompensationRecalculationAction::class, 'apply'],
+            );
             $g->get('/time/leave-ledger', [PayrollAbsenceAction::class, 'leaveLedger']);
             $g->post('/time/leave-ledger', [PayrollAbsenceAction::class, 'createLeaveEntry']);
             $g->delete('/time/leave-ledger/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteLeaveEntry']);
@@ -3859,6 +3882,7 @@ final class Routes
         $app->get    ('/api/suppliers/{id:[0-9]+}',         [SettingsAction::class, 'getSupplierById']);
         $app->put    ('/api/suppliers/{id:[0-9]+}',         [SettingsAction::class, 'updateSupplierById']);
         $app->delete ('/api/suppliers/{id:[0-9]+}',         [SettingsAction::class, 'deleteSupplierById']);
+        $app->get    ('/api/suppliers/{id:[0-9]+}/delete-preview', [SettingsAction::class, 'deleteSupplierPreview']);
 
         // Settings (M6) — aktuální supplier (z X-Supplier-Id)
         $app->get ('/api/settings/supplier',                [SettingsAction::class, 'getSupplier']);

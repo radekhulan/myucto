@@ -74,6 +74,11 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Kroky a stavy průvodce měsícem (GET /payroll/month-guide)
+        'payroll.ts::PayrollMonthGuideStepKey'
+            => 'const:MyInvoice\Service\Payroll\Run\PayrollMonthGuide::STEP_KEYS',
+        'payroll.ts::PayrollMonthGuideStepState'
+            => 'const:MyInvoice\Service\Payroll\Run\PayrollMonthGuide::STATES',
         // Skupiny hodinové evidence, které server umí posoudit automatickou nulou
         'payroll.ts::PayrollHourlyAutomaticKey'
             => 'const:MyInvoice\Service\Payroll\PayrollHourlyEntitlementContextLoader::SELECTION_KEYS',
@@ -197,6 +202,12 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::ALL',
         'payrollImports.ts::AttendanceMatchStatus'
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::MATCH_STATUSES',
+        'payrollImports.ts::AgreementImportStatus'
+            => 'const:MyInvoice\Service\Payroll\Import\Agreement\AgreementImportService::STATUSES',
+        'payrollImports.ts::AgreementImportOutcome'
+            => 'const:MyInvoice\Service\Payroll\Import\Agreement\AgreementImportService::OUTCOMES',
+        'payrollImports.ts::AgreementRelationType'
+            => 'const:MyInvoice\Service\Payroll\Import\Agreement\AgreementImportService::RELATION_TYPES',
         'payroll.ts::PayrollAgreementAnnualHoursStatus'
             => 'const:MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours::STATUSES',
         'payroll.ts::PayrollDeclarationSignState'
@@ -494,6 +505,8 @@ final class PayrollEnumContractTest extends TestCase
         // Kam UI pošle nález hlášení a stav odloženého vztahu.
         'payroll.ts::PayrollJmhzRemediationKind'
             => 'const:MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog::KINDS',
+        'payroll.ts::PayrollJmhzExternalRootMode'
+            => 'const:MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCorrectionRootService::MODES',
         'payroll.ts::PayrollJmhzDeferralState'
             => 'const:MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeferralService::STATES',
         'payroll.ts::PayrollJmhzImportedProtocolKind' => 'db:payroll_imported_jmhz_protocols.protocol_kind',

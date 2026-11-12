@@ -533,6 +533,184 @@ final class PayrollSurchargeRepository
         }
     }
 
+    /**
+     * Posun začátku platnosti verze, podle které se ještě nepočítalo.
+     *
+     * Účinnost je hranice proti předchozí verzi. Když na ni předchozí verze
+     * navazovala (končila den před ní), posune se její konec s ní, takže mezi
+     * verzemi nevznikne díra ani překryv. Když mezi nimi díra byla (předchozí
+     * verze byla ukončena dřív), zůstane předchozí verze, jak je, a nový začátek
+     * do ní nesmí zasáhnout. Konec posouvané verze ani následující verze se
+     * nemění.
+     *
+     * Hranice se nesmí dotknout měsíce, který už zmrazila neodmítnutá revize
+     * běhu: ani dnů posouvané verze, ani dnů, které přechází mezi ní
+     * a předchozí verzí. Zmrazená mzda tak dál odpovídá zásadě, podle které
+     * vznikla.
+     *
+     * @return array<string,mixed>
+     */
+    public function movePolicyStart(
+        int $supplierId,
+        int $employmentId,
+        int $policyId,
+        string $validFrom,
+        int $expectedVersion,
+        ?callable $beforeWrite = null,
+    ): array {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $lock = $pdo->prepare('SELECT id FROM payroll_employments WHERE supplier_id = ? AND id = ? FOR UPDATE');
+            $lock->execute([$supplierId, $employmentId]);
+            if ($lock->fetchColumn() === false) {
+                throw new \InvalidArgumentException('Pracovní vztah nebyl nalezen.');
+            }
+            $versions = $pdo->prepare(
+                'SELECT id, valid_from, valid_to, row_version
+                   FROM payroll_employment_surcharge_policies
+                  WHERE supplier_id = ? AND employment_id = ?
+                  ORDER BY valid_from, id
+                  FOR UPDATE'
+            );
+            $versions->execute([$supplierId, $employmentId]);
+            $current = null;
+            $previous = null;
+            $next = null;
+            foreach ($versions->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $row = PayrollTimeValue::row($row, 'payroll_employment_surcharge_policy');
+                if ((int) $row['id'] === $policyId) {
+                    $current = $row;
+                    continue;
+                }
+                if ($current === null) {
+                    $previous = $row;
+                } elseif ($next === null) {
+                    $next = $row;
+                }
+            }
+            if ($current === null) {
+                throw new PayrollSurchargePolicyNotFoundException();
+            }
+            $currentVersion = (int) $current['row_version'];
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollSurchargePolicyConflictException($currentVersion);
+            }
+            $oldFrom = (string) $current['valid_from'];
+            $validTo = $current['valid_to'] === null ? null : (string) $current['valid_to'];
+            if ($validFrom === $oldFrom) {
+                return $this->findPolicy($supplierId, $employmentId, $policyId)
+                    ?? throw new PayrollSurchargePolicyNotFoundException();
+            }
+            if ($validTo !== null && $validFrom > $validTo) {
+                throw new \InvalidArgumentException(
+                    'Začátek platnosti nesmí být po konci platnosti této verze (' . $validTo . ').',
+                );
+            }
+            if ($next !== null && $validFrom >= (string) $next['valid_from']) {
+                throw new \InvalidArgumentException(
+                    'Začátek platnosti musí být před začátkem následující verze (' . $next['valid_from'] . ').',
+                );
+            }
+            $dayBefore = static fn (string $date): string => (new \DateTimeImmutable($date))->modify('-1 day')->format('Y-m-d');
+            $joined = false;
+            if ($previous !== null) {
+                if ($validFrom <= (string) $previous['valid_from']) {
+                    throw new \InvalidArgumentException(
+                        'Začátek platnosti musí být po začátku předchozí verze (' . $previous['valid_from'] . ').',
+                    );
+                }
+                $previousTo = $previous['valid_to'] === null ? null : (string) $previous['valid_to'];
+                $joined = $previousTo === null || $previousTo >= $dayBefore($oldFrom);
+                if (!$joined && $validFrom <= $previousTo) {
+                    throw new \InvalidArgumentException(
+                        'Začátek platnosti by zasáhl do předchozí verze, která platí do ' . $previousTo . '.',
+                    );
+                }
+            }
+            $this->assertPolicyRangeUnfrozen($supplierId, $employmentId, min($validFrom, $oldFrom), $validTo);
+            if ($beforeWrite !== null) {
+                $beforeWrite();
+            }
+
+            if ($joined) {
+                $boundary = $pdo->prepare(
+                    'UPDATE payroll_employment_surcharge_policies
+                        SET valid_to = ?, row_version = row_version + 1
+                      WHERE supplier_id = ? AND employment_id = ? AND id = ? AND row_version = ?'
+                );
+                $boundary->execute([
+                    $dayBefore($validFrom),
+                    $supplierId,
+                    $employmentId,
+                    (int) $previous['id'],
+                    (int) $previous['row_version'],
+                ]);
+                if ($boundary->rowCount() !== 1) {
+                    throw new PayrollSurchargePolicyConflictException($currentVersion);
+                }
+            }
+            $stmt = $pdo->prepare(
+                'UPDATE payroll_employment_surcharge_policies
+                    SET valid_from = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND employment_id = ? AND id = ? AND row_version = ?'
+            );
+            $stmt->execute([$validFrom, $supplierId, $employmentId, $policyId, $expectedVersion]);
+            if ($stmt->rowCount() !== 1) {
+                throw new PayrollSurchargePolicyConflictException($currentVersion);
+            }
+            $row = $this->findPolicy($supplierId, $employmentId, $policyId)
+                ?? throw new \RuntimeException('Posunutou zásadu příplatků se nepodařilo načíst.');
+
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+
+            return $row;
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Žádná neodmítnutá revize nezrušeného běhu nezmrazila vztah za měsíc,
+     * který zasahuje do dnů `$from` až `$through` (`null` = bez konce).
+     */
+    private function assertPolicyRangeUnfrozen(int $supplierId, int $employmentId, string $from, ?string $through): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT MIN(run.period_start)
+               FROM payroll_run_employments run_employment
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run_employment.supplier_id
+                AND revision.id = run_employment.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE run_employment.supplier_id = ?
+                AND run_employment.employment_id = ?
+                AND revision.status <> "abandoned"
+                AND run.status <> "cancelled"
+                AND LAST_DAY(run.period_start) >= ?
+                AND (? IS NULL OR run.period_start <= ?)'
+        );
+        $stmt->execute([$supplierId, $employmentId, $from, $through, $through]);
+        $frozen = $stmt->fetchColumn();
+        if (is_string($frozen) && $frozen !== '') {
+            throw new PayrollSurchargePolicyHistoryLockedException(sprintf(
+                'Začátek zásady příplatků nejde posunout: mzdový běh za %s už podle ní počítal. '
+                . 'Posunout jde jen začátek, který se nedotkne spočítaného měsíce; jinak založte novou verzi.',
+                substr($frozen, 5, 2) . '/' . substr($frozen, 0, 4),
+            ));
+        }
+    }
+
     /** @return array<string,mixed> */
     private function lockPolicy(int $supplierId, int $employmentId, int $policyId): array
     {

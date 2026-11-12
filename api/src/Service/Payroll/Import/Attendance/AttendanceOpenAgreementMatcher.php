@@ -33,10 +33,13 @@ final class AttendanceOpenAgreementMatcher
     }
 
     /**
+     * Bez `$withOpenAgreements` jen `existing_person` (import dohod): otevřené
+     * DPP ani upozornění k období se nehledají.
+     *
      * @param list<array<string,mixed>> $persons
      * @return list<array<string,mixed>>
      */
-    public function annotate(int $supplierId, string $periodStart, array $persons): array
+    public function annotate(int $supplierId, string $periodStart, array $persons, bool $withOpenAgreements = true): array
     {
         $wanted = [];
         foreach ($persons as $index => $person) {
@@ -82,6 +85,19 @@ final class AttendanceOpenAgreementMatcher
         foreach ($wanted as $index) {
             $person = $persons[$index];
             $employeeId = $existing[$index]['employee_id'] ?? null;
+            if (!$withOpenAgreements) {
+                if ($employeeId !== null && isset($summaries[$employeeId])) {
+                    $person['existing_person'] = [
+                        'employee_id' => $employeeId,
+                        'employee_name' => $summaries[$employeeId]['employee_name'],
+                        'matched_by' => $existing[$index]['matched_by'],
+                        'relation_type' => $summaries[$employeeId]['relation_type'] ?? 'dpp',
+                        'requires_confirmation' => $existing[$index]['matched_by'] === 'name_birth_date',
+                    ];
+                }
+                $persons[$index] = $person;
+                continue;
+            }
             if ($employeeId !== null && isset($summaries[$employeeId])) {
                 $confirm = $existing[$index]['matched_by'] === 'name_birth_date';
                 $person['existing_person'] = [

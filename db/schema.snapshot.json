@@ -1192,7 +1192,8 @@
         "2286_payroll_component_employer_contribution_non_monetary.sql",
         "2287_payroll_run_live_period_slot.sql",
         "2288_payroll_run_exclusions.sql",
-        "2289_payroll_jmhz_external_roots.sql"
+        "2289_payroll_snapshot_column_compression.sql",
+        "2290_payroll_identity_from_first_employment.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -15862,41 +15863,6 @@
                 "chk_payroll_jmhz_employer_annual_year": "`report_year` between 2026 and 2100"
             }
         },
-        "payroll_jmhz_external_roots": {
-            "type": "BASE TABLE",
-            "engine": "InnoDB",
-            "collation": "utf8mb4_unicode_ci",
-            "columns": {
-                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
-                "created_by": "bigint(20) unsigned NOT NULL",
-                "environment": "enum('production','test') NOT NULL",
-                "form_count": "int(10) unsigned NOT NULL",
-                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
-                "mode": "enum('original_xml','guid_reference') NOT NULL",
-                "note": "varchar(1000) NOT NULL",
-                "original_sha256": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
-                "period": "char(7) NOT NULL COLLATE ascii_bin",
-                "submission_guid": "char(36) NOT NULL COLLATE ascii_bin",
-                "submission_id": "bigint(20) unsigned NOT NULL",
-                "supplier_id": "int(10) unsigned NOT NULL",
-                "unmatched_form_count": "int(10) unsigned NOT NULL DEFAULT 0"
-            },
-            "indexes": {
-                "PRIMARY": "UNIQUE BTREE (id)",
-                "fk_payroll_jmhz_external_root_creator": "BTREE (created_by)",
-                "idx_payroll_jmhz_external_root_period": "BTREE (supplier_id, environment, period)",
-                "uq_payroll_jmhz_external_root_submission": "UNIQUE BTREE (supplier_id, environment, submission_id)"
-            },
-            "foreign_keys": {
-                "fk_payroll_jmhz_external_root_creator": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "fk_payroll_jmhz_external_root_submission": "(supplier_id, environment, submission_id) -> payroll_submissions (supplier_id, environment, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
-            },
-            "checks": {
-                "chk_payroll_jmhz_external_root_guid": "`submission_guid` regexp '^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$'",
-                "chk_payroll_jmhz_external_root_original": "`mode` = 'original_xml' = (`original_sha256` is not null)",
-                "chk_payroll_jmhz_external_root_period": "`period` regexp '^[0-9]{4}-(0[1-9]|1[0-2])$'"
-            }
-        },
         "payroll_jmhz_field_requirements": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -19524,10 +19490,10 @@
                 "employment_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "input_hash": "char(64) NOT NULL",
-                "input_json": "longtext NOT NULL",
+                "input_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
                 "period_start": "date NOT NULL",
                 "result_hash": "char(64) NULL DEFAULT NULL",
-                "result_json": "longtext NULL DEFAULT NULL",
+                "result_json": "longtext /*M!100301 COMPRESSED*/ NULL DEFAULT NULL",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "status": "enum('pending','calculated','blocked') NOT NULL DEFAULT 'pending'",
                 "supplier_id": "int(10) unsigned NOT NULL"
@@ -19638,7 +19604,7 @@
                 "payable_minor": "bigint(20) NULL DEFAULT NULL",
                 "period_start": "date NOT NULL",
                 "result_hash": "char(64) NULL DEFAULT NULL",
-                "result_json": "longtext NULL DEFAULT NULL",
+                "result_json": "longtext /*M!100301 COMPRESSED*/ NULL DEFAULT NULL",
                 "result_status": "varchar(16) NULL DEFAULT NULL",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "status": "enum('pending','calculated','blocked') NOT NULL DEFAULT 'pending'",
@@ -19672,10 +19638,10 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idempotency_key_hash": "binary(32) NOT NULL",
                 "input_snapshot_hash": "char(64) NOT NULL",
-                "input_snapshot_json": "longtext NOT NULL",
+                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
                 "previous_revision_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "result_snapshot_hash": "char(64) NULL DEFAULT NULL",
-                "result_snapshot_json": "longtext NULL DEFAULT NULL",
+                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NULL DEFAULT NULL",
                 "reviewed_at": "datetime NULL DEFAULT NULL",
                 "reviewed_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "revision_kind": "enum('regular','correction') NOT NULL DEFAULT 'regular'",
@@ -20341,9 +20307,9 @@
                 "employee_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "input_snapshot_hash": "char(64) NOT NULL",
-                "input_snapshot_json": "longtext NOT NULL",
+                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
                 "result_snapshot_hash": "char(64) NOT NULL",
-                "result_snapshot_json": "longtext NOT NULL",
+                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
                 "result_status": "enum('calculated','manual_review','error') NOT NULL",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "statutory_result_id": "bigint(20) unsigned NOT NULL",
@@ -20378,10 +20344,10 @@
                 "employment_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "input_snapshot_hash": "char(64) NOT NULL",
-                "input_snapshot_json": "longtext NOT NULL",
+                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
                 "person_result_id": "bigint(20) unsigned NOT NULL",
                 "result_snapshot_hash": "char(64) NOT NULL",
-                "result_snapshot_json": "longtext NOT NULL",
+                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
                 "result_status": "enum('calculated','manual_review','error') NOT NULL",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "statutory_result_id": "bigint(20) unsigned NOT NULL",
@@ -20416,10 +20382,10 @@
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "input_snapshot_hash": "char(64) NOT NULL",
-                "input_snapshot_json": "longtext NOT NULL",
+                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
                 "result_set_hash": "char(64) NOT NULL",
                 "result_snapshot_hash": "char(64) NOT NULL",
-                "result_snapshot_json": "longtext NOT NULL",
+                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
                 "result_status": "enum('calculated','manual_review','error') NOT NULL",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "ruleset_hash": "char(64) NOT NULL",

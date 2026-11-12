@@ -2188,7 +2188,8 @@
     "framework_conversion": "Controlled conversion 500 → 504",
     "property_charges": "Charge components and rates",
     "internal_documents": "Internal documents",
-    "quick_internal_document": "Internal document"
+    "quick_internal_document": "Internal document",
+    "payroll_month_guide": "Month guide"
   },
   "migration_nonprofit_notice": {
     "title": "Data transfer has not been verified for non-profit organisations",
@@ -3839,7 +3840,9 @@
       "result": "Added: {applied}. Not added: {skipped}.",
       "load_failed": "The payout rule preview could not be loaded.",
       "apply_failed": "The payout rules could not be added.",
-      "retry": "Try again"
+      "retry": "Try again",
+      "none_missing": "Everyone with an ongoing employment already has a payout rule.",
+      "truncated": "The preview shows the first {count} people without a rule. Open the action again afterwards for the rest."
     },
     "health_insurer_bulk": {
       "known_later": "The insurer is recorded for this person only from {period}; prefilled for confirmation.",
@@ -4460,7 +4463,8 @@
           "change_payment_date": "Payment date changed",
           "exclude_employee": "Person excluded from run",
           "include_employee": "Person returned to run",
-          "validation_overrides_carried": "Exceptions carried over from previous revision"
+          "validation_overrides_carried": "Exceptions carried over from previous revision",
+          "compensation_recalculated": "Compensations recalculated from the new average"
         }
       },
       "validation": {
@@ -4906,7 +4910,7 @@
         "average_removed": "average {from}/h, none approved now",
         "compensation": "{component} {amount}, from the new average {expected}",
         "compensation_unknown": "{component} {amount}, recalculate manually",
-        "compensation_body": "Compensations carry a fixed amount from the original average and are not recalculated by themselves (difference {difference}). In the open correction cancel the compensation input and enter it again (approve the leave again, apply the source import again), then recalculate the run.",
+        "compensation_body": "Compensations carry a fixed amount from the original average and are not recalculated on their own (difference {difference}). In an open run or open correction, use “Recalculate compensations from the new average”; for an approved run open a correction first.",
         "body_request_correction": "The approved run carries compensations and the average for the monthly report (10345) from the old average. Open a correction: the new revision picks up the current sources and the run is recalculated. Approval stays with you. Then fix a filed report with a corrective report.",
         "body_reopen": "A correction has been requested. Open it: the new revision picks up the current sources and the run is recalculated.",
         "body_refresh_inputs": "The run was calculated from the old average and cannot be approved without refreshing the sources. Refresh the sources and the run is recalculated.",
@@ -4915,7 +4919,8 @@
         "action_reopen": "Open correction and refresh sources",
         "action_refresh_inputs": "Refresh sources and recalculate",
         "action_forbidden": "A user with the rights to review, unlock and calculate payroll can correct the run and refresh the sources.",
-        "reason": "The average for compensations changed after approval"
+        "reason": "The average for compensations changed after approval",
+        "recalculate_compensations": "Recalculate compensations from the new average"
       },
       "missing_employments": {
         "title": "No relationship is missing from the run | The run is missing {count} employment relationship that belongs to the period | The run is missing {count} employment relationships that belong to the period",
@@ -6740,6 +6745,7 @@
       "filter": "View",
       "quick_inputs": "Monthly payroll entry",
       "statutory_bulk_action": "Fill in default statutory data",
+      "payout_defaults_action": "Payout rules from person cards",
       "declaration_sign_bulk_action": "Signed declarations in bulk",
       "workplace_bulk_action": "Fill in place of work",
       "terms_bulk_action": "Edit terms of selected employments",
@@ -9257,6 +9263,9 @@
         "valid_from": "Valid from",
         "valid_from_required": "Enter the date from which the policy applies.",
         "valid_from_locked": "Changing the date must not affect a frozen or approved period or cross an adjacent version.",
+        "move_start": "Move start",
+        "move_start_save": "Save start",
+        "start_moved": "The surcharge policy start was moved.",
         "valid_to": "End validity on",
         "valid_to_hint": "Optional. Filling it in closes the policy; from the next day the statutory default applies, so compensatory time off for holidays and a missing basis for a difficult environment.",
         "valid_to_invalid": "The end of validity cannot precede the start of the policy.",
@@ -13043,6 +13052,28 @@
         "predecessor": "The previous program filed the registration.",
         "profile_incomplete": "The registration profile is incomplete, the registration was not prepared.",
         "not_found": "The employment was not found or has already ended."
+      },
+      "defaults": {
+        "intro": "{count} relationships in the period have an incomplete A1 profile. You can set the shared data the app does not keep elsewhere (work mode, continuous operation, position, workplace municipality, managerial position) at once.",
+        "open": "Set shared A1 data",
+        "close": "Hide",
+        "work_mode": "Work mode",
+        "continuous_operation": "Continuous operation",
+        "leadership": "Managerial position",
+        "position_name": "Position title",
+        "workplace_city": "Workplace municipality",
+        "keep": "Keep",
+        "work_modes": {
+          "1": "Single shift",
+          "2": "Two shifts",
+          "3": "Multiple shifts",
+          "4": "Not stated"
+        },
+        "split_house_number": "Split the house number from the street (“Dlouhá 12/3” → street, descriptive and orientation number) where the profile lacks it",
+        "overwrite": "Overwrite values already filled in the profile",
+        "apply": "Set for {count} relationships",
+        "done": "Done: complete profile {verified}, still incomplete {draft}, skipped {skipped}, errors {failed}. Remaining issues are shown in the rows below.",
+        "failed": "The shared A1 data could not be set."
       }
     },
     "healthInsurerNotice": {
@@ -15032,6 +15063,156 @@
       "submit": "Take over submission",
       "load_failed": "Failed to load the taken-over reports.",
       "save_failed": "The submission could not be taken over."
+    },
+    "compensation_recalculation": {
+      "title": "Recalculate compensations from the new average",
+      "open": "Recalculate compensations from the new average",
+      "hint": "Wage compensations carry a fixed amount from the average valid when they were entered. Here you see compensations calculated from an older average and the amount from the average approved today. After confirmation, leave entered with dates and compensations from imported hours are recalculated (the original input is cancelled and a new one is created); other compensations need to be adjusted manually. An approved payroll run is never changed.",
+      "bulk_hint": "Finds compensations in the months of {quarter} calculated from an older average, shows the old and new amount and recalculates them after confirmation. An approved run is not changed, you are guided to a correction.",
+      "loading": "Loading compensations…",
+      "empty": "All compensations are calculated from the average approved today.",
+      "load_failed": "The compensation preview could not be loaded.",
+      "apply_failed": "Compensations could not be recalculated.",
+      "amount_change": "{from} → {to}",
+      "average_change": "average {from}/h → {to}/h",
+      "period_ready": "Compensations to recalculate: {count}, difference {difference}. An open run for the month returns to calculation (inputs are refreshed).",
+      "open_runs": "Open payroll runs",
+      "columns": {
+        "person": "Person",
+        "compensation": "Compensation",
+        "amount": "Old → new amount",
+        "action": "What happens"
+      },
+      "action": {
+        "recalculate": "leave amount is recalculated",
+        "replace": "cancelled and created again",
+        "manual": "manually",
+        "blocked": "run is approved"
+      },
+      "confirm": "Recalculate ({count})",
+      "forbidden": "Recalculating compensations requires the permission to write payroll inputs.",
+      "refresh_forbidden": "The compensations are in an open payroll run whose inputs must be refreshed afterwards. This requires the Calculate payroll permission.",
+      "drafts_hint": "You cannot approve payroll inputs, so the new compensations are created as drafts for approval.",
+      "done": "{period}: compensations recalculated: {count}.",
+      "done_drafts": "The new compensations await approval in Payroll inputs.",
+      "done_refreshed": "Run inputs were refreshed, calculate the run again."
+    },
+    "month_guide": {
+      "title": "Payroll month guide",
+      "subtitle": "The monthly payroll close in seven steps. Each step shows what is done and what is left, and its main button takes you to the screen where the work is done. The guide itself neither calculates nor sends anything.",
+      "period": "Period",
+      "load_failed": "The month guide could not be loaded.",
+      "retry": "Try again",
+      "refresh": "Refresh status",
+      "loading": "Loading the month status…",
+      "progress": "{done} of {total} steps done",
+      "all_done": "The month is complete: payroll is approved, submissions are fulfilled and payments are settled.",
+      "current": "Next up",
+      "open_guide": "Month guide",
+      "remaining": "{count} left | {count} left",
+      "state": {
+        "done": "Done",
+        "todo": "{count} missing | {count} missing",
+        "todo_plain": "To do",
+        "waiting": "Not yet",
+        "unavailable": "No access"
+      },
+      "unavailable_hint": "You have no permission for the data of this step. Ask the company administrator for access to payroll submissions.",
+      "steps": {
+        "inputs": {
+          "title": "Month inputs",
+          "hint": "Attendance, payroll inputs and absences for the month. An agency with many agreements fills them fastest with an attendance import, a small company with the quick monthly input."
+        },
+        "people": {
+          "title": "New people and agreements",
+          "hint": "People and agreements created from an import and the data the month cannot go through without (insurer, tax declaration, payout method)."
+        },
+        "registrations": {
+          "title": "CSSA registrations and insurer notices",
+          "hint": "Employee registrations (A1) are prepared in bulk and leave from the To send queue. Mark what you filed elsewhere as filed outside the app."
+        },
+        "check": {
+          "title": "Pre-run check",
+          "hint": "What stops the calculation or approval. Bulk fixes open the existing dialog in the employee list."
+        },
+        "run": {
+          "title": "Calculation and approval",
+          "hint": "Create the payroll run, calculate the payroll and approve it.",
+          "waiting": "The run cannot be created while the pre-run check reports a blocking finding."
+        },
+        "submissions": {
+          "title": "JMHZ and other monthly submissions",
+          "hint": "The employer's monthly report, insurer statements and other duties of the month. You can test the JMHZ report or defer it before sending.",
+          "waiting": "Reports are prepared from the approved run. Approve the payroll first."
+        },
+        "payments": {
+          "title": "Payments and payslips",
+          "hint": "Payment orders, matching payments with the bank statement and issuing payslips.",
+          "waiting": "Payments and payslips come from the approved run."
+        }
+      },
+      "action": {
+        "time": "Open attendance",
+        "attendance_import": "Import attendance",
+        "absences": "Decide absences",
+        "quick_inputs": "Open monthly inputs",
+        "runs": "Open checks in Payroll runs",
+        "people_gaps": "Fill in missing data",
+        "people": "Open employees",
+        "registration_a1": "Prepare registrations in bulk",
+        "health": "Open insurer notices",
+        "create_run": "Create and calculate the run",
+        "run": "Open the payroll run",
+        "monthly_checklist": "Open the monthly submissions overview",
+        "payments": "Open payroll payments"
+      },
+      "secondary": {
+        "quick_inputs": "Quick monthly input",
+        "attendance_import": "Attendance import",
+        "people_import": "Create people from attendance import",
+        "queue": "To send queue",
+        "external": "Filed outside the app ({count})",
+        "jmhz": "JMHZ test XML and deferral",
+        "documents": "Payslips and documents"
+      },
+      "facts": {
+        "batches": "Attendance imports for the month: {count} (people: {persons})",
+        "no_batches": "There is no attendance import for the month yet.",
+        "stopping": "Of which stop approval: {count}",
+        "a1": "A1 registrations for {from} - {to}: {total} (ready {preparable}, incomplete {incomplete}, too early {too_early}, overdue {overdue})",
+        "a1_range": "The bulk preparation opens on its default period; set the range {from} - {to} there for this month.",
+        "hoz": "Open notices to health insurers: {count}",
+        "by_impact": "Stops: {stop} · costs a correction revision: {revision} · can be filled any time: {anytime}",
+        "run_blockers": "Run checks blocking approval: {count}",
+        "readiness_unknown": "The pre-run check could not finish. Open Payroll runs, it runs again there.",
+        "status": "Run status: {status}",
+        "no_run": "There is no payroll run for the month yet.",
+        "checklist": "Fulfilled {done} of {total} (to send {send}, to prepare {generate}, manual {manual}, awaiting result {waiting})",
+        "jmhz": "JMHZ: fulfilled {done} of {total}",
+        "coverage": "Settled payments: {settled} of {total}",
+        "documents": "Documents for the month: {count}"
+      },
+      "code": {
+        "time_month_not_approved": "Attendance not approved",
+        "time_month_missing": "Attendance missing",
+        "draft_inputs_present": "Unapproved payroll inputs",
+        "employment_without_inputs": "No pay in the month",
+        "hourly_claim_component_conflict": "Hourly claim and component overlap",
+        "recurring_component_without_input": "Recurring component without input",
+        "absence_pending_decision": "Absence awaiting decision",
+        "inputs_on_unstarted_employment": "Inputs on an employment not yet started",
+        "person_data_gap": "Missing personal data",
+        "payout_rule_missing": "Payout method missing",
+        "tax_declaration_evidence_missing": "Tax declaration evidence missing",
+        "tax_declaration_not_signed_summary": "Unsigned tax declaration",
+        "tax_residence_missing_unsigned_summary": "Tax residence missing",
+        "health_coverage_missing_summary": "Health insurer missing",
+        "social_jurisdiction_missing_summary": "Social insurance jurisdiction missing",
+        "annual_accumulator_missing_summary": "Annual totals missing",
+        "employments_past_agreed_end": "Agreements past agreed end",
+        "statutory_calculation_manual_review": "Manual statutory review",
+        "other": "Other findings"
+      }
     }
   },
   "foreign_income": {
@@ -25584,7 +25765,19 @@
     "dic": "VAT ID",
     "clients": "Clients",
     "invoices": "Invoices",
-    "delete_confirm": "Delete supplier? Only possible if no clients or invoices.",
+    "delete_dialog": {
+      "title": "Delete company {name}",
+      "warning_title": "This cannot be undone.",
+      "warning": "Everything the company has in the application will be deleted: documents, the accounting journal, payroll and personnel records, filings, HOA data, documents, settings and files in storage. The data can only be recovered from a backup. Make sure you have it stored elsewhere before deleting.",
+      "summary": "{rows} rows in {tables} registers and {files} storage items will be deleted.",
+      "protected": "{count} of them are append-only registers (payroll, filings, HOA) that cannot be deleted otherwise.",
+      "is_last": "This is the last company of the installation, it cannot be deleted.",
+      "type_ic": "To confirm, type the company ID: {value}",
+      "type_name": "The company has no company ID. To confirm, type its exact name: {value}",
+      "submit": "Permanently delete company",
+      "deleting": "Deleting…",
+      "done": "Company {name} has been deleted."
+    },
     "create_title": "New supplier",
     "create_hint": "After creation, default CZK + EUR currencies are auto-seeded. Fill in bank account info in Settings after switching to the new supplier.",
     "carry_over": {
@@ -25630,7 +25823,8 @@
     "street": "Street + no.",
     "zip": "ZIP",
     "city": "City",
-    "email": "Email"
+    "email": "Email",
+    "delete_confirm": "Delete supplier? Only possible if no clients or invoices."
   },
   "type": {
     "invoice": "Invoice",
@@ -36328,6 +36522,7 @@
     "tabs": {
       "label": "Import type",
       "registration": "JMHZ",
+      "agreements": "Agreements",
       "attendance": "Attendance",
       "mapping": "Column mapping",
       "pohoda_oic": "OIČ from POHODA",
@@ -36752,6 +36947,14 @@
       "tax_declaration_from": "Declaration from",
       "education_code": "Education (KKOV)",
       "employment_status_code": "Employment status (NKPZ)",
+      "birth_surname": "Birth surname",
+      "birth_place": "Place of birth",
+      "birth_country": "Country of birth",
+      "work_mode_code": "Work mode (A1)",
+      "continuous_operation": "Continuous operation (A1)",
+      "workplace_city": "Workplace municipality (A1)",
+      "position_name": "Position title (A1)",
+      "leadership": "Managerial position (A1)",
       "worked_hours": "Worked",
       "worked_days": "Worked days",
       "overtime_hours": "Overtime",
@@ -36888,7 +37091,14 @@
         "tax_residence": "Tax residence",
         "tax_declaration": "Declaration from",
         "employment_status_code": "Employment status",
-        "education_code": "Education"
+        "education_code": "Education",
+        "birth": "Birth",
+        "work_mode_code": "Work mode",
+        "position_name": "Position",
+        "workplace_city": "Workplace municipality",
+        "continuous_operation": "Continuous operation",
+        "leadership": "Managerial position",
+        "house_number": "House number"
       },
       "persons": {
         "title": "People",
@@ -37346,7 +37556,70 @@
       }
     },
     "no_access_title": "No import is available",
-    "no_access_description": "You have no permission for payroll data imports or for migrating from another payroll program."
+    "no_access_description": "You have no permission for payroll data imports or for migrating from another payroll program.",
+    "agreements": {
+      "title": "Agreement import",
+      "hint": "Bulk agreements without attendance: one row = one agreement or employment, not tied to a month. A person already on record (by birth number, saved link or personal number) gets only the new agreement; a new person gets a card and the agreement. Filled registration data are enough for bulk preparation of A1 registrations.",
+      "no_permission": "Only a user allowed to write payroll persons can create persons and agreements.",
+      "drop_hint": "Drop an XLSX or CSV file based on the agreement template here",
+      "preview": "Load preview",
+      "refresh_preview": "Reload preview",
+      "template": "Download XLSX template",
+      "template_hint": "Template with headers, two sample rows and a column guide",
+      "preview_failed": "The agreement import preview could not be loaded.",
+      "apply_failed": "The agreements could not be created.",
+      "applied": "Agreements created: {created}, already existing: {existing}, skipped: {skipped}.",
+      "applied_with_errors": "Agreements created: {created}, errors: {failed}, skipped: {skipped}. Check the result.",
+      "summary": {
+        "persons": "Persons",
+        "new_persons": "New persons",
+        "existing_persons": "On record",
+        "confirm": "To confirm",
+        "create": "Agreements to create",
+        "exists": "Already exist",
+        "errors": "Errors"
+      },
+      "persons_title": "Persons and agreements from the file",
+      "no_rows": "The file contains no agreement rows.",
+      "existing": "On record: {name}",
+      "new_person": "New person",
+      "confirm_legend": "Match by name and date of birth",
+      "confirm_hint": "{name} with the same name and date of birth is on record. Is it the same person?",
+      "confirm_existing": "Yes, create only the agreements",
+      "confirm_new": "No, create a new person",
+      "status": {
+        "create": "Will be created",
+        "exists": "Already exists",
+        "duplicate": "Repeated row",
+        "error": "Error"
+      },
+      "outcome": {
+        "created": "Created",
+        "existing": "Already existed",
+        "skipped": "Skipped",
+        "failed": "Error"
+      },
+      "relation": {
+        "dpp": "DPP",
+        "dpc": "DPČ",
+        "employment": "Employment",
+        "small_scale_employment": "Small-scale employment"
+      },
+      "open_ended": "from {date}, indefinite",
+      "source_row": "{sheet}, row {row}",
+      "apply_hint": "Only rows marked “Will be created” are created. Agreements the person already has and rows with errors are skipped; you can upload the same file again after fixing it.",
+      "apply": "Create agreements ({count})",
+      "applying": "Creating… {done} of {total} persons",
+      "reason": {
+        "no_files": "Upload a file first.",
+        "nothing": "The preview has no agreement to create.",
+        "unconfirmed": "Decide for {count} persons whether they are the person on record."
+      },
+      "result_title": "Result",
+      "result_summary": "Created {created}, already existing {existing}, skipped {skipped}, errors {failed}.",
+      "next_a1": "Prepare social security registrations in bulk in",
+      "next_a1_link": "Payroll submissions → Registrations to file (A1)"
+    }
   },
   "pamica": {
     "title": "Migration from PAMICA",

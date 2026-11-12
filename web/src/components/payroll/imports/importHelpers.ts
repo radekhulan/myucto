@@ -366,6 +366,8 @@ export const REGISTRATION_MEANINGS: readonly AttendanceMeaning[] = [
   'address_street', 'address_house_number', 'address_city', 'address_postal_code', 'address_country',
   'citizenship', 'cz_isco_code', 'activity_code', 'workplace', 'tax_residence', 'tax_declaration',
   'tax_declaration_from', 'education_code', 'employment_status_code',
+  'birth_surname', 'birth_place', 'birth_country', 'work_mode_code', 'continuous_operation',
+  'workplace_city', 'position_name', 'leadership',
 ]
 
 export const ATTENDANCE_MEANING_GROUPS: { key: string; meanings: AttendanceMeaning[] }[] = [

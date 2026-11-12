@@ -65,6 +65,13 @@ final class AttendanceRegistrationCodebooks
         return null;
     }
 
+    public function municipalityName(string $code, string $validOn): ?string
+    {
+        $label = $this->external->findMunicipality($code, $validOn)['label'] ?? null;
+
+        return is_string($label) && $label !== '' ? $label : null;
+    }
+
     /**
      * Obec podle názvu (bez ohledu na diakritiku a velikost písmen):
      * jednoznačná shoda celého názvu, jinak jediná obec, jejíž název obsahuje

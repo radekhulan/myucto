@@ -164,6 +164,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'document-requests',      name: 'document-requests', component: () => import('@/pages/documents/DocumentRequests.vue') },
       // Úplné mzdy — samostatný bounded context dostupný v obou účetních režimech.
       { path: 'payroll', name: 'payroll-dashboard', component: () => import('@/pages/payroll/PayrollDashboard.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/month-guide', name: 'payroll-month-guide', component: () => import('@/pages/payroll/PayrollMonthGuide.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/runs', name: 'payroll-runs', component: () => import('@/pages/payroll/PayrollRuns.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/payments', name: 'payroll-payments', component: () => import('@/pages/payroll/PayrollPayments.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // MZ-18-W07 — reconciliation účetního můstku mezd (mzda ↔ deník ↔ platby).

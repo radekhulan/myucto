@@ -215,6 +215,9 @@ final class PayrollPayoutRulesAction
             return $error;
         }
         try {
+            if (($this->input($request)['employee_ids'] ?? null) === null) {
+                return Json::ok($response, $this->defaults->previewWithoutRules($this->currentSupplierId($request)));
+            }
             $people = $this->defaults->previewMany(
                 $this->currentSupplierId($request),
                 $this->employeeIds($request),
@@ -223,7 +226,7 @@ final class PayrollPayoutRulesAction
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
 
-        return Json::ok($response, ['people' => $people]);
+        return Json::ok($response, ['people' => $people, 'truncated' => false]);
     }
 
     public function applyDefaultsBulk(Request $request, Response $response): Response

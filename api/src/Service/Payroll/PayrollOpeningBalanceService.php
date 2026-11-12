@@ -302,7 +302,7 @@ final readonly class PayrollOpeningBalanceService
         }
         $firstRun = $this->firstRunPeriod($supplierId, $year);
 
-        $provable = [];
+        $candidates = [];
         foreach ($this->firstEmploymentStarts($supplierId, $employeeIds) as $employeeId => $firstStart) {
             // Okno „měsíce roku před obdobím, ve kterých u téhle firmy mohl mít
             // příjem" začíná pozdějším z: začátek roku a nástup.
@@ -319,13 +319,20 @@ final readonly class PayrollOpeningBalanceService
                 && ($moduleStart > $windowStart || $firstRun === null || $firstRun > substr($windowStart, 0, 8) . '01')) {
                 continue;
             }
-            if ($this->hasAnyOpening($supplierId, $employeeId, $year)) {
-                continue;
-            }
-            $provable[] = $employeeId;
+            $candidates[] = $employeeId;
         }
+        if ($candidates === []) {
+            return [];
+        }
+        $withOpening = array_fill_keys(
+            $this->accumulators->employeesWithCurrentOpening($supplierId, $year, self::KINDS, $candidates),
+            true,
+        );
 
-        return $provable;
+        return array_values(array_filter(
+            $candidates,
+            static fn (int $employeeId): bool => !isset($withOpening[$employeeId]),
+        ));
     }
 
     private function firstRunPeriod(int $supplierId, int $year): ?string
@@ -382,17 +389,6 @@ final readonly class PayrollOpeningBalanceService
         }
 
         return $result;
-    }
-
-    private function hasAnyOpening(int $supplierId, int $employeeId, int $year): bool
-    {
-        foreach (self::KINDS as $kind) {
-            if ($this->accumulators->openingBalance($supplierId, $employeeId, $year, $kind) !== null) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**

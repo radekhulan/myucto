@@ -150,6 +150,8 @@ final class SettingsAction
         private readonly AccountingDecreeService $accountingDecree,
         private readonly SupplierBrandingSettings $brandingSettings,
         private readonly \MyInvoice\Service\Tenant\SupplierAccessResolver $supplierAccess,
+        private readonly \MyInvoice\Service\System\CompanyPurgeService $companyPurge,
+        private readonly \Psr\Log\LoggerInterface $diagnostics,
     ) {}
 
     /**
@@ -1372,18 +1374,50 @@ final class SettingsAction
     }
 
     /**
-     * DELETE /api/suppliers/{id} — fyzicky smaž firmu.
-     *
-     * Povoleno JEN pro firmu bez účetních/business dat. Firma, která vede deník,
-     * přijaté/vydané faktury, pokladnu, majetek, sklad, DMS nebo daňové výkazy,
-     * jde jen archivovat (soft-delete) — fyzické smazání by nevratně osiřelo
-     * účetní záznamy a porušilo archivační povinnost §31/§32 ZoÚ (audit C3).
-     *
-     * Vlastní DELETE FROM supplier běží se ZAPNUTOU FK kontrolou, aby se korektně
-     * spustily ON DELETE CASCADE na všech dětských tabulkách (nic neosiří). FK
-     * kontrola se vypíná JEN lokálně kolem odstranění per-supplier konfigurace
-     * (RESTRICT FK) a cyklu supplier.default_currency_id ↔ currencies.supplier_id
-     * (oba RESTRICT a NOT NULL — cyklus nelze rozbít UPDATE … = NULL).
+     * GET /api/suppliers/{id}/delete-preview — co smazání firmy odstraní (počty řádků),
+     * a čím se smazání potvrzuje (IČO, u firmy bez IČO přesný název).
+     */
+    public function deleteSupplierPreview(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->guard($request, $response, $err)) return $err;
+        $id = (int) ($args['id'] ?? 0);
+        if ($id <= 0 || $this->membershipDenies($request, $id)) {
+            return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
+        }
+        try {
+            $plan = $this->companyPurge->preview($id, true);
+        } catch (\MyInvoice\Service\System\CompanyPurgeException $e) {
+            return Json::error($response, $e->reason === 'not_found' ? 'not_found' : $e->reason, $e->getMessage(), $e->reason === 'not_found' ? 404 : 409);
+        }
+        $tables = [];
+        foreach ($plan['children'] as $child) {
+            $tables[$child['table']] = ($tables[$child['table']] ?? 0) + $child['rows'];
+        }
+        foreach ($plan['counts'] as $table => $n) {
+            $tables[$table] = ($tables[$table] ?? 0) + $n;
+        }
+        arsort($tables);
+        $ic = $plan['supplier']['ic'];
+        return Json::ok($response, [
+            'id' => $id,
+            'company_name' => $plan['supplier']['company_name'],
+            'ic' => $ic !== '' ? $ic : null,
+            'confirm_with' => $ic !== '' ? 'ic' : 'company_name',
+            'total_rows' => array_sum($tables),
+            'tables' => array_map(static fn (string $t, int $n): array => ['table' => $t, 'rows' => $n], array_keys($tables), array_values($tables)),
+            'protected_tables' => count(array_unique($plan['guards'])),
+            'files' => count($plan['files']),
+            'is_last' => (int) $this->db->pdo()->query('SELECT COUNT(*) FROM supplier')->fetchColumn() <= 1,
+        ]);
+    }
+
+    /**
+     * DELETE /api/suppliers/{id} — nevratně smaže firmu se VŠEMI daty (doklady, deník,
+     * mzdy, podání, SVJ, DMS) i soubory v úložišti. Rozhodnutí vlastníka produktu:
+     * smazání projde vždy, odpovědnost nese uživatel. Pojistkou je opsání IČO (u firmy
+     * bez IČO přesného názvu) v těle `confirm`. Mazání dělá {@see \MyInvoice\Service\System\CompanyPurgeService}
+     * v jedné transakci; tabulky jen pro přidávání jen na dobu mazání zbaví triggerů.
+     * Auditní záznam se zapíše mimo smazanou firmu (`activity_log.supplier_id` NULL).
      */
     public function deleteSupplierById(Request $request, Response $response, array $args): Response
     {
@@ -1399,130 +1433,49 @@ final class SettingsAction
         if ($count <= 1) {
             return Json::error($response, 'cannot_delete_last', 'Posledního supplier nelze smazat.', 409);
         }
-
-        // Dependency check přes VŠECHNY tabulky nesoucí účetní/business data firmy
-        // (nejen clients+invoices jako dřív — audit C3: dřívější check + FK_CHECKS=0
-        // osiřel deník/PF/majetek/pokladnu/sklad). Bankovní výpisy mají od E8
-        // autoritativní supplier_id; řádkové děti
-        // (journal_entry_lines, cash_document_vat_lines, depreciation_entries…) kryjí
-        // jejich hlavičkové tabulky níže.
-        $dataChecks = [
-            'clients'            => 'klienty (odběratele)',
-            'invoices'           => 'vydané faktury',
-            'purchase_invoices'  => 'přijaté faktury',
-            'journal_entries'    => 'účetní deník',
-            'accounting_account_definition_history' => 'historii definic účetního rozvrhu',
-            'cash_documents'     => 'pokladní doklady',
-            'cash_registers'     => 'pokladny',
-            'assets'             => 'majetek',
-            'stock_items'        => 'skladové karty',
-            'stock_documents'    => 'skladové doklady',
-            'warehouses'         => 'sklady',
-            'documents'          => 'dokumenty (DMS)',
-            'income_tax_returns' => 'přiznání k dani z příjmů',
-            'nonprofit_tax_assessments' => 'potvrzená daňová posouzení',
-            'nonprofit_funding_revisions' => 'evidenci zdrojů financování',
-            'payroll_runs'       => 'mzdové běhy',
-            'payroll_enforcement_cases' => 'exekuce a insolvence zaměstnanců',
-            'property_objects' => 'registr domů, jednotek a služeb',
-            'property_module_profiles' => 'potvrzené profily SVJ',
-            'unit_charge_components' => 'složky předpisů SVJ',
-            'unit_charge_versions' => 'verze předpisů SVJ',
-            'unit_charge_batches' => 'dávky vydaných předpisů SVJ',
-            'unit_charges' => 'vydané předpisy SVJ',
-            'tax_submissions'    => 'daňové výkazy (DPH/KH/SH)',
-            'payment_orders'     => 'příkazy k úhradě',
-            'bank_statements'    => 'bankovní výpisy',
-        ];
-        $blocking = [];
-        foreach ($dataChecks as $table => $label) {
-            $stmt = $pdo->prepare("SELECT 1 FROM `$table` WHERE supplier_id = ? LIMIT 1");
-            $stmt->execute([$id]);
-            if ($stmt->fetchColumn() !== false) {
-                $blocking[] = $label;
-            }
+        $stmt = $pdo->prepare('SELECT company_name, ic FROM supplier WHERE id = ?');
+        $stmt->execute([$id]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
         }
-        if ($blocking !== []) {
-            return Json::error(
-                $response,
-                'has_dependencies',
-                'Firmu nelze smazat — obsahuje účetní data: ' . implode(', ', $blocking)
-                    . '. Data nejdřív odstraňte, nebo firmu archivujte.',
-                409
-            );
+        $ic = trim((string) $row['ic']);
+        $expected = $ic !== '' ? $ic : trim((string) $row['company_name']);
+        $body = (array) ($request->getParsedBody() ?? []);
+        $confirm = is_scalar($body['confirm'] ?? null) ? trim((string) $body['confirm']) : '';
+        if ($expected === '' || $confirm !== $expected) {
+            return Json::error($response, 'confirmation_mismatch', $ic !== ''
+                ? 'Smazání potvrďte opsáním IČO firmy.'
+                : 'Smazání potvrďte opsáním přesného názvu firmy.', 422);
         }
 
-        // Per-supplier konfigurace s RESTRICT FK na supplier/currencies (jinak by
-        // blokovala DELETE FROM supplier) + currencies (cyklický FK). Smažeme je
-        // s lokálně vypnutou FK kontrolou; VLASTNÍ DELETE FROM supplier pak proběhne
-        // se ZAPNUTOU kontrolou, aby se u ostatních (~CASCADE) tabulek korektně
-        // spustil ON DELETE CASCADE a nic nezůstalo osiřelé.
-        $pdo->beginTransaction();
         try {
-            (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy($this->db))->lockContext($id);
-            $supplierLock = $pdo->prepare('SELECT id FROM supplier WHERE id = ? FOR UPDATE');
-            $supplierLock->execute([$id]);
-            if ((new \MyInvoice\Service\Property\PropertyHistoryUseGuard($this->db))->supplierHasHistory($id, true)) {
-                $pdo->rollBack();
-                return Json::error($response, 'has_dependencies', 'Firmu nelze smazat, obsahuje potvrzené podklady registru SVJ.', 409);
-            }
-            if ((new \MyInvoice\Repository\AccountDefinitionRepository($this->db))->hasHistory($id, null, true)) {
-                $pdo->rollBack();
-                return Json::error($response, 'has_dependencies', 'Firmu nelze smazat, obsahuje historii definic účetního rozvrhu.', 409);
-            }
-            $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
-            try {
-                foreach ([
-                    'invoice_counters',
-                    'purchase_invoice_counters',
-                    'expense_categories',
-                    'revenue_categories',
-                    'vat_classifications',
-                    'import_jobs',
-                    'crm_monthly_summary',
-                    'recurring_invoice_templates',
-                    'gopay_settings',
-                    // Metadata bez FK na supplier — bez explicitního smazání by po
-                    // úspěšném DELETE (dependency check výše prošel) zůstaly osiřelé
-                    // (audit C3 doauditováno, doplňkový nález security-review).
-                    'work_report_links',
-                    'document_folders',
-                    'document_tags',
-                    'activity_log',
-                    'currencies',
-                ] as $cfgTable) {
-                    $pdo->prepare("DELETE FROM `$cfgTable` WHERE supplier_id = ?")->execute([$id]);
-                }
-            } finally {
-                $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
-            }
-            // FK kontrola je zpět ZAPNUTÁ → ON DELETE CASCADE se korektně spustí.
-            $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$id]);
-            $pdo->commit();
+            $result = $this->companyPurge->purge($id, true, true);
+        } catch (\MyInvoice\Service\System\CompanyPurgeException $e) {
+            $this->diagnostics->error('Smazání firmy selhalo', ['supplier_id' => $id, 'reason' => $e->reason, 'error' => $e->getMessage()]);
+            return match ($e->reason) {
+                'not_found' => Json::error($response, 'not_found', 'Supplier nenalezen.', 404),
+                'trigger_restore_failed' => Json::internalError($response, 'trigger_restore_failed', $e->getMessage(), 500),
+                default => Json::error($response, $e->reason, $e->getMessage(), 409),
+            };
         } catch (\Throwable $e) {
-            $pdo->rollBack();
-            if ($e instanceof \PDOException && (int) ($e->errorInfo[1] ?? 0) === 1451) {
-                return Json::error($response, 'has_dependencies', 'Firmu nelze smazat, na její data odkazují jiné záznamy. Firmu archivujte.', 409);
-            }
-            return Json::internalError($response, 'delete_failed', 'Smazání selhalo: ' . $e->getMessage(), 500);
+            $this->diagnostics->error('Smazání firmy selhalo', ['supplier_id' => $id, 'error' => $e->getMessage()]);
+            return Json::internalError($response, 'delete_failed', 'Smazání firmy selhalo, nic se nesmazalo: ' . $e->getMessage(), 500);
         }
 
-        // MS-P3-4: smaž PDF cache subfolder pro tohoto supplier
-        $pdfDir = \MyInvoice\Infrastructure\Config\RuntimePaths::storage('invoices') . '/sup-' . $id;
-        if (is_dir($pdfDir)) {
-            $iter = new \RecursiveIteratorIterator(
-                new \RecursiveDirectoryIterator($pdfDir, \FilesystemIterator::SKIP_DOTS),
-                \RecursiveIteratorIterator::CHILD_FIRST
-            );
-            foreach ($iter as $f) {
-                if ($f->isDir()) @rmdir($f->getPathname());
-                else @unlink($f->getPathname());
-            }
-            @rmdir($pdfDir);
-        }
-
-        $this->log($request, 'supplier.deleted', $id, []);
-        return Json::ok($response, ['deleted' => true]);
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $audit = [
+            'company_name' => (string) $row['company_name'],
+            'ic' => $ic !== '' ? $ic : null,
+            'rows' => (int) $result['preview']['total'],
+            'tables' => count($result['preview']['counts']),
+            'protected_tables' => (int) $result['triggers'],
+            'files' => (int) $result['files_removed'],
+        ];
+        $this->diagnostics->notice('Firma smazána', ['supplier_id' => $id, 'user_id' => (int) ($user['id'] ?? 0)] + $audit);
+        $this->logger->log('supplier.deleted', (int) ($user['id'] ?? 0), 'supplier', $id, $audit,
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
+        return Json::ok($response, ['deleted' => true, 'rows' => $audit['rows']]);
     }
 
     private function finishFrameworkTransaction(bool $ownsTransaction): void

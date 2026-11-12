@@ -372,6 +372,7 @@ final class RegistrationImportWriter
      * @param array{
      *   terms?:array<string,string>,
      *   identity_facts?:array<string,string>,
+     *   birth_surname?:string,
      *   addresses?:array<string,array<string,string>>,
      *   tax_residence?:array{residence:string,country_code:string,identifier:?string},
      *   a1_profile?:array<string,mixed>
@@ -430,6 +431,18 @@ final class RegistrationImportWriter
                     $decisive,
                     $steps['addresses'],
                     null,
+                    $userId,
+                    $ip,
+                    $userAgent,
+                ));
+            }
+            if (is_string($steps['birth_surname'] ?? null) && $steps['birth_surname'] !== '') {
+                $this->optional('Rodné příjmení', $notes, $operations, 'birth_surname', fn () => $this->writePersonCard(
+                    $supplierId,
+                    $employeeId,
+                    $decisive,
+                    [],
+                    $steps['birth_surname'],
                     $userId,
                     $ip,
                     $userAgent,

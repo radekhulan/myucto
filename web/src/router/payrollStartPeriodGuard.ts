@@ -32,13 +32,14 @@ const ROUTES = new Set([
   'payroll-time',
   'payroll-documents',
   'payroll-runs',
+  'payroll-month-guide',
   'payroll-payments',
   'payroll-submissions',
   'payroll-submissions-tab',
 ])
 
 /** Stránky, kde se měsíc připravuje: výchozí je první měsíc bez schválené mzdy. */
-const WORK_ROUTES = new Set(['payroll-quick-inputs', 'payroll-time', 'payroll-runs'])
+const WORK_ROUTES = new Set(['payroll-quick-inputs', 'payroll-time', 'payroll-runs', 'payroll-month-guide'])
 /** Stránky nad výsledkem: výchozí je poslední zpracovaný měsíc. */
 const RESULT_ROUTES = new Set(['payroll-documents', 'payroll-payments'])
 

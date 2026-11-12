@@ -35,6 +35,7 @@ final readonly class JmhzExternalCorrectionRootService
 {
     public const MODE_XML = 'original_xml';
     public const MODE_GUIDS = 'guid_reference';
+    public const MODES = [self::MODE_XML, self::MODE_GUIDS];
     private const CHANNEL = 'other';
     private const PRODUCT_NAME = 'MyÚčto.cz';
     private const MAX_XML_BYTES = 30 * 1024 * 1024;

@@ -707,6 +707,107 @@ final class PayrollPayoutRulesApiTest extends TestCase
         self::assertSame(0, $this->activeRuleCount($this->foreignSupplierId));
     }
 
+    public function testBulkPreviewMatchesSinglePreviewWithConstantQueryCount(): void
+    {
+        $this->setProfile('cash');
+        $people = [$this->employeeId];
+        foreach (['bank_one', 'bank_two', 'bank_none', 'mixed', 'manual', 'no_card'] as $variant) {
+            $employeeId = $this->createEmployee($this->supplierId);
+            $people[] = $employeeId;
+            if ($variant === 'no_card') {
+                continue;
+            }
+            $this->setProfileFor($employeeId, $variant === 'mixed' ? 'mixed' : ($variant === 'manual' ? 'cash' : 'bank'));
+            if ($variant === 'bank_one' || $variant === 'bank_two') {
+                $this->createAccount($employeeId, verified: true);
+            }
+            if ($variant === 'bank_two') {
+                $this->createAccount($employeeId, verified: true);
+            }
+            if ($variant === 'manual') {
+                $this->db->pdo()->prepare(
+                    'INSERT INTO payroll_payout_rules
+                        (supplier_id, employee_id, allocation_reference, destination_kind, allocation_kind, priority_no, is_active)
+                     VALUES (?, ?, ?, "cash", "remainder", 5, 1)',
+                )->execute([$this->supplierId, $employeeId, 'manual-' . $employeeId]);
+            }
+        }
+
+        $preview = function (array $ids): array {
+            $before = $this->questions();
+            $response = $this->action->previewDefaultsBulk(
+                $this->request('POST', ['employee_ids' => $ids]),
+                new Response(),
+            );
+            self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+
+            return [array_column($this->json($response)['people'], null, 'employee_id'), $this->questions() - $before];
+        };
+        $preview($people);
+        [, $smallQueries] = $preview(array_slice($people, 0, 2));
+        [$rows, $allQueries] = $preview($people);
+        self::assertSame($smallQueries, $allQueries);
+
+        foreach ($people as $employeeId) {
+            $single = $this->json($this->action->list(
+                $this->request('GET'),
+                new Response(),
+                ['employeeId' => (string) $employeeId],
+            ))['proposal'];
+            self::assertSame($single['available'] && $single['applicable'], $rows[$employeeId]['applicable'], (string) $employeeId);
+            self::assertSame($single['blocked_reason'], $rows[$employeeId]['blocked_reason'], (string) $employeeId);
+            self::assertSame($single['payout_method'], $rows[$employeeId]['payout_method'], (string) $employeeId);
+            self::assertSame($single['rules'][0]['destination_kind'] ?? null, $rows[$employeeId]['destination_kind'], (string) $employeeId);
+        }
+        self::assertTrue($rows[$people[1]]['applicable']);
+        self::assertStringContainsString('vyberte cílový účet ručně', (string) $rows[$people[2]]['blocked_reason']);
+        self::assertStringContainsString('ověřený výplatní účet', (string) $rows[$people[3]]['blocked_reason']);
+        self::assertFalse($rows[$people[5]]['applicable']);
+        self::assertStringContainsString('osobní kartu', (string) $rows[$people[6]]['blocked_reason']);
+    }
+
+    public function testPreviewWithoutSelectionOffersPeopleWithoutRules(): void
+    {
+        $employ = function (int $employeeId, string $status): void {
+            $this->db->pdo()->prepare(
+                'INSERT INTO payroll_employments (supplier_id, employee_id, code, relation_type, status, start_date)
+                 VALUES (?, ?, ?, "dpp", ?, "2026-01-01")',
+            )->execute([$this->supplierId, $employeeId, 'PR-' . $employeeId, $status]);
+        };
+        $this->setProfile('cash');
+        $employ($this->employeeId, 'active');
+        $withRule = $this->createEmployee($this->supplierId);
+        $this->setProfileFor($withRule, 'cash');
+        $employ($withRule, 'active');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payout_rules
+                (supplier_id, employee_id, allocation_reference, destination_kind, allocation_kind, priority_no, is_active)
+             VALUES (?, ?, "manual", "cash", "remainder", 5, 1)',
+        )->execute([$this->supplierId, $withRule]);
+        $ended = $this->createEmployee($this->supplierId);
+        $employ($ended, 'ended');
+        $withoutEmployment = $this->createEmployee($this->supplierId);
+        $foreign = $this->createEmployee($this->foreignSupplierId);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employments (supplier_id, employee_id, code, relation_type, status, start_date)
+             VALUES (?, ?, "PR-F", "dpp", "active", "2026-01-01")',
+        )->execute([$this->foreignSupplierId, $foreign]);
+
+        $response = $this->action->previewDefaultsBulk($this->request('POST', []), new Response());
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertFalse($body['truncated']);
+        self::assertSame([$this->employeeId], array_column($body['people'], 'employee_id'));
+        self::assertTrue($body['people'][0]['applicable']);
+        self::assertNotContains($withoutEmployment, array_column($body['people'], 'employee_id'));
+    }
+
+    private function questions(): int
+    {
+        return (int) ($this->db->pdo()->query("SHOW SESSION STATUS LIKE 'Questions'")->fetch(PDO::FETCH_ASSOC)['Value'] ?? 0);
+    }
+
     public function testBulkDefaultsRejectEmptySelection(): void
     {
         $response = $this->action->applyDefaultsBulk(
