@@ -81,7 +81,7 @@ final class PayrollStatutoryObligationAction
         Response $response,
         AccessLevel $level,
     ): ?Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return $this->noStore(Json::sessionRequired($response));
         }
         $error = null;

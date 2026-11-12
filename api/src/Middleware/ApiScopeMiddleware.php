@@ -25,9 +25,15 @@ use Slim\Psr7\Factory\ResponseFactory;
  *      GET / HEAD                 → vyžaduje `read` (každý token splňuje)
  *      POST / PUT / PATCH / DELETE → vyžaduje `read_write`
  *    Nad rámec toho je účetní a daňová vrstva ({@see self::BEARER_READ_ONLY})
- *    pro token jednosměrná — zápis odmítne i `read_write`. Výjimkou jsou
+ *    pro token jednosměrná — zápis odmítne i `read_write` (`token_write_forbidden`,
+ *    i u zápisové cesty mimo allowlist, např. SVJ). Výjimkou jsou
  *    koncepty ostatních pohledávek a závazků a analytické účty osnovy
  *    ({@see self::BEARER_WRITE_EXCEPTIONS}).
+ *
+ * Token s plným zápisem (`system_write`, #371, jen na instanci s
+ * `api.allow_system_write_tokens`) allowlist, read-only vrstvu ani výjimky nepoužívá:
+ * smí všechny cesty kromě {@see self::SYSTEM_WRITE_FORBIDDEN} a platí jen oprávnění
+ * jeho uživatele (PermissionMiddleware a akce), stejně jako v přihlášené relaci.
  *
  * Session auth (browser SPA) tímto MW není dotčen — uživatel má plná práva své role.
  *
@@ -294,6 +300,29 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         ['PUT', '#^/api/accounting/dimensions/documents/other-items/[0-9]+$#'],
     ];
 
+    /**
+     * Cesty nedostupné ani tokenu s plným zápisem (`system_write`): přihlášení, MFA,
+     * heslo, relace a správa tokenů (`/api/auth/*` kromě `api-me`), správa uživatelů,
+     * rolí a instance, licence, připojení MCP a úložiště přístupových údajů firmy
+     * (podpisové certifikáty, datové schránky, napojení bank, přihlašovací domény,
+     * SMTP profily, klíče AI). Token nesmí rozšířit vlastní přístup ani bezpečnostní
+     * nastavení účtu; to dělá člověk v aplikaci.
+     *
+     * @var list<string>
+     */
+    private const SYSTEM_WRITE_FORBIDDEN = [
+        '#^/api/auth(?!/api-me$)(/|$)#',
+        '#^/api/admin(/|$)#',
+        '#^/api/instance-admin(/|$)#',
+        '#^/api/license(/|$)#',
+        '#^/api/managed(/|$)#',
+        '#^/api/maintenance(/|$)#',
+        '#^/api/mcp(/|$)#',
+        '#^/api/oauth(/|$)#',
+        '#^/api/settings/(domains|signing|pdf-signing|certificates|email-profiles|databox|isds-gateway|bank-connections|ai-assist)(/|$)#',
+        '#^/api/settings/client/signing(/|$)#',
+    ];
+
     public function __construct(
         private readonly ResponseFactory $responseFactory,
     ) {}
@@ -318,10 +347,27 @@ final class ApiScopeMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
+        if (RequestAuthorization::isSystemWriteToken($request)) {
+            if (self::isSystemWriteForbidden($path)) {
+                return Json::error(
+                    $this->responseFactory->createResponse(403),
+                    'token_endpoint_forbidden',
+                    'Přihlášení, MFA, heslo, správa tokenů, licence, správa instance a přístupové údaje '
+                        . 'jsou dostupné jen z webového rozhraní, ani token s plným zápisem k nim nemá přístup.',
+                    403,
+                );
+            }
+
+            return $handler->handle($request);
+        }
+
         // 1) Path allowlist — token mimo veřejný subset → 403 (vrací se 403, ne 404,
         //    aby integrátor dostal jasný signál; samotná existence interních cest
         //    není tajemství — jsou zdokumentované jako session-only).
         if (!$this->isBearerAllowed($path)) {
+            if (!in_array($method, self::READ_METHODS, true) && $this->isReadOnlyForBearer($path) && !$this->isSessionOnly($path)) {
+                return $this->writeForbidden();
+            }
             $response = $this->responseFactory->createResponse(403);
             return Json::error(
                 $response,
@@ -349,14 +395,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         //     Kontrola je PŘED scope kontrolou schválně: token s právem zápisu by
         //     jinak prošel a hláška „nemáte scope" by lhala o důvodu odmítnutí.
         if ($this->isReadOnlyForBearer($path) && !$this->isBearerWriteException($method, $path)) {
-            $response = $this->responseFactory->createResponse(403);
-            return Json::error(
-                $response,
-                'token_write_forbidden',
-                'Tato část API je přes token dostupná pouze ke čtení. '
-                . 'Zaúčtování, mzdové běhy, uzávěrky a podání lze řídit jen z webového rozhraní.',
-                403,
-            );
+            return $this->writeForbidden();
         }
 
         $apiToken = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);
@@ -375,12 +414,42 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         return $handler->handle($request);
     }
 
-    private function isBearerAllowed(string $path): bool
+    public static function isSystemWriteForbidden(string $path): bool
+    {
+        foreach (self::SYSTEM_WRITE_FORBIDDEN as $pattern) {
+            if (preg_match($pattern, $path) === 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function writeForbidden(): Response
+    {
+        return Json::error(
+            $this->responseFactory->createResponse(403),
+            'token_write_forbidden',
+            'Tato část API je přes token dostupná pouze ke čtení. '
+            . 'Zaúčtování, mzdové běhy, uzávěrky a podání lze řídit jen z webového rozhraní '
+            . 'nebo tokenem s plným zápisem (system_write).',
+            403,
+        );
+    }
+
+    private function isSessionOnly(string $path): bool
     {
         foreach (self::BEARER_SESSION_ONLY as $pattern) {
             if (preg_match($pattern, $path) === 1) {
-                return false;
+                return true;
             }
+        }
+        return false;
+    }
+
+    private function isBearerAllowed(string $path): bool
+    {
+        if ($this->isSessionOnly($path)) {
+            return false;
         }
 
         foreach (self::BEARER_ALLOWED as $pattern) {

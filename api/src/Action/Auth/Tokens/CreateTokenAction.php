@@ -30,7 +30,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  * Body: { name, password, supplier_id?, scope: 'read'|'read_write',
  *         expires_at?, never_expires?, allow_payroll_submission_docs?,
- *         allow_issued_invoice_edit?, totp_code? }
+ *         allow_issued_invoice_edit?, allow_system_write?, totp_code? }
  *
  * Vyžaduje:
  *   - aktivní session (NE bearer — token by si nemohl vytvořit další token)
@@ -67,6 +67,7 @@ final class CreateTokenAction
         private readonly MfaProtectedOperationService $protectedOperations,
         private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
         private readonly \MyInvoice\Security\CrossSupplierAuthorization $crossSupplier,
+        private readonly \MyInvoice\Service\Auth\SystemWriteTokenFeature $systemWrite,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -102,6 +103,7 @@ final class CreateTokenAction
         // vůbec — viz RequestAuthorization::tokenAllowsPayrollSubmissionDocs().
         $allowPayrollSubmissionDocs = !empty($body['allow_payroll_submission_docs']);
         $allowIssuedInvoiceEdit = !empty($body['allow_issued_invoice_edit']);
+        $allowSystemWrite = !empty($body['allow_system_write']);
         $expiresRaw = trim((string) ($body['expires_at'] ?? ''));
         $neverExpires = ($body['never_expires'] ?? false) === true;
         $totpCode = trim((string) ($body['totp_code'] ?? ''));
@@ -151,6 +153,40 @@ final class CreateTokenAction
                     $response,
                     'issued_invoice_edit_not_allowed',
                     'Úpravu vystavených faktur může tokenu povolit jen správce firmy nebo role s právem upravit vystavenou fakturu.',
+                    422,
+                );
+            }
+        }
+
+        // Plný zápis (#371): jen na instanci, která ho povoluje, jen se zápisem a jen od toho,
+        // kdo za firmu rozhoduje (RequestAuthorization::canGrantSystemWriteToken()). Před
+        // spotřebou proofu.
+        if ($allowSystemWrite) {
+            if (!$this->systemWrite->isEnabled()) {
+                return Json::error(
+                    $response,
+                    'system_write_disabled',
+                    'Plný zápis přes API token tato instalace nepovoluje (api.allow_system_write_tokens).',
+                    422,
+                );
+            }
+            if ($scope !== 'read_write') {
+                return Json::error(
+                    $response,
+                    'system_write_not_allowed',
+                    'Plný zápis lze povolit jen tokenu s právem zápisu.',
+                    422,
+                );
+            }
+            $scoped = $supplierId !== null ? $this->crossSupplier->scopedRequest($request, $supplierId) : $request;
+            $mayGrant = $scoped !== null && RequestAuthorization::canGrantSystemWriteToken($scoped, $supplierId !== null);
+            if (!$mayGrant) {
+                return Json::error(
+                    $response,
+                    'system_write_not_allowed',
+                    $supplierId !== null
+                        ? 'Plný zápis může tokenu vázanému na firmu povolit jen správce této firmy.'
+                        : 'Plný zápis tokenu bez vazby na firmu může povolit jen superadmin; ostatní ho vážou na firmu, kterou spravují.',
                     422,
                 );
             }
@@ -222,6 +258,7 @@ final class CreateTokenAction
                     $expiresAt,
                     $allowPayrollSubmissionDocs,
                     $allowIssuedInvoiceEdit,
+                    $allowSystemWrite,
                 );
             } catch (OneTimeTokenException|StepUpOperationException) {
                 return Json::error(
@@ -309,6 +346,7 @@ final class CreateTokenAction
                 $expiresAt,
                 $allowPayrollSubmissionDocs,
                 $allowIssuedInvoiceEdit,
+                $allowSystemWrite,
             );
         } catch (LicenseSeatLimitExceeded) {
             return self::seatLimitError($response);
@@ -334,6 +372,7 @@ final class CreateTokenAction
                 'never_expires' => $expiresAt === null,
                 'allow_payroll_submission_docs' => $allowPayrollSubmissionDocs,
                 'allow_issued_invoice_edit' => $allowIssuedInvoiceEdit,
+                'allow_system_write' => $allowSystemWrite,
             ],
             $ip,
             $userAgent,

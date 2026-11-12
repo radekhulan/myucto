@@ -39,7 +39,7 @@ final class PayrollPeopleGlobalSearch
      */
     public function search(Request $request, int $currentSupplierId, string $query, int $limit = 8): array
     {
-        if (!RequestAuthorization::isSessionAuth($request) || !$this->access->isLicensed()) {
+        if (!RequestAuthorization::actsAsSession($request) || !$this->access->isLicensed()) {
             return [];
         }
         $hits = $this->people->searchAcrossSuppliers(

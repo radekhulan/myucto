@@ -15,6 +15,7 @@ const m = vi.hoisted(() => ({
 vi.mock('@/api/tokens', () => ({
   tokensApi: {
     list: m.list,
+    overview: async () => ({ tokens: await m.list(), systemWriteAvailable: false }),
     create: m.create,
     revoke: vi.fn(),
     purge: vi.fn(),

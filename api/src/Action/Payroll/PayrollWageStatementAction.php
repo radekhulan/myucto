@@ -136,7 +136,7 @@ final class PayrollWageStatementAction
 
     private function guard(Request $request, Response $response, AccessLevel $level): ?Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return self::private(Json::sessionRequired(
                 $response,
                 'Tento endpoint je dostupný pouze z přihlášené webové session.',

@@ -84,7 +84,7 @@ final class NonprofitTaxAssessmentAction
 
     private function handle(Request $request, Response $response, bool $write, callable $work): Response
     {
-        if ($write && !\MyInvoice\Security\RequestAuthorization::isSessionAuth($request)) {
+        if ($write && !\MyInvoice\Security\RequestAuthorization::actsAsSession($request)) {
             return Json::error($response, 'nonprofit_tax_session_only', 'Potvrzení a odvolání daňového posouzení vyžaduje přihlášenou relaci.', 403);
         }
         $allowed = $write ? $this->requireClose($request, $response, $error) : $this->requirePermission($request, $response, 'accounting', AccessLevel::READ, $error);

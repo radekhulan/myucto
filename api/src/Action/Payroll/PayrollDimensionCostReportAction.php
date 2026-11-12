@@ -24,7 +24,7 @@ final class PayrollDimensionCostReportAction
     /** @param array{year:string} $args */
     public function show(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         $error = null;

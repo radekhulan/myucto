@@ -47,6 +47,7 @@ const form = ref({
   // ji člověk vědomě nezaškrtne.
   allow_payroll_submission_docs: false,
   allow_issued_invoice_edit: false,
+  allow_system_write: false,
   totp_code: '',
 })
 
@@ -67,6 +68,11 @@ const copied = ref(false)
 const confirmCopied = ref(false)
 
 const issuedEditAvailable = computed(() => form.value.supplier_id !== null && form.value.scope === 'read_write')
+// Plný zápis (#371): jen když ho instance povoluje, jen se zápisem; token bez vazby
+// na firmu ho dostane jen od superadmina (CreateTokenAction).
+const systemWriteInstance = ref(false)
+const systemWriteAvailable = computed(() => systemWriteInstance.value && form.value.scope === 'read_write'
+  && (form.value.supplier_id !== null || auth.user?.is_superadmin === true))
 
 const needsTotp = computed(() => auth.user?.totp_enabled === true)
 const canManageTokens = computed(() => auth.canWrite('profile.tokens'))
@@ -83,7 +89,9 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    list.value = await tokensApi.list()
+    const overview = await tokensApi.overview()
+    list.value = overview.tokens
+    systemWriteInstance.value = overview.systemWriteAvailable
   } catch (e: any) {
     error.value = e?.response?.data?.error?.message || t('common.error')
   } finally {
@@ -102,6 +110,7 @@ function openCreate() {
     never_expires: false,
     allow_payroll_submission_docs: false,
     allow_issued_invoice_edit: false,
+    allow_system_write: false,
     totp_code: '',
   }
   createError.value = ''
@@ -178,6 +187,7 @@ async function submitCreate() {
       never_expires: canNeverExpire.value && !form.value.expires_at && form.value.never_expires,
       allow_payroll_submission_docs: form.value.allow_payroll_submission_docs,
       allow_issued_invoice_edit: issuedEditAvailable.value && form.value.allow_issued_invoice_edit,
+      allow_system_write: systemWriteAvailable.value && form.value.allow_system_write,
       totp_code: !proof && hasValidTotp ? form.value.totp_code : undefined,
       step_up_token: proof || undefined,
     }
@@ -443,6 +453,11 @@ onMounted(() => {
                   :title="t('api_tokens.payroll_docs_desc')">
                   {{ t('api_tokens.payroll_docs_badge') }}
                 </span>
+                <span v-if="tk.allow_system_write" data-token-system-write-badge
+                  class="px-2 py-0.5 rounded text-xs font-semibold bg-danger-50 text-danger-700 border border-danger-500/40 whitespace-nowrap"
+                  :title="t('api_tokens.system_write_desc')">
+                  {{ t('api_tokens.system_write_badge') }}
+                </span>
                 <span v-if="tk.allow_issued_invoice_edit" data-token-issued-edit-badge
                   class="px-2 py-0.5 rounded text-xs font-medium bg-warning-50 text-warning-600"
                   :title="t('api_tokens.issued_edit_desc')">
@@ -645,6 +660,22 @@ onMounted(() => {
             <p v-if="issuedEditAvailable && form.allow_issued_invoice_edit" data-token-issued-edit-warning
               class="mt-2 rounded-md border border-warning-500/40 bg-warning-50 p-2 text-xs text-warning-700">
               {{ t('api_tokens.issued_edit_warning') }}
+            </p>
+          </div>
+
+          <div v-if="systemWriteInstance" class="text-sm">
+            <label class="flex items-start gap-2" :class="systemWriteAvailable ? '' : 'opacity-60'">
+              <input type="checkbox" v-model="form.allow_system_write" :disabled="!systemWriteAvailable"
+                class="mt-0.5" data-token-system-write />
+              <span>
+                <strong>{{ t('api_tokens.system_write') }}</strong>
+                <span class="text-neutral-500"> - {{ t('api_tokens.system_write_desc') }}</span>
+                <span v-if="!systemWriteAvailable" class="block text-xs text-neutral-500">{{ t('api_tokens.system_write_unavailable') }}</span>
+              </span>
+            </label>
+            <p v-if="systemWriteAvailable && form.allow_system_write" data-token-system-write-warning
+              class="mt-2 rounded-md border border-danger-500/40 bg-danger-50 p-2 text-xs text-danger-700">
+              {{ t('api_tokens.system_write_warning') }}
             </p>
           </div>
 

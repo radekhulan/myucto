@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ClosingRepository;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -181,6 +182,10 @@ final class AccountingPeriodAction
                 'Tento přechod se provádí uzávěrkovým průvodcem (closing/start, closing/abort, POST /close).', 422);
         }
         $transition = "{$from}→{$status}";
+        if ($transition === 'closed→open' && !RequestAuthorization::mayOverridePeriodProtection($request)) {
+            return Json::error($response, 'period_closed',
+                'Uzavřené účetní období lze znovu otevřít jen v aplikaci, přes API token ne.', 409);
+        }
         // Povolené přechody přes /status: vratná interní kontrola (reviewed), nevratné
         // zákonné schválení (approved) a reopen. Rušení zákonného schválení tu NENÍ.
         if (!in_array($transition, [

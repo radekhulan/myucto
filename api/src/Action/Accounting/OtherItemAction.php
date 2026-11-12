@@ -365,7 +365,7 @@ final class OtherItemAction
      */
     private function assertSessionForAutoPostDraft(Request $request, int $id, string $action): void
     {
-        if (!RequestAuthorization::isSessionAuth($request)
+        if (!RequestAuthorization::actsAsSession($request)
             && $this->service->belongsToAutoPostSchedule($this->currentSupplierId($request), $id)) {
             throw new OtherItemException('auto_post_session_only',
                 'Koncept patří do opakování s automatickým účtováním. ' . $action . ' ho lze jen ve webovém rozhraní.', 403);

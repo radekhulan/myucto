@@ -128,7 +128,7 @@ final class ClosingAction
 
     public function fxCasePreview(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) return Json::error($response, 'fx_case_session_only', 'Posouzení kurzových případů je dostupné pouze v přihlášené relaci.', 403);
+        if (!RequestAuthorization::actsAsSession($request)) return Json::error($response, 'fx_case_session_only', 'Posouzení kurzových případů je dostupné pouze v přihlášené relaci.', 403);
         if (!$this->requirePermission($request, $response, 'accounting', AccessLevel::READ, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
@@ -595,7 +595,7 @@ final class ClosingAction
      */
     public function deferredTax504Preview(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request) || !RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
+        if (!RequestAuthorization::actsAsSession($request) || !RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Náhled vyžaduje přihlášenou relaci s oprávněním číst účetnictví.', 403);
         }
         $supplierId = $this->currentSupplierId($request);

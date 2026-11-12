@@ -238,10 +238,10 @@ final class MembershipAction
 
     private function handle(Request $request, Response $response, bool $write, callable $work, int $status = 200, string $writePermission = 'accounting.journal.post'): Response
     {
-        if (!$write && !RequestAuthorization::isSessionAuth($request)) {
+        if (!$write && !RequestAuthorization::actsAsSession($request)) {
             return Json::error($response, 'token_endpoint_forbidden', 'API token má přístup pouze k veřejnému API (/api/v1). Tento endpoint je dostupný jen z webového rozhraní.', 403);
         }
-        if ($write && !RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response, 'Změna členské evidence vyžaduje přihlášenou relaci.');
+        if ($write && !RequestAuthorization::actsAsSession($request)) return Json::sessionRequired($response, 'Změna členské evidence vyžaduje přihlášenou relaci.');
         $allowed = $write
             ? $this->requirePermission($request, $response, $writePermission, AccessLevel::WRITE, $error)
             : $this->requirePermission($request, $response, 'accounting', AccessLevel::READ, $error);

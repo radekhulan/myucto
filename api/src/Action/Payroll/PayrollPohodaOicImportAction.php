@@ -96,7 +96,7 @@ final class PayrollPohodaOicImportAction
 
     private function authorize(Request $request, Response $response): ?Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

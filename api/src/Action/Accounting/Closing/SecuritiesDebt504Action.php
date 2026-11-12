@@ -51,7 +51,7 @@ final class SecuritiesDebt504Action
     }
     private function handle(Request $q,Response $r,bool $write,callable $work): Response
     {
-        if(!RequestAuthorization::isSessionAuth($q))return Json::sessionRequired($r);
+        if(!RequestAuthorization::actsAsSession($q))return Json::sessionRequired($r);
         if(!$this->requirePermission($q,$r,$write?'accounting.journal.post':'accounting',$write?AccessLevel::WRITE:AccessLevel::READ,$error))return $error;
         try{return Json::ok($r,$work($this->currentSupplierId($q)));}
         catch(ClosingException|\MyInvoice\Service\Accounting\PostingException|\MyInvoice\Service\Accounting\Dimension\DimensionException|\MyInvoice\Service\Property\PropertyException|\MyInvoice\Service\Property\Payments\PaymentException $e){return Json::error($r,$e->errorCode,$e->getMessage(),$e->httpStatus);}

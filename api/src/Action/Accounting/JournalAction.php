@@ -19,6 +19,7 @@ use MyInvoice\Repository\InvoiceListDetailsRepository;
 use MyInvoice\Repository\DimensionListSummaryRepository;
 use MyInvoice\Repository\JournalEntryAttachmentRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
@@ -1553,7 +1554,7 @@ final class JournalAction
     /** Účetní vědomě potvrdil zásah do uzamčeného období ({@see JournalEntryDeletionRules::blockPeriod()}). */
     private function lockedAcknowledged(Request $request): bool
     {
-        return ($request->getQueryParams()[JournalEntryDeletionRules::ACK_LOCKED_PARAM] ?? '') === '1';
+        return RequestAuthorization::acknowledgesLockedPeriod($request);
     }
 
     /** @param array{code:string, message:string, can_acknowledge?:bool} $block */

@@ -479,7 +479,7 @@ final class IsdsGatewayAction
         if ($this->userId($request) <= 0) {
             return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         }
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Odesílání datovou schránkou lze ovládat jen z webového rozhraní.');
         }
 

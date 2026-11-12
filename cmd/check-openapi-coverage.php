@@ -110,10 +110,14 @@ if (preg_match_all(
     }
 }
 
-if (str_contains($src, '\\MyInvoice\\Routes\\PropertyAccountingCatalogRoutes::register($app)')) {
+preg_match_all('/\\\\MyInvoice\\\\Routes\\\\(\w+)::register\(\$app\)/', $src, $registrars);
+foreach (array_unique($registrars[1]) as $registrar) {
+    $registrarClass = 'MyInvoice\\Routes\\' . $registrar;
+    if (!class_exists($registrarClass)) continue;
     $registrarApp = \Slim\Factory\AppFactory::create();
-    \MyInvoice\Routes\PropertyAccountingCatalogRoutes::register($registrarApp);
+    $registrarClass::register($registrarApp);
     foreach ($registrarApp->getRouteCollector()->getRoutes() as $route) {
+        if (!str_starts_with($route->getPattern(), '/api/property/')) continue;
         $callable = $route->getCallable();
         $action = is_array($callable) ? $callable[0] . '::' . $callable[1] : null;
         foreach ($route->getMethods() as $method) {

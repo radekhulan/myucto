@@ -96,6 +96,27 @@ PHP, "paths:\n");
         self::assertStringNotContainsString("  - GET /api/stock/assemblies\n", $output);
     }
 
+    public function testPropertyRouteRegistrarsAreReadFromRoutesFile(): void
+    {
+        $routes = <<<'PHP'
+<?php
+\MyInvoice\Routes\FundingRoutes::register($app);
+\MyInvoice\Routes\ServiceLifecycleRoutes::register($app);
+PHP;
+        $spec = <<<'YAML'
+paths:
+  /api/v1/property/funds/commands:
+    post:
+  /api/v1/property/service-lifecycles/commands/{operation}:
+    post:
+YAML;
+        [$exit, $output] = $this->check($routes, $spec);
+        self::assertSame(0, $exit, $output);
+        [$exit, $output] = $this->check($routes, $spec . "\n  /api/v1/property/funds/unknown:\n    post:\n");
+        self::assertSame(1, $exit, $output);
+        self::assertStringContainsString('(no methods) /api/property/funds/unknown', $output);
+    }
+
     private function check(string $routes, string $spec): array
     {
         $dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'openapi-coverage-' . bin2hex(random_bytes(8));

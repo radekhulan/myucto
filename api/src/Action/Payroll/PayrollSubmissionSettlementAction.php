@@ -68,7 +68,7 @@ final class PayrollSubmissionSettlementAction
     ): Response {
         // Uzavření úřední povinnosti jménem firmy se nespouští přes token:
         // token se dá odcizit a na rozdíl od relace u něj není druhý faktor.
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Uzavření podání je dostupné jen z přihlášené relace.');
         }
         $error = null;

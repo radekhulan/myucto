@@ -100,7 +100,7 @@ final class PayrollBankSubmissionAction
 
     private function denied(Request $request, Response $response, AccessLevel $minimum): ?Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
+        if (!RequestAuthorization::actsAsSession($request)) return Json::sessionRequired($response);
         foreach (['payroll.payments', 'settings.bank_accounts'] as $permission) {
             if (!$this->requirePermission($request, $response, $permission, $minimum, $error)) return $error;
         }

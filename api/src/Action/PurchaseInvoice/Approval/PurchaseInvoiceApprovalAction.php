@@ -146,7 +146,7 @@ final class PurchaseInvoiceApprovalAction
      */
     private function sessionOnly(Request $request, Response $response): ?Response
     {
-        return RequestAuthorization::isSessionAuth($request)
+        return RequestAuthorization::actsAsSession($request)
             ? null
             : Json::error($response, 'forbidden', 'Tato operace vyžaduje přihlášenou relaci.', 403);
     }

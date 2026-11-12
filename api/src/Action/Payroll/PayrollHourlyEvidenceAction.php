@@ -35,7 +35,7 @@ final class PayrollHourlyEvidenceAction
 
     private function handle(Request $request, Response $response, array $args, bool $write): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
+        if (!RequestAuthorization::actsAsSession($request)) return Json::sessionRequired($response);
         $error = null;
         if (!$this->requirePermission($request, $response, $write ? 'payroll.time.write' : 'payroll', $write ? AccessLevel::WRITE : AccessLevel::READ, $error)) return $error;
         if (!$this->requirePayrollEnabled($request, $response, $this->access, $error)) return $error;

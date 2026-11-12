@@ -1286,7 +1286,7 @@ final class PayrollAbsenceAction
         bool $allowBearer = false,
     ): ?Response
     {
-        if (!$allowBearer && !RequestAuthorization::isSessionAuth($request)) {
+        if (!$allowBearer && !RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Mzdové absence jsou dostupné pouze z přihlášené relace.');
         }
         $permission = $level === AccessLevel::READ ? 'payroll' : 'payroll.time.write';

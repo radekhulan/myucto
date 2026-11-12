@@ -505,7 +505,7 @@ final class EpoDirectSubmissionAction
         if ($this->userId($request) <= 0) {
             return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         }
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Přímé EPO operace lze provádět jen z webového rozhraní.');
         }
         return null;

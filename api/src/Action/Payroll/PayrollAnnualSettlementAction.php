@@ -177,7 +177,7 @@ final class PayrollAnnualSettlementAction
         Response $response,
         array $args,
     ): Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         if (!$this->approvalGuard($request, $response, AccessLevel::WRITE, $error)) {
@@ -249,7 +249,7 @@ final class PayrollAnnualSettlementAction
         Response $response,
         array $args,
     ): Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         if (!$this->approvalGuard($request, $response, AccessLevel::WRITE, $error)) {
@@ -319,7 +319,7 @@ final class PayrollAnnualSettlementAction
         Response $response,
         array $args,
     ): Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         if (!$this->guard($request, $response, AccessLevel::WRITE, $error)) {
@@ -443,7 +443,7 @@ final class PayrollAnnualSettlementAction
         Response $response,
         array $args,
     ): Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         if (!$this->guard($request, $response, AccessLevel::WRITE, $error)) {
@@ -536,7 +536,7 @@ final class PayrollAnnualSettlementAction
     /** @param array<string,string> $args */
     public function settle(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         if (!$this->approvalGuard($request, $response, AccessLevel::WRITE, $error)) {

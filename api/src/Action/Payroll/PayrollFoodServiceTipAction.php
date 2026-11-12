@@ -95,7 +95,7 @@ final class PayrollFoodServiceTipAction
         string $permission,
         AccessLevel $level,
     ): ?Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

@@ -36,7 +36,7 @@ final class PayrollMonthlyChecklistPrepareAction
 
     public function __invoke(Request $request, Response $response): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

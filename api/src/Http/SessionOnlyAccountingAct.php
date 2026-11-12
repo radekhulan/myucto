@@ -22,9 +22,12 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Automatické zaúčtování, které si firma nastavila (vystavení faktury, přijetí přijaté
  * faktury), sem nepatří: je to volba firmy a token ho spouští stejně jako uživatel.
  *
- * Brána je `!isSessionAuth()`, ne `isBearerAuth()`: požadavek bez metody ověření je
- * anonymní a projít nesmí (viz {@see RequestAuthorization::isSessionAuth()}). Kód chyby
- * je tentýž jako u ApiScopeMiddleware, integrace tak obě odmítnutí rozpozná stejně.
+ * Brána je `!actsAsSession()`, ne `isBearerAuth()`: požadavek bez metody ověření je
+ * anonymní a projít nesmí (viz {@see RequestAuthorization::isSessionAuth()}). Token
+ * s plným zápisem (`system_write`, #371) úkon provede jako uživatel v aplikaci; přebití
+ * uzavřeného nebo podaného období ale nepovoluje ani jemu
+ * ({@see RequestAuthorization::mayOverridePeriodProtection()}). Kód chyby je tentýž
+ * jako u ApiScopeMiddleware, integrace tak obě odmítnutí rozpozná stejně.
  */
 final class SessionOnlyAccountingAct
 {
@@ -35,7 +38,7 @@ final class SessionOnlyAccountingAct
      */
     public static function deny(Request $request, Response $response, string $act): ?Response
     {
-        if (RequestAuthorization::isSessionAuth($request)) {
+        if (RequestAuthorization::actsAsSession($request)) {
             return null;
         }
 

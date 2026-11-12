@@ -96,7 +96,7 @@ final class CatalogJobAction
 
     public function change(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $supplierId = $this->currentSupplierId($request);

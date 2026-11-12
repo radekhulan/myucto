@@ -241,7 +241,7 @@ final class PayrollJmhzProtocolImportAction
     ): ?Response {
         // Stejně jako u odeslání: úřední doklady firmy se přes token nečtou
         // ani nezakládají — token se dá odcizit a nemá druhý faktor.
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

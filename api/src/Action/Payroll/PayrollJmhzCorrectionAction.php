@@ -430,7 +430,7 @@ final class PayrollJmhzCorrectionAction
     {
         // Storno i příprava opravy jednají jménem firmy. Token se dá odcizit
         // a nemá druhý faktor, takže sem se smí jen z přihlášené relace.
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;
