@@ -4105,7 +4105,7 @@ final class PayrollRunPersistenceTest extends TestCase
                 $finding['impact'],
                 ['blocking', 'approval', 'revision', 'anytime'],
             );
-            self::assertContains($finding['scope'], ['setup', 'monthly']);
+            self::assertContains($finding['scope'], ['setup', 'monthly', 'person']);
             self::assertNotSame('', trim((string) $finding['message']));
             foreach ($finding['entities'] as $entity) {
                 // Nález MUSÍ umět jmenovat konkrétní věc; `label` je pro to
