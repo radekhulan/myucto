@@ -346,7 +346,24 @@ pojišťovně (HOZ).
 Nastupuje-li víc lidí najednou, připravte přihlášky A1 hromadně v
 **Mimořádná podání ▾ → Přihlášky k podání (A1)** (viz
 [§ 85.14.16](#851416-registrace-zamestnance-prezec-a-regzec)). Profil A1
-(krok 3) se doplňuje u každého vztahu zvlášť.
+(krok 3) nemusíte vyplňovat po jednom:
+
+- Dohody s údaji přihlášky naimportujte souborem (`Mzdy → Importy → Dohody`,
+  viz [Nastavení mezd § 90.11.1](90_Nastaveni_mezd.md#90111-krok-za-krokem-import-dohod-bez-dochazky)).
+  Vyplněné sloupce šablony (adresa s číslem domu zvlášť, rodné příjmení, místo
+  a stát narození, občanství, CZ-ISCO, místo výkonu práce, režim práce,
+  nepřetržitý provoz, název pozice, vedoucí pozice) dají ověřený profil A1.
+- U neúplných profilů v období nabídne seznam přihlášek tlačítko **Nastavit
+  společné údaje A1**: režim práce, nepřetržitý provoz, vedoucí pozice, název
+  pozice a obec pracoviště se zapíší všem neúplným profilům v období najednou.
+  Vyplněné hodnoty se nepřepisují, pokud nezaškrtnete **Přepsat i údaje, které
+  už v profilu vyplněné jsou**. Volba **Číslo domu oddělit z ulice** rozdělí
+  ulici zapsanou v evidenci i s číslem („Dlouhá 12/3") na ulici, číslo popisné
+  a orientační. Profil se ukládá stejně jako formulář na kartě vztahu; co
+  zůstane neúplné, ukáže seznam u řádku.
+
+Odkaz na seznam může nést období: `?period=2026-12` (celý měsíc) nebo
+`?from=2026-12-01&to=2026-12-15`.
 
 **Oznámení zdravotní pojišťovně** (do 8 dnů, u DPP a DPČ do 20. dne
 následujícího měsíce):
