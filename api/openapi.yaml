@@ -45139,7 +45139,7 @@ components:
         code: { type: string }
         severity: { type: string, enum: [blocker, warning, info] }
         impact: { type: string, enum: [anytime, revision, approval, blocking] }
-        scope: { type: string, enum: [setup, monthly] }
+        scope: { type: string, enum: [setup, monthly, person] }
         message: { type: string }
         remediation_path: { type: [string, "null"] }
         count: { type: integer, minimum: 0 }
@@ -45165,7 +45165,7 @@ components:
           items:
             type: object
             properties:
-              kind: { type: string, enum: [statutory_defaults, declaration_signed, health_insurer, workplace, closure, annual_settlement_request] }
+              kind: { type: string, enum: [statutory_defaults, declaration_signed, health_insurer, workplace, closure, annual_settlement_request, payout_defaults] }
               count: { type: integer, minimum: 0 }
               employee_ids:
                 type: array

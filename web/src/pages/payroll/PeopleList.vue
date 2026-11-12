@@ -72,6 +72,7 @@ import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import DateInput from '@/components/ui/DateInput.vue'
 import PayrollDeclarationSignBulkDialog from '@/components/payroll/PayrollDeclarationSignBulkDialog.vue'
 import PayrollHealthInsurerBulkDialog from '@/components/payroll/PayrollHealthInsurerBulkDialog.vue'
+import PayrollPayoutDefaultsBulkDialog from '@/components/payroll/PayrollPayoutDefaultsBulkDialog.vue'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
 import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
 import PayrollTermsBulkEditDialog from '@/components/payroll/PayrollTermsBulkEditDialog.vue'
@@ -266,6 +267,7 @@ function bulkEmployeeIds(kind: string): number[] | null {
   return ids.length > 0 ? ids : null
 }
 const declarationSignEmployeeIds = computed(() => bulkEmployeeIds('declaration_signed'))
+const payoutDefaultsEmployeeIds = ref<number[] | null>(null)
 // Z nálezu kontroly běhu: dialog výchozích údajů nabídne tytéž osoby jako tlačítko.
 const statutoryBulkEmployeeIds = ref<number[] | null>(bulkEmployeeIds('statutory_defaults'))
 const canWriteEmployment = computed(() => auth.canWrite('payroll.employment.write'))
@@ -290,6 +292,8 @@ function openBulkFromQuery(bulk: unknown) {
     openWithBulkPeriod(() => { healthInsurerBulkOpen.value = true })
   } else if (bulk === 'workplace' && canWriteEmployment.value) {
     openWithBulkPeriod(() => { workplaceBulkOpen.value = true })
+  } else if (bulk === 'payout_defaults' && auth.canWrite('payroll.person.write')) {
+    payoutDefaultsEmployeeIds.value = bulkEmployeeIds('payout_defaults')
   } else if (bulk === 'closure' && canWriteEmployment.value) {
     const linked = payrollQueryValue(route.query, 'period')
     bulkClosurePeriod.value = linked !== null && /^\d{4}-(0[1-9]|1[0-2])$/.test(linked) ? linked : null
@@ -302,7 +306,7 @@ watch(() => route.query.bulk, openBulkFromQuery)
 // druhý proklik na tentýž odkaz adresu nezměnil a dialog se znovu neotevřel.
 watch(
   () => statutoryBulkOpen.value || declarationSignBulkOpen.value || healthInsurerBulkOpen.value
-    || workplaceBulkOpen.value || bulkClosureOpen.value,
+    || workplaceBulkOpen.value || bulkClosureOpen.value || payoutDefaultsEmployeeIds.value !== null,
   (open, wasOpen) => {
     if (open || !wasOpen || (route.query.bulk === undefined && route.query.employees === undefined)) return
     const query = { ...route.query }
@@ -2128,6 +2132,13 @@ onMounted(async () => {
       v-if="healthInsurerBulkOpen"
       :period-start="statutoryBulkEffectiveOn"
       @close="healthInsurerBulkOpen = false"
+      @applied="load"
+    />
+
+    <PayrollPayoutDefaultsBulkDialog
+      v-if="payoutDefaultsEmployeeIds !== null"
+      :employee-ids="payoutDefaultsEmployeeIds"
+      @close="payoutDefaultsEmployeeIds = null"
       @applied="load"
     />
 

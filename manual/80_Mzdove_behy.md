@@ -112,8 +112,13 @@ a již uzavřenou revizi nepřepíše.
    Chybějící docházka schválení nezastaví, doplnění po zamknutí vstupů ale
    stojí opravnou revizi.
    U osob s částkou k výplatě kontrola hlásí také chybějící výplatní
-   pravidlo a odkáže na výplatní údaje v kartě zaměstnance. Výpočet ani
-   schválení tím nejsou omezené, bez pravidla ale nepůjdou připravit platby.
+   pravidlo a odkáže na výplatní údaje v kartě zaměstnance. Je to údaj
+   osoby, ne nastavení firmy, a potřebujete ho jen tehdy, když platby mezd
+   připravujete v aplikaci. Výpočet ani schválení tím nejsou omezené.
+   Tlačítko **Doplnit výplatní pravidla z karet osob (N)** otevře náhled:
+   osobám s výplatou v hotovosti nebo s jediným ověřeným účtem na kartě
+   pravidlo doplní, u ostatních řekne proč ne (rozdělená výplata, chybí
+   ověřený účet). Osobám, které už pravidlo mají, nic nemění.
    Doplnění po schválení vyžaduje opravnou revizi a nový výpočet běhu.
    Nulová nebo záporná výplata pravidlo nepotřebuje; existující pravidlo
    pro hotovost nebo jiný způsob výplaty se jako chybějící nehlásí.

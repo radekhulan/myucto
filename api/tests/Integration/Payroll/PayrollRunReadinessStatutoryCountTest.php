@@ -65,8 +65,12 @@ final class PayrollRunReadinessStatutoryCountTest extends TestCase
         self::assertNotNull($finding);
         self::assertSame('warning', $finding['severity']);
         self::assertSame('revision', $finding['impact']);
-        self::assertSame('setup', $finding['scope']);
+        self::assertSame('person', $finding['scope']);
         self::assertSame(1, $finding['count']);
+        self::assertSame(
+            [['kind' => 'payout_defaults', 'count' => 1, 'employee_ids' => [$missing['employee_id']]]],
+            $finding['bulk_actions'],
+        );
         self::assertSame([$missing['employee_id']], array_column($finding['entities'], 'entity_id'));
         self::assertSame('Syntetická Bez pravidla', $finding['entities'][0]['label']);
         self::assertSame(

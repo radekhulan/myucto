@@ -1455,6 +1455,7 @@ const READINESS_BULK_ICONS: Record<PayrollRunReadinessBulkKind, string> = {
   workplace: ICONS.pin,
   closure: ICONS.archive,
   annual_settlement_request: ICONS.check,
+  payout_defaults: ICONS.coin,
 }
 
 function readinessBulkPeriod(): string {

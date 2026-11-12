@@ -1865,6 +1865,14 @@ final class Routes
                 '/people/{employeeId:[0-9]+}/accounts/{accountId:[0-9]+}/verify',
                 [PayrollPaymentAction::class, 'verifyPersonAccount'],
             );
+            $g->post(
+                '/payout-rules/defaults/preview',
+                [PayrollPayoutRulesAction::class, 'previewDefaultsBulk'],
+            );
+            $g->post(
+                '/payout-rules/defaults/apply',
+                [PayrollPayoutRulesAction::class, 'applyDefaultsBulk'],
+            );
             $g->get(
                 '/people/{employeeId:[0-9]+}/payout-rules',
                 [PayrollPayoutRulesAction::class, 'list'],

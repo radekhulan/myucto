@@ -1245,6 +1245,31 @@ describe('PeopleList toolbar and shared employee creation', () => {
     wrapper.unmount()
   })
 
+  it('proklik z kontroly běhu otevře hromadná výplatní pravidla pro osoby nálezu', async () => {
+    m.routeQuery.bulk = 'payout_defaults'
+    m.routeQuery.employees = '7,9'
+    const wrapper = mount(PeopleList, {
+      global: {
+        stubs: {
+          ActionBar: true,
+          RouterLink: true,
+          EmploymentCard: true,
+          PayrollPersonQuickEdit: true,
+          PayrollPersonProfilePanel: true,
+          PayrollPersonStatutoryEvidencePanel: true,
+          PayrollPayoutDefaultsBulkDialog: {
+            props: ['employeeIds'],
+            template: '<div data-test="payout-bulk-stub">{{ employeeIds.join(",") }}</div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="payout-bulk-stub"]').text()).toBe('7,9')
+    wrapper.unmount()
+  })
+
   it('opens a person missing from the page by fetching that single detail', async () => {
     m.routeQuery.person = '2'
     m.person.mockResolvedValue({

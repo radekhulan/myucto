@@ -3821,6 +3821,26 @@
       },
       "open_runs": "Open payroll runs"
     },
+    "payout_defaults_bulk": {
+      "title": "Payout rules from person cards",
+      "intro": "A payout rule says where the net wage is paid. You only need it if you prepare payroll payments (payment order) in the application. The rule is derived from the payout method on the person card: a transfer to the single verified account on the card, or cash. People who already have a rule are not changed.",
+      "ready": "Rule will be added",
+      "blocked": "Cannot be derived",
+      "blocked_title": "The rule cannot be derived from the card ({count}); add it on the person card",
+      "kind": {
+        "bank": "Transfer to the account on the person card",
+        "cash": "Cash payout",
+        "partner_settlement": "Set-off with the partner",
+        "other": "Other method"
+      },
+      "apply": "Add rules ({count})",
+      "nothing_to_apply": "No rule can be derived from the cards. Add the payout method and a verified account on the person card.",
+      "applied_toast": "Payout rules added: {count}.",
+      "result": "Added: {applied}. Not added: {skipped}.",
+      "load_failed": "The payout rule preview could not be loaded.",
+      "apply_failed": "The payout rules could not be added.",
+      "retry": "Try again"
+    },
     "health_insurer_bulk": {
       "known_later": "The insurer is recorded for this person only from {period}; prefilled for confirmation.",
       "title": "Health insurers in bulk",
@@ -4930,7 +4950,7 @@
       },
       "readiness": {
         "affected": "Affects: {names}",
-        "payout_rule_missing": "A net wage payout rule is missing. Calculation and approval can proceed, but payment preparation will be blocked. Add a payout rule in the employee card under Payout / accounts. Fixing this after approval requires a correction revision and recalculation of the run.",
+        "payout_rule_missing": "The person has no payout rule (data on the employee card, not a company setting). You only need it if you prepare payroll payments in the application; calculation and approval of the run are not blocked. Add the rules in bulk from the person cards with the button at this finding, or one by one in the Payout / accounts section of the employee card. A fix after approval means a correction revision and a recalculation of the run.",
         "people_list": "Show in the employee list | Show this person in the employee list | Show all {count} people in the employee list",
         "open_all": "Open the agenda for all affected ({count})",
         "fill_probable_average": "Fill in probable earnings from the rate",
@@ -4940,7 +4960,8 @@
           "health_insurer": "Health insurers in bulk ({count})",
           "workplace": "Fill in place of work ({count})",
           "closure": "End finished agreements ({count})",
-          "annual_settlement_request": "Mark annual settlement as not requested ({count})"
+          "annual_settlement_request": "Mark annual settlement as not requested ({count})",
+          "payout_defaults": "Add payout rules from person cards ({count})"
         },
         "fill_probable_average_done": "Filled in automatically from the agreed hourly rate: {count}. The average can be corrected with a new revision in Absences and leave → Average earnings.",
         "fill_probable_average_failed": "Probable earnings could not be filled in.",
@@ -4958,7 +4979,8 @@
         },
         "scope": {
           "setup": "Company setup — one-off, then it is done.",
-          "monthly": "Monthly work."
+          "monthly": "Monthly work.",
+          "person": "Data on the person card, filled in once per person."
         },
         "title": "Pre-flight check",
         "subtitle": "You would see these after starting the run anyway — we show them now, while the inputs can still be fixed. Payroll can be calculated with these findings, but the red ones block approving the run - each has a button that resolves it.",

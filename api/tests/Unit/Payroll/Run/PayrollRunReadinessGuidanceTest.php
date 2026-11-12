@@ -55,7 +55,7 @@ final class PayrollRunReadinessGuidanceTest extends TestCase
     public function testMissingPayoutRuleWarnsAboutPaymentPreparationAndLinksToAccounts(): void
     {
         self::assertSame(
-            ['impact' => 'revision', 'scope' => 'setup', 'severity' => 'warning'],
+            ['impact' => 'revision', 'scope' => 'person', 'severity' => 'warning'],
             PayrollRunReadinessImpact::describe('payout_rule_missing'),
         );
         $guidance = PayrollRunIssueGuidance::describe('payout_rule_missing', 42);

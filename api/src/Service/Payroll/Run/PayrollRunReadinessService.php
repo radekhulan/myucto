@@ -66,6 +66,7 @@ final class PayrollRunReadinessService
         'workplace',
         'closure',
         'annual_settlement_request',
+        'payout_defaults',
     ];
 
     /**
@@ -575,6 +576,11 @@ final class PayrollRunReadinessService
                 ...($declarationIds === [] ? [] : ['employee_ids' => $declarationIds]),
             ]],
             $code === 'employments_past_agreed_end' => [['kind' => 'closure', 'count' => $count]],
+            $code === 'payout_rule_missing' && ($finding['bulk_ids']['payout_defaults'] ?? []) !== [] => [[
+                'kind' => 'payout_defaults',
+                'count' => count($finding['bulk_ids']['payout_defaults']),
+                'employee_ids' => $finding['bulk_ids']['payout_defaults'],
+            ]],
             // Hromadné „nepožádal" je výběr na stránce Roční zúčtování, ne dialog
             // v seznamu zaměstnanců; klient tam vede s rokem a zúžením.
             $code === 'jmhz_annual_request_status_unresolved'
@@ -891,7 +897,7 @@ final class PayrollRunReadinessService
             $entities[] = $person;
         }
 
-        return self::withPeopleList(
+        return ['bulk_ids' => ['payout_defaults' => array_map('intval', array_column($missing, 'entity_id'))]] + self::withPeopleList(
             self::finding(
                 'payout_rule_missing',
                 $guidance['message'],

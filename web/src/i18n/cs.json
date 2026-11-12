@@ -3821,6 +3821,26 @@
       },
       "open_runs": "Otevřít mzdové běhy"
     },
+    "payout_defaults_bulk": {
+      "title": "Výplatní pravidla z karet osob",
+      "intro": "Výplatní pravidlo říká, kam se čistá mzda vyplatí. Potřebujete ho jen tehdy, když platby (příkaz k úhradě mezd) připravujete v aplikaci. Pravidlo se odvodí ze způsobu výplaty na kartě osoby: převod na jediný ověřený účet z karty, nebo výplata v hotovosti. Osobám, které už nějaké pravidlo mají, se nic nemění.",
+      "ready": "Pravidlo se doplní",
+      "blocked": "Nejde odvodit",
+      "blocked_title": "Pravidlo nejde z karty odvodit ({count}), doplňte ho na kartě osoby",
+      "kind": {
+        "bank": "Převod na účet z karty osoby",
+        "cash": "Výplata v hotovosti",
+        "partner_settlement": "Zápočet se společníkem",
+        "other": "Jiný způsob"
+      },
+      "apply": "Doplnit pravidla ({count})",
+      "nothing_to_apply": "Žádné osobě nejde pravidlo z karty odvodit. Doplňte na kartě osoby způsob výplaty a ověřený účet.",
+      "applied_toast": "Výplatní pravidla doplněna: {count}.",
+      "result": "Doplněno: {applied}. Nedoplněno: {skipped}.",
+      "load_failed": "Náhled výplatních pravidel se nepodařilo načíst.",
+      "apply_failed": "Výplatní pravidla se nepodařilo doplnit.",
+      "retry": "Zkusit znovu"
+    },
     "health_insurer_bulk": {
       "known_later": "Pojišťovna je u osoby zapsaná až od {period}, předvyplněno k potvrzení.",
       "title": "Zdravotní pojišťovny hromadně",
@@ -4930,7 +4950,7 @@
       },
       "readiness": {
         "affected": "Týká se: {names}",
-        "payout_rule_missing": "Chybí výplatní pravidlo pro čistou mzdu. Výpočet ani schválení to nezastaví, ale zablokuje přípravu plateb. Na kartě zaměstnance v části Výplata / účty doplňte výplatní pravidlo. Oprava po schválení znamená opravnou revizi a nový výpočet běhu.",
+        "payout_rule_missing": "Chybí výplatní pravidlo osoby (údaj na kartě zaměstnance, ne nastavení firmy). Potřebujete ho jen tehdy, když platby mezd připravujete v aplikaci; výpočet ani schválení běhu to nezastaví. Pravidla doplníte hromadně z karet osob tlačítkem u nálezu, jednotlivě na kartě zaměstnance v části Výplata / účty. Oprava po schválení znamená opravnou revizi a nový výpočet běhu.",
         "people_list": "Zobrazit v seznamu zaměstnanců | Zobrazit tuto osobu v seznamu zaměstnanců | Zobrazit všechny {count} osoby v seznamu zaměstnanců | Zobrazit všech {count} osob v seznamu zaměstnanců",
         "open_all": "Otevřít agendu pro všechny dotčené ({count})",
         "fill_probable_average": "Doplnit pravděpodobný výdělek ze sazby",
@@ -4940,7 +4960,8 @@
           "health_insurer": "Zdravotní pojišťovny hromadně ({count})",
           "workplace": "Doplnit místo výkonu práce ({count})",
           "closure": "Ukončit skončené dohody ({count})",
-          "annual_settlement_request": "Nastavit „nepožádal“ o roční zúčtování ({count})"
+          "annual_settlement_request": "Nastavit „nepožádal“ o roční zúčtování ({count})",
+          "payout_defaults": "Doplnit výplatní pravidla z karet osob ({count})"
         },
         "fill_probable_average_done": "Doplněno automaticky ze sjednané hodinové sazby: {count}. Průměr jde opravit novou revizí v Absence a dovolená → Průměrný výdělek.",
         "fill_probable_average_failed": "Pravděpodobný výdělek se nepodařilo doplnit.",
@@ -4958,7 +4979,8 @@
         },
         "scope": {
           "setup": "Nastavení firmy - jednorázové, pak je pokoj.",
-          "monthly": "Měsíční práce."
+          "monthly": "Měsíční práce.",
+          "person": "Údaj na kartě osoby, doplní se jednou za osobu."
         },
         "title": "Kontrola před zahájením",
         "subtitle": "Tohle uvidíte i po zahájení běhu - ukazujeme to teď, dokud jdou vstupy ještě opravit. Spočítat se dá i s těmito nálezy, červené ale zablokují schválení běhu - u každého je tlačítko, které ho vyřeší.",
