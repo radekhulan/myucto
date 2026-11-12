@@ -4241,6 +4241,8 @@ export interface PayrollMonthGuideStep {
 
 export interface PayrollMonthGuideResponse {
   period: string
+  /** První mzdové období firmy, když zvolený měsíc předchází začátku vedení mezd (kroky jsou prázdné). */
+  before_start: string | null
   current_step: PayrollMonthGuideStepKey | null
   runs: { id: number, status: PayrollRun['status'], office_id: number | null, approve_blocker_count: number }[]
   steps: PayrollMonthGuideStep[]

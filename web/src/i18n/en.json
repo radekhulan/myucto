@@ -15106,6 +15106,8 @@
     "month_guide": {
       "title": "Payroll month guide",
       "subtitle": "The monthly payroll close in seven steps. Each step shows what is done and what is left, and its main button takes you to the screen where the work is done. The guide itself neither calculates nor sends anything.",
+      "before_start": "The period {period} precedes the first payroll period you keep in MyÚčto ({start}). Months processed in the previous program are not handled here, they belong to the employees’ opening cumulative balances. If MyÚčto should calculate this month, change the first payroll period in Payroll → Payroll activation.",
+      "open_start": "Open {start}",
       "period": "Period",
       "load_failed": "The month guide could not be loaded.",
       "retry": "Try again",

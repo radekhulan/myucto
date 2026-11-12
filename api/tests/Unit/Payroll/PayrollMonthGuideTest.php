@@ -64,6 +64,15 @@ final class PayrollMonthGuideTest extends TestCase
         self::assertSame(4, $steps['people']['remaining']);
     }
 
+    public function testMonthBeforePayrollStartHasNoStepsAndPointsToTheFirstPeriod(): void
+    {
+        self::assertSame(
+            ['period' => '2026-09', 'before_start' => '2026-10', 'current_step' => null, 'runs' => [], 'steps' => []],
+            PayrollMonthGuide::beforeStart('2026-09', '2026-10'),
+        );
+        self::assertNull(PayrollMonthGuide::build(self::facts())['before_start']);
+    }
+
     public function testLockedRunUsesRunValidationsInsteadOfReadiness(): void
     {
         $guide = PayrollMonthGuide::build(self::facts(

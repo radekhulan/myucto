@@ -15106,6 +15106,8 @@
     "month_guide": {
       "title": "Průvodce měsícem mezd",
       "subtitle": "Měsíční uzávěrka mezd v sedmi krocích. U každého kroku vidíte, co je hotové a co zbývá, a hlavní tlačítko vás pošle na obrazovku, kde se to udělá. Průvodce sám nic nepočítá ani neodesílá.",
+      "before_start": "Období {period} předchází prvnímu mzdovému období, které vedete v MyÚčtu ({start}). Měsíce zpracované v předchozím programu se tu nezpracovávají, patří do počátečních stavů kumulací u zaměstnanců. Pokud má tenhle měsíc spočítat MyÚčto, změňte první mzdové období v Mzdy → Aktivace mzdové agendy.",
+      "open_start": "Otevřít {start}",
       "period": "Období",
       "load_failed": "Průvodce měsícem se nepodařilo načíst.",
       "retry": "Zkusit znovu",

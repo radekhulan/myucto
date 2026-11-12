@@ -48535,9 +48535,13 @@ components:
 
     PayrollMonthGuide:
       type: object
-      required: [period, current_step, runs, steps]
+      required: [period, before_start, current_step, runs, steps]
       properties:
         period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        before_start:
+          type: [string, "null"]
+          pattern: '^[0-9]{4}-[0-9]{2}$'
+          description: První mzdové období firmy, když zvolený měsíc předchází začátku vedení mezd v aplikaci (kroky jsou pak prázdné); jinak `null`.
         current_step:
           type: [string, "null"]
           description: První krok ve stavu `todo`; `null`, když není co dělat.

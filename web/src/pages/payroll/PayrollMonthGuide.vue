@@ -67,6 +67,12 @@ function changePeriod(): void {
   void load()
 }
 
+function openStartPeriod(): void {
+  if (!guide.value?.before_start) return
+  period.value = guide.value.before_start
+  changePeriod()
+}
+
 function periodQuery() {
   return { period: period.value }
 }
@@ -275,7 +281,18 @@ onMounted(() => { void load() })
 
     <p v-if="loading && guide === null" class="text-sm text-neutral-500" data-test="month-guide-loading">{{ t('payroll.month_guide.loading') }}</p>
 
-    <template v-if="guide">
+    <div
+      v-if="guide?.before_start"
+      class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-800"
+      data-test="month-guide-before-start"
+    >
+      <p class="min-w-0 flex-1">{{ t('payroll.month_guide.before_start', { period: formatPeriodNumeric(guide.period), start: formatPeriodNumeric(guide.before_start) }) }}</p>
+      <button type="button" :class="[btnFilled('primary'), 'whitespace-nowrap']" data-test="month-guide-open-start" @click="openStartPeriod">
+        {{ t('payroll.month_guide.open_start', { start: formatPeriodNumeric(guide.before_start) }) }}
+      </button>
+    </div>
+
+    <template v-else-if="guide">
       <div class="flex flex-wrap items-center gap-3 rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm" data-test="month-guide-progress">
         <span class="font-medium text-neutral-900">{{ t('payroll.month_guide.progress', { done: doneCount, total: countable.length }) }}</span>
         <span v-if="allDone" class="text-success-700" data-test="month-guide-all-done">{{ t('payroll.month_guide.all_done') }}</span>

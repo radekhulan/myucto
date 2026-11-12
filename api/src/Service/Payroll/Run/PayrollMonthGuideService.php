@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
+use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaydayResolver;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
@@ -25,6 +26,7 @@ final class PayrollMonthGuideService
         private readonly PayrollRegistrationA1BatchService $registrationA1,
         private readonly AttendanceImportService $attendanceImports,
         private readonly PayrollDocumentRepository $documents,
+        private readonly PayrollHistoricalPeriodService $historicalPeriods,
     ) {}
 
     /**
@@ -46,6 +48,11 @@ final class PayrollMonthGuideService
         }
         $periodStart = "{$period}-01";
         $periodEnd = (new \DateTimeImmutable($periodStart))->format('Y-m-t');
+
+        $startPeriod = $this->historicalPeriods->startPeriod($supplierId);
+        if (PayrollHistoricalPeriodService::precedesStart($startPeriod, $periodStart)) {
+            return PayrollMonthGuide::beforeStart($period, substr((string) $startPeriod, 0, 7));
+        }
 
         $items = $this->runs->list(
             $supplierId,

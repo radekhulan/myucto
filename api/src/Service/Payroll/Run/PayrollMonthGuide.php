@@ -87,6 +87,7 @@ final class PayrollMonthGuide
 
         return [
             'period' => $facts['period'],
+            'before_start' => null,
             'current_step' => $current,
             'runs' => array_map(static fn (array $run): array => [
                 'id' => $run['id'],
@@ -95,6 +96,24 @@ final class PayrollMonthGuide
                 'approve_blocker_count' => $run['approve_blocker_count'],
             ], $runs),
             'steps' => $steps,
+        ];
+    }
+
+    /**
+     * Měsíc před prvním mzdovým obdobím firmy patří předchozímu programu: běh
+     * za něj nejde založit a kroky by jen hlásily „hotovo“ u věcí, které se tu
+     * nedělají. Průvodce proto kroky nevrací a odkáže na první měsíc vedení mezd.
+     *
+     * @return array<string,mixed>
+     */
+    public static function beforeStart(string $period, string $startPeriod): array
+    {
+        return [
+            'period' => $period,
+            'before_start' => $startPeriod,
+            'current_step' => null,
+            'runs' => [],
+            'steps' => [],
         ];
     }
 

@@ -41,6 +41,7 @@ function step(key: PayrollMonthGuideStep['key'], overrides: Partial<PayrollMonth
 function response(overrides: Partial<PayrollMonthGuideResponse> = {}): PayrollMonthGuideResponse {
   return {
     period: '2026-10',
+    before_start: null,
     current_step: 'inputs',
     runs: [],
     steps: [
@@ -173,6 +174,22 @@ describe('PayrollMonthGuide', () => {
 
     expect(m.replace).toHaveBeenCalledWith({ query: { period: '2026-09' } })
     expect(m.monthGuide).toHaveBeenLastCalledWith('2026-09', 'production')
+  })
+
+  it('a month before payroll start offers the first payroll month instead of steps', async () => {
+    m.query = { period: '2026-09' }
+    m.monthGuide.mockResolvedValueOnce(response({ period: '2026-09', before_start: '2026-10', current_step: null, steps: [] }))
+    const wrapper = mountGuide()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="month-guide-progress"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-test^="month-guide-step-"]')).toHaveLength(0)
+    expect(wrapper.get('[data-test="month-guide-before-start"]').text()).toContain('payroll.month_guide.before_start')
+    await wrapper.get('[data-test="month-guide-open-start"]').trigger('click')
+    await flushPromises()
+
+    expect(m.replace).toHaveBeenCalledWith({ query: { period: '2026-10' } })
+    expect(m.monthGuide).toHaveBeenLastCalledWith('2026-10', 'production')
   })
 
   it('shows the error with a retry button when loading fails', async () => {
