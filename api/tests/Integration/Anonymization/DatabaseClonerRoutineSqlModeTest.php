@@ -35,7 +35,7 @@ final class DatabaseClonerRoutineSqlModeTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach ($this->owned as $database) $this->server->exec('DROP DATABASE IF EXISTS `' . $database . '`');
+        foreach ($this->owned as $database) DatabaseCloner::dropDatabase($this->server, $database);
     }
 
     public function testRoutineKeepsAllowInvalidDatesThroughPlanAndFinalize(): void

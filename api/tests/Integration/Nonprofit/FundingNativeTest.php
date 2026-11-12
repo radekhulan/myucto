@@ -80,7 +80,7 @@ final class FundingNativeTest extends TestCase
         $this->cloneConnection?->close();
         if($this->cloneServer!==null)foreach([$this->cloneTarget,$this->cloneSource]as$name){
             if($name===null||!preg_match('/^myucto_funding_(?:src|dst)_[a-f0-9]{10}_test$/D',$name))throw new \LogicException('Unexpected owned clone schema.');
-            $this->cloneServer->exec('DROP DATABASE IF EXISTS '.\MyInvoice\Service\Anonymization\DatabaseCloner::quote($name));
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->cloneServer, $name);
         }
     }
     private function post(string $code,string $amount,string $date='2026-06-01',bool $red=false):int

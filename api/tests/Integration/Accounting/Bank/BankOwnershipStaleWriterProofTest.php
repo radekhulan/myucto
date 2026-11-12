@@ -70,7 +70,7 @@ final class BankOwnershipStaleWriterProofTest extends TestCase
     {
         if (self::$classSchema !== null) {
             self::assertMatchesRegularExpression('/^myucto_bank_owner_proof_[a-f0-9]{10}_test$/D', self::$classSchema);
-            self::$classServer->exec('DROP DATABASE ' . DatabaseCloner::quote(self::$classSchema));
+            DatabaseCloner::dropDatabase(self::$classServer, self::$classSchema);
             self::$classSchema = null;
             self::$classServer = null;
         }

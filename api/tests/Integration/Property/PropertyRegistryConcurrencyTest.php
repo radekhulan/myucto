@@ -57,7 +57,7 @@ final class PropertyRegistryConcurrencyTest extends TestCase
             $db->close();
         }
         self::assertMatchesRegularExpression('/^myucto_property_race_[a-f0-9]{10}_test$/D', $this->ownedSchema);
-        $this->server->exec('DROP DATABASE ' . DatabaseCloner::quote($this->ownedSchema));
+        DatabaseCloner::dropDatabase($this->server, $this->ownedSchema);
     }
 
     public function testStaleCallerSnapshotCannotLoseRevisionOrMissProfileDisable(): void

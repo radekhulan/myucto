@@ -36,7 +36,7 @@ final class PaymentPermissionsMigrationTest extends TestCase
     protected function tearDown(): void
     {
         if ($this->server !== null && preg_match('/^myucto_payment_roles_[a-f0-9]{12}_test$/D', $this->database)) {
-            $this->server->exec("DROP DATABASE `{$this->database}`");
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->server, $this->database);
         }
     }
 

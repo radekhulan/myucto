@@ -44,7 +44,7 @@ final class InstanceRestoreTriggersTest extends TestCase
             $this->pdo->rollBack();
         }
         if (isset($this->server) && preg_match('/^myucto_restore_triggers_[a-f0-9]{12}$/D', $this->database) === 1) {
-            $this->server->exec("DROP DATABASE IF EXISTS `{$this->database}`");
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->server, $this->database);
         }
     }
 

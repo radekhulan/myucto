@@ -227,7 +227,7 @@ function cloneDatabase(PDO $pdo, array $plan, string $target): void
             $pdo->exec($ddl);
         }
     } catch (Throwable $e) {
-        $pdo->exec('DROP DATABASE IF EXISTS ' . quoteIdentifier($target));
+        \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($pdo, $target);
         throw $e;
     } finally {
         $pdo->exec('SET SESSION FOREIGN_KEY_CHECKS = 1');
@@ -704,7 +704,7 @@ try {
             }
             try {
                 foreach ($databases as $database) {
-                    $pdo->exec('DROP DATABASE IF EXISTS ' . quoteIdentifier($database));
+                    \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($pdo, $database);
                 }
             } finally {
                 \MyInvoice\Tests\Support\ParallelRuntime::removeRoot($runtimeRoot);

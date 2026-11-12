@@ -45,7 +45,7 @@ final class AccountingFrameworkMigrationRuntimeTest extends TestCase
     protected function tearDown(): void
     {
         if ($this->databaseCreated && isset($this->db, $this->database) && preg_match('/^myucto_framework_[0-9a-f]{12}_test$/D', $this->database) === 1) {
-            $this->db->exec("DROP DATABASE IF EXISTS `{$this->database}`");
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->db, $this->database);
         }
     }
 

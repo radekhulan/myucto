@@ -30,6 +30,13 @@ final class OwnedTestDatabaseSessions
                     // Spojení mezitím skončilo samo.
                 }
             }
+            for ($wait = 0; $wait < 100; ++$wait) {
+                $sessions->execute([$schema]);
+                if ($sessions->fetchAll(PDO::FETCH_COLUMN) === []) {
+                    break;
+                }
+                usleep(50_000);
+            }
         }
     }
 }

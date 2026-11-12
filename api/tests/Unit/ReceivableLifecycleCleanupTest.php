@@ -42,8 +42,9 @@ final class ReceivableLifecycleCleanupTest extends TestCase
         try {
             self::cleanup($pdo, false);
             self::fail('Persistent cleanup error was hidden.');
-        } catch (PDOException $actual) {
-            self::assertSame($error, $actual);
+        } catch (\RuntimeException $actual) {
+            self::assertNotInstanceOf(PDOException::class, $actual);
+            self::assertSame($error, $actual->getPrevious());
         }
         self::assertCount(5, $pdo->statements);
     }
@@ -103,5 +104,10 @@ final class LifecycleDropPdo extends PDO
             throw $outcome;
         }
         return 0;
+    }
+
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): \PDOStatement|false
+    {
+        return false;
     }
 }

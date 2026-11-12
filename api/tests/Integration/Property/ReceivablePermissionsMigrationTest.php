@@ -27,7 +27,7 @@ final class ReceivablePermissionsMigrationTest extends TestCase
     {
         $this->db?->close();
         if ($this->ownsDatabase && $this->server !== null && preg_match('/^myucto_receivable_roles_[a-f0-9]{12}_test$/D', $this->database)) {
-            $this->server->exec("DROP DATABASE `{$this->database}`");
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->server, $this->database);
         }
     }
 

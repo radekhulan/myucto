@@ -59,7 +59,7 @@ final class BankProposalConcurrencyTest extends TestCase
             $db->close();
         }
         self::assertMatchesRegularExpression('/^myucto_bank_proposal_[a-f0-9]{10}_test$/D', $this->schema);
-        $this->server->exec('DROP DATABASE ' . DatabaseCloner::quote($this->schema));
+        DatabaseCloner::dropDatabase($this->server, $this->schema);
     }
 
     public function testConcurrentImportsAndConfirmationsNeverDuplicate(): void

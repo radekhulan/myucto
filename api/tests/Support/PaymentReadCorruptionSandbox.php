@@ -64,7 +64,7 @@ trait PaymentReadCorruptionSandbox
         }
         if (self::$paymentReadServer !== null && self::$paymentReadSchema !== null) {
             self::assertMatchesRegularExpression('/^myucto_property_read_[a-f0-9]{10}_test$/D', self::$paymentReadSchema);
-            self::$paymentReadServer->exec('DROP DATABASE ' . DatabaseCloner::quote(self::$paymentReadSchema));
+            DatabaseCloner::dropDatabase(self::$paymentReadServer, self::$paymentReadSchema);
             self::$paymentReadServer = null;
             self::$paymentReadSchema = null;
         }

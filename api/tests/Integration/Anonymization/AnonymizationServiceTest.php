@@ -441,7 +441,7 @@ final class AnonymizationServiceTest extends TestCase
     private function dropDatabases(): void
     {
         foreach ([$this->source, $this->target] as $schema) {
-            $this->server->exec('DROP DATABASE IF EXISTS ' . DatabaseCloner::quote($schema));
+            DatabaseCloner::dropDatabase($this->server, $schema);
         }
     }
 }

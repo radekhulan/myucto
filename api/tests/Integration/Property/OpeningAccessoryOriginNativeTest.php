@@ -52,7 +52,7 @@ final class OpeningAccessoryOriginNativeTest extends TestCase
         if(self::$ownedConnection!==null){if(self::$ownedConnection->pdo()->inTransaction())self::$ownedConnection->pdo()->rollBack();self::$ownedConnection->close();self::$ownedConnection=null;}
         if(self::$ownedSchema!==null){
             $schema=self::$ownedSchema;self::assertMatchesRegularExpression('/^myucto_accessory_origin_[a-f0-9]{12}_test$/D',$schema);self::assertSame(self::$ownerToken,self::$server->query('SELECT token FROM `'.$schema.'`.`_accessory_origin_test_owner`')->fetchColumn());
-            self::$server->exec('DROP DATABASE `'.$schema.'`');$exists=self::$server->prepare('SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=?');$exists->execute([$schema]);self::assertSame(0,(int)$exists->fetchColumn());self::$ownedSchema=null;
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase(self::$server, $schema);$exists=self::$server->prepare('SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=?');$exists->execute([$schema]);self::assertSame(0,(int)$exists->fetchColumn());self::$ownedSchema=null;
         }
     }
     protected function setUp():void

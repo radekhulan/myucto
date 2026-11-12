@@ -27,6 +27,71 @@ final class DatabaseCloner
     }
 
     /**
+     * DROP DATABASE IF EXISTS, který přežije zálohy definic po MariaDB.
+     *
+     * CREATE TRIGGER nad tabulkou, která už trigger má, zkopíruje `<tabulka>.TRG` do
+     * `<tabulka>.TRG-` (CREATE OR REPLACE i `<trigger>.TRN-`) a na konci příkazu zálohu
+     * smaže. Při souběžném DDL v jiných spojeních ji MariaDB občas nesmaže (ddl log
+     * mezitím přidělí uvolněnou pozici záznamu jinému příkazu a záloha vypadá jako
+     * dosud potřebná). DROP DATABASE takový soubor nezná, smaže tabulky a skončí chybou
+     * 1010 „Directory not empty“. Zálohu odstraní jen další CREATE OR REPLACE TRIGGER
+     * nad tabulkou a triggerem téhož jména, proto se před opakováním dropu založí
+     * náhradní tabulky s triggery podle stavu před prvním pokusem.
+     */
+    public static function dropDatabase(PDO $pdo, string $schema, int $attempts = 5): void
+    {
+        $triggers = self::triggerNamesByTable($pdo, $schema);
+        for ($attempt = 1; ; ++$attempt) {
+            try {
+                $pdo->exec('DROP DATABASE IF EXISTS ' . self::quote($schema));
+                return;
+            } catch (\PDOException $error) {
+                if ((int) ($error->errorInfo[1] ?? 0) !== 1010 || stripos($error->getMessage(), 'Directory not empty') === false) {
+                    throw $error;
+                }
+                if ($attempt >= $attempts) {
+                    throw new \RuntimeException("Databázi {$schema} nejde smazat: v jejím datovém adresáři zůstaly soubory, které DROP DATABASE nezná "
+                        . '(záloha <tabulka>.TRG- nebo <trigger>.TRN- po CREATE TRIGGER souběžném s jiným DDL). '
+                        . "Smažte je v datovém adresáři MariaDB (find <datadir>/{$schema} -name '*-') a DROP DATABASE zopakujte.", 0, $error);
+                }
+            }
+            usleep($attempt * 50_000);
+            self::clearDefinitionBackups($pdo, $schema, $triggers);
+        }
+    }
+
+    /** @return array<string, list<string>> tabulka => názvy jejích triggerů */
+    private static function triggerNamesByTable(PDO $pdo, string $schema): array
+    {
+        try {
+            $statement = $pdo->query('SHOW TRIGGERS FROM ' . self::quote($schema));
+        } catch (\PDOException) {
+            return [];
+        }
+        $triggers = [];
+        foreach ($statement instanceof \PDOStatement ? $statement->fetchAll(PDO::FETCH_ASSOC) : [] as $row) {
+            $triggers[(string) $row['Table']][] = (string) $row['Trigger'];
+        }
+
+        return $triggers;
+    }
+
+    /** @param array<string, list<string>> $triggers */
+    private static function clearDefinitionBackups(PDO $pdo, string $schema, array $triggers): void
+    {
+        $database = self::quote($schema) . '.';
+        foreach ($triggers as $table => $names) {
+            $pdo->exec('CREATE TABLE IF NOT EXISTS ' . $database . self::quote($table) . ' (id INT)');
+            foreach ($names as $name) {
+                $ddl = 'CREATE OR REPLACE TRIGGER ' . $database . self::quote($name) . ' BEFORE INSERT ON '
+                    . $database . self::quote($table) . ' FOR EACH ROW SET @myucto_drop_backup = 1';
+                $pdo->exec($ddl);
+                $pdo->exec($ddl);
+            }
+        }
+    }
+
+    /**
      * @return array{
      *   source:string, charset:string, collation:string,
      *   tables: array<string, array{ddl:string, columns:string}>,

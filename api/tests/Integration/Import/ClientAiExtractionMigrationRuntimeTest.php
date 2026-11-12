@@ -32,7 +32,7 @@ final class ClientAiExtractionMigrationRuntimeTest extends TestCase
 
     protected function tearDown(): void
     {
-        $this->server?->exec("DROP DATABASE IF EXISTS `{$this->database}`");
+        if ($this->server !== null) \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->server, $this->database);
     }
 
     public function testOldSchemaUpgradeAndRepeatedMigrationPreserveOptInAndRoleOverrides(): void

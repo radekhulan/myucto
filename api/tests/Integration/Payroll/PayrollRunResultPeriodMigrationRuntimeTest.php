@@ -49,7 +49,7 @@ final class PayrollRunResultPeriodMigrationRuntimeTest extends TestCase
         if ($this->server !== null
             && preg_match('/^myucto_payroll_result_period_[0-9a-f]{12}$/D', $this->database) === 1
         ) {
-            $this->server->exec("DROP DATABASE IF EXISTS `{$this->database}`");
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->server, $this->database);
         }
     }
 

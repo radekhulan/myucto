@@ -49,7 +49,7 @@ final class PayrollRegistrationEventBusinessDeduplicationMigrationRuntimeTest ex
     protected function tearDown(): void
     {
         if ($this->server !== null && $this->database !== '') {
-            $this->server->exec("DROP DATABASE IF EXISTS `{$this->database}`");
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->server, $this->database);
         }
     }
 

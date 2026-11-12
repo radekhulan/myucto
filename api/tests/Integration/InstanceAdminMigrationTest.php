@@ -45,7 +45,7 @@ final class InstanceAdminMigrationTest extends TestCase
     protected function tearDown(): void
     {
         if (isset($this->pdo, $this->database) && preg_match('/^myucto_224_schema_[0-9a-f]{12}_test$/D', $this->database)) {
-            $this->pdo->exec("DROP DATABASE `{$this->database}`");
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->pdo, $this->database);
         }
     }
 

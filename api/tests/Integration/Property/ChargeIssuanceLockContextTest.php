@@ -76,7 +76,7 @@ final class ChargeIssuanceLockContextTest extends TestCase
         } finally {
             foreach ($connections as $db) { if ($db->pdo()->inTransaction()) $db->pdo()->rollBack(); $db->close(); }
             self::assertMatchesRegularExpression('/^myucto_s3_lock_[a-f0-9]{10}_test$/D', $owned);
-            $server->exec('DROP DATABASE ' . DatabaseCloner::quote($owned));
+            DatabaseCloner::dropDatabase($server, $owned);
         }
     }
 }

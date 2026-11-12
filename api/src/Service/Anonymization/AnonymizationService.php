@@ -104,7 +104,7 @@ final class AnonymizationService
             $cloner->finalize($plan, $options->target);
             $this->writeMarker($pdo, $transformed['archives'], $transformed['transport']);
         } catch (\Throwable $e) {
-            $pdo->exec('DROP DATABASE IF EXISTS ' . DatabaseCloner::quote($options->target));
+            DatabaseCloner::dropDatabase($pdo, $options->target);
             throw $e;
         }
 
@@ -856,7 +856,7 @@ final class AnonymizationService
             throw new \RuntimeException("Cílová databáze {$options->target} není anonymizovaná kopie (chybí značka " . self::MARKER_KEY . ') — nepřepíšu ji.');
         }
         $log("Odstraňuji předchozí anonymizovanou kopii {$options->target}…");
-        $pdo->exec('DROP DATABASE ' . DatabaseCloner::quote($options->target));
+        DatabaseCloner::dropDatabase($pdo, $options->target);
     }
 
     private function assertNames(AnonymizationOptions $options): void

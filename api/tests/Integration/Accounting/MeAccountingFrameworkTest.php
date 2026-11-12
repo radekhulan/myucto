@@ -61,7 +61,7 @@ final class MeAccountingFrameworkTest extends TestCase
     {
         if ($this->worker !== null && is_file($this->worker)) unlink($this->worker);
         if ($this->databaseCreated && isset($this->db) && preg_match('/^myucto_me_framework_[0-9a-f]{12}_test$/D', $this->database) === 1) {
-            $this->db->exec("DROP DATABASE IF EXISTS `{$this->database}`");
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->db, $this->database);
         }
     }
 

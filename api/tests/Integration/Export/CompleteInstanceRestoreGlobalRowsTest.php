@@ -79,7 +79,7 @@ final class CompleteInstanceRestoreGlobalRowsTest extends TestCase
     {
         $this->target = null;
         if ($this->server !== null && preg_match(self::TARGET_DATABASE_PATTERN, $this->targetDatabase) === 1) {
-            $this->server->exec('DROP DATABASE IF EXISTS `' . $this->targetDatabase . '`');
+            DatabaseCloner::dropDatabase($this->server, $this->targetDatabase);
         }
         $this->removeDirectory($this->targetStorage);
         foreach ($this->temporaryFiles as $path) {

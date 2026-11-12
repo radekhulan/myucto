@@ -155,7 +155,7 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         $this->target = null;
         if ($this->server !== null && $this->isSafeTargetDatabase($this->targetDatabase)) {
             try {
-                $this->server->exec('DROP DATABASE IF EXISTS `' . $this->targetDatabase . '`');
+                DatabaseCloner::dropDatabase($this->server, $this->targetDatabase);
             } catch (\Throwable) {
                 // Původní výsledek testu má přednost; název DB je i tak bezpečně omezený.
             }

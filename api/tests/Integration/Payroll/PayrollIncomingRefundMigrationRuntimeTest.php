@@ -52,7 +52,7 @@ final class PayrollIncomingRefundMigrationRuntimeTest extends TestCase
         ) {
             return;
         }
-        $this->server->exec("DROP DATABASE IF EXISTS `{$this->database}`");
+        \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->server, $this->database);
     }
 
     public function testExistingMatchesAreBackfilledAndGuardRemainsImmutable(): void
