@@ -264,7 +264,7 @@ final class SchemaIntegrityService
                 self::diffNamed($name, 'index', (array) $want['indexes'], (array) $have['indexes'],
                     static fn (string $name, string $definition): bool => $name === 'PRIMARY' || str_starts_with($definition, 'UNIQUE ')),
                 self::diffNamed($name, 'foreign_key', (array) $want['foreign_keys'], (array) $have['foreign_keys'],
-                    static fn (): bool => true),
+                    static fn (): bool => true, sameObject: self::bothAutomaticForeignKeyNames(...)),
                 self::diffNamed($name, 'check', (array) $want['checks'], (array) $have['checks'],
                     static fn (): bool => true, changedIsFail: false),
             );
@@ -342,6 +342,7 @@ final class SchemaIntegrityService
         array $have,
         callable $missingIsFail,
         bool $changedIsFail = true,
+        ?\Closure $sameObject = null,
     ): array {
         $findings = [];
         $prefix = $table !== '' ? $table . '.' : '';
@@ -362,6 +363,9 @@ final class SchemaIntegrityService
             $renamedTo = array_search($definition, $extra, true);
             if ($renamedTo !== false) {
                 unset($extra[$renamedTo]);
+                if ($sameObject !== null && $sameObject($name, (string) $renamedTo)) {
+                    continue;
+                }
                 $findings[] = self::finding(self::STATUS_WARN, $kind . '_renamed', $prefix . $name, $name, (string) $renamedTo);
                 continue;
             }
@@ -375,6 +379,13 @@ final class SchemaIntegrityService
         }
 
         return $findings;
+    }
+
+    private static function bothAutomaticForeignKeyNames(string $expected, string $actual): bool
+    {
+        $automatic = static fn (string $name): bool => preg_match('/^(?:[0-9]+|.+_ibfk_[0-9]+)$/D', $name) === 1;
+
+        return $automatic($expected) && $automatic($actual);
     }
 
     /** Typ a NULL/NOT NULL — část definice sloupce, jejíž změna mění, co jde uložit. */

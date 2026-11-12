@@ -7,11 +7,6 @@ namespace MyInvoice\Tests\Support;
 use PDO;
 use PDOException;
 
-/**
- * Smazání testovacího dodavatele kaskádou nezávisle na jejím pořadí: MariaDB 11.8 řadí
- * podřízené vazby podle jména FK, MariaDB 12 podle jména tabulky (1451 na RESTRICT vazbě
- * k období). Blokujícího rodiče smaže bez kontroly FK a smazání zopakuje.
- */
 final class SupplierCascadeCleanup
 {
     public static function delete(PDO $pdo, int ...$supplierIds): void
