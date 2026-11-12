@@ -126,6 +126,47 @@ final class PayrollE2eNavAgencyBenchmarkTest extends TestCase
         if (getenv('MYINVOICE_PAYROLL_AGENCY_BENCHMARK_MARK') === '1') {
             $this->explainNewQueries($employmentIds[0]);
         }
+        if (getenv('MYINVOICE_PAYROLL_AGENCY_BENCHMARK_SIZES') === '1') {
+            $this->reportSnapshotSizes();
+        }
+    }
+
+    /**
+     * Velikost JSON snímků firmy po jednom měsíci: holá délka a délka po
+     * kompresi zlib (odhad úspory u komprimovaného sloupce).
+     */
+    private function reportSnapshotSizes(): void
+    {
+        $columns = $this->db->pdo()->query(
+            "SELECT column_info.TABLE_NAME, column_info.COLUMN_NAME
+               FROM information_schema.COLUMNS column_info
+               JOIN information_schema.COLUMNS supplier_column
+                 ON supplier_column.TABLE_SCHEMA = column_info.TABLE_SCHEMA
+                AND supplier_column.TABLE_NAME = column_info.TABLE_NAME
+                AND supplier_column.COLUMN_NAME = 'supplier_id'
+              WHERE column_info.TABLE_SCHEMA = DATABASE()
+                AND column_info.TABLE_NAME LIKE 'payroll%'
+                AND column_info.DATA_TYPE IN ('longtext', 'mediumtext', 'text', 'longblob', 'mediumblob', 'blob')
+              ORDER BY column_info.TABLE_NAME, column_info.COLUMN_NAME"
+        )->fetchAll(PDO::FETCH_NUM);
+        $rows = [];
+        $total = [0, 0];
+        foreach ($columns as [$table, $column]) {
+            $statement = $this->db->pdo()->prepare(
+                "SELECT COUNT(`{$column}`), COALESCE(SUM(LENGTH(`{$column}`)), 0), COALESCE(SUM(LENGTH(COMPRESS(`{$column}`))), 0)
+                   FROM `{$table}` WHERE supplier_id = ?"
+            );
+            $statement->execute([$this->supplierId]);
+            [$count, $plain, $compressed] = array_map('intval', $statement->fetch(PDO::FETCH_NUM));
+            if ($plain < 100_000) {
+                continue;
+            }
+            $rows[] = sprintf('  %-48s %6d řádků %8.2f MB  zlib %7.2f MB', "{$table}.{$column}", $count, $plain / 1e6, $compressed / 1e6);
+            $total[0] += $plain;
+            $total[1] += $compressed;
+        }
+        $rows[] = sprintf('  %-48s %15s %8.2f MB  zlib %7.2f MB', 'celkem (sloupce nad 0,1 MB)', '', $total[0] / 1e6, $total[1] / 1e6);
+        fwrite(STDERR, "Snímky firmy po měsíci:\n" . implode("\n", $rows) . "\n");
     }
 
     /**
