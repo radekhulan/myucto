@@ -19,7 +19,7 @@ declare(strict_types=1);
  *   php api/bin/migrate.php --until=1073_x.sql # aplikovat nejvýše zadanou migraci
  *   php api/bin/migrate.php --below=1000       # jen migrace s číselnou předponou < 1000
  *   php api/bin/migrate.php --only=1000_user_suppliers.sql,1121_price_list_items.sql
- *   php api/bin/migrate.php --repair-definers          # náhled triggerů s chybějícím definerem
+ *   php api/bin/migrate.php --repair-definers          # náhled triggerů s chybějícím definerem nebo bez práv
  *   php api/bin/migrate.php --repair-definers --apply  # znovuvytvoření pod aktuálním DB účtem
  *
  * `--below` je stabilní alternativa k `--until` — neváže se na konkrétní jméno
@@ -451,46 +451,28 @@ function splitSqlStatements(string $sql): array
 
 /**
  * Opraví triggery přenesené dumpem z jiného serveru, jejichž DEFINER v cílové
- * MariaDB neexistuje. Bez --apply pouze vypíše rozsah. Při aplikaci zachová tělo
- * triggeru i jeho SQL mode a změní jen vlastníka na CURRENT_USER.
+ * MariaDB neexistuje, nebo existuje, ale k této databázi nemá práva (výpočet
+ * pak padá chybou 1142). Bez --apply pouze vypíše rozsah a obě možnosti opravy.
+ * Při aplikaci zachová tělo triggeru i jeho SQL mode a změní jen vlastníka na
+ * CURRENT_USER ({@see \MyInvoice\Infrastructure\Database\TriggerDefinerRepair}).
  */
 function repairMissingTriggerDefiners(\PDO $db, bool $apply): void
 {
-    $identity = $db->query(
-        'SELECT DATABASE() AS database_name, CURRENT_USER() AS authenticated_user'
-    )->fetch(\PDO::FETCH_ASSOC);
-    $database = (string) ($identity['database_name'] ?? '');
-    $currentUser = (string) ($identity['authenticated_user'] ?? '');
-    if ($database === '') {
-        throw new \RuntimeException('Není vybraná databáze.');
-    }
-
-    try {
-        $stmt = $db->prepare(
-            "SELECT t.TRIGGER_NAME, t.DEFINER
-               FROM information_schema.TRIGGERS t
-          LEFT JOIN mysql.user u
-                 ON u.User = SUBSTRING_INDEX(t.DEFINER, '@', 1)
-                AND u.Host = SUBSTRING_INDEX(t.DEFINER, '@', -1)
-              WHERE t.TRIGGER_SCHEMA = ?
-                AND u.User IS NULL
-              ORDER BY t.TRIGGER_NAME"
-        );
-        $stmt->execute([$database]);
-        $broken = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
-    } catch (\Throwable $e) {
-        throw new \RuntimeException(
-            'Kontrola definerů vyžaduje oprávnění číst mysql.user: ' . $e->getMessage(),
-            0,
-            $e,
-        );
-    }
+    $repair = new \MyInvoice\Infrastructure\Database\TriggerDefinerRepair($db);
+    $state = $repair->inspect();
+    $database = $state['database'];
+    $broken = $state['triggers'];
+    $missing = array_values(array_filter(
+        $broken,
+        static fn (array $row): bool => $row['problem'] === \MyInvoice\Infrastructure\Database\TriggerDefinerRepair::PROBLEM_MISSING,
+    ));
 
     echo sprintf(
-        "Databáze: %s, aktuální účet: %s, triggery s chybějícím definerem: %d\n",
+        "Databáze: %s, aktuální účet: %s, triggery s chybějícím definerem: %d, s definerem bez práv k databázi: %d\n",
         $database,
-        $currentUser,
-        count($broken),
+        $state['current_user'],
+        count($missing),
+        count($broken) - count($missing),
     );
     if ($broken === []) {
         echo "Není co opravovat.\n";
@@ -499,57 +481,31 @@ function repairMissingTriggerDefiners(\PDO $db, bool $apply): void
     if (!$apply) {
         $byDefiner = [];
         foreach ($broken as $row) {
-            $definer = (string) $row['DEFINER'];
-            $byDefiner[$definer] = ($byDefiner[$definer] ?? 0) + 1;
+            $key = $row['definer'] . "\0" . $row['problem'];
+            $byDefiner[$key] = ($byDefiner[$key] ?? 0) + 1;
         }
-        foreach ($byDefiner as $definer => $count) {
-            echo "  {$definer}: {$count}\n";
+        $grants = [];
+        foreach ($byDefiner as $key => $count) {
+            [$definer, $problem] = explode("\0", $key, 2);
+            if ($problem === \MyInvoice\Infrastructure\Database\TriggerDefinerRepair::PROBLEM_MISSING) {
+                echo "  {$definer}: {$count} (účet na serveru neexistuje)\n";
+            } else {
+                echo "  {$definer}: {$count} (účet existuje, ale nemá k databázi {$database} práva "
+                    . implode(', ', \MyInvoice\Infrastructure\Database\TriggerDefinerRepair::REQUIRED_PRIVILEGES)
+                    . "; zápis pak končí chybou 1142)\n";
+                $grants[] = \MyInvoice\Infrastructure\Database\TriggerDefinerRepair::grantStatement($definer, $database);
+            }
         }
-        echo "Náhled bez změn. Pro opravu přidej --apply.\n";
+        echo "Náhled bez změn. Pro opravu přidej --apply: triggery se znovu vytvoří pod aktuálním účtem.\n";
+        if ($grants !== []) {
+            echo "Účtu, který existuje, může místo toho správce databáze přidělit práva:\n";
+            foreach ($grants as $grant) {
+                echo "  {$grant}\n";
+            }
+        }
         return;
     }
 
-    $quoteIdentifier = static fn (string $name): string => '`' . str_replace('`', '``', $name) . '`';
-    $originalMode = (string) $db->query('SELECT @@SESSION.sql_mode')->fetchColumn();
-    $repaired = 0;
-    try {
-        foreach ($broken as $row) {
-            $name = (string) $row['TRIGGER_NAME'];
-            $show = $db->query('SHOW CREATE TRIGGER ' . $quoteIdentifier($name))->fetch(\PDO::FETCH_ASSOC);
-            $originalSql = is_array($show) ? (string) ($show['SQL Original Statement'] ?? '') : '';
-            $sqlMode = is_array($show) ? (string) ($show['sql_mode'] ?? '') : '';
-            if ($originalSql === '') {
-                throw new \RuntimeException("Nelze načíst definici triggeru {$name}.");
-            }
-            $createSql = preg_replace(
-                '/\ACREATE\s+DEFINER=(?:`(?:``|[^`])+`@`(?:``|[^`])+`|\S+)\s+TRIGGER\s+/i',
-                'CREATE DEFINER=CURRENT_USER TRIGGER ',
-                $originalSql,
-                1,
-                $replacementCount,
-            );
-            if (!is_string($createSql) || $replacementCount !== 1) {
-                throw new \RuntimeException("Neznámý formát definice triggeru {$name}.");
-            }
-
-            $setMode = $db->prepare('SET SESSION sql_mode = ?');
-            $setMode->execute([$sqlMode]);
-            $db->exec('DROP TRIGGER IF EXISTS ' . $quoteIdentifier($name));
-            try {
-                $db->exec($createSql);
-            } catch (\Throwable $e) {
-                try {
-                    $db->exec($originalSql);
-                } catch (\Throwable) {
-                }
-                throw new \RuntimeException("Obnova triggeru {$name} selhala: " . $e->getMessage(), 0, $e);
-            }
-            $repaired++;
-        }
-    } finally {
-        $restoreMode = $db->prepare('SET SESSION sql_mode = ?');
-        $restoreMode->execute([$originalMode]);
-    }
-
+    $repaired = $repair->repair($broken);
     echo "Opraveno triggerů: {$repaired}.\n";
 }

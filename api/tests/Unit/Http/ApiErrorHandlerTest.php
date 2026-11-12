@@ -99,6 +99,40 @@ final class ApiErrorHandlerTest extends TestCase
         self::assertStringContainsString('administrator', $english['error']['message']);
     }
 
+    /**
+     * Definer triggeru z obnovené databáze bez práv k nové databázi: výpočet
+     * mezd padal obecnou chybou 500. Odpověď teď říká, co se stalo a jak to
+     * správce opraví, a nevynáší text chyby databáze.
+     */
+    public function testDatabasePrivilegeErrorTellsAdministratorHowToRepairDefiners(): void
+    {
+        foreach ([1142, 1449] as $code) {
+            $pdo = new \PDOException('SQLSTATE[42000]: INSERT command denied to user x@y for table secret_table');
+            $pdo->errorInfo = ['42000', $code, 'command denied'];
+            $wrapped = new \RuntimeException('Výpočet selhal.', 0, $pdo);
+            $response = $this->handle('/api/payroll/runs/5/calculate', $wrapped, true, $this->logger());
+            $raw = (string) $response->getBody();
+            $body = json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
+
+            self::assertSame(503, $response->getStatusCode(), (string) $code);
+            self::assertSame('database_privileges_missing', $body['error']['code']);
+            self::assertSame(ApiErrorHandler::DATABASE_PRIVILEGES_MESSAGE, $body['error']['message']);
+            self::assertStringContainsString('--repair-definers', $body['error']['message']);
+            self::assertStringNotContainsString('secret_table', $raw);
+            self::assertArrayNotHasKey('debug', $body['error']);
+        }
+
+        $other = new \PDOException('SQLSTATE[23000]: duplicate');
+        $other->errorInfo = ['23000', 1062, 'duplicate'];
+        self::assertSame(500, $this->handle('/api/payroll/runs', $other, false, $this->logger())->getStatusCode());
+
+        Locale::set('en');
+        $pdo = new \PDOException('denied');
+        $pdo->errorInfo = ['42000', 1142, 'denied'];
+        $english = json_decode((string) $this->handle('/api/payroll/runs', $pdo, false, $this->logger())->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertStringStartsWith('The database refused the write', $english['error']['message']);
+    }
+
     public function testHttpExceptionKeepsStatusWithoutTrace(): void
     {
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/nope')

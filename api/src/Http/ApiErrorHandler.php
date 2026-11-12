@@ -40,7 +40,13 @@ use Throwable;
 final class ApiErrorHandler extends ErrorHandler
 {
     public const CODE_ENCRYPTION_KEY_UNAVAILABLE = 'encryption_key_unavailable';
+    public const CODE_DATABASE_PRIVILEGES = 'database_privileges_missing';
     public const CODE_INTERNAL = 'internal_error';
+
+    /** 1142 = účtu chybí právo k tabulce, 1449 = definer triggeru neexistuje. */
+    private const DATABASE_PRIVILEGE_ERRORS = [1142, 1449];
+
+    public const DATABASE_PRIVILEGES_MESSAGE = 'Databáze odmítla zápis, protože databázový účet, pod kterým běží její triggery, k ní nemá potřebná práva nebo na serveru neexistuje. Typicky se to stane po obnově databáze z jiného serveru. Nejde o chybu v datech, ale o nastavení instalace: správce instalace spustí php api/bin/migrate.php --repair-definers (náhled) a potom totéž s --apply, nebo účtu přidělí práva k této databázi.';
 
     public const ENCRYPTION_KEY_UNAVAILABLE_MESSAGE = 'Šifrované osobní údaje nejde přečíst, protože tato instalace nemá šifrovací klíč, kterým byly uložené. Nejde o chybu v datech, ale o nastavení instalace: správce instalace musí do její konfigurace vrátit původní šifrovací klíč. Do té doby nejde připravit podání ani zobrazit údaje, které šifrované osobní údaje potřebují.';
 
@@ -60,7 +66,9 @@ final class ApiErrorHandler extends ErrorHandler
 
     protected function determineStatusCode(): int
     {
-        if ($this->method !== 'OPTIONS' && self::isEncryptionKeyUnavailable($this->exception)) {
+        if ($this->method !== 'OPTIONS'
+            && (self::isEncryptionKeyUnavailable($this->exception) || self::isDatabasePrivilegeError($this->exception))
+        ) {
             return 503;
         }
 
@@ -86,6 +94,17 @@ final class ApiErrorHandler extends ErrorHandler
         }
 
         $response = $this->responseFactory->createResponse();
+        if ($this->statusCode === 503 && self::isDatabasePrivilegeError($this->exception)) {
+            return Json::error(
+                $response,
+                self::CODE_DATABASE_PRIVILEGES,
+                self::DATABASE_PRIVILEGES_MESSAGE,
+                503,
+                ['request_id' => $this->requestId],
+            )
+                ->withoutHeader(Json::HEADER_PUBLIC_MESSAGE)
+                ->withHeader(InternalErrorRedactionMiddleware::HEADER_REQUEST_ID, $this->requestId);
+        }
         if ($this->statusCode === 503) {
             return Json::error(
                 $response,
@@ -129,6 +148,23 @@ final class ApiErrorHandler extends ErrorHandler
     {
         for ($current = $exception; $current !== null; $current = $current->getPrevious()) {
             if ($current instanceof EncryptionKeyUnavailableException) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Zápis odmítnutý kvůli právům databázového účtu (typicky definer triggeru
+     * z obnovené databáze jiného serveru). Rozpoznává se podle kódu chyby.
+     */
+    public static function isDatabasePrivilegeError(Throwable $exception): bool
+    {
+        for ($current = $exception; $current !== null; $current = $current->getPrevious()) {
+            if ($current instanceof \PDOException
+                && in_array((int) ($current->errorInfo[1] ?? 0), self::DATABASE_PRIVILEGE_ERRORS, true)
+            ) {
                 return true;
             }
         }

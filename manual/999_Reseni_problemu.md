@@ -588,6 +588,23 @@ Možná chybí cache statistik. Spusťte `php api/bin/recompute-stats.php`, pře
 - Zkontrolujte `cfg.php → app.debug => false` v produkci (ladicí logy jsou drahé).
 - Sledujte `log/app-RRRR-MM-DD.log` (pomalé dotazy jsou v logu jako `slow_query`).
 
+#### 999.5.7.3 Po obnově databáze z jiného serveru zápis hlásí „Databáze odmítla zápis…“
+
+Triggery databáze běží pod účtem, který je vytvořil (DEFINER). Po obnově dumpu
+z jiného serveru buď tento účet na novém serveru neexistuje, nebo existuje, ale práva
+má jen k původní databázi. Zápis, typicky výpočet mezd, pak skončí touto hláškou
+(v logu chyba databáze 1142 nebo 1449).
+
+```bash
+php api/bin/migrate.php --repair-definers          # náhled: kolik triggerů a proč
+php api/bin/migrate.php --repair-definers --apply  # znovu vytvoří triggery pod aktuálním účtem
+```
+
+Náhled rozliší účet, který neexistuje, od účtu bez práv k databázi. U účtu bez práv
+navíc vypíše příkaz `GRANT SELECT, INSERT, UPDATE, DELETE ON …`, kterým mu práva může
+přidělit správce databáze místo opravy triggerů. Těla triggerů ani jejich SQL mode se
+opravou nemění.
+
 ### 999.5.8 Multi-supplier
 
 #### 999.5.8.1 Po přepnutí dodavatele vidím prázdný seznam klientů
