@@ -10,6 +10,8 @@ final class PayrollMonthGuide
     public const STATE_TODO = 'todo';
     public const STATE_WAITING = 'waiting';
     public const STATE_UNAVAILABLE = 'unavailable';
+    public const STATES = [self::STATE_DONE, self::STATE_TODO, self::STATE_WAITING, self::STATE_UNAVAILABLE];
+    public const STEP_KEYS = ['inputs', 'people', 'registrations', 'check', 'run', 'submissions', 'payments'];
 
     private const INPUT_CODES = [
         'time_month_not_approved',

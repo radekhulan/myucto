@@ -74,6 +74,11 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Kroky a stavy průvodce měsícem (GET /payroll/month-guide)
+        'payroll.ts::PayrollMonthGuideStepKey'
+            => 'const:MyInvoice\Service\Payroll\Run\PayrollMonthGuide::STEP_KEYS',
+        'payroll.ts::PayrollMonthGuideStepState'
+            => 'const:MyInvoice\Service\Payroll\Run\PayrollMonthGuide::STATES',
         // Skupiny hodinové evidence, které server umí posoudit automatickou nulou
         'payroll.ts::PayrollHourlyAutomaticKey'
             => 'const:MyInvoice\Service\Payroll\PayrollHourlyEntitlementContextLoader::SELECTION_KEYS',
