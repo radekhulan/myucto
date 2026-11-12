@@ -283,6 +283,9 @@ final class PayrollRunReadinessPredictionTest extends TestCase
         );
         $insert->execute([$this->supplierId, $unknownId, 'unknown', $this->actorId, $this->actorId]);
         $insert->execute([$this->supplierId, $decidedId, 'not_requested', $this->actorId, $this->actorId]);
+        // Podepsané prohlášení v roce 2026: o zúčtování požádat mohla, „nepožádal"
+        // u ní musí potvrdit účetní. Osoba bez prohlášení požádat nemohla.
+        $this->declaration($unknownId, 'signed', '2026-03-01', '2026-06-30');
 
         $result = $this->readiness->inspect($this->supplierId, '2027-02-01', '2027-03-10');
 
@@ -295,25 +298,40 @@ final class PayrollRunReadinessPredictionTest extends TestCase
         $expected = [$withoutRowId, $unknownId];
         sort($expected);
         self::assertSame($expected, $ids);
-        self::assertSame([['kind' => 'annual_settlement_request', 'count' => 2]], $finding['bulk_actions']);
+        // Tlačítka nesou dotčené osoby: bezpečnou skupinu (bez prohlášení,
+        // rok mzdy pokrývají celý) zvlášť od osob, u kterých je žádost fakt.
+        self::assertSame([
+            ['kind' => 'annual_settlement_request_safe', 'count' => 1, 'employee_ids' => [$withoutRowId]],
+            ['kind' => 'annual_settlement_request', 'count' => 1, 'employee_ids' => [$unknownId]],
+        ], $finding['bulk_actions']);
         self::assertStringContainsString('Syntetická Nevím', $finding['message']);
-        // Odkaz nese rok zúčtování (rok před hlášením), ne rok podle dneška.
-        self::assertSame('/payroll/annual-settlement?year=2026', $finding['remediation_path']);
+        self::assertStringContainsString('1 z nich nemá za rok 2026 podepsané prohlášení', $finding['message']);
+        self::assertStringContainsString('U zbývajících 1 s podepsaným prohlášením', $finding['message']);
+        // Odkaz nese rok zúčtování (rok před hlášením), ne rok podle dneška,
+        // a zúžení na nerozhodnuté osoby.
+        self::assertSame('/payroll/annual-settlement?year=2026&state=request_undecided', $finding['remediation_path']);
         foreach ($finding['entities'] as $entity) {
             self::assertSame(
-                '/payroll/annual-settlement?year=2026&person=' . $entity['entity_id'],
+                '/payroll/annual-settlement?year=2026&state=request_undecided&person=' . $entity['entity_id'],
                 $entity['remediation_path'],
             );
         }
 
         // Tlačítko vede na Roční zúčtování zúžené na tytéž osoby.
-        $listed = \MyInvoice\Tests\Support\PayrollTestContainer::build()
-            ->get(\MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository::class)
-            ->listForYear($this->supplierId, 2026, 50, 0, '', 'request_undecided');
+        $repository = \MyInvoice\Tests\Support\PayrollTestContainer::build()
+            ->get(\MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository::class);
+        $listed = $repository->listForYear($this->supplierId, 2026, 50, 0, '', 'request_undecided');
         $listedIds = array_map(static fn (array $item): int => (int) $item['employee_id'], $listed['items']);
         sort($listedIds);
         self::assertSame($expected, $listedIds);
         self::assertSame(2, $listed['total']);
+        // Zúžení na osoby z tlačítka: jen ony, i když jsou nerozhodnutí další.
+        [$otherId] = $this->employment('Syntetický Mimo hlášení');
+        self::assertSame(3, $repository->listForYear($this->supplierId, 2026, 50, 0, '', 'request_undecided')['total']);
+        $narrowed = $repository->listForYear($this->supplierId, 2026, 50, 0, '', 'request_undecided', [$withoutRowId]);
+        self::assertSame(1, $narrowed['total']);
+        self::assertSame([$withoutRowId], array_map(static fn (array $item): int => (int) $item['employee_id'], $narrowed['items']));
+        self::assertNotContains($otherId, $expected);
 
         // Mimo leden a únor se stav žádosti nehlásí.
         $march = $this->readiness->inspect($this->supplierId, '2027-03-01', '2027-04-10');
@@ -335,8 +353,16 @@ final class PayrollRunReadinessPredictionTest extends TestCase
         self::assertNotNull($early, json_encode(array_column($february2026['findings'], 'code')));
         $earlyIds = array_column($early['entities'], 'entity_id');
         sort($earlyIds);
-        self::assertSame($expected, $earlyIds);
-        self::assertSame('/payroll/annual-settlement?year=2025', $early['remediation_path']);
+        $expectedEarly = [...$expected, $otherId];
+        sort($expectedEarly);
+        self::assertSame($expectedEarly, $earlyIds);
+        self::assertSame('/payroll/annual-settlement?year=2025&state=request_undecided', $early['remediation_path']);
+        // Rok 2025 mzdy v aplikaci nepokrývají (start 01/2026): chybějící
+        // prohlášení nic nedokazuje, nic se nepředvybírá jako bezpečné.
+        self::assertSame(['annual_settlement_request'], array_column($early['bulk_actions'], 'kind'));
+        self::assertSame(3, $early['bulk_actions'][0]['count']);
+        self::assertSame($expectedEarly, $early['bulk_actions'][0]['employee_ids']);
+        self::assertStringNotContainsString('bezpečná odpověď', $early['message']);
         self::assertSame('info', $early['severity']);
         self::assertSame('anytime', $early['impact']);
         $march2026 = $this->readiness->inspect($this->supplierId, '2026-03-01', '2026-04-10');

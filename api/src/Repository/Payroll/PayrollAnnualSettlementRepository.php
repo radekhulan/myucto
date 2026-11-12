@@ -584,6 +584,12 @@ final class PayrollAnnualSettlementRepository
      *  - `request_undecided` — o žádosti není rozhodnuto (řádek chybí nebo
      *    má stav `unknown`) a osoba měla v roce nebo má teď pracovní vztah
      *
+     * `$employeeIds` zúží seznam na konkrétní osoby, typicky ty, kvůli kterým
+     * stojí měsíční hlášení (odkaz z kontroly před během nebo z testu JMHZ).
+     * Bez toho stránka nabídla všechny nerozhodnuté osoby roku, i ty, které
+     * v hlášeném měsíci vůbec nepracovaly.
+     *
+     * @param list<int> $employeeIds
      * @return array{items:list<array<string,mixed>>,total:int}
      */
     public function listForYear(
@@ -593,6 +599,7 @@ final class PayrollAnnualSettlementRepository
         int $offset,
         string $search = '',
         string $state = 'all',
+        array $employeeIds = [],
     ): array {
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
@@ -625,6 +632,14 @@ final class PayrollAnnualSettlementRepository
         };
         if ($state === 'request_undecided') {
             $filterParams[] = sprintf('%04d-01-01', $taxYear);
+        }
+        $employeeIds = array_values(array_unique(array_filter(
+            array_map('intval', $employeeIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($employeeIds !== []) {
+            $conditions .= ' AND employee.id IN (' . implode(',', array_fill(0, count($employeeIds), '?')) . ')';
+            array_push($filterParams, ...$employeeIds);
         }
 
         $joins =
@@ -672,7 +687,7 @@ final class PayrollAnnualSettlementRepository
             $statement->bindValue(++$position, $value, PDO::PARAM_INT);
         }
         foreach ($filterParams as $value) {
-            $statement->bindValue(++$position, $value, PDO::PARAM_STR);
+            $statement->bindValue(++$position, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
         }
         $statement->bindValue(++$position, $limit, PDO::PARAM_INT);
         $statement->bindValue(++$position, $offset, PDO::PARAM_INT);

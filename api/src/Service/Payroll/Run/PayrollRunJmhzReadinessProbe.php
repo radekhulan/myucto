@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Run;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzAnnualEvidenceService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerExplainer;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerRemediationPath;
@@ -60,6 +61,7 @@ final class PayrollRunJmhzReadinessProbe
         private readonly JmhzPreparationSnapshotService $preparation,
         private readonly PayrollComponentJmhzMappingDefaults $mappingDefaults,
         private readonly PayrollPeopleRepository $people,
+        private readonly JmhzAnnualEvidenceService $annualEvidence,
     ) {}
 
     /**
@@ -171,10 +173,14 @@ final class PayrollRunJmhzReadinessProbe
                     'entities' => [],
                     'labels' => [],
                     'detail' => is_string($issue['message'] ?? null) ? $issue['message'] : null,
+                    'all_ids' => [],
                 ];
             }
             ++$groups[$code]['count'];
             ++$groups[$code]['entity_total'];
+            if (is_int($issue['entity_id'])) {
+                $groups[$code]['all_ids'][$issue['entity_id']] = $issue['entity_id'];
+            }
             if (count($groups[$code]['entities']) < self::MAX_ENTITIES) {
                 $groups[$code]['entities'][] = [
                     'entity_type' => $issue['entity_type'],
@@ -210,7 +216,10 @@ final class PayrollRunJmhzReadinessProbe
                 $group['count'],
                 $group['count'] === 1 ? $group['detail'] : null,
             );
-            unset($group['labels'], $group['detail']);
+            if ($group['code'] === 'jmhz_annual_request_status_unresolved') {
+                $group = $this->withAnnualRequestBulk($supplierId, $periodStart, $group);
+            }
+            unset($group['labels'], $group['detail'], $group['all_ids']);
             $findings[] = $group;
         }
 
@@ -263,6 +272,50 @@ final class PayrollRunJmhzReadinessProbe
         }
 
         return $issues;
+    }
+
+    /**
+     * Hromadné „nepožádal" zúžené na osoby hlášení, rozdělené podle toho,
+     * zda je ta odpověď bezpečná.
+     *
+     * Osoby bez podepsaného prohlášení v roce o zúčtování požádat nemohly
+     * ({@see JmhzAnnualEvidenceService::employeesUnableToRequest()}); u nich
+     * tlačítko rovnou předvybere všechny. U ostatních je žádost fakt, který
+     * musí potvrdit účetní, takže odkaz je jen zúží.
+     *
+     * @param array<string,mixed> $group
+     * @return array<string,mixed>
+     */
+    private function withAnnualRequestBulk(int $supplierId, string $periodStart, array $group): array
+    {
+        /** @var list<int> $all */
+        $all = array_values($group['all_ids']);
+        sort($all);
+        $taxYear = (int) substr($periodStart, 0, 4) - 1;
+        try {
+            $unable = $this->annualEvidence->employeesUnableToRequest($supplierId, $all, $taxYear);
+        } catch (\Throwable) {
+            $unable = [];
+        }
+        $toConfirm = array_values(array_diff($all, $unable));
+        $group['bulk_ids'] = [
+            'annual_settlement_request_safe' => $unable,
+            'annual_settlement_request' => $toConfirm,
+        ];
+        if ($unable !== []) {
+            $group['message'] .= sprintf(
+                ' %d z nich nemá za rok %d podepsané prohlášení k dani, takže o roční '
+                . 'zúčtování požádat nemohli (§ 38ch odst. 1 ZDP) a „nepožádal" je u nich '
+                . 'bezpečná odpověď. %s',
+                count($unable),
+                $taxYear,
+                $toConfirm === []
+                    ? 'Nastavit ji jde jedním tlačítkem.'
+                    : sprintf('U zbývajících %d s podepsaným prohlášením ověřte, zda písemně požádali.', count($toConfirm)),
+            );
+        }
+
+        return $group;
     }
 
     /**

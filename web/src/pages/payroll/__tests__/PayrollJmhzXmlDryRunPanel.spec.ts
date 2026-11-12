@@ -409,6 +409,53 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     expect(wrapper.text()).not.toContain('10050')
   })
 
+  /*
+   * Nerozhodnutá žádost o roční zúčtování u desítek osob vedla na Roční
+   * zúčtování bez filtru. Odkaz teď nese rok, zúžení na nerozhodnuté, osoby
+   * hlášení a předvýběr, takže „nepožádal" je jedno potvrzení.
+   */
+  it('nerozhodnutou žádost o roční zúčtování vede na hromadné nastavení pro osoby hlášení', async () => {
+    m.dryRun.mockResolvedValue({
+      status: 'blocked',
+      preparation_id: 78,
+      blockers: [21, 22, 23].map(id => ({
+        code: 'jmhz_annual_request_source_missing',
+        entity_type: 'person',
+        entity_id: id,
+        attribute_ids: ['10319'],
+        remediation: { kind: 'annual_settlement', field: null },
+      })),
+      official_submission: {
+        supported: false,
+        reason_code: 'jmhz_dry_run_is_not_a_submission',
+        reason: 'Jde o lokální test, ne o podání.',
+      },
+    })
+
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [{ ...run, period_start: '2026-02-01' }] as never[] },
+      global: {
+        stubs: {
+          RouterLink: {
+            props: ['to'],
+            template: '<a data-test="router-link" :data-to="JSON.stringify(to)"><slot /></a>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    const links = wrapper.findAll('[data-test="jmhz-dry-run-remediation"]')
+    expect(links).toHaveLength(1)
+    expect(JSON.parse(links[0]!.attributes('data-to')!)).toEqual({
+      name: 'payroll-annual-settlement',
+      query: { year: '2025', state: 'request_undecided', employees: '21,22,23', select: 'all' },
+    })
+    expect(links[0]!.text()).toContain('jmhz_dry_run_action_codes.jmhz_annual_request_source_missing')
+  })
+
   it('vypíše nepropustné vady z katalogu kontrol i s kódem chyby', async () => {
     m.dryRun.mockResolvedValue({
       status: 'dry_run_incomplete',

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import { cs, en, i18nMessages } from '../../../../tests/locales'
 import type { PayrollComponent, PayrollComponentJmhzMappingState, PayrollJmhzXmlDryRunBlocker } from '@/api/payroll'
-import { jmhzBlockerLabel, jmhzErrorMessage, jmhzRemediationKind, jmhzRemediationTarget } from '../jmhzBlockerRemediation'
+import { annualSettlementRequestTarget, jmhzBlockerLabel, jmhzErrorMessage, jmhzRemediationKind, jmhzRemediationTarget } from '../jmhzBlockerRemediation'
 import { payrollCodeKey } from '../payrollServerMessage'
 
 function blocker(overrides: Partial<PayrollJmhzXmlDryRunBlocker>): PayrollJmhzXmlDryRunBlocker {
@@ -68,14 +68,37 @@ describe('navigace nálezů měsíčního hlášení', () => {
       id,
       { period: '2027-02', employments: [{ id: 7, employee_id: 3 }] },
     )
-    expect(target('person', 3)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', person: '3' } })
-    expect(target('employee', 5)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', person: '5' } })
-    expect(target('employment', 7)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', person: '3' } })
-    expect(target('run', null)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026' } })
+    const undecided = { state: 'request_undecided' }
+    expect(target('person', 3)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', ...undecided, person: '3' } })
+    expect(target('employee', 5)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', ...undecided, person: '5' } })
+    expect(target('employment', 7)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', ...undecided, person: '3' } })
+    expect(target('run', null)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', ...undecided } })
     expect(jmhzRemediationTarget(
       blocker({ code: 'jmhz_annual_request_status_unresolved', entity_type: 'run', remediation: { kind: 'annual_settlement', field: null } }),
       null,
-    )).toEqual({ name: 'payroll-annual-settlement', query: {} })
+    )).toEqual({ name: 'payroll-annual-settlement', query: undecided })
+    // Jiný nález ročního zúčtování (provedené zúčtování) zúžení na nerozhodnuté nedostane.
+    expect(jmhzRemediationTarget(
+      blocker({ code: 'jmhz_annual_settlement_request_source_inconsistent', entity_type: 'person', remediation: { kind: 'annual_settlement', field: null } }),
+      4,
+      { period: '2027-02' },
+    )).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', person: '4' } })
+  })
+
+  /**
+   * Odkaz z testu XML vedl na Roční zúčtování bez filtru: účetní hledala
+   * dotčené osoby mezi všemi lidmi roku. Hromadný odkaz nese rok, zúžení
+   * na nerozhodnuté, osoby hlášení a předvýběr.
+   */
+  it('hromadné „nepožádal" nese rok, nerozhodnuté a osoby hlášení', () => {
+    expect(annualSettlementRequestTarget('2026-02', [12, 5, 12, 0])).toEqual({
+      name: 'payroll-annual-settlement',
+      query: { year: '2025', state: 'request_undecided', employees: '12,5', select: 'all' },
+    })
+    expect(annualSettlementRequestTarget('2026-01', [], false)).toEqual({
+      name: 'payroll-annual-settlement',
+      query: { year: '2025', state: 'request_undecided' },
+    })
   })
 
   it('nález složky otevře její zařazení do JMHZ v číselníku, ne Mzdové vstupy', () => {

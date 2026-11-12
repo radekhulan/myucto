@@ -235,7 +235,7 @@ final class PayrollE2eHppReadinessTest extends TestCase
             self::assertSame($severity, $predicted[$code]['severity'], $code);
             $this->assertActionable($predicted[$code], $code);
         }
-        self::assertSame('/payroll/annual-settlement?year=2025', $predicted['jmhz_annual_request_status_unresolved']['remediation_path']);
+        self::assertSame('/payroll/annual-settlement?year=2025&state=request_undecided', $predicted['jmhz_annual_request_status_unresolved']['remediation_path']);
         self::assertSame('/payroll/absences?tab=averages&year=2026&quarter=1', $predicted['jmhz_average_hourly_earning_missing']['remediation_path']);
 
         // Mzdu za únor spočítat a schválit jde; příprava hlášení za únor pak

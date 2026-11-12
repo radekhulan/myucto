@@ -52,6 +52,7 @@ import {
   statutoryReviewEmployeeIds,
 } from '@/components/payroll/statutoryBulkDefaults'
 import { runRemediationHref } from './payrollRemediationQuery'
+import { annualSettlementRequestTarget } from './jmhzBlockerRemediation'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -1470,6 +1471,7 @@ const READINESS_BULK_ICONS: Record<PayrollRunReadinessBulkKind, string> = {
   workplace: ICONS.pin,
   closure: ICONS.archive,
   annual_settlement_request: ICONS.check,
+  annual_settlement_request_safe: ICONS.check,
   payout_defaults: ICONS.coin,
 }
 
@@ -1480,11 +1482,10 @@ function readinessBulkPeriod(): string {
 function readinessBulkTarget(action: { kind: PayrollRunReadinessBulkKind, employee_ids?: number[] }) {
   const kind = action.kind
   const bulkPeriod = readinessBulkPeriod()
-  if (kind === 'annual_settlement_request') {
-    // Hlášení za leden a únor se ptá na žádost za MINULÝ rok. Hromadné
-    // „nepožádal" je výběr na stránce Ročního zúčtování, zúžený na nerozhodnuté.
-    const taxYear = Number(bulkPeriod.slice(0, 4)) - 1
-    return { name: 'payroll-annual-settlement', query: { year: String(taxYear), state: 'request_undecided', select: 'all' } }
+  if (kind === 'annual_settlement_request' || kind === 'annual_settlement_request_safe') {
+    // Hromadné „nepožádal" je výběr na stránce Ročního zúčtování zúžený na
+    // osoby hlášení. Osoby bez prohlášení (bezpečná skupina) se rovnou vyberou.
+    return annualSettlementRequestTarget(bulkPeriod, action.employee_ids, true)
   }
   // Nález nese osoby, kterých se týká — dialog se jimi zúží, ne na celý rok.
   const employees = action.employee_ids?.length ? { employees: action.employee_ids.join(',') } : {}

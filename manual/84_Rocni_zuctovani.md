@@ -87,9 +87,22 @@ zúčtování nepožádali, nemusíte otevírat každého zvlášť.
 2. Zaškrtněte zaměstnance, nebo použijte **Vybrat vše na stránce**. Výběr zůstane
    zachovaný i při listování na další stránky. Tlačítko **Vybrat všechny
    odpovídající** vybere najednou všechny, kdo zúžení odpovídají, i z dalších
-   stránek. Odkaz z kontroly mzdového běhu otevře stránku zúženou na
-   nerozhodnuté žádosti a rovnou je všechny vybere.
+   stránek. Odkaz z kontroly mzdového běhu nebo z testu XML měsíčního hlášení
+   otevře stránku zúženou na nerozhodnuté žádosti osob z hlášení daného měsíce
+   a rovnou je všechny vybere. Nad seznamem pak vidíte „Zobrazeny jen N osob
+   z měsíčního hlášení“; tlačítkem **Zobrazit všechny** zúžení zrušíte.
 3. Klikněte na **Nastavit: nepožádal** (nebo **Nastavit: požádal**) a potvrďte.
+
+**Kdy je „nepožádal“ bezpečná hromadná odpověď.** O roční zúčtování smí požádat
+jen zaměstnanec, který u vás za daný rok podepsal prohlášení k dani (§ 38ch
+odst. 1 zákona o daních z příjmů). Kdo prohlášení nepodepsal, typicky brigádník
+na DPP se srážkovou daní, požádat nemohl a „nepožádal“ je u něj pravda. Pokud
+mzdy v aplikaci pokrývají celý rok zúčtování, kontrola mzdového běhu tyto osoby
+nabídne zvlášť tlačítkem **Nastavit „nepožádal“ osobám bez prohlášení**.
+Zaměstnanci s podepsaným prohlášením mohli písemně požádat do 15. února; u nich
+„nepožádal“ potvrďte jen tehdy, když od nich žádost nepřišla. Když firma vede mzdy
+v aplikaci až od pozdějšího měsíce, záznam o prohlášení za celý rok chybí a aplikace
+bezpečnou skupinu neurčí; rozhodněte podle svých podkladů.
 
 Změní se jen stav žádosti. Lidem, kteří žádost zatím nemají, se založí s ostatními
 údaji ve stavu „Neznámé“, u ostatních zůstává datum, doklad i další evidence beze

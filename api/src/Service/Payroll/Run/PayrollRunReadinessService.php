@@ -66,6 +66,7 @@ final class PayrollRunReadinessService
         'workplace',
         'closure',
         'annual_settlement_request',
+        'annual_settlement_request_safe',
         'payout_defaults',
     ];
 
@@ -528,6 +529,22 @@ final class PayrollRunReadinessService
                     // Dialog se zúží na tytéž osoby, aby sliboval stejný počet jako tlačítko.
                     $actions[] = ['kind' => $kind, 'count' => $totals[$kind]]
                         + (($ids[$kind] ?? []) === [] ? [] : ['employee_ids' => $ids[$kind]]);
+                }
+            }
+
+            return $actions;
+        }
+        /*
+         * Hromadné „nepožádal" je výběr na stránce Roční zúčtování zúžený na
+         * osoby hlášení. Bezpečnou skupinu (bez podepsaného prohlášení v roce)
+         * stránka rovnou předvybere, zbytek jen zúží k ověření.
+         */
+        if ($code === 'jmhz_annual_request_status_unresolved' && isset($finding['bulk_ids'])) {
+            $actions = [];
+            foreach (['annual_settlement_request_safe', 'annual_settlement_request'] as $kind) {
+                $ids = array_values(array_map('intval', (array) ($finding['bulk_ids'][$kind] ?? [])));
+                if ($ids !== []) {
+                    $actions[] = ['kind' => $kind, 'count' => count($ids), 'employee_ids' => $ids];
                 }
             }
 

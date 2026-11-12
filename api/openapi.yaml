@@ -45408,15 +45408,15 @@ components:
                 items: { type: string }
         bulk_actions:
           type: array
-          description: Hromadné opravy ze seznamu zaměstnanců (/payroll/people?bulk=kind), které nález nabízí; annual_settlement_request vede na hromadné nastavení stavu žádosti v Ročním zúčtování.
+          description: Hromadné opravy ze seznamu zaměstnanců (/payroll/people?bulk=kind), které nález nabízí; annual_settlement_request a annual_settlement_request_safe vedou na hromadné nastavení stavu žádosti v Ročním zúčtování (safe = osoby bez podepsaného prohlášení v roce, které o zúčtování požádat nemohly).
           items:
             type: object
             properties:
-              kind: { type: string, enum: [statutory_defaults, declaration_signed, health_insurer, workplace, closure, annual_settlement_request, payout_defaults] }
+              kind: { type: string, enum: [statutory_defaults, declaration_signed, health_insurer, workplace, closure, annual_settlement_request, annual_settlement_request_safe, payout_defaults] }
               count: { type: integer, minimum: 0 }
               employee_ids:
                 type: array
-                description: U declaration_signed osoby, kterých se nález týká; hromadný podpis se na ně zúží.
+                description: Osoby, kterých se nález týká (declaration_signed, annual_settlement_request*); hromadná oprava se na ně zúží.
                 items: { type: integer, minimum: 1 }
 
     PayrollRunReadiness:

@@ -108,6 +108,48 @@ final class PayrollAnnualSettlementActionTest extends TestCase
         self::assertSame('2026-06', substr((string) ($body['payroll_start_period'] ?? ''), 0, 7));
     }
 
+    /**
+     * Odkaz z kontroly před během zúží seznam na osoby hlášení (`employees`).
+     * Neplatný výčet je validační chyba, ne chyba databáze.
+     */
+    public function testListNarrowsToEmployeesFromLinkAndRejectsInvalidList(): void
+    {
+        $list = function (string $employees): Response {
+            $request = (new ServerRequestFactory())
+                ->createServerRequest('GET', '/api/payroll/annual-settlements/2025')
+                ->withQueryParams(['employees' => $employees])
+                ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+                ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+                ->withAttribute('auth.effective_role', new EffectiveRole(
+                    1,
+                    'Syntetická mzdová role',
+                    'staff',
+                    true,
+                    ['payroll.documents' => AccessLevel::WRITE->value, 'payroll' => AccessLevel::WRITE->value],
+                ));
+
+            return $this->action->list($request, new Response(), ['year' => '2025']);
+        };
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Syntetická jiná osoba", "employee", 1)',
+        )->execute([$this->supplierId]);
+        self::assertSame(2, $this->body($list(''))['total']);
+
+        $response = $list((string) $this->employeeId);
+        self::assertSame(200, $response->getStatusCode());
+        $body = $this->body($response);
+        self::assertSame([$this->employeeId], $body['employees']);
+        self::assertSame([$this->employeeId], array_map('intval', array_column($body['items'], 'employee_id')));
+
+        foreach (['abc', '1,,2', '0', '-1', implode(',', range(1, 1001))] as $invalid) {
+            self::assertSame(422, $list($invalid)->getStatusCode(), $invalid);
+        }
+    }
+
     public function testRejectsCaregiverListBeyondDatabasePositionLimit(): void
     {
         $caregiver = [

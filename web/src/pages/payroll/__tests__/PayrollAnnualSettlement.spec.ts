@@ -782,6 +782,38 @@ describe('Roční zúčtování', () => {
     expect(m.bulkSetAnnualSettlementRequestStatus).toHaveBeenCalledWith(2026, [7, 8, 9], 'not_requested')
   })
 
+  /*
+   * Odkaz z testu JMHZ nebo z kontroly před během nese osoby hlášení. Seznam
+   * i předvýběr se na ně zúží; „Zobrazit všechny" zúžení zruší.
+   */
+  it('odkaz s osobami hlášení zúží seznam i předvýběr na ně', async () => {
+    m.routeQuery = { year: '2025', state: 'request_undecided', employees: '7,8', select: 'all' }
+    const linked = [person({ employee_id: 7 }), person({ employee_id: 8, employee_name: 'Druhá osoba' })]
+    m.listAnnualSettlements.mockResolvedValue(listResponse(linked, { total: 2, state: 'request_undecided' }))
+    const wrapper = mountPage()
+    await flushPromises()
+    m.routeQuery = {}
+
+    expect(m.listAnnualSettlements).toHaveBeenCalledWith(
+      2025,
+      expect.anything(),
+      expect.objectContaining({ state: 'request_undecided', employees: [7, 8] }),
+    )
+    expect(wrapper.get('[data-test="annual-settlement-linked-employees"]').text())
+      .toContain('payroll.annual_settlement.linked_employees')
+    await wrapper.get('[data-test="annual-settlement-bulk-not-requested"]').trigger('click')
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-test="annual-settlement-bulk-confirm-submit"]')!.click()
+    await flushPromises()
+    expect(m.bulkSetAnnualSettlementRequestStatus).toHaveBeenCalledWith(2025, [7, 8], 'not_requested')
+
+    m.listAnnualSettlements.mockClear()
+    await wrapper.get('[data-test="annual-settlement-linked-employees-clear"]').trigger('click')
+    await flushPromises()
+    expect(m.listAnnualSettlements.mock.lastCall?.[2]).toEqual({ search: '', state: 'request_undecided' })
+    expect(wrapper.find('[data-test="annual-settlement-linked-employees"]').exists()).toBe(false)
+  })
+
   it('bez odkazu s předvýběrem nikoho sama nevybere', async () => {
     const wrapper = mountPage()
     await flushPromises()

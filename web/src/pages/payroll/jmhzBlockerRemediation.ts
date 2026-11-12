@@ -158,10 +158,12 @@ export function jmhzRemediationTarget(
       return { name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-offices' }
     case 'annual_settlement': {
       // Leden a únor hlásí zúčtování MINULÉHO roku; stejně jako server
-      // (`JmhzBlockerRemediationPath`) odkaz nese rok a osobu.
+      // (`JmhzBlockerRemediationPath`) odkaz nese rok, osobu a u nerozhodnuté
+      // žádosti zúžení na nerozhodnuté osoby.
       const year = period && /^\d{4}-/.test(period) ? { year: String(Number(period.slice(0, 4)) - 1) } : {}
+      const state = ANNUAL_REQUEST_CODES.includes(blocker.code) ? { state: 'request_undecided' } : {}
       const person = employeeId === null ? {} : { person: String(employeeId) }
-      return { name: 'payroll-annual-settlement', query: { ...year, ...person } }
+      return { name: 'payroll-annual-settlement', query: { ...year, ...state, ...person } }
     }
     case 'deferred_income':
       return { name: 'payroll-people', query: { ...scope, panel: 'deferred_income' } }
@@ -176,6 +178,38 @@ export function jmhzRemediationTarget(
     case 'manual':
     default:
       return null
+  }
+}
+
+/** Nerozhodnutá žádost o roční zúčtování (JMHZ 10319). */
+export const ANNUAL_REQUEST_CODES = [
+  'jmhz_annual_request_source_missing',
+  'jmhz_annual_request_status_unresolved',
+]
+
+/**
+ * Hromadné „nepožádal" na stránce Roční zúčtování pro osoby jednoho hlášení.
+ *
+ * Hlášení za leden a únor se ptá na zúčtování MINULÉHO roku. Seznam se zúží
+ * na nerozhodnuté a na osoby hlášení (`employees`); bez toho stránka ukázala
+ * všechny nerozhodnuté osoby roku, i ty, které v měsíci nepracovaly.
+ * `preselect` je vybere všechny, potvrzuje se až dialogem na stránce.
+ */
+export function annualSettlementRequestTarget(
+  period: string | null | undefined,
+  employeeIds: number[] = [],
+  preselect = true,
+): RouteLocationRaw {
+  const year = period && /^\d{4}-/.test(period) ? { year: String(Number(period.slice(0, 4)) - 1) } : {}
+  const ids = [...new Set(employeeIds.filter(id => Number.isInteger(id) && id > 0))]
+  return {
+    name: 'payroll-annual-settlement',
+    query: {
+      ...year,
+      state: 'request_undecided',
+      ...(ids.length > 0 ? { employees: ids.join(',') } : {}),
+      ...(preselect ? { select: 'all' } : {}),
+    },
   }
 }
 

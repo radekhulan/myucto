@@ -155,9 +155,9 @@ final class PayrollE2eNavPreflightAgencyTest extends TestCase
         $annual = self::finding($findings, 'jmhz_annual_request_status_unresolved');
         self::assertSame(2, $annual['entity_total']);
         // Odkaz nese rok zúčtování (minulý rok hlášení), ne rok podle dneška.
-        self::assertSame('/payroll/annual-settlement?year=2025', $annual['remediation_path']);
+        self::assertSame('/payroll/annual-settlement?year=2025&state=request_undecided', $annual['remediation_path']);
         foreach ($annual['entities'] as $entity) {
-            self::assertSame('/payroll/annual-settlement?year=2025&person=' . $entity['entity_id'], $entity['remediation_path']);
+            self::assertSame('/payroll/annual-settlement?year=2025&state=request_undecided&person=' . $entity['entity_id'], $entity['remediation_path']);
         }
         $ended = self::finding($findings, 'employments_past_agreed_end');
         self::assertSame(3, $ended['entity_total']);

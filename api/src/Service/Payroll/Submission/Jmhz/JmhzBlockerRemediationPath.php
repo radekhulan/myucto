@@ -28,6 +28,12 @@ final class JmhzBlockerRemediationPath
         'jmhz_identity_unresolved',
     ];
 
+    /** Kódy nerozhodnuté žádosti o roční zúčtování (10319). */
+    private const ANNUAL_REQUEST_CODES = [
+        'jmhz_annual_request_source_missing',
+        'jmhz_annual_request_status_unresolved',
+    ];
+
     /**
      * Nálezy s jmény a odkazy pro odpověď serveru.
      *
@@ -204,9 +210,12 @@ final class JmhzBlockerRemediationPath
             // Hlášení vykazuje roční zúčtování za předchozí zdaňovací období
             // (JmhzAnnualEvidenceService: rok hlášení - 1); bez roku by stránka
             // otevřela loňský rok podle dnešního data, ne podle hlášení.
+            // Nerozhodnutá žádost (10319) otevře seznam zúžený na nerozhodnuté;
+            // bez filtru účetní hledala dotčené osoby mezi všemi lidmi roku.
             'annual_settlement' => self::withQuery(
                 '/payroll/annual-settlement',
                 ($period === null ? [] : ['year' => $period['year'] - 1])
+                    + (in_array($code, self::ANNUAL_REQUEST_CODES, true) ? ['state' => 'request_undecided'] : [])
                     + ($personId === null ? [] : ['person' => $personId]),
             ),
             'takeover' => '/payroll/imports?tab=reconciliation',

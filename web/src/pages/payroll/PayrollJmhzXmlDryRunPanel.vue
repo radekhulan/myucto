@@ -27,6 +27,8 @@ import {
   jmhzErrorMessage,
   jmhzRemediationKind,
   jmhzRemediationTarget,
+  ANNUAL_REQUEST_CODES,
+  annualSettlementRequestTarget,
 } from './jmhzBlockerRemediation'
 import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
 import PayrollJmhzDeferralList from './PayrollJmhzDeferralList.vue'
@@ -382,10 +384,27 @@ function blockerUsesSharedTarget(code: string): boolean {
 }
 
 function blockerUsesAgendaTarget(group: BlockerGroup): boolean {
-  return blockerUsesSharedTarget(group.blocker.code) || group.entityIds.length > 10
+  return blockerUsesSharedTarget(group.blocker.code)
+    || ANNUAL_REQUEST_CODES.includes(group.blocker.code)
+    || group.entityIds.length > 10
+}
+
+/**
+ * Nerozhodnutá žádost o roční zúčtování se řeší hromadně: Roční zúčtování
+ * za minulý rok zúžené na nerozhodnuté osoby tohoto hlášení, všechny vybrané.
+ * Dřív odkaz otevřel stránku bez filtru a dotčené osoby se hledaly ručně.
+ */
+function annualRequestGroupTarget(group: BlockerGroup, payrollRun: PayrollRun): RouteLocationRaw {
+  const employeeIds = group.blocker.entity_type === 'employment'
+    ? group.entityIds
+      .map(id => remediationEmployments.value.find(item => item.id === id)?.employee_id ?? null)
+      .filter((id): id is number => id !== null)
+    : group.entityIds
+  return annualSettlementRequestTarget(payrollRun.period_start.slice(0, 7), employeeIds)
 }
 
 function blockerGroupTarget(group: BlockerGroup, payrollRun: PayrollRun): RouteLocationRaw | null {
+  if (ANNUAL_REQUEST_CODES.includes(group.blocker.code)) return annualRequestGroupTarget(group, payrollRun)
   return blockerUsesAgendaTarget(group)
     ? blockerTarget(group.blocker, null, payrollRun)
     : blockerTarget(group.blocker, group.blocker.entity_id, payrollRun)

@@ -250,6 +250,56 @@ final readonly class JmhzAnnualEvidenceService
     }
 
     /**
+     * Osoby, u kterých je „nepožádal" bezpečná hromadná odpověď.
+     *
+     * O roční zúčtování smí požádat jen ten, kdo u plátce podepsal prohlášení
+     * k dani (§ 38ch odst. 1 ZDP). Osoba bez podepsaného prohlášení účinného
+     * kdykoli ve zdaňovacím roce proto o zúčtování požádat nemohla, typicky
+     * brigádník na DPP se srážkovou daní. U osoby s podepsaným prohlášením
+     * je žádost fakt, který zná jen účetní (písemná žádost do 15. 2.).
+     *
+     * Chybějící záznam o prohlášení je důkaz jen tehdy, když mzdy v aplikaci
+     * pokrývají celý zdaňovací rok. U firmy, která přešla v průběhu nebo bez
+     * převzaté historie, se nic nepředvybírá a vrací se prázdný seznam.
+     *
+     * @param list<int> $employeeIds
+     * @return list<int>
+     */
+    public function employeesUnableToRequest(int $supplierId, array $employeeIds, int $taxYear): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $employeeIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($ids === [] || !$this->yearCoveredByPayroll($supplierId, $taxYear)) {
+            return [];
+        }
+        $signed = [];
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT DISTINCT employee_id
+                   FROM payroll_person_tax_declarations
+                  WHERE supplier_id = ?
+                    AND employee_id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')
+                    AND status = "signed"
+                    AND effective_from <= ?
+                    AND (effective_to IS NULL OR effective_to >= ?)',
+            );
+            $stmt->execute([
+                $supplierId,
+                ...$chunk,
+                sprintf('%04d-12-31', $taxYear),
+                sprintf('%04d-01-01', $taxYear),
+            ]);
+            foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $employeeId) {
+                $signed[(int) $employeeId] = true;
+            }
+        }
+
+        return array_values(array_filter($ids, static fn (int $id): bool => !isset($signed[$id])));
+    }
+
+    /**
      * Úhrn měsíčních daňových bonusů za zdaňovací rok (JMHZ 10577, jen leden
      * verze 2027) z roční zákonné kumulace daně: počáteční stav (převzatá část
      * roku) plus schválené měsíce. Je to týž úhrn, který roční zúčtování bere

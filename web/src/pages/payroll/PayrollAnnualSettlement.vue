@@ -105,6 +105,15 @@ let loadSequence = 0
 let pendingFocusPersonId: number | null = payrollQueryId(useRoute().query, 'person')
 /** `?select=all` z odkazu nálezu: po prvním načtení vybrat všechny odpovídající filtru. */
 let pendingSelectAll = routeQuery.select === 'all'
+/**
+ * `?employees=1,2,3` z kontroly před během nebo z testu JMHZ: seznam jen
+ * s osobami hlášení. Bez toho stránka nabídla všechny nerozhodnuté osoby roku.
+ */
+const linkedEmployeeIds = ref<number[]>(
+  typeof routeQuery.employees === 'string' && /^\d+(,\d+)*$/.test(routeQuery.employees)
+    ? [...new Set(routeQuery.employees.split(',').map(Number).filter(id => id > 0))]
+    : [],
+)
 
 const form = ref({
   request_status: 'unknown' as PayrollAnnualSettlementRequestStatus,
@@ -511,7 +520,7 @@ async function load(): Promise<void> {
     const response = await payrollApi.listAnnualSettlements(
       year.value,
       { limit: pageSize, offset: offset.value },
-      { search: search.value.trim(), state: state.value },
+      listFilters(),
     )
     if (sequence !== loadSequence) return
     // Výchozí rok nesmí ležet před začátkem vedení mezd v MyÚčtu (Q8-43):
@@ -1049,7 +1058,7 @@ async function selectAllMatching(): Promise<void> {
       const page = await payrollApi.listAnnualSettlements(
         year.value,
         { limit: BULK_SELECT_PAGE, offset: fetched },
-        { search: search.value.trim(), state: state.value },
+        listFilters(),
       )
       for (const item of page.items) next.add(item.employee_id)
       expected = page.total
@@ -1279,11 +1288,27 @@ function applyFilters(): void {
 }
 
 /** Seznam je zúžený stavem nebo hledáním; prázdno pak neznamená firmu bez lidí. */
-const listNarrowed = computed(() => state.value !== 'all' || search.value.trim() !== '')
+const listNarrowed = computed(() =>
+  state.value !== 'all' || search.value.trim() !== '' || linkedEmployeeIds.value.length > 0)
 
 function clearNarrowing(): void {
   state.value = 'all'
   search.value = ''
+  linkedEmployeeIds.value = []
+  applyFilters()
+}
+
+function listFilters(): { search: string, state: PayrollAnnualSettlementListState, employees?: number[] } {
+  return {
+    search: search.value.trim(),
+    state: state.value,
+    ...(linkedEmployeeIds.value.length > 0 ? { employees: linkedEmployeeIds.value } : {}),
+  }
+}
+
+function clearLinkedEmployees(): void {
+  linkedEmployeeIds.value = []
+  bulkSelected.value = new Set()
   applyFilters()
 }
 
@@ -1503,6 +1528,23 @@ onMounted(async () => {
           <SavedFiltersMenu :ctrl="saved" />
         </div>
       </div>
+    </div>
+
+    <div
+      v-if="linkedEmployeeIds.length > 0"
+      class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-payroll-500/30 bg-payroll-50 px-4 py-2 text-sm text-neutral-800"
+      data-test="annual-settlement-linked-employees"
+    >
+      <span>{{ t('payroll.annual_settlement.linked_employees', { count: linkedEmployeeIds.length }, linkedEmployeeIds.length) }}</span>
+      <button
+        type="button"
+        :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+        data-test="annual-settlement-linked-employees-clear"
+        @click="clearLinkedEmployees"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+        {{ t('payroll.annual_settlement.linked_employees_clear') }}
+      </button>
     </div>
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">

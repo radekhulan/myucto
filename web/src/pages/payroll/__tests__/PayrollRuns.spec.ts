@@ -2792,6 +2792,46 @@ describe('PayrollRuns', () => {
       wrapper.unmount()
     })
 
+    it('hromadné „nepožádal" se zúží na osoby hlášení a bezpečnou skupinu nabídne zvlášť', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: true,
+        has_findings: true,
+        findings: [{
+          code: 'jmhz_annual_request_status_unresolved',
+          severity: 'info',
+          impact: 'anytime',
+          scope: 'monthly',
+          message: 'Není rozhodnuto, zda o roční zúčtování za minulý rok požádal(a).',
+          remediation_path: '/payroll/annual-settlement?year=2025&state=request_undecided',
+          count: 3,
+          entities: [],
+          bulk_actions: [
+            { kind: 'annual_settlement_request_safe', count: 2, employee_ids: [4, 9] },
+            { kind: 'annual_settlement_request', count: 1, employee_ids: [7] },
+          ],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const safe = wrapper.get('[data-test="run-readiness-bulk-action-annual_settlement_request_safe"]')
+      expect(JSON.parse(safe.attributes('data-to')!)).toEqual({
+        name: 'payroll-annual-settlement',
+        query: { year: '2025', state: 'request_undecided', employees: '4,9', select: 'all' },
+      })
+      expect(safe.text()).toContain('payroll.runs.readiness.bulk.annual_settlement_request_safe')
+      const rest = wrapper.get('[data-test="run-readiness-bulk-action-annual_settlement_request"]')
+      expect(JSON.parse(rest.attributes('data-to')!).query.employees).toBe('7')
+      wrapper.unmount()
+    })
+
     it('chybějící výplatní pravidlo je údaj osoby a vede na hromadné pravidla z karet', async () => {
       m.runs.mockResolvedValue([])
       m.readiness.mockReturnValue({

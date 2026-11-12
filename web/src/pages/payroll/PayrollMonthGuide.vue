@@ -13,6 +13,7 @@ import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/butt
 import { formatDate, formatPeriodNumeric } from '@/composables/useFormat'
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { payrollQueryPeriod } from './payrollComponentsUi'
+import { annualSettlementRequestTarget } from './jmhzBlockerRemediation'
 
 interface GuideLink {
   key: string
@@ -94,9 +95,8 @@ function primaryLabel(step: PayrollMonthGuideStep): string {
 }
 
 function bulkTarget(kind: PayrollRunReadinessBulkKind, employeeIds: number[] | undefined): RouteLocationRaw {
-  if (kind === 'annual_settlement_request') {
-    const taxYear = Number(period.value.slice(0, 4)) - 1
-    return { name: 'payroll-annual-settlement', query: { year: String(taxYear), state: 'request_undecided', select: 'all' } }
+  if (kind === 'annual_settlement_request' || kind === 'annual_settlement_request_safe') {
+    return annualSettlementRequestTarget(period.value, employeeIds, true)
   }
   const employees = employeeIds?.length ? { employees: employeeIds.join(',') } : {}
   return { name: 'payroll-people', query: { bulk: kind, period: period.value, ...employees } }

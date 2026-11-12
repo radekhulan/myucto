@@ -4966,6 +4966,7 @@
           "workplace": "Fill in place of work ({count})",
           "closure": "End finished agreements ({count})",
           "annual_settlement_request": "Mark annual settlement as not requested ({count})",
+          "annual_settlement_request_safe": "Mark as not requested for people without a declaration ({count})",
           "payout_defaults": "Add payout rules from person cards ({count})"
         },
         "fill_probable_average_done": "Filled in automatically from the agreed hourly rate: {count}. The average can be corrected with a new revision in Absences and leave → Average earnings.",
@@ -6004,6 +6005,8 @@
       "settled_on": "Performed",
       "filter_search": "Search employees",
       "filter_search_placeholder": "Name or part of it",
+      "linked_employees": "Showing only people from the monthly report | Showing only {count} person from the monthly report | Showing only {count} people from the monthly report",
+      "linked_employees_clear": "Show everyone",
       "filter_state": "State",
       "states": {
         "all": "All",
@@ -10060,7 +10063,9 @@
           "jmhz_scenario1_whole_czk_required": "Check the payroll run",
           "jmhz_workplace_codebooks_unverified": "Bulk-fill place of work",
           "jmhz_temporary_assignment_user_missing": "Fill in the assignment user",
-          "jmhz_risk_categorization_missing": "Fill in the risk categorisation"
+          "jmhz_risk_categorization_missing": "Fill in the risk categorisation",
+          "jmhz_annual_request_source_missing": "Decide annual settlement requests in bulk",
+          "jmhz_annual_request_status_unresolved": "Decide annual settlement requests in bulk"
         },
         "jmhz_dry_run_show_xml": "Show XML",
         "jmhz_dry_run_hide_xml": "Hide XML",

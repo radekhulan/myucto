@@ -8364,6 +8364,7 @@ export type PayrollRunReadinessBulkKind =
   | 'workplace'
   | 'closure'
   | 'annual_settlement_request'
+  | 'annual_settlement_request_safe'
   | 'payout_defaults'
 
 /**
@@ -10989,13 +10990,14 @@ export const payrollApi = {
   listAnnualSettlements: (
     year: number,
     page?: PayrollPageParams,
-    filters?: { search?: string; state?: PayrollAnnualSettlementListState },
+    filters?: { search?: string; state?: PayrollAnnualSettlementListState; employees?: number[] },
   ) =>
     api.get<PayrollAnnualSettlementList>(`/payroll/annual-settlements/${year}`, {
       params: {
         ...pageParams(page),
         ...(filters?.search ? { search: filters.search } : {}),
         ...(filters?.state && filters.state !== 'all' ? { state: filters.state } : {}),
+        ...(filters?.employees?.length ? { employees: filters.employees.join(',') } : {}),
       },
     }).then(response => response.data),
   previewAnnualSettlement: (year: number, employeeId: number) =>

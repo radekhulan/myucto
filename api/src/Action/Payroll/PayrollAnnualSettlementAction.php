@@ -69,6 +69,10 @@ final class PayrollAnnualSettlementAction
         $offset = max(0, (int) ($query['offset'] ?? 0));
         $search = is_string($query['search'] ?? null) ? trim($query['search']) : '';
         $state = is_string($query['state'] ?? null) ? trim($query['state']) : 'all';
+        $employeeIds = self::employeeIdsFilter($query['employees'] ?? null);
+        if ($employeeIds === null) {
+            return self::invalid($response);
+        }
         try {
             $page = $this->repository->listForYear(
                 $supplierId,
@@ -77,6 +81,7 @@ final class PayrollAnnualSettlementAction
                 $offset,
                 $search,
                 $state,
+                $employeeIds,
             );
         } catch (\InvalidArgumentException $exception) {
             return Json::error(
@@ -103,6 +108,7 @@ final class PayrollAnnualSettlementAction
             'offset' => $offset,
             'search' => $search,
             'state' => $state,
+            'employees' => $employeeIds,
             // První měsíc mezd v MyÚčtu: rok před ním zúčtoval předchozí
             // program a stránka ho nemá nabízet jako výchozí.
             'payroll_start_period' => $this->historicalPeriods->startPeriod($supplierId),
@@ -678,6 +684,28 @@ final class PayrollAnnualSettlementAction
         $year = (int) ($args['year'] ?? 0);
 
         return $year >= 2000 && $year <= 2199 ? $year : null;
+    }
+
+    /**
+     * Zúžení na osoby z odkazu (`employees=1,2,3`). Prázdné = bez zúžení,
+     * `null` = neplatný výčet.
+     *
+     * @return list<int>|null
+     */
+    private static function employeeIdsFilter(mixed $value): ?array
+    {
+        if ($value === null || $value === '') {
+            return [];
+        }
+        if (!is_string($value) || preg_match('/^\d+(,\d+)*$/D', $value) !== 1) {
+            return null;
+        }
+        $ids = array_values(array_unique(array_map('intval', explode(',', $value))));
+        if (count($ids) > self::BULK_MAX_IDS || in_array(0, $ids, true)) {
+            return null;
+        }
+
+        return $ids;
     }
 
     private static function invalid(Response $response): Response
