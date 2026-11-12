@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Service\Payroll\PayrollStatutoryEvidenceBulkDefaults;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
@@ -64,8 +65,12 @@ final class PayrollRunReadinessStatutoryCountTest extends TestCase
         self::assertNotNull($finding);
         self::assertSame('warning', $finding['severity']);
         self::assertSame('revision', $finding['impact']);
-        self::assertSame('setup', $finding['scope']);
+        self::assertSame('person', $finding['scope']);
         self::assertSame(1, $finding['count']);
+        self::assertSame(
+            [['kind' => 'payout_defaults', 'count' => 1, 'employee_ids' => [$missing['employee_id']]]],
+            $finding['bulk_actions'],
+        );
         self::assertSame([$missing['employee_id']], array_column($finding['entities'], 'entity_id'));
         self::assertSame('Syntetická Bez pravidla', $finding['entities'][0]['label']);
         self::assertSame(
@@ -139,5 +144,87 @@ final class PayrollRunReadinessStatutoryCountTest extends TestCase
         foreach ($finding['bulk_actions'] as $action) {
             self::assertSame(1, $action['count'], $action['kind']);
         }
+    }
+
+    /**
+     * Tlačítko „Doplnit výchozí zákonné údaje" z kontroly nabídne všechny osoby
+     * běhu, kterým se něco doplní, i ty, u kterých jde jen o údaj pro JMHZ.
+     * Dřív se zúžilo na blokující osoby a zbytek musela účetní doplnit znovu
+     * ze Zaměstnanců.
+     */
+    public function testStatutoryDefaultsActionOffersEveryRunPersonMissingData(): void
+    {
+        $officeId = $this->createOffice('ALL', 'Syntetická účtárna', '1100001237');
+        $this->configureSocialInsuranceOutput($officeId);
+        $this->configureHealthInsuranceOutput();
+        $componentId = $this->createComponent('MZDA_MESICNI_ALL', 'base_wage', 'regular');
+        $blocking = $this->createEmployment($officeId, 'Syntetická Bez rezidence', 1, 'hpp', 'employment', 40, 10_000, true, self::PERIOD_START);
+        $jmhzOnly = $this->createEmployment($officeId, 'Syntetická Bez příslušnosti', 2, 'dpp', 'dpp', 10, 2_500, false, self::PERIOD_START);
+        $complete = $this->createEmployment($officeId, 'Syntetická Úplná', 3, 'dpp', 'dpp', 10, 2_500, false, self::PERIOD_START);
+        $workdays = self::workdays(self::PERIOD);
+        foreach ([$blocking, $jmhzOnly, $complete] as $person) {
+            $this->publishShifts($person['employment_id'], $workdays);
+            self::assertSame(200, $this->approveTimeMonth($person['employment_id'], self::PERIOD, $workdays)->getStatusCode());
+            $this->createApprovedInput($person, $componentId, $person === $blocking ? 4_500_000 : 300_000, 'all-' . $person['employee_id'], self::PERIOD_START);
+        }
+        $this->db->pdo()->prepare('DELETE FROM payroll_person_tax_residences WHERE supplier_id = ? AND employee_id = ?')
+            ->execute([$this->supplierId, $blocking['employee_id']]);
+        $this->db->pdo()->prepare('DELETE FROM payroll_person_social_jurisdictions WHERE supplier_id = ? AND employee_id = ?')
+            ->execute([$this->supplierId, $jmhzOnly['employee_id']]);
+
+        $finding = array_column(
+            $this->container->get(PayrollRunReadinessService::class)
+                ->inspect($this->supplierId, self::PERIOD_START, self::PAYDAY)['findings'],
+            null,
+            'code',
+        )['statutory_calculation_manual_review'] ?? null;
+        self::assertNotNull($finding);
+        self::assertSame([$blocking['employee_id']], array_column($finding['entities'], 'entity_id'), CanonicalJson::encode($finding['entities']));
+        $action = array_column($finding['bulk_actions'], null, 'kind')['statutory_defaults'] ?? null;
+        self::assertNotNull($action, CanonicalJson::encode($finding['bulk_actions']));
+        $expected = [$blocking['employee_id'], $jmhzOnly['employee_id']];
+        sort($expected);
+        self::assertSame($expected, $action['employee_ids']);
+        self::assertSame(2, $action['count']);
+        $preview = $this->container->get(PayrollStatutoryEvidenceBulkDefaults::class)
+            ->preview($this->supplierId, self::PERIOD_START, $action['employee_ids']);
+        self::assertSame(2, $preview['summary']['people']);
+    }
+
+    /**
+     * Vztah bez schválené složky hlásí samostatná skupina (vztah bez vstupů,
+     * neschválené vstupy). Skupina zákonné evidence ho nesmí počítat podruhé:
+     * kontrola u agentury hlásila „53×", ale výchozí údaje nabízela 31 osobám.
+     */
+    public function testStatutoryManualReviewSkipsPeopleMissingOnlyComponent(): void
+    {
+        $officeId = $this->createOffice('CMP', 'Syntetická účtárna', '1100001237');
+        $this->configureSocialInsuranceOutput($officeId);
+        $this->configureHealthInsuranceOutput();
+        $componentId = $this->createComponent('MZDA_MESICNI_CMP', 'base_wage', 'regular');
+        $statutory = $this->createEmployment($officeId, 'Syntetická Bez rezidence', 1, 'hpp', 'employment', 40, 10_000, true, self::PERIOD_START);
+        $withoutInput = $this->createEmployment($officeId, 'Syntetická Bez složky', 2, 'dpp', 'dpp', 10, 2_500, false, self::PERIOD_START);
+        $workdays = self::workdays(self::PERIOD);
+        foreach ([$statutory, $withoutInput] as $person) {
+            $this->publishShifts($person['employment_id'], $workdays);
+            self::assertSame(200, $this->approveTimeMonth($person['employment_id'], self::PERIOD, $workdays)->getStatusCode());
+        }
+        $this->createApprovedInput($statutory, $componentId, 4_500_000, 'cmp-base', self::PERIOD_START);
+        $this->db->pdo()->prepare('DELETE FROM payroll_person_tax_residences WHERE supplier_id = ? AND employee_id = ?')
+            ->execute([$this->supplierId, $statutory['employee_id']]);
+
+        $findings = array_column(
+            $this->container->get(PayrollRunReadinessService::class)
+                ->inspect($this->supplierId, self::PERIOD_START, self::PAYDAY)['findings'],
+            null,
+            'code',
+        );
+        $finding = $findings['statutory_calculation_manual_review'] ?? null;
+        self::assertNotNull($finding);
+        self::assertSame([$statutory['employee_id']], array_column($finding['entities'], 'entity_id'), CanonicalJson::encode($finding['entities']));
+        self::assertSame(1, $finding['count']);
+        self::assertStringNotContainsString('Syntetická Bez složky', $finding['message']);
+        self::assertArrayHasKey('employment_without_inputs', $findings);
+        self::assertSame([$withoutInput['employment_id']], array_column($findings['employment_without_inputs']['entities'], 'entity_id'));
     }
 }

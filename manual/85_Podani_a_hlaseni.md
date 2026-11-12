@@ -622,6 +622,11 @@ Přehled pojišťovně odeslaný mimo aplikaci, u kterého chybí doručenka,
 uzavřete u řádku tlačítkem **Označit za vyřízené** s poznámkou, čím je
 doručení doložené.
 
+Je-li po termínu víc povinností, ke kterým v aplikaci žádné podání nevzniklo
+(typicky přihlášky dohod podané dřív jiným programem), ukáže záložka **Měsíc**
+i přehledy agend upozornění s odkazem do panelu **Zákonné termíny**. Tam je
+označíte jako vyřízené mimo aplikaci hromadně.
+
 **Jak poznáte, že je hotovo:** Povinnost je **Splněno** a v historii je
 výslovně zapsané, že podání proběhlo jinudy a kdy.
 

@@ -209,6 +209,60 @@ final class PayrollPayoutRulesAction
         ], 201);
     }
 
+    public function previewDefaultsBulk(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $error;
+        }
+        try {
+            $people = $this->defaults->previewMany(
+                $this->currentSupplierId($request),
+                $this->employeeIds($request),
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, ['people' => $people]);
+    }
+
+    public function applyDefaultsBulk(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $result = $this->defaults->applyMany(
+                $this->currentSupplierId($request),
+                $this->employeeIds($request),
+            );
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+        foreach ($result['applied'] as $rule) {
+            $this->audit($request, 'payroll.payout_rule.defaults_applied', $rule);
+        }
+
+        return Json::ok($response, [
+            'applied' => array_values(array_unique(array_map(
+                static fn (array $rule): int => PayrollTimeValue::int($rule['employee_id'] ?? null, 'employee_id'),
+                $result['applied'],
+            ))),
+            'skipped' => $result['skipped'],
+        ]);
+    }
+
+    /** @return list<int> */
+    private function employeeIds(Request $request): array
+    {
+        $ids = $this->input($request)['employee_ids'] ?? null;
+        if (!is_array($ids) || !array_is_list($ids) || $ids === []) {
+            throw new \InvalidArgumentException('Pole employee_ids musí být neprázdný seznam.');
+        }
+
+        return array_map(fn (mixed $id): int => $this->positiveInt($id, 'employee_ids'), $ids);
+    }
+
     private function authorize(
         Request $request,
         Response $response,

@@ -3821,6 +3821,26 @@
       },
       "open_runs": "Otevřít mzdové běhy"
     },
+    "payout_defaults_bulk": {
+      "title": "Výplatní pravidla z karet osob",
+      "intro": "Výplatní pravidlo říká, kam se čistá mzda vyplatí. Potřebujete ho jen tehdy, když platby (příkaz k úhradě mezd) připravujete v aplikaci. Pravidlo se odvodí ze způsobu výplaty na kartě osoby: převod na jediný ověřený účet z karty, nebo výplata v hotovosti. Osobám, které už nějaké pravidlo mají, se nic nemění.",
+      "ready": "Pravidlo se doplní",
+      "blocked": "Nejde odvodit",
+      "blocked_title": "Pravidlo nejde z karty odvodit ({count}), doplňte ho na kartě osoby",
+      "kind": {
+        "bank": "Převod na účet z karty osoby",
+        "cash": "Výplata v hotovosti",
+        "partner_settlement": "Zápočet se společníkem",
+        "other": "Jiný způsob"
+      },
+      "apply": "Doplnit pravidla ({count})",
+      "nothing_to_apply": "Žádné osobě nejde pravidlo z karty odvodit. Doplňte na kartě osoby způsob výplaty a ověřený účet.",
+      "applied_toast": "Výplatní pravidla doplněna: {count}.",
+      "result": "Doplněno: {applied}. Nedoplněno: {skipped}.",
+      "load_failed": "Náhled výplatních pravidel se nepodařilo načíst.",
+      "apply_failed": "Výplatní pravidla se nepodařilo doplnit.",
+      "retry": "Zkusit znovu"
+    },
     "health_insurer_bulk": {
       "known_later": "Pojišťovna je u osoby zapsaná až od {period}, předvyplněno k potvrzení.",
       "title": "Zdravotní pojišťovny hromadně",
@@ -3914,9 +3934,9 @@
       "intro": "Osobám bez cizího prvku doplní chybějící údaje, které plynou z toho, že s cizinou nemají nic společného: daňovou rezidenci v Česku, českou příslušnost k pojištění bez formuláře A1 a u osob mladších 60 let neuplatňování slevy pracujícího důchodce. Existující záznam se nikdy nepřepíše. Zdravotní pojišťovnu hromadně nedoplníme, zná ji jen registrace nebo zaměstnanec.",
       "period": "Údaje platí od měsíce",
       "reload": "Načíst náhled znovu",
-      "scope_run": "Náhled zahrnuje všechny osoby, které by vzal mzdový běh za {period}.",
-      "scope_selection": "Náhled zahrnuje vybrané osoby ({count}).",
-      "frozen": "Mzdy jsou schválené do {date}. Do schváleného období se nezapisuje, údaje začnou platit až od dalšího měsíce.",
+      "scope_run": "Náhled zahrnuje všechny osoby, které by vzal mzdový běh za {period}. Údaje budou platit od {from}.",
+      "scope_selection": "Náhled zahrnuje vybrané osoby ({count}). Údaje budou platit od {from}.",
+      "frozen": "Mzdy jsou schválené do {date}. Do schváleného období se nezapisuje, proto údaje začnou platit až od {from}.",
       "load_failed": "Náhled doplnění se nepodařilo načíst.",
       "retry": "Zkusit znovu",
       "summary": {
@@ -4278,6 +4298,12 @@
         "hint": "U větší firmy může krok trvat desítky sekund. Stránku nechte otevřenou; opakované kliknutí ani obnovení stránky krok nespustí podruhé."
       },
       "command_done": "Stav mzdového běhu byl změněn.",
+      "command_toast": {
+        "excluded": "{name}: osoba je z běhu vyřazená.",
+        "included": "{name}: osoba je zpět v běhu.",
+        "payment_date": "Datum výplaty je {date}.",
+        "recalculated": "{done} Běh je přepočítaný (revize {revision})."
+      },
       "command_failed": "Příkaz mzdového běhu se nepodařilo provést.",
       "payments_unsettled": "Běh zatím není skutečně uhrazený. V agendě Mzdové příkazy a úhrady spárujte všechny částky s bankovními pohyby nebo zaúčtovanými pokladními doklady a vyřešte případné vratky či storna.",
       "incoming_refund_unresolved": "Běh zatím není zcela vypořádaný a obsahuje nejméně jednu příchozí opravnou vratku. Běžné odchozí úhrady nejprve spárujte v agendě Mzdové příkazy a úhrady. Příchozí vratku nelze vložit do odchozí dávky a aktuální agenda ji zatím neumí připojit k mzdovému závazku bez takové dávky; nevytvářejte proto falešnou odchozí platbu.",
@@ -4924,7 +4950,7 @@
       },
       "readiness": {
         "affected": "Týká se: {names}",
-        "payout_rule_missing": "Chybí výplatní pravidlo pro čistou mzdu. Výpočet ani schválení to nezastaví, ale zablokuje přípravu plateb. Na kartě zaměstnance v části Výplata / účty doplňte výplatní pravidlo. Oprava po schválení znamená opravnou revizi a nový výpočet běhu.",
+        "payout_rule_missing": "Chybí výplatní pravidlo osoby (údaj na kartě zaměstnance, ne nastavení firmy). Potřebujete ho jen tehdy, když platby mezd připravujete v aplikaci; výpočet ani schválení běhu to nezastaví. Pravidla doplníte hromadně z karet osob tlačítkem u nálezu, jednotlivě na kartě zaměstnance v části Výplata / účty. Oprava po schválení znamená opravnou revizi a nový výpočet běhu.",
         "people_list": "Zobrazit v seznamu zaměstnanců | Zobrazit tuto osobu v seznamu zaměstnanců | Zobrazit všechny {count} osoby v seznamu zaměstnanců | Zobrazit všech {count} osob v seznamu zaměstnanců",
         "open_all": "Otevřít agendu pro všechny dotčené ({count})",
         "fill_probable_average": "Doplnit pravděpodobný výdělek ze sazby",
@@ -4934,7 +4960,8 @@
           "health_insurer": "Zdravotní pojišťovny hromadně ({count})",
           "workplace": "Doplnit místo výkonu práce ({count})",
           "closure": "Ukončit skončené dohody ({count})",
-          "annual_settlement_request": "Nastavit „nepožádal“ o roční zúčtování ({count})"
+          "annual_settlement_request": "Nastavit „nepožádal“ o roční zúčtování ({count})",
+          "payout_defaults": "Doplnit výplatní pravidla z karet osob ({count})"
         },
         "fill_probable_average_done": "Doplněno automaticky ze sjednané hodinové sazby: {count}. Průměr jde opravit novou revizí v Absence a dovolená → Průměrný výdělek.",
         "fill_probable_average_failed": "Pravděpodobný výdělek se nepodařilo doplnit.",
@@ -4952,7 +4979,8 @@
         },
         "scope": {
           "setup": "Nastavení firmy - jednorázové, pak je pokoj.",
-          "monthly": "Měsíční práce."
+          "monthly": "Měsíční práce.",
+          "person": "Údaj na kartě osoby, doplní se jednou za osobu."
         },
         "title": "Kontrola před zahájením",
         "subtitle": "Tohle uvidíte i po zahájení běhu - ukazujeme to teď, dokud jdou vstupy ještě opravit. Spočítat se dá i s těmito nálezy, červené ale zablokují schválení běhu - u každého je tlačítko, které ho vyřeší.",
@@ -4973,7 +5001,8 @@
       },
       "exclusion": {
         "exclude": "Vyřadit osobu z běhu",
-        "hint": "{name} se z tohoto běhu vyřadí: běh dostane novou revizi bez této osoby a ostatním se mzda spočítá a schválí jako obvykle. Osoba nedostane výplatní pásku ani mzdu v tomto běhu a nebude ve schválené revizi. Mzdu jí doplatíte opravou běhu za stejné období (Vyžádat opravu, Otevřít opravu), až doplníte chybějící údaje. Do měsíčního hlášení JMHZ se pak dostane opravným hlášením. Uveďte, co chybí a kdy se doplní.",
+        "exclude_short": "Vyřadit z běhu",
+        "hint": "{name} se z tohoto běhu vyřadí: běh dostane novou revizi bez této osoby a ostatním se mzda spočítá a schválí jako obvykle. Osoba nedostane výplatní pásku ani mzdu v tomto běhu a nebude ve schválené revizi. Mzdu jí doplatíte opravou běhu za stejné období (Vyžádat opravu, Otevřít opravu), až doplníte chybějící údaje nebo vyjasníte podklady. Do měsíčního hlášení JMHZ se pak dostane opravným hlášením. Uveďte důvod (aspoň 10 znaků), např. co chybí a kdy se doplní.",
         "active_title": "Z běhu vyřazeno: {count}",
         "active_hint": "Tyto osoby revize nepočítá. Až údaje doplníte, vraťte je do běhu, nebo je doplaťte opravou po schválení.",
         "include": "Vrátit do běhu",
@@ -5191,7 +5220,7 @@
       "save_blocked_invalid": "Opravte červeně označená pole. Dokud v tabulce zůstane neplatná hodnota, uložit nejde.",
       "save_blocked_rows": "Některý řádek má blokující stav (uzamčený vstup nebo ukončený vztah). Vyřešte ho a zkuste uložit znovu.",
       "save_partial_invalid": "Uloží se jen řádky bez chyby - {count} řádek zůstane neuložený, dokud ho neopravíte. | Uloží se jen řádky bez chyby - {count} řádky zůstanou neuložené, dokud je neopravíte. | Uloží se jen řádky bez chyby - {count} řádků zůstane neuložených, dokud je neopravíte.",
-      "save_partial_conflict": "U {count} řádku je částka evidovaná dvakrát; ostatní se uloží normálně. | U {count} řádků je částka evidovaná dvakrát; ostatní se uloží normálně.",
+      "save_partial_conflict": "U {count} řádků je částka evidovaná dvakrát; ostatní se uloží normálně. | U {count} řádku je částka evidovaná dvakrát; ostatní se uloží normálně. | U {count} řádků je částka evidovaná dvakrát; ostatní se uloží normálně.",
       "save_pending_pages": "Uloží se i {count} rozepsaný řádek z jiných stránek. | Uloží se i {count} rozepsané řádky z jiných stránek. | Uloží se i {count} rozepsaných řádků z jiných stránek.",
       "saved_partially": "Uloženo {saved} řádků, {failed} se neuložilo - důvod je u konkrétního pole.",
       "columns_menu": {
@@ -5486,6 +5515,7 @@
         "round_whole_crowns": "Zaokrouhlit vstupy na celé koruny nahoru",
         "round_whole_crowns_hint": "Měsíční hlášení vykazuje výdělek v celých korunách. Vstupy s haléři v období se zaokrouhlí nahoru, ve prospěch zaměstnance.",
         "round_whole_crowns_confirm": "Zaokrouhlit haléřové vstupy období nahoru na celé koruny? Změní se koncepty i schválené vstupy, které ještě nejsou uzamčené během.",
+        "round_whole_crowns_ok": "Zaokrouhlit",
         "round_whole_crowns_done": "Zaokrouhleno vstupů: {count}. Nezměněno: {skipped}.",
         "round_whole_crowns_none": "V období nejsou vstupy s haléři, které by měsíční hlášení odmítlo.",
         "round_whole_crowns_failed": "Vstupy se nepodařilo zaokrouhlit.",
@@ -25519,9 +25549,9 @@
     "carry_over": {
       "title": "Převzít ze stávajících firem",
       "hint": "Nabízí se jen to, co máte ve všech svých firmách stejné. Převezme se hned po založení firmy.",
-      "ai": "AI klíč a nastavení ({provider}, stejné jako ve vaší firmě) | AI klíč a nastavení ({provider}, stejné ve všech {n} firmách)",
+      "ai": "AI klíč a nastavení ({provider}, stejné ve všech {n} firmách) | AI klíč a nastavení ({provider}, stejné jako ve vaší firmě) | AI klíč a nastavení ({provider}, stejné ve všech {n} firmách)",
       "ai_different": "AI klíč se ve vašich firmách liší, proto se nepřebírá. Nastavte ho v nové firmě v Integracích.",
-      "certificate": "Certifikát {label}, platný do {date} (povolený ve vaší firmě) | Certifikát {label}, platný do {date} (povolený ve všech {n} firmách)",
+      "certificate": "Certifikát {label}, platný do {date} (povolený ve všech {n} firmách) | Certifikát {label}, platný do {date} (povolený ve vaší firmě) | Certifikát {label}, platný do {date} (povolený ve všech {n} firmách)",
       "step_up_hint": "Povolení certifikátu v nové firmě potvrďte stejně jako v Elektronických podpisech. Ověření platí jen pro toto založení a nikam se neukládá.",
       "done": "Převzato do nové firmy: {n}.",
       "failed_ai": "AI klíč se nepřevzal: {reason}",
@@ -36946,7 +36976,7 @@
         "save_links_hint": "Příští import stejné osoby spáruje automaticky podle osobního čísla nebo jména.",
         "adopt_personal_numbers": "Převzít osobní čísla z podkladů",
         "adopt_personal_numbers_hint": "Vztahy s automatickým číslem (1, ZAM-7…) dostanou osobní číslo z podkladů; ručně zadané číslo se nepřepisuje.",
-        "adopt_personal_numbers_ambiguous": "Osobní číslo {numbers} má víc osob, k párování se nepoužilo a nepřevezme se. | Osobní čísla {numbers} má víc osob, k párování se nepoužila a nepřevezmou se.",
+        "adopt_personal_numbers_ambiguous": "Osobní čísla {numbers} má víc osob, k párování se nepoužila a nepřevezmou se. | Osobní číslo {numbers} má víc osob, k párování se nepoužilo a nepřevezme se. | Osobní čísla {numbers} má víc osob, k párování se nepoužila a nepřevezmou se.",
         "adopt_monthly_wage": "Převzít měsíční mzdu z podkladů ({count} změn)",
         "adopt_monthly_wage_hint": "Zapíše se jen u osob bez překážky v tabulce Měsíční mzda z podkladů. Chybějící mzda se doplní do platných podmínek vztahu, jiná mzda založí novou verzi podmínek od prvního dne období.",
         "fill_registration": "Doplnit chybějící údaje pro registraci ČSSZ ({count} osob)",

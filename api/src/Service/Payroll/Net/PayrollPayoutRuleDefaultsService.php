@@ -131,6 +131,89 @@ final class PayrollPayoutRuleDefaultsService
         });
     }
 
+    public const BULK_LIMIT = 500;
+
+    /**
+     * @param list<int> $employeeIds
+     * @return list<array{employee_id:int,full_name:string,payout_method:?string,applicable:bool,destination_kind:?string,blocked_reason:?string}>
+     */
+    public function previewMany(int $supplierId, array $employeeIds): array
+    {
+        $names = $this->names($supplierId, $employeeIds);
+        $rows = [];
+        foreach (array_keys($names) as $employeeId) {
+            $proposal = $this->proposeFor($supplierId, $employeeId);
+            $rows[] = [
+                'employee_id' => $employeeId,
+                'full_name' => $names[$employeeId],
+                'payout_method' => $proposal['payout_method'],
+                'applicable' => $proposal['available'] && $proposal['applicable'],
+                'destination_kind' => $proposal['rules'][0]['destination_kind'] ?? null,
+                'blocked_reason' => $proposal['blocked_reason'],
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param list<int> $employeeIds
+     * @return array{applied:list<array<string,mixed>>,skipped:list<array{employee_id:int,full_name:string,reason:string}>}
+     */
+    public function applyMany(int $supplierId, array $employeeIds): array
+    {
+        $names = $this->names($supplierId, $employeeIds);
+        $applied = [];
+        $skipped = [];
+        foreach (array_keys($names) as $employeeId) {
+            try {
+                foreach ($this->applyDefaults($supplierId, $employeeId) as $rule) {
+                    if ($rule['is_active'] === true) {
+                        $applied[] = $rule;
+                    }
+                }
+            } catch (\DomainException $exception) {
+                $skipped[] = [
+                    'employee_id' => $employeeId,
+                    'full_name' => $names[$employeeId],
+                    'reason' => $exception->getMessage(),
+                ];
+            }
+        }
+
+        return ['applied' => $applied, 'skipped' => $skipped];
+    }
+
+    /**
+     * @param list<int> $employeeIds
+     * @return array<int,string>
+     */
+    private function names(int $supplierId, array $employeeIds): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $employeeIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($ids === []) {
+            return [];
+        }
+        if (count($ids) > self::BULK_LIMIT) {
+            throw new \InvalidArgumentException(sprintf('Najednou jde zpracovat nejvýš %d osob.', self::BULK_LIMIT));
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, full_name FROM payroll_employees
+              WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')
+              ORDER BY full_name, id'
+        );
+        $stmt->execute([$supplierId, ...$ids]);
+        $names = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $names[(int) $row['id']] = (string) $row['full_name'];
+        }
+
+        return $names;
+    }
+
     /**
      * @param array<string,mixed> $profile
      * @throws \DomainException když z karty jednoznačné pravidlo neplyne

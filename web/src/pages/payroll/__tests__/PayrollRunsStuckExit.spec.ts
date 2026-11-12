@@ -198,6 +198,80 @@ describe('PayrollRuns – cesty ven z běhu', () => {
     wrapper.unmount()
   })
 
+  it('vyřadí osobu i z tabulky osob běhu, bez nálezu ruční kontroly', async () => {
+    const people = {
+      run_id: 15, period_start: '2026-08-01', revision_id: 9, revision_no: 1, revision_status: 'calculated',
+      items: [{
+        employee_id: 82, full_name: 'Brigádník Sporný', result_status: 'calculated',
+        gross_minor: 100_000, employee_social_minor: 0, employee_health_minor: 0, insurance_minor: 0,
+        advance_tax_minor: 0, withholding_tax_minor: 15_000, tax_minor: 15_000, tax_bonus_minor: 0,
+        net_minor: 85_000, payable_minor: 85_000, employments: [], findings: { blockers: 0, warnings: 0 }, has_finding: false,
+      }],
+      total: 1, limit: 25, offset: 0, sort: 'name', dir: 'asc', totals: null,
+    }
+    m.runPeople.mockResolvedValue(people)
+    const calculated = run({
+      available_commands: ['calculate', 'approve', 'exclude_employee', 'include_employee', 'cancel'],
+      result_snapshot: { totals: { cash_payable_minor: 85_000 } } as PayrollRun['result_snapshot'],
+    })
+    m.runs.mockResolvedValueOnce([calculated])
+      .mockResolvedValueOnce([{ ...calculated, status: 'inputs_locked', row_version: 4, revision_no: 2, available_commands: ['calculate'] }])
+      .mockResolvedValue([{ ...calculated, row_version: 5, revision_no: 2 }])
+    m.commandRun.mockResolvedValueOnce({ outcome: null, run: calculated })
+      .mockResolvedValueOnce({ outcome: null, run: { ...calculated, revision_no: 2 } })
+
+    const wrapper = mount(PayrollRuns, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-breakdown-toggle"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-person-82-exclude"]').trigger('click')
+    expect(document.body.querySelector('[data-test="run-exclude-hint"]')).not.toBeNull()
+    const reason = document.body.querySelector<HTMLTextAreaElement>('[data-test="run-command-reason"]')!
+    reason.value = 'Sporné hodiny, doloží se příští týden.'
+    reason.dispatchEvent(new Event('input'))
+    submitDialog()
+    await flushPromises()
+
+    expect(m.commandRun).toHaveBeenNthCalledWith(
+      1,
+      15,
+      'exclude_employee',
+      { row_version: 3, reason: 'Sporné hodiny, doloží se příští týden.', employee_id: 82 },
+      expect.any(String),
+    )
+    expect(m.commandRun).toHaveBeenNthCalledWith(2, 15, 'calculate', { row_version: 4 }, expect.any(String))
+    expect(m.success).toHaveBeenCalledTimes(1)
+    expect(m.success).toHaveBeenCalledWith('payroll.runs.command_toast.recalculated')
+    wrapper.unmount()
+  })
+
+  it('v opravné revizi vyřazení z tabulky osob nenabídne', async () => {
+    m.runPeople.mockResolvedValue({
+      run_id: 15, period_start: '2026-08-01', revision_id: 9, revision_no: 3, revision_status: 'calculated',
+      items: [{
+        employee_id: 82, full_name: 'Brigádník', result_status: 'calculated',
+        gross_minor: 0, employee_social_minor: 0, employee_health_minor: 0, insurance_minor: 0,
+        advance_tax_minor: 0, withholding_tax_minor: 0, tax_minor: 0, tax_bonus_minor: 0,
+        net_minor: 0, payable_minor: 0, employments: [], findings: { blockers: 0, warnings: 0 }, has_finding: false,
+      }],
+      total: 1, limit: 25, offset: 0, sort: 'name', dir: 'asc', totals: null,
+    })
+    m.runs.mockResolvedValue([run({
+      status: 'reopened',
+      revision_kind: 'correction',
+      available_commands: ['calculate', 'exclude_employee'],
+      result_snapshot: { totals: { cash_payable_minor: 0 } } as PayrollRun['result_snapshot'],
+    })])
+
+    const wrapper = mount(PayrollRuns, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-breakdown-toggle"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="payroll-run-person-82"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="payroll-run-person-82-exclude"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('bez práva schvalovat vyřazení nenabídne', async () => {
     m.canWrite.mockImplementation((permission: string) => permission !== 'payroll.approve')
     m.runs.mockResolvedValue([run({
@@ -227,6 +301,8 @@ describe('PayrollRuns – cesty ven z běhu', () => {
     await wrapper.get('[data-testid="payroll-run-15-include-44"]').trigger('click')
     await flushPromises()
     expect(m.commandRun).toHaveBeenCalledWith(15, 'include_employee', { row_version: 3, employee_id: 44 }, expect.any(String))
+    expect(m.success).toHaveBeenCalledWith('payroll.runs.command_toast.recalculated')
+    expect(m.success).not.toHaveBeenCalledWith('payroll.runs.command_done')
     wrapper.unmount()
   })
 
@@ -243,6 +319,7 @@ describe('PayrollRuns – cesty ven z běhu', () => {
     await flushPromises()
 
     expect(m.commandRun).toHaveBeenCalledWith(15, 'change_payment_date', { row_version: 3, payment_date: '2026-09-10' }, expect.any(String))
+    expect(m.success).toHaveBeenCalledWith('payroll.runs.command_toast.payment_date')
     wrapper.unmount()
   })
 

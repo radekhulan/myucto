@@ -3821,6 +3821,26 @@
       },
       "open_runs": "Open payroll runs"
     },
+    "payout_defaults_bulk": {
+      "title": "Payout rules from person cards",
+      "intro": "A payout rule says where the net wage is paid. You only need it if you prepare payroll payments (payment order) in the application. The rule is derived from the payout method on the person card: a transfer to the single verified account on the card, or cash. People who already have a rule are not changed.",
+      "ready": "Rule will be added",
+      "blocked": "Cannot be derived",
+      "blocked_title": "The rule cannot be derived from the card ({count}); add it on the person card",
+      "kind": {
+        "bank": "Transfer to the account on the person card",
+        "cash": "Cash payout",
+        "partner_settlement": "Set-off with the partner",
+        "other": "Other method"
+      },
+      "apply": "Add rules ({count})",
+      "nothing_to_apply": "No rule can be derived from the cards. Add the payout method and a verified account on the person card.",
+      "applied_toast": "Payout rules added: {count}.",
+      "result": "Added: {applied}. Not added: {skipped}.",
+      "load_failed": "The payout rule preview could not be loaded.",
+      "apply_failed": "The payout rules could not be added.",
+      "retry": "Try again"
+    },
     "health_insurer_bulk": {
       "known_later": "The insurer is recorded for this person only from {period}; prefilled for confirmation.",
       "title": "Health insurers in bulk",
@@ -3914,9 +3934,9 @@
       "intro": "For people without a foreign element, fills in the missing data that follows from having no ties abroad: Czech tax residence, Czech insurance jurisdiction without an A1 form and, for people under 60, the working pensioner discount not claimed. An existing record is never overwritten. The health insurer is never filled in bulk; only the registration or the employee knows it.",
       "period": "Data valid from month",
       "reload": "Reload preview",
-      "scope_run": "The preview covers everyone the payroll run for {period} would include.",
-      "scope_selection": "The preview covers the selected people ({count}).",
-      "frozen": "Payroll is approved up to {date}. Nothing is written into an approved period; the data takes effect from the following month.",
+      "scope_run": "The preview covers everyone the payroll run for {period} would include. The data takes effect from {from}.",
+      "scope_selection": "The preview covers the selected people ({count}). The data takes effect from {from}.",
+      "frozen": "Payroll is approved up to {date}. Nothing is written into an approved period, so the data takes effect only from {from}.",
       "load_failed": "The fill-in preview could not be loaded.",
       "retry": "Try again",
       "summary": {
@@ -4278,6 +4298,12 @@
         "hint": "For a larger company the step can take tens of seconds. Keep the page open; clicking again or reloading the page will not run the step twice."
       },
       "command_done": "Payroll run status was changed.",
+      "command_toast": {
+        "excluded": "{name}: the person is excluded from the run.",
+        "included": "{name}: the person is back in the run.",
+        "payment_date": "The payment date is {date}.",
+        "recalculated": "{done} The run is recalculated (revision {revision})."
+      },
       "command_failed": "Payroll run command failed.",
       "payments_unsettled": "The run has not actually been paid in full yet. Under Payroll payment orders and settlement, match every amount to a bank transaction or posted cash document and resolve any refunds or reversals.",
       "incoming_refund_unresolved": "The run is not fully settled and contains at least one incoming correction refund. First match all ordinary outgoing payments under Payroll payment orders and settlement. The incoming refund cannot be added to an outgoing batch, and the current workflow cannot yet link it to the payroll liability without such a batch; do not create a false outgoing payment.",
@@ -4924,7 +4950,7 @@
       },
       "readiness": {
         "affected": "Affects: {names}",
-        "payout_rule_missing": "A net wage payout rule is missing. Calculation and approval can proceed, but payment preparation will be blocked. Add a payout rule in the employee card under Payout / accounts. Fixing this after approval requires a correction revision and recalculation of the run.",
+        "payout_rule_missing": "The person has no payout rule (data on the employee card, not a company setting). You only need it if you prepare payroll payments in the application; calculation and approval of the run are not blocked. Add the rules in bulk from the person cards with the button at this finding, or one by one in the Payout / accounts section of the employee card. A fix after approval means a correction revision and a recalculation of the run.",
         "people_list": "Show in the employee list | Show this person in the employee list | Show all {count} people in the employee list",
         "open_all": "Open the agenda for all affected ({count})",
         "fill_probable_average": "Fill in probable earnings from the rate",
@@ -4934,7 +4960,8 @@
           "health_insurer": "Health insurers in bulk ({count})",
           "workplace": "Fill in place of work ({count})",
           "closure": "End finished agreements ({count})",
-          "annual_settlement_request": "Mark annual settlement as not requested ({count})"
+          "annual_settlement_request": "Mark annual settlement as not requested ({count})",
+          "payout_defaults": "Add payout rules from person cards ({count})"
         },
         "fill_probable_average_done": "Filled in automatically from the agreed hourly rate: {count}. The average can be corrected with a new revision in Absences and leave → Average earnings.",
         "fill_probable_average_failed": "Probable earnings could not be filled in.",
@@ -4952,7 +4979,8 @@
         },
         "scope": {
           "setup": "Company setup — one-off, then it is done.",
-          "monthly": "Monthly work."
+          "monthly": "Monthly work.",
+          "person": "Data on the person card, filled in once per person."
         },
         "title": "Pre-flight check",
         "subtitle": "You would see these after starting the run anyway — we show them now, while the inputs can still be fixed. Payroll can be calculated with these findings, but the red ones block approving the run - each has a button that resolves it.",
@@ -4973,7 +5001,8 @@
       },
       "exclusion": {
         "exclude": "Exclude person from run",
-        "hint": "{name} will be excluded from this run: the run gets a new revision without this person and everyone else is calculated and approved as usual. The person gets no payslip or pay in this run and will not be in the approved revision. Pay them later through a correction of the run for the same period (Request correction, Open correction) once the missing data are completed. They get into the monthly JMHZ report through a corrective report. State what is missing and when it will be completed.",
+        "exclude_short": "Exclude from run",
+        "hint": "{name} will be excluded from this run: the run gets a new revision without this person and everyone else is calculated and approved as usual. The person gets no payslip or pay in this run and will not be in the approved revision. Pay them later through a correction of the run for the same period (Request correction, Open correction) once the missing data are completed or the source documents are clarified. They get into the monthly JMHZ report through a corrective report. State a reason of at least 10 characters, e.g. what is missing and when it will be completed.",
         "active_title": "Excluded from run: {count}",
         "active_hint": "The revision does not calculate these people. Once their data are complete, return them to the run, or pay them through a correction after approval.",
         "include": "Return to run",
@@ -5486,6 +5515,7 @@
         "round_whole_crowns": "Round inputs up to whole crowns",
         "round_whole_crowns_hint": "The monthly employer report states earnings in whole crowns. Inputs with hellers in the period are rounded up, in the employee's favour.",
         "round_whole_crowns_confirm": "Round inputs with hellers in this period up to whole crowns? Drafts and approved inputs not yet locked by a payroll run will change.",
+        "round_whole_crowns_ok": "Round up",
         "round_whole_crowns_done": "Inputs rounded: {count}. Left unchanged: {skipped}.",
         "round_whole_crowns_none": "No inputs in this period have hellers that the monthly report would reject.",
         "round_whole_crowns_failed": "The inputs could not be rounded.",

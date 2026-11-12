@@ -8263,8 +8263,9 @@ export interface PayrollRunReadinessFinding {
   /**
    * `setup` = nastavení firmy, dořeší se při rozjezdu a pak je pokoj.
    * `monthly` = práce, která se opakuje každý měsíc.
+   * `person` = údaj na kartě osoby.
    */
-  scope: 'setup' | 'monthly'
+  scope: 'setup' | 'monthly' | 'person'
   message: string
   remediation_path: string | null
   /** Kolika vztahů/položek se nález týká. */
@@ -8297,6 +8298,7 @@ export type PayrollRunReadinessBulkKind =
   | 'workplace'
   | 'closure'
   | 'annual_settlement_request'
+  | 'payout_defaults'
 
 /**
  * Kontrola před zahájením mzdového běhu. Čtecí, nic neukládá — stejný vzor
@@ -8330,6 +8332,20 @@ export interface PayrollRunsPage {
   missing_previous_periods?: string[]
   /** Období, na které jde posunout začátek vedení mezd (chybějící měsíce zpracoval předchozí program). */
   advance_start_to?: string | null
+}
+
+export interface PayrollPayoutDefaultsPreviewRow {
+  employee_id: number
+  full_name: string
+  payout_method: string | null
+  applicable: boolean
+  destination_kind: string | null
+  blocked_reason: string | null
+}
+
+export interface PayrollPayoutDefaultsBulkResult {
+  applied: number[]
+  skipped: Array<{ employee_id: number, full_name: string, reason: string }>
 }
 
 export interface PayrollRunCommandResponse {
@@ -9215,6 +9231,12 @@ export const payrollApi = {
       payload,
     ).then(response => response.data.evidence),
   /** Náhled hromadného doplnění výchozí zákonné evidence; `employee_ids: null` = osoby běhu za měsíc. */
+  payoutDefaultsPreview: (employeeIds: number[]) =>
+    api.post<{ people: PayrollPayoutDefaultsPreviewRow[] }>('/payroll/payout-rules/defaults/preview', { employee_ids: employeeIds })
+      .then(response => response.data.people),
+  payoutDefaultsApply: (employeeIds: number[]) =>
+    api.post<PayrollPayoutDefaultsBulkResult>('/payroll/payout-rules/defaults/apply', { employee_ids: employeeIds })
+      .then(response => response.data),
   statutoryBulkDefaultsPreview: (payload: { effective_on: string, employee_ids?: number[] | null }) =>
     api.post<{ preview: PayrollStatutoryBulkPreview }>(
       '/payroll/statutory-evidence/bulk-defaults/preview',

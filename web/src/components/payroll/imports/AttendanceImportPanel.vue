@@ -17,7 +17,7 @@ import {
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { BTN_DISABLED_NOTE, btnFilled, btnOutline, btnOutlineSm, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
-import { formatMoneyMinor, formatPeriod } from '@/composables/useFormat'
+import { formatMoneyMinor, formatPeriod, formatPeriodNumeric } from '@/composables/useFormat'
 import { adoptableWageChanges, uniqueRefreshRuns, upgradeMatchesProfile } from './attendanceWages'
 import ImportFilesDropzone from './ImportFilesDropzone.vue'
 import AttendancePersonsStep from './AttendancePersonsStep.vue'
@@ -711,7 +711,7 @@ async function approveTimeMonths() {
         <section v-if="result" class="rounded-xl border p-4 text-sm sm:p-6" data-testid="attendance-result"
           :class="result.inputs.errors.length ? 'border-warning-500/30 bg-warning-50' : 'border-success-500/30 bg-success-50'">
           <h4 class="font-semibold text-neutral-900">{{ t('payroll_imports.attendance.result.title') }}</h4>
-          <p class="mt-1 text-neutral-700">{{ t('payroll_imports.attendance.result.batch', { id: result.batch.id, period: result.batch.period }) }}</p>
+          <p class="mt-1 text-neutral-700">{{ t('payroll_imports.attendance.result.batch', { id: result.batch.id, period: formatPeriodNumeric(result.batch.period) }) }}</p>
           <p v-if="result.replayed" class="mt-1 font-medium text-warning-700">{{ t('payroll_imports.attendance.result.replayed') }}</p>
           <ul class="mt-2 space-y-0.5 text-neutral-700">
             <li>{{ t('payroll_imports.attendance.result.inputs_created', { count: result.inputs.created }) }}</li>

@@ -2764,6 +2764,43 @@ describe('PayrollRuns', () => {
       wrapper.unmount()
     })
 
+    it('chybějící výplatní pravidlo je údaj osoby a vede na hromadné pravidla z karet', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: true,
+        has_findings: true,
+        findings: [{
+          code: 'payout_rule_missing',
+          severity: 'warning',
+          impact: 'revision',
+          scope: 'person',
+          message: 'Chybí výplatní pravidlo.',
+          remediation_path: '/payroll/people?person=21&panel=accounts',
+          count: 2,
+          entities: [],
+          bulk_actions: [{ kind: 'payout_defaults', count: 2, employee_ids: [21, 22] }],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const finding = wrapper.get('[data-testid="run-readiness-payout_rule_missing"]')
+      expect(finding.text()).toContain('payroll.runs.readiness.scope.person')
+      expect(finding.text()).not.toContain('payroll.runs.readiness.scope.setup')
+      const action = wrapper.get('[data-test="run-readiness-bulk-action-payout_defaults"]')
+      expect(JSON.parse(action.attributes('data-to')!)).toEqual({
+        name: 'payroll-people',
+        query: { bulk: 'payout_defaults', period: '2026-02', employees: '21,22' },
+      })
+      wrapper.unmount()
+    })
+
     it('hromadný podpis prohlášení z nálezu nese jen dotčené osoby', async () => {
       m.runs.mockResolvedValue([])
       m.readiness.mockReturnValue({

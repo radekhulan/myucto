@@ -242,6 +242,7 @@ final class PayrollRunReadinessPredictionTest extends TestCase
         self::assertSame('anytime', $finding['impact']);
         self::assertStringNotContainsString('spočítat odvody', $finding['message']);
         self::assertStringContainsString('Mzdy se spočítají i bez nich', $finding['message']);
+        self::assertStringStartsWith('Za období 02/2026 chybí zákonné údaje', $finding['message']);
         $messages = array_column($finding['entities'], 'message', 'entity_id');
         self::assertStringContainsString('identita je zapsaná až od 16. 3. 2026', $messages[$laterId]);
         self::assertStringContainsString('křestní jméno a příjmení zvlášť', $messages[$noneId]);

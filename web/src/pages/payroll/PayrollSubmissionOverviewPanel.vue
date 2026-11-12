@@ -212,10 +212,15 @@ const counts = computed(() => {
 })
 
 // Souhrn po termínu platí za celé období, stránka nese jen 50 řádků.
-const unpreparedOverdueCount = computed(() => items.value.some(item =>
-  item.latest_submission === null && item.deadline.phase === 'overdue')
-  ? deadlineSummary.value.overdue
-  : 0)
+function unpreparedOverdue(item: PayrollSubmissionOverviewItem): boolean {
+  return item.latest_submission === null
+    && (item.deadline?.is_overdue === true || item.deadline?.phase === 'overdue')
+}
+
+const unpreparedOverdueCount = computed(() => {
+  const onPage = items.value.filter(unpreparedOverdue).length
+  return onPage === 0 ? 0 : Math.max(deadlineSummary.value.overdue, onPage)
+})
 
 function statusClass(status: string): string {
   if (status === 'fulfilled') return 'bg-success-50 text-success-700'

@@ -7,7 +7,7 @@ namespace MyInvoice\Service\Payroll\Run;
 final class PayrollRunIssueGuidance
 {
     private const RULES = [
-        'payout_rule_missing' => ['Chybí výplatní pravidlo pro čistou mzdu. Výpočet ani schválení to nezastaví, ale zablokuje přípravu plateb. Na kartě zaměstnance v části Výplata / účty doplňte výplatní pravidlo. Oprava po schválení znamená opravnou revizi a nový výpočet běhu.', 'accounts'],
+        'payout_rule_missing' => ['Chybí výplatní pravidlo pro čistou mzdu (údaj na kartě zaměstnance, ne nastavení firmy). Výpočet ani schválení to nezastaví, pravidlo je potřeba jen pro přípravu plateb v aplikaci. Na kartě zaměstnance v části Výplata / účty doplňte výplatní pravidlo, nebo ho doplňte hromadně z karet osob tlačítkem v kontrole před během. Oprava po schválení znamená opravnou revizi a nový výpočet běhu.', 'accounts'],
         'duplicate_id' => ['Pohledávka je v podkladu srážek uvedena vícekrát. Zkontrolujte evidenci pohledávek; pokud duplicita není v agendě vidět, předejte uloženou revizi správci.', 'enforcement'],
         'enforcement_ruleset_incomplete' => ['Pravidla pro výpočet exekučních srážek jsou neúplná. Správce musí ověřit a doplnit platnou sadu pravidel pro rok výplaty.', 'rulesets'],
         'concurrent_priority_enforcement_with_insolvency_requires_manual_review' => ['Současně je evidována insolvence a přednostní exekuce. V agendě Insolvence ověřte podle doručených rozhodnutí, zda pokračovat v exekuci a komu srážku odvádět.', 'insolvency'],

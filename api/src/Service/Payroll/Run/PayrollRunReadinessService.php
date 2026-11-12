@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Run;
 
+use MyInvoice\Service\Payroll\PayrollPeriodLabel;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\PayrollHourlyWageComponents;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind;
@@ -17,6 +18,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollInstitutionVerificationWindow;
 use MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\PayrollOpeningBalanceService;
+use MyInvoice\Service\Payroll\PayrollStatutoryEvidenceBulkDefaults;
 use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry;
@@ -64,6 +66,7 @@ final class PayrollRunReadinessService
         'workplace',
         'closure',
         'annual_settlement_request',
+        'payout_defaults',
     ];
 
     /**
@@ -88,6 +91,7 @@ final class PayrollRunReadinessService
         'tax_declaration_evidence_missing',
         'tax_declaration_evidence_unverified',
         'employment_term_missing',
+        'payroll_component_missing',
     ];
 
     /** Sekce zákonné evidence, které doplní hromadné výchozí údaje. */
@@ -133,6 +137,7 @@ final class PayrollRunReadinessService
         // Nulové počáteční úhrny, které doplní založení běhu.
         private readonly PayrollOpeningBalanceService $openingBalances,
         private readonly PayrollRunCalculationPipeline $calculation,
+        private readonly PayrollStatutoryEvidenceBulkDefaults $statutoryBulk,
     ) {}
 
     /**
@@ -358,6 +363,9 @@ final class PayrollRunReadinessService
         if ($pendingValuesFinding !== null) {
             $findings[] = $pendingValuesFinding;
         }
+        if ($snapshot !== null) {
+            $findings = $this->withRunStatutoryDefaults($supplierId, $periodStart, $snapshot->data, $findings);
+        }
         // Jednotný tvar nálezu: co nepochází z katalogu skrytí, skrýt nejde.
         $findings = array_map(
             static function (array $finding): array {
@@ -455,6 +463,46 @@ final class PayrollRunReadinessService
     }
 
     /**
+     * @param array<string,mixed> $snapshotData
+     * @param list<array<string,mixed>> $findings
+     * @return list<array<string,mixed>>
+     */
+    private function withRunStatutoryDefaults(int $supplierId, string $periodStart, array $snapshotData, array $findings): array
+    {
+        if (!in_array('statutory_calculation_manual_review', array_column($findings, 'code'), true)) {
+            return $findings;
+        }
+        $runPeople = [];
+        foreach ((array) ($snapshotData['people'] ?? []) as $person) {
+            $id = is_array($person) && is_array($person['employee'] ?? null) ? (int) ($person['employee']['id'] ?? 0) : 0;
+            if ($id > 0) {
+                $runPeople[$id] = $id;
+            }
+        }
+        if ($runPeople === []) {
+            return $findings;
+        }
+        try {
+            $ready = $this->statutoryBulk->preview($supplierId, $periodStart, array_values($runPeople))['ready_employee_ids'];
+        } catch (\Throwable) {
+            return $findings;
+        }
+        $ready = array_values(array_map('intval', (array) $ready));
+        foreach ($findings as &$finding) {
+            if (($finding['code'] ?? null) !== 'statutory_calculation_manual_review') {
+                continue;
+            }
+            $ids = array_values(array_unique([...($finding['bulk_ids']['statutory_defaults'] ?? []), ...$ready]));
+            sort($ids);
+            $finding['bulk_ids']['statutory_defaults'] = $ids;
+            $finding['bulk_totals']['statutory_defaults'] = count($ids);
+        }
+        unset($finding);
+
+        return $findings;
+    }
+
+    /**
      * Hromadné opravy, které nález nabízí.
      *
      * Nic se tu nepočítá znovu: každá vede na existující dialog v Mzdy →
@@ -528,6 +576,11 @@ final class PayrollRunReadinessService
                 ...($declarationIds === [] ? [] : ['employee_ids' => $declarationIds]),
             ]],
             $code === 'employments_past_agreed_end' => [['kind' => 'closure', 'count' => $count]],
+            $code === 'payout_rule_missing' && ($finding['bulk_ids']['payout_defaults'] ?? []) !== [] => [[
+                'kind' => 'payout_defaults',
+                'count' => count($finding['bulk_ids']['payout_defaults']),
+                'employee_ids' => $finding['bulk_ids']['payout_defaults'],
+            ]],
             // Hromadné „nepožádal" je výběr na stránce Roční zúčtování, ne dialog
             // v seznamu zaměstnanců; klient tam vede s rokem a zúžením.
             $code === 'jmhz_annual_request_status_unresolved'
@@ -844,7 +897,7 @@ final class PayrollRunReadinessService
             $entities[] = $person;
         }
 
-        return self::withPeopleList(
+        return ['bulk_ids' => ['payout_defaults' => array_map('intval', array_column($missing, 'entity_id'))]] + self::withPeopleList(
             self::finding(
                 'payout_rule_missing',
                 $guidance['message'],
@@ -1352,7 +1405,7 @@ final class PayrollRunReadinessService
                 . 'spočítají i bez nich, ale bez nich nepůjde podat přihlášku ani měsíční '
                 . 'hlášení; doplňte je před podáním. Odkaz u osoby otevře místo, kde '
                 . 'se údaj doplňuje.',
-                substr($periodStart, 0, 7),
+                PayrollPeriodLabel::monthYear($periodStart),
                 implode('; ', $named),
                 $hidden > 0 ? sprintf(' a dalších %d', $hidden) : '',
             ),
@@ -1483,8 +1536,8 @@ final class PayrollRunReadinessService
                 . 'patří do počátečních stavů kumulací u zaměstnanců, ne do mzdových běhů. '
                 . 'Pokud má tenhle měsíc spočítat MyÚčto, změňte první mzdové období '
                 . 'v Mzdy → Aktivace mzdové agendy.',
-                substr($periodStart, 0, 7),
-                (string) $startPeriod,
+                PayrollPeriodLabel::monthYear($periodStart),
+                PayrollPeriodLabel::monthYear((string) $startPeriod),
             ),
             '/payroll',
             1,
@@ -1509,8 +1562,8 @@ final class PayrollRunReadinessService
                 . 'politika. Otevřete Mzdy → Nastavení zaměstnavatele → '
                 . 'Mzdové politiky a založte politiku účinnou od %s; bez ní '
                 . 'se mzdový běh nedá zahájit.',
-                substr($periodStart, 0, 7),
-                $periodStart,
+                PayrollPeriodLabel::monthYear($periodStart),
+                (new \DateTimeImmutable($periodStart))->format('j. n. Y'),
             );
         } catch (\Throwable $e) {
             // Překryv dvou politik má vlastní výjimku — je to taky nález, jen

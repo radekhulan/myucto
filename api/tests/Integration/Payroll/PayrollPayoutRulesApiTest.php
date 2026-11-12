@@ -666,6 +666,58 @@ final class PayrollPayoutRulesApiTest extends TestCase
         self::assertSame(77, (int) $remaining->fetchColumn());
     }
 
+    public function testBulkDefaultsPreviewAndApplyDeriveRulesFromCards(): void
+    {
+        $this->setProfile('cash');
+        $bankEmployee = $this->createEmployee($this->supplierId);
+        $this->setProfileFor($bankEmployee, 'bank');
+        $this->createAccount($bankEmployee, verified: false);
+        $manualEmployee = $this->createEmployee($this->supplierId);
+        $this->setProfileFor($manualEmployee, 'cash');
+        $this->createRule(['destination_kind' => 'cash', 'priority_no' => 77]);
+        $this->db->pdo()->prepare('UPDATE payroll_payout_rules SET employee_id = ? WHERE supplier_id = ? AND employee_id = ?')
+            ->execute([$manualEmployee, $this->supplierId, $this->employeeId]);
+        $foreignEmployee = $this->createEmployee($this->foreignSupplierId);
+        $ids = [$this->employeeId, $bankEmployee, $manualEmployee, $foreignEmployee];
+
+        $preview = $this->action->previewDefaultsBulk(
+            $this->request('POST', ['employee_ids' => $ids]),
+            new Response(),
+        );
+        self::assertSame(200, $preview->getStatusCode(), (string) $preview->getBody());
+        $people = array_column($this->json($preview)['people'], null, 'employee_id');
+        self::assertSame([$this->employeeId, $bankEmployee, $manualEmployee], array_values(array_intersect(array_keys($people), $ids)));
+        self::assertArrayNotHasKey($foreignEmployee, $people);
+        self::assertTrue($people[$this->employeeId]['applicable']);
+        self::assertSame('cash', $people[$this->employeeId]['destination_kind']);
+        self::assertFalse($people[$bankEmployee]['applicable']);
+        self::assertStringContainsString('ověřený výplatní účet', (string) $people[$bankEmployee]['blocked_reason']);
+        self::assertFalse($people[$manualEmployee]['applicable']);
+        self::assertSame(1, $this->activeRuleCount($this->supplierId));
+
+        $applied = $this->action->applyDefaultsBulk(
+            $this->request('POST', ['employee_ids' => $ids]),
+            new Response(),
+        );
+        self::assertSame(200, $applied->getStatusCode(), (string) $applied->getBody());
+        $body = $this->json($applied);
+        self::assertSame([$this->employeeId], $body['applied']);
+        self::assertEqualsCanonicalizing([$bankEmployee, $manualEmployee], array_column($body['skipped'], 'employee_id'));
+        self::assertSame(2, $this->activeRuleCount($this->supplierId));
+        self::assertSame(0, $this->activeRuleCount($this->foreignSupplierId));
+    }
+
+    public function testBulkDefaultsRejectEmptySelection(): void
+    {
+        $response = $this->action->applyDefaultsBulk(
+            $this->request('POST', ['employee_ids' => []]),
+            new Response(),
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(0, $this->activeRuleCount($this->supplierId));
+    }
+
     public function testBearerTokenCannotReachThePayoutRules(): void
     {
         $response = $this->action->list(
@@ -784,6 +836,17 @@ final class PayrollPayoutRulesApiTest extends TestCase
             $payoutMethod,
             $accountCode,
         ]);
+    }
+
+    private function setProfileFor(int $employeeId, string $payoutMethod): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employee_profiles
+                (supplier_id, employee_id, profile_status, payout_method,
+                 partner_settlement_account_code, cash_allocation_basis_points,
+                 payout_effective_on, secure_delivery_channel)
+             VALUES (?, ?, "ready", ?, NULL, 10000, "2026-01-01", "portal")'
+        )->execute([$this->supplierId, $employeeId, $payoutMethod]);
     }
 
     private function activeRuleCount(int $supplierId): int

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Import\Attendance;
 
+use MyInvoice\Service\Payroll\PayrollPeriodLabel;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
@@ -3026,7 +3027,7 @@ final class AttendanceImportService
             )
             : sprintf(
                 'Odměna za odpracované hodiny podle importu docházky za %s: %s Kč za %s h.',
-                substr($periodStart, 0, 7),
+                PayrollPeriodLabel::monthYear($periodStart),
                 number_format((int) $proposal['amount_minor'] / 100, 2, ',', ' '),
                 str_replace('.', ',', (string) $proposal['hours']),
             );

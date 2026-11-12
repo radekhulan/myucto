@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Run;
 
+use MyInvoice\Service\Payroll\PayrollPeriodLabel;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\Payroll\PayrollRunConflictException;
@@ -169,7 +170,7 @@ final class PayrollRunCommandService
                 . 'účtárnách zvlášť, jeden z běhů zrušte — uzávěrka roku se '
                 . 'dívá jen na to, jestli je aspoň jeden uzavřený, takže '
                 . 'rozdělaný druhý běh by si nikdo nevšiml.',
-                substr($periodStart, 0, 7),
+                PayrollPeriodLabel::monthYear($periodStart),
                 $ids,
             ),
         ]];

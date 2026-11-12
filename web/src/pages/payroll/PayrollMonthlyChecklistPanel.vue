@@ -169,6 +169,10 @@ function matchesAgenda(code: string | null): boolean {
 
 const items = computed(() => (response.value?.items ?? []).filter(item => matchesAgenda(item.agenda_code)))
 
+const unpreparedOverdueCount = computed(() => items.value
+  .filter(item => !item.done && item.is_overdue && item.submission_id === null)
+  .length)
+
 /**
  * Odeslané zprávy datové schránky a kolik z nich má doložené doručení.
  * Bez doručenky přehled pojišťovně nedoběhne do „splněno" — účetní to musí
@@ -895,6 +899,17 @@ useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && pr
           </dd>
         </div>
       </dl>
+
+      <p
+        v-if="!compact && unpreparedOverdueCount > 1"
+        class="flex flex-wrap items-center gap-2 rounded-xl border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-700"
+        data-test="monthly-checklist-bulk-external-hint"
+      >
+        <span>{{ t('payroll.submissions.overview.bulk_external_hint', { count: unpreparedOverdueCount }) }}</span>
+        <RouterLink :to="{ name: 'payroll-dashboard', hash: '#payroll-deadlines' }" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" data-test="monthly-checklist-bulk-external-link">
+          {{ t('payroll.submissions.overview.bulk_external_action') }}
+        </RouterLink>
+      </p>
 
       <section class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
         <div v-if="items.length === 0" class="p-6 text-sm text-neutral-500" data-test="monthly-checklist-empty">

@@ -112,8 +112,13 @@ a již uzavřenou revizi nepřepíše.
    Chybějící docházka schválení nezastaví, doplnění po zamknutí vstupů ale
    stojí opravnou revizi.
    U osob s částkou k výplatě kontrola hlásí také chybějící výplatní
-   pravidlo a odkáže na výplatní údaje v kartě zaměstnance. Výpočet ani
-   schválení tím nejsou omezené, bez pravidla ale nepůjdou připravit platby.
+   pravidlo a odkáže na výplatní údaje v kartě zaměstnance. Je to údaj
+   osoby, ne nastavení firmy, a potřebujete ho jen tehdy, když platby mezd
+   připravujete v aplikaci. Výpočet ani schválení tím nejsou omezené.
+   Tlačítko **Doplnit výplatní pravidla z karet osob (N)** otevře náhled:
+   osobám s výplatou v hotovosti nebo s jediným ověřeným účtem na kartě
+   pravidlo doplní, u ostatních řekne proč ne (rozdělená výplata, chybí
+   ověřený účet). Osobám, které už pravidlo mají, nic nemění.
    Doplnění po schválení vyžaduje opravnou revizi a nový výpočet běhu.
    Nulová nebo záporná výplata pravidlo nepotřebuje; existující pravidlo
    pro hotovost nebo jiný způsob výplaty se jako chybějící nehlásí.
@@ -243,11 +248,17 @@ období. U schváleného běhu vede cesta přes **Vyžádat opravu**
 
 Jedna osoba v ruční kontrole (chybí zdravotní pojišťovna, podmínky vztahu nebo
 hodnoty pro srážky) zastaví schválení celého běhu. Nechcete-li kvůli ní
-odkládat výplatu ostatním:
+odkládat výplatu ostatním, nebo chcete osobu vyřadit z jiného důvodu (sporné
+hodiny, chybějící podklad):
 
-1. U blokace osoby v kontrolách běhu klikněte na **Vyřadit osobu z běhu**.
-2. Napište důvod (co chybí a kdy se doplní) a potvrďte. Běh dostane novou
-   revizi bez této osoby a hned se přepočítá.
+1. U blokace osoby v kontrolách běhu klikněte na **Vyřadit osobu z běhu**,
+   nebo v tabulce **Zaměstnanci v běhu** (tlačítko **Zobrazit rozpad podle
+   zaměstnanců** na kartě spočítaného běhu) klikněte u osoby na **Vyřadit
+   z běhu**. Tabulka tlačítko nabízí jen v běžné revizi, která ještě není
+   schválená.
+2. Napište důvod (aspoň 10 znaků: co chybí a kdy se doplní) a potvrďte. Běh
+   dostane novou revizi bez této osoby a hned se přepočítá; potvrzení uvede
+   číslo nové revize.
 3. Schvalte běh obvyklým postupem.
 4. Až údaje doplníte, klikněte na **Vyžádat opravu** a **Otevřít opravu**.
    Opravná revize osobu zase obsahuje; po schválení dostane mzdu za stejné
@@ -286,6 +297,10 @@ pro JMHZ. Aplikace nabízí tři hromadné akce.
 **Výchozí zákonná evidence** (daňová rezidence, příslušnost k pojištění):
 
 1. U blokace na kartě běhu klikněte na **Doplnit výchozí údaje (N osob)**.
+   Tlačítko v kontrole před během nabídne všechny osoby běhu, kterým se
+   výchozí údaj doplní: ty, kterým chybějící údaj zastaví výpočet, i ty, kterým
+   chybí jen údaj pro měsíční hlášení JMHZ (například příslušnost k pojištění
+   u dohody bez účasti). Platnost je předvyplněná od měsíce běhu.
    Totéž je v `Mzdy → Zaměstnanci → Další funkce` pod **Doplnit výchozí zákonné údaje**;
    tam zvolíte měsíc, od kterého údaje platí. Předvyplněný je měsíc nejstaršího
    mzdového běhu, který ještě není schválený (z kontroly běhu měsíc běhu).
