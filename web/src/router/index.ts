@@ -158,6 +158,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   'accounting-setup-assistant': ['accounting'],
   'payroll-dashboard': ['payroll'],
   'payroll-runs': ['payroll'],
+  'payroll-month-guide': ['payroll'],
   'payroll-payments': ['payroll.payments'],
   'payroll-posting-reconciliation': ['payroll.post'],
   'payroll-posting-detail': ['payroll.reports'],

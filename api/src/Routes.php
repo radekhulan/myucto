@@ -1250,6 +1250,7 @@ final class Routes
                 [PayrollPostingReconciliationAction::class, 'get'],
             );
             $g->get('/runs', [PayrollRunsAction::class, 'list']);
+            $g->get('/month-guide', \MyInvoice\Action\Payroll\PayrollMonthGuideAction::class);
             $g->get('/reports/annual/{year:[0-9]{4}}', [PayrollAnnualReportAction::class, 'show']);
             // Náklady na zaměstnance po dimenzi — nad cílovými alokacemi
             // účetního můstku, ne nad deníkem (ten se po zaměstnanci neúčtuje).

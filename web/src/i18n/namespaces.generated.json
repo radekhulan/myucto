@@ -621,6 +621,9 @@
       "payroll",
       "payroll_absence"
     ],
+    "payroll-month-guide": [
+      "payroll"
+    ],
     "payroll-runs": [
       "databox",
       "payroll"

@@ -4197,6 +4197,53 @@ export interface PayrollMonthlyChecklistPreparationResult {
   warning?: string | null
 }
 
+export type PayrollMonthGuideStepKey = 'inputs' | 'people' | 'registrations' | 'check' | 'run' | 'submissions' | 'payments'
+export type PayrollMonthGuideStepState = 'done' | 'todo' | 'waiting' | 'unavailable'
+
+export interface PayrollMonthGuideCodeCount {
+  code: string
+  count: number
+}
+
+export interface PayrollMonthGuideStep {
+  key: PayrollMonthGuideStepKey
+  state: PayrollMonthGuideStepState
+  remaining: number
+  action: string | null
+  facts: {
+    codes?: PayrollMonthGuideCodeCount[]
+    stopping?: number
+    attendance_batches?: { count: number, persons: number } | null
+    registration_a1?: {
+      total: number
+      preparable: number
+      incomplete: number
+      overdue: number
+      too_early: number
+      from: string
+      to: string
+    } | null
+    hoz_open?: number | null
+    unprepared_overdue?: number | null
+    source?: 'readiness' | 'run' | null
+    by_impact?: Record<'blocking' | 'approval' | 'revision' | 'anytime', number> | null
+    bulk_actions?: { kind: PayrollRunReadinessBulkKind, count: number, employee_ids?: number[] }[]
+    findings?: { code: string, impact: string, message: string, count: number }[]
+    status?: PayrollRun['status'] | null
+    summary?: PayrollMonthlyChecklistResponse['summary']
+    jmhz?: { total: number, done: number } | null
+    coverage?: { liability_count: number, uncovered_count: number } | null
+    documents_total?: number | null
+  } | null
+}
+
+export interface PayrollMonthGuideResponse {
+  period: string
+  current_step: PayrollMonthGuideStepKey | null
+  runs: { id: number, status: PayrollRun['status'], office_id: number | null, approve_blocker_count: number }[]
+  steps: PayrollMonthGuideStep[]
+}
+
 export interface PayrollMonthlyChecklistResponse {
   environment: PayrollRegzelEnvironment
   period: string
@@ -9954,6 +10001,10 @@ export const payrollApi = {
    * jakou cestou, do kdy a co s tím — přes VŠECHNY agendy i to, co appka
    * jen počítá nebo drží jako úkol bez podání (viz {@see PayrollMonthlyChecklistItem}).
    */
+  monthGuide: (period: string, environment: PayrollRegzelEnvironment = 'production') =>
+    api.get<PayrollMonthGuideResponse>('/payroll/month-guide', {
+      params: { period, environment },
+    }).then(response => response.data),
   monthlyChecklist: (environment: PayrollRegzelEnvironment, period: string) =>
     api.get<PayrollMonthlyChecklistResponse>('/payroll/submissions/monthly-checklist', {
       params: { environment, period },

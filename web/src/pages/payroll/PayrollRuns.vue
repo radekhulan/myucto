@@ -2067,6 +2067,16 @@ onMounted(() => { void load() })
             @input="paymentDateTouched = true" />
         </label>
         <RouterLink
+          :to="{ name: 'payroll-month-guide', query: { period } }"
+          :class="btnOutline('neutral')"
+          data-test="runs-month-guide-link"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.clipboardCheck" />
+          </svg>
+          {{ t('payroll.month_guide.open_guide') }}
+        </RouterLink>
+        <RouterLink
           :to="{ name: 'payroll-quick-inputs', query: { period } }"
           :class="btnOutline('primary')"
         >

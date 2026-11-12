@@ -20,6 +20,7 @@ Kapitolu otevřete, když:
 <!-- cols: 26 40 34 -->
 | Kdy | Co udělat | Kde v aplikaci |
 |---|---|---|
+| na začátku měsíční uzávěrky | Zjistit, co je hotové a co zbývá | `Mzdy → Průvodce měsícem`, postup v [§ 80.2a](#802a-pruvodce-mesicem-mezd) |
 | po schválení docházky a vstupů | Založit běh, spočítat a schválit mzdy | `Mzdy → Mzdové běhy`, postup v [§ 80.3](#803-krok-za-krokem-spocitat-a-schvalit-mzdy) |
 | hned po schválení | Zaúčtovat, připravit platby, vydat dokumenty a podat hlášení | karta běhu, postup v [§ 80.4](#804-krok-za-krokem-dokonceni-mesice-po-schvaleni) |
 | po spárování plateb a odeslání podání | Uzavřít měsíc | karta běhu, tlačítko **Uzavřít** |
@@ -75,6 +76,45 @@ a již uzavřenou revizi nepřepíše.
    firmy.
 5. **Aktivní legislativní pravidla.** Pro období musí být odborně schválená
    a aktivní legislativní pravidla mezd (`Mzdy → Legislativní pravidla mezd`).
+
+## 80.2a Průvodce měsícem mezd
+
+Průvodce v `Mzdy → Průvodce měsícem` (odkaz je i v hlavičce Mzdových
+běhů) vede celou měsíční uzávěrku jedním postupem. Hodí se malé firmě
+s několika zaměstnanci na HPP stejně jako agentuře s desítkami až stovkami
+dohod. Nahoře zvolíte období, pod ním je sedm kroků. U každého uvidíte
+stav, počet věcí, které zbývají, a jedno hlavní tlačítko. To vás pošle na
+obrazovku nebo do hromadného dialogu, kde se věc udělá. Průvodce sám nic
+nepočítá, neukládá ani neodesílá.
+
+<!-- cols: 26 40 34 -->
+| Krok | Co ukazuje | Kam vede |
+|---|---|---|
+| 1. Podklady měsíce | Neschválenou nebo chybějící docházku, koncepty vstupů, lidi bez mzdy, nerozhodnuté nepřítomnosti a počet importů docházky za měsíc | Docházka, import docházky (`Mzdy → Importy`, záložka Docházka), rychlý měsíční vstup |
+| 2. Noví lidé a dohody | Chybějící údaje lidí: pojišťovna, prohlášení, způsob výplaty, příslušnost k pojištění, dohody po sjednaném konci | Zaměstnanci zúžení na blokující údaje, založení lidí z importu docházky |
+| 3. Registrace ČSSZ a oznámení ZP | Přihlášky A1 za měsíc (kolik jde připravit, kolik je neúplných a po termínu) a otevřená oznámení zdravotním pojišťovnám | Hromadná příprava přihlášek, fronta K odeslání, hromadné označení „podáno mimo aplikaci“ v Zákonných termínech |
+| 4. Kontrola před během | Nálezy podle dopadu: co zastaví, co stojí opravnou revizi, co se doplní kdykoli; hromadné opravy | Kontrola v Mzdových bězích, hromadné dialogy v seznamu zaměstnanců |
+| 5. Výpočet a schválení | Stav běhu a počet kontrol, které brání schválení | Mzdové běhy |
+| 6. JMHZ a další měsíční podání | Splněné a zbývající povinnosti měsíčního přehledu podání, z toho JMHZ | Měsíční přehled podání, záložka JMHZ (test XML, odložení) |
+| 7. Platby a výplatní pásky | Doložené úhrady a počet dokumentů za měsíc | Platby mezd, Dokumenty a výstupy |
+
+Stavy kroků:
+
+- **Hotovo**: v kroku nic nezbývá.
+- **Chybí N**: krok čeká na práci, N je počet věcí ze zdroje kroku.
+  Krok, na který je řada, je zvýrazněný jako **Teď na řadě**.
+- **Zatím nelze**: krok navazuje na dřívější. Podání, platby a pásky
+  vznikají ze schváleného běhu, běh nejde založit při blokujícím nálezu.
+- **Bez oprávnění**: k údajům kroku nemáte přístup (například k podáním).
+
+Počty jsou tytéž, jaké ukazují cílové obrazovky. Kroky 1, 2 a 4 čtou
+kontrolu před během z [§ 80.3](#803-krok-za-krokem-spocitat-a-schvalit-mzdy);
+po zamknutí vstupů místo ní kontroly běhu, které brání schválení. Krok 1
+a 2 jsou výřez téže kontroly, krok 4 ji shrnuje celou. Krok 6 přebírá
+souhrn měsíčního přehledu podání ([kapitola 85](85_Podani_a_hlaseni.md)).
+Krok 3 počítá přihlášky A1 za zvolený měsíc; hromadná příprava se otevírá
+na svém výchozím období, proto v ní rozsah nastavte podle textu
+v průvodci.
 
 ## 80.3 Krok za krokem: spočítat a schválit mzdy
 
