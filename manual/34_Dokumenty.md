@@ -26,7 +26,8 @@ pod jinou neuvidíte.
 
 - **Firma.** V přepínači firem mějte zvolenou firmu, do jejíhož úložiště soubory patří.
 - **Oprávnění.** Procházet, otevírat, hledat a stahovat smí i uživatel jen pro čtení.
-  Nahrávat, mazat, přesouvat, označovat tagy a vytvářet vazby smí účetní a administrátor.
+  Zápisové akce se povolují samostatnými právy pro nahrávání, přesun a vazby,
+  mazání, obnovu a požadavky. Vlastní role může mít jen některé z nich.
 - **Osobní, nebo firemní.** Nad seznamem je přepínač **Firemní / Osobní**. Zvolte
   vrstvu, do které soubor patří (viz [§ 34.10.4](#34104-firemni-a-osobni-dokumenty)).
 - **Klientský portál.** Chcete-li po klientovi chybějící doklady, musí mít klient
@@ -169,12 +170,12 @@ Seznam filtrujete podle stavu (**Všechny stavy**). Prošlý termín je v seznam
 <!-- cols: 30 35 35 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| Nelze nahrávat, mazat ani přesouvat | Máte oprávnění jen pro čtení | Požádejte administrátora o roli účetní |
+| Nelze nahrávat, mazat ani přesouvat | Máte oprávnění jen pro čtení | Požádejte správce o konkrétní právo k požadované akci |
 | **Nic nenalezeno** u dokumentu, který určitě máte | Sken bez textové vrstvy se neindexuje podle obsahu | Hledejte podle názvu nebo tagu, případně přidejte popis a tag |
 | Soubor se nenahrál (**nepodporovaný typ**, **spustitelný soubor**) | Typ se ověřuje podle obsahu a spustitelné soubory, HTML a SVG jsou z bezpečnostních důvodů odmítnuty | Soubor nenahrávejte, nebo ho zabalte jinak, než jako spustitelný obsah |
 | Soubor je **příliš velký** | Překročen limit velikosti souboru, který aplikace u nahrávání uvádí | Soubor zmenšete, nebo ho rozdělte |
 | Náhled souboru se nezobrazí | Ostatní typy souborů se nabízejí jen ke stažení; velký textový soubor má náhled zkrácený | Soubor stáhněte tlačítkem **Stáhnout**, celý originál je vždy dostupný |
-| Cizí osobní dokument nevidím | Osobní dokumenty vidí běžný uživatel jen své | Požádejte administrátora, ten vidí osobní dokumenty všech |
+| Cizí osobní dokument nevidím | Osobní dokumenty vidí běžný uživatel jen své | Požádejte superadministrátora; správce firmy cizí osobní dokumenty nevidí |
 | Koš po vysypání nechal několik dokladů | Doklady jsou navázané jinou agendou | Odpojte vazbu v jiné agendě a koš vysypejte znovu |
 | Požadavek zmizel z fronty **K doúčtování**, ale bankovní pohyb zůstal v Úplnosti dokladů | Založení požadavku pohyb nevyřeší | Doložte doklad a nechte ho správně zaúčtovat |
 
@@ -225,7 +226,7 @@ Přepínač **Firemní / Osobní** řídí, kterou vrstvu dokumentů procházít
 
 - **Firemní.** Klasické sdílené úložiště. Vidí ho každý, kdo má k sekci Dokumenty přístup.
 - **Osobní.** Dokumenty patřící konkrétnímu uživateli. Běžný uživatel vidí jen svoje
-  vlastní. Administrátor vidí osobní dokumenty všech uživatelů firmy a vedle přepínače
+  vlastní. Superadministrátor vidí osobní dokumenty všech uživatelů firmy a vedle přepínače
   má výběr konkrétního vlastníka (nebo volbu **Všichni vlastníci**).
 
 Rozlišení firemní a osobní je vlastnost každého jednotlivého dokumentu, ne složky.
@@ -242,7 +243,10 @@ nezobrazí v žádném z těchto míst, ani v hromadném exportu ZIP.
 ### 34.10.5 Oprávnění
 
 - **Jen pro čtení.** Procházení, náhledy, fulltext, stahování a export.
-- **Účetní a administrátor.** Navíc nahrávání, mazání, přesouvání, tagy a vazby.
+- **Zápisové akce.** Řídí se samostatnými právy: nahrání `documents.upload`,
+  přesun a vazby `documents.move`, mazání a vysypání koše `documents.delete`,
+  obnova `documents.restore` a požadavky `documents.requests`. Vlastní role
+  může mít tyto činnosti povolené odděleně; samotný název role oprávnění neurčuje.
 
 ### 34.10.6 Stavy požadavků na chybějící podklady
 
@@ -326,18 +330,17 @@ uvidíte přehled, co se povedlo a co ne, s důvodem (například „už evidov�
 - **Čtení** seznamu příloh u zápisu: kdokoli s přístupem k účetnímu deníku (od role jen pro čtení).
 - **Nahrávání, mazání a úprava popisku:** jen role účetní nebo administrátor.
 
-> [!WARNING]
-> Plánovaná úloha `cron-backup-documents` (viz [§ 34.10.8](#34108-zalohovani))
-> zálohuje jen `storage/documents/`. Přílohy účetního deníku (`storage/journal/`)
-> v ní aktuálně obsažené nejsou. Počítejte s tím při plánování celkové zálohy databáze
-> a souborového úložiště.
-
 ### 34.10.8 Zálohování
 
 Dokumenty zálohuje samostatná plánovaná úloha `cron-backup-documents` (viz
-`Systém → Plánované úlohy`), oddělená od zálohy PDF faktur. Zálohuje celé úložiště
-`storage/documents/` (všechny typy souborů) do `storage/backup/{db}-documents-RRRR-MM-DD.zip`
-s retencí 30 denních a 12 měsíčních záloh. Náhledy se nezálohují, regenerují se. Zálohu
+`Systém → Plánované úlohy`), oddělená od zálohy PDF faktur. Zahrnuje dokumenty,
+přílohy účetního deníku, účetní archivy, uzávěrkové balíčky a loga firem. Dokumenty
+a přílohy ukládá do čitelných složek pod původními názvy; soubory bez dohledaných
+metadat do složky `_neprirazene`. Archiv má název
+`{db}-documents-RRRR-MM-DD_HH-mm.zip` v nastaveném adresáři záloh
+(výchozí `storage/backup/`). Úloha drží zálohy 30 dnů, zálohy z prvního dne
+měsíce 365 dnů; samostatná retenční úloha může dobu zkrátit, viz
+[§ 5.9.5](05_Po_instalaci.md#595-uklid-zaloh-a-logu). Náhledy se nezálohují, regenerují se. Zálohu
 lze volitelně šifrovat heslem `cron.backup.password` v `cfg.php` (AES-256, společné pro
 všechny typy záloh, viz [§ 5.5 Cron skripty](05_Po_instalaci.md#55-krok-za-krokem-naplanovani-uloh-cron)).
 

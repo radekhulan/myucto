@@ -256,6 +256,11 @@ by hlášení vzniklo. Opravu podejte tam, odkud šlo řádné hlášení (před
 program nebo portál ČSSZ). Opravené úhrny potom promítněte do převzatých mezd
 i počátečních stavů, ať roční doklady odpovídají podanému.
 
+Odlišný případ je měsíc s vlastním schváleným vypočteným během v MyÚčtu,
+za který řádné hlášení odeslal jiný program. Na něj lze navázat opravu
+z původního XML nebo GUID, viz [§ 85.14.14.1](85_Podani_a_hlaseni.md#8514141-navazani-opravy-na-radne-podani-z-jineho-programu).
+Pouhý import historických úhrnů tento předpoklad nesplňuje.
+
 ### 113.10.6 Co kontrola převzetí hlídá
 
 - **Chybějící počáteční stavy:** komu v převzatých měsících trval vztah, ale

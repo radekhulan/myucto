@@ -21,7 +21,7 @@ Položka se v menu zobrazí jen tehdy, když máte k dispozici více firem. Str�
 ## 51.3 Krok za krokem: denní průchod firmami
 
 1. Otevřete `Systém → Přehled firem`.
-2. Projděte karty firem. Nahoře jsou firmy s nejvyšší urgencí, štítek **Urgence** u názvu firmy vypisuje důvody. Řazení a filtry nad kartami popisuje [§ 51.7.3](#5173-razeni-filtry-a-urgence).
+2. Projděte karty firem. Nahoře jsou firmy s nejvyšší urgencí, štítek **Urgence** u názvu firmy vypisuje důvody. Řazení a filtry nad kartami popisuje [§ 51.7.2](#5172-razeni-filtry-a-urgence).
 3. U každé firmy zkontrolujte **Nejbližší termín**, **Nezaúčtováno**, **Nespárováno (banka)** a **Koncepty PF**.
 4. Klikněte na konkrétní ukazatel. Aplikace přepne aktivní firmu a otevře zdrojovou agendu (viz tabulka níže).
 5. Po dokončení práce se vraťte do Přehledu firem a klikněte na **Obnovit**.
@@ -41,7 +41,7 @@ Položka se v menu zobrazí jen tehdy, když máte k dispozici více firem. Str�
 **Jak poznáte, že je hotovo:** Pruh je zelený a hlásí **Nic akutního**.
 
 > [!WARNING]
-> Zelený pruh znamená "nic akutního", ne "účetnictví je hotové". Práce vázaná na rozvahový den se v pruhu nezobrazuje (viz [§ 51.7.2](#5172-pruh-akutnich-kontrol)).
+> Zelený pruh znamená "nic akutního", ne "účetnictví je hotové". Práce vázaná na rozvahový den se v pruhu nezobrazuje (viz [§ 51.7.3](#5173-pruh-akutnich-kontrol)).
 
 ## 51.5 Když něco nejde
 
@@ -83,7 +83,7 @@ Omezení se provádí na serveru, nikoli pouze skrytím řádků v prohlížeči
 
 Naléhavost nejbližšího daňového termínu ukazuje barevný pruh u karty: termín po splatnosti je výraznější než budoucí termín, firma bez vypočteného termínu nemá pruh upozornění.
 
-### 51.7.3 Řazení, filtry a urgence
+### 51.7.2 Řazení, filtry a urgence
 
 Nad kartami je hledání podle názvu nebo IČO, volba řazení s přepínačem směru a filtry **Plátci / Neplátci DPH**, **Podvojné účetnictví / Daňová evidence** a **Jen s urgencí / Jen bez urgence**. Nastavení se ukládá do adresy stránky, takže odkaz na konkrétní pohled lze poslat kolegovi.
 
@@ -109,7 +109,7 @@ Urgence je stejná jako ve [správě firem](95_Multi_supplier.md). Skládá se z
 
 Stav přiznání DPH se počítá jen u firem, které DPH podávají přes aplikaci, tedy mají aspoň jedno doložené podání. Počty dokladů se započítávají jen do stropu, aby firma se stovkou starých nespárovaných plateb nepřebila firmu s nepodaným přiznáním. Podle výsledku je urgence **Vysoká**, **Střední**, **Nízká**, nebo štítek hlásí **Nic nečeká**.
 
-### 51.7.2 Pruh akutních kontrol
+### 51.7.3 Pruh akutních kontrol
 
 Firma s podvojným účetnictvím má nad ukazateli barevný pruh **Akutní kontroly**. Ukazuje vybrané nálezy z měsíční kontroly za aktuální účetní období do dnešního dne, jen jako názvy a počty. Kliknutím na nález se otevře měsíční kontrola té firmy, kde je celý seznam dokladů i opravy.
 
@@ -124,7 +124,7 @@ Práce vázaná na rozvahový den se v pruhu **nezobrazuje**, protože u otevře
 
 Tyto kontroly najdete v [Měsíční kontrole](62_Mesicni_kontrola.md) a hlídá je uzávěrková brána, která bez jejich vyřešení nedovolí rok uzavřít. Zelený pruh proto znamená "nic akutního", nikoli "účetnictví je hotové".
 
-### 51.7.3 Co přehled nekontroluje
+### 51.7.4 Co přehled nekontroluje
 
 Přehled neověřuje věcnou správnost kontace, úplnost všech účetních podkladů, shodu saldokonta, DPH ani stav inventarizace. Například:
 

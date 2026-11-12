@@ -38,7 +38,8 @@ Vyberte nebo zkontrolujte činnost, druh činnosti a daňový režim z účetní
 
 Účetní období musí mít potvrzený právní profil spolku s hlavní nepodnikatelskou činností. Zkontrolujte také revizi členství platnou k účetnímu datu. Samotné číslo účtu ani označení organizace neprokazuje právní titul.
 
-Zvolte **Zobrazit náhled**, zkontrolujte člena, období, částku a účty a použijte **Potvrdit a zapsat**. Potvrzení vytvoří pohledávku a navazující účetní doklad v jednom kroku. Změna formuláře vyžaduje nový náhled. Zápis vyžaduje přihlášenou relaci a oprávnění k zaúčtování.
+Zvolte **Zobrazit náhled**, zkontrolujte člena, období, částku a účty a použijte **Potvrdit a zapsat**. Potvrzení vytvoří pohledávku a navazující účetní doklad v jednom kroku. Změna formuláře vyžaduje nový náhled. Zápis vyžaduje oprávnění k zaúčtování a přihlášenou relaci, případně
+API token s [Plným zápisem](103_API.md#103973-plny-zapis-tokenem-systemwrite).
 
 Členský předpis není automatickým rozhodnutím o osvobození příjmu. Daňový režim doložte v daňovém posouzení příslušného období.
 

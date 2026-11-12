@@ -151,15 +151,15 @@ Výchozí zkratky jsou v [§ 10.10.11](#101011-klavesove-zkratky).
 
 ### 10.10.1 KPI dlaždice
 
-Horní řada dlaždic se přizpůsobí počtu aktivních měn (4 až 6 dlaždic):
+Horní řada dlaždic se přizpůsobí měnám vráceným v přehledu; obrat není
+omezený jen na CZK a EUR:
 
 <!-- cols: 30 70 -->
 | Dlaždice | Význam |
 |---|---|
-| **Obrat YYYY (CZK)** | Součet všech vystavených (i nezaplacených) faktur v CZK za aktuální rok. Pod číslem je pro porovnání obrat minulého roku ve stejném období. |
-| **Obrat YYYY (EUR)** | Totéž pro EUR, jen pokud je měna EUR aktivní v číselnících. |
-| **Vystaveno YYYY** | Počet faktur za rok (všechny stavy kromě konceptů). |
-| **Po splatnosti** | Suma neuhrazených faktur po splatnosti, součet CZK a EUR, červeně. Klik otevře filtrovaný seznam. |
+| **Obrat YYYY (měna)** | Obrat za aktuální rok v dané měně, včetně nezaplacených vystavených dokladů. Pod číslem je pro porovnání stejné období minulého roku; každá měna má vlastní dlaždici. |
+| **Vystaveno YYYY** | Počet běžných faktur, dobropisů a daňových dokladů k platbě za rok, bez konceptů, storen a proforem. |
+| **Po splatnosti** | Počet neuhrazených faktur po splatnosti; pod ním částky odděleně podle měn. Měny se nesčítají. Klik otevře filtrovaný seznam. |
 | **Ø doba úhrady** | Průměrný počet dní mezi vystavením a zaplacením (jen letošní zaplacené faktury). |
 
 ### 10.10.2 Top klienti

@@ -207,7 +207,7 @@ Další rok převedete i později zopakováním postupu (§ 109.8.4).
 | Z PREMIER | Do MyÚčta |
 |---|---|
 | účtová osnova (jen účty, na které se účtovalo) | analytiky pod syntetiky osnovy (`518100` → `518.100`) včetně daňové uznatelnosti účtu |
-| účetní rok | účetní období 1. 1. až 31. 12. |
+| účetní rok | účetní období podle účetního kalendáře firmy, včetně hospodářského roku |
 | počáteční stavy spočtené z předchozích let | otevírací zápis k 1. dni období (účty proti 701, výsledek na 431) |
 | účetní deník | účetní zápisy, přesná kopie |
 | adresář partnerů | klienti, párování podle IČO |

@@ -81,7 +81,7 @@ instalace zapnul.
    vícefaktorové ověření, potvrďte passkey nebo zadejte kód z autentikátoru,
    případně kód z e-mailu. E-mail ani heslo už nezadáváte.
 
-Účet Google, Apple ani Seznam nahrazuje jen heslo, druhý faktor dál ověřuje
+Přihlášení přes Google, Apple nebo Seznam nahrazuje jen heslo, druhý faktor dál ověřuje
 MyÚčto. Proto jím nejde potvrzovat citlivé operace a firma ho nemůže vyžadovat
 místo hesla. Tlačítkem **Přihlásit se jinak** se vrátíte k běžnému formuláři.
 Vyprší-li přihlášení (po zhruba 10 minutách nebo v jiném prohlížeči), začněte
@@ -236,8 +236,8 @@ Zavřete-li jen okno bez odhlášení, session má absolutní platnost nejvýše
 <!-- cols: 34 30 36 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| Objevila se CAPTCHA | 5 neúspěšných pokusů během 5 minut z jedné IP | Vyřešte ji a pokračujte. Hláška „Vyřešte prosím ověření CAPTCHA.“ znamená, že jste ji vynechali |
-| „Příliš mnoho pokusů. Zkuste to později.“ | IP je zablokovaná (10 selhání za 15 minut = blok 15 minut) | Počkejte 15 minut, nebo požádejte správce o reset hesla z CLI: `php api/bin/set-password.php tvuj@email.cz` |
+| Objevila se CAPTCHA | Dosažen práh neúspěšných pokusů pro účet a síť, případně ji vyžádal Turnstile | Vyřešte ji a pokračujte. Hláška „Vyřešte prosím ověření CAPTCHA.“ znamená, že jste ji vynechali |
+| „Příliš mnoho pokusů. Zkuste to později.“ | Překročen práh pro účet a síť (výchozí 10 selhání za 15 minut = blok 15 minut) | Počkejte podle hlášky; při opakování požádejte správce o prověření blokace. Samotná změna hesla čítač nemaže |
 | E-mail s obnovou hesla nedorazil | Spam nebo nenastavené SMTP | Zkontrolujte spam, správce ověří `smtp.*` v `cfg.php`, v krajním případě nastaví heslo z CLI |
 | „Tento prohlížeč přístupové klíče nepodporuje.“ | Prohlížeč nebo zařízení passkey neumí | Použijte e-mail a heslo, kód z autentikátoru, nebo požádejte správce o obnovu MFA |
 | „Ověření přístupovým klíčem bylo zrušeno.“ | Zrušili jste systémový dialog | Zkuste to znovu, nebo použijte **Použít kód z autentikátoru** |
@@ -250,14 +250,17 @@ Zavřete-li jen okno bez odhlášení, session má absolutní platnost nejvýše
 
 ### 8.10.1 Brute-force ochrana
 
-Po **5 neúspěšných pokusech** během 5 minut z jedné IP se objeví **CAPTCHA**
-(Cloudflare Turnstile). Po **10 selháních** během 15 minut se IP zablokuje na
-15 minut. Po **30 selháních za hodinu** je lockout 24 hodin a uživateli na
-e-mail přijde upozornění.
+Výchozí prahy jsou **5 neúspěšných pokusů za 5 minut** pro CAPTCHA,
+**10 selhání za 15 minut** pro blokaci na 15 minut a **30 selhání za hodinu**
+pro blokaci na 24 hodin. Čítač se váže na kombinaci účtu a sítě
+(/24 u IPv4, /64 u IPv6), ne na samotnou IP. Turnstile může ověření
+vyžádat i nezávisle na prahu. Při blokaci vznikne záznam v auditu,
+přihlašovací brána sama e-mailové upozornění neposílá.
 
 Zapomenete-li heslo a omylem se 5× spletete, CAPTCHA se objeví: vyřešte ji a
-pokračujte. Pokud se zablokujete, počkejte 15 minut nebo požádejte správce,
-aby heslo resetoval z CLI: `php api/bin/set-password.php tvuj@email.cz`.
+pokračujte. Pokud se zablokujete, počkejte podle hlášky nebo požádejte
+správce o prověření aktivního čítače. Obnova zapomenutého hesla a odblokování
+jsou samostatné úkony.
 
 ### 8.10.2 Vícefaktorové ověření
 

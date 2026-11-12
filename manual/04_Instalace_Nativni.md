@@ -26,13 +26,19 @@ Kapitolu otevřete, když:
 
 Pro build ze zdrojových kódů potřebujete:
 
-- **PHP 8.5+** s rozšířeními `pdo`, `pdo_mysql`, `mbstring`, `openssl`, `json`, `iconv`, `gd`,
+- **PHP 8.5+** s povinnými rozšířeními `bcmath`, `ctype`, `dom`, `fileinfo`, `filter`,
+  `gd`, `iconv`, `json`, `libxml`, `mbstring`, `openssl`, `pdo`, `pdo_mysql`,
+  `simplexml`, `xmlreader`, `zip` a `zlib` (úplný seznam je v `api/composer.json`),
 - **MariaDB 11.8+** (minimum 11.8 LTS, podporovaná i 12.3),
 - **Composer 2.x**, **Node.js 22+** (doporučeno 24) a **pnpm 10+**,
 - **Redis** (volitelné, jinak se použije záložní řešení v MariaDB MEMORY),
 - web server **IIS** nebo **Apache** (oba jsou podporované, repozitář má `web.config` i `.htaccess`).
 
 Pro instalaci z hotového balíčku stačí PHP, MariaDB a web server.
+Požadavky na rozšíření PHP platí i pro hotový balíček. Při instalaci ze zdrojů
+je ověří Composer, v aplikaci je zkontroluje průvodce a `Systém → Diagnostika`.
+Volitelná rozšíření a jejich dopad uvádí diagnostika; například OPcache
+zrychluje provoz a Imagick rozšiřuje práci s obrázky a náhledy.
 
 Před konfigurací si připravte:
 
@@ -90,14 +96,14 @@ mysql -u root -p -e "CREATE DATABASE myucto CHARACTER SET utf8mb4 COLLATE utf8mb
    php tools/generateManualHtml.php
    ```
 
-`generateManualHtml.php` je samostatný skript (nepotřebuje Composer ani `vendor`) a generuje HTML kapitoly a vyhledávací index. `exportManualToPdf.php` vyžaduje `api/vendor/` (mPDF). Obojí spouštějte znovu po každém stažení repozitáře, aby `/manual` ukazoval aktuální obsah. V Docker variantě se to volá při buildu uvnitř `Dockerfile` (viz [Instalace - Docker](03_Instalace_Docker.md)).
+`generateManualHtml.php` je samostatný skript (nepotřebuje Composer ani `vendor`) a generuje HTML kapitoly a vyhledávací index. Spusťte ho po aktualizaci zdrojů manuálu, aby `/manual` ukazoval aktuální obsah. Docker image i hotový instalační balíček mají HTML již vygenerované. Tlačítko **Stáhnout PDF** vede na zveřejněné PDF na myucto.cz; místní PDF není pro provoz potřeba.
 
 ### 4.3.4 Build frontendu
 
 ```bash
 cd web
-pnpm install
-pnpm build       # produkční build do web/dist/
+pnpm install --frozen-lockfile
+npm run build   # kontroly a produkční build do web/dist/
 ```
 
 ### 4.3.5 Web server
@@ -118,6 +124,7 @@ Pro sdílený hosting bez Composeru a Node. Production bundle z [release stránk
    ```bash
    TAG=X.Y.Z
    curl -LO https://github.com/radekhulan/myucto/releases/download/v$TAG/myucto-$TAG.tar.gz
+   curl -LO https://github.com/radekhulan/myucto/releases/download/v$TAG/myucto-$TAG.tar.gz.sha256
    sha256sum -c myucto-$TAG.tar.gz.sha256   # ověření integrity
    tar -xzf myucto-$TAG.tar.gz --strip-components=1 \
      --exclude='cfg.php' --exclude='cfg.local.php' \
@@ -137,7 +144,7 @@ Pro sdílený hosting bez Composeru a Node. Production bundle z [release stránk
 **Jak poznáte, že je hotovo:** `php api/bin/migrate.php` doběhne bez chyby a na adrese z `app.url` se zobrazí průvodce prvním spuštěním.
 
 > [!TIP]
-> Upgrade jde spustit i z aplikace: v `Systém → Aktualizace` je tlačítko **Aktualizovat na {verze}**, které příkazy pro stažení bundlu zobrazí jako box ke zkopírování. Patička aplikace ukazuje aktuální verzi a štítek, pokud je dostupná novější (denně ji obnovuje `cron-version-check.php`). Podrobnosti v kapitole [Aktualizace](102_Aktualizace.md).
+> Superadmin může upgrade spustit i z aplikace: v `Systém → Aktualizace` tlačítko **Aktualizovat na {verze}** provede kontrolu prostředí, stažení a ověření balíčku, zálohu přepisovaných souborů, nasazení a migrace. Pokud automatická aktualizace není dostupná, stránka nabídne ruční postup. Zálohu databáze zajistěte předem. Patička aplikace ukazuje aktuální verzi a štítek, pokud je dostupná novější (denně ji obnovuje `cron-version-check.php`). Podrobnosti v kapitole [Aktualizace](102_Aktualizace.md).
 
 ## 4.5 Krok za krokem: aktualizace
 
@@ -156,14 +163,13 @@ Nativní instalaci aktualizujete jedním ze dvou postupů podle toho, co máte n
 
    ```bash
    cd api && composer install --no-dev && cd ..
-   cd web && pnpm install && pnpm build && cd ..
+   cd web && pnpm install --frozen-lockfile && npm run build && cd ..
    ```
 
 3. Přegenerujte manuál a spusťte migrace.
 
    ```bash
    php tools/generateManualHtml.php
-   php tools/exportManualToPdf.php
    php api/bin/migrate.php
    ```
 
@@ -174,6 +180,7 @@ Rozbalte hotový production bundle (viz [§ 4.4](#44-krok-za-krokem-instalace-z-
 ```bash
 TAG=X.Y.Z
 curl -LO https://github.com/radekhulan/myucto/releases/download/v$TAG/myucto-$TAG.tar.gz
+curl -LO https://github.com/radekhulan/myucto/releases/download/v$TAG/myucto-$TAG.tar.gz.sha256
 sha256sum -c myucto-$TAG.tar.gz.sha256
 tar -xzf myucto-$TAG.tar.gz --strip-components=1 \
   --exclude='cfg.php' --exclude='cfg.local.php' \

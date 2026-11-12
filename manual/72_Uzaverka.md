@@ -23,7 +23,12 @@
 ## 72.2 Než začnete
 
 1. **Podvojné účetnictví.** Celý modul (období, průvodce i uzávěrkový balíček) je dostupný jen firmám v podvojném účetnictví. U daňové evidence se místo něj zobrazuje daňový deník příjmů a výdajů.
-2. **Role.** Většinu kroků zvládne role **účetní**. Zahájení a přerušení uzávěrky, přípravné kroky a úpravu prefixů číselných řad dělá i účetní. Administrátor je navíc potřeba pro uzavření knih, otevření nového roku, revert kroků, schválení a znovuotevření období. Uzávěrkový balíček vyžaduje oprávnění k exportu sestav.
+2. **Oprávnění.** Uzávěrkový postup, včetně zahájení, přípravných kroků,
+   uzavření knih, otevření dalšího roku a vrácení kroků, vyžaduje zápis
+   do **Uzavřít období** (`accounting.periods.close`). Změny stavu období,
+   interní kontrola, zákonné schválení a znovuotevření vyžadují
+   **Spravovat období** (`accounting.periods.manage`). Práva může mít
+   i delegovaná role; uzávěrkový balíček vyžaduje právo exportu sestav.
 3. **Zaúčtované doklady.** Nezaúčtované koncepty a doklady bez účetního zápisu uzávěrku zablokují (kontroly v kroku 1).
 4. **Odpisy majetku zaúčtujte předem.** Zaúčtovat odpisy lze na stránce Majetek jen v otevřeném období. Udělejte to před zahájením uzávěrky (viz [Majetek § 28.6](28_Majetek.md#286-krok-za-krokem-zauctovat-odpisy-roku)).
 5. **Souběžné účtování.** Při zahájení uzávěrky organizačně zastavte souběžné běžné účtování (viz [§ 72.12.6](#72126-omezeni-a-tipy)).
@@ -31,7 +36,7 @@
 
 > [!TIP]
 > Uzávěrku dělejte v pořadí shora dolů. Krok 1 (kontroly) vám dopředu ukáže, co je potřeba doladit ještě
-> před tím, než administrátor uzavře knihy. Dokud závěrku neschválíte, dokončené kroky lze v povoleném
+> před tím, než oprávněný uživatel uzavře knihy. Dokud závěrku neschválíte, dokončené kroky lze v povoleném
 > pořadí vzít zpět a opravit.
 
 ## 72.3 Krok za krokem: založit účetní období
@@ -275,7 +280,7 @@ Volitelný krok pro zaúčtování **předpisu splatné daně z příjmů** k ro
 **Jak poznáte, že je hotovo:** Aplikace ohlásí **Splatná daň byla zaúčtována**.
 
 Částku vždy potvrdí účetní. Zaúčtování je idempotentní (opakování přepíše týž zápis, nevznikají duplicity), krok lze
-přeskočit a administrátor ho může vzít zpět. U fyzické osoby se daň z příjmů na 591/341 neúčtuje; průvodce krok
+přeskočit a uživatel s právem uzávěrky ho může vzít zpět. U fyzické osoby se daň z příjmů na 591/341 neúčtuje; průvodce krok
 označí jako nepoužitelný a vyžaduje jeho vědomé přeskočení.
 
 > [!TIP]
@@ -312,13 +317,23 @@ a posouzení mank a přebytků.
 ### 72.5.1 Krok 9: Uzavření knih
 
 1. Ověřte, že je období ve stavu Uzavírá se, kontroly v kroku 1 nemají chybu a všechny předchozí kroky jsou potvrzené nebo přeskočené.
-2. Jako administrátor klikněte na **Uzavřít knihy** a potvrďte dialog **Uzavření účetních knih**.
+2. S právem uzávěrky klikněte na **Uzavřít knihy** a potvrďte dialog **Uzavření účetních knih**.
 3. Jsou-li v období nezaúčtované aktivní doklady, aplikace uzavření zablokuje. Uzavřít přes ně lze jen s doloženým důvodem (**Důvod override**, tlačítko **Uzavřít přes nezaúčtované**). Výjimka se zapíše do auditní stopy.
+
+Účty uzávěrky se volí podle účetního rámce účinného pro období:
+
+| Úloha účtu | Rámec 500 | Rámec 504 |
+|---|---|---|
+| Počáteční účet rozvažný | 701 | 961 |
+| Konečný účet rozvažný | 702 | 962 |
+| Výsledek běžného období | 710 | 933 |
+| Výsledek ve schvalovacím řízení | 431 | 931 |
 
 Zaúčtuje se uzávěrkový zápis:
 
-- **výsledkové účty (5xx/6xx)** se uzavřou přes účet **710 - Účet zisků a ztrát**,
-- **rozvahové účty** se uzavřou přes **702 - Konečný účet rozvažný**,
+- **výsledkové účty (5xx/6xx)** se uzavřou přes účet **710** v rámci 500,
+  nebo **933** v rámci 504,
+- **rozvahové účty** se uzavřou přes **702** v rámci 500, nebo **962** v rámci 504,
 - vypočte se **výsledek hospodaření** a období přejde do stavu **Uzavřené**.
 
 Doklad dostane číslo z řady UZ (viz [§ 72.8](#728-krok-za-krokem-ciselne-rady-a-nastaveni-uzaverky)).
@@ -326,13 +341,13 @@ Doklad dostane číslo z řady UZ (viz [§ 72.8](#728-krok-za-krokem-ciselne-rad
 **Jak poznáte, že je hotovo:** Aplikace ohlásí **Účetní knihy byly uzavřeny**. Panel zobrazí **Výsledek
 hospodaření**, **Doklad** a odkaz **Zobrazit uzávěrkové zápisy v deníku**.
 
-Dokud závěrka není schválená, administrátor může krok zrušit tlačítkem **Vzít zpět uzavření knih** (uzávěrkové zápisy
+Dokud závěrka není schválená, uživatel s právem uzávěrky může krok zrušit tlačítkem **Vzít zpět uzavření knih** (uzávěrkové zápisy
 se smažou, opět s auditní stopou).
 
 ### 72.5.2 Krok 10: Otevření nového roku
 
-1. Jako administrátor klikněte na **Otevřít nový rok** (aktivní až po dokončení kroku Uzavření knih) a potvrďte dialog **Otevření účetních knih**.
-2. Zaúčtuje se otevírací zápis k 1. dni následujícího období (to se založí automaticky, pokud ještě neexistuje) přes účet **701 - Počáteční účet rozvažný** a výsledek hospodaření se převede na účet **431**. Doklad dostane číslo z řady OT.
+1. S právem uzávěrky klikněte na **Otevřít nový rok** (aktivní až po dokončení kroku Uzavření knih) a potvrďte dialog **Otevření účetních knih**.
+2. Zaúčtuje se otevírací zápis k 1. dni následujícího období (to se založí automaticky, pokud ještě neexistuje) přes počáteční účet rozvažný **701** v rámci 500, nebo **961** v rámci 504. Výsledek hospodaření se převede na **431** v rámci 500, nebo **931** v rámci 504. Doklad dostane číslo z řady OT.
 3. Je-li v nastavení uzávěrky zapnutá volba **Storno přecenění saldokonta k 1. dni nového období** (viz [§ 72.8](#728-krok-za-krokem-ciselne-rady-a-nastaveni-uzaverky)), zaúčtuje se zároveň zrcadlové storno kurzových rozdílů z kroku 3 (řada KR). Panel pak hlásí, že bylo zaúčtováno storno přecenění saldokonta k 1. dni období.
 
 **Jak poznáte, že je hotovo:** Aplikace ohlásí **Nový rok byl otevřen**.
@@ -380,7 +395,7 @@ vypočtený otevírací zápis z řady OT. Potvrdíte ji tlačítkem **Nahradit 
 Jakmile je krok Uzavření knih hotový, období je ve stavu **Uzavřené** a je možné kroky ještě revidovat (revert)
 nebo období znovuotevřít.
 
-**Schválení závěrky** (administrátor):
+**Schválení závěrky** (právo Spravovat období):
 
 1. Otevřete `Nástroje → Uzávěrka` a u období ve stavu Uzavřené klikněte na **Schválit závěrku**.
 2. V dialogu **Schválení účetní závěrky** potvrďte zaškrtnutím, že rozumíte nevratnosti. Volitelně doložte schvalující orgán nebo osobu, odkaz na rozhodnutí o schválení závěrky a hash dokumentu závěrky (údaje se uchovávají a už se nikdy nemažou).
@@ -389,7 +404,7 @@ nebo období znovuotevřít.
 **Jak poznáte, že je hotovo:** Období má štítek **Schválené** a ikonu zámku. U období ve stavu Schválené je odkaz na
 stránku uzávěrky pojmenován **Uzávěrka / rozdělení**.
 
-**Znovuotevření uzavřeného období** (administrátor):
+**Znovuotevření uzavřeného období** (právo Spravovat období, přihlášení v aplikaci):
 
 1. U období ve stavu Uzavřené klikněte na **Znovuotevřít**.
 2. Vyplňte **Důvod** (nejméně 10 znaků) a potvrďte.
@@ -556,7 +571,7 @@ rozsahem uvnitř otevřeného účetního období, a bez zahájení uzávěrky (
 2. Nahoře vyberte **účetní období** (jen otevřené nebo probíhající uzávěrka) a **rozsah**: konkrétní měsíc, kvartál nebo vlastní od-do. Rozsah musí ležet celý uvnitř vybraného období.
 3. Klikněte na **Spustit kontrolu**. Po prvním načtení stránky se kontrola automaticky spustí za poslední dostupný měsíc.
 4. Projděte řádky: **zelená fajfka** (v pořádku) nebo **červený křížek** s počtem nálezů. Řádek je proklikatelný: nezaúčtované doklady vedou do seznamu faktur, zůstatkové kontroly na výpis účtu za zvolený rozsah, majetek bez oprávek na jednotlivé karty a saldo 343 na konkrétní doklady s nesouladem.
-5. Jako administrátor můžete měsíc zamknout tlačítkem **Uzamknout k datu**. Dialog nabídne datum (výchozí je konec právě kontrolovaného rozsahu) a vyžaduje povinné zdůvodnění.
+5. S právem Spravovat období nebo interním Posunout zámek účtování k datu můžete měsíc zamknout tlačítkem **Uzamknout k datu**. Dialog nabídne datum (výchozí je konec právě kontrolovaného rozsahu) a vyžaduje povinné zdůvodnění.
 
 **Jak poznáte, že je hotovo:** Všechny řádky jsou zelené (nebo nálezy máte vysvětlené) a měsíc je zamknutý k datu.
 
@@ -621,7 +636,7 @@ uzávěrku a krok Uzavření knih). Přímá změna stavu na ně skončí chybou
 Interně zkontrolované období má uzavřené knihy. Umožňuje otevření dalšího roku a zahájení jeho uzávěrky; zámky
 dokladů i daňové kontroly jej považují za uzavřené.
 
-Stavový automat podporuje tyto samostatné administrátorské přechody:
+Stavový automat podporuje tyto samostatné přechody s právem Spravovat období:
 
 - **Zahájit interní kontrolu** (Uzavřené na Zkontrolované): označí závěrku jako procházející interní kontrolou. Jde o vratný pracovní stav, žádná zákonná data nevznikají.
 - **Zrušit interní kontrolu** (Zkontrolované na Uzavřené): vyžaduje **důvod** (nejméně 10 znaků). Ruší pouze interní kontrolu, žádná data zákonného schválení se přitom nemažou (protože ve stavu Zkontrolované ještě žádná neexistují).
@@ -699,11 +714,15 @@ potvrzení správnosti; k významným varováním uchovejte podklad a zdůvodně
 ### 72.12.6 Omezení a tipy
 
 - Celý modul (období, průvodce i uzávěrkový balíček) je dostupný jen firmám vedeným v **podvojném účetnictví**, u daňové evidence se nezobrazuje.
-- **Administrátorská role** je nutná pro: interní kontrolu a její zrušení, zákonné schválení a znovuotevření období, revert libovolného kroku uzávěrky, uzavření knih a otevření nového roku. Zrušit zákonné schválení nelze vůbec (§ 17 odst. 7). Zahájení a přerušení uzávěrky, běh přípravných kroků a úpravu prefixů číselných řad zvládne i role **účetní** (právo zápisu). Balíček vyžaduje oprávnění k exportu sestav.
+- **Oprávnění jsou oddělená.** Uzávěrkový postup řídí `accounting.periods.close`,
+  změny stavu a schválení období `accounting.periods.manage`. Znovuotevření
+  navíc vyžaduje přihlášení v aplikaci; token s Plným zápisem tuto ochranu
+  nepřebije. Zrušit zákonné schválení nelze (§ 17 odst. 7). Balíček vyžaduje
+  oprávnění k exportu sestav.
 - Všechny změny období a kroků nesou interní verzi záznamu. Pokud mezi načtením a uložením zasáhne jiný uživatel, aplikace to ohlásí a znovu načte aktuální data místo provedení zastaralé akce.
-- Při zahájení uzávěrky organizačně zastavte souběžné běžné účtování. Kontrola otevřenosti období při běžném zápisu není ve stejné databázové zámkové sekci jako přechod otevřené na uzavírá se, takže těsný souběh může propustit zápis do právě uzavíraného období. Po zahájení vždy znovu spusťte předkontroly.
-- Auditní událost některých uzávěrkových kroků vzniká až po potvrzení účetní transakce. Při technickém výpadku proto ověřte stav kroku a deník i tehdy, když auditní stopa chybí; změnu neopakujte naslepo.
-- Do kurzového přecenění nevkládejte stejný bankovní analytický účet vícekrát. Aplikace duplicitu neodmítne a mohla by stejný zůstatek přecenit opakovaně.
+- Přechod do stavu **Uzavírá se** i běžné zaúčtování ověřují stav období pod databázovým zámkem. Po zahájení uzávěrky se běžné zápisy do tohoto období odmítnou; uzávěrkové kroky používají vlastní řízený postup. Před uzavřením knih znovu spusťte předkontroly.
+- Uzávěrkový krok a jeho auditní událost se ukládají ve stejné účetní transakci. Pokud se přeruší spojení, nejprve obnovte stránku a ověřte stav kroku i deník; podle výsledku pak pokračujte.
+- Každý bankovní analytický účet zadejte do devizových zůstatků přecenění jen jednou. Duplicitu aplikace odmítne chybou `fx_duplicate_bank_account` před vytvořením zápisu.
 - Znovuotevření uzavřeného období je zablokované, dokud existují zaúčtované uzávěrkové nebo otevírací zápisy. Nejprve je nutné vzít zpět kroky Otevření nového roku a Uzavření knih v průvodci.
 - Číselné řady se nikdy nedorovnávají po smazaných dokladech. Jedinečnost a souvislost číslování je vyžadována zákonem, ne estetika bez mezer.
 

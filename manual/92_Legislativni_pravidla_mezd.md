@@ -84,7 +84,7 @@ Ruční úpravu zahodíte tlačítkem **Vrátit ověřenou hodnotu**.
 <!-- cols: 30 34 36 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| Parametr má štítek **Čeká na vyhlášení** | Hodnota ještě nevyšla ve Sbírce (např. stravné pro příští rok) | Nic nevyplňujte, hodnota přijde aktualizací aplikace. Do té doby nejde schválit vstup, který ji potřebuje; ostatní mzda se počítá. |
+| Parametr má štítek **Čeká na vyhlášení** | Hodnota ještě nevyšla ve Sbírce (např. stravné pro příští rok) | Hodnota přijde aktualizací aplikace. Příspěvek na stravování lze do té doby schválit, ale celý se zdaní a pojistí. Po vyhlášení limitu dorovnejte osvobozenou část opravou vstupu; běh na to upozorní. |
 | Parametr má štítek **Posuzuje se jinde** | Nárok se dokládá u konkrétního zaměstnance nebo případu | Klikněte na odkaz u parametru (např. **Roční zúčtování**) a nárok zapište tam. |
 | Parametr má štítek **Aplikace nepočítá** | Zvláštní případ, který aplikace nepočítá (např. zahraniční cesta) nebo nepotvrzená hodnota roku 2025 | Týká se vás, jen když na takový případ narazíte; postup je u parametru v části **Co s tím**. |
 | Pravidla jsou jen ke čtení | Nejste superadmin | Změnu nechte provést superadmina. |
@@ -187,8 +187,10 @@ používají normálně.
   Typicky osvobozený příspěvek na stravování za směnu, který je 70 % horní
   hranice stravného (§ 6 odst. 9 písm. b) ZDP); tu stanoví vyhláška podle § 189
   zákoníku práce obvykle v prosinci. Hodnota přijde aktualizací aplikace. Do té
-  doby nejde schválit mzdový vstup s příspěvkem na stravování za období nového
-  roku a aplikace to u vstupu ohlásí. Ostatní mzda se počítá normálně.
+  doby lze příspěvek na stravování schválit, ale **celé plnění se zdaní
+  a pojistí jako mzda**. Mzdový běh upozorní, že limit chybí. Po jeho
+  vyhlášení dorovnejte osvobozenou část opravou vstupu, případně opravnou
+  revizí již schválené mzdy. Samotná aktualizace původní rozpad nepřepíše.
 - **Posuzuje se jinde**: nárok se nedá posoudit ze sady pravidel, ale
   z dokladů v jiné agendě, kam vede odkaz. Sleva na manžela se uplatňuje až
   v **Ročním zúčtování** podle prohlášení a dokladů zaměstnance; nárok na

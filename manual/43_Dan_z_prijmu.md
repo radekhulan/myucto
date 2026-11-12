@@ -853,7 +853,10 @@ bez průkazného období nelze automaticky použít v této příloze. Hospodá�
 rok nebo zkrácené období s přílohou ztrát vyžaduje samostatné zpracování.
 
 Přehled daňových úspor zobrazuje doložené uložené záznamy podle oprávnění uživatele.
-Právní profily a interní podklady úspor jsou přístupné pouze v přihlášeném webovém rozhraní.
+Právní profily a interní podklady úspor vyžadují přihlášenou aplikaci
+nebo API token s **Plným zápisem** a odpovídajícími právy
+([§ 103.9.7.3](103_API.md#103973-plny-zapis-tokenem-systemwrite)).
+Běžný token ani katalog MCP tyto interní podklady nezpřístupňují.
 
 #### Použití daňové úspory v následujícím období
 

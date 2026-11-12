@@ -14,7 +14,8 @@ Vyberte otevřené účetní období a zvolte **Nový účelový zdroj**. Vybert
 
 Vyplňte název, účel, odkaz na smlouvu nebo rozhodnutí, schválený rozpočet, časové rozmezí způsobilých nákladů, druhy činností a nákladové účty. Podmínky musí odpovídat doloženému titulu. Uveďte důvod revize a otevřete náhled.
 
-Náhled ukazuje účetně doloženou částku, rozpočet, potvrzené použití a nevyčerpaný rozpočet. Rozpočet může zahrnovat i dosud nečerpanou část schváleného titulu. Ověřte podklady a výslovně potvrďte revizi. Potvrzování podmínek vyžaduje oprávnění k účetní uzávěrce a přihlášenou relaci.
+Náhled ukazuje účetně doloženou částku, rozpočet, potvrzené použití a nevyčerpaný rozpočet. Rozpočet může zahrnovat i dosud nečerpanou část schváleného titulu. Ověřte podklady a výslovně potvrďte revizi. Potvrzování podmínek vyžaduje oprávnění k účetní uzávěrce a přihlášenou
+relaci, případně API token s [Plným zápisem](103_API.md#103973-plny-zapis-tokenem-systemwrite).
 
 ## 117.3 Skutečné použití
 

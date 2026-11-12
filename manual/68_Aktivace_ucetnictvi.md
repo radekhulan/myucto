@@ -1,7 +1,7 @@
 # 68. Aktivace podvojného účetnictví
 
 > Návod, jak převést firmu z daňové evidence na podvojné účetnictví: zvolit datum zahájení, zadat
-> otevírací rozvahu, zkontrolovat historii nanečisto a doúčtovat doklady. Pro administrátora s oprávněním
+> otevírací rozvahu, zkontrolovat historii nanečisto a doúčtovat doklady. Pro uživatele s oprávněním
 > ke správě účetních období.
 
 ## 68.1 Kdy to potřebujete
@@ -18,7 +18,7 @@ běh a dávkové doúčtování. Až po úspěšném dokončení se firma přepn
 
 ## 68.2 Než začnete
 
-1. **Oprávnění.** Položku menu `Nástroje → Aktivace a doúčtování` a všechny akce vidí jen administrátor s oprávněním ke správě účetních období (zápis). Stav čte uživatel s oprávněním k firemnímu nastavení.
+1. **Oprávnění.** Položku menu `Nástroje → Aktivace a doúčtování` a všechny akce vyžadují oprávnění ke správě účetních období (zápis), které může mít i delegovaná interní role. Vynutit dokončení přes zbývající chyby smí jen správce firmy s tímto oprávněním. Stav čte uživatel s oprávněním k firemnímu nastavení.
 2. **Schválený přechodový postup.** Datum zahájení volte podle něj (viz [§ 68.3](#683-krok-za-krokem-datum-zahajeni)).
 3. **Podklady k počátečním stavům.** Připravte zůstatky ke dni před zahájením: ostatní aktiva, pasiva, oprávky, kapitál, daně. Předvyplnění je jen návrh.
 4. **Účetní období a účtový rozvrh.** Období zahájení musí být otevřené. Rozvrh a systémové předkontace se založí při zahájení sami.
@@ -49,7 +49,7 @@ založí účtový rozvrh a systémové předkontace.
 ## 68.4 Krok za krokem: otevírací rozvaha
 
 1. V kroku **Otevírací rozvaha** klikněte na **Předvyplnit z daňové evidence**. Aplikace sestaví návrh k dni před zahájením (viz [§ 68.9.1](#6891-predvyplneni-z-prechodoveho-mustku)).
-2. Zkontrolujte řádky. Další přidáte tlačítkem **Přidat řádek**. Každý řádek má **Účet**, **Stranu** (MD/Dal), kladnou **Částku** a **Poznámku**. Účet 701 nezadávejte: protiúčet doplní systém sám.
+2. Zkontrolujte řádky. Další přidáte tlačítkem **Přidat řádek**. Každý řádek má **Účet**, **Stranu** (MD/Dal), kladnou **Částku** a **Poznámku**. Počáteční rozvažný účet nezadávejte: protiúčet doplní systém sám, 701 v rámci 500 nebo 961 v rámci 504.
 3. Doplňte ostatní aktiva, pasiva, oprávky, kapitál, daně a další zůstatky podle průkazných podkladů.
 4. Sledujte stav bilance: **✓ vyrovnáno**, nebo **Σ MD ≠ Σ D - opravte rozvahu**.
 5. Klikněte na **Uložit a pokračovat**.
@@ -205,7 +205,8 @@ na analytiky.
 ### 68.9.2 Zaúčtování počátečních stavů
 
 Ostrý běh zajistí otevřené období pro datum zahájení a vytvoří jediný zápis se zdrojem otevření. Pro řádek MD
-vytvoří `účet MD / 701 Dal`, pro řádek Dal `701 MD / účet Dal`. Číslo dostane z řady otevíracích zápisů.
+vytvoří `účet MD / počáteční účet Dal`, pro řádek Dal obráceně. Počáteční účet
+rozvažný je **701** v rámci 500 a **961** v rámci 504. Číslo dostane z řady otevíracích zápisů.
 
 Pokud předchozí den patří uzavíranému, uzavřenému nebo schválenému období, otevření už vlastní uzávěrka
 předchozího období a aktivační zápis se odmítne. Opakovaný běh používá stejný zdrojový klíč, takže zápis
@@ -286,7 +287,7 @@ zápis odmítne. Stejně se respektuje otevřenost období a aktivita účtů.
 ### 68.9.9 Oprávnění a chybové kódy
 
 Stav může číst uživatel s oprávněním k firemnímu nastavení. Zahájení, počáteční stavy, úlohy a zrušení vyžadují
-administrátorské oprávnění ke správě účetních období (zápis). Vynutit dokončení smí jen správce firmy,
+oprávnění ke správě účetních období (zápis). Vynutit dokončení smí jen správce firmy,
 delegovaná role se správou účetních období ne. Vše je omezené na aktuální firmu a auditované.
 
 Chyby v protokolu a v logu mají tyto kódy:

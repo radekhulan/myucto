@@ -62,7 +62,8 @@ skutečný stav a vypořádání rozdílu.
 **Jaké účty a datum sestava používá.** Sestava se vždy sestavuje k poslednímu dni celého vybraného účetního
 období. Z deníku bere jen zaúčtované řádky a vylučuje vlastní závěrkový převod knih.
 
-Zahrnuty jsou účty typu **aktiva**, **pasiva** a **vlastní kapitál**, tedy rozvahové účty tříd 0 až 4.
+Zahrnuty jsou účty typu **aktiva**, **pasiva** a **vlastní kapitál**. Rozhoduje typ účtu,
+nikoli první číslice: v rámci 504 se zahrnují také příslušné rozvahové účty 9xx.
 Nákladové, výnosové, podrozvahové a uzávěrkové účty se vynechají. Každý účet s pohybem má vlastní řádek,
 analytiky se řadí pod součtový řádek své syntetiky. Skutečný stav, rozdíl a poznámka se vedou za každou
 analytiku zvlášť a nenapočítaná analytika blokuje dokončení stejně jako jiný účet. Součet syntetiky ukáže

@@ -534,14 +534,14 @@ Jak se to projeví v přiznání:
 
 Zálohový a vypořádací koeficient: zálohový (§ 76 odst. 6) se používá během roku. Na začátku roku ho buď zadáte ručně (kvalifikovaný odhad), nebo se automaticky převezme z vypořádacího koeficientu předchozího, už vypořádaného roku. Vypořádací koeficient (§ 76 odst. 7) se počítá až ze skutečných dat celého roku, takže je zpravidla přesnější než odhad použitý během roku. Proto poslední období roku obsahuje dorovnání na ř. 53. Oba koeficienty se zaokrouhlují nahoru na celé procento (§ 76 odst. 5). Vyjde-li hodnota 95 % a víc, zaokrouhlí se rovnou na 100 % (plný nárok).
 
-Bez nastaveného zálohového koeficientu pro daný rok nejde doklad s kráceným nárokem § 76 ani zaúčtovat, ani zahrnout do přiznání. Aplikace vrátí srozumitelnou chybu s výzvou koeficient nejdřív nastavit. Nastavení koeficientu a roční vypořádání jsou na stránce `Nástroje → Koeficient krácení (§76)` ([§ 41.8](#418-krok-za-krokem-koeficient-kraceni-odpoctu-76)). Stejné akce jsou dostupné i přes administrátorské API:
+Bez nastaveného zálohového koeficientu pro daný rok nejde doklad s kráceným nárokem § 76 ani zaúčtovat, ani zahrnout do přiznání. Aplikace vrátí srozumitelnou chybu s výzvou koeficient nejdřív nastavit. Nastavení koeficientu a roční vypořádání jsou na stránce `Nástroje → Koeficient krácení (§76)` ([§ 41.8](#418-krok-za-krokem-koeficient-kraceni-odpoctu-76)). Stejné akce používá aplikační API; zápis vyžaduje přihlášení v aplikaci nebo token s plným zápisem ([§ 103.9.7.3](103_API.md#103973-plny-zapis-tokenem-systemwrite)):
 
 <!-- cols: 46 18 36 -->
 | Endpoint | Kdo smí | Co dělá |
 |---|---|---|
-| `GET /api/reports/vat-coefficient?year=2026` | administrátor, účetní, jen čtení | Vrátí nastavený zálohový koeficient pro rok (případně automaticky převzatý z vypořádání předchozího roku) a vypořádací koeficient, pokud je rok vypořádaný. |
-| `PUT /api/reports/vat-coefficient` | administrátor, účetní | Nastaví nebo změní zálohový koeficient (celé %, 0-100) pro rok. |
-| `POST /api/reports/vat-coefficient/settle` | jen administrátor | Spočítá a uloží vypořádací koeficient za celý (uzavřený) rok ze skutečných ročních dat. Náhled ani stažení přiznání koeficient nikdy automaticky neuloží, vypořádání je vždy samostatný vědomý krok. |
+| `GET /api/reports/vat-coefficient?year=2026` | čtení Daní a výkazů (`reports`) | Vrátí nastavený zálohový koeficient pro rok (případně automaticky převzatý z vypořádání předchozího roku) a vypořádací koeficient, pokud je rok vypořádaný. |
+| `PUT /api/reports/vat-coefficient` | zápis Daní a výkazů (`reports`) | Nastaví nebo změní zálohový koeficient (celé %, 0-100) pro rok. |
+| `POST /api/reports/vat-coefficient/settle` | právo Finalizovat výkazy (`reports.finalize`, zápis) | Spočítá a uloží vypořádací koeficient za celý (uzavřený) rok ze skutečných ročních dat. Náhled ani stažení přiznání koeficient nikdy automaticky neuloží, vypořádání je vždy samostatný vědomý krok. |
 
 **Plnění vyloučená z koeficientu.** Pro transakce podle § 76 odst. 4 zvolte v klasifikaci DPH odpovídající kód: `1m` / `2m` pro zdaněný prodej dlouhodobého majetku, nebo `3m` pro příležitostné osvobozené finanční či nemovitostní plnění. Doklad zůstane na běžném řádku 1/2 nebo 50 a současně se vykáže na řádku 51 ve správném sloupci. Vypořádací koeficient ho odečte z čitatele nebo jmenovatele.
 

@@ -87,16 +87,25 @@ stav, počet věcí, které zbývají, a jedno hlavní tlačítko. To vás pošl
 obrazovku nebo do hromadného dialogu, kde se věc udělá. Průvodce sám nic
 nepočítá, neukládá ani neodesílá.
 
+Zvolíte-li měsíc **před začátkem vedení mezd**, průvodce místo kroků
+vysvětlí hranici a nabídne **Otevřít MM/RRRR** pro první vedené období.
+Starší měsíce patří do [převzatých mezd](113_Prechod_mezd_v_prubehu_roku.md);
+hranici vedení měňte v aktivaci mzdové agendy.
+
 <!-- cols: 26 40 34 -->
 | Krok | Co ukazuje | Kam vede |
 |---|---|---|
-| 1. Podklady měsíce | Neschválenou nebo chybějící docházku, koncepty vstupů, lidi bez mzdy, nerozhodnuté nepřítomnosti a počet importů docházky za měsíc | Docházka, import docházky (`Mzdy → Importy`, záložka Docházka), rychlý měsíční vstup |
+| 1. Podklady měsíce | Neschválenou nebo chybějící docházku, koncepty a haléřové částky vstupů, lidi bez mzdy, nerozhodnuté nepřítomnosti a počet importů docházky za měsíc | Docházka, import docházky (`Mzdy → Importy`, záložka Docházka), rychlý měsíční vstup |
 | 2. Noví lidé a dohody | Chybějící údaje lidí: pojišťovna, prohlášení, způsob výplaty, příslušnost k pojištění, dohody po sjednaném konci | Zaměstnanci zúžení na blokující údaje, založení lidí z importu docházky |
 | 3. Registrace ČSSZ a oznámení ZP | Přihlášky A1 za měsíc (kolik jde připravit, kolik je neúplných a po termínu) a otevřená oznámení zdravotním pojišťovnám | Hromadná příprava přihlášek, fronta K odeslání, hromadné označení „podáno mimo aplikaci“ v Zákonných termínech |
 | 4. Kontrola před během | Nálezy podle dopadu: co zastaví, co stojí opravnou revizi, co se doplní kdykoli; hromadné opravy | Kontrola v Mzdových bězích, hromadné dialogy v seznamu zaměstnanců |
 | 5. Výpočet a schválení | Stav běhu a počet kontrol, které brání schválení | Mzdové běhy |
 | 6. JMHZ a další měsíční podání | Splněné a zbývající povinnosti měsíčního přehledu podání, z toho JMHZ | Měsíční přehled podání, záložka JMHZ (test XML, odložení) |
 | 7. Platby a výplatní pásky | Doložené úhrady a počet dokumentů za měsíc | Platby mezd, Dokumenty a výstupy |
+
+U haléřových částek vede akce **Zaokrouhlit vstupy na celé koruny**
+na `Mzdy → Mzdové složky a vstupy`, záložku **Měsíční vstupy** ve stejném měsíci.
+Částky zkontrolujte a upravte tam; průvodce je sám nemění.
 
 Stavy kroků:
 
@@ -200,7 +209,7 @@ a v podvojném
 
 ## 80.4 Krok za krokem: dokončení měsíce po schválení
 
-Pořadí je dané a všechny kroky se dělají ze schválené revize.
+Doporučený postup na kartě běhu navazuje na schválenou revizi.
 
 1. Na kartě běhu klikněte na **Zaúčtovat** a ověřte
    [shodu účtování](81_Shoda_uctovani_mezd.md). U daňové evidence účetní zápis
@@ -212,9 +221,15 @@ Pořadí je dané a všechny kroky se dělají ze schválené revize.
    ([§ 85.3](85_Podani_a_hlaseni.md#853-krok-za-krokem-mesicni-hlaseni-jmhz)).
 5. Klikněte na **Uzavřít**.
 
-**Jak poznáte, že je hotovo:** Běh má stav **Uzavřeno**. Do stavu **Uhrazeno**
-ho server překlopí sám podle spárovaných plateb; tlačítko pro potvrzení úhrady
-neexistuje. Celý klikací postup měsíce je v
+**Uzavřít** lze už ve stavu **Platby připraveny**. Uzavření samo
+nepotvrzuje zaplacení závazků ani přijetí podání. Nedoložené úhrady dál
+sledujte v platbách a výsledek odeslání v přehledu podání.
+
+**Jak poznáte, že je hotovo:** Běh má stav **Uzavřeno** a zvlášť jste
+ověřili úhrady a podání. Před uzavřením se běh ze stavu **Platby připraveny**
+přepne automaticky na **Uhrazeno** po doložení všech úhrad. Již uzavřený běh
+svůj stav nemění a platební evidence se doplňuje dál. Tlačítko pro ruční
+potvrzení úhrady neexistuje. Celý klikací postup měsíce je v
 [§ 75.4](75_Uplne_mzdy.md#754-krok-za-krokem-zpracovani-mzdoveho-mesice).
 
 ## 80.5 Krok za krokem: oprava schváleného měsíce

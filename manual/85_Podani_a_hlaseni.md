@@ -1828,8 +1828,32 @@ vždy. Firma bez převodu tenhle oddíl nevidí.
 **Měsíc, za který řádné hlášení odešlo, MyÚčto znovu nepodá.** Druhé řádné
 hlášení za stejný měsíc ČSSZ zamítne jako duplicitní (kontrola č. 22
 katalogu kontrol), proto se ani nepřipraví: příprava skončí hláškou, který
-program a kdy hlášení podal, a odkazem na tento oddíl. Opravu takového měsíce
-pošlete jako opravné podání z programu, který řádné hlášení podal.
+program a kdy hlášení podal, a odkazem na tento oddíl. Opravu můžete
+navázat v MyÚčtu, pokud pro měsíc existuje vlastní schválený vypočtený běh
+s revizí; postup je níže. U pouze převzatých historických měsíců bez
+vypočtené revize použijte původní program nebo portál ČSSZ.
+
+#### 85.14.14.1 Navázání opravy na řádné podání z jiného programu
+
+1. Na záložce **JMHZ** rozbalte **Podrobnosti** a najděte panel
+   **Oprava měsíce podaného předchozím
+   programem** a klikněte na **Navázat opravu**. Potřebujete právo zápisu
+   do mzdových podání.
+2. Vyberte běh ve stavu **Schváleno** s vypočtenou revizí za opravovaný měsíc.
+3. Máte-li **Původní XML**, nahrajte řádné hlášení, nejvýše 30 MB. Aplikace
+   ověří XSD, typ R, období, variabilní symbol zaměstnavatele a vazbu
+   formulářů na ID pojistných vztahů aktuálního běhu.
+4. Alternativou je režim **GUID**: zadejte GUID původního podání a GUID
+   formulářů vybraných vztahů. Výslovně potvrďte, že tyto vztahy byly součástí
+   původního hlášení. GUID formulářů se nesmějí opakovat ani shodovat s GUID podání.
+5. Zapište poznámku alespoň o 10 znacích a klikněte na **Převzít podání**.
+6. Otevřete převzaté podání a pokračujte akcí **Opravit hodnoty hlášení**
+   podle [§ 85.14.13](#851413-storno-a-obsahova-oprava-jmhz).
+
+**Převzetí nic neodesílá.** Uloží externí řádné hlášení jako přijatý výchozí
+podklad pro opravu. Přebírejte proto jen skutečně přijaté hlášení
+s doloženými identifikátory. Nejde o nový výpočet převzatých historických
+mezd ani o automatické ověření přijetí u ČSSZ.
 
 **Zrušené a zamítnuté hlášení měsíc nepodalo.** Řádné nebo opravné hlášení,
 které zrušilo nahrané stornující podání téhož programu (storno nese GUID

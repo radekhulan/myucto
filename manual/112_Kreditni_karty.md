@@ -146,7 +146,7 @@ Režim pro jednotlivý úvěrový účet změníte v jeho detailu v oddílu **Ú
 | Česká spořitelna (Erste) | Výpis z kartového účtu | číslo kartového účtu |
 | ČSOB | Výpis z úvěrového účtu ke kartě | číslo úvěrového účtu |
 
-Úvěrový účet, který eviduje jiná firma, načíst nejde. Kreditní účet vedený v cizí měně aplikace odmítne. Úvěrový účet se na záložce **Kontace účtů** v bance nevypíná: jeho pohyby se účtují na 231 a vypnutý by je poslal na 221. Kartu, kterou už nepoužíváte, archivujte v detailu kreditní karty. Výpisy i zaúčtované pohyby zůstanou beze změny, účet se jen skryje z přehledu. Nákupy kreditkou se automaticky párují s přijatými fakturami stejně jako odchozí platby z běžného účtu; splátky na kreditní účet se s vydanými fakturami nepárují.
+Úvěrový účet se hledá nejprve v aktivní firmě. Pokud tam není a eviduje ho právě jedna další firma, do které smíte importovat banku, výpis se přiřadí jí. Nový úvěrový účet vzniká v aktivní firmě; při nejednoznačnosti nejprve zvolte správnou firmu. Kreditní účet vedený v cizí měně aplikace odmítne. Úvěrový účet se na záložce **Kontace účtů** v bance nevypíná: jeho pohyby se účtují na 231 a vypnutý by je poslal na 221. Kartu, kterou už nepoužíváte, archivujte v detailu kreditní karty. Výpisy i zaúčtované pohyby zůstanou beze změny, účet se jen skryje z přehledu. Nákupy kreditkou se automaticky párují s přijatými fakturami stejně jako odchozí platby z běžného účtu; splátky na kreditní účet se s vydanými fakturami nepárují.
 
 ### 112.9.2 Zpracování pohybů ve výpisu
 

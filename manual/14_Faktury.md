@@ -35,8 +35,9 @@ Kapitolu otevřete, když:
   [kapitole 15](15_Faktura_editor.md)).
 - **Zaúčtování** je dostupné jen firmám s podvojným účetnictvím. Tlačítko **Náhled** u
   zaúčtovaného dokladu a sloupce s předkontací vyžadují oprávnění ke čtení účetnictví.
-- **Odeslání e-mailem** vyžaduje, aby měl klient vyplněný e-mail (jinak se faktura
-  při hromadném odeslání přeskočí).
+- **Odeslání e-mailem** vyžaduje platného příjemce z kontaktů klienta, zakázky
+  nebo hlavního e-mailu klienta. Bez příjemce se faktura při hromadném odeslání
+  přeskočí; pravidla výběru popisuje [§ 16.10.8](16_Faktura_PDF.md#16108-odesilani-e-mailem).
 - **PDF export s podpisem** vyžaduje nastavený podpisový profil pro PDF faktur.
 
 ## 14.3 Krok za krokem: najít fakturu v seznamu

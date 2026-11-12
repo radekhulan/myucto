@@ -287,7 +287,7 @@ chybu přihlášení. Záznamy se drží 90 dní.
 | `401 invalid_token` | Token je zrušený nebo expirovaný | Vygenerujte nový |
 | `403 token_ip_forbidden` | Token má omezení podle IP a tahle adresa mezi nimi není | Přidejte IP v omezení tokenu |
 | `403 insufficient_scope` | Token má jen rozsah čtení, operace vyžaduje zápis | Vytvořte token s rozsahem čtení a zápis |
-| `403 token_write_forbidden` | Zápis do účetnictví nebo daní přes API nejde (viz [§ 103.9.7](103_API.md#10397-scopes)) | Úkon proveďte v aplikaci; výjimkou jsou koncepty ostatních pohledávek a závazků a analytické účty osnovy ([§ 105.8.8.5](#105885-ostatni-pohledavky-a-zavazky)) |
+| `403 token_write_forbidden` | Běžný token nepovoluje tuto účetní nebo daňovou operaci (viz [§ 103.9.7](103_API.md#10397-scopes)) | Úkon proveďte v aplikaci; výjimkou jsou koncepty ostatních pohledávek a závazků a analytické účty osnovy ([§ 105.8.8.5](#105885-ostatni-pohledavky-a-zavazky)) |
 | `403 other_items.error.auto_post_session_only` | Automatické účtování opakování nebo koncept, který by se automaticky zaúčtoval | Řeší se ve webovém rozhraní |
 | `403 stock_disabled` | Skladový a e-shopový modul není pro firmu zapnutý | Zapněte ho v nastavení firmy |
 | `409` u mazání zboží, výrobce, kategorie, skladu | Záznam je někde použitý | Archivujte ho (`archived`), případně zboží či sklad jen deaktivujte |
@@ -378,9 +378,12 @@ peněžní pohyb konkrétního projektu.
 > [!WARNING]
 > **Do účetnictví a daní asistent nezapisuje.** Zaúčtovat doklad, uzavřít období,
 > zaevidovat opravu podle § 46 / § 74b ani odeslat podání na EPO nemůže. Je to
-> agenda s daňovou odpovědností, kde chyba znamená opravné podání - dělá ji člověk
-> v aplikaci. Zákaz vynucuje server, ne jen MCP: i token s právem zápisu dostane
-> na takovou operaci `403 token_write_forbidden` (viz [§ 103.9.7](103_API.md#10397-scopes)).
+> agenda s daňovou odpovědností a tyto akce nejsou v katalogu nástrojů MCP.
+> Běžný token na přímý účetní nebo daňový zápis dostane
+> `403 token_write_forbidden`. REST API umožňuje zvlášť povolený
+> **Plný zápis** ([§ 103.9.7.3](103_API.md#103973-plny-zapis-tokenem-systemwrite));
+> tím se však katalog MCP ani vlastní kontroly jeho nástrojů nerozšiřují.
+> Online OAuth připojení MCP plný zápis nepřebírá.
 >
 > Výjimkou jsou **koncepty ostatních pohledávek a závazků** a **analytické účty
 > účtové osnovy** ([§ 105.8.8.5](#105885-ostatni-pohledavky-a-zavazky)). Koncept
@@ -1030,8 +1033,8 @@ Platí přitom:
   účtování přijatých faktur, aplikace doklad při přijetí zaúčtuje; u úhrady
   hotově z pokladny založí výdajový pokladní doklad. Asistent to před přijetím
   řekne a čeká na potvrzení.
-- **Zaúčtovat doklad asistent neumí.** Ruční zaúčtování je účetní úkon a přes
-  token nejde. U zaúčtovaného dokladu proto odmítne i změnu druhu dokladu,
+- **Zaúčtovat doklad asistent neumí.** Ruční zaúčtování není
+  v katalogu MCP a běžný token je nepovoluje. U zaúčtovaného dokladu proto odmítne i změnu druhu dokladu,
   druhu nákladu, kurzu a spárování se zálohou, protože by se doklad rozešel
   s deníkem. Zakázku přiřadit jde, je to jen analytický údaj.
 - Zálohová faktura se zakládá jako druh „záloha“, daňový doklad k zaplacené
@@ -1194,7 +1197,7 @@ Na rozdíl od účetnictví je e-shopová a skladová agenda **obousměrná** - 
 umí katalog nejen číst, ale i zakládat, upravovat a mazat. Důvod je prostý:
 skladový pohyb je dohledatelný ve skladové knize a zaúčtovaný doklad jde
 stornovat protidokladem, takže se chyba dá v aplikaci napravit. Účetní dopad
-vzniká až v účetní vrstvě, která zůstává jen ke čtení.
+může navazovat podle nastavení firmy; přímé účetní operace katalog MCP nenabízí.
 
 > [!TIP]
 > Celá tahle agenda je **volitelný modul**. Když ho firma nemá zapnutý,
@@ -1396,7 +1399,7 @@ Online připojení používá přihlášení a souhlas popsané v [§ 105.8.3.5]
 - Token se ukládá jen jako **SHA-256 hash**; plaintext se zobrazí jednou.
 - **Omezte token na IP** - uniklý token je pak mimo vaši síť k ničemu.
 - **Rozsah `čtení`** stačí na drtivou většinu dotazů; zápis dávejte vědomě.
-- Bearer token má přístup **jen k veřejnému API**. Správa uživatelů, rolí,
+- Běžný bearer token má přístup **jen k veřejnému API**. Správa uživatelů, rolí,
   citlivá nastavení a podpisové profily jsou pro něj nedostupné bez ohledu
   na roli uživatele, který token vydal.
 - Token **nedávejte do souborů, které commitujete** do gitu (týká se hlavně

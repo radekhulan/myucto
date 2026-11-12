@@ -33,7 +33,7 @@ Deník je dostupný jen firmám v podvojném účetnictví. Firmy na [daňové e
 ## 52.2 Než začnete
 
 1. **Podvojné účetnictví.** Deník je jen pro podvojné účetnictví. Firmy na daňové evidenci modul v menu nevidí.
-2. **Právo zápisu.** Ruční zápis, storno, úprava popisu a přílohy vyžadují právo zápisu (role účetní nebo administrátor). Role jen pro čtení vidí vše, ale nic nemění. Znovuotevření období a zámek účtování k datu smí jen administrátor ([§ 52.14.12.1](#5214121-kdo-smi-co)).
+2. **Právo zápisu.** Ruční zápis, storno, úprava popisu a přílohy vyžadují právo zápisu (role účetní nebo administrátor). Role jen pro čtení vidí vše, ale nic nemění. Znovuotevření období vyžaduje právo **Spravovat období** a přihlášení v aplikaci; změna zámku toto právo nebo interní **Posunout zámek účtování k datu** ([§ 52.14.12.1](#5214121-kdo-smi-co)).
 3. **Otevřené účetní období.** Zaúčtovat, stornovat ani přepsat zápis lze jen do otevřeného období. Existenci a stav období ověříte v [Uzávěrce](72_Uzaverka.md).
 4. **Předkontace.** Deník nepředkontovává. Které účty se doklad zaúčtuje, určují předkontace ([Účtový rozvrh](66_Ucetni_osnova.md), [Předkontace](73_Ucetni_nastroje.md#735-krok-za-krokem-predkontace)).
 
@@ -61,7 +61,7 @@ Z bankovního výpisu použijte u pohybu **Otevřít v účetním deníku**. Ote
 ## 52.4 Krok za krokem: ruční zápis
 
 1. Na hlavní stránce deníku klikněte na **Ruční zápis**. Otevře se formulář **Ruční účetní zápis**.
-2. Vyplňte **Datum zápisu**. Musí spadat do existujícího a otevřeného účetního období.
+2. Vyplňte **Datum zápisu**. Musí spadat do otevřeného účetního období. Chybějící období může aplikace založit automaticky podle pravidel [§ 72.12.2](72_Uzaverka.md#72122-automaticky-doplnena-obdobi); uzavřené období tím neotevře.
 3. Volitelně vyplňte **Číslo dokladu** (prázdné pole se doplní z číselné řady, je-li zapnutá volba **Automatická čísla dokladů ručních zápisů (řada ID)** na stránce `Nástroje → Uzávěrka`) a **Popis** (nejvýš 255 znaků).
 4. V tabulce řádků vyplňte **Kód účtu** (našeptávač nabízí aktivní účty firemní osnovy), stranu **MD** nebo **Dal** a kladnou **Částku** v Kč. Volitelně zvolte **Středisko**.
 5. Další řádek přidáte tlačítkem **+ Přidat řádek**, řádek odeberete křížkem.
@@ -171,7 +171,7 @@ Podrobnosti jsou v [§ 52.14.13](#521413-douctovani-nezauctovanych-dokladu).
 
 Po podání přiznání k DPH zamkněte minulost, aby se omylem nezaúčtoval doklad zpátky do podaného období.
 
-1. Zámek smí nastavit jen administrátor. Otevřete `Účetnictví → Měsíční kontrola`.
+1. S právem **Spravovat období** nebo interním **Posunout zámek účtování k datu** otevřete `Účetnictví → Měsíční kontrola`.
 2. Klikněte na **Uzamknout k datu**, zadejte datum a zdůvodnění (nejméně 5 znaků) a klikněte na **Uložit zámek**. Postup je v [§ 62.4](62_Mesicni_kontrola.md#624-krok-za-krokem-zamek-uctovani-k-datu).
 3. Po skutečném podání můžete zámek posunout také v Archivu podání tlačítkem **Označit jako podané**.
 
@@ -568,8 +568,10 @@ administrátor) otevřete formulář **Ruční účetní zápis** (`/accounting/
 
 #### 52.14.5.1 Hlavička
 
-- **Datum zápisu** - povinné, datum účetního případu; musí spadat do **existujícího a
-  otevřeného** účetního období, jinak zaúčtování selže s chybou o chybějícím/uzavřeném období,
+- **Datum zápisu** - povinné, datum účetního případu v **otevřeném** účetním období.
+  Chybějící období se při účtování může automaticky založit, pokud datum odpovídá
+  hranicím vedení podvojného účetnictví a nevznikne překryv; jinak je nutná oprava
+  období nebo data. Uzavřené období zaúčtování vždy blokuje,
 - **Číslo dokladu** - volitelné; necháte-li prázdné a firma má na stránce
   [Účetní období](72_Uzaverka.md) zapnutou volbu **„Automatická čísla dokladů ručních
   zápisů (řada ID)"**, systém číslo přidělí automaticky z číselné řady vedené pro ruční
@@ -629,7 +631,7 @@ všechny hlídá server bez ohledu na to, co propustí formulář:
 | Žádný řádek nemá vyplněný účet nebo částku | „Vyplňte všechny řádky" |
 | Součet MD ≠ součet Dal | „Zápis není vyrovnaný" + konkrétní rozdíl |
 | Zadaný kód účtu není v účtové osnově firmy | Účet ✱ není v účtové osnově - zkontrolujte kód |
-| Pro datum zápisu neexistuje založené účetní období | Pro zadané datum neexistuje účetní období |
+| Období pro datum zápisu nelze automaticky založit | Zkontrolujte datum zahájení účetnictví, účetní kalendář a překryvy období ([§ 72.12.2](72_Uzaverka.md#72122-automaticky-doplnena-obdobi)) |
 | Účetní období pro dané datum je uzavřené / uzavírá se | Do uzavřeného období nelze účtovat (§35 ZoÚ) |
 
 #### 52.14.5.5 Příklad: ruční zápis se dvěma řádky
@@ -1215,7 +1217,7 @@ je zamčené, samo o sobě projde, ale protizápis se automaticky zaúčtuje k d
 (otevřenému) datu, ne k datu originálu.
 
 **Ruční nastavení a posun.** Zámek nastavuje, posouvá dopředu i vrací zpátky
-**administrátor** (právo „Spravovat období") nebo role s právem **„Posunout zámek účtování
+uživatel s právem **„Spravovat období"** nebo interní role s právem **„Posunout zámek účtování
 k datu"**, které správce přidělí v editoru rolí třeba roli hlavní účetní. Slouží k tomu
 stránka [**Účetnictví → Měsíční kontrola**](62_Mesicni_kontrola.md), tlačítko
 „Uzamknout k datu", vždy s povinným písemným zdůvodněním (min. 5 znaků); změna se
@@ -1224,7 +1226,9 @@ zaznamená do auditní stopy (hodnota před/po + důvod). Stejná akce je dostup
 
 Role, která má jen právo posunout zámek, ho nevrátí zpátky přes **podané období DPH**
 (přiznání, kontrolní hlášení nebo OSS ve stavu podáno) ani přes **uzavřené účetní
-období**; to smí jen administrátor. Podané se opravuje opravným zápisem do otevřeného
+období**; to vyžaduje správu období nebo oprávnění správce firmy a relaci
+přihlášenou v aplikaci. Ani token s plným zápisem tuto ochranu nepřebije.
+Podané se opravuje opravným zápisem do otevřeného
 data. Zámek platí stejně pro složený i jednoduchý zápis (dvojice).
 
 ### 52.14.11 Kontrola integrity deníku (noční job)
@@ -1276,8 +1280,8 @@ leží v jiném kalendářním roce, zápis se vytvoří, ale odpověď vrátí 
 | Upravit popis zápisu | - | ✓ |
 | Nahrát / smazat / popsat přílohu | - | ✓ |
 | Stornovat zaúčtovaný zápis | - | ✓ |
-| Znovuotevřít uzavřené období (pro opravu) | - | jen administrátor |
-| Nastavit/posunout zámek účtování k datu | - | jen administrátor |
+| Znovuotevřít uzavřené období (pro opravu) | - | právo Spravovat období, přihlášení v aplikaci a splněné ochrany uzávěrky |
+| Nastavit/posunout zámek účtování k datu | - | právo Spravovat období nebo interní Posunout zámek účtování k datu; ochrana podaných a uzavřených období platí dál |
 
 - Deník je **jen pro podvojné účetnictví** - firmy na daňové evidenci modul v menu
   vůbec nevidí.
@@ -1633,8 +1637,9 @@ Druh **Jiná pohledávka** / **Jiný závazek** je výchozí: nabízí se vždy 
 společnou řadou. Proto i položka založená ze zůstatku zápisu v saldokontu
 ([§ 60](60_Saldokonto.md)) má číslo vždy z řady OP nebo OZ.
 
-Přes API a MCP server se druhy jen čtou (`kind`, `kind_id`, `kind_name`, seznam
-druhů); nastavují se ve webovém rozhraní. Úprava konceptu, která pošle druh `other`
+Běžným API tokenem a přes MCP server se druhy jen čtou (`kind`, `kind_id`, `kind_name`, seznam
+druhů); nastavují se ve webovém rozhraní nebo tokenem s
+[Plným zápisem](103_API.md#103973-plny-zapis-tokenem-systemwrite). Úprava konceptu, která pošle druh `other`
 bez `kind_id`, vlastní druh ponechá; zruší ho jiný vestavěný druh nebo `kind_id: null`.
 
 #### 52.14.14.12 Účetní profily druhů a vlastní kontace
@@ -1718,11 +1723,11 @@ Opakování přenáší vlastní kontaci úhrad zdrojové položky na každý vy
 koncept. Výchozí dimenze z profilu dostane jen nově pořízený doklad a jen u typů,
 které ještě nemá vyplněné.
 
-Přes API a MCP server se profily druhů jen čtou (seznam druhů vrací `posting_profiles`,
+Běžným API tokenem a přes MCP server se profily druhů jen čtou (seznam druhů vrací `posting_profiles`,
 `posting_suggestion` a `posting_component_defaults`, detail položky `posting_rules`
 a `posting_overrides`). MCP server smí nastavit vlastní kontaci úhrad jen konceptu
 (`posting_overrides` v založení nebo úpravě); profily druhů a kontace potvrzené
-položky se mění jen ve webovém rozhraní.
+položky vyžadují webové rozhraní nebo API token s Plným zápisem a příslušnými právy.
 
 #### 52.14.14.13 Úvěry a leasing: jistina, úrok a poplatek
 

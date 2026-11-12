@@ -39,6 +39,10 @@ Cesta: `Účetnictví → Výkaz zisku a ztráty`. Výkaz je dostupný jen pro p
 
 ## 58.4 Krok za krokem: výsledovka po účtech
 
+Následující skupiny a název **Účet 710 (po účtech)** platí pro rámec 500.
+V rámci 504 zvolte **Průběžný účetní přehled**; jeho členění odpovídá
+nevýdělečné organizaci, včetně hlavní a hospodářské činnosti.
+
 1. Otevřete `Účetnictví → Výkaz zisku a ztráty` a zvolte záložku **Účet 710 (po účtech)**.
 2. Projděte skupiny **Provozní činnost**, **Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku hospodaření společníkům**. Náklady jsou vlevo, výnosy vpravo na jednom řádku.
 3. Zkontrolujte mezisoučty **Provozní výsledek hospodaření**, **Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a **po zdanění**.

@@ -55,8 +55,10 @@ Kapitolu otevřete, když:
    Výchozí dimenze klienta a zakázky smí měnit ten, kdo smí upravovat klienta,
    resp. zakázku. Výchozí dimenze bankovního účtu smí měnit uživatel s právem
    zápisu do účetnictví. Schvalování řídí oprávnění **Schvalovat přijaté doklady**.
-3. **Podvojné účetnictví** pro sestavy v menu **Grafy → Dimenze** a pro většinu
-   účetních funkcí (účtotvorná dimenze, pravidla, účty produktů).
+3. **Režim evidence.** Sestavy v **Grafy → Dimenze** fungují v podvojném účetnictví
+   i daňové evidenci; v daňové evidenci vycházejí z peněžního deníku. Podvojné
+   účetnictví vyžadují účtotvorné dimenze a účty produktů. Pravidla dimenzí
+   lze použít i v daňové evidenci s maskami tříd 5 a 6.
 
 ## 114.3 Krok za krokem: zapnout dimenze a založit typy
 
@@ -1031,8 +1033,9 @@ operace nevytváří další zápis. Předběžné daňové zařazení nenahrazu
 daňové posouzení.
 
 Náhled a historii může číst uživatel s právem číst účetnictví. Klíče,
-zaúčtování a storno vyžadují právo zápisu a přihlášení přes web. Veřejné API
-a MCP poskytují čtení klíčů, zdrojů a historie v rozsahu dostupné firmy.
+zaúčtování a storno vyžadují právo zápisu a přihlášení přes web nebo API
+token s [Plným zápisem](103_API.md#103973-plny-zapis-tokenem-systemwrite).
+Běžné API tokeny a MCP poskytují čtení klíčů, zdrojů a historie v rozsahu dostupné firmy.
 
 ## 114.12 Související kapitoly
 

@@ -18,7 +18,7 @@ uživatel firmy její certifikát ani tajné údaje nevidí.
 
 ## 98.2 Než začnete
 
-1. **Oprávnění provozovatele.** Bránu spravuje administrátor instalace. Otevřete ji přes `Mzdy → Odesílací brána ISDS`.
+1. **Oprávnění provozovatele.** Bránu spravuje jen **Superadmin instalace**. Otevřete ji přes `Mzdy → Odesílací brána ISDS`.
 2. **Registrace externí aplikace v ISDS.** Musíte mít v portálu ISDS zaregistrovanou externí aplikaci pro službu vytváření konceptu (viz [§ 98.3](#983-krok-za-krokem-zaregistrovat-aplikaci-v-isds)).
 3. **Klientský certifikát** ve formátu **PFX/P12** s heslem k jeho soukromému klíči. Musí obsahovat soukromý klíč.
 4. **Veřejná HTTPS adresa** instalace, aby šla vyplnit návratová adresa.

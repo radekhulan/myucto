@@ -11,7 +11,10 @@ Kapitolu otevřete, když:
 - jste zavedli novou nákladovou analytiku nebo změnili účtový rozvrh,
 - potřebujete porovnat celkový výsledek s druhovou výsledovkou.
 
-Cesta: `Účetnictví → Výsledovka - účelová`. Výkaz je dostupný jen pro podvojné účetnictví.
+Cesta: `Účetnictví → Výsledovka - účelová`. Výkaz je dostupný pro podvojné účetnictví v **rámci 500**. V rámci 504
+účelová výsledovka není podporovaná (`statement_purpose_unsupported`);
+použijte [druhovou výsledovku](58_Vysledovka_druhova.md) s hlavní
+a hospodářskou činností.
 
 ## 59.2 Než začnete
 

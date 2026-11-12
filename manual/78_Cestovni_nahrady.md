@@ -61,8 +61,8 @@ promítnutí uvádí, kolik vstupů vzniklo. Panel **Zákonné termíny** už lh
 cesty neukazuje.
 
 > [!TIP]
-> Opakované promítnutí nevytvoří duplicitu, takže ho můžete bez obav
-> spustit znovu (například když účetní období ještě nebylo otevřené).
+> Opakovaný požadavek na promítnutí nevytvoří duplicitní mzdové vstupy.
+> Nejde však o způsob opravy již schváleného vyúčtování.
 
 ## 78.4 Když něco nejde
 
@@ -71,9 +71,9 @@ cesty neukazuje.
 |---|---|---|
 | *„Vyúčtování vyžaduje ruční posouzení a nelze ho schválit“* | Sazba stravného je nižší než zákonné minimum, chybí účinná sazba, nebo jde o zahraniční cestu | Opravte sazbu, nebo cestu vyúčtujte mimo aplikaci. |
 | *„Zadaný čas odjezdu nebo příjezdu v této časové zóně neexistuje“* | Zvolená hodina při přechodu na letní čas neexistuje | Zvolte jiný čas. |
-| Do mzdy šel celý nárok, i když zaměstnanec dostal zálohu z pokladny | Záloha není u cesty zapsaná | Doplňte **Poskytnutá záloha (Kč)** a vyúčtování znovu promítněte. |
+| Do mzdy šel celý nárok, i když zaměstnanec dostal zálohu z pokladny | Záloha nebyla správně zapsaná před schválením | Ověřte vyúčtování a zálohu. Schválenou cestu nelze přepsat a opakované promítnutí chybějící odečet nepřidá; rozdíl vypořádejte opravnou revizí mzdy a doložte účetně. |
 | *„Záloha převýšila nárok. Zaměstnanec vrací do pokladny …“* | Záloha byla vyšší než nárok | Přeplatek se ze mzdy nesráží; přijměte ho pokladním dokladem. |
-| *„Nezdaněnou část se nepodařilo zaúčtovat …“* | Účetní období je zavřené | Promítněte vyúčtování znovu, až bude období otevřené. |
+| *„Nezdaněnou část se nepodařilo zaúčtovat …“* | Účetní období je zavřené | Prověřte vzniklé mzdové vstupy i deník a opravte účtování v přípustném období. Stav Promítnutá do mzdy již nenabízí nové promítnutí z webového seznamu. |
 | *„Nemáte oprávnění měnit pracovní cesty“* | Chybí oprávnění pro mzdové vstupy | Požádejte správce o oprávnění. |
 | Účtenka je ve vyúčtování dvakrát | Duplicitně vložená položka | Smažte ji u položky tlačítkem **Smazat**. |
 | Stravné je vyšší, než má být | Chybí zápis poskytnutých jídel | Doplňte **Bezplatná jídla**. |
@@ -112,7 +112,8 @@ mohou obsahovat osobní údaje, ukládejte je bezpečně.
 
 Cesta je **Rozpracovaná**, **Schválená**, **Promítnutá do mzdy** nebo
 **Zrušená**. Rozpracovaný výpočet není účetním dokladem ani příkazem
-k úhradě. Schválením se cesta vyúčtuje; schválená cesta už termín nemá.
+k úhradě. **Upravovat lze jen rozpracovanou cestu.** Schválením se cesta
+vyúčtuje a její podklady se již nepřepisují; schválená cesta už termín nemá.
 
 ### 78.5.3 Promítnutí do mzdy a lhůty
 

@@ -64,7 +64,7 @@ Vytvoříte první uživatelský účet se systémovou rolí **Superadmin** (pln
 |---|---|
 | Jméno | Vaše jméno (zobrazí se v UI a v aktivity logu) |
 | E-mail | Login a adresa pro reset hesla a systémové notifikace |
-| Heslo | Nejméně 12 znaků, indikátor síly (slabé / střední / silné). Bez maxima, passphrase je v pořádku. |
+| Heslo | Nejméně 12 znaků, indikátor síly (slabé / střední / silné). Server přijímá nejvýše 128 bajtů; passphrase je v pořádku. |
 | Heslo znovu | Ověřovací duplicita |
 | Vynutit vícefaktorové ověření (MFA) pro všechny uživatele | Po dokončení wizardu musí admin zaregistrovat passkey nebo zapnout TOTP |
 | Přijímám licenční ujednání a obchodní podmínky produktu MyÚčto.cz | **Povinné.** Odkazy vedou na **Licenční ujednání** a **Obchodní podmínky** |
@@ -227,7 +227,7 @@ přístup až po registraci jedné z povolených metod.
 | Kontrolu prostředí se nepodařilo spustit | Kontrola je nedostupná, setup tím není blokovaný | Stav prostředí zkontrolujte po přihlášení v `Systém → Diagnostika` |
 | Nejde pokračovat z kroku **Admin účet** | Heslo je kratší než 12 znaků, hesla se neshodují nebo není přijato licenční ujednání | Opravte pole a zaškrtněte souhlas |
 | QR platba se na faktuře nezobrazuje | Bankovní účet neprošel mod-11 kontrolou | Opravte číslo účtu v `Peníze → Bankovní účty` na záložce **Měny a účty** |
-| Ukázková data chcete vygenerovat až po dokončení setupu a aplikace to odmítne | Ukázková data nejdou doinstalovat zpětně | Viz [§ 7.9.2](#792-ukazkova-data) |
+| Generování ukázkových dat aplikace odmítne | Firma nebo instalace už obsahuje data, která se nesmějí přepsat | Použijte samostatnou prázdnou firmu a CLI postup v [§ 7.9.2](#792-ukazkova-data) |
 | Passkey nejde zaregistrovat | `app.url` nemá stabilní HTTPS hostname | Nastavte HTTPS hostname (lokálně funguje `http://localhost`) |
 
 ## 7.9 Podrobnosti a pravidla
@@ -267,9 +267,13 @@ návrhů čeká na schválení, aby šlo procvičit jejich zpracování.
 Část faktur spáruje s bankovními úhradami, takže lze vyzkoušet také saldokonto
 a párování plateb.
 
-Ukázková data **nejdou doinstalovat zpětně**. Přeskočíte-li je a později je
-budete chtít, dostanete `409 setup_done` (ochrana proti přepsání reálných
-faktur). Reset přes `php api/bin/reset.php` smaže všechno a wizard se objeví znovu.
+Po dokončení průvodce může správce serveru ukázky doplnit do **prázdné firmy**
+příkazem `php api/bin/sample.php --supplier=123`. Firmy a jejich obsazenost
+vypíše `php api/bin/sample.php --list`. Pokud je firem více, ID musíte zvolit
+výslovně. Generátor odmítne firmu s vlastními daty; není nutné kvůli ukázkám
+resetovat celou instalaci. Webové generování má navíc ochranu na úrovni celé
+instalace a při existujících klientech, fakturách nebo zakázkách vrací
+`409 setup_done`. Náhradu dříve evidovaných ukázek popisuje [§ 7.6.1](#761-odebrani-ukazkovych-dat).
 
 ### 7.9.3 Zabezpečení účtu
 

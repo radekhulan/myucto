@@ -53,7 +53,12 @@ Platí pro neplátce DPH.
 
 1. Otevřete `Grafy → Tržby`.
 2. Najděte dlaždici **Obrat pro registraci DPH RRRR**. Progress bar ukazuje, kolik z limitu 2 000 000 Kč za kalendářní rok je naplněno. Při přiblížení k limitu se zobrazí upozornění **Blížíš se limitu 2 000 000 Kč**.
-3. Při překročení 2 000 000 Kč se zobrazí varování: plátcem se stáváte od 1. 1. dalšího roku a přihlášku k registraci podáváte do 10 dnů od konce roku.
+3. Při překročení 2 000 000 Kč řešte přihlášku **do 10 pracovních dnů
+   od překročení obratu**, i když se plátcem stanete až od 1. 1. dalšího
+   roku. Ve včasné přihlášce lze zvolit vznik plátcovství už dnem
+   následujícím po překročení. Podrobnosti jsou v
+   [§ 40.9.3](40_Fakturujeme.md#4093-kdy-se-platcem-stanete-ze-zakona-6-a-94-zdph)
+   a [vysvětlení Finanční správy](https://app.fs.gov.cz/dotazy-verejnosti/dotaz/termin-pro-podani-prihlasky-k-registraci-platce-dph-1493).
 4. Při překročení 2 536 500 Kč se zobrazí varování, že jste plátcem ze zákona ihned, od dne následujícího po překročení.
 
 **Jak poznáte, že je hotovo:** víte, kolik zbývá do limitu, a včas řešíte registraci.

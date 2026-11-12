@@ -18,7 +18,7 @@ manual/
 │   └── SCREENSHOTS.md        # seznam, co vyfotit
 ├── index.php                 # PHP route handler — servíruje HTML manuál
 ├── README.md                 # tento soubor
-├── generated/                # auto-generated, NEKOMITUJ — `git update-index`
+├── generated/                # vygenerované HTML, gitignorované
 │   ├── 01_Uvod.html          # body fragment per kapitola
 │   ├── INDEX.html            # landing
 │   ├── _toc.php              # PHP pole s grupy → kapitoly
@@ -42,8 +42,8 @@ php tools/generateManualHtml.php
 # https://tvoje-domena.cz/manual
 ```
 
-PDF se při běžné editaci manuálu negeneruje. Vytváří se při sestavení vydání,
-případně ručně na výslovnou žádost:
+PDF se při běžné editaci ani při buildu release bundlu a Docker image
+negeneruje. Pro samostatnou publikaci jej vytvoř jen na výslovnou žádost:
 
 ```powershell
 php tools/exportManualToPdf.php
@@ -57,8 +57,8 @@ php tools/exportManualToPdf.php
    ### Grafy / ### Prodej / ### Nákup / ### Peníze / ### Dokumenty /
    ### Sklad / ### Daně / ### Účetnictví / ### Mzdy / ### Nástroje /
    ### Daňová evidence / ### Firma / ### Systém).
-3. Spusť `php tools/generateManualHtml.php`. PDF vytvoř jen při sestavení vydání
-   nebo na výslovnou žádost.
+3. Spusť `php tools/generateManualHtml.php` a `node web/scripts/check-manual-links.mjs`.
+   PDF vytvoř jen na výslovnou žádost.
 
 ### Reorganizace pořadí
 
@@ -89,7 +89,8 @@ písmenné rodiny na samostatná čísla vyžaduje `--allow-flatten`).
 
 `/manual` URL je nakonfigurované v:
 
-- `.htaccess` (Apache / Docker) — RewriteRule `^manual/?$ → manual/index.php`
+- `.htaccess` (Apache) - RewriteRule `^manual/?$ → manual/index.php`
+- `docker/nginx.conf` (výchozí Docker image s nginx) - `/manual` obsluhuje `manual/index.php`
 - `web.config` (IIS) — `<rule name="Manual route">`
 
 `manual/index.php` čte `manual/generated/_toc.php` (sidebar) a
@@ -99,7 +100,7 @@ fulltext search přes `search-index.json` (klient-side).
 ## Bezpečnost
 
 `.md` soubory jsou blokované přímým přístupem (i přes URL `/manual/01_Uvod.md`)
-— uživatel je dostane jen v HTML rendru přes PHP. Týká se to .htaccess i web.config.
+Uživatel je dostane jen v HTML rendru přes PHP. Platí to pro `.htaccess`, `web.config` i `docker/nginx.conf`.
 
 `/manual/img/*.webp` a `/manual/generated/img/*.webp` jsou veřejně dostupné jako
 statické soubory (cacheované 1 rok).

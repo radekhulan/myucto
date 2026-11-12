@@ -33,7 +33,7 @@ Kapitolu otevřete, když:
 1. **Podvojné účetnictví zapnuté u firmy.** Sekce **Účetnictví** a **Nástroje** se zobrazují jen firmě v podvojném účetnictví. Zapnutí a aktivaci řeší `Nástroje → Aktivace a doúčtování`.
 2. **Oprávnění k účetnictví.** Fronty **Automat**, **K doúčtování**, **Doúčtovat doklady** a **Úplnost dokladů** se zobrazí jen s oprávněním k účetnictví. Ruční zápisy v deníku vyžadují oprávnění k zápisu do deníku.
 3. **Účtový rozvrh a předkontace.** Základ je hotový po zapnutí účetnictví. U firmy s importovanou historií sestaví první sadu pravidel `Nástroje → Asistent nastavení účtování` ([Asistent nastavení účtování](65_Sablony.md#658-krok-za-krokem-asistent-nastaveni-uctovani)).
-4. **Pochopte jedno pravidlo.** Vystavení nebo přijetí dokladu a jeho zaúčtování jsou dva oddělené kroky. Dokud doklad není zaúčtovaný, nepromítne se do hlavní knihy, výsledovky, rozvahy ani do kontroly DPH. Podrobně v [§ 50.10.1](#50101-co-je-zauctovano-a-proc-na-tom-vsechno-stoji).
+4. **Pochopte jedno pravidlo.** Vystavení nebo přijetí dokladu a jeho zaúčtování jsou dva oddělené kroky. Dokud doklad není zaúčtovaný, nepromítne se do hlavní knihy, výsledovky ani rozvahy. Evidence DPH se řídí samostatně stavem dokladu a rozhodným obdobím; kontrola proti účtu 343 může čekat na zaúčtování. Podrobně v [§ 50.10.1](#50101-co-je-zauctovano-a-proc-na-tom-vsechno-stoji).
 
 > [!TIP]
 > Chcete-li vědět, kolik dokladů čeká na zaúčtování, otevřete dlaždici **Akce pro tebe** na [Přehledu](10_Prehled.md). Badge **Nezaúčtováno** vidíte i v seznamech faktur.
@@ -75,10 +75,11 @@ Celý postup vede uzávěrkový průvodce v `Nástroje → Uzávěrka` ([Uzávě
 4. [Dohadné položky a časové rozlišení](72_Uzaverka.md#7244-kroky-4-a-5-dohadne-polozky-a-casove-rozliseni), včetně návrhů předplacených nákladů a zvolené politiky drobného majetku. Návrhy vycházejí z pravidel nákladů označených jako **opakovaný předplacený náklad**. Jde o doporučení jen ke čtení, které uzávěrka zaúčtuje až po vašem potvrzení.
 5. [Opravné položky k pohledávkám](72_Uzaverka.md#7245-krok-6-opravne-polozky-k-pohledavkam). Navazují na saldokonto z [§ 50.4](#504-krok-za-krokem-mesicni-prace).
 6. [Daň z příjmů](72_Uzaverka.md#7246-krok-7-dan-z-prijmu): mezikrok na stránce [Daň z příjmů](43_Dan_z_prijmu.md).
-7. [Zásoby](72_Uzaverka.md#7247-krok-8-zasoby). Je-li sklad vedený v podvojném účetnictví a firma účtuje zásoby způsobem B, doložte fyzickou inventuru a ocenění a klikněte na **Zaúčtovat / přepočítat zásoby**. Krok zaúčtuje konečný stav, manka a přebytky. Firmě bez skladu se krok přeskočí sám.
-8. [Uzavření knih a otevření nového roku](72_Uzaverka.md#725-krok-za-krokem-uzavreni-knih-a-otevreni-noveho-roku).
-9. **Uzávěrkový balíček.** Před schválením stáhněte doložitelný ZIP sestav, inventarizací a daňových podkladů.
-10. [Schválení závěrky](72_Uzaverka.md#726-krok-za-krokem-schvaleni-zaverky-a-znovuotevreni-obdobi): rozdělení výsledku hospodaření (431 → 428/429/364).
+7. **Odložená daň**: po splatné dani z příjmů posuďte a potvrďte odloženou daň, případně doložte přeskočení podle nastavení firmy.
+8. [Zásoby](72_Uzaverka.md#7247-krok-8-zasoby). Je-li sklad vedený v podvojném účetnictví a firma účtuje zásoby způsobem B, doložte fyzickou inventuru a ocenění a klikněte na **Zaúčtovat / přepočítat zásoby**. Krok zaúčtuje konečný stav, manka a přebytky. Firmě bez skladu se krok přeskočí sám.
+9. [Uzavření knih a otevření nového roku](72_Uzaverka.md#725-krok-za-krokem-uzavreni-knih-a-otevreni-noveho-roku).
+10. **Uzávěrkový balíček.** Před schválením stáhněte doložitelný ZIP sestav, inventarizací a daňových podkladů.
+11. [Schválení závěrky](72_Uzaverka.md#726-krok-za-krokem-schvaleni-zaverky-a-znovuotevreni-obdobi): rozdělení výsledku hospodaření podle rámce firmy. Účty 431 → 428/429/364 platí pro rámec 500; v rámci 504 se pracuje s výsledkem na 931 a příslušnými účty 9xx.
 
 Po celý rok si držte po ruce [**Rozvahu**](57_Rozvaha.md) a [**Výsledovku**](58_Vysledovka_druhova.md) jako průběžnou kontrolu, jestli výsledek hospodaření ve výsledovce sedí s řádkem A.V. rozvahy. U firem s bankovním úvěrem zkontrolujte i řádek nákladových úroků (562).
 

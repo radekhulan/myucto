@@ -407,7 +407,8 @@ Pořadí je dané a nedá se přeskočit.
 | Schváleno | **Zaúčtovat** | zápis do deníku (u daňové evidence se přeskočí) |
 | Zaúčtováno | **Připravit platby** | vznikne seznam platebních závazků |
 | Platby připraveny / Uhrazeno | **Uzavřít** | uzavře měsíc |
-| Čeká na opravu / Zrušeno | **Otevřít opravu** | nová revize nad opravenými vstupy |
+| Čeká na opravu | **Otevřít opravu** | nová revize nad opravenými vstupy |
+| Zrušeno | **Začít z opravených vstupů** | nový výpočet z aktuálních podkladů |
 
 Vedle jsou méně časté akce **Vyžádat opravu** a **Zrušit běh** (červeně úplně
 vpravo). Důvod se píše u **Vyžádat opravu** schváleného běhu a u zrušení

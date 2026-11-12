@@ -39,8 +39,8 @@
 Připravte si:
 
 1. **Přesný text hlášky** a čas, kdy se objevila.
-2. **Oprávnění správce** pro kroky označené jako správcovské (Diagnostika,
-   Plánované úlohy, Aktualizace, konfigurace). Běžný uživatel se při problému obrací
+2. **Roli Superadmin** pro Diagnostiku, Plánované úlohy a Aktualizace.
+   Přístup ke konfiguraci na serveru vyžaduje oprávnění správce serveru. Běžný uživatel se při problému obrací
    na správce.
 3. **Přístup k serveru** u příkazů příkazové řádky: soubory `cfg.php`
    a `cfg.local.php`, adresář `log/` a spouštění skriptů `php api/bin/…`.
@@ -137,9 +137,15 @@ php api/bin/setup.php                # interaktivní náhrada z příkazové ř�
 
 #### 999.5.1.4 Lockout po brute-force
 
-Po 10 neúspěšných pokusech za 15 minut jste zablokovaní na 15 minut. Po 30 za hodinu
-na 24 hodin. Počkejte, nebo požádejte správce o reset z databáze:
-`DELETE FROM login_attempts WHERE bucket_key LIKE '%vas_email%';`
+Při výchozím nastavení následuje po 10 neúspěšných pokusech za 15 minut
+blokace na 15 minut, po 30 za hodinu na 24 hodin. Počkejte podle hlášky
+nebo požádejte správce o prověření konkrétního účtu a sítě.
+
+Čítač používá hash normalizovaného e-mailu a síťový prefix, nikoli čitelný
+e-mail. Při dostupném Redisu je uložený v Redisu, jinak v `login_attempts`.
+Smazání řádků podle e-mailu ani samotná změna hesla blokaci neodstraní.
+Správce musí nejprve zjistit použitý backend a příslušný čítač; nemažte
+plošně historii pokusů ostatních uživatelů.
 
 #### 999.5.1.5 Passkey nefunguje nebo se nezobrazuje systémový dialog
 
@@ -622,7 +628,8 @@ vytvořte téhož klienta (data jsou oddělená).
 
 ### 999.6.1 Diagnostika
 
-`Systém → Diagnostika` je první místo, kam se podívat, když se aplikace chová divně
+`Systém → Diagnostika` je dostupná jen **Superadminovi instalace**. Je to
+první místo, kam se podívat, když se aplikace chová divně
 a není jasné proč. Nejde o výpis hodnot, ale o verdikt (**vyhovuje**, **vyhovuje s
 výhradami**, **nevyhovuje**) a u každého nálezu je dopad, náprava a odkaz do příslušné
 kapitoly manuálu.
@@ -675,9 +682,10 @@ informace, jestli jsou nastavené (`<set>` / `<empty>`), nikdy hodnota.
 
 #### 999.6.1.2 Logy v balíčku
 
-Logy aplikace v balíčku **ve výchozím stavu nejsou** a přidávají se zaškrtnutím. Před
-vytvořením balíčku si jejich obsah můžete přímo na stránce prohlédnout, den po dni
-a po stránkách.
+Ve webovém formuláři je zahrnutí logů **předem zaškrtnuté**. Nechcete-li
+je přibalit, volbu vypněte. Při zapnuté volbě musíte před vytvořením
+samostatně potvrdit seznámení s obsahem. Obsah si lze přímo na stránce
+prohlédnout den po dni a po stránkách.
 
 Z výřezu se odstraňují navázané parametry databázových dotazů, stack trace a záznamy
 o komunikaci se SMTP serverem. **Zbytek se neupravuje**, logy proto mohou obsahovat

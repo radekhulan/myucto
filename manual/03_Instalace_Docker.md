@@ -104,7 +104,7 @@ Volby skriptu (platí jen při prvním vygenerování `cfg.docker.php`): `--url=
 
 ## 3.5 Krok za krokem: instalace bez klonu repozitáře
 
-Hodí se pro produkční Linux server, kde je jen Docker. GHCR image obsahuje veškerý kód i migrace, z repozitáře potřebujete jen tři malé soubory.
+Hodí se pro produkční Linux server, kde je jen Docker. GHCR image obsahuje veškerý kód i migrace; pro skriptovou instalaci si stáhnete compose soubor, vzor konfigurace, instalační skript a parser `.env`.
 
 ### 3.5.1 Varianta C1: jedním skriptem (doporučeno)
 
@@ -172,7 +172,7 @@ Zvolte ji, když chcete plnou kontrolu nad `cfg.docker.php` a `.env`. Hesla a kl
 1. V prohlížeči otevřete **`http://localhost:8080`**. Použijte `http://` a explicitní port `:8080`.
 2. Projděte průvodce prvním spuštěním (viz [7. První spuštění](07_Setup_wizard.md)).
 
-**Jak poznáte, že je hotovo:** zobrazí se průvodce prvním spuštěním a po jeho dokončení přihlašovací stránka.
+**Jak poznáte, že je hotovo:** zobrazí se průvodce prvním spuštěním. Po jeho dokončení a vstupu do aplikace pokračujete s přihlášeným účtem na Přehled, případně nejprve na nastavení MFA.
 
 Přístup z jiného stroje (LAN IP, hostname) funguje také, například `http://10.0.0.8:8080`. Adresa `app.url` se uloží podle URL, kterou v průvodci použijete. Potřebujete-li ji znát předem (produkční doména a reverse proxy), spusťte kontejner s `-e MYINVOICE_APP_URL=https://invoice.example.com`.
 
@@ -447,7 +447,7 @@ Watcher reaguje jen na kliknutí. Aby administrátor viděl, že je dostupná ak
 | Po přepnutí na `__Host-` cookie nejde přihlášení | Aplikace je otevřená přes `http://` | Otevřete ji přes `https://` |
 | Odkazy v e-mailech vedou na `localhost:8080` | `app.url` neodpovídá veřejné URL | Nastavte `app.url` na přesnou veřejnou adresu |
 | Passkey po změně hostname nefunguje | WebAuthn je svázaný s hostname z `app.url` | Přihlaste se přes TOTP nebo jinou cestou obnovy a passkey zaregistrujte znovu |
-| `/manual` vrací 503 „Manuál není zatím vygenerovaný" | HTML manuál nebyl vygenerován | Spusťte `docker compose -f docker-compose.production.yml exec app php tools/generateManualHtml.php` a potom stejně `php tools/exportManualToPdf.php` |
+| `/manual` vrací 503 „Manuál není zatím vygenerovaný" | HTML manuál nebyl vygenerován | Spusťte `docker compose -f docker-compose.production.yml exec --user www-data app php tools/generateManualHtml.php`. PDF generovat nemusíte |
 | Kontrola prostředí hlásí „Bez práva zápisu: cache" | Cache vytvořil root | Postup v [§ 3.12.6](#3126-opravneni-cache-pri-rucnim-spusteni-php) |
 | Tlačítko **Aktualizovat na {verze}** nic neudělá, stav „Upgrade probíhá…" trvá | Na hostu neběží watcher | Spusťte watcher ([§ 3.10](#310-krok-za-krokem-tlacitko-aktualizovat-v-aplikaci-update-watcher)), nebo klikněte na **Zrušit / odblokovat** a aktualizujte ručně ([§ 3.7](#37-krok-za-krokem-aktualizace)) |
 | Aplikace po přepnutí layoutu úložiště ukazuje prázdná data | Aplikace se dívá do prázdného `/data` | Nikdy nepřepínejte layout bez migrace, viz [§ 3.12.4](#3124-single-volume-uloziste) |
@@ -658,7 +658,7 @@ cmd/docker-prune-images.sh             # smaže zastaralé (běžící a compose
 
 ### 3.12.11 Manuál na /manual
 
-GHCR image má vygenerovaný HTML manuál i PDF (`tools/generateManualHtml.php` a `tools/exportManualToPdf.php` se volají při buildu v `Dockerfile`). Adresa `http://localhost:8080/manual` proto funguje bez dalších kroků a v postranním panelu je tlačítko **Stáhnout PDF**. Nový obsah získáte aktualizací (`cmd/docker-update.{sh,ps1}` stáhne novější image i s novými kapitolami). Při chybě 503 viz [§ 3.11](#311-kdyz-neco-nejde).
+GHCR image má vygenerovaný HTML manuál (`tools/generateManualHtml.php` se volá při buildu image). Adresa `http://localhost:8080/manual` proto funguje bez dalších kroků. Tlačítko **Stáhnout PDF** v postranním panelu odkazuje na zveřejněné PDF na myucto.cz; PDF není součástí image. Nový HTML obsah získáte aktualizací (`cmd/docker-update.{sh,ps1}` stáhne novější image i s novými kapitolami). Při chybě 503 viz [§ 3.11](#311-kdyz-neco-nejde).
 
 ## 3.13 Související kapitoly
 

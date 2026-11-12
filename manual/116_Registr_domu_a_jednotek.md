@@ -184,7 +184,10 @@ Náhled ověřuje aktuální podklady, pořadí právních událostí a rozsahy 
 
 Vydání potvrzení vyžaduje samostatné oprávnění, žadatele, doložené oprávnění žadatele, účel a výslovné vymezení neúplného rozsahu. Nejprve zkontrolujte náhled, potom potvrzení vydejte. Neúplné nebo nejisté podklady mohou vydání zablokovat.
 
-Uložené potvrzení se otevírá podle jeho čísla a zobrazuje původní časové okamžiky, podklady a kontrolní otisk. Pozdější převod jej nepřepočítá. Potvrzení se týká pouze evidovaných předpisů, úhrad a doložených počátečních stavů, nikoli bezpodmínečné bezdlužnosti. Právní potvrzení a změny jsou dostupné pouze přihlášenému uživateli aplikace, ne prostřednictvím veřejného API nebo MCP.
+Uložené potvrzení se otevírá podle jeho čísla a zobrazuje původní časové okamžiky, podklady a kontrolní otisk. Pozdější převod jej nepřepočítá. Potvrzení se týká pouze evidovaných předpisů, úhrad a doložených počátečních stavů, nikoli bezpodmínečné bezdlužnosti. Právní potvrzení a změny vyžadují přihlášení v aplikaci nebo API token
+s **Plným zápisem** a odpovídajícími právy
+([§ 103.9.7.3](103_API.md#103973-plny-zapis-tokenem-systemwrite)).
+Běžné API tokeny ani katalog MCP je nenabízejí.
 
 ## Převzetí počátečních stavů SVJ
 
@@ -205,7 +208,8 @@ Převzetí se eviduje v jednom počátečním období firmy. Běžné otevření
 
 Karta rozlišuje rozhodný okamžik a okamžik znalosti: pozdější doložená revize nemění to, co bylo známo dříve. Rekonciliace odděluje osobní pohledávky a kredity od technických služeb. Pokrytí `opening_journals_only` potvrzuje pouze vazby otevření; `complete_financial_position=false` nadále neznamená potvrzení celé finanční pozice.
 
-Veřejné čtení `GET /api/v1/property/catalog/openings` a MCP `list_property_openings` poskytují stránkované účetní role a částky bez právních podkladů a osob. Použijte `after_id` podle `next_cursor` a limit 1 až 100. Zápis, potvrzení a revize vyžadují přihlášenou obsluhu a samostatná oprávnění.
+Veřejné čtení `GET /api/v1/property/catalog/openings` a MCP `list_property_openings` poskytují stránkované účetní role a částky bez právních podkladů a osob. Použijte `after_id` podle `next_cursor` a limit 1 až 100. Zápis, potvrzení a revize vyžadují samostatná oprávnění a přihlášení
+v aplikaci nebo API token s Plným zápisem.
 
 ### Příklad vlastního souboru
 
@@ -320,7 +324,8 @@ Aktuální souhrn u dokumentu ukazuje pouze jeho navazující nové nároky a kr
 
 Účetní storno se vztahuje ke konkrétní aplikaci. Před potvrzením zkontrolujte její dopady, datum a odůvodnění. Server odmítne storno, pokud tomu brání navazující použití. Dokument se nepřepisuje; po stornu připravte novou revizi se stejnou referencí. Historie zachovává původní dokumenty, aplikace a storna.
 
-Při změně podkladů nebo konfliktu verze obnovte data a vytvořte nový náhled. Aplikace zápis neopakuje automaticky s novým ověřením. Čtení, příprava, zaúčtování a storno respektují oddělená oprávnění; veřejné API a MCP poskytují pouze kurátorované čtení bez právních podkladů a zdrojových důkazů.
+Při změně podkladů nebo konfliktu verze obnovte data a vytvořte nový náhled. Aplikace zápis neopakuje automaticky s novým ověřením. Čtení, příprava, zaúčtování a storno respektují oddělená oprávnění; běžné API tokeny a MCP poskytují pouze kurátorované čtení bez právních
+podkladů a zdrojových důkazů. Plný zápis tokenem má samostatná pravidla v kapitole 103.
 
 ### Externí dossier, příjemci a doručení
 
@@ -332,7 +337,8 @@ Doručení se eviduje samostatně pro každého příjemce v segmentu. Rozlišuj
 
 V detailu připojíte nový doklad doručení nebo právní podklad změny osoby. Zkontrolujte údaje, uveďte důvod a potvrďte připojení neměnného záznamu. Pozdější oprava doručenky výslovně navazuje na aktuální záznam a původní doručenka zůstává v historii. Doplnění důkazů nemění původní dokument ani jeho účetní historii a nevyžaduje účetní storno či přeúčtování stejné částky v dalším roce. Samotné metadata události také nepřepisují dlužníka ani příjemce finančního kreditu. Změna skutečného účtovacího podkladu se řeší příslušným účetním postupem.
 
-Při souběžné změně načtěte aktuální evidenci a zadání znovu ověřte. Zápis se automaticky neopakuje s novou revizí. Připojování podkladů vyžaduje právo správy vyúčtování; veřejné API ani MCP neposkytují mutace, osobní údaje a právní dossier.
+Při souběžné změně načtěte aktuální evidenci a zadání znovu ověřte. Zápis se automaticky neopakuje s novou revizí. Připojování podkladů vyžaduje právo správy vyúčtování; běžné API tokeny ani MCP neposkytují mutace, osobní údaje a právní dossier.
+Token s Plným zápisem se řídí oprávněními uživatele a ochranami popsanými v kapitole 103.
 
 ### Lhůty a námitky
 

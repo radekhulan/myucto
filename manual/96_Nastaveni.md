@@ -40,7 +40,7 @@ Nastavení konkrétní firmy je v sekci **Firma**: **Nastavení**, **Externí in
 
 Správa opakovaně používaných fakturačních položek je kvůli návaznosti na vystavování dokladů v menu `Prodej → Ceník`.
 
-Nastavení globálních položek smí měnit jen superadministrátor nebo administrátor; viz [§ 96.4](#964-krok-za-krokem-uzivatele-role-a-pristup-k-firmam).
+Globální administraci spravuje superadministrátor. Provozní nastavení firmy lze delegovat jednotlivými oprávněními; viz [§ 96.4](#964-krok-za-krokem-uzivatele-role-a-pristup-k-firmam).
 
 V **Nastavení / Účetní rámec** lze zvolit **Nevýdělečné organizace (vyhláška 504)**. Zadejte první den existujícího účetního období a použijte **Uložit účetní rámec samostatně**. Změna vyžaduje příslušné oprávnění a v dotčeném intervalu nesmějí být zaúčtované zápisy. Přímo zde lze rámec 504 zapnout jen firmě bez účetní historie, tedy bez jediného zápisu v deníku a s prázdnou nebo nedotčenou výchozí osnovou. Nedotčená osnova podle vyhlášky 500 (žádný vlastní ani upravený účet a žádné použití v dokladech, předkontacích ani nastavení) se při uložení nahradí osnovou podle vyhlášky 504. Firmě, která už účtuje, aplikace změnu odmítne a nabídne odkaz na **Převod účetního rámce**. Platnost změn je vidět v historii rámce.
 
@@ -815,8 +815,9 @@ externí roli typu **client** a pro každou nastavit oprávnění po modulech a 
 | **Pouze čtení** | Uživatel vidí seznamy, detaily, historii a povolené výstupy, ale nemění data. |
 | **Zápis** | Zahrnuje čtení a dovoluje příslušnou změnu nebo akci. |
 
-Role má po vytvoření neměnný typ. Klientské role nabízejí jen funkce bezpečné pro klientský portál; interní účetnictví,
-banka a globální správa se jim nepovolí. Čtyři předdefinované správcovské role mají pevná práva a nelze je deaktivovat,
+Role má po vytvoření neměnný typ. Klientské role nabízejí jen funkce bezpečné pro klientský portál; interní účetnictví a globální správa se jim nepovolí. Přístup k bance
+lze klientské roli přidělit samostatnými právy ke čtení, importu, párování
+a ignorování pohybů, viz [Klientský portál](09_Klientsky_portal.md#91113-banka-a-uhrady-dokladu). Čtyři předdefinované správcovské role mají pevná práva a nelze je deaktivovat,
 smazat ani upravit jejich matici:
 
 <!-- cols: 22 78 -->

@@ -53,8 +53,10 @@ Hromadný export je samostatná stránka `Daně → Hromadný export`. Retenčn�
 **Jak poznáte, že je hotovo:** Úloha je dokončená a v historii je ZIP ke stažení.
 
 > [!WARNING]
-> Chybějící zdrojové PDF nebo chyba rendereru se objeví v chybě úlohy. Export nepovažujte za úplný jen proto,
-> že ZIP existuje. Aktivní může být jen jeden export firmy. Smazání historie odstraní i výsledný soubor.
+> Chyba jednotlivého PDF nebo ISDOC nemusí zastavit celý export. I stav
+> **Hotovo** může obsahovat přeskočené soubory: projděte log úlohy a `README.txt`
+> v ZIPu. Chybějící originál přijaté faktury se nejprve nahrazuje rekonstrukcí.
+> Aktivní může být jen jeden export firmy. Smazání historie odstraní i výsledný soubor.
 
 ## 73.4 Krok za krokem: střediska
 

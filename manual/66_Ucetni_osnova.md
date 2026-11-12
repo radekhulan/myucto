@@ -288,7 +288,8 @@ změněné, přeskočené a chybné řádky.
 
 Vedle existence a aktivity účtu hlídá centrální účetní služba i následující invarianty:
 
-- účty **701, 702 a 710** lze použít jen v řízeném závěrkovém nebo otevíracím zápisu,
+- účty typu **uzávěrkový** lze použít jen v řízeném závěrkovém nebo otevíracím
+  zápisu; ochrana zahrnuje například 701/702/710 v rámci 500 a 961/962 v rámci 504,
 - podrozvahové účty 75x/79x se nesmějí v jednom zápisu míchat s rozvahovým či výsledkovým účtem,
 - každý zápis musí být vyrovnaný na haléř,
 - datum musí patřit do otevřeného období a nesmí spadat do zámku účtování k datu.

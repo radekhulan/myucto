@@ -59,8 +59,9 @@ v editoru skladové karty (záložky **Obecné**, **Jazyky**, **Kategorie**, **P
 > [!WARNING]
 > **Kolik smí e-shop nabídnout: skladem mínus rezervováno.** U skladové položky se pro
 > e-shop nepočítá holý fyzický stav, ale **prodejné množství** = skladem − rezervováno.
-> Rezervované je zboží už vyfakturované zákazníkovi a dosud nevydané ze skladu. Díky
-> tomu se stejný kus neprodá dvakrát. **Zboží na cestě** (objednané u dodavatele,
+> Rezervováno zahrnuje tvrdé rezervace prodejních objednávek i vystavené faktury
+> dosud nevydané ze skladu. Propojená faktura se nezapočítá podruhé. Díky tomu
+> se stejný kus neprodá dvakrát. **Zboží na cestě** (objednané u dodavatele,
 > ještě nedodané) se do nabídky **záměrně nepromítá**. Podrobně
 > [Skladem, rezervováno, na cestě, u dodavatele](37_Sklad.md#37129-skladem-rezervovano-na-ceste-u-dodavatele).
 
@@ -159,8 +160,9 @@ zápisu karet a jejich průběh je ve stejném reportu.
 
 ## 38.6 Krok za krokem: nacenit zboží
 
-Prodejní cena není hodnota, kterou prostě zadáte. Je to **výsledek výpočtu**, který
-systém přepočítává z nákupní ceny ([§ 38.11.8](#38118-cenotvorba)).
+Prodejní cenu může systém **počítat z nákupní ceny** podle přirážky nebo marže.
+Můžete také zvolit **Fixní cenu** nebo cenu ručně uzamknout; taková cena se
+při automatickém přepočtu nemění. Volby popisuje [§ 38.11.8](#38118-cenotvorba).
 
 ### 38.6.1 Nacenění nového skladového zboží
 

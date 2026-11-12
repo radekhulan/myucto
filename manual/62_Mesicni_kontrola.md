@@ -27,7 +27,7 @@ Kapitolu otevřete, když:
 1. **Podvojné účetnictví a právo číst účetnictví.** Stránka je dostupná firmám s podvojným účetnictvím a uživatelům s právem číst účetnictví.
 2. **Založené účetní období.** Bez něj stránka vyzve: **Nejprve založte účetní období.** Nabízí období ve stavu otevřené nebo uzavírá se.
 3. **Doúčtované doklady.** Nálezy o nezaúčtovaných dokladech se řeší v [K doúčtování](54_Rucni_fronta_doctovani.md).
-4. **Zámek vyžaduje administrátora.** Zámek účtování k datu server přijme jen od administrátora.
+4. **Právo změnit zámek.** Potřebujete zápis do **Spravovat období**, nebo jako interní uživatel do **Posunout zámek účtování k datu**. Samotné čtení účetnictví nestačí.
 
 ## 62.3 Krok za krokem: spuštění kontroly a vyřešení nálezů
 
@@ -60,7 +60,7 @@ Zámek použijte po doloženém podání daní.
 **Jak poznáte, že je hotovo:** Stránka hlásí **Zámek k datu byl uložen.** a doklady s datem do zámku už nejde zaúčtovat ani přeúčtovat.
 
 > [!TIP]
-> Administrátor může zámek nastavit, posunout dopředu, posunout zpět pro řízenou opravu nebo zrušit. Každá změna ukládá do auditní stopy původní hodnotu, novou hodnotu a zdůvodnění. Podrobnosti jsou v [Účetním deníku](52_Ucetni_denik.md#521410-zamek-uctovani-k-datu).
+> Oprávněný uživatel může zámek nastavit, posunout nebo zrušit. Samostatné právo posunout zámek nedovoluje návrat přes podané DPH nebo uzavřené účetní období; k tomu je nutná správa období nebo oprávnění správce firmy a přihlášení v aplikaci. Každá změna ukládá do auditní stopy původní hodnotu, novou hodnotu a zdůvodnění. Podrobnosti jsou v [Účetním deníku](52_Ucetni_denik.md#521410-zamek-uctovani-k-datu).
 
 ## 62.5 Když něco nejde
 
@@ -73,7 +73,7 @@ Zámek použijte po doloženém podání daní.
 | Předchozí období není uzavřené | Bezprostředně předchozí období musí být uzavřené nebo schválené | Dokončete nebo vědomě znovu otevřete předchozí období. |
 | Deník není vyrovnaný | Součet MD a Dal celého období se neshoduje | Dohledejte zápis a neopravujte ho nepodloženým dorovnáním. |
 | Odchylka kurzu proti ČNB | Upozornění, ne automatická oprava | Pevný, celní nebo jiný doložený kurz může odchylku vysvětlit. Kurz nepřepisujte jen kvůli zelené kontrole. |
-| Zámek nejde uložit | Změnu přijme jen administrátor, zdůvodnění má méně než 5 znaků | Požádejte administrátora, doplňte zdůvodnění. |
+| Zámek nejde uložit | Chybí právo ke změně zámku, zdůvodnění má méně než 5 znaků nebo návrat zasahuje do chráněného období | Ověřte konkrétní oprávnění a ochranu období, doplňte zdůvodnění. |
 | Nenulový zůstatek je zelený | U informačních kontrol může být výsledek v pořádku, i když seznam nebo zůstatek vyžaduje kontrolu | Otevřete opis účtu a doložte, proč účet k rozhodnému dni zůstává otevřený. |
 
 ## 62.6 Podrobnosti a pravidla
@@ -208,13 +208,13 @@ spojenými osobami je informační podklad a vyžaduje dokumentaci ceny obvyklé
 ### 62.6.7 Zámek účtování k datu
 
 Nahoře je zobrazen aktuální stav zámku. Uživatel s právem číst účetnictví
-stav vidí. Tlačítko **Uzamknout k datu** se zobrazuje podle práva na uzavírání
-období, ale server změnu přijme pouze od administrátora.
-
-Administrátor může zámek:
+stav vidí. Tlačítko **Uzamknout k datu** vyžaduje zápis do **Spravovat období**
+nebo interní právo **Posunout zámek účtování k datu**. Stejnou podmínku
+ověřuje server. Oprávněný uživatel může zámek:
 
 - nastavit nebo posunout dopředu,
-- posunout zpět pro řízenou opravu,
+- posunout zpět v otevřeném a nepodaném rozsahu; přes podané DPH nebo uzavřené
+  období jen se správou období nebo oprávněním správce firmy z přihlášené aplikace,
 - zrušit prázdným datem.
 
 Každá změna vyžaduje důvod o nejméně pěti znacích a ukládá do auditní stopy

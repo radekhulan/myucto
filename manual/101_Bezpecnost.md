@@ -412,7 +412,7 @@ neomezuje.
 | Algoritmus | bcrypt cost 12 |
 | Pepper | Sůl z `cfg.php → app.pepper` (32B base64), neukládá se v DB |
 | Min. délka | 12 znaků |
-| Max. délka | Bez limitu - passphrase je doporučená (20+ znaků) |
+| Max. délka | 128 bajtů; znak s diakritikou může zabrat více bajtů. Passphrase je podporovaná. |
 | Kontrola síly | Indikátor v UI (slabé / střední / silné) |
 | Reset hesla | Odkaz na 1 hodinu, e-mailem |
 
@@ -938,10 +938,13 @@ expirované řádky.
 | Pokusy během | Akce |
 |---|---|
 | 5 selhání / 5 minut | CAPTCHA (Cloudflare Turnstile) |
-| 10 selhání / 15 minut | Lockout 15 minut (per IP) |
-| 30 selhání / 1 hodinu | Lockout 24 hodin + e-mail uživateli o pokusech |
+| 10 selhání / 15 minut | Lockout 15 minut pro kombinaci účtu a síťového prefixu |
+| 30 selhání / 1 hodinu | Lockout 24 hodin pro stejnou kombinaci účtu a sítě; pokus se zapíše do auditu |
 
-Implementace: **Redis** pokud běží, jinak **MariaDB MEMORY engine** fallback.
+U IPv4 se používá síťový prefix **/24**, u IPv6 **/64**. Sousední IP ve stejné
+síti proto není nový čítač pro tentýž účet. Implementace: **Redis**, pokud
+běží, jinak **MariaDB MEMORY**. Přihlašovací brána při blokaci sama
+e-mailové upozornění neposílá.
 
 ### 101.11.4 IP allowlist (volitelné)
 

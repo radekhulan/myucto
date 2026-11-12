@@ -169,7 +169,7 @@ podklad a schválení odpovědnou osobou.
 | Sestava číselné řady hlásí extrémně mnoho chybějících čísel | Ručně zadané nebo importem rozbité číslo vystřelilo řadu nahoru | Zkontrolujte nejvyšší doklad v období. |
 | Importované doklady tvoří „Rozpoznanou řadu“ | Číslování z jiného programu nemá odpovídající šablonu | Ověřte, že doklady patří do stejné řady (viz [§ 46.9.7](#4697-uplnost-ciselne-rady-pravidla)). |
 | Měsíční kontrola ukazuje nález mimo zvolený měsíc | Celoroční invarianty se posuzují za celé období | Řešte nález podle [Měsíční kontroly](62_Mesicni_kontrola.md). |
-| Exportovaný soupis neobsahuje zapsané skutečné stavy | Export vytváří jen soupis účetních zůstatků a prázdná pole | Archivujte i podepsané důkazy a protokol (viz [§ 46.9.4](#4694-inventarizace-pravidla)). |
+| Exportovaný soupis neobsahuje poslední změny skutečných stavů | Formulář nebyl před exportem uložen | Nejprve uložte protokol a pak export zopakujte. Export přebírá uložené hodnoty ([§ 46.9.4](#4694-inventarizace-pravidla)). |
 
 ## 46.9 Podrobnosti a pravidla
 
@@ -218,7 +218,9 @@ pokud by tím evidence úhrad a deník přestaly odpovídat skutečnosti.
 
 ### 46.9.4 Inventarizace: pravidla
 
-Sestava vytvoří k rozvahovému dni soupis konečných zůstatků účtů tříd 0-4.
+Sestava vytvoří k rozvahovému dni soupis konečných zůstatků účtů typu
+aktiva, pasiva a vlastní kapitál. V rámci 504 zahrnuje i příslušné účty 9xx;
+výběr se neomezuje na číselné třídy 0-4.
 Číslo účtu vede na opis a doporučený druh podkladu napovídá, čím zůstatek
 doložit:
 
@@ -244,10 +246,10 @@ v aplikaci volitelná. Uložení kontroluje verzi období a zapisuje auditní
 událost, takže souběžná změna účetnictví nemůže být tiše překryta starým
 formulářem.
 
-Export PDF/XLSX poskytuje soupis účetních zůstatků a prostor pro ruční
-inventurní doplnění. Export do souboru nepřebírá elektronicky uložené
-skutečné stavy a poznámky z formuláře; při archivaci
-proto přiložte i podepsané důkazy, externí potvrzení a schválený protokol
+Export PDF/XLSX přebírá **uložený inventarizační protokol**: hlavičku,
+účetní i skutečné stavy, rozdíly, poznámky a podpisová pole. Dosud
+nevyplněné skutečné stavy zůstanou prázdné k doplnění. Před exportem
+formulář uložte. Při archivaci přiložte i podepsané důkazy a externí potvrzení
 podle vnitřní směrnice. Starší již uzavřené období bez uložené inventarizace
 je pouze pro čtení a aplikace jeho stav zpětně odvodí z ověřených účetních
 zůstatků.

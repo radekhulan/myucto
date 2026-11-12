@@ -20,7 +20,8 @@
    popsáno v [kapitole 15](15_Faktura_editor.md).
 2. **Funkční odesílání e-mailů.** Zkontrolujte ho tlačítkem **Test odeslání**
    (detail faktury, nabídka **Další akce**, část **Pokročilé**), které pošle
-   e-mail jen vám, ne klientovi.
+   testovací e-mail na adresu aktuální firmy. Chybí-li platná adresa firmy,
+   použije se výchozí odesílací adresa instalace (`smtp.from_email`).
 3. **Platný bankovní účet v měně faktury**, jinak se v PDF nezobrazí QR platba
    (viz [§ 16.10.7](#16107-qr-platba)). Účty spravujete v `Peníze → Bankovní účty`, záložce **Měny a účty**.
 4. **E-mail klienta.** Vyplňte ho na kartě klienta nebo v kontaktech klienta,
@@ -38,8 +39,9 @@
 
 2. Volitelně si PDF prohlédněte v náhledu na detailu nebo tlačítkem **Zobrazit PDF**.
 3. Klikněte na **Odeslat klientovi**. Stejným tlačítkem odešlete i už odeslanou fakturu znovu.
-4. V okně zkontrolujte příjemce. Jsou předvyplnění podle kontaktů klienta
-   (účel Doklady), e-mailů zakázky a hlavního e-mailu, duplicity jsou sloučené.
+4. V okně zkontrolujte příjemce. Přednost mají aktivní kontakty klienta pro účel
+   **Doklady**. Hlavní e-mail je náhradní příjemce; nastavení zakázky může
+   adresy doplnit nebo nahradit. Duplicity jsou sloučené.
    Seznam můžete upravit, přidat kopii (CC), skrytou kopii (BCC) a poznámku do e-mailu.
 5. Potvrďte odeslání.
 
@@ -54,8 +56,8 @@ záznam s adresami příjemců. V sekci **Historie PDF** je u odeslané verze ze
 štítek **Odesláno** a seznam příjemců.
 
 > [!TIP]
-> Před prvním ostrým odesláním použijte **Test odeslání**. E-mail přijde jen
-> vám a ověříte šablonu, SMTP i vzhled PDF bez rizika.
+> Před prvním ostrým odesláním použijte **Test odeslání**. Předem zkontrolujte
+> e-mail aktuální firmy, kam test dorazí. Ověříte šablonu, SMTP i vzhled PDF.
 
 Příloha navíc k PDF (smlouva, předávací protokol) se přidává v sekci **Přílohy
 e-mailu** na detailu, viz [§ 16.10.9](#16109-prilohy-e-mailu).
@@ -234,7 +236,9 @@ Akční tlačítka vpravo nahoře závisí na stavu faktury:
 \* Jen v podvojném účetnictví a dokud faktura nemá štítek **Zaúčtováno**, viz
 [§ 16.10.3](#16103-zauctovani-do-deniku).
 
-**Test odeslání** a **Test upomínky** pošlou e-mail jen na váš e-mail, ne klientovi.
+**Test odeslání** a **Test upomínky** posílají na e-mail aktuální firmy,
+případně na výchozí odesílací adresu instalace. Stav faktury ani počítadlo
+upomínek testem nemění.
 
 ### 16.10.2 Platby a částečné úhrady
 
@@ -502,10 +506,13 @@ převod** a jen na nezaplacenou zbývající částku. Zaplacená faktura ani pl
 
 ### 16.10.8 Odesílání e-mailem
 
-**Příjemci.** E-mail jde na adresy z kontaktů klienta (účel Doklady), fakturační
-e-maily zakázky (až 3 dodatečné adresy) a hlavní e-mail klienta. V okně odeslání
-je můžete upravit. Předmět a tělo se berou ze šablony nového dokladu (česky nebo
-anglicky podle jazyka klienta), viz [96. Nastavení](96_Nastaveni.md). Předmět
+**Příjemci.** Přednost mají aktivní kontakty klienta pro účel **Doklady**
+s rozlišením Komu, Kopie a Skrytá kopie. Hlavní e-mail klienta se použije,
+pokud pro daný účel nejsou kontakty. Při chybějícím příjemci Komu jej aplikace
+doplní jen tehdy, když tato adresa už není mezi Kopie nebo Skrytá kopie. Fakturační
+e-maily zakázky se použijí podle jejího režimu: automaticky, přidáním nebo
+nahrazením příjemců. V okně odeslání můžete výsledný seznam upravit. Předmět
+a tělo se berou ze šablony nového dokladu podle **jazyka uloženého na faktuře**, viz [96. Nastavení](96_Nastaveni.md). Předmět
 i název přiloženého PDF lze předepsat pro konkrétního klienta, viz
 [§ 18.4.1](18_Klienti.md#1841-predmet-e-mailu-a-nazev-prilozeneho-pdf). Po odeslání
 se stav faktury změní na Odesláno a v activity logu je záznam s adresami příjemců.
@@ -663,8 +670,13 @@ faktury. Doklad v uzavřeném účetním období upraví i s tímto právem jen 
 skladová omezení níže platí pro všechny. U zaúčtované faktury přeúčtuje změna částek,
 DPH nebo položek zápis v deníku, proto k ní role kromě tohoto práva potřebuje i
 **Zaúčtovat doklad**. Bez něj úpravu odmítne a dovolí změnit jen neúčetní údaje
-(texty, poznámky, splatnost). Úpravu ani výkaz vystavené faktury nejde vynutit
-přes API token, jen v aplikaci.
+(texty, poznámky, splatnost). Přes API lze úpravu vynutit tokenem s výslovně
+přidělenou schopností **Úprava vystavených faktur přes API (force)**
+([§ 103.9.7.2](103_API.md#103972-uprava-vystavene-faktury-pres-api-token)),
+případně tokenem s **Plným zápisem**
+([§ 103.9.7.3](103_API.md#103973-plny-zapis-tokenem-systemwrite)). Token
+nepřekoná ochranu podaných a uzavřených období; schopnost upravit fakturu
+sama neuděluje práva k dalším agendám.
 
 Variabilní symbol je neměnný, úprava ho nezmění. Chcete-li číslo změnit, vystavte
 storno nebo dobropis a fakturu znovu pod novým číslem.

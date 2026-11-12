@@ -26,7 +26,7 @@ variabilních symbolů, číselné cykly, e-mailové šablony a další nastaven
 
 ## 95.2 Než začnete
 
-1. **Oprávnění.** Novou firmu může založit superadmin nebo uživatel s pevnou rolí **Admin Plus**. Běžná role **Admin** pracuje jen s firmami, které jí přidělí superadmin. Smazat firmu smí superadmin. Údaje v detailu firmy smí měnit admin; jedinou výjimkou je zapnutí skladu, které smí přepnout i role **účetní**.
+1. **Oprávnění.** Novou firmu může založit superadmin nebo uživatel s pevnou rolí **Admin Plus**. Běžná role **Admin** pracuje jen s firmami, které jí přidělí superadmin. Smazat firmu smí superadmin. Údaje firmy upravuje interní role se zápisem do **Nastavení firmy**. Další oblasti mají samostatná oprávnění, například sklad nebo nastavení mezd; rozhoduje konkrétní právo, ne jen název role.
 2. **Přístup k firmám.** Ke každému uživateli lze v `Systém → Uživatelé` v editaci účtu v části **Přístup k firmám** zaškrtnout, ke kterým firmám smí. Uživatel bez zaškrtnuté firmy nemá přístup k žádné firmě; systémový superadmin vidí všechny.
 3. **Pro přehled firem** potřebujete přístup k více než jedné firmě. Role klient k přehledu nemá přístup vůbec.
 4. **ARES a registr plátců DPH** pro automatické předvyplnění údajů nové firmy (volitelně).
@@ -344,7 +344,7 @@ vidíte v přehledu jen ty. Systémový superadmin vidí všechny firmy v instal
 **Jak poznáte, že je hotovo:** Firma zmizí ze seznamu a aplikace ohlásí „Firma … byla smazána".
 
 > [!WARNING]
-> Smazání firmy je nevratné a projde vždy, i když firma má doklady, účetní deník, mzdy a personalistiku,
+> Smazání firmy je nevratné a může zahrnout i firmu, která má doklady, účetní deník, mzdy a personalistiku,
 > exekuce, podání, SVJ, dokumenty nebo bankovní výpisy. Smaže se všechno, co firma v aplikaci má, včetně
 > evidencí jen pro přidávání (mzdy, podání, SVJ) a souborů firmy v úložišti (PDF faktur, přílohy, archivy,
 > podpisové profily, loga). Zákonné archivační povinnosti (účetní záznamy, mzdové listy, podání) tím
@@ -354,10 +354,14 @@ Co ještě platí:
 
 - Posledního zbývajícího dodavatele instalace smazat nejde („Posledního supplier nelze smazat", vždy musí
   zůstat aspoň jeden).
-- Maže se v jedné transakci. Když se něco nepovede, nesmaže se nic a aplikace ohlásí důvod.
-- Evidence jen pro přidávání chrání v databázi triggery. Aplikace je na dobu mazání dočasně odstraní a hned
-  potom vždy obnoví (i po chybě). Databázový účet aplikace k tomu potřebuje právo `TRIGGER`; bez něj smazání
-  skončí srozumitelnou chybou a nic se nesmaže.
+- Databázové řádky se mažou v jedné transakci. Chyba uvnitř této transakce
+  mazání vrátí zpět. Obnova databázových ochran a mazání souborů ale probíhají
+  samostatně; dokončovací chyba proto neznamená, že se firma nesmazala.
+- Evidence jen pro přidávání chrání triggery. Aplikace je na dobu mazání dočasně
+  odstraní a poté obnovuje. Databázový účet potřebuje právo `TRIGGER`.
+  Při chybě `trigger_restore_failed` správce serveru nejprve prověří stav firmy
+  a obnoví ochrany podle zálohy definic v runtime úložišti
+  `storage/company-purge/triggers-<schema>.json`. Operaci neopakujte naslepo.
 - Zůstane jen auditní stopa: v auditním logu instance záznam `supplier.deleted` (kdo, kdy, IČO, název, počty
   řádků) a dřívější auditní záznamy firmy, protože auditní log je zřetězený a jeho řádky se nemažou. Smazané
   zápisy verzovaného účetního deníku zůstávají jen v historii verzí databáze, aplikace je nezobrazuje.
@@ -646,6 +650,12 @@ Aktuální dodavatel se posílá v každém API požadavku v hlavičce `X-Suppli
 úložiště prohlížeče (`myinvoice.current_supplier_id`). Pokud hlavička chybí, server použije výchozí firmu
 uživatele ([§ 95.3](#953-krok-za-krokem-prepnout-firmu)). Ukládá ji `PUT /api/auth/default-supplier` s tělem
 `{"supplier_id": N}`, které volá přepínač firem.
+
+Přednost má vazba vlastní klientské domény na firmu a potom vazba API tokenu
+na konkrétní firmu. Takový token se hlavičkou na jinou firmu nepřesměruje,
+ani s příznakem Plný zápis. U požadavku bez těchto vazeb má hlavička
+přednost před parametrem `supplier_id`; teprve bez výslovného výběru se
+použije výchozí firma. Každý výběr dál vyžaduje oprávnění k dané firmě.
 
 ### 95.13.7 Tipy
 

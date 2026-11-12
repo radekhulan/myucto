@@ -1431,7 +1431,7 @@ Záložku vidí jen uživatel, který má kromě skladu i právo číst vydané 
 ### 37.12.9 Skladem, rezervováno, na cestě, u dodavatele
 
 Samotné číslo „skladem“ na otázku „můžu to prodat?“ neodpovídá. Část zásoby už je
-vyfakturovaná zákazníkovi a jen fyzicky nevydaná, další kusy jsou objednané u dodavatele
+slíbená zákazníkovi na prodejní objednávce nebo faktuře a dosud nevydaná, další kusy jsou objednané u dodavatele
 a ještě nedorazily, a dodavatel má ve svém skladu ještě další. Modul proto vede
 **čtyři množstevní veličiny** a dvě dopočtené hodnoty.
 
@@ -1439,7 +1439,7 @@ a ještě nedorazily, a dodavatel má ve svém skladu ještě další. Modul pro
 | Veličina | Co znamená | Odkud se bere |
 |---|---|---|
 | **Skladem** | fyzický stav na skladě | zaúčtované skladové doklady ([§ 37.12.4](#37124-skladove-doklady)) |
-| **Rezervováno** | vyfakturováno zákazníkovi, ale ještě nevydáno ze skladu | řádky vystavených faktur bez zaúčtované výdejky ([§ 37.12.9.2](#371292-rezervace)) |
+| **Rezervováno** | slíbeno zákazníkovi a dosud nevydáno | aktivní tvrdé rezervace prodejních objednávek a řádky vystavených faktur bez zaúčtované výdejky ([§ 37.12.9.2](#371292-rezervace)) |
 | **Na cestě** | objednáno u dodavatele a ještě nedodáno | objednávky u dodavatele ([§ 37.12.11](#371211-objednavky-u-dodavatele)) |
 | **U dodavatele** | kolik toho podle svého ceníku drží dodavatel | nabídky dodavatelů ([§ 37.12.10](#371210-nabidky-dodavatelu-u-dodavatele)) |
 
@@ -1458,11 +1458,13 @@ Z nich se počítají dvě odvozené hodnoty:
 > tomu **plánovací** číslo pro nákup a rozhodování uvnitř firmy. Tam „na cestě“ smysl
 > dává, protože jde o to, kdy zboží bude, ne co se dá slíbit dnes.
 
-**Žádná z těch čtyř veličin se nikam neukládá.** Počítají se v okamžiku dotazu
-z objednávek a dokladů. Objednané ani rezervované zboží nemá pořizovací cenu,
-nevstupuje do rozvahy, a proto nepatří mezi skladové stavy, ze kterých se dělá
-ocenění ([§ 37.12.3](#37123-ocenovani-zasob)) ani inventura
-([§ 37.12.7](#37127-inventury)). Objednávka ani rezervace skladovou knihou nehýbe.
+**Souhrnná dostupnost se počítá v okamžiku dotazu** z uložených skladových
+stavů, dokladů, objednávek, rezervací a nabídek dodavatelů. Samotná objednávka
+ani rezervace skladovou knihou nehýbe a nevytváří další oceněnou zásobu.
+Rezervované kusy, které fyzicky leží na skladě, však dál patří do účetní
+hodnoty zásob, [ocenění](#37123-ocenovani-zasob)
+i [inventury](#37127-inventury). Rezervace omezuje prodejnost, nikoli
+hodnotu skutečně naskladněného zboží.
 Veličiny se počítají v tisícinách jednotky, stejně jako zbytek skladu, takže na nich
 nevzniká zaokrouhlovací chyba.
 
@@ -1478,7 +1480,7 @@ Karta, která nemá jediný pohyb ani objednávku, ukazuje ve všech čtyřech d
 
 Hodnota **prodejné** vlastní dlaždici nemá. Je to číslo pro strojové odběratele
 ([REST API](103_API.md) a [MCP server](105_MCP_server.md)), odkud si ho bere e-shop.
-Může vyjít i **záporně**: znamená to, že je vyfakturováno víc, než je fyzicky skladem,
+Může vyjít i **záporně**: znamená to, že je rezervováno víc, než je fyzicky skladem,
 a záměrně se to neschovává nulou.
 
 > [!TIP]
@@ -1488,27 +1490,27 @@ a záměrně se to neschovává nulou.
 
 #### 37.12.9.2 Rezervace
 
-**Rezervaci vytvoří řádek vystavené faktury napojený na skladovou kartu, ke kterému
-ještě neexistuje zaúčtovaná výdejka.** Rezervováno je tedy množství, které sice
-fyzicky leží ve skladu, ale už je slíbené konkrétnímu odběrateli.
+**Rezervace mají dva zdroje:** aktivní tvrdé rezervace
+[prodejních objednávek](#371214-prodejni-objednavky-a-tvrde-rezervace) a dosud nevydané řádky
+vystavených faktur napojené na skladovou kartu. U objednávky se započítá
+rezervované množství po odečtení spotřebované a uvolněné části. Faktura
+navázaná na objednávku se nezapočítá podruhé.
 
-Rezervaci **netvoří** koncept faktury, proforma (zálohová faktura) ani stornovaná
+Fakturační rezervaci **netvoří** koncept faktury, proforma (zálohová faktura) ani stornovaná
 faktura. Storno faktury rezervaci uvolní. Naopak **storno výdejky rezervaci vrátí**:
 protidoklad se do součtu započítá se záporným znaménkem, takže se řádek faktury zase
 tváří jako nevydaný.
 
 > [!WARNING]
-> **Firmy se zapnutou automatickou výdejkou ([§ 37.12.1](#37121-zapnuti-modulu))
-> uvidí v rezervacích trvale nulu, a je to správně.** Když se výdejka zakládá
-> a účtuje v tomtéž okamžiku jako vystavení faktury, žádné okno mezi „slíbeno“
-> a „vydáno“ neexistuje a rezervovat není co. Rezervace mají smysl pro firmy, které
-> automatickou výdejku **vypnuly** a zboží vydávají ze skladu ručně (typicky později,
-> při expedici). Teprve tam vzniká mezera, ve které by se stejný kus dal prodat
-> podruhé.
+> **Automatická výdejka odstraňuje čekání mezi vystavením samostatné faktury
+> a výdejem** ([§ 37.12.1](#37121-zapnuti-modulu)). Pokud se výdejka rovnou
+> zaúčtuje, tato faktura už nic nerezervuje. Tvrdé rezervace prodejních
+> objednávek však mohou existovat i při zapnuté automatické výdejce, například
+> před fakturací. Nenulová rezervace proto sama o sobě neznamená chybu.
 
 Rezervace se sčítají **za celou kartu**. Filtr na sklad je jen omezením, ne rozpadem.
-U každé karty je k dispozici i rozpad na konkrétní faktury (číslo, odběratel, datum
-vystavení, splatnost, množství).
+U každé karty je k dispozici rozpad na konkrétní faktury a prodejní objednávky
+s jejich zbývajícím rezervovaným množstvím.
 
 #### 37.12.9.3 Na cestě
 

@@ -24,7 +24,8 @@ Upomínky lze posílat **třemi způsoby**:
 
 Aby šla upomínka odeslat, faktura musí:
 
-- být typu **Faktura** (ne proforma, dobropis ani storno),
+- být typu **Faktura** nebo **Zálohová faktura (proforma)**, nikoli dobropis či storno,
+- mít kladnou částku k úhradě a způsob úhrady **Bankovní převod**,
 - být ve stavu vystavená, odeslaná nebo upomenutá,
 - být **po splatnosti** (splatnost starší než dnešek),
 - mít k dispozici e-mail klienta (hlavní e-mail, kontakty nebo fakturační
@@ -57,9 +58,11 @@ fakturační e-maily zakázky.
 
 ### 22.3.1 Test upomínky
 
-Na detailu faktury po splatnosti otevřete nabídku **Další akce** a v části
-**Pokročilé** klikněte na **Test upomínky**. Aplikace pošle stejný e-mail jen na
-váš e-mail (přihlášeného administrátora). Hodí se pro:
+Na detailu faktury otevřete nabídku **Další akce** a v části **Pokročilé**
+klikněte na **Test upomínky**. Test se odešle na e-mail aktuální firmy;
+pokud není platný, použije se výchozí odesílací adresa instalace
+(`smtp.from_email`). Stav faktury a počítadlo upomínek se nemění. Náhled
+lze poslat i u konceptu a před splatností; tehdy používá 7 dní prodlení. Hodí se pro:
 
 - vyzkoušení šablony před odesláním klientovi,
 - ověření, že SMTP funguje,
@@ -174,7 +177,7 @@ generování PDF) červeným řádkem se stavem **Neodesláno** a textem chyby.
 <!-- cols: 34 30 36 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| Tlačítko **Odeslat upomínku** chybí | Faktura není po splatnosti, není typu Faktura nebo je ve stavu, který se neupomíná (proforma, dobropis, storno) | Zkontrolujte typ, stav a splatnost |
+| Tlačítko **Odeslat upomínku** chybí | Doklad není po splatnosti, nemá kladnou částku k úhradě, je placen jinak než převodem nebo nejde o běžnou fakturu či proformu v přípustném stavu | Zkontrolujte typ, stav, částku k úhradě, způsob úhrady a splatnost |
 | Cron fakturu přeskočil | Automatické upomínky jsou vypnuté u dodavatele, klienta nebo faktury, nebo je faktura méně dní po splatnosti než práh, nebo poslední upomínka byla před méně než cooldown dny | Zkontrolujte [§ 22.10.6](#22106-tri-urovne-vypnuti-a-prah-dni) a použijte `--dry-run` |
 | Upomínka se nevyskytuje v přehledu chyb, přesto neodešla | Cron ji přeskočil kvůli předpokladům (například klient nemá e-mail), to není selhání odeslání | Doplňte e-mail klienta, viz [§ 18.4](18_Klienti.md#184-krok-za-krokem-e-mailove-kontakty-podle-ucelu) |
 | Červený řádek **Neodesláno** | Nedostupný SMTP, odmítnutý příjemce nebo chyba PDF | Přečtěte text chyby v **Odeslané e-maily** a odešlete znovu |

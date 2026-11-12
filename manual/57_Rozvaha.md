@@ -68,6 +68,10 @@ Podrobnosti jsou v [§ 57.7.7](#5777-mapovani-uctu-pro-konkretni-firmu).
 
 ## 57.5 Krok za krokem: rozvaha po účtech
 
+Následující členění a název **Účet 702 (po účtech)** platí pro rámec 500.
+V rámci 504 se odpovídající záložka jmenuje **Průběžný účetní přehled**
+a používá členění tohoto rámce.
+
 1. Otevřete `Účetnictví → Rozvaha` a zvolte záložku **Účet 702 (po účtech)**.
 2. Nastavte **Rozvahový den**. Rozsah výkazu se tu nepoužívá.
 3. Projděte aktiva vlevo a pasiva vpravo. Přepínač **Zobrazit analytiky** analytiky skryje, **Skrýt nulové účty** schová účty bez zůstatku a pohybu.

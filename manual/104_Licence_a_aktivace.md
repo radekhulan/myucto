@@ -34,7 +34,8 @@ Kapitolu otevřete, když:
 ## 104.2 Než začnete
 
 - **Role.** Správu licence (stránku **Zakoupení**) vidí a ovládá jen
-  administrátor. Běžný uživatel stránku otevře, ale operace nejsou dostupné.
+  **Superadmin instalace**. Správce firmy ani role Správce instance tímto
+  oprávněním automaticky nedisponují.
 - **Internet.** Instalace musí být online, aby mohla ověřit licenci na
   myucto.cz.
 - **Platební karta** pro předplatné a pro změny rozsahu za běhu.

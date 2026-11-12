@@ -88,7 +88,8 @@ párování výpisů, jinak hrozí dvojí evidence.
 ## 26.5 Krok za krokem: odeslat příkaz přímo do banky
 
 Funguje u aktivně propojeného účtu Fio ČR (2010), ČSOB (0300), Raiffeisenbank (5500),
-Banky CREDITAS (2250), MONETA Money Bank (0600) nebo KB+ (0100, jen varianta Plus
+Banky CREDITAS (2250), MONETA Money Bank (0600), České spořitelny (0800, se souhlasem
+pro platby) nebo KB+ (0100, jen varianta Plus
 se souhlasem pro hromadné platby), a to pro tuzemský příkaz v CZK. Napojení Fio SR
 (8330) slouží jen k načítání pohybů, ne k přímému odesílání EUR příkazů.
 
@@ -99,6 +100,8 @@ se souhlasem pro hromadné platby), a to pro tuzemský příkaz v CZK. Napojení
 4. V internetovém bankovnictví dávku zkontrolujte a autorizujte.
    - CREDITAS: `Transakce → Zadané → Hromadné`.
    - MONETA: sekce **Zprávy a oznámení** (dávka k podpisu).
+   - Česká spořitelna: podpis v MyÚčtu nebo přechod do George podle nastavení
+     propojení, viz [§ 30.11.5.2](30_Bankovni_ucty.md#301152-ceska-sporitelna-0800).
 
 **Jak poznáte, že je hotovo:** banka dávku přijala a čeká na vaši autorizaci. Odeslání
 samo úhradu nepotvrzuje a zahájený import dávky ještě nepotvrzuje přijetí jednotlivých plateb.

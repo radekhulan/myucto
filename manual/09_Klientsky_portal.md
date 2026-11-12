@@ -200,7 +200,7 @@ Postup ověření a aktivace popisuje [§ 96.16 Vlastní domény](96_Nastaveni.m
 
 ### 9.11.1 Menu klienta
 
-Menu běžného klienta má pět sekcí:
+Základní klientské menu obsahuje tyto sekce; skutečný rozsah určuje role:
 
 - **Přehled** (domovská stránka),
 - **Prodej** (vydané faktury a pravidelná fakturace),
@@ -210,7 +210,12 @@ Menu běžného klienta má pět sekcí:
 
 Na desktopu jsou sekce v horní liště s popup položkami, na mobilu v nabídce **☰**. Nápovědu otevírá ikona **?** v horní liště.
 
-Cokoliv jiného klient v menu nevidí: účetnictví, bankovní výpisy, sklad, e-shop, reporty, Grafy, kniha jízd, DMS dokumenty, systémové nastavení a správu uživatelů. Při pokusu otevřít takovou stránku přes adresu ho aplikace přesměruje na portál. Omezení je vynucené na frontendu i v API, ruční úpravou adresy se obejít nedá.
+Další agendy lze povolit samostatnými klientskými oprávněními: například
+banku, knihu jízd, zakázky, vybrané skladové operace, připravená podání,
+MCP nebo provozní nastavení firmy. Podrobnosti popisují následující části
+a [Bezpečnost](101_Bezpecnost.md). Interní účetní deník, daňová evidence,
+e-shop a globální správa uživatelů zůstávají klientovi uzavřené. Omezení
+vynucují menu, router i server; ruční změna adresy práva nerozšíří.
 
 Uvnitř povolených sekcí klient **není v režimu jen pro čtení**. Smí, pokud doklad ještě nebyl zaúčtovaný (viz [§ 9.11.5](#9115-zamek-zauctovanych-dokladu)):
 

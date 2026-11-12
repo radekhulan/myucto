@@ -21,9 +21,9 @@ Co kde najdete:
 | dokončit první spuštění | [7. První spuštění](07_Setup_wizard.md), [8. Přihlášení](08_Prihlaseni.md) |
 | vystavit fakturu | [14. Faktury](14_Faktury.md), [15. Editor faktury](15_Faktura_editor.md) |
 | zpracovat přijaté doklady | [23. Přijaté faktury](23_Prijate_faktury.md), [25. AI extrakce](25_AI_extrakce.md) |
-| spárovat banku | [28. Banka](29_Banka.md), [29. Bankovní účty a avíza](30_Bankovni_ucty.md) |
-| podat DPH | [39. Výkazy DPH](41_Vykazy_DPH.md), [40. Kniha DPH](42_Kniha_DPH.md) |
-| uzavřít rok | [91. Účetní období a uzávěrka](72_Uzaverka.md) |
+| spárovat banku | [29. Banka](29_Banka.md), [30. Bankovní účty a avíza](30_Bankovni_ucty.md) |
+| podat DPH | [41. Výkazy DPH](41_Vykazy_DPH.md), [42. Kniha DPH](42_Kniha_DPH.md) |
+| uzavřít rok | [72. Účetní období a uzávěrka](72_Uzaverka.md) |
 | dát klientovi přístup | [9. Klientský portál](09_Klientsky_portal.md) |
 
 ## 1.2 Než začnete
@@ -167,9 +167,12 @@ neopravíte.
 ### 1.5.2 Vystavování dokladů
 
 Aplikace pokrývá celý český cyklus daňových dokladů, od proforma faktury, přes
-ostrou fakturu, po dobropis. Každý doklad má **immutable PDF**: jakmile fakturu
-vystavíte, PDF se vygeneruje a od té chvíle se nemění, i kdybyste později měnili
-adresu, banku nebo logo v nastavení.
+ostrou fakturu, po dobropis. Vystavený doklad uchovává **snapshot údajů**.
+Odeslané verze PDF jsou dohledatelné v historii. Některé oprávněné změny
+(například změna bankovního spojení nebo vynucená úprava dokladu) mohou
+aktuální PDF zneplatnit a vytvořit novou verzi; nejde o příslib, že se
+každé zobrazení PDF navždy shoduje s původně odeslanou přílohou. Podrobnosti
+a historii verzí popisuje [Faktura PDF a e-mail](16_Faktura_PDF.md).
 
 - **Faktura - daňový doklad** (pro plátce DPH) i **faktura** (pro neplátce)
 - **Zálohová faktura (proforma)** s možností konverze na ostrou
@@ -195,8 +198,9 @@ kapitolu [17. Pravidelné faktury](17_Pravidelne_fakturace.md).
 MyÚčto umí **fakturaci podle českého ZDPH**. Přepíná chování formuláře
 podle toho, jestli jste plátce nebo neplátce, a podporuje speciální režimy:
 
-- **Plátce / neplátce DPH**: globální přepínač u dodavatele; ovlivňuje
-  záhlaví dokladu, sloupce v tabulce, sumace i povinné poznámky
+- **Plátce / neplátce / identifikovaná osoba**: stav firmy k rozhodnému datu
+  podle historie plátcovství, včetně plánovaných změn. Ovlivňuje záhlaví
+  dokladu, sloupce, sumace i povinné poznámky
 - **Sazby DPH** v číselníku (`CZ-21`, `CZ-12`, `CZ-0`, `CZ-RC`) se
   přiřazují per položku, smíšené sazby jsou možné v jedné faktuře
 - **Reverse charge (přenesená daňová povinnost)**: tuzemský RC dle § 92a-g
@@ -209,7 +213,7 @@ podle toho, jestli jste plátce nebo neplátce, a podporuje speciální režimy:
 - **VAT klasifikace se přiřadí sama** podle sazby DPH a nese se až do
   kontrolního hlášení
 
-Detaily jsou v kapitole [38. Fakturujeme](40_Fakturujeme.md). Pozor:
+Detaily jsou v kapitole [40. Fakturujeme](40_Fakturujeme.md). Pozor:
 **správnost faktury je vždy na uživateli**. Aplikace generuje doklady,
 ale není daňový poradce.
 
@@ -246,8 +250,8 @@ Viz [18. Klienti](18_Klienti.md) a [19. Zakázky](19_Zakazky.md).
 - **DKIM podpis** odchozích e-mailů: vyšší doručitelnost, méně spam-složek
 - **Šablony e-mailů** v nastavení: předmět + tělo s placeholdery
   (`{varsymbol}`, `{amount}`, `{due_date}`); vícejazyčné
-- **Test odeslání** pošle vzorový e-mail jen na váš e-mail (ne klientovi),
-  pro vyzkoušení šablony i SMTP konfigurace
+- **Test odeslání** pošle vzorový e-mail na adresu aktuální firmy, případně
+  na výchozí odesílací adresu instalace, pro vyzkoušení šablony i SMTP
 
 Viz [16. Faktura PDF a e-mail](16_Faktura_PDF.md).
 
@@ -259,9 +263,13 @@ sazby DPH i jednotlivé položky) a předloží vám výsledek ke kontrole:
 - **Extrakce z PDF i z obrázku**, včetně vícestránkových dokladů
 - **Sledovaná e-mailová schránka**: doklad dorazí mailem a systém ho vytěží sám
 - **Poskytovatele AI si volíte vy**, zvlášť pro každou firmu: **Anthropic Claude**
-  (výchozí), **Azure OpenAI**, **OpenAI** nebo **Google Gemini**
-- **Bez potvrzené zpracovatelské smlouvy se AI vůbec nespustí.** Volání se
-  tvrdě zablokuje. Souhlas je per poskytovatel, ne plošný.
+  (výchozí), **Azure OpenAI**, **OpenAI**, **Google Gemini** nebo **Ollama**
+  na vlastním serveru
+- **Vytěžení dokladů a AI návrhy účtování mají samostatná nastavení.**
+  Volitelný asistent účtování u externích poskytovatelů vyžaduje potvrzení
+  zpracovatelské smlouvy pro daného poskytovatele; lokální Ollama má výjimku.
+  Tato brána se nevztahuje plošně na veškeré vytěžování PDF. Rozsah a nastavení
+  popisují [AI extrakce](25_AI_extrakce.md) a [Automat](53_Automat.md).
 - **Kontrolní součet nad extrakcí**: pokud se součet položek rozejde se čtenou
   základnou o víc než **2 %**, doklad se označí „ke kontrole" místo tichého
   uložení
@@ -295,16 +303,18 @@ a aplikace platby spáruje sama:
 - **Pokladna** s příjmovými a výdajovými doklady (PPD/VPD) a pravidly
 - **Multi-currency banky**: víc účtů per dodavatel (CZK + EUR + USD)
 
-Viz [28. Banka](29_Banka.md), [29. Bankovní účty a avíza](30_Bankovni_ucty.md),
-[31. Pokladna](32_Pokladna.md) a [26. Platební příkazy](26_Platebni_prikazy.md).
+Viz [29. Banka](29_Banka.md), [30. Bankovní účty a avíza](30_Bankovni_ucty.md),
+[32. Pokladna](32_Pokladna.md) a [26. Platební příkazy](26_Platebni_prikazy.md).
 
 ### 1.5.8 Upomínky a chybějící doklady
 
 - **Manuální tlačítko** „Poslat upomínku" v detailu faktury
 - **Hromadná akce** „Upomenout vybrané" v seznamu
 - **Cron**: denní automatické upomínky podle pravidel (X dní po splatnosti)
-- **Cooldown**: žádná druhá upomínka dřív než za 14 dní (anti-spam)
-- **Šablony**: jiné znění pro 1., 2., 3. upomínku
+- **Odstup automatických upomínek**: výchozí 7 dní, lze změnit při spuštění
+  cronu. Ruční a hromadné odeslání tento odstup neuplatňuje
+- **Šablony**: samostatná pro běžnou fakturu a proformu; pořadí upomínky
+  je dostupné jako proměnná
 - **Žádost o chybějící doklad**: účetní označí, co chybí, a systém klientovi
   sám připomíná, dokud se doklad neobjeví
 
@@ -327,7 +337,7 @@ zápis vznikají ze stejné události, takže se ta dvě čísla nemají jak roz
   popisky, výrobci, tagy, cenotvorba a marže, hromadný import, archivace místo
   mazání; skladová karta a karta zboží jsou provázané
 
-Viz [35. Sklad](37_Sklad.md) a [36. E-shop](38_Eshop.md).
+Viz [37. Sklad](37_Sklad.md) a [38. E-shop](38_Eshop.md).
 
 ### 1.5.10 Účetnictví - deník, hlavní kniha, sestavy
 
@@ -343,8 +353,8 @@ vede tu formu, která jí přísluší:
 - **Náhled dokladu** přímo z deníku
 - **Storno místo mazání**, auditní stopa zůstává
 
-Viz [46. Průvodce účetního](50_Pruvodce_ucetniho.md),
-[48. Účetní deník](52_Ucetni_denik.md),
+Viz [50. Průvodce účetního](50_Pruvodce_ucetniho.md),
+[52. Účetní deník](52_Ucetni_denik.md),
 [účtový rozvrh](66_Ucetni_osnova.md),
 [hlavní kniha](55_Hlavni_kniha.md),
 [rozvaha](57_Rozvaha.md),
@@ -369,7 +379,7 @@ Opakovanou práci odvede systém, vy ji potvrdíte:
   a rozpadu saldokonta
 - **Ranní souhrn e-mailem** a u každého zápisu dohledatelné, co ho způsobilo
 
-Viz [49. Automat účtování](53_Automat.md).
+Viz [53. Automat účtování](53_Automat.md).
 
 ### 1.5.12 Účetní kontroly a inventarizace
 
@@ -383,7 +393,7 @@ nesedí, ale ukážou konkrétní doklad:
 - **Audit kurzů (ČNB)**
 - **Kontrola integrity deníku** na pozadí hlídá, že strana MD odpovídá straně D
 
-Viz [62. Účetní kontroly a inventarizace](46_Ucetni_kontroly_a_inventarizace.md).
+Viz [46. Účetní kontroly a inventarizace](46_Ucetni_kontroly_a_inventarizace.md).
 
 ### 1.5.13 DPH, kontrolní a souhrnné hlášení
 
@@ -396,8 +406,8 @@ Viz [62. Účetní kontroly a inventarizace](46_Ucetni_kontroly_a_inventarizace.
   a plánované faktury, skutečnost a odhad ale zůstávají oddělené
 - **Vývoj DPH za dvanáct měsíců** na jedné obrazovce
 
-Viz [39. Výkazy DPH](41_Vykazy_DPH.md), [40. Kniha DPH](42_Kniha_DPH.md) a
-[42. Souhrnné hlášení](44_Souhrnne_hlaseni.md).
+Viz [41. Výkazy DPH](41_Vykazy_DPH.md), [42. Kniha DPH](42_Kniha_DPH.md) a
+[44. Souhrnné hlášení](44_Souhrnne_hlaseni.md).
 
 ### 1.5.14 Daň z příjmů - průběžně, ne až v březnu
 
@@ -419,9 +429,9 @@ zaplatíme" existuje odpověď v systému:
 - **Daňový optimalizátor**: porovnání režimů a predikce ročních limitů
 
 Díky tomu se dá daňová optimalizace řešit v říjnu, ne v březnu, kdy už je pozdě.
-Viz [41. Daň z příjmů](43_Dan_z_prijmu.md),
-[93. EPO podání, archív a rekonciliace](49_Archiv_podani_a_rekonciliace.md) a
-[44. Daňový optimalizátor](47_Danovy_optimalizator.md).
+Viz [43. Daň z příjmů](43_Dan_z_prijmu.md),
+[49. EPO podání, archív a rekonciliace](49_Archiv_podani_a_rekonciliace.md) a
+[47. Daňový optimalizátor](47_Danovy_optimalizator.md).
 
 > [!WARNING]
 > **Daňové výstupy jsou pomůcka.** Před podáním je vždy ověřte s účetní nebo
@@ -453,7 +463,7 @@ mimo jiné:
 - **Rozdělení výsledku hospodaření** z účtu `431` na `428/421/364`
 
 Na konci vznikne **závěrkový balíček** a nový rok se otevře automaticky včetně
-řad dokladů. Viz [91. Účetní období a uzávěrka](72_Uzaverka.md).
+řad dokladů. Viz [72. Účetní období a uzávěrka](72_Uzaverka.md).
 
 ### 1.5.16 Majetek, mzdy, kniha jízd a dokumenty
 
@@ -472,9 +482,9 @@ Agendy, kvůli kterým účetní v jednodušších systémech vede paralelní ta
 - **Kniha jízd**: vozidla, cesty, tankování a daňové souhrny
 - **Dokumenty**: archiv s fulltextem a přiřazením k dokladům
 
-Viz [63. Úplné mzdy](75_Uplne_mzdy.md), [60. Mzdová rekapitulace](64_Mzdy.md),
-[61. Majetek a odpisy](28_Majetek.md), [34. Kniha jízd](36_Kniha_jizd.md)
-a [32. Dokumenty](34_Dokumenty.md).
+Viz [75. Úplné mzdy](75_Uplne_mzdy.md), [64. Mzdová rekapitulace](64_Mzdy.md),
+[28. Majetek a odpisy](28_Majetek.md), [36. Kniha jízd](36_Kniha_jizd.md)
+a [34. Dokumenty](34_Dokumenty.md).
 
 ### 1.5.17 Exporty, importy a API
 
@@ -503,12 +513,12 @@ Nad tím vším je **REST API v1 popsané specifikací OpenAPI 3.1** s tokenovou
 autentizací a výběrem firmy hlavičkou `X-Supplier-Id`. Napojí se na
 něj e-shop, CRM, BI nástroj i automatizační platforma typu Make nebo Zapier.
 Viz [103. REST API](103_API.md), [20. Exporty](20_Exporty.md),
-[21. Importy](21_Importy.md) a [45. Hromadný export](48_Hromadny_export.md).
+[21. Importy](21_Importy.md) a [48. Hromadný export](48_Hromadny_export.md).
 
 ### 1.5.18 Multi-supplier - víc firem z jedné instalace
 
-Z jedné instalace MyÚčto můžete fakturovat za **libovolný počet
-dodavatelů** (firem / IČO) s plně izolovanými daty:
+Z jedné instalace MyÚčto můžete fakturovat za **více dodavatelů**
+(firem / IČO) v rozsahu zakoupené licence, s plně izolovanými daty:
 
 - Vlastní číselné řady, klienti, zakázky a faktury per dodavatel
 - Vlastní logo, bankovní účty, SMTP, DKIM klíče
@@ -535,13 +545,13 @@ Viz [95. Více dodavatelů](95_Multi_supplier.md).
 - **Zálohování** databáze, dokladů i dokumentů, volitelně šifrované
 
 Viz [96. Nastavení](96_Nastaveni.md),
-[100. Elektronické podpisy](99_Elektronicke_podpisy.md) a
-[106. Aktualizace](102_Aktualizace.md).
+[99. Elektronické podpisy](99_Elektronicke_podpisy.md) a
+[102. Aktualizace](102_Aktualizace.md).
 
 ### 1.5.20 Bezpečnost
 
 Bezpečnost má dvě roviny: **kdo se dostane dovnitř** a **co se uvnitř může
-stát s účetnictvím** (detail v [102. Bezpečnost](101_Bezpecnost.md)).
+stát s účetnictvím** (detail v [101. Bezpečnost](101_Bezpecnost.md)).
 
 **Přístup a přihlášení**
 
@@ -577,7 +587,10 @@ stát s účetnictvím** (detail v [102. Bezpečnost](101_Bezpecnost.md)).
   (amd64 + arm64), připravený pro běžné nasazení přes Docker Compose
 - **Nativní nasazení** na IIS i Apache, s volitelným Redisem
 - **Migrace** přes `php api/bin/migrate.php`, verzované a idempotentní
-- **Backup** = `mysqldump` + `tar` adresáře s PDF; obnovení obrácený postup
+- **Zálohy** zahrnují databázi i souborové agendy: PDF, dokumenty, přílohy
+  deníku, mzdy a personální spisy. Zálohujte také konfiguraci a šifrovací
+  klíče. Přehled a kontrolu záloh najdete v [Po instalaci](05_Po_instalaci.md)
+  a [Aktualizacích](102_Aktualizace.md)
 
 Viz [3. Instalace - Docker](03_Instalace_Docker.md) a
 [4. Instalace - Nativní](04_Instalace_Nativni.md).

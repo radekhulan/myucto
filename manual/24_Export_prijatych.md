@@ -80,7 +80,7 @@ z dat v MyÚčto.cz. Originál od dodavatele je referenční dokument."*
 
 ### 24.6.2 ISDOC XML
 
-Export je ve standardu ISDOC 6.0, kompatibilním s Pohodou, Money S3, iDokladem
+Export je ve standardu ISDOC 6.0.2, kompatibilním s Pohodou, Money S3, iDokladem
 a dalšími. Používá se **inverze rolí**: v ISDOC přijaté faktury je *dodavatel*
 původní vendor a *zákazník* je vaše firma (opak vystavené faktury).
 Platební údaje obsahují evidovaný bankovní účet dodavatele a variabilní symbol.
@@ -94,7 +94,8 @@ faktury v MyÚčtu (například `PF2607002`) zůstává oddělené v
 ### 24.6.3 Pohoda XML
 
 Pohoda dataPack XML pro import do účetního programu Pohoda. Směr dokladu je
-přijatý (`<pur:purchase>` místo `<inv:invoice>`). V Pohodě soubor otevřete přes
+přijatý: element `<inv:invoice>` obsahuje typ přijatého dokladu
+v `invoiceType` (`received*`). V Pohodě soubor otevřete přes
 `Soubor → Datová komunikace → XML import`.
 
 ### 24.6.4 Pravidla hromadného exportu

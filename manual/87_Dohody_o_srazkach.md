@@ -35,7 +35,14 @@
 4. Zvolte **Druh srážky** a **Pořadí** (10 až 9999).
 5. V **Zadání částky** zvolte **Pevná částka**, nebo **Procento ze základu**
    s **Základ pro procento (Kč)**. Volitelně vyplňte **Celkový limit (Kč)**.
+   Při přechodu z jiného programu doplňte **Sraženo předchozím programem (Kč)**;
+   jde o již provedené srážky, nikoli částku k nové výplatě.
 6. Vyplňte **Účinnost od**, případně **Účinnost do**, a **Příjemce srážky**.
+   U dohod o srážkách v sekci **Měsíční hlášení JMHZ (zaměstnanci OZP)**
+   rozhodněte, zda je
+   věřitelem zaměstnavatel nebo třetí osoba. U zaměstnavatele vyberte
+   **Vykázat v JMHZ jako** (10350 až 10353). Význam a rozsah této evidence
+   vysvětluje [§ 85.14.11](85_Podani_a_hlaseni.md#851411-zmrazeni-odeslani-a-protokol-jmhz).
 7. Chcete-li srážet hned, zaškrtněte **Rovnou aktivovat**.
 8. Klikněte na **Uložit**.
 9. V prvním dotčeném mzdovém běhu zkontrolujte výpočet srážky a závazek
@@ -65,7 +72,7 @@ odpovídá akci. Sražené částky v **Pohyby srážek** zůstanou.
 |---|---|---|
 | „Dohodu mezitím změnil někdo jiný." | Dohodu mezitím změnil jiný uživatel nebo přibyl pohyb | Formulář se načetl znovu; zkontrolujte hodnoty a uložte znovu. |
 | „U srážky ze zákona vyplň den zahájení srážek" | U srážky podle § 147 chybí **Den zahájení srážek** | Vyplňte ho, určuje pořadí vůči exekucím. |
-| Srážka se ve mzdě neprovedla nebo je nižší | Dohoda není aktivní a účinná v období, je vyčerpaný limit, nebo nezbyla volná kapacita po zákonných srážkách | Zkontrolujte stav, účinnost a limit; kapacitu ukáže výsledek srážek ve mzdovém běhu. |
+| Srážka se ve mzdě neprovedla nebo je nižší | Dohoda není aktivní a účinná v období, je vyčerpaný limit, nebo na ni podle pořadí nezbyla kapacita | Zkontrolujte stav, účinnost a limit; kapacitu ukáže výsledek srážek ve mzdovém běhu. |
 | Srážka se sráží dvakrát | K aktivní dohodě je zadaná i ruční srážka ve vstupech | Ruční vstup odstraňte. |
 | Dohodu nejde uložit | Máte k mzdovým vstupům jen právo ke čtení | Požádejte o oprávnění k zápisu. |
 | Srážka pokračuje po dosažení limitu | Limit není vyplněný | Doplňte **Celkový limit (Kč)**, nebo dohodu ukončete. |
@@ -88,11 +95,15 @@ Srážky ze zákona podle § 147 odst. 1 se do zápočtového listu jako pokrač
 nepřenášejí: jsou to pohledávky tohoto zaměstnavatele a další plátce mzdy je
 srážet nesmí (viz [Zaměstnanci, skončení vztahu](86_Zamestnanci.md#861217-skonceni-vztahu)).
 
-Pořadí zadáváte v rozsahu 10 až 9999. Uvnitř dohod rozhoduje toto pořadí, vůči
-exekucím den doručení. Nižší pásmo je vyhrazené zákonným a exekučním srážkám,
-takže dobrovolná dohoda nikdy nepředběhne přednostní pohledávku ani neobejde
-nezabavitelnou částku: výpočet ji vždy omezí volnou kapacitou po zákonných
-srážkách. Je-li uplatněný nárok na vyživovanou osobu nedoložený, mzdový běh
+Nejdřív rozhoduje **den doručení dohody nebo zahájení zákonné srážky**.
+Při stejném dni mají zákonné tituly přednost v pořadí c), d), e), potom
+rozhoduje ruční **Pořadí** (10 až 9999). Stejná skupina se při nedostatku
+kapacity uspokojí poměrně. Dohoda bez data se řadí za dohody s datem;
+nižší ruční číslo datum nepřebije.
+
+Dohoda doručená před exekučním příkazem může soutěžit v obecné nepřednostní
+části. Nejde proto vždy jen o zbytek po všech exekucích. Výpočet dál
+respektuje nezabavitelnou částku a pravidla přednostních pohledávek. Je-li uplatněný nárok na vyživovanou osobu nedoložený, mzdový běh
 nepustí dohody do vyčerpání kapacity (viz [Srážky a exekuce](88_Srazky_a_exekuce.md#88123-manzel-a-nezabavitelna-castka-dolozeny-duchod)).
 
 ### 87.6.2 Částka, limit a stavy
@@ -100,7 +111,9 @@ nepustí dohody do vyčerpání kapacity (viz [Srážky a exekuce](88_Srazky_a_e
 Dohoda má titul, příjemce, druh (**Záloha**, **Stravování**, **Příspěvek**,
 **Náhrada škody**, **Jiná srážka**, případně **Srážka z podkladů (bez dohody
 podle OZ)** z importu docházky), pořadí, částku a účinnost od-do. Volitelný
-celkový limit po vyčerpání srážku zastaví. Při zadání procentem se z procenta
+celkový limit po vyčerpání srážku zastaví. Ze zbývajícího limitu se odečítají
+vlastní srážky i částka **Sraženo předchozím programem (Kč)**. Ta nesmí být
+záporná ani vyšší než vyplněný limit a znovu se nesráží. Při zadání procentem se z procenta
 a základu uloží pevná částka, protože mzdový běh zmrazuje podklady dřív, než
 zná výsledný příjem.
 

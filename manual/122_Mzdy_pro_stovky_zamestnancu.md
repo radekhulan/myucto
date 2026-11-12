@@ -489,6 +489,12 @@ pod ním je sedm kroků se stavem, počtem a jedním hlavním tlačítkem. Prův
 nic nepočítá ani neukládá, jen posílá na místo práce
 ([§ 80.2a](80_Mzdove_behy.md#802a-pruvodce-mesicem-mezd)).
 
+Měsíc před začátkem vedení mezd ukáže vysvětlení a tlačítko
+**Otevřít MM/RRRR** na první vedené období. Starší měsíce řešte jako
+převzaté stavy. U haléřových vstupů použijte **Zaokrouhlit vstupy na celé
+koruny**; otevře se záložka **Měsíční vstupy** ve stejném měsíci, kde částky
+zkontrolujete a upravíte.
+
 <!-- cols: 26 40 34 -->
 | Krok | Co sledovat u stovek lidí | Hlavní tlačítko |
 |---|---|---|

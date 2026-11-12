@@ -42,7 +42,7 @@ Hlavní kniha zahrnuje rozvahové, výsledkové, uzávěrkové i podrozvahové �
 3. Klikněte na doklad. Otevře se prvotní doklad.
 4. Přesahuje-li měsíc 200 řádků, klikněte v patičce na **Načíst další**.
 5. Chcete-li vidět celý účet, klikněte na **kód účtu**. Otevře se karta účtu se zachovaným rozsahem **Od / Do**. Odtud otevřete **Opis účtu**.
-6. V opisu čtěte sloupec **Zůstatek**, což je běžící saldo. Kladný zůstatek znamená MD, záporný Dal.
+6. V opisu čtěte sloupec **Zůstatek**, což je běžící saldo. Aktiva a náklady se zobrazují jako MD minus Dal, pasiva, vlastní kapitál a výnosy jako Dal minus MD. Znaménko proto posuzujte podle typu účtu, viz [§ 55.8.5](#5585-opis-uctu).
 
 **Jak poznáte, že je hotovo:** Součet řádků opisu odpovídá zůstatku účtu v knize.
 
@@ -211,8 +211,8 @@ PS, obrat MD, obrat Dal a KS. Je-li opis složený z víc analytik, přibude
 sloupec **Analytika** s odkazem na kartu příslušného účtu.
 
 Pohyby jsou řazené podle data, ID zápisu a čísla řádku. Sloupec **Zůstatek**
-je běžící saldo `PS + MD − Dal` počítané nad celým rozsahem, takže navazuje
-správně i na dalších stránkách. Výchozí stránka má 50 řádků.
+je běžící saldo počítané z počátečního stavu a pohybů nad celým rozsahem,
+se znaménkem podle typu účtu, takže navazuje správně i na dalších stránkách. Výchozí stránka má 50 řádků.
 
 Zůstatek v opisu je se znaménkem podle typu účtu: aktiva a náklady `MD − Dal`,
 pasiva, vlastní kapitál a výnosy `Dal − MD`. Běžný zůstatek je tak kladný. Stranu
