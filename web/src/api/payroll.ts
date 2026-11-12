@@ -2670,9 +2670,9 @@ export interface PayrollEmploymentSurchargePolicyPayload
 /**
  * Oprava OTEVŘENÉ verze zásady.
  *
- * `valid_from` tu chybí schválně: účinnost je hranice proti předchozí, uzavřené
- * verzi, jejíž konec je z ní odvozený. Jiná účinnost znamená novou verzi, ne
- * opravu — server hodnotu z těla ignoruje.
+ * `valid_from` tu chybí schválně: server ho z opravy ignoruje. Začátek
+ * nepoužité verze se posouvá vlastní operací
+ * (`moveEmploymentSurchargePolicyStart`), která posune i hranici předchozí verze.
  */
 export interface PayrollEmploymentSurchargePolicyUpdatePayload
   extends Record<string, unknown>, PayrollSurchargeFixedHourlyFields {
@@ -10836,6 +10836,14 @@ export const payrollApi = {
     payload: PayrollEmploymentSurchargePolicyUpdatePayload,
   ) => api.put<{ policy: PayrollEmploymentSurchargePolicy }>(
     `/payroll/employments/${employmentId}/surcharge-policies/${policyId}`,
+    payload,
+  ).then(response => response.data.policy),
+  moveEmploymentSurchargePolicyStart: (
+    employmentId: number,
+    policyId: number,
+    payload: { valid_from: string, row_version: number },
+  ) => api.post<{ policy: PayrollEmploymentSurchargePolicy }>(
+    `/payroll/employments/${employmentId}/surcharge-policies/${policyId}/valid-from`,
     payload,
   ).then(response => response.data.policy),
   closeEmploymentSurchargePolicy: (

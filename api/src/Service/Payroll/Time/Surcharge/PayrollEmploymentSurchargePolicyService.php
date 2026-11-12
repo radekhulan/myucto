@@ -197,6 +197,38 @@ final class PayrollEmploymentSurchargePolicyService
     }
 
     /**
+     * Posun začátku platnosti verze, podle které se ještě nepočítalo
+     * ({@see PayrollSurchargeRepository::movePolicyStart()}).
+     *
+     * Sjednání se znovu ověří proti sadě pravidel k novému dni: posun přes
+     * přelom roku nesmí propašovat sazbu pod zákonnou podlahu nového roku.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function moveStart(
+        int $supplierId,
+        int $employmentId,
+        int $policyId,
+        array $input,
+    ): array {
+        $existing = $this->repository->findPolicy($supplierId, $employmentId, $policyId)
+            ?? throw new PayrollSurchargePolicyNotFoundException();
+        $validFrom = self::date($input['valid_from'] ?? null, 'valid_from');
+        $currentFrom = self::date($existing['valid_from'] ?? null, 'valid_from');
+        $data = $this->agreedFields($existing, $validFrom);
+
+        return $this->repository->movePolicyStart(
+            $supplierId,
+            $employmentId,
+            $policyId,
+            $validFrom,
+            self::rowVersion($input),
+            fn() => $this->assertHourlyPolicyWritable($supplierId, $employmentId, min($validFrom, $currentFrom), $data['hourly_terms']),
+        );
+    }
+
+    /**
      * Ukončení platnosti otevřené verze.
      *
      * @param array<string,mixed> $input

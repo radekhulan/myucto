@@ -197,6 +197,39 @@ final class PayrollEmploymentSurchargePolicyAction
         return Json::ok($response, ['policy' => $policy]);
     }
 
+    /**
+     * Posun začátku platnosti verze, podle které se ještě nepočítalo.
+     *
+     * @param array<string,string> $args
+     */
+    public function moveStart(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $employmentId = (int) ($args['id'] ?? 0);
+        if (!$this->repository->employmentExists($supplierId, $employmentId)) {
+            return Json::error($response, 'not_found', 'Pracovní vztah nebyl nalezen.', 404);
+        }
+        $policyId = (int) ($args['policyId'] ?? 0);
+
+        try {
+            $policy = $this->service->moveStart(
+                $supplierId,
+                $employmentId,
+                $policyId,
+                $this->body($request),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+
+        $this->logPolicy($request, 'payroll.employment_surcharge_policy.start_moved', $employmentId, $policy);
+
+        return Json::ok($response, ['policy' => $policy]);
+    }
+
     /** @return array<string,mixed> */
     private function body(Request $request): array
     {

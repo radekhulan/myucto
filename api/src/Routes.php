@@ -2607,6 +2607,12 @@ final class Routes
                 '/employments/{id:[0-9]+}/surcharge-policies/{policyId:[0-9]+}/close',
                 [PayrollEmploymentSurchargePolicyAction::class, 'close'],
             );
+            // Posun začátku verze, podle které se ještě nepočítalo; hranice
+            // s předchozí verzí se posune s ním.
+            $g->post(
+                '/employments/{id:[0-9]+}/surcharge-policies/{policyId:[0-9]+}/valid-from',
+                [PayrollEmploymentSurchargePolicyAction::class, 'moveStart'],
+            );
             $g->get('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'list']);
             $g->post('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'create']);
             // Procentní rozpad vztahu na víc hodnot jednoho typu (70 / 30) — celý

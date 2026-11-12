@@ -17,11 +17,12 @@ namespace MyInvoice\Repository\Payroll;
  *   * Verze, nad kterou už stojí novější, je uzavřená z definice: její konec
  *     platnosti dopočetl `savePolicy()` z účinnosti nástupkyně.
  *
- * Překlep v SAZBĚ otevřené verze se proto opravuje na místě (`update`), ale
- * překlep v datu účinnosti nikoli: `valid_from` je hranice proti PŘEDCHOZÍ,
- * uzavřené verzi, jejíž `valid_to` je z něj odvozené. Posunout ji znamená
- * sáhnout na historii a vyrobit v ní díru nebo překryv. Jiná účinnost = nová
- * verze, ne oprava.
+ * Překlep v SAZBĚ otevřené verze se proto opravuje na místě (`update`).
+ * Datum účinnosti je hranice proti PŘEDCHOZÍ verzi, jejíž `valid_to` je z něj
+ * odvozené, a tak ho oprava obsahu nemění. Posunout ho jde jen vlastní
+ * operací ({@see PayrollSurchargeRepository::movePolicyStart()}), která posune
+ * i navazující hranici a odmítne zásah do měsíce, který už zmrazila revize
+ * běhu. Použitá verze se mění novou verzí.
  */
 final class PayrollSurchargePolicyHistoryLockedException extends \DomainException
 {
