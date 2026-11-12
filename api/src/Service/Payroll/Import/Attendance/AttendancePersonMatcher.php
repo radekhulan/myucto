@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Import\Attendance;
 
+use MyInvoice\Service\Payroll\PayrollPeriodLabel;
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollImportLinkRepository;
 use MyInvoice\Service\Payroll\CzechBirthNumber;
@@ -61,7 +62,7 @@ final class AttendancePersonMatcher
             }
         }
         $links = $this->links->all($supplierId, AttendanceMeaning::SOURCE_SYSTEM);
-        $period = substr($periodStart, 0, 7);
+        $period = PayrollPeriodLabel::monthYear($periodStart);
         $persons = $this->withIdentityKeys($supplierId, $persons);
         $facts = $this->imports->identityFacts($supplierId, array_keys($byEmployee));
 

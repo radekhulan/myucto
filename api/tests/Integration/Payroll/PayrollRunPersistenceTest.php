@@ -3169,8 +3169,8 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->service->createRun($this->supplierId, '2026-06-01', '2026-07-15', null, $this->actors[0]);
             self::fail('Běh před prvním mzdovým obdobím nesmí vzniknout.');
         } catch (\DomainException $e) {
-            self::assertStringContainsString('Období 2026-06 předchází prvnímu mzdovému období', $e->getMessage());
-            self::assertStringContainsString('(2026-08)', $e->getMessage());
+            self::assertStringContainsString('Období 06/2026 předchází prvnímu mzdovému období', $e->getMessage());
+            self::assertStringContainsString('(08/2026)', $e->getMessage());
             self::assertStringContainsString('Mzdy → Přehled mezd', $e->getMessage());
         }
 
@@ -3991,7 +3991,7 @@ final class PayrollRunPersistenceTest extends TestCase
             '#' . (int) $first['id'],
             $warnings[0]['message'],
         );
-        self::assertStringContainsString('2026-06', $warnings[0]['message']);
+        self::assertStringContainsString('06/2026', $warnings[0]['message']);
     }
 
     private function seedOfficeForDuplicateWarning(): int

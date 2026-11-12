@@ -767,7 +767,7 @@ final class AttendanceImportServiceTest extends TestCase
             self::fail('Podklady jiného měsíce se bez potvrzení nesmí použít.');
         } catch (AttendanceSourceConfirmationRequired $e) {
             self::assertTrue($e->checks['period']['mismatch']);
-            self::assertStringContainsString('2026-05', $e->getMessage());
+            self::assertStringContainsString('05/2026', $e->getMessage());
         }
         self::assertSame(0, $this->countRows('SELECT COUNT(*) FROM payroll_attendance_imports WHERE supplier_id = ?', [$this->supplierId]));
 

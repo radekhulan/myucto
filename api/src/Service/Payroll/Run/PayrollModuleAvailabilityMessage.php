@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Run;
 
+use MyInvoice\Service\Payroll\PayrollPeriodLabel;
+
 /**
  * Hlášky, proč za období nejde založit mzdový běh, i s tím, kde se to napraví.
  *
@@ -32,8 +34,8 @@ final class PayrollModuleAvailabilityMessage
                 . 'za něj proto nejde založit. Měsíce zpracované v předchozím programu patří do '
                 . 'počátečních stavů kumulací u zaměstnanců. Pokud má tenhle měsíc spočítat MyÚčto, '
                 . 'změňte první mzdové období v Mzdy → Přehled mezd.',
-            substr($periodStart, 0, 7),
-            substr($startPeriod, 0, 7),
+            PayrollPeriodLabel::monthYear($periodStart),
+            PayrollPeriodLabel::monthYear($startPeriod),
         );
     }
 }

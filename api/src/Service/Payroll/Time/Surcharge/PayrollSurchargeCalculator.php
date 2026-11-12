@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Time\Surcharge;
 
+use MyInvoice\Service\Payroll\PayrollPeriodLabel;
 use MyInvoice\Service\Payroll\Absence\MinimumWageFloor;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 
@@ -83,7 +84,7 @@ final class PayrollSurchargeCalculator
                         'Příplatek %s se počítá z průměrného výdělku, který pro období %s '
                         . 'není zjištěný. Zjistěte ho a výpočet zopakujte.',
                         $kind->section(),
-                        $periodStart,
+                        PayrollPeriodLabel::monthYear($periodStart),
                     ),
                 );
             }

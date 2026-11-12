@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Run;
 
+use MyInvoice\Service\Payroll\PayrollPeriodLabel;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\PayrollHourlyWageComponents;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind;
@@ -1352,7 +1353,7 @@ final class PayrollRunReadinessService
                 . 'spočítají i bez nich, ale bez nich nepůjde podat přihlášku ani měsíční '
                 . 'hlášení; doplňte je před podáním. Odkaz u osoby otevře místo, kde '
                 . 'se údaj doplňuje.',
-                substr($periodStart, 0, 7),
+                PayrollPeriodLabel::monthYear($periodStart),
                 implode('; ', $named),
                 $hidden > 0 ? sprintf(' a dalších %d', $hidden) : '',
             ),
@@ -1483,8 +1484,8 @@ final class PayrollRunReadinessService
                 . 'patří do počátečních stavů kumulací u zaměstnanců, ne do mzdových běhů. '
                 . 'Pokud má tenhle měsíc spočítat MyÚčto, změňte první mzdové období '
                 . 'v Mzdy → Aktivace mzdové agendy.',
-                substr($periodStart, 0, 7),
-                (string) $startPeriod,
+                PayrollPeriodLabel::monthYear($periodStart),
+                PayrollPeriodLabel::monthYear((string) $startPeriod),
             ),
             '/payroll',
             1,
@@ -1509,8 +1510,8 @@ final class PayrollRunReadinessService
                 . 'politika. Otevřete Mzdy → Nastavení zaměstnavatele → '
                 . 'Mzdové politiky a založte politiku účinnou od %s; bez ní '
                 . 'se mzdový běh nedá zahájit.',
-                substr($periodStart, 0, 7),
-                $periodStart,
+                PayrollPeriodLabel::monthYear($periodStart),
+                (new \DateTimeImmutable($periodStart))->format('j. n. Y'),
             );
         } catch (\Throwable $e) {
             // Překryv dvou politik má vlastní výjimku — je to taky nález, jen
