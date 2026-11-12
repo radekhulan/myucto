@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 const m = vi.hoisted(() => ({
   candidates: vi.fn(),
   prepare: vi.fn(),
+  defaults: vi.fn(),
   canWrite: vi.fn(() => true),
 }))
 
@@ -11,6 +12,7 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     registrationA1Candidates: m.candidates,
     prepareRegistrationA1Batch: m.prepare,
+    setRegistrationA1Defaults: m.defaults,
   },
 }))
 
@@ -171,5 +173,42 @@ describe('PayrollRegistrationA1BatchPanel', () => {
       .toBe(true)
     expect((wrapper.get('[data-test="registration-a1-select-all"]').element as HTMLInputElement).disabled)
       .toBe(true)
+  })
+
+  it('sets shared A1 defaults for incomplete profiles in the period and reloads the list', async () => {
+    m.defaults.mockResolvedValue({
+      results: [{ employment_id: 6, status: 'verified', changed: ['employment.position_name'], message: null, problems: [] }],
+      counts: { verified: 1, draft: 0, skipped: 0, failed: 0 },
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-a1-defaults"]').text()).toContain('"count":1')
+    await wrapper.get('[data-test="registration-a1-defaults-toggle"]').trigger('click')
+    await wrapper.get('[data-test="registration-a1-defaults-position"]').setValue('Promotér')
+    await wrapper.get('[data-test="registration-a1-defaults-apply"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.defaults).toHaveBeenCalledWith({
+      employment_ids: [6],
+      defaults: {
+        work_mode_code: '1',
+        continuous_operation: false,
+        workplace_city: null,
+        position_name: 'Promotér',
+        leadership: false,
+      },
+      overwrite: false,
+      split_house_number: true,
+    })
+    expect(m.candidates).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-test="registration-a1-defaults-result"]').text()).toContain('"verified":1')
+  })
+
+  it('hides shared A1 defaults without write permission', async () => {
+    m.canWrite.mockReturnValue(false)
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-test="registration-a1-defaults"]').exists()).toBe(false)
   })
 })

@@ -40,6 +40,10 @@ final class AgreementImportService
 {
     private const MAX_PERSONS_PER_REQUEST = 200;
 
+    public const STATUSES = ['create', 'exists', 'duplicate', 'error'];
+    public const OUTCOMES = ['created', 'existing', 'skipped', 'failed'];
+    public const RELATION_TYPES = ['dpp', 'dpc', 'employment', 'small_scale_employment'];
+
     private const RELATION_LABELS = [
         'dpp' => 'DPP',
         'dpc' => 'DPČ',

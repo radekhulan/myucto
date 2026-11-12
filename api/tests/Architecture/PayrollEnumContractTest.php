@@ -197,6 +197,12 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::ALL',
         'payrollImports.ts::AttendanceMatchStatus'
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::MATCH_STATUSES',
+        'payrollImports.ts::AgreementImportStatus'
+            => 'const:MyInvoice\Service\Payroll\Import\Agreement\AgreementImportService::STATUSES',
+        'payrollImports.ts::AgreementImportOutcome'
+            => 'const:MyInvoice\Service\Payroll\Import\Agreement\AgreementImportService::OUTCOMES',
+        'payrollImports.ts::AgreementRelationType'
+            => 'const:MyInvoice\Service\Payroll\Import\Agreement\AgreementImportService::RELATION_TYPES',
         'payroll.ts::PayrollAgreementAnnualHoursStatus'
             => 'const:MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours::STATUSES',
         'payroll.ts::PayrollDeclarationSignState'

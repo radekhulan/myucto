@@ -5784,6 +5784,25 @@ export interface PayrollRegistrationA1BatchResult {
   }>
 }
 
+export interface PayrollRegistrationA1Defaults {
+  work_mode_code?: string | null
+  continuous_operation?: boolean | null
+  workplace_city?: string | null
+  position_name?: string | null
+  leadership?: boolean | null
+}
+
+export interface PayrollRegistrationA1DefaultsResult {
+  results: Array<{
+    employment_id: number
+    status: 'verified' | 'draft' | 'skipped' | 'failed'
+    changed: string[]
+    message: string | null
+    problems: Array<{ field: string | null, code: string, message: string }>
+  }>
+  counts: Record<'verified' | 'draft' | 'skipped' | 'failed', number>
+}
+
 /** Varování před podáním, které podání neblokuje (překryv 603/604). */
 export interface PayrollRegistrationWarning {
   code: string
@@ -10472,6 +10491,15 @@ export const payrollApi = {
   ) => api.get<PayrollRegistrationA1Candidates>(
     '/payroll/submissions/registration-a1',
     { params: { environment, ...period } },
+  ).then(response => response.data),
+  setRegistrationA1Defaults: (payload: {
+    employment_ids: number[]
+    defaults: PayrollRegistrationA1Defaults
+    overwrite: boolean
+    split_house_number: boolean
+  }) => api.post<PayrollRegistrationA1DefaultsResult>(
+    '/payroll/submissions/registration-a1/defaults',
+    payload,
   ).then(response => response.data),
   prepareRegistrationA1Batch: (payload: {
     environment: PayrollJmhzTransportEnvironment

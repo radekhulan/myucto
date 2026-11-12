@@ -1008,7 +1008,89 @@ export interface PohodaOicApplyResult {
   summary: { applied: number; failed: number; skipped: number }
 }
 
+// ─── Dohody (jen smlouvy, bez docházky) ───────────────────────────────────────
+
+export type AgreementImportStatus = 'create' | 'exists' | 'duplicate' | 'error'
+export type AgreementImportOutcome = 'created' | 'existing' | 'skipped' | 'failed'
+export type AgreementRelationType = 'dpp' | 'dpc' | 'employment' | 'small_scale_employment'
+
+export interface AgreementImportAgreement {
+  key: string
+  sheet: string
+  row: number
+  relation_type: AgreementRelationType | null
+  relation_label: string | null
+  start_on: string | null
+  end_on: string | null
+  status: AgreementImportStatus
+  note: string | null
+  errors: string[]
+  warnings: string[]
+  registration: AttendanceRegistrationItem[]
+}
+
+export interface AgreementImportPerson {
+  key: string
+  display_name: string
+  personal_number: string | null
+  birth_number_masked: string | null
+  birth_date: string | null
+  existing_person: {
+    employee_id: number
+    employee_name: string
+    matched_by: string
+    requires_confirmation: boolean
+  } | null
+  warnings: string[]
+  errors: string[]
+  agreements: AgreementImportAgreement[]
+}
+
+export interface AgreementImportPreview {
+  persons: AgreementImportPerson[]
+  files: { name: string; rows: number; error: string | null }[]
+  summary: {
+    persons: number
+    new_persons: number
+    existing_persons: number
+    confirm: number
+    create: number
+    exists: number
+    errors: number
+  }
+}
+
+export interface AgreementImportResult {
+  results: {
+    person_key: string
+    row_key: string
+    display_name: string
+    relation_type: AgreementRelationType | null
+    start_on: string | null
+    outcome: AgreementImportOutcome
+    employee_id: number | null
+    employment_id: number | null
+    message: string | null
+  }[]
+  counts: Record<AgreementImportOutcome, number>
+}
+
+export const AGREEMENT_TEMPLATE_FILENAME = 'dohody-myucto.xlsx'
+
 export const payrollImportsApi = {
+  previewAgreements: (files: ImportFilePayload[]) =>
+    api.post<AgreementImportPreview>('/payroll/imports/agreements/preview', { files })
+      .then(response => response.data),
+  applyAgreements: (payload: {
+    files: ImportFilePayload[]
+    confirmations: Record<string, number | 'new'>
+    person_keys: string[]
+  }) =>
+    api.post<AgreementImportResult>('/payroll/imports/agreements/apply', payload)
+      .then(response => response.data),
+  downloadAgreementTemplate: () =>
+    downloadApiFile('/payroll/imports/agreements/template', AGREEMENT_TEMPLATE_FILENAME),
+
   previewRegistrations: (payload: RegistrationPreviewPayload) =>
     api.post<RegistrationPreview>('/payroll/imports/registrations/preview', payload)
       .then(response => response.data),

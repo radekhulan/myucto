@@ -13043,6 +13043,28 @@
         "predecessor": "Přihlášku podal předchozí program.",
         "profile_incomplete": "Profil registrace není úplný, přihláška se nepřipravila.",
         "not_found": "Vztah nebyl nalezen nebo už skončil."
+      },
+      "defaults": {
+        "intro": "Neúplný profil A1 má {count} vztahů v období. Společné údaje, které aplikace jinde nevede (režim práce, nepřetržitý provoz, pozice, obec pracoviště, vedoucí pozice), jim můžete nastavit najednou.",
+        "open": "Nastavit společné údaje A1",
+        "close": "Skrýt",
+        "work_mode": "Režim práce",
+        "continuous_operation": "Nepřetržitý provoz",
+        "leadership": "Vedoucí pozice",
+        "position_name": "Název pozice",
+        "workplace_city": "Obec pracoviště",
+        "keep": "Neměnit",
+        "work_modes": {
+          "1": "Jednosměnný",
+          "2": "Dvousměnný",
+          "3": "Vícesměnný",
+          "4": "Neuvedeno"
+        },
+        "split_house_number": "Číslo domu oddělit z ulice („Dlouhá 12/3“ → ulice, číslo popisné a orientační), kde v profilu chybí",
+        "overwrite": "Přepsat i údaje, které už v profilu vyplněné jsou",
+        "apply": "Nastavit u {count} vztahů",
+        "done": "Hotovo: úplný profil {verified}, stále neúplný {draft}, přeskočeno {skipped}, chyba {failed}. Zbývající vady jsou u řádků níže.",
+        "failed": "Společné údaje A1 se nepodařilo nastavit."
       }
     },
     "healthInsurerNotice": {
@@ -36287,6 +36309,7 @@
     "tabs": {
       "label": "Druh importu",
       "registration": "JMHZ",
+      "agreements": "Dohody",
       "attendance": "Docházka",
       "mapping": "Mapování sloupců",
       "pohoda_oic": "OIČ z POHODY",
@@ -37320,7 +37343,70 @@
       }
     },
     "no_access_title": "Žádný import není dostupný",
-    "no_access_description": "K importům mzdových podkladů ani k agendě přechodu z jiného mzdového programu nemáte oprávnění."
+    "no_access_description": "K importům mzdových podkladů ani k agendě přechodu z jiného mzdového programu nemáte oprávnění.",
+    "agreements": {
+      "title": "Import dohod",
+      "hint": "Hromadné uzavření dohod bez docházky: jeden řádek souboru = jedna dohoda nebo pracovní poměr, bez vazby na měsíc. Osobě, která už v evidenci je (podle rodného čísla, uložené vazby nebo osobního čísla), se založí jen nová dohoda, nové osobě karta i dohoda. Vyplněné údaje pro registraci stačí k hromadné přípravě přihlášek A1.",
+      "no_permission": "Zakládat osoby a dohody může jen uživatel s právem zápisu osob ve mzdách.",
+      "drop_hint": "Přetáhněte sem soubor XLSX nebo CSV se šablonou dohod",
+      "preview": "Načíst náhled",
+      "refresh_preview": "Načíst náhled znovu",
+      "template": "Stáhnout šablonu XLSX",
+      "template_hint": "Šablona s hlavičkami, dvěma ukázkovými řádky a návodem ke sloupcům",
+      "preview_failed": "Náhled importu dohod se nepodařilo načíst.",
+      "apply_failed": "Dohody se nepodařilo založit.",
+      "applied": "Založeno dohod: {created}, už existovalo: {existing}, přeskočeno: {skipped}.",
+      "applied_with_errors": "Založeno dohod: {created}, chyb: {failed}, přeskočeno: {skipped}. Zkontrolujte výsledek.",
+      "summary": {
+        "persons": "Osoby",
+        "new_persons": "Nové osoby",
+        "existing_persons": "V evidenci",
+        "confirm": "K potvrzení",
+        "create": "Dohody k založení",
+        "exists": "Už existují",
+        "errors": "Chyby"
+      },
+      "persons_title": "Osoby a dohody ze souboru",
+      "no_rows": "Soubor neobsahuje žádné řádky s dohodami.",
+      "existing": "V evidenci: {name}",
+      "new_person": "Nová osoba",
+      "confirm_legend": "Shoda podle jména a data narození",
+      "confirm_hint": "V evidenci je {name} se stejným jménem a datem narození. Je to tatáž osoba?",
+      "confirm_existing": "Ano, založit jí jen dohody",
+      "confirm_new": "Ne, založit novou osobu",
+      "status": {
+        "create": "Založí se",
+        "exists": "Už existuje",
+        "duplicate": "Opakovaný řádek",
+        "error": "Chyba"
+      },
+      "outcome": {
+        "created": "Založeno",
+        "existing": "Už existovalo",
+        "skipped": "Přeskočeno",
+        "failed": "Chyba"
+      },
+      "relation": {
+        "dpp": "DPP",
+        "dpc": "DPČ",
+        "employment": "Pracovní poměr",
+        "small_scale_employment": "Zaměstnání malého rozsahu"
+      },
+      "open_ended": "od {date}, na dobu neurčitou",
+      "source_row": "{sheet}, řádek {row}",
+      "apply_hint": "Založí se jen řádky ve stavu „Založí se“. Dohody, které osoba už má, ani řádky s chybou se nezakládají; stejný soubor můžete po opravě nahrát znovu.",
+      "apply": "Založit dohody ({count})",
+      "applying": "Zakládám… {done} z {total} osob",
+      "reason": {
+        "no_files": "Nejdřív nahrajte soubor.",
+        "nothing": "V náhledu není žádná dohoda k založení.",
+        "unconfirmed": "Rozhodněte u {count} osob, zda jde o osobu z evidence."
+      },
+      "result_title": "Výsledek založení",
+      "result_summary": "Založeno {created}, už existovalo {existing}, přeskočeno {skipped}, chyb {failed}.",
+      "next_a1": "Přihlášky k pojištění připravíte hromadně v části",
+      "next_a1_link": "Mzdová podání → Přihlášky k podání (A1)"
+    }
   },
   "pamica": {
     "title": "Přechod z PAMICA",
