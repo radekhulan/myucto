@@ -27,14 +27,19 @@ final class SchemaMetadataProviderTest extends TestCase
             }
         }
         $rows = [
-            ['TABLE_NAME' => 'single', 'CONSTRAINT_NAME' => 'alternate_symbol', 'COLUMN_NAME' => 'alternate_id', 'REFERENCED_TABLE_NAME' => 'parent', 'REFERENCED_COLUMN_NAME' => 'id', 'ORDINAL_POSITION' => 1],
-            ['TABLE_NAME' => 'composite', 'CONSTRAINT_NAME' => 'same_symbol', 'COLUMN_NAME' => 'parent_id', 'REFERENCED_TABLE_NAME' => 'parent', 'REFERENCED_COLUMN_NAME' => 'id', 'ORDINAL_POSITION' => 1],
-            ['TABLE_NAME' => 'single', 'CONSTRAINT_NAME' => 'same_symbol', 'COLUMN_NAME' => 'parent_id', 'REFERENCED_TABLE_NAME' => 'parent', 'REFERENCED_COLUMN_NAME' => 'id', 'ORDINAL_POSITION' => 1],
-            ['TABLE_NAME' => 'composite', 'CONSTRAINT_NAME' => 'same_symbol', 'COLUMN_NAME' => 'second_id', 'REFERENCED_TABLE_NAME' => 'parent', 'REFERENCED_COLUMN_NAME' => 'id', 'ORDINAL_POSITION' => 2],
+            ['TABLE_NAME' => 'single', 'CONSTRAINT_NAME' => 'alternate_symbol', 'COLUMN_NAME' => 'alternate_id', 'REFERENCED_TABLE_SCHEMA' => 'app', 'REFERENCED_TABLE_NAME' => 'parent', 'REFERENCED_COLUMN_NAME' => 'id', 'ORDINAL_POSITION' => 1],
+            ['TABLE_NAME' => 'composite', 'CONSTRAINT_NAME' => 'same_symbol', 'COLUMN_NAME' => 'parent_id', 'REFERENCED_TABLE_SCHEMA' => 'app', 'REFERENCED_TABLE_NAME' => 'parent', 'REFERENCED_COLUMN_NAME' => 'id', 'ORDINAL_POSITION' => 1],
+            ['TABLE_NAME' => 'single', 'CONSTRAINT_NAME' => 'same_symbol', 'COLUMN_NAME' => 'parent_id', 'REFERENCED_TABLE_SCHEMA' => 'app', 'REFERENCED_TABLE_NAME' => 'parent', 'REFERENCED_COLUMN_NAME' => 'id', 'ORDINAL_POSITION' => 1],
+            ['TABLE_NAME' => 'composite', 'CONSTRAINT_NAME' => 'same_symbol', 'COLUMN_NAME' => 'second_id', 'REFERENCED_TABLE_SCHEMA' => 'app', 'REFERENCED_TABLE_NAME' => 'parent', 'REFERENCED_COLUMN_NAME' => 'id', 'ORDINAL_POSITION' => 2],
+        ];
+        $rules = [
+            ['TABLE_NAME' => 'single', 'CONSTRAINT_NAME' => 'alternate_symbol', 'UPDATE_RULE' => 'RESTRICT', 'DELETE_RULE' => 'CASCADE'],
+            ['TABLE_NAME' => 'single', 'CONSTRAINT_NAME' => 'same_symbol', 'UPDATE_RULE' => 'RESTRICT', 'DELETE_RULE' => 'RESTRICT'],
+            ['TABLE_NAME' => 'composite', 'CONSTRAINT_NAME' => 'same_symbol', 'UPDATE_RULE' => 'CASCADE', 'DELETE_RULE' => 'SET NULL'],
         ];
         $pdo = $this->createMock(PDO::class);
-        $sequence = [$tables, $columns, $rows];
-        $pdo->expects(self::exactly(3))->method('query')->willReturnCallback(function (string $sql) use (&$sequence): PDOStatement {
+        $sequence = [$tables, $columns, $rows, $rules];
+        $pdo->expects(self::exactly(4))->method('query')->willReturnCallback(function (string $sql) use (&$sequence): PDOStatement {
             self::assertStringNotContainsString('JOIN', strtoupper($sql));
             $statement = $this->createStub(PDOStatement::class);
             $statement->method('fetchAll')->willReturn(array_shift($sequence));
@@ -43,6 +48,8 @@ final class SchemaMetadataProviderTest extends TestCase
         $snapshot = SchemaMetadataProvider::load($pdo);
         self::assertTrue(SchemaMetadataProvider::validSnapshot($snapshot));
         self::assertSame($rows, $snapshot['foreignKeyRows']);
+        self::assertSame(['DELETE_RULE' => 'SET NULL', 'UPDATE_RULE' => 'CASCADE'], $snapshot['referentialRules']["composite\0same_symbol"]);
+        self::assertCount(3, $snapshot['referentialRules']);
         self::assertSame(['single' => [
             ['column' => 'parent_id', 'refTable' => 'parent', 'refColumn' => 'id', 'nullable' => true],
             ['column' => 'alternate_id', 'refTable' => 'parent', 'refColumn' => 'id', 'nullable' => true],
@@ -64,7 +71,7 @@ final class SchemaMetadataProviderTest extends TestCase
         $pdo = $this->createMock(PDO::class);
         $statement = $this->createStub(PDOStatement::class);
         $statement->method('fetchAll')->willReturn([]);
-        $pdo->expects(self::exactly(3))->method('query')->willReturn($statement);
+        $pdo->expects(self::exactly(4))->method('query')->willReturn($statement);
         $this->expectException(RuntimeException::class);
         SchemaMetadataProvider::load($pdo);
     }

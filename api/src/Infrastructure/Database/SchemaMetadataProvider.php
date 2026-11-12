@@ -31,7 +31,7 @@ final class SchemaMetadataProvider
 
     public static function validSnapshot(array $snapshot): bool
     {
-        foreach (['tables', 'columns', 'primaryKeys', 'foreignKeys', 'foreignKeyRows'] as $key) {
+        foreach (['tables', 'columns', 'primaryKeys', 'foreignKeys', 'foreignKeyRows', 'referentialRules'] as $key) {
             if (!is_array($snapshot[$key] ?? null)) {
                 return false;
             }
@@ -81,10 +81,15 @@ final class SchemaMetadataProvider
             if (!is_array($row)) {
                 return false;
             }
-            foreach (['TABLE_NAME', 'CONSTRAINT_NAME', 'COLUMN_NAME', 'REFERENCED_TABLE_NAME', 'REFERENCED_COLUMN_NAME'] as $field) {
+            foreach (['TABLE_NAME', 'CONSTRAINT_NAME', 'COLUMN_NAME', 'REFERENCED_TABLE_SCHEMA', 'REFERENCED_TABLE_NAME', 'REFERENCED_COLUMN_NAME'] as $field) {
                 if (!is_string($row[$field] ?? null)) {
                     return false;
                 }
+            }
+        }
+        foreach ($snapshot['referentialRules'] as $key => $rule) {
+            if (!is_string($key) || !is_array($rule) || !is_string($rule['DELETE_RULE'] ?? null) || !is_string($rule['UPDATE_RULE'] ?? null)) {
+                return false;
             }
         }
         return true;
@@ -111,7 +116,11 @@ final class SchemaMetadataProvider
                 }
             }
         }
-        $foreignKeyRows = self::rows($pdo, 'SELECT TABLE_NAME, CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME, ORDINAL_POSITION FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL');
+        $foreignKeyRows = self::rows($pdo, 'SELECT TABLE_NAME, CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_SCHEMA, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME, ORDINAL_POSITION FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME IS NOT NULL');
+        $referentialRules = [];
+        foreach (self::rows($pdo, 'SELECT TABLE_NAME, CONSTRAINT_NAME, UPDATE_RULE, DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE()') as $row) {
+            $referentialRules[$row['TABLE_NAME'] . "\0" . $row['CONSTRAINT_NAME']] = ['DELETE_RULE' => $row['DELETE_RULE'], 'UPDATE_RULE' => $row['UPDATE_RULE']];
+        }
         $counts = [];
         foreach ($foreignKeyRows as $row) {
             $counts[$row['TABLE_NAME']][$row['CONSTRAINT_NAME']] = ($counts[$row['TABLE_NAME']][$row['CONSTRAINT_NAME']] ?? 0) + 1;
@@ -146,7 +155,7 @@ final class SchemaMetadataProvider
                 throw new RuntimeException('Databázové schéma se během načítání změnilo.');
             }
         }
-        return compact('tables', 'columns', 'primaryKeys', 'foreignKeys', 'foreignKeyRows');
+        return compact('tables', 'columns', 'primaryKeys', 'foreignKeys', 'foreignKeyRows', 'referentialRules');
     }
 
     private static function rows(PDO $pdo, string $sql): array

@@ -39,10 +39,12 @@ final class NonprofitTaxJournalOverheadTest extends TestCase
 
     public function testJournalTablesHaveNoNonprofitTaxTriggers(): void
     {
-        $stmt = $this->pdo->query("SELECT TRIGGER_NAME FROM information_schema.TRIGGERS
-            WHERE TRIGGER_SCHEMA=DATABASE() AND EVENT_OBJECT_TABLE IN ('journal_entries','journal_entry_lines')
-              AND (TRIGGER_NAME LIKE 'trg\\_ntsll\\_%' OR ACTION_STATEMENT LIKE '%nonprofit\\_tax%')");
-        self::assertSame([], $stmt->fetchAll(PDO::FETCH_COLUMN));
+        $found = array_filter(
+            \MyInvoice\Infrastructure\Database\TriggerMetadata::read($this->pdo, (string) $this->pdo->query('SELECT DATABASE()')->fetchColumn()),
+            static fn (array $t): bool => in_array(strtolower((string) $t['EVENT_OBJECT_TABLE']), ['journal_entries', 'journal_entry_lines'], true)
+                && (str_starts_with(strtolower((string) $t['TRIGGER_NAME']), 'trg_ntsll_') || str_contains(strtolower((string) $t['ACTION_STATEMENT']), 'nonprofit_tax')),
+        );
+        self::assertSame([], array_column($found, 'TRIGGER_NAME'));
         $table = $this->pdo->query("SELECT COUNT(*) FROM information_schema.TABLES
             WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='nonprofit_tax_snapshot_line_locator'")->fetchColumn();
         self::assertSame(0, (int) $table);

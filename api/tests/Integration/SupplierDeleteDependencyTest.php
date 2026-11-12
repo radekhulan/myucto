@@ -358,10 +358,10 @@ final class SupplierDeleteDependencyTest extends TestCase
     {
         $pdo = $this->db->pdo();
         $left = [];
-        $tables = $pdo->query("SELECT c.TABLE_NAME FROM information_schema.COLUMNS c JOIN information_schema.TABLES t
-              ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
-             WHERE c.TABLE_SCHEMA = DATABASE() AND c.COLUMN_NAME = 'supplier_id' AND t.TABLE_TYPE IN ('BASE TABLE', 'SYSTEM VERSIONED')")
-            ->fetchAll(\PDO::FETCH_COLUMN);
+        $types = $pdo->query('SHOW FULL TABLES')->fetchAll(\PDO::FETCH_KEY_PAIR);
+        $tables = array_filter($pdo->query("SELECT TABLE_NAME FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'supplier_id'")->fetchAll(\PDO::FETCH_COLUMN),
+            static fn (string $table): bool => in_array($types[$table] ?? null, ['BASE TABLE', 'SYSTEM VERSIONED'], true));
         foreach ($tables as $table) {
             if (in_array($table, \MyInvoice\Service\System\CompanyPurgeService::RETAINED_TABLES, true)) {
                 continue;
@@ -401,8 +401,9 @@ final class SupplierDeleteDependencyTest extends TestCase
     /** @return list<string> */
     private function triggers(): array
     {
-        return $this->db->pdo()->query('SELECT TRIGGER_NAME FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() ORDER BY TRIGGER_NAME')
-            ->fetchAll(\PDO::FETCH_COLUMN);
+        $names = array_column(\MyInvoice\Infrastructure\Database\TriggerMetadata::read($this->db->pdo(), $this->schema()), 'TRIGGER_NAME');
+        usort($names, \MyInvoice\Infrastructure\Database\SchemaMetadata::compareNames(...));
+        return $names;
     }
 
     private function schema(): string
