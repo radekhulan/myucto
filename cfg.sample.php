@@ -562,7 +562,8 @@ return [
     ],
     'rate_limits' => [
         // Limity nad rámec brute_force (ten řeší jen login). Klíč = max požadavků v daném okně.
-        'login_per_min_per_ip'      => 10,           // doplněk k brute_force; ochrana proti spamu z 1 IP
+        'login_per_min_per_ip'      => 10,           // doplněk k brute_force; ochrana proti spamu z 1 IP (i výměna hesla za API token)
+        'password_token_per_min'    => 60,           // celkový strop POST /api/v1/auth/password-token (všechny IP dohromady)
         'forgot_per_hour_per_email' => 3,            // POST /auth/forgot-password
         'mutation_per_min_per_user' => 120,          // všechna POST/PUT/PATCH/DELETE (bulk akce + import jobs)
         'read_per_min_per_user'     => 1200,         // GET endpointy (CRM dashboard ~16 paralelně, časté refresh)

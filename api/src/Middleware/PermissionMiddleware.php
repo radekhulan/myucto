@@ -28,7 +28,7 @@ final class PermissionMiddleware implements MiddlewareInterface
     public const PUBLIC_OR_SELF = [
         '/api/health', '/api/version', '/api/openapi.yaml', '/api/docs', '/api/reference', '/api/scalar',
         '/api/auth/setup-status', '/api/auth/setup-preflight', '/api/auth/setup', '/api/auth/setup-ares-lookup',
-        '/api/auth/setup-crpdph-lookup', '/api/auth/setup-sample', '/api/auth/login',
+        '/api/auth/setup-crpdph-lookup', '/api/auth/setup-sample', '/api/auth/login', '/api/auth/password-token',
         '/api/auth/domain-context',
         '/api/auth/domain-login/start', '/api/auth/domain-login/authorize', '/api/auth/domain-login/exchange',
         '/api/auth/logout', '/api/auth/me', '/api/auth/api-me', '/api/auth/forgot', '/api/auth/reset',

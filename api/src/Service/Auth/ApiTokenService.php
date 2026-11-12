@@ -26,6 +26,12 @@ use PDO;
  */
 final class ApiTokenService
 {
+    /**
+     * Výchozí životnost tokenu, když volající expiraci neuvede (token z webu
+     * i výměna hesla za token, PasswordTokenAction).
+     */
+    public const DEFAULT_EXPIRY_DAYS = 90;
+
     private const PLAINTEXT_PREFIX = 'mi_pat_';
     private const RANDOM_BYTES = 32;
     private const TOUCH_INTERVAL_SEC = 300;

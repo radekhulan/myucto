@@ -4495,6 +4495,75 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/auth/password-token:
+    post:
+      tags: [Auth]
+      summary: Výměna e-mailu a hesla za API token
+      description: |
+        Pro aplikace, které neumí webové přihlášení (mobilní aplikace). Uživatel
+        zadá stejné údaje jako ve webu a dostane osobní API token s rozsahem
+        `read_write`, bez vazby na firmu a s výchozí platností 90 dní. Token je
+        ve webu v seznamu API tokenů pod názvem `device_name` a jde tam zrušit.
+
+        Druhý faktor jako ve webu: se zapnutým TOTP vrátí první volání
+        `totp_required` a token vznikne až s `totp` (nebo `recovery_code`).
+        Účet chráněný jen passkey, instalace s kódem z e-mailu a vynucené
+        přihlášení přes poskytovatele identity token heslem nedostanou; při
+        vynuceném MFA bez silného faktoru vrací `mfa_setup_required`.
+
+        Ochrana: zámek pokusů sdílený s přihlášením webu (stejné počítadlo
+        e-mailu a IP, včetně zámku na 15 minut a 24 hodin), limit na IP sdílený
+        s přihlášením webu a celkový limit endpointu. Stav, kdy by web chtěl
+        CAPTCHA, tady znamená dočasné odmítnutí. Neexistující účet i špatné
+        heslo vrací stejnou odpověď. Volání bez hlavičky `Origin` (nativní
+        aplikace) nepotřebuje CSRF token; s hlavičkou `Origin` musí odpovídat
+        adrese instalace.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordTokenRequest' }
+      responses:
+        '201':
+          description: Token vydán. Plaintext je jen v této odpovědi.
+          headers:
+            Cache-Control:
+              schema: { type: string, example: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PasswordTokenResponse' }
+        '401':
+          description: |
+            `invalid_credentials` (neznámý e-mail, neaktivní účet nebo špatné heslo,
+            vždy stejná odpověď), `totp_required` (pošlete `totp` nebo `recovery_code`,
+            pole `methods`), `invalid_totp`, `invalid_recovery_code`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: |
+            `second_factor_unsupported` (účet jen s passkey nebo instalace s kódem
+            z e-mailu, pole `methods`), `mfa_setup_required` (vynucené MFA, účet
+            nemá silný faktor), `sso_required` (vynucený poskytovatel identity, pole
+            `provider`), `forbidden` (klientský účet), `license_user_limit`
+            (token se zápisem by překročil počet uživatelů licence),
+            `origin_mismatch` (hlavička `Origin` z jiné adresy).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: |
+            `too_many_attempts` (zámek pokusů; `Retry-After` 300, 900 nebo 86400 s)
+            nebo `rate_limited` (limit na IP nebo celkový limit endpointu).
+          headers:
+            Retry-After:
+              schema: { type: integer }
+              description: Sekundy do uvolnění
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/auth/domain-context:
     get:
       tags: [Auth]
@@ -39209,6 +39278,28 @@ components:
         preview: { anyOf: [{ $ref: '#/components/schemas/PropertyPaymentWorkflowPreview' }, { type: 'null' }] }
         review: { type: [object, 'null'], additionalProperties: true }
         remaining_cents: { type: string }
+    PasswordTokenRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+        totp: { type: string, description: 'Kód z ověřovací aplikace, když předchozí volání vrátilo `totp_required`.' }
+        recovery_code: { type: string, description: Jednorázový záložní kód místo `totp`. }
+        device_name:
+          type: string
+          maxLength: 100
+          description: Název tokenu v seznamu API tokenů (např. „MyÚčto iPhone 16“). Řídicí znaky se odstraní.
+    PasswordTokenResponse:
+      type: object
+      required: [token, id, prefix, name, scope, expires_at]
+      properties:
+        token: { type: string, description: 'Plaintext tokenu (`mi_pat_…`), pošlete ho jako `Authorization: Bearer`.' }
+        id: { type: integer }
+        prefix: { type: string }
+        name: { type: string }
+        scope: { type: string, enum: [read_write] }
+        expires_at: { type: string, format: date-time }
     PayrollJmhzExternalRoot:
       type: object
       properties:

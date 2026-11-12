@@ -15,7 +15,9 @@ use MyInvoice\Service\Auth\LoginSessionIssuer;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\Oidc\OidcFlowStore;
 use MyInvoice\Service\Auth\PasskeyService;
+use MyInvoice\Service\Auth\LoginFailure;
 use MyInvoice\Service\Auth\PasswordHasher;
+use MyInvoice\Service\Auth\PasswordLoginVerifier;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\StoredPasskeyCredential;
@@ -30,16 +32,18 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 final class LoginAction
 {
+    private readonly PasswordLoginVerifier $passwordLogin;
+
     public function __construct(
         private readonly Connection $db,
-        private readonly PasswordHasher $hasher,
+        PasswordHasher $hasher,
         private readonly BruteForceGuard $bf,
         private readonly TurnstileVerifier $turnstile,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly Config $config,
-        private readonly TotpService $totp,
-        private readonly SecretEncryption $crypto,
+        TotpService $totp,
+        SecretEncryption $crypto,
         private readonly EmailOtpService $emailOtp,
         private readonly TrustedDeviceService $trustedDevices,
         private readonly PasskeyCredentialRepository $credentials,
@@ -51,7 +55,14 @@ final class LoginAction
         private readonly \MyInvoice\Service\Auth\MfaRecoveryCodeService $recoveryCodes,
         private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
         private readonly OidcFlowStore $oidcFlows,
-    ) {}
+        ?PasswordLoginVerifier $passwordLogin = null,
+    ) {
+        // Ověření hesla, TOTP a záložního kódu sdílí s výměnou hesla za API token
+        // (PasswordTokenAction). Bez předané instance vznikne ze stejných služeb.
+        $this->passwordLogin = $passwordLogin ?? new PasswordLoginVerifier(
+            $db, $hasher, $bf, $logger, $totp, $crypto, $recoveryCodes,
+        );
+    }
 
     public function passkeyOptions(Request $request, Response $response): Response
     {
@@ -193,37 +204,17 @@ final class LoginAction
             return Json::error($response, 'captcha_failed', 'CAPTCHA selhala.', 400);
         }
 
-        // Načti usera (vždy zavolej dummyVerify pokud user neexistuje → konstantní timing)
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT u.id, u.email, u.name, u.role, u.role_id, u.locale, u.password_hash,
-                    u.is_active, u.totp_secret, u.totp_enabled, u.session_lock_after_minutes,
-                    r.name AS role_name, r.role_type,
-                    r.is_active AS role_active, r.system_key
-               FROM users u
-               JOIN roles r ON r.id = u.role_id
-              WHERE u.email = ? LIMIT 1'
-        );
-        $stmt->execute([$email]);
-        $user = $stmt->fetch(\PDO::FETCH_ASSOC);
-
-        if (!$user || (int) $user['is_active'] === 0) {
-            $this->hasher->dummyVerify();
-            $this->bf->recordFailure($email, $ip);
-            $this->logger->log('auth.login_failed', null, null, null, [
-                'email' => $email, 'reason' => $user ? 'user_inactive' : 'user_not_found',
-            ], $ip, $userAgent);
-            return Json::error($response, 'invalid_credentials', 'Neplatné přihlašovací údaje.', 401);
+        // Načti usera (neexistující i neaktivní účet projde dummyVerify → konstantní timing)
+        $user = $this->passwordLogin->findUser($email);
+        $failure = $ssoTicket === null
+            ? $this->passwordLogin->verifyPassword($user, $email, $password, $ip, $userAgent)
+            : $this->passwordLogin->verifyActiveAccount($user, $email, $ip, $userAgent);
+        if ($failure !== null || $user === null) {
+            return self::failureResponse($response, $failure ?? LoginFailure::invalidCredentials());
         }
 
         if ($ssoTicket !== null && (int) $user['id'] !== $ssoTicket['user_id']) {
             return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
-        }
-        if ($ssoTicket === null && !$this->hasher->verify($password, (string) $user['password_hash'])) {
-            $this->bf->recordFailure($email, $ip);
-            $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [
-                'email' => $email, 'reason' => 'wrong_password',
-            ], $ip, $userAgent);
-            return Json::error($response, 'invalid_credentials', 'Neplatné přihlašovací údaje.', 401);
         }
 
         $totpActive = (int) $user['totp_enabled'] === 1 && !empty($user['totp_secret']);
@@ -236,23 +227,11 @@ final class LoginAction
         // ne čím se lze zachránit; kdyby ho musel splnit, byl by k nepotřebě přesně
         // v konfiguraci, která uživatele zamkla ven.
         if ($recoveryCode !== '' && $this->recoveryCodes->hasUsable((int) $user['id'])) {
-            if ($this->bf->isTotpLocked((int) $user['id'])) {
-                return Json::error($response, 'too_many_attempts', 'Příliš mnoho pokusů. Zkus to později.', 429);
+            $failure = $this->passwordLogin->useRecoveryCode($user, $email, $recoveryCode, $ip, $userAgent);
+            if ($failure !== null) {
+                return self::failureResponse($response, $failure);
             }
-            if (!$this->recoveryCodes->consume((int) $user['id'], $recoveryCode, $ip)) {
-                $this->bf->recordTotpFailure((int) $user['id']);
-                $this->bf->recordFailure($email, $ip);
-                $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [
-                    'email' => $email, 'reason' => 'recovery_code_invalid',
-                ], $ip, $userAgent);
-                return Json::error($response, 'invalid_recovery_code', 'Neplatný nebo už použitý záložní kód.', 401);
-            }
-            $this->bf->recordTotpSuccess((int) $user['id']);
-            $this->rehashPasswordIfNeeded($user, $password);
-            $remaining = $this->recoveryCodes->remaining((int) $user['id']);
-            $this->logger->log('auth.recovery_code_login', (int) $user['id'], 'user', (int) $user['id'], [
-                'email' => $email, 'remaining' => $remaining,
-            ], $ip, $userAgent);
+            $this->passwordLogin->rehashPasswordIfNeeded($user, $password);
 
             // Session je STRONG schválně: uživatel se hlásí právě proto, aby si pořádek
             // ve faktorech udělal, a `basic` session by ho při povinném MFA uvěznila
@@ -281,7 +260,7 @@ final class LoginAction
         if ($storedPasskeys !== []
             && !($totpCode !== '' && $totpActive && $totpAllowed)
         ) {
-            $this->rehashPasswordIfNeeded($user, $password);
+            $this->passwordLogin->rehashPasswordIfNeeded($user, $password);
             $challenge = random_bytes(32);
             $options = $this->passkeys->assertionOptions(
                 array_map(
@@ -344,7 +323,7 @@ final class LoginAction
             && !$emailOtpOn
             && $this->credentials->countActiveForUser((int) $user['id']) > 0
         ) {
-            $this->rehashPasswordIfNeeded($user, $password);
+            $this->passwordLogin->rehashPasswordIfNeeded($user, $password);
             $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [
                 'email' => $email, 'reason' => 'passkeys_unavailable',
             ], $ip, $userAgent);
@@ -363,28 +342,15 @@ final class LoginAction
             if ($totpCode === '') {
                 // Nepočítej jako fail — uživatel zadal heslo OK, jen čekáme na 2FA
                 return Json::error($response, 'totp_required', 'TOTP kód požadován.', 401, [
-                    'methods' => $this->totpStepMethods((int) $user['id']),
+                    'methods' => $this->passwordLogin->totpStepMethods((int) $user['id']),
                 ]);
             }
-            // Per-user TOTP lockout — chrání 10⁶ keyspace proti brute-force
-            if ($this->bf->isTotpLocked((int) $user['id'])) {
-                $this->logger->log('auth.totp_locked', (int) $user['id'], 'user', (int) $user['id'], [
-                    'email' => $email,
-                ], $ip, $userAgent);
-                return Json::error($response, 'too_many_attempts', 'Příliš mnoho TOTP pokusů. Zkus to později.', 429);
+            $failure = $this->passwordLogin->verifyTotp($user, $email, $totpCode, $ip, $userAgent);
+            if ($failure !== null) {
+                return self::failureResponse($response, $failure, $failure->code === 'invalid_totp' ? [
+                    'methods' => $this->passwordLogin->totpStepMethods((int) $user['id']),
+                ] : []);
             }
-            $totpSecret = $this->crypto->decrypt((string) $user['totp_secret']);
-            if (!$this->totp->verifyAndConsume($this->db, $totpSecret, $totpCode)) {
-                $this->bf->recordTotpFailure((int) $user['id']);
-                $this->bf->recordFailure($email, $ip);
-                $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [
-                    'email' => $email, 'reason' => 'totp_invalid',
-                ], $ip, $userAgent);
-                return Json::error($response, 'invalid_totp', 'Neplatný TOTP kód.', 401, [
-                    'methods' => $this->totpStepMethods((int) $user['id']),
-                ]);
-            }
-            $this->bf->recordTotpSuccess((int) $user['id']);
             $authContext = $totpAllowed
                 ? SessionAuthContext::strong('totp', $this->clock->now())
                 : SessionAuthContext::basic('totp');
@@ -435,7 +401,7 @@ final class LoginAction
             $authContext = SessionAuthContext::setup($authContext->authMethod);
         }
 
-        $this->rehashPasswordIfNeeded($user, $password);
+        $this->passwordLogin->rehashPasswordIfNeeded($user, $password);
         if ($ssoTicket !== null) {
             // Sezení si nese identitu, ze které přihlášení vzniklo, i když ho
             // dokončil TOTP nebo e-mailový kód: odpojení identity ho pak zruší.
@@ -456,23 +422,6 @@ final class LoginAction
             // jen s Googlem při povinném MFA nezřídil první faktor a zůstal v setupu.
             (string) $user['password_hash'],
         );
-    }
-
-    /**
-     * Metody druhého faktoru nabídnuté ve fázi „heslo prošlo, čekáme na TOTP".
-     * Seznam sestavuje výhradně server z uloženého stavu uživatele — klient si
-     * o jinou metodu říct nemůže a passkey tu chybí schválně: kdyby ji uživatel
-     * měl, skončil by dřív ve větvi `mfa_required` s vázanou ceremonií.
-     *
-     * @return list<string>
-     */
-    private function totpStepMethods(int $userId): array
-    {
-        $methods = ['totp'];
-        if ($this->recoveryCodes->hasUsable($userId)) {
-            $methods[] = 'recovery';
-        }
-        return $methods;
     }
 
     /**
@@ -500,22 +449,11 @@ final class LoginAction
     }
 
     /**
-     * @param array<string,mixed> $user
+     * @param array<string,mixed> $extra
      */
-    private function rehashPasswordIfNeeded(array &$user, string $password): void
+    private static function failureResponse(Response $response, LoginFailure $failure, array $extra = []): Response
     {
-        if ($password === '') {
-            return;
-        }
-        if (!$this->hasher->needsRehash((string) $user['password_hash'])) {
-            return;
-        }
-        $newHash = $this->hasher->hash($password);
-        $stmt = $this->db->pdo()->prepare('UPDATE users SET password_hash = ? WHERE id = ? AND HEX(password_hash) = HEX(?)');
-        $stmt->execute([$newHash, (int) $user['id'], (string) $user['password_hash']]);
-        if ($stmt->rowCount() === 1) {
-            $user['password_hash'] = $newHash;
-        }
+        return Json::error($response, $failure->code, $failure->message, $failure->status, $extra + $failure->extra);
     }
 
     /** p***@example.cz — náznak adresy pro UI, bez prozrazení celého e-mailu. */

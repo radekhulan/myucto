@@ -460,6 +460,8 @@ final class Routes
             $g->post('/setup-crpdph-lookup', SetupCrpDphLookupAction::class);  // public proxy do registru plátců DPH (účty z DIČ)
             $g->post('/setup-sample',    SetupSampleAction::class);         // public sample data generator (jen pokud nejsou data)
             $g->post('/login',           LoginAction::class);
+            // Výměna hesla (a TOTP) za API token pro aplikace bez webového přihlášení.
+            $g->post('/password-token',  \MyInvoice\Action\Auth\PasswordTokenAction::class);
             $g->get ('/domain-context',  \MyInvoice\Action\Auth\DomainContextAction::class);
             $g->post('/domain-login/start',     [\MyInvoice\Action\Auth\DomainLoginAction::class, 'start']);
             $g->post('/domain-login/authorize', [\MyInvoice\Action\Auth\DomainLoginAction::class, 'authorize']);

@@ -22,6 +22,9 @@ use Slim\Psr7\Factory\ResponseFactory;
  * zarovnané `window_start`).
  *
  *   login_per_min_per_ip      → 60s window, key = "rl:login:ip:{ip/24}"
+ *                               (i POST /api/auth/password-token)
+ *   password_token_per_min    → 60s window, key = "rl:password-token:all" (celkový strop
+ *                               endpointu, konzumuje PasswordTokenAction přes consume())
  *   forgot_per_hour_per_ip    → 3600s window, key = "rl:forgot:ip:{ip/24}"
  *   forgot_per_hour_per_email → 3600s window, key = "rl:forgot:email:{sha1}"
  *                               (konzumuje ForgotPasswordAction přes consume() —
@@ -253,8 +256,9 @@ final class RateLimitMiddleware implements MiddlewareInterface
             return ['rl:mcp-consent:user:' . $userId, 10, 60];
         }
 
-        // Login — všichni
-        if ($path === '/api/auth/login' && $method === 'POST') {
+        // Login — všichni. Výměna hesla za API token sdílí s webovým přihlášením
+        // kbelík na IP: jde o stejné hádání hesla jinými dveřmi.
+        if (in_array($path, ['/api/auth/login', '/api/auth/password-token'], true) && $method === 'POST') {
             return ['rl:login:ip:' . $this->ipBucket($ip), (int) ($rl['login_per_min_per_ip'] ?? 10), 60];
         }
         if ($path === '/api/auth/webauthn/login/verify' && $method === 'POST') {
