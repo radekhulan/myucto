@@ -793,10 +793,22 @@ Hromadnou měsíční práci dělá aplikace z importů v obrazovce `Mzdy →
 Importy`. Mzdová data obsahují rodná čísla a mzdy, proto je rozsah pro
 externí integrace úzký:
 
-- **REST API token** na mzdové endpointy obecně nesmí
+- **Běžný REST API token** na mzdové endpointy nesmí
   ([§ 103.9.7.1](103_API.md#103971-ucetnictvi-a-dane-jen-ke-cteni)). Importy
   dohod a docházky, výpočet, schválení běhu, platby, dokumenty ani podání přes
-  token nejdou.
+  něj nejdou.
+- **Token s plným zápisem** (`system_write`,
+  [§ 103.9.7.3](103_API.md#103973-plny-zapis-tokenem-systemwrite)) smí totéž co
+  jeho uživatel v aplikaci, tedy i celý měsíc mezd: importy dohod a docházky,
+  hromadné akce z kontroly před během, zamknutí, výpočet, schválení běhu,
+  přípravu a test hlášení. Musí ho povolit provozovatel instance
+  (`api.allow_system_write_tokens`) a zapíná se jen při založení tokenu.
+  Platí jen oprávnění uživatele tokenu a pojistky zůstávají: token nezmění
+  uzavřené účetní období ani podané období DPH, nespravuje tokeny, hesla
+  a MFA a úkony s čerstvým ověřením člověkem (podpis plateb, přímé podání)
+  neprovede. Takový token má přístup i ke zdravotním údajům, exekucím
+  a insolvencím zaměstnanců, pokud k nim má přístup jeho uživatel; vydávejte
+  ho jen pro důvěryhodný serverový systém s omezením na IP adresu.
 - **MCP server** (napojení AI asistenta, [kapitola 105](105_MCP_server.md))
   používá úzký personální a vstupní rozsah: čte zaměstnance, podmínky
   a výsledky, s tokenem pro čtení i zápis může založit osobu, změnit
@@ -804,9 +816,10 @@ externí integrace úzký:
   ([§ 105.8.2](105_MCP_server.md#10582-rozsah-co-asistent-umi)). Vstupy
   vzniknou k posouzení, běh nespustí ani neschválí.
 
-Pro stovky lidí je proto nejrychlejší cesta export z docházkového nebo
+Pro stovky lidí je nejjednodušší cesta export z docházkového nebo
 personálního systému do šablony Vzor MyÚčto (případně vlastního mapování)
-a import v aplikaci.
+a import v aplikaci. Kdo chce celý měsíc řídit ze svého systému, použije
+token s plným zápisem a stejné kroky jako v této kapitole volá přes API.
 
 ## 122.12 Výkon a limity
 
