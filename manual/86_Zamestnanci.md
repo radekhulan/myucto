@@ -97,9 +97,13 @@ má stav **Aktivní** a v checklistu nástupu jsou registrace splněné.
 
 > [!TIP]
 > Víc lidí najednou doplníte v nabídce **Další funkce** nad seznamem: **Doplnit
-> výchozí zákonné údaje**, **Podepsaná prohlášení hromadně**, **Zdravotní
-> pojišťovny hromadně**, **Doplnit místo výkonu práce** a **Upravit podmínky
-> vybraných vztahů** ([§ 86.6.1](#8661-hromadna-uprava-podminek-vybranych-vztahu)).
+> výchozí zákonné údaje**, **Výplatní pravidla z karet osob**, **Podepsaná
+> prohlášení hromadně**, **Zdravotní pojišťovny hromadně**, **Doplnit místo
+> výkonu práce** a **Upravit podmínky vybraných vztahů**
+> ([§ 86.6.1](#8661-hromadna-uprava-podminek-vybranych-vztahu)).
+> **Výplatní pravidla z karet osob** nabídne všechny osoby s trvajícím vztahem,
+> které výplatní pravidlo nemají, a doplní je stejně jako tlačítko v kontrole
+> před během ([§ 80](80_Mzdove_behy.md)).
 > Skončené dohody ukončíte najednou akcí **Ukončit skončené dohody**
 > ([§ 86.9.1](#8691-hromadne-ukonceni-skoncenych-dohod)). Když nějaké čekají,
 > je přímo nad seznamem s jejich počtem, jinak v **Další funkce**.

@@ -9231,9 +9231,9 @@ export const payrollApi = {
       payload,
     ).then(response => response.data.evidence),
   /** Náhled hromadného doplnění výchozí zákonné evidence; `employee_ids: null` = osoby běhu za měsíc. */
-  payoutDefaultsPreview: (employeeIds: number[]) =>
-    api.post<{ people: PayrollPayoutDefaultsPreviewRow[] }>('/payroll/payout-rules/defaults/preview', { employee_ids: employeeIds })
-      .then(response => response.data.people),
+  payoutDefaultsPreview: (employeeIds: number[] | null) =>
+    api.post<{ people: PayrollPayoutDefaultsPreviewRow[], truncated?: boolean }>('/payroll/payout-rules/defaults/preview', { employee_ids: employeeIds })
+      .then(response => ({ people: response.data.people, truncated: response.data.truncated === true })),
   payoutDefaultsApply: (employeeIds: number[]) =>
     api.post<PayrollPayoutDefaultsBulkResult>('/payroll/payout-rules/defaults/apply', { employee_ids: employeeIds })
       .then(response => response.data),

@@ -267,7 +267,9 @@ function bulkEmployeeIds(kind: string): number[] | null {
   return ids.length > 0 ? ids : null
 }
 const declarationSignEmployeeIds = computed(() => bulkEmployeeIds('declaration_signed'))
+const payoutDefaultsOpen = ref(false)
 const payoutDefaultsEmployeeIds = ref<number[] | null>(null)
+const canWritePerson = computed(() => auth.canWrite('payroll.person.write'))
 // Z nálezu kontroly běhu: dialog výchozích údajů nabídne tytéž osoby jako tlačítko.
 const statutoryBulkEmployeeIds = ref<number[] | null>(bulkEmployeeIds('statutory_defaults'))
 const canWriteEmployment = computed(() => auth.canWrite('payroll.employment.write'))
@@ -292,8 +294,9 @@ function openBulkFromQuery(bulk: unknown) {
     openWithBulkPeriod(() => { healthInsurerBulkOpen.value = true })
   } else if (bulk === 'workplace' && canWriteEmployment.value) {
     openWithBulkPeriod(() => { workplaceBulkOpen.value = true })
-  } else if (bulk === 'payout_defaults' && auth.canWrite('payroll.person.write')) {
+  } else if (bulk === 'payout_defaults' && canWritePerson.value) {
     payoutDefaultsEmployeeIds.value = bulkEmployeeIds('payout_defaults')
+    payoutDefaultsOpen.value = true
   } else if (bulk === 'closure' && canWriteEmployment.value) {
     const linked = payrollQueryValue(route.query, 'period')
     bulkClosurePeriod.value = linked !== null && /^\d{4}-(0[1-9]|1[0-2])$/.test(linked) ? linked : null
@@ -306,7 +309,7 @@ watch(() => route.query.bulk, openBulkFromQuery)
 // druhý proklik na tentýž odkaz adresu nezměnil a dialog se znovu neotevřel.
 watch(
   () => statutoryBulkOpen.value || declarationSignBulkOpen.value || healthInsurerBulkOpen.value
-    || workplaceBulkOpen.value || bulkClosureOpen.value || payoutDefaultsEmployeeIds.value !== null,
+    || workplaceBulkOpen.value || bulkClosureOpen.value || payoutDefaultsOpen.value,
   (open, wasOpen) => {
     if (open || !wasOpen || (route.query.bulk === undefined && route.query.employees === undefined)) return
     const query = { ...route.query }
@@ -726,6 +729,18 @@ const peopleBulkActions = computed<ActionItem[]>(() => [
     variant: 'warning',
     show: canQuickEditPerson.value,
     run: () => openWithBulkPeriod(() => { healthInsurerBulkOpen.value = true }),
+  },
+  {
+    key: 'payout-defaults-bulk',
+    label: t('payroll.people.payout_defaults_action'),
+    icon: 'coin',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canWritePerson.value,
+    run: () => {
+      payoutDefaultsEmployeeIds.value = null
+      payoutDefaultsOpen.value = true
+    },
   },
   {
     key: 'workplace-bulk',
@@ -2136,9 +2151,9 @@ onMounted(async () => {
     />
 
     <PayrollPayoutDefaultsBulkDialog
-      v-if="payoutDefaultsEmployeeIds !== null"
+      v-if="payoutDefaultsOpen"
       :employee-ids="payoutDefaultsEmployeeIds"
-      @close="payoutDefaultsEmployeeIds = null"
+      @close="payoutDefaultsOpen = false; payoutDefaultsEmployeeIds = null"
       @applied="load"
     />
 

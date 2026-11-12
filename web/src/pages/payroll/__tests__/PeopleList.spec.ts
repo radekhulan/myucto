@@ -349,7 +349,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
 
     expect(wrapper.find('[data-test="quick-inputs-link"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="action-more-label"]').exists()).toBe(true)
-    for (const key of ['statutory-bulk', 'declaration-sign-bulk', 'health-insurer-bulk', 'workplace-bulk', 'terms-bulk', 'bulk-closure']) {
+    for (const key of ['statutory-bulk', 'payout-defaults-bulk', 'declaration-sign-bulk', 'health-insurer-bulk', 'workplace-bulk', 'terms-bulk', 'bulk-closure']) {
       expect(wrapper.get(`[data-test="action-${key}"]`).attributes('data-tier')).toBe('overflow')
     }
   })
@@ -1267,6 +1267,35 @@ describe('PeopleList toolbar and shared employee creation', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="payout-bulk-stub"]').text()).toBe('7,9')
+    wrapper.unmount()
+  })
+
+  it('Další funkce otevřou výplatní pravidla pro všechny osoby bez pravidla', async () => {
+    const wrapper = mount(PeopleList, {
+      global: {
+        stubs: {
+          ActionBar: {
+            props: ['actions'],
+            template: '<div><button v-for="action in actions" :key="action.key" type="button" :data-test="`action-${action.key}`" @click="action.run && action.run()">{{ action.label }}</button></div>',
+          },
+          RouterLink: true,
+          EmploymentCard: true,
+          PayrollPersonQuickEdit: true,
+          PayrollPersonProfilePanel: true,
+          PayrollPersonStatutoryEvidencePanel: true,
+          PayrollPayoutDefaultsBulkDialog: {
+            props: ['employeeIds'],
+            template: '<div data-test="payout-bulk-stub">{{ employeeIds === null ? "all" : employeeIds.join(",") }}</div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-test="payout-bulk-stub"]').exists()).toBe(false)
+    await wrapper.get('[data-test="action-payout-defaults-bulk"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="payout-bulk-stub"]').text()).toBe('all')
     wrapper.unmount()
   })
 

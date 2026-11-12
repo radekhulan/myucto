@@ -3839,7 +3839,9 @@
       "result": "Doplněno: {applied}. Nedoplněno: {skipped}.",
       "load_failed": "Náhled výplatních pravidel se nepodařilo načíst.",
       "apply_failed": "Výplatní pravidla se nepodařilo doplnit.",
-      "retry": "Zkusit znovu"
+      "retry": "Zkusit znovu",
+      "none_missing": "Všechny osoby s trvajícím vztahem už výplatní pravidlo mají.",
+      "truncated": "Náhled ukazuje prvních {count} osob bez pravidla. Po doplnění otevřete nabídku znovu pro další."
     },
     "health_insurer_bulk": {
       "known_later": "Pojišťovna je u osoby zapsaná až od {period}, předvyplněno k potvrzení.",
@@ -6740,6 +6742,7 @@
       "filter": "Zobrazení",
       "quick_inputs": "Měsíční zadání mezd",
       "statutory_bulk_action": "Doplnit výchozí zákonné údaje",
+      "payout_defaults_action": "Výplatní pravidla z karet osob",
       "declaration_sign_bulk_action": "Podepsaná prohlášení hromadně",
       "workplace_bulk_action": "Doplnit místo výkonu práce",
       "terms_bulk_action": "Upravit podmínky vybraných vztahů",
