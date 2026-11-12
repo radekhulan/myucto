@@ -4460,7 +4460,8 @@
           "change_payment_date": "Změněno datum výplaty",
           "exclude_employee": "Osoba vyřazena z běhu",
           "include_employee": "Osoba vrácena do běhu",
-          "validation_overrides_carried": "Výjimky převzaté z předchozí revize"
+          "validation_overrides_carried": "Výjimky převzaté z předchozí revize",
+          "compensation_recalculated": "Náhrady přepočítané z nového průměru"
         }
       },
       "validation": {
@@ -4906,7 +4907,7 @@
         "average_removed": "průměr {from}/h, dnes žádný schválený",
         "compensation": "{component} {amount}, z nového průměru {expected}",
         "compensation_unknown": "{component} {amount}, přepočítejte ručně",
-        "compensation_body": "Náhrady mají pevnou částku z původního průměru a samy se nepřepočítají (rozdíl {difference}). V otevřené opravě zrušte vstup náhrady a zadejte ho znovu (dovolenou znovu schvalte, import podkladů použijte znovu), pak běh přepočítejte.",
+        "compensation_body": "Náhrady mají pevnou částku z původního průměru a samy se nepřepočítají (rozdíl {difference}). V otevřeném běhu nebo otevřené opravě je přepočítá tlačítko „Přepočítat náhrady z nového průměru“; u schváleného běhu nejdřív otevřete opravu.",
         "body_request_correction": "Schválený běh nese náhrady a průměr pro měsíční hlášení (10345) ze starého průměru. Otevřete opravu: nová revize převezme aktuální podklady a běh se přepočítá. Schválení zůstává na vás. Podané hlášení pak opravte opravným hlášením.",
         "body_reopen": "Oprava je vyžádaná. Otevřete ji: nová revize převezme aktuální podklady a běh se přepočítá.",
         "body_refresh_inputs": "Běh je spočítaný ze starého průměru a bez obnovy podkladů ho schválit nejde. Obnovte podklady a běh se přepočítá.",
@@ -4915,7 +4916,8 @@
         "action_reopen": "Otevřít opravu a obnovit podklady",
         "action_refresh_inputs": "Obnovit podklady a přepočítat",
         "action_forbidden": "Opravu běhu a obnovu podkladů může udělat uživatel s právy kontrolovat, odemknout a vypočítat mzdy.",
-        "reason": "Průměr pro náhrady se změnil po schválení"
+        "reason": "Průměr pro náhrady se změnil po schválení",
+        "recalculate_compensations": "Přepočítat náhrady z nového průměru"
       },
       "missing_employments": {
         "title": "V běhu nechybí žádný vztah | V běhu chybí {count} pracovní vztah, který do období patří | V běhu chybí {count} pracovní vztahy, které do období patří | V běhu chybí {count} pracovních vztahů, které do období patří",
@@ -14991,6 +14993,39 @@
         "revoke": "Vzít potvrzení zpět",
         "revoke_consequence": "Měsíc {period} se znovu objeví mezi převzatými měsíci bez hlášení."
       }
+    },
+    "compensation_recalculation": {
+      "title": "Přepočítat náhrady z nového průměru",
+      "open": "Přepočítat náhrady z nového průměru",
+      "hint": "Náhrady mzdy mají pevnou částku z průměru, který platil při jejich zadání. Tady vidíte náhrady spočítané ze staršího průměru a částku z dnes schváleného průměru. Po potvrzení se dovolená zadaná s daty a náhrady z importu hodin přepočítají (původní vstup se zruší a vznikne nový), ostatní náhrady je potřeba upravit ručně. Schválený mzdový běh se nemění.",
+      "bulk_hint": "Najde v měsících {quarter} náhrady spočítané ze staršího průměru, ukáže starou a novou částku a po potvrzení je přepočítá. Schválený běh nemění, navede na opravu.",
+      "loading": "Načítám náhrady…",
+      "empty": "Všechny náhrady jsou spočítané z dnes schváleného průměru.",
+      "load_failed": "Náhled náhrad se nepodařilo načíst.",
+      "apply_failed": "Náhrady se nepodařilo přepočítat.",
+      "amount_change": "{from} → {to}",
+      "average_change": "průměr {from}/h → {to}/h",
+      "period_ready": "Přepočte se náhrad: {count}, rozdíl {difference}. Otevřený běh za měsíc se po přepočtu vrátí k výpočtu (obnoví se podklady).",
+      "open_runs": "Otevřít mzdové běhy",
+      "columns": {
+        "person": "Osoba",
+        "compensation": "Náhrada",
+        "amount": "Stará → nová částka",
+        "action": "Co se stane"
+      },
+      "action": {
+        "recalculate": "přepočítá se částka dovolené",
+        "replace": "stornuje se a založí znovu",
+        "manual": "ručně",
+        "blocked": "běh je schválený"
+      },
+      "confirm": "Přepočítat ({count})",
+      "forbidden": "Přepočítat náhrady smí uživatel s právem zapisovat mzdové vstupy.",
+      "refresh_forbidden": "Náhrady jsou v otevřeném mzdovém běhu a po přepočtu je potřeba obnovit podklady. To smí uživatel s právem Spočítat mzdy.",
+      "drafts_hint": "Nemáte právo schvalovat mzdové vstupy, nové náhrady proto vzniknou jako koncepty ke schválení.",
+      "done": "{period}: přepočítaných náhrad {count}.",
+      "done_drafts": "Nové náhrady čekají na schválení v Mzdových vstupech.",
+      "done_refreshed": "Podklady běhu se obnovily, běh spočítejte znovu."
     }
   },
   "foreign_income": {

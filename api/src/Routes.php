@@ -2641,6 +2641,15 @@ final class Routes
             $g->post('/time/averages', [PayrollAbsenceAction::class, 'createAverage']);
             $g->post('/time/averages/{id:[0-9]+}/approve', [PayrollAbsenceAction::class, 'approveAverage']);
             $g->delete('/time/averages/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteAverage']);
+            // Přepočet náhrad z nového průměru: náhled a výslovné potvrzení účetní.
+            $g->get(
+                '/time/compensation-recalculation',
+                [\MyInvoice\Action\Payroll\PayrollCompensationRecalculationAction::class, 'preview'],
+            );
+            $g->post(
+                '/time/compensation-recalculation',
+                [\MyInvoice\Action\Payroll\PayrollCompensationRecalculationAction::class, 'apply'],
+            );
             $g->get('/time/leave-ledger', [PayrollAbsenceAction::class, 'leaveLedger']);
             $g->post('/time/leave-ledger', [PayrollAbsenceAction::class, 'createLeaveEntry']);
             $g->delete('/time/leave-ledger/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteLeaveEntry']);

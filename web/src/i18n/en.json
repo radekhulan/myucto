@@ -4460,7 +4460,8 @@
           "change_payment_date": "Payment date changed",
           "exclude_employee": "Person excluded from run",
           "include_employee": "Person returned to run",
-          "validation_overrides_carried": "Exceptions carried over from previous revision"
+          "validation_overrides_carried": "Exceptions carried over from previous revision",
+          "compensation_recalculated": "Compensations recalculated from the new average"
         }
       },
       "validation": {
@@ -4906,7 +4907,7 @@
         "average_removed": "average {from}/h, none approved now",
         "compensation": "{component} {amount}, from the new average {expected}",
         "compensation_unknown": "{component} {amount}, recalculate manually",
-        "compensation_body": "Compensations carry a fixed amount from the original average and are not recalculated by themselves (difference {difference}). In the open correction cancel the compensation input and enter it again (approve the leave again, apply the source import again), then recalculate the run.",
+        "compensation_body": "Compensations carry a fixed amount from the original average and are not recalculated on their own (difference {difference}). In an open run or open correction, use “Recalculate compensations from the new average”; for an approved run open a correction first.",
         "body_request_correction": "The approved run carries compensations and the average for the monthly report (10345) from the old average. Open a correction: the new revision picks up the current sources and the run is recalculated. Approval stays with you. Then fix a filed report with a corrective report.",
         "body_reopen": "A correction has been requested. Open it: the new revision picks up the current sources and the run is recalculated.",
         "body_refresh_inputs": "The run was calculated from the old average and cannot be approved without refreshing the sources. Refresh the sources and the run is recalculated.",
@@ -4915,7 +4916,8 @@
         "action_reopen": "Open correction and refresh sources",
         "action_refresh_inputs": "Refresh sources and recalculate",
         "action_forbidden": "A user with the rights to review, unlock and calculate payroll can correct the run and refresh the sources.",
-        "reason": "The average for compensations changed after approval"
+        "reason": "The average for compensations changed after approval",
+        "recalculate_compensations": "Recalculate compensations from the new average"
       },
       "missing_employments": {
         "title": "No relationship is missing from the run | The run is missing {count} employment relationship that belongs to the period | The run is missing {count} employment relationships that belong to the period",
@@ -14991,6 +14993,39 @@
         "revoke": "Revoke confirmation",
         "revoke_consequence": "The month {period} will reappear among taken-over months without a report."
       }
+    },
+    "compensation_recalculation": {
+      "title": "Recalculate compensations from the new average",
+      "open": "Recalculate compensations from the new average",
+      "hint": "Wage compensations carry a fixed amount from the average valid when they were entered. Here you see compensations calculated from an older average and the amount from the average approved today. After confirmation, leave entered with dates and compensations from imported hours are recalculated (the original input is cancelled and a new one is created); other compensations need to be adjusted manually. An approved payroll run is never changed.",
+      "bulk_hint": "Finds compensations in the months of {quarter} calculated from an older average, shows the old and new amount and recalculates them after confirmation. An approved run is not changed, you are guided to a correction.",
+      "loading": "Loading compensations…",
+      "empty": "All compensations are calculated from the average approved today.",
+      "load_failed": "The compensation preview could not be loaded.",
+      "apply_failed": "Compensations could not be recalculated.",
+      "amount_change": "{from} → {to}",
+      "average_change": "average {from}/h → {to}/h",
+      "period_ready": "Compensations to recalculate: {count}, difference {difference}. An open run for the month returns to calculation (inputs are refreshed).",
+      "open_runs": "Open payroll runs",
+      "columns": {
+        "person": "Person",
+        "compensation": "Compensation",
+        "amount": "Old → new amount",
+        "action": "What happens"
+      },
+      "action": {
+        "recalculate": "leave amount is recalculated",
+        "replace": "cancelled and created again",
+        "manual": "manually",
+        "blocked": "run is approved"
+      },
+      "confirm": "Recalculate ({count})",
+      "forbidden": "Recalculating compensations requires the permission to write payroll inputs.",
+      "refresh_forbidden": "The compensations are in an open payroll run whose inputs must be refreshed afterwards. This requires the Calculate payroll permission.",
+      "drafts_hint": "You cannot approve payroll inputs, so the new compensations are created as drafts for approval.",
+      "done": "{period}: compensations recalculated: {count}.",
+      "done_drafts": "The new compensations await approval in Payroll inputs.",
+      "done_refreshed": "Run inputs were refreshed, calculate the run again."
     }
   },
   "foreign_income": {

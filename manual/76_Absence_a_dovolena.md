@@ -188,6 +188,29 @@ který začíná po konci čtvrtletí nebo skončil před jeho začátkem, aplik
 odmítne a hromadné založení ho přeskočí. Průměr tak nevznikne omylem na jiném
 vztahu téže osoby.
 
+**Přepočítat náhrady z nového průměru.** Náhrada mzdy má pevnou částku z průměru,
+který platil při jejím zadání. Když průměr čtvrtletí později změníte (nová revize,
+pravděpodobný výdělek), náhrady se samy nepřepočítají. Udělejte to výslovně:
+
+1. V záložce **Průměrný výdělek** klikněte u schváleného průměru (nebo v hromadném
+   přehledu za zvolené čtvrtletí) na **Přepočítat náhrady z nového průměru**.
+2. Náhled vypíše po měsících osobu, náhradu, starou a novou částku z dnes
+   schváleného průměru a co se stane:
+   - dovolená zadaná s daty: přepočítá se částka (původní vstup se zruší a vznikne
+     nový se stejnými hodinami),
+   - náhrada z importu hodin: stornuje se a založí znovu z nového průměru,
+   - překážky s dorovnáním, náhrada dorovnaná na zaručené minimum, nemoc:
+     **ručně**, upravte je v Mzdových vstupech.
+3. Klikněte na **Přepočítat**. Kdo smí schvalovat mzdové vstupy, dostane nové
+   náhrady rovnou schválené, ostatním vzniknou koncepty ke schválení.
+
+Schválený mzdový běh se nemění nikdy: měsíc se schváleným během náhled označí
+a navede na **Vyžádat opravu** a **Otevřít opravu** ([§ 80.5](80_Mzdove_behy.md#805-krok-za-krokem-oprava-schvaleneho-mesice));
+v otevřené opravě přepočet spusťte znovu. U otevřeného (neschváleného) běhu se
+po přepočtu obnoví podklady a běh se vrátí k výpočtu, k tomu je potřeba i právo
+spočítat mzdy. Každý přepočet se zapíše do auditního záznamu a do historie běhu.
+Opakované spuštění nic nezmění, náhrady z dnešního průměru už náhled neukáže.
+
 ## 76.5 Krok za krokem: dovolená
 
 **Na začátku roku určete nárok:**
@@ -331,6 +354,7 @@ listu se doba vykáže jako vyloučená doba.
 | Ruční krácení dovolené aplikace odmítne | Chybí schválená **Neomluvená absence** v témže roce, nebo krácení překračuje její hodiny | Zapište a schvalte neomluvenou absenci. |
 | Výpočet nároku má štítek **Doplnit** | Chybí podmínky, docházka, nebo je potřeba posoudit jiné absence | Klikněte na štítek a doplňte, co řádek vyjmenuje. |
 | Hromadné založení průměrů: *„Podklady se od načtení seznamu změnily.“* | Mezitím se změnila data | Zkontrolujte výběr a odešlete znovu. |
+| Přepočet náhrad hlásí schválený běh | Měsíc má schválený mzdový běh | Vyžádejte a otevřete opravu běhu ([§ 80.5](80_Mzdove_behy.md#805-krok-za-krokem-oprava-schvaleneho-mesice)), pak přepočet spusťte znovu. |
 | Měsíc s mateřskou nejde sestavit do hlášení | Měsíc sahá na očekávaný den porodu, ale den porodu není doplněný | Klikněte na **Doplnit den porodu**. |
 | Den porodu je zapsaný chybně | Den porodu jde doplnit jen jednou | Zrušte nepřítomnost a zapište ji znovu. |
 
