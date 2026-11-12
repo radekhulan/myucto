@@ -88,6 +88,27 @@ final class RequestAuthorization
     }
 
     /**
+     * Smí tenhle token vynuceně upravit vystavenou vydanou fakturu (`?force=1`)?
+     *
+     * Jen token vázaný na firmu, se zápisem a s výslovně zapnutou schopností.
+     * Kontrola práva vlastníka (`invoices.edit_issued`) a přísnější zámky pro token
+     * (uzavřené i podané období, přečíslování, úhrady) zůstávají na akci.
+     */
+    public static function tokenAllowsIssuedInvoiceEdit(Request $request): bool
+    {
+        if (self::isSessionAuth($request)) {
+            return false;
+        }
+        $token = $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_API_TOKEN);
+
+        return is_array($token)
+            && !empty($token['allow_issued_invoice_edit'])
+            && ($token['scope'] ?? '') === 'read_write'
+            && ($token['supplier_id'] ?? null) !== null
+            && (int) $token['supplier_id'] > 0;
+    }
+
+    /**
      * Firma, na kterou je požadavek pevně vázaný: API token vydaný pro jednu firmu,
      * nebo vlastní doména firmy. NULL = požadavek vázaný není.
      *

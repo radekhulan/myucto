@@ -32,6 +32,7 @@ final class FiledVatPeriodLookup
         'dphdp3' => ['B', 'O', 'D', 'E'],
         'dphkh1' => ['B', 'O', 'N', 'E'],
         'ossei1' => ['B', 'O', 'D', 'E'],
+        'dphshv' => ['R', 'N'],
     ];
 
     public function __construct(private readonly TaxSubmissionRepository $submissions) {}
@@ -39,14 +40,20 @@ final class FiledVatPeriodLookup
     /**
      * Popis podaného výkazu, který dané datum plnění pokrývá, nebo `null`.
      * `$includeOss = false` pro doklad, který do OSS přiznání nevstupuje (tuzemský import).
+     * `$includeSummaryReport = true` počítá i podané souhrnné hlášení (vynucená úprava
+     * přes API token, která je přísnější než správce v relaci).
      */
-    public function describe(int $supplierId, string $refDate, bool $includeOss = true): ?string
+    public function describe(int $supplierId, string $refDate, bool $includeOss = true, bool $includeSummaryReport = false): ?string
     {
         $year = (int) substr($refDate, 0, 4);
         $month = (int) substr($refDate, 5, 2);
         $quarter = (int) ceil($month / 3);
 
-        foreach ([['dphdp3', 'přiznání k DPH'], ['dphkh1', 'kontrolní hlášení']] as [$form, $label]) {
+        $forms = [['dphdp3', 'přiznání k DPH'], ['dphkh1', 'kontrolní hlášení']];
+        if ($includeSummaryReport) {
+            $forms[] = ['dphshv', 'souhrnné hlášení'];
+        }
+        foreach ($forms as [$form, $label]) {
             $variants = self::VARIANTS_BY_FORM[$form];
             if ($this->submissions->findLatestForPeriod($supplierId, $form, $year, $month, null, $variants) !== null) {
                 return sprintf('%s za %d/%d', $label, $month, $year);

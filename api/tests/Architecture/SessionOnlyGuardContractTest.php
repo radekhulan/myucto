@@ -165,4 +165,36 @@ final class SessionOnlyGuardContractTest extends TestCase
             'Schopnost tokenu patří výhradně k evidenci mzdových podání.',
         );
     }
+
+    /**
+     * Schopnost tokenu upravit vystavenou fakturu (#355) odemyká jedinou akci a jen
+     * spolu s přísnějšími zámky pro token. Kdyby se `tokenAllowsIssuedInvoiceEdit()`
+     * objevil jinde (smazání, přijaté faktury, uzavřené období), spadne to tady.
+     */
+    public function testIssuedInvoiceEditCapabilityUnlocksOnlyInvoiceUpdate(): void
+    {
+        $root = dirname(__DIR__, 2) . '/src';
+        $users = [];
+        $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS));
+        foreach ($it as $file) {
+            if ($file->getExtension() !== 'php') {
+                continue;
+            }
+            $src = (string) file_get_contents($file->getPathname());
+            if (preg_match('/tokenAllowsIssuedInvoiceEdit\(/', $src) === 1) {
+                $users[] = substr($file->getPathname(), strlen($root) + 1);
+            }
+        }
+        sort($users);
+        self::assertSame(
+            ['Action/Auth/ApiMeAction.php', 'Action/Invoice/UpdateInvoiceAction.php', 'Security/RequestAuthorization.php'],
+            $users,
+            'Schopnost tokenu smí odemykat jen vynucenou úpravu vydané faktury (api-me ji jen vypisuje).',
+        );
+
+        $update = SourceCorpus::read($root . '/Action/Invoice/UpdateInvoiceAction.php');
+        foreach (['lockedForToken(', 'denyTokenForce(', "'period_filed'"] as $needle) {
+            self::assertStringContainsString($needle, $update, 'Token force musí jít přes přísnější zámky: ' . $needle);
+        }
+    }
 }

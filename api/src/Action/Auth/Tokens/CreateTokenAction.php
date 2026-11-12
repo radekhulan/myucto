@@ -29,7 +29,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * POST /api/auth/tokens — vytvoří nový API token.
  *
  * Body: { name, password, supplier_id?, scope: 'read'|'read_write',
- *         expires_at?, never_expires?, totp_code? }
+ *         expires_at?, never_expires?, allow_payroll_submission_docs?,
+ *         allow_issued_invoice_edit?, totp_code? }
  *
  * Vyžaduje:
  *   - aktivní session (NE bearer — token by si nemohl vytvořit další token)
@@ -65,6 +66,7 @@ final class CreateTokenAction
         private readonly BruteForceGuard $bruteForce,
         private readonly MfaProtectedOperationService $protectedOperations,
         private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
+        private readonly \MyInvoice\Security\CrossSupplierAuthorization $crossSupplier,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -99,6 +101,7 @@ final class CreateTokenAction
         // ji člověk výslovně nezaškrtne. Zbytek mzdové evidence nejde odemknout
         // vůbec — viz RequestAuthorization::tokenAllowsPayrollSubmissionDocs().
         $allowPayrollSubmissionDocs = !empty($body['allow_payroll_submission_docs']);
+        $allowIssuedInvoiceEdit = !empty($body['allow_issued_invoice_edit']);
         $expiresRaw = trim((string) ($body['expires_at'] ?? ''));
         $neverExpires = ($body['never_expires'] ?? false) === true;
         $totpCode = trim((string) ($body['totp_code'] ?? ''));
@@ -128,6 +131,28 @@ final class CreateTokenAction
             $allowed = $this->memberships->allowedSupplierIds($userId);
             if (($user['is_superadmin'] ?? false) !== true && !in_array($supplierId, $allowed, true)) {
                 return Json::error($response, 'forbidden_supplier', 'K této firmě nemáte oprávnění.', 403);
+            }
+        }
+
+        // Vynucená úprava vystavené faktury přes token (#355): jen token vázaný na firmu,
+        // se zápisem, a jen od toho, kdo ji ve firmě smí provést sám. Před spotřebou proofu.
+        if ($allowIssuedInvoiceEdit) {
+            if ($supplierId === null || $scope !== 'read_write') {
+                return Json::error(
+                    $response,
+                    'issued_invoice_edit_not_allowed',
+                    'Úpravu vystavených faktur lze povolit jen tokenu vázanému na jednu firmu s právem zápisu.',
+                    422,
+                );
+            }
+            $scoped = $this->crossSupplier->scopedRequest($request, $supplierId);
+            if ($scoped === null || !RequestAuthorization::canEditIssuedInvoice($scoped)) {
+                return Json::error(
+                    $response,
+                    'issued_invoice_edit_not_allowed',
+                    'Úpravu vystavených faktur může tokenu povolit jen správce firmy nebo role s právem upravit vystavenou fakturu.',
+                    422,
+                );
             }
         }
 
@@ -196,6 +221,7 @@ final class CreateTokenAction
                     $scope,
                     $expiresAt,
                     $allowPayrollSubmissionDocs,
+                    $allowIssuedInvoiceEdit,
                 );
             } catch (OneTimeTokenException|StepUpOperationException) {
                 return Json::error(
@@ -282,6 +308,7 @@ final class CreateTokenAction
                 $scope,
                 $expiresAt,
                 $allowPayrollSubmissionDocs,
+                $allowIssuedInvoiceEdit,
             );
         } catch (LicenseSeatLimitExceeded) {
             return self::seatLimitError($response);
@@ -306,6 +333,7 @@ final class CreateTokenAction
                 'expires_at' => $expiresAt?->format('Y-m-d H:i:s'),
                 'never_expires' => $expiresAt === null,
                 'allow_payroll_submission_docs' => $allowPayrollSubmissionDocs,
+                'allow_issued_invoice_edit' => $allowIssuedInvoiceEdit,
             ],
             $ip,
             $userAgent,

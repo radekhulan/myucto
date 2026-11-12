@@ -118,6 +118,7 @@ final class MfaProtectedOperationService
         string $scope,
         ?\DateTimeImmutable $expiresAt,
         bool $allowPayrollSubmissionDocs = false,
+        bool $allowIssuedInvoiceEdit = false,
     ): array {
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
@@ -141,6 +142,7 @@ final class MfaProtectedOperationService
                 $scope,
                 $expiresAt,
                 $allowPayrollSubmissionDocs,
+                allowIssuedInvoiceEdit: $allowIssuedInvoiceEdit,
             );
             $pdo->commit();
             return $token;

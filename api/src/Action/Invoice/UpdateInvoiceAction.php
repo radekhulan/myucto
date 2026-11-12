@@ -88,6 +88,7 @@ final class UpdateInvoiceAction
         private readonly FiledVatPeriodLookup $filedPeriods,
         private readonly NumberSeriesSelection $numberSeries,
         private readonly \MyInvoice\Service\Invoice\InvoiceIssueTaxGate $taxGate,
+        private readonly \MyInvoice\Service\Accounting\DocumentPaymentLinks $paymentLinks,
     ) {}
 
     /**
@@ -172,12 +173,22 @@ final class UpdateInvoiceAction
         // document_locked, ne 409 not_editable): kontrola staré I nové refDate —
         // klient nesmí datem do uzavřeného období „utéct" ani ho tam přesunout.
         $lock = $this->locks->forInvoice($existing);
+        // Vynucená úprava vystaveného dokladu přes API token se schopností (#355): přísněji
+        // než správce v relaci. Uzavřené období token nepřebije nikdy, ani jako správce.
+        $tokenForce = $existing['status'] !== 'draft'
+            && $isForce
+            && !RequestAuthorization::isSessionAuth($request)
+            && RequestAuthorization::tokenAllowsIssuedInvoiceEdit($request);
+        if ($tokenForce && self::lockedForToken($lock)) {
+            return Json::error($response, 'period_closed', 'Doklad spadá do uzavřeného nebo zamčeného účetního období; přes API token ho nelze upravit.', 409);
+        }
         if ($deny = $this->denyIfLocked($request, $response, $lock, 'invoice', $id)) {
             return $deny;
         }
         if ($existing['status'] !== 'draft') {
-            // Vynucená úprava vystaveného dokladu (u zaúčtovaného přeúčtuje deník) jen z relace.
-            if ($isForce
+            // Vynucená úprava vystaveného dokladu (u zaúčtovaného přeúčtuje deník) jen z relace,
+            // nebo přes API token s výslovně povolenou schopností.
+            if ($isForce && !$tokenForce
                 && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Vynucená úprava vystaveného dokladu'))) {
                 return $deny;
             }
@@ -189,6 +200,9 @@ final class UpdateInvoiceAction
             // Cancellation/credit_note jsou implicitně chráněné (auditní stopa)
             if (in_array($existing['invoice_type'], ['cancellation'], true)) {
                 return Json::error($response, 'not_editable', 'Storno doklad nelze editovat.', 409);
+            }
+            if ($tokenForce && ($deny = $this->denyTokenForce($response, $body, $existing))) {
+                return $deny;
             }
         }
 
@@ -422,6 +436,9 @@ final class UpdateInvoiceAction
         $newRefDate = DocumentLockService::invoiceRefDate($body) ?? DocumentLockService::invoiceRefDate($existing);
         if ($newRefDate !== null) {
             $newLock = $this->locks->forDate((int) $existing['supplier_id'], $newRefDate);
+            if ($tokenForce && self::lockedForToken($newLock)) {
+                return Json::error($response, 'period_closed', 'Nové datum spadá do uzavřeného nebo zamčeného účetního období; přes API token ho nelze použít.', 409);
+            }
             if ($deny = $this->denyIfLocked($request, $response, $newLock, 'invoice', $id)) {
                 return $deny;
             }
@@ -484,9 +501,18 @@ final class UpdateInvoiceAction
         // tvrzením. Stejná brána jako import vystaveného dokladu a hromadná změna OSS.
         if ($existing['status'] !== 'draft'
             && $isForce
-            && !RequestAuthorization::canChangeFiledVatPeriod($request)
+            && ($tokenForce || !RequestAuthorization::canChangeFiledVatPeriod($request))
             && self::financialFieldsChanged($body, $existing) !== []
-            && ($filed = $this->filedPeriodOf($existing, $body)) !== null) {
+            && ($filed = $this->filedPeriodOf($existing, $body, $tokenForce)) !== null) {
+            if ($tokenForce) {
+                return Json::error(
+                    $response,
+                    'period_filed',
+                    'Období faktury už bylo podáno (' . $filed . '). Přes API token v něm nelze měnit částky, data ani položky; '
+                        . 'opravu řešte opravným daňovým dokladem nebo v aplikaci.',
+                    409,
+                );
+            }
             return Json::error(
                 $response,
                 'period_filed',
@@ -785,6 +811,17 @@ final class UpdateInvoiceAction
         if ($forceMode !== null) {
             $payload = ($payload ?? []) + ['force_mode' => $forceMode];
         }
+        if ($tokenForce) {
+            $token = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);
+            $payload = ($payload ?? []) + [
+                'via_api_token' => true,
+                'api_token' => [
+                    'id'     => (int) ($token['id'] ?? 0),
+                    'name'   => (string) ($token['name'] ?? ''),
+                    'prefix' => (string) ($token['prefix'] ?? ''),
+                ],
+            ];
+        }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $action = ($existing['status'] !== 'draft') ? 'invoice.force_updated' : 'invoice.updated';
@@ -1036,7 +1073,7 @@ final class UpdateInvoiceAction
      * @param array<string,mixed> $existing
      * @param array<string,mixed> $body tělo po sloučení s uloženou hlavičkou
      */
-    private function filedPeriodOf(array $existing, array $body): ?string
+    private function filedPeriodOf(array $existing, array $body, bool $includeSummaryReport = false): ?string
     {
         $items = [...(array) ($existing['items'] ?? []), ...(DocumentItemsPayload::replaces($body) ? (array) $body['items'] : [])];
         $includeOss = array_filter($items, static fn ($item): bool => !empty($item['oss_applicable'])) !== [];
@@ -1046,9 +1083,51 @@ final class UpdateInvoiceAction
             DocumentLockService::invoiceRefDate($body),
         ]));
         foreach ($dates as $refDate) {
-            if (($filed = $this->filedPeriods->describe($supplierId, $refDate, $includeOss)) !== null) {
+            if (($filed = $this->filedPeriods->describe($supplierId, $refDate, $includeOss, $includeSummaryReport)) !== null) {
                 return $filed;
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * Uzavřené, uzavírané i k datu zamčené období token nepřebije (#355).
+     */
+    private static function lockedForToken(\MyInvoice\Service\Accounting\DocumentLock $lock): bool
+    {
+        return $lock->inClosedPeriod || $lock->inClosingPeriod || $lock->dateLocked;
+    }
+
+    /**
+     * Zámky vynucené úpravy přes API token (#355), všechny před jakýmkoli zápisem:
+     * token doklad nepřečísluje a nesahá na fakturu s úhradou nebo zápočtem.
+     */
+    private function denyTokenForce(Response $response, array $body, array $existing): ?Response
+    {
+        $typeChanged = array_key_exists('invoice_type', $body)
+            && (string) $body['invoice_type'] !== '' && (string) $body['invoice_type'] !== (string) $existing['invoice_type'];
+        $numberChanged = array_key_exists('varsymbol', $body)
+            && (string) $body['varsymbol'] !== (string) ($existing['varsymbol'] ?? '');
+        if ($typeChanged || $numberChanged) {
+            return Json::error(
+                $response,
+                'token_force_renumber_forbidden',
+                'Přes API token nelze u vystavené faktury měnit typ dokladu ani číslo (variabilní symbol).',
+                422,
+            );
+        }
+        $supplierId = (int) $existing['supplier_id'];
+        if ((string) $existing['status'] === 'paid'
+            || (float) ($existing['advance_paid_amount'] ?? 0) != 0.0
+            || $this->paymentLinks->existsForDocuments($supplierId, 'invoice', [(int) $existing['id']])) {
+            return Json::error(
+                $response,
+                'invoice_has_payments',
+                'Faktura už má evidovanou úhradu, zálohu, zápočet nebo platební doklad. Přes API token ji nelze upravit; '
+                    . 'opravte ji dobropisem.',
+                409,
+            );
         }
 
         return null;

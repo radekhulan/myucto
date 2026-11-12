@@ -57,6 +57,7 @@ final class ApiTokenService
         string $scope,
         ?\DateTimeImmutable $expiresAt = null,
         bool $allowPayrollSubmissionDocs = false,
+        bool $allowIssuedInvoiceEdit = false,
     ): array {
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
@@ -69,6 +70,7 @@ final class ApiTokenService
                 $scope,
                 $expiresAt,
                 $allowPayrollSubmissionDocs,
+                allowIssuedInvoiceEdit: $allowIssuedInvoiceEdit,
             );
             $pdo->commit();
             return $token;
@@ -92,6 +94,7 @@ final class ApiTokenService
         ?\DateTimeImmutable $expiresAt = null,
         bool $allowPayrollSubmissionDocs = false,
         bool $seatGate = true,
+        bool $allowIssuedInvoiceEdit = false,
     ): array {
         if (!$pdo->inTransaction() || $userId < 1) {
             throw new \LogicException('Vytvoření API tokenu vyžaduje aktivní transakci a uživatele.');
@@ -103,6 +106,9 @@ final class ApiTokenService
         if ($name === '' || mb_strlen($name) > 100) {
             throw new \InvalidArgumentException('Token name must be 1–100 chars');
         }
+        if ($allowIssuedInvoiceEdit && ($supplierId === null || $scope !== 'read_write')) {
+            throw new \InvalidArgumentException('Issued invoice edit requires a supplier-bound read_write token');
+        }
 
         $raw       = random_bytes(self::RANDOM_BYTES);
         $body      = rtrim(strtr(base64_encode($raw), '+/', '-_'), '=');
@@ -113,8 +119,8 @@ final class ApiTokenService
         $expiresSql = $expiresAt !== null ? 'FROM_UNIXTIME(?)' : 'NULL';
         $stmt = $pdo->prepare(
             'INSERT INTO api_tokens (user_id, supplier_id, name, token_hash, prefix, scope,
-                                     allow_payroll_submission_docs, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ' . $expiresSql . ')'
+                                     allow_payroll_submission_docs, allow_issued_invoice_edit, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ' . $expiresSql . ')'
         );
         $params = [
             $userId,
@@ -124,6 +130,7 @@ final class ApiTokenService
             $prefix,
             $scope,
             $allowPayrollSubmissionDocs ? 1 : 0,
+            $allowIssuedInvoiceEdit ? 1 : 0,
         ];
         if ($expiresAt !== null) {
             $params[] = $expiresAt->getTimestamp();
@@ -162,7 +169,7 @@ final class ApiTokenService
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT t.id, t.user_id, t.supplier_id, t.name, t.prefix, t.scope, t.audience,
-                    t.allow_payroll_submission_docs, t.eet_external_by_default,
+                    t.allow_payroll_submission_docs, t.allow_issued_invoice_edit, t.eet_external_by_default,
                     t.expires_at, t.revoked_at, t.issued_auth_method,
                     u.email AS user_email, u.name AS user_name, u.role_id AS user_role_id,
                     r.name AS user_role_name, r.role_type AS user_role_type,
@@ -197,6 +204,7 @@ final class ApiTokenService
         $row['user_is_active']    = true;
         $row['user_totp_enabled'] = (int) ($row['user_totp_enabled'] ?? 0) === 1;
         $row['eet_external_by_default'] = (int) ($row['eet_external_by_default'] ?? 0) === 1;
+        $row['allow_issued_invoice_edit'] = (int) ($row['allow_issued_invoice_edit'] ?? 0) === 1;
         return $row;
     }
 
@@ -263,8 +271,8 @@ final class ApiTokenService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT t.id, t.supplier_id, s.display_name AS supplier_name, s.company_name AS supplier_company,
-                    t.name, t.prefix, t.scope, t.allow_payroll_submission_docs, t.eet_external_by_default,
-                    t.last_used_at, t.last_used_ip,
+                    t.name, t.prefix, t.scope, t.allow_payroll_submission_docs, t.allow_issued_invoice_edit,
+                    t.eet_external_by_default, t.last_used_at, t.last_used_ip,
                     t.expires_at, t.revoked_at, t.created_at,
                     (SELECT COUNT(*) FROM api_token_ips ip WHERE ip.token_id = t.id) AS ip_rule_count
              FROM api_tokens t
@@ -282,6 +290,7 @@ final class ApiTokenService
             // přetypování by štítek schopnosti svítil i u tokenů, které ji nemají.
             $r['allow_payroll_submission_docs'] = (int) $r['allow_payroll_submission_docs'] === 1;
             $r['eet_external_by_default'] = (int) $r['eet_external_by_default'] === 1;
+            $r['allow_issued_invoice_edit'] = (int) $r['allow_issued_invoice_edit'] === 1;
             if ($r['last_used_ip'] !== null) {
                 $r['last_used_ip'] = @inet_ntop($r['last_used_ip']) ?: null;
             }

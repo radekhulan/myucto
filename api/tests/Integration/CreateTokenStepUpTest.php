@@ -130,6 +130,7 @@ final class CreateTokenStepUpTest extends TestCase
             // službě, ale výsledkem akce — mock bez expectations hlásí notice.
             $this->createStub(MfaProtectedOperationService::class),
             $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
+            $this->createStub(\MyInvoice\Security\CrossSupplierAuthorization::class),
         );
     }
 

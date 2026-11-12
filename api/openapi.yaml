@@ -3181,6 +3181,22 @@ paths:
         Vynucená úprava vystaveného dokladu (`force=1`, u zaúčtovaného dokladu
         přeúčtuje deník) i úprava v uzavřeném účetním období je účetní úkon:
         přes API token vrací 403 `token_write_forbidden`, provádí se v aplikaci.
+
+        Výjimka: API token se schopností `allow_issued_invoice_edit` (zapíná se jen při
+        vytvoření tokenu vázaného na firmu se zápisem, viz `GET /api/auth/api-me`) smí
+        vystavenou vydanou fakturu upravit s `force=1`, ale přísněji než správce v aplikaci.
+        Uzavřené, uzavírané nebo k datu zamčené účetní období (staré i nové datum) vrací
+        vždy 409 `period_closed`, `force_mode` se neuplatní. Podané přiznání k DPH, kontrolní
+        hlášení, souhrnné hlášení nebo OSS přiznání vrací při změně částek, dat nebo položek
+        vždy 409 `period_filed`, i když je vlastník tokenu správce. Změna `invoice_type` nebo
+        `varsymbol` vrací 422 `token_force_renumber_forbidden`. Faktura s úhradou, zálohou,
+        zápočtem nebo platebním dokladem vrací 409 `invoice_has_payments` (opravuje se
+        dobropisem). Zaúčtovanou fakturu v otevřeném období token přeúčtuje jen tehdy, když
+        vlastník tokenu má `accounting.journal.post` (jinak 403 `journal_post_forbidden`).
+        Ostatní zámky (sklad, sériová čísla, storno, splátkový kalendář) platí beze změny.
+        Všechny tyto kontroly proběhnou dřív, než se cokoli zapíše. Úprava se zaznamená
+        do historie faktury jako `invoice.force_updated` s `via_api_token: true` a
+        identifikací tokenu (id, název, prefix).
         Vystavený doklad upraví správce firmy nebo role s právem `invoices.edit_issued`.
         Taková role mění částky, DPH nebo položky zaúčtovaného dokladu jen s právem
         `accounting.journal.post` (jinak 403 `journal_post_forbidden`) a v období, za které
@@ -3206,6 +3222,13 @@ paths:
         změní `currency_id`, `issue_date` nebo `tax_date` oproti uloženým hodnotám. (7) Poslaný
         `vat_classification_code` položky, který se liší od uloženého, je účetní změna: neprojde
         režimem `notes_only` ani zámkem podaného období DPH. Vynechaný kód se odvodí ze sazby a jednotky.
+      parameters:
+        - in: query
+          name: force
+          description: |
+            Vynucená úprava vystavené faktury. Z aplikace správce nebo role s `invoices.edit_issued`,
+            přes API token jen se schopností `allow_issued_invoice_edit`.
+          schema: { type: integer, enum: [1] }
       requestBody:
         required: true
         content:
@@ -3227,8 +3250,9 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '403':
           description: |
-            Doklad je uzamčený pro roli (`document_locked`), nebo API token žádá vynucenou
-            úpravu vystaveného dokladu či přebití uzavřeného období (`token_write_forbidden`).
+            Doklad je uzamčený pro roli (`document_locked`), nebo API token bez schopnosti
+            `allow_issued_invoice_edit` žádá vynucenou úpravu vystaveného dokladu či přebití
+            uzavřeného období (`token_write_forbidden`).
             Role bez práva zaúčtovat mění částky, DPH nebo položky zaúčtované vystavené faktury,
             což by přeúčtovalo deník (`journal_post_forbidden`).
           content:
@@ -3243,11 +3267,18 @@ paths:
             skladového řádku, přidávají nebo odebírají skladový řádek. Opravuje se dobropisem.
             `period_filed`: role, která není správcem, mění částky, data nebo položky v období,
             za které už je podané přiznání k DPH, kontrolní hlášení nebo OSS přiznání.
+            API token se schopností `allow_issued_invoice_edit`: `period_closed` (uzavřené, uzavírané
+            nebo zamčené účetní období, staré i nové datum), `period_filed` (navíc i podané souhrnné
+            hlášení, platí i pro vlastníka správce) a `invoice_has_payments` (faktura má úhradu,
+            zálohu, zápočet nebo platební doklad; opravuje se dobropisem).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
-          description: '`items: []` by nedraftový doklad připravilo o všechny položky (`no_items`)'
+          description: |
+            `items: []` by nedraftový doklad připravilo o všechny položky (`no_items`), nebo API token
+            se schopností `allow_issued_invoice_edit` mění typ dokladu či číslo
+            (`token_force_renumber_forbidden`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -48430,6 +48461,13 @@ components:
                     pojišťoven). `false` = takové dokumenty výpis přeskočí
                     a detail vrátí 404 — zavřený kanál, ne prázdná data.
                     Nastavuje se jen při vytváření tokenu.
+                allow_issued_invoice_edit:
+                  type: boolean
+                  description: |
+                    Smí token vynuceně upravit vystavenou vydanou fakturu
+                    (`PUT /api/v1/invoices/{id}?force=1`) za přísnějších podmínek
+                    než správce v aplikaci. Jen token vázaný na firmu se zápisem;
+                    nastavuje se jen při vytváření tokenu.
                 expires_at: { type: [string, "null"], format: date-time }
             - { type: "null" }
 
