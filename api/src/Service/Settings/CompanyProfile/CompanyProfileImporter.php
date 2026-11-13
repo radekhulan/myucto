@@ -1089,6 +1089,11 @@ final class CompanyProfileImporter
                 && (int) ($current['bank_account_id'] ?? 0) !== (int) ($rule['bank_account_id'] ?? 0)) {
                 $fields['bank_account_id'] = $rule['bank_account_id'] ?? null;
             }
+            // Starší profil přednost před párováním nezná a nesmí ji pravidlu vypnout.
+            if (array_key_exists('skip_document_matching', $raw)
+                && (int) ($current['skip_document_matching'] ?? 0) !== $rule['skip_document_matching']) {
+                $fields['skip_document_matching'] = $rule['skip_document_matching'];
+            }
             if ($fields !== []) {
                 $this->bankRuleRepo->update($supplierId, $id, $fields);
             }
@@ -1186,13 +1191,14 @@ final class CompanyProfileImporter
                     AND bank_account_id <=> ?
                     AND counterparty_account <=> ? AND counterparty_bank <=> ? AND counterparty_prefix <=> ?
                     AND variable_symbol <=> ? AND message_contains <=> ?
-                    AND amount_min <=> ? AND amount_max <=> ?
+                    AND amount_min <=> ? AND amount_max <=> ? AND card_payment <=> ?
                   ORDER BY id LIMIT 1'
             );
             $stmt->execute([
                 $supplierId, $rule['direction'], $rule['applies_currency'], $rule['bank_account_id'],
                 $rule['counterparty_account'], $rule['counterparty_bank'], $rule['counterparty_prefix'],
                 $rule['variable_symbol'], $rule['message_contains'], $rule['amount_min'], $rule['amount_max'],
+                $rule['card_payment'],
             ]);
         }
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

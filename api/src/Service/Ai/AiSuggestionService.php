@@ -359,6 +359,7 @@ final class AiSuggestionService
             'counterparty_bank'    => isset($tx['counterparty_bank']) ? (string) $tx['counterparty_bank'] : null,
             'description'          => isset($tx['description']) ? (string) $tx['description'] : null,
             'counterparty_name'    => isset($tx['counterparty_name']) ? (string) $tx['counterparty_name'] : null,
+            'card_last4'           => isset($tx['card_last4']) ? (string) $tx['card_last4'] : null,
         ];
         $matchTx = (new \MyInvoice\Service\Accounting\Bank\StatementOwnAccount($this->db))->withOwnAccount($supplierId, $matchTx, $tx);
         foreach ($this->bankRules->findActive($supplierId, $amount > 0 ? 'incoming' : 'outgoing') as $rule) {

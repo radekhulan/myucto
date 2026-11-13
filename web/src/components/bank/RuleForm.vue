@@ -39,7 +39,7 @@ const idPrefix = `bank-rule-form-${useId()}`
 const debitListId = `${idPrefix}-debit`
 const creditListId = `${idPrefix}-credit`
 
-const form = reactive<BankPostingRulePayload>({ ...props.modelValue })
+const form = reactive<BankPostingRulePayload>({ card_payment: null, skip_document_matching: false, ...props.modelValue })
 let syncing = false
 
 watch(() => props.modelValue, (v) => {
@@ -50,6 +50,11 @@ watch(() => props.modelValue, (v) => {
 watch(form, () => {
   if (!syncing) emit('update:modelValue', { ...form })
 }, { deep: true })
+
+// Přednost před párováním s doklady jen u pravidla s účtem protistrany a bankou (hlídá i server).
+const canSkipMatching = computed(() =>
+  !!String(form.counterparty_account ?? '').trim() && !!String(form.counterparty_bank ?? '').trim(),
+)
 
 const forcedPromotion = computed(() =>
   props.mode === 'edit' && props.initialMode === 'suggest' && form.mode === 'auto' && !props.promotionCandidate,
@@ -214,6 +219,32 @@ defineExpose({ runDryRun, dryRun })
           class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
         <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank.posting.rule_message_hint') }}</p>
       </div>
+    </div>
+
+    <div>
+      <label :for="`${idPrefix}-card`" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.rule_card_payment') }}</label>
+      <select :id="`${idPrefix}-card`" v-model="form.card_payment" data-test="rule-card-payment"
+        class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+        <option :value="null">{{ t('bank.posting.rule_card_payment_any') }}</option>
+        <option :value="1">{{ t('bank.posting.rule_card_payment_only') }}</option>
+        <option :value="0">{{ t('bank.posting.rule_card_payment_none') }}</option>
+      </select>
+      <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank.posting.rule_card_payment_hint') }}</p>
+    </div>
+
+    <div>
+      <label class="flex items-start gap-2 text-sm text-neutral-700"
+        :class="canSkipMatching || form.skip_document_matching ? 'cursor-pointer' : 'text-neutral-400 cursor-not-allowed'">
+        <input v-model="form.skip_document_matching" type="checkbox" data-test="rule-skip-matching"
+          :disabled="!canSkipMatching && !form.skip_document_matching" class="mt-0.5 rounded border-neutral-300" />
+        <span>
+          <span class="font-medium">{{ t('bank.posting.rule_skip_matching') }}</span>
+          <span class="block text-xs text-neutral-500">{{ t('bank.posting.rule_skip_matching_hint') }}</span>
+          <span v-if="!canSkipMatching" class="block text-xs text-warning-600" data-test="rule-skip-matching-requires">
+            {{ t('bank.posting.rule_skip_matching_requires') }}
+          </span>
+        </span>
+      </label>
     </div>
 
     <div>

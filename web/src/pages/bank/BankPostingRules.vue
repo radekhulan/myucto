@@ -189,6 +189,10 @@ function amountRange(r: BankPostingRule): string {
   return `${lo} – ${hi}`
 }
 
+function cardLabel(r: BankPostingRule): string {
+  return r.card_payment === 1 ? t('bank.posting.rule_card_payment_only') : t('bank.posting.rule_card_payment_none')
+}
+
 watch([() => supplierStore.currentSupplierId, page], ([supplierId], [previousSupplier]) => {
   if (supplierId !== previousSupplier) {
     ++loadSequence
@@ -275,6 +279,10 @@ watch([() => supplierStore.currentSupplierId, page], ([supplierId], [previousSup
                   <span v-if="r.message_contains" class="italic">„{{ r.message_contains }}"</span>
                   <span v-if="amountRange(r)" class="font-mono">{{ amountRange(r) }}</span>
                   <span v-if="r.bank_account_id" data-test="rule-own-account-label">{{ t('bank.posting.rule_own_account') }}: {{ ownAccountLabel(r.bank_account_id) }}</span>
+                  <span v-if="r.card_payment != null" data-test="rule-card-label">{{ cardLabel(r) }}</span>
+                  <span v-if="r.skip_document_matching" data-test="rule-skip-matching-label"
+                    class="inline-flex rounded bg-warning-50 px-1.5 py-0.5 text-xs font-medium text-warning-700"
+                    :title="t('bank.posting.rule_skip_matching_hint')">{{ t('bank.posting.rule_skip_matching_badge') }}</span>
                 </div>
                 <DimensionChips v-if="r.dimensions && Object.keys(r.dimensions).length" class="mt-1" :dimensions="r.dimensions" />
               </td>
@@ -360,6 +368,9 @@ watch([() => supplierStore.currentSupplierId, page], ([supplierId], [previousSup
             <span v-if="r.variable_symbol" class="font-mono">VS {{ r.variable_symbol }}</span>
             <span v-if="r.message_contains" class="italic">„{{ r.message_contains }}"</span>
             <span v-if="r.bank_account_id">{{ t('bank.posting.rule_own_account') }}: {{ ownAccountLabel(r.bank_account_id) }}</span>
+            <span v-if="r.card_payment != null">{{ cardLabel(r) }}</span>
+            <span v-if="r.skip_document_matching"
+              class="inline-flex rounded bg-warning-50 px-1.5 py-0.5 font-medium text-warning-700">{{ t('bank.posting.rule_skip_matching_badge') }}</span>
           </div>
           <DimensionChips v-if="r.dimensions && Object.keys(r.dimensions).length" :dimensions="r.dimensions" />
           <div class="flex items-center justify-between text-xs">

@@ -1196,7 +1196,8 @@
         "2290_payroll_identity_from_first_employment.sql",
         "2291_payroll_jmhz_external_roots.sql",
         "2292_api_token_issued_invoice_edit.sql",
-        "2293_api_token_system_write.sql"
+        "2293_api_token_system_write.sql",
+        "2294_bank_posting_rule_skip_matching_card.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3481,6 +3482,7 @@
                 "approved_streak": "tinyint(3) unsigned NOT NULL DEFAULT 0",
                 "auto_amount_cap": "decimal(14,2) NULL DEFAULT NULL",
                 "bank_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "card_payment": "tinyint(1) NULL DEFAULT NULL",
                 "counterparty_account": "varchar(35) NULL DEFAULT NULL",
                 "counterparty_bank": "varchar(10) NULL DEFAULT NULL",
                 "counterparty_prefix": "varchar(6) NULL DEFAULT NULL",
@@ -3503,6 +3505,7 @@
                 "other_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "priority": "smallint(5) unsigned NOT NULL DEFAULT 100",
                 "rejected_streak": "tinyint(3) unsigned NOT NULL DEFAULT 0",
+                "skip_document_matching": "tinyint(1) NOT NULL DEFAULT 0",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "system_template_key": "varchar(64) NULL DEFAULT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
@@ -3523,7 +3526,7 @@
                 "fk_bpr_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": {
-                "chk_bpr_criteria": "`counterparty_account` is not null or `counterparty_bank` is not null or `counterparty_prefix` is not null or `variable_symbol` is not null or `message_contains` is not null"
+                "chk_bpr_criteria": "`counterparty_account` is not null or `counterparty_bank` is not null or `counterparty_prefix` is not null or `variable_symbol` is not null or `message_contains` is not null or `card_payment` = 1"
             }
         },
         "bank_posting_suggestions": {

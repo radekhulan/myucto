@@ -316,6 +316,7 @@ final class BankPostingRuleAction
                 'counterparty_bank'    => $tx['counterparty_bank'],
                 'description'          => $tx['description'],
                 'counterparty_name'    => $tx['counterparty_name'],
+                'card_last4'           => $tx['card_last4'],
             ], $tx))) {
                 continue;
             }
@@ -395,6 +396,15 @@ final class BankPostingRuleAction
         if (array_key_exists('counterparty_prefix', $body)) {
             $fields['counterparty_prefix'] = self::nn($body['counterparty_prefix'], static fn (string $v): string => ltrim(preg_replace('/\D/', '', $v) ?? '', '0'));
         }
+        if (array_key_exists('card_payment', $body)) {
+            $fields['card_payment'] = BankPostingRuleValidator::cardPayment($body['card_payment']);
+        }
+        if (array_key_exists('skip_document_matching', $body)) {
+            $fields['skip_document_matching'] = BankPostingRuleValidator::skipDocumentMatching($body['skip_document_matching']);
+        }
+        // Kritéria posuzuje výsledný stav pravidla: úprava nesmí odebrat poslední kritérium
+        // ani účet protistrany pravidlu s předností před párováním.
+        BankPostingRuleValidator::assertMatchingConditions($fields + $existing);
         if (array_key_exists('description', $body)) {
             $fields['description'] = self::nn($body['description']);
         }
@@ -635,7 +645,7 @@ final class BankPostingRuleAction
         $sign = $direction === 'incoming' ? '> 0' : '< 0';
         $stmt = $this->db->pdo()->prepare(
             "SELECT bt.id, bt.posted_at, bt.amount, bt.variable_symbol, bt.counterparty_account,
-                    bt.counterparty_bank, bt.description, bt.counterparty_name, bt.match_status,
+                    bt.counterparty_bank, bt.description, bt.counterparty_name, bt.card_last4, bt.match_status,
                     bs.account_number AS recipient_account, bs.bank_code AS recipient_bank,
                     EXISTS (SELECT 1 FROM journal_entries je WHERE je.supplier_id = ?
                               AND je.source_type = 'bank' AND je.source_id = bt.id AND je.reversed_by IS NULL) AS already_posted,

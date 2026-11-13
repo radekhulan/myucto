@@ -25269,7 +25269,7 @@
       "revenue_category_hint": "Category for revenue breakdown in CRM and stats. Managed in Codebooks."
     },
     "linked": {
-      "final_invoice": "Tax document for advance",
+      "final_invoice": "Invoice - tax document for advance",
       "proforma": "Advance (proforma) invoice",
       "parent": "Original invoice"
     },
@@ -26440,6 +26440,7 @@
     "match_reason": {
       "payroll_settled": "Already used by a payroll payment",
       "own_transfer_matched": "Transfer between own accounts, paired with its counter-movement",
+      "rule_skips_matching": "A posting rule takes precedence over matching with documents",
       "other_item_allocated": "Already used to settle another receivable or payable",
       "other_item_candidates": "Possibly another receivable or payable, pick it in Match",
       "unknown_supplier_for_account": "Statement account belongs to no company",
@@ -26722,6 +26723,15 @@
       "rule_vs": "Variable symbol",
       "rule_fragment": "Message fragment",
       "rule_message_hint": "Matched against the movement description and the counterparty name.",
+      "rule_card_payment": "Card payment",
+      "rule_card_payment_any": "Any movement",
+      "rule_card_payment_only": "Card payments only",
+      "rule_card_payment_none": "Non-card movements only",
+      "rule_card_payment_hint": "A card payment is a movement with the card's last four digits from the statement. \"Card payments only\" is enough as the rule's only criterion.",
+      "rule_skip_matching": "Do not match with documents, always post by this rule",
+      "rule_skip_matching_hint": "Automatic matching does not pair the movement with an issued or received invoice, even when the VS equals the document number, and this rule posts it. Useful for factoring, collection agencies or leasing. You can still match the movement manually.",
+      "rule_skip_matching_requires": "Fill in both the counterparty account and the bank code.",
+      "rule_skip_matching_badge": "No matching",
       "rule_amount_range": "Amount range (CZK)",
       "rule_priority": "Priority",
       "rule_priority_hint": "Lower = higher precedence; below 50 overrides built-in detection",
@@ -26826,7 +26836,9 @@
       "err_ignored": "Ignored transaction cannot be posted.",
       "err_rule_account_forbidden": "Open-item accounts do not belong in rules — invoice payments are matched.",
       "err_fx_rule_account_forbidden": "A foreign-currency rule can only post to a P&L account 5xx/6xx, an own account 221 or other receivables and payables 378/379.",
-      "err_rule_criteria": "Rule needs at least one criterion.",
+      "err_rule_criteria": "Rule needs at least one criterion (account, bank, prefix, VS, text or card payments only).",
+      "err_rule_skip_matching_account": "Precedence over matching with documents requires a counterparty account and bank code in the rule.",
+      "err_rule_card_payment": "Invalid card payment condition.",
       "err_rule_auto_requirements": "Auto mode requires an amount range and at least one hit.",
       "err_suggestion_gone": "Suggestion already resolved — the list will refresh.",
       "err_suggestion_replaced": "Own-transfer detection replaced the suggestion — review the new suggestion.",

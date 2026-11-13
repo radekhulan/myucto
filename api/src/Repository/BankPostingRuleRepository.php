@@ -17,7 +17,8 @@ final class BankPostingRuleRepository
         variable_symbol, message_contains, amount_min, amount_max, debit_account_code, credit_account_code,
         description, mode, mode_set_manually_at, is_active, hit_count, last_hit_at, rejected_streak, last_rejected_tx_id,
         priority, operation_type, system_template_key, auto_amount_cap, applies_currency,
-        counterparty_prefix, approved_streak, other_item_id, created_by, created_at, updated_at';
+        counterparty_prefix, approved_streak, other_item_id, skip_document_matching, card_payment,
+        created_by, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -36,6 +37,23 @@ final class BankPostingRuleRepository
               ORDER BY priority ASC, bank_account_id IS NULL, hit_count DESC, id ASC'
         );
         $stmt->execute([$supplierId, $direction]);
+        return array_map(fn (array $r): array => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Aktivní pravidla obou směrů s předností před párováním s doklady
+     * ({@see \MyInvoice\Service\Accounting\Bank\DocumentMatchingRulePrecedence}).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function findActiveSkippingDocumentMatching(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLS . ' FROM bank_posting_rules
+              WHERE supplier_id = ? AND is_active = 1 AND skip_document_matching = 1
+              ORDER BY priority ASC, bank_account_id IS NULL, hit_count DESC, id ASC'
+        );
+        $stmt->execute([$supplierId]);
         return array_map(fn (array $r): array => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
@@ -145,8 +163,9 @@ final class BankPostingRuleRepository
                 (supplier_id, name, direction, bank_account_id, counterparty_account, counterparty_bank, variable_symbol,
                  message_contains, amount_min, amount_max, debit_account_code, credit_account_code,
                  description, mode, mode_set_manually_at, is_active, priority, operation_type, system_template_key,
-                 auto_amount_cap, applies_currency, counterparty_prefix, other_item_id, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 auto_amount_cap, applies_currency, counterparty_prefix, other_item_id, skip_document_matching,
+                 card_payment, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $data['name'],
@@ -171,6 +190,8 @@ final class BankPostingRuleRepository
             $data['applies_currency'] ?? 'CZK',
             $data['counterparty_prefix'] ?? null,
             $data['other_item_id'] ?? null,
+            (int) ($data['skip_document_matching'] ?? 0),
+            $data['card_payment'] ?? null,
             $createdBy,
         ]);
         return (int) $pdo->lastInsertId();
@@ -188,7 +209,7 @@ final class BankPostingRuleRepository
             'message_contains', 'amount_min', 'amount_max', 'debit_account_code', 'credit_account_code',
             'description', 'mode', 'mode_set_manually_at', 'is_active',
             'priority', 'operation_type', 'auto_amount_cap', 'applies_currency', 'counterparty_prefix',
-            'other_item_id',
+            'other_item_id', 'skip_document_matching', 'card_payment',
         ];
         $sets = [];
         $params = [];
@@ -351,6 +372,8 @@ final class BankPostingRuleRepository
         $r['last_rejected_tx_id'] = $r['last_rejected_tx_id'] === null ? null : (int) $r['last_rejected_tx_id'];
         $r['created_by'] = $r['created_by'] === null ? null : (int) $r['created_by'];
         $r['other_item_id'] = ($r['other_item_id'] ?? null) === null ? null : (int) $r['other_item_id'];
+        $r['skip_document_matching'] = (bool) ($r['skip_document_matching'] ?? false);
+        $r['card_payment'] = ($r['card_payment'] ?? null) === null ? null : (int) $r['card_payment'];
         if (array_key_exists('created_by_name', $r)) {
             $r['created_by_name'] = $r['created_by_name'] === null ? null : (string) $r['created_by_name'];
         }
