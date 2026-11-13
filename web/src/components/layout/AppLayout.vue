@@ -2327,47 +2327,42 @@ onBeforeUnmount(() => {
             </a>
           </div>
           <!-- Na telefonu nemá jazyk, motiv ani oblíbené místo ve spodní liště, žijí tady
-               v jednom řádku s odhlášením, ať menu zůstane co nejvíc místa. Okna jsou v hlavičce. -->
-          <div v-if="phoneNavigation" class="flex items-center gap-1.5">
-            <LanguageToggle class="h-9! w-10!" />
-            <ThemeToggle class="h-9! w-10!" />
-            <WorkspaceFavoritesButton class="h-9! w-10! border border-neutral-200" />
+               v jednom řádku s odhlášením, ať menu zůstane co nejvíc místa. Okna jsou v hlavičce.
+               Zamknutí a odhlášení jsou pro obě podoby tatáž tlačítka, mění se jen vzhled. -->
+          <div :class="phoneNavigation ? 'flex items-center gap-1.5' : ['grid gap-2', canLockSession ? 'grid-cols-2' : 'grid-cols-1']">
+            <template v-if="phoneNavigation">
+              <LanguageToggle class="h-9! w-10!" />
+              <ThemeToggle class="h-9! w-10!" />
+              <WorkspaceFavoritesButton class="h-9! w-10! border border-neutral-200" />
+            </template>
             <button
               v-if="canLockSession"
               type="button"
-              class="ml-auto inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md border border-neutral-300 text-neutral-700 hover:bg-surface"
-              :title="t('session_lock.lock_now')"
-              :aria-label="t('session_lock.lock_now')"
+              class="cursor-pointer h-9 border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface"
+              :class="phoneNavigation ? 'ml-auto inline-flex w-9 shrink-0 items-center justify-center' : 'w-full px-2 text-sm'"
+              :title="phoneNavigation ? t('session_lock.lock_now') : undefined"
+              :aria-label="phoneNavigation ? t('session_lock.lock_now') : undefined"
               @click="sessionSecurity.lock"
             >
-              <svg class="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <svg v-if="phoneNavigation" class="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M7 11V7a5 5 0 0 1 10 0v4M5 11h14v10H5V11z" />
               </svg>
+              <template v-else>{{ t('session_lock.lock_now') }}</template>
             </button>
             <button
               type="button"
-              class="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 text-sm text-neutral-700 hover:bg-surface disabled:opacity-60"
-              :class="canLockSession ? '' : 'ml-auto'"
+              class="cursor-pointer h-9 border border-neutral-300 rounded-md text-sm text-neutral-700 hover:bg-surface disabled:opacity-60"
+              :class="phoneNavigation
+                ? ['inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3', canLockSession ? '' : 'ml-auto']
+                : 'w-full px-2'"
               :disabled="logoutBusy"
               @click="logout"
             >
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <svg v-if="phoneNavigation" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 17l5-5-5-5M20 12H9M12 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" />
               </svg>
               {{ t('nav.logout') }}
             </button>
-          </div>
-          <div v-else class="grid gap-2" :class="canLockSession ? 'grid-cols-2' : 'grid-cols-1'">
-            <button
-              v-if="canLockSession"
-              @click="sessionSecurity.lock"
-              class="cursor-pointer w-full px-2 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface"
-            >{{ t('session_lock.lock_now') }}</button>
-            <button
-              @click="logout"
-              :disabled="logoutBusy"
-              class="cursor-pointer w-full px-2 h-9 text-sm border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface disabled:opacity-60"
-            >{{ t('nav.logout') }}</button>
           </div>
           <!-- Klávesové zkratky tu byly, ale na dotykovém zařízení je není čím
                vyvolat — odkaz jen zabíral místo na dně zásuvky. Na desktopu

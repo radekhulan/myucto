@@ -46,7 +46,7 @@ describe('mobilní rám aplikace', () => {
     const header = snippet('<template v-if="phoneNavigation">', 400)
     expect(header).toContain('<WorkspaceWindowButton')
     expect(header).toContain('data-testid="mobile-windows"')
-    const drawerRow = snippet('<div v-if="phoneNavigation" class="flex items-center gap-1.5">', 400)
+    const drawerRow = snippet(`<div :class="phoneNavigation ? 'flex items-center gap-1.5'`, 400)
     expect(drawerRow).not.toContain('WorkspaceWindowButton')
     expect(drawerRow).toContain('<WorkspaceFavoritesButton')
   })

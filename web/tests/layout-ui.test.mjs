@@ -11,7 +11,7 @@ test('mobile navigation links the signed-in user to the profile', async () => {
   assert.match(mobileFooter, /<WorkspaceNavLink[\s\S]*?to="\/profile\/password"/)
   assert.match(mobileFooter, /@click="mobileOpen = false"/)
   assert.match(mobileFooter, /\{\{ auth\.user\?\.name \}\}/)
-  assert.match(mobileFooter, /:class="canLockSession \? 'grid-cols-2' : 'grid-cols-1'"/)
+  assert.match(mobileFooter, /\['grid gap-2', canLockSession \? 'grid-cols-2' : 'grid-cols-1'\]/)
   assert.match(mobileFooter, /v-if="canLockSession"[\s\S]*?sessionSecurity\.lock[\s\S]*?logout/)
 })
 
