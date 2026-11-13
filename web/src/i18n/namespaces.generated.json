@@ -587,7 +587,8 @@
       "documents"
     ],
     "scan-attach": [
-      "attachment_check"
+      "attachment_check",
+      "capture_photo"
     ],
     "document-detail": [
       "documents",
@@ -870,6 +871,7 @@
       "linked_documents"
     ],
     "accounting-cash-new": [
+      "capture_photo",
       "cash",
       "dimensions",
       "documents",
@@ -878,6 +880,7 @@
       "purchase_invoice"
     ],
     "accounting-cash-edit": [
+      "capture_photo",
       "cash",
       "dimensions",
       "documents",

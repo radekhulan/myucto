@@ -27,6 +27,8 @@ import AttachmentDiscrepancyTable from '@/components/documents/AttachmentDiscrep
 import AttachmentDiscrepanciesPanel from '@/components/documents/AttachmentDiscrepanciesPanel.vue'
 import AttachmentCheckReview from '@/components/documents/AttachmentCheckReview.vue'
 import type { AttachmentCheckRow } from '@/api/attachmentChecks'
+import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -152,6 +154,15 @@ function setPicked(files: File[]) {
   const accepted = files.filter(f => SCAN_FILE_RE.test(f.name))
   if (accepted.length < files.length) toast.warning(t('scan_attach.dropzone_skipped', { n: files.length - accepted.length }))
   if (accepted.length > 0) picked.value = accepted
+}
+
+// Telefon: vyfocení dokladu přidá fotku k výběru, období a volby zpracování
+// jsou sbalené pod „Možnosti" a výsledkové tabulky se skládají do karet (CSS).
+const isPhone = useIsPhone()
+const optionsOpen = ref(false)
+const showOptions = computed(() => !isPhone.value || optionsOpen.value)
+function onCaptured(file: File) {
+  setPicked([...picked.value, file])
 }
 
 function onPick(e: Event) {
@@ -398,6 +409,9 @@ onUnmounted(stopPolling)
           <p class="text-sm text-neutral-700">{{ dragging ? t('scan_attach.dropzone_active') : t('scan_attach.dropzone_hint') }}</p>
           <p class="text-xs text-neutral-500 mt-1">{{ t('scan_attach.form_files_hint') }}</p>
         </div>
+        <div v-if="isPhone" class="mt-2 flex">
+          <CapturePhotoButton :disabled="uploading" data-testid="scan-capture" @captured="onCaptured" />
+        </div>
         <p v-if="picked.length" class="text-sm text-neutral-700 mt-2">{{ t('scan_attach.form_selected', { n: picked.length, size: fmtSize(pickedSize) }) }}</p>
       </div>
 
@@ -414,7 +428,14 @@ onUnmounted(stopPolling)
         </div>
       </div>
 
-      <div class="flex flex-wrap gap-4">
+      <button v-if="isPhone" type="button" data-testid="scan-options-toggle" :aria-expanded="optionsOpen"
+        class="cursor-pointer w-full min-h-10 inline-flex items-center justify-between gap-2 rounded-md border border-neutral-200 px-3 text-sm font-medium text-neutral-700"
+        @click="optionsOpen = !optionsOpen">
+        {{ t('scan_attach.form_options') }}
+        <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': optionsOpen }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+      </button>
+
+      <div v-if="showOptions" class="flex flex-wrap gap-4">
         <label class="text-sm">
           <span class="block text-neutral-700 mb-1">{{ t('scan_attach.form_date_from') }}</span>
           <DateInput v-model="dateFrom" class="border border-neutral-300 rounded-md px-2 py-1.5 text-sm" :disabled="uploading" />
@@ -425,7 +446,7 @@ onUnmounted(stopPolling)
         </label>
       </div>
 
-      <div class="space-y-2 text-sm">
+      <div v-if="showOptions" class="space-y-2 text-sm">
         <label class="flex items-start gap-2">
           <input v-model="extract" type="checkbox" class="mt-0.5" :disabled="uploading" />
           <span>{{ t('scan_attach.form_extract') }}<span class="block text-xs text-neutral-500">{{ t('scan_attach.form_extract_hint') }}</span></span>
@@ -506,8 +527,8 @@ onUnmounted(stopPolling)
           <!-- Připojeno -->
           <div v-if="tab === 'attached'" class="overflow-x-auto">
             <p v-if="overview.attached.length === 0" class="text-sm text-neutral-500">{{ t('scan_attach.empty.attached') }}</p>
-            <table v-else class="w-full text-sm">
-              <thead>
+            <table v-else class="w-full text-sm max-md:block">
+              <thead class="max-md:hidden">
                 <tr class="text-left text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-100">
                   <th class="py-2 pr-3">{{ t('scan_attach.col_file') }}</th>
                   <th class="py-2 pr-3">{{ t('scan_attach.col_document') }}</th>
@@ -515,20 +536,20 @@ onUnmounted(stopPolling)
                   <th class="py-2">{{ t('scan_attach.col_level') }}</th>
                 </tr>
               </thead>
-              <tbody>
-                <tr v-for="m in overview.attached" :key="m.match_id" class="border-b border-neutral-50 last:border-0">
-                  <td class="py-2 pr-3">
+              <tbody class="max-md:block max-md:space-y-2">
+                <tr v-for="m in overview.attached" :key="m.match_id" class="border-b border-neutral-50 last:border-0 max-md:block max-md:rounded-lg max-md:border max-md:border-neutral-200 max-md:p-3 max-md:last:border">
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3">
                     <RouterLink v-if="m.document_id" :to="`/documents/${m.document_id}`" class="text-primary-600 hover:underline">{{ m.file_name }}</RouterLink>
                     <span v-else>{{ m.file_name }}</span>
                   </td>
-                  <td class="py-2 pr-3">
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3">
                     <span class="text-xs text-neutral-500 mr-1">{{ t('scan_attach.target.' + m.target_type) }}</span>
                     <RouterLink v-if="targetLink(m.target_type, m.target_id)" :to="targetLink(m.target_type, m.target_id)!" class="text-primary-600 hover:underline">{{ m.target?.label ?? '#' + m.target_id }}</RouterLink>
                     <span v-else>{{ m.target?.label ?? '#' + m.target_id }}</span>
                     <span v-if="m.target?.counterparty" class="text-neutral-500"> · {{ m.target.counterparty }}</span>
                   </td>
-                  <td class="py-2 pr-3 whitespace-nowrap">{{ t('scan_attach.method.' + m.method) }}</td>
-                  <td class="py-2">
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3 whitespace-nowrap">{{ t('scan_attach.method.' + m.method) }}</td>
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2">
                     {{ t('scan_attach.level.' + m.level) }}
                     <span v-if="m.note" class="block text-xs text-warning-700">{{ t('scan_attach.note.' + m.note) }}</span>
                   </td>
@@ -540,8 +561,8 @@ onUnmounted(stopPolling)
           <!-- Ke kontrole -->
           <div v-else-if="tab === 'candidates'" class="overflow-x-auto">
             <p v-if="overview.candidates.length === 0" class="text-sm text-neutral-500">{{ t('scan_attach.empty.candidates') }}</p>
-            <table v-else class="w-full text-sm">
-              <thead>
+            <table v-else class="w-full text-sm max-md:block">
+              <thead class="max-md:hidden">
                 <tr class="text-left text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-100">
                   <th class="py-2 pr-3">{{ t('scan_attach.col_file') }}</th>
                   <th class="py-2 pr-3">{{ t('scan_attach.col_scan') }}</th>
@@ -550,20 +571,20 @@ onUnmounted(stopPolling)
                   <th class="py-2 text-right">{{ t('scan_attach.col_actions') }}</th>
                 </tr>
               </thead>
-              <tbody>
-                <tr v-for="m in overview.candidates" :key="m.match_id" class="border-b border-neutral-50 last:border-0 align-top">
-                  <td class="py-2 pr-3">
+              <tbody class="max-md:block max-md:space-y-2">
+                <tr v-for="m in overview.candidates" :key="m.match_id" class="border-b border-neutral-50 last:border-0 align-top max-md:block max-md:rounded-lg max-md:border max-md:border-neutral-200 max-md:p-3 max-md:last:border">
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3">
                     <RouterLink v-if="m.document_id" :to="`/documents/${m.document_id}`" class="text-primary-600 hover:underline">{{ m.file_name }}</RouterLink>
                     <span v-else>{{ m.file_name }}</span>
                   </td>
-                  <td class="py-2 pr-3 text-xs text-neutral-700">
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3 text-xs text-neutral-700">
                     <template v-if="m.scan">
                       <div>{{ m.scan.vendor_name || m.scan.vendor_ico || '—' }}<span v-if="m.scan.document_number"> · {{ m.scan.document_number }}</span></div>
                       <div>{{ m.scan.issue_date || '—' }} · {{ fmtMoney(m.scan.total_with_vat, m.scan.currency) }}</div>
                     </template>
                     <span v-else class="text-neutral-400">{{ t('scan_attach.scan_none') }}</span>
                   </td>
-                  <td class="py-2 pr-3 text-xs">
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3 text-xs">
                     <div>
                       <span class="text-neutral-500 mr-1">{{ t('scan_attach.target.' + m.target_type) }}</span>
                       <RouterLink v-if="targetLink(m.target_type, m.target_id)" :to="targetLink(m.target_type, m.target_id)!" class="text-primary-600 hover:underline">{{ m.target?.label ?? '#' + m.target_id }}</RouterLink>
@@ -572,11 +593,11 @@ onUnmounted(stopPolling)
                     <div class="text-neutral-700">{{ m.target?.counterparty || '—' }}</div>
                     <div class="text-neutral-700">{{ m.target?.date || '—' }} · {{ fmtMoney(m.target?.total, m.target?.currency) }}</div>
                   </td>
-                  <td class="py-2 pr-3 text-xs">
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3 text-xs">
                     {{ t('scan_attach.level.' + m.level) }} · {{ t('scan_attach.method.' + m.method) }}
                     <span v-if="m.note" class="block text-warning-700">{{ t('scan_attach.note.' + m.note) }}</span>
                   </td>
-                  <td class="py-2">
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2">
                     <div class="flex flex-wrap justify-end gap-2">
                       <button type="button" :class="btnFilledSm('success')" class="whitespace-nowrap" :disabled="deciding !== null" @click="decide(m.match_id, true)">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
@@ -596,8 +617,8 @@ onUnmounted(stopPolling)
           <!-- Doklady bez skenu -->
           <div v-else-if="tab === 'missing'" class="overflow-x-auto">
             <p v-if="overview.missing.length === 0" class="text-sm text-neutral-500">{{ t('scan_attach.empty.missing') }}</p>
-            <table v-else class="w-full text-sm">
-              <thead>
+            <table v-else class="w-full text-sm max-md:block">
+              <thead class="max-md:hidden">
                 <tr class="text-left text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-100">
                   <th class="py-2 pr-3">{{ t('scan_attach.col_type') }}</th>
                   <th class="py-2 pr-3">{{ t('scan_attach.col_document') }}</th>
@@ -606,16 +627,16 @@ onUnmounted(stopPolling)
                   <th class="py-2 text-right">{{ t('scan_attach.col_amount') }}</th>
                 </tr>
               </thead>
-              <tbody>
-                <tr v-for="r in overview.missing" :key="r.target_type + r.id" class="border-b border-neutral-50 last:border-0">
-                  <td class="py-2 pr-3 text-xs text-neutral-500 whitespace-nowrap">{{ t('scan_attach.target.' + r.target_type) }}</td>
-                  <td class="py-2 pr-3">
+              <tbody class="max-md:block max-md:space-y-2">
+                <tr v-for="r in overview.missing" :key="r.target_type + r.id" class="border-b border-neutral-50 last:border-0 max-md:block max-md:rounded-lg max-md:border max-md:border-neutral-200 max-md:p-3 max-md:last:border">
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3 text-xs text-neutral-500 whitespace-nowrap">{{ t('scan_attach.target.' + r.target_type) }}</td>
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3">
                     <RouterLink v-if="targetLink(r.target_type, r.id)" :to="targetLink(r.target_type, r.id)!" class="text-primary-600 hover:underline">{{ r.label }}</RouterLink>
                     <span v-else>{{ r.label }}</span>
                   </td>
-                  <td class="py-2 pr-3">{{ r.counterparty || '—' }}</td>
-                  <td class="py-2 pr-3 whitespace-nowrap">{{ r.date || '—' }}</td>
-                  <td class="py-2 text-right whitespace-nowrap">{{ fmtMoney(r.total, r.currency) }}</td>
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3">{{ r.counterparty || '—' }}</td>
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3 whitespace-nowrap">{{ r.date || '—' }}</td>
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 text-right whitespace-nowrap">{{ fmtMoney(r.total, r.currency) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -624,8 +645,8 @@ onUnmounted(stopPolling)
           <!-- Skeny bez dokladu / nerozpoznané -->
           <div v-else-if="tab === 'orphans' || tab === 'unrecognized'" class="overflow-x-auto">
             <p v-if="(tab === 'orphans' ? overview.orphans : overview.unrecognized).length === 0" class="text-sm text-neutral-500">{{ t('scan_attach.empty.' + tab) }}</p>
-            <table v-else class="w-full text-sm">
-              <thead>
+            <table v-else class="w-full text-sm max-md:block">
+              <thead class="max-md:hidden">
                 <tr class="text-left text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-100">
                   <th class="py-2 pr-3">{{ t('scan_attach.col_file') }}</th>
                   <th class="py-2 pr-3">{{ t('scan_attach.col_scan') }}</th>
@@ -634,19 +655,19 @@ onUnmounted(stopPolling)
                   <th v-if="tab === 'unrecognized'" class="py-2">{{ t('scan_attach.col_result') }}</th>
                 </tr>
               </thead>
-              <tbody>
-                <tr v-for="r in (tab === 'orphans' ? overview.orphans : overview.unrecognized)" :key="r.item_id" class="border-b border-neutral-50 last:border-0">
-                  <td class="py-2 pr-3">
+              <tbody class="max-md:block max-md:space-y-2">
+                <tr v-for="r in (tab === 'orphans' ? overview.orphans : overview.unrecognized)" :key="r.item_id" class="border-b border-neutral-50 last:border-0 max-md:block max-md:rounded-lg max-md:border max-md:border-neutral-200 max-md:p-3 max-md:last:border">
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3">
                     <RouterLink v-if="r.document_id" :to="`/documents/${r.document_id}`" class="text-primary-600 hover:underline">{{ r.file_name }}</RouterLink>
                     <span v-else>{{ r.file_name }}</span>
                   </td>
-                  <td class="py-2 pr-3 text-xs">
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3 text-xs">
                     <template v-if="r.scan">{{ r.scan.vendor_name || r.scan.vendor_ico || '—' }}<span v-if="r.scan.document_number"> · {{ r.scan.document_number }}</span></template>
                     <span v-else class="text-neutral-400">{{ t('scan_attach.scan_none') }}</span>
                   </td>
-                  <td class="py-2 pr-3 whitespace-nowrap">{{ r.scan?.issue_date || '—' }}</td>
-                  <td class="py-2 pr-3 text-right whitespace-nowrap">{{ fmtMoney(r.scan?.total_with_vat, r.scan?.currency) }}</td>
-                  <td v-if="tab === 'unrecognized'" class="py-2 text-xs">
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3 whitespace-nowrap">{{ r.scan?.issue_date || '—' }}</td>
+                  <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3 text-right whitespace-nowrap">{{ fmtMoney(r.scan?.total_with_vat, r.scan?.currency) }}</td>
+                  <td v-if="tab === 'unrecognized'" class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 text-xs">
                     {{ t('scan_attach.outcome.' + r.outcome) }}
                     <span v-if="r.error" class="block text-neutral-500 break-all">{{ r.error }}</span>
                   </td>
@@ -679,8 +700,8 @@ onUnmounted(stopPolling)
         <h2 class="font-medium text-neutral-900 mb-3">{{ t('scan_attach.history_title') }}</h2>
         <p v-if="batches.length === 0" class="text-sm text-neutral-500">{{ t('scan_attach.history_empty') }}</p>
         <div v-else class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead>
+          <table class="w-full text-sm max-md:block">
+            <thead class="max-md:hidden">
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500 border-b border-neutral-100">
                 <th class="py-2 pr-3">{{ t('scan_attach.col_created') }}</th>
                 <th class="py-2 pr-3">{{ t('scan_attach.col_status') }}</th>
@@ -689,14 +710,14 @@ onUnmounted(stopPolling)
                 <th class="py-2 text-right">{{ t('scan_attach.col_proposed') }}</th>
               </tr>
             </thead>
-            <tbody>
-              <tr v-for="b in batches" :key="b.id" class="border-b border-neutral-50 last:border-0 cursor-pointer hover:bg-neutral-50"
+            <tbody class="max-md:block max-md:space-y-2">
+              <tr v-for="b in batches" :key="b.id" class="border-b border-neutral-50 last:border-0 cursor-pointer hover:bg-neutral-50 max-md:block max-md:rounded-lg max-md:border max-md:border-neutral-200 max-md:p-3 max-md:last:border"
                 :class="detail?.id === b.id ? 'bg-primary-50/50' : ''" @click="open(b.id)">
-                <td class="py-2 pr-3 whitespace-nowrap">#{{ b.id }} · {{ fmtDateTime(b.created_at) }}</td>
-                <td class="py-2 pr-3">{{ t('scan_attach.status.' + b.status) }}</td>
-                <td class="py-2 pr-3 text-right">{{ Object.values(b.counts ?? {}).reduce((s, n) => s + n, 0) }}</td>
-                <td class="py-2 pr-3 text-right">{{ b.attached_count }}</td>
-                <td class="py-2 text-right" :class="b.proposed_count > 0 ? 'text-warning-600 font-medium' : ''">{{ b.proposed_count }}</td>
+                <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3 whitespace-nowrap">#{{ b.id }} · {{ fmtDateTime(b.created_at) }}</td>
+                <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3">{{ t('scan_attach.status.' + b.status) }}</td>
+                <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3 text-right">{{ Object.values(b.counts ?? {}).reduce((s, n) => s + n, 0) }}</td>
+                <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 pr-3 text-right">{{ b.attached_count }}</td>
+                <td class="max-md:block max-md:py-0.5 max-md:pr-0 max-md:text-left py-2 text-right" :class="b.proposed_count > 0 ? 'text-warning-600 font-medium' : ''">{{ b.proposed_count }}</td>
               </tr>
             </tbody>
           </table>

@@ -16,6 +16,7 @@ import { ICONS, BTN_BASE, OUTLINE, btnFilled, btnOutline } from '@/components/ui
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 
 const route = useRoute()
 const router = useRouter()
@@ -86,6 +87,8 @@ const selCount = computed(() => selDocCount.value + selFolderCount.value)
 // Mobilní odkrytí akcí složky: bez hoveru jsou ikony přejmenovat/smazat skryté.
 // První ťuk je jen odkryje (canHover=false → pointer-events vypnuté), teprve další ťuk akci spustí.
 const canHover = ref(true)
+// Telefon: seznam dokumentů jako karty místo tabulky (výběr s plochou 44 px).
+const isPhone = useIsPhone()
 const revealedFolderId = ref<number | null>(null)
 function revealFolderActions(f: DocFolder) { revealedFolderId.value = f.id }
 
@@ -903,7 +906,35 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- documents: list -->
+        <!-- documents: list (telefon = karty) -->
+        <div v-else-if="documents.length && isPhone" data-test="documents-phone-list">
+          <label class="flex items-center gap-2 min-h-11 px-1 text-xs text-neutral-500 cursor-pointer">
+            <span class="inline-flex items-center justify-center w-11 h-11 -my-1.5 -ml-1">
+              <input type="checkbox" class="w-5 h-5 cursor-pointer" :checked="selDocCount === documents.length && documents.length > 0"
+                @change="selDocCount === documents.length ? clearSel() : selectAll()" />
+            </span>
+            {{ t('documents.select_all') }}
+          </label>
+          <ul class="divide-y divide-neutral-100 border border-neutral-200 rounded-lg bg-surface overflow-hidden">
+            <li v-for="d in sortedDocuments" :key="d.id" data-test="documents-phone-card"
+              :class="['flex items-center gap-1 pr-3 cursor-pointer', selected.has(d.id) ? 'bg-primary-50' : 'active:bg-neutral-50']"
+              @click="openDoc(d)">
+              <label class="shrink-0 inline-flex items-center justify-center w-11 h-11 my-1 cursor-pointer" @click.stop>
+                <input type="checkbox" class="w-5 h-5 cursor-pointer" :checked="selected.has(d.id)" :aria-label="d.title" @change="toggleSel(d.id)" />
+              </label>
+              <div class="min-w-0 flex-1 py-2.5">
+                <RouterLink class="row-link block text-sm font-medium text-neutral-800 truncate"
+                  :to="{ name: 'document-detail', params: { id: d.id } }" @click.stop @auxclick.stop>{{ d.title }}</RouterLink>
+                <span v-if="d.ai_summary_short" class="block text-xs text-neutral-400 line-clamp-1">{{ d.ai_summary_short }}</span>
+                <span class="mt-1 flex items-center gap-2 text-xs text-neutral-500 tabular-nums">
+                  <span :class="['px-1.5 py-0.5 rounded text-[10px] font-semibold', docTypeBadge(d.doc_type).class]">{{ docTypeBadge(d.doc_type).label }}</span>
+                  <span>{{ formatBytes(d.size_bytes) }}</span>
+                  <span class="text-neutral-400">{{ uploadedDate(d.created_at) }}</span>
+                </span>
+              </div>
+            </li>
+          </ul>
+        </div>
         <table v-else-if="documents.length" class="w-full text-sm">
           <thead><tr class="text-left text-xs text-neutral-400 border-b border-neutral-200">
             <th class="py-2 w-8"><input type="checkbox" :checked="selDocCount === documents.length && documents.length > 0" @change="selDocCount === documents.length ? clearSel() : selectAll()" /></th>

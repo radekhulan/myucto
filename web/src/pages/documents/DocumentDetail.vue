@@ -13,6 +13,8 @@ import DocumentFilesPanel from '@/components/documents/DocumentFilesPanel.vue'
 import DocumentAiPanel from '@/components/documents/DocumentAiPanel.vue'
 import TextDocumentPreview from '@/components/documents/TextDocumentPreview.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PdfCanvasViewer from '@/components/documents/PdfCanvasViewer.vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { cashDocumentLink } from '@/utils/journalSourceLink'
 
@@ -171,6 +173,44 @@ function goEntity(l: { entity_type: EntityType; entity_id: number }) {
   router.push({ name: map[l.entity_type], params: { id: l.entity_id } })
 }
 
+// Telefon: PDF v iframe ukáže na iOS jen první stranu, proto se kreslí přes
+// PdfCanvasViewer; metadata jsou nad náhledem a Stáhnout / Sdílet v liště dole.
+const isPhone = useIsPhone()
+const sharing = ref(false)
+const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+
+function downloadDocument() {
+  if (!doc.value) return
+  const link = document.createElement('a')
+  link.href = documentsApi.downloadUrl(doc.value.id)
+  link.download = doc.value.original_name || ''
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
+async function shareDocument() {
+  const d = doc.value
+  if (!d || sharing.value) return
+  sharing.value = true
+  try {
+    const res = await fetch(documentsApi.downloadUrl(d.id), { credentials: 'include' })
+    if (!res.ok) throw new Error(String(res.status))
+    const blob = await res.blob()
+    const file = new File([blob], d.original_name || d.title, { type: blob.type || 'application/octet-stream' })
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: d.title })
+    } else {
+      downloadDocument()
+    }
+  } catch (e) {
+    // Zrušené sdílení není chyba; cokoliv jiného spadne do obyčejného stažení.
+    if ((e as DOMException)?.name !== 'AbortError') downloadDocument()
+  } finally {
+    sharing.value = false
+  }
+}
+
 onMounted(load)
 watch(id, () => {
   previewOverrideId.value = null
@@ -213,7 +253,7 @@ watch(id, () => {
         </p>
       </div>
       <div class="flex flex-wrap items-center justify-end gap-2 basis-full pl-8 sm:basis-auto sm:pl-0 sm:justify-start shrink-0" data-test="document-detail-actions">
-        <a :href="documentsApi.downloadUrl(doc.id)" :class="btnOutline('primary')">
+        <a v-if="!isPhone" :href="documentsApi.downloadUrl(doc.id)" :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('documents.download') }}
         </a>
@@ -226,20 +266,31 @@ watch(id, () => {
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <!-- Left: preview -->
-      <div class="lg:col-span-2 space-y-4">
-        <div v-if="previewTarget" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <div class="lg:col-span-2 space-y-4 max-md:contents max-md:space-y-0">
+        <div v-if="previewTarget" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden max-md:-order-1" data-test="document-preview-card">
           <div class="flex items-center justify-between px-4 py-2 border-b border-neutral-100">
             <span class="text-sm font-medium text-neutral-600">
               {{ t('documents.preview') }}
               <span v-if="previewTarget.id !== doc.id" class="text-neutral-400 font-normal">· {{ previewTarget.original_name }}</span>
             </span>
-            <button type="button" class="text-xs text-neutral-500 hover:text-neutral-800" @click="previewOpen = !previewOpen">
-              {{ previewOpen ? '–' : '+' }}
-            </button>
+            <div class="flex items-center gap-1">
+              <a v-if="isPhone" :href="previewUrl" target="_blank" rel="noopener" data-test="document-preview-fullscreen"
+                class="inline-flex items-center min-h-10 px-2 text-xs text-primary-600">{{ t('documents.preview_fullscreen') }}</a>
+              <button type="button" class="text-xs text-neutral-500 hover:text-neutral-800 max-md:min-h-10 max-md:min-w-10" @click="previewOpen = !previewOpen">
+                {{ previewOpen ? '–' : '+' }}
+              </button>
+            </div>
           </div>
           <div v-if="previewOpen" class="bg-neutral-100">
+            <PdfCanvasViewer
+              v-if="previewKind === 'pdf' && isPhone"
+              :key="previewUrl"
+              :src="previewUrl"
+              :title="previewTarget.original_name"
+              class="w-full h-[72vh]"
+            />
             <iframe
-              v-if="previewKind === 'pdf'"
+              v-else-if="previewKind === 'pdf'"
               :src="previewUrl + '#view=FitH'"
               class="w-full h-[72vh] border-0"
               :title="previewTarget.original_name"
@@ -286,9 +337,9 @@ watch(id, () => {
       </div>
 
       <!-- Right: metadata + links -->
-      <div class="space-y-4">
+      <div class="space-y-4 max-md:contents max-md:space-y-0">
         <!-- Metadata -->
-        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 space-y-3">
+        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 space-y-3 max-md:-order-2" data-test="document-metadata-card">
           <h3 class="text-sm font-medium text-neutral-700">{{ t('documents.metadata') }}</h3>
           <div>
             <label class="block text-xs text-neutral-400 mb-1">{{ t('documents.name') }}</label>
@@ -343,6 +394,20 @@ watch(id, () => {
           </div>
         </div>
       </div>
+    </div>
+
+    <div v-if="isPhone" data-test="document-phone-bar"
+      class="sticky bottom-[calc(var(--app-footer-height,0px)+0.5rem)] z-10 flex items-center gap-2 rounded-lg border border-neutral-200 bg-surface p-3 shadow-lg">
+      <button type="button" :class="canShare ? btnOutline('primary') : btnFilled('primary')" class="flex-1 justify-center min-h-10"
+        data-test="document-phone-download" @click="downloadDocument">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+        {{ t('documents.download') }}
+      </button>
+      <button v-if="canShare" type="button" :class="btnFilled('primary')" class="flex-1 justify-center min-h-10" :disabled="sharing"
+        data-test="document-phone-share" @click="shareDocument">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12s-.114-.938-.316-1.342m0 2.684a3 3 0 1 1 0-2.684m0 2.684 6.632 3.316m-6.632-6 6.632-3.316m0 0a3 3 0 1 0 5.367-2.684 3 3 0 0 0-5.367 2.684zm0 9.316a3 3 0 1 0 5.368 2.684 3 3 0 0 0-5.368-2.684z" /></svg>
+        {{ t('documents.share') }}
+      </button>
     </div>
   </div>
 

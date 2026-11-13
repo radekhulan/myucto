@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useMediaQuery } from '@vueuse/core'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { RouterLink, useRoute } from 'vue-router'
 import { cashApi, type CashRegister, type CashDocument, type CashDocumentStatus } from '@/api/cash'
 import { cashErrorMessage, cashWarningMessage } from '@/api/cashErrors'
@@ -134,7 +134,7 @@ function applyFilters() { page.value = 1; load() }
 
 // Na telefonu je pět filtrů pod sebou přes půl obrazovky, proto jsou sbalené
 // za tlačítkem „Filtry"; odznáček počítá jen odchylky od výchozího stavu.
-const isPhone = useMediaQuery('(max-width: 47.99rem)')
+const isPhone = useIsPhone()
 const filtersOpen = ref(false)
 const activeFilterCount = computed(() => {
   const def = defaultRange()
@@ -667,12 +667,12 @@ async function postDraft(d: CashDocument) {
         <div class="md:hidden divide-y divide-neutral-100">
           <div v-for="d in documents" :key="`m-${d.id}`" class="p-3 space-y-2"
             :class="{ 'opacity-60': d.status === 'reversed' }" @click="toggleExpand(d)">
-            <div class="flex items-baseline justify-between gap-2">
+            <div class="flex items-baseline justify-between gap-2 max-md:flex-wrap max-md:items-center">
               <div class="font-mono text-base font-semibold whitespace-nowrap"
                 :class="d.doc_type === 'in' ? 'text-success-600' : 'text-warning-600'">
                 {{ formatMoney(signedAmount(d)) }}
               </div>
-              <div class="flex flex-col items-end gap-1">
+              <div class="flex flex-col items-end gap-1 max-md:flex-row max-md:flex-wrap max-md:items-center max-md:justify-end" data-test="cash-card-chips">
                 <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap"
                   :class="d.doc_type === 'in' ? 'bg-success-50 text-success-600' : 'bg-warning-50 text-warning-600'">
                   {{ d.doc_type === 'in' ? t('cash.type.in_short') : t('cash.type.out_short') }}
@@ -681,12 +681,13 @@ async function postDraft(d: CashDocument) {
                   :class="d.status === 'posted' ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-500'">
                   {{ t(`cash.status.${d.status}`) }}
                 </span>
+                <span class="hidden max-md:inline text-xs px-2 py-0.5 rounded bg-neutral-100 text-neutral-600 font-mono whitespace-nowrap">{{ formatDate(d.issue_date) }}</span>
               </div>
             </div>
 
             <div class="flex items-baseline justify-between gap-2 text-xs text-neutral-500">
               <span class="font-mono" :class="{ 'line-through': d.status === 'reversed' }">{{ d.doc_number || '—' }}</span>
-              <span class="font-mono">{{ formatDate(d.issue_date) }}</span>
+              <span class="font-mono max-md:hidden">{{ formatDate(d.issue_date) }}</span>
             </div>
 
             <div class="text-xs">
@@ -700,7 +701,7 @@ async function postDraft(d: CashDocument) {
             <CashDocumentDetail v-if="expandedId === d.id" :doc="d" :purpose-label="purposeLabel"
               class="pt-2 border-t border-neutral-100" />
 
-            <div class="flex flex-wrap items-center justify-end gap-1.5 pt-1" @click.stop>
+            <div class="flex flex-wrap items-center justify-end gap-1.5 pt-1 max-md:gap-2 max-md:[&>*]:min-h-10 max-md:[&>*]:min-w-10" @click.stop>
               <RouterLink v-if="auth.canWrite('cash.document.write') && d.status === 'draft'"
                 :to="{ name: 'accounting-cash-edit', params: { id: d.id } }"
                 :title="t('common.edit')" :aria-label="t('common.edit')" :class="btnIconSm('neutral')">

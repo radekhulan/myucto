@@ -1279,7 +1279,9 @@
     "job_status_running": "Running",
     "job_status_completed": "Done",
     "job_status_failed": "Failed",
-    "job_status_cancelled": "Cancelled"
+    "job_status_cancelled": "Cancelled",
+    "preview_fullscreen": "Full screen",
+    "share": "Share"
   },
   "scan_attach": {
     "nav": "Scans to documents",
@@ -1395,7 +1397,8 @@
     "reject": "Reject",
     "confirmed": "Scan attached",
     "rejected": "Proposal rejected",
-    "scan_none": "not extracted"
+    "scan_none": "not extracted",
+    "form_options": "Options (period and processing)"
   },
   "attachment_check": {
     "badge_title": "Document compared with its extracted attachment",
@@ -1820,7 +1823,10 @@
     "recognize": "Recognize",
     "scan_failed": "Could not recognize refuellings.",
     "scan_done": "Recognized {n} refuellings ({parser}).",
-    "scan_updated": "Filled in details (liters) for {n} refuellings."
+    "scan_updated": "Filled in details (liters) for {n} refuellings.",
+    "phone_tabs_more": "More",
+    "phone_tabs_more_placeholder": "More views…",
+    "trip_more": "More details (date, time, km, category)"
   },
   "logbook_fuel": {
     "actions": "Refuelling actions",
@@ -15763,7 +15769,8 @@
       "tax_treatment": "Income tax",
       "vat_deduction_hint": "Deduction and tax treatment are set per breakdown line. “Proportional (§75)” enables the percentage the deduction is reduced by; income tax affects only PIT/CIT, not VAT.",
       "is_fixed_asset": "Acquisition of fixed assets",
-      "is_fixed_asset_hint": "Cash purchase of assets defined in § 4(4) (vehicle, machine). The amount is additionally reported on line 47 of the return as a supplementary figure; the deduction stays on lines 40/41."
+      "is_fixed_asset_hint": "Cash purchase of assets defined in § 4(4) (vehicle, machine). The amount is additionally reported on line 47 of the return as a supplementary figure; the deduction stays on lines 40/41.",
+      "more_details": "More details"
     },
     "tax_treatment": {
       "deductible": "Tax-deductible expense",
@@ -26884,7 +26891,9 @@
       "rule_own_account_any": "All accounts",
       "rule_own_account_hint": "The rule applies only to movements on this account's statement. It takes precedence over a general rule with the same priority.",
       "rule_dimensions": "Rule dimensions",
-      "rule_dimensions_hint": "Written to the movement when the suggestion is approved or posted automatically. Manual movement dimensions and dimensions of paid documents take precedence."
+      "rule_dimensions_hint": "Written to the movement when the suggestion is approved or posted automatically. Manual movement dimensions and dimensions of paid documents take precedence.",
+      "tab_unposted_short": "Unposted",
+      "tab_suggestions_history_short": "History"
     },
     "idoklad_source_badge": "iDoklad",
     "idoklad_source_hint": "Monthly summary of bank movements imported from iDoklad (not an uploaded statement). A GPC/PDF bank statement takes precedence.",
@@ -26899,7 +26908,12 @@
         "review_required": "Association proposal to review",
         "unidentified": "Association unit not identified"
       }
-    }
+    },
+    "phone_tabs_more": "More",
+    "phone_tabs_more_placeholder": "More views…",
+    "balance_details_show": "Details",
+    "balance_details_hide": "Hide details",
+    "balance_difference_short": "Difference from the statement: {amount}"
   },
   "stats": {
     "title": "Sales",
@@ -36210,7 +36224,8 @@
       "scheme_cash": "Cash withdrawal",
       "scheme_reward": "Reward, cashback",
       "scheme_note": "The entry date is the bank booking date, so the 231 balance matches the statement. The transaction date and the original currency stay in the transaction description."
-    }
+    },
+    "intro_toggle": "Supported banks and what the import does"
   },
   "payment_cards": {
     "nav": "Payment cards",
