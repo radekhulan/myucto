@@ -176,7 +176,7 @@ async function verify() {
              a blok DODAVATEL), hlavička je identita aplikace. -->
         <div class="w-8 h-8 bg-primary-600 rounded-md flex items-center justify-center text-white font-bold">M</div>
         <div class="text-sm">
-          <div class="font-semibold">My<span class="text-primary-700">Účto</span><span class="text-neutral-500">.cz</span></div>
+          <div class="font-semibold">My<span class="text-primary-700">Účto</span><span class="brand-tld">.cz</span></div>
           <div class="text-xs text-neutral-500">{{ t('workReportTracking.public.title') }}</div>
         </div>
       </div>

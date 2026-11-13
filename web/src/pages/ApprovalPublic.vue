@@ -169,7 +169,7 @@ async function submit(decision: 'approve' | 'reject') {
         </div>
         <div class="text-sm min-w-0">
           <div v-if="branding.display_name" class="font-semibold truncate">{{ branding.display_name }}</div>
-          <div v-else class="font-semibold">My<span class="text-primary-700">Účto</span><span class="text-neutral-500">.cz</span></div>
+          <div v-else class="font-semibold">My<span class="text-primary-700">Účto</span><span class="brand-tld">.cz</span></div>
           <div class="text-xs text-neutral-500">{{ tt('Schválení výkazu práce', 'Work report approval') }}</div>
         </div>
       </div>

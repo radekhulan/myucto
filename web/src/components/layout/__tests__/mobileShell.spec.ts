@@ -42,6 +42,15 @@ describe('mobilní rám aplikace', () => {
     expect(appLayout).toContain("items.some(item => item.to === '/accounting/cash') && can('/accounting/cash/new')")
   })
 
+  it('přepínač oken je v hlavičce telefonu, ne v menu', () => {
+    const header = snippet('<template v-if="phoneNavigation">', 400)
+    expect(header).toContain('<WorkspaceWindowButton')
+    expect(header).toContain('data-testid="mobile-windows"')
+    const drawerRow = snippet('<div v-if="phoneNavigation" class="flex items-center gap-1.5">', 400)
+    expect(drawerRow).not.toContain('WorkspaceWindowButton')
+    expect(drawerRow).toContain('<WorkspaceFavoritesButton')
+  })
+
   it('zásuvka i nabídky nechávají hlavičku a spodní lištu volné', () => {
     expect(appLayout).toContain("const phoneOverlayStyle = { top: 'var(--app-header-height)', bottom: 'var(--app-footer-height)', height: 'auto' }")
     expect(appLayout).toContain(':style="phoneNavigation ? phoneOverlayStyle : undefined"')

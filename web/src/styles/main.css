@@ -354,6 +354,12 @@ input[type="file"].form-input::file-selector-button {
  *
  * Accent tečky sekcí (-400/-500/-600) jsou dost syté, aby na tmavém podkladu
  * držely čitelnost — ty se schválně nepřepisují. */
+/* „.cz" ve slovní značce MyÚčto.cz má barvu amber jako na webu myucto.cz. Na světlé
+   ploše je o stupeň tmavší, aby byl čitelný; v tmavé liště a v dark režimu plný amber. */
+.brand-tld { color: #D97706; font-weight: 400; }
+.dark .brand-tld,
+.nav-inverted .brand-tld { color: #F59E0B; }
+
 .nav-inverted {
   color-scheme: dark;
   /* Text, který si barvu nikde nenastavuje, dědí `color` z <body> — a to je

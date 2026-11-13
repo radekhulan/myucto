@@ -1998,6 +1998,8 @@ onBeforeUnmount(() => {
 
           <!-- Telefon: hledání a zakládání vpravo nahoře, menu je ve spodní liště. -->
           <template v-if="phoneNavigation">
+            <!-- Okna jsou nahoře: počítadlo ukazuje rozpracované doklady bez otevírání menu. -->
+            <WorkspaceWindowButton class="lg:hidden h-10! w-10! rounded-full! border border-neutral-200 text-neutral-700!" data-testid="mobile-windows" />
             <button
               type="button"
               class="lg:hidden inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-neutral-200 text-neutral-700 hover:bg-neutral-100"
@@ -2324,15 +2326,12 @@ onBeforeUnmount(() => {
               </svg>
             </a>
           </div>
-          <!-- Na telefonu nemá jazyk, motiv ani okna místo ve spodní liště, žijí tady
-               v jednom řádku s odhlášením, ať menu zůstane co nejvíc místa. -->
+          <!-- Na telefonu nemá jazyk, motiv ani oblíbené místo ve spodní liště, žijí tady
+               v jednom řádku s odhlášením, ať menu zůstane co nejvíc místa. Okna jsou v hlavičce. -->
           <div v-if="phoneNavigation" class="flex items-center gap-1.5">
             <LanguageToggle class="h-9! w-10!" />
             <ThemeToggle class="h-9! w-10!" />
-            <div class="flex h-9 items-center gap-0.5 rounded-lg bg-neutral-100/80 p-0.5 ring-1 ring-neutral-200/80" role="group" :aria-label="t('favorites.group_label')">
-              <WorkspaceFavoritesButton class="h-8! hover:bg-surface!" />
-              <WorkspaceWindowButton class="h-8! hover:bg-surface!" />
-            </div>
+            <WorkspaceFavoritesButton class="h-9! w-10! border border-neutral-200" />
             <button
               v-if="canLockSession"
               type="button"

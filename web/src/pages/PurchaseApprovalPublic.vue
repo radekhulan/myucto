@@ -93,7 +93,7 @@ async function submit(decision: 'approve' | 'reject') {
         </div>
         <div class="text-sm min-w-0">
           <div v-if="data?.company.name" class="font-semibold truncate" data-test="public-company">{{ data.company.name }}</div>
-          <div v-else class="font-semibold">My<span class="text-primary-700">Účto</span><span class="text-neutral-500">.cz</span></div>
+          <div v-else class="font-semibold">My<span class="text-primary-700">Účto</span><span class="brand-tld">.cz</span></div>
           <div class="text-xs text-neutral-500">{{ t('purchase_approval.public.page_title') }}</div>
         </div>
       </div>
