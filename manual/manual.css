@@ -135,7 +135,9 @@ a:hover { text-decoration: underline; }
     white-space: nowrap;
 }
 .brand .wordmark b { color: var(--prim); font-weight: 600; }
-.brand .wordmark i { color: var(--faint); font-style: normal; font-weight: 400; }
+.brand .wordmark i { color: #D97706; font-style: normal; font-weight: 400; }
+/* „.cz" je amber jako na webu i v aplikaci (.brand-tld v web/src/styles/main.css). */
+.dark .brand .wordmark i { color: #F59E0B; }
 .brand-badge {
     background: var(--prim-soft);
     color: var(--acc-primary-fg);
