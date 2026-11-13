@@ -25269,7 +25269,7 @@
       "revenue_category_hint": "Category for revenue breakdown in CRM and stats. Managed in Codebooks."
     },
     "linked": {
-      "final_invoice": "Tax document for advance",
+      "final_invoice": "Invoice - tax document for advance",
       "proforma": "Advance (proforma) invoice",
       "parent": "Original invoice"
     },

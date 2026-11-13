@@ -25269,7 +25269,7 @@
       "revenue_category_hint": "Kategorie pro rozpad tržeb v CRM a statistikách. Spravuje se v Číselnících."
     },
     "linked": {
-      "final_invoice": "Daňový doklad k záloze",
+      "final_invoice": "Faktura - daňový doklad k záloze",
       "proforma": "Zálohová faktura",
       "parent": "Původní faktura"
     },
