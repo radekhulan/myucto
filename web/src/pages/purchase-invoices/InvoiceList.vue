@@ -1074,6 +1074,14 @@ async function bulkSetKind() {
 }
 useWindowRefresh(refreshLoadedPages,
   () => !loading.value && !loadingMore.value && !bulkBusy.value && selectedIds.value.length === 0)
+
+// Telefon: patička rozbalených filtrů. Stav rozbalení drží FilterBar, proto se zavírá
+// jeho vlastním přepínačem; „Zobrazit" pak posune stránku na začátek seznamu.
+function closeFilterPanel(event: MouseEvent, reveal = false) {
+  const bar = (event.currentTarget as HTMLElement | null)?.closest<HTMLElement>('[data-print-hide]')
+  bar?.querySelector<HTMLButtonElement>('button[aria-expanded="true"]')?.click()
+  if (reveal) bar?.scrollIntoView?.({ block: 'start' })
+}
 </script>
 
 <template>
@@ -1375,6 +1383,15 @@ useWindowRefresh(refreshLoadedPages,
             {{ formatDate(b.created_at) }} · {{ t('purchase_invoice.filters.import_batch_count', { n: b.count }) }}
           </option>
         </select>
+        <!-- Telefon: rozbalené filtry zaberou celou obrazovku, zavřít je jde dole bez scrollu nahoru. -->
+        <div data-test="phone-filter-footer" class="hidden max-md:flex max-md:sticky max-md:bottom-[calc(var(--app-footer-height,0px)+0.5rem)] max-md:z-10 basis-full gap-2 rounded-lg border border-neutral-200 bg-surface p-2 shadow-lg">
+          <button type="button" data-test="phone-filter-close" :class="btnOutline('neutral')" class="h-11 justify-center" @click="closeFilterPanel($event)">
+            {{ t('common.close') }}
+          </button>
+          <button type="button" data-test="phone-filter-show" :class="btnFilled('primary')" class="h-11 flex-1 justify-center whitespace-nowrap" @click="closeFilterPanel($event, true)">
+            {{ t('purchase_invoice.filters.show_results', { count: total }) }}
+          </button>
+        </div>
       <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
         <button type="button" :class="btnOutline('neutral')" :title="groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly')" @click="toggleGrouping">
@@ -1679,16 +1696,19 @@ useWindowRefresh(refreshLoadedPages,
             :class="[rowClass(inv), flashedIds.has(inv.id) ? 'row-flash' : '']"
           >
             <div class="flex items-start gap-3">
-              <input
-                type="checkbox"
-                :checked="selectedIds.includes(inv.id)"
-                @change="toggleSelected(inv.id)"
-                @click.stop
-                class="w-5 h-5 mt-0.5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
-              />
+              <!-- Telefon: zaškrtávátko s plochou 44 px (label kolem, mimo telefon display:contents). -->
+              <label data-test="card-select-hit" class="contents max-md:flex max-md:shrink-0 max-md:items-start max-md:justify-center max-md:w-11 max-md:h-11 max-md:-m-3 max-md:p-3 max-md:cursor-pointer" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selectedIds.includes(inv.id)"
+                  @change="toggleSelected(inv.id)"
+                  @click.stop
+                  class="w-5 h-5 mt-0.5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
+                />
+              </label>
               <div class="flex-1 min-w-0">
                 <div class="flex items-baseline justify-between gap-2">
-                  <div class="font-medium text-neutral-900 truncate flex items-center gap-1.5" :data-custom-color="!!colors.color('vendor')" :style="colors.cellStyle('vendor')">
+                  <div class="font-medium text-neutral-900 truncate flex items-center gap-1.5 max-md:items-start max-md:whitespace-normal" :data-custom-color="!!colors.color('vendor')" :style="colors.cellStyle('vendor')">
                     <span
                       v-if="inv.extraction_warning"
                       :title="t('purchase_invoice.extraction.needs_review_tooltip')"
@@ -1709,7 +1729,7 @@ useWindowRefresh(refreshLoadedPages,
                         <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/>
                       </svg>
                     </span>
-                    <span class="truncate">{{ inv.vendor_company_name }}</span>
+                    <span class="truncate max-md:whitespace-normal max-md:line-clamp-2 max-md:break-words" data-test="card-vendor-name">{{ inv.vendor_company_name }}</span>
                   </div>
                   <div class="font-mono text-sm whitespace-nowrap" :data-custom-color="!!colors.color('amount')" :style="colors.cellStyle('amount')">
                     {{ formatMoney(inv.total_with_vat, inv.currency) }}

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { useAuthStore } from '@/stores/auth'
 import {
   paymentOrdersApi,
@@ -27,6 +28,7 @@ import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { ICONS, OUTLINE, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import PdfFrame from '@/components/documents/PdfFrame.vue'
 import { appIsoDate } from '@/utils/date'
@@ -738,6 +740,42 @@ async function createAndDownload(format: PaymentOrderFormat | 'bank') {
   }
 }
 
+// ─── Telefon ───
+// Nastavení příkazu sbalené, sekundární akce karet v „…" a dole jedna lišta
+// „Vybráno N · Stáhnout příkaz". Mimo telefon se stránka vykreslí beze změny.
+const isPhone = useIsPhone()
+const phoneSettingsOpen = ref(false)
+const canOrder = computed(() => auth.canWrite('purchase_invoices.payment_orders'))
+/** Formát hlavního stažení: ABO pro CZK, SEPA pro EUR, jinak PDF příkaz. */
+const phonePrimaryFormat = computed<PaymentOrderFormat>(() => isCzk.value ? 'abo' : (isEur.value ? 'sepa' : 'pdf'))
+const phonePrimaryDisabled = computed(() => creating.value || selectedCount.value === 0
+  || (phonePrimaryFormat.value === 'sepa' && !selectedPayer.value?.iban))
+
+function phoneCardActions(c: PaymentCandidate): RowAction[] {
+  return [
+    { key: 'detail', label: t('payment_order.detail'), icon: 'eye', run: () => openDetail(c) },
+    { key: 'verify', label: t('payment_order.verify_account'), icon: 'checkCircle', show: c.can_verify,
+      disabled: verifyingId.value === c.id, run: () => { void verifyAccountRow(c) } },
+    { key: 'qr', label: t('payment_order.qr_code'), icon: 'qr', show: c.has_account, run: () => { void toggleQr(c) } },
+    { key: 'add-account', label: t('payment_order.add_account'), icon: 'plus',
+      show: !c.has_account && canOrder.value && editingAccountId.value !== c.id, run: () => startEditAccount(c) },
+    { key: 'edit-account', label: t('payment_order.edit_account'), icon: 'edit',
+      show: c.has_account && canOrder.value && editingAccountId.value !== c.id, run: () => startEditAccount(c) },
+  ]
+}
+
+const phoneBarActions = computed<RowAction[]>(() => [
+  { key: 'bank', label: t('bank_connection.payment_prepare'), icon: 'plus',
+    show: canOrder.value && auth.canWrite('settings.bank_accounts') && isCzk.value,
+    disabled: creating.value || selectedCount.value === 0, run: () => { void createAndDownload('bank') } },
+  { key: 'mark-only', label: t('payment_order.mark_only'), icon: 'checkCircle', show: canOrder.value,
+    disabled: creating.value || selectedCount.value === 0, run: () => { void markOnly() } },
+  { key: 'csv', label: t('payment_order.export_csv'), icon: 'download', show: canOrder.value,
+    disabled: creating.value || selectedCount.value === 0, run: () => { void createAndDownload('csv') } },
+  { key: 'pdf', label: t('payment_order.export_pdf'), icon: 'download', show: canOrder.value && phonePrimaryFormat.value !== 'pdf',
+    disabled: creating.value || selectedCount.value === 0, run: () => { void createAndDownload('pdf') } },
+])
+
 function redownload(item: PaymentOrderListItem, format: PaymentOrderFormat) {
   paymentOrdersApi.downloadPaymentOrder(item.id, format)
 }
@@ -766,7 +804,16 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
 
     <!-- ═══ Ovládací box ═══ -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm mb-4 p-4 space-y-3">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <button v-if="isPhone" type="button" data-test="po-settings-toggle" :aria-expanded="phoneSettingsOpen"
+        class="cursor-pointer w-full min-h-11 -my-1 flex items-center justify-between gap-2 text-left"
+        @click="phoneSettingsOpen = !phoneSettingsOpen">
+        <span class="min-w-0">
+          <span class="block text-sm font-medium text-neutral-700">{{ t('payment_order.settings_title') }}</span>
+          <span class="block text-xs text-neutral-500 truncate">{{ selectedPayer ? payerDisplay(selectedPayer) : t('payment_order.no_payer_accounts') }} · {{ formatDate(paymentDate) }}</span>
+        </span>
+        <svg class="w-4 h-4 shrink-0 transition-transform" :class="phoneSettingsOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      <div v-show="!isPhone || phoneSettingsOpen" data-test="po-settings-fields" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('payment_order.payer_account') }}</label>
           <select v-model="selectedPayerId" @change="onPayerChange"
@@ -795,7 +842,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
         </div>
       </div>
 
-      <div class="flex items-center gap-4 flex-wrap">
+      <div v-show="!isPhone || phoneSettingsOpen" class="flex items-center gap-4 flex-wrap">
         <label class="flex items-center gap-1.5 text-sm text-neutral-700">
           <input v-model="markPaid" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
           {{ t('payment_order.mark_paid') }}
@@ -828,7 +875,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
     </div>
 
     <!-- Hromadné akce nad vybranými fakturami v plovoucí liště u spodní hrany (BulkActionBar). -->
-    <BulkActionBar :count="selectedCount" @clear="clearSelection">
+    <BulkActionBar v-if="!isPhone" :count="selectedCount" @clear="clearSelection">
       <span class="px-1.5 text-sm font-mono font-semibold text-neutral-900 whitespace-nowrap">
         {{ formatMoney(selectedTotal, payerCurrency || 'CZK') }}
       </span>
@@ -1124,7 +1171,8 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
               </span>
               <div class="text-xs mt-1">
                 <template v-if="!c.has_account">
-                  <button v-if="auth.canWrite('purchase_invoices.payment_orders') && editingAccountId !== c.id" type="button" @click="startEditAccount(c)"
+                  <span v-if="isPhone" class="text-warning-700">{{ t('payment_order.no_account') }}</span>
+                  <button v-else-if="auth.canWrite('purchase_invoices.payment_orders') && editingAccountId !== c.id" type="button" @click="startEditAccount(c)"
                     class="cursor-pointer inline-flex items-center gap-1 h-7 px-2 text-[11px] font-medium rounded-md border border-primary-500 text-primary-700 hover:bg-primary-50 transition">
                     <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
                     {{ t('payment_order.add_account') }}
@@ -1147,7 +1195,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                       <span v-else-if="isCzk && !c.abo_eligible" class="text-[10px] text-warning-600">{{ t('payment_order.not_abo_eligible_row') }}</span>
                       <span v-else-if="isEur && !c.sepa_eligible" class="text-[10px] text-warning-600">{{ t('payment_order.not_sepa_eligible_row') }}</span>
                     </div>
-                    <button v-if="auth.canWrite('purchase_invoices.payment_orders') && editingAccountId !== c.id" type="button" @click="startEditAccount(c)"
+                    <button v-if="!isPhone && auth.canWrite('purchase_invoices.payment_orders') && editingAccountId !== c.id" type="button" @click="startEditAccount(c)"
                       :title="t('payment_order.edit_account')"
                       class="cursor-pointer flex-shrink-0 inline-flex items-center gap-1 h-7 px-2 text-[11px] font-medium rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-100 transition">
                       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931z"/></svg>
@@ -1156,8 +1204,18 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                   </div>
                 </template>
               </div>
+              <!-- Akce (telefon): Doklad inline, ostatní v „…" -->
+              <div v-if="isPhone" data-test="po-card-phone-actions" class="flex items-center gap-2 mt-2">
+                <button v-if="c.has_pdf" type="button" @click="togglePdf(c)"
+                  class="cursor-pointer inline-flex items-center justify-center gap-1 h-9 min-w-11 px-3 text-xs rounded-md text-white font-medium"
+                  :class="pdfPreviewId === c.id ? 'bg-primary-800' : 'bg-primary-600 hover:bg-primary-700'">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye"/></svg>
+                  {{ t('payment_order.view_pdf') }}
+                </button>
+                <RowActionsMenu :actions="phoneCardActions(c)" :inline-count="0" class="ml-auto [&>button]:h-9 [&>button]:w-11" />
+              </div>
               <!-- Akce (mobile) -->
-              <div class="flex items-center gap-2 mt-2 flex-wrap">
+              <div v-else class="flex items-center gap-2 mt-2 flex-wrap">
                 <button v-if="c.has_account" type="button" @click="toggleQr(c)"
                   class="cursor-pointer inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border font-medium"
                   :class="qrPreviewId === c.id ? 'bg-neutral-800 text-neutral-50 border-neutral-800' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'">
@@ -1681,5 +1739,23 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
 
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="focusInJournal" />
+
+    <div v-if="isPhone && selectedCount > 0" data-test="po-phone-bar"
+      class="sticky bottom-[calc(var(--app-footer-height,0px)+0.5rem)] z-10 mt-4 flex items-center gap-2 rounded-lg border border-neutral-200 bg-surface p-2 shadow-lg">
+      <div class="min-w-0 flex-1 px-1">
+        <div class="text-sm font-medium text-neutral-900 whitespace-nowrap">{{ t('common.bulk_selected', { n: selectedCount }) }}</div>
+        <div class="text-xs font-mono text-neutral-600 truncate">{{ formatMoney(selectedTotal, payerCurrency || 'CZK') }}</div>
+      </div>
+      <button type="button" class="h-9 min-w-11 px-2 text-xs text-neutral-500 hover:text-neutral-900 cursor-pointer"
+        :aria-label="t('common.bulk_clear')" :title="t('common.bulk_clear')" @click="clearSelection">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+      </button>
+      <button v-if="canOrder" type="button" data-test="po-phone-download" :disabled="phonePrimaryDisabled"
+        :class="btnFilled('primary')" class="h-11 whitespace-nowrap" @click="createAndDownload(phonePrimaryFormat)">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+        {{ creating ? '…' : t('payment_order.download_order') }}
+      </button>
+      <RowActionsMenu v-if="canOrder" :actions="phoneBarActions" :inline-count="0" class="[&>button]:h-11 [&>button]:w-11" />
+    </div>
   </div>
 </template>

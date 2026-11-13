@@ -166,11 +166,11 @@ async function confirmReject(): Promise<void> {
       </div>
     </div>
 
-    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 mb-4">
-      <div class="flex flex-wrap gap-2" role="tablist">
+    <div data-test="approvals-filters" class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 mb-4 max-md:flex-nowrap max-md:gap-2">
+      <div class="flex flex-wrap gap-2 max-md:flex-nowrap max-md:gap-1 max-md:min-w-0" role="tablist">
         <button v-for="key in (['pending', 'decided'] as const)" :key="key" type="button" role="tab"
                 :aria-selected="tab === key"
-                class="px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap"
+                class="px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap max-md:min-h-11 max-md:px-2"
                 :class="tab === key ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'"
                 :data-test="`approvals-tab-${key}`"
                 @click="tab = key">
@@ -179,14 +179,16 @@ async function confirmReject(): Promise<void> {
                 class="ml-1 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-primary-600 text-white text-xs tabular-nums">{{ count.pending.value }}</span>
         </button>
       </div>
-      <div v-if="isAccountant" class="flex flex-wrap gap-2 pb-2" role="group" data-test="approvals-scope">
+      <div v-if="isAccountant" class="flex flex-wrap gap-2 pb-2 max-md:flex-nowrap max-md:shrink-0 max-md:gap-1 max-md:pb-1" role="group" data-test="approvals-scope">
         <button v-for="key in (['mine', 'all'] as const)" :key="key" type="button"
                 :class="scope === key ? btnFilledSm('primary') : btnOutlineSm('neutral')"
+                class="max-md:h-10 max-md:w-10 max-md:justify-center max-md:px-0"
                 :aria-pressed="scope === key"
+                :title="t(`purchase_approval.scope.${key}`)"
                 :data-test="`approvals-scope-${key}`"
                 @click="scope = key">
-          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="key === 'mine' ? ICONS.user : ICONS.table" /></svg>
-          {{ t(`purchase_approval.scope.${key}`) }}
+          <svg class="w-3.5 h-3.5 max-md:w-4 max-md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="key === 'mine' ? ICONS.user : ICONS.table" /></svg>
+          <span class="max-md:sr-only">{{ t(`purchase_approval.scope.${key}`) }}</span>
         </button>
       </div>
     </div>
@@ -290,20 +292,21 @@ async function confirmReject(): Promise<void> {
             <span class="text-xs text-neutral-500">{{ formatDate(tab === 'pending' ? row.requested_at : (row.decided_at ?? row.requested_at)) }}</span>
           </div>
           <p v-if="row.comment" class="text-xs text-neutral-600 whitespace-pre-wrap">{{ row.comment }}</p>
-          <div class="flex flex-wrap gap-1.5">
-            <a v-if="row.invoice.has_pdf" :href="purchaseInvoicesApi.pdfUrl(row.purchase_invoice_id, true)" target="_blank" rel="noopener" :class="btnOutlineSm('neutral')">
+          <!-- Telefon: Schválit / Zamítnout jako první velká tlačítka (≥ 40 px), náhled a připomenutí pod nimi. -->
+          <div class="flex flex-wrap gap-1.5 max-md:grid max-md:grid-cols-2 max-md:gap-2 max-md:[&>*]:h-10 max-md:[&>*]:justify-center" data-test="approval-card-actions">
+            <a v-if="row.invoice.has_pdf" :href="purchaseInvoicesApi.pdfUrl(row.purchase_invoice_id, true)" target="_blank" rel="noopener" :class="btnOutlineSm('neutral')" class="max-md:order-3">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
               {{ t('purchase_approval.action.preview') }}
             </a>
-            <button v-if="canRemind(row)" type="button" :disabled="busyId !== null" :class="btnOutlineSm('neutral')" @click="remind(row)">
+            <button v-if="canRemind(row)" type="button" :disabled="busyId !== null" :class="btnOutlineSm('neutral')" class="max-md:order-3" @click="remind(row)">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" /></svg>
               {{ t('purchase_approval.action.remind') }}
             </button>
-            <button v-if="canDecide(row)" type="button" :disabled="busyId !== null" :class="btnOutlineSm('danger')" @click="openReject(row)">
+            <button v-if="canDecide(row)" type="button" :disabled="busyId !== null" :class="btnOutlineSm('danger')" class="max-md:order-2 max-md:text-sm" data-test="approval-card-reject" @click="openReject(row)">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
               {{ t('purchase_approval.action.reject') }}
             </button>
-            <button v-if="canDecide(row)" type="button" :disabled="busyId !== null" :class="btnFilledSm('success')" @click="approve(row)">
+            <button v-if="canDecide(row)" type="button" :disabled="busyId !== null" :class="btnFilledSm('success')" class="max-md:order-1 max-md:text-sm" data-test="approval-card-approve" @click="approve(row)">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
               {{ t('purchase_approval.action.approve') }}
             </button>

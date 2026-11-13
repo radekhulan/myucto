@@ -22716,7 +22716,9 @@
       "invalid_pdf": "Soubor musí být PDF nebo obrázek (JPG/PNG/WEBP/HEIC).",
       "invalid_document": "Soubor musí být PDF, obrázek, ISDOC nebo ISDOCX.",
       "duplicate": "Stejný PDF dokument už je archivován u jiné faktury.",
-      "upload_error": "Nahrání selhalo: {error}"
+      "upload_error": "Nahrání selhalo: {error}",
+      "pick_file": "Vybrat soubor",
+      "open_fullscreen": "Doklad (PDF)"
     },
     "source": {
       "download": "Zdrojový doklad (ISDOC)",
@@ -22992,7 +22994,8 @@
       "import_batch_current": "Vybraný import",
       "import_batch_count": "{n} dokladů",
       "vendor_placeholder": "Vyberte dodavatele",
-      "search_placeholder": "Hledat číslo / dodavatele…"
+      "search_placeholder": "Hledat číslo / dodavatele…",
+      "show_results": "Zobrazit ({count})"
     },
     "payment_ordered_badge": "Předáno k úhradě",
     "payment_ordered_at_tooltip": "Zařazeno do platebního příkazu {date}",
@@ -23150,6 +23153,17 @@
       "kind_success": "Typ dokladu změněn u {n} dokladů.",
       "set_project": "Zařadit k zakázce ({n})",
       "project_success": "Zakázka nastavena u {n} dokladů."
+    },
+    "phone_summary": {
+      "details": "Podrobnosti dokladu",
+      "state": {
+        "paid": "Uhrazeno",
+        "partial": "Částečně uhrazeno",
+        "overdue": "Po splatnosti",
+        "unpaid": "Neuhrazeno",
+        "draft": "Koncept",
+        "cancelled": "Stornováno"
+      }
     }
   },
   "payment_order": {
@@ -23269,7 +23283,9 @@
       "manual": "zadáno ručně",
       "vat_registry": "registr DPH",
       "bank_statement": "z výpisu"
-    }
+    },
+    "settings_title": "Nastavení příkazu",
+    "download_order": "Stáhnout příkaz"
   },
   "refundPayment": {
     "action": "Vrátit peníze",
