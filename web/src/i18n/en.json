@@ -15567,7 +15567,12 @@
       "staff": "Uploaded manually",
       "email": "Email"
     },
-    "portal_after_submit": "Your accountant will then process the documents. You can see the status of each document in the list below."
+    "portal_after_submit": "Your accountant will then process the documents. You can see the status of each document in the list below.",
+    "phone_back": "List",
+    "phone_position": "{n}/{total}",
+    "phone_prev": "Previous document",
+    "phone_next": "Next document",
+    "phone_move": "Move"
   },
   "portfolio": {
     "title": "Companies overview",

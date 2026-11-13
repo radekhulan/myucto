@@ -15567,7 +15567,12 @@
       "staff": "Nahráno ručně",
       "email": "E-mail"
     },
-    "portal_after_submit": "Doklady pak zpracuje vaše účetní. Stav každého dokladu uvidíte v seznamu níže."
+    "portal_after_submit": "Doklady pak zpracuje vaše účetní. Stav každého dokladu uvidíte v seznamu níže.",
+    "phone_back": "Seznam",
+    "phone_position": "{n}/{total}",
+    "phone_prev": "Předchozí doklad",
+    "phone_next": "Další doklad",
+    "phone_move": "Přesunout"
   },
   "portfolio": {
     "title": "Přehled firem",
