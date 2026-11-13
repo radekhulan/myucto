@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
-import { computed, ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted, nextTick } from 'vue'
+import { useEventListener } from '@vueuse/core'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -75,6 +76,29 @@ function tabLabel(v: Tab): string {
     : t('bank_accounts.tab_email_notices')
 }
 useWindowRefresh(loadPendingCount, undefined, { partial: true })
+
+// Na telefonu se záložky nevejdou: aktivní se odroluje do záběru a pravý okraj
+// dostane přechod, dokud vpravo zbývají další.
+const tabBar = ref<HTMLElement | null>(null)
+const tabOverflowRight = ref(false)
+function updateTabOverflow() {
+  const bar = tabBar.value
+  tabOverflowRight.value = !!bar && bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 1
+}
+function revealActiveTab() {
+  const bar = tabBar.value
+  const el = bar?.querySelector<HTMLElement>('[data-active]')
+  if (bar && el) {
+    if (el.offsetLeft < bar.scrollLeft) bar.scrollLeft = el.offsetLeft
+    else if (el.offsetLeft + el.offsetWidth > bar.scrollLeft + bar.clientWidth) {
+      bar.scrollLeft = el.offsetLeft + el.offsetWidth - bar.clientWidth
+    }
+  }
+  updateTabOverflow()
+}
+onMounted(() => nextTick(revealActiveTab))
+watch([tab, visibleTabs], () => nextTick(revealActiveTab))
+useEventListener(window, 'resize', updateTabOverflow, { passive: true })
 </script>
 
 <template>
@@ -84,17 +108,23 @@ useWindowRefresh(loadPendingCount, undefined, { partial: true })
       <p class="text-sm text-neutral-500 mt-0.5">{{ t('bank_accounts.subtitle') }}</p>
     </div>
 
-    <div v-if="visibleTabs.length > 1" class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto">
-      <button v-for="tt in visibleTabs" :key="tt"
-        @click="switchTab(tt)"
-        class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap inline-flex items-center gap-1.5"
-        :class="tab === tt
-          ? 'border-primary-600 text-primary-700 font-medium'
-          : 'border-transparent text-neutral-600 hover:text-neutral-900'">
-        {{ tabLabel(tt) }}
-        <span v-if="tt === 'posting' && pendingCount > 0"
-          class="inline-flex items-center bg-warning-50 text-warning-600 rounded-full px-1.5 text-xs">{{ pendingCount }}</span>
-      </button>
+    <div v-if="visibleTabs.length > 1" class="relative mb-4">
+      <div ref="tabBar" class="relative border-b border-neutral-200 flex gap-1 overflow-x-auto max-md:snap-x max-md:[scrollbar-width:none]"
+        @scroll.passive="updateTabOverflow">
+        <button v-for="tt in visibleTabs" :key="tt"
+          @click="switchTab(tt)"
+          :data-active="tab === tt || undefined"
+          class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap inline-flex items-center gap-1.5 max-md:px-2.5 max-md:text-[13px] max-md:snap-start"
+          :class="tab === tt
+            ? 'border-primary-600 text-primary-700 font-medium'
+            : 'border-transparent text-neutral-600 hover:text-neutral-900'">
+          {{ tabLabel(tt) }}
+          <span v-if="tt === 'posting' && pendingCount > 0"
+            class="inline-flex items-center bg-warning-50 text-warning-600 rounded-full px-1.5 text-xs">{{ pendingCount }}</span>
+        </button>
+      </div>
+      <span v-if="tabOverflowRight" aria-hidden="true"
+        class="md:hidden pointer-events-none absolute right-0 top-0 bottom-px w-10 bg-gradient-to-l from-neutral-50 to-transparent"></span>
     </div>
 
     <StatementList v-if="tab === 'statements'" embedded />

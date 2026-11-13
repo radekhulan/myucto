@@ -225,7 +225,7 @@ const hasAnyData = computed(() =>
 
     <div v-else-if="summary && summary.kpi" class="space-y-6">
       <!-- Plovoucí 12měsíční obrat — KPI tiles per měna -->
-      <div v-if="summary.rolling_12m.length" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div v-if="summary.rolling_12m.length" class="grid grid-cols-2 lg:grid-cols-3 gap-4 max-md:gap-3 max-md:[&>*]:min-w-0 max-md:[&>*]:p-3 max-md:[&>*]:break-words max-md:[&_.text-2xl]:text-lg">
         <div v-for="r in summary.rolling_12m" :key="`r12-${r.currency}`"
           class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">
@@ -245,7 +245,7 @@ const hasAnyData = computed(() =>
           <div class="text-xs text-neutral-500 mt-1">
             {{ t('stats.rolling_12m_vs_prev', { total: formatMoneyWhole(r.prev_period_total, r.currency) }) }}
           </div>
-          <div class="text-[11px] text-neutral-400 mt-2">{{ t('stats.rolling_12m_hint') }}</div>
+          <div class="max-md:hidden text-[11px] text-neutral-400 mt-2">{{ t('stats.rolling_12m_hint') }}</div>
         </div>
 
         <!-- Obrat pro registraci DPH (kalendářní rok) — relevantní pro neplátce -->
@@ -269,7 +269,7 @@ const hasAnyData = computed(() =>
               <span v-else-if="obratCzkThisYear >= VAT_REG_NEAR">{{ t('stats.vat_reg_near', { pct: vatRegPct }) }}</span>
               <span v-else>{{ t('stats.vat_reg_ok', { pct: vatRegPct }) }}</span>
             </div>
-            <div class="text-[10px] text-neutral-400 mt-0.5">{{ t('stats.vat_reg_thresholds') }}</div>
+            <div class="max-md:hidden text-[10px] text-neutral-400 mt-0.5">{{ t('stats.vat_reg_thresholds') }}</div>
           </div>
         </div>
 
@@ -300,7 +300,7 @@ const hasAnyData = computed(() =>
                 limit: formatMoneyWhole(summary.flat_tax_threshold.limit_czk, 'CZK'),
               }) }}
             </div>
-            <div class="text-[10px] text-neutral-400 mt-0.5">{{ t('stats.flat_tax_hint') }}</div>
+            <div class="max-md:hidden text-[10px] text-neutral-400 mt-0.5">{{ t('stats.flat_tax_hint') }}</div>
           </div>
         </div>
 
@@ -318,7 +318,7 @@ const hasAnyData = computed(() =>
             {{ revenueTotalCzk.change_pct >= 0 ? '▲' : '▼' }} {{ Math.abs(revenueTotalCzk.change_pct) }} %
             {{ t('dashboard.vs_prev_ytd', { year: summary.prev_year }) }}
           </div>
-          <div class="text-[11px] text-neutral-500 mt-2">
+          <div class="max-md:hidden text-[11px] text-neutral-500 mt-2">
             {{ t('stats.revenue_total_czk_hint', { n: revenueTotalCzk.currency_count }) }}
           </div>
         </div>
@@ -367,7 +367,7 @@ const hasAnyData = computed(() =>
             {{ Math.abs(Math.round(((f.forecast - f.prev_year_full) / f.prev_year_full) * 100 * 10) / 10) }} %
             {{ t('stats.vs_prev_year_full', { year: summary.prev_year }) }}
           </div>
-          <div class="text-[11px] text-neutral-500 mt-2">
+          <div class="max-md:hidden text-[11px] text-neutral-500 mt-2">
             {{ f.prev_year_full > 0
                 ? t('stats.forecast_growth_hint', { trend: growthPct(f.growth_trend), short: growthPct(f.growth_short) })
                 : t('stats.forecast_runrate_hint') }}
@@ -421,7 +421,7 @@ const hasAnyData = computed(() =>
           </div>
           <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoneyWhole(r.total, r.currency) }}</div>
           <div class="text-xs text-neutral-500 mt-1">{{ r.invoice_count }} {{ t('dashboard.invoices_unit') }}</div>
-          <div class="text-[11px] text-neutral-400 mt-2">{{ t('stats.last_30d_hint') }}</div>
+          <div class="max-md:hidden text-[11px] text-neutral-400 mt-2">{{ t('stats.last_30d_hint') }}</div>
         </div>
 
         <!-- Aktivní pravidelné fakturace -->
@@ -429,7 +429,7 @@ const hasAnyData = computed(() =>
           class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm hover:bg-neutral-50 transition cursor-pointer block">
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">{{ t('stats.active_recurring') }}</div>
           <div class="text-2xl font-semibold text-neutral-900">{{ summary.active_recurring_count }}</div>
-          <div class="text-[11px] text-neutral-400 mt-2">{{ t('stats.active_recurring_hint') }}</div>
+          <div class="max-md:hidden text-[11px] text-neutral-400 mt-2">{{ t('stats.active_recurring_hint') }}</div>
         </RouterLink>
       </div>
 

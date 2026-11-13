@@ -76,13 +76,14 @@ async function onOverwrite() {
       type="button"
       @click="open = !open"
       :aria-expanded="open"
+      :title="t('common.saved_filters')"
       class="cursor-pointer shrink-0 whitespace-nowrap h-9 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-neutral-300 bg-surface text-sm text-neutral-700 hover:bg-neutral-50 transition-colors"
       :class="open ? 'bg-neutral-50' : ''"
     >
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-7-4-7 4V5z" />
       </svg>
-      <span>{{ t('common.saved_filters') }}</span>
+      <span class="max-md:sr-only">{{ t('common.saved_filters') }}</span>
       <span
         v-if="activeFilter"
         class="max-w-28 truncate inline-flex items-center px-1.5 h-5 rounded bg-primary-100 text-primary-700 text-xs font-medium"

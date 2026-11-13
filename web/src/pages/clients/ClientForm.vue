@@ -288,6 +288,7 @@ const aresError = ref('')
 const viesLoading = ref(false)
 const viesError = ref('')
 const viesResult = ref<import('@/api/clients').ViesLookupResult | null>(null)
+const simplifiedHintOpen = ref(false)
 const duplicateIc = ref<{ id: number; name: string } | null>(null)
 const duplicateDic = ref<{ id: number; name: string } | null>(null)
 
@@ -621,9 +622,9 @@ if (!props.embedded) {
               <div class="flex gap-2">
                 <input autocomplete="off" v-model="form.ic" maxlength="8" placeholder="12345678"
                   @blur="checkDuplicateIc"
-                  class="min-w-0 flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+                  class="min-w-0 flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm max-md:h-10 max-md:text-base focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
                 <button type="button" @click="loadFromAres" :disabled="!form.ic || aresLoading"
-                  class="shrink-0 whitespace-nowrap px-3 h-9 text-sm bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-100 disabled:opacity-50">
+                  class="shrink-0 whitespace-nowrap px-3 h-9 text-sm max-md:h-10 max-md:px-4 bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-100 disabled:opacity-50">
                   {{ aresLoading ? '…' : 'ARES' }}
                 </button>
               </div>
@@ -641,9 +642,9 @@ if (!props.embedded) {
               <div class="flex gap-2">
                 <input autocomplete="off" v-model="form.dic" :placeholder="isSkClient ? 'SK2022638992' : 'CZ12345678'"
                   @blur="checkDuplicateDic"
-                  class="min-w-0 flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+                  class="min-w-0 flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm max-md:h-10 max-md:text-base focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
                 <button type="button" @click="checkVies" :disabled="!form.dic || viesLoading"
-                  class="shrink-0 whitespace-nowrap px-3 h-9 text-sm bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-100 disabled:opacity-50">
+                  class="shrink-0 whitespace-nowrap px-3 h-9 text-sm max-md:h-10 max-md:px-4 bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-100 disabled:opacity-50">
                   {{ viesLoading ? '…' : 'VIES' }}
                 </button>
               </div>
@@ -733,7 +734,8 @@ if (!props.embedded) {
               @change="onSimplifiedOnlyToggle" />
             <span>{{ t('client.simplified_only_label') }}</span>
           </label>
-          <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('client.simplified_only_hint') }}</p>
+          <p class="text-xs text-neutral-500 mt-1 ml-6 max-md:cursor-pointer" :class="simplifiedHintOpen ? '' : 'max-md:line-clamp-2'"
+            @click="simplifiedHintOpen = !simplifiedHintOpen">{{ t('client.simplified_only_hint') }}</p>
         </div>
 
         <!-- Základní -->
@@ -744,14 +746,14 @@ if (!props.embedded) {
           <p data-field-error v-if="errors.company_name" class="text-xs text-danger-500 mt-1">{{ errors.company_name[0] }}</p>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="min-w-0">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.first_name') }}</label>
             <input autocomplete="off" v-model="form.first_name" maxlength="60"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.first_name" class="text-xs text-danger-500 mt-1">{{ errors.first_name[0] }}</p>
           </div>
-          <div>
+          <div class="min-w-0">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.last_name') }}</label>
             <input autocomplete="off" v-model="form.last_name" maxlength="60"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
@@ -759,20 +761,20 @@ if (!props.embedded) {
           </div>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="min-w-0">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.main_email') }}{{ form.simplified_only ? ' *' : '' }}</label>
             <input autocomplete="off" v-model="form.main_email" type="email"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.main_email" class="text-xs text-danger-500 mt-1">{{ errors.main_email[0] }}</p>
           </div>
-          <div>
+          <div class="min-w-0">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.phone') }}</label>
             <input autocomplete="off" v-model="form.phone"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.phone" class="text-xs text-danger-500 mt-1">{{ errors.phone[0] }}</p>
           </div>
-          <p v-if="form.simplified_only" class="sm:col-span-2 text-xs text-neutral-500 -mt-1">{{ t('client.simplified_only_contact_hint') }}</p>
+          <p v-if="form.simplified_only" class="col-span-2 text-xs text-neutral-500 -mt-1">{{ t('client.simplified_only_contact_hint') }}</p>
         </div>
 
         <!-- E-mailové kontakty dle účelu (#86) — plný editor i embedded modal (faktura/new) -->
