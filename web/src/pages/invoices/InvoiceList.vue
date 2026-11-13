@@ -53,6 +53,8 @@ import { ACCOUNTING_PERIOD_MISSING_CODES, accountingPeriodRoute } from '@/api/er
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
 import { appIsoDate, overdueDays } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 
 const { t, tm, rt } = useI18n()
 const toast = useToast()
@@ -580,16 +582,17 @@ async function applyBulkOss() {
 }
 
 // Hromadné odeslání klientům — pouze faktury se status issued/sent/reminded/paid + ne cancellation
+function canSendRow(inv: InvoiceListItem): boolean {
+  return ['issued', 'sent', 'reminded', 'paid'].includes(inv.status)
+    && inv.invoice_type !== 'cancellation'
+    && !inv.calendar_id
+}
+
 const sendableSelected = computed(() => {
   const ids = new Set(selectedIds.value)
   return groups.value
     .flatMap(g => g.invoices)
-    .filter(inv =>
-      ids.has(inv.id)
-      && ['issued', 'sent', 'reminded', 'paid'].includes(inv.status)
-      && inv.invoice_type !== 'cancellation'
-      && !inv.calendar_id
-    )
+    .filter(inv => ids.has(inv.id) && canSendRow(inv))
 })
 
 // Hromadné vystavení — jen drafty. Řadíme podle issue_date asc, pak id asc, aby varsymboly šly sekvenčně.
@@ -602,19 +605,73 @@ const issuableSelected = computed(() => {
 })
 
 // Hromadné označení za zaplacené — jen issued/sent/reminded (ne paid, ne cancelled, ne draft, ne cancellation)
+function canMarkPaidRow(inv: InvoiceListItem): boolean {
+  return ['issued', 'sent', 'reminded'].includes(inv.status)
+    && inv.invoice_type !== 'cancellation'
+    && !isCalendarType(inv.invoice_type)
+    && hasPositiveAmountToPay(inv)
+    && !rowLockedForMe(inv)
+}
+
 const markPayableSelected = computed(() => {
   const ids = new Set(selectedIds.value)
   return groups.value
     .flatMap(g => g.invoices)
-    .filter(inv =>
-      ids.has(inv.id)
-      && ['issued', 'sent', 'reminded'].includes(inv.status)
-      && inv.invoice_type !== 'cancellation'
-      && !isCalendarType(inv.invoice_type)
-      && hasPositiveAmountToPay(inv)
-      && !rowLockedForMe(inv)
-    )
+    .filter(inv => ids.has(inv.id) && canMarkPaidRow(inv))
 })
+
+// Telefon: „…" na kartě dokladu se stejnými akcemi, jaké seznam umí hromadně
+// (PDF, odeslat, označit zaplaceno), jen pro jeden doklad a bez zaškrtávání.
+const isPhone = useIsPhone()
+const rowBusyId = ref<number | null>(null)
+
+function rowNumber(inv: InvoiceListItem): string {
+  return inv.varsymbol || t('invoice.draft_id_short', { id: inv.id })
+}
+
+function rowMenuActions(inv: InvoiceListItem): RowAction[] {
+  const busy = rowBusyId.value !== null || bulkBusy.value
+  const hasPdf = inv.status !== 'draft'
+  return [
+    { key: 'view-pdf', label: t('invoice.view_pdf'), icon: 'eye', show: hasPdf, href: invoicesApi.pdfUrl(inv.id, false) },
+    { key: 'download-pdf', label: t('invoice.download_pdf'), icon: 'download', show: hasPdf, href: invoicesApi.pdfUrl(inv.id, true), download: true },
+    { key: 'send', label: t('invoice.phone.send'), icon: 'send', variant: 'primary', disabled: busy,
+      show: auth.canWrite('invoices.send') && canSendRow(inv), run: () => void rowSend(inv) },
+    { key: 'mark-paid', label: t('invoice.mark_paid'), icon: 'checkCircle', variant: 'success', disabled: busy,
+      show: auth.canWrite('invoices.mark_paid') && canMarkPaidRow(inv), run: () => void rowMarkPaid(inv) },
+  ]
+}
+
+async function rowSend(inv: InvoiceListItem) {
+  if (!confirm(t('invoice.phone.send_confirm', { number: rowNumber(inv) }))) return
+  rowBusyId.value = inv.id
+  try {
+    await invoicesApi.send(inv.id)
+    markRowsTouched('invoice', [inv.id])
+    toast.success(t('invoice.phone.send_done', { number: rowNumber(inv) }))
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('invoice.phone.send_failed'))
+  } finally {
+    rowBusyId.value = null
+  }
+}
+
+async function rowMarkPaid(inv: InvoiceListItem) {
+  if (!confirm(t('invoice.phone.mark_paid_confirm', { number: rowNumber(inv) }))) return
+  const sendThanks = thanksEnabled.value && confirm(t('invoice.phone.thanks_confirm'))
+  rowBusyId.value = inv.id
+  try {
+    await invoicesApi.markPaid(inv.id, appIsoDate(), sendThanks ? { sendThanks: true, thanksTrigger: 'manual' } : undefined)
+    markRowsTouched('invoice', [inv.id])
+    toast.success(t('invoice.phone.mark_paid_done', { number: rowNumber(inv) }))
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('invoice.phone.mark_paid_failed'))
+  } finally {
+    rowBusyId.value = null
+  }
+}
 
 // Hromadná upomínka — jen běžné faktury (ne proforma/dobropis/storno) ve stavu issued/sent/reminded,
 // po splatnosti a placené bankovním převodem (kartové/hotovostní úhrady se neupomínají).
@@ -1814,13 +1871,16 @@ useWindowRefresh(refreshLoadedPages,
             :class="[rowClass(inv), flashedIds.has(inv.id) ? 'row-flash' : '']"
           >
             <div class="flex items-start gap-3">
-              <input
-                type="checkbox"
-                :checked="selectedIds.includes(inv.id)"
-                @change="toggleSelected(inv.id)"
-                @click.stop
-                class="mt-0.5 w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
-              />
+              <!-- Telefon: dotyková plocha 44 px kolem zaškrtávátka (vizuálně beze změny). -->
+              <label class="flex shrink-0 max-md:-m-3 max-md:p-3 max-md:cursor-pointer" data-test="invoice-card-select" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selectedIds.includes(inv.id)"
+                  @change="toggleSelected(inv.id)"
+                  @click.stop
+                  class="mt-0.5 w-5 h-5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
+                />
+              </label>
               <div class="flex-1 min-w-0">
                 <div class="flex items-baseline justify-between gap-2">
                   <div class="font-medium text-neutral-900 truncate" :data-custom-color="!!colors.color('client')" :style="colors.cellStyle('client')">{{ inv.client_company_name }}</div>
@@ -1869,7 +1929,7 @@ useWindowRefresh(refreshLoadedPages,
                     <!-- Pro koncepty (s právem editace) zobraz tlačítko "Výkaz" místo "KONCEPT" badge — stejně jako v desktop tabulce. -->
                     <button v-if="inv.status === 'draft' && inv.invoice_type !== 'tax_document' && auth.canWrite('invoices')"
                       @click="openWorkReport(inv.id)"
-                      class="cursor-pointer text-xs px-2 py-0.5 rounded border border-primary-500/40 text-primary-700 hover:bg-primary-50 inline-flex items-center gap-1"
+                      class="cursor-pointer text-xs px-2 py-0.5 rounded border border-primary-500/40 text-primary-700 hover:bg-primary-50 inline-flex items-center gap-1 max-md:min-h-9 max-md:px-3"
                       :title="t('invoice.wr_btn')">
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-6m3 6v-4m3 4v-2"/></svg>
                       {{ t('invoice.wr_btn') }}
@@ -1877,6 +1937,10 @@ useWindowRefresh(refreshLoadedPages,
                     <span v-else class="text-xs px-2 py-0.5 rounded" :class="statusBadgeClass(inv.status)">
                       {{ statusLabel(inv.status) }}
                     </span>
+                    <div v-if="isPhone && rowMenuActions(inv).some(a => a.show)" data-test="invoice-card-menu"
+                      class="[&_[aria-haspopup=menu]]:w-10 [&_[aria-haspopup=menu]]:h-10">
+                      <RowActionsMenu :inline-count="0" :actions="rowMenuActions(inv)" />
+                    </div>
                   </div>
                 </div>
               </div>

@@ -21,6 +21,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import EntityDimensionDefaults from '@/components/dimensions/EntityDimensionDefaults.vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -413,6 +414,18 @@ async function deleteClient() {
   }
 }
 
+// Telefon: řádek velkých tlačítek Zavolat · E-mail · Nová faktura pod nadpisem.
+const isPhone = useIsPhone()
+const PHONE_ICON = 'M3 5a2 2 0 0 1 2-2h3.28a1 1 0 0 1 .948.684l1.498 4.493a1 1 0 0 1-.502 1.21l-2.257 1.13a11.042 11.042 0 0 0 5.516 5.516l1.13-2.257a1 1 0 0 1 1.21-.502l4.493 1.498a1 1 0 0 1 .684.949V19a2 2 0 0 1-2 2h-1C9.716 21 3 14.284 3 6V5z'
+const telHref = (phone: string | null | undefined) => {
+  const digits = (phone ?? '').replace(/[^\d+]/g, '')
+  return digits ? `tel:${digits}` : undefined
+}
+const mailHref = (email: string | null | undefined) => (email ? `mailto:${email.trim()}` : undefined)
+const canNewInvoice = computed(() => !!client.value && client.value.is_customer !== false && auth.canWrite('invoices.create'))
+const showPhoneQuickActions = computed(() => isPhone.value && !!client.value
+  && (!!telHref(client.value.phone) || !!client.value.main_email || canNewInvoice.value))
+
 // ─── Lišta akcí (sdílená ActionBar) — sjednocuje horní toolbar i spodní lištu ───
 const clientActions = computed<ActionItem[]>(() => {
   const c = client.value
@@ -478,6 +491,21 @@ useWindowRefresh(async () => {
       <ActionBar :actions="clientActions" />
     </div>
 
+    <div v-if="showPhoneQuickActions" class="grid grid-flow-col auto-cols-fr gap-2" data-test="client-phone-actions">
+      <a v-if="telHref(client.phone)" :href="telHref(client.phone)" :class="btnOutline('success')" class="h-12 justify-center" data-test="client-phone-call">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="PHONE_ICON" /></svg>
+        {{ t('client.phone_actions.call') }}
+      </a>
+      <a v-if="client.main_email" :href="mailHref(client.main_email)" :class="btnOutline('primary')" class="h-12 justify-center" data-test="client-phone-email">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.send" /></svg>
+        {{ t('client.phone_actions.email') }}
+      </a>
+      <RouterLink v-if="canNewInvoice" :to="`/invoices/new?client_id=${client.id}`" :class="btnFilled('primary')" class="h-12 justify-center" data-test="client-phone-invoice">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.plus" /></svg>
+        {{ t('client.phone_actions.new_invoice') }}
+      </RouterLink>
+    </div>
+
     <!-- Detaily plátce DPH (na vyžádání z registru plátců DPH / MFČR) -->
     <div v-if="vatInfoOpen" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
       <div class="flex items-center justify-between mb-3">
@@ -529,11 +557,17 @@ useWindowRefresh(async () => {
         <dl class="space-y-2 text-sm">
           <div>
             <dt class="text-neutral-500">{{ t('client.email') }}</dt>
-            <dd class="text-neutral-900">{{ client.main_email || '—' }}</dd>
+            <dd class="text-neutral-900">
+              <a v-if="client.main_email" :href="mailHref(client.main_email)" class="hover:underline" data-test="client-email-link">{{ client.main_email }}</a>
+              <template v-else>—</template>
+            </dd>
           </div>
           <div v-if="client.phone">
             <dt class="text-neutral-500">{{ t('client.telephone') }}</dt>
-            <dd class="text-neutral-900 font-mono">{{ client.phone }}</dd>
+            <dd class="text-neutral-900 font-mono">
+              <a v-if="telHref(client.phone)" :href="telHref(client.phone)" class="hover:underline" data-test="client-phone-link">{{ client.phone }}</a>
+              <template v-else>{{ client.phone }}</template>
+            </dd>
           </div>
         </dl>
         <!-- E-mailové kontakty dle účelu (#86) -->
@@ -543,7 +577,7 @@ useWindowRefresh(async () => {
             <div v-for="ec in client.email_contacts" :key="ec.id ?? ec.email"
               :class="['text-sm', ec.is_active ? '' : 'opacity-50']">
               <div class="text-neutral-900 break-all">
-                {{ ec.email }}
+                <a :href="mailHref(ec.email)" class="hover:underline">{{ ec.email }}</a>
                 <span v-if="ec.contact_name || ec.label" class="text-neutral-500 text-xs">
                   - {{ [ec.contact_name, ec.label].filter(Boolean).join(', ') }}</span>
                 <span v-if="!ec.is_active" class="text-xs text-neutral-400">({{ t('client.email_contacts.inactive') }})</span>

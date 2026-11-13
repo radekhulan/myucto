@@ -25755,7 +25755,23 @@
     "receipt_banner_text": "zjednodušený daňový doklad (§ 30 ZDPH) do {limit} včetně DPH, odběratel není povinný",
     "receipt_switch": "Vystavit jako fakturu",
     "secondary_section": "Další části dokladu",
-    "secondary_section_hint": "Klasifikace, dimenze, poznámky, výkazy a přílohy"
+    "secondary_section_hint": "Klasifikace, dimenze, poznámky, výkazy a přílohy",
+    "phone": {
+      "share_pdf": "Sdílet PDF",
+      "share_failed": "PDF se nepodařilo sdílet.",
+      "details_show": "Zobrazit podrobnosti dokladu",
+      "details_hide": "Skrýt podrobnosti dokladu",
+      "move_up": "Posunout nahoru",
+      "move_down": "Posunout dolů",
+      "send": "Odeslat klientovi",
+      "send_confirm": "Odeslat doklad {number} klientovi e-mailem?",
+      "send_done": "Doklad {number} byl odeslán.",
+      "send_failed": "Doklad se nepodařilo odeslat.",
+      "mark_paid_confirm": "Označit doklad {number} jako zaplacený k dnešnímu datu?",
+      "thanks_confirm": "Odeslat klientovi i poděkování za úhradu?",
+      "mark_paid_done": "Doklad {number} je označený jako zaplacený.",
+      "mark_paid_failed": "Doklad se nepodařilo označit jako zaplacený."
+    }
   },
   "status": {
     "draft": "Koncept",
@@ -26154,7 +26170,12 @@
     "dic_invalid": "{dic} není platné nebo neexistuje",
     "duplicate_ic": "Klient s tímto IČO již existuje:",
     "duplicate_dic": "Klient s tímto DIČ již existuje:",
-    "open_existing": "otevřít detail"
+    "open_existing": "otevřít detail",
+    "phone_actions": {
+      "call": "Zavolat",
+      "email": "E-mail",
+      "new_invoice": "Nová faktura"
+    }
   },
   "project": {
     "title": "Zakázky",

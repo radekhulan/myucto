@@ -44,7 +44,7 @@ import BillingRecap from '@/components/work-reports/BillingRecap.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { offsetRoute } from '@/components/accounting/offsetLink'
-import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
@@ -61,6 +61,7 @@ import CreditNoteOffsetNotice from '@/components/invoices/CreditNoteOffsetNotice
 import InvoiceOtherItemLink from '@/components/invoices/InvoiceOtherItemLink.vue'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import ListNavArrows from '@/components/ui/ListNavArrows.vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { useListNavigation } from '@/composables/useListNavigation'
 
 const PaymentMethodModal = defineAsyncComponent(() => import('@/components/invoices/PaymentMethodModal.vue'))
@@ -73,6 +74,10 @@ const toast = useToast()
 // Chybějící účetní období = nejčastější důvod, proč „Zaúčtovat" neprojde (import
 // historie). Toast k němu nese proklik na Uzávěrku, ne jen konstatování.
 const postingErrorToast = useAccountingPeriodToast()
+
+// Telefon: souhrn částky nahoře a sbalené karty nastavení dokladu.
+const isPhone = useIsPhone()
+const phoneDetailsOpen = ref(false)
 
 const auth = useAuthStore()
 const isAdmin = computed(() => auth.isCompanyAdminRole)
@@ -461,6 +466,26 @@ const unrecordedBankTransactions = computed(() => {
 const remainingToPay = computed(() => {
   if (!invoice.value) return 0
   return Math.round(((invoice.value.amount_to_pay ?? 0) - (invoice.value.paid_total ?? 0)) * 100) / 100
+})
+
+// Souhrn na telefonu: stejná částka, jakou končí sumace dokladu (zbývá / k úhradě / celkem).
+const phoneSummaryLabel = computed(() => {
+  const inv = invoice.value
+  if (!inv) return ''
+  if ((inv.paid_total ?? 0) > 0) return t('invoice.payments.remaining')
+  if (inv.advance_paid_amount > 0) return t('invoice.amount_to_pay')
+  return t('invoice.totals.total')
+})
+const phoneSummaryAmount = computed(() => {
+  const inv = invoice.value
+  if (!inv) return 0
+  if ((inv.paid_total ?? 0) > 0) return Math.max(remainingToPay.value, 0)
+  if (inv.advance_paid_amount > 0) return inv.amount_to_pay
+  return inv.totals.with_vat
+})
+const phoneSummaryAmountClass = computed(() => {
+  if (!invoice.value || (invoice.value.paid_total ?? 0) <= 0) return 'text-primary-700'
+  return remainingToPay.value > 0 ? 'text-amber-700' : 'text-success-600'
 })
 
 // Modal částečné úhrady
@@ -1414,6 +1439,31 @@ async function downloadPdf() {
   window.open(invoicesApi.pdfUrl(inv.id, true), '_blank')
 }
 
+// Telefon: PDF se sdílí přímo do aplikací (pošta, chat) přes Web Share API se souborem.
+// Prohlížeč bez sdílení souborů dostane jen „Stáhnout PDF".
+const canSharePdfFiles = (() => {
+  if (typeof navigator === 'undefined' || typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') return false
+  try {
+    return navigator.canShare({ files: [new File([''], 'x.pdf', { type: 'application/pdf' })] })
+  } catch {
+    return false
+  }
+})()
+
+async function sharePdf() {
+  if (!invoice.value) return
+  const inv = invoice.value
+  try {
+    const response = await fetch(invoicesApi.pdfUrl(inv.id, true), { credentials: 'same-origin' })
+    if (!response.ok) throw new Error(`PDF download failed (${response.status})`)
+    const file = new File([await response.blob()], pdfFileName(inv.varsymbol, `faktura-${inv.id}`), { type: 'application/pdf' })
+    await navigator.share({ files: [file], title: file.name })
+  } catch (e: unknown) {
+    if ((e as { name?: string })?.name === 'AbortError') return
+    toast.error(t('invoice.phone.share_failed'), { label: t('invoice.download_pdf'), handler: downloadPdf })
+  }
+}
+
 function viewPdf() {
   if (!invoice.value) return
   window.open(invoicesApi.pdfUrl(invoice.value.id, false), '_blank', 'noopener')
@@ -1594,6 +1644,7 @@ async function send() {
 }
 
 const isDraft = computed(() => invoice.value?.status === 'draft')
+const canPdf = computed(() => !!invoice.value && (!isDraft.value || invoice.value.items.length > 0))
 const isProforma = computed(() => invoice.value?.invoice_type === 'proforma')
 // Vystavený kalendář nenese pohledávku, úhrady ani zápis v deníku, ty jsou na dokladech splátek.
 const isCalendar = computed(() => isCalendarType(invoice.value?.invoice_type))
@@ -2243,6 +2294,34 @@ useWindowRefresh(async () => {
         </div>
       </div>
 
+      <!-- Telefon: částka, splatnost a stav úhrady hned pod nadpisem (sumace je jinak
+           několik obrazovek dolů) a PDF po ruce. -->
+      <div v-if="isPhone" class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm space-y-3" data-test="invoice-phone-summary">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">{{ phoneSummaryLabel }}</div>
+            <div class="font-mono text-2xl font-semibold tabular-nums" :class="phoneSummaryAmountClass" data-test="invoice-phone-amount">
+              {{ formatMoney(phoneSummaryAmount, invoice.currency) }}
+            </div>
+            <div class="text-sm text-neutral-600 mt-0.5">{{ t('invoice.due_date') }}: {{ formatDate(invoice.due_date) }}</div>
+          </div>
+          <span class="shrink-0 text-sm font-medium px-3 py-1 rounded-full" data-test="invoice-phone-status"
+            :class="statusBadgeClass(displayStatus(invoice.status, invoice.payment_status))">
+            {{ statusLabel(displayStatus(invoice.status, invoice.payment_status)) }}
+          </span>
+        </div>
+        <div v-if="canPdf" class="flex flex-wrap gap-2">
+          <button type="button" :class="btnOutline('neutral')" class="flex-1 justify-center h-11" data-test="invoice-phone-pdf" @click="downloadPdf">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.download" /></svg>
+            {{ t('invoice.download_pdf') }}
+          </button>
+          <button v-if="canSharePdfFiles" type="button" :class="btnOutline('primary')" class="flex-1 justify-center h-11" data-test="invoice-phone-share" @click="sharePdf">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.upload" /></svg>
+            {{ t('invoice.phone.share_pdf') }}
+          </button>
+        </div>
+      </div>
+
       <!-- Označit jako uhrazené — evidenčně / pokladnou / zápočtem -->
       <PaymentMethodModal v-if="markPaidOpen && invoice" doc-type="invoice"
         :doc-id="invoice.id" :doc-number="invoice.varsymbol || `#${invoice.id}`"
@@ -2741,7 +2820,13 @@ useWindowRefresh(async () => {
         </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <button v-if="isPhone" type="button" data-test="invoice-phone-details-toggle"
+        class="cursor-pointer w-full min-h-11 px-4 flex items-center justify-between gap-2 bg-surface border border-neutral-200 rounded-lg shadow-sm text-sm font-medium text-neutral-700"
+        :aria-expanded="phoneDetailsOpen" @click="phoneDetailsOpen = !phoneDetailsOpen">
+        {{ phoneDetailsOpen ? t('invoice.phone.details_hide') : t('invoice.phone.details_show') }}
+        <svg class="h-4 w-4 transition-transform" :class="phoneDetailsOpen ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.chevron" /></svg>
+      </button>
+      <div v-show="!isPhone || phoneDetailsOpen" class="grid grid-cols-1 md:grid-cols-3 gap-4" data-test="invoice-detail-cards">
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">
             {{ t('invoice.issue_date') }}
