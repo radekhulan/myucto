@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Auth;
 use MyInvoice\Infrastructure\Cache\RedisFactory;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\PasswordHasher;
 use PHPUnit\Framework\Attributes\Group;
@@ -17,7 +18,8 @@ use PHPUnit\Framework\TestCase;
  * bez session, cookies a CSRF (jak ji volá mobilní aplikace) a vrácený token
  * projde `GET /api/v1/auth/api-me`.
  *
- * Vyžaduje běžící server nad toutéž DB (env MYINVOICE_TEST_URL), jinak se přeskočí.
+ * Vyžaduje běžící server nad toutéž DB (env MYINVOICE_TEST_URL) se zapnutým
+ * `auth.password_token.enabled`, jinak se přeskočí.
  * Spustit: vendor/bin/phpunit --filter=PasswordTokenHttpTest
  */
 #[Group('integration')]
@@ -53,13 +55,23 @@ final class PasswordTokenHttpTest extends TestCase
         $this->db->pdo()->prepare(
             'INSERT INTO users (email, password_hash, name, role_id, is_active)
              SELECT ?, ?, ?, id, 1 FROM roles WHERE system_key = ? LIMIT 1'
-        )->execute([$this->email, (new PasswordHasher($this->config))->hash(self::PASSWORD), 'Password token HTTP test', 'accountant']);
+        )->execute([$this->email, (new PasswordHasher($this->config))->hash(self::PASSWORD), 'Password token HTTP test', 'admin']);
         $this->userId = (int) $this->db->pdo()->lastInsertId();
 
-        // Server musí číst tutéž DB, do které test zakládá uživatele (jinak 401 z jiného důvodu).
+        // Server musí číst tutéž DB, do které test zakládá uživatele: sonda tokenem
+        // založeným přímo v DB (špatné heslo by vrátilo 401 i nad jinou DB).
+        $tokens = new ApiTokenService($this->db, new RedisFactory($this->config));
+        $probeToken = $tokens->generate($this->userId, null, 'probe', 'read');
+        $me = $this->request('GET', '/api/v1/auth/api-me', null, $probeToken['plaintext']);
+        $tokens->revoke($probeToken['id'], $this->userId);
+        if ($me['status'] !== 200) {
+            $this->markTestSkipped("Server {$this->baseUrl} čte jinou databázi.");
+        }
+
+        // Endpoint musí server znát a mít zapnutý (auth.password_token.enabled).
         $probe = $this->request('POST', '/api/v1/auth/password-token', ['email' => $this->email, 'password' => 'x']);
-        if ($probe['status'] === 404) {
-            $this->markTestSkipped('Server endpoint nezná (starší build).');
+        if ((json_decode($probe['body'], true)['error']['code'] ?? null) !== 'invalid_credentials') {
+            $this->markTestSkipped('Server endpoint nezná nebo ho má vypnutý.');
         }
     }
 

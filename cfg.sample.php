@@ -233,6 +233,12 @@ return [
 
         // Opt-in přihlášení discoverable passkey bez zadání e-mailu a hesla.
         // Vyžaduje povolenou passkey metodu a správně nastavený HTTPS WebAuthn origin.
+        // Výměna e-mailu a hesla za API token (POST /api/v1/auth/password-token) pro
+        // mobilní a jiné nativní aplikace bez webového přihlášení. Default vypnuto.
+        'password_token' => [
+            'enabled' => false,
+        ],
+
         'passwordless_login' => [
             'enabled' => false,
         ],
@@ -567,7 +573,8 @@ return [
     'rate_limits' => [
         // Limity nad rámec brute_force (ten řeší jen login). Klíč = max požadavků v daném okně.
         'login_per_min_per_ip'      => 10,           // doplněk k brute_force; ochrana proti spamu z 1 IP (i výměna hesla za API token)
-        'password_token_per_min'    => 60,           // celkový strop POST /api/v1/auth/password-token (všechny IP dohromady)
+        'password_token_failures_per_min' => 60,     // neúspěchy POST /api/v1/auth/password-token ze všech IP dohromady
+        'password_token_failures_per_hour_per_account' => 20, // neúspěchy jednoho účtu ze všech IP
         'forgot_per_hour_per_email' => 3,            // POST /auth/forgot-password
         'mutation_per_min_per_user' => 120,          // všechna POST/PUT/PATCH/DELETE (bulk akce + import jobs)
         'read_per_min_per_user'     => 1200,         // GET endpointy (CRM dashboard ~16 paralelně, časté refresh)
