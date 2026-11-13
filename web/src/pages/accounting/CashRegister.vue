@@ -540,7 +540,7 @@ async function postDraft(d: CashDocument) {
         </div>
         <div class="flex flex-wrap items-center justify-end gap-2 mt-2 max-md:mt-0 max-md:order-first">
           <button type="button" @click="filtersOpen = !filtersOpen" :aria-expanded="filtersOpen" data-test="cash-filters-toggle"
-            class="md:hidden mr-auto cursor-pointer h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm inline-flex items-center gap-1.5 text-neutral-700 hover:bg-neutral-50 transition-colors"
+            class="hidden max-md:inline-flex mr-auto cursor-pointer h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm items-center gap-1.5 text-neutral-700 hover:bg-neutral-50 transition-colors"
             :class="filtersOpen ? 'bg-neutral-50 border-neutral-400' : ''">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h18M6 12h12M10 20h4" />

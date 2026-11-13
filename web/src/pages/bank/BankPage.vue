@@ -124,7 +124,7 @@ useEventListener(window, 'resize', updateTabOverflow, { passive: true })
         </button>
       </div>
       <span v-if="tabOverflowRight" aria-hidden="true"
-        class="md:hidden pointer-events-none absolute right-0 top-0 bottom-px w-10 bg-gradient-to-l from-neutral-50 to-transparent"></span>
+        class="hidden max-md:block pointer-events-none absolute right-0 top-0 bottom-px w-10 bg-gradient-to-l from-neutral-50 to-transparent"></span>
     </div>
 
     <StatementList v-if="tab === 'statements'" embedded />

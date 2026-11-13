@@ -3310,7 +3310,7 @@ useWindowTitle(
     <form ref="editorForm" @submit.prevent="submit" class="space-y-4">
       <!-- Klient + zakázka + datumy -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="bg-surface border border-neutral-200 rounded-lg p-4 md:p-5 shadow-sm">
+        <div class="bg-surface border border-neutral-200 rounded-lg p-5 max-md:p-4 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.client') }} &amp; {{ t('invoice.project') }}</h3>
           <div class="space-y-3">
             <div>
@@ -3575,7 +3575,7 @@ useWindowTitle(
           </div>
         </div>
 
-        <div class="bg-surface border border-neutral-200 rounded-lg p-4 md:p-5 shadow-sm">
+        <div class="bg-surface border border-neutral-200 rounded-lg p-5 max-md:p-4 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.dates_section') }}</h3>
           <div class="flex flex-col gap-3">
             <!-- Telefon: data dokladu jdou první, čísla a reference až za nimi a sbalené,
@@ -4272,7 +4272,7 @@ useWindowTitle(
         :doc-id="invoiceId ?? null" :payload="previewPayload" :missing="previewMissing" />
 
       <!-- Klasifikace (VAT pro DPH přiznání + volitelný revenue tag) -->
-      <div v-show="showSecondary" class="bg-surface border border-neutral-200 rounded-lg p-4 md:p-5 shadow-sm">
+      <div v-show="showSecondary" class="bg-surface border border-neutral-200 rounded-lg p-5 max-md:p-4 shadow-sm">
         <h2 class="text-sm font-medium text-neutral-700 mb-3">{{ t('invoice.classification.title') }}</h2>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -4306,17 +4306,17 @@ useWindowTitle(
       <!-- Sumace + poznámky -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="md:col-span-2 space-y-4">
-          <div v-show="showSecondary || form.note_above_items.trim() !== ''" class="bg-surface border border-neutral-200 rounded-lg p-4 md:p-5 shadow-sm">
+          <div v-show="showSecondary || form.note_above_items.trim() !== ''" class="bg-surface border border-neutral-200 rounded-lg p-5 max-md:p-4 shadow-sm">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.note_above') }}</label>
             <textarea v-model="form.note_above_items" rows="2" class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm"></textarea>
           </div>
-          <div v-show="showSecondary || form.note_below_items.trim() !== ''" class="bg-surface border border-neutral-200 rounded-lg p-4 md:p-5 shadow-sm">
+          <div v-show="showSecondary || form.note_below_items.trim() !== ''" class="bg-surface border border-neutral-200 rounded-lg p-5 max-md:p-4 shadow-sm">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.note_below') }}</label>
             <textarea v-model="form.note_below_items" rows="2" class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm"></textarea>
           </div>
         </div>
 
-        <div class="bg-surface border border-neutral-200 rounded-lg p-4 md:p-5 shadow-sm">
+        <div class="bg-surface border border-neutral-200 rounded-lg p-5 max-md:p-4 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.summary') }}</h3>
           <div class="flex items-center justify-between gap-3 mb-3 pb-3 border-b border-neutral-100">
             <label :for="`${pageId}-discount-percent`" class="text-sm text-neutral-700">{{ t('invoice.discount.label') }}</label>
