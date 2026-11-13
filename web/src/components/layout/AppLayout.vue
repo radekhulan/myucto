@@ -2404,7 +2404,7 @@ onBeforeUnmount(() => {
           >
             <span>{{ licenseBanner.text }}</span>
             <span class="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <a v-if="['trial', 'trial_expired', 'degraded'].includes(auth.license?.state ?? '')" href="https://myucto.cz/licence" target="_blank" rel="noopener" class="font-medium underline whitespace-nowrap" data-license-buy>
+              <a v-if="['trial', 'trial_expired', 'degraded'].includes(auth.license?.state ?? '')" href="https://myucto.cz/objednavka" target="_blank" rel="noopener" class="font-medium underline whitespace-nowrap" data-license-buy>
                 {{ t('license.banner_buy_web') }}
               </a>
               <WorkspaceNavLink v-if="auth.isSuperadmin && !clientExperience" to="/activation/purchase" class="font-medium underline whitespace-nowrap">
