@@ -56,6 +56,20 @@ describe('mobilní rám aplikace', () => {
     expect(appLayout).toContain(':style="phoneNavigation ? phoneOverlayStyle : undefined"')
   })
 
+  it('Peníze nesou i Dokumenty: odkazy, zápis jízdy a zvýraznění záložky', () => {
+    expect(appLayout).toContain("bank_cash: ['bank_cash', 'documents']")
+    expect(snippet("const mobileSheetMoreLinks = computed", 220)).toContain("mobileSection('documents')")
+    expect(snippet("const logbook = mobileSection('documents')", 200)).toContain('canCreate(logbook)')
+  })
+
+  it('max-md a max-sm se řídí šířkou okna prohlížeče, ne panelu', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/styles/main.css'), 'utf8')
+    expect(css).toContain('@custom-variant max-md (&:where([data-phone], [data-phone] *));')
+    expect(css).toContain('@custom-variant max-sm (&:where([data-phone-sm], [data-phone-sm] *));')
+    const main = readFileSync(resolve(process.cwd(), 'src/main.ts'), 'utf8')
+    expect(main.indexOf('installPhoneViewport()')).toBeLessThan(main.indexOf('parseWindowFrameBootstrap(window.location.search'))
+  })
+
   it('všechny texty mobilního rámu jsou v obou jazycích', () => {
     const keys = Object.keys(cs.nav.mobile)
     expect(keys.length).toBeGreaterThan(10)

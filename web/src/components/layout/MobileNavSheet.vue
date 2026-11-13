@@ -37,6 +37,9 @@ defineProps<{
   links: SheetLink[]
   closeLabel: string
   linksLabel: string
+  /** Druhá skupina odkazů pod první (Peníze nesou i Dokumenty). */
+  moreLinks?: SheetLink[]
+  moreLinksLabel?: string
 }>()
 const emit = defineEmits<{ close: []; capture: [file: File] }>()
 
@@ -124,9 +127,10 @@ const tileClass = 'flex min-h-[5.5rem] cursor-pointer flex-col items-start justi
         </template>
       </div>
 
-      <h3 v-if="links.length" class="mb-1.5 mt-4 px-1 text-[11px] font-bold uppercase tracking-wider text-neutral-500">{{ linksLabel }}</h3>
-      <div class="grid grid-cols-2 gap-1.5">
-        <template v-for="link in links" :key="link.to">
+      <template v-for="group in [{ label: linksLabel, items: links }, { label: moreLinksLabel ?? '', items: moreLinks ?? [] }]" :key="group.label">
+      <h3 v-if="group.items.length" class="mb-1.5 mt-4 px-1 text-[11px] font-bold uppercase tracking-wider text-neutral-500">{{ group.label }}</h3>
+      <div v-if="group.items.length" class="grid grid-cols-2 gap-1.5">
+        <template v-for="link in group.items" :key="link.to">
           <a
             v-if="link.external"
             :href="link.to"
@@ -157,6 +161,7 @@ const tileClass = 'flex min-h-[5.5rem] cursor-pointer flex-col items-start justi
           </WorkspaceNavLink>
         </template>
       </div>
+      </template>
     </div>
   </section>
 </template>

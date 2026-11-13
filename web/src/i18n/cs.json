@@ -2211,7 +2211,8 @@
       "payables_hint": "Neuhrazené přijaté",
       "all_in_section": "Vše v sekci",
       "money_bank_total": "Na bankovních účtech celkem",
-      "money_more": "Další účty ({n})"
+      "money_more": "Další účty ({n})",
+      "log_trip": "Zapsat jízdu"
     }
   },
   "migration_nonprofit_notice": {
@@ -24666,7 +24667,8 @@
       "out_of_range_between": "Datum musí být mezi {min} a {max}.",
       "out_of_range_min": "Datum nesmí být před {min}.",
       "out_of_range_max": "Datum nesmí být po {max}."
-    }
+    },
+    "bulk_actions": "Akce"
   },
   "markdown_editor": {
     "bold": "Tučně",

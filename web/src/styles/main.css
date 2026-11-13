@@ -10,6 +10,11 @@
 @custom-variant lg (@container workspace (width >= 64rem));
 @custom-variant xl (@container workspace (width >= 80rem));
 @custom-variant 2xl (@container workspace (width >= 96rem));
+/* Telefonní varianty se řídí šířkou OKNA PROHLÍŽEČE, ne panelu: stránky běží v panelech
+   (iframe), kde by media dotaz měřil panel a úzký panel na desktopu by dostal telefonní
+   vzhled. Atribut data-phone / data-phone-sm nastavuje composables/useIsPhone.ts. */
+@custom-variant max-md (&:where([data-phone], [data-phone] *));
+@custom-variant max-sm (&:where([data-phone-sm], [data-phone-sm] *));
 
 html {
   scrollbar-gutter: stable;
@@ -1607,4 +1612,16 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .field-flash { animation-duration: 1ms; box-shadow: 0 0 0 3px rgb(245 158 11 / 0.55); }
+}
+
+/* iOS přiblíží stránku při psaní do pole s písmem pod 16 px. Jen telefon (data-phone). */
+[data-phone] input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
+[data-phone] select,
+[data-phone] textarea {
+  font-size: 16px;
+}
+
+/* Nabídka akcí zespodu na telefonu (ActionBar): položky na palec. */
+.phone-action-sheet :is(a, button) {
+  min-height: 3rem;
 }

@@ -1679,8 +1679,19 @@ function sectionIsCurrent(section: NavSection | undefined): boolean {
 
 const homeTarget = computed(() => (clientExperience.value ? '/portal' : '/'))
 
+/** Sekce menu, které na telefonu patří pod záložku (Dokumenty jsou v nabídce Peníze). */
+const MOBILE_TAB_SECTIONS: Record<MobileSheetKey, string[]> = {
+  sales: ['sales'],
+  purchase: ['purchase'],
+  bank_cash: ['bank_cash', 'documents'],
+}
+
+function tabIsCurrent(key: MobileSheetKey): boolean {
+  return MOBILE_TAB_SECTIONS[key].some(section => sectionIsCurrent(mobileSection(section)))
+}
+
 const mobileTabs = computed<MobileTab[]>(() => {
-  const anySheetCurrent = MOBILE_SHEET_KEYS.some(key => sectionIsCurrent(mobileSection(key)))
+  const anySheetCurrent = MOBILE_SHEET_KEYS.some(key => tabIsCurrent(key))
   const tabs: MobileTab[] = [{
     key: 'home',
     label: t('nav.dashboard'),
@@ -1705,7 +1716,7 @@ const mobileTabs = computed<MobileTab[]>(() => {
       key,
       label: labels[key],
       icon: icons[key],
-      current: sectionIsCurrent(section) && !mobileOpen.value && !mobileSheet.value,
+      current: tabIsCurrent(key) && !mobileOpen.value && !mobileSheet.value,
       open: mobileSheet.value === key,
       badge: section.items.reduce((sum, item) => sum + (item.badge ?? 0), 0) || undefined,
     })
@@ -1786,6 +1797,11 @@ const mobileSheetActions = computed<SheetAction[]>(() => {
     if (!clientExperience.value && auth.canRead('purchase_invoices')) {
       actions.push({ key: 'payables', to: '/purchase-invoices?unpaid=1', label: t('nav.mobile.payables'), hint: t('nav.mobile.payables_hint'), icon: ICONS.payment_orders })
     }
+    // Kniha jízd je v sekci Dokumenty: zápis jízdy z auta je typicky telefonní úkon.
+    const logbook = mobileSection('documents')?.items.find(item => item.to === '/logbook')
+    if (logbook && canCreate(logbook)) {
+      actions.push({ key: 'trip', to: createTarget(logbook), label: t('nav.mobile.log_trip'), icon: ICONS.logbook })
+    }
   }
   return actions
 })
@@ -1801,6 +1817,20 @@ const mobileSheetLinks = computed<SheetLink[]>(() => {
     active: !item.external && isActive(item),
   }))
 })
+
+/** Druhá skupina odkazů v nabídce: Peníze nesou i Dokumenty (šestá záložka by se nevešla). */
+const mobileSheetMoreLinks = computed<SheetLink[]>(() => {
+  if (mobileSheet.value !== 'bank_cash') return []
+  return (mobileSection('documents')?.items ?? []).map(item => ({
+    to: item.to,
+    label: item.label,
+    icon: item.icon,
+    external: item.external,
+    badge: item.badge,
+    active: !item.external && isActive(item),
+  }))
+})
+const mobileSheetMoreLabel = computed(() => mobileSection('documents')?.title ?? '')
 
 const mobileMoneyBank = computed(() => mobileSheet.value === 'bank_cash' && !clientExperience.value && auth.canRead('bank'))
 const mobileMoneyCash = computed(() => mobileSheet.value === 'bank_cash'
@@ -1854,6 +1884,9 @@ const licenseBanner = computed<{ variant: 'primary' | 'warning' | 'danger'; text
   if (lic.state === 'degraded') return { variant: 'danger', text: t('license.banner_degraded') }
   return null
 })
+
+/** První věta textu banneru (před pomlčkou) pro telefon. */
+const licenseBannerShort = computed(() => licenseBanner.value?.text.split(/ [-—] /)[0].replace(/[.\s]+$/, '') ?? '')
 
 const versionInfo = ref<PublicVersion | null>(null)
 
@@ -2397,12 +2430,14 @@ onBeforeUnmount(() => {
             class="mb-3 sm:mb-5 rounded-lg border px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
             :class="BANNER_CLASS[licenseBanner.variant]"
           >
-            <span>{{ licenseBanner.text }}</span>
+            <span class="max-md:hidden">{{ licenseBanner.text }}</span>
+            <!-- Telefon: jen první věta, celé znění by zabralo čtvrtinu obrazovky. -->
+            <span class="hidden max-md:inline font-medium">{{ licenseBannerShort }}</span>
             <span class="flex flex-wrap items-center gap-x-4 gap-y-1">
               <a v-if="['trial', 'trial_expired', 'degraded'].includes(auth.license?.state ?? '')" href="https://myucto.cz/objednavka" target="_blank" rel="noopener" class="font-medium underline whitespace-nowrap" data-license-buy>
                 {{ t('license.banner_buy_web') }}
               </a>
-              <WorkspaceNavLink v-if="auth.isSuperadmin && !clientExperience" to="/activation/purchase" class="font-medium underline whitespace-nowrap">
+              <WorkspaceNavLink v-if="auth.isSuperadmin && !clientExperience" to="/activation/purchase" class="font-medium underline whitespace-nowrap max-md:hidden">
                 {{ auth.license?.state === 'overage' ? t('license.banner_upgrade_cta') : t('license.banner_cta') }}
               </WorkspaceNavLink>
             </span>
@@ -2656,6 +2691,8 @@ onBeforeUnmount(() => {
             :links="mobileSheetLinks"
             :close-label="t('common.close')"
             :links-label="t('nav.mobile.all_in_section')"
+            :more-links="mobileSheetMoreLinks"
+            :more-links-label="mobileSheetMoreLabel"
             @close="mobileSheet = null"
             @capture="onMobileCapture"
           >

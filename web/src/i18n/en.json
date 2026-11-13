@@ -2211,7 +2211,8 @@
       "payables_hint": "Unpaid received invoices",
       "all_in_section": "Everything in this section",
       "money_bank_total": "Total in bank accounts",
-      "money_more": "More accounts ({n})"
+      "money_more": "More accounts ({n})",
+      "log_trip": "Log a trip"
     }
   },
   "migration_nonprofit_notice": {
@@ -24666,7 +24667,8 @@
       "out_of_range_between": "The date must be between {min} and {max}.",
       "out_of_range_min": "The date must not be before {min}.",
       "out_of_range_max": "The date must not be after {max}."
-    }
+    },
+    "bulk_actions": "Actions"
   },
   "markdown_editor": {
     "bold": "Bold",

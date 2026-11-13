@@ -2,6 +2,7 @@ import './styles/main.css'
 import { captureInitialDomainLogin } from '@/security/domainLoginContext'
 import { parseWindowFrameBootstrap } from '@/workspace/frameProtocol'
 import { initPwaInstall } from '@/composables/usePwaInstall'
+import { installPhoneViewport } from '@/composables/useIsPhone'
 import { captureSsoFragment, captureSsoLoginTicket, relaySsoStepUpPopup } from '@/security/oidc'
 
 // Nasazení nové verze uklidí assety předchozích vydání a záložka se starou verzí pak
@@ -31,6 +32,8 @@ if (ssoStepUpPopup) {
   window.close()
 }
 
+// Atribut data-phone podle šířky okna prohlížeče (i v pracovním panelu), viz useIsPhone.
+installPhoneViewport()
 captureInitialDomainLogin(window.location)
 // Návrat od poskytovatele identity nese výsledek ve fragmentu; před startem
 // routeru se přečte a z adresy zmizí.

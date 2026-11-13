@@ -197,7 +197,7 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
           ? 'h-12 pl-12 pr-4 text-base border-neutral-300 bg-surface shadow-sm focus:ring-4 focus:ring-primary-100'
           : [
             'pl-8 text-sm rounded-md border-neutral-200 bg-neutral-50 focus:bg-surface focus:ring-1 focus:ring-primary-200',
-            compact ? 'h-8 py-1' : 'py-1.5',
+            compact ? 'h-8 py-1' : 'py-1.5 max-lg:h-11',
             compact && shortcut ? 'pr-20' : 'pr-3',
           ]"
         autocomplete="off"

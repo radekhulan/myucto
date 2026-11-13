@@ -4,6 +4,7 @@ import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import { usePaneActivity } from '@/workspace/paneActivity'
+import { useIsPhone } from '@/composables/useIsPhone'
 
 /**
  * Sdílená lišta akcí pro detailní stránky (faktura / přijatá faktura / klient …).
@@ -68,13 +69,19 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const paneActive = usePaneActivity()
+// Telefon (okno prohlížeče pod 768 px): inline jen hlavní krok, zbytek v nabídce zespodu.
+// Úzký panel na desktopu se řídí dál šířkou panelu (sm:) jako dosud.
+const isPhone = useIsPhone()
 
 // Ikony a barevné varianty (FILLED/OUTLINE/MENU_ICON) žijí v buttonStyles.ts —
 // sdílené s tlačítky mimo ActionBar (jednotný koncept UI, AGENTS.md §Frontend).
 const DOTS = 'M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zM12.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0zM18.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0z'
 
 const visible = computed(() => props.actions.filter(a => a.show === undefined || !!a.show))
-const primary = computed(() => visible.value.filter(a => (a.tier ?? 'secondary') === 'primary'))
+const allPrimary = computed(() => visible.value.filter(a => (a.tier ?? 'secondary') === 'primary'))
+// Na telefonu zůstane inline jen první hlavní akce, další hlavní jdou na začátek nabídky.
+const primary = computed(() => (isPhone.value ? allPrimary.value.slice(0, PHONE_INLINE) : allPrimary.value))
+const phonePrimaryOverflow = computed(() => (isPhone.value ? allPrimary.value.slice(PHONE_INLINE) : []))
 const secondary = computed(() => visible.value.filter(a => (a.tier ?? 'secondary') === 'secondary'))
 const overflow = computed(() => visible.value.filter(a => a.tier === 'overflow'))
 const advanced = computed(() => visible.value.filter(a => a.tier === 'advanced'))
@@ -82,10 +89,11 @@ const advanced = computed(() => visible.value.filter(a => a.tier === 'advanced')
 // Kolik akcí (primary + secondary) zůstane inline v hlavičce; zbytek spadne do „…".
 // Desktop = max 3 (AGENTS.md: max 3 tlačítka v hlavičce), mobil = 2.
 const MOBILE_INLINE = 2
+const PHONE_INLINE = 1
 const DESKTOP_INLINE = 3
 const inlineOrder = computed(() => [...primary.value, ...secondary.value])
 const mobileInlineKeys = computed(() => new Set(
-  inlineOrder.value.slice(0, MOBILE_INLINE).map(a => a.key),
+  inlineOrder.value.slice(0, isPhone.value ? PHONE_INLINE : MOBILE_INLINE).map(a => a.key),
 ))
 const desktopInlineKeys = computed(() => new Set(
   inlineOrder.value.slice(0, props.desktopInline ?? DESKTOP_INLINE).map(a => a.key),
@@ -102,7 +110,8 @@ const hasSecondaryOverflow = computed(() => secondaryOverflow.value.length > 0)
 const hasOverflow = computed(() => overflow.value.length > 0)
 const hasAdvanced = computed(() => advanced.value.length > 0)
 // „…" trigger: vždy když je overflow/advanced/secondaryOverflow; jinak (jen collapsnuté secondary) jen na mobilu
-const showTrigger = computed(() => hasOverflow.value || hasAdvanced.value || hasSecondaryOverflow.value || hasSecondaryDesktop.value)
+const showTrigger = computed(() => hasOverflow.value || hasAdvanced.value || hasSecondaryOverflow.value || hasSecondaryDesktop.value
+  || phonePrimaryOverflow.value.length > 0)
 // na desktopu má „…" smysl pro overflow/advanced/secondaryOverflow (secondaryDesktop jsou inline)
 const triggerDesktop = computed(() => hasOverflow.value || hasAdvanced.value || hasSecondaryOverflow.value)
 const advancedOpen = ref(false)
@@ -158,6 +167,7 @@ function reposition() {
 }
 async function toggle() {
   if (open.value) { open.value = false; return }
+  if (isPhone.value) { open.value = true; return }
   reposition(); open.value = true; await nextTick(); reposition()
 }
 function close() { open.value = false; advancedOpen.value = false }
@@ -166,15 +176,20 @@ function runItem(a: ActionItem) {
   if (a.run) a.run()
 }
 
+// Nabídka zespodu na telefonu se při posouvání jejího obsahu zavírat nesmí.
+function closeOnScroll(e: Event) {
+  if (isPhone.value && menuRef.value && e.target instanceof Node && menuRef.value.contains(e.target)) return
+  close()
+}
 function onKey(e: KeyboardEvent) { if (paneActive.value && e.key === 'Escape') close() }
 onMounted(() => {
   window.addEventListener('keydown', onKey)
-  window.addEventListener('scroll', close, true)
+  window.addEventListener('scroll', closeOnScroll, true)
   window.addEventListener('resize', close)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
-  window.removeEventListener('scroll', close, true)
+  window.removeEventListener('scroll', closeOnScroll, true)
   window.removeEventListener('resize', close)
 })
 </script>
@@ -229,12 +244,31 @@ onBeforeUnmount(() => {
 
     <WorkspaceTeleport>
       <template v-if="open">
-        <div class="fixed inset-0 z-[60]" @click="close" @contextmenu.prevent="close" aria-hidden="true"></div>
-        <div ref="menuRef" class="fixed z-[61] w-60 max-w-[calc(100vw-16px)] bg-surface border border-neutral-200 rounded-lg shadow-xl py-1 text-sm"
-          :style="{ top: pos.top + 'px', left: pos.left + 'px' }">
+        <div class="fixed inset-0 z-[60]" :class="isPhone ? 'bg-black/40' : ''" @click="close" @contextmenu.prevent="close" aria-hidden="true"></div>
+        <div ref="menuRef"
+          :class="isPhone
+            ? 'phone-action-sheet fixed inset-x-0 bottom-0 z-[61] max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-2xl border-t border-neutral-200 bg-surface pb-[max(0.5rem,env(safe-area-inset-bottom))] text-[15px] shadow-2xl'
+            : 'fixed z-[61] w-60 max-w-[calc(100vw-16px)] bg-surface border border-neutral-200 rounded-lg shadow-xl py-1 text-sm'"
+          :style="isPhone ? undefined : { top: pos.top + 'px', left: pos.left + 'px' }"
+          data-test="action-bar-menu">
           <div class="px-3 py-2 text-xs font-semibold text-neutral-500 text-center border-b border-neutral-100 truncate">
             {{ moreLabel ?? t('common.more_actions') }}
           </div>
+
+          <!-- Telefon: další hlavní akce, které se nevešly vedle jediné inline akce. -->
+          <template v-if="isPhone">
+            <component :is="tagOf(a)" v-for="a in phonePrimaryOverflow" :key="a.key" v-bind="attrsOf(a)"
+              :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
+                       a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
+                       a.disabled ? 'opacity-50 pointer-events-none' : '']"
+              :title="titleOf(a)" @click="runItem(a)">
+              <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
+              </svg>
+              <span class="min-w-0"><span class="block">{{ a.loading ? '…' : a.label }}</span><span v-if="reasonOf(a)" class="mt-0.5 block text-xs leading-snug text-warning-700">{{ reasonOf(a) }}</span></span>
+            </component>
+          </template>
 
           <!-- sekundární, které se nevešly inline: secondaryOverflow vždy, secondaryDesktop jen na mobilu -->
           <template v-if="hasSecondaryOverflow || hasSecondaryDesktop">
