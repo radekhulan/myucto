@@ -1625,3 +1625,8 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .phone-action-sheet :is(a, button) {
   min-height: 3rem;
 }
+
+/* Select s pevnou minimální šířkou nesmí na telefonu přetéct mimo obrazovku (panel se do strany neposouvá). */
+[data-phone] select {
+  max-width: 100%;
+}

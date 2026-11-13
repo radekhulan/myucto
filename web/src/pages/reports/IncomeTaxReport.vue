@@ -802,7 +802,7 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
         <h1 class="text-2xl font-semibold">{{ t('taxReturn.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('taxReturn.subtitle') }}</p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 max-md:flex-wrap">
         <div class="inline-flex rounded-md border border-neutral-300 overflow-hidden text-sm">
           <button type="button" @click="type = 'fo'" :disabled="supplierType !== 'fo'" :class="type === 'fo' ? 'bg-primary-600 text-white' : 'bg-surface text-neutral-700'" class="px-3 h-9 disabled:opacity-40">DPFO</button>
           <button type="button" @click="type = 'po'" :disabled="supplierType !== 'po'" :class="type === 'po' ? 'bg-primary-600 text-white' : 'bg-surface text-neutral-700'" class="px-3 h-9 border-l border-neutral-300 disabled:opacity-40">DPPO</button>

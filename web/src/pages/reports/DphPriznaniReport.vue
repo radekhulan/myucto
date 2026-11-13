@@ -635,7 +635,7 @@ onMounted(() => { void initialize() })
             <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm bg-success-500"></span>{{ t('reports.dph.vat_input') }}</span>
           </div>
         </header>
-        <table class="w-full text-xs">
+        <div class="max-md:overflow-x-auto"><table class="w-full text-xs">
           <thead class="bg-neutral-50 text-neutral-500 uppercase tracking-wide">
             <tr>
               <th class="text-left px-5 py-2 w-20">{{ t('reports.dph.line') }}</th>
@@ -663,7 +663,7 @@ onMounted(() => { void initialize() })
               </td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
       </div>
 
       <!-- DPH na výstupu -->
@@ -673,7 +673,7 @@ onMounted(() => { void initialize() })
         </header>
         <EmptyState v-if="outputLines.length === 0" dense accent="neutral" icon="doc"
           :title="t('reports.dph.no_output_lines')" />
-        <table v-else class="w-full text-sm">
+        <div v-else class="max-md:overflow-x-auto"><table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
               <th class="text-left px-5 py-2 w-16">{{ t('reports.dph.line') }}</th>
@@ -694,7 +694,7 @@ onMounted(() => { void initialize() })
               </td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
       </div>
 
       <!-- DPH na vstupu -->
@@ -704,7 +704,7 @@ onMounted(() => { void initialize() })
         </header>
         <EmptyState v-if="inputLines.length === 0" dense accent="neutral" icon="doc"
           :title="t('reports.dph.no_input_lines')" />
-        <table v-else class="w-full text-sm">
+        <div v-else class="max-md:overflow-x-auto"><table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
               <th class="text-left px-5 py-2 w-16">{{ t('reports.dph.line') }}</th>
@@ -725,7 +725,7 @@ onMounted(() => { void initialize() })
               </td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
       </div>
 
       <!-- Tip -->

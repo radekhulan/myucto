@@ -201,7 +201,7 @@ onMounted(() => { void initialize() })
         <h1 class="text-2xl font-semibold">{{ t('reports.dph_book.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('reports.dph_book.subtitle') }}</p>
       </div>
-      <div class="flex items-center gap-2 flex-wrap">
+      <div class="flex items-center gap-2 flex-wrap max-md:min-w-0 max-md:max-w-full">
         <!-- Period toggle (měsíční / kvartální) -->
         <div class="flex rounded-md border border-neutral-300 overflow-hidden text-sm">
           <button type="button" :disabled="!ready" @click="periodOverride = 'monthly'"

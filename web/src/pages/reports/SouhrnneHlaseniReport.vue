@@ -229,7 +229,7 @@ onMounted(() => { void initialize() })
         <header class="px-5 py-3 border-b border-neutral-200 bg-neutral-50">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-700">{{ t('reports.shv.rows_title') }}</h3>
         </header>
-        <table class="w-full text-sm">
+        <div class="max-md:overflow-x-auto"><table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
               <th class="text-left px-5 py-2 w-16">{{ t('reports.shv.country') }}</th>
@@ -253,7 +253,7 @@ onMounted(() => { void initialize() })
               <td class="px-5 py-2.5 text-right font-mono">{{ formatMoney(r.amount, 'CZK') }}</td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
       </div>
 
       <EmptyState v-else boxed accent="neutral" icon="box" :title="t('reports.shv.no_data')" />

@@ -139,9 +139,9 @@ async function save() {
     </div>
 
     <!-- Přepínač roku / režimu -->
-    <div v-if="analysis" class="inline-flex gap-1.5 bg-neutral-100 border border-neutral-200 rounded-xl p-1.5 mb-6">
+    <div v-if="analysis" class="inline-flex gap-1.5 bg-neutral-100 border border-neutral-200 rounded-xl p-1.5 mb-6 max-md:flex max-md:max-w-full max-md:overflow-x-auto">
       <button v-for="y in analysis.available_years" :key="y" @click="load(y)" type="button"
-        class="flex flex-col items-center min-w-[7.5rem] px-5 py-2 rounded-lg transition cursor-pointer border"
+        class="flex flex-col items-center min-w-[7.5rem] max-md:min-w-[5.5rem] max-md:shrink-0 px-5 max-md:px-3 py-2 rounded-lg transition cursor-pointer border"
         :class="y === year
           ? 'bg-primary-600 border-primary-600 text-white shadow-md'
           : 'bg-surface border-neutral-200 text-neutral-600 hover:border-primary-300 hover:text-neutral-900'">

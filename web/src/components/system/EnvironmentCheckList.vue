@@ -185,7 +185,7 @@ function statusPill(status: string): string {
              ať se nepřičte k tomu, co má uživatel opravovat. -->
         <div v-if="check.info" class="flex gap-1.5 sm:col-span-2">
           <dt class="text-neutral-500 shrink-0">{{ valueLabel(check, 'info') }}:</dt>
-          <dd v-if="inactiveOf(check).length" class="flex flex-col gap-0.5">
+          <dd v-if="inactiveOf(check).length" class="flex flex-col gap-0.5 min-w-0 max-md:break-all">
             <span v-for="job in inactiveOf(check)" :key="job.script">
               <span class="font-mono">{{ job.script }}</span> · {{ inactiveText(job) }}
             </span>
