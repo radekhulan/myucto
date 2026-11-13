@@ -35,6 +35,7 @@ final class PaymentMatchAuditBatchTest extends TestCase
             'chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, parent_id INTEGER)',
             // Mapy převodu z jiných programů (převzatý bankovní zápis, TakenOverRecord).
             'abra_flexi_import_map (supplier_id INTEGER, kind TEXT, target_id INTEGER)',
+            'helios_import_map (supplier_id INTEGER, kind TEXT, target_id INTEGER)',
             'money_s3_import_map (supplier_id INTEGER, kind TEXT, target_id INTEGER)',
             'pohoda_import_map (supplier_id INTEGER, kind TEXT, target_id INTEGER)',
             'premier_import_map (supplier_id INTEGER, kind TEXT, target_id INTEGER)',

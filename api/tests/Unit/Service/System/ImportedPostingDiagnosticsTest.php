@@ -15,7 +15,7 @@ final class ImportedPostingDiagnosticsTest extends TestCase
     public function testMissingOwnershipMigrationIsUnavailableRatherThanEmptySuccess(): void
     {
         $pdo = new PDO('sqlite::memory:', options: [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-        foreach (['stereo_nx_import_map', 'premier_import_map', 'money_s3_import_map', 'pohoda_import_map',
+        foreach (['stereo_nx_import_map', 'premier_import_map', 'money_s3_import_map', 'pohoda_import_map', 'helios_import_map',
             'abra_flexi_import_map', 'journal_entry_document_links', 'journal_entries', 'invoices', 'purchase_invoices'] as $table) {
             $pdo->exec("CREATE TABLE {$table} (id INTEGER)");
         }

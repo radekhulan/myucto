@@ -538,6 +538,7 @@ final class GlobalSeedTables
         'payroll_time_months', 'payroll_travel_compensation_links', 'payroll_wage_statement_revisions',
         'payroll_work_calendars', 'payroll_year_closures',
         'abra_flexi_connections', 'abra_flexi_import_map', 'abra_flexi_imports',
+        'helios_import_map',
         'pohoda_import_map', 'pohoda_imports',
         'premier_import_map', 'premier_imports',
         'price_list_customer_overrides', 'price_list_item_prices', 'price_list_items',

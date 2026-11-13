@@ -1197,7 +1197,8 @@
         "2291_payroll_jmhz_external_roots.sql",
         "2292_api_token_issued_invoice_edit.sql",
         "2293_api_token_system_write.sql",
-        "2294_bank_posting_rule_skip_matching_card.sql"
+        "2294_bank_posting_rule_skip_matching_card.sql",
+        "2295_helios_import_map.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -6586,6 +6587,26 @@
             "checks": {
                 "chk_gopay_settings_tolerance": "`payout_date_tolerance_days` <= 14"
             }
+        },
+        "helios_import_map": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "kind": "varchar(40) NOT NULL",
+                "source_key": "varchar(190) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "target_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, kind, source_key)",
+                "idx_helios_map_target": "BTREE (supplier_id, kind, target_id)"
+            },
+            "foreign_keys": {
+                "fk_helios_import_map_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "import_jobs": {
             "type": "BASE TABLE",

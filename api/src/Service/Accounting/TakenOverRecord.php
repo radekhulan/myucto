@@ -9,7 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 /**
  * Záznam převzatý z jiného účetního programu (SSOT).
  *
- * Převod (Money S3, POHODA, PREMIER, Stereo NX) zapisuje do MyÚčta deník, doklady
+ * Převod (Money S3, POHODA, PREMIER, Stereo NX, Helios) zapisuje do MyÚčta deník, doklady
  * i úhrady tak, jak je zaúčtoval zdroj, a eviduje je v mapě převodu (`*_import_map`).
  * Převzatý záznam je vazba na doklad v původním programu: automatika MyÚčta (dorovnání
  * haléřů, doúčtování dokladů, přeúčtování bankovních pohybů, přečíslování, přeřazení
@@ -41,6 +41,11 @@ final class TakenOverRecord
             self::INVOICE          => ['faktura-vydana', 'prodejka'],
             self::PURCHASE_INVOICE => ['faktura-prijata', 'zavazek'],
         ],
+        'helios_import_map' => [
+            self::JOURNAL_ENTRY    => 'journal_entry',
+            self::INVOICE          => 'invoice',
+            self::PURCHASE_INVOICE => 'purchase_invoice',
+        ],
         'money_s3_import_map' => [
             self::JOURNAL_ENTRY    => 'journal_entry',
             self::INVOICE          => 'invoice',
@@ -69,6 +74,7 @@ final class TakenOverRecord
      */
     private const PERIOD_KINDS = [
         'abra_flexi_import_map' => 'ucetni-obdobi',
+        'helios_import_map'     => 'period',
         'money_s3_import_map'   => 'period',
         'pohoda_import_map'     => 'period',
         'premier_import_map'    => 'period',

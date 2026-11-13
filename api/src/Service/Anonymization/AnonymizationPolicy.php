@@ -700,6 +700,7 @@ final class AnonymizationPolicy
         'pdf_signature_output_settings' => ['backend' => 'keep', 'output_type' => 'keep', 'signature_config_json' => 'json'],
         'abra_flexi_import_map' => ['kind' => 'keep', 'abra_key' => 'text', 'target_type' => 'keep', 'source_hash' => 'keep'],
         'abra_flexi_imports' => ['automation_snapshot' => 'json', 'protocol' => 'json'],
+        'helios_import_map' => ['kind' => 'keep', 'source_key' => 'text'],
         'pohoda_import_map' => ['kind' => 'keep', 'pohoda_key' => 'text'],
         'pohoda_imports' => ['agenda_ico' => 'ico', 'automation_snapshot' => 'json', 'export_sha256' => 'keep', 'pohoda_version' => 'keep', 'protocol' => 'json'],
         'posting_rules' => ['credit_account_code' => 'keep', 'debit_account_code' => 'keep', 'description' => 'text', 'rule_key' => 'keep'],
