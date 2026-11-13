@@ -1279,7 +1279,9 @@
     "job_status_running": "Probíhá",
     "job_status_completed": "Hotovo",
     "job_status_failed": "Chyba",
-    "job_status_cancelled": "Zrušeno"
+    "job_status_cancelled": "Zrušeno",
+    "preview_fullscreen": "Celá obrazovka",
+    "share": "Sdílet"
   },
   "scan_attach": {
     "nav": "Skeny k dokladům",
@@ -1395,7 +1397,8 @@
     "reject": "Odmítnout",
     "confirmed": "Sken připojen",
     "rejected": "Návrh odmítnut",
-    "scan_none": "nevytěženo"
+    "scan_none": "nevytěženo",
+    "form_options": "Možnosti (období a zpracování)"
   },
   "attachment_check": {
     "badge_title": "Porovnání dokladu s vytěženou přílohou",
@@ -1820,7 +1823,10 @@
     "recognize": "Rozpoznat",
     "scan_failed": "Tankování se nepodařilo rozpoznat.",
     "scan_done": "Rozpoznáno {n} tankování ({parser}).",
-    "scan_updated": "Doplněny údaje (litry) u {n} tankování."
+    "scan_updated": "Doplněny údaje (litry) u {n} tankování.",
+    "phone_tabs_more": "Více",
+    "phone_tabs_more_placeholder": "Další přehledy…",
+    "trip_more": "Další údaje (datum, čas, km, kategorie)"
   },
   "logbook_fuel": {
     "actions": "Akce tankování",
@@ -15769,7 +15775,8 @@
       "tax_treatment": "Daň z příjmů",
       "vat_deduction_hint": "Odpočet i uznatelnost se zadávají na řádek rozpadu. „Krácený nárok (poměrný §75)“ zpřístupní procento, kterým se odpočet zkrátí; daň z příjmů ovlivňuje jen DPFO/DPPO, ne DPH.",
       "is_fixed_asset": "Pořízení dlouhodobého majetku",
-      "is_fixed_asset_hint": "Nákup majetku vymezeného v § 4 odst. 4 (vozidlo, stroj) za hotové. Hodnota se v přiznání uvede navíc na ř. 47 jako doplňující údaj; odpočet zůstává na ř. 40/41."
+      "is_fixed_asset_hint": "Nákup majetku vymezeného v § 4 odst. 4 (vozidlo, stroj) za hotové. Hodnota se v přiznání uvede navíc na ř. 47 jako doplňující údaj; odpočet zůstává na ř. 40/41.",
+      "more_details": "Další údaje"
     },
     "tax_treatment": {
       "deductible": "Daňově uznatelný náklad",
@@ -26912,7 +26919,9 @@
       "rule_own_account_any": "Všechny účty",
       "rule_own_account_hint": "Pravidlo platí jen pro pohyby na výpisu tohoto účtu. Při shodě s obecným pravidlem stejné priority má přednost.",
       "rule_dimensions": "Dimenze pravidla",
-      "rule_dimensions_hint": "Zapíší se k pohybu při schválení návrhu nebo automatickém zaúčtování. Ruční dimenze pohybu a dimenze hrazených dokladů mají přednost."
+      "rule_dimensions_hint": "Zapíší se k pohybu při schválení návrhu nebo automatickém zaúčtování. Ruční dimenze pohybu a dimenze hrazených dokladů mají přednost.",
+      "tab_unposted_short": "Nezaúčtované",
+      "tab_suggestions_history_short": "Historie"
     },
     "idoklad_source_badge": "iDoklad",
     "idoklad_source_hint": "Měsíční souhrn bankovních pohybů importovaných z iDokladu (ne nahraný výpis). GPC/PDF výpis z banky má přednost.",
@@ -26927,7 +26936,12 @@
         "review_required": "Návrh SVJ k posouzení",
         "unidentified": "Jednotka SVJ neurčena"
       }
-    }
+    },
+    "phone_tabs_more": "Více",
+    "phone_tabs_more_placeholder": "Další přehledy…",
+    "balance_details_show": "Podrobnosti",
+    "balance_details_hide": "Skrýt podrobnosti",
+    "balance_difference_short": "Rozdíl proti výpisu: {amount}"
   },
   "stats": {
     "title": "Tržby",
@@ -36238,7 +36252,8 @@
       "scheme_cash": "Výběr hotovosti",
       "scheme_reward": "Odměna, cashback",
       "scheme_note": "Datum zápisu je datum zaúčtování bankou, takže zůstatek 231 sedí na výpis. Datum transakce a původní měna zůstávají v popisu pohybu."
-    }
+    },
+    "intro_toggle": "Podporované banky a co import udělá"
   },
   "payment_cards": {
     "nav": "Platební karty",

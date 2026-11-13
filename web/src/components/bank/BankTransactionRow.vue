@@ -31,6 +31,7 @@ import type { BankTransactionActions } from '@/composables/useBankTransactionAct
 import { useSupplierStore } from '@/stores/supplier'
 import { hasFrameworkScope } from '@/security/frameworkScope'
 import { usePropertyBankLinks } from './usePropertyBankLinks'
+import { useIsPhone } from '@/composables/useIsPhone'
 
 /** Náš zdrojový účet (jen scope='all' u „Všechny pohyby" — viz UnpostedBankTransaction). */
 type RowTx = BankTransaction & {
@@ -362,6 +363,27 @@ function matchActions(tx: BankTransaction): RowAction[] {
   ]
 }
 
+// Telefon: karta má jeden pruh akcí — jedna hlavní akce (u podvojného účetnictví
+// zaúčtování z PostingRowActions, jinak první stavová akce) a zbytek včetně odkazu
+// do deníku a textu pohybu v „…". Úzký desktopový panel drží původní pruh.
+const isPhone = useIsPhone()
+const phoneActions = computed<RowAction[]>(() => {
+  const tx = props.tx
+  const journalTo = journalNavigation.entryTarget(tx.posting?.journal_entry_id)
+  return [
+    ...matchActions(tx),
+    {
+      key: 'open-journal', label: t('bank.open_accounting_journal'), icon: 'doc', variant: 'neutral',
+      to: journalTo ?? undefined, show: !!journalTo, menuOnly: true, workspaceOpen: 'beside',
+      onNavigate: event => { void journalNavigation.open(event, journalTo) },
+    },
+    {
+      key: 'show-text', label: t('bank.show_transaction_text'), icon: 'eye', variant: 'neutral',
+      run: () => { props.actions.textDetail.value = tx }, menuOnly: true,
+    },
+  ]
+})
+
 function candidateAccept(candidateIndex: number) {
   acceptTxSuggestion(props.tx.id, candidateIndex)
 }
@@ -679,7 +701,14 @@ function candidateReject() {
          Při dvou se pruh zalomil. První akce v `matchActions` je vždycky ta
          stavově relevantní — Otevřít u spárovaného pohybu, Spárovat u ostatních
          — takže na očích zůstane to, co uživatel na daném řádku opravdu chce. -->
-    <div class="flex flex-wrap items-center justify-end gap-1.5 pt-1">
+    <div v-if="isPhone" data-test="tx-phone-actions"
+      class="flex flex-wrap items-center justify-end gap-1.5 pt-1 [&_button]:min-h-10 [&_a]:min-h-10 [&_button]:min-w-10">
+      <PostingRowActions v-if="isDoubleEntry"
+        :tx="tx" :currency="currency()"
+        @changed="emit('changed')" @posted="onPosted" />
+      <RowActionsMenu :actions="phoneActions" :inline-count="isDoubleEntry ? 0 : 1" />
+    </div>
+    <div v-else class="flex flex-wrap items-center justify-end gap-1.5 pt-1">
       <BankTransactionJournalLink :tx="tx" />
       <PostingRowActions v-if="isDoubleEntry"
         :tx="tx" :currency="currency()"

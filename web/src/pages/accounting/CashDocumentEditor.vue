@@ -29,6 +29,9 @@ import { useAuthStore } from '@/stores/auth'
 import { useSidePreview } from '@/composables/useSidePreview'
 import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
+import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -806,6 +809,34 @@ async function startNextDocument(): Promise<void> {
   await nextTick()
   formEl.value?.querySelector<HTMLElement>('input:not([type="hidden"]):not([readonly]):not([disabled]), select:not([disabled]), textarea:not([disabled])')?.focus()
 }
+
+// Telefon: nejdřív Typ, Pokladna, Datum a Částka; partner a dimenze pod „Další údaje"
+// (otevřené, když už nesou hodnotu nebo formulář hlásí chybu), lišta akcí přilepená
+// dole s Vystavit jako hlavní akcí a náhled zaúčtování sbalitelný. Mimo telefon beze změny.
+const isPhone = useIsPhone()
+const moreDetailsOpen = ref(false)
+const moreDetailsFilled = computed(() =>
+  !!(form.partner_name?.trim() || form.partner_ic?.trim() || form.partner_dic?.trim())
+  || Object.values(docDims.header.value ?? {}).some(v => v != null),
+)
+const moreDetailsNeeded = computed(() => moreDetailsFilled.value || !!error.value || saleOver10k.value)
+const showMoreDetails = computed(() => !isPhone.value || moreDetailsOpen.value || moreDetailsNeeded.value)
+const hasMoreDetails = computed(() => hasPartner.value || docDims.enabled.value)
+const postingPreviewOpen = ref(false)
+const showPostingPreview = computed(() => !isPhone.value || postingPreviewOpen.value)
+const phoneFooterActions = computed<RowAction[]>(() => [
+  {
+    key: 'post-and-next', label: t('cash.post_and_next'), icon: 'plus', variant: 'primary',
+    run: () => { void save(true, true) }, show: !isEdit.value,
+    disabled: !canSubmit.value, disabledReason: blockedReason.value ?? undefined,
+  },
+  {
+    key: 'draft', label: t('cash.save_draft'), icon: 'doc', variant: 'neutral',
+    run: () => { void save(false) },
+    disabled: !canSubmit.value, disabledReason: blockedReason.value ?? undefined,
+  },
+  { key: 'cancel', label: t('common.cancel'), icon: 'x', variant: 'neutral', to: '/accounting/cash' },
+])
 </script>
 
 <template>
@@ -828,6 +859,7 @@ async function startNextDocument(): Promise<void> {
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
             {{ t('cash.original.pick') }}
           </button>
+          <CapturePhotoButton v-if="isPhone && !pendingOriginal" data-test="cash-original-capture" @captured="setPendingOriginal" />
         </template>
         <button v-if="previewSource" type="button" :class="btnOutline('neutral')" data-test="cash-preview-toggle"
           :aria-pressed="preview.open.value" @click="preview.toggle()">
@@ -844,9 +876,9 @@ async function startNextDocument(): Promise<void> {
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <!-- Formulář -->
-      <div ref="formEl" :class="isTaxEvidence ? 'lg:col-span-3' : 'lg:col-span-2'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4">
+      <div ref="formEl" :class="isTaxEvidence ? 'lg:col-span-3' : 'lg:col-span-2'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4 max-md:p-4 max-md:flex max-md:flex-col max-md:gap-4 max-md:space-y-0">
         <!-- Hlavička -->
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 max-md:-order-2">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.col.type') }}</label>
             <div class="inline-flex rounded-md border border-neutral-300 overflow-hidden w-full">
@@ -881,7 +913,7 @@ async function startNextDocument(): Promise<void> {
             <DateInput v-model="form.issue_date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
         </div>
-        <p class="text-xs text-neutral-400 -mt-2" data-test="cash-number-hint">{{ seriesHintPrefix ? t('cash.form.number_hint_series', { series: seriesHintPrefix }) : t('cash.form.number_hint') }}</p>
+        <p class="text-xs text-neutral-400 -mt-2 max-md:-order-2" data-test="cash-number-hint">{{ seriesHintPrefix ? t('cash.form.number_hint_series', { series: seriesHintPrefix }) : t('cash.form.number_hint') }}</p>
 
         <!-- Účel -->
         <div>
@@ -924,9 +956,16 @@ async function startNextDocument(): Promise<void> {
           </div>
         </template>
 
+        <button v-if="isPhone && hasMoreDetails" type="button" data-test="cash-more-details-toggle"
+          class="order-1 cursor-pointer min-h-10 inline-flex items-center justify-between gap-2 rounded-md border border-neutral-200 px-3 text-sm font-medium text-neutral-700"
+          :aria-expanded="showMoreDetails" :disabled="moreDetailsNeeded" @click="moreDetailsOpen = !moreDetailsOpen">
+          {{ t('cash.form.more_details') }}
+          <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': showMoreDetails }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+        </button>
+
         <!-- Partner: (a) odběratel/dodavatel prodeje a nákupu, (b) plátce faktury (předvyplněný z faktury) -->
-        <template v-if="hasPartner">
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <template v-if="hasPartner && showMoreDetails">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 max-md:order-1" data-test="cash-partner-fields">
             <div class="sm:col-span-1">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.form.partner') }}</label>
               <input v-model="form.partner_name" @input="onPartnerSearch" :list="`${pageId}-cash-partners`" type="text"
@@ -993,20 +1032,21 @@ async function startNextDocument(): Promise<void> {
           <input v-model="form.description" type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
         </div>
 
-        <div v-if="docDims.enabled.value" data-test="cash-header-dimensions">
+        <div v-if="docDims.enabled.value && showMoreDetails" class="max-md:order-1" data-test="cash-header-dimensions">
           <p class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.header_title') }}</p>
           <DimensionFields v-model="docDims.header.value" :disabled="!docDims.canEdit.value" />
           <p v-if="docDims.hasAutoFilled.value" class="text-xs text-neutral-500 mt-1" data-test="dimension-autofilled">{{ t('dimensions.defaults.autofilled') }}</p>
         </div>
 
         <!-- Částka + DPH přepínač -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end max-md:-order-1">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">
               {{ t('cash.form.total_incl') }}
               <span v-if="isForeign" class="font-mono text-primary-600">({{ registerCurrency }})</span>
             </label>
             <input v-model.number="form.total_amount" type="number" step="0.01" min="0" :readonly="amountReadonly"
+              :inputmode="isPhone ? 'decimal' : undefined" data-test="cash-total-amount"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm text-right"
               :class="{ 'bg-neutral-100': amountReadonly }" />
             <p v-if="isForeign" class="mt-1 text-xs text-neutral-500">{{ t('cash.form.foreign_hint') }}</p>
@@ -1095,9 +1135,21 @@ async function startNextDocument(): Promise<void> {
           {{ t('cash.eet.refund_info', { amount: formatMoney(eetRefundAmount) }) }}
         </div>
 
-        <div v-if="error" class="text-sm text-danger-500">{{ error }}</div>
+        <div v-if="error" class="text-sm text-danger-500 max-md:order-2">{{ error }}</div>
 
-        <div class="border-t border-neutral-200 pt-3 flex flex-col items-end gap-1.5">
+        <div v-if="isPhone" data-test="cash-phone-footer"
+          class="order-2 sticky bottom-[calc(var(--app-footer-height,0px)+0.5rem)] z-10 -mx-1 rounded-lg border border-neutral-200 bg-surface p-3 shadow-lg flex flex-col gap-1.5">
+          <div class="flex items-center gap-2 [&_button]:min-h-10">
+            <button @click="save(true)" :disabled="!canSubmit" :class="btnFilled('primary')" class="flex-1 justify-center"
+              :title="disabledTitle(!canSubmit, blockedReason)" data-test="cash-phone-post">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+              {{ saving ? t('common.saving') : t('cash.post_document') }}
+            </button>
+            <RowActionsMenu :actions="phoneFooterActions" :inline-count="0" />
+          </div>
+          <p v-if="blockedReason" :class="BTN_DISABLED_NOTE">{{ blockedReason }}</p>
+        </div>
+        <div v-else class="border-t border-neutral-200 pt-3 flex flex-col items-end gap-1.5">
           <div class="flex flex-wrap justify-end gap-2">
             <RouterLink to="/accounting/cash" :class="btnOutline('neutral')">{{ t('common.cancel') }}</RouterLink>
             <button @click="save(false)" :disabled="!canSubmit" :class="btnOutline('neutral')"
@@ -1123,8 +1175,14 @@ async function startNextDocument(): Promise<void> {
       <!-- Live náhled zaúčtování (jen podvojné účetnictví — v daňové evidenci není journal) -->
       <div v-if="!isTaxEvidence" class="lg:col-span-1">
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 lg:sticky lg:top-20">
-          <h3 class="text-sm font-semibold text-neutral-700 mb-3">{{ t('cash.preview.title') }}</h3>
-          <table class="w-full text-sm">
+          <button v-if="isPhone" type="button" data-test="cash-preview-posting-toggle" :aria-expanded="postingPreviewOpen"
+            class="cursor-pointer w-full min-h-10 -my-2 flex items-center justify-between gap-2 text-sm font-semibold text-neutral-700"
+            @click="postingPreviewOpen = !postingPreviewOpen">
+            {{ t('cash.preview.title') }}
+            <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': postingPreviewOpen }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          <h3 v-else class="text-sm font-semibold text-neutral-700 mb-3">{{ t('cash.preview.title') }}</h3>
+          <table v-if="showPostingPreview" class="w-full text-sm max-md:mt-3" data-test="cash-preview-posting">
             <thead class="text-xs text-neutral-500 uppercase tracking-wide">
               <tr>
                 <th class="text-left font-medium py-1">{{ t('cash.col.number') }}</th>

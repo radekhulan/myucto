@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { documentRequestsApi, type DocumentRequest, type DocumentRequestStatus } from '@/api/documentRequests'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
@@ -11,6 +12,8 @@ import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
 const toast = useToast()
+// Telefon: žádosti jako karty se stavovým čipem místo tabulky.
+const isPhone = useIsPhone()
 
 const items = ref<DocumentRequest[]>([])
 const loading = ref(false)
@@ -167,6 +170,41 @@ function isOverdue(item: DocumentRequest): boolean {
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
     <EmptyState v-else-if="items.length === 0" boxed icon="doc" :title="t('document_requests.empty')" />
+    <ul v-else-if="isPhone" class="bg-surface border border-neutral-200 rounded-lg shadow-sm divide-y divide-neutral-100" data-test="document-requests-cards">
+      <li v-for="item in items" :key="item.id" class="p-3 space-y-2" data-test="document-request-card">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0 text-sm text-neutral-800 break-words">{{ item.description }}</div>
+          <span class="shrink-0 text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap" :class="statusBadge(item.status)">
+            {{ t(`document_requests.status_${item.status}`) }}
+          </span>
+        </div>
+        <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-neutral-500">
+          <span class="font-mono text-sm text-neutral-800">{{ item.amount !== null ? formatMoney(item.amount, 'CZK') : '—' }}</span>
+          <span v-if="item.deadline" class="whitespace-nowrap" :class="isOverdue(item) ? 'text-danger-500 font-medium' : ''">
+            {{ t('document_requests.deadline') }}: {{ formatDate(item.deadline) }}
+          </span>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <RouterLink v-if="item.purchase_invoice_id" :to="`/purchase-invoices/${item.purchase_invoice_id}`"
+            class="text-sm text-primary-600 hover:underline inline-flex items-center min-h-10">
+            {{ item.pi_vendor_invoice_number || `#${item.purchase_invoice_id}` }}
+          </RouterLink>
+          <span v-else></span>
+          <div class="flex items-center gap-2 [&>button]:min-h-10">
+            <button v-if="item.status !== 'resolved'" :disabled="busy" @click="resolve(item)" :class="btnOutline('success')">
+              {{ t('document_requests.resolve') }}
+            </button>
+            <button v-else :disabled="busy" @click="reopen(item)" :class="btnOutline('neutral')">
+              {{ t('document_requests.reopen') }}
+            </button>
+            <button :disabled="busy" @click="remove(item)" :class="btnOutline('danger')" class="min-w-10 justify-center"
+              :title="t('common.delete')" :aria-label="t('common.delete')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            </button>
+          </div>
+        </div>
+      </li>
+    </ul>
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">

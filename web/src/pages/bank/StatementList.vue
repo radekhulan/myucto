@@ -2,6 +2,8 @@
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { ref, computed, onMounted, onUnmounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useIsPhone } from '@/composables/useIsPhone'
+import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
 import { useI18n } from 'vue-i18n'
 import { bankApi, type BankStatement, type BankAccountOption, type ImportResult, type AmbiguousAccount, type IgnoreNoticePreview, type IgnoreNoticeDecision } from '@/api/bank'
 import { clientsApi, type Client } from '@/api/clients'
@@ -467,6 +469,31 @@ async function onDelete(s: BankStatement, ev: MouseEvent) {
 
 // Stažení jde přes axios, aby nesl hlavičku X-Supplier-Id. Holý <a href> ji nepošle
 // a server by u výpisu jiné než výchozí firmy vrátil not_found.
+// Telefon: karta výpisu bez názvu souboru, stažení GPC/PDF i smazání v „…"
+// (smazání tak nikdy nesedí hned vedle stahování).
+const isPhone = useIsPhone()
+function phoneStatementActions(s: BankStatement): RowAction[] {
+  const gpcUrl = statementGpcUrl(s)
+  return [
+    {
+      key: 'gpc', label: t('bank.download_gpc'), icon: 'download', variant: 'neutral',
+      run: () => downloadStatementFile(gpcUrl, 'vypis.gpc'),
+      show: statementHasGpc(s), disabled: !gpcUrl, disabledReason: gpcUrl ? undefined : t(statementGpcTitle(s)),
+    },
+    {
+      key: 'pdf', label: t('bank.download_pdf'), icon: 'download', variant: 'neutral',
+      run: () => downloadStatementFile(bankApi.pdfUrl(s.id), 'vypis.pdf'),
+      show: s.has_pdf,
+    },
+    {
+      key: 'delete', label: t('bank.delete'), icon: 'trash', variant: 'danger',
+      run: () => onDelete(s, new MouseEvent('click')),
+      show: canDeleteStatement(s), disabled: deleteBlocked(s),
+      disabledReason: deleteBlocked(s) ? t('bank.statement_delete_has_matches') : undefined,
+    },
+  ]
+}
+
 async function downloadStatementFile(url: string | undefined, fallbackName: string) {
   if (!url) return
   try {
@@ -968,7 +995,7 @@ useWindowRefresh(() => load(),
           </div>
           <div class="font-mono text-xs text-neutral-500 mt-0.5">{{ formatAccountNumber(s.account_number, s.bank_code) }}</div>
           <div v-if="s.account_label" class="text-xs text-neutral-400">{{ s.account_label }}</div>
-          <div class="text-xs text-neutral-500 truncate mt-0.5">{{ s.file_name }}</div>
+          <div v-if="!isPhone" class="text-xs text-neutral-500 truncate mt-0.5">{{ s.file_name }}</div>
           <div class="flex items-baseline justify-between gap-2 mt-2">
             <span class="text-xs text-neutral-500">{{ s.transaction_count }} transakcí</span>
             <span class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap"
@@ -982,7 +1009,10 @@ useWindowRefresh(() => load(),
           <div v-if="s.processing_failed" class="mt-1 text-xs text-warning-600 font-medium">
             {{ t('bank.processing_failed_badge_hint', { count: s.unprocessed_count ?? 0 }) }}
           </div>
-          <div class="flex flex-wrap items-center gap-1.5 mt-2" @click.stop>
+          <div v-if="isPhone" class="flex justify-end -mt-1 [&_button]:min-h-10 [&_button]:min-w-10" data-testid="statement-phone-actions" @click.stop>
+            <RowActionsMenu :actions="phoneStatementActions(s)" :inline-count="0" />
+          </div>
+          <div v-else class="flex flex-wrap items-center gap-1.5 mt-2" @click.stop>
             <button v-if="statementHasGpc(s)" type="button" data-testid="statement-gpc"
                @click.stop="downloadStatementFile(statementGpcUrl(s), 'vypis.gpc')"
                :aria-disabled="!statementGpcUrl(s) || undefined" :tabindex="statementGpcUrl(s) ? undefined : -1"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
-import { computed, ref, watch, onMounted, nextTick } from 'vue'
-import { useEventListener } from '@vueuse/core'
+import { computed, ref, watch, onMounted } from 'vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -77,28 +77,20 @@ function tabLabel(v: Tab): string {
 }
 useWindowRefresh(loadPendingCount, undefined, { partial: true })
 
-// Na telefonu se záložky nevejdou: aktivní se odroluje do záběru a pravý okraj
-// dostane přechod, dokud vpravo zbývají další.
-const tabBar = ref<HTMLElement | null>(null)
-const tabOverflowRight = ref(false)
-function updateTabOverflow() {
-  const bar = tabBar.value
-  tabOverflowRight.value = !!bar && bar.scrollLeft + bar.clientWidth < bar.scrollWidth - 1
+// Na telefonu se sedm záložek nevejde: tři hlavní jdou do segmentového přepínače,
+// ostatní do výběru „Více". Desktop (i úzký panel) drží původní pruh záložek.
+const isPhone = useIsPhone()
+const PHONE_PRIMARY_TABS: Tab[] = ['statements', 'all_movements', 'balances']
+const phonePrimaryTabs = computed(() => visibleTabs.value.filter(v => PHONE_PRIMARY_TABS.includes(v)))
+const phoneMoreTabs = computed(() => visibleTabs.value.filter(v => !PHONE_PRIMARY_TABS.includes(v)))
+const phoneMoreValue = computed(() => phoneMoreTabs.value.includes(tab.value) ? tab.value : '')
+function onPhoneMore(e: Event) {
+  const v = (e.target as HTMLSelectElement).value as Tab
+  if (v) switchTab(v)
 }
-function revealActiveTab() {
-  const bar = tabBar.value
-  const el = bar?.querySelector<HTMLElement>('[data-active]')
-  if (bar && el) {
-    if (el.offsetLeft < bar.scrollLeft) bar.scrollLeft = el.offsetLeft
-    else if (el.offsetLeft + el.offsetWidth > bar.scrollLeft + bar.clientWidth) {
-      bar.scrollLeft = el.offsetLeft + el.offsetWidth - bar.clientWidth
-    }
-  }
-  updateTabOverflow()
+function phoneMoreLabel(v: Tab): string {
+  return v === 'posting' && pendingCount.value > 0 ? `${tabLabel(v)} (${pendingCount.value})` : tabLabel(v)
 }
-onMounted(() => nextTick(revealActiveTab))
-watch([tab, visibleTabs], () => nextTick(revealActiveTab))
-useEventListener(window, 'resize', updateTabOverflow, { passive: true })
 </script>
 
 <template>
@@ -108,13 +100,34 @@ useEventListener(window, 'resize', updateTabOverflow, { passive: true })
       <p class="text-sm text-neutral-500 mt-0.5">{{ t('bank_accounts.subtitle') }}</p>
     </div>
 
-    <div v-if="visibleTabs.length > 1" class="relative mb-4">
-      <div ref="tabBar" class="relative border-b border-neutral-200 flex gap-1 overflow-x-auto max-md:snap-x max-md:[scrollbar-width:none]"
-        @scroll.passive="updateTabOverflow">
+    <div v-if="visibleTabs.length > 1 && isPhone" class="mb-4 space-y-2" data-test="bank-phone-tabs">
+      <div role="tablist" class="grid gap-1 rounded-lg bg-neutral-100 p-1"
+        :style="{ gridTemplateColumns: `repeat(${phonePrimaryTabs.length}, minmax(0, 1fr))` }">
+        <button v-for="tt in phonePrimaryTabs" :key="tt" type="button" role="tab"
+          :aria-selected="tab === tt"
+          :data-test="`bank-phone-tab-${tt}`"
+          @click="switchTab(tt)"
+          class="cursor-pointer min-h-10 rounded-md px-1.5 py-1 text-[13px] leading-tight text-center transition"
+          :class="tab === tt ? 'bg-surface text-primary-700 font-medium shadow-sm' : 'text-neutral-600'">
+          {{ tabLabel(tt) }}
+        </button>
+      </div>
+      <label v-if="phoneMoreTabs.length" class="flex items-center gap-2 text-sm">
+        <span class="text-neutral-500 whitespace-nowrap">{{ t('bank.phone_tabs_more') }}</span>
+        <select :value="phoneMoreValue" data-test="bank-phone-more" @change="onPhoneMore"
+          class="flex-1 min-w-0 h-10 rounded-md border bg-surface px-2 text-sm"
+          :class="phoneMoreValue ? 'border-primary-500/60 text-primary-700 font-medium' : 'border-neutral-300 text-neutral-700'">
+          <option value="" disabled>{{ t('bank.phone_tabs_more_placeholder') }}</option>
+          <option v-for="tt in phoneMoreTabs" :key="tt" :value="tt">{{ phoneMoreLabel(tt) }}</option>
+        </select>
+      </label>
+    </div>
+    <div v-else-if="visibleTabs.length > 1" class="relative mb-4">
+      <div class="relative border-b border-neutral-200 flex gap-1 overflow-x-auto">
         <button v-for="tt in visibleTabs" :key="tt"
           @click="switchTab(tt)"
           :data-active="tab === tt || undefined"
-          class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap inline-flex items-center gap-1.5 max-md:px-2.5 max-md:text-[13px] max-md:snap-start"
+          class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap inline-flex items-center gap-1.5"
           :class="tab === tt
             ? 'border-primary-600 text-primary-700 font-medium'
             : 'border-transparent text-neutral-600 hover:text-neutral-900'">
@@ -123,8 +136,6 @@ useEventListener(window, 'resize', updateTabOverflow, { passive: true })
             class="inline-flex items-center bg-warning-50 text-warning-600 rounded-full px-1.5 text-xs">{{ pendingCount }}</span>
         </button>
       </div>
-      <span v-if="tabOverflowRight" aria-hidden="true"
-        class="hidden max-md:block pointer-events-none absolute right-0 top-0 bottom-px w-10 bg-gradient-to-l from-neutral-50 to-transparent"></span>
     </div>
 
     <StatementList v-if="tab === 'statements'" embedded />
@@ -134,18 +145,18 @@ useEventListener(window, 'resize', updateTabOverflow, { passive: true })
       <div class="flex items-center justify-between gap-2 mb-4 flex-wrap">
         <div class="flex gap-1 border-b border-neutral-200 overflow-x-auto flex-1">
         <button type="button" @click="postingView = 'unposted'"
-          class="cursor-pointer px-3 py-2 text-sm border-b-2 transition whitespace-nowrap"
+          class="cursor-pointer px-3 py-2 text-sm border-b-2 transition whitespace-nowrap max-md:px-2 max-md:text-[13px]"
           :class="postingView === 'unposted' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-neutral-600 hover:text-neutral-900'">
-          {{ t('bank.posting.tab_unposted') }}
+          {{ isPhone ? t('bank.posting.tab_unposted_short') : t('bank.posting.tab_unposted') }}
           <span v-if="pendingCount > 0" class="ml-1 text-xs text-neutral-500">({{ pendingCount }})</span>
         </button>
         <button type="button" @click="postingView = 'history'"
-          class="cursor-pointer px-3 py-2 text-sm border-b-2 transition whitespace-nowrap"
+          class="cursor-pointer px-3 py-2 text-sm border-b-2 transition whitespace-nowrap max-md:px-2 max-md:text-[13px]"
           :class="postingView === 'history' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-neutral-600 hover:text-neutral-900'">
-          {{ t('bank.posting.tab_suggestions_history') }}
+          {{ isPhone ? t('bank.posting.tab_suggestions_history_short') : t('bank.posting.tab_suggestions_history') }}
         </button>
         </div>
-        <RouterLink to="/templates?section=posting" class="text-sm text-primary-600 hover:underline whitespace-nowrap">
+        <RouterLink to="/templates?section=posting" class="text-sm text-primary-600 hover:underline whitespace-nowrap max-md:text-xs">
           {{ t('bank.posting.manage_rules_link') }}
         </RouterLink>
       </div>

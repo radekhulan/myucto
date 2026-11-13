@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { useRoute, RouterLink, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -554,6 +555,11 @@ const statementActions = computed<ActionItem[]>(() => {
   ]
 })
 useWindowRefresh(refreshTransactions)
+
+// Telefon: souhrn výpisu ve dvou sloupcích a dlouhé vysvětlení zůstatku za „Podrobnosti".
+const isPhone = useIsPhone()
+const balanceDetailsOpen = ref(false)
+const showBalanceDetails = computed(() => !isPhone.value || balanceDetailsOpen.value)
 </script>
 
 <template>
@@ -602,50 +608,67 @@ useWindowRefresh(refreshTransactions)
 
     <!-- Měsíční avízo-výpis: disponibilní zůstatek z nejnovějšího avíza (nesou ho
          Creditas/Fio/RB) + součty příjmů/výdajů měsíce spočtené z transakcí. -->
-    <div v-if="isVirtual && noticeSummary" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4">
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.available_balance') }}</div>
-        <div class="text-lg font-mono font-semibold">
+    <div v-if="isVirtual && noticeSummary" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4 max-md:grid-cols-2 max-md:gap-2">
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.available_balance') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all font-semibold">
           {{ noticeSummary.balance !== null ? formatMoney(noticeSummary.balance, statement.currency ?? 'CZK') : '—' }}
         </div>
       </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.available_balance_as_of') }}</div>
-        <div class="text-lg font-mono">
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.available_balance_as_of') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all">
           {{ noticeSummary.balanceAt !== null ? formatDate(noticeSummary.balanceAt) : '—' }}
         </div>
       </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.credit_total') }}</div>
-        <div class="text-lg font-mono text-success-600">+{{ formatMoney(noticeSummary.credit, statement.currency ?? 'CZK') }}</div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.credit_total') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all text-success-600">+{{ formatMoney(noticeSummary.credit, statement.currency ?? 'CZK') }}</div>
       </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.debit_total') }}</div>
-        <div class="text-lg font-mono text-danger-500">−{{ formatMoney(noticeSummary.debit, statement.currency ?? 'CZK') }}</div>
-      </div>
-    </div>
-
-    <div v-else-if="!isVirtual" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4">
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.prev_balance') }}</div>
-        <div class="text-lg font-mono">{{ (statement.prev_balance ?? statement.balance_calculation?.opening) == null ? '-' : formatMoney(statement.prev_balance ?? statement.balance_calculation?.opening, statement.currency ?? 'CZK') }}</div>
-      </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.curr_balance') }}</div>
-        <div class="text-lg font-mono font-semibold">{{ (statementClosingBalance(statement)) == null ? '-' : formatMoney(statementClosingBalance(statement), statement.currency ?? 'CZK') }}</div>
-      </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.credit_total') }}</div>
-        <div class="text-lg font-mono text-success-600">+{{ formatMoney(statement.credit_total, statement.currency ?? 'CZK') }}</div>
-      </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.debit_total') }}</div>
-        <div class="text-lg font-mono text-danger-500">−{{ formatMoney(Math.abs(statement.debit_total), statement.currency ?? 'CZK') }}</div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.debit_total') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all text-danger-500">−{{ formatMoney(noticeSummary.debit, statement.currency ?? 'CZK') }}</div>
       </div>
     </div>
 
-    <div v-if="statement.balance_calculation" class="mt-4 mb-4 rounded-lg border border-neutral-200 bg-surface p-4 text-sm" role="status">
-      <strong>{{ t(`bank.balance_${statement.balance_calculation.status}`) }}</strong>
+    <div v-else-if="!isVirtual" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4 max-md:grid-cols-2 max-md:gap-2">
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.prev_balance') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all">{{ (statement.prev_balance ?? statement.balance_calculation?.opening) == null ? '-' : formatMoney(statement.prev_balance ?? statement.balance_calculation?.opening, statement.currency ?? 'CZK') }}</div>
+      </div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.curr_balance') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all font-semibold">{{ (statementClosingBalance(statement)) == null ? '-' : formatMoney(statementClosingBalance(statement), statement.currency ?? 'CZK') }}</div>
+      </div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.credit_total') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all text-success-600">+{{ formatMoney(statement.credit_total, statement.currency ?? 'CZK') }}</div>
+      </div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.debit_total') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all text-danger-500">−{{ formatMoney(Math.abs(statement.debit_total), statement.currency ?? 'CZK') }}</div>
+      </div>
+    </div>
+
+    <div v-if="statement.balance_calculation" class="mt-4 mb-4 rounded-lg border border-neutral-200 bg-surface p-4 text-sm max-md:p-3" role="status">
+      <div v-if="isPhone" class="flex items-start justify-between gap-2">
+        <strong>{{ t(`bank.balance_${statement.balance_calculation.status}`) }}</strong>
+        <button type="button" data-test="balance-details-toggle" :aria-expanded="balanceDetailsOpen"
+          class="cursor-pointer shrink-0 min-h-10 px-2 -my-2 -mr-2 text-xs text-primary-600 inline-flex items-center"
+          @click="balanceDetailsOpen = !balanceDetailsOpen">
+          {{ balanceDetailsOpen ? t('bank.balance_details_hide') : t('bank.balance_details_show') }}
+        </button>
+      </div>
+      <strong v-else>{{ t(`bank.balance_${statement.balance_calculation.status}`) }}</strong>
+      <template v-if="isPhone && !balanceDetailsOpen">
+        <p v-if="statement.balance_calculation.status === 'mismatch'" class="text-danger-600 mt-1" data-test="balance-difference-short">
+          {{ t('bank.balance_difference_short', { amount: formatMoney(statement.balance_calculation.difference, statement.currency ?? 'CZK') }) }}
+        </p>
+        <p v-if="statement.balance_calculation.unexplained_difference" class="text-danger-600 mt-1" data-testid="balance-unexplained">
+          {{ t('bank.balance_difference_short', { amount: formatMoney(statement.balance_calculation.unexplained_difference, statement.currency ?? 'CZK') }) }}
+        </p>
+      </template>
+      <template v-if="showBalanceDetails">
       <p v-if="statement.balance_calculation.bank_statement_id" class="mt-1">
         <RouterLink :to="`/bank/${statement.balance_calculation.bank_statement_id}`" class="text-primary-600 underline">{{ t('bank.balance_bank_evidence') }}</RouterLink>
       </p>
@@ -661,6 +684,7 @@ useWindowRefresh(refreshTransactions)
         {{ t('bank.balance_difference', { amount: formatMoney(statement.balance_calculation.unexplained_difference, statement.currency ?? 'CZK') }) }}
       </p>
       <p class="text-neutral-500 mt-1">{{ t('bank.gpc_calculated_hint') }}</p>
+      </template>
     </div>
 
     <RuleHintBanner v-if="isDoubleEntry && hintTx && hintData" class="mt-4"
