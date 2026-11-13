@@ -242,6 +242,11 @@ function formatPaymentDue(c: Client): string {
     '—',
   )
 }
+
+// Telefon: řádek karty bez posledního dokladu i bez počtu dokladů jen ukazuje „—", skryje se.
+function cardActivityEmpty(c: Client): boolean {
+  return !c.last_invoice_date && !(roleFilter.value === 'vendors' && c.purchase_count) && !c.invoice_count
+}
 useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
 </script>
 
@@ -260,12 +265,13 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
     </div>
 
     <!-- FR 2 — report existujících duplicit (stejné IČO/DIČ v jiném zápisu). -->
-    <div v-if="duplicateGroups.length" class="mb-4 px-4 py-2.5 bg-warning-50 border border-warning-200 rounded-lg flex flex-wrap items-center gap-2 text-sm">
+    <div v-if="duplicateGroups.length" data-test="client-duplicates-banner"
+      class="mb-4 px-4 py-2.5 bg-warning-50 border border-warning-200 rounded-lg flex flex-wrap items-center gap-2 text-sm max-md:flex-nowrap max-md:px-3 max-md:py-2">
       <svg class="w-4 h-4 shrink-0 text-warning-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
       </svg>
-      <span class="text-warning-800 font-medium">{{ t('client.duplicates.banner_title', { count: duplicateGroups.length }) }}</span>
-      <span class="text-warning-700">{{ t('client.duplicates.banner_hint') }}</span>
+      <span class="text-warning-800 font-medium max-md:truncate max-md:min-w-0">{{ t('client.duplicates.banner_title', { count: duplicateGroups.length }) }}</span>
+      <span class="text-warning-700 max-md:hidden">{{ t('client.duplicates.banner_hint') }}</span>
       <button type="button" @click="showDuplicatesModal = true"
         class="cursor-pointer ml-auto shrink-0 text-warning-800 font-medium underline hover:no-underline whitespace-nowrap">
         {{ t('client.duplicates.view_link') }}
@@ -501,11 +507,11 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
             <div class="font-mono text-sm whitespace-nowrap">
               <template v-if="roleFilter === 'vendors'">
                 <span v-if="c.costs && c.costs > 0">{{ formatMoney(c.costs, 'CZK') }}</span>
-                <span v-else class="text-neutral-300">—</span>
+                <span v-else class="text-neutral-300 max-md:hidden">—</span>
               </template>
               <template v-else>
                 <span v-if="c.revenue && c.revenue > 0">{{ formatMoney(c.revenue, c.currency_default) }}</span>
-                <span v-else class="text-neutral-300">—</span>
+                <span v-else class="text-neutral-300 max-md:hidden">—</span>
               </template>
             </div>
           </div>
@@ -514,8 +520,8 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
                 class="inline-block mt-0.5 px-1.5 py-0 text-[10px] bg-neutral-100 text-neutral-600 rounded font-medium uppercase tracking-wide">{{ t('client.simplified_only_badge') }}</span>
           <div class="flex items-baseline justify-between gap-2 mt-1 text-xs text-neutral-500">
             <div class="truncate">
-              <span class="font-mono">{{ c.ic || '—' }}</span>
-              <span v-if="c.main_email" class="text-neutral-400"> · </span>
+              <span class="font-mono" :class="c.ic ? '' : 'max-md:hidden'">{{ c.ic || '—' }}</span>
+              <span v-if="c.main_email" class="text-neutral-400" :class="c.ic ? '' : 'max-md:hidden'"> · </span>
               <span v-if="c.main_email" class="truncate">{{ c.main_email }}</span>
             </div>
             <span class="flex items-center gap-1.5 whitespace-nowrap">
@@ -523,10 +529,11 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
               <span class="font-mono">{{ c.currency_default }}</span>
             </span>
           </div>
-          <div class="flex items-center justify-between gap-2 mt-2 text-xs">
+          <div class="flex items-center justify-between gap-2 mt-2 text-xs" data-test="client-card-activity"
+            :class="cardActivityEmpty(c) ? 'max-md:hidden' : ''">
             <span class="text-neutral-600">
               <span v-if="c.last_invoice_date">{{ formatDate(c.last_invoice_date) }}</span>
-              <span v-else class="text-neutral-300">—</span>
+              <span v-else class="text-neutral-300 max-md:hidden">—</span>
             </span>
             <span v-if="roleFilter === 'vendors' && c.purchase_count" class="px-2 py-0.5 bg-warning-50 text-warning-700 rounded">
               {{ t('client.invoice_count_label') }}: {{ c.purchase_count }}

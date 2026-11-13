@@ -7,7 +7,7 @@ import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySe
 import type { WorkReportDisplayOptions } from '@/api/invoices'
 import { useWindowTitle } from '@/composables/useWindowTitle'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId, toRaw } from 'vue'
-import { useMediaQuery } from '@vueuse/core'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { invoicesApi, type Invoice, type InvoicePayload, type InvoiceItem, type WorkReportItem, type WorkReportMaterial, type InvoiceAttachment, type PaymentMethod, type InvoiceRoundingMode, type PaymentScheduleRow, type CashSettlementResult } from '@/api/invoices'
 import { useHotkey } from '@/composables/useHotkey'
@@ -77,6 +77,7 @@ import { useResultAccounts } from '@/composables/useResultAccounts'
 import DurationInput from '@/components/ui/DurationInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
+import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
 import NumberSeriesSelect from '@/components/numberSeries/NumberSeriesSelect.vue'
 import { useDocumentDimensions, applyPrefill } from '@/composables/useDocumentDimensions'
 import { durationTotal, isPreciseUnitPrice, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, unitPriceForAmount, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
@@ -2036,6 +2037,15 @@ function moveDown(index: number) {
   form.value.items.forEach((it, i) => (it.order_index = i))
 }
 
+/** Telefon: nabídka „…" na kartě položky místo malých tlačítek ▲ ▼ ×. */
+function itemRowMenuActions(index: number): RowAction[] {
+  return [
+    { key: 'move-up', label: t('invoice.phone.move_up'), disabled: index === 0, run: () => moveUp(index) },
+    { key: 'move-down', label: t('invoice.phone.move_down'), disabled: index >= form.value.items.length - 1, run: () => moveDown(index) },
+    { key: 'remove', label: t('common.delete'), icon: 'trash', variant: 'danger', run: () => removeItem(index) },
+  ]
+}
+
 const roundingAvailable = computed(() =>
   ['invoice', 'credit_note'].includes(form.value.invoice_type)
   && form.value.currency === 'CZK'
@@ -2381,7 +2391,7 @@ const showPricesIncludeVatUI = computed(() => supplierIsVatPayer.value)
 // Editor má na telefonu přes pět obrazovek. Méně častá pole (čísla a reference,
 // příznaky dokladu) se sbalí, dokud nic neobsahují, šedé nápovědy se skryjí.
 // Varování a vyplněné hodnoty zůstávají vidět vždy, nic se neschová potichu.
-const isPhone = useMediaQuery('(max-width: 767.98px)')
+const isPhone = useIsPhone()
 const refsOpen = ref(false)
 const hasRefs = computed(() => paymentVsInvalid.value
   || [form.value.varsymbol, form.value.payment_variable_symbol, form.value.supplier_order_number].some(v => v.trim() !== ''))
@@ -3702,10 +3712,10 @@ useWindowTitle(
               </button>
             </template>
             <button type="button" @click="addTextItem" data-test="invoice-add-text-row" :title="t('invoice.text_row_hint')"
-              class="cursor-pointer inline-flex items-center justify-center h-8 px-3 border border-neutral-300 bg-surface hover:bg-neutral-50 text-neutral-700 text-sm font-medium rounded-md whitespace-nowrap">
+              class="cursor-pointer inline-flex items-center justify-center h-8 max-md:h-11 px-3 border border-neutral-300 bg-surface hover:bg-neutral-50 text-neutral-700 text-sm font-medium rounded-md whitespace-nowrap">
               {{ t('invoice.add_text_row') }}
             </button>
-            <button type="button" @click="addItem" class="px-3 h-8 text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md">
+            <button type="button" @click="addItem" data-test="invoice-add-item" class="px-3 h-8 max-md:h-11 max-md:w-full text-sm bg-primary-600 hover:bg-primary-700 text-white rounded-md">
               {{ t('invoice.add_item') }}
             </button>
           </div>
@@ -4021,21 +4031,27 @@ useWindowTitle(
             <div class="flex items-center justify-between text-xs text-neutral-500">
               <span class="font-mono">#{{ i + 1 }}</span>
               <div class="flex items-center gap-2">
-                <ItemDimensionsToggle v-if="docDims.enabled.value && !isTextItem(item)"
+                <ItemDimensionsToggle v-if="docDims.enabled.value && !isTextItem(item)" class="max-md:w-11 max-md:h-11"
                   :open="docDims.isItemOpen(item)" :filled="docDims.itemHasDims(item)" :disabled="!docDims.canEdit.value"
                   @toggle="docDims.toggleItem(item)" />
                 <button v-if="!isTextItem(item) && itemDetailsAvailable(item)" type="button" data-test="item-details-toggle-mobile"
                   :title="itemDetailsOpen.has(item) ? t('invoice.item_details.close') : t('invoice.item_details.open')"
                   :aria-label="itemDetailsOpen.has(item) ? t('invoice.item_details.close') : t('invoice.item_details.open')"
                   :aria-expanded="itemDetailsOpen.has(item)"
-                  class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border rounded"
+                  class="cursor-pointer w-8 h-8 max-md:w-11 max-md:h-11 inline-flex items-center justify-center border rounded"
                   :class="itemDetailsFilled(item) ? 'border-primary-300 bg-primary-50 text-primary-700' : 'border-neutral-300 hover:bg-neutral-50'"
                   @click="toggleItemDetails(item)">
                   <svg class="w-4 h-4 transition-transform" :class="itemDetailsOpen.has(item) ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
                 </button>
+                <!-- Telefon: ▲ ▼ × v jedné nabídce „…" se spouštěčem 44 px. -->
+                <div v-if="isPhone" class="[&_[aria-haspopup=menu]]:w-11 [&_[aria-haspopup=menu]]:h-11" data-test="item-row-menu-phone">
+                  <RowActionsMenu :inline-count="0" :actions="itemRowMenuActions(i)" />
+                </div>
+                <template v-else>
                 <button type="button" @click="moveUp(i)" :disabled="i === 0" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-neutral-300 rounded hover:bg-neutral-50 disabled:opacity-30 disabled:cursor-not-allowed">▲</button>
                 <button type="button" @click="moveDown(i)" :disabled="i === form.items.length - 1" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-neutral-300 rounded hover:bg-neutral-50 disabled:opacity-30 disabled:cursor-not-allowed">▼</button>
                 <button type="button" @click="removeItem(i)" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-danger-500/40 text-danger-500 hover:bg-danger-50 rounded text-lg leading-none">×</button>
+                </template>
               </div>
             </div>
             <div v-if="isTextItem(item)" data-test="invoice-text-row-mobile">
@@ -4913,16 +4929,16 @@ useWindowTitle(
 
       <!-- Action bar -->
       <div class="bg-surface border border-neutral-200 rounded-lg p-4 flex flex-wrap justify-between items-center gap-2 shadow-sm max-md:sticky max-md:bottom-[calc(var(--app-footer-height,0px)+0.5rem)] max-md:z-10 max-md:p-3 max-md:shadow-lg">
-        <RouterLink to="/invoices" class="px-4 py-2 text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors">{{ t('common.back') }}</RouterLink>
-        <div class="flex flex-wrap items-center gap-2">
+        <RouterLink to="/invoices" data-test="editor-bar-back" class="px-4 py-2 text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors max-md:hidden">{{ t('common.back') }}</RouterLink>
+        <div class="flex flex-wrap items-center gap-2 max-md:w-full">
           <button v-if="canSaveAndPost" type="button" :disabled="submitting" data-test="save-and-post"
             :title="t('accounting.editor_posting.save_and_post_hint_sale')"
-            :class="btnFilled('success')" class="whitespace-nowrap" @click="saveAndPost">
+            :class="btnFilled('success')" class="whitespace-nowrap max-md:flex-1 max-md:justify-center max-md:h-11" @click="saveAndPost">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ t('accounting.editor_posting.save_and_post') }}
           </button>
-          <button type="submit" :disabled="submitting"
-            class="px-5 h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md whitespace-nowrap">
+          <button type="submit" :disabled="submitting" data-test="editor-bar-submit"
+            class="px-5 h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md whitespace-nowrap max-md:flex-1 max-md:h-11">
             {{ submitting ? t('common.saving') : (isEdit ? t('common.save') : t('common.create')) }}
           </button>
         </div>

@@ -25748,7 +25748,23 @@
     "receipt_banner_text": "simplified tax document (Section 30 of the VAT Act) up to {limit} incl. VAT, customer details optional",
     "receipt_switch": "Issue as an invoice",
     "secondary_section": "More document sections",
-    "secondary_section_hint": "Classification, dimensions, notes, reports and attachments"
+    "secondary_section_hint": "Classification, dimensions, notes, reports and attachments",
+    "phone": {
+      "share_pdf": "Share PDF",
+      "share_failed": "Could not share the PDF.",
+      "details_show": "Show document details",
+      "details_hide": "Hide document details",
+      "move_up": "Move up",
+      "move_down": "Move down",
+      "send": "Send to client",
+      "send_confirm": "Send document {number} to the client by e-mail?",
+      "send_done": "Document {number} has been sent.",
+      "send_failed": "Could not send the document.",
+      "mark_paid_confirm": "Mark document {number} as paid as of today?",
+      "thanks_confirm": "Also send the client a thank-you for the payment?",
+      "mark_paid_done": "Document {number} is marked as paid.",
+      "mark_paid_failed": "Could not mark the document as paid."
+    }
   },
   "status": {
     "draft": "Draft",
@@ -26147,7 +26163,12 @@
     "dic_invalid": "{dic} is invalid or does not exist",
     "duplicate_ic": "A client with this Reg. No. already exists:",
     "duplicate_dic": "A client with this VAT ID already exists:",
-    "open_existing": "open detail"
+    "open_existing": "open detail",
+    "phone_actions": {
+      "call": "Call",
+      "email": "E-mail",
+      "new_invoice": "New invoice"
+    }
   },
   "project": {
     "title": "Projects",

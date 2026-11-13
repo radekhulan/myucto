@@ -24,6 +24,9 @@ const query = ref('')
 const currency = ref('')
 const status = ref<'active' | 'archived' | 'all'>('active')
 const currencies = ref<Currency[]>([])
+// Telefon: měna a stav za tlačítkem „Filtry" (vzor CashRegister), hledání zůstává vidět.
+const filtersOpen = ref(false)
+const activeFilterCount = computed(() => (currency.value ? 1 : 0) + (status.value !== 'active' ? 1 : 0))
 
 async function load() {
   loading.value = true
@@ -103,11 +106,24 @@ onMounted(async () => {
           <button type="button" :class="btnOutline('neutral')" @click="load"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>{{ t('common.search') }}</button>
         </div>
         <div class="flex flex-wrap gap-2">
-          <select v-model="currency" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" @change="load">
+          <button type="button" @click="filtersOpen = !filtersOpen" :aria-expanded="filtersOpen" data-test="price-list-filters-toggle"
+            class="hidden max-md:inline-flex cursor-pointer h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm items-center gap-1.5 text-neutral-700 hover:bg-neutral-50 transition-colors"
+            :class="filtersOpen ? 'bg-neutral-50 border-neutral-400' : ''">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h18M6 12h12M10 20h4" />
+            </svg>
+            {{ t('common.filters') }}
+            <span v-if="activeFilterCount"
+              class="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-primary-600 text-white text-xs font-medium tabular-nums">{{ activeFilterCount }}</span>
+            <svg class="w-3.5 h-3.5 transition-transform" :class="filtersOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          <select v-model="currency" data-test="price-list-currency" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" :class="filtersOpen ? '' : 'max-md:hidden'" @change="load">
             <option value="">{{ t('price_list.all_currencies') }}</option>
             <option v-for="row in currencies" :key="row.code" :value="row.code">{{ row.code }}</option>
           </select>
-          <select v-model="status" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" @change="load">
+          <select v-model="status" data-test="price-list-status" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm" :class="filtersOpen ? '' : 'max-md:hidden'" @change="load">
             <option value="active">{{ t('price_list.active') }}</option>
             <option value="archived">{{ t('price_list.inactive') }}</option>
             <option value="all">{{ t('price_list.all_statuses') }}</option>
