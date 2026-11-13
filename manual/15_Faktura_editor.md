@@ -86,6 +86,21 @@ Koncept lze uložit i bez položek; fakturu bez alespoň jedné položky nelze *
 **Jak poznáte, že je hotovo:** aplikace ohlásí „Pokladní doklad {číslo} byl vystaven a
 zaúčtován.“ a faktura je uhrazená. Pravidla jsou v [§ 15.9.2](#1592-hlavicka).
 
+### 15.3.3 Účtenka z telefonu (zjednodušený daňový doklad)
+
+1. Na telefonu klepněte ve spodní liště na **Prodej** a zvolte dlaždici **Účtenka**.
+   Na počítači otevřete adresu `/invoices/new?simplified=1`.
+2. Editor předvyplní **Zjednodušený daňový doklad**, úhradu **Hotově**, ceny včetně DPH
+   a výchozí korunovou pokladnu. Odběratele vybírat nemusíte.
+3. Doplňte položky a doklad vystavte.
+
+Nad formulářem je řádek **Účtenka** s limitem 10 000 Kč včetně DPH. Tlačítkem
+**Vystavit jako fakturu** volbu zrušíte a pokračujete běžnou fakturou. Dlaždice se
+nabízí jen plátci DPH. Pravidla zjednodušeného dokladu jsou v [§ 15.9.2](#1592-hlavicka).
+
+**Jak poznáte, že je hotovo:** PDF má titulek **Zjednodušený daňový doklad** a při
+zvolené pokladně je doklad rovnou uhrazený.
+
 ## 15.4 Krok za krokem: zálohová faktura a daňový doklad k ní
 
 1. Vytvořte fakturu s typem **Zálohová faktura (proforma)** a vystavte ji. Dostane číslo s

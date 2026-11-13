@@ -2190,7 +2190,29 @@
     "internal_documents": "Interní doklady",
     "quick_internal_document": "Interní doklad",
     "payroll_month_guide": "Průvodce měsícem",
-    "email_documents": "Doklady z e-mailu"
+    "email_documents": "Doklady z e-mailu",
+    "mobile": {
+      "menu": "Menu",
+      "search": "Hledat",
+      "issue_invoice": "Vystavit fakturu",
+      "receipt": "Účtenka",
+      "receipt_hint": "Zjednodušený doklad, hotově",
+      "new_project": "Nová zakázka",
+      "new_client": "Nový klient",
+      "capture_document": "Vyfotit doklad",
+      "capture_document_hint": "AI připraví přijatou fakturu",
+      "upload_document": "Nahrát doklad",
+      "new_vendor": "Nový dodavatel",
+      "cash_in": "Příjem do pokladny",
+      "cash_out": "Výdej z pokladny",
+      "receivables": "Kdo mi dluží",
+      "receivables_hint": "Neuhrazené vydané",
+      "payables": "Co zaplatit",
+      "payables_hint": "Neuhrazené přijaté",
+      "all_in_section": "Vše v sekci",
+      "money_bank_total": "Na bankovních účtech celkem",
+      "money_more": "Další účty ({n})"
+    }
   },
   "migration_nonprofit_notice": {
     "title": "Převod pro neziskové organizace nebyl ověřen",
@@ -25717,7 +25739,15 @@
       "paid": "uhrazeno",
       "partially_paid": "částečně uhrazeno",
       "unpaid": "neuhrazeno"
-    }
+    },
+    "simplified_document_short": "Zjednodušený daňový doklad",
+    "doc_options": "Další nastavení dokladu",
+    "refs_section": "Číslo dokladu a reference",
+    "receipt_banner_title": "Účtenka",
+    "receipt_banner_text": "zjednodušený daňový doklad (§ 30 ZDPH) do {limit} včetně DPH, odběratel není povinný",
+    "receipt_switch": "Vystavit jako fakturu",
+    "secondary_section": "Další části dokladu",
+    "secondary_section_hint": "Klasifikace, dimenze, poznámky, výkazy a přílohy"
   },
   "status": {
     "draft": "Koncept",

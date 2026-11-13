@@ -6,6 +6,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import type { SupplierBrief, User } from '@/api/auth'
 import type { AiExtractionStatus } from '@/api/integrations'
 import AiImport from '../AiImport.vue'
+import { usePendingCapture } from '@/composables/usePendingCapture'
 
 const m = vi.hoisted(() => ({ status: vi.fn(), extract: vi.fn(), batches: vi.fn(), push: vi.fn() }))
 vi.mock('@/api/integrations', () => ({ integrationsApi: { getAiExtractionStatus: m.status, extractPdfAi: m.extract } }))
@@ -227,6 +228,36 @@ describe('klientský AI import přijatých faktur', () => {
     expect(m.extract).toHaveBeenCalledTimes(1)
     expect(w.findComponent({ name: 'ExtractionReviewModal' }).exists()).toBe(false)
     expect(w.text()).not.toContain('synthetic-a.pdf')
+    w.unmount()
+  })
+
+  it('fotku z mobilní nabídky Nákup převezme, nechá oříznout a rovnou vytěží', async () => {
+    setupRole(false)
+    m.extract.mockResolvedValue({ ok: true, purchase_invoice_id: 21, source: 'ai', document_kind: 'invoice' })
+    const photo = new File(['synthetic'], 'snapshot.jpg', { type: 'image/jpeg' })
+    usePendingCapture().set(photo)
+    const w = mount(AiImport, { global: { stubs: { RouterLink: true, ExtractionReviewModal: true, PhotoCropDialog: true } } })
+    await flushPromises()
+    expect(usePendingCapture().pending.value).toBeNull()
+    const crop = w.getComponent({ name: 'PhotoCropDialog' })
+    expect((crop.props('file') as File).name).toBe('snapshot.jpg')
+    const cropped = new File(['synthetic-cropped'], 'snapshot-cropped.jpg', { type: 'image/jpeg' })
+    crop.vm.$emit('done', cropped)
+    await flushPromises()
+    expect(m.extract).toHaveBeenCalledTimes(1)
+    expect((m.extract.mock.calls[0][0] as File).name).toBe('snapshot-cropped.jpg')
+    w.unmount()
+  })
+
+  it('fotku z mobilní nabídky bez dostupného vytěžení zahodí a nic neodešle', async () => {
+    setupRole()
+    m.status.mockResolvedValue(status(false))
+    usePendingCapture().set(new File(['synthetic'], 'snapshot.jpg', { type: 'image/jpeg' }))
+    const w = mount(AiImport, { global: { stubs: { RouterLink: true, ExtractionReviewModal: true, PhotoCropDialog: true } } })
+    await flushPromises()
+    expect(usePendingCapture().pending.value).toBeNull()
+    expect(w.findComponent({ name: 'PhotoCropDialog' }).exists()).toBe(false)
+    expect(m.extract).not.toHaveBeenCalled()
     w.unmount()
   })
 })

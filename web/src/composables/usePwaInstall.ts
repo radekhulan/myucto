@@ -35,7 +35,9 @@ export function initPwaInstall(): void {
 export function isStandaloneDisplay(): boolean {
   if (typeof window === 'undefined') return false
   if ((navigator as Navigator & { standalone?: boolean }).standalone === true) return true
-  return typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches
+  // Manifest chce fullscreen, prohlížeč bez jeho podpory spustí aplikaci jako standalone.
+  return typeof window.matchMedia === 'function'
+    && (window.matchMedia('(display-mode: fullscreen)').matches || window.matchMedia('(display-mode: standalone)').matches)
 }
 
 /** iPhone/iPad, včetně iPadOS, který se hlásí jako Mac s dotykovou obrazovkou. */

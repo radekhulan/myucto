@@ -16,6 +16,7 @@ import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.v
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
 import PhotoCropDialog from '@/components/upload/PhotoCropDialog.vue'
 import { usePhotoCropQueue } from '@/composables/usePhotoCropQueue'
+import { usePendingCapture } from '@/composables/usePendingCapture'
 import MergeDocumentsPanel from '@/components/upload/MergeDocumentsPanel.vue'
 
 const { t } = useI18n()
@@ -69,6 +70,16 @@ const aiPerRequestModel = ref('')  // empty = použít default
 
 /** Celý výběr; výřezy se do něj vrátí na svá místa a extrakce se spustí najednou. */
 const crop = usePhotoCropQueue(files => useAiFiles(files))
+
+/**
+ * Fotka z mobilní nabídky Nákup („Vyfotit doklad"): projde ořezem a rovnou se
+ * vytěží. Uživatel klepnutím na dlaždici řekl, co chce, další tlačítko by jen zdržovalo.
+ */
+const pendingCapture = usePendingCapture()
+const captureCrop = usePhotoCropQueue(files => {
+  useAiFiles(files)
+  if (aiPdfFile.value) void runAiExtract()
+})
 
 /**
  * Fotka papírového dokladu jde nejdřív do ořezu: server fotku jen zmenší, takže
@@ -306,6 +317,12 @@ function targetLabel(result: AiExtractResult): string {
 function gotoInvoice(id: number) {
   router.push(`/purchase-invoices/${id}`)
 }
+
+watch([() => pendingCapture.pending.value, credsLoaded], ([file, loaded]) => {
+  if (!file || !loaded) return
+  pendingCapture.take()
+  if (canStartExtraction.value && !aiExtracting.value && !aiBatchRunning.value) captureCrop.start([file])
+}, { immediate: true })
 
 watch(() => suppliers.currentSupplierId, () => {
   contextVersion++
@@ -565,6 +582,8 @@ watch(() => suppliers.currentSupplierId, () => {
     </div>
     <MergeDocumentsPanel v-if="canExtract && aiConfigured" :disabled="!canStartExtraction"
       :busy="aiExtracting || aiBatchRunning" @import="importMerged" />
+    <PhotoCropDialog v-if="captureCrop.current.value" :file="captureCrop.current.value"
+      @done="captureCrop.done" @cancel="captureCrop.cancel" />
     <PhotoCropDialog v-if="crop.current.value" :key="crop.step.value" :file="crop.current.value" from-file
       :step="crop.step.value" :steps="crop.steps.value" :skip-count="crop.remaining.value"
       @done="crop.done" @skip-rest="crop.skipRest" @cancel="crop.cancel" />

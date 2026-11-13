@@ -85,7 +85,7 @@ describe('navigace podle RBAC oprávnění', () => {
     expect(appLayout).toContain('prefersCompactNavigation(tabletNavigationRailPreference.value, forceNavigationRail.value)')
     expect(appLayout).toContain('v-if="compactNavigationFits"')
     expect(appLayout).toContain('<TabletNavigationRail')
-    expect(appLayout).toContain('v-if="!tabletNavigationRail"')
+    expect(appLayout).toContain('<AppMenuToggle v-else-if="!tabletNavigationRail"')
     expect(appLayout).toContain("'nav.tablet_menu_drawer' : 'nav.tablet_menu_rail'")
   })
 

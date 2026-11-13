@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { OPERATIONAL_SETTINGS_KEYS } from '@/security/permissions'
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -28,6 +28,12 @@ import { APP_BRAND_LINK, APP_HEADER, APP_HEADER_ROW, DRAWER_ITEM, DRAWER_ITEM_AC
 import DesktopMenuBar from './DesktopMenuBar.vue'
 import DesktopUtilityActions from './DesktopUtilityActions.vue'
 import TabletNavigationRail from './TabletNavigationRail.vue'
+import MobileTabBar, { type MobileTab } from './MobileTabBar.vue'
+import MobileNavSheet, { type SheetAction, type SheetLink } from './MobileNavSheet.vue'
+import { usePendingCapture } from '@/composables/usePendingCapture'
+
+// Stav účtů a pokladen se načítá až s nabídkou Peníze, ne s layoutem.
+const MobileMoneySummary = defineAsyncComponent(() => import('./MobileMoneySummary.vue'))
 import StorageQuotaBanner from './StorageQuotaBanner.vue'
 import InstanceCriticalBar from './InstanceCriticalBar.vue'
 import MaintenanceNoticeBanner from './MaintenanceNoticeBanner.vue'
@@ -1617,9 +1623,202 @@ function syncActivePaneTitle(): void {
   })
 }
 
+// ── Telefon: spodní lišta agend ──
+// Na výšku (bez lišty ikon) nese navigaci spodní lišta Přehled / Prodej / Nákup /
+// Peníze / Menu. Agendy otevírají nabídku s velkými dlaždicemi, Menu celé menu
+// se všemi sekcemi (daně, účetnictví, mzdy, firma, systém).
+type MobileSheetKey = 'sales' | 'purchase' | 'bank_cash'
+const MOBILE_SHEET_KEYS: MobileSheetKey[] = ['sales', 'purchase', 'bank_cash']
+const MOBILE_SHEET_ACCENT: Record<MobileSheetKey, 'primary' | 'warning' | 'success'> = {
+  sales: 'primary',
+  purchase: 'warning',
+  bank_cash: 'success',
+}
+const MOBILE_ICONS = {
+  menu: 'M4 6h16M4 12h16M4 18h16',
+  camera: 'M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9zM15 13a3 3 0 11-6 0 3 3 0 016 0z',
+  receipt: 'M9 14l2 2 4-4M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-3-2-2 2-2-2-2 2-2-2-3 2z',
+  cashIn: 'M12 4v12m0 0l-4-4m4 4l4-4M4 20h16',
+  cashOut: 'M12 16V4m0 0L8 8m4-4l4 4M4 20h16',
+  search: 'M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z',
+  plus: 'M12 5v14M5 12h14',
+}
+
+const phoneNavigation = computed(() => !isDesktop.value && !tabletNavigationRail.value)
+/** Zásuvka a nabídky na telefonu leží mezi hlavičkou a spodní lištou, obě zůstávají vidět. */
+const phoneOverlayStyle = { top: 'var(--app-header-height)', bottom: 'var(--app-footer-height)', height: 'auto' }
+const openDrawerSections = ref<Set<string>>(new Set())
+
+function drawerSectionOpen(key: string): boolean {
+  return openDrawerSections.value.has(key)
+}
+
+function toggleDrawerSection(key: string): void {
+  const next = new Set(openDrawerSections.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  openDrawerSections.value = next
+}
+
+// Při otevření úplného menu je rozbalená sekce, ve které uživatel právě je.
+watch(mobileOpen, open => {
+  if (!open || !phoneNavigation.value) return
+  const current = orderedNav.value.find(section => sectionIsCurrent(section))
+  openDrawerSections.value = new Set(current ? [current.key] : [])
+})
+const mobileSheet = ref<MobileSheetKey | null>(null)
+const pendingCapture = usePendingCapture()
+
+function mobileSection(key: string): NavSection | undefined {
+  return orderedNav.value.find(section => section.key === key)
+}
+
+function sectionIsCurrent(section: NavSection | undefined): boolean {
+  return !!section?.items.some(item => !item.external && isActive(item))
+}
+
+const homeTarget = computed(() => (clientExperience.value ? '/portal' : '/'))
+
+const mobileTabs = computed<MobileTab[]>(() => {
+  const anySheetCurrent = MOBILE_SHEET_KEYS.some(key => sectionIsCurrent(mobileSection(key)))
+  const tabs: MobileTab[] = [{
+    key: 'home',
+    label: t('nav.dashboard'),
+    icon: ICONS.dashboard,
+    current: activeRoute.value.path === homeTarget.value && !mobileSheet.value && !mobileOpen.value,
+    open: false,
+  }]
+  const labels: Record<MobileSheetKey, string> = {
+    sales: t('nav.section_sales'),
+    purchase: t('nav.section_purchase'),
+    bank_cash: t('nav.section_bank_cash'),
+  }
+  const icons: Record<MobileSheetKey, string> = {
+    sales: ICONS.invoices,
+    purchase: ICONS.purchase,
+    bank_cash: ICONS.coin,
+  }
+  for (const key of MOBILE_SHEET_KEYS) {
+    const section = mobileSection(key)
+    if (!section) continue
+    tabs.push({
+      key,
+      label: labels[key],
+      icon: icons[key],
+      current: sectionIsCurrent(section) && !mobileOpen.value && !mobileSheet.value,
+      open: mobileSheet.value === key,
+      badge: section.items.reduce((sum, item) => sum + (item.badge ?? 0), 0) || undefined,
+    })
+  }
+  tabs.push({
+    key: 'menu',
+    label: t('nav.mobile.menu'),
+    icon: MOBILE_ICONS.menu,
+    current: !anySheetCurrent && activeRoute.value.path !== homeTarget.value && !mobileSheet.value && !mobileOpen.value,
+    open: mobileOpen.value,
+  })
+  return tabs
+})
+
+function onMobileTab(key: string): void {
+  quickAddOpen.value = false
+  if (key === 'home') {
+    mobileSheet.value = null
+    mobileOpen.value = false
+    void workspaceNavigation.navigate(homeTarget.value)
+    return
+  }
+  if (key === 'menu') {
+    mobileSheet.value = null
+    mobileOpen.value = !mobileOpen.value
+    return
+  }
+  mobileOpen.value = false
+  mobileSheet.value = mobileSheet.value === key ? null : key as MobileSheetKey
+}
+
+function openMobileSearch(): void {
+  mobileSheet.value = null
+  quickAddOpen.value = false
+  mobileOpen.value = true
+  void nextTick(() => mobileSearchRef.value?.focus())
+}
+
+/** Velké dlaždice nabídky: nejčastější kroky agendy, každý jen s právem k němu. */
+const mobileSheetActions = computed<SheetAction[]>(() => {
+  const key = mobileSheet.value
+  if (!key) return []
+  const can = (to: string) => canCreate({ to, label: '', icon: '', newTo: to })
+  const actions: SheetAction[] = []
+  if (key === 'sales') {
+    if (can('/invoices/new')) {
+      actions.push({ key: 'invoice', to: '/invoices/new', label: t('nav.mobile.issue_invoice'), icon: ICONS.invoices })
+      if (supplierStore.currentSupplier?.is_vat_payer !== false && !clientExperience.value) {
+        actions.push({ key: 'receipt', to: '/invoices/new?simplified=1', label: t('nav.mobile.receipt'), hint: t('nav.mobile.receipt_hint'), icon: MOBILE_ICONS.receipt })
+      }
+    }
+    if (!clientExperience.value && auth.canWrite('projects.create')) {
+      actions.push({ key: 'project', to: '/projects/new', label: t('nav.mobile.new_project'), icon: ICONS.projects })
+    }
+    if (can('/clients/new')) {
+      actions.push({ key: 'client', to: '/clients/new', label: t('nav.mobile.new_client'), icon: ICONS.clients })
+    }
+  } else if (key === 'purchase') {
+    if (canExtractPurchase.value) {
+      actions.push({ key: 'capture', capture: true, label: t('nav.mobile.capture_document'), hint: t('nav.mobile.capture_document_hint'), icon: MOBILE_ICONS.camera })
+      actions.push({ key: 'ai_upload', to: '/purchase-invoices/ai-import', label: t('nav.mobile.upload_document'), hint: t('nav.ai_import'), icon: ICONS.imports })
+    }
+    if (can('/purchase-invoices/new')) {
+      actions.push({ key: 'purchase', to: '/purchase-invoices/new', label: t('nav.quick_purchase'), icon: ICONS.purchase })
+    }
+    if (can('/clients/new?role=vendor')) {
+      actions.push({ key: 'vendor', to: '/clients/new?role=vendor', label: t('nav.mobile.new_vendor'), icon: ICONS.suppliers })
+    }
+  } else {
+    const items = mobileSection('bank_cash')?.items ?? []
+    if (items.some(item => item.to === '/accounting/cash') && can('/accounting/cash/new')) {
+      actions.push({ key: 'cash_in', to: '/accounting/cash/new?doc_type=in', label: t('nav.mobile.cash_in'), icon: MOBILE_ICONS.cashIn })
+      actions.push({ key: 'cash_out', to: '/accounting/cash/new?doc_type=out', label: t('nav.mobile.cash_out'), icon: MOBILE_ICONS.cashOut })
+    }
+    if (!clientExperience.value && auth.canRead('invoices')) {
+      actions.push({ key: 'receivables', to: '/invoices?unpaid=1', label: t('nav.mobile.receivables'), hint: t('nav.mobile.receivables_hint'), icon: ICONS.invoices })
+    }
+    if (!clientExperience.value && auth.canRead('purchase_invoices')) {
+      actions.push({ key: 'payables', to: '/purchase-invoices?unpaid=1', label: t('nav.mobile.payables'), hint: t('nav.mobile.payables_hint'), icon: ICONS.payment_orders })
+    }
+  }
+  return actions
+})
+
+const mobileSheetLinks = computed<SheetLink[]>(() => {
+  const section = mobileSheet.value ? mobileSection(mobileSheet.value) : undefined
+  return (section?.items ?? []).map(item => ({
+    to: item.to,
+    label: item.label,
+    icon: item.icon,
+    external: item.external,
+    badge: item.badge,
+    active: !item.external && isActive(item),
+  }))
+})
+
+const mobileMoneyBank = computed(() => mobileSheet.value === 'bank_cash' && !clientExperience.value && auth.canRead('bank'))
+const mobileMoneyCash = computed(() => mobileSheet.value === 'bank_cash'
+  && (mobileSection('bank_cash')?.items.some(item => item.to === '/accounting/cash') ?? false)
+  && auth.canRead('cash'))
+
+function onMobileCapture(file: File): void {
+  mobileSheet.value = null
+  pendingCapture.set(file)
+  void workspaceNavigation.navigate('/purchase-invoices/ai-import', { fresh: true })
+}
+
+watch(phoneNavigation, phone => { if (!phone) mobileSheet.value = null })
+
 // Zavři mobile drawer + popupy po navigaci
 watch([() => workspace.activeFullPath, () => workspace.layoutRevision], () => {
   mobileOpen.value = false
+  mobileSheet.value = null
   userMenuOpen.value = false
   quickAddOpen.value = false
   syncActivePaneTitle()
@@ -1797,7 +1996,55 @@ onBeforeUnmount(() => {
             @logout="logout"
           />
 
-          <AppMenuToggle v-if="!tabletNavigationRail" v-model="mobileOpen" />
+          <!-- Telefon: hledání a zakládání vpravo nahoře, menu je ve spodní liště. -->
+          <template v-if="phoneNavigation">
+            <button
+              type="button"
+              class="lg:hidden inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-neutral-200 text-neutral-700 hover:bg-neutral-100"
+              :aria-label="t('nav.mobile.search')"
+              :title="t('nav.mobile.search')"
+              data-testid="mobile-search"
+              @click="openMobileSearch"
+            >
+              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="MOBILE_ICONS.search" />
+              </svg>
+            </button>
+            <div v-if="quickActions.length > 0" class="relative lg:hidden">
+              <button
+                type="button"
+                class="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-primary-400 text-[#211A4B] shadow-sm transition-colors hover:bg-primary-300 active:translate-y-px"
+                :aria-label="t('nav.quick_new')"
+                :title="t('nav.quick_new')"
+                :aria-expanded="quickAddOpen"
+                aria-haspopup="menu"
+                data-testid="mobile-quick-add"
+                @click="quickAddOpen = !quickAddOpen; mobileSheet = null; mobileOpen = false"
+              >
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.4" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="MOBILE_ICONS.plus" />
+                </svg>
+              </button>
+              <div v-if="quickAddOpen" class="fixed inset-0 z-10" aria-hidden="true" @click="quickAddOpen = false"></div>
+              <div v-if="quickAddOpen" class="absolute right-0 top-full z-40 mt-2 w-64 max-h-[calc(100dvh-var(--app-header-height,3rem)-var(--app-footer-height,3rem)-1rem)] overflow-y-auto overscroll-contain rounded-xl border border-neutral-200 bg-surface py-1 shadow-xl" role="menu">
+                <WorkspaceNavLink
+                  v-for="action in quickActions"
+                  :key="action.to"
+                  :to="action.to"
+                  fresh
+                  class="flex items-center gap-3 px-3 py-3 text-[15px] text-neutral-700 hover:bg-neutral-50 hover:text-primary-700"
+                  role="menuitem"
+                  @click="quickAddOpen = false"
+                >
+                  <svg class="h-5 w-5 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="action.icon" />
+                  </svg>
+                  <span>{{ action.label }}</span>
+                </WorkspaceNavLink>
+              </div>
+            </div>
+          </template>
+          <AppMenuToggle v-else-if="!tabletNavigationRail" v-model="mobileOpen" />
         </div>
       </div>
 
@@ -1831,6 +2078,7 @@ onBeforeUnmount(() => {
       <div
         v-if="mobileOpen" @click="mobileOpen = false"
         class="lg:hidden fixed inset-0 bg-black/50 z-20"
+        :style="phoneNavigation ? phoneOverlayStyle : undefined"
         aria-hidden="true"
       ></div>
 
@@ -1852,6 +2100,8 @@ onBeforeUnmount(() => {
           sideNavigation ? 'lg:flex lg:translate-x-0 lg:z-auto' : 'lg:hidden',
           mobileOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0',
         ]"
+        :style="phoneNavigation ? phoneOverlayStyle : undefined"
+        data-testid="app-drawer"
       >
         <nav class="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-slim px-2.5 py-3">
           <!-- Globální vyhledávač (před Přehled) — našeptává menu + hledá klienty/faktury -->
@@ -1860,9 +2110,38 @@ onBeforeUnmount(() => {
           </div>
 
           <template v-for="(section, si) in orderedNav" :key="section.key">
+            <!-- Telefon: sekce jako rozbalovací řádky, jinak by úplné menu bylo
+                 nekonečný seznam. Otevřená je sekce, ve které uživatel je. -->
+            <button
+              v-if="section.title && phoneNavigation"
+              type="button"
+              class="flex w-full cursor-pointer items-center gap-3 rounded-lg px-2.5 py-3 text-left text-[15px] font-semibold text-neutral-800 hover:bg-neutral-100"
+              :class="si === 0 ? '' : 'mt-0.5'"
+              :aria-expanded="drawerSectionOpen(section.key)"
+              :data-section="section.key"
+              @click="toggleDrawerSection(section.key)"
+            >
+              <span
+                class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-neutral-100"
+                aria-hidden="true"
+              >
+                <svg class="h-[18px] w-[18px] text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="sectionIcon(section)" />
+                </svg>
+              </span>
+              <span class="min-w-0 flex-1 truncate">{{ section.title }}</span>
+              <span class="h-2 w-2 shrink-0 rounded-full" :class="section.accent ? ACCENT_DOT[section.accent] : 'bg-neutral-400'" aria-hidden="true"></span>
+              <svg
+                class="h-4 w-4 shrink-0 text-neutral-400 transition-transform"
+                :class="drawerSectionOpen(section.key) ? 'rotate-180' : ''"
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
             <!-- Section title — soft pill; §10: chytni za hlavičku a přetáhni celý blok -->
             <div
-              v-if="section.title"
+              v-else-if="section.title"
               :class="[
                 si === 0 ? 'pt-1 pb-1.5' : 'pt-2.5 pb-1.5 mt-2',
                 // Hairline mezi sekcemi. Při přetahování ho nahradí silnější
@@ -1915,8 +2194,9 @@ onBeforeUnmount(() => {
                  Levá lišta v barvě sekce váže položky k hlavičce nad nimi; sekce
                  bez nadpisu (Nápověda) ji nemá, není co rámovat. -->
             <div
+              v-show="!phoneNavigation || !section.title || drawerSectionOpen(section.key)"
               :class="section.title
-                ? ['ml-2 border-l-2', section.accent ? ACCENT_RAIL[section.accent] : 'border-neutral-200']
+                ? ['border-l-2', section.accent ? ACCENT_RAIL[section.accent] : 'border-neutral-200', phoneNavigation ? 'mb-2 ml-6' : 'ml-2']
                 : ''"
             >
             <template v-for="item in section.items" :key="item.to">
@@ -1957,6 +2237,7 @@ onBeforeUnmount(() => {
                   exact-active-class=""
                   :class="[
                     DRAWER_ITEM,
+                    'max-lg:py-2.5 max-lg:text-[15px]',
                     isActive(item)
                       ? DRAWER_ITEM_ACTIVE
                       : item.accent
@@ -1992,7 +2273,7 @@ onBeforeUnmount(() => {
                   :draggable="false"
                   :title="t('nav.quick_new')"
                   :aria-label="t('nav.quick_new')"
-                  class="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 rounded-md text-neutral-400 hover:text-primary-700 hover:bg-primary-100 transition-all opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
+                  class="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-5 h-5 max-lg:w-8 max-lg:h-8 rounded-md text-neutral-400 hover:text-primary-700 hover:bg-primary-100 transition-all opacity-100 lg:opacity-0 lg:group-hover:opacity-100 focus:opacity-100"
                 >
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v8m4-4H8M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
@@ -2020,7 +2301,7 @@ onBeforeUnmount(() => {
         </nav>
 
         <!-- Mobile only: profil + ovládání relace (na dně sidebaru) -->
-        <div class="lg:hidden shrink-0 border-t border-neutral-200 px-4 py-3 bg-neutral-50 space-y-3">
+        <div class="lg:hidden shrink-0 border-t border-neutral-200 bg-neutral-50" :class="phoneNavigation ? 'space-y-2 px-3 py-2.5' : 'space-y-3 px-4 py-3'">
           <div class="flex items-center justify-between">
             <WorkspaceNavLink
               to="/profile/password"
@@ -2043,7 +2324,41 @@ onBeforeUnmount(() => {
               </svg>
             </a>
           </div>
-          <div class="grid gap-2" :class="canLockSession ? 'grid-cols-2' : 'grid-cols-1'">
+          <!-- Na telefonu nemá jazyk, motiv ani okna místo ve spodní liště, žijí tady
+               v jednom řádku s odhlášením, ať menu zůstane co nejvíc místa. -->
+          <div v-if="phoneNavigation" class="flex items-center gap-1.5">
+            <LanguageToggle class="h-9! w-10!" />
+            <ThemeToggle class="h-9! w-10!" />
+            <div class="flex h-9 items-center gap-0.5 rounded-lg bg-neutral-100/80 p-0.5 ring-1 ring-neutral-200/80" role="group" :aria-label="t('favorites.group_label')">
+              <WorkspaceFavoritesButton class="h-8! hover:bg-surface!" />
+              <WorkspaceWindowButton class="h-8! hover:bg-surface!" />
+            </div>
+            <button
+              v-if="canLockSession"
+              type="button"
+              class="ml-auto inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md border border-neutral-300 text-neutral-700 hover:bg-surface"
+              :title="t('session_lock.lock_now')"
+              :aria-label="t('session_lock.lock_now')"
+              @click="sessionSecurity.lock"
+            >
+              <svg class="h-[18px] w-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7 11V7a5 5 0 0 1 10 0v4M5 11h14v10H5V11z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md border border-neutral-300 px-3 text-sm text-neutral-700 hover:bg-surface disabled:opacity-60"
+              :class="canLockSession ? '' : 'ml-auto'"
+              :disabled="logoutBusy"
+              @click="logout"
+            >
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 17l5-5-5-5M20 12H9M12 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7" />
+              </svg>
+              {{ t('nav.logout') }}
+            </button>
+          </div>
+          <div v-else class="grid gap-2" :class="canLockSession ? 'grid-cols-2' : 'grid-cols-1'">
             <button
               v-if="canLockSession"
               @click="sessionSecurity.lock"
@@ -2071,7 +2386,7 @@ onBeforeUnmount(() => {
         <WorkspaceFavorites />
 
         <main
-          class="flex-1 px-5 sm:px-8 py-6 w-full"
+          class="flex-1 px-4 py-4 sm:px-8 sm:py-6 w-full"
           :class="workspace.paneCount > 1 ? 'workspace-main-multi' : 'workspace-main-single'"
           :data-accent="activeSectionAccent"
         >
@@ -2085,7 +2400,7 @@ onBeforeUnmount(() => {
           <MaintenanceNoticeBanner poll />
           <div
             v-if="licenseBanner"
-            class="mb-5 rounded-lg border px-4 py-3 text-sm flex flex-wrap items-center justify-between gap-2"
+            class="mb-3 sm:mb-5 rounded-lg border px-3 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
             :class="BANNER_CLASS[licenseBanner.variant]"
           >
             <span>{{ licenseBanner.text }}</span>
@@ -2104,7 +2419,7 @@ onBeforeUnmount(() => {
         <!-- Patička je stejné „chrome" jako topbar (globální hledání, jazyk, motiv),
              takže nosí i stejnou tmavou plochu. Světlá patička pod tmavou lištou
              působila jako nedodělaná půlka — takhle obsah rámují z obou stran. -->
-        <footer ref="appFooter" class="nav-inverted sticky bottom-0 z-20 border-t border-neutral-200 bg-surface shadow-[0_-2px_10px_rgba(21,19,29,0.10)]">
+        <footer ref="appFooter" class="nav-inverted sticky bottom-0 z-20 border-t border-neutral-200 bg-surface pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_10px_rgba(21,19,29,0.10)]">
           <!-- Pod 2xl nese pravý sloupec i ikony oblíbených, oken a panelů, takže má
                šířku podle obsahu (`auto`) a zužuje se hledání vlevo; jinak by přetekl
                přes přepínač firmy uprostřed. -->
@@ -2251,7 +2566,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="lg:hidden min-h-12 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-neutral-500">
+          <MobileTabBar v-if="phoneNavigation" class="lg:hidden" :tabs="mobileTabs" :label="t('nav.main_menu')" @select="onMobileTab" />
+          <div v-else class="lg:hidden min-h-12 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-neutral-500">
             <div class="flex items-center gap-1.5">
               <button
                 v-if="compactNavigationFits"
@@ -2315,6 +2631,45 @@ onBeforeUnmount(() => {
         </footer>
       </div>
     </div>
+
+    <!-- ── TELEFON: nabídka agendy nad spodní lištou ── -->
+    <template v-if="phoneNavigation">
+      <Transition
+        enter-active-class="transition-opacity duration-200"
+        enter-from-class="opacity-0"
+        leave-active-class="transition-opacity duration-150"
+        leave-to-class="opacity-0"
+      >
+        <div v-if="mobileSheet" class="lg:hidden fixed inset-x-0 z-20 bg-black/40" :style="phoneOverlayStyle" aria-hidden="true" @click="mobileSheet = null"></div>
+      </Transition>
+      <Transition
+        enter-active-class="transition-transform duration-200 ease-out"
+        enter-from-class="translate-y-full"
+        leave-active-class="transition-transform duration-150 ease-in"
+        leave-to-class="translate-y-full"
+      >
+        <div
+          v-if="mobileSheet"
+          :key="mobileSheet"
+          class="lg:hidden pointer-events-none fixed inset-x-0 z-20 flex flex-col justify-end pt-6"
+          :style="phoneOverlayStyle"
+        >
+          <MobileNavSheet
+            class="pointer-events-auto"
+            :title="mobileSection(mobileSheet)?.title ?? ''"
+            :accent="MOBILE_SHEET_ACCENT[mobileSheet]"
+            :actions="mobileSheetActions"
+            :links="mobileSheetLinks"
+            :close-label="t('common.close')"
+            :links-label="t('nav.mobile.all_in_section')"
+            @close="mobileSheet = null"
+            @capture="onMobileCapture"
+          >
+            <MobileMoneySummary v-if="mobileMoneyBank || mobileMoneyCash" :show-bank="mobileMoneyBank" :show-cash="mobileMoneyCash" />
+          </MobileNavSheet>
+        </div>
+      </Transition>
+    </template>
 
     <!-- ── MODÁL: Podpora autora ── -->
     <div v-if="supportOpen" class="fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto"

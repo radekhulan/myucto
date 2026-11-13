@@ -7,6 +7,7 @@ import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySe
 import type { WorkReportDisplayOptions } from '@/api/invoices'
 import { useWindowTitle } from '@/composables/useWindowTitle'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId, toRaw } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { invoicesApi, type Invoice, type InvoicePayload, type InvoiceItem, type WorkReportItem, type WorkReportMaterial, type InvoiceAttachment, type PaymentMethod, type InvoiceRoundingMode, type PaymentScheduleRow, type CashSettlementResult } from '@/api/invoices'
 import { useHotkey } from '@/composables/useHotkey'
@@ -1749,6 +1750,7 @@ onMounted(async () => {
     if (form.value.items.length === 0) {
       form.value.items = [blankItem()]
     }
+    applyReceiptPreset()
     // Bez klienta i zakázky: splatnost z výchozího nastavení dodavatele
     // (supplier store je teď spolehlivě načtený, na rozdíl od init form refu).
     if (!form.value.client_id && !form.value.project_id) {
@@ -2374,6 +2376,62 @@ function setItemGross(item: InvoiceItem, raw: string): void {
 
 // Přepínač „ceny s DPH" má smysl jen pro plátce DPH (u neplátce/RC je sazba 0 → gross = net).
 const showPricesIncludeVatUI = computed(() => supplierIsVatPayer.value)
+
+// ── Telefon ──
+// Editor má na telefonu přes pět obrazovek. Méně častá pole (čísla a reference,
+// příznaky dokladu) se sbalí, dokud nic neobsahují, šedé nápovědy se skryjí.
+// Varování a vyplněné hodnoty zůstávají vidět vždy, nic se neschová potichu.
+const isPhone = useMediaQuery('(max-width: 767.98px)')
+const refsOpen = ref(false)
+const hasRefs = computed(() => paymentVsInvalid.value
+  || [form.value.varsymbol, form.value.payment_variable_symbol, form.value.supplier_order_number].some(v => v.trim() !== ''))
+const showRefs = computed(() => !isPhone.value || refsOpen.value || hasRefs.value)
+const docOptionsOpen = ref(false)
+const activeDocFlags = computed(() => [
+  showReverseChargeUI.value && form.value.reverse_charge ? t('invoice.reverse_charge') : null,
+  supplierIsVatPayer.value && form.value.is_simplified ? t('invoice.simplified_document_short') : null,
+  showPricesIncludeVatUI.value && form.value.prices_include_vat ? t('invoice.prices_include_vat') : null,
+  showIncomeTaxExemptUI.value && form.value.income_tax_exempt ? t('invoice.income_tax_exempt') : null,
+].filter((flag): flag is string => flag !== null))
+const docOptionsNeedAttention = computed(() => !!simplifiedOnlyClientWarning.value
+  || (form.value.is_simplified && !!simplifiedBlockedReason.value)
+  || (form.value.income_tax_exempt && showIncomeTaxExemptUI.value))
+const showDocOptions = computed(() => !isPhone.value || docOptionsOpen.value || docOptionsNeedAttention.value)
+// Klasifikace, dimenze, poznámky, výkazy a přílohy: na telefonu za jedním řádkem
+// pod položkami. Rozepsaný výkaz nebo poznámka zůstávají vidět i sbalené.
+const secondaryOpen = ref(false)
+const showSecondary = computed(() => !isPhone.value || secondaryOpen.value)
+
+/**
+ * Účtenka (`?simplified=1`, dlaždice v mobilní nabídce Prodej): zjednodušený daňový
+ * doklad § 30 ZDPH pro koncového zákazníka placený na místě. Předvyplní jen to, co
+ * by uživatel jinak přepínal ručně; vše zůstává běžným editorem a jde změnit.
+ */
+const receiptPreset = ref(false)
+
+function applyReceiptPreset(): void {
+  if (route.query.simplified !== '1' || !supplierIsVatPayer.value || form.value.invoice_type !== 'invoice') return
+  receiptPreset.value = true
+  form.value.is_simplified = true
+  onSimplifiedToggle()
+  form.value.payment_method = 'cash'
+  form.value.prices_include_vat = true
+  pickDefaultCashRegister()
+}
+
+function pickDefaultCashRegister(): void {
+  if (!receiptPreset.value || form.value.cash_register_id !== null || !showCashSettlement.value) return
+  const registers = cashRegisters.value
+  const preferred = registers.find(r => r.is_default) ?? (registers.length === 1 ? registers[0] : undefined)
+  if (preferred) form.value.cash_register_id = preferred.id
+}
+
+watch(cashRegisters, pickDefaultCashRegister)
+
+function switchReceiptToInvoice(): void {
+  receiptPreset.value = false
+  form.value.is_simplified = false
+}
 // Záhlaví sloupce jednotkové ceny — v režimu „ceny s DPH" je to cena včetně DPH.
 const unitPriceHeaderLabel = computed(() => form.value.prices_include_vat && supplierIsVatPayer.value
   ? t('invoice.items_table.unit_price_gross')
@@ -3232,10 +3290,27 @@ useWindowTitle(
       </div>
     </div>
 
+    <!-- Účtenka: zjednodušený doklad § 30 ZDPH jedním řádkem místo zaškrtávátka
+         s paragrafem schovaného mezi dalšími volbami dokladu. -->
+    <div v-if="form.is_simplified && supplierIsVatPayer && (receiptPreset || isPhone)"
+      class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-primary-200 bg-primary-50 px-4 py-2.5 text-sm text-primary-800"
+      data-test="receipt-banner">
+      <svg class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 14l2 2 4-4M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-3-2-2 2-2-2-2 2-2-2-3 2z" />
+      </svg>
+      <span class="min-w-0 flex-1 basis-56">
+        <span class="font-semibold">{{ t('invoice.receipt_banner_title') }}</span>
+        <span class="text-primary-700"> · {{ t('invoice.receipt_banner_text', { limit: formatMoney(SIMPLIFIED_LIMIT_WITH_VAT, form.currency, 0) }) }}</span>
+      </span>
+      <button v-if="editedStatus === 'draft'" type="button" class="cursor-pointer whitespace-nowrap font-medium underline" @click="switchReceiptToInvoice">
+        {{ t('invoice.receipt_switch') }}
+      </button>
+    </div>
+
     <form ref="editorForm" @submit.prevent="submit" class="space-y-4">
       <!-- Klient + zakázka + datumy -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <div class="bg-surface border border-neutral-200 rounded-lg p-4 md:p-5 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.client') }} &amp; {{ t('invoice.project') }}</h3>
           <div class="space-y-3">
             <div>
@@ -3271,7 +3346,7 @@ useWindowTitle(
               <input v-model="form.calendar_contract_ref" type="text" maxlength="190"
                 :placeholder="t('invoice.calendar_contract_ref_placeholder')"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
-              <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.calendar_contract_ref_hint') }}</p>
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1">{{ t('invoice.calendar_contract_ref_hint') }}</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.client') }}{{ form.is_simplified ? '' : ' *' }}</label>
@@ -3329,7 +3404,7 @@ useWindowTitle(
                 <option v-for="l in priceLevelOptions" :key="l.id" :value="l.id">{{ l.name }}</option>
               </select>
               <p v-if="priceLevelStale" class="text-xs text-warning-600 mt-1">{{ t('invoice.price_level.stale') }}</p>
-              <p v-else class="text-xs text-neutral-500 mt-1">{{ t('invoice.price_level.hint') }}</p>
+              <p v-else class="max-md:hidden text-xs text-neutral-500 mt-1">{{ t('invoice.price_level.hint') }}</p>
             </div>
             <!-- Firma mezitím deaktivovala všechny hladiny: výběr zmizí, zrušení hladiny konceptu ale nesmí být tiché. -->
             <p v-else-if="stockEnabled && priceLevelStale && !auth.isClientRole" class="text-xs text-warning-600">{{ t('invoice.price_level.stale') }}</p>
@@ -3388,15 +3463,6 @@ useWindowTitle(
                 {{ t('payment_method.hint') }}
               </p>
             </div>
-            <div>
-              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.rounding.label') }}</label>
-              <select v-model="form.rounding_mode" :disabled="!roundingAvailable" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface disabled:opacity-50">
-                <option value="auto">{{ t('invoice.rounding.auto') }}</option>
-                <option value="none">{{ t('invoice.rounding.none') }}</option>
-                <option value="whole_czk">{{ t('invoice.rounding.whole_czk') }}</option>
-              </select>
-              <p class="text-xs text-neutral-500 mt-1">{{ t(roundingAvailable ? 'invoice.rounding.hint' : 'invoice.rounding.unavailable') }}</p>
-            </div>
             <!-- Hotovostní vyrovnání (migrace 1327): pokladna k formě úhrady „Hotově".
                  Nepovinné — bez pokladny se nic nezaúčtuje a faktura zůstane pohledávkou. -->
             <div v-if="showCashSettlement">
@@ -3413,6 +3479,30 @@ useWindowTitle(
               <p v-else-if="form.cash_register_id" class="text-xs text-neutral-500 mt-1">
                 {{ t('cash_settlement.invoice_hint') }}
               </p>
+            </div>
+            <!-- Telefon: zaokrouhlení a příznaky dokladu pod jedním řádkem. Zapnuté
+                 příznaky jsou vidět jako štítky i sbalené, varování sekci otevře. -->
+            <button v-if="isPhone" type="button"
+              class="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-left text-sm text-neutral-700"
+              :aria-expanded="showDocOptions" data-test="doc-options-toggle"
+              @click="docOptionsOpen = !docOptionsOpen">
+              <span class="font-medium">{{ t('invoice.doc_options') }}</span>
+              <span class="flex min-w-0 flex-1 flex-wrap justify-end gap-1">
+                <span v-for="flag in activeDocFlags" :key="flag" class="truncate rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700">{{ flag }}</span>
+              </span>
+              <svg class="h-4 w-4 shrink-0 text-neutral-400 transition-transform" :class="showDocOptions ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            <div v-show="showDocOptions" class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.rounding.label') }}</label>
+              <select v-model="form.rounding_mode" :disabled="!roundingAvailable" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface disabled:opacity-50">
+                <option value="auto">{{ t('invoice.rounding.auto') }}</option>
+                <option value="none">{{ t('invoice.rounding.none') }}</option>
+                <option value="whole_czk">{{ t('invoice.rounding.whole_czk') }}</option>
+              </select>
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1">{{ t(roundingAvailable ? 'invoice.rounding.hint' : 'invoice.rounding.unavailable') }}</p>
             </div>
             <div v-if="showReverseChargeUI">
               <label class="flex items-center gap-2 text-sm text-neutral-700">
@@ -3432,7 +3522,7 @@ useWindowTitle(
               <label class="flex items-center gap-2 text-sm text-neutral-700">
                 <input v-model="form.is_simplified" type="checkbox" class="rounded border-neutral-300 text-primary-600"
                   @change="onSimplifiedToggle" />
-                <span>{{ t('invoice.simplified_document') }}</span>
+                <span>{{ isPhone ? t('invoice.simplified_document_short') : t('invoice.simplified_document') }}</span>
               </label>
               <!-- Zjednodušený doklad údaje odběratele nevyžaduje (§ 30a), klient zůstává
                    na dokladu kvůli statistikám a cenové hladině. Bez klienta se netiskne nic. -->
@@ -3454,7 +3544,7 @@ useWindowTitle(
               <p v-else-if="form.is_simplified && !form.client_id" class="text-xs text-neutral-500 mt-1 ml-6">
                 {{ t('invoice.simplified_document_walk_in_hint') }}
               </p>
-              <p v-else class="text-xs text-neutral-500 mt-1 ml-6">
+              <p v-else class="max-md:hidden text-xs text-neutral-500 mt-1 ml-6">
                 {{ t('invoice.simplified_document_hint') }}
               </p>
             </div>
@@ -3463,14 +3553,14 @@ useWindowTitle(
                 <input v-model="form.prices_include_vat" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
                 <span>{{ t('invoice.prices_include_vat') }}</span>
               </label>
-              <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('invoice.prices_include_vat_hint') }}</p>
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1 ml-6">{{ t('invoice.prices_include_vat_hint') }}</p>
             </div>
             <div v-if="showIncomeTaxExemptUI">
               <label class="flex items-center gap-2 text-sm text-neutral-700">
                 <input v-model="form.income_tax_exempt" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
                 <span>{{ t('invoice.income_tax_exempt') }}</span>
               </label>
-              <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('invoice.income_tax_exempt_hint') }}</p>
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1 ml-6">{{ t('invoice.income_tax_exempt_hint') }}</p>
               <div v-if="form.income_tax_exempt" class="ml-6 mt-2">
                 <input
                   v-model="form.income_tax_exempt_reason"
@@ -3481,12 +3571,27 @@ useWindowTitle(
                 />
               </div>
             </div>
+            </div>
           </div>
         </div>
 
-        <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <div class="bg-surface border border-neutral-200 rounded-lg p-4 md:p-5 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.dates_section') }}</h3>
-          <div class="space-y-3">
+          <div class="flex flex-col gap-3">
+            <!-- Telefon: data dokladu jdou první, čísla a reference až za nimi a sbalené,
+                 dokud nic neobsahují (číslo i VS se jinak doplní samy). -->
+            <div class="flex flex-col gap-3 max-md:order-last">
+            <button v-if="isPhone && !hasRefs" type="button"
+              class="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 text-left text-sm text-neutral-700"
+              :aria-expanded="showRefs" data-test="refs-toggle"
+              @click="refsOpen = !refsOpen">
+              <span class="flex-1 font-medium">{{ t('invoice.refs_section') }}</span>
+              <span class="truncate font-mono text-xs text-neutral-500">{{ varsymbolAutoPreview }}</span>
+              <svg class="h-4 w-4 shrink-0 text-neutral-400 transition-transform" :class="showRefs ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            <div v-show="showRefs" class="flex flex-col gap-3">
             <!-- Ruční override čísla faktury — jen u draftu; prázdné = vygeneruje se při Vystavení.
                  Placeholder ukazuje, jaké číslo dostane fakturu při Issue (z preview API).
                  Když není žádný template (ani per-supplier ani v cfg), ukáže warning. -->
@@ -3503,7 +3608,7 @@ useWindowTitle(
               <p v-else-if="form.varsymbol.trim()" class="text-xs text-warning-600 mt-1">
                 {{ t('invoice.varsymbol_manual_warning') }}
               </p>
-              <p v-else class="text-xs text-neutral-500 mt-1">{{ t('invoice.varsymbol_hint') }}</p>
+              <p v-else class="max-md:hidden text-xs text-neutral-500 mt-1">{{ t('invoice.varsymbol_hint') }}</p>
             </div>
             <div v-else-if="editedVarsymbol" class="rounded-md bg-neutral-50 border border-neutral-200 p-3 text-sm">
               <span class="text-neutral-500">{{ t(varsymbolLabelKey) }}:</span>
@@ -3516,39 +3621,43 @@ useWindowTitle(
                 :placeholder="derivedPaymentVs || t('invoice.payment_variable_symbol_placeholder')"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono" />
               <p v-if="paymentVsInvalid" class="text-xs text-danger-600 mt-1">{{ t('invoice.payment_variable_symbol_invalid') }}</p>
-              <p v-else class="text-xs text-neutral-500 mt-1">{{ t('invoice.payment_variable_symbol_hint') }}</p>
+              <p v-else class="max-md:hidden text-xs text-neutral-500 mt-1">{{ t('invoice.payment_variable_symbol_hint') }}</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.supplier_order_number') }}</label>
               <input v-model="form.supplier_order_number" type="text" maxlength="80"
                 :placeholder="t('invoice.supplier_order_number_placeholder')"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono" />
-              <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.supplier_order_number_hint') }}</p>
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1">{{ t('invoice.supplier_order_number_hint') }}</p>
             </div>
+            </div>
+            </div>
+            <div class="grid grid-cols-1 gap-3 max-md:grid-cols-2">
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.issue_date') }} *</label>
               <DateInput v-model="form.issue_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
             </div>
-            <div v-if="isInstalmentCalendar" class="rounded-md bg-accent-50 border border-accent-100 p-3 text-sm text-accent-600">
+            <div v-if="isInstalmentCalendar" class="max-md:col-span-2 rounded-md bg-accent-50 border border-accent-100 p-3 text-sm text-accent-600">
               {{ isRentCalendar ? t('invoice.calendar_tax_date_rent') : t('invoice.calendar_tax_date_advance') }}
             </div>
             <div v-else-if="form.invoice_type !== 'proforma'">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.tax_date') }} *</label>
               <DateInput v-model="form.tax_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
             </div>
-            <div v-else class="rounded-md bg-accent-50 border border-accent-100 p-3 text-sm text-accent-600">
+            <div v-else class="max-md:col-span-2 rounded-md bg-accent-50 border border-accent-100 p-3 text-sm text-accent-600">
               {{ t('invoice.proforma_no_tax_point') }}
             </div>
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.due_date') }} *</label>
               <DateInput v-model="form.due_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
             </div>
+            </div>
             <div v-if="form.invoice_type !== 'credit_note' && remindersAvailable">
               <label class="flex items-center gap-2 text-sm text-neutral-700">
                 <input v-model="form.auto_send_reminders" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
                 <span>{{ t('invoice.auto_send_reminders') }}</span>
               </label>
-              <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('invoice.auto_send_reminders_hint') }}</p>
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1 ml-6">{{ t('invoice.auto_send_reminders_hint') }}</p>
             </div>
             <div v-if="form.currency !== 'CZK' && form.exchange_rate !== null && form.exchange_rate > 0">
               <label class="block text-sm font-medium text-neutral-700 mb-1">
@@ -3556,7 +3665,7 @@ useWindowTitle(
               </label>
               <input v-model.number="form.exchange_rate" type="number" step="0.0001" min="0"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono" />
-              <p class="text-xs text-neutral-500 mt-1">
+              <p class="max-md:hidden text-xs text-neutral-500 mt-1">
                 {{ t('invoice.exchange_rate_hint') }}
               </p>
             </div>
@@ -4145,12 +4254,25 @@ useWindowTitle(
         </div>
       </div>
 
+      <button v-if="isPhone" type="button"
+        class="flex min-h-12 w-full cursor-pointer items-center gap-2 rounded-lg border border-neutral-200 bg-surface px-4 py-2.5 text-left shadow-sm"
+        :aria-expanded="showSecondary" data-test="secondary-toggle"
+        @click="secondaryOpen = !secondaryOpen">
+        <span class="min-w-0 flex-1">
+          <span class="block text-sm font-medium text-neutral-800">{{ t('invoice.secondary_section') }}</span>
+          <span class="block truncate text-xs text-neutral-500">{{ t('invoice.secondary_section_hint') }}</span>
+        </span>
+        <svg class="h-4 w-4 shrink-0 text-neutral-400 transition-transform" :class="showSecondary ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
       <!-- Náhled zápisu (zaúčtování už při zadání): tentýž výpočet jako Zaúčtovat. -->
       <DraftPostingPreviewPanel v-if="editorPostable" source="invoices"
         :doc-id="invoiceId ?? null" :payload="previewPayload" :missing="previewMissing" />
 
       <!-- Klasifikace (VAT pro DPH přiznání + volitelný revenue tag) -->
-      <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <div v-show="showSecondary" class="bg-surface border border-neutral-200 rounded-lg p-4 md:p-5 shadow-sm">
         <h2 class="text-sm font-medium text-neutral-700 mb-3">{{ t('invoice.classification.title') }}</h2>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -4184,17 +4306,17 @@ useWindowTitle(
       <!-- Sumace + poznámky -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="md:col-span-2 space-y-4">
-          <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+          <div v-show="showSecondary || form.note_above_items.trim() !== ''" class="bg-surface border border-neutral-200 rounded-lg p-4 md:p-5 shadow-sm">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.note_above') }}</label>
             <textarea v-model="form.note_above_items" rows="2" class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm"></textarea>
           </div>
-          <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+          <div v-show="showSecondary || form.note_below_items.trim() !== ''" class="bg-surface border border-neutral-200 rounded-lg p-4 md:p-5 shadow-sm">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('invoice.note_below') }}</label>
             <textarea v-model="form.note_below_items" rows="2" class="w-full px-3 py-2 border border-neutral-300 rounded-md text-sm"></textarea>
           </div>
         </div>
 
-        <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+        <div class="bg-surface border border-neutral-200 rounded-lg p-4 md:p-5 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('invoice.summary') }}</h3>
           <div class="flex items-center justify-between gap-3 mb-3 pb-3 border-b border-neutral-100">
             <label :for="`${pageId}-discount-percent`" class="text-sm text-neutral-700">{{ t('invoice.discount.label') }}</label>
@@ -4370,7 +4492,7 @@ useWindowTitle(
       </div>
 
       <!-- Výkaz víceprací -->
-      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <div v-show="showSecondary || wrOpen" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <header class="px-5 py-3 border-b border-neutral-200 flex flex-wrap gap-3 items-center justify-between">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.work_report') }}</h3>
           <div class="flex flex-wrap items-center gap-2">
@@ -4541,8 +4663,8 @@ useWindowTitle(
       </div>
 
       <!-- Výkaz materiálu -->
-      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
+      <div v-show="showSecondary || matOpen" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <header class="px-5 py-3 border-b border-neutral-200 flex flex-wrap gap-3 items-center justify-between">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.work_report_material') }}</h3>
           <div class="flex items-center gap-2">
             <button v-if="!matOpen" type="button" @click="openMaterial"
@@ -4710,7 +4832,7 @@ useWindowTitle(
 
       <!-- Přílohy — u nové faktury držené v prohlížeči (nahrají se po vytvoření),
            u existující faktury rovnou nahrávané / mazané -->
-      <div v-if="attachmentsAllowed"
+      <div v-if="attachmentsAllowed" v-show="showSecondary || attachments.length + pendingAttachments.length > 0"
            class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
           <div>
@@ -4790,7 +4912,7 @@ useWindowTitle(
       </fieldset>
 
       <!-- Action bar -->
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 flex flex-wrap justify-between items-center gap-2 shadow-sm">
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 flex flex-wrap justify-between items-center gap-2 shadow-sm max-md:sticky max-md:bottom-[calc(var(--app-footer-height,0px)+0.5rem)] max-md:z-10 max-md:p-3 max-md:shadow-lg">
         <RouterLink to="/invoices" class="px-4 py-2 text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors">{{ t('common.back') }}</RouterLink>
         <div class="flex flex-wrap items-center gap-2">
           <button v-if="canSaveAndPost" type="button" :disabled="submitting" data-test="save-and-post"

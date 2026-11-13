@@ -2190,7 +2190,29 @@
     "internal_documents": "Internal documents",
     "quick_internal_document": "Internal document",
     "payroll_month_guide": "Month guide",
-    "email_documents": "Documents from email"
+    "email_documents": "Documents from email",
+    "mobile": {
+      "menu": "Menu",
+      "search": "Search",
+      "issue_invoice": "Issue invoice",
+      "receipt": "Receipt",
+      "receipt_hint": "Simplified document, cash",
+      "new_project": "New project",
+      "new_client": "New client",
+      "capture_document": "Snap a document",
+      "capture_document_hint": "AI drafts the received invoice",
+      "upload_document": "Upload document",
+      "new_vendor": "New vendor",
+      "cash_in": "Cash receipt",
+      "cash_out": "Cash payment",
+      "receivables": "Who owes me",
+      "receivables_hint": "Unpaid issued invoices",
+      "payables": "To pay",
+      "payables_hint": "Unpaid received invoices",
+      "all_in_section": "Everything in this section",
+      "money_bank_total": "Total in bank accounts",
+      "money_more": "More accounts ({n})"
+    }
   },
   "migration_nonprofit_notice": {
     "title": "Data transfer has not been verified for non-profit organisations",
@@ -25717,7 +25739,15 @@
       "paid": "paid",
       "partially_paid": "partially paid",
       "unpaid": "unpaid"
-    }
+    },
+    "simplified_document_short": "Simplified tax document",
+    "doc_options": "More document settings",
+    "refs_section": "Document number and references",
+    "receipt_banner_title": "Receipt",
+    "receipt_banner_text": "simplified tax document (Section 30 of the VAT Act) up to {limit} incl. VAT, customer details optional",
+    "receipt_switch": "Issue as an invoice",
+    "secondary_section": "More document sections",
+    "secondary_section_hint": "Classification, dimensions, notes, reports and attachments"
   },
   "status": {
     "draft": "Draft",

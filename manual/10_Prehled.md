@@ -114,6 +114,8 @@ Dva panely jsou dostupné od šířky pracovního prostoru 1 100 px, tři od 1 6
 1. Ve spodní liště klikněte na ikonu slunce nebo měsíce - přepne se **světlý** a **tmavý** motiv.
 2. Kliknutím na vlaječku přepnete jazyk na druhý dostupný.
 
+Na telefonu jsou obě tlačítka dole v **Menu** (spodní lišta vpravo).
+
 Volba se uloží v prohlížeči. Podrobnosti jsou v [§ 10.10.12](#101012-vzhled-jazyk-svetly-a-tmavy-rezim).
 
 ### 10.7.4 Přepnutí firmy
@@ -271,7 +273,14 @@ Pokud v sekci **Systém** zůstane pouze **Nápověda (manuál)**, horní menu t
 
 Pokud by se názvy sekcí do horní lišty nevešly, aplikace to změří a automaticky zobrazí menu jako trvalý levý panel. Na dostatečně široké obrazovce můžete mezi horní a levou variantou přepnout tlačítkem **Styl menu** ve spodní liště. Přetékající horní variantu nelze vynutit. Výchozí je horní menu, ručně zvolená levá varianta se uloží do cookie tohoto prohlížeče. Přepínač rozložení nabízí horní menu, plný levý panel a kompaktní levý pruh. Sbalovací šipka v prvním řádku plného panelu přepne na kompaktní pruh s výraznými barevnými ikonami sekcí, šipka nahoře v pruhu znovu otevře plný panel. Všechny varianty používají stejné sekce, například **Sklad** a **Nástroje**.
 
-Na menších obrazovkách se v hlavičce vedle loga zobrazuje celý název aplikace a hlavní nabídka se otevírá tlačítkem **☰** zprava. Přepínač firmy pod hlavičkou využívá celou dostupnou šířku. Jazyk a motiv zůstávají ve spodní liště, jazyk přepíná jediná vlaječka na druhý dostupný jazyk.
+Na telefonu na výšku (a na menších obrazovkách bez kompaktního pruhu) je navigace ve **spodní liště** s velkými ikonami **Přehled**, **Prodej**, **Nákup**, **Peníze** a **Menu**:
+
+- **Prodej** otevře nabídku s dlaždicemi **Vystavit fakturu**, **Účtenka** (zjednodušený daňový doklad, jen plátce DPH, viz [§ 15.3.3](15_Faktura_editor.md#1533-uctenka-z-telefonu-zjednoduseny-danovy-doklad)), **Nová zakázka** a **Nový klient**, pod nimi jsou všechny položky sekce Prodej.
+- **Nákup** nabízí **Vyfotit doklad**: otevře fotoaparát, fotku nechá oříznout a rovnou ji pošle k AI vytěžení přijaté faktury. Dále **Nahrát doklad**, **Přijatá faktura** a **Nový dodavatel**.
+- **Peníze** ukazuje stav bankovních účtů podle posledního výpisu nebo avíza a zůstatky pokladen, dlaždice **Příjem do pokladny**, **Výdej z pokladny**, **Kdo mi dluží** a **Co zaplatit** (neuhrazené vydané a přijaté faktury).
+- **Menu** otevře úplné menu se všemi sekcemi (Daně, Účetnictví, Nástroje, Mzdy, Firma, Systém...). Sekce jsou sbalené, otevřená je ta, ve které právě jste. Dole je jazyk, motiv, oblíbené, okna a odhlášení.
+
+Každá dlaždice se zobrazí jen tomu, kdo má k akci oprávnění, stejně jako v menu. V hlavičce vpravo je hledání (v menu, klientech a dokladech) a tlačítko **+** s rychlým zakládáním. Přepínač firmy pod hlavičkou využívá celou dostupnou šířku.
 
 Na menší obrazovce lze tlačítkem **Menu vlevo** ve spodní liště nahradit hamburger kompaktním levým pruhem. Volba je dostupná, pokud pruh a rozbalené menu společně zaberou nejvýše 90 % šířky obrazovky (při běžné velikosti textu je to šířka alespoň 400 px). Barevné ikony a názvy sekcí zůstávají viditelné, klepnutí otevře položky vedle pruhu. Tlačítkem **Hamburger** se vrátíte k hamburgeru. Volba se ukládá v prohlížeči. Dokud pro menší obrazovku nevyberete jiný režim, přebírá se kompaktní menu z desktopového nastavení. Při dalším zúžení se dočasně zobrazí hamburger, po rozšíření se kompaktní menu vrátí.
 

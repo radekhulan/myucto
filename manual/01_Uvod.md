@@ -65,6 +65,11 @@ Datum zadáváte ve formátu jazyka aplikace: česky `d. m. rrrr` (`1. 9. 2026`,
 
 **Jak poznáte, že je hotovo:** aplikace se spouští ve vlastním okně s ikonou MyÚčto.
 
+Nainstalovaná aplikace se na telefonu otevírá přes celou obrazovku, bez adresního
+řádku prohlížeče. Kde systém celou obrazovku nepodporuje (například iPhone), běží jako
+samostatná aplikace a tmavá hlavička sahá až pod stavový řádek. Ovládání na telefonu
+popisuje [§ 10.10.8](10_Prehled.md#10108-navigace-a-rozlozeni-menu).
+
 ### 1.3.3 Široké tabulky
 
 Pokud se tabulka nevejde do šířky okna nebo pracovního panelu, můžete ji posouvat
