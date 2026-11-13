@@ -83,7 +83,7 @@ async function onOverwrite() {
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M5 5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-7-4-7 4V5z" />
       </svg>
-      <span class="max-md:sr-only">{{ t('common.saved_filters') }}</span>
+      <span class="max-md:hidden">{{ t('common.saved_filters') }}</span><span class="hidden max-md:inline">{{ t('common.saved_filters_short') }}</span>
       <span
         v-if="activeFilter"
         class="max-w-28 truncate inline-flex items-center px-1.5 h-5 rounded bg-primary-100 text-primary-700 text-xs font-medium"

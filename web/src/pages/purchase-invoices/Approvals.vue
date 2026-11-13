@@ -182,13 +182,13 @@ async function confirmReject(): Promise<void> {
       <div v-if="isAccountant" class="flex flex-wrap gap-2 pb-2 max-md:flex-nowrap max-md:shrink-0 max-md:gap-1 max-md:pb-1" role="group" data-test="approvals-scope">
         <button v-for="key in (['mine', 'all'] as const)" :key="key" type="button"
                 :class="scope === key ? btnFilledSm('primary') : btnOutlineSm('neutral')"
-                class="max-md:h-10 max-md:w-10 max-md:justify-center max-md:px-0"
+                class="max-md:h-10 max-md:px-2.5"
                 :aria-pressed="scope === key"
                 :title="t(`purchase_approval.scope.${key}`)"
                 :data-test="`approvals-scope-${key}`"
                 @click="scope = key">
           <svg class="w-3.5 h-3.5 max-md:w-4 max-md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="key === 'mine' ? ICONS.user : ICONS.table" /></svg>
-          <span class="max-md:sr-only">{{ t(`purchase_approval.scope.${key}`) }}</span>
+          <span>{{ t(`purchase_approval.scope.${key}`) }}</span>
         </button>
       </div>
     </div>

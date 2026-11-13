@@ -2218,7 +2218,16 @@
       "all_in_section": "Everything in this section",
       "money_bank_total": "Total in bank accounts",
       "money_more": "More accounts ({n})",
-      "log_trip": "Log a trip"
+      "log_trip": "Log a trip",
+      "issue_invoice_hint": "Tax document for a client",
+      "new_project_hint": "Work for a client",
+      "new_client_hint": "Customer, details from ARES",
+      "upload_document_hint": "PDF or photo from gallery",
+      "purchase_hint": "Enter the document manually",
+      "new_vendor_hint": "Vendor, details from ARES",
+      "cash_in_hint": "Cash receipt document",
+      "cash_out_hint": "Cash payment document",
+      "log_trip_hint": "Logbook"
     }
   },
   "migration_nonprofit_notice": {
@@ -24696,7 +24705,10 @@
       "out_of_range_min": "The date must not be before {min}.",
       "out_of_range_max": "The date must not be after {max}."
     },
-    "bulk_actions": "Actions"
+    "bulk_actions": "Actions",
+    "saved_filters_short": "Saved",
+    "item_colors_short": "Colours",
+    "book_short": "Book"
   },
   "markdown_editor": {
     "bold": "Bold",
@@ -25794,7 +25806,8 @@
       "thanks_confirm": "Also send the client a thank-you for the payment?",
       "mark_paid_done": "Document {number} is marked as paid.",
       "mark_paid_failed": "Could not mark the document as paid."
-    }
+    },
+    "view_continuous_short": "Continuous"
   },
   "status": {
     "draft": "Draft",

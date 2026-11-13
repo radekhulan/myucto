@@ -1583,7 +1583,7 @@ useWindowRefresh(refreshLoadedPages,
         <SavedFiltersMenu :ctrl="saved" />
         <button type="button" :class="btnOutline('neutral')" :title="groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly')" @click="toggleGrouping">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
-          <span class="max-md:sr-only">{{ groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly') }}</span>
+          <span class="max-md:hidden">{{ groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly') }}</span><span class="hidden max-md:inline">{{ groupByMonth ? t('invoice.view_continuous_short') : t('invoice.view_monthly') }}</span>
         </button>
         <ColumnPicker :ctrl="tbl" :presets="COLUMN_PRESETS" reorderable />
         <TableColorsMenu :ctrl="tbl" :colors="colors" />

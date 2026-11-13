@@ -70,6 +70,12 @@ describe('mobilní rám aplikace', () => {
     expect(main.indexOf('installPhoneViewport()')).toBeLessThan(main.indexOf('parseWindowFrameBootstrap(window.location.search'))
   })
 
+  it('každá dlaždice nabídky má popisek i podtitulek, ať mají jednotný vzhled', () => {
+    const tiles = [...appLayout.matchAll(/actions\.push\(\{ key: '(\w+)'[^\n]*/g)]
+    expect(tiles.length).toBeGreaterThan(10)
+    for (const tile of tiles) expect(tile[0], tile[1]).toContain('hint:')
+  })
+
   it('všechny texty mobilního rámu jsou v obou jazycích', () => {
     const keys = Object.keys(cs.nav.mobile)
     expect(keys.length).toBeGreaterThan(10)

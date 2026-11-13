@@ -2218,7 +2218,16 @@
       "all_in_section": "Vše v sekci",
       "money_bank_total": "Na bankovních účtech celkem",
       "money_more": "Další účty ({n})",
-      "log_trip": "Zapsat jízdu"
+      "log_trip": "Zapsat jízdu",
+      "issue_invoice_hint": "Daňový doklad klientovi",
+      "new_project_hint": "Práce pro klienta",
+      "new_client_hint": "Odběratel, údaje z ARES",
+      "upload_document_hint": "PDF nebo foto z galerie",
+      "purchase_hint": "Zadat doklad ručně",
+      "new_vendor_hint": "Dodavatel, údaje z ARES",
+      "cash_in_hint": "Příjmový pokladní doklad",
+      "cash_out_hint": "Výdajový pokladní doklad",
+      "log_trip_hint": "Kniha jízd"
     }
   },
   "migration_nonprofit_notice": {
@@ -24696,7 +24705,10 @@
       "out_of_range_min": "Datum nesmí být před {min}.",
       "out_of_range_max": "Datum nesmí být po {max}."
     },
-    "bulk_actions": "Akce"
+    "bulk_actions": "Akce",
+    "saved_filters_short": "Uložené",
+    "item_colors_short": "Barvy",
+    "book_short": "Kniha"
   },
   "markdown_editor": {
     "bold": "Tučně",
@@ -25794,7 +25806,8 @@
       "thanks_confirm": "Odeslat klientovi i poděkování za úhradu?",
       "mark_paid_done": "Doklad {number} je označený jako zaplacený.",
       "mark_paid_failed": "Doklad se nepodařilo označit jako zaplacený."
-    }
+    },
+    "view_continuous_short": "Souvislý"
   },
   "status": {
     "draft": "Koncept",

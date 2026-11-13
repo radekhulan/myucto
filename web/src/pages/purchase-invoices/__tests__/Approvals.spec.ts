@@ -122,14 +122,15 @@ describe('Approvals.vue', () => {
     expect(wrapper.find('[data-test="approval-reject-dialog"]').exists()).toBe(true)
   })
 
-  it('filtry drží na telefonu v jednom řádku, přepínač rozsahu jako ikony', async () => {
+  it('filtry drží na telefonu v jednom řádku, přepínač rozsahu s ikonou i popiskem', async () => {
     m.accountant = true
     const wrapper = mount(Approvals, { global: { stubs } })
     await flushPromises()
     expect(wrapper.get('[data-test="approvals-filters"]').classes()).toContain('max-md:flex-nowrap')
     const all = wrapper.get('[data-test="approvals-scope-all"]')
-    expect(all.classes()).toEqual(expect.arrayContaining(['max-md:h-10', 'max-md:w-10']))
+    expect(all.classes()).toContain('max-md:h-10')
     expect(all.attributes('title')).toBe('purchase_approval.scope.all')
-    expect(all.get('span').classes()).toContain('max-md:sr-only')
+    expect(all.get('span').classes()).not.toContain('max-md:sr-only')
+    expect(all.get('span').text()).toBe('purchase_approval.scope.all')
   })
 })

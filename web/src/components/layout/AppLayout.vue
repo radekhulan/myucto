@@ -1763,33 +1763,33 @@ const mobileSheetActions = computed<SheetAction[]>(() => {
   const actions: SheetAction[] = []
   if (key === 'sales') {
     if (can('/invoices/new')) {
-      actions.push({ key: 'invoice', to: '/invoices/new', label: t('nav.mobile.issue_invoice'), icon: ICONS.invoices })
+      actions.push({ key: 'invoice', to: '/invoices/new', label: t('nav.mobile.issue_invoice'), hint: t('nav.mobile.issue_invoice_hint'), icon: ICONS.invoices })
       if (supplierStore.currentSupplier?.is_vat_payer !== false && !clientExperience.value) {
         actions.push({ key: 'receipt', to: '/invoices/new?simplified=1', label: t('nav.mobile.receipt'), hint: t('nav.mobile.receipt_hint'), icon: MOBILE_ICONS.receipt })
       }
     }
     if (!clientExperience.value && auth.canWrite('projects.create')) {
-      actions.push({ key: 'project', to: '/projects/new', label: t('nav.mobile.new_project'), icon: ICONS.projects })
+      actions.push({ key: 'project', to: '/projects/new', label: t('nav.mobile.new_project'), hint: t('nav.mobile.new_project_hint'), icon: ICONS.projects })
     }
     if (can('/clients/new')) {
-      actions.push({ key: 'client', to: '/clients/new', label: t('nav.mobile.new_client'), icon: ICONS.clients })
+      actions.push({ key: 'client', to: '/clients/new', label: t('nav.mobile.new_client'), hint: t('nav.mobile.new_client_hint'), icon: ICONS.clients })
     }
   } else if (key === 'purchase') {
     if (canExtractPurchase.value) {
       actions.push({ key: 'capture', capture: true, label: t('nav.mobile.capture_document'), hint: t('nav.mobile.capture_document_hint'), icon: MOBILE_ICONS.camera })
-      actions.push({ key: 'ai_upload', to: '/purchase-invoices/ai-import', label: t('nav.mobile.upload_document'), hint: t('nav.ai_import'), icon: ICONS.imports })
+      actions.push({ key: 'ai_upload', to: '/purchase-invoices/ai-import', label: t('nav.mobile.upload_document'), hint: t('nav.mobile.upload_document_hint'), icon: ICONS.imports })
     }
     if (can('/purchase-invoices/new')) {
-      actions.push({ key: 'purchase', to: '/purchase-invoices/new', label: t('nav.quick_purchase'), icon: ICONS.purchase })
+      actions.push({ key: 'purchase', to: '/purchase-invoices/new', label: t('nav.quick_purchase'), hint: t('nav.mobile.purchase_hint'), icon: ICONS.purchase })
     }
     if (can('/clients/new?role=vendor')) {
-      actions.push({ key: 'vendor', to: '/clients/new?role=vendor', label: t('nav.mobile.new_vendor'), icon: ICONS.suppliers })
+      actions.push({ key: 'vendor', to: '/clients/new?role=vendor', label: t('nav.mobile.new_vendor'), hint: t('nav.mobile.new_vendor_hint'), icon: ICONS.suppliers })
     }
   } else {
     const items = mobileSection('bank_cash')?.items ?? []
     if (items.some(item => item.to === '/accounting/cash') && can('/accounting/cash/new')) {
-      actions.push({ key: 'cash_in', to: '/accounting/cash/new?doc_type=in', label: t('nav.mobile.cash_in'), icon: MOBILE_ICONS.cashIn })
-      actions.push({ key: 'cash_out', to: '/accounting/cash/new?doc_type=out', label: t('nav.mobile.cash_out'), icon: MOBILE_ICONS.cashOut })
+      actions.push({ key: 'cash_in', to: '/accounting/cash/new?doc_type=in', label: t('nav.mobile.cash_in'), hint: t('nav.mobile.cash_in_hint'), icon: MOBILE_ICONS.cashIn })
+      actions.push({ key: 'cash_out', to: '/accounting/cash/new?doc_type=out', label: t('nav.mobile.cash_out'), hint: t('nav.mobile.cash_out_hint'), icon: MOBILE_ICONS.cashOut })
     }
     if (!clientExperience.value && auth.canRead('invoices')) {
       actions.push({ key: 'receivables', to: '/invoices?unpaid=1', label: t('nav.mobile.receivables'), hint: t('nav.mobile.receivables_hint'), icon: ICONS.invoices })
@@ -1800,7 +1800,7 @@ const mobileSheetActions = computed<SheetAction[]>(() => {
     // Kniha jízd je v sekci Dokumenty: zápis jízdy z auta je typicky telefonní úkon.
     const logbook = mobileSection('documents')?.items.find(item => item.to === '/logbook')
     if (logbook && canCreate(logbook)) {
-      actions.push({ key: 'trip', to: createTarget(logbook), label: t('nav.mobile.log_trip'), icon: ICONS.logbook })
+      actions.push({ key: 'trip', to: createTarget(logbook), label: t('nav.mobile.log_trip'), hint: t('nav.mobile.log_trip_hint'), icon: ICONS.logbook })
     }
   }
   return actions
