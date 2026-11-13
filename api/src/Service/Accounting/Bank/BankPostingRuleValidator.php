@@ -54,9 +54,13 @@ final class BankPostingRuleValidator
         $fragment = self::nn($body['message_contains'] ?? null, static fn (string $v): string => BankMessageNormalizer::normalize($v));
         $bank = self::nn($body['counterparty_bank'] ?? null);
         $prefix = self::nn($body['counterparty_prefix'] ?? null, static fn (string $v): string => ltrim(preg_replace('/\D/', '', $v) ?? '', '0'));
-        if ($account === null && $bank === null && $prefix === null && $vs === null && $fragment === null) {
-            throw self::err('rule_criteria_missing', 'Pravidlo musí mít alespoň jedno kritérium.');
-        }
+        $card = self::cardPayment($body['card_payment'] ?? null);
+        $skipMatching = self::skipDocumentMatching($body['skip_document_matching'] ?? false);
+        self::assertMatchingConditions([
+            'counterparty_account' => $account, 'counterparty_bank' => $bank, 'counterparty_prefix' => $prefix,
+            'variable_symbol' => $vs, 'message_contains' => $fragment, 'card_payment' => $card,
+            'skip_document_matching' => $skipMatching,
+        ]);
 
         $priority = (int) ($body['priority'] ?? 100);
         if ($priority < 0 || $priority > 999) {
@@ -89,7 +93,55 @@ final class BankPostingRuleValidator
             'auto_amount_cap'      => self::amount($body['auto_amount_cap'] ?? null),
             'applies_currency'     => $currency,
             'other_item_id'        => $otherItemId,
+            'skip_document_matching' => $skipMatching,
+            'card_payment'         => $card,
         ];
+    }
+
+    /**
+     * Kritéria shody pravidla po normalizaci (nové pravidlo i výsledný stav po úpravě):
+     * aspoň jedno kritérium, kterým pravidlo pohyb pozná, a přednost před párováním
+     * s doklady jen u pravidla s účtem protistrany i bankou. Bez účtu by pravidlo
+     * vyřadilo z párování platby všech odběratelů a dodavatelů se shodným textem či VS.
+     *
+     * @param array<string,mixed> $rule
+     */
+    public static function assertMatchingConditions(array $rule): void
+    {
+        $filled = static fn (string $key): bool => self::nn($rule[$key] ?? null) !== null;
+        if (!$filled('counterparty_account') && !$filled('counterparty_bank') && !$filled('counterparty_prefix')
+            && !$filled('variable_symbol') && !$filled('message_contains')
+            && (int) ($rule['card_payment'] ?? -1) !== 1) {
+            throw self::err('rule_criteria_missing', 'Pravidlo musí mít alespoň jedno kritérium.');
+        }
+        if ((int) ($rule['skip_document_matching'] ?? 0) === 1
+            && (!$filled('counterparty_account') || !$filled('counterparty_bank'))) {
+            throw self::err(
+                'rule_skip_matching_requires_account',
+                'Přednost před párováním s doklady lze zapnout jen u pravidla s účtem protistrany a kódem banky.',
+            );
+        }
+    }
+
+    /** Podmínka platby kartou: null = jakýkoli pohyb, 1 = jen kartou, 0 = jen bez karty. */
+    public static function cardPayment(mixed $raw): ?int
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if ($raw === true || $raw === 1 || $raw === '1') {
+            return 1;
+        }
+        if ($raw === false || $raw === 0 || $raw === '0') {
+            return 0;
+        }
+        throw self::err('invalid_card_payment', 'Podmínka platby kartou musí být prázdná, 1 (jen kartou) nebo 0 (bez karty).');
+    }
+
+    /** Přednost pravidla před automatickým párováním s doklady (0/1). */
+    public static function skipDocumentMatching(mixed $raw): int
+    {
+        return filter_var($raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) === true ? 1 : 0;
     }
 
     /**

@@ -751,6 +751,7 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Bank\MatchedInvoicePaymentRepair::class),
                 $c->get(\MyInvoice\Service\Accounting\Bank\TransferPairService::class),
                 $c->get(\MyInvoice\Service\Accounting\OtherItemAutoMatcher::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\DocumentMatchingRulePrecedence::class),
             ),
             // ?ActivityLogger je optional class-param, autowire ho nevyplní; bez něj by
             // automatické přiřazení úhrady chybělo v aktivitě položky.

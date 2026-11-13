@@ -91,6 +91,9 @@ final class StatementMatcher
         // Ostatní pohledávky a závazky se zkouší až po fakturách, jen u firmy se zapnutým
         // automatickým párováním. Nullable kvůli izolovaným konstrukcím v testech.
         private readonly ?\MyInvoice\Service\Accounting\OtherItemAutoMatcher $otherItems = null,
+        // Pravidlo účtování s předností před párováním si pohyb vezme dřív, než by se
+        // spároval s dokladem. Nullable kvůli izolovaným konstrukcím v testech.
+        private readonly ?\MyInvoice\Service\Accounting\Bank\DocumentMatchingRulePrecedence $rulePrecedence = null,
     ) {}
 
     /**
@@ -328,6 +331,18 @@ final class StatementMatcher
             array_map('intval', $transactionIds),
             static fn (int $id): bool => $id > 0,
         )));
+        // Pravidla s předností před párováním se načtou jednou za dávku, ne za každý pohyb.
+        return $this->rulePrecedence === null
+            ? $this->matchBatchIds($ids)
+            : $this->rulePrecedence->withinBatch(fn (): array => $this->matchBatchIds($ids));
+    }
+
+    /**
+     * @param list<int> $ids
+     * @return array<int,array<string,mixed>>
+     */
+    private function matchBatchIds(array $ids): array
+    {
         $results = [];
         foreach ($ids as $transactionId) {
             $results[$transactionId] = $this->doMatch($transactionId, false);
@@ -727,6 +742,13 @@ final class StatementMatcher
         // by odchozí noha bez VS šla do párování podle částky a data na přijatou fakturu.
         if ($this->ownTransfers?->pairIfCertain($supplierId, $transactionId) !== null) {
             return ['status' => 'unmatched', 'reason' => 'own_transfer_matched'];
+        }
+
+        // Pravidlo účtování s předností (faktoring, inkasní agentura, leasing s VS naší
+        // faktury): pohyb se s doklady automaticky nepáruje a zaúčtuje ho pravidlo. Důvod
+        // není mezi důvody návrhů párování ani automatiky ostatních položek.
+        if ($this->rulePrecedence?->skipsDocumentMatching($supplierId, $row) === true) {
+            return ['status' => 'unmatched', 'reason' => \MyInvoice\Service\Accounting\Bank\DocumentMatchingRulePrecedence::REASON];
         }
 
         // ── Outgoing → purchase_invoice (přijaté faktury) ────────────────

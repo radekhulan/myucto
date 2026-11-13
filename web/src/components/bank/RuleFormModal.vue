@@ -51,6 +51,7 @@ function emptyPayload(): BankPostingRulePayload {
     debit_account_code: '', credit_account_code: '',
     description: null, mode: 'suggest',
     bank_account_id: null, dimensions: {}, other_item_id: null,
+    skip_document_matching: false, card_payment: null,
   }
 }
 
@@ -72,6 +73,7 @@ function toPayload(r: BankPostingRule): BankPostingRulePayload {
     description: r.description, mode: r.mode,
     bank_account_id: r.bank_account_id ?? null, dimensions: { ...(r.dimensions ?? {}) },
     other_item_id: r.other_item_id ?? null,
+    skip_document_matching: !!r.skip_document_matching, card_payment: r.card_payment ?? null,
   }
 }
 

@@ -5093,19 +5093,11 @@ final class BankPostingService
 
     /**
      * @param array<string,mixed> $tx
-     * @return array{amount:float, variable_symbol:?string, counterparty_account:?string,
-     *   counterparty_bank:?string, description:?string}
+     * @return array<string,mixed>
      */
     private function matchTxArray(int $supplierId, array $tx): array
     {
-        return (new StatementOwnAccount($this->db))->withOwnAccount($supplierId, [
-            'amount'               => (float) $tx['amount'],
-            'variable_symbol'      => $tx['variable_symbol'] !== null ? (string) $tx['variable_symbol'] : null,
-            'counterparty_account' => $tx['counterparty_account'] !== null ? (string) $tx['counterparty_account'] : null,
-            'counterparty_bank'    => $tx['counterparty_bank'] !== null ? (string) $tx['counterparty_bank'] : null,
-            'description'          => $tx['description'] !== null ? (string) $tx['description'] : null,
-            'counterparty_name'    => ($tx['counterparty_name'] ?? null) !== null ? (string) $tx['counterparty_name'] : null,
-        ], $tx);
+        return (new StatementOwnAccount($this->db))->withOwnAccount($supplierId, BankRuleMatcher::txFields($tx), $tx);
     }
 
     // ── data access ─────────────────────────────────────────────────────────────

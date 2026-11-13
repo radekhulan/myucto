@@ -49723,8 +49723,9 @@ components:
       description: |
         Kromě povinných polí musí být vyplněné **aspoň jedno kritérium**, podle kterého
         pravidlo pohyb pozná: `counterparty_account`, `counterparty_bank`,
-        `counterparty_prefix`, `variable_symbol` nebo `message_contains`. Pravidlo bez
-        kritéria by sedělo na všechno — server ho odmítne `422 rule_criteria_missing`.
+        `counterparty_prefix`, `variable_symbol`, `message_contains` nebo `card_payment: 1`.
+        Pravidlo bez kritéria by sedělo na všechno — server ho odmítne `422 rule_criteria_missing`
+        (také při úpravě, která by poslední kritérium odebrala).
       properties:
         name: { type: string }
         direction: { type: string, enum: [incoming, outgoing] }
@@ -49771,6 +49772,21 @@ components:
             Automatické pravidlo pohyb zaúčtuje a přiřadí jedním krokem; když položku uhradit nejde
             (uhrazená, stornovaná, přeplatek), vznikne návrh s poznámkou `other_item_unavailable`.
             Schválení návrhu takového pravidla úhradu přiřadí také. NULL = pravidlo jen zaúčtuje.
+        card_payment:
+          type: [integer, "null"]
+          enum: [0, 1, null]
+          description: |
+            Podmínka platby kartou: `1` = jen pohyby s koncovkou karty z výpisu, `0` = jen pohyby
+            bez karty, NULL = jakýkoli pohyb. Hodnota `1` stačí jako jediné kritérium pravidla.
+            Jiná hodnota vrací `422 invalid_card_payment`.
+        skip_document_matching:
+          type: boolean
+          description: |
+            Přednost pravidla před automatickým párováním s doklady. Pohyb, na který pravidlo sedí,
+            se automaticky nespáruje s vystavenou ani přijatou fakturou (ani podle VS), s ostatní
+            položkou ani se nenavrhne ke spárování; zaúčtuje ho pravidlo podle svého režimu.
+            Ruční spárování zůstává možné. Dovolené jen u pravidla s `counterparty_account`
+            i `counterparty_bank`, jinak `422 rule_skip_matching_requires_account`. Výchozí `false`.
         backfill_suggestions: { type: boolean }
 
     BankPostingRule:

@@ -383,7 +383,7 @@ final class AutomationFeedService
         $stmt = $this->db->pdo()->prepare(
             "SELECT bps.*, bt.posted_at tx_date, DATE(bps.created_at) decision_date,
                     bt.currency tx_currency, bt.description tx_description,
-                    bt.statement_id, bt.amount signed_amount, bt.counterparty_name, bt.counterparty_account, bt.counterparty_bank, bt.variable_symbol,
+                    bt.statement_id, bt.amount signed_amount, bt.counterparty_name, bt.counterparty_account, bt.counterparty_bank, bt.variable_symbol, bt.card_last4,
                     bs.account_number recipient_account, bs.bank_code recipient_bank,
                     COALESCE(NULLIF(s.display_name,''),s.company_name) supplier_name,
                     r.name rule_name, r.hit_count rule_hit_count, r.approved_streak rule_approved_streak, je.document_no,

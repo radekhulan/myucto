@@ -375,6 +375,7 @@ final class CompanyProfileExporter
             'SELECT r.id, r.name, r.direction, r.counterparty_account, r.counterparty_bank, r.counterparty_prefix, r.variable_symbol,
                     r.message_contains, r.amount_min, r.amount_max, r.applies_currency, r.debit_account_code, r.credit_account_code,
                     r.description, r.priority, r.operation_type, r.auto_amount_cap, r.system_template_key, r.mode, r.is_active,
+                    r.card_payment, r.skip_document_matching,
                     sba.account_canonical AS own_account, sba.bank_code_norm AS own_bank_code
                FROM bank_posting_rules r
           LEFT JOIN supplier_bank_accounts sba ON sba.id = r.bank_account_id AND sba.supplier_id = r.supplier_id
@@ -402,6 +403,8 @@ final class CompanyProfileExporter
             }
             $r['priority'] = (int) $r['priority'];
             $r['is_active'] = (bool) $r['is_active'];
+            $r['card_payment'] = $r['card_payment'] === null ? null : (int) $r['card_payment'];
+            $r['skip_document_matching'] = (bool) $r['skip_document_matching'];
             $r['bank_account'] = $r['own_account'] === null ? null : ['account' => (string) $r['own_account'], 'bank_code' => (string) $r['own_bank_code']];
             $r['dimensions'] = $byRule[(int) $r['id']] ?? [];
             unset($r['id'], $r['own_account'], $r['own_bank_code']);

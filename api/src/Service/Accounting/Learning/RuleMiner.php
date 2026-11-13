@@ -33,7 +33,7 @@ final class RuleMiner
         $stmt = $this->db->pdo()->prepare(
             "SELECT c.supplier_id, c.entity_id AS tx_id, c.final_debit, c.final_credit,
                     bt.amount, bt.counterparty_account, bt.counterparty_bank, bt.counterparty_name,
-                    bt.variable_symbol, bt.description, bs.account_number AS recipient_account, bs.bank_code AS recipient_bank
+                    bt.variable_symbol, bt.description, bt.card_last4, bs.account_number AS recipient_account, bs.bank_code AS recipient_bank
                FROM accounting_corrections c
                JOIN bank_transactions bt ON bt.id=c.entity_id
                JOIN bank_statements bs ON bs.id=bt.statement_id
@@ -208,7 +208,7 @@ final class RuleMiner
         return [
             'amount' => (float) $row['amount'], 'variable_symbol' => $row['variable_symbol'],
             'counterparty_account' => $row['counterparty_account'], 'counterparty_bank' => $row['counterparty_bank'],
-            'description' => $row['description'],
+            'description' => $row['description'], 'card_last4' => $row['card_last4'] ?? null,
         ];
     }
 
