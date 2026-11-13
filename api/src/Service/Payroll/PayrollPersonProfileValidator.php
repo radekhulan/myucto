@@ -516,11 +516,15 @@ final class PayrollPersonProfileValidator
             $city = $addressPresent
                 ? $this->text($row['city'], "addresses.{$index}.city", 128)
                 : null;
-            $postalCode = $addressPresent
-                ? $this->text($row['postal_code'], "addresses.{$index}.postal_code", 24)
-                : null;
             $countryCode = $addressPresent
                 ? $this->countryCode($row['country_code'], "addresses.{$index}.country_code")
+                : null;
+            // Zahraniční adresa nemusí PSČ mít (např. ukrajinská adresa převzatá bez PSČ);
+            // česká ano. Podání ČSSZ, které PSČ vyžaduje, ho chybějící ohlásí samo.
+            $postalCode = $addressPresent
+                ? ($countryCode !== 'CZ' && is_string($row['postal_code']) && trim($row['postal_code']) === ''
+                    ? ''
+                    : $this->text($row['postal_code'], "addresses.{$index}.postal_code", 24))
                 : null;
             foreach ([$street, $city, $postalCode] as $addressPart) {
                 if ($addressPart !== null) {
