@@ -1264,14 +1264,14 @@ useWindowRefresh(refreshLoadedPages,
       <div>
         <h1 class="text-2xl font-semibold">{{ t('invoice.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">
-          {{ t('invoice.subtitle_grouping') }}
+          <span class="max-md:hidden">{{ t('invoice.subtitle_grouping') }}</span>
           <template v-if="!loading && total > 0">
-            <span class="ml-2 whitespace-nowrap">· {{ groupByMonth ? t('invoice.summary_count', { n: total, m: groups.length }) : t('invoice.summary_continuous', { n: total }) }}</span>
+            <span class="md:ml-2 whitespace-nowrap"><span class="max-md:hidden">· </span>{{ groupByMonth ? t('invoice.summary_count', { n: total, m: groups.length }) : t('invoice.summary_continuous', { n: total }) }}</span>
             <span v-if="total > loadedCount" class="ml-2 whitespace-nowrap">· {{ t('common.loaded_count', { loaded: loadedCount, total }) }}</span>
           </template>
         </p>
       </div>
-      <div class="flex items-center gap-2 flex-wrap justify-end">
+      <div class="flex items-center gap-2 flex-wrap justify-end max-md:w-full">
         <template v-if="clientFilter !== '' && !auth.isClientRole && auth.canRead('clients')">
           <RouterLink :to="{ name: 'client-detail', params: { id: clientFilter } }" :class="btnOutline('neutral')" data-test="filter-client-detail">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
@@ -1287,11 +1287,12 @@ useWindowRefresh(refreshLoadedPages,
           :label="t('invoice.book_issued')"
           :url-for="invoiceBookUrl"
           fallback-filename="kniha-vystavenych-faktur"
+          class="max-md:-order-1"
         />
         <RouterLink
           v-if="auth.canWrite('invoices.create') || auth.isDemo"
           to="/invoices/new"
-          :class="btnFilled('primary')"
+          :class="[btnFilled('primary'), 'max-md:order-first max-md:flex-1 max-md:justify-center max-md:h-10']"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('invoice.new') }}
@@ -1409,7 +1410,7 @@ useWindowRefresh(refreshLoadedPages,
       <template #primary>
         <!-- Hledání je nejpoužívanější prvek lišty, takže dostává nejvíc místa
              a ikonu lupy uvnitř — dřív bylo nejmenší z deseti ovládacích prvků. -->
-        <div class="relative flex-1 min-w-56">
+        <div class="relative flex-1 min-w-56 max-md:min-w-0 max-md:basis-full">
           <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400"
             fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
@@ -1418,7 +1419,7 @@ useWindowRefresh(refreshLoadedPages,
             v-model="search"
             type="search"
             :placeholder="t('invoice.search_placeholder')"
-            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+            class="w-full h-9 pl-9 pr-3 border border-neutral-300 rounded-md text-sm max-md:h-10 max-md:text-base focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
           />
         </div>
       </template>
@@ -1523,9 +1524,9 @@ useWindowRefresh(refreshLoadedPages,
         </select>
       <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
-        <button type="button" :class="btnOutline('neutral')" @click="toggleGrouping">
+        <button type="button" :class="btnOutline('neutral')" :title="groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly')" @click="toggleGrouping">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
-          {{ groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly') }}
+          <span class="max-md:sr-only">{{ groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly') }}</span>
         </button>
         <ColumnPicker :ctrl="tbl" :presets="COLUMN_PRESETS" reorderable />
         <TableColorsMenu :ctrl="tbl" :colors="colors" />

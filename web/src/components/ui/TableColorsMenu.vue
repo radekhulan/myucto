@@ -39,11 +39,11 @@ function changeColor(key: string, event: Event) {
 
 <template>
   <div ref="root" class="relative" @keydown.esc.stop="open = false">
-    <button type="button" :aria-expanded="open" :disabled="!ctrl.ready.value" @click="toggleOpen"
+    <button type="button" :aria-expanded="open" :disabled="!ctrl.ready.value" :title="t('common.item_colors')" @click="toggleOpen"
       class="cursor-pointer shrink-0 whitespace-nowrap h-9 px-2.5 inline-flex items-center gap-1.5 rounded-md border border-neutral-300 bg-surface text-sm text-neutral-700 hover:bg-neutral-50 transition-colors disabled:opacity-50">
       <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3a9 9 0 1 0 0 18h1.5a2.5 2.5 0 0 0 1.8-4.2 1.5 1.5 0 0 1 1.1-2.6H18a3 3 0 0 0 3-3A8.2 8.2 0 0 0 12 3Z"/><circle cx="7.5" cy="10" r=".7"/><circle cx="11" cy="7" r=".7"/><circle cx="15.5" cy="8.5" r=".7"/></svg>
-      {{ t('common.item_colors') }}
-      <svg class="w-3 h-3" :class="open ? 'rotate-180' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+      <span class="max-md:sr-only">{{ t('common.item_colors') }}</span>
+      <svg class="w-3 h-3 max-md:hidden" :class="open ? 'rotate-180' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
     </button>
     <div v-if="open" ref="popup" :style="menuStyle" class="absolute right-0 mt-1 w-80 max-w-[calc(100vw-1rem)] max-h-[min(70vh,32rem)] flex flex-col rounded-lg border border-neutral-200 bg-surface shadow-lg z-40">
       <p class="px-3 py-2 text-xs text-neutral-500 border-b border-neutral-100">{{ t('common.item_colors_hint') }}</p>

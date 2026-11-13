@@ -348,15 +348,15 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
         </button>
       </div>
 
-      <div class="px-4 py-3 border-b border-neutral-200 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+      <div class="px-4 py-3 border-b border-neutral-200 flex flex-row flex-wrap items-center gap-3">
         <input
           v-model="search"
           type="search"
           :placeholder="t('common.search')"
-          class="flex-1 h-9 px-3 border border-neutral-300 rounded-md text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+          class="flex-1 h-9 px-3 border border-neutral-300 rounded-md text-sm max-sm:basis-full max-sm:h-10 max-md:text-base focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
         />
-        <label class="flex items-center gap-2 text-sm text-neutral-700">
-          <input v-model="showArchived" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+        <label class="flex items-center gap-2 text-sm text-neutral-700 max-sm:order-last max-sm:basis-full max-sm:min-h-10">
+          <input v-model="showArchived" type="checkbox" class="rounded border-neutral-300 text-primary-600 max-sm:w-5 max-sm:h-5" />
           {{ t('client.show_archived') }}
         </label>
         <select v-if="roleFilter === 'vendors'" v-model.number="categoryFilter"
@@ -372,13 +372,13 @@ useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
           <option :value="0">{{ t('client.price_level_default') }}</option>
           <option v-for="l in priceLevels.filter(pl => pl.is_active || pl.id === priceLevelFilter)" :key="l.id" :value="l.id">{{ l.name }}</option>
         </select>
-        <select v-model="sort" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
+        <select v-model="sort" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface max-sm:flex-1 max-sm:min-w-0"
           :title="t('common.sort_by')">
           <option value="name">{{ t('common.sort_name') }}</option>
           <option value="revenue">{{ t('common.sort_revenue') }}</option>
           <option value="last_activity">{{ t('common.sort_last_activity') }}</option>
         </select>
-        <div class="flex flex-wrap items-center gap-2 sm:ml-auto">
+        <div class="flex flex-wrap items-center gap-2 ml-auto">
           <SavedFiltersMenu :ctrl="saved" />
           <ColumnPicker class="hidden md:block" :ctrl="tbl" />
           <DensityToggle class="hidden md:block" :ctrl="tbl" />

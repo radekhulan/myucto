@@ -37,7 +37,7 @@ async function download(format: BookFormat) {
     <button
       type="button"
       data-test="invoice-book-toggle"
-      :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+      :class="[btnOutline('neutral'), 'whitespace-nowrap max-md:h-10']"
       aria-haspopup="menu"
       :aria-expanded="open"
       :aria-busy="busy !== null"
@@ -47,8 +47,8 @@ async function download(format: BookFormat) {
     >
       <svg v-if="busy !== null" class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z" /></svg>
       <svg v-else class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.download" /></svg>
-      {{ label }}
-      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevron" /></svg>
+      <span class="max-md:sr-only">{{ label }}</span>
+      <svg class="h-3.5 w-3.5 max-md:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevron" /></svg>
     </button>
     <template v-if="open">
       <div class="fixed inset-0 z-[60]" aria-hidden="true" @click="open = false" />

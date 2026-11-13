@@ -15637,6 +15637,7 @@
   "cash": {
     "title": "Pokladna",
     "book_title": "Pokladní kniha",
+    "book_short": "Kniha",
     "new_document": "Nový pokladní doklad",
     "edit_document": "Úprava pokladního dokladu",
     "original": {

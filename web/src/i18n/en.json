@@ -15637,6 +15637,7 @@
   "cash": {
     "title": "Cash register",
     "book_title": "Cash book",
+    "book_short": "Book",
     "new_document": "New cash document",
     "edit_document": "Edit cash document",
     "original": {

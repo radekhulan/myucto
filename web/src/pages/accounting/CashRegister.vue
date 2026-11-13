@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useMediaQuery } from '@vueuse/core'
 import { RouterLink, useRoute } from 'vue-router'
 import { cashApi, type CashRegister, type CashDocument, type CashDocumentStatus } from '@/api/cash'
 import { cashErrorMessage, cashWarningMessage } from '@/api/cashErrors'
@@ -130,6 +131,16 @@ async function load() {
 }
 
 function applyFilters() { page.value = 1; load() }
+
+// Na telefonu je pět filtrů pod sebou přes půl obrazovky, proto jsou sbalené
+// za tlačítkem „Filtry"; odznáček počítá jen odchylky od výchozího stavu.
+const isPhone = useMediaQuery('(max-width: 47.99rem)')
+const filtersOpen = ref(false)
+const activeFilterCount = computed(() => {
+  const def = defaultRange()
+  return [filters.doc_type, filters.status, filters.q.trim()].filter(Boolean).length
+    + (filters.from !== def.from || filters.to !== def.to ? 1 : 0)
+})
 function resetFilters() {
   filters.register_id = ''
   filters.doc_type = ''
@@ -366,7 +377,8 @@ const headerActions = computed<ActionItem[]>(() => {
     },
     {
       key: 'book', tier: 'secondary', variant: 'neutral', icon: 'doc',
-      label: t('cash.book_title'), to: '/accounting/cash/book',
+      label: isPhone.value ? t('cash.book_short') : t('cash.book_title'),
+      title: t('cash.book_title'), to: '/accounting/cash/book',
     },
     {
       key: 'registers', tier: 'overflow', variant: 'neutral', icon: 'edit',
@@ -494,8 +506,8 @@ async function postDraft(d: CashDocument) {
       </div>
 
       <!-- Filtry -->
-      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4 max-md:flex max-md:flex-col">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 max-md:mt-3" :class="filtersOpen ? '' : 'max-md:hidden'" data-test="cash-filters">
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('cash.col.date_from') }}</label>
             <DateInput v-model="filters.from" @change="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
@@ -526,7 +538,20 @@ async function postDraft(d: CashDocument) {
             <input v-model="filters.q" type="text" @keyup.enter="applyFilters" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
           </div>
         </div>
-        <div class="flex flex-wrap items-center justify-end gap-2 mt-2">
+        <div class="flex flex-wrap items-center justify-end gap-2 mt-2 max-md:mt-0 max-md:order-first">
+          <button type="button" @click="filtersOpen = !filtersOpen" :aria-expanded="filtersOpen" data-test="cash-filters-toggle"
+            class="md:hidden mr-auto cursor-pointer h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm inline-flex items-center gap-1.5 text-neutral-700 hover:bg-neutral-50 transition-colors"
+            :class="filtersOpen ? 'bg-neutral-50 border-neutral-400' : ''">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 4h18M6 12h12M10 20h4" />
+            </svg>
+            {{ t('common.filters') }}
+            <span v-if="activeFilterCount"
+              class="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-primary-600 text-white text-xs font-medium tabular-nums">{{ activeFilterCount }}</span>
+            <svg class="w-3.5 h-3.5 transition-transform" :class="filtersOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
           <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.journal.reset_filters') }}</button>
           <SavedFiltersMenu :ctrl="saved" />
           <ColumnPicker class="hidden md:block" :ctrl="tbl" />
