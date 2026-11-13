@@ -22729,7 +22729,9 @@
       "invalid_pdf": "File must be a PDF or image (JPG/PNG/WEBP/HEIC).",
       "invalid_document": "File must be a PDF, image, ISDOC or ISDOCX.",
       "duplicate": "The same PDF is already archived under another invoice.",
-      "upload_error": "Upload failed: {error}"
+      "upload_error": "Upload failed: {error}",
+      "pick_file": "Choose file",
+      "open_fullscreen": "Document (PDF)"
     },
     "source": {
       "download": "Source document (ISDOC)",
@@ -23005,7 +23007,8 @@
       "import_batch_current": "Selected import",
       "import_batch_count": "{n} documents",
       "vendor_placeholder": "Select vendor",
-      "search_placeholder": "Search number / vendor…"
+      "search_placeholder": "Search number / vendor…",
+      "show_results": "Show ({count})"
     },
     "payment_ordered_badge": "In payment order",
     "payment_ordered_at_tooltip": "Added to a payment order on {date}",
@@ -23163,6 +23166,17 @@
       "kind_success": "Document type changed for {n} documents.",
       "set_project": "Assign to project ({n})",
       "project_success": "Project set for {n} documents."
+    },
+    "phone_summary": {
+      "details": "Document details",
+      "state": {
+        "paid": "Paid",
+        "partial": "Partially paid",
+        "overdue": "Overdue",
+        "unpaid": "Unpaid",
+        "draft": "Draft",
+        "cancelled": "Cancelled"
+      }
     }
   },
   "payment_order": {
@@ -23282,7 +23296,9 @@
       "manual": "entered manually",
       "vat_registry": "VAT registry",
       "bank_statement": "from statement"
-    }
+    },
+    "settings_title": "Order settings",
+    "download_order": "Download order"
   },
   "refundPayment": {
     "action": "Refund money",

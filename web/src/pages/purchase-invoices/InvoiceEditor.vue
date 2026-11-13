@@ -2,6 +2,7 @@
 import { useWindowTitle } from '@/composables/useWindowTitle'
 import { ref, reactive, computed, toRaw, onMounted, onBeforeUnmount, nextTick, watch, useId, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
+import { useIsPhone } from '@/composables/useIsPhone'
 // RouterLink se používá i v Add Currency modalu — import už pokrývá
 import { useI18n } from 'vue-i18n'
 import {
@@ -69,7 +70,7 @@ import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vu
 import PaymentCurrencyBlock from '@/components/purchase/PaymentCurrencyBlock.vue'
 import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formControl, formInput } from '@/components/ui/formStyles'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -421,6 +422,16 @@ const pdfInlineUrl = computed(() => invoiceId.value
 const pdfUploading = ref(false)
 const handoffUploading = ref(false)
 const dropzoneVisible = ref(true)
+// Telefon: místo plochy „přetáhněte sem" dvě velká tlačítka; výběr souboru jde přes
+// skrytý input dropzóny, aby zůstala stejná validace i ořez fotek.
+const isPhone = useIsPhone()
+const newPdfDropzone = ref<InstanceType<typeof PdfDropzone> | null>(null)
+const replacePdfDropzone = ref<InstanceType<typeof PdfDropzone> | null>(null)
+function pickDropzoneFile(dropzone: InstanceType<typeof PdfDropzone> | null) {
+  if (pdfUploading.value) return
+  const root = dropzone?.$el as HTMLElement | undefined
+  root?.querySelector<HTMLInputElement>('input[type="file"]')?.click()
+}
 
 // Náhled PDF/obrázku připraveného k nahrání u NOVÉ faktury (ještě není na serveru).
 // Soubor držíme jen v paměti prohlížeče (File), náhled tvoříme přes blob: URL —
@@ -1915,9 +1926,17 @@ useWindowTitle(
       </section>
 
       <!-- DRAG & DROP PDF (jen nahoře u nové faktury, schovaný po prvním interaction) -->
-      <div v-if="!isEdit && !submissionId && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <PdfDropzone accept-structured crop-photos :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
-        <div class="mt-2 flex flex-wrap gap-2"><CapturePhotoButton :disabled="pdfUploading" @captured="onPdfDropped" /></div>
+      <div v-if="!isEdit && !submissionId && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm max-md:p-4">
+        <PdfDropzone ref="newPdfDropzone" accept-structured crop-photos :uploading="pdfUploading" :class="isPhone ? 'hidden' : ''" @file-dropped="onPdfDropped" @error="onPdfError" />
+        <div v-if="isPhone" data-test="phone-upload-buttons" class="grid grid-cols-2 gap-2 [&_button]:h-12 [&_button]:w-full [&_button]:justify-center">
+          <CapturePhotoButton filled :disabled="pdfUploading" @captured="onPdfDropped" />
+          <button type="button" data-test="phone-pick-file" :class="btnOutline('neutral')" :disabled="pdfUploading" @click="pickDropzoneFile(newPdfDropzone)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+            {{ t('purchase_invoice.pdf.pick_file') }}
+          </button>
+        </div>
+        <p v-if="isPhone && pdfUploading" class="text-sm text-primary-700 mt-2">{{ t('purchase_invoice.pdf.uploading') }}</p>
+        <div v-else-if="!isPhone" class="mt-2 flex flex-wrap gap-2"><CapturePhotoButton :disabled="pdfUploading" @captured="onPdfDropped" /></div>
         <p class="text-xs text-neutral-500 mt-2">
           {{ t('purchase_invoice.extraction.ai_pending') }}
         </p>
@@ -2049,9 +2068,17 @@ useWindowTitle(
       </div>
 
       <!-- Replace dropzone když user vybere replace -->
-      <div v-else-if="isEdit && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <PdfDropzone crop-photos :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
-        <div class="mt-2 flex flex-wrap gap-2"><CapturePhotoButton :disabled="pdfUploading" @captured="onPdfDropped" /></div>
+      <div v-else-if="isEdit && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm max-md:p-4">
+        <PdfDropzone ref="replacePdfDropzone" crop-photos :uploading="pdfUploading" :class="isPhone ? 'hidden' : ''" @file-dropped="onPdfDropped" @error="onPdfError" />
+        <div v-if="isPhone" data-test="phone-upload-buttons" class="grid grid-cols-2 gap-2 [&_button]:h-12 [&_button]:w-full [&_button]:justify-center">
+          <CapturePhotoButton filled :disabled="pdfUploading" @captured="onPdfDropped" />
+          <button type="button" data-test="phone-pick-file" :class="btnOutline('neutral')" :disabled="pdfUploading" @click="pickDropzoneFile(replacePdfDropzone)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+            {{ t('purchase_invoice.pdf.pick_file') }}
+          </button>
+        </div>
+        <p v-if="isPhone && pdfUploading" class="text-sm text-primary-700 mt-2">{{ t('purchase_invoice.pdf.uploading') }}</p>
+        <div v-else-if="!isPhone" class="mt-2 flex flex-wrap gap-2"><CapturePhotoButton :disabled="pdfUploading" @captured="onPdfDropped" /></div>
       </div>
 
       <!-- Box 1: Hlavička — vendor + typ + čísla + datumy + měna -->
@@ -2143,7 +2170,7 @@ useWindowTitle(
             <input v-model="form.vendor_invoice_number" type="text" maxlength="50" required
                    class="w-full h-10 px-3 border rounded-md text-sm font-mono"
                    :class="fieldErr('vendor_invoice_number') ? 'border-danger-500/40' : 'border-neutral-300'" />
-            <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.fields.vendor_invoice_number_hint') }}</p>
+            <p class="text-xs text-neutral-500 mt-1 max-md:hidden">{{ t('purchase_invoice.fields.vendor_invoice_number_hint') }}</p>
             <p v-if="fieldErr('vendor_invoice_number')" class="text-xs text-danger-600 mt-1">{{ fieldErr('vendor_invoice_number') }}</p>
           </div>
           <div>
@@ -2151,7 +2178,7 @@ useWindowTitle(
             <input v-model="form.varsymbol" type="text" maxlength="20"
                    class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono"
                    placeholder="PF2605001" />
-            <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_invoice.fields.varsymbol_hint') }}</p>
+            <p class="text-xs text-neutral-500 mt-1 max-md:hidden">{{ t('purchase_invoice.fields.varsymbol_hint') }}</p>
           </div>
           <NumberSeriesSelect v-if="!form.varsymbol" class="sm:col-span-2"
             :scope="{ module: 'purchase-invoices' }" v-model="numberSeriesId" />
@@ -2182,9 +2209,9 @@ useWindowTitle(
             <DateInput v-model="form.delivery_date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
         </div>
-        <p class="text-xs text-neutral-500 -mt-2">{{ t('purchase_invoice.fields.delivery_date_hint') }}</p>
+        <p class="text-xs text-neutral-500 -mt-2 max-md:hidden">{{ t('purchase_invoice.fields.delivery_date_hint') }}</p>
         <!-- RC: DPH období se řídí DUZP (§ 25 / § 24), ne datem vystavení — issue #117 -->
-        <p v-if="form.reverse_charge" class="text-xs text-neutral-500 -mt-2">
+        <p v-if="form.reverse_charge" class="text-xs text-neutral-500 -mt-2 max-md:hidden">
           {{ t('purchase_invoice.fields.tax_date_rc_hint') }}
         </p>
         <!-- Období odpočtu (§ 73/1/a) — issue #9: uživatel musí z formuláře poznat, do
@@ -2192,7 +2219,7 @@ useWindowTitle(
         <div v-else-if="vatClaim" class="-mt-2 text-xs rounded-md px-3 py-2"
              :class="vatClaim.basis === 'received_at'
                ? 'bg-warning-50 text-warning-700 border border-warning-500/30'
-               : 'bg-neutral-50 text-neutral-600 border border-neutral-200'">
+               : 'bg-neutral-50 text-neutral-600 border border-neutral-200 max-md:hidden'">
           <p>
             {{ t('purchase_invoice.fields.vat_claim_hint', {
               period: vatClaimPeriodLabel,
@@ -2707,7 +2734,7 @@ useWindowTitle(
       <!-- Box 2b: Rekapitulace DPH — editovatelná dle dokladu dodavatele (§ 73 ZDPH).
            Pod reverse-charge se skrývá (na dokladu zahr. dodavatele není česká DPH). -->
       <div v-if="form.items.length > 0 && !form.reverse_charge" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between gap-3">
+        <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between gap-3 max-md:flex-wrap max-md:px-4">
           <h2 class="text-sm font-medium text-neutral-700">{{ t('purchase_invoice.vat_recap.title') }}</h2>
           <div class="flex flex-wrap items-center justify-end gap-3">
             <button v-if="canCreateExpenseTemplate" type="button" @click="expenseRuleTemplateOpen = true"
@@ -2734,9 +2761,36 @@ useWindowTitle(
             </button>
           </div>
         </div>
-        <div class="px-5 py-3">
-          <p class="text-xs text-neutral-500 mb-3">{{ t('purchase_invoice.vat_recap.hint') }}</p>
-          <table class="w-full sm:w-auto text-sm">
+        <div class="px-5 py-3 max-md:px-4">
+          <p class="text-xs text-neutral-500 mb-3 max-md:hidden">{{ t('purchase_invoice.vat_recap.hint') }}</p>
+          <!-- Telefon: tabulka sazba/základ/DPH se nevejde (ořezávala se vpravo), proto karty. -->
+          <div v-if="isPhone" data-test="vat-recap-cards" class="space-y-2">
+            <div v-for="r in recapRows" :key="r.rate" class="rounded-md border border-neutral-200 p-3">
+              <div class="flex items-center justify-between gap-2 mb-2">
+                <span class="text-sm font-medium text-neutral-700">{{ r.rate }} %</span>
+                <button v-if="r.overridden" type="button" @click="resetRecapRate(r.rate)"
+                  :title="t('purchase_invoice.vat_recap.reset')" :aria-label="t('purchase_invoice.vat_recap.reset')"
+                  class="cursor-pointer h-9 w-9 inline-flex items-center justify-center rounded-md text-neutral-500 hover:text-primary-700 text-lg leading-none">↺</button>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="block">
+                  <span class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_recap.base') }}</span>
+                  <input :value="r.base" @change="setRecapBase(r.rate, ($event.target as HTMLInputElement).value)"
+                    type="text" inputmode="decimal"
+                    class="w-full h-10 px-2 border rounded text-sm text-right font-mono"
+                    :class="r.overridden ? 'border-warning-500/60 bg-warning-50' : 'border-neutral-300'" />
+                </label>
+                <label class="block">
+                  <span class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_recap.vat') }}</span>
+                  <input :value="r.vat" @change="setRecapVat(r.rate, ($event.target as HTMLInputElement).value)"
+                    type="text" inputmode="decimal"
+                    class="w-full h-10 px-2 border rounded text-sm text-right font-mono"
+                    :class="r.overridden ? 'border-warning-500/60 bg-warning-50' : 'border-neutral-300'" />
+                </label>
+              </div>
+            </div>
+          </div>
+          <table v-else class="w-full sm:w-auto text-sm">
             <thead>
               <tr class="text-xs text-neutral-500">
                 <th class="text-left font-normal py-1 pr-6">{{ t('purchase_invoice.vat_recap.rate') }}</th>
@@ -3068,18 +3122,18 @@ useWindowTitle(
       </div>
 
       <!-- Submit bar — sticky bottom -->
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm flex flex-wrap items-center justify-between gap-2">
-        <RouterLink to="/purchase-invoices" class="px-4 h-10 inline-flex items-center text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors">
+      <div data-test="purchase-editor-submit-bar" class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm flex flex-wrap items-center justify-between gap-2 max-md:sticky max-md:bottom-[calc(var(--app-footer-height,0px)+0.5rem)] max-md:z-10 max-md:p-2 max-md:shadow-lg">
+        <RouterLink to="/purchase-invoices" data-test="purchase-editor-back" class="px-4 h-10 inline-flex items-center text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors max-md:hidden">
           ← {{ t('purchase_invoice.actions.back') }}
         </RouterLink>
-        <div class="flex flex-wrap items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2 max-md:w-full max-md:flex-nowrap">
           <button v-if="editorPosting.canPost.value" type="button" :disabled="submitting" data-test="save-and-post"
             :title="t('accounting.editor_posting.save_and_post_hint_purchase')"
-            :class="btnFilled('success')" class="whitespace-nowrap" @click="saveAndPost">
+            :class="btnFilled('success')" class="whitespace-nowrap max-md:h-11 max-md:shrink-0 max-md:px-3 max-md:text-xs" @click="saveAndPost">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ t('accounting.editor_posting.save_and_post') }}
           </button>
-          <button type="submit" :disabled="submitting" class="cursor-pointer px-5 h-10 inline-flex items-center text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white rounded-md disabled:opacity-50 whitespace-nowrap">
+          <button type="submit" :disabled="submitting" data-test="purchase-editor-save" class="cursor-pointer px-5 h-10 inline-flex items-center text-sm font-medium bg-primary-600 hover:bg-primary-700 text-white rounded-md disabled:opacity-50 whitespace-nowrap max-md:order-first max-md:h-11 max-md:flex-1 max-md:justify-center max-md:text-base">
             {{ submitting ? '…' : t('purchase_invoice.actions.save') }}
           </button>
         </div>

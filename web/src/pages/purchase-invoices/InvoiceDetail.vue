@@ -11,6 +11,9 @@ import PurchaseItemMeta from '@/components/purchase/PurchaseItemMeta.vue'
 import CreditNoteOffsetNotice from '@/components/invoices/CreditNoteOffsetNotice.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
+import { createReusableTemplate } from '@vueuse/core'
+import { useIsPhone } from '@/composables/useIsPhone'
+import PdfCanvasViewer from '@/components/documents/PdfCanvasViewer.vue'
 import { useI18n } from 'vue-i18n'
 import { purchaseInvoicesApi, type PurchaseInvoice, type PurchaseInvoiceStatus, type PurchaseInvoiceBrief, type PaymentQrResponse, type VatDeduction, type PurchaseForceMode } from '@/api/purchaseInvoices'
 import { formatMoney, formatUnitPrice, formatDate } from '@/composables/useFormat'
@@ -135,6 +138,35 @@ const pdfPreviewOpen = pdfPreview.open
 const pdfInlineUrl = computed(() => (invoice.value ? `${purchaseInvoicesApi.pdfUrl(invoice.value.id, true)}#view=FitH` : ''))
 const dismissingWarning = ref(false)
 const reviewOpen = ref(false)
+
+// Telefon: souhrn pod číslem dokladu, doklad přes celou obrazovku, karty s údaji
+// sbalené a sekce originálu výš. Mimo telefon se šablona vykreslí beze změny.
+const isPhone = useIsPhone()
+const phoneDetailsOpen = ref(false)
+const phonePdfOpen = ref(false)
+const [DefinePdfSection, ReusePdfSection] = createReusableTemplate()
+const phonePdfIsImage = computed(() => /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i.test(invoice.value?.pdf_original_name ?? ''))
+const phoneToPay = computed(() => invoice.value
+  ? (invoice.value.amount_to_pay ?? invoice.value.total_with_vat) + (invoice.value.rounding || 0)
+  : 0)
+type PhonePaymentState = 'paid' | 'partial' | 'overdue' | 'unpaid' | 'draft' | 'cancelled'
+const phonePaymentState = computed<PhonePaymentState>(() => {
+  const inv = invoice.value
+  if (!inv) return 'unpaid'
+  if (inv.status === 'draft' || inv.status === 'cancelled') return inv.status
+  if (inv.status === 'paid') return 'paid'
+  if (inv.due_date && inv.due_date < appIsoDate()) return 'overdue'
+  if ((inv.paid_amount ?? 0) > 0.005 && (inv.remaining_amount ?? 0) > 0.005) return 'partial'
+  return 'unpaid'
+})
+const phonePaymentStateClass = computed(() => ({
+  paid: 'bg-success-50 text-success-700 border-success-500/40',
+  partial: 'bg-warning-50 text-warning-700 border-warning-500/40',
+  overdue: 'bg-danger-50 text-danger-600 border-danger-500/40',
+  unpaid: 'bg-primary-50 text-primary-700 border-primary-500/40',
+  draft: 'bg-neutral-100 text-neutral-600 border-neutral-200',
+  cancelled: 'bg-danger-50 text-danger-500 border-danger-500/40',
+}[phonePaymentState.value]))
 
 function onReviewUpdated(inv: PurchaseInvoice) {
   invoice.value = inv
@@ -1010,6 +1042,52 @@ useWindowRefresh(async () => {
   <div v-else-if="invoice">
     <DocumentPreviewSplit :ctrl="pdfPreview" :show="!!invoice.pdf_path && pdfPreviewOpen" :src="pdfInlineUrl"
       :file-name="invoice.pdf_original_name" form-class="space-y-4" narrow-class="max-w-5xl">
+      <DefinePdfSection>
+        <div v-if="invoice.pdf_path" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+          <!-- Na mobilu se trojice tlačítek vedle názvu souboru nevejde — bez zalomení
+               se zmáčkla do úzkého sloupce a každý popisek se lámal na dva řádky.
+               Zalomí se tedy celý blok: nejdřív soubor, pod ním řada tlačítek. -->
+          <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-neutral-100">
+            <div class="flex items-center gap-3 min-w-0">
+              <svg class="w-7 h-8 shrink-0" viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg">
+                <path fill="#dc2626" d="M4 2h16l8 8v22a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+                <path fill="#ffffff" opacity="0.35" d="M20 2v8h8z"/>
+                <text x="16" y="26" fill="#ffffff" font-family="Arial,Helvetica,sans-serif" font-size="8" font-weight="700" text-anchor="middle" letter-spacing="0.3">PDF</text>
+              </svg>
+              <div class="min-w-0">
+                <div class="font-medium text-sm truncate">{{ invoice.pdf_original_name || 'invoice.pdf' }}</div>
+                <div class="text-xs text-neutral-500">{{ Math.round((Number(invoice.pdf_size_bytes) || 0) / 1024) }} KiB · {{ invoice.pdf_uploaded_at ? formatDate(invoice.pdf_uploaded_at.slice(0,10)) : '' }}</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button type="button" @click="pdfPreview.toggle()"
+                class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                </svg>
+                {{ pdfPreviewOpen ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
+              </button>
+              <a :href="purchaseInvoicesApi.pdfUrl(invoice.id)" target="_blank"
+                 @click="downloadPdfToCompanyFolder($event, invoice.id, invoice.vendor_invoice_number)"
+                 class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
+                <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                {{ t('purchase_invoice.pdf.download') }}
+              </a>
+              <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="deletePdf"
+                class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
+                {{ t('purchase_invoice.pdf.delete') }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+          <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.pdf.title') }}</h3>
+          <PdfDropzone v-if="auth.canWrite('purchase_invoices') && !lockedForMe" crop-photos :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
+          <p v-else class="text-sm text-neutral-500">{{ t('purchase_invoice.pdf.no_pdf') }}</p>
+        </div>
+      </DefinePdfSection>
       <div class="flex items-center gap-2">
         <ListNavArrows v-if="listNav.active.value" :has-previous="listNav.hasPrevious.value" :has-next="listNav.hasNext.value"
           :busy="listNav.busy.value" @previous="listNav.previous" @next="listNav.next" />
@@ -1100,6 +1178,11 @@ useWindowRefresh(async () => {
             :can-acknowledge="auth.canWrite('purchase_invoices')" />
         </h1>
         <ActionBar :actions="purchaseActions" />
+        <button v-if="isPhone && invoice.pdf_path" type="button" data-test="phone-open-pdf"
+          :class="btnOutline('primary')" class="h-11 w-full justify-center" @click="phonePdfOpen = true">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+          {{ t('purchase_invoice.pdf.open_fullscreen') }}
+        </button>
       </div>
 
       <!-- Příznak zaúčtování bez zápisu v deníku (např. převzato z jiného programu nezaúčtované). -->
@@ -1135,6 +1218,44 @@ useWindowRefresh(async () => {
           <span v-if="invoice.vendor_dic">{{ t('common.dic') }} {{ invoice.vendor_dic }}</span>
         </div>
       </div>
+
+      <template v-if="isPhone">
+        <div data-test="phone-summary" class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm space-y-3">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-xs text-neutral-500">{{ t('purchase_invoice.totals.to_pay') }}</div>
+              <div class="text-2xl font-semibold font-mono text-neutral-900 break-words">{{ formatMoney(phoneToPay, invoice.currency) }}</div>
+              <div class="text-xs text-neutral-500 mt-0.5">
+                {{ t('purchase_invoice.totals.with_vat') }}: <span class="font-mono">{{ formatMoney(invoice.total_with_vat, invoice.currency) }}</span>
+              </div>
+            </div>
+            <span data-test="phone-payment-state" class="shrink-0 inline-flex items-center min-h-9 px-3 rounded-full border text-sm font-medium" :class="phonePaymentStateClass">
+              {{ t('purchase_invoice.phone_summary.state.' + phonePaymentState) }}
+            </span>
+          </div>
+          <dl class="grid grid-cols-2 gap-3 text-sm border-t border-neutral-100 pt-3">
+            <div>
+              <dt class="text-xs text-neutral-500">{{ t('purchase_invoice.fields.due_date') }}</dt>
+              <dd class="font-mono" :class="phonePaymentState === 'overdue' ? 'text-danger-600 font-semibold' : ''">{{ formatDate(invoice.due_date) }}</dd>
+            </div>
+            <div v-if="showPaymentSummary && phonePaymentState === 'partial'">
+              <dt class="text-xs text-neutral-500">{{ t('purchase_invoice.payment_summary.remaining') }}</dt>
+              <dd class="font-mono font-semibold">{{ formatMoney(invoice.remaining_amount ?? 0, invoice.currency) }}</dd>
+            </div>
+            <div v-else>
+              <dt class="text-xs text-neutral-500">{{ t('purchase_invoice.fields.issue_date') }}</dt>
+              <dd class="font-mono">{{ formatDate(invoice.issue_date) }}</dd>
+            </div>
+          </dl>
+        </div>
+        <ReusePdfSection />
+        <button type="button" data-test="phone-details-toggle" :aria-expanded="phoneDetailsOpen"
+          class="cursor-pointer w-full min-h-11 px-4 inline-flex items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-surface text-sm font-medium text-neutral-700 shadow-sm"
+          @click="phoneDetailsOpen = !phoneDetailsOpen">
+          <span>{{ t('purchase_invoice.phone_summary.details') }}</span>
+          <svg class="w-4 h-4 transition-transform" :class="phoneDetailsOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+        </button>
+      </template>
 
       <!-- ═══ Propojení se zálohou — banner pod headerem (sjednoceno s vydanou fakturou) ═══ -->
       <!-- Tento doklad JE záloha → odkaz na vyúčtovací fakturu (+ odpojení) -->
@@ -1389,7 +1510,7 @@ useWindowRefresh(async () => {
       </div>
 
       <!-- ═══ Datumy & metadata (3 sloupce ala vystavená InvoiceDetail) ═══ -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div v-show="!isPhone || phoneDetailsOpen" data-test="detail-cards" class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <!-- Datumy -->
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.fields.issue_date') }} / {{ t('purchase_invoice.fields.tax_date') }} / {{ t('purchase_invoice.fields.due_date') }}</h3>
@@ -1506,7 +1627,7 @@ useWindowRefresh(async () => {
 
       <!-- Zaúčtování — účetní klasifikace je dostupná i před vznikem zápisu,
            samotná kontace se dál načítá na pozadí. -->
-      <DocumentPostingPanel ref="postingPanelRef" source="purchase-invoices" :doc-id="invoice.id" always-visible
+      <DocumentPostingPanel v-show="!isPhone || phoneDetailsOpen" ref="postingPanelRef" source="purchase-invoices" :doc-id="invoice.id" always-visible
         :advance="invoice.document_kind === 'advance' && isDoubleEntry"
         :doc-label="invoice.vendor_invoice_number || invoice.varsymbol" @reposted="onReposted">
         <div v-if="auth.canWrite('purchase_invoices') && !auth.isClientRole" class="flex flex-wrap justify-end gap-2">
@@ -1603,7 +1724,7 @@ useWindowRefresh(async () => {
       </DocumentPostingPanel>
       <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
            se přerazítkují. Sbalené pod zaúčtováním, stejně jako u vydané faktury. -->
-      <DocumentDimensionsPanel doc-type="purchase-invoices" :doc-id="invoice.id" collapsible :initially-open="missingDimensions(invoice).length > 0" @saved="postingPanelRef?.reload()" />
+      <DocumentDimensionsPanel v-show="!isPhone || phoneDetailsOpen" doc-type="purchase-invoices" :doc-id="invoice.id" collapsible :initially-open="missingDimensions(invoice).length > 0" @saved="postingPanelRef?.reload()" />
       <!-- ═══ Položky ═══ -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <h3 class="text-sm font-medium text-neutral-700 px-5 py-3 border-b border-neutral-100">{{ t('purchase_invoice.items.title') }}</h3>
@@ -1938,51 +2059,8 @@ useWindowRefresh(async () => {
         </div>
       </div>
 
-      <!-- ═══ Originální PDF od dodavatele ═══ -->
-      <div v-if="invoice.pdf_path" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <!-- Na mobilu se trojice tlačítek vedle názvu souboru nevejde — bez zalomení
-             se zmáčkla do úzkého sloupce a každý popisek se lámal na dva řádky.
-             Zalomí se tedy celý blok: nejdřív soubor, pod ním řada tlačítek. -->
-        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-neutral-100">
-          <div class="flex items-center gap-3 min-w-0">
-            <svg class="w-7 h-8 shrink-0" viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg">
-              <path fill="#dc2626" d="M4 2h16l8 8v22a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
-              <path fill="#ffffff" opacity="0.35" d="M20 2v8h8z"/>
-              <text x="16" y="26" fill="#ffffff" font-family="Arial,Helvetica,sans-serif" font-size="8" font-weight="700" text-anchor="middle" letter-spacing="0.3">PDF</text>
-            </svg>
-            <div class="min-w-0">
-              <div class="font-medium text-sm truncate">{{ invoice.pdf_original_name || 'invoice.pdf' }}</div>
-              <div class="text-xs text-neutral-500">{{ Math.round((Number(invoice.pdf_size_bytes) || 0) / 1024) }} KiB · {{ invoice.pdf_uploaded_at ? formatDate(invoice.pdf_uploaded_at.slice(0,10)) : '' }}</div>
-            </div>
-          </div>
-          <div class="flex items-center gap-2 flex-wrap">
-            <button type="button" @click="pdfPreview.toggle()"
-              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
-                <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-              </svg>
-              {{ pdfPreviewOpen ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
-            </button>
-            <a :href="purchaseInvoicesApi.pdfUrl(invoice.id)" target="_blank"
-               @click="downloadPdfToCompanyFolder($event, invoice.id, invoice.vendor_invoice_number)"
-               class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
-              <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-              {{ t('purchase_invoice.pdf.download') }}
-            </a>
-            <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="deletePdf"
-              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
-              {{ t('purchase_invoice.pdf.delete') }}
-            </button>
-          </div>
-        </div>
-      </div>
-      <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.pdf.title') }}</h3>
-        <PdfDropzone v-if="auth.canWrite('purchase_invoices') && !lockedForMe" crop-photos :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
-        <p v-else class="text-sm text-neutral-500">{{ t('purchase_invoice.pdf.no_pdf') }}</p>
-      </div>
+      <!-- ═══ Originální PDF od dodavatele (na telefonu výš, pod souhrnem) ═══ -->
+      <ReusePdfSection v-if="!isPhone" />
 
       <!-- ═══ Poznámky (jen pokud existují) ═══ -->
       <div v-if="invoice.note_above_items || invoice.note_below_items" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
@@ -2123,6 +2201,27 @@ useWindowRefresh(async () => {
       @close="expenseRuleTemplateOpen = false"
       @saved="() => { expenseRuleTemplateOpen = false; load() }" />
     <WorkspaceTeleport>
+      <div v-if="isPhone && phonePdfOpen && invoice?.pdf_path" data-test="phone-pdf-modal" role="dialog" aria-modal="true"
+        :aria-label="invoice.pdf_original_name || t('purchase_invoice.pdf.title')"
+        class="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-surface" @keydown.esc="phonePdfOpen = false">
+        <div class="flex items-center gap-2 border-b border-neutral-200 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
+          <div class="flex-1 min-w-0 truncate text-sm font-medium">{{ invoice.pdf_original_name || t('purchase_invoice.pdf.title') }}</div>
+          <a :href="purchaseInvoicesApi.pdfUrl(invoice.id)" target="_blank" rel="noopener" data-test="phone-pdf-download"
+            :class="btnOutline('primary')" class="h-11 whitespace-nowrap"
+            @click="downloadPdfToCompanyFolder($event, invoice.id, invoice.vendor_invoice_number)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            {{ t('common.download') }}
+          </a>
+          <button type="button" data-test="phone-pdf-close" :class="btnOutline('neutral')" class="h-11 whitespace-nowrap" @click="phonePdfOpen = false">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            {{ t('common.close') }}
+          </button>
+        </div>
+        <div v-if="phonePdfIsImage" class="flex-1 min-h-0 overflow-auto bg-neutral-100 p-2">
+          <img :src="purchaseInvoicesApi.pdfUrl(invoice.id, true)" :alt="invoice.pdf_original_name || t('purchase_invoice.pdf.title')" class="w-full object-contain" />
+        </div>
+        <PdfCanvasViewer v-else class="flex-1 min-h-0" :src="purchaseInvoicesApi.pdfUrl(invoice.id, true)" :title="invoice.pdf_original_name" />
+      </div>
       <RuleFormModal v-if="postingRuleOpen && invoice"
         :prefill="{ name: invoice.vendor_company_name || invoice.vendor_invoice_number || '', direction: invoice.total_with_vat < 0 ? 'incoming' : 'outgoing', applies_currency: invoice.currency, variable_symbol: invoice.payment_variable_symbol || invoice.varsymbol || null }"
         @close="postingRuleOpen = false" @saved="postingRuleOpen = false" />

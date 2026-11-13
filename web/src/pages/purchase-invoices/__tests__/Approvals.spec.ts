@@ -104,4 +104,32 @@ describe('Approvals.vue', () => {
     expect(m.decide).toHaveBeenCalledWith(1, { decision: 'reject', comment: 'Špatné středisko' })
     expect(m.toastSuccess).toHaveBeenCalledWith('purchase_approval.toast.rejected')
   })
+
+  it('karta na telefonu nabízí Schválit a Zamítnout jako první velká tlačítka', async () => {
+    m.decide.mockResolvedValue({ ...row(1, 7, 'approved'), invoice_approval_status: 'approved' })
+    const wrapper = mount(Approvals, { global: { stubs } })
+    await flushPromises()
+    const actions = wrapper.get('[data-test="approval-card-1"] [data-test="approval-card-actions"]')
+    expect(actions.classes()).toEqual(expect.arrayContaining(['max-md:grid', 'max-md:grid-cols-2', 'max-md:[&>*]:h-10']))
+    const approve = actions.get('[data-test="approval-card-approve"]')
+    expect(approve.classes()).toContain('max-md:order-1')
+    expect(actions.get('[data-test="approval-card-reject"]').classes()).toContain('max-md:order-2')
+    expect(wrapper.find('[data-test="approval-card-2"] [data-test="approval-card-approve"]').exists()).toBe(false)
+    await approve.trigger('click')
+    await flushPromises()
+    expect(m.decide).toHaveBeenCalledWith(1, { decision: 'approve' })
+    await wrapper.get('[data-test="approval-card-1"] [data-test="approval-card-reject"]').trigger('click')
+    expect(wrapper.find('[data-test="approval-reject-dialog"]').exists()).toBe(true)
+  })
+
+  it('filtry drží na telefonu v jednom řádku, přepínač rozsahu jako ikony', async () => {
+    m.accountant = true
+    const wrapper = mount(Approvals, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="approvals-filters"]').classes()).toContain('max-md:flex-nowrap')
+    const all = wrapper.get('[data-test="approvals-scope-all"]')
+    expect(all.classes()).toEqual(expect.arrayContaining(['max-md:h-10', 'max-md:w-10']))
+    expect(all.attributes('title')).toBe('purchase_approval.scope.all')
+    expect(all.get('span').classes()).toContain('max-md:sr-only')
+  })
 })
