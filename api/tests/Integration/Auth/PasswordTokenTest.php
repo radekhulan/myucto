@@ -10,6 +10,9 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\RateLimitMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
+use MyInvoice\Repository\UserSupplierRepository;
+use MyInvoice\Security\PermissionCatalog;
+use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\Auth\BruteForceGuard;
@@ -21,6 +24,7 @@ use MyInvoice\Service\Auth\PasswordLoginVerifier;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\TotpService;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -41,7 +45,6 @@ final class PasswordTokenTest extends TestCase
 {
     /** Musí projít PasswordHasher::validate() (min. 12 znaků). */
     private const PASSWORD = 'Str0ng-Test-Pwd-2026';
-    private const GLOBAL_LIMIT_KEY = 'rl:password-token:all';
 
     private Connection $db;
     private Config $config;
@@ -82,6 +85,99 @@ final class PasswordTokenTest extends TestCase
             $this->db->pdo()->prepare('DELETE FROM login_attempts WHERE email = ?')->execute([$email]);
         }
         $this->resetGlobalLimit();
+    }
+
+    public function testDisabledByDefaultAnswersNotFound(): void
+    {
+        [, $email] = $this->createUser();
+
+        $res = $this->invoke(['email' => $email, 'password' => self::PASSWORD], $this->action(enabled: false));
+
+        self::assertSame(404, $res->getStatusCode(), 'Bez auth.password_token.enabled endpoint neexistuje');
+        self::assertSame(0, $this->tokenCount($email));
+        self::assertSame(0, $this->loginAttempts($email), 'Vypnutý endpoint heslo vůbec neověřuje');
+    }
+
+    public function testRoleWithoutTokenWritePermissionGetsNoToken(): void
+    {
+        // Účetní a Pouze pro čtení mají ve výchozí matici profile.tokens jen ke čtení:
+        // ve webu token nevytvoří, heslem přes API také ne.
+        foreach (['accountant', 'readonly'] as $roleKey) {
+            [, $email] = $this->createUser(roleKey: $roleKey);
+
+            $res = $this->invoke(['email' => $email, 'password' => self::PASSWORD]);
+
+            self::assertSame(403, $res->getStatusCode(), $roleKey);
+            self::assertSame('forbidden', $this->decode($res)['error']['code'] ?? null, $roleKey);
+            self::assertSame(0, $this->tokenCount($email), $roleKey);
+        }
+    }
+
+    public function testInstanceAdminGetsNoToken(): void
+    {
+        [, $email] = $this->createUser(roleKey: 'instance_admin');
+
+        $res = $this->invoke(['email' => $email, 'password' => self::PASSWORD]);
+
+        self::assertSame(403, $res->getStatusCode());
+        self::assertSame(0, $this->tokenCount($email));
+    }
+
+    public function testRecoveryCodeIsNotAcceptedInsteadOfTotp(): void
+    {
+        $secret = TotpService::generateSecret();
+        [$userId, $email] = $this->createUser(totpSecret: $secret);
+        $codes = (new MfaRecoveryCodeService($this->db))->generate($userId);
+
+        $res = $this->invoke(['email' => $email, 'password' => self::PASSWORD, 'recovery_code' => $codes[0]]);
+
+        self::assertSame(401, $res->getStatusCode(), 'Záložní kód slouží jen k obnovení přístupu ve webu');
+        self::assertSame('totp_required', $this->decode($res)['error']['code'] ?? null);
+        self::assertSame(0, $this->tokenCount($email));
+    }
+
+    public function testNewLoginOfSameDeviceReplacesItsPreviousToken(): void
+    {
+        [, $email] = $this->createUser();
+
+        $first = $this->decode($this->invoke(['email' => $email, 'password' => self::PASSWORD, 'device_name' => 'iPhone']));
+        $other = $this->decode($this->invoke(['email' => $email, 'password' => self::PASSWORD, 'device_name' => 'iPad']));
+        $second = $this->decode($this->invoke(['email' => $email, 'password' => self::PASSWORD, 'device_name' => 'iPhone']));
+
+        self::assertNotNull($this->tokenRow((int) $first['id'])['revoked_at'], 'Předchozí token zařízení je zrušený');
+        self::assertNull($this->tokenRow((int) $other['id'])['revoked_at'], 'Token jiného zařízení zůstává');
+        self::assertNull($this->tokenRow((int) $second['id'])['revoked_at']);
+    }
+
+    public function testTokenCreationLimitPerUserIsSharedWithWeb(): void
+    {
+        [$userId, $email] = $this->createUser();
+        $this->extraLimitKeys[] = 'rl:pat:user:' . $userId;
+        $action = $this->action(config: ['rate_limits' => ['enabled' => true, 'token_create_per_hour' => 1]]);
+
+        self::assertSame(201, $this->invoke(['email' => $email, 'password' => self::PASSWORD, 'device_name' => 'A'], $action)->getStatusCode());
+        $res = $this->invoke(['email' => $email, 'password' => self::PASSWORD, 'device_name' => 'B'], $action);
+
+        self::assertSame(429, $res->getStatusCode());
+        self::assertSame('rate_limited', $this->decode($res)['error']['code'] ?? null);
+        self::assertSame(1, $this->tokenCount($email));
+    }
+
+    public function testAccountFailureCapAppliesAcrossIpAddresses(): void
+    {
+        [, $email] = $this->createUser();
+        $action = $this->action(config: ['rate_limits' => ['enabled' => true, 'password_token_failures_per_hour_per_account' => 3]]);
+
+        for ($i = 0; $i < 3; $i++) {
+            $this->ip = '10.' . $i . '.0.1';
+            self::assertSame(401, $this->invoke(['email' => $email, 'password' => 'Spatne-Heslo-2026'], $action)->getStatusCode());
+        }
+        $this->ip = '100.64.0.9';
+        $res = $this->invoke(['email' => $email, 'password' => self::PASSWORD], $action);
+
+        self::assertSame(429, $res->getStatusCode(), 'Strop účtu platí přes různé sítě /24');
+        self::assertSame('rate_limited', $this->decode($res)['error']['code'] ?? null);
+        self::assertSame(0, $this->tokenCount($email));
     }
 
     public function testPasswordReturnsWorkingReadWriteTokenNamedAfterDevice(): void
@@ -196,11 +292,16 @@ final class PasswordTokenTest extends TestCase
         self::assertSame('900', $locked->getHeaderLine('Retry-After'), 'Zámek na 15 minut jako ve webu');
     }
 
-    public function testGlobalEndpointLimitReturns429WithRetryAfter(): void
+    public function testGlobalFailureLimitReturns429WithRetryAfter(): void
     {
         [, $email] = $this->createUser();
-        $action = $this->action(config: ['rate_limits' => ['enabled' => true, 'password_token_per_min' => 2]]);
+        [, $okEmail] = $this->createUser();
+        $action = $this->action(config: ['rate_limits' => ['enabled' => true, 'password_token_failures_per_min' => 2]]);
 
+        // Úspěšná přihlášení strop neúspěchů nečerpají.
+        for ($i = 0; $i < 3; $i++) {
+            self::assertSame(201, $this->invoke(['email' => $okEmail, 'password' => self::PASSWORD, 'device_name' => 'ok' . $i], $action)->getStatusCode());
+        }
         for ($i = 0; $i < 2; $i++) {
             $this->ip = '198.51.100.' . ($i + 1);
             self::assertSame(401, $this->invoke(['email' => $email, 'password' => 'Spatne-Heslo-2026'], $action)->getStatusCode());
@@ -311,9 +412,10 @@ final class PasswordTokenTest extends TestCase
     /**
      * @param array<string,mixed> $config přepíše hodnoty z cfg.php
      */
-    private function action(array $config = [], ?LoginPolicyService $loginPolicy = null): PasswordTokenAction
+    private function action(array $config = [], ?LoginPolicyService $loginPolicy = null, bool $enabled = true): PasswordTokenAction
     {
-        $cfg = $config === [] ? $this->config : new Config(array_replace_recursive($this->config->all(), $config));
+        $config = array_replace_recursive(['auth' => ['password_token' => ['enabled' => $enabled]]], $config);
+        $cfg = new Config(array_replace_recursive($this->config->all(), $config));
         $redis = new RedisFactory($cfg);
         $hasher = new PasswordHasher($cfg);
         $logger = new ActivityLogger($this->db);
@@ -334,9 +436,13 @@ final class PasswordTokenTest extends TestCase
             $cfg,
             new MfaPolicyService($cfg),
             $loginPolicy,
-            $recoveryCodes,
             new PasskeyCredentialRepository($this->db),
             new RateLimitMiddleware($cfg, $redis, new ResponseFactory(), new IpMatcher(), $this->db),
+            new PermissionResolver(
+                $this->db,
+                new SupplierAccessResolver($this->db, new UserSupplierRepository($this->db)),
+                new PermissionCatalog(),
+            ),
         );
     }
 
@@ -352,7 +458,7 @@ final class PasswordTokenTest extends TestCase
     }
 
     /** @return array{int,string} */
-    private function createUser(?string $totpSecret = null, string $roleKey = 'accountant'): array
+    private function createUser(?string $totpSecret = null, string $roleKey = 'admin'): array
     {
         $pdo = $this->db->pdo();
         $email = 'pwd-token-' . bin2hex(random_bytes(6)) . '@example.test';
@@ -428,10 +534,22 @@ final class PasswordTokenTest extends TestCase
         return implode("\n", $stmt->fetchAll(\PDO::FETCH_COLUMN));
     }
 
+    /** @var list<string> */
+    private array $extraLimitKeys = [];
+
     private function resetGlobalLimit(): void
     {
-        $this->redis->run(fn ($r) => $r->del('myinvoice:ci:' . self::GLOBAL_LIMIT_KEY), null);
-        $this->redis->run(fn ($r) => $r->del(self::GLOBAL_LIMIT_KEY), null);
+        $keys = ['rl:password-token:fail:all', ...$this->extraLimitKeys];
+        foreach ($this->emails as $email) {
+            $keys[] = 'rl:password-token:fail:email:' . sha1(mb_strtolower($email));
+        }
+        foreach ($keys as $key) {
+            $this->redis->run(fn ($r) => $r->del('myinvoice:ci:' . $key), null);
+            $this->redis->run(fn ($r) => $r->del($key), null);
+        }
         $this->db->pdo()->prepare('DELETE FROM rate_limit_counters WHERE bucket_key LIKE ?')->execute(['%password-token%']);
+        foreach ($this->extraLimitKeys as $key) {
+            $this->db->pdo()->prepare('DELETE FROM rate_limit_counters WHERE bucket_key LIKE ?')->execute(['%' . $key]);
+        }
     }
 }

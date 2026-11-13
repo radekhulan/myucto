@@ -23,8 +23,12 @@ use Slim\Psr7\Factory\ResponseFactory;
  *
  *   login_per_min_per_ip      → 60s window, key = "rl:login:ip:{ip/24}"
  *                               (i POST /api/auth/password-token)
- *   password_token_per_min    → 60s window, key = "rl:password-token:all" (celkový strop
- *                               endpointu, konzumuje PasswordTokenAction přes consume())
+ *   password_token_failures_per_min → 60s window, key = "rl:password-token:fail:all"
+ *                               (neúspěchy endpointu ze všech IP dohromady)
+ *   password_token_failures_per_hour_per_account → 3600s window,
+ *                               key = "rl:password-token:fail:email:{sha1}" (neúspěchy
+ *                               jednoho účtu ze všech IP; obojí počítá PasswordTokenAction
+ *                               přes blockedFor() a consume())
  *   forgot_per_hour_per_ip    → 3600s window, key = "rl:forgot:ip:{ip/24}"
  *   forgot_per_hour_per_email → 3600s window, key = "rl:forgot:email:{sha1}"
  *                               (konzumuje ForgotPasswordAction přes consume() —
@@ -171,6 +175,24 @@ final class RateLimitMiddleware implements MiddlewareInterface
             'count'   => $bumped['count'],
             'ttl'     => $bumped['ttl'],
         ];
+    }
+
+    /**
+     * Je bucket vyčerpaný? Jen čte, slot neodebere. Pro limity, které počítají
+     * jen neúspěchy: akce se nejdřív zeptá tady a slot odebere přes consume()
+     * až po neúspěchu.
+     *
+     * @return int|null  null = průchod povolen, jinak Retry-After v sekundách
+     */
+    public function blockedFor(string $key, int $limit, int $window): ?int
+    {
+        if ($this->config->get('rate_limits.enabled', true) === false) {
+            return null;
+        }
+
+        $state = $this->peek($key, $window);
+
+        return $state['count'] >= $limit ? max(1, $state['ttl']) : null;
     }
 
     /**

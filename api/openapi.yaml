@@ -4504,18 +4504,25 @@ paths:
         zadá stejné údaje jako ve webu a dostane osobní API token s rozsahem
         `read_write`, bez vazby na firmu a s výchozí platností 90 dní. Token je
         ve webu v seznamu API tokenů pod názvem `device_name` a jde tam zrušit.
+        Nový token se stejným `device_name` nahradí předchozí token zařízení.
         U účtu s více firmami volí firmu každého požadavku hlavička
         `X-Supplier-Id` (u účtu s jednou firmou není potřeba).
 
+        Endpoint je ve výchozím stavu vypnutý (`auth.password_token.enabled`),
+        vypnutý vrací `404`. Token dostane jen uživatel, jehož role smí API
+        tokeny vytvářet i ve webu (oprávnění `profile.tokens` k zápisu).
+
         Druhý faktor jako ve webu: se zapnutým TOTP vrátí první volání
-        `totp_required` a token vznikne až s `totp` (nebo `recovery_code`).
+        `totp_required` a token vznikne až s `totp`. Záložní kód se nepřijímá.
         Účet chráněný jen passkey, instalace s kódem z e-mailu a vynucené
         přihlášení přes poskytovatele identity token heslem nedostanou; při
         vynuceném MFA bez silného faktoru vrací `mfa_setup_required`.
 
         Ochrana: zámek pokusů sdílený s přihlášením webu (stejné počítadlo
         e-mailu a IP, včetně zámku na 15 minut a 24 hodin), limit na IP sdílený
-        s přihlášením webu a celkový limit endpointu. Stav, kdy by web chtěl
+        s přihlášením webu, strop neúspěšných pokusů jednoho účtu ze všech IP,
+        strop neúspěšných pokusů celého endpointu a limit nových tokenů na
+        uživatele sdílený s tvorbou tokenu ve webu. Stav, kdy by web chtěl
         CAPTCHA, tady znamená dočasné odmítnutí. Neexistující účet i špatné
         heslo vrací stejnou odpověď. Volání bez hlavičky `Origin` (nativní
         aplikace) nepotřebuje CSRF token; s hlavičkou `Origin` musí odpovídat
@@ -4543,8 +4550,8 @@ paths:
         '401':
           description: |
             `invalid_credentials` (neznámý e-mail, neaktivní účet nebo špatné heslo,
-            vždy stejná odpověď), `totp_required` (pošlete `totp` nebo `recovery_code`,
-            pole `methods`), `invalid_totp`, `invalid_recovery_code`.
+            vždy stejná odpověď), `totp_required` (pošlete `totp`, pole `methods`),
+            `invalid_totp`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -4553,16 +4560,26 @@ paths:
             `second_factor_unsupported` (účet jen s passkey nebo instalace s kódem
             z e-mailu, pole `methods`), `mfa_setup_required` (vynucené MFA, účet
             nemá silný faktor), `sso_required` (vynucený poskytovatel identity, pole
-            `provider`), `forbidden` (klientský účet), `license_user_limit`
-            (token se zápisem by překročil počet uživatelů licence),
-            `origin_mismatch` (hlavička `Origin` z jiné adresy).
+            `provider`), `forbidden` (role bez práva vytvářet API tokeny, klientský
+            účet nebo technický správce instalace), `license_user_limit` (token se
+            zápisem by překročil počet uživatelů licence), `origin_mismatch`
+            (hlavička `Origin` z jiné adresy), `demo_read_only` (ukázková instalace,
+            účet není v `demo.password_token_emails`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: |
+            `not_found`: vydávání tokenu heslem je v instalaci vypnuté
+            (`auth.password_token.enabled`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '429':
           description: |
             `too_many_attempts` (zámek pokusů; `Retry-After` 300, 900 nebo 86400 s)
-            nebo `rate_limited` (limit na IP nebo celkový limit endpointu).
+            nebo `rate_limited` (limit na IP, strop neúspěchů účtu nebo endpointu,
+            limit nových tokenů uživatele).
           headers:
             Retry-After:
               schema: { type: integer }
@@ -39292,7 +39309,6 @@ components:
         email: { type: string, format: email }
         password: { type: string, format: password }
         totp: { type: string, description: 'Kód z ověřovací aplikace, když předchozí volání vrátilo `totp_required`.' }
-        recovery_code: { type: string, description: Jednorázový záložní kód místo `totp`. }
         device_name:
           type: string
           maxLength: 100

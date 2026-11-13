@@ -89,6 +89,15 @@ final class PermissionResolver
         return $roleId > 0 ? $this->load($roleId) : EffectiveRole::denied();
     }
 
+    /**
+     * Výchozí role uživatele i s oprávněními, bez requestu. Pro akce, které ověřují
+     * uživatele samy a nemají přihlášené sezení (výměna hesla za API token).
+     */
+    public function forRoleId(int $roleId): EffectiveRole
+    {
+        return $roleId > 0 ? $this->load($roleId) : EffectiveRole::denied();
+    }
+
     private function load(int $roleId): EffectiveRole
     {
         $stmt = $this->db->pdo()->prepare(
