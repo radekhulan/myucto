@@ -99,7 +99,7 @@ if (ssoStepUpPopup) {
   app.mount('#app')
 
   if (import.meta.env.PROD && 'serviceWorker' in navigator) {
-    window.addEventListener('load', async () => {
+    const registerServiceWorker = async () => {
       const ourScript = new URL('/service-worker.js', window.location.origin).href
       try {
         const registrations = await navigator.serviceWorker.getRegistrations()
@@ -117,6 +117,9 @@ if (ssoStepUpPopup) {
       } catch (error) {
         console.error('Service worker registration failed:', error)
       }
-    })
+    }
+
+    if (document.readyState === 'complete') void registerServiceWorker()
+    else window.addEventListener('load', registerServiceWorker, { once: true })
   }
 }

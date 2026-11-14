@@ -143,3 +143,7 @@ test('a foreign service worker on the same origin is unregistered before ours re
     'cizí registrace se musí rušit dřív, než zaregistrujeme vlastní',
   )
 })
+
+test('service worker registration handles an app that finishes bootstrapping after load', () => {
+  assert.match(main, /if \(document\.readyState === 'complete'\) void registerServiceWorker\(\)\s*\n\s*else window\.addEventListener\('load', registerServiceWorker, \{ once: true \}\)/)
+})
