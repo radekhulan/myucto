@@ -622,8 +622,10 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 onMounted(async () => {
-  await ensurePrefsLoaded()
-  try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
+  await Promise.all([
+    ensurePrefsLoaded(),
+    accountingApi.listPeriods().then(result => { periods.value = result }).catch(() => { periods.value = [] }),
+  ])
   // Prvky dvojic (filtr M : N) se ukazují jen firmě, která někdy zapnula jednoduchý zápis.
   accountingApi.getEntryForm().then(v => { hasSingleForm.value = hasAnySingle(v.history) }).catch(() => { hasSingleForm.value = false })
   // Osnova jen pro našeptávání filtru — výpadek nesmí zabránit načtení deníku.

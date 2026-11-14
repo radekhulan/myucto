@@ -17,7 +17,7 @@ vi.mock('@/stores/auth', async () => {
   return {
     useAuthStore: defineStore('frame-test-auth', {
       state: () => ({ user: { id: 1 } }),
-      actions: { async refresh() {} },
+      actions: { async bootstrapWorkspace() {}, async refresh() {} },
     }),
   }
 })

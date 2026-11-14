@@ -109,8 +109,6 @@ export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<voi
   const init = await initialMessage(frame)
   let purchaseCapture = init.purchaseCapture
   delete init.purchaseCapture
-  await ensureInitialLocaleReady()
-  await applyAppearance(init.theme, init.locale, init.accent, init.singlePanel)
 
   const active = ref(init.active)
   const paneId = ref<WindowFramePaneId | null>(init.paneId ?? null)
@@ -128,7 +126,10 @@ export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<voi
     finally { refreshingPermissions = false }
   })
 
-  await auth.refresh()
+  await Promise.all([
+    auth.bootstrapWorkspace(),
+    ensureInitialLocaleReady().then(() => applyAppearance(init.theme, init.locale, init.accent, init.singlePanel)),
+  ])
   if (init.csrfToken) auth.setSessionCsrfToken(init.csrfToken)
   const shortcuts = useKeyboardShortcuts()
   shortcuts.registerActions(init.shortcutActions ?? [])

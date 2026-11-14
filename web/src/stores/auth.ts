@@ -108,20 +108,29 @@ export const useAuthStore = defineStore('auth', () => {
     permissionCatalogVersion.value = ''
   }
 
-  async function fetchSetupStatus() {
+  async function loadSetupStatus() {
     setupStatus.value = await authApi.setupStatus()
     setOverdueIncludesToday(setupStatus.value.overdue_includes_today === true)
     setSsoRenewalPolicy(setupStatus.value)
+    return setupStatus.value
+  }
+
+  async function fetchSetupStatus() {
+    const status = await loadSetupStatus()
     // Na úplně čerstvé instalaci ještě nemusí existovat tabulka domén a setup
     // záměr schválně povoluje přístup i z LAN hostname odlišného od app.url.
     // Tenant kontext proto načítáme až po dokončení prvotního setupu.
-    if (!setupStatus.value.needs_setup) {
+    if (!status.needs_setup) {
       await fetchDomainContext()
     } else {
       domainContext.value = null
       setDomainSupplierLock(null)
     }
-    return setupStatus.value
+    return status
+  }
+
+  async function bootstrapWorkspace() {
+    await Promise.allSettled([loadSetupStatus(), refresh()])
   }
 
   async function fetchDomainContext() {
@@ -358,6 +367,7 @@ export const useAuthStore = defineStore('auth', () => {
     clearPermissions,
     prepareDomainLogin,
     fetchSetupStatus,
+    bootstrapWorkspace,
     fetchDomainContext,
     setSessionCsrfToken,
     setMfaPolicy,

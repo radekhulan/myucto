@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   router: undefined as Router | undefined,
   context: undefined as WindowContext | undefined,
   refresh: vi.fn().mockResolvedValue(undefined),
+  bootstrapWorkspace: vi.fn().mockResolvedValue(undefined),
   mounts: 0,
   setSessionCsrfToken: vi.fn(),
   registerActions: vi.fn(),
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/api/client', () => ({ setForbiddenPermissionHandler: vi.fn() }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({
-  refresh: mocks.refresh, setSessionCsrfToken: mocks.setSessionCsrfToken,
+  refresh: mocks.refresh, bootstrapWorkspace: mocks.bootstrapWorkspace, setSessionCsrfToken: mocks.setSessionCsrfToken,
 }) }))
 vi.mock('@/router', () => ({ authorizationGuard: vi.fn(() => true), applyAuthorizationMeta: vi.fn() }))
 vi.mock('@/router/createPaneRouter', async () => {

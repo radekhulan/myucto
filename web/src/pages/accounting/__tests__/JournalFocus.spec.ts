@@ -6,6 +6,7 @@ const m = vi.hoisted(() => ({
   listPeriods: vi.fn(),
   listAccounts: vi.fn(),
   listJournal: vi.fn(),
+  ensurePrefsLoaded: vi.fn(),
   exportReport: vi.fn(),
   getEntry: vi.fn(),
   replace: vi.fn(),
@@ -47,7 +48,7 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, c
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_framework: 'cz_500', entity_profile: 'unknown' } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatDateTime: (v: string) => v, formatMoney: (v: number) => String(v) }))
-vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined), getPagePrefs: () => ref({}) }))
+vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: m.ensurePrefsLoaded, getPagePrefs: () => ref({}) }))
 vi.mock('@/composables/useTablePrefs', () => ({
   useTablePrefs: (_key: string, columns: unknown[]) => ({
     columns, orderedColumns: ref(columns), ready: ref(true), isVisible: () => true, densityClass: ref(''), setFlag: vi.fn(), flag: () => false,
@@ -121,6 +122,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   m.routeQuery = reactive({})
   m.listPeriods.mockResolvedValue([])
+  m.ensurePrefsLoaded.mockResolvedValue(undefined)
   m.listAccounts.mockResolvedValue([])
   m.getEntry.mockImplementation(async (id: number) => entry(id))
   m.listJournal.mockImplementation(async (params: { entry_id?: number }) => ({
@@ -130,6 +132,22 @@ beforeEach(() => {
 })
 
 describe('journal entry focus', () => {
+  it('loads periods while waiting for saved preferences before querying the journal', async () => {
+    let finishPreferences!: () => void
+    m.ensurePrefsLoaded.mockReturnValueOnce(new Promise<void>(resolve => { finishPreferences = resolve }))
+    const wrapper = mountJournal()
+    try {
+      await flushPromises()
+      expect(m.listPeriods).toHaveBeenCalledTimes(1)
+      expect(m.listJournal).not.toHaveBeenCalled()
+      finishPreferences()
+      await flushPromises()
+      expect(m.listJournal).toHaveBeenCalledTimes(1)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it.each(['desktop', 'mobile'])('opens the exact historical entry and scrolls the visible %s row inside its pane', async layout => {
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function (this: HTMLElement) {
       const visible = layout === 'desktop' ? this.tagName === 'TR' : this.tagName === 'DIV'
