@@ -68,7 +68,7 @@ async function load() {
     proposal.value = prop
     warehouses.value = whs
     warehouseId.value = whs.find(w => w.is_default)?.id ?? whs[0]?.id ?? null
-    const proposedLines = [...prop.lines, ...(prop.unmatched_lines ?? [])]
+    const proposedLines = [...prop.lines, ...(prop.unmatched_lines ?? []), ...(prop.uncoded_lines ?? [])]
       .sort((a, b) => a.order_index - b.order_index || a.purchase_invoice_item_id - b.purchase_invoice_item_id)
     lines.value = proposedLines.map(l => ({
       purchase_invoice_item_id: l.purchase_invoice_item_id,
