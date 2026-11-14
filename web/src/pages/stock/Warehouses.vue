@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { stockApi, type Warehouse, type WarehousePayload, type WarehouseLocation } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
@@ -9,27 +9,83 @@ import Modal from '@/components/ui/Modal.vue'
 import CodeNameFields from '@/components/ui/CodeNameFields.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 
 const warehouses = ref<Warehouse[]>([])
-const locations = ref<WarehouseLocation[]>([])
 const loading = ref(false)
+const expandedWarehouseId = ref<number | null>(null)
+const locations = ref<WarehouseLocation[]>([])
+const locationsLoading = ref(false)
+const locationsError = ref('')
+const locationSearch = ref('')
+const locationStatus = ref<'all' | 'active' | 'inactive'>('all')
+const locationPage = ref(1)
+const locationsPerPage = 20
+const normalizeSearch = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase()
+const filteredLocations = computed(() => {
+  const terms = normalizeSearch(locationSearch.value.trim()).split(/\s+/).filter(Boolean)
+  return locations.value.filter(location => {
+    if (locationStatus.value !== 'all' && location.is_active !== (locationStatus.value === 'active')) return false
+    const text = normalizeSearch(location.code + ' ' + location.name)
+    return terms.every(term => text.includes(term))
+  })
+})
+const visibleLocations = computed(() => filteredLocations.value.slice(
+  (locationPage.value - 1) * locationsPerPage,
+  locationPage.value * locationsPerPage,
+))
+watch([locationSearch, locationStatus], () => { locationPage.value = 1 })
+watch(() => filteredLocations.value.length, count => {
+  locationPage.value = Math.min(locationPage.value, Math.max(1, Math.ceil(count / locationsPerPage)))
+})
 
 async function load() {
   loading.value = true
   try {
     warehouses.value = await stockApi.listWarehouses()
-    locations.value = await stockApi.listLocations()
+    if (!warehouses.value.some(warehouse => warehouse.id === expandedWarehouseId.value)) {
+      expandedWarehouseId.value = null
+    }
   } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('common.error'))
+    toast.error(mapError(e))
   } finally {
     loading.value = false
   }
 }
 onMounted(load)
+
+let locationRequest = 0
+async function loadLocations(warehouseId: number) {
+  const request = ++locationRequest
+  locationsLoading.value = true
+  locationsError.value = ''
+  try {
+    const rows = await stockApi.listLocations(warehouseId)
+    if (request === locationRequest) locations.value = rows
+  } catch (e: any) {
+    if (request === locationRequest) locationsError.value = mapError(e)
+  } finally {
+    if (request === locationRequest) locationsLoading.value = false
+  }
+}
+
+function toggleLocations(warehouse: Warehouse) {
+  if (expandedWarehouseId.value === warehouse.id) {
+    expandedWarehouseId.value = null
+    locationRequest++
+    return
+  }
+  expandedWarehouseId.value = warehouse.id
+  locations.value = []
+  locationPage.value = 1
+  locationSearch.value = ''
+  locationStatus.value = 'all'
+  void loadLocations(warehouse.id)
+}
 
 function mapError(e: any): string {
   const code = e?.response?.data?.error?.code
@@ -104,6 +160,7 @@ async function remove(w: Warehouse) {
 
 const locationOpen = ref(false)
 const locationEditing = ref<WarehouseLocation | null>(null)
+const savingLocation = ref(false)
 const locationForm = ref({ warehouse_id: 0, code: '', name: '', is_active: true })
 // Kód lokace je unikátní v rámci skladu (backend do 50 znaků).
 const takenLocationCodes = computed(() => locations.value
@@ -116,13 +173,19 @@ function openLocation(warehouse: Warehouse, location: WarehouseLocation | null =
 }
 async function saveLocation() {
   if (!locationForm.value.code.trim() || !locationForm.value.name.trim()) return
+  const payload = locationForm.value
+  savingLocation.value = true
   try {
-    if (locationEditing.value) await stockApi.updateLocation(locationEditing.value.id, locationForm.value)
-    else await stockApi.createLocation(locationForm.value)
+    if (locationEditing.value) await stockApi.updateLocation(locationEditing.value.id, payload)
+    else await stockApi.createLocation(payload)
     locationOpen.value = false
-    await load()
+    if (expandedWarehouseId.value === payload.warehouse_id) await loadLocations(payload.warehouse_id)
     toast.success(t('common.saved'))
-  } catch (e: any) { toast.error(mapError(e)) }
+  } catch (e: any) {
+    toast.error(mapError(e))
+  } finally {
+    savingLocation.value = false
+  }
 }
 </script>
 
@@ -139,27 +202,6 @@ async function saveLocation() {
       </button>
     </div>
 
-    <div v-if="warehouses.length" class="mt-4 bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-      <div class="px-5 py-3 border-b border-neutral-200">
-        <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.locations.title') }}</h2>
-      </div>
-      <div class="divide-y divide-neutral-100">
-        <div v-for="w in warehouses" :key="`locations-${w.id}`" class="px-5 py-3">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <span class="font-medium">{{ w.name }}</span>
-            <button v-if="auth.canWrite('stock.items.write')" type="button" @click="openLocation(w)" :class="btnOutline('primary')">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-              {{ t('stock.locations.new') }}
-            </button>
-          </div>
-          <div class="mt-2 flex flex-wrap gap-2">
-            <button v-for="location in locations.filter(l => l.warehouse_id === w.id)" :key="location.id" type="button" @click="openLocation(w, location)" class="px-2 py-1 rounded-md border border-neutral-200 text-sm font-mono" :class="location.is_active ? 'bg-neutral-50 text-neutral-700' : 'bg-neutral-100 text-neutral-400 line-through'">{{ location.code }} - {{ location.name }}</button>
-            <span v-if="locations.every(l => l.warehouse_id !== w.id)" class="text-sm text-neutral-400">{{ t('stock.locations.empty') }}</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
     <EmptyState v-else-if="warehouses.length === 0" boxed icon="stock_warehouses"
@@ -168,51 +210,86 @@ async function saveLocation() {
       :cta="auth.canWrite('stock.items.write') ? t('stock.warehouses.new') : undefined"
       @action="openCreate" />
 
-    <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
-            <tr>
-              <th class="px-3 py-2 text-left font-medium">{{ t('stock.warehouses.col_code') }}</th>
-              <th class="px-3 py-2 text-left font-medium">{{ t('stock.warehouses.col_name') }}</th>
-              <th class="px-3 py-2 text-right font-medium">{{ t('stock.warehouses.col_value') }}</th>
-              <th class="px-3 py-2 text-center font-medium">{{ t('stock.warehouses.col_default') }}</th>
-              <th class="px-3 py-2 text-center font-medium">{{ t('stock.warehouses.col_active') }}</th>
-              <th class="px-3 py-2 w-24"></th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-neutral-100">
-            <tr v-for="w in warehouses" :key="w.id" :class="{ 'opacity-50': !w.is_active }" class="hover:bg-neutral-50">
-              <td class="px-3 py-2 font-mono">{{ w.code }}</td>
-              <td class="px-3 py-2">
-                {{ w.name }}
-                <span v-if="w.is_default" class="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 font-medium">{{ t('stock.warehouses.default_badge') }}</span>
-              </td>
-              <td class="px-3 py-2 text-right font-mono">{{ formatMoney(Number(w.value)) }}</td>
-              <td class="px-3 py-2 text-center">
-                <span class="text-xs px-2 py-0.5 rounded font-medium" :class="w.is_default ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-500'">
-                  {{ w.is_default ? t('common.yes') : t('common.no') }}
-                </span>
-              </td>
-              <td class="px-3 py-2 text-center">
-                <span class="text-xs px-2 py-0.5 rounded font-medium" :class="w.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-500'">
-                  {{ w.is_active ? t('common.yes') : t('common.no') }}
-                </span>
-              </td>
-              <td class="px-3 py-2 text-right whitespace-nowrap" v-if="auth.canWrite('stock.items.write')">
-                <button type="button" @click="openEdit(w)" :title="t('common.edit')" class="cursor-pointer text-neutral-400 hover:text-primary-600 px-1">
-                  <svg class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+    <ul v-else class="divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-surface shadow-sm">
+      <li v-for="warehouse in warehouses" :key="warehouse.id">
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
+          <div class="min-w-0 flex-1 basis-52">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="min-w-0 break-words text-sm font-semibold">{{ warehouse.name }}</span>
+              <span v-if="warehouse.is_default" class="rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700">{{ t('stock.warehouses.default_badge') }}</span>
+              <span v-if="!warehouse.is_active" class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">{{ t('stock.locations.inactive') }}</span>
+            </div>
+            <div class="mt-0.5 break-all font-mono text-xs text-neutral-500">{{ warehouse.code }}</div>
+          </div>
+          <div class="text-sm">
+            <span class="text-xs text-neutral-500">{{ t('stock.warehouses.col_value') }}</span>
+            <div class="font-medium tabular-nums">{{ formatMoney(Number(warehouse.value)) }}</div>
+          </div>
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button type="button" @click="toggleLocations(warehouse)" :class="btnOutline('neutral')"
+              :aria-expanded="expandedWarehouseId === warehouse.id">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.pin" /></svg>
+              {{ t('stock.locations.title') }}
+              <svg class="h-3.5 w-3.5 transition-transform" :class="{ 'rotate-180': expandedWarehouseId === warehouse.id }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
+            </button>
+            <template v-if="auth.canWrite('stock.items.write')">
+              <button type="button" @click="openEdit(warehouse)" :title="t('common.edit')" :aria-label="t('common.edit')" :class="btnOutline('neutral')">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+              </button>
+              <button type="button" @click="remove(warehouse)" :title="t('common.delete')" :aria-label="t('common.delete')" :class="btnOutline('danger')">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <section v-if="expandedWarehouseId === warehouse.id" :aria-label="t('stock.locations.for_warehouse', { warehouse: warehouse.name })"
+          class="border-t border-neutral-200 bg-neutral-50 px-4 py-4">
+          <div class="mb-3 flex flex-wrap items-center gap-2">
+            <input v-model="locationSearch" type="search" :aria-label="t('stock.locations.search')" :placeholder="t('stock.locations.search')"
+              class="h-9 min-w-0 grow rounded-md border border-neutral-300 bg-surface px-3 text-sm sm:max-w-xs" />
+            <select v-model="locationStatus" :aria-label="t('stock.locations.status')" class="h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm">
+              <option value="all">{{ t('stock.locations.all') }}</option>
+              <option value="active">{{ t('stock.warehouses.col_active') }}</option>
+              <option value="inactive">{{ t('stock.locations.inactive') }}</option>
+            </select>
+            <button v-if="auth.canWrite('stock.items.write')" type="button" @click="openLocation(warehouse)" :class="btnOutline('primary')">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+              {{ t('stock.locations.new') }}
+            </button>
+          </div>
+          <p v-if="locationsLoading" class="py-3 text-sm text-neutral-500" role="status">{{ t('common.loading') }}</p>
+          <div v-else-if="locationsError" class="flex flex-wrap items-center gap-2" role="alert">
+            <span class="text-sm text-danger-600">{{ locationsError }}</span>
+            <button type="button" @click="loadLocations(warehouse.id)" :class="btnOutline('neutral')">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+              {{ t('common.refresh') }}
+            </button>
+          </div>
+          <p v-else-if="filteredLocations.length === 0" class="py-3 text-sm text-neutral-500" role="status">
+            {{ t(locations.length ? 'stock.locations.no_matches' : 'stock.locations.empty') }}
+          </p>
+          <div v-else class="overflow-hidden rounded-md border border-neutral-200 bg-surface">
+            <ul class="divide-y divide-neutral-100">
+              <li v-for="location in visibleLocations" :key="location.id" class="flex items-center gap-3 px-3 py-2 text-sm">
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                    <span class="break-all font-mono text-xs font-medium text-neutral-700">{{ location.code }}</span>
+                    <span v-if="location.name.trim() !== location.code.trim()" class="break-words">{{ location.name }}</span>
+                    <span v-if="!location.is_active" class="text-xs text-neutral-500">{{ t('stock.locations.inactive') }}</span>
+                  </div>
+                </div>
+                <button v-if="auth.canWrite('stock.items.write')" type="button" @click="openLocation(warehouse, location)"
+                  :title="t('stock.locations.edit')" :aria-label="t('stock.locations.edit_named', { code: location.code })" :class="btnOutline('neutral')">
+                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                 </button>
-                <button type="button" @click="remove(w)" :title="t('common.delete')" class="cursor-pointer text-neutral-400 hover:text-danger-500 px-1">
-                  <svg class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
-                </button>
-              </td>
-              <td v-else></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+              </li>
+            </ul>
+            <PaginationBar v-model:page="locationPage" embedded :per-page="locationsPerPage" :total="filteredLocations.length" />
+          </div>
+        </section>
+      </li>
+    </ul>
 
     <Modal v-if="modalOpen" :title="editing ? t('stock.warehouses.edit') : t('stock.warehouses.new')" widthClass="max-w-md" @close="modalOpen = false">
       <div class="space-y-3">
@@ -274,7 +351,7 @@ async function saveLocation() {
         <label class="inline-flex items-center gap-2 text-sm"><input v-model="locationForm.is_active" type="checkbox" class="rounded border-neutral-300 text-primary-600" />{{ t('stock.warehouses.field_active') }}</label>
         <div class="flex flex-wrap justify-end gap-2 pt-2 border-t border-neutral-100">
           <button type="button" @click="locationOpen = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
-          <button type="button" @click="saveLocation" :class="btnFilled('primary')"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>{{ t('common.save') }}</button>
+          <button type="button" @click="saveLocation" :disabled="savingLocation" :class="btnFilled('primary')"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>{{ t('common.save') }}</button>
         </div>
       </div>
     </Modal>

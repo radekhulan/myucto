@@ -17234,6 +17234,8 @@
       "lots_hint": "Kód a datum spotřeby šarže přepište přímo v poli a uložte kartu. Nový text se propíše do rozpracovaných dokladů (koncepty faktur, nezaúčtované i zaúčtované skladové doklady, rozpracovaná expedice). Vystavené faktury a jejich PDF zůstanou se starým textem. Karta se ukládá první; šarže, kterou server odmítne (například jiná šarže už má stejný kód a datum), zůstane označená u svého pole, opravte ji a uložte znovu.",
       "lots_empty": "Karta zatím nemá žádnou šarži.",
       "lots_search": "Hledat v kódech šarží",
+      "inventory_search": "Hledat číslo, šarži, sklad nebo pozici",
+      "inventory_no_matches": "Žádná sledovaná zásoba neodpovídá hledání.",
       "lots_none_found": "Žádná šarže neodpovídá hledání.",
       "lots_more": "Načíst další šarže (zobrazeno {shown} z {total})",
       "lots_load_error": "Šarže karty se nepodařilo načíst: {message}",
@@ -17333,12 +17335,19 @@
       "hint": "Ceny jsou za základní jednotku bez DPH, dnes a bez akce. Individuální cena zákazníka má před hladinou přednost, akční cena se použije jen tehdy, když je levnější."
     },
     "locations": {
-      "title": "Skladové lokace",
-      "new": "Nová lokace",
-      "edit": "Upravit lokaci",
-      "empty": "Bez lokací",
-      "name": "Název lokace",
-      "code": "Kód lokace"
+      "title": "Skladové pozice",
+      "new": "Nová pozice",
+      "edit": "Upravit pozici",
+      "empty": "Tento sklad nemá žádné pozice.",
+      "name": "Název pozice",
+      "code": "Kód pozice",
+      "for_warehouse": "Pozice skladu {warehouse}",
+      "search": "Hledat podle kódu nebo názvu",
+      "status": "Stav pozice",
+      "all": "Všechny pozice",
+      "inactive": "Neaktivní",
+      "no_matches": "Žádná pozice neodpovídá hledání.",
+      "edit_named": "Upravit pozici {code}"
     },
     "cycles": {
       "title": "Cyklické inventury",

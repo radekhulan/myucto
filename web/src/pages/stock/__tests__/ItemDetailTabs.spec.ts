@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   context: null as Record<string, unknown> | null,
   vatRates: [{ id: 1, rate_percent: 21, is_reverse_charge: false }] as Array<Record<string, unknown>>,
   deniedWrite: new Set<string>(),
+  inventory: [] as Array<Record<string, unknown>>,
 }))
 
 vi.mock('@/api/stock', () => ({
@@ -24,6 +25,7 @@ vi.mock('@/api/stock', () => ({
       ...m.item,
     })),
     itemMovements: vi.fn(async () => ({ opening_balance: '0', items: [] })),
+    itemTracking: vi.fn(async () => ({ tracking_mode: m.item.tracking_mode, base_unit: 'pcs', inventory: m.inventory })),
     itemMovementsExportUrl: vi.fn(() => ''),
     levels: vi.fn(async () => ({ data: m.levels, meta: { total: m.levels.length } })),
   },
@@ -73,6 +75,35 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 import ItemDetail from '../ItemDetail.vue'
 
 describe('ItemDetail overview', () => {
+  it('stránkuje sériová čísla a hledá podle čísla, skladu a pozice', async () => {
+    m.item = { tracking_mode: 'serial' }
+    m.inventory = Array.from({ length: 24 }, (_, index) => ({
+      stock_tracking_unit_id: index + 1, warehouse_id: 1, location_id: index + 1,
+      serial_number: `SN-${100 + index}`, warehouse_code: 'MAIN', location_code: `BIN-${100 + index}`, quantity: '1',
+    }))
+    const wrapper = mount(ItemDetail, {
+      global: { stubs: { ActionBar: true, EmptyState: true, ItemDuplicateDialog: true, ItemTemplatesPanel: true, ProductRelationsPanel: true, RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    try {
+      await flushPromises()
+      expect(wrapper.text()).toContain('stock.tracking.mode_serial')
+      expect(wrapper.text()).toContain('SN-100')
+      expect(wrapper.text()).not.toContain('SN-123')
+      await wrapper.findAll('button').find(button => button.text() === 'common.next')!.trigger('click')
+      expect(wrapper.text()).toContain('SN-123')
+      const search = wrapper.get('input[type="search"]')
+      await search.setValue('sn-102 main bin-102')
+      expect(wrapper.text()).toContain('SN-102')
+      expect(wrapper.text()).not.toContain('SN-123')
+      await search.setValue('missing')
+      expect(wrapper.text()).toContain('stock.tracking.inventory_no_matches')
+    } finally {
+      wrapper.unmount()
+      m.item = {}
+      m.inventory = []
+    }
+  })
+
   it('ukáže stav po skladech, cenu s DPH, parametry, poznámku a rychlé doklady', async () => {
     m.item = { sale_price_without_vat: '1000.00', effective_price: '1000.00', vat_rate_id: 1, note: 'Synthetic note' }
     m.levels = [

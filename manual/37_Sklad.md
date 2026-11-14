@@ -1186,7 +1186,8 @@ pohyby (na kterémkoli z obou směrů převodky), **nejde smazat**. Pokus o smaz
 hláškou „Sklad nelze smazat - má nenulový stav nebo skladové pohyby. Deaktivujte jej
 místo mazání." a nabídne deaktivaci.
 
-Sklad lze rozdělit na volitelné **lokace** s vlastním kódem a názvem. Lokace vždy
+Tlačítko **Skladové pozice** u vybraného skladu rozbalí jeho seznam pozic. Hledat lze
+podle kódu nebo názvu. Sklad lze rozdělit na volitelné **lokace**. Lokace vždy
 patří právě jednomu skladu a nelze ji při editaci přesunout jinam. U karet se
 sledováním šarží nebo sériových čísel může příjemka, výdejka a převodka určit
 zdrojovou a cílovou lokaci. Karta bez zapnutého sledování dál používá běžný stav
@@ -1195,8 +1196,9 @@ skladu a při fakturaci ani při skladovém pohybu nevyžaduje žádnou lokaci.
 Na kartě lze zapnout sledování **šarží a expirace** nebo **sériových čísel**.
 Zaúčtování sledované karty vyžaduje rozdělit celé množství řádku do alokací.
 Sériové číslo představuje vždy jeden nedělitelný kus a je jedinečné v rámci firmy
-a karty. Šarže dovoluje množství a volitelné datum expirace. Detail karty ukazuje
-aktuální rozpad i historii od příjmu přes převody a výdeje po vratku. Storno použije
+a karty. Šarže dovoluje množství a volitelné datum expirace. Na detailu karty
+v přehledu aktuální zásoby lze hledat sériové číslo, šarži, kód skladu nebo pozice.
+Pohyby ukazují historii od příjmu přes převody a výdeje po vratku. Storno použije
 přesně stejné identity a množství jako původní doklad.
 
 Překlep v kódu šarže nebo v datu spotřeby opravíte na úpravě skladové karty

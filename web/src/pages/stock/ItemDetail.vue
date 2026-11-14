@@ -13,6 +13,7 @@ import { formatMoney, formatDate, formatUnitPrice } from '@/composables/useForma
 import { hasSubCentPrice, roundUnitPrice } from '@/utils/unitPrice'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnOutline } from '@/components/ui/buttonStyles'
 import ItemDuplicateDialog from '@/components/stock/ItemDuplicateDialog.vue'
 import ItemTemplatesPanel from '@/components/stock/ItemTemplatesPanel.vue'
@@ -181,6 +182,22 @@ async function loadQuantities() {
 
 const movements = ref<StockLedgerRow[]>([])
 const tracking = ref<StockTrackingOverview | null>(null)
+const trackingSearch = ref('')
+const trackingPage = ref(1)
+const trackingPerPage = 20
+const filteredTracking = computed(() => {
+  const terms = trackingSearch.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  return (tracking.value?.inventory ?? []).filter(row => {
+    const text = [row.serial_number, row.lot_code, row.warehouse_code, row.location_code].join(' ').toLocaleLowerCase()
+    return terms.every(term => text.includes(term))
+  })
+})
+const visibleTracking = computed(() => filteredTracking.value.slice(
+  (trackingPage.value - 1) * trackingPerPage,
+  trackingPage.value * trackingPerPage,
+))
+watch(trackingSearch, () => { trackingPage.value = 1 })
+watch(tracking, () => { trackingSearch.value = ''; trackingPage.value = 1 })
 // Balení (issue #17): detail je jen přehled, upravuje se v editoru karty
 // společně s ostatními údaji (jedno Uložit).
 const packaging = ref<StockItemPackaging | null>(null)
@@ -518,14 +535,20 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
       </div>
 
       <div v-if="tracking" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
-        <div class="px-5 py-3 border-b border-neutral-200">
-          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.tracking.title') }}</h3>
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 px-5 py-3">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">
+            {{ t(tracking.tracking_mode === 'serial' ? 'stock.tracking.mode_serial' : 'stock.tracking.mode_lot') }}
+          </h3>
+          <input v-if="tracking.inventory.length" v-model="trackingSearch" type="search"
+            :aria-label="t('stock.tracking.inventory_search')" :placeholder="t('stock.tracking.inventory_search')"
+            class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm sm:max-w-xs" />
         </div>
         <div v-if="tracking.inventory.length === 0" class="px-5 py-6 text-sm text-neutral-500">{{ t('stock.tracking.empty') }}</div>
+        <div v-else-if="filteredTracking.length === 0" class="px-5 py-6 text-sm text-neutral-500" role="status">{{ t('stock.tracking.inventory_no_matches') }}</div>
         <div v-else class="divide-y divide-neutral-100">
-          <div v-for="row in tracking.inventory" :key="`${row.stock_tracking_unit_id}-${row.warehouse_id}-${row.location_id ?? 0}`" class="px-5 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
-            <div>
-              <span class="font-mono font-medium">{{ row.serial_number ?? row.lot_code }}</span>
+          <div v-for="row in visibleTracking" :key="`${row.stock_tracking_unit_id}-${row.warehouse_id}-${row.location_id ?? 0}`" class="px-5 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <div class="min-w-0">
+              <span class="break-all font-mono font-medium">{{ row.serial_number ?? row.lot_code }}</span>
               <span v-if="row.expires_on" class="ml-2 text-neutral-500">{{ t('stock.tracking.expires') }} {{ formatDate(row.expires_on) }}</span>
             </div>
             <div class="text-right">
@@ -533,6 +556,7 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
               <span class="ml-2 text-neutral-500">{{ row.warehouse_code }}<template v-if="row.location_code"> / {{ row.location_code }}</template></span>
             </div>
           </div>
+          <PaginationBar v-model:page="trackingPage" embedded :per-page="trackingPerPage" :total="filteredTracking.length" />
         </div>
       </div>
 
