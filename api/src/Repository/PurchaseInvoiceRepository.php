@@ -1088,11 +1088,6 @@ final class PurchaseInvoiceRepository
      */
     private function listGroupedRows(string $whereSql, array $params, array $filters, int $page, int $perPage): array
     {
-        // MariaDB 10.2+ window function — COUNT(*) OVER() vrací total v každém řádku.
-        // Místo 2 query (COUNT + SELECT s LIMIT) jeden round-trip, žádný race condition
-        // mezi count a paginated select, žádný duplicate WHERE / JOIN parsing.
-        $selectTotal = $perPage > 0 ? ', COUNT(*) OVER() AS total_rows' : '';
-
         $sortColumns = [
             'number' => 'pi.varsymbol', 'vendor' => 'c.company_name', 'vendor_ic' => 'c.ic',
             'vendor_number' => 'pi.vendor_invoice_number', 'kind' => 'pi.document_kind',
@@ -1127,7 +1122,29 @@ final class PurchaseInvoiceRepository
             $sortSql = "DATE_FORMAT(pi.issue_date, '%Y-%m') {$monthDir}, " . $sortSql;
         }
 
-        $sql = "SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,
+        $joins = 'JOIN clients c ON c.id = pi.vendor_id
+                  JOIN currencies cur ON cur.id = pi.currency_id
+             LEFT JOIN countries co ON co.id = c.country_id
+             LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id AND ec.supplier_id = pi.supplier_id
+             LEFT JOIN projects prj ON prj.id = pi.project_id';
+
+        // Okno počítá a stránkuje jen ID. Saldo a další odvozené sloupce se načtou až pro stránku.
+        $pageCte = '';
+        $selectTotal = '';
+        $from = "FROM purchase_invoices pi $joins WHERE $whereSql";
+        if ($perPage > 0) {
+            $pageCte = "WITH page_ids AS (
+                SELECT pi.id, COUNT(*) OVER() AS total_rows
+                  FROM purchase_invoices pi $joins
+                 WHERE $whereSql
+                 ORDER BY $sortSql
+                 LIMIT ? OFFSET ?
+            )";
+            $selectTotal = ', page_ids.total_rows';
+            $from = "FROM page_ids JOIN purchase_invoices pi ON pi.id = page_ids.id $joins";
+        }
+
+        $sql = "$pageCte SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,
                        pi.payment_variable_symbol, pi.payment_method,
                        pi.vendor_id, pi.supplier_id,
                        pi.issue_date, pi.tax_date, pi.due_date, pi.received_at,
@@ -1155,27 +1172,15 @@ final class PurchaseInvoiceRepository
                                WHERE pii.purchase_invoice_id = pi.id
                                  AND pii.expense_kind = 'small_asset') AS has_small_asset
                        {$selectTotal}
-                  FROM purchase_invoices pi
-                  JOIN clients c ON c.id = pi.vendor_id
-                  JOIN currencies cur ON cur.id = pi.currency_id
-             LEFT JOIN countries co ON co.id = c.country_id
-             LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id AND ec.supplier_id = pi.supplier_id
-             LEFT JOIN projects prj ON prj.id = pi.project_id
-                 WHERE $whereSql
+                  $from
                  ORDER BY $sortSql";
-
-        $offset = 0;
-        if ($perPage > 0) {
-            $offset = max(0, ($page - 1) * $perPage);
-            $sql .= ' LIMIT ? OFFSET ?';
-        }
 
         $stmt = $this->db->pdo()->prepare($sql);
         $idx = 1;
         foreach ($params as $v) $stmt->bindValue($idx++, $v);
         if ($perPage > 0) {
             $stmt->bindValue($idx++, $perPage, PDO::PARAM_INT);
-            $stmt->bindValue($idx++, $offset,  PDO::PARAM_INT);
+            $stmt->bindValue($idx++, max(0, ($page - 1) * $perPage), PDO::PARAM_INT);
         }
         $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
