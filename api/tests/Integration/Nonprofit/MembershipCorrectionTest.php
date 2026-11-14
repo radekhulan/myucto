@@ -358,6 +358,66 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
         self::assertNotNull($this->batchRowStatus($batch, $other));
     }
 
+    public function testCorrectionDuringPreparedBatchRejectsOnlyTheChangedMemberAtConfirmation(): void
+    {
+        $fixed = $this->member('BATCH-FIXED');
+        $voided = $this->member('BATCH-VOIDED');
+        $this->revision($voided, 'active', '2026-02-01', 1, 'batch-voided-2');
+        $untouched = $this->member('BATCH-UNTOUCHED');
+        $ready = $this->ready([$fixed, $voided, $untouched], 'batch-corrected');
+        $id = $ready['batch']['id'];
+        self::assertSame(3, $ready['summary']['ready']);
+        // Rozpracovaná dávka opravu ani zrušení neblokuje (rozhodnutí D2/D5).
+        $client = $this->repository->member($this->supplier, $fixed)['client_id'];
+        $this->corrections->updateIdentity($this->supplier, $fixed, $this->identity($client, 'SYN-BATCH-FIXED-2', $client, 'SYN-BATCH-FIXED'), $this->actor);
+        $this->void($voided, $this->lastRevision($voided), 2, 'batch-voided-cancel');
+
+        $done = $this->batches->confirm($this->supplier, $id, $ready['batch']['approval_token'], $this->actor);
+        $status = array_column($done['items'], 'status', 'member_id');
+        self::assertSame('created', $status[$untouched]);
+        self::assertSame('rejected', $status[$fixed]);
+        self::assertSame('rejected', $status[$voided]);
+        $errors = array_column($done['items'], 'error_code', 'member_id');
+        self::assertSame('nonprofit_membership_preview_stale', $errors[$fixed]);
+        self::assertSame('nonprofit_membership_preview_stale', $errors[$voided]);
+        $this->assertCounters($id);
+    }
+
+    public function testDeletionKeepsFinishedBatchHeaderEqualToItsItems(): void
+    {
+        [$bare] = $this->bareMember('DEL-COUNTERS');
+        $other = $this->member('DEL-COUNTERS-OTHER');
+        $batch = $this->batches->create($this->supplier, $this->input([$bare, $other], 'del-counters'), $this->actor)['batch']['id'];
+        $this->batches->cancel($this->supplier, $batch, $this->actor);
+        $before = (new \MyInvoice\Repository\Nonprofit\Membership\MembershipBatchRepository($this->db))->summary($this->supplier, $batch);
+        $this->corrections->delete($this->supplier, $bare, $this->actor);
+        $after = (new \MyInvoice\Repository\Nonprofit\Membership\MembershipBatchRepository($this->db))->summary($this->supplier, $batch);
+        self::assertSame([$before['total'] - 1, $before['rejected'] - 1], [$after['total'], $after['rejected']]);
+        $this->assertCounters($batch);
+    }
+
+    public function testVoidingRevisionOfAnotherMemberIsNotFound(): void
+    {
+        $member = $this->member('VOID-OWNER');
+        $other = $this->member('VOID-OTHER');
+        $this->assertCorrectionRejected('nonprofit_membership_revision_not_found', fn () => $this->void($member, $this->lastRevision($other), 1, 'void-foreign'));
+        try {
+            $this->void($member, $this->lastRevision($other), 1, 'void-foreign-status');
+        } catch (MembershipException $e) {
+            self::assertSame(404, $e->httpStatus);
+        }
+    }
+
+    public function testCloneScrubbingHidesMemberNumberInCorrectionAudit(): void
+    {
+        $scrubber = new \MyInvoice\Service\Anonymization\TextScrubber(new \MyInvoice\Service\Anonymization\Pseudonymizer('synthetic-correction-audit'));
+        $payload = json_encode(['before' => ['client_id' => 5, 'member_number' => 'SYN-PRIVATE-77'], 'after' => ['client_id' => 6, 'member_number' => 'SYN-PRIVATE-78']]);
+        $scrubbed = $scrubber->scrubJson((string) $payload);
+        self::assertStringNotContainsString('SYN-PRIVATE-77', $scrubbed);
+        self::assertStringNotContainsString('SYN-PRIVATE-78', $scrubbed);
+        self::assertSame(5, json_decode($scrubbed, true)['before']['client_id']);
+    }
+
     public function testCatalogSkipsMemberWhoseOnlyRevisionWasVoided(): void
     {
         $member = $this->member('VOID-ONLY');

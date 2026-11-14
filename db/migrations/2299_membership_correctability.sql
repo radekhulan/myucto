@@ -9,6 +9,10 @@ ALTER TABLE nonprofit_member_revisions
   REFERENCES nonprofit_member_revisions(supplier_id,member_id,id) ON DELETE RESTRICT,
  DROP INDEX IF EXISTS uq_nmr_effective;
 
+-- Smazání člena zamyká jen plněné dávky organizace (souběh s plněním dávky).
+ALTER TABLE nonprofit_membership_batches
+ ADD INDEX IF NOT EXISTS ix_nmb_phase (supplier_id,phase,id);
+
 -- Člen jde opravit (kontakt, členské číslo) jen do prvního předpisu a smazat jen bez navázaných dat (FK RESTRICT).
 DELIMITER $$
 DROP TRIGGER IF EXISTS trg_nm_immutable_update$$

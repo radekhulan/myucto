@@ -37,6 +37,8 @@ final class TextScrubber
      */
     private const JSON_KEYS = [
         'costcenter' => 'cost_center',
+        // Členské číslo (audit oprav členské evidence) zachová tvar, ne hodnotu.
+        'membernumber' => 'shape',
         'companyname' => 'party_name', 'displayname' => 'party_name', 'partnername' => 'party_name',
         'vendorname' => 'party_name', 'buyername' => 'party_name', 'customername' => 'party_name',
         'counterpartyname' => 'party_name', 'payername' => 'party_name', 'payeename' => 'party_name',

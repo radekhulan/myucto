@@ -98,16 +98,19 @@ final class MembershipCorrectionService
     {
         if ($actor <= 0) throw new MembershipException('nonprofit_membership_invalid', 'Smazání člena vyžaduje autora.');
         return TransactionFailure::retrying($this->db->pdo(), fn (): array => (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplier, $member, $actor, $ip, $userAgent): array {
+            // Plnění dávky zamyká dávku a pak (cizím klíčem položky) člena; smazání proto zamyká plněné dávky
+            // dřív než člena. Zámek rozsahu indexu zároveň pozdrží založení nové dávky do konce smazání.
+            $seeding = $this->seedingBatchIds($supplier, $member, true);
             $current = $this->lockedMember($supplier, $member);
             $q = $this->db->pdo()->prepare('SELECT 1 FROM nonprofit_member_revisions WHERE supplier_id=? AND member_id=? LIMIT 1 LOCK IN SHARE MODE');
             $q->execute([$supplier, $member]);
             if ($q->fetchColumn() !== false) throw new MembershipException('nonprofit_membership_member_has_revisions', 'Člen má zapsanou historii členství, smazat ho nejde. Opravit jde kontakt a číslo.', 409);
             // Předpis vyžaduje aktivní revizi, takže tuto větev zastaví už kontrola revizí; zůstává jako pojistka pro převzatá data.
             if ($this->hasCharges($supplier, $member, true)) throw new MembershipException('nonprofit_membership_member_has_charges', 'Člen už má předpis, smazat ho nejde.', 409);
-            $open = $this->openBatchIds($supplier, $member, true);
+            $open = $this->openBatchIds($supplier, $member, true, $seeding);
             if ($open !== []) throw new MembershipException('nonprofit_membership_member_in_batch', 'Člen je v rozpracovaném hromadném předpisu. Dokončete nebo zrušte dávku.', 409, ['batch_ids' => $open]);
             // Dokončená nebo zrušená dávka zapisuje i člena bez revize jako odmítnutého; řádek bez operace
-            // nenese účetní zápis. Počty v hlavičce dávky zůstávají jako historie.
+            // nenese účetní zápis. Hlavička dávky se sníží stejně, aby její počty dál odpovídaly položkám.
             $q = $this->db->pdo()->prepare("SELECT bm.batch_id FROM nonprofit_membership_batch_members bm
                 JOIN nonprofit_membership_batches b ON b.supplier_id=bm.supplier_id AND b.id=bm.batch_id
                 WHERE bm.supplier_id=? AND bm.member_id=? AND bm.status='rejected' AND bm.operation_id IS NULL AND b.phase IN ('finished','cancelled')
@@ -118,6 +121,8 @@ final class MembershipCorrectionService
                 $marks = implode(',', array_fill(0, count($batches), '?'));
                 $this->db->pdo()->prepare("DELETE FROM nonprofit_membership_batch_members WHERE supplier_id=? AND member_id=? AND status='rejected' AND operation_id IS NULL AND batch_id IN ({$marks})")
                     ->execute([$supplier, $member, ...$batches]);
+                $this->db->pdo()->prepare("UPDATE nonprofit_membership_batches SET member_count=member_count-1,rejected_count=rejected_count-1 WHERE supplier_id=? AND id IN ({$marks})")
+                    ->execute([$supplier, ...$batches]);
             }
             try {
                 $this->db->pdo()->prepare('DELETE FROM nonprofit_members WHERE supplier_id=? AND id=?')->execute([$supplier, $member]);
@@ -154,8 +159,11 @@ final class MembershipCorrectionService
             }
             $this->lockedMember($supplier, $member);
             $history = $this->members->history($supplier, $member, true);
-            $head = $history === [] ? null : $history[array_key_last($history)];
-            if (($head['revision_no'] ?? 0) !== $input['expected_revision']) throw new MembershipException('nonprofit_membership_revision_changed', 'Historie členství se mezitím změnila.', 409);
+            if (!in_array($revision, array_column($history, 'id'), true)) {
+                throw new MembershipException('nonprofit_membership_revision_not_found', 'Revize nepatří tomuto členovi.', 404);
+            }
+            $head = $history[array_key_last($history)];
+            if ($head['revision_no'] !== $input['expected_revision']) throw new MembershipException('nonprofit_membership_revision_changed', 'Historie členství se mezitím změnila.', 409);
             $effective = MembershipRevisionTimeline::effective($history);
             $target = $effective === [] ? null : $effective[array_key_last($effective)];
             if ($target === null || $target['id'] !== $revision) {
@@ -219,21 +227,27 @@ final class MembershipCorrectionService
      * Rozpracované dávky člena: už zapsaná položka, nebo plněná dávka, do které člen ještě může spadnout
      * (plnění čte členy bez zámku a jeho položka by po smazání skončila chybou cizího klíče).
      */
-    private function openBatchIds(int $supplier, int $member, bool $lock): array
+    private function openBatchIds(int $supplier, int $member, bool $lock, ?array $seeding = null): array
     {
-        $suffix = $lock ? ' LOCK IN SHARE MODE' : '';
         $q = $this->db->pdo()->prepare('SELECT bm.batch_id FROM nonprofit_membership_batch_members bm
             JOIN nonprofit_membership_batches b ON b.supplier_id=bm.supplier_id AND b.id=bm.batch_id
-            WHERE bm.supplier_id=? AND bm.member_id=? AND b.phase IN (' . self::OPEN_BATCH_PHASES . ')' . $suffix);
+            WHERE bm.supplier_id=? AND bm.member_id=? AND b.phase IN (' . self::OPEN_BATCH_PHASES . ')' . ($lock ? ' LOCK IN SHARE MODE' : ''));
         $q->execute([$supplier, $member]);
         $ids = array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
-        // Bez zámku: dávek firmy je málo a sdílený zámek by na chvíli zastavil všechny dávky organizace.
-        // Dávka založená až po této kontrole může plnění jednou selhat na cizím klíči; opakované plnění smazaného člena už nenajde.
-        $q = $this->db->pdo()->prepare("SELECT id FROM nonprofit_membership_batches WHERE supplier_id=? AND phase='seeding' AND seed_cursor<? AND seed_until>=?
-            AND (selection_mode='active' OR JSON_CONTAINS(selection_json, ?))");
-        $q->execute([$supplier, $member, $member, (string) $member]);
-        $ids = array_values(array_unique([...$ids, ...array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN))]));
+        $ids = array_values(array_unique([...$ids, ...($seeding ?? $this->seedingBatchIds($supplier, $member, false))]));
         sort($ids);
         return $ids;
+    }
+
+    /**
+     * Plněné dávky, do kterých člen ještě může spadnout (plnění čte členy bez zámku).
+     * Index (supplier_id, phase) omezí zámek jen na plněné dávky, ostatní dávky organizace neblokuje.
+     */
+    private function seedingBatchIds(int $supplier, int $member, bool $lock): array
+    {
+        $q = $this->db->pdo()->prepare("SELECT id FROM nonprofit_membership_batches FORCE INDEX(ix_nmb_phase) WHERE supplier_id=? AND phase='seeding'
+            AND seed_cursor<? AND seed_until>=? AND (selection_mode='active' OR JSON_CONTAINS(selection_json, ?))" . ($lock ? ' LOCK IN SHARE MODE' : ''));
+        $q->execute([$supplier, $member, $member, (string) $member]);
+        return array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
     }
 }

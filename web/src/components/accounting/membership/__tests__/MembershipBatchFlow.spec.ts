@@ -77,15 +77,16 @@ describe('hromadný předpis', () => {
     expired.unmount()
   })
 
-  it('copies a saved batch without a member deleted after it finished', async () => {
+  it('does not copy a saved batch whose loaded items do not match its member count', async () => {
     const source={...state('finished'),batch:{...state('finished').batch,member_count:3}}
     api.batches.mockResolvedValue({items:[{id:7,phase:'finished',title_key:'synthetic',period_from:'2026-01-01',period_to:'2026-12-31',created_at:'2026-01-01 12:00:00',member_count:3}],next_before_id:null})
     api.batch.mockResolvedValue({...source,next_after_member_id:null})
     const w=mounted({selectedMemberIds:[]});await flushPromises()
     await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
     await w.get('[data-action="batch-new"]').trigger('click');await flushPromises()
-    w.findComponent(Issue).vm.$emit('batchRequest',request);await flushPromises()
-    expect(api.createBatch).toHaveBeenCalledWith(5,expect.objectContaining({member_ids:[9,10]}))
+    expect(w.find('[data-section="batch-error"]').exists()).toBe(true)
+    expect(w.findComponent(Issue).exists()).toBe(false)
+    expect(api.createBatch).not.toHaveBeenCalled()
     w.unmount()
   })
 

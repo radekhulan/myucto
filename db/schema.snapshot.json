@@ -1200,10 +1200,9 @@
         "2294_bank_posting_rule_skip_matching_card.sql",
         "2295_helios_import_map.sql",
         "2296_eet_units_dis_import.sql",
-        "2297_invoices_supplier_parent_index.sql",
-        "2298_invoice_item_advance_drawdown.sql",
-        "2299_membership_list_indexes.sql",
-        "2300_membership_variable_symbol.sql"
+        "2297_membership_list_indexes.sql",
+        "2298_membership_variable_symbol.sql",
+        "2299_membership_correctability.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7284,7 +7283,6 @@
             "columns": {
                 "accrual_from": "date NULL DEFAULT NULL",
                 "accrual_to": "date NULL DEFAULT NULL",
-                "advance_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "asset_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "counter_account_code": "varchar(10) NULL DEFAULT NULL",
                 "description": "text NOT NULL",
@@ -7336,11 +7334,9 @@
                 "idx_ii_invoice": "BTREE (invoice_id, order_index)",
                 "idx_ii_small_asset": "BTREE (small_asset_id)",
                 "idx_invoice_items_oss": "BTREE (oss_applicable, oss_consumer_country)",
-                "idx_invoice_items_oss_manual_review": "BTREE (oss_needs_manual_review, oss_applicable, invoice_id)",
-                "ix_ii_advance_invoice": "BTREE (advance_invoice_id, invoice_id)"
+                "idx_invoice_items_oss_manual_review": "BTREE (oss_needs_manual_review, oss_applicable, invoice_id)"
             },
             "foreign_keys": {
-                "fk_ii_advance_invoice": "(advance_invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ii_asset": "(asset_id) -> assets (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ii_invoice": "(invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_ii_small_asset": "(small_asset_id) -> small_assets (id) ON UPDATE RESTRICT ON DELETE SET NULL",
@@ -7610,7 +7606,6 @@
                 "idx_inv_supplier": "BTREE (supplier_id)",
                 "idx_inv_supplier_calendar": "BTREE (supplier_id, calendar_id)",
                 "idx_inv_supplier_efftax": "BTREE (supplier_id, effective_tax_date)",
-                "idx_inv_supplier_parent": "BTREE (supplier_id, parent_invoice_id)",
                 "idx_inv_supplier_payment_vs": "BTREE (supplier_id, payment_variable_symbol)",
                 "idx_inv_supplier_payment_vs_key": "BTREE (supplier_id, payment_variable_symbol_match_key)",
                 "idx_inv_supplier_status_due": "BTREE (supplier_id, status, due_date)",
@@ -9199,7 +9194,8 @@
                 "request_json": "longtext NOT NULL",
                 "revision_no": "int(10) unsigned NOT NULL",
                 "status": "enum('active','suspended','ended') NOT NULL",
-                "supplier_id": "int(10) unsigned NOT NULL"
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "voids_revision_id": "bigint(20) unsigned NULL DEFAULT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
@@ -9207,12 +9203,13 @@
                 "ix_nmr_effective_lookup": "BTREE (supplier_id, member_id, effective_from, id)",
                 "supplier_id": "BTREE (supplier_id, member_id, previous_id)",
                 "uq_nmr_chain": "UNIQUE BTREE (supplier_id, member_id, id)",
-                "uq_nmr_effective": "UNIQUE BTREE (supplier_id, member_id, effective_from)",
                 "uq_nmr_key": "UNIQUE BTREE (supplier_id, idempotency_key)",
                 "uq_nmr_revision": "UNIQUE BTREE (supplier_id, member_id, revision_no)",
-                "uq_nmr_tenant": "UNIQUE BTREE (supplier_id, id)"
+                "uq_nmr_tenant": "UNIQUE BTREE (supplier_id, id)",
+                "uq_nmr_voids": "UNIQUE BTREE (supplier_id, member_id, voids_revision_id)"
             },
             "foreign_keys": {
+                "fk_nmr_voids": "(supplier_id, member_id, voids_revision_id) -> nonprofit_member_revisions (supplier_id, member_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "nonprofit_member_revisions_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "nonprofit_member_revisions_ibfk_2": "(supplier_id, member_id) -> nonprofit_members (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "nonprofit_member_revisions_ibfk_3": "(supplier_id, member_id, previous_id) -> nonprofit_member_revisions (supplier_id, member_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
@@ -9320,6 +9317,7 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "confirmed_by": "BTREE (confirmed_by)",
                 "created_by": "BTREE (created_by)",
+                "ix_nmb_phase": "BTREE (supplier_id, phase, id)",
                 "uq_nmb_key": "UNIQUE BTREE (supplier_id, idempotency_key)",
                 "uq_nmb_tenant": "UNIQUE BTREE (supplier_id, id)",
                 "uq_nmb_uid": "UNIQUE BTREE (batch_uid)"
@@ -30535,8 +30533,7 @@
         "trg_nfr_insert": "BEFORE INSERT ON nonprofit_funding_revisions #8ef193715bd5844a87d770d92e7eb9b550d9c2eb",
         "trg_nlp_immutable_delete": "BEFORE DELETE ON nonprofit_legal_profiles #14114d6f757030293ceadac8f5ac999e5e0188fa",
         "trg_nlp_immutable_update": "BEFORE UPDATE ON nonprofit_legal_profiles #14114d6f757030293ceadac8f5ac999e5e0188fa",
-        "trg_nm_immutable_delete": "BEFORE DELETE ON nonprofit_members #b6e16ca403b6b8a607604546967555ea319ac4e1",
-        "trg_nm_immutable_update": "BEFORE UPDATE ON nonprofit_members #b6e16ca403b6b8a607604546967555ea319ac4e1",
+        "trg_nm_immutable_update": "BEFORE UPDATE ON nonprofit_members #69061ceb0369e2e38736bc827c99cc1f0deb5f7e",
         "trg_nmcc_guard_update": "BEFORE UPDATE ON nonprofit_membership_charge_cases #6c2a7a4e0c545851941b22f2f96d111a5263b2f5",
         "trg_nmcc_immutable_delete": "BEFORE DELETE ON nonprofit_membership_charge_cases #b6e16ca403b6b8a607604546967555ea319ac4e1",
         "trg_nmclaim_immutable_delete": "BEFORE DELETE ON nonprofit_membership_charge_claims #b6e16ca403b6b8a607604546967555ea319ac4e1",

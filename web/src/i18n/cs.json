@@ -41718,6 +41718,7 @@
       "nonprofit_membership_member_has_revisions": "Člen má zapsanou historii členství, smazat ho nejde. Opravit jde kontakt a číslo.",
       "nonprofit_membership_member_in_batch": "Člen je v rozpracovaném hromadném předpisu. Dokončete nebo zrušte dávku.",
       "nonprofit_membership_member_in_use": "Člena používají další záznamy, smazat ho nejde.",
+      "nonprofit_membership_revision_not_found": "Revize nepatří tomuto členovi. Obnovte detail člena.",
       "nonprofit_membership_revision_not_last": "Zrušit jde jen poslední platnou revizi. Obnovte detail člena.",
       "nonprofit_membership_revision_has_charges": "Na revizi stojí předpis příspěvku, zrušit ji nejde.",
       "nonprofit_membership_inactive": "Členství není k účetnímu datu aktivní.",

@@ -3549,8 +3549,8 @@ paths:
       summary: Kurátorované historické členské role
       description: Pouze čtení s oprávněním accounting. Bez jmen, členských čísel, právních podkladů a interních otisků.
         Výsledek neopravňuje k finanční mutaci. Detail vrací stejnou obálku jako seznam. Role se ověřují k účinnosti
-        a okamžiku tehdejší znalosti. Zrušená revize se nepočítá od okamžiku zápisu zrušení. Opravu kontaktu
-        a smazání člena bez předpisu okamžik tehdejší znalosti nezachycuje; vrací se aktuální kontakt.
+        a okamžiku tehdejší znalosti. Zrušená revize se nepočítá od okamžiku zápisu zrušení. Oprava kontaktu
+        člena bez předpisu se projeví i pro dřívější okamžik znalosti; smazaný člen bez předpisu se nevrací vůbec.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: query
@@ -3598,8 +3598,8 @@ paths:
       summary: Kurátorované historické členské role
       description: Pouze čtení s oprávněním accounting. Bez jmen, členských čísel, právních podkladů a interních otisků.
         Výsledek neopravňuje k finanční mutaci. Detail vrací stejnou obálku jako seznam. Role se ověřují k účinnosti
-        a okamžiku tehdejší znalosti. Zrušená revize se nepočítá od okamžiku zápisu zrušení. Opravu kontaktu
-        a smazání člena bez předpisu okamžik tehdejší znalosti nezachycuje; vrací se aktuální kontakt.
+        a okamžiku tehdejší znalosti. Zrušená revize se nepočítá od okamžiku zápisu zrušení. Oprava kontaktu
+        člena bez předpisu se projeví i pro dřívější okamžik znalosti; smazaný člen bez předpisu se nevrací vůbec.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: path

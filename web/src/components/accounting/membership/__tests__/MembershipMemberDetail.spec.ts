@@ -18,8 +18,8 @@ vi.mock('@/api/nonprofitDppo', () => ({ nonprofitDppoApi: { profile: vi.fn() } }
 
 const ActionBar = defineComponent({
   props: ['actions'],
-  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; show?: unknown; run: () => void }>)
-    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, onClick: a.run }, a.label))),
+  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; disabledReason?: string; show?: unknown; run: () => void }>)
+    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, 'data-reason': a.disabled ? a.disabledReason : undefined, onClick: a.run }, a.label))),
 })
 const RevisionForm = defineComponent({ name: 'MembershipRevisionForm', props: ['supplier', 'canManage', 'member', 'history'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'revision' }) })
 const IssueFlow = defineComponent({ name: 'MembershipIssueFlow', props: ['supplier', 'canManage', 'member', 'history', 'periods'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'issue' }) })
@@ -360,7 +360,8 @@ describe('Membership member detail', () => {
     const w = mountedWithCorrection(); await flushPromises()
     expect(w.find('[data-action="fix-identity"]').exists()).toBe(true)
     expect(w.find('[data-action="void-revision"]').exists()).toBe(true)
-    expect(w.find('[data-action="delete-member"]').exists()).toBe(false)
+    expect(w.get('[data-action="delete-member"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-action="delete-member"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_revisions)
     await w.get('[data-action="void-revision"]').trigger('click')
     const flow = w.findComponent(CorrectionFlow)
     expect(flow.props('mode')).toBe('void')
@@ -369,11 +370,14 @@ describe('Membership member detail', () => {
     w.unmount()
   })
 
-  it('hides corrections without the server permission and after a charge', async () => {
+  it('explains blocked corrections after a charge and hides them without the write permission', async () => {
     api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: { can_edit_identity: false, edit_identity_block: 'nonprofit_membership_member_has_charges',
       can_delete: false, delete_block: 'nonprofit_membership_member_has_revisions', voidable_revision_id: null, void_block: 'nonprofit_membership_revision_has_charges', head_revision_no: 1 } })
     const w = mountedWithCorrection(); await flushPromises()
-    for (const key of ['fix-identity', 'void-revision', 'delete-member']) expect(w.find(`[data-action="${key}"]`).exists()).toBe(false)
+    expect(w.get('[data-action="fix-identity"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_charges)
+    expect(w.get('[data-action="void-revision"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_revision_has_charges)
+    expect(w.get('[data-action="delete-member"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_revisions)
+    for (const key of ['fix-identity', 'void-revision', 'delete-member']) expect(w.get(`[data-action="${key}"]`).attributes('disabled')).toBeDefined()
     w.unmount()
     api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: { can_edit_identity: true, edit_identity_block: null, can_delete: true, delete_block: null, voidable_revision_id: 1, void_block: null, head_revision_no: 1 } })
     const readOnly = mountedWithCorrection({ canManage: false }); await flushPromises()

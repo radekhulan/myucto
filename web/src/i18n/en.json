@@ -42033,6 +42033,7 @@
       "nonprofit_membership_member_has_revisions": "The member has membership history and cannot be deleted. The contact and number can be corrected.",
       "nonprofit_membership_member_in_batch": "The member is in a bulk charge in progress. Finish or cancel the batch.",
       "nonprofit_membership_member_in_use": "The member is used by other records and cannot be deleted.",
+      "nonprofit_membership_revision_not_found": "The revision does not belong to this member. Reload the member detail.",
       "nonprofit_membership_revision_not_last": "Only the last valid revision can be voided. Reload the member detail.",
       "nonprofit_membership_revision_has_charges": "A contribution charge relies on this revision, so it cannot be voided.",
       "nonprofit_membership_inactive": "Membership is not active on the accounting date.",
