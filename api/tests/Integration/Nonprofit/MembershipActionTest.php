@@ -74,7 +74,7 @@ final class MembershipActionTest extends TestCase
         $this->pdo->prepare("INSERT INTO clients(supplier_id,company_name,street,city,zip,country_id,main_email,language,currency_default_id,is_customer,is_vendor) VALUES(?,'Synthetic action member','Synthetic street','Synthetic city','10000',203,'membership-action-client@example.test','cs',?,1,0)")
             ->execute([$this->supplier, $currency]);
         $this->client = (int) $this->pdo->lastInsertId();
-        $this->action = new MembershipAction($this->db, $container->get(PostingService::class));
+        $this->action = new MembershipAction($this->db, $container->get(PostingService::class), $container->get(\MyInvoice\Service\ActivityLogger::class), $container->get(\MyInvoice\Service\IpMatcher::class));
         $this->publicAction = new MembershipResourceCatalogAction(new MembershipPublicCatalog($this->db,
             new MembershipRepository($this->db), new MembershipChargeRepository($this->db), new MembershipBalanceRepository($this->db)));
     }
@@ -364,6 +364,12 @@ final class MembershipActionTest extends TestCase
         self::assertSame('invalid_reference', $error['error']['code']);
         self::assertStringNotContainsString('Synthetic foreign member', json_encode($error, JSON_THROW_ON_ERROR));
         self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_members WHERE supplier_id IN (' . $this->supplier . ',' . $foreignSupplier . ')')->fetchColumn());
+        $own = $this->activeMember('M-ACTION-OWN');
+        [$status, $error] = $this->call('PUT', 'updateMember', ['client_id' => $foreignClient, 'member_number' => 'M-ACTION-OWN',
+            'expected_client_id' => $this->client, 'expected_member_number' => 'M-ACTION-OWN'], ['id' => (string) $own]);
+        self::assertSame(400, $status);
+        self::assertSame('invalid_reference', $error['error']['code']);
+        self::assertSame($this->client, (int) $this->pdo->query('SELECT client_id FROM nonprofit_members WHERE id=' . $own)->fetchColumn());
     }
 
     public function testRateManagementUsesTemplatePermissionInsteadOfPostingPermission(): void
@@ -396,6 +402,57 @@ final class MembershipActionTest extends TestCase
         self::assertSame(200, $status);
         [$status] = $this->call('POST', 'selectionCheck', $body, [], ['accounting' => 1], 'bearer', ['system_write' => true]);
         self::assertSame(200, $status);
+    }
+
+    public function testContainerWiresSealedAuditLoggerIntoCorrections(): void
+    {
+        $action = \MyInvoice\Bootstrap::buildContainer()->get(MembershipAction::class);
+        $corrections = (new \ReflectionProperty($action, 'corrections'))->getValue($action);
+        $logger = (new \ReflectionProperty($corrections, 'activity'))->getValue($corrections);
+        // Bez řetězu hashů by audit oprav nebyl zapečetěný (volitelný parametr autowire nevyplní).
+        self::assertNotNull((new \ReflectionProperty($logger, 'hashChain'))->getValue($logger));
+    }
+
+    public function testCorrectionRoutesRequireSessionAndJournalWriteAndReportAvailability(): void
+    {
+        $id = $this->activeMember('M-ACTION-FIX');
+        $args = ['id' => (string) $id];
+        [$status, $detail] = $this->call('GET', 'member', null, $args, ['accounting' => 1]);
+        self::assertSame(200, $status);
+        self::assertTrue($detail['corrections']['can_edit_identity']);
+        self::assertSame('nonprofit_membership_member_has_revisions', $detail['corrections']['delete_block']);
+        $revision = $detail['corrections']['voidable_revision_id'];
+        self::assertSame($detail['history'][0]['id'], $revision);
+
+        $identity = ['client_id' => $this->client, 'member_number' => 'M-ACTION-FIX-2', 'expected_client_id' => $this->client, 'expected_member_number' => 'M-ACTION-FIX'];
+        $void = ['expected_revision' => 1, 'reason' => 'Synthetic entry mistake', 'idempotency_key' => 'action-void'];
+        foreach ([['PUT', 'updateMember', $identity, $args], ['DELETE', 'deleteMember', null, $args], ['POST', 'voidRevision', $void, $args + ['revisionId' => (string) $revision]]] as [$http, $method, $body, $routeArgs]) {
+            [$status] = $this->call($http, $method, $body, $routeArgs, ['accounting' => 1]);
+            self::assertSame(403, $status, $method . ' bez práva zápisu');
+            [$status, $denied] = $this->call($http, $method, $body, $routeArgs, ['accounting.journal.post' => 2], 'bearer');
+            self::assertSame(403, $status, $method . ' přes API token');
+            self::assertSame('session_required', $denied['error']['code']);
+        }
+        // Token s plným zápisem (system_write) jedná jako relace: projde bránou a narazí až na doménovou blokaci.
+        [$status, $viaToken] = $this->call('DELETE', 'deleteMember', null, $args, null, 'bearer', ['system_write' => true]);
+        self::assertSame(409, $status);
+        self::assertSame('nonprofit_membership_member_has_revisions', $viaToken['error']['code']);
+        [$status, $blocked] = $this->call('DELETE', 'deleteMember', null, $args);
+        self::assertSame(409, $status);
+        self::assertSame('nonprofit_membership_member_has_revisions', $blocked['error']['code']);
+        [$status, $invalid] = $this->call('PUT', 'updateMember', ['client_id' => $this->client], $args);
+        self::assertSame(422, $status);
+        self::assertSame('nonprofit_membership_invalid', $invalid['error']['code']);
+
+        [$status, $updated] = $this->call('PUT', 'updateMember', $identity, $args);
+        self::assertSame(200, $status);
+        self::assertSame('M-ACTION-FIX-2', $updated['member_number']);
+        [$status, $voiding] = $this->call('POST', 'voidRevision', $void, $args + ['revisionId' => (string) $revision]);
+        self::assertSame(201, $status);
+        self::assertSame($revision, $voiding['voids_revision_id']);
+        $q = $this->pdo->prepare("SELECT action FROM activity_log WHERE supplier_id=? AND entity_type='nonprofit_member' AND entity_id=? ORDER BY id");
+        $q->execute([$this->supplier, $id]);
+        self::assertSame(['nonprofit_membership_member_update', 'nonprofit_membership_revision_void'], $q->fetchAll(\PDO::FETCH_COLUMN));
     }
 
     private function call(string $httpMethod, string $method, ?array $body, array $args = [], ?array $permissions = null, string $auth = 'session', ?array $apiToken = null): array

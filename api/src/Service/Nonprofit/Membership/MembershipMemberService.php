@@ -60,8 +60,11 @@ final class MembershipMemberService
             $history = $this->members->history($supplier, $member, true);
             $previous = $history === [] ? null : $history[array_key_last($history)];
             if (($previous['revision_no'] ?? 0) !== $input['expected_revision']) throw new MembershipException('nonprofit_membership_revision_changed', 'Historie členství se mezitím změnila.', 409);
-            if ($previous === null && $input['status'] !== 'active') throw new MembershipException('nonprofit_membership_initial_status_invalid', 'První revize členství musí členství aktivovat.');
-            if ($previous !== null && $effective <= $previous['effective_from']) throw new MembershipException('nonprofit_membership_effective_conflict', 'Nová revize musí začít po posledním datu účinnosti.', 409);
+            // Řetěz pokračuje za posledním článkem (i rušícím), datum a první stav se posuzují proti platným revizím.
+            $valid = MembershipRevisionTimeline::effective($history);
+            $lastValid = $valid === [] ? null : $valid[array_key_last($valid)];
+            if ($lastValid === null && $input['status'] !== 'active') throw new MembershipException('nonprofit_membership_initial_status_invalid', 'První revize členství musí členství aktivovat.');
+            if ($lastValid !== null && $effective <= $lastValid['effective_from']) throw new MembershipException('nonprofit_membership_effective_conflict', 'Nová revize musí začít po posledním datu účinnosti.', 409);
             return $this->members->appendRevision([
                 'supplier_id' => $supplier, 'member_id' => $member, 'revision_no' => ($previous['revision_no'] ?? 0) + 1,
                 'previous_id' => $previous['id'] ?? null, 'effective_from' => $effective, 'status' => $input['status'],

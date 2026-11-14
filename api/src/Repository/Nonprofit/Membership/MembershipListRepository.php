@@ -272,7 +272,10 @@ final class MembershipListRepository
           SELECT p.*,r.revision_no,r.effective_from,r.status FROM paged p
             LEFT JOIN nonprofit_member_revisions r ON r.supplier_id=p.supplier_id AND r.id=(
               SELECT latest.id FROM nonprofit_member_revisions latest
-              WHERE latest.supplier_id=p.supplier_id AND latest.member_id=p.id ORDER BY latest.revision_no DESC LIMIT 1)
+              WHERE latest.supplier_id=p.supplier_id AND latest.member_id=p.id AND latest.voids_revision_id IS NULL
+                AND NOT EXISTS(SELECT 1 FROM nonprofit_member_revisions v FORCE INDEX(uq_nmr_voids)
+                  WHERE v.supplier_id=latest.supplier_id AND v.member_id=latest.member_id AND v.voids_revision_id=latest.id)
+              ORDER BY latest.revision_no DESC LIMIT 1)
           ORDER BY p.id";
         return [$sql, $params];
     }

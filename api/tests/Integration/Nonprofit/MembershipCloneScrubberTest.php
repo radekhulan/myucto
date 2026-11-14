@@ -28,6 +28,9 @@ use MyInvoice\Service\Nonprofit\Membership\MembershipChargeService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipClassification;
 use MyInvoice\Service\Nonprofit\Membership\MembershipJournalProof;
 use MyInvoice\Service\Nonprofit\Membership\MembershipMemberService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipCorrectionService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipRevisionTimeline;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitLegalProfileService;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxRules;
 use MyInvoice\Service\Tax\Nonprofit\SourceFacts\MembershipJ6SourceFacts;
@@ -88,6 +91,20 @@ final class MembershipCloneScrubberTest extends TestCase
                 'idempotency_key' => 'private-reactivate', 'legal_basis' => $this->basis('private-reactivate@example.test')], $actor);
             $members->appendRevision($supplier, $memberId, ['status' => 'ended', 'effective_from' => '2028-01-01', 'expected_revision' => 3,
                 'idempotency_key' => 'private-ended', 'legal_basis' => $this->basis('private-ended@example.test')], $actor);
+            // Krok 7: zrušená revize a oprava ke stejnému dni; klon musí řetěz zachovat a důvod pseudonymizovat.
+            $q = $target->pdo()->prepare('SELECT default_currency_id FROM supplier WHERE id=?');
+            $q->execute([$supplier]);
+            $target->pdo()->prepare("INSERT INTO clients(supplier_id,company_name,street,city,zip,country_id,main_email,language,currency_default_id,is_customer,is_vendor) VALUES(?,'Private voided member','Private street','Private city','10000',203,'private-void-client@example.test','cs',?,1,0)")
+                ->execute([$supplier, (int) $q->fetchColumn()]);
+            $voidMember = $members->create($supplier, (int) $target->pdo()->lastInsertId(), 'PRIVATE-MEMBER-002', $actor)['id'];
+            $members->appendRevision($supplier, $voidMember, ['status' => 'active', 'effective_from' => '2026-01-01', 'expected_revision' => 0,
+                'idempotency_key' => 'private-void-active', 'legal_basis' => $this->basis('private-void-active@example.test')], $actor);
+            $wrong = $members->appendRevision($supplier, $voidMember, ['status' => 'suspended', 'effective_from' => '2026-07-01', 'expected_revision' => 1,
+                'idempotency_key' => 'private-void-wrong', 'legal_basis' => $this->basis('private-void-wrong@example.test')], $actor);
+            (new MembershipCorrectionService($target, new MembershipRepository($target), new ActivityLogger($target)))->voidRevision($supplier, $voidMember, $wrong['id'],
+                ['expected_revision' => 2, 'reason' => 'Private reason private-void-reason@example.test', 'idempotency_key' => 'private-void'], $actor);
+            $members->appendRevision($supplier, $voidMember, ['status' => 'ended', 'effective_from' => '2026-07-01', 'expected_revision' => 3,
+                'idempotency_key' => 'private-void-ended', 'legal_basis' => $this->basis('private-void-ended@example.test')], $actor);
             $replay = $charges->confirmIssue($supplier, $request, $preview['expected_case_version'], $preview['preview_hash'], 'private-issue', $actor);
             self::assertTrue($replay['idempotent_replay']);
             self::assertSame($issued['operation']['id'], $replay['operation']['id']);
@@ -157,6 +174,11 @@ final class MembershipCloneScrubberTest extends TestCase
             self::assertNotNull($history[0]['recorded_at_utc']);
             self::assertNull($history[array_key_last($history)]['recorded_at_utc']);
             self::assertSame('clone-member-' . $memberId, $repository->member($supplier, $memberId)['member_number']);
+            $voidHistory = $repository->history($supplier, $voidMember);
+            self::assertSame([null, null, $wrong['id'], null], array_column($voidHistory, 'voids_revision_id'));
+            self::assertSame(['active', 'ended'], array_column(MembershipRevisionTimeline::effective($voidHistory), 'status'));
+            self::assertStringNotContainsString('private-void-reason', (string) $voidHistory[2]['request']['reason']);
+            self::assertArrayNotHasKey('legal_basis', $voidHistory[2]['request']);
             $chargeRepository = new MembershipChargeRepository($target);
             $operation = $chargeRepository->operation($supplier, $issued['operation']['id']);
             self::assertNotNull($operation);

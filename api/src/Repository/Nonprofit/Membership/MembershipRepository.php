@@ -161,9 +161,12 @@ final class MembershipRepository
               AND (m.recorded_at_utc<=? OR m.recorded_at_utc IS NULL)
               AND EXISTS(SELECT 1 FROM nonprofit_member_revisions r FORCE INDEX(ix_nmr_effective_lookup)
                           WHERE r.supplier_id=m.supplier_id AND r.member_id=m.id AND r.effective_from<=?
-                            AND (r.recorded_at_utc<=? OR r.recorded_at_utc IS NULL))
+                            AND (r.recorded_at_utc<=? OR r.recorded_at_utc IS NULL) AND r.voids_revision_id IS NULL
+                            AND NOT EXISTS(SELECT 1 FROM nonprofit_member_revisions v FORCE INDEX(uq_nmr_voids)
+                                            WHERE v.supplier_id=r.supplier_id AND v.member_id=r.member_id AND v.voids_revision_id=r.id
+                                              AND (v.recorded_at_utc<=? OR v.recorded_at_utc IS NULL)))
             ORDER BY m.id LIMIT {$limit}");
-        $q->execute([$supplier, max(0, $afterId), $knownAtSql, $asOf, $knownAtSql]);
+        $q->execute([$supplier, max(0, $afterId), $knownAtSql, $asOf, $knownAtSql, $knownAtSql]);
         $rows = $q->fetchAll(PDO::FETCH_ASSOC);
         if ($rows !== []) $this->assertRecordedTimeProven($supplier, array_map('intval', array_column($rows, 'id')));
         return array_map(static fn (array $row): array => ['id' => (int) $row['id'], 'client_id' => (int) $row['client_id'],
@@ -203,8 +206,8 @@ final class MembershipRepository
         $row['recorded_at_utc'] = MembershipRecordedTime::nowSql();
         $record = self::revisionRecord($row);
         $row['record_hash'] = NonprofitTaxRules::hash($record);
-        $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_member_revisions(supplier_id,member_id,revision_no,previous_id,effective_from,status,legal_basis_json,request_json,idempotency_key,request_hash,parent_hash,record_hash,created_by,created_at,recorded_at_utc) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
-        $q->execute([$row['supplier_id'], $row['member_id'], $row['revision_no'], $row['previous_id'], $row['effective_from'], $row['status'],
+        $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_member_revisions(supplier_id,member_id,revision_no,previous_id,voids_revision_id,effective_from,status,legal_basis_json,request_json,idempotency_key,request_hash,parent_hash,record_hash,created_by,created_at,recorded_at_utc) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        $q->execute([$row['supplier_id'], $row['member_id'], $row['revision_no'], $row['previous_id'], $row['voids_revision_id'] ?? null, $row['effective_from'], $row['status'],
             NonprofitTaxRules::canonicalJson($row['legal_basis']), NonprofitTaxRules::canonicalJson($row['request']), $row['idempotency_key'], $row['request_hash'], $row['parent_hash'], $row['record_hash'], $row['created_by'], $row['recorded_at_utc'], $row['recorded_at_utc']]);
         return $this->revision((int) $row['supplier_id'], (int) $row['member_id'], (int) $this->db->pdo()->lastInsertId(), true)
             ?? throw new \LogicException('Inserted membership revision disappeared.');
@@ -215,6 +218,8 @@ final class MembershipRepository
         $record = array_intersect_key($row, array_flip(['supplier_id', 'member_id', 'revision_no', 'previous_id', 'effective_from', 'status', 'legal_basis',
             'request', 'idempotency_key', 'request_hash', 'parent_hash', 'created_by']));
         if (($row['recorded_at_utc'] ?? null) !== null) $record['recorded_at_utc'] = $row['recorded_at_utc'];
+        // Rušící článek nese odkaz v hashi; otisk běžných revizí zůstává beze změny.
+        if (($row['voids_revision_id'] ?? null) !== null) $record['voids_revision_id'] = (int) $row['voids_revision_id'];
         return $record;
     }
 
@@ -222,6 +227,7 @@ final class MembershipRepository
     {
         foreach (['id', 'supplier_id', 'member_id', 'revision_no', 'created_by'] as $field) $row[$field] = (int) $row[$field];
         $row['previous_id'] = $row['previous_id'] === null ? null : (int) $row['previous_id'];
+        $row['voids_revision_id'] = ($row['voids_revision_id'] ?? null) === null ? null : (int) $row['voids_revision_id'];
         foreach (['legal_basis', 'request'] as $field) {
             $row[$field] = json_decode($row[$field . '_json'], true, flags: JSON_THROW_ON_ERROR);
             unset($row[$field . '_json']);
@@ -276,19 +282,23 @@ final class MembershipRepository
                 }
                 MembershipRevisionTimeline::date($row['effective_from']);
                 if ($targets !== null && isset($targets[$member][$row['id']])) $state[$member]['target'][$row['id']] = $row;
-                if ($asOf !== null) {
-                    if ($row['effective_from'] <= $asOf && ($state[$member]['effective'] === null || $row['effective_from'] > $state[$member]['effective']['effective_from'])) {
-                        $state[$member]['effective'] = $row;
-                    } elseif ($row['effective_from'] > $asOf
-                        && ($state[$member]['next_effective'] === null || $row['effective_from'] < $state[$member]['next_effective'])) {
-                        $state[$member]['next_effective'] = $row['effective_from'];
-                    }
-                }
+                if ($asOf !== null) $state[$member]['rows'][] = $row;
                 $state[$member]['previous'] = $row;
                 $cursorMember = $member;
                 $cursorId = $row['id'];
             }
         } while (count($batch) === 500);
+        if ($asOf !== null) {
+            // Platná revize k datu se počítá jen z platných revizí; zrušené a rušící články se vynechají.
+            foreach ($state as $member => $item) {
+                foreach (MembershipRevisionTimeline::intervals($item['rows'] ?? []) as $interval) {
+                    if ($interval['effective_from'] > $asOf) break;
+                    $state[$member]['effective'] = $interval;
+                    $state[$member]['next_effective'] = $interval['effective_to'];
+                }
+                unset($state[$member]['rows']);
+            }
+        }
         return $state;
     }
 

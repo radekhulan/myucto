@@ -77,6 +77,18 @@ describe('hromadný předpis', () => {
     expired.unmount()
   })
 
+  it('copies a saved batch without a member deleted after it finished', async () => {
+    const source={...state('finished'),batch:{...state('finished').batch,member_count:3}}
+    api.batches.mockResolvedValue({items:[{id:7,phase:'finished',title_key:'synthetic',period_from:'2026-01-01',period_to:'2026-12-31',created_at:'2026-01-01 12:00:00',member_count:3}],next_before_id:null})
+    api.batch.mockResolvedValue({...source,next_after_member_id:null})
+    const w=mounted({selectedMemberIds:[]});await flushPromises()
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    await w.get('[data-action="batch-new"]').trigger('click');await flushPromises()
+    w.findComponent(Issue).vm.$emit('batchRequest',request);await flushPromises()
+    expect(api.createBatch).toHaveBeenCalledWith(5,expect.objectContaining({member_ids:[9,10]}))
+    w.unmount()
+  })
+
   it('copies a selected saved batch from history across pages without issuing anything', async () => {
     const source={...state('finished'),batch:{...state('finished').batch,member_count:3}}
     api.batches.mockResolvedValue({items:[{id:7,phase:'finished',title_key:'synthetic',period_from:'2026-01-01',period_to:'2026-12-31',created_at:'2026-01-01 12:00:00',member_count:3}],next_before_id:null})

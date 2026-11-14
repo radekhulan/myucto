@@ -87,6 +87,15 @@ const detailVersion = ref(0)
 // Uložená dávka nebo předpis v detailu mohou založit nový titul, proto se obnoví i výběr titulů.
 function batchChanged() { dataVersion.value++; detailVersion.value++; void load(); void loadTitles(true) }
 function memberChanged() { dataVersion.value++; void load(); void loadTitles(true) }
+/** Smazaný člen zmizí z výběru i detailu; fokus jde na nadpis seznamu. */
+async function memberDeleted() {
+  const id = selected.value?.id
+  if (id !== undefined) checkedMembers.value = checkedMembers.value.filter(x => x !== id)
+  selected.value = null
+  selectionNotice.value = t('nonprofitMembership.correction.done_delete')
+  await nextTick()
+  root.value?.querySelector<HTMLElement>('[data-focus="members-heading"]')?.focus()
+}
 function checkMember(id: number, event: Event) {
   if (!props.canManage || batchLocked.value || loading.value) return
   selectionNotice.value = ''
@@ -380,7 +389,7 @@ watch(batchLocked, locked => {
       <MembershipMemberDetail
         :key="selected.id"
         :supplier="supplier" :can-manage="canManage" :member-id="selected.id" :label="selected.label" :periods="periods" :refresh-version="detailVersion"
-        @changed="memberChanged" @close="closeMember()"
+        @changed="memberChanged" @close="closeMember()" @deleted="memberDeleted()" @relabel="selected && (selected.label = $event)"
       />
     </div>
     <section class="min-w-0 space-y-3" data-section="members" :aria-busy="loading ? 'true' : 'false'">

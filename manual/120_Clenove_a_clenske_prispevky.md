@@ -8,9 +8,17 @@ Postup je vždy stejný: založte člena, zapište mu první revizi členství a
 
 Vyberte kontakt a vyplňte jedinečné členské číslo. Kontakt i číslo smí v organizaci patřit jen jednomu členovi. Založení člena samo nevytvoří pohledávku ani účetní zápis. V detailu přidejte první revizi členství s datem účinnosti, odkazem na stanovy nebo rozhodnutí a doložením členského vztahu bez vzájemného protiplnění. První revize musí mít stav **Aktivní**.
 
-Změny stavu se zapisují jako další revize přes **Změnit stav členství** v detailu člena. Nová revize musí začínat po datu účinnosti poslední revize. Původní historie zůstává zachovaná. Budoucí pozastavení nebo ukončení nemění dnešní stav ani starší předpisy. Detail odlišuje dnešní stav od budoucích změn.
+Změny stavu se zapisují jako další revize přes **Změnit stav členství** v detailu člena. Nová revize musí začínat po datu účinnosti poslední platné revize. Původní historie zůstává zachovaná. Budoucí pozastavení nebo ukončení nemění dnešní stav ani starší předpisy. Detail odlišuje dnešní stav od budoucích změn.
 
-Člena nejde smazat, přiřazený kontakt ani členské číslo nejde změnit a zapsanou revizi nejde vzít zpět. Před založením člena i před potvrzením revize proto údaje zkontrolujte.
+### Oprava chyb v evidenci
+
+Dokud na záznamu nestojí předpis příspěvku, jdou chyby opravit. Akce v detailu člena se ukazují jen tehdy, když je oprava právě možná. Každá oprava se zapíše do auditní stopy.
+
+- **Opravit kontakt a číslo** změní přiřazený kontakt nebo členské číslo, dokud člen nemá žádný předpis, ani stornovaný. Kontakt i číslo nesmí patřit jinému členovi. Oprava jen velikosti písmen v čísle je možná. Prohození čísel dvou členů udělejte přes dočasné číslo.
+- **Zrušit poslední revizi** (v nabídce **…**) zruší poslední platnou revizi, pokud na ní nestojí předpis, ani stornovaný. Revize stojí pod předpisem, když platí k jeho účetnímu datu nebo zasahuje do jeho období. Zadejte důvod. Zrušená revize zůstane v historii přeškrtnutá a zrušení se zapíše jako další revize s důvodem. Stav členství, nový předpis, hromadný předpis i přehled se pak řídí předchozí platnou revizí. Opravenou revizi můžete zapsat i ke stejnému dni. Postupně jde zrušit i starší revize.
+- **Smazat člena** (v nabídce **…**) jde jen u člena bez jakékoli revize, i zrušené, a bez předpisu. Člen v rozpracovaném hromadném předpisu nejde smazat, dokud dávku nedokončíte nebo nezrušíte. Z dokončené nebo zrušené dávky se odstraní jeho odmítnutá položka; počty v souhrnu dávky zůstávají původní. Kontakt v adresáři zůstává a po smazání člena ho jde smazat. Detail starší dávky ukazuje aktuální kontakt a číslo člena.
+
+Revize, na které stojí předpis, ani člena s předpisem opravit nejde. Před založením člena i před potvrzením revize proto údaje zkontrolujte.
 
 ## 120.2 Předpis příspěvku
 
@@ -109,6 +117,6 @@ Při nejistém výsledku odeslání obnovte přehled nebo opakujte stejný zmraz
 
 Kurátorované katalogy členských rolí a pohledávek jsou dostupné s oprávněním ke čtení účetnictví také přes API token a MCP. Seznamy i detaily používají stejnou obálku; stránka obsahuje nejvýše 100 záznamů a pokračovací kurzor je vázaný na firmu a filtry. Výstup neobsahuje jména, členská čísla, právní podklady ani interní otisky a aktéry.
 
-U členských rolí zadejte rozhodné datum `as_of` a případně okamžik tehdejší znalosti `known_at`. Pokud jej vynecháte, připne jej první stránka. Později zaznamenaná revize tak nezmění navazující stránky téhož čtení. U pohledávek se čte aktuální účetní stav a doložená nativní bankovní nebo pokladní párování; historický okamžik úhrad se nepřijímá. U pohledávek k prověření zůstávají uhrazená i otevřená částka `null`. Katalog sám nepotvrzuje osvobození příjmu ani oprávnění k finanční operaci.
+U členských rolí zadejte rozhodné datum `as_of` a případně okamžik tehdejší znalosti `known_at`. Pokud jej vynecháte, připne jej první stránka. Později zaznamenaná revize ani její zrušení tak nezmění navazující stránky téhož čtení. Opravu kontaktu nebo smazání člena bez předpisu okamžik tehdejší znalosti nezachycuje; katalog vrací aktuální kontakt. U pohledávek se čte aktuální účetní stav a doložená nativní bankovní nebo pokladní párování; historický okamžik úhrad se nepřijímá. U pohledávek k prověření zůstávají uhrazená i otevřená částka `null`. Katalog sám nepotvrzuje osvobození příjmu ani oprávnění k finanční operaci.
 
 Historické role vyžadují průkazný okamžik zaznamenání. Pokud jej starší záznam nemá doložený, časový katalog vrátí chybu místo odhadování časové zóny nebo vynechání člena. U pohledávky může být čas zaznamenání `null` se stavem `unproven`; ověření její částky a účetních podkladů tím zůstává samostatné. Původní časové údaje se při aktualizaci ani anonymizované kopii nepřepočítávají odhadem.

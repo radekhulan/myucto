@@ -22,7 +22,10 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Nonprofit\Membership\MembershipChargeService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipCorrectionService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipException;
 use MyInvoice\Service\Nonprofit\Membership\MembershipChargeRequest;
 use MyInvoice\Service\Nonprofit\Membership\MembershipMemberService;
@@ -41,9 +44,13 @@ final class MembershipAction
     private readonly MembershipReconciliationService $reconciliation;
     private readonly MembershipBatchService $batchService;
     private readonly TenantReferenceGuard $tenantRefs;
+    private readonly MembershipCorrectionService $corrections;
+    private readonly IpMatcher $ipMatcher;
 
-    public function __construct(private readonly Connection $db, PostingService $posting, ?LoggerInterface $logger = null)
+    /** Audit a IP jsou povinné třídní parametry, aby je DI doplnil (volitelné autowire nevyplní a audit by nebyl zapečetěný). */
+    public function __construct(private readonly Connection $db, PostingService $posting, ActivityLogger $activity, IpMatcher $ipMatcher, ?LoggerInterface $logger = null)
     {
+        $this->ipMatcher = $ipMatcher;
         $this->tenantRefs = new TenantReferenceGuard($db);
         $this->members = new MembershipRepository($db);
         $charges = new MembershipChargeRepository($db);
@@ -51,6 +58,7 @@ final class MembershipAction
         $this->chargeService = new MembershipChargeService($db, $this->members, $charges, $posting);
         $this->batchService = new MembershipBatchService($db, $this->chargeService, logger: $logger);
         $this->reconciliation = new MembershipReconciliationService(new MembershipBalanceRepository($db));
+        $this->corrections = new MembershipCorrectionService($db, $this->members, $activity);
     }
 
     public function members(Request $request, Response $response): Response
@@ -221,9 +229,47 @@ final class MembershipAction
             $query = $request->getQueryParams();
             $after = $this->queryInteger($query['after_claim_id'] ?? 0, 'after_claim_id', 0);
             $limit = $this->queryInteger($query['limit'] ?? 100, 'limit', 1, 100);
-            return ['member' => $member, 'history' => $this->members->history($supplier, $member['id']),
+            $history = $this->members->history($supplier, $member['id']);
+            return ['member' => $member, 'history' => $history,
+                'corrections' => $this->corrections->availability($supplier, $member, $history),
                 'balance' => $this->reconciliation->memberBalance($supplier, $member['id'], $after, $limit)];
         });
+    }
+
+    public function updateMember(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request, $response, true, function (int $supplier) use ($request, $args): array {
+            $body = $this->body($request, ['client_id', 'member_number', 'expected_client_id', 'expected_member_number']);
+            if (is_int($body['client_id'])) {
+                $badRefs = $this->tenantRefs->violations($supplier, ['client_id' => $body['client_id']], ['client_id']);
+                if ($badRefs !== []) throw new MembershipException('invalid_reference', TenantReferenceGuard::message($badRefs), 400);
+            }
+            [$ip, $agent] = $this->origin($request);
+            return $this->corrections->updateIdentity($supplier, (int) $args['id'], $body, $this->actor($request), $ip, $agent);
+        });
+    }
+
+    public function deleteMember(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request, $response, true, function (int $supplier) use ($request, $args): array {
+            [$ip, $agent] = $this->origin($request);
+            return $this->corrections->delete($supplier, (int) $args['id'], $this->actor($request), $ip, $agent);
+        });
+    }
+
+    public function voidRevision(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request, $response, true, function (int $supplier) use ($request, $args): array {
+            $body = $this->body($request, ['expected_revision', 'reason', 'idempotency_key']);
+            [$ip, $agent] = $this->origin($request);
+            return $this->corrections->voidRevision($supplier, (int) $args['id'], (int) $args['revisionId'], $body, $this->actor($request), $ip, $agent);
+        }, 201);
+    }
+
+    /** @return array{0:?string,1:string} */
+    private function origin(Request $request): array
+    {
+        return [$this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent')];
     }
 
     public function claim(Request $request, Response $response, array $args): Response

@@ -55,6 +55,8 @@ final class ActivityLogHashChain
      * (ručně upravený popis zápisu, automatické zaúčtování, ruční změna úhrady,
      * storno, přeúčtování, kurzový rozdíl převodu) a odeslané e-maily jsou doklad
      * o doručení dokladu. Smazáním by se změnilo chování, ne jen délka historie.
+     * Opravy členské evidence (smazání člena, oprava kontaktu a čísla) jinou stopu
+     * nemají; zrušení revize je sice v řetězu revizí, audit nese autora a IP.
      */
     public const RETAINED_ACTIONS = [
         'accounting.auto_posted',
@@ -74,6 +76,9 @@ final class ActivityLogHashChain
         'invoice.payment_thanks_failed',
         'recurring.reminder_sent',
         'recurring.reminder_failed',
+        'nonprofit_membership_member_update',
+        'nonprofit_membership_member_delete',
+        'nonprofit_membership_revision_void',
     ];
 
     /** Klíč `app_meta` s hranicí promazané části řetězu. */

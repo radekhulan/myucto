@@ -6,7 +6,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 import { formDateInput as dateInput, formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import { membershipApi, type MemberIdentity, type MemberRevision, type MemberRevisionInput, type MemberStatus } from '@/api/nonprofitMembership'
 import { formatDate } from '@/composables/useFormat'
-import { errorBox, isIsoDate, lastRevision } from './membershipFormat'
+import { errorBox, isIsoDate, lastRevision, lastValidRevision } from './membershipFormat'
 import MembershipConfirmBar from './MembershipConfirmBar.vue'
 import { useGuardedCommit } from './useGuardedCommit'
 
@@ -20,7 +20,8 @@ const inputForm = ref<HTMLFormElement | null>(null)
 
 const form = reactive({ status: 'active' as MemberStatus, effectiveFrom: '', reference: '', evidence: '' })
 const notice = ref('')
-const last = computed(() => lastRevision(props.history))
+const head = computed(() => lastRevision(props.history))
+const last = computed(() => lastValidRevision(props.history))
 const statuses = computed<MemberStatus[]>(() => (last.value ? ['active', 'suspended', 'ended'] : ['active']))
 
 const commit = useGuardedCommit<RevisionCommand, RevisionCommand>({
@@ -52,7 +53,7 @@ function review() {
       status: form.status,
       effective_from: form.effectiveFrom,
       legal_basis: { organisation_form: 'association', relationship: 'nonreciprocal_membership', reference: form.reference.trim(), evidence: form.evidence.trim() },
-      expected_revision: last.value?.revision_no ?? 0,
+      expected_revision: head.value?.revision_no ?? 0,
       idempotency_key: crypto.randomUUID(),
     },
   }
@@ -60,7 +61,7 @@ function review() {
   commit.arm(command, command, props.supplier)
 }
 
-watch([form, () => last.value?.revision_no ?? 0, () => props.member.id], () => commit.touch(), { deep: true, flush: 'sync' })
+watch([form, () => head.value?.revision_no ?? 0, () => props.member.id], () => commit.touch(), { deep: true, flush: 'sync' })
 watch(() => props.supplier, () => { commit.reset(); notice.value = '' })
 watch(commit.locked, locked => emit('lock', locked))
 

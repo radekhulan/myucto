@@ -153,7 +153,8 @@ async function newFromDetail() {
         if (result.next_after_member_id <= after || ids.length > 500) throw new Error(t('nonprofitMembership.batchSelectionRequired'))
         after = result.next_after_member_id
       }
-      if (ids.length !== source.batch.member_count || ids.length > 500) throw new Error(t('nonprofitMembership.batchSelectionRequired'))
+      // Smazaný člen (krok 7: jen bez revize a předpisu) zmizí z položek, počet v hlavičce dávky zůstává původní.
+      if (!ids.length || ids.length > source.batch.member_count || ids.length > 500) throw new Error(t('nonprofitMembership.batchSelectionRequired'))
     }
     if (!alive || ticket !== epoch || supplier !== props.supplier) return
     draftTemplate.value = {...source.batch.template, classification: {...source.batch.template.classification}}

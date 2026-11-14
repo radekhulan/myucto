@@ -90,9 +90,8 @@ final class MembershipCloneScrubber
             foreach (self::revisionBatches($pdo) as $batch) {
                 foreach ($batch as $raw) {
                     $row = self::revisionRow($raw);
-                    self::validateRevision($row, $revisionState);
+                    $revisionState = self::validateRevision($row, $revisionState);
                     $writer->append('revision', $row);
-                    $revisionState = $row;
                 }
             }
             $chain = null;
@@ -183,7 +182,9 @@ final class MembershipCloneScrubber
                 if ($row === null || !self::same($old, $row)) throw new \LogicException('Membership clone revision changed after capture.');
                 if ($state === null || $state['supplier_id'] !== $row['supplier_id'] || $state['member_id'] !== $row['member_id']) $state = null;
                 $row['legal_basis'] = self::legalBasis($scrubber, $row['legal_basis']);
-                $row['request']['legal_basis'] = $row['legal_basis'];
+                // Rušící článek nese v požadavku jen odkaz a důvod; důvod je volný text jako podklad revize.
+                if (array_key_exists('legal_basis', $row['request'])) $row['request']['legal_basis'] = $row['legal_basis'];
+                if (isset($row['request']['reason'])) $row['request']['reason'] = $scrubber->scrub((string) $row['request']['reason']);
                 $row['idempotency_key'] = 'clone-membership-revision-' . $row['id'];
                 $row['request_hash'] = NonprofitTaxRules::hash($row['request']);
                 $row['parent_hash'] = $state['record_hash'] ?? str_repeat('0', 64);
@@ -305,8 +306,7 @@ final class MembershipCloneScrubber
         foreach (self::revisionBatches($pdo) as $batch) {
             foreach ($batch as $raw) {
                 $row = self::revisionRow($raw);
-                self::validateRevision($row, $revisionState);
-                $revisionState = $row;
+                $revisionState = self::validateRevision($row, $revisionState);
             }
         }
         $chain = null;
@@ -530,16 +530,31 @@ final class MembershipCloneScrubber
         $state = null;
     }
 
-    private static function validateRevision(array $row, ?array $previous): void
+    /**
+     * Ověří článek řetězu a vrátí stav pro další článek téhož člena.
+     * Datum roste mezi platnými revizemi; rušící článek odebere poslední platnou revizi (krok 7 #321).
+     */
+    private static function validateRevision(array $row, ?array $state): array
     {
-        if ($previous === null || $previous['supplier_id'] !== $row['supplier_id'] || $previous['member_id'] !== $row['member_id']) $previous = null;
+        if ($state === null || $state['row']['supplier_id'] !== $row['supplier_id'] || $state['row']['member_id'] !== $row['member_id']) $state = null;
+        $previous = $state['row'] ?? null;
+        $valid = $state['valid'] ?? [];
+        $top = $valid === [] ? null : $valid[array_key_last($valid)];
+        if ($row['voids_revision_id'] !== null) {
+            $dateInvalid = $top === null || $top['id'] !== $row['voids_revision_id'] || $top['effective_from'] !== $row['effective_from'] || $top['status'] !== $row['status'];
+            array_pop($valid);
+        } else {
+            $dateInvalid = $top !== null && $row['effective_from'] <= $top['effective_from'];
+            $valid[] = ['id' => $row['id'], 'effective_from' => $row['effective_from'], 'status' => $row['status']];
+        }
         if ($row['revision_no'] !== ($previous['revision_no'] ?? 0) + 1 || $row['previous_id'] !== ($previous['id'] ?? null)
-            || ($previous !== null && $row['effective_from'] <= $previous['effective_from'])
+            || $dateInvalid
             || !hash_equals($row['parent_hash'], $previous['record_hash'] ?? str_repeat('0', 64))
             || !hash_equals($row['request_hash'], NonprofitTaxRules::hash($row['request']))
             || !hash_equals($row['record_hash'], NonprofitTaxRules::hash(MembershipRepository::revisionRecord($row)))) {
             throw new \LogicException('Membership clone revision history is invalid.');
         }
+        return ['row' => $row, 'valid' => $valid];
     }
 
     private static function assertCompleteGraph(PDO $pdo): void
@@ -787,6 +802,7 @@ final class MembershipCloneScrubber
     {
         foreach (['id', 'supplier_id', 'member_id', 'revision_no', 'created_by'] as $field) $row[$field] = (int) $row[$field];
         $row['previous_id'] = $row['previous_id'] === null ? null : (int) $row['previous_id'];
+        $row['voids_revision_id'] = ($row['voids_revision_id'] ?? null) === null ? null : (int) $row['voids_revision_id'];
         foreach (['legal_basis', 'request'] as $field) {
             $row[$field] = json_decode($row[$field . '_json'], true, flags: JSON_THROW_ON_ERROR);
             unset($row[$field . '_json']);
@@ -871,7 +887,7 @@ final class MembershipCloneScrubber
     {
         $tables = [
             'nonprofit_members' => ['id', 'supplier_id', 'client_id', 'created_by', 'created_at', 'recorded_at_utc'],
-            'nonprofit_member_revisions' => ['id', 'supplier_id', 'member_id', 'revision_no', 'previous_id', 'effective_from', 'status', 'created_by', 'created_at', 'recorded_at_utc'],
+            'nonprofit_member_revisions' => ['id', 'supplier_id', 'member_id', 'revision_no', 'previous_id', 'voids_revision_id', 'effective_from', 'status', 'created_by', 'created_at', 'recorded_at_utc'],
             'nonprofit_membership_charge_cases' => ['id', 'supplier_id', 'member_id', 'title_key', 'period_from', 'period_to', 'head_operation_id', 'row_version', 'created_by', 'created_at'],
             'nonprofit_membership_charge_operations' => ['id', 'supplier_id', 'case_id', 'command_id', 'operation', 'previous_operation_id', 'original_operation_id', 'member_revision_id', 'legal_profile_id', 'accounting_period_id', 'accounting_date', 'due_date', 'amount_cents', 'receivable_account_id', 'revenue_account_id', 'journal_entry_id', 'receivable_line_id', 'revenue_line_id', 'receipt_json', 'created_by', 'created_at'],
             'nonprofit_membership_charge_claims' => ['id', 'supplier_id', 'case_id', 'operation_id', 'original_claim_id', 'member_id', 'client_id', 'kind', 'amount_cents', 'created_at', 'recorded_at_utc'],

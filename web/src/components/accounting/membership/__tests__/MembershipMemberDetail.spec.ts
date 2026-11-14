@@ -352,4 +352,64 @@ describe('Membership member detail', () => {
     expect(w.find('[data-stub="revision"]').exists()).toBe(true)
     w.unmount()
   })
+
+  it('offers only the corrections the server allows and opens one at a time', async () => {
+    const corrections = { can_edit_identity: true, edit_identity_block: null, can_delete: false, delete_block: 'nonprofit_membership_member_has_revisions',
+      voidable_revision_id: 1, void_block: null, head_revision_no: 1 }
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections })
+    const w = mountedWithCorrection(); await flushPromises()
+    expect(w.find('[data-action="fix-identity"]').exists()).toBe(true)
+    expect(w.find('[data-action="void-revision"]').exists()).toBe(true)
+    expect(w.find('[data-action="delete-member"]').exists()).toBe(false)
+    await w.get('[data-action="void-revision"]').trigger('click')
+    const flow = w.findComponent(CorrectionFlow)
+    expect(flow.props('mode')).toBe('void')
+    expect(flow.props('revision')).toMatchObject({ id: 1 })
+    expect(w.find('[data-action="fix-identity"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('hides corrections without the server permission and after a charge', async () => {
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: { can_edit_identity: false, edit_identity_block: 'nonprofit_membership_member_has_charges',
+      can_delete: false, delete_block: 'nonprofit_membership_member_has_revisions', voidable_revision_id: null, void_block: 'nonprofit_membership_revision_has_charges', head_revision_no: 1 } })
+    const w = mountedWithCorrection(); await flushPromises()
+    for (const key of ['fix-identity', 'void-revision', 'delete-member']) expect(w.find(`[data-action="${key}"]`).exists()).toBe(false)
+    w.unmount()
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: { can_edit_identity: true, edit_identity_block: null, can_delete: true, delete_block: null, voidable_revision_id: 1, void_block: null, head_revision_no: 1 } })
+    const readOnly = mountedWithCorrection({ canManage: false }); await flushPromises()
+    for (const key of ['fix-identity', 'void-revision', 'delete-member']) expect(readOnly.find(`[data-action="${key}"]`).exists()).toBe(false)
+    readOnly.unmount()
+  })
+
+  it('shows a voided revision struck through with the voiding reason and keeps today status from the valid revision', async () => {
+    const voiding = { ...revision(3, '2021-01-01', 'ended'), voids_revision_id: 2, request: { reason: 'Synthetic wrong date' } }
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01'), revision(2, '2021-01-01', 'ended'), voiding], []))
+    const w = mountedWithCorrection(); await flushPromises()
+    expect(w.get('[data-section="history-row"][data-voided="true"]').text()).toContain('#2')
+    expect(w.get('[data-section="history-void-row"]').text()).toContain('Synthetic wrong date')
+    expect(w.get('[data-field="status-today"]').text()).toContain(cs.nonprofitMembership.status_active)
+    w.unmount()
+  })
+
+  it('emits deleted after a confirmed deletion without reloading the removed member', async () => {
+    api.member.mockResolvedValue({ ...detail([], []), corrections: { can_edit_identity: true, edit_identity_block: null, can_delete: true, delete_block: null, voidable_revision_id: null, void_block: null, head_revision_no: 0 } })
+    const w = mountedWithCorrection(); await flushPromises()
+    await w.get('[data-action="delete-member"]').trigger('click')
+    w.findComponent(CorrectionFlow).vm.$emit('done', 'delete', '')
+    await flushPromises()
+    expect(w.emitted('deleted')).toHaveLength(1)
+    expect(api.member).toHaveBeenCalledTimes(1)
+    w.unmount()
+  })
 })
+
+const CorrectionFlow = defineComponent({ name: 'MembershipCorrectionFlow', props: ['supplier', 'canManage', 'mode', 'member', 'label', 'revision', 'headRevisionNo'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'correction' }) })
+function mountedWithCorrection(props: Record<string, unknown> = {}) {
+  return mount(Detail, {
+    props: { supplier: 5, canManage: true, memberId: 9, label: 'Synthetic member', periods: [period], ...props },
+    global: {
+      plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
+      stubs: { ActionBar, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow, MembershipCorrectionFlow: CorrectionFlow },
+    },
+  })
+}

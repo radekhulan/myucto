@@ -21,6 +21,9 @@ export interface MembershipListFilters {search?: string; year?: number | null; t
 export interface MemberIdentity { id: number; supplier_id: number; client_id: number; member_number: string; created_by: number; created_at?: string }
 export interface MemberRevision {
   id: number; supplier_id: number; member_id: number; revision_no: number; previous_id: number | null
+  /** Rušící článek: odkaz na zrušenou revizi. Zrušená revize zůstává v historii, ale nepočítá se. */
+  voids_revision_id?: number | null
+  request?: { reason?: string }
   effective_from: string; status: MemberStatus; legal_basis: MembershipLegalBasis
   idempotency_key: string; request_hash: string; parent_hash: string; record_hash: string; created_by: number; created_at?: string
 }
@@ -38,7 +41,16 @@ export interface MemberBalance {
   member_id: number; page_active_claim_cents: number; page_open_cents: number | null; page_needs_review_count: number
   items: ClaimRow[]; next_after_claim_id: number | null
 }
-export interface MemberDetail { member: MemberIdentity; history: MemberRevision[]; balance: MemberBalance }
+/** Které opravy server u člena právě dovolí (krok 7 #321); důvod blokace je chybový kód. */
+export interface MemberCorrections {
+  can_edit_identity: boolean; edit_identity_block: string | null
+  can_delete: boolean; delete_block: string | null
+  voidable_revision_id: number | null; void_block: string | null
+  head_revision_no: number
+}
+export interface MemberIdentityInput { client_id: number; member_number: string; expected_client_id: number; expected_member_number: string }
+export interface MemberRevisionVoidInput { expected_revision: number; reason: string; idempotency_key: string }
+export interface MemberDetail { member: MemberIdentity; history: MemberRevision[]; corrections?: MemberCorrections; balance: MemberBalance }
 
 export interface ReconciliationTotals {
   claims: { row_count: number | string; cents: number | string }
@@ -152,6 +164,9 @@ export const membershipApi = {
   reconciliation: (supplier: number, period: number) => api.get<ReconciliationTotals>(`/accounting/periods/${period}/nonprofit-membership/reconciliation`, options(supplier)).then(r => r.data),
   createMember: (supplier: number, body: { client_id: number; member_number: string }) => api.post<MemberIdentity>(`${base}/members`, body, options(supplier)).then(r => r.data),
   appendRevision: (supplier: number, member: number, body: MemberRevisionInput) => api.post<MemberRevision>(`${base}/members/${member}/revisions`, body, options(supplier)).then(r => r.data),
+  updateMember: (supplier: number, member: number, body: MemberIdentityInput) => api.put<MemberIdentity>(`${base}/members/${member}`, body, options(supplier)).then(r => r.data),
+  deleteMember: (supplier: number, member: number) => api.delete<{ deleted: true; member_id: number }>(`${base}/members/${member}`, options(supplier)).then(r => r.data),
+  voidRevision: (supplier: number, member: number, revision: number, body: MemberRevisionVoidInput) => api.post<MemberRevision>(`${base}/members/${member}/revisions/${revision}/void`, body, options(supplier)).then(r => r.data),
   preview: (supplier: number, body: MembershipPreviewBody) => api.post<MembershipPreview>(`${base}/charges/preview`, body, options(supplier)).then(r => r.data),
   confirm: (supplier: number, body: MembershipConfirmBody) => api.post<MembershipConfirmResult>(`${base}/charges/confirm`, body, options(supplier)).then(r => r.data),
 }

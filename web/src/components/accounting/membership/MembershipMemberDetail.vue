@@ -4,21 +4,25 @@ import { useI18n } from 'vue-i18n'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnIconSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import type { AccountingPeriod } from '@/api/accounting'
-import { membershipApi, type ClaimRow, type MemberIdentity, type MemberRevision } from '@/api/nonprofitMembership'
+import { membershipApi, type ClaimRow, type MemberCorrections, type MemberIdentity, type MemberRevision } from '@/api/nonprofitMembership'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
-import { badgeBase, errorBox, membershipError, formatDateRange, memberStatusBadge, revisionAt } from './membershipFormat'
+import { badgeBase, errorBox, membershipError, formatDateRange, memberStatusBadge, revisionAt, validRevisions, voidedRevisions } from './membershipFormat'
+import MembershipCorrectionFlow from './MembershipCorrectionFlow.vue'
 import MembershipIssueFlow from './MembershipIssueFlow.vue'
 import MembershipReverseFlow from './MembershipReverseFlow.vue'
 import MembershipRevisionForm from './MembershipRevisionForm.vue'
 import MembershipSettlement from './MembershipSettlement.vue'
 
 const props = defineProps<{ supplier: number; canManage: boolean; memberId: number; label: string; periods: AccountingPeriod[]; refreshVersion?: number }>()
-const emit = defineEmits<{ changed: []; close: [] }>()
+const emit = defineEmits<{ changed: []; close: []; deleted: []; relabel: [label: string] }>()
 const { t, te } = useI18n()
 
 const identity = ref<MemberIdentity | null>(null)
 const history = ref<MemberRevision[]>([])
+const corrections = ref<MemberCorrections | null>(null)
+/** Otevřená oprava (kontakt a číslo, smazání, zrušení revize); jen jedna najednou. */
+const correction = ref<'identity' | 'delete' | 'void' | null>(null)
 const claims = ref<ClaimRow[]>([])
 const nextAfter = ref<number | null>(null)
 const loading = ref(false)
@@ -28,15 +32,18 @@ const issueOpen = ref(false)
 /** Formulář revize je u člena s historií sbalený za akcí „Změnit stav členství“. */
 const revisionOpen = ref(false)
 const reverseClaim = ref<ClaimRow | null>(null)
-const locks = ref({ revision: false, issue: false, reverse: false })
+const locks = ref({ revision: false, issue: false, reverse: false, correction: false })
 let alive = true
 let generation = 0
 let refreshPending = false
 
 const today = computed(() => appIsoDate())
 const current = computed(() => revisionAt(history.value, today.value))
-const upcoming = computed(() => history.value.filter(r => r.effective_from > today.value))
-const anyLocked = computed(() => locks.value.revision || locks.value.issue || locks.value.reverse)
+const valid = computed(() => validRevisions(history.value))
+const voided = computed(() => voidedRevisions(history.value))
+const upcoming = computed(() => valid.value.filter(r => r.effective_from > today.value))
+const voidable = computed(() => history.value.find(r => r.id === corrections.value?.voidable_revision_id) ?? null)
+const anyLocked = computed(() => locks.value.revision || locks.value.issue || locks.value.reverse || locks.value.correction)
 const member = computed(() => ({ id: props.memberId, member_number: identity.value?.member_number ?? '', label: props.label }))
 
 const issued = computed(() => claims.value.filter(c => c.reversal_claim_id === null).reduce((sum, c) => sum + c.amount_cents, 0))
@@ -54,6 +61,7 @@ async function load(append = false) {
     if (!alive || ticket !== generation || supplier !== props.supplier || id !== props.memberId) return
     identity.value = data.member
     history.value = data.history
+    corrections.value = data.corrections ?? null
     claims.value = append ? [...claims.value, ...data.balance.items] : data.balance.items
     nextAfter.value = data.balance.next_after_claim_id
   } catch (e) {
@@ -90,6 +98,21 @@ async function revisionFinished() {
   emit('changed')
 }
 
+async function correctionFinished(mode: 'identity' | 'delete' | 'void', label: string) {
+  correction.value = null
+  if (mode === 'delete') { emit('changed'); emit('deleted'); return }
+  if (mode === 'identity' && label) emit('relabel', label)
+  notice.value = t(`nonprofitMembership.correction.done_${mode}`)
+  await load()
+  emit('changed')
+}
+
+function startCorrection(mode: 'identity' | 'delete' | 'void') {
+  if (anyLocked.value) return
+  issueOpen.value = false; reverseClaim.value = null; revisionOpen.value = false
+  correction.value = mode
+}
+
 function startReverse(row: ClaimRow) {
   if (anyLocked.value) return
   issueOpen.value = false
@@ -103,8 +126,8 @@ watch(() => props.refreshVersion, () => {
 watch(anyLocked, locked => {
   if (!locked && refreshPending) { refreshPending = false; void load() }
 })
-watch(() => props.memberId, () => { generation++; refreshPending = false; identity.value = null; history.value = []; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; notice.value = ''; void load() })
-watch(() => props.supplier, () => { generation++; refreshPending = false; loading.value = false; identity.value = null; history.value = []; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; notice.value = '' })
+watch(() => props.memberId, () => { generation++; refreshPending = false; identity.value = null; history.value = []; corrections.value = null; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; notice.value = ''; void load() })
+watch(() => props.supplier, () => { generation++; refreshPending = false; loading.value = false; identity.value = null; history.value = []; corrections.value = null; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; notice.value = '' })
 onBeforeUnmount(() => { alive = false; generation++ })
 onMounted(() => { void load() })
 let firstActivation = true
@@ -114,10 +137,13 @@ onActivated(() => {
 })
 
 const actions = computed<ActionItem[]>(() => [
-  { key: 'new-charge', label: t('nonprofitMembership.newCharge'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: anyLocked.value || loading.value || !history.value.length, disabledReason: t('nonprofitMembership.newChargeNeedsRevision'), run: () => { reverseClaim.value = null; issueOpen.value = true } },
-  { key: 'change-status', label: t('nonprofitMembership.changeStatus'), icon: 'edit', show: props.canManage && history.value.length > 0 && !revisionOpen.value, disabled: anyLocked.value || loading.value, run: () => { revisionOpen.value = true } },
+  { key: 'new-charge', label: t('nonprofitMembership.newCharge'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: anyLocked.value || loading.value || !valid.value.length, disabledReason: t('nonprofitMembership.newChargeNeedsRevision'), run: () => { reverseClaim.value = null; issueOpen.value = true } },
+  { key: 'change-status', label: t('nonprofitMembership.changeStatus'), icon: 'edit', show: props.canManage && valid.value.length > 0 && !revisionOpen.value, disabled: anyLocked.value || loading.value, run: () => { correction.value = null; revisionOpen.value = true } },
+  { key: 'fix-identity', label: t('nonprofitMembership.correction.title_identity'), icon: 'edit', show: props.canManage && !!corrections.value?.can_edit_identity && correction.value === null, disabled: anyLocked.value || loading.value, run: () => startCorrection('identity') },
   { key: 'reload', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value || anyLocked.value, run: () => { void load() } },
   { key: 'close-detail', label: t('nonprofitMembership.close'), icon: 'x', disabled: anyLocked.value, run: () => emit('close') },
+  { key: 'void-revision', label: t('nonprofitMembership.correction.title_void'), icon: 'uturn', tier: 'overflow', variant: 'danger', show: props.canManage && !!voidable.value && correction.value === null, disabled: anyLocked.value || loading.value, run: () => startCorrection('void') },
+  { key: 'delete-member', label: t('nonprofitMembership.correction.title_delete'), icon: 'trash', tier: 'overflow', variant: 'danger', show: props.canManage && !!corrections.value?.can_delete && correction.value === null, disabled: anyLocked.value || loading.value, run: () => startCorrection('delete') },
 ])
 </script>
 
@@ -147,21 +173,40 @@ const actions = computed<ActionItem[]>(() => [
     <div class="space-y-2" data-section="history">
       <h3 class="font-semibold">{{ t('nonprofitMembership.history') }}</h3>
       <p v-if="identity && !history.length" class="text-sm text-neutral-500">{{ t('nonprofitMembership.historyEmpty') }}</p>
-      <div v-for="revision in history" :key="revision.id" class="space-y-1 rounded border border-neutral-200 p-3 text-sm" data-section="history-row">
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="font-medium">#{{ revision.revision_no }}</span>
-          <span :class="memberStatusBadge(revision.status)">{{ t(`nonprofitMembership.status_${revision.status}`) }}</span>
-          <span>{{ t('nonprofitMembership.sinceDate', { date: formatDate(revision.effective_from) }) }}</span>
-          <span v-if="current?.id === revision.id" :class="[badgeBase, 'bg-success-50 text-success-600']">{{ t('nonprofitMembership.validToday') }}</span>
-          <span v-else-if="revision.effective_from > today" :class="[badgeBase, 'bg-warning-50 text-warning-700']">{{ t('nonprofitMembership.notYetValid') }}</span>
+      <template v-for="revision in history" :key="revision.id">
+        <div v-if="revision.voids_revision_id != null" class="space-y-1 rounded border border-neutral-200 p-3 text-sm" data-section="history-void-row">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-medium">#{{ revision.revision_no }}</span>
+            <span :class="[badgeBase, 'bg-danger-50 text-danger-700']">{{ t('nonprofitMembership.correction.voidingBadge') }}</span>
+            <span>{{ t('nonprofitMembership.correction.voidingOf', { no: history.find(r => r.id === revision.voids_revision_id)?.revision_no ?? '?' }) }}</span>
+          </div>
+          <p v-if="revision.request?.reason" data-field="void-reason">{{ revision.request.reason }}</p>
         </div>
-        <p>{{ revision.legal_basis.reference }}</p>
-        <p class="text-neutral-500">{{ revision.legal_basis.evidence }}</p>
-      </div>
+        <div v-else class="space-y-1 rounded border border-neutral-200 p-3 text-sm" data-section="history-row" :data-voided="voided.has(revision.id) ? 'true' : undefined">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-medium" :class="{ 'line-through text-neutral-500': voided.has(revision.id) }">#{{ revision.revision_no }}</span>
+            <span :class="memberStatusBadge(revision.status)">{{ t(`nonprofitMembership.status_${revision.status}`) }}</span>
+            <span :class="{ 'line-through text-neutral-500': voided.has(revision.id) }">{{ t('nonprofitMembership.sinceDate', { date: formatDate(revision.effective_from) }) }}</span>
+            <span v-if="voided.has(revision.id)" :class="[badgeBase, 'bg-neutral-100 text-neutral-600']" data-field="voided-badge">{{ t('nonprofitMembership.correction.voidedBy', { no: voided.get(revision.id)?.revision_no }) }}</span>
+            <span v-else-if="current?.id === revision.id" :class="[badgeBase, 'bg-success-50 text-success-600']">{{ t('nonprofitMembership.validToday') }}</span>
+            <span v-else-if="revision.effective_from > today" :class="[badgeBase, 'bg-warning-50 text-warning-700']">{{ t('nonprofitMembership.notYetValid') }}</span>
+          </div>
+          <p>{{ revision.legal_basis.reference }}</p>
+          <p class="text-neutral-500">{{ revision.legal_basis.evidence }}</p>
+        </div>
+      </template>
     </div>
 
+    <MembershipCorrectionFlow
+      v-if="canManage && identity && correction"
+      :key="`${correction}-${identity.id}`"
+      :supplier="supplier" :can-manage="canManage" :mode="correction" :member="identity" :label="label"
+      :revision="correction === 'void' ? voidable : null" :head-revision-no="corrections?.head_revision_no ?? 0"
+      @done="(mode, label) => correctionFinished(mode, label)" @close="correction = null" @lock="locks.correction = $event"
+    />
+
     <MembershipRevisionForm
-      v-if="canManage && identity && (!history.length || revisionOpen || locks.revision)"
+      v-if="canManage && identity && !correction && (!valid.length || revisionOpen || locks.revision)"
       :supplier="supplier" :can-manage="canManage" :member="identity" :history="history"
       @done="revisionFinished()" @close="revisionOpen = false" @lock="locks.revision = $event"
     />
