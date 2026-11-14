@@ -39,8 +39,9 @@ final class MembershipCorrectionService
         $effective = MembershipRevisionTimeline::effective($history);
         $last = $effective === [] ? null : $effective[array_key_last($effective)];
         $voidBlock = $last === null ? null : $this->revisionBlock($supplier, $member['id'], $last['id'], false);
-        $deleteBlock = $history !== [] ? 'nonprofit_membership_member_has_revisions'
-            : ($charged ? 'nonprofit_membership_member_has_charges'
+        // Předpis má přednost: důvod „má revize“ radí opravit kontakt, což u člena s předpisem nejde.
+        $deleteBlock = $charged ? 'nonprofit_membership_member_has_charges'
+            : ($history !== [] ? 'nonprofit_membership_member_has_revisions'
             : ($this->openBatchIds($supplier, $member['id'], false) !== [] ? 'nonprofit_membership_member_in_batch' : null));
         return [
             'can_edit_identity' => !$charged,
@@ -99,14 +100,16 @@ final class MembershipCorrectionService
         if ($actor <= 0) throw new MembershipException('nonprofit_membership_invalid', 'Smazání člena vyžaduje autora.');
         return TransactionFailure::retrying($this->db->pdo(), fn (): array => (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplier, $member, $actor, $ip, $userAgent): array {
             // Plnění dávky zamyká dávku a pak (cizím klíčem položky) člena; smazání proto zamyká plněné dávky
-            // dřív než člena. Zámek rozsahu indexu zároveň pozdrží založení nové dávky do konce smazání.
+            // dřív než člena. Když plnění poslední stránky přepíná fázi dávky (mění index ix_nmb_phase, na kterém
+            // smazání drží sdílený zámek), vznikne deadlock; obětí je smazání (nic nezapsalo), retry pak vrátí 409.
+            // Zámek mezery v indexu pozdrží i založení nové dávky, ale jen při REPEATABLE READ (výchozí izolace).
             $seeding = $this->seedingBatchIds($supplier, $member, true);
             $current = $this->lockedMember($supplier, $member);
+            // Předpis má přednost před revizemi: hláška o revizích radí opravit kontakt, což u předpisu nejde.
+            if ($this->hasCharges($supplier, $member, true)) throw new MembershipException('nonprofit_membership_member_has_charges', 'Člen už má předpis, smazat ho nejde.', 409);
             $q = $this->db->pdo()->prepare('SELECT 1 FROM nonprofit_member_revisions WHERE supplier_id=? AND member_id=? LIMIT 1 LOCK IN SHARE MODE');
             $q->execute([$supplier, $member]);
             if ($q->fetchColumn() !== false) throw new MembershipException('nonprofit_membership_member_has_revisions', 'Člen má zapsanou historii členství, smazat ho nejde. Opravit jde kontakt a číslo.', 409);
-            // Předpis vyžaduje aktivní revizi, takže tuto větev zastaví už kontrola revizí; zůstává jako pojistka pro převzatá data.
-            if ($this->hasCharges($supplier, $member, true)) throw new MembershipException('nonprofit_membership_member_has_charges', 'Člen už má předpis, smazat ho nejde.', 409);
             $open = $this->openBatchIds($supplier, $member, true, $seeding);
             if ($open !== []) throw new MembershipException('nonprofit_membership_member_in_batch', 'Člen je v rozpracovaném hromadném předpisu. Dokončete nebo zrušte dávku.', 409, ['batch_ids' => $open]);
             // Dokončená nebo zrušená dávka zapisuje i člena bez revize jako odmítnutého; řádek bez operace
@@ -242,6 +245,7 @@ final class MembershipCorrectionService
     /**
      * Plněné dávky, do kterých člen ještě může spadnout (plnění čte členy bez zámku).
      * Index (supplier_id, phase) omezí zámek jen na plněné dávky, ostatní dávky organizace neblokuje.
+     * Při READ COMMITTED se nezamyká mezera, takže dávka založená až po této kontrole kryta není (limit).
      */
     private function seedingBatchIds(int $supplier, int $member, bool $lock): array
     {

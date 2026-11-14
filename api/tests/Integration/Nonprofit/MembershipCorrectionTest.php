@@ -61,7 +61,8 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
 
         $charged = $this->member('DEL-CHARGE');
         $this->issue($charged, 'del-charge');
-        $this->assertCorrectionRejected('nonprofit_membership_member_has_revisions', fn () => $this->corrections->delete($this->supplier, $charged, $this->actor));
+        // Předpis má přednost (hláška o revizích by radila opravu, která u předpisu nejde).
+        $this->assertCorrectionRejected('nonprofit_membership_member_has_charges', fn () => $this->corrections->delete($this->supplier, $charged, $this->actor));
         foreach ([$withRevision, $voided, $charged] as $id) self::assertNotNull($this->repository->member($this->supplier, $id));
         self::assertSame(0, $this->auditCount(MembershipCorrectionService::AUDIT_MEMBER_DELETE));
     }
@@ -400,12 +401,14 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
     {
         $member = $this->member('VOID-OWNER');
         $other = $this->member('VOID-OTHER');
-        $this->assertCorrectionRejected('nonprofit_membership_revision_not_found', fn () => $this->void($member, $this->lastRevision($other), 1, 'void-foreign'));
         try {
-            $this->void($member, $this->lastRevision($other), 1, 'void-foreign-status');
+            $this->void($member, $this->lastRevision($other), 1, 'void-foreign');
+            self::fail('Revize jiného člena se nesmí zrušit.');
         } catch (MembershipException $e) {
-            self::assertSame(404, $e->httpStatus);
+            self::assertSame(['nonprofit_membership_revision_not_found', 404], [$e->errorCode, $e->httpStatus]);
         }
+        self::assertCount(1, $this->repository->history($this->supplier, $member));
+        self::assertCount(1, $this->repository->history($this->supplier, $other));
     }
 
     public function testCloneScrubbingHidesMemberNumberInCorrectionAudit(): void
@@ -445,6 +448,7 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
         self::assertSame(1, $freeState['head_revision_no']);
 
         $chargedState = $this->availability($charged);
+        self::assertSame('nonprofit_membership_member_has_charges', $chargedState['delete_block']);
         self::assertFalse($chargedState['can_edit_identity']);
         self::assertNull($chargedState['voidable_revision_id']);
         self::assertSame('nonprofit_membership_revision_has_charges', $chargedState['void_block']);

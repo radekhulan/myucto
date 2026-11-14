@@ -447,6 +447,14 @@ final class MembershipActionTest extends TestCase
         [$status, $updated] = $this->call('PUT', 'updateMember', $identity, $args);
         self::assertSame(200, $status);
         self::assertSame('M-ACTION-FIX-2', $updated['member_number']);
+        $this->pdo->prepare("INSERT INTO clients(supplier_id,company_name,street,city,zip,country_id,main_email,language,currency_default_id,is_customer,is_vendor) SELECT supplier_id,'Synthetic second member',street,city,zip,country_id,'membership-second@example.test',language,currency_default_id,1,0 FROM clients WHERE id=?")
+            ->execute([$this->client]);
+        [, $foreignMember] = $this->call('POST', 'createMember', ['client_id' => (int) $this->pdo->lastInsertId(), 'member_number' => 'M-ACTION-FOREIGN-REV']);
+        $this->call('POST', 'appendRevision', ['status' => 'active', 'effective_from' => '2026-01-01', 'expected_revision' => 0, 'idempotency_key' => 'foreign-rev',
+            'legal_basis' => ['organisation_form' => 'association', 'relationship' => 'nonreciprocal_membership', 'reference' => 'Synthetic statutes article 5', 'evidence' => 'Synthetic application']], ['id' => (string) $foreignMember['id']]);
+        [, $foreignDetail] = $this->call('GET', 'member', null, ['id' => (string) $foreignMember['id']], ['accounting' => 1]);
+        [$status, $notFound] = $this->call('POST', 'voidRevision', ['idempotency_key' => 'action-void-foreign'] + $void, $args + ['revisionId' => (string) $foreignDetail['history'][0]['id']]);
+        self::assertSame([404, 'nonprofit_membership_revision_not_found'], [$status, $notFound['error']['code']]);
         [$status, $voiding] = $this->call('POST', 'voidRevision', $void, $args + ['revisionId' => (string) $revision]);
         self::assertSame(201, $status);
         self::assertSame($revision, $voiding['voids_revision_id']);

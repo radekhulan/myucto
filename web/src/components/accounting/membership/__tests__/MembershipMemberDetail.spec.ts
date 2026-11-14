@@ -372,11 +372,11 @@ describe('Membership member detail', () => {
 
   it('explains blocked corrections after a charge and hides them without the write permission', async () => {
     api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: { can_edit_identity: false, edit_identity_block: 'nonprofit_membership_member_has_charges',
-      can_delete: false, delete_block: 'nonprofit_membership_member_has_revisions', voidable_revision_id: null, void_block: 'nonprofit_membership_revision_has_charges', head_revision_no: 1 } })
+      can_delete: false, delete_block: 'nonprofit_membership_member_has_charges', voidable_revision_id: null, void_block: 'nonprofit_membership_revision_has_charges', head_revision_no: 1 } })
     const w = mountedWithCorrection(); await flushPromises()
     expect(w.get('[data-action="fix-identity"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_charges)
     expect(w.get('[data-action="void-revision"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_revision_has_charges)
-    expect(w.get('[data-action="delete-member"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_revisions)
+    expect(w.get('[data-action="delete-member"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_charges)
     for (const key of ['fix-identity', 'void-revision', 'delete-member']) expect(w.get(`[data-action="${key}"]`).attributes('disabled')).toBeDefined()
     w.unmount()
     api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: { can_edit_identity: true, edit_identity_block: null, can_delete: true, delete_block: null, voidable_revision_id: 1, void_block: null, head_revision_no: 1 } })

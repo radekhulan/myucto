@@ -28,8 +28,10 @@ $pdo->exec('SET SESSION innodb_snapshot_isolation=0,innodb_lock_wait_timeout=20'
 $service = new MembershipCorrectionService($db, new MembershipRepository($db), new ActivityLogger($db));
 $supplier = (int) $input['supplier']; $member = (int) $input['member']; $actor = (int) $input['actor'];
 $result = [];
+// Bez vnější transakce volá službu jako akce, takže TransactionFailure::retrying smí zopakovat deadlock.
+$outer = ($input['outer'] ?? true) === true;
 try {
-    $pdo->beginTransaction();
+    if ($outer) $pdo->beginTransaction();
     $q = $pdo->prepare('SELECT COUNT(*) FROM nonprofit_membership_charge_cases WHERE supplier_id=? AND member_id=?');
     $q->execute([$supplier, $member]);
     $snapshotCases = (int) $q->fetchColumn();
@@ -41,7 +43,7 @@ try {
         'delete' => $service->delete($supplier, $member, $actor),
         default => throw new RuntimeException('Neplatná operace workeru.'),
     };
-    $pdo->commit();
+    if ($outer) $pdo->commit();
     $result = ['status' => 'completed', 'detail' => $detail];
 } catch (Throwable $failure) {
     if ($pdo->inTransaction()) $pdo->rollBack();
