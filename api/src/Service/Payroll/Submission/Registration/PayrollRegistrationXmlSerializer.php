@@ -1204,10 +1204,17 @@ final class PayrollRegistrationXmlSerializer
         ) {
             $birth->setAttribute('dat', $birthDate);
         }
-        $birth->setAttribute(
-            'nam',
-            $this->requiredIdentityString($identity, 'birth_surname'),
-        );
+        $birthSurname = PayrollRegistrationIdentityRequirements::birthSurnameRequired(
+            $payload->interaction->documentType === 'PREZEC26'
+                ? PayrollRegistrationIdentityRequirements::AGENDA_PREZEC
+                : PayrollRegistrationIdentityRequirements::AGENDA_REGZEC,
+            $payload->preparedOn,
+        )
+            ? $this->requiredIdentityString($identity, 'birth_surname')
+            : $this->nullableIdentityString($identity, 'birth_surname');
+        if ($birthSurname !== null) {
+            $birth->setAttribute('nam', $birthSurname);
+        }
         $birthPlace = $this->requiredIdentityString($identity, 'birth_place');
         $birthCountry = $this->nullableIdentityString(
             $identity,

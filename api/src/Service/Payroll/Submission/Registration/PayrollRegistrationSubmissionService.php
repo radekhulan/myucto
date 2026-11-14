@@ -934,6 +934,7 @@ final readonly class PayrollRegistrationSubmissionService
                 null,
                 $eventAction,
                 $completion,
+                $this->today(),
             )
             : [];
 
