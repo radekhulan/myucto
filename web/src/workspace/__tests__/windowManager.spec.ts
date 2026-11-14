@@ -92,6 +92,7 @@ function testRouter(slowGate?: { entered: Deferred<void>, release: Deferred<bool
       { path: '/editor/:id', name: 'editor', component: TestEditor },
       { path: '/slow/:id', name: 'slow-editor', component: TestEditor },
       { path: '/list', name: 'list', component: TestEditor },
+      { path: '/purchase-invoices/ai-import', name: 'purchase-invoice-ai-import', component: TestEditor },
       { path: '/new-tab', name: 'new-tab', component: TestEditor },
       { path: '/', name: 'home', component: TestEditor },
     ],
@@ -482,6 +483,51 @@ describe('workspace window manager', () => {
     expect(harness.store.windows.find(window => window.fullPath.includes('detail=1'))?.paneId).toBe(panes === 3 ? 'secondary-2' : 'primary')
     expect(harness.store.paneCount).toBe(panes)
     expect(harness.errors).toEqual([])
+  })
+
+  it('předá fotku právě jednou jen novému oknu AI importu', async () => {
+    vi.spyOn(HTMLIFrameElement.prototype, 'src', 'set').mockImplementation(() => undefined)
+    const harness = createHarness({ frames: true, supplier: { id: 1, name: 'Firma A' } })
+    harness.attachPane('primary')
+    const path = '/purchase-invoices/ai-import'
+    await harness.manager.open(path, 'primary')
+    const previous = harness.store.windows[0]!
+    const photo = new File(['synthetic'], 'snapshot.jpg', { type: 'image/jpeg' })
+    await harness.manager.openPurchaseCapture(photo, 1, 'primary')
+    const capture = harness.store.windows[0]!
+    expect(capture).toMatchObject({ fullPath: path, supplierId: 1, paneId: 'primary' })
+    expect(capture.id).not.toBe(previous.id)
+    const [oldFrame, newFrame] = Array.from(document.querySelectorAll('iframe'))
+    const postOld = vi.spyOn(oldFrame!.contentWindow!, 'postMessage').mockImplementation(() => undefined)
+    const postNew = vi.spyOn(newFrame!.contentWindow!, 'postMessage').mockImplementation(() => undefined)
+    const ready = (frame: HTMLIFrameElement, id: string, origin = window.location.origin) => window.dispatchEvent(new MessageEvent('message', {
+      origin, source: frame.contentWindow, data: { type: 'myucto-window-ready', id },
+    }))
+    ready(oldFrame!, capture.id)
+    ready(newFrame!, capture.id, 'https://other.example')
+    expect(postNew).not.toHaveBeenCalled()
+    ready(oldFrame!, previous.id)
+    expect(postOld.mock.calls[0]?.[0]).not.toHaveProperty('purchaseCapture')
+    ready(newFrame!, capture.id)
+    expect(postNew.mock.calls[0]?.[0]).toMatchObject({ type: 'myucto-window-init', to: path, purchaseCapture: photo })
+    ready(newFrame!, capture.id)
+    expect(postNew.mock.calls[1]?.[0]).not.toHaveProperty('purchaseCapture')
+  })
+
+  it('nepředá fotku, pokud se při ověření oprávnění změnila firma', async () => {
+    vi.spyOn(HTMLIFrameElement.prototype, 'src', 'set').mockImplementation(() => undefined)
+    const supplier = { id: 1, name: 'Firma A' }
+    const gate = deferred<boolean>()
+    const authorize = vi.fn(async () => await gate.promise)
+    const harness = createHarness({ frames: true, supplier, authorize })
+    harness.attachPane('primary')
+    const opening = harness.manager.openPurchaseCapture(new File(['synthetic'], 'snapshot.jpg'), 1, 'primary')
+    await vi.waitFor(() => expect(authorize).toHaveBeenCalledTimes(1))
+    supplier.id = 2
+    gate.resolve(true)
+    await opening
+    expect(harness.store.windows).toHaveLength(0)
+    expect(document.querySelector('iframe')).toBeNull()
   })
 
   it.each([true, false])('při frame navigaci vedle ověří firmu zdroje (přepnutí: %s)', async allowed => {

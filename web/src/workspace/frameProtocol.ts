@@ -27,6 +27,7 @@ export interface WindowFrameInitMessage {
   type: 'myucto-window-init'
   id: string
   to: RouteLocationRaw
+  purchaseCapture?: File
   active: boolean
   theme: WindowFrameTheme
   locale: WindowFrameLocale
@@ -117,7 +118,8 @@ export function isWindowFrameParentMessage(value: unknown, id: string): value is
       || (invalidation.self !== undefined && typeof invalidation.self !== 'boolean')) return false
   }
   if (message.type === 'myucto-window-init') {
-    return typeof message.to === 'string' || (!!message.to && typeof message.to === 'object')
+    return (typeof message.to === 'string' || (!!message.to && typeof message.to === 'object'))
+      && (message.purchaseCapture === undefined || message.purchaseCapture instanceof File)
   }
   return message.type === 'myucto-window-state'
     && (message.refreshAuth === undefined || typeof message.refreshAuth === 'boolean')

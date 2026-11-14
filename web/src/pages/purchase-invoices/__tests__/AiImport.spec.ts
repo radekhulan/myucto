@@ -6,7 +6,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import type { SupplierBrief, User } from '@/api/auth'
 import type { AiExtractionStatus } from '@/api/integrations'
 import AiImport from '../AiImport.vue'
-import { usePendingCapture } from '@/composables/usePendingCapture'
+import { windowContextKey } from '@/workspace/windowContext'
 
 const m = vi.hoisted(() => ({ status: vi.fn(), extract: vi.fn(), batches: vi.fn(), push: vi.fn() }))
 vi.mock('@/api/integrations', () => ({ integrationsApi: { getAiExtractionStatus: m.status, extractPdfAi: m.extract } }))
@@ -235,10 +235,13 @@ describe('klientský AI import přijatých faktur', () => {
     setupRole(false)
     m.extract.mockResolvedValue({ ok: true, purchase_invoice_id: 21, source: 'ai', document_kind: 'invoice' })
     const photo = new File(['synthetic'], 'snapshot.jpg', { type: 'image/jpeg' })
-    usePendingCapture().set(photo)
-    const w = mount(AiImport, { global: { stubs: { RouterLink: true, ExtractionReviewModal: true, PhotoCropDialog: true } } })
+    const takePurchaseCapture = vi.fn().mockReturnValueOnce(photo)
+    const w = mount(AiImport, { global: {
+      provide: { [windowContextKey as symbol]: { takePurchaseCapture } },
+      stubs: { RouterLink: true, ExtractionReviewModal: true, PhotoCropDialog: true },
+    } })
     await flushPromises()
-    expect(usePendingCapture().pending.value).toBeNull()
+    expect(takePurchaseCapture).toHaveBeenCalledTimes(1)
     const crop = w.getComponent({ name: 'PhotoCropDialog' })
     expect((crop.props('file') as File).name).toBe('snapshot.jpg')
     const cropped = new File(['synthetic-cropped'], 'snapshot-cropped.jpg', { type: 'image/jpeg' })
@@ -249,14 +252,25 @@ describe('klientský AI import přijatých faktur', () => {
     w.unmount()
   })
 
-  it('fotku z mobilní nabídky bez dostupného vytěžení zahodí a nic neodešle', async () => {
-    setupRole()
-    m.status.mockResolvedValue(status(false))
-    usePendingCapture().set(new File(['synthetic'], 'snapshot.jpg', { type: 'image/jpeg' }))
-    const w = mount(AiImport, { global: { stubs: { RouterLink: true, ExtractionReviewModal: true, PhotoCropDialog: true } } })
+  it.each([
+    [true, status(false), 'aiGateway.client_extraction_unavailable'],
+    [false, status(true, false), 'aiGateway.not_configured_body'],
+  ])('bez dostupného vytěžení zobrazí fotku a důvod (klient: %s)', async (client, config, reason) => {
+    setupRole(client)
+    m.status.mockResolvedValue(config)
+    const original = new File(['synthetic'], 'snapshot.jpg', { type: 'image/jpeg' })
+    const takePurchaseCapture = vi.fn().mockReturnValueOnce(original)
+    const w = mount(AiImport, { global: {
+      provide: { [windowContextKey as symbol]: { takePurchaseCapture } },
+      stubs: { RouterLink: true, ExtractionReviewModal: true, PhotoCropDialog: true },
+    } })
     await flushPromises()
-    expect(usePendingCapture().pending.value).toBeNull()
-    expect(w.findComponent({ name: 'PhotoCropDialog' }).exists()).toBe(false)
+    expect(takePurchaseCapture).toHaveBeenCalledTimes(1)
+    const crop = w.getComponent({ name: 'PhotoCropDialog' })
+    expect(crop.props('file')).toBe(original)
+    expect(crop.props('previewOnlyReason')).toBe(reason)
+    crop.vm.$emit('done', original)
+    await flushPromises()
     expect(m.extract).not.toHaveBeenCalled()
     w.unmount()
   })

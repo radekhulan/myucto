@@ -57,6 +57,7 @@ const VISIBLE_REFRESH_DEBOUNCE_MS = 250
 
 export interface WorkspaceWindowManager {
   open: (to: RouteLocationRaw, paneId: PaneId, options?: { fresh?: boolean }) => Promise<void>
+  openPurchaseCapture: (file: File, supplierId: number, paneId: PaneId) => Promise<void>
   /** Nová prázdná záložka; první stránka otevřená z ní v ní zůstane. S oknem záložku duplikuje. */
   openTab: (duplicateWindowId?: string) => Promise<void>
   openRight: (to: RouteLocationRaw, sourcePaneId: PaneId) => Promise<void>
@@ -280,7 +281,7 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
   }
 
   async function open(to: RouteLocationRaw, paneId: PaneId, fresh = false, reuseVisibleElsewhere = true,
-    placement: { source?: WindowRuntime, tab?: string } = {}): Promise<void> {
+    placement: { source?: WindowRuntime, tab?: string, purchaseCapture?: { file: File, supplierId: number } } = {}): Promise<void> {
     if (!workspace.panes.some(pane => pane.id === paneId)) return
     const source = placement.source ?? windowFor(paneId)
     const resolver = options.createRouter()
@@ -288,6 +289,8 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
     const resolved = resolver.resolve(to)
     const fullPath = resolved.fullPath
     const supplier = options.currentSupplier?.() ?? { id: 0, name: '' }
+    const capture = placement.purchaseCapture
+    if (capture && (supplier.id <= 0 || supplier.id !== capture.supplierId)) return
     const useFrame = options.frames && supplier.id > 0
     const existing = !fresh && [...runtimes.values()].find(runtime => runtime.state.fullPath === fullPath
       && (runtime.state.supplierId ?? 0) === supplier.id
@@ -307,6 +310,7 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
       if (!resolver.currentRoute.value.matched.length) return
     }
     if (destroyed || currentGeneration !== generation) return
+    if (capture && (options.currentSupplier?.().id !== capture.supplierId || !useFrame && resolver.currentRoute.value.name !== 'purchase-invoice-ai-import')) return
     if (oldest && runtimes.size >= MAX_WORKSPACE_WINDOWS) remove(runtimes.get(oldest.id)!)
     const state: WorkspaceWindowState = {
       id: `window-${++sequence}`,
@@ -437,7 +441,7 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
           if (paneId) workspace.updatePane(paneId, { fullPath: null, title: null })
           options.onError(new Error('Window access revoked.'))
         },
-      })
+      }, capture?.file)
       await display(runtime, paneId)
       return
     }
@@ -450,8 +454,14 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
     app.directive('math', vMath)
     app.directive('select-on-focus', vSelectOnFocus)
     app.directive('column-labels', vColumnLabels)
+    let purchaseCapture = capture?.file
     app.provide(windowContextKey, {
       paneId: computed(() => runtime.state.paneId), active, root, portal,
+      takePurchaseCapture: () => {
+        const file = purchaseCapture
+        purchaseCapture = undefined
+        return file
+      },
       navigate: to => runtime.state.paneId ? enqueue(() => open(to, runtime.state.paneId!)) : Promise.resolve(),
       setTitle: (title, subtitle) => {
         if (!runtimes.has(state.id)) return
@@ -627,6 +637,7 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
 
   const manager: WorkspaceWindowManager = {
     open: (to, paneId, options) => enqueue(() => open(to, paneId, options?.fresh)),
+    openPurchaseCapture: (file, supplierId, paneId) => enqueue(() => open('/purchase-invoices/ai-import', paneId, true, true, { purchaseCapture: { file, supplierId } })),
     openRight: (to, sourcePaneId) => enqueue(() => openRight(to, sourcePaneId)),
     openInTab: (to, paneId) => enqueue(() => open(to, paneId, true, true, { tab: newUserTab() })),
     select: id => enqueue(() => select(id)),

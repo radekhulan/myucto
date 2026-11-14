@@ -10,6 +10,7 @@ export interface WindowContext {
   root: HTMLElement
   portal: HTMLElement
   navigate?: (to: RouteLocationRaw) => Promise<void>
+  takePurchaseCapture?: () => File | undefined
   setTitle?: (title: string | null, subtitle?: string | null) => void
 }
 

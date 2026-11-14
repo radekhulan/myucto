@@ -30,7 +30,6 @@ import DesktopUtilityActions from './DesktopUtilityActions.vue'
 import TabletNavigationRail from './TabletNavigationRail.vue'
 import MobileTabBar, { type MobileTab } from './MobileTabBar.vue'
 import MobileNavSheet, { type SheetAction, type SheetLink } from './MobileNavSheet.vue'
-import { usePendingCapture } from '@/composables/usePendingCapture'
 
 // Stav účtů a pokladen se načítá až s nabídkou Peníze, ne s layoutem.
 const MobileMoneySummary = defineAsyncComponent(() => import('./MobileMoneySummary.vue'))
@@ -1667,7 +1666,6 @@ watch(mobileOpen, open => {
   openDrawerSections.value = new Set(current ? [current.key] : [])
 })
 const mobileSheet = ref<MobileSheetKey | null>(null)
-const pendingCapture = usePendingCapture()
 
 function mobileSection(key: string): NavSection | undefined {
   return orderedNav.value.find(section => section.key === key)
@@ -1839,8 +1837,12 @@ const mobileMoneyCash = computed(() => mobileSheet.value === 'bank_cash'
 
 function onMobileCapture(file: File): void {
   mobileSheet.value = null
-  pendingCapture.set(file)
-  void workspaceNavigation.navigate('/purchase-invoices/ai-import', { fresh: true })
+  const manager = getWindowManager()
+  if (!manager) {
+    toast.error(t('workspace.load_error'))
+    return
+  }
+  void manager.openPurchaseCapture(file, supplierStore.currentSupplierId, workspace.activePaneId)
 }
 
 watch(phoneNavigation, phone => { if (!phone) mobileSheet.value = null })

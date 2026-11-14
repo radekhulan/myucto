@@ -40,6 +40,7 @@ const props = withDefaults(defineProps<{
   fromFile?: boolean
   /** Nabídnout „Vyfotit znovu“ — jen tam, odkud se fotoaparát otevírá. */
   allowRetake?: boolean
+  previewOnlyReason?: string
   /** Pořadí fotky v dávce; s `steps > 1` se ukáže v titulku. */
   step?: number
   steps?: number
@@ -296,7 +297,7 @@ async function buildFile(src: PhotoSource): Promise<File> {
 }
 
 async function confirm() {
-  if (!source || busy.value) return
+  if (!source || busy.value || props.previewOnlyReason) return
   busy.value = true
   await nextPaint()
   try {
@@ -308,17 +309,18 @@ async function confirm() {
 }
 
 function uploadOriginal() {
-  emit('done', props.file)
+  if (!props.previewOnlyReason) emit('done', props.file)
 }
 </script>
 
 <template>
   <Modal :title="title" width-class="max-w-md" @close="emit('cancel')">
     <div class="space-y-3">
+      <p v-if="previewOnlyReason" class="text-sm text-warning-700" role="status">{{ previewOnlyReason }}</p>
       <p v-if="busy && !ready" class="text-sm text-neutral-600">{{ t('capture_photo.processing') }}</p>
       <template v-else-if="error">
         <p class="text-sm text-danger-700" role="alert">{{ error }}</p>
-        <p class="text-xs text-neutral-500">
+        <p v-if="!previewOnlyReason" class="text-xs text-neutral-500">
           {{ t(allowRetake ? 'capture_photo.fallback_hint' : 'capture_photo.fallback_hint_file') }}
         </p>
       </template>
@@ -327,7 +329,7 @@ function uploadOriginal() {
           :style="frameStyle" data-testid="capture-photo-frame"
           @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerUp">
           <img ref="preview" :src="previewUrl" :alt="t('capture_photo.title')" class="absolute inset-0 w-full h-full" draggable="false" />
-          <template v-if="cropOn">
+          <template v-if="cropOn && !previewOnlyReason">
             <svg class="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
               <path :d="shadePath" fill="black" fill-opacity="0.45" fill-rule="evenodd" />
               <polygon :points="quadPoints" fill="none" stroke="white" stroke-width="2" vector-effect="non-scaling-stroke" />
@@ -344,7 +346,7 @@ function uploadOriginal() {
               :style="loupeStyle" data-testid="capture-photo-loupe" />
           </template>
         </div>
-        <div class="flex flex-wrap items-center justify-between gap-2">
+        <div v-if="!previewOnlyReason" class="flex flex-wrap items-center justify-between gap-2">
           <label class="inline-flex items-center gap-2 text-sm text-neutral-700">
             <input type="checkbox" :checked="cropOn" data-testid="capture-photo-crop" @change="toggleCrop" />
             {{ t('capture_photo.crop_toggle') }}
@@ -368,11 +370,11 @@ function uploadOriginal() {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h5M20 20v-5h-5M5.6 15A8 8 0 0018.4 9M18.4 9A8 8 0 005.6 15" /></svg>
           {{ t('capture_photo.retake') }}
         </button>
-        <button v-if="error" type="button" :class="btnFilled('primary')" data-testid="capture-photo-original" @click="uploadOriginal">
+        <button v-if="error && !previewOnlyReason" type="button" :class="btnFilled('primary')" data-testid="capture-photo-original" @click="uploadOriginal">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 001 1h12a1 1 0 001-1v-5" /></svg>
           {{ t('capture_photo.upload_original') }}
         </button>
-        <button v-else type="button" :class="btnFilled('success')" :disabled="busy || !ready" data-testid="capture-photo-confirm" @click="confirm">
+        <button v-else-if="!previewOnlyReason" type="button" :class="btnFilled('success')" :disabled="busy || !ready" data-testid="capture-photo-confirm" @click="confirm">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
           {{ busy ? t('capture_photo.processing') : t('capture_photo.upload') }}
         </button>

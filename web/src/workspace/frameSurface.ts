@@ -59,7 +59,7 @@ interface FrameSurfaceOptions {
   mutation?: (change: FrameMutation) => void
 }
 
-export function createFrameSurface(options: FrameSurfaceOptions) {
+export function createFrameSurface(options: FrameSurfaceOptions, purchaseCapture?: File) {
   const iframe = document.createElement('iframe')
   iframe.className = 'block h-full w-full border-0 bg-neutral-50'
   iframe.title = options.id
@@ -78,7 +78,8 @@ export function createFrameSurface(options: FrameSurfaceOptions) {
     if (!data || typeof data !== 'object' || data.id !== options.id) return
     if (data.type === 'myucto-window-ready') {
       initialized = true
-      send('myucto-window-init', { to: options.to })
+      send('myucto-window-init', { to: options.to, ...(purchaseCapture ? { purchaseCapture } : {}) })
+      purchaseCapture = undefined
     } else if (data.type === 'myucto-window-route' && typeof data.fullPath === 'string' && data.fullPath.startsWith('/') && !data.fullPath.startsWith('//')) {
       options.route(data.fullPath, typeof data.title === 'string' ? data.title : data.fullPath, typeof data.subtitle === 'string' ? data.subtitle : null)
     } else if (data.type === 'myucto-window-navigate' && (typeof data.to === 'string' || typeof data.to === 'object' && data.to !== null)) {

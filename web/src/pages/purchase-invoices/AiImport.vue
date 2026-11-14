@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, inject, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { integrationsApi, type AiExtractResult, type AiExtractionStatus, type AiProvider } from '@/api/integrations'
@@ -16,7 +16,7 @@ import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.v
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
 import PhotoCropDialog from '@/components/upload/PhotoCropDialog.vue'
 import { usePhotoCropQueue } from '@/composables/usePhotoCropQueue'
-import { usePendingCapture } from '@/composables/usePendingCapture'
+import { windowContextKey } from '@/workspace/windowContext'
 import MergeDocumentsPanel from '@/components/upload/MergeDocumentsPanel.vue'
 
 const { t } = useI18n()
@@ -42,6 +42,13 @@ const clientUsage = computed(() => aiCreds.value?.client_ai_extraction_usage)
 const quotaRejected = ref(false)
 const quotaExhausted = computed(() => auth.isClientRole && (quotaRejected.value || (clientUsage.value?.remaining ?? 1) <= 0))
 const canStartExtraction = computed(() => canExtract.value && !quotaExhausted.value)
+const capturePreviewOnlyReason = computed(() => {
+  if (quotaExhausted.value) return t('aiGateway.client_extraction_limit_reached')
+  if (auth.isClientRole && !canExtract.value) return t('aiGateway.client_extraction_unavailable')
+  if (!aiConfigured.value) return t('aiGateway.not_configured_body')
+  if (!canExtract.value) return t('common.error')
+  return undefined
+})
 const requestModel = computed(() => auth.isClientRole ? undefined : aiPerRequestModel.value || undefined)
 const canEditKind = computed(() => auth.canWrite('purchase_invoices'))
 const aiDefaultModel = computed(() => providerInfo.value?.default_model ?? '')
@@ -75,8 +82,9 @@ const crop = usePhotoCropQueue(files => useAiFiles(files))
  * Fotka z mobilní nabídky Nákup („Vyfotit doklad"): projde ořezem a rovnou se
  * vytěží. Uživatel klepnutím na dlaždici řekl, co chce, další tlačítko by jen zdržovalo.
  */
-const pendingCapture = usePendingCapture()
+const windowContext = inject(windowContextKey, null)
 const captureCrop = usePhotoCropQueue(files => {
+  if (capturePreviewOnlyReason.value) return
   useAiFiles(files)
   if (aiPdfFile.value) void runAiExtract()
 })
@@ -318,17 +326,18 @@ function gotoInvoice(id: number) {
   router.push(`/purchase-invoices/${id}`)
 }
 
-watch([() => pendingCapture.pending.value, credsLoaded], ([file, loaded]) => {
-  if (!file || !loaded) return
-  pendingCapture.take()
-  if (canStartExtraction.value && !aiExtracting.value && !aiBatchRunning.value) captureCrop.start([file])
-}, { immediate: true })
+watch(credsLoaded, loaded => {
+  if (!loaded) return
+  const file = windowContext?.takePurchaseCapture?.()
+  if (file && !aiExtracting.value && !aiBatchRunning.value) captureCrop.start([file])
+})
 
 watch(() => suppliers.currentSupplierId, () => {
   contextVersion++
   aiCreds.value = null
   quotaRejected.value = false
   credsLoaded.value = false
+  captureCrop.cancel()
   aiPdfFile.value = null
   aiResult.value = null
   aiPerRequestModel.value = ''
@@ -582,7 +591,7 @@ watch(() => suppliers.currentSupplierId, () => {
     </div>
     <MergeDocumentsPanel v-if="canExtract && aiConfigured" :disabled="!canStartExtraction"
       :busy="aiExtracting || aiBatchRunning" @import="importMerged" />
-    <PhotoCropDialog v-if="captureCrop.current.value" :file="captureCrop.current.value"
+    <PhotoCropDialog v-if="captureCrop.current.value" :file="captureCrop.current.value" :preview-only-reason="capturePreviewOnlyReason"
       @done="captureCrop.done" @cancel="captureCrop.cancel" />
     <PhotoCropDialog v-if="crop.current.value" :key="crop.step.value" :file="crop.current.value" from-file
       :step="crop.step.value" :steps="crop.steps.value" :skip-count="crop.remaining.value"

@@ -107,6 +107,8 @@ async function initialMessage(frame: WindowFrameBootstrap): Promise<WindowFrameI
 
 export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<void> {
   const init = await initialMessage(frame)
+  let purchaseCapture = init.purchaseCapture
+  delete init.purchaseCapture
   await ensureInitialLocaleReady()
   await applyAppearance(init.theme, init.locale, init.accent, init.singlePanel)
 
@@ -193,6 +195,11 @@ export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<voi
         visible: computed(() => paneId.value !== null),
         root,
         portal: document.body,
+        takePurchaseCapture: () => {
+          const file = purchaseCapture
+          purchaseCapture = undefined
+          return file
+        },
         navigate: async (to: RouteLocationRaw) => {
           postWindowFrameMessage({ type: 'myucto-window-navigate', id: frame.id, to })
         },
@@ -218,6 +225,7 @@ export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<voi
   })
   await router.push(init.to)
   await router.isReady()
+  if (router.currentRoute.value.name !== 'purchase-invoice-ai-import') purchaseCapture = undefined
   installFrameNavigation(router, direction => {
     postWindowFrameMessage({ type: 'myucto-window-history', id: frame.id, direction })
   }, () => window.scrollTo({ top: 0, left: 0, behavior: 'instant' }))
