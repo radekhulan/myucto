@@ -30,7 +30,6 @@ import DesktopUtilityActions from './DesktopUtilityActions.vue'
 import TabletNavigationRail from './TabletNavigationRail.vue'
 import MobileTabBar, { type MobileTab } from './MobileTabBar.vue'
 import MobileNavSheet, { type SheetAction, type SheetLink } from './MobileNavSheet.vue'
-import MobileFullscreenButton from './MobileFullscreenButton.vue'
 
 // Stav účtů a pokladen se načítá až s nabídkou Peníze, ne s layoutem.
 const MobileMoneySummary = defineAsyncComponent(() => import('./MobileMoneySummary.vue'))
@@ -1973,7 +1972,7 @@ onBeforeUnmount(() => {
       <InstanceCriticalBar />
       <div :class="APP_HEADER_ROW">
         <WorkspaceNavLink to="/" :class="APP_BRAND_LINK" @click="mobileOpen = false">
-          <AppBrand ref="brand" :text-class="phoneNavigation ? 'inline max-[360px]:hidden' : (sideNavigation || tabletNavigationRail ? 'inline' : (logoTextHidden ? 'hidden' : 'inline lg:hidden 2xl:inline'))" />
+          <AppBrand ref="brand" :text-class="sideNavigation || tabletNavigationRail ? 'inline' : (logoTextHidden ? 'hidden' : 'inline lg:hidden 2xl:inline')" />
         </WorkspaceNavLink>
 
         <div
@@ -2036,7 +2035,6 @@ onBeforeUnmount(() => {
           <template v-if="phoneNavigation">
             <!-- Okna jsou nahoře: počítadlo ukazuje rozpracované doklady bez otevírání menu. -->
             <WorkspaceWindowButton class="lg:hidden h-10! w-10! rounded-full! border border-neutral-200 text-neutral-700!" data-testid="mobile-windows" />
-            <MobileFullscreenButton class="lg:hidden" />
             <WorkspaceReloadButton class="lg:hidden h-10! w-10! rounded-full! border border-neutral-200 text-neutral-700!" />
             <button
               type="button"
@@ -2623,7 +2621,6 @@ onBeforeUnmount(() => {
                 <WorkspaceFavoritesButton class="h-7! hover:bg-surface!" />
                 <WorkspaceReloadButton class="h-7! hover:bg-surface!" />
                 <WorkspaceWindowButton class="h-7! hover:bg-surface!" />
-                <MobileFullscreenButton class="h-7! w-8! rounded-md! border-0! hover:bg-surface!" />
               </div>
             </div>
             <div v-if="tabletNavigationRail && supplierStore.hasMultiple" class="flex min-w-0 flex-1 justify-center">

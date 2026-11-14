@@ -65,10 +65,10 @@ Datum zadáváte ve formátu jazyka aplikace: česky `d. m. rrrr` (`1. 9. 2026`,
 
 **Jak poznáte, že je hotovo:** aplikace se spouští ve vlastním okně s ikonou MyÚčto.
 
-Nainstalovaná aplikace na telefonu žádá o režim celé obrazovky. Pokud stavový řádek
-zůstane viditelný, klepněte vedle ikony **Okna** na **Celá obrazovka**, pokud ji
-prohlížeč nabízí. Další klepnutí tento režim ukončí. Ikona **Znovu načíst okno**
-obnoví aktivní okno a jeho neuložené změny zahodí. Ovládání na telefonu popisuje
+Nainstalovaná aplikace na telefonu běží v samostatném okně bez adresního řádku
+prohlížeče. Telefon může nad přichycenou hlavičkou zobrazit svůj stavový řádek.
+Ikona **Znovu načíst okno** vedle ikony **Okna** obnoví aktivní okno a jeho
+neuložené změny zahodí. Ovládání na telefonu popisuje
 [§ 10.10.8](10_Prehled.md#10108-navigace-a-rozlozeni-menu).
 
 ### 1.3.3 Široké tabulky
