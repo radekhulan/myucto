@@ -131,11 +131,14 @@ final class OtherItemForecastService
             }
             $groups[$code]['draft'] += $amount;
         }
+        // Výběr začíná zápisy ostatních položek za dané období. Storno se dohledá
+        // indexem podle ID zápisu, jinak může optimalizátor pročítat celý deník.
         $posted = $this->db->pdo()->prepare(
-            'SELECT oi.currency, oi.amount, oi.amount_czk, a.account_type,
+            'SELECT STRAIGHT_JOIN oi.currency, oi.amount, oi.amount_czk, a.account_type,
                     line.side, line.amount AS line_amount
                FROM journal_entries entry
-          LEFT JOIN journal_entries original ON original.supplier_id = entry.supplier_id
+          LEFT JOIN journal_entries original FORCE INDEX FOR JOIN (idx_je_supplier_reversed_by)
+                 ON original.supplier_id = entry.supplier_id
                 AND original.reversed_by = entry.id AND original.source_type = \'other_item\'
                JOIN other_items oi ON oi.supplier_id = entry.supplier_id
                 AND oi.id = COALESCE(entry.source_id, original.source_id)

@@ -420,6 +420,37 @@ final class OtherItemServiceTest extends TestCase
         self::assertSame([], $forecast->resultImpact($this->supplierId, '2100-01-01', '2101-01-01'));
     }
 
+    public function testResultImpactStartsWithOtherItemJournalEntriesAndLooksUpReversalsByIndex(): void
+    {
+        $draft = $this->service->create($this->supplierId, $this->input(), null);
+        $this->service->post($this->supplierId, (int) $draft['id'], null);
+
+        $postedSql = null;
+        $statementClass = $this->pdo->getAttribute(PDO::ATTR_STATEMENT_CLASS);
+        $this->pdo->setAttribute(PDO::ATTR_STATEMENT_CLASS, [OtherItemForecastStatement::class, [
+            static function (string $sql) use (&$postedSql): void {
+                if (str_contains($sql, 'FROM journal_entries entry')) {
+                    $postedSql = $sql;
+                }
+            },
+        ]]);
+        try {
+            $rows = (new OtherItemForecastService($this->db))->resultImpact($this->supplierId, '2099-01-01', '2100-01-01');
+        } finally {
+            $this->pdo->setAttribute(PDO::ATTR_STATEMENT_CLASS, $statementClass);
+        }
+
+        self::assertSame(1200.0, $rows[0]['costs']);
+        self::assertNotNull($postedSql);
+        $explain = $this->pdo->prepare('EXPLAIN ' . $postedSql);
+        $explain->execute([$this->supplierId, '2099-01-01', '2100-01-01']);
+        $plan = $explain->fetchAll(PDO::FETCH_ASSOC);
+        self::assertSame('entry', $plan[0]['table']);
+        $byTable = array_column($plan, null, 'table');
+        self::assertSame('idx_je_supplier_reversed_by', $byTable['original']['key']);
+        self::assertSame('ref', $byTable['original']['type']);
+    }
+
     private function containerPeriod(int $year): void
     {
         (new AccountingPeriodRepository($this->db))->create($this->supplierId, $year,
@@ -445,5 +476,18 @@ final class OtherItemServiceTest extends TestCase
         );
         $stmt->execute([$entryId]);
         return $stmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+}
+
+
+final class OtherItemForecastStatement extends \PDOStatement
+{
+    protected function __construct(private readonly \Closure $capture) {}
+
+    public function execute(?array $params = null): bool
+    {
+        ($this->capture)($this->queryString);
+
+        return parent::execute($params);
     }
 }
