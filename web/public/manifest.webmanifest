@@ -7,7 +7,6 @@
   "start_url": "/",
   "scope": "/",
   "display": "fullscreen",
-  "display_override": ["fullscreen", "standalone"],
   "background_color": "#f5f5f5",
   "theme_color": "#3B2D83",
   "categories": ["business", "finance", "productivity"],
