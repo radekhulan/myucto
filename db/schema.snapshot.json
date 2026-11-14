@@ -1198,7 +1198,8 @@
         "2292_api_token_issued_invoice_edit.sql",
         "2293_api_token_system_write.sql",
         "2294_bank_posting_rule_skip_matching_card.sql",
-        "2295_helios_import_map.sql"
+        "2295_helios_import_map.sql",
+        "2296_eet_units_dis_import.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -5771,16 +5772,30 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
+                "activity_note": "varchar(255) NULL DEFAULT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "house_number": "varchar(10) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
-                "kind": "enum('premises','online','vehicle','mobile','other') NOT NULL",
+                "indirect_representation": "tinyint(1) NOT NULL DEFAULT 0",
+                "kind": "enum('premises','online','vehicle','mobile','other','vending','taxpayer') NOT NULL",
+                "location_text": "varchar(255) NULL DEFAULT NULL",
+                "municipality": "varchar(48) NULL DEFAULT NULL",
+                "municipality_part": "varchar(48) NULL DEFAULT NULL",
+                "nace_code": "varchar(6) NULL DEFAULT NULL",
                 "name": "varchar(120) NOT NULL",
                 "notified_to_fs": "tinyint(1) NOT NULL DEFAULT 1",
+                "orientation_number": "varchar(10) NULL DEFAULT NULL",
+                "postal_code": "char(5) NULL DEFAULT NULL",
+                "records_sales": "tinyint(1) NOT NULL DEFAULT 1",
+                "ruian_code": "int(10) unsigned NULL DEFAULT NULL",
+                "street": "varchar(32) NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
-                "unit_number": "int(10) unsigned NOT NULL",
+                "unit_number": "int(10) unsigned NULL DEFAULT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "valid_from": "date NOT NULL",
-                "valid_to": "date NULL DEFAULT NULL"
+                "valid_to": "date NULL DEFAULT NULL",
+                "vehicle_kind": "char(1) NULL DEFAULT NULL",
+                "vehicle_kind_note": "varchar(150) NULL DEFAULT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",

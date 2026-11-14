@@ -3,7 +3,7 @@ import { appendStepUpProof, stepUpProofBody, type EpoStepUpProof } from './epoSu
 
 export type EetEnvironment = 'playground' | 'production'
 export type EetRegime = 'standard' | 'exempt' | 'eet_off'
-export type EetUnitKind = 'premises' | 'online' | 'vehicle' | 'mobile' | 'other'
+export type EetUnitKind = 'premises' | 'mobile' | 'vending' | 'online' | 'vehicle' | 'taxpayer' | 'other'
 export type EetPermissionLevel = 'none' | 'read' | 'write'
 /** Evidence v pověření: none = sám nebo v zastoupení, single = situace 4, multiple = situace 5. */
 export type EetDelegationMode = 'none' | 'single' | 'multiple'
@@ -77,9 +77,31 @@ export interface EetSettingsResponse {
   history?: EetSettingsHistoryItem[]
 }
 
-export interface EetUnit {
+/** Druh dopravního prostředku podle DIS+ (A osobní … J jiné). */
+export type EetVehicleKind = 'A' | 'N' | 'B' | 'M' | 'V' | 'T' | 'P' | 'L' | 'J'
+
+/** Údaje evidenční jednotky pro oznámení v DIS+ (hromadný import CSV). */
+export interface EetUnitDisFields {
+  nace_code: string | null
+  activity_note: string | null
+  records_sales: boolean
+  indirect_representation: boolean
+  ruian_code: number | null
+  street: string | null
+  house_number: string | null
+  orientation_number: string | null
+  municipality: string | null
+  municipality_part: string | null
+  postal_code: string | null
+  location_text: string | null
+  vehicle_kind: EetVehicleKind | null
+  vehicle_kind_note: string | null
+}
+
+export interface EetUnit extends EetUnitDisFields {
   id: number
-  unit_number: number
+  /** id_jednotky z DIS+; null = jednotka připravená k importu, DIS+ ji ještě neočísloval. */
+  unit_number: number | null
   name: string
   kind: EetUnitKind
   valid_from: string
@@ -89,8 +111,8 @@ export interface EetUnit {
   updated_at: string | null
 }
 
-export interface EetUnitInput {
-  unit_number: number
+export interface EetUnitInput extends Partial<EetUnitDisFields> {
+  unit_number: number | null
   name: string
   kind: EetUnitKind
   valid_from: string

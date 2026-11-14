@@ -15,7 +15,17 @@ use MyInvoice\Infrastructure\Database\Connection;
  */
 final class EetUnitRepository
 {
-    private const COLUMNS = 'u.id, u.unit_number, u.name, u.kind, u.valid_from, u.valid_to, u.notified_to_fs, u.created_at, u.updated_at';
+    private const COLUMNS = 'u.id, u.unit_number, u.name, u.kind, u.nace_code, u.activity_note, u.records_sales,
+        u.indirect_representation, u.ruian_code, u.street, u.house_number, u.orientation_number, u.municipality,
+        u.municipality_part, u.postal_code, u.location_text, u.vehicle_kind, u.vehicle_kind_note,
+        u.valid_from, u.valid_to, u.notified_to_fs, u.created_at, u.updated_at';
+
+    /** Údaje pro DIS+ v pořadí sloupců tabulky ({@see EetUnitDisFormat}). */
+    private const DIS_FIELDS = [
+        'nace_code', 'activity_note', 'records_sales', 'indirect_representation', 'ruian_code', 'street',
+        'house_number', 'orientation_number', 'municipality', 'municipality_part', 'postal_code',
+        'location_text', 'vehicle_kind', 'vehicle_kind_note',
+    ];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -58,11 +68,13 @@ final class EetUnitRepository
         $data = self::validate($input, null);
         $this->assertUniqueNumber($supplierId, $data['unit_number'], null);
         $this->db->pdo()->prepare(
-            'INSERT INTO eet_units (supplier_id, unit_number, name, kind, valid_from, valid_to, notified_to_fs)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO eet_units (supplier_id, unit_number, name, kind, valid_from, valid_to, notified_to_fs, '
+            . implode(', ', self::DIS_FIELDS) . ')
+             VALUES (?, ?, ?, ?, ?, ?, ?' . str_repeat(', ?', count(self::DIS_FIELDS)) . ')'
         )->execute([
             $supplierId, $data['unit_number'], $data['name'], $data['kind'],
             $data['valid_from'], $data['valid_to'], $data['notified_to_fs'] ? 1 : 0,
+            ...self::disValues($data),
         ]);
         return $this->find($supplierId, (int) $this->db->pdo()->lastInsertId())
             ?? throw new \RuntimeException('Uloženou jednotku se nepodařilo načíst.');
@@ -77,12 +89,19 @@ final class EetUnitRepository
         $current = $this->find($supplierId, $id) ?? throw EetException::notFound('Jednotka EET nebyla nalezena.');
         $data = self::validate($input, $current);
         $this->assertUniqueNumber($supplierId, $data['unit_number'], $id);
+        if ($current['unit_number'] !== null && $data['unit_number'] === null && $this->hasDevices($supplierId, $id)) {
+            throw EetException::validation(
+                'Jednotka má pokladní zařízení, číslo z DIS+ jí proto nejde odebrat.',
+                ['field' => 'unit_number'],
+            );
+        }
         $this->db->pdo()->prepare(
-            'UPDATE eet_units SET unit_number = ?, name = ?, kind = ?, valid_from = ?, valid_to = ?, notified_to_fs = ?
+            'UPDATE eet_units SET unit_number = ?, name = ?, kind = ?, valid_from = ?, valid_to = ?, notified_to_fs = ?, '
+            . implode(', ', array_map(static fn (string $f): string => $f . ' = ?', self::DIS_FIELDS)) . '
               WHERE supplier_id = ? AND id = ?'
         )->execute([
             $data['unit_number'], $data['name'], $data['kind'], $data['valid_from'], $data['valid_to'],
-            $data['notified_to_fs'] ? 1 : 0, $supplierId, $id,
+            $data['notified_to_fs'] ? 1 : 0, ...self::disValues($data), $supplierId, $id,
         ]);
         return $this->find($supplierId, $id) ?? throw EetException::notFound('Jednotka EET nebyla nalezena.');
     }
@@ -112,19 +131,60 @@ final class EetUnitRepository
     }
 
     /**
+     * Jednotky k hromadnému importu do DIS+: účinné k danému dni, a bez
+     * `$all` jen ty, kterým DIS+ ještě nepřidělil číslo.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listForDisImport(int $supplierId, string $date, bool $all): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM eet_units u
+              WHERE u.supplier_id = ? AND (u.valid_to IS NULL OR u.valid_to >= ?)'
+            . ($all ? '' : ' AND u.unit_number IS NULL')
+            . ' ORDER BY u.unit_number, u.id'
+        );
+        $stmt->execute([$supplierId, $date]);
+        return array_map(self::present(...), $stmt->fetchAll(\PDO::FETCH_ASSOC));
+    }
+
+    private function hasDevices(int $supplierId, int $unitId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM eet_devices WHERE supplier_id = ? AND unit_id = ? LIMIT 1');
+        $stmt->execute([$supplierId, $unitId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     * @return list<mixed>
+     */
+    private static function disValues(array $data): array
+    {
+        return array_map(
+            static fn (string $field): mixed => is_bool($data[$field]) ? ($data[$field] ? 1 : 0) : $data[$field],
+            self::DIS_FIELDS,
+        );
+    }
+
+    /**
      * @param array<string,mixed> $input
      * @param array<string,mixed>|null $current
-     * @return array{unit_number:int,name:string,kind:string,valid_from:string,valid_to:?string,notified_to_fs:bool}
+     * @return array<string,mixed>
      */
     private static function validate(array $input, ?array $current): array
     {
         $pick = static fn (string $key): mixed => array_key_exists($key, $input) ? $input[$key] : ($current[$key] ?? null);
 
+        // Číslo přiděluje DIS+; jednotku připravenou k importu jde uložit bez něj.
         $number = $pick('unit_number');
         if (is_string($number) && ctype_digit($number)) {
             $number = (int) $number;
         }
-        if (!is_int($number) || $number < 1 || $number > EetIdentifiers::UNIT_NUMBER_MAX) {
+        if ($number === '' || $number === 0) {
+            $number = null;
+        }
+        if ($number !== null && (!is_int($number) || $number < 1 || $number > EetIdentifiers::UNIT_NUMBER_MAX)) {
             throw EetException::validation('Číslo jednotky (id_jednotky z DIS+) musí být celé číslo 1–999999999.', ['field' => 'unit_number']);
         }
         $name = trim((string) (is_scalar($pick('name')) ? $pick('name') : ''));
@@ -162,11 +222,14 @@ final class EetUnitRepository
             'valid_from' => $validFrom,
             'valid_to' => $validTo,
             'notified_to_fs' => $notified,
-        ];
+        ] + EetUnitDisFormat::normalize($input, $current);
     }
 
-    private function assertUniqueNumber(int $supplierId, int $number, ?int $exceptId): void
+    private function assertUniqueNumber(int $supplierId, ?int $number, ?int $exceptId): void
     {
+        if ($number === null) {
+            return;
+        }
         $stmt = $this->db->pdo()->prepare('SELECT id FROM eet_units WHERE supplier_id = ? AND unit_number = ?');
         $stmt->execute([$supplierId, $number]);
         $id = $stmt->fetchColumn();
@@ -183,9 +246,23 @@ final class EetUnitRepository
     {
         return [
             'id' => (int) $row['id'],
-            'unit_number' => (int) $row['unit_number'],
+            'unit_number' => $row['unit_number'] === null ? null : (int) $row['unit_number'],
             'name' => (string) $row['name'],
             'kind' => (string) $row['kind'],
+            'nace_code' => $row['nace_code'],
+            'activity_note' => $row['activity_note'],
+            'records_sales' => (int) $row['records_sales'] === 1,
+            'indirect_representation' => (int) $row['indirect_representation'] === 1,
+            'ruian_code' => $row['ruian_code'] === null ? null : (int) $row['ruian_code'],
+            'street' => $row['street'],
+            'house_number' => $row['house_number'],
+            'orientation_number' => $row['orientation_number'],
+            'municipality' => $row['municipality'],
+            'municipality_part' => $row['municipality_part'],
+            'postal_code' => $row['postal_code'],
+            'location_text' => $row['location_text'],
+            'vehicle_kind' => $row['vehicle_kind'],
+            'vehicle_kind_note' => $row['vehicle_kind_note'],
             'valid_from' => (string) $row['valid_from'],
             'valid_to' => $row['valid_to'] === null ? null : (string) $row['valid_to'],
             'notified_to_fs' => (int) $row['notified_to_fs'] === 1,

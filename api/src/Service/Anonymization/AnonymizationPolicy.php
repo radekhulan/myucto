@@ -375,7 +375,7 @@ final class AnonymizationPolicy
         'eet_devices' => ['code' => 'keep', 'delegating_eic' => 'dic', 'name' => 'text'],
         'eet_settings' => ['eic' => 'dic', 'exemption_reason' => 'text'],
         'eet_settings_history' => ['snapshot_json' => 'json'],
-        'eet_units' => ['name' => 'text'],
+        'eet_units' => ['activity_note' => 'text', 'house_number' => 'shape', 'location_text' => 'text', 'municipality' => 'city', 'municipality_part' => 'city', 'nace_code' => 'keep', 'name' => 'text', 'orientation_number' => 'shape', 'postal_code' => 'zip', 'street' => 'street', 'vehicle_kind' => 'keep', 'vehicle_kind_note' => 'text'],
         'eet_records' => ['action_code' => 'keep', 'delegating_eic' => 'dic', 'device_code' => 'keep', 'eic' => 'dic', 'external_key' => 'wipe', 'last_error_message' => 'text', 'lease_token' => 'keep', 'pok' => 'keep', 'policy_decision' => 'keep', 'policy_reason' => 'keep', 'policy_version' => 'keep', 'public_id' => 'keep', 'sale_at_offset' => 'keep', 'sequence_number' => 'keep', 'warnings_json' => 'json'],
         'payment_events' => ['confirm_idempotency_key' => 'keep', 'confirm_request_hash' => 'keep', 'currency' => 'keep', 'exchange_rate_source' => 'keep', 'original_currency' => 'keep', 'eet_reason_code' => 'keep', 'idempotency_key' => 'keep', 'note' => 'text', 'payment_method' => 'keep', 'policy_version' => 'keep', 'public_id' => 'keep', 'request_hash' => 'keep'],
         'epo_signing_credentials' => ['fingerprint_sha256' => 'keep', 'issuer_dn' => 'keep', 'label' => 'text', 'passphrase_ciphertext' => 'wipe', 'pfx_ciphertext' => 'wipe', 'serial_hex' => 'keep', 'subject_dn' => 'text'],

@@ -92,6 +92,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/eet/settings$#', 'eet.settings', AccessLevel::READ],
         ['PUT', '#^/api/eet/settings$#', 'eet.settings', AccessLevel::WRITE],
         ['GET', '#^/api/eet/(units|devices)(/[0-9]+)?$#', 'eet.settings', AccessLevel::READ],
+        ['GET', '#^/api/eet/units/dis-import$#', 'eet.settings', AccessLevel::READ],
         ['*', '#^/api/eet/(units|devices)(/[0-9]+)?$#', 'eet.settings', AccessLevel::WRITE],
         ['GET', '#^/api/eet/certificates$#', 'eet.certificates', AccessLevel::READ],
         ['POST', '#^/api/eet/certificates(/[0-9]+/deactivate)?$#', 'eet.certificates', AccessLevel::WRITE],
