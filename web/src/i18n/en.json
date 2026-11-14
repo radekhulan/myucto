@@ -15677,6 +15677,7 @@
     "post_confirm": "Post document {number}? A series number will be assigned and the document posted.",
     "balance": "Balance",
     "balance_as_of": "balance as of {date}",
+    "balance_czk_value": "Book value {amount}",
     "opening_balance": "Opening balance",
     "closing_balance": "Closing balance",
     "income_total": "Total income",

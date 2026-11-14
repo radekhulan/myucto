@@ -256,7 +256,7 @@ async function saveAll() {
                 <td class="px-3 py-2 text-right font-mono">
                   {{ formatMoney(r.source.balance) }}
                   <span v-if="r.source.balance_foreign != null" class="block text-xs text-neutral-500">
-                    {{ formatMoney(r.source.balance_foreign) }} {{ r.source.currency_code }}
+                    {{ formatMoney(r.source.balance_foreign, r.source.currency_code) }}
                   </span>
                 </td>
                 <td class="px-3 py-2 text-center">

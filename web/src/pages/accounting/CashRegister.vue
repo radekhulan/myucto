@@ -452,7 +452,12 @@ async function postDraft(d: CashDocument) {
       <div>
         <div class="text-xs text-neutral-500">{{ selectedRegister.name }} · {{ t('cash.balance_as_of', { date: formatDate(selectedRegister.balance_date) }) }}</div>
         <div class="text-2xl font-semibold font-mono" :class="selectedRegister.balance < 0 ? 'text-danger-500' : 'text-neutral-800'">
-          {{ formatMoney(selectedRegister.balance) }}
+          {{ selectedRegister.balance_foreign == null
+            ? formatMoney(selectedRegister.balance)
+            : formatMoney(selectedRegister.balance_foreign, selectedRegister.currency_code) }}
+        </div>
+        <div v-if="selectedRegister.balance_foreign != null" class="text-xs text-neutral-500">
+          {{ t('cash.balance_czk_value', { amount: formatMoney(selectedRegister.balance) }) }}
         </div>
         <div class="text-xs text-neutral-400 font-mono mt-0.5">{{ t('cash.register_account') }} {{ selectedRegister.account_code }}</div>
       </div>

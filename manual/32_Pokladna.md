@@ -182,7 +182,7 @@ Každá pokladna musí mít **jinou analytiku 211** (ani neaktivní pokladna ú�
 
 Stránka `Peníze → Pokladna` zobrazuje:
 
-- **Hero panel se zůstatkem** vybrané pokladny k aktuálnímu dni, název pokladny a účet analytiky. U valutové pokladny je vedle korunové účetní hodnoty vidět také zůstatek v její měně. Je-li zůstatek záporný, zobrazí se červené upozornění „Zůstatek pokladny je záporný“. Pokladna do minusu jít nemá (krátkodobý finanční majetek), ale systém to eviduje jako varování, nikoli jako tvrdý blok.
+- **Zůstatek vybrané pokladny** k aktuálnímu dni, název pokladny a analytický účet. U valutové pokladny je hlavní částka v její měně. Pod ní je korunová **Účetní hodnota** z deníku. Při záporné korunové hodnotě systém zobrazí červené upozornění „Zůstatek pokladny je záporný“. Jde o varování, které další práci neblokuje.
 - **Výběr pokladny** (pokud jich firma má víc) v rozbalovací nabídce v hlavičce.
 - Tlačítka **Příjem** a **Výdej** (zelené pro příjem, oranžové pro výdej), **Pokladní kniha** a v nabídce **…** položku **Správa pokladen**.
 

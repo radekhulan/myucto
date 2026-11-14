@@ -15677,6 +15677,7 @@
     "post_confirm": "Vystavit doklad {number}? Přidělí se číslo z řady a doklad se zaúčtuje.",
     "balance": "Zůstatek",
     "balance_as_of": "zůstatek k {date}",
+    "balance_czk_value": "Účetní hodnota {amount}",
     "opening_balance": "Počáteční zůstatek",
     "closing_balance": "Konečný zůstatek",
     "income_total": "Příjmy celkem",
