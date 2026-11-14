@@ -12,8 +12,8 @@ vi.mock('@/api/nonprofitMembership', () => ({ membershipApi: api }))
 
 const ActionBar = defineComponent({
   props: ['actions'],
-  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; show?: unknown; run: () => void }>)
-    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, onClick: a.run }, a.label))),
+  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; disabledReason?: string; show?: unknown; run: () => void }>)
+    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, 'data-reason': a.disabled ? a.disabledReason : undefined, onClick: a.run }, a.label))),
 })
 const ClientSearchSelect = defineComponent({
   props: ['modelValue', 'selectedLabel'], emits: ['update:modelValue', 'selected'],
@@ -55,6 +55,19 @@ describe('Membership correction flow', () => {
       expect(w.text()).toContain(messages[`title_${mode}`])
       w.unmount()
     }
+  })
+
+  it('explains an invalid form once, below the form, not again at the button', async () => {
+    const w = mounted({ mode: 'identity' })
+    expect(w.get('[data-section="corr-invalid"]').text()).toBe(cs.nonprofitMembership.correction.identityUnchanged)
+    expect(w.get('[data-action="corr-review"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-action="corr-review"]').attributes('data-reason')).toBeUndefined()
+    w.unmount()
+    // Prázdný důvod zrušení se pod formulářem nehlásí, tlačítko proto důvod nese.
+    const voiding = mounted({ mode: 'void', revision })
+    expect(voiding.find('[data-section="corr-invalid"]').exists()).toBe(false)
+    expect(voiding.get('[data-action="corr-review"]').attributes('data-reason')).toBe(cs.nonprofitMembership.correction.reasonRequired)
+    voiding.unmount()
   })
 
   it('sends the corrected identity with the values it was opened with', async () => {

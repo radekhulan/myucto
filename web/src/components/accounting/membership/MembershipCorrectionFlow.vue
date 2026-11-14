@@ -53,6 +53,9 @@ const invalid = computed(() => {
   return ''
 })
 
+/** Důvod pod formulářem; tlačítko ho pak neopakuje (dvojí hláška posouvala tlačítko pod kurzorem). */
+const invalidShown = computed(() => !!invalid.value && props.mode !== 'delete' && (props.mode !== 'void' || !!form.reason))
+
 function chooseClient(client: Client | null) {
   form.clientId = client?.id ?? null
   form.clientLabel = client ? membershipMemberLabel(client) : ''
@@ -82,7 +85,7 @@ const tone = computed(() => (props.mode === 'identity' ? 'success' : 'danger'))
 const actions = computed<ActionItem[]>(() => [
   { key: 'corr-close', label: t('nonprofitMembership.close'), icon: 'x', disabled: commit.locked.value, run: () => emit('close') },
   { key: 'corr-review', label: t('nonprofitMembership.review'), icon: 'eye', tier: 'primary', variant: props.mode === 'identity' ? 'primary' : 'danger',
-    disabled: !props.canManage || !!invalid.value || commit.busy.value || commit.locked.value, disabledReason: invalid.value || undefined, run: review },
+    disabled: !props.canManage || !!invalid.value || commit.busy.value || commit.locked.value, disabledReason: invalidShown.value ? undefined : invalid.value || undefined, run: review },
 ])
 const pending = computed(() => commit.review.value)
 </script>
@@ -112,7 +115,7 @@ const pending = computed(() => commit.review.value)
     </div>
 
     <p v-if="mode === 'delete'" class="text-sm" data-section="corr-delete-target">{{ t('nonprofitMembership.correction.deleteTarget', { member: `${member.member_number} · ${label}` }) }}</p>
-    <p v-if="invalid && mode !== 'delete' && (mode !== 'void' || form.reason)" class="text-sm text-warning-700" data-section="corr-invalid">{{ invalid }}</p>
+    <p v-if="invalidShown" class="text-sm text-warning-700" data-section="corr-invalid">{{ invalid }}</p>
 
     <ActionBar v-if="canManage && !pending" :actions="actions" />
     <div v-if="pending" class="space-y-3 rounded border border-neutral-200 p-3" data-section="corr-review">

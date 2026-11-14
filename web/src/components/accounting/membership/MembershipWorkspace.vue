@@ -92,7 +92,8 @@ async function memberDeleted() {
   const id = selected.value?.id
   if (id !== undefined) checkedMembers.value = checkedMembers.value.filter(x => x !== id)
   selected.value = null
-  selectionNotice.value = t('nonprofitMembership.correction.done_delete')
+  // Potvrzení jako ostatní úspěšné akce stránky; hláška výběru je varování a mizí s ním.
+  notice.value = t('nonprofitMembership.correction.done_delete')
   await nextTick()
   root.value?.querySelector<HTMLElement>('[data-focus="members-heading"]')?.focus()
 }

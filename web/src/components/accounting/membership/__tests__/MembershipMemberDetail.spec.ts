@@ -18,8 +18,8 @@ vi.mock('@/api/nonprofitDppo', () => ({ nonprofitDppoApi: { profile: vi.fn() } }
 
 const ActionBar = defineComponent({
   props: ['actions'],
-  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; disabledReason?: string; show?: unknown; run: () => void }>)
-    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, 'data-reason': a.disabled ? a.disabledReason : undefined, onClick: a.run }, a.label))),
+  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; disabledReason?: string; tier?: string; show?: unknown; run: () => void }>)
+    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, 'data-tier': a.tier, disabled: a.disabled, 'data-reason': a.disabled ? a.disabledReason : undefined, onClick: a.run }, a.label))),
 })
 const RevisionForm = defineComponent({ name: 'MembershipRevisionForm', props: ['supplier', 'canManage', 'member', 'history'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'revision' }) })
 const IssueFlow = defineComponent({ name: 'MembershipIssueFlow', props: ['supplier', 'canManage', 'member', 'history', 'periods'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'issue' }) })
@@ -358,11 +358,17 @@ describe('Membership member detail', () => {
       voidable_revision_id: 1, void_block: null, head_revision_no: 1 }
     api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections })
     const w = mountedWithCorrection(); await flushPromises()
-    expect(w.find('[data-action="fix-identity"]').exists()).toBe(true)
+    // Opravy mají stálé místo v „…“ bez ohledu na to, zda jsou právě povolené.
+    expect(w.get('[data-action="fix-identity"]').attributes('data-tier')).toBe('overflow')
     expect(w.find('[data-action="void-revision"]').exists()).toBe(true)
     expect(w.get('[data-action="delete-member"]').attributes('disabled')).toBeDefined()
     expect(w.get('[data-action="delete-member"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_revisions)
-    await w.get('[data-action="void-revision"]').trigger('click')
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    await w.get('[data-action="void-revision"]').trigger('click'); await flushPromises()
+    // Formulář je pod historií; otevření ho posune na obrazovku.
+    expect(scroll).toHaveBeenCalledTimes(1)
+    expect(scroll.mock.contexts[0]).toBe(w.findComponent(CorrectionFlow).element.parentElement)
     const flow = w.findComponent(CorrectionFlow)
     expect(flow.props('mode')).toBe('void')
     expect(flow.props('revision')).toMatchObject({ id: 1 })
@@ -375,6 +381,7 @@ describe('Membership member detail', () => {
       can_delete: false, delete_block: 'nonprofit_membership_member_has_charges', voidable_revision_id: null, void_block: 'nonprofit_membership_revision_has_charges', head_revision_no: 1 } })
     const w = mountedWithCorrection(); await flushPromises()
     expect(w.get('[data-action="fix-identity"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_charges)
+    expect(w.get('[data-action="fix-identity"]').attributes('data-tier')).toBe('overflow')
     expect(w.get('[data-action="void-revision"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_revision_has_charges)
     expect(w.get('[data-action="delete-member"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_charges)
     for (const key of ['fix-identity', 'void-revision', 'delete-member']) expect(w.get(`[data-action="${key}"]`).attributes('disabled')).toBeDefined()

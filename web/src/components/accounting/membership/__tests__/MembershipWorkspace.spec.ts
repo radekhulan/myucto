@@ -39,7 +39,7 @@ const ClientSearchSelect = defineComponent({
 const SearchableSelect = defineComponent({ props: ['modelValue', 'options', 'disabled'], emits: ['update:modelValue'], setup: (p, {emit, attrs}) => () => h('select', { ...attrs, value: p.modelValue ?? '', disabled: p.disabled,
   onChange: (e: Event) => { const option = (p.options as {value: string | number}[]).find(x => String(x.value) === (e.target as HTMLSelectElement).value); emit('update:modelValue', option?.value ?? null) },
 }, [h('option', {value: ''}), ...(p.options as {value: string | number; label: string}[]).map(x => h('option', {value: x.value}, x.label))]) })
-const Detail = defineComponent({ name: 'MembershipMemberDetail', props: ['supplier', 'canManage', 'memberId', 'label', 'periods', 'refreshVersion'], emits: ['changed', 'close'], setup: () => () => h('div', { 'data-stub': 'detail' }, [h('h2', { tabindex: -1, 'data-focus': 'member-heading' })]) })
+const Detail = defineComponent({ name: 'MembershipMemberDetail', props: ['supplier', 'canManage', 'memberId', 'label', 'periods', 'refreshVersion'], emits: ['changed', 'close', 'deleted'], setup: () => () => h('div', { 'data-stub': 'detail' }, [h('h2', { tabindex: -1, 'data-focus': 'member-heading' })]) })
 const ClientFormModal = defineComponent({ name: 'ClientFormModal', emits: ['created', 'close'], setup: () => () => h('div', { 'data-stub': 'client-modal' }) })
 const Reconciliation = defineComponent({ name: 'MembershipReconciliation', props: ['supplier', 'periods', 'dataVersion'], setup: () => () => h('div', { 'data-stub': 'reconciliation' }) })
 
@@ -131,6 +131,15 @@ describe('Membership workspace', () => {
     await w.get('[data-field="member-payment-status"]').setValue('paid'); await flushPromises()
     expect(w.findAll('[data-section="member-row"]')).toHaveLength(0)
     expect(w.find('[data-action="more-members"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('confirms a deleted member like other successful actions and closes the detail', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
+    w.findComponent(Detail).vm.$emit('deleted');w.findComponent(Detail).vm.$emit('changed');await flushPromises()
+    expect(w.get('[data-section="workspace-notice"]').text()).toBe(cs.nonprofitMembership.correction.done_delete)
+    expect(w.findComponent(Detail).exists()).toBe(false)
     w.unmount()
   })
 

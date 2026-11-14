@@ -24,6 +24,7 @@ const corrections = ref<MemberCorrections | null>(null)
 /** Otevřená oprava (kontakt a číslo, smazání, zrušení revize); jen jedna najednou. */
 const correction = ref<'identity' | 'delete' | 'void' | null>(null)
 const heading = ref<HTMLElement | null>(null)
+const correctionPane = ref<HTMLElement | null>(null)
 const claims = ref<ClaimRow[]>([])
 const nextAfter = ref<number | null>(null)
 const loading = ref(false)
@@ -121,10 +122,13 @@ function blockReason(code: string | null | undefined): string | undefined {
   return code ? membershipError({ t, te }, code) : undefined
 }
 
-function startCorrection(mode: 'identity' | 'delete' | 'void') {
+async function startCorrection(mode: 'identity' | 'delete' | 'void') {
   if (anyLocked.value) return
   issueOpen.value = false; reverseClaim.value = null; revisionOpen.value = false
   correction.value = mode
+  // Formulář je pod historií a předpisy; bez posunu by otevření zůstalo mimo obrazovku.
+  await nextTick()
+  correctionPane.value?.scrollIntoView({ block: 'start', behavior: 'smooth' })
 }
 
 function startReverse(row: ClaimRow) {
@@ -154,7 +158,7 @@ const actions = computed<ActionItem[]>(() => [
   { key: 'new-charge', label: t('nonprofitMembership.newCharge'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: anyLocked.value || loading.value || !valid.value.length, disabledReason: t('nonprofitMembership.newChargeNeedsRevision'), run: () => { reverseClaim.value = null; issueOpen.value = true } },
   { key: 'change-status', label: t('nonprofitMembership.changeStatus'), icon: 'edit', show: props.canManage && valid.value.length > 0 && !revisionOpen.value, disabled: anyLocked.value || loading.value, run: () => { correction.value = null; revisionOpen.value = true } },
   // Zablokovaná oprava zůstává v „…“ zašedlá s důvodem ze serveru, aby bylo vidět, proč nejde.
-  { key: 'fix-identity', label: t('nonprofitMembership.correction.title_identity'), icon: 'edit', tier: corrections.value?.can_edit_identity ? 'secondary' : 'overflow',
+  { key: 'fix-identity', label: t('nonprofitMembership.correction.title_identity'), icon: 'edit', tier: 'overflow',
     show: props.canManage && !!corrections.value && correction.value === null, disabled: anyLocked.value || loading.value || !corrections.value?.can_edit_identity,
     disabledReason: blockReason(corrections.value?.edit_identity_block), run: () => startCorrection('identity') },
   { key: 'reload', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value || anyLocked.value, run: () => { void load() } },
@@ -218,13 +222,14 @@ const actions = computed<ActionItem[]>(() => [
       </template>
     </div>
 
-    <MembershipCorrectionFlow
-      v-if="canManage && identity && correction"
-      :key="`${correction}-${identity.id}`"
-      :supplier="supplier" :can-manage="canManage" :mode="correction" :member="identity" :label="label"
-      :revision="correction === 'void' ? voidable : null" :head-revision-no="corrections?.head_revision_no ?? 0"
-      @done="(mode, label) => correctionFinished(mode, label)" @close="correction = null" @lock="locks.correction = $event"
-    />
+    <div v-if="canManage && identity && correction" ref="correctionPane" class="scroll-mt-4">
+      <MembershipCorrectionFlow
+        :key="`${correction}-${identity.id}`"
+        :supplier="supplier" :can-manage="canManage" :mode="correction" :member="identity" :label="label"
+        :revision="correction === 'void' ? voidable : null" :head-revision-no="corrections?.head_revision_no ?? 0"
+        @done="(mode, label) => correctionFinished(mode, label)" @close="correction = null" @lock="locks.correction = $event"
+      />
+    </div>
 
     <MembershipRevisionForm
       v-if="canManage && identity && !correction && (!valid.length || revisionOpen || locks.revision)"
