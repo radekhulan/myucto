@@ -54,7 +54,7 @@ final class MembershipPublicCatalog
                 throw new MembershipException('nonprofit_membership_member_proof_changed', 'Zachycený členský podklad není průkazný.', 409);
             }
             $items[] = ['member_id' => $member['id'], 'client_id' => $member['client_id'], 'revision_id' => $revision['id'],
-                'revision_no' => $revision['revision_no'], 'previous_revision_id' => $revision['previous_id'], 'role' => 'association_member',
+                'revision_no' => $revision['revision_no'], 'previous_revision_id' => $revision['previous_valid_id'] ?? null, 'role' => 'association_member',
                 'status' => $revision['status'], 'effective_from' => $revision['effective_from'], 'effective_to' => $revision['effective_to'],
                 'recorded_at' => MembershipRecordedTime::requiredInstant($revision['recorded_at_utc'] ?? null),
                 'recorded_time_status' => 'proven_utc', 'proof_status' => 'verified'];

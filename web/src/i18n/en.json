@@ -41853,7 +41853,7 @@
     "review": "Review",
     "revisionReview": "Review the revision before it is written",
     "expectedRevision": "Follows revision no.",
-    "revisionAck": "I checked the status, the effective date and the evidence. The revision stays in the history; until a charge relies on it, it can be voided by a reversing revision.",
+    "revisionAck": "I checked the status, the effective date and the evidence. The revision stays in the history; while it is the last valid one and no charge relies on it, it can be voided by a reversing revision.",
     "revisionDone": "The membership revision was written.",
     "correction": {
       "title_identity": "Correct contact and number",
@@ -41875,7 +41875,7 @@
       "ack_void": "I checked the revision and the reason. The voiding stays in the history.",
       "confirm_identity": "Save correction",
       "confirm_delete": "Delete member",
-      "confirm_void": "Void revision",
+      "confirm_void": "Confirm voiding",
       "done_identity": "The contact and member number were corrected.",
       "done_delete": "The member was deleted.",
       "done_void": "The revision was voided.",

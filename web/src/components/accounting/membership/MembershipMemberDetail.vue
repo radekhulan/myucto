@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnIconSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
@@ -7,7 +7,7 @@ import type { AccountingPeriod } from '@/api/accounting'
 import { membershipApi, type ClaimRow, type MemberCorrections, type MemberIdentity, type MemberRevision } from '@/api/nonprofitMembership'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
-import { badgeBase, errorBox, membershipError, formatDateRange, memberStatusBadge, revisionAt, validRevisions, voidedRevisions } from './membershipFormat'
+import { badgeBase, errorBox, errorCode, membershipError, formatDateRange, memberStatusBadge, revisionAt, validRevisions, voidedRevisions } from './membershipFormat'
 import MembershipCorrectionFlow from './MembershipCorrectionFlow.vue'
 import MembershipIssueFlow from './MembershipIssueFlow.vue'
 import MembershipReverseFlow from './MembershipReverseFlow.vue'
@@ -23,6 +23,7 @@ const history = ref<MemberRevision[]>([])
 const corrections = ref<MemberCorrections | null>(null)
 /** Otevřená oprava (kontakt a číslo, smazání, zrušení revize); jen jedna najednou. */
 const correction = ref<'identity' | 'delete' | 'void' | null>(null)
+const heading = ref<HTMLElement | null>(null)
 const claims = ref<ClaimRow[]>([])
 const nextAfter = ref<number | null>(null)
 const loading = ref(false)
@@ -65,6 +66,8 @@ async function load(append = false) {
     claims.value = append ? [...claims.value, ...data.balance.items] : data.balance.items
     nextAfter.value = data.balance.next_after_claim_id
   } catch (e) {
+    // Už načtený člen smazaný v jiné záložce: detail se zavře stejně jako po smazání zde.
+    if (alive && ticket === generation && identity.value && errorCode(e) === 'nonprofit_membership_member_not_found') { emit('deleted'); return }
     if (alive && ticket === generation) error.value = membershipError({t, te}, e)
   } finally {
     if (alive && ticket === generation) loading.value = false
@@ -99,12 +102,18 @@ async function revisionFinished() {
 }
 
 async function correctionFinished(mode: 'identity' | 'delete' | 'void', label: string) {
+  // Formulář se odpojí dřív, než stihne ohlásit uvolnění zámku; jinak by akce detailu zůstaly zašedlé.
   correction.value = null
-  if (mode === 'delete') { emit('changed'); emit('deleted'); return }
+  locks.value.correction = false
+  // Nejdřív odebrat smazaného člena z výběru, teprve pak obnovit seznam (hláška o smazání se nepřepíše).
+  if (mode === 'delete') { emit('deleted'); emit('changed'); return }
   if (mode === 'identity' && label) emit('relabel', label)
   notice.value = t(`nonprofitMembership.correction.done_${mode}`)
   await load()
   emit('changed')
+  // Spouštěcí akce je po dokončení skrytá, fokus jde na nadpis detailu.
+  await nextTick()
+  heading.value?.focus()
 }
 
 function startCorrection(mode: 'identity' | 'delete' | 'void') {
@@ -150,7 +159,7 @@ const actions = computed<ActionItem[]>(() => [
 <template>
   <section class="space-y-5 rounded-lg border border-neutral-200 bg-surface p-4" data-section="member-detail">
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <h2 tabindex="-1" class="min-w-0 break-words text-lg font-semibold focus:outline-none" data-focus="member-heading">{{ identity ? `${identity.member_number} · ${label}` : label }}</h2>
+      <h2 ref="heading" tabindex="-1" class="min-w-0 break-words text-lg font-semibold focus:outline-none" data-focus="member-heading">{{ identity ? `${identity.member_number} · ${label}` : label }}</h2>
       <ActionBar :actions="actions" />
     </div>
     <p v-if="error" role="alert" :class="errorBox" data-section="detail-error">{{ error }}</p>
@@ -187,7 +196,7 @@ const actions = computed<ActionItem[]>(() => [
             <span class="font-medium" :class="{ 'line-through text-neutral-500': voided.has(revision.id) }">#{{ revision.revision_no }}</span>
             <span :class="memberStatusBadge(revision.status)">{{ t(`nonprofitMembership.status_${revision.status}`) }}</span>
             <span :class="{ 'line-through text-neutral-500': voided.has(revision.id) }">{{ t('nonprofitMembership.sinceDate', { date: formatDate(revision.effective_from) }) }}</span>
-            <span v-if="voided.has(revision.id)" :class="[badgeBase, 'bg-neutral-100 text-neutral-600']" data-field="voided-badge">{{ t('nonprofitMembership.correction.voidedBy', { no: voided.get(revision.id)?.revision_no }) }}</span>
+            <span v-if="voided.has(revision.id)" :class="memberStatusBadge('ended')" data-field="voided-badge">{{ t('nonprofitMembership.correction.voidedBy', { no: voided.get(revision.id)?.revision_no }) }}</span>
             <span v-else-if="current?.id === revision.id" :class="[badgeBase, 'bg-success-50 text-success-600']">{{ t('nonprofitMembership.validToday') }}</span>
             <span v-else-if="revision.effective_from > today" :class="[badgeBase, 'bg-warning-50 text-warning-700']">{{ t('nonprofitMembership.notYetValid') }}</span>
           </div>

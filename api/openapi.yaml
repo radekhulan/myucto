@@ -70376,11 +70376,13 @@ components:
         revision_no:
           type: integer
           minimum: 1
+          description: Pořadí článku v řetězu historie; zrušení revize je také článek, proto čísla platných revizí nemusí jít po sobě.
         previous_revision_id:
           type:
           - integer
           - 'null'
           minimum: 1
+          description: Předchozí platná revize; zrušené revize a rušící články přeskakuje.
         role:
           type: string
           const: association_member

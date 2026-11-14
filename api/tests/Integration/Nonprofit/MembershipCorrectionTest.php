@@ -330,6 +330,34 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
         self::assertSame(1, $ready['summary']['ready']);
     }
 
+    public function testCatalogPreviousRevisionSkipsVoidedRevisionAndVoidingLink(): void
+    {
+        $member = $this->member('VOID-PREVIOUS');
+        $first = $this->lastRevision($member);
+        $wrong = $this->revision($member, 'suspended', '2026-02-01', 1, 'void-previous-wrong');
+        $this->void($member, $wrong['id'], 2, 'void-previous-cancel');
+        $ended = $this->revision($member, 'ended', '2026-02-01', 3, 'void-previous-ended');
+        $catalog = new MembershipPublicCatalog($this->db, $this->repository, new MembershipChargeRepository($this->db), new MembershipBalanceRepository($this->db));
+        $role = $catalog->roles($this->supplier, '2026-03-01', null, null, 25, $member)['items'][0];
+        self::assertSame($ended['id'], $role['revision_id']);
+        self::assertSame($first, $role['previous_revision_id']);
+        // Bez zrušení zůstává předchozí revize totožná s článkem řetězu.
+        $plain = $this->member('PLAIN-PREVIOUS');
+        $second = $this->revision($plain, 'suspended', '2026-02-01', 1, 'plain-previous-2');
+        self::assertSame($second['previous_id'], $catalog->roles($this->supplier, '2026-03-01', null, null, 25, $plain)['items'][0]['previous_revision_id']);
+    }
+
+    public function testFinishedBatchRejectedRowIsRemovedOnDeletion(): void
+    {
+        [$bare] = $this->bareMember('DEL-FINISHED');
+        $other = $this->member('DEL-FINISHED-OTHER');
+        $batch = $this->batches->create($this->supplier, $this->input([$bare, $other], 'del-finished'), $this->actor)['batch']['id'];
+        $this->pdo->prepare("UPDATE nonprofit_membership_batches SET phase='finished' WHERE supplier_id=? AND id=?")->execute([$this->supplier, $batch]);
+        $this->corrections->delete($this->supplier, $bare, $this->actor);
+        self::assertNull($this->batchRowStatus($batch, $bare));
+        self::assertNotNull($this->batchRowStatus($batch, $other));
+    }
+
     public function testCatalogSkipsMemberWhoseOnlyRevisionWasVoided(): void
     {
         $member = $this->member('VOID-ONLY');

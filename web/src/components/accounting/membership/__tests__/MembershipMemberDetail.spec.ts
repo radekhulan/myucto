@@ -403,9 +403,50 @@ describe('Membership member detail', () => {
   })
 })
 
+describe('Membership member detail after a correction', () => {
+  const allowed = { can_edit_identity: true, edit_identity_block: null, can_delete: true, delete_block: null, voidable_revision_id: 1, void_block: null, head_revision_no: 1 }
+
+  it('releases the correction lock and focuses the heading when the flow finishes while locked', async () => {
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
+    const w = mountedWithCorrection(); await flushPromises()
+    await w.get('[data-action="void-revision"]').trigger('click')
+    const flow = w.findComponent(CorrectionFlow)
+    flow.vm.$emit('lock', true)
+    flow.vm.$emit('done', 'void', '')
+    await flushPromises()
+    expect(w.get('[data-action="change-status"]').attributes('disabled')).toBeUndefined()
+    expect(w.get('[data-action="fix-identity"]').attributes('disabled')).toBeUndefined()
+    expect(document.activeElement?.getAttribute('data-focus')).toBe('member-heading')
+    w.unmount()
+  })
+
+  it('reports the deletion before the list refresh so the deleted member leaves the selection first', async () => {
+    api.member.mockResolvedValue({ ...detail([], []), corrections: allowed })
+    const w = mountedWithCorrection(); await flushPromises()
+    await w.get('[data-action="delete-member"]').trigger('click')
+    w.findComponent(CorrectionFlow).vm.$emit('done', 'delete', '')
+    await flushPromises()
+    const order = Object.entries(w.emitted()).filter(([name]) => name === 'deleted' || name === 'changed')
+    expect(order.map(([name]) => name)).toEqual(['deleted', 'changed'])
+    w.unmount()
+  })
+
+  it('closes like a deletion when the member was deleted in another tab', async () => {
+    api.member.mockResolvedValueOnce({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
+      .mockRejectedValue({ response: { status: 404, data: { error: { code: 'nonprofit_membership_member_not_found' } } } })
+    const w = mountedWithCorrection({ refreshVersion: 0 }); await flushPromises()
+    expect(w.emitted('deleted')).toBeUndefined()
+    await w.setProps({ refreshVersion: 1 }); await flushPromises()
+    expect(w.emitted('deleted')).toHaveLength(1)
+    expect(w.find('[data-section="detail-error"]').exists()).toBe(false)
+    w.unmount()
+  })
+})
+
 const CorrectionFlow = defineComponent({ name: 'MembershipCorrectionFlow', props: ['supplier', 'canManage', 'mode', 'member', 'label', 'revision', 'headRevisionNo'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'correction' }) })
 function mountedWithCorrection(props: Record<string, unknown> = {}) {
   return mount(Detail, {
+    attachTo: document.body,
     props: { supplier: 5, canManage: true, memberId: 9, label: 'Synthetic member', periods: [period], ...props },
     global: {
       plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],

@@ -291,10 +291,14 @@ final class MembershipRepository
         if ($asOf !== null) {
             // Platná revize k datu se počítá jen z platných revizí; zrušené a rušící články se vynechají.
             foreach ($state as $member => $item) {
+                $previousValid = null;
                 foreach (MembershipRevisionTimeline::intervals($item['rows'] ?? []) as $interval) {
                     if ($interval['effective_from'] > $asOf) break;
+                    // Předchozí platná revize; bez zrušení je totožná s previous_id článku řetězu.
+                    $interval['previous_valid_id'] = $previousValid;
                     $state[$member]['effective'] = $interval;
                     $state[$member]['next_effective'] = $interval['effective_to'];
+                    $previousValid = $interval['id'];
                 }
                 unset($state[$member]['rows']);
             }

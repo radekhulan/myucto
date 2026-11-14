@@ -41538,7 +41538,7 @@
     "review": "Zkontrolovat",
     "revisionReview": "Kontrola revize před zápisem",
     "expectedRevision": "Navazuje na revizi č.",
-    "revisionAck": "Zkontroloval(a) jsem stav, datum účinnosti a doložení. Revize zůstane v historii; dokud na ní nestojí předpis, jde ji zrušit protizápisem.",
+    "revisionAck": "Zkontroloval(a) jsem stav, datum účinnosti a doložení. Revize zůstane v historii; dokud je poslední platná a nestojí na ní předpis, jde ji zrušit protizápisem.",
     "revisionDone": "Revize členství je zapsána.",
     "correction": {
       "title_identity": "Opravit kontakt a číslo",
@@ -41560,7 +41560,7 @@
       "ack_void": "Zkontroloval(a) jsem revizi a důvod. Zrušení zůstane v historii.",
       "confirm_identity": "Uložit opravu",
       "confirm_delete": "Smazat člena",
-      "confirm_void": "Zrušit revizi",
+      "confirm_void": "Potvrdit zrušení",
       "done_identity": "Kontakt a členské číslo jsou opravené.",
       "done_delete": "Člen je smazaný.",
       "done_void": "Revize je zrušená.",
