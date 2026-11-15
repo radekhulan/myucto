@@ -41542,6 +41542,7 @@
     "revisionAck": "Zkontroloval(a) jsem stav, datum účinnosti a doložení. Revize zůstane v historii; dokud je poslední platná a nestojí na ní předpis, jde ji zrušit protizápisem.",
     "revisionDone": "Revize členství je zapsána.",
     "correction": {
+      "rebased": "Údaje člena se mezitím změnily. Oprava teď vychází z aktuálních údajů, zkontrolujte je a potvrďte znovu.",
       "closeCorrectionFirst": "Nejdřív dokončete nebo zavřete rozepsanou opravu.",
       "closeFormFirst": "Nejdřív dokončete nebo zavřete otevřený formulář, aby se rozepsané údaje neztratily.",
       "title_identity": "Opravit kontakt a číslo",

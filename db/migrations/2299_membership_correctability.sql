@@ -1,8 +1,8 @@
 -- Opravitelnost členské evidence, dokud na záznamu nestojí účetní zápis.
 -- Zrušení revize je další článek řetězu (voids_revision_id); revize samotné zůstávají neměnné.
 -- Jedno platné datum účinnosti hlídá služba pod zámkem člena a ověření historie při každém čtení,
--- protože zrušená revize datum dál drží a opravená revize ho smí použít znovu. Zápis mimo službu (ruční SQL,
--- import) se dvěma platnými revizemi ke stejnému dni ohlásí čtení jako poškozenou historii (409), nezapíše se tiše.
+-- protože zrušená revize datum dál drží a opravená revize ho smí použít znovu. Platné revize zapsané mimo službu
+-- (ruční SQL) se stejným nebo klesajícím datem ohlásí detail, předpis i dávka jako neprůkaznou historii (409).
 ALTER TABLE nonprofit_member_revisions
  ADD COLUMN IF NOT EXISTS voids_revision_id BIGINT UNSIGNED NULL AFTER previous_id,
  ADD UNIQUE INDEX IF NOT EXISTS uq_nmr_voids (supplier_id,member_id,voids_revision_id),

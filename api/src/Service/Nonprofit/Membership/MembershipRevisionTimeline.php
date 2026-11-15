@@ -31,10 +31,10 @@ final class MembershipRevisionTimeline
         foreach ($chain as $row) {
             $voids = $row['voids_revision_id'] ?? null;
             if ($voids === null) {
-                // Nová revize začíná po poslední platné (MembershipMemberService::appendRevision); unikátní index
-                // data kvůli opravám (zrušená revize datum drží) zmizel. Stejný den hlásí intervals() jako konflikt.
+                // Nová revize začíná po poslední platné (MembershipMemberService::appendRevision, klon stejně);
+                // unikátní index data kvůli opravám (zrušená revize datum drží) zmizel, hlídá to až čtení.
                 $last = $stack === [] ? null : $stack[array_key_last($stack)];
-                if ($last !== null && (string) ($row['effective_from'] ?? '') < (string) $last['effective_from']) {
+                if ($last !== null && (string) ($row['effective_from'] ?? '') <= (string) $last['effective_from']) {
                     throw new MembershipException('nonprofit_membership_revision_corrupt', 'Historie členství není průkazná.', 409);
                 }
                 $stack[] = $row;

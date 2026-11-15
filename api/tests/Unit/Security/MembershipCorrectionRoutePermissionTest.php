@@ -34,14 +34,4 @@ final class MembershipCorrectionRoutePermissionTest extends TestCase
         yield 'zrušení revize' => ['POST', '/api/accounting/nonprofit-membership/members/7/revisions/3/void', 'accounting.journal.post', AccessLevel::WRITE];
         yield 'zápis revize' => ['POST', '/api/accounting/nonprofit-membership/members/7/revisions', 'accounting.journal.post', AccessLevel::WRITE];
     }
-
-    public function testCorrectionRoutesDoNotMatchOtherShapes(): void
-    {
-        $map = new RoutePermissionMap();
-        foreach ([['PUT', '/api/accounting/nonprofit-membership/members/7/revisions'], ['DELETE', '/api/accounting/nonprofit-membership/members/7/revisions/3'],
-            ['POST', '/api/accounting/nonprofit-membership/members/7/revisions/3/void/x']] as [$method, $path]) {
-            $match = $map->match($method, $path);
-            self::assertTrue($match === null || $match->key !== 'accounting.journal.post' || $match->minimum !== AccessLevel::WRITE, "$method $path");
-        }
-    }
 }

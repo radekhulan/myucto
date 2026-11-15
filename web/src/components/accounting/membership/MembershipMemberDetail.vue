@@ -45,6 +45,7 @@ const valid = computed(() => validRevisions(history.value))
 const voided = computed(() => voidedRevisions(history.value))
 const upcoming = computed(() => valid.value.filter(r => r.effective_from > today.value))
 const voidable = computed(() => history.value.find(r => r.id === corrections.value?.voidable_revision_id) ?? null)
+const revisionDirty = ref(false)
 const anyLocked = computed(() => locks.value.revision || locks.value.issue || locks.value.reverse || locks.value.correction)
 const member = computed(() => ({ id: props.memberId, member_number: identity.value?.member_number ?? '', label: props.label }))
 
@@ -137,12 +138,14 @@ function startReverse(row: ClaimRow) {
   reverseClaim.value = row
 }
 
+// Rozepsaná první revize se obnovou neodpojí: kdyby mezitím vznikla platná revize, formulář by i s textem zmizel.
+const refreshBlocked = computed(() => anyLocked.value || revisionDirty.value)
 watch(() => props.refreshVersion, () => {
-  if (anyLocked.value) refreshPending = true
+  if (refreshBlocked.value) refreshPending = true
   else void load()
 })
-watch(anyLocked, locked => {
-  if (!locked && refreshPending) { refreshPending = false; void load() }
+watch(refreshBlocked, blocked => {
+  if (!blocked && refreshPending) { refreshPending = false; void load() }
 })
 watch(() => props.memberId, () => { generation++; refreshPending = false; identity.value = null; history.value = []; corrections.value = null; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; notice.value = ''; void load() })
 watch(() => props.supplier, () => { generation++; refreshPending = false; loading.value = false; identity.value = null; history.value = []; corrections.value = null; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; notice.value = '' })
@@ -151,12 +154,12 @@ onMounted(() => { void load() })
 let firstActivation = true
 onActivated(() => {
   if (firstActivation) { firstActivation = false; return }
-  void load()
+  if (refreshBlocked.value) refreshPending = true
+  else void load()
 })
 
 // Oprava zavírá formulář revize, předpisu i storna. Rozepsaný text se nesmí ztratit tiše, proto jsou akce
 // oprav zašedlé s důvodem, dokud je jiný formulář otevřený; obdobně „Změnit stav“ při rozepsané opravě.
-const revisionDirty = ref(false)
 const formOpen = computed(() => issueOpen.value || reverseClaim.value !== null || revisionOpen.value || revisionDirty.value)
 const formReason = (block?: string | null) => (formOpen.value ? t('nonprofitMembership.correction.closeFormFirst') : blockReason(block))
 
@@ -234,7 +237,7 @@ const actions = computed<ActionItem[]>(() => [
         :key="`${correction}-${identity.id}`"
         :supplier="supplier" :can-manage="canManage" :mode="correction" :member="identity" :label="label"
         :revision="correction === 'void' ? voidable : null" :head-revision-no="corrections?.head_revision_no ?? 0"
-        @done="(mode, label) => correctionFinished(mode, label)" @close="correction = null" @lock="locks.correction = $event"
+        @done="(mode, label) => correctionFinished(mode, label)" @close="correction = null" @lock="locks.correction = $event" @stale="load()"
       />
     </div>
 

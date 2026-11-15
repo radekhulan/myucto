@@ -41857,6 +41857,7 @@
     "revisionAck": "I checked the status, the effective date and the evidence. The revision stays in the history; while it is the last valid one and no charge relies on it, it can be voided by a reversing revision.",
     "revisionDone": "The membership revision was written.",
     "correction": {
+      "rebased": "The member data changed in the meantime. The correction now uses the current data; check it and confirm again.",
       "closeCorrectionFirst": "Finish or close the correction in progress first.",
       "closeFormFirst": "Finish or close the open form first so the entered data is not lost.",
       "title_identity": "Correct contact and number",

@@ -76,6 +76,41 @@ describe('Membership correction flow', () => {
     expect(api.voidRevision).toHaveBeenCalledWith(5, 9, 7, expect.objectContaining({ expected_revision: 2 }))
   })
 
+  it('po 409 zastaralého podkladu převezme nové údaje, zachová změněný kontakt a nové potvrzení projde', async () => {
+    api.updateMember.mockRejectedValueOnce({ response: { status: 409, data: { error: { code: 'nonprofit_membership_member_changed', message: 'Člen se mezitím změnil.' } } } })
+    const w = mounted({ mode: 'identity' })
+    await w.get('[data-stub="client"]').trigger('click')
+    await confirm(w)
+    expect(w.emitted('stale')).toHaveLength(1)
+    await w.setProps({ member: { ...member, member_number: 'M-9' } }); await flushPromises()
+    expect(w.find('[data-section="corr-rebased"]').exists()).toBe(true)
+    expect(w.find('[data-section="corr-error"]').exists()).toBe(false)
+    expect((w.get('[data-field="corr-number"]').element as HTMLInputElement).value).toBe('M-9')
+    await confirm(w)
+    expect(api.updateMember).toHaveBeenLastCalledWith(5, 9, expect.objectContaining({
+      client_id: 44, member_number: 'M-9', expected_client_id: 3, expected_member_number: 'M-9' }))
+  })
+
+  it('po 409 změněné historie zruší nově nabízenou revizi s novým číslem hlavy a zachová důvod', async () => {
+    api.voidRevision.mockRejectedValueOnce({ response: { status: 409, data: { error: { code: 'nonprofit_membership_revision_changed', message: 'Historie se změnila.' } } } })
+    const w = mounted({ mode: 'void', revision })
+    await w.get('[data-field="corr-reason"]').setValue('Synthetic duplicate revision')
+    await confirm(w)
+    expect(w.emitted('stale')).toHaveLength(1)
+    await w.setProps({ revision: { ...revision, id: 8, revision_no: 3 }, headRevisionNo: 3 }); await flushPromises()
+    expect(w.get('[data-section="corr-revision"]').text()).toContain('#3')
+    await confirm(w)
+    expect(api.voidRevision).toHaveBeenLastCalledWith(5, 9, 8, expect.objectContaining({ expected_revision: 3, reason: 'Synthetic duplicate revision' }))
+  })
+
+  it('jiná chyba než zastaralý podklad detail znovu nenačítá', async () => {
+    api.updateMember.mockRejectedValueOnce({ response: { status: 409, data: { error: { code: 'nonprofit_membership_identity_conflict', message: 'Kolize.' } } } })
+    const w = mounted({ mode: 'identity' })
+    await w.get('[data-stub="client"]').trigger('click')
+    await confirm(w)
+    expect(w.emitted('stale')).toBeUndefined()
+  })
+
   it('explains an invalid form once, below the form, not again at the button', async () => {
     const w = mounted({ mode: 'identity' })
     expect(w.get('[data-section="corr-invalid"]').text()).toBe(cs.nonprofitMembership.correction.identityUnchanged)

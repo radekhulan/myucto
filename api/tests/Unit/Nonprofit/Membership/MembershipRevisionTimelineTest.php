@@ -64,13 +64,16 @@ final class MembershipRevisionTimelineTest extends TestCase
         }
     }
 
-    public function testTwoValidRevisionsOnTheSameDayRemainAConflict(): void
+    /** Dvě platné revize ke stejnému dni služba nezapíše; vzniknou jen obchvatem (ruční SQL) a čtení je odmítne. */
+    public function testTwoValidRevisionsOnTheSameDayMakeHistoryUnproven(): void
     {
-        try {
-            MembershipRevisionTimeline::intervals([self::row(1, 1, '2026-01-01', 'active'), self::row(2, 2, '2026-01-01', 'ended')]);
-            self::fail('Dvě platné revize ke stejnému dni jsou konflikt.');
-        } catch (MembershipException $e) {
-            self::assertSame('nonprofit_membership_effective_conflict', $e->errorCode);
+        foreach (['effective', 'intervals'] as $method) {
+            try {
+                MembershipRevisionTimeline::$method([self::row(1, 1, '2026-01-01', 'active'), self::row(2, 2, '2026-01-01', 'ended')]);
+                self::fail("Dvě platné revize ke stejnému dni ($method).");
+            } catch (MembershipException $e) {
+                self::assertSame('nonprofit_membership_revision_corrupt', $e->errorCode, $method);
+            }
         }
     }
 

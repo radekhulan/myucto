@@ -491,6 +491,27 @@ describe('Membership member detail after a correction', () => {
     w.unmount()
   })
 
+  it('odloží obnovu z jiné záložky, dokud je rozepsaná první revize, a načte po uvolnění', async () => {
+    api.member.mockResolvedValue({ ...detail([], []), corrections: allowed })
+    const w = mountedWithCorrection({ refreshVersion: 0 }); await flushPromises()
+    w.findComponent(RevisionForm).vm.$emit('dirty', true); await flushPromises()
+    await w.setProps({ refreshVersion: 1 }); await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(1)
+    w.findComponent(RevisionForm).vm.$emit('dirty', false); await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(2)
+    w.unmount()
+  })
+
+  it('po odmítnutí zastaralé opravy načte detail znovu', async () => {
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
+    const w = mountedWithCorrection(); await flushPromises()
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    w.findComponent(CorrectionFlow).vm.$emit('stale'); await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(2)
+    expect(w.findComponent(CorrectionFlow).exists()).toBe(true)
+    w.unmount()
+  })
+
   it('closes like a deletion when the member was deleted in another tab', async () => {
     api.member.mockResolvedValueOnce({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
       .mockRejectedValue({ response: { status: 404, data: { error: { code: 'nonprofit_membership_member_not_found' } } } })
@@ -503,7 +524,7 @@ describe('Membership member detail after a correction', () => {
   })
 })
 
-const CorrectionFlow = defineComponent({ name: 'MembershipCorrectionFlow', props: ['supplier', 'canManage', 'mode', 'member', 'label', 'revision', 'headRevisionNo'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'correction' }) })
+const CorrectionFlow = defineComponent({ name: 'MembershipCorrectionFlow', props: ['supplier', 'canManage', 'mode', 'member', 'label', 'revision', 'headRevisionNo'], emits: ['done', 'close', 'lock', 'stale'], setup: () => () => h('div', { 'data-stub': 'correction' }) })
 function mountedWithCorrection(props: Record<string, unknown> = {}) {
   return mount(Detail, {
     attachTo: document.body,
