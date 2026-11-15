@@ -253,6 +253,74 @@ final class AdvanceFullFlowTest extends BankPostingTestCase
         self::assertContains($txB, $bankRefs, 'I na úhradu zálohy B.');
     }
 
+    /**
+     * Smlouva o dílo: záloha 30 % ceny díla, tři faktury za milníky odečtou každá 30 % svého
+     * plnění. Každá faktura má v saldokontu i v K3 vyrovnaný jen svůj odpočet, nevyčerpaný
+     * zbytek zálohy zůstává otevřenou položkou zálohy, a to i u zálohy vedené přímo na 311.
+     */
+    #[DataProvider('variants')]
+    public function testMilestoneInvoicesDrawOneAdvanceStepByStep(bool $advanceOn311): void
+    {
+        if ($advanceOn311) {
+            $this->advanceRulesOn311();
+        }
+        $client = $this->client('Odběratel milníků díla');
+        // Dílo 10 000 Kč bez DPH, záloha 30 %: 3 000 + 630.
+        [$proforma, , $txA, $bankA, $ddkp, $ddkpEntry] = $this->paidAdvanceWithTaxDocument($client, 3000.00);
+        $drawdown = $this->container->get(AdvancePartialDrawdown::class);
+        $advanceAcc = $advanceOn311 ? '311' : '324';
+        $entries = [$bankA, $ddkpEntry];
+        $docs = [$proforma, $ddkp];
+        $remainingBase = 3000.00;
+
+        foreach ([3000.00, 3000.00, 4000.00] as $i => $base) {
+            $final = $this->draftInvoice($client, $base);
+            $drawdown->applyPercent($this->supplierId, $final, $proforma, 30.0);
+            $this->issue($final);
+            $finalEntry = $this->ensurePosted($final);
+            $remainingBase = round($remainingBase - $base * 0.3, 2);
+
+            $toPay = (float) $this->db->pdo()->query("SELECT amount_to_pay FROM invoices WHERE id = {$final}")->fetchColumn();
+            self::assertEqualsWithDelta(round($base * 1.21 * 0.7, 2), $toPay, 0.001, 'Doplatek milníku = 70 % plnění.');
+            $vs = (string) $this->db->pdo()->query("SELECT varsymbol FROM invoices WHERE id = {$final}")->fetchColumn();
+            $tx = $this->transaction($this->statement(), $toPay, ['variable_symbol' => $vs]);
+            $this->container->get(StatementMatcher::class)->matchBatch([$tx]);
+            self::assertSame('posted', $this->service->handleTransaction($tx, $this->userId)['action']);
+            array_push($entries, $finalEntry, $this->entryFor('bank', $tx));
+            $docs[] = $final;
+
+            $asOf = self::YEAR . '-12-31';
+            foreach (['311', '324'] as $code) {
+                $acc = $this->saldo($code, $asOf);
+                self::assertSame(0, self::cents($acc['difference']), "Konfrontace {$code} po milníku " . ($i + 1) . '.');
+            }
+            $open = $this->partnerOf($this->saldo($advanceAcc, $asOf), $client);
+            if ($remainingBase > 0.005) {
+                self::assertNotNull($open, 'Nevyčerpaná záloha je otevřená položka po milníku ' . ($i + 1) . '.');
+                self::assertSame([$proforma], array_map(static fn (array $it): int => (int) $it['doc_id'], $open['items']),
+                    'Otevřená je jen záloha, faktury milníků jsou vyrovnané.');
+                // Znaménko položky podle strany účtu: na 311 kreditní (záporná), na 324 závazek.
+                self::assertSame(self::cents($remainingBase), abs(self::cents($open['items'][0]['remaining_czk'])),
+                    'Zbývá nevyčerpaný základ zálohy po milníku ' . ($i + 1) . '.');
+            } else {
+                self::assertNull($open, 'Po posledním milníku je záloha vyčerpaná.');
+            }
+            self::assertNull($this->partnerOf($this->saldo($advanceOn311 ? '324' : '311', $asOf), $client),
+                'Na druhém účtu nic otevřeného.');
+            $flagged = array_filter(
+                (new ClosingRepository($this->db))->paidInvoicesOpenSaldo($this->supplierId, $asOf),
+                static fn (array $r): bool => in_array((int) $r['id'], $docs, true),
+            );
+            self::assertSame([], array_values($flagged), 'K3 nesmí hlásit milníky ani zálohu po milníku ' . ($i + 1) . '.');
+        }
+
+        $sum = $this->sums($entries);
+        self::assertSame(0, self::cents($sum['311'] ?? 0), '311 po třech milnících na nule.');
+        self::assertSame(0, self::cents($sum['324'] ?? 0), '324 po vyčerpání zálohy na nule.');
+        self::assertSame(-210000, self::cents($sum['343.200'] ?? 0), '343 = daň z díla 10 000 právě jednou.');
+        self::assertSame(-1000000, self::cents($sum['602'] ?? 0));
+    }
+
     // ── fixtury ──────────────────────────────────────────────────────────────
 
     private function advanceRulesOn311(): void
