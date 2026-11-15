@@ -11,6 +11,6 @@
 {% for note in change_notes %}
 <p style="margin:0 0 16px;"><strong>{{ note }}</strong></p>
 {% endfor %}
-<p style="margin:0 0 16px;">Export obsahuje vydané faktury, zjednodušené daňové doklady a dobropisy podle data vystavení. Neobsahuje pokladní doklady, přijaté faktury, zálohové faktury, daňové doklady k platbě ani bankovní pohyby.</p>
+<p style="margin:0 0 16px;">Export obsahuje vydané faktury{% if include_credit_notes %}, zjednodušené daňové doklady a dobropisy{% else %} a zjednodušené daňové doklady{% endif %} podle data vystavení. Neobsahuje {% if not include_credit_notes %}dobropisy, {% endif %}pokladní doklady, přijaté faktury, zálohové faktury, daňové doklady k platbě ani bankovní pohyby.</p>
 <p style="margin:24px 0 0;font-size:13px;color:#7A748C;">E-mail byl odeslán automaticky.</p>
 {% endblock %}

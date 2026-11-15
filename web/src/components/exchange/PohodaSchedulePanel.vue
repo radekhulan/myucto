@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { pohodaScheduleApi, type PohodaScheduleConfig, type PohodaScheduleProblem, type PohodaScheduleRun } from '@/api/reports'
 
@@ -9,6 +9,8 @@ const { t } = useI18n()
 const auth = useAuthStore()
 // Stejné právo jako na serveru (PUT /reports/pohoda-schedule): příjemce exportu mění jen správce firmy.
 const canSave = computed(() => auth.isDemo || auth.canWrite('settings.company.write'))
+// POST /reports/pohoda-schedule/run vyžaduje utilities.export WRITE.
+const canRun = computed(() => auth.canWrite('utilities.export'))
 
 const config = ref<PohodaScheduleConfig>({ enabled: false, run_day: 5, include_credit_notes: true, recipient_email: '' })
 const runs = ref<PohodaScheduleRun[]>([])
@@ -22,8 +24,12 @@ const prev = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1)
 const lastClosedMonth = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`
 const month = ref(lastClosedMonth)
 
+type ApiFailure = { message?: string; response?: { status?: number; data?: { error?: { message?: string; last?: { created_at: string; recipient_email: string } } } } }
+
 function apiError(e: unknown): string {
-  return (e as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message || t('pohodaSchedule.failed')
+  const f = e as ApiFailure
+  // Chyba běhu (status error) přichází jako Error s textem ze serveru, ne jako odpověď HTTP.
+  return f?.response?.data?.error?.message || (f?.response ? '' : f?.message) || t('pohodaSchedule.failed')
 }
 
 async function load() {
@@ -52,15 +58,23 @@ const save = () => act(async () => {
   return t('pohodaSchedule.saved')
 })
 
+function runResult(r: { status: string; doc_count: number; error?: string | null }): string {
+  if (r.status === 'error') throw new Error(r.error || t('pohodaSchedule.failed'))
+  return t('pohodaSchedule.run_done', { count: r.doc_count })
+}
+
 const runNow = () => act(async () => {
   try {
-    const r = await pohodaScheduleApi.run(month.value)
-    if (r.status === 'error') throw new Error(r.error ?? '')
-    return t('pohodaSchedule.run_done', { count: r.doc_count })
+    return runResult(await pohodaScheduleApi.run(month.value))
   } catch (e) {
-    if ((e as { response?: { status?: number } })?.response?.status !== 409 || !window.confirm(t('pohodaSchedule.run_confirm'))) throw e
-    const r = await pohodaScheduleApi.run(month.value, true)
-    return t('pohodaSchedule.run_done', { count: r.doc_count })
+    const failure = (e as ApiFailure)?.response
+    if (failure?.status !== 409 || !failure.data?.error?.last) throw e
+    const last = failure.data.error.last
+    const question = last.recipient_email
+      ? t('pohodaSchedule.run_confirm_to', { when: last.created_at, email: last.recipient_email })
+      : t('pohodaSchedule.run_confirm', { when: last.created_at })
+    if (!window.confirm(question)) return ''
+    return runResult(await pohodaScheduleApi.run(month.value, true))
   }
 })
 
@@ -106,11 +120,17 @@ onMounted(() => { load().catch(e => { error.value = apiError(e) }) })
     <div v-if="message" class="rounded-md bg-primary-50 border border-primary-200 px-3 py-2 text-sm text-primary-700">{{ message }}</div>
 
     <div class="flex flex-wrap items-center justify-between gap-2">
-      <div class="flex items-center gap-2">
+      <div v-if="canRun" class="flex items-center gap-2">
         <input v-model="month" type="month" :max="lastClosedMonth" class="rounded-md border border-neutral-300 px-3 py-2 text-sm" />
-        <button type="button" :disabled="busy || !month || month > lastClosedMonth" :class="btnOutline('primary')" @click="runNow">{{ t('pohodaSchedule.run_now') }}</button>
+        <button type="button" :disabled="busy || !month || month > lastClosedMonth" :class="btnOutline('primary')" data-test="pohoda-run-now" @click="runNow">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send" /></svg>
+          {{ t('pohodaSchedule.run_now') }}
+        </button>
       </div>
-      <button type="button" :disabled="busy || !canSave" :title="canSave ? undefined : t('pohodaSchedule.no_rights')" :class="btnFilled('primary')" @click="save">{{ t('pohodaSchedule.save') }}</button>
+      <button type="button" :disabled="busy || !canSave" :title="canSave ? undefined : t('pohodaSchedule.no_rights')" :class="btnFilled('primary')" @click="save">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+        {{ t('pohodaSchedule.save') }}
+      </button>
     </div>
 
     <div>

@@ -1199,7 +1199,8 @@
         "2293_api_token_system_write.sql",
         "2294_bank_posting_rule_skip_matching_card.sql",
         "2295_helios_import_map.sql",
-        "2296_eet_units_dis_import.sql"
+        "2296_eet_units_dis_import.sql",
+        "2297_scheduled_pohoda_export.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7603,6 +7604,7 @@
                 "idx_inv_supplier": "BTREE (supplier_id)",
                 "idx_inv_supplier_calendar": "BTREE (supplier_id, calendar_id)",
                 "idx_inv_supplier_efftax": "BTREE (supplier_id, effective_tax_date)",
+                "idx_inv_supplier_issue": "BTREE (supplier_id, issue_date)",
                 "idx_inv_supplier_payment_vs": "BTREE (supplier_id, payment_variable_symbol)",
                 "idx_inv_supplier_payment_vs_key": "BTREE (supplier_id, payment_variable_symbol_match_key)",
                 "idx_inv_supplier_status_due": "BTREE (supplier_id, status, due_date)",
@@ -24691,6 +24693,76 @@
             "foreign_keys": {
                 "fk_scanmatch_item": "(item_id) -> scan_batch_items (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_scanmatch_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "scheduled_pohoda_export": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "enabled": "tinyint(1) NOT NULL DEFAULT 0",
+                "include_credit_notes": "tinyint(1) NOT NULL DEFAULT 1",
+                "recipient_email": "varchar(255) NOT NULL DEFAULT ''",
+                "run_day": "tinyint(3) unsigned NOT NULL DEFAULT 5",
+                "start_month": "char(7) NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id)"
+            },
+            "foreign_keys": {
+                "fk_spe_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "scheduled_pohoda_export_doc": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "cancelled": "tinyint(1) NOT NULL DEFAULT 0",
+                "fp": "char(32) NOT NULL",
+                "invoice_id": "bigint(20) unsigned NOT NULL",
+                "run_id": "int(10) unsigned NOT NULL",
+                "varsymbol": "varchar(64) NOT NULL DEFAULT ''"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (run_id, invoice_id)"
+            },
+            "foreign_keys": {
+                "fk_spe_doc_run": "(run_id) -> scheduled_pohoda_export_run (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "scheduled_pohoda_export_run": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "changed_after": "int(10) unsigned NOT NULL DEFAULT 0",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "doc_count": "int(10) unsigned NOT NULL DEFAULT 0",
+                "error": "varchar(1000) NULL DEFAULT NULL",
+                "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
+                "include_credit_notes": "tinyint(1) NOT NULL DEFAULT 1",
+                "outbox_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "period_label": "char(7) NOT NULL",
+                "recipient_email": "varchar(255) NOT NULL DEFAULT ''",
+                "status": "enum('sending','ok','queued','error') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "trigger_by": "enum('cron','manual') NOT NULL DEFAULT 'cron'",
+                "warned_changed": "int(10) unsigned NOT NULL DEFAULT 0"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_spe_run_supplier_created": "BTREE (supplier_id, created_at)",
+                "idx_spe_run_supplier_period": "BTREE (supplier_id, period_label, status)"
+            },
+            "foreign_keys": {
+                "fk_spe_run_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },

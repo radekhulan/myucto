@@ -30063,7 +30063,7 @@ paths:
       tags: [Reports]
       summary: Plánovaný export do Pohody — nastavení a poslední běhy
       responses:
-        '200': { description: 'config (enabled, run_day, include_credit_notes, recipient_email, start_month), runs po měsících (period_label, status ok|queued|error, doc_count, attempts, changed_after) a problem (poslední selhání měsíce bez úspěšného běhu). Příjemce a texty chyb jen s právem číst nastavení firmy. Právo: utilities.export' }
+        '200': { description: 'config (enabled, run_day, include_credit_notes, recipient_email, start_month), runs po měsících (period_label, status sending|ok|queued|error, doc_count, attempts, changed_after = změny po odeslání, které denně ukládá cron) a problem (poslední selhání měsíce bez úspěšného běhu). Příjemce a texty chyb jen s právem číst nastavení firmy. Právo: utilities.export' }
         '403': { $ref: '#/components/responses/Forbidden' }
     put:
       tags: [Reports]
@@ -30079,11 +30079,12 @@ paths:
     post:
       tags: [Reports]
       summary: Spustit export do Pohody teď za měsíc (month=YYYY-MM)
-      description: Jen uzavřený měsíc (jinak 422). Pokud už pro měsíc úspěšný nebo ve frontě čekající běh existuje, vyžaduje `confirm_repeat=true`, jinak 409 `already_exported`. Běží-li export téhož měsíce, 409 `busy`.
+      description: Jen uzavřený měsíc (jinak 422). Pokud už pro měsíc úspěšný nebo ve frontě čekající běh existuje, vyžaduje `confirm_repeat=true`, jinak 409 `already_exported`. Potvrzené opakování dřív než 5 minut po posledním odeslání vrací 429 `too_soon`. Obě odpovědi nesou v `error.last` čas (`created_at`) a příjemce (`recipient_email`, jen s právem číst nastavení firmy) posledního odeslání. Běží-li export téže firmy, 409 `busy`.
       responses:
         '200': { description: 'Výsledek běhu (status ok|queued|error, doc_count, error)' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: 'Měsíc už byl exportován' }
+        '409': { description: 'Měsíc už byl exportován (already_exported) nebo export firmy právě běží (busy)' }
+        '429': { description: 'Opakování dřív než 5 minut po posledním odeslání (too_soon)' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/reports/monthly-export/preview:
     parameters:

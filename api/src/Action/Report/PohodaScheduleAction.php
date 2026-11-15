@@ -19,7 +19,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  *   GET  /api/reports/pohoda-schedule       → nastavení, historie po měsících, poslední selhání
  *   PUT  /api/reports/pohoda-schedule       → uložení nastavení
- *   POST /api/reports/pohoda-schedule/run   → spustit teď (month=YYYY-MM uzavřeného měsíce, confirm_repeat=true při opakování)
+ *   POST /api/reports/pohoda-schedule/run   → spustit teď (month=YYYY-MM uzavřeného měsíce, confirm_repeat=true při opakování;
+ *                                            409 already_exported a 429 too_soon nesou `last`: kdy a komu se posílalo)
  */
 final class PohodaScheduleAction
 {
@@ -71,11 +72,17 @@ final class PohodaScheduleAction
         } catch (\DomainException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
+        if (isset($result['last']) && !RequestAuthorization::allows($request, 'settings.company', AccessLevel::READ)) {
+            $result['last']['recipient_email'] = '';
+        }
         if ($result['status'] === 'exists') {
-            return Json::error($response, 'already_exported', 'Tento měsíc už byl exportován. Potvrď opakování.', 409);
+            return Json::error($response, 'already_exported', 'Tento měsíc už byl exportován. Potvrď opakování.', 409, ['last' => $result['last']]);
+        }
+        if ($result['status'] === 'too_soon') {
+            return Json::error($response, 'too_soon', sprintf('Tento měsíc se odeslal před chvílí. Znovu ho lze poslat za %d minut od posledního odeslání.', ScheduledPohodaExportService::REPEAT_COOLDOWN_MINUTES), 429, ['last' => $result['last']]);
         }
         if ($result['status'] === 'busy') {
-            return Json::error($response, 'busy', 'Export tohoto měsíce právě běží.', 409);
+            return Json::error($response, 'busy', 'Export této firmy právě běží.', 409);
         }
         return Json::ok($response, $result);
     }

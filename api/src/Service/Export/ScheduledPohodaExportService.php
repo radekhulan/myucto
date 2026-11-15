@@ -21,9 +21,13 @@ use MyInvoice\Service\Mail\SupplierEmailContext;
  *
  * Měsíc se nesmí ztratit:
  *  - exportují se jen uzavřené měsíce, nejdřív od `start_month` (měsíc před zapnutím plánu),
- *  - běh si pod `GET_LOCK` (firma + měsíc) pamatuje otisk každého dokladu; doklad, který po odeslání
+ *  - běh si pod `GET_LOCK` (celá firma) pamatuje otisk každého dokladu; doklad, který po odeslání
  *    přibyl, zmizel nebo se změnil (včetně storna), se hlásí v panelu a v dalším měsíčním e-mailu,
+ *  - běh se zapíše se stavem `sending` dřív, než e-mail odejde, takže selhání zápisu po odeslání
+ *    neskončí druhým e-mailem účetní,
  *  - e-mail ve frontě pošty má stav `queued`, dokud ho fronta nedoručí nebo nevzdá.
+ *
+ * Změny po odeslání počítá cron ({@see refreshChanges()}) a běh exportu, panel je jen čte.
  */
 final class ScheduledPohodaExportService
 {
@@ -34,6 +38,15 @@ final class ScheduledPohodaExportService
     private const MAIL_LIST_LIMIT = 50;
 
     private const GENERIC_ERROR = 'Export se nepodařilo odeslat. Podrobnosti jsou v protokolu aktivit.';
+
+    /** Za kolik minut po posledním odeslání jde měsíc ručně poslat znovu. */
+    public const REPEAT_COOLDOWN_MINUTES = 5;
+
+    /** Nejdelší odstup (dny) mezi automatickými pokusy o měsíc, který opakovaně selhává. */
+    private const MAX_RETRY_DAYS = 7;
+
+    /** Stavy běhu, se kterými měsíc platí za odeslaný (`sending` = e-mail mohl odejít). */
+    private const DELIVERED = "'sending','ok','queued'";
 
     public function __construct(
         private readonly Connection $db,
@@ -100,6 +113,8 @@ final class ScheduledPohodaExportService
     /**
      * Firma => nejstarší uzavřený měsíc od `start_month`, který ještě nemá úspěšný běh.
      * Nejnovější uzavřený měsíc je na řadě od `run_day`, starší (zameškané) hned.
+     * Měsíc, který selhává, se zkouší s rostoucím odstupem (1, 2, 4, nejvýš 7 dní), ať trvalá
+     * chyba jedné firmy (třeba neplatná adresa účetní) nezkouší odesílat každý den donekonečna.
      *
      * @return array<int,string>
      */
@@ -117,10 +132,10 @@ final class ScheduledPohodaExportService
             $this->reconcileQueued($sid);
             for ($m = new DateTimeImmutable($r['start_month'] . '-01'); $m->format('Y-m') <= $last; $m = $m->modify('+1 month')) {
                 $label = $m->format('Y-m');
-                if ($this->hasDelivered($sid, $label)) {
+                if ($this->lastDelivery($sid, $label) !== null) {
                     continue;
                 }
-                if ($label < $last || (int) $now->format('j') >= (int) $r['run_day']) {
+                if (($label < $last || (int) $now->format('j') >= (int) $r['run_day']) && $this->retryAllowed($sid, $label, $now)) {
                     $due[$sid] = $label;
                 }
                 break;
@@ -130,7 +145,10 @@ final class ScheduledPohodaExportService
     }
 
     /**
-     * @return array{status:'ok'|'queued'|'error'|'exists'|'busy',doc_count:int,error?:?string}
+     * `exists` = měsíc už je odeslaný a opakování není potvrzené, `too_soon` = potvrzené opakování
+     * dřív než REPEAT_COOLDOWN_MINUTES po posledním odeslání; obojí vrací `last` (kdy a komu).
+     *
+     * @return array{status:'ok'|'queued'|'error'|'exists'|'too_soon'|'busy',doc_count:int,error?:?string,last?:array{created_at:string,recipient_email:string}}
      * @throws \DomainException Měsíc není uzavřený.
      */
     public function run(int $supplierId, string $periodLabel, string $trigger, bool $force = false, ?int $userId = null, ?DateTimeImmutable $now = null): array
@@ -140,7 +158,8 @@ final class ScheduledPohodaExportService
             throw new \DomainException('Exportovat lze jen uzavřený měsíc.');
         }
         $pdo = $this->db->pdo();
-        $lock = NamedLockName::for($this->db, 'pohoda-export', $supplierId . ':' . $periodLabel);
+        // Zámek na celou firmu: souběžné běhy dvou měsíců by tytéž změny starších měsíců ohlásily dvakrát.
+        $lock = NamedLockName::for($this->db, 'pohoda-export', (string) $supplierId);
         $got = $pdo->prepare('SELECT GET_LOCK(?, 0)');
         $got->execute([$lock]);
         if ((int) $got->fetchColumn() !== 1) {
@@ -148,82 +167,154 @@ final class ScheduledPohodaExportService
         }
         try {
             $this->reconcileQueued($supplierId);
-            if (!$force && $this->hasDelivered($supplierId, $periodLabel)) {
-                return ['status' => 'exists', 'doc_count' => 0];
+            $last = $this->lastDelivery($supplierId, $periodLabel);
+            if ($last !== null && (!$force || $last['recent'])) {
+                return ['status' => $force ? 'too_soon' : 'exists', 'doc_count' => 0,
+                    'last' => ['created_at' => $last['created_at'], 'recipient_email' => $last['recipient_email']]];
             }
-            return $this->runLocked($supplierId, $periodLabel, $trigger, $userId);
+            return $this->runLocked($supplierId, $periodLabel, $trigger, $userId, $now);
         } finally {
             $pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$lock]);
         }
     }
 
     /** @return array{status:'ok'|'queued'|'error',doc_count:int,error?:?string} */
-    private function runLocked(int $supplierId, string $periodLabel, string $trigger, ?int $userId): array
+    private function runLocked(int $supplierId, string $periodLabel, string $trigger, ?int $userId, DateTimeImmutable $now): array
     {
         $cfg = $this->config($supplierId);
-        $docs = [];
-        $exportIds = [];
-        $changes = [];
-        $status = 'ok';
-        $outboxId = null;
-        $error = null;
         try {
             if ($cfg['recipient_email'] === '') {
                 throw new \DomainException('Není vyplněný e-mail účetní.');
             }
             $docs = $this->fingerprints($supplierId, $periodLabel, $cfg['include_credit_notes']);
             $exportIds = array_keys(array_filter($docs, fn (array $d): bool => !$d['cancelled']));
-            $changes = $this->changedMonths($supplierId, $periodLabel, true);
-            if ($exportIds !== [] || $changes !== []) {
-                $file = $exportIds === [] ? null : $this->pohoda->export($exportIds, $supplierId, $periodLabel);
-                $delivery = $this->send($supplierId, $cfg['recipient_email'], $periodLabel, count($exportIds), $file, $changes, $userId);
-                if ($delivery['deferred']) {
-                    $status = 'queued';
-                    $outboxId = $delivery['outbox_id'];
-                }
-            }
+            $changes = $this->changedMonths($supplierId, $periodLabel, false, $now);
+            $notify = array_filter($changes, fn (array $c): bool => $c['changed'] > $c['warned']);
+            $file = $exportIds === [] ? null : $this->pohoda->export($exportIds, $supplierId, $periodLabel);
         } catch (\Throwable $e) {
-            $error = $e instanceof \DomainException ? $e->getMessage() : self::GENERIC_ERROR;
-            $status = 'error';
-            $this->logger->log('pohoda_export.scheduled_failed', $userId, 'supplier', $supplierId, [
-                'period' => $periodLabel, 'trigger' => $trigger, 'detail' => mb_substr($e->getMessage(), 0, 1000),
-            ]);
+            return $this->failed($supplierId, $periodLabel, $trigger, $cfg, $userId, $e, null);
         }
 
+        $mail = $exportIds !== [] || $notify !== [];
+        // Běh se zapíše dřív, než e-mail odejde: kdyby zápis po odeslání selhal, `sending` měsíc drží
+        // jako odeslaný a cron ho účetní nepošle podruhé.
+        $runId = $this->transaction(function () use ($supplierId, $periodLabel, $trigger, $mail, $exportIds, $cfg, $docs, $changes): int {
+            $pdo = $this->db->pdo();
+            $pdo->prepare(
+                'INSERT INTO scheduled_pohoda_export_run (supplier_id, period_label, trigger_by, status, doc_count, include_credit_notes, recipient_email)
+                 VALUES (?,?,?,?,?,?,?)'
+            )->execute([$supplierId, $periodLabel, $trigger, $mail ? 'sending' : 'ok', count($exportIds), (int) $cfg['include_credit_notes'], $cfg['recipient_email']]);
+            $runId = (int) $pdo->lastInsertId();
+            $ins = $pdo->prepare('INSERT INTO scheduled_pohoda_export_doc (run_id, invoice_id, fp, varsymbol, cancelled) VALUES (?,?,?,?,?)');
+            foreach ($docs as $id => $d) {
+                $ins->execute([$runId, $id, $d['fp'], mb_substr($d['vs'], 0, 64), (int) $d['cancelled']]);
+            }
+            $this->storeChanges($supplierId, $changes);
+            return $runId;
+        });
+
+        $status = 'ok';
+        if ($mail) {
+            try {
+                $delivery = $this->send($supplierId, $cfg['recipient_email'], $periodLabel, count($exportIds), $file, $notify, $cfg['include_credit_notes'], $userId);
+            } catch (\Throwable $e) {
+                return $this->failed($supplierId, $periodLabel, $trigger, $cfg, $userId, $e, $runId);
+            }
+            $status = $delivery['deferred'] ? 'queued' : 'ok';
+            $this->transaction(function () use ($runId, $status, $delivery, $notify): void {
+                $pdo = $this->db->pdo();
+                $pdo->prepare('UPDATE scheduled_pohoda_export_run SET status = ?, outbox_id = ? WHERE id = ?')
+                    ->execute([$status, $status === 'queued' ? $delivery['outbox_id'] : null, $runId]);
+                // Oznámené změny starších měsíců se už příště nehlásí, dokud nepřibude další.
+                $warn = $pdo->prepare('UPDATE scheduled_pohoda_export_run SET warned_changed = ? WHERE id = ?');
+                foreach ($notify as $c) {
+                    $warn->execute([$c['changed'], $c['run_id']]);
+                }
+            });
+        }
+        $this->logger->log('pohoda_export.scheduled_run', $userId, 'supplier', $supplierId, [
+            'period' => $periodLabel, 'trigger' => $trigger, 'status' => $status, 'count' => count($exportIds),
+            'recipient_email' => $cfg['recipient_email'],
+        ]);
+        return ['status' => $status, 'doc_count' => count($exportIds)];
+    }
+
+    /**
+     * Zapíše neúspěšný běh: nový řádek, nebo převede `sending` běh, jehož e-mail neodešel.
+     *
+     * @param array{recipient_email:string,include_credit_notes:bool} $cfg
+     * @return array{status:'error',doc_count:int,error:string}
+     */
+    private function failed(int $supplierId, string $periodLabel, string $trigger, array $cfg, ?int $userId, \Throwable $e, ?int $runId): array
+    {
+        $error = $e instanceof \DomainException ? $e->getMessage() : self::GENERIC_ERROR;
+        $this->logger->log('pohoda_export.scheduled_failed', $userId, 'supplier', $supplierId, [
+            'period' => $periodLabel, 'trigger' => $trigger, 'detail' => mb_substr($e->getMessage(), 0, 1000),
+        ]);
+        $this->transaction(function () use ($supplierId, $periodLabel, $trigger, $cfg, $error, $runId): void {
+            $pdo = $this->db->pdo();
+            if ($runId === null) {
+                $pdo->prepare(
+                    "INSERT INTO scheduled_pohoda_export_run (supplier_id, period_label, trigger_by, status, doc_count, include_credit_notes, recipient_email, error)
+                     VALUES (?,?,?,'error',0,?,?,?)"
+                )->execute([$supplierId, $periodLabel, $trigger, (int) $cfg['include_credit_notes'], $cfg['recipient_email'], $error]);
+                return;
+            }
+            $pdo->prepare('DELETE FROM scheduled_pohoda_export_doc WHERE run_id = ?')->execute([$runId]);
+            $pdo->prepare("UPDATE scheduled_pohoda_export_run SET status = 'error', doc_count = 0, error = ? WHERE id = ?")->execute([$error, $runId]);
+        });
+        return ['status' => 'error', 'doc_count' => 0, 'error' => $error];
+    }
+
+    /**
+     * @template T
+     * @param callable():T $fn
+     * @return T
+     */
+    private function transaction(callable $fn): mixed
+    {
         $pdo = $this->db->pdo();
         $own = !$pdo->inTransaction();
         $own && $pdo->beginTransaction();
         try {
-            $pdo->prepare(
-                'INSERT INTO scheduled_pohoda_export_run (supplier_id, period_label, trigger_by, status, doc_count, include_credit_notes, recipient_email, outbox_id, error)
-                 VALUES (?,?,?,?,?,?,?,?,?)'
-            )->execute([$supplierId, $periodLabel, $trigger, $status, $status === 'error' ? 0 : count($exportIds), (int) $cfg['include_credit_notes'], $cfg['recipient_email'], $outboxId, $error]);
-            $runId = (int) $pdo->lastInsertId();
-            if ($status !== 'error') {
-                $ins = $pdo->prepare('INSERT INTO scheduled_pohoda_export_doc (run_id, invoice_id, fp, varsymbol, cancelled) VALUES (?,?,?,?,?)');
-                foreach ($docs as $id => $d) {
-                    $ins->execute([$runId, $id, $d['fp'], mb_substr($d['vs'], 0, 64), (int) $d['cancelled']]);
-                }
-                // Oznámené změny starších měsíců se už příště nehlásí, dokud nepřibude další.
-                $warn = $pdo->prepare('UPDATE scheduled_pohoda_export_run SET warned_changed = ? WHERE id = ?');
-                foreach ($changes as $c) {
-                    $warn->execute([$c['changed'], $c['run_id']]);
-                }
-            }
+            $result = $fn();
             $own && $pdo->commit();
+            return $result;
         } catch (\Throwable $e) {
             if ($own && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
             throw $e;
         }
-        $this->logger->log('pohoda_export.scheduled_run', $userId, 'supplier', $supplierId, [
-            'period' => $periodLabel, 'trigger' => $trigger, 'status' => $status, 'count' => count($exportIds),
-            'recipient_email' => $cfg['recipient_email'],
-        ]);
-        return $status === 'error'
-            ? ['status' => 'error', 'doc_count' => 0, 'error' => $error]
-            : ['status' => $status, 'doc_count' => count($exportIds)];
+    }
+
+    /**
+     * Přepočítá změny po odeslání u všech firem s nastaveným exportem a uloží je k běhům (`changed_after`),
+     * aby je panel jen četl. Volá denně cron.
+     *
+     * @return int Počet firem
+     */
+    public function refreshChanges(?DateTimeImmutable $now = null): int
+    {
+        $ids = $this->db->pdo()->query(
+            'SELECT e.supplier_id FROM scheduled_pohoda_export e JOIN supplier s ON s.id = e.supplier_id'
+        )->fetchAll(\PDO::FETCH_COLUMN);
+        foreach ($ids as $sid) {
+            $changes = $this->changedMonths((int) $sid, null, false, $now);
+            $this->transaction(fn () => $this->storeChanges((int) $sid, $changes));
+        }
+        return count($ids);
+    }
+
+    /** @param array<string,array{changed:int,run_id:int}> $changes */
+    private function storeChanges(int $supplierId, array $changes): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE scheduled_pohoda_export_run SET changed_after = 0 WHERE supplier_id = ? AND changed_after <> 0')->execute([$supplierId]);
+        $set = $pdo->prepare('UPDATE scheduled_pohoda_export_run SET changed_after = ? WHERE id = ?');
+        foreach ($changes as $c) {
+            $set->execute([$c['changed'], $c['run_id']]);
+        }
     }
 
     /**
@@ -240,23 +331,26 @@ final class ScheduledPohodaExportService
         $from = $now->modify('first day of this month')->modify('-' . self::WATCH_MONTHS . ' months')->format('Y-m');
         $st = $this->db->pdo()->prepare(
             "SELECT r.id, r.period_label, r.warned_changed, r.include_credit_notes FROM scheduled_pohoda_export_run r
-              WHERE r.supplier_id = ? AND r.period_label >= ? AND r.period_label < ? AND r.status IN ('ok','queued')
+              WHERE r.supplier_id = ? AND r.period_label >= ? AND r.period_label < ? AND r.status IN (" . self::DELIVERED . ")
                 AND r.id = (SELECT MAX(r2.id) FROM scheduled_pohoda_export_run r2
-                             WHERE r2.supplier_id = r.supplier_id AND r2.period_label = r.period_label AND r2.status IN ('ok','queued'))"
+                             WHERE r2.supplier_id = r.supplier_id AND r2.period_label = r.period_label AND r2.status IN (" . self::DELIVERED . "))"
         );
         $st->execute([$supplierId, $from, $now->format('Y-m')]);
-        $out = [];
-        foreach ($st->fetchAll(\PDO::FETCH_ASSOC) as $r) {
-            $label = (string) $r['period_label'];
-            if ($label === $exclude) {
-                continue;
-            }
-            $map = $this->db->pdo()->prepare('SELECT invoice_id, fp, varsymbol, cancelled FROM scheduled_pohoda_export_doc WHERE run_id = ?');
-            $map->execute([(int) $r['id']]);
-            $before = [];
+        $runs = array_filter($st->fetchAll(\PDO::FETCH_ASSOC), fn (array $r): bool => $r['period_label'] !== $exclude);
+        // Otisky všech hlídaných běhů jedním dotazem, ne dotazem za každý měsíc.
+        $byRun = [];
+        if ($runs !== []) {
+            $ids = array_map(fn (array $r): int => (int) $r['id'], $runs);
+            $map = $this->db->pdo()->prepare('SELECT run_id, invoice_id, fp, varsymbol, cancelled FROM scheduled_pohoda_export_doc WHERE run_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
+            $map->execute($ids);
             foreach ($map->fetchAll(\PDO::FETCH_ASSOC) as $d) {
-                $before[(int) $d['invoice_id']] = $d;
+                $byRun[(int) $d['run_id']][(int) $d['invoice_id']] = $d;
             }
+        }
+        $out = [];
+        foreach ($runs as $r) {
+            $label = (string) $r['period_label'];
+            $before = $byRun[(int) $r['id']] ?? [];
             $current = $this->fingerprints($supplierId, $label, (bool) $r['include_credit_notes']);
             $items = [];
             foreach ($current as $id => $d) {
@@ -286,6 +380,7 @@ final class ScheduledPohodaExportService
     /**
      * Historie po měsících: nejnovější běh měsíce, počet pokusů a změny po odeslání.
      * `problem` = poslední selhání měsíce, který zatím nemá úspěšný běh.
+     * Změny po odeslání se tu nepočítají, čtou se z `changed_after` (ukládá je cron a běh exportu).
      *
      * @return array{runs:list<array<string,mixed>>,problem:?array<string,mixed>}
      */
@@ -304,16 +399,16 @@ final class ScheduledPohodaExportService
             }
             $byPeriod[$p]['attempts']++;
             $byPeriod[$p]['delivered'] = $byPeriod[$p]['delivered'] || $r['status'] !== 'error';
+            // Změny se ukládají k poslednímu odeslanému běhu, který nemusí být nejnovější (pak selhal opakovaný).
+            $byPeriod[$p]['changed_after'] = max((int) $byPeriod[$p]['changed_after'], (int) $r['changed_after']);
         }
-        $changes = $this->changedMonths($supplierId);
         $problem = null;
-        foreach ($byPeriod as $p => &$r) {
-            $r['changed_after'] = (int) ($changes[$p]['changed'] ?? 0);
-            if ($problem === null && !$r['delivered']) {
+        foreach ($byPeriod as $p => $r) {
+            if (!$r['delivered']) {
                 $problem = ['period_label' => $p, 'error' => $r['error'], 'attempts' => $r['attempts'], 'created_at' => $r['created_at']];
+                break;
             }
         }
-        unset($r);
         return ['runs' => array_slice(array_values($byPeriod), 0, $limit), 'problem' => $problem];
     }
 
@@ -353,18 +448,47 @@ final class ScheduledPohodaExportService
         return 'pending';
     }
 
-    private function hasDelivered(int $supplierId, string $periodLabel): bool
+    /**
+     * Poslední odeslání měsíce; `recent` = před méně než REPEAT_COOLDOWN_MINUTES (hodiny databáze).
+     *
+     * @return array{created_at:string,recipient_email:string,recent:bool}|null
+     */
+    private function lastDelivery(int $supplierId, string $periodLabel): ?array
     {
         $st = $this->db->pdo()->prepare(
-            "SELECT 1 FROM scheduled_pohoda_export_run WHERE supplier_id = ? AND period_label = ? AND status IN ('ok','queued') LIMIT 1"
+            'SELECT created_at, recipient_email, created_at > NOW() - INTERVAL ' . self::REPEAT_COOLDOWN_MINUTES . ' MINUTE AS recent
+               FROM scheduled_pohoda_export_run
+              WHERE supplier_id = ? AND period_label = ? AND status IN (' . self::DELIVERED . ')
+              ORDER BY id DESC LIMIT 1'
         );
         $st->execute([$supplierId, $periodLabel]);
-        return $st->fetchColumn() !== false;
+        $r = $st->fetch(\PDO::FETCH_ASSOC);
+        return $r === false ? null : ['created_at' => (string) $r['created_at'], 'recipient_email' => (string) $r['recipient_email'], 'recent' => (bool) $r['recent']];
+    }
+
+    /** Po n-tém selhání měsíce se cron o něj pokusí až za 2^(n-1) dní, nejvýš za MAX_RETRY_DAYS. */
+    private function retryAllowed(int $supplierId, string $periodLabel, DateTimeImmutable $now): bool
+    {
+        $st = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) AS n, MAX(created_at) AS last FROM scheduled_pohoda_export_run
+              WHERE supplier_id = ? AND period_label = ? AND status = 'error'"
+        );
+        $st->execute([$supplierId, $periodLabel]);
+        $r = $st->fetch(\PDO::FETCH_ASSOC);
+        $n = (int) ($r['n'] ?? 0);
+        if ($n === 0) {
+            return true;
+        }
+        $days = min(2 ** ($n - 1), self::MAX_RETRY_DAYS);
+        // Po dnech, ne po hodinách: denní cron nesmí pokus minout kvůli pár vteřinám.
+        return $now->format('Y-m-d') >= (new DateTimeImmutable((string) $r['last']))->modify("+{$days} days")->format('Y-m-d');
     }
 
     /**
      * Doklady měsíce podle data vystavení (jako ruční export) a otisk obsahu každého.
      * Storna se vedou s příznakem `cancelled`: neexportují se, ale změna stavu na storno je změna.
+     * Otisk bere údaje, které jdou do Pohody: hlavičku (měna, kurz, klasifikace DPH, ceny s DPH,
+     * přenesená daňová povinnost, zaokrouhlení), odběratele (údaje z dokladu i karty) a položky.
      *
      * @return array<int,array{fp:string,cancelled:bool,vs:string}>
      */
@@ -377,11 +501,16 @@ final class ScheduledPohodaExportService
         $st = $this->db->pdo()->prepare(
             "SELECT i.id, i.varsymbol, i.status = 'cancelled' AS cancelled,
                     MD5(CONCAT_WS('|', i.invoice_type, i.varsymbol, i.issue_date, i.tax_date, i.due_date, i.client_id,
-                        i.status = 'cancelled', i.total_without_vat, i.total_with_vat,
-                        COALESCE((SELECT GROUP_CONCAT(CONCAT_WS(',', it.description, it.quantity, it.unit_price_without_vat,
-                                                                it.vat_rate_snapshot, it.total_with_vat) ORDER BY it.id SEPARATOR ';')
+                        i.status = 'cancelled', i.total_without_vat, i.total_vat, i.total_with_vat,
+                        i.currency_id, COALESCE(i.exchange_rate, ''), COALESCE(i.vat_classification_code, ''),
+                        i.prices_include_vat, i.reverse_charge, COALESCE(i.rounding, ''), COALESCE(i.client_snapshot, ''),
+                        CONCAT_WS(',', c.company_name, c.ic, c.dic, c.street, c.city, c.zip, c.country_id, c.main_email, c.phone),
+                        COALESCE((SELECT GROUP_CONCAT(CONCAT_WS(',', it.description, it.quantity, it.unit, it.unit_price_without_vat,
+                                                                it.vat_rate_snapshot, COALESCE(it.vat_classification_code, ''),
+                                                                it.total_without_vat, it.total_vat, it.total_with_vat) ORDER BY it.id SEPARATOR ';')
                                     FROM invoice_items it WHERE it.invoice_id = i.id), ''))) AS fp
                FROM invoices i
+          LEFT JOIN clients c ON c.id = i.client_id
               WHERE i.supplier_id = ? AND i.issue_date >= ? AND i.issue_date < ?
                 AND i.status IN ('issued','sent','reminded','paid','cancelled') AND i.invoice_type IN ($types)
            ORDER BY i.issue_date, i.id"
@@ -399,7 +528,7 @@ final class ScheduledPohodaExportService
      * @param array<string,array{period:string,changed:int,items:list<array{vs:string,kind:string}>}> $changes
      * @return array{deferred:bool,outbox_id:?int}
      */
-    private function send(int $supplierId, string $to, string $label, int $count, ?array $file, array $changes, ?int $userId): array
+    private function send(int $supplierId, string $to, string $label, int $count, ?array $file, array $changes, bool $creditNotes, ?int $userId): array
     {
         $notes = [];
         $kinds = [
@@ -426,6 +555,7 @@ final class ScheduledPohodaExportService
                 'period' => $label,
                 'count' => $count,
                 'has_attachment' => $file !== null,
+                'include_credit_notes' => $creditNotes,
                 'change_notes' => $notes,
                 'supplier' => $this->emailContext->forSupplier($supplierId),
             ], $file === null ? 'Upozornění k exportu dokladů do Pohody' : "Export dokladů do Pohody za $label", [], [], $attachments, $userId, templateSupplierId: $supplierId);

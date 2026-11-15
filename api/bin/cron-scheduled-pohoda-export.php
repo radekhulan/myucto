@@ -37,11 +37,15 @@ try {
                 $report['results'][$sid] = ['period' => $label, 'status' => 'error', 'error' => $e->getMessage()];
             }
         }
+        // Změny odeslaných měsíců pro panel (ten je sám nepočítá).
+        $report['changes_checked'] = $service->refreshChanges();
     }
     echo json_encode($report, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . PHP_EOL;
+    // Chyba jedné firmy (třeba neplatná adresa účetní) je vidět v jejím panelu a zkouší se s odstupem;
+    // cron kvůli ní nehlásí chybu celé instance. Exit 1 jen při selhání cronu jako celku (catch níže).
     $errors = array_filter($report['results'], fn ($r) => $r['status'] === 'error');
-    $run->finish($errors ? 'error' : 'ok', ['due' => count($report['due']), 'errors' => count($errors), 'dry_run' => $dryRun]);
-    exit($errors ? 1 : 0);
+    $run->finish('ok', ['due' => count($report['due']), 'company_errors' => count($errors), 'dry_run' => $dryRun]);
+    exit(0);
 } catch (Throwable $e) {
     fwrite(STDERR, $e->getMessage() . PHP_EOL);
     $run->finish('error', ['error' => $e->getMessage()]);

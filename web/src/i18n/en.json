@@ -43938,7 +43938,8 @@
     "save": "Save",
     "saved": "Settings saved.",
     "run_now": "Run now for month",
-    "run_confirm": "This month was already exported. Send again?",
+    "run_confirm": "This month was already sent ({when}). Send it again?",
+    "run_confirm_to": "This month was already sent on {when} to {email}. Send it again?",
     "run_done": "Export sent, documents: {count}.",
     "history": "Recent runs",
     "none": "No export has run yet.",
@@ -43954,6 +43955,7 @@
     "failed": "Saving or running failed.",
     "no_rights": "Settings can only be changed by a user with company management rights.",
     "queued": "Waiting in the mail queue",
+    "sending": "Sent, not confirmed",
     "attempts": "attempts: {count}",
     "problem": "Export for {period} could not be sent (attempts: {count}). It will be retried."
   }

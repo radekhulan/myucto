@@ -341,6 +341,41 @@ tiše vydával za českou 21 %.
 Řádky v režimu OSS vykažte přes `Daně → OSS přiznání` a z exportu do Pohody
 doklady s nimi vyřaďte.
 
+#### 20.7.3.8 Automatický měsíční export e-mailem účetní
+
+Doklady do Pohody může aplikace posílat účetní sama, jednou za měsíc.
+
+**Kde se nastavuje.** `Prodej → Export`, panel **Automatický export do Pohody**
+pod ručním exportem. Zapněte **Zapnout automatický export**, vyplňte **E-mail
+účetní**, zvolte **Den v měsíci** (1 až 28) a jestli posílat i dobropisy. Nastavení
+mění uživatel s právem správy firmy, spustit export ručně smí uživatel s právem
+zápisu do exportů.
+
+**Kdy se posílá.** V nastavený den pošle aplikace doklady za uplynulý měsíc
+(Pohoda XML v příloze). Měsíce, které se nestihly, pošle hned, každý zvlášť.
+Historie před zapnutím se neposílá: první je měsíc před zapnutím. Doklady se do
+měsíce řadí podle data vystavení. Exportují se vydané faktury, zjednodušené
+daňové doklady a podle volby dobropisy, stornované doklady ne. Měsíc, který už
+odešel, se automaticky znovu neposílá. Ručně ho pošlete tlačítkem **Spustit teď
+za měsíc**: aplikace se zeptá, jestli ho poslat znovu, a ukáže, kdy a komu se
+posílal naposledy. Znovu ho jde poslat nejdřív 5 minut po posledním odeslání.
+
+**Změny odeslaných dokladů.** Aplikace si u každého odeslaného měsíce pamatuje
+podobu dokladů. Jednou denně porovná posledních 12 měsíců a v historii panelu
+ukáže, kolik dokladů se od odeslání změnilo, přibylo, zmizelo nebo bylo
+stornováno (počítá se změna údajů, které jdou do Pohody: částky, položky, data,
+měna a kurz, klasifikace DPH, odběratel). Čísla těchto dokladů dostane účetní
+jednou v dalším měsíčním e-mailu. Opravený měsíc pak pošlete znovu ručně.
+
+**Když odeslání selže** (třeba neplatná adresa účetní nebo nedostupný poštovní
+server), panel ukáže chybu a počet pokusů. Aplikace to zkusí znovu s rostoucím
+odstupem (za 1, 2, 4 a pak každých 7 dní), dokud adresu neopravíte nebo měsíc
+nepošlete ručně. E-mail, který čeká ve frontě pošty, má stav **Čeká ve frontě
+pošty**.
+
+Automatický export potřebuje naplánovanou úlohu `cron-scheduled-pohoda-export`
+(viz [§ 5 Po instalaci](05_Po_instalaci.md)).
+
 ### 20.7.4 Stereo XML
 
 Stereo XML export vytváří jeden soubor `DocumentPack` s vydanými fakturami za

@@ -43938,7 +43938,8 @@
     "save": "Uložit",
     "saved": "Nastavení uloženo.",
     "run_now": "Spustit teď za měsíc",
-    "run_confirm": "Tento měsíc už byl exportován. Odeslat znovu?",
+    "run_confirm": "Tento měsíc už byl odeslán ({when}). Odeslat znovu?",
+    "run_confirm_to": "Tento měsíc už byl odeslán {when} na {email}. Odeslat znovu?",
     "run_done": "Export odeslán, počet dokladů: {count}.",
     "history": "Poslední běhy",
     "none": "Zatím neproběhl žádný export.",
@@ -43954,6 +43955,7 @@
     "failed": "Uložení nebo spuštění se nepodařilo.",
     "no_rights": "Nastavení může měnit jen uživatel s právem správy firmy.",
     "queued": "Čeká ve frontě pošty",
+    "sending": "Odesláno, nepotvrzeno",
     "attempts": "pokusů: {count}",
     "problem": "Export za {period} se nepodařilo odeslat (pokusů: {count}). Zkusí se znovu."
   }

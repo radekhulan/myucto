@@ -7,7 +7,7 @@ Dobrý den,
 
 {% for note in change_notes %}{{ note }}
 
-{% endfor %}Export obsahuje vydané faktury, zjednodušené daňové doklady a dobropisy podle data vystavení. Neobsahuje pokladní doklady, přijaté faktury, zálohové faktury, daňové doklady k platbě ani bankovní pohyby.
+{% endfor %}Export obsahuje vydané faktury{% if include_credit_notes %}, zjednodušené daňové doklady a dobropisy{% else %} a zjednodušené daňové doklady{% endif %} podle data vystavení. Neobsahuje {% if not include_credit_notes %}dobropisy, {% endif %}pokladní doklady, přijaté faktury, zálohové faktury, daňové doklady k platbě ani bankovní pohyby.
 
 E-mail byl odeslán automaticky.
 {% endblock %}

@@ -4,10 +4,13 @@
 -- vyexportují do Pohoda XML a pošlou e-mailem účetní.
 --   scheduled_pohoda_export        nastavení (jeden řádek na firmu); start_month = první měsíc,
 --                                  který se exportuje (před zapnutím plánu se historie neposílá)
---   scheduled_pohoda_export_run    evidence běhů (ok / queued = e-mail čeká ve frontě pošty / error)
+--   scheduled_pohoda_export_run    evidence běhů (sending = zapsáno před odesláním e-mailu / ok / queued = e-mail
+--                                  čeká ve frontě pošty / error); changed_after ukládá cron, panel ho jen čte
 --   scheduled_pohoda_export_doc    otisk každého dokladu v měsíci v okamžiku běhu; podle něj se pozná,
 --                                  že se doklad po odeslání změnil, přibyl nebo zmizel
 -- Měsíc s úspěšným během cron znovu nedělá; ruční běh nad už odeslaným měsícem musí být potvrzený.
+-- Index invoices (supplier_id, issue_date): běh i denní kontrola změn čtou doklady firmy po měsících
+-- podle data vystavení (stejně jako ruční export).
 
 SET NAMES utf8mb4;
 
@@ -28,12 +31,13 @@ CREATE TABLE IF NOT EXISTS scheduled_pohoda_export_run (
   supplier_id  INT UNSIGNED NOT NULL,
   period_label CHAR(7) NOT NULL COMMENT 'YYYY-MM exportovaného měsíce',
   trigger_by   ENUM('cron','manual') NOT NULL DEFAULT 'cron',
-  status       ENUM('ok','queued','error') NOT NULL,
+  status       ENUM('sending','ok','queued','error') NOT NULL,
   doc_count    INT UNSIGNED NOT NULL DEFAULT 0,
   include_credit_notes TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Rozsah běhu: zahrnuty dobropisy; změny po odeslání se porovnávají ve stejném rozsahu',
   recipient_email VARCHAR(255) NOT NULL DEFAULT '',
   outbox_id    BIGINT UNSIGNED NULL DEFAULT NULL COMMENT 'Zpráva ve frontě pošty, dokud status = queued',
   warned_changed INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Kolik změněných dokladů už bylo oznámeno e-mailem',
+  changed_after INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Kolik dokladů se po odeslání změnilo; počítá cron a běh exportu',
   error        VARCHAR(1000) NULL DEFAULT NULL COMMENT 'Bezpečný text bez detailů SMTP, ty jsou v protokolu aktivit',
   created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_spe_run_supplier_period (supplier_id, period_label, status),
@@ -50,3 +54,5 @@ CREATE TABLE IF NOT EXISTS scheduled_pohoda_export_doc (
   PRIMARY KEY (run_id, invoice_id),
   CONSTRAINT fk_spe_doc_run FOREIGN KEY (run_id) REFERENCES scheduled_pohoda_export_run(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE invoices ADD INDEX IF NOT EXISTS idx_inv_supplier_issue (supplier_id, issue_date);

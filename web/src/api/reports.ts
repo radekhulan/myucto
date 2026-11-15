@@ -1094,7 +1094,7 @@ export interface PohodaScheduleRun {
   id: number
   period_label: string
   trigger_by: 'cron' | 'manual'
-  status: 'ok' | 'queued' | 'error'
+  status: 'sending' | 'ok' | 'queued' | 'error'
   doc_count: number
   attempts: number
   error: string | null

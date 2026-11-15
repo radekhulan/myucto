@@ -26,6 +26,8 @@ final class ScheduledPohodaExportServiceTest extends TestCase
     private array $sent = [];
     private ?\Throwable $mailFailure = null;
     private array $mailResult = ['smtp_response' => '250 ok'];
+    /** Volá se ve chvíli, kdy e-mail odchází. */
+    private ?\Closure $onSend = null;
     private \DateTimeImmutable $now;
 
     protected function setUp(): void
@@ -61,6 +63,9 @@ final class ScheduledPohodaExportServiceTest extends TestCase
         $mailer = $this->createStub(Mailer::class);
         $mailer->method('sendTemplateDetailed')->willReturnCallback(
             function (string $code, string $locale, array $to, array $vars, ?string $subject = null, array $cc = [], array $bcc = [], array $attachments = []): array {
+                if ($this->onSend !== null) {
+                    ($this->onSend)();
+                }
                 if ($this->mailFailure !== null) {
                     throw $this->mailFailure;
                 }
@@ -142,7 +147,15 @@ final class ScheduledPohodaExportServiceTest extends TestCase
         // Nově vystavený doklad se starším datem v už vyřízeném měsíci.
         $this->invoice('2026-10-12');
         $this->assertSame(1, $s->changedMonths($this->supplierId, null, false, $this->now)['2026-10']['changed']);
+        $this->assertSame(0, $s->history($this->supplierId)['runs'][0]['changed_after'], 'Panel změny nepočítá, čte je z cronu.');
+        $s->refreshChanges($this->now);
         $this->assertSame(1, $s->history($this->supplierId)['runs'][0]['changed_after']);
+
+        // Potvrzené opakování hned po odeslání se odmítne a řekne, kdy a komu se posílalo.
+        $soon = $s->run($this->supplierId, '2026-10', 'manual', true, null, $this->now);
+        $this->assertSame('too_soon', $soon['status']);
+        $this->assertSame('ucetni@example.com', $soon['last']['recipient_email']);
+        $this->backdateRuns(10);
 
         // Opakovaný export čítač vynuluje.
         $r = $s->run($this->supplierId, '2026-10', 'manual', true, null, $this->now);
@@ -150,6 +163,7 @@ final class ScheduledPohodaExportServiceTest extends TestCase
         $this->assertCount(1, $this->sent);
         $this->assertSame('pohoda-2026-10.xml', $this->sent[0]['attachments'][0]['name']);
         $this->assertSame([], $s->changedMonths($this->supplierId, null, false, $this->now));
+        $this->assertSame(0, $s->history($this->supplierId)['runs'][0]['changed_after']);
     }
 
     public function testCancelledAndEditedDocumentsAreReportedAndOnlyCancelledMonthIsNotAnError(): void
@@ -229,7 +243,10 @@ final class ScheduledPohodaExportServiceTest extends TestCase
         $this->assertCount(1, $h['runs'], 'Opakované chyby téhož měsíce tvoří jeden řádek.');
         $this->assertSame(3, $h['runs'][0]['attempts']);
         $this->assertSame('2026-10', $h['problem']['period_label']);
-        $this->assertSame('2026-10', $s->dueMonths($this->now)[$this->supplierId], 'Selhaný měsíc se zkouší znovu.');
+        // Po třetím selhání se cron o měsíc pokusí až za 4 dny, ne každý den.
+        $this->db->pdo()->prepare("UPDATE scheduled_pohoda_export_run SET created_at = '2026-11-10 06:30:00' WHERE supplier_id = ?")->execute([$this->supplierId]);
+        $this->assertArrayNotHasKey($this->supplierId, $s->dueMonths(new \DateTimeImmutable('2026-11-13 06:30')));
+        $this->assertSame('2026-10', $s->dueMonths(new \DateTimeImmutable('2026-11-14 06:29'))[$this->supplierId], 'Selhaný měsíc se zkouší znovu.');
 
         $this->mailFailure = null;
         $this->assertSame('ok', $s->run($this->supplierId, '2026-10', 'cron', false, null, $this->now)['status']);
@@ -271,16 +288,18 @@ final class ScheduledPohodaExportServiceTest extends TestCase
         $this->assertStringNotContainsString('SMTP detail', (string) $h['runs'][0]['error']);
     }
 
-    public function testConcurrentRunForSameMonthIsRefused(): void
+    public function testConcurrentRunOfAnyMonthOfTheSameCompanyIsRefused(): void
     {
         $s = $this->service();
-        $this->enable($s);
+        $this->enable($s, '2026-09');
         $cfg = Bootstrap::buildContainer()->get(\MyInvoice\Infrastructure\Config\Config::class)->get('db');
         $other = new \PDO(sprintf('mysql:host=%s;port=%d;dbname=%s', $cfg['host'], $cfg['port'] ?? 3306, (string) $this->db->pdo()->query('SELECT DATABASE()')->fetchColumn()), $cfg['user'], $cfg['pass']);
-        $name = NamedLockName::for($this->db, 'pohoda-export', $this->supplierId . ':2026-10');
+        // Zámek drží běh firmy (třeba ruční běh září); cron října téže firmy musí počkat.
+        $name = NamedLockName::for($this->db, 'pohoda-export', (string) $this->supplierId);
         $other->prepare('SELECT GET_LOCK(?, 0)')->execute([$name]);
         try {
             $this->assertSame('busy', $s->run($this->supplierId, '2026-10', 'cron', false, null, $this->now)['status']);
+            $this->assertSame('busy', $s->run($this->supplierId, '2026-09', 'manual', false, null, $this->now)['status']);
         } finally {
             $other->prepare('SELECT RELEASE_LOCK(?)')->execute([$name]);
         }
@@ -381,5 +400,76 @@ final class ScheduledPohodaExportServiceTest extends TestCase
         $this->assertSame([], $s->changedMonths($this->supplierId, null, false, $this->now));
         $pdo->prepare('UPDATE invoice_items SET unit_price_without_vat = 11 WHERE invoice_id = ? ORDER BY id DESC LIMIT 1')->execute([$id]);
         $this->assertSame(1, $s->changedMonths($this->supplierId, null, false, $this->now)['2026-08']['changed']);
+    }
+
+    public function testRunIsRecordedBeforeMailLeavesSoFailedWriteAfterSendingDoesNotResend(): void
+    {
+        $s = $this->service();
+        $this->enable($s);
+        $this->invoice('2026-10-02');
+        $seen = null;
+        // Kdyby proces po odeslání spadl dřív, než běh dokončí, musí už teď měsíc platit za odeslaný.
+        $this->onSend = function () use ($s, &$seen): void {
+            $st = $this->db->pdo()->prepare('SELECT status FROM scheduled_pohoda_export_run WHERE supplier_id = ? ORDER BY id DESC LIMIT 1');
+            $st->execute([$this->supplierId]);
+            $seen = ['status' => $st->fetchColumn(), 'due' => $s->dueMonths($this->now)];
+        };
+        $this->assertSame('ok', $s->run($this->supplierId, '2026-10', 'cron', false, null, $this->now)['status']);
+        $this->assertSame('sending', $seen['status']);
+        $this->assertArrayNotHasKey($this->supplierId, $seen['due'], 'Měsíc v odesílání cron znovu neposílá.');
+        $this->assertSame('ok', $s->history($this->supplierId)['runs'][0]['status']);
+
+        // E-mail neodešel: běh se převede na chybu bez otisků a měsíc se zkusí znovu.
+        $this->onSend = null;
+        $this->invoice('2026-09-02');
+        $this->db->pdo()->prepare("UPDATE scheduled_pohoda_export SET start_month = '2026-09' WHERE supplier_id = ?")->execute([$this->supplierId]);
+        $this->mailFailure = new \RuntimeException('SMTP down');
+        $this->assertSame('error', $s->run($this->supplierId, '2026-09', 'cron', false, null, $this->now)['status']);
+        $st = $this->db->pdo()->prepare("SELECT COUNT(*) FROM scheduled_pohoda_export_doc d JOIN scheduled_pohoda_export_run r ON r.id = d.run_id WHERE r.supplier_id = ? AND r.status = 'error'");
+        $st->execute([$this->supplierId]);
+        $this->assertSame(0, (int) $st->fetchColumn());
+        $this->assertArrayNotHasKey($this->supplierId, $s->dueMonths(new \DateTimeImmutable()), 'Další pokus až po odstupu.');
+        $this->assertSame('2026-09', $s->dueMonths(new \DateTimeImmutable('tomorrow 06:30'))[$this->supplierId]);
+    }
+
+    public function testFingerprintCoversCurrencyRateVatClassificationPricesWithVatAndClient(): void
+    {
+        $s = $this->service();
+        $this->enable($s, '2026-08');
+        $id = $this->invoice('2026-08-03');
+        $s->run($this->supplierId, '2026-08', 'cron', false, null, $this->now);
+        $pdo = $this->db->pdo();
+        $changes = [
+            'UPDATE invoices SET exchange_rate = 25.1 WHERE id = ?',
+            'UPDATE invoices SET prices_include_vat = 1 - prices_include_vat WHERE id = ?',
+            "UPDATE invoices SET vat_classification_code = 'X99' WHERE id = ?",
+            "UPDATE clients SET dic = 'CZ12345678' WHERE id = (SELECT client_id FROM invoices WHERE id = ?)",
+            "UPDATE invoices SET client_snapshot = JSON_OBJECT('company_name', 'Jiný odběratel') WHERE id = ?",
+        ];
+        foreach ($changes as $sql) {
+            $this->backdateRuns(10);
+            $s->run($this->supplierId, '2026-08', 'manual', true, null, $this->now); // nový otisk
+            $this->assertSame([], $s->changedMonths($this->supplierId, null, false, $this->now), 'Po opakování nic: ' . $sql);
+            $pdo->prepare($sql)->execute([$id]);
+            $this->assertSame(1, $s->changedMonths($this->supplierId, null, false, $this->now)['2026-08']['changed'] ?? 0, $sql);
+        }
+    }
+
+    public function testMailMentionsCreditNotesOnlyWhenIncluded(): void
+    {
+        $s = $this->service();
+        $s->saveConfig($this->supplierId, ['enabled' => true, 'run_day' => 5, 'include_credit_notes' => false, 'recipient_email' => 'ucetni@example.com'], null, new \DateTimeImmutable('2026-11-15'));
+        $this->invoice('2026-10-03');
+        $s->run($this->supplierId, '2026-10', 'cron', false, null, $this->now);
+        $this->assertFalse($this->sent[0]['vars']['include_credit_notes']);
+        $twig = new \Twig\Environment(new \Twig\Loader\FilesystemLoader(dirname(__DIR__, 3) . '/templates/email'));
+        $text = $twig->render('scheduled_export.cs.txt.twig', $this->sent[0]['vars']);
+        $this->assertStringContainsString('Neobsahuje dobropisy,', $text);
+        $this->assertStringNotContainsString('a dobropisy podle', $text);
+    }
+
+    private function backdateRuns(int $minutes): void
+    {
+        $this->db->pdo()->prepare('UPDATE scheduled_pohoda_export_run SET created_at = created_at - INTERVAL ? MINUTE WHERE supplier_id = ?')->execute([$minutes, $this->supplierId]);
     }
 }

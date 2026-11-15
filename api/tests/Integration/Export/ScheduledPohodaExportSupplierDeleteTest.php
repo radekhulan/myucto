@@ -65,7 +65,8 @@ final class ScheduledPohodaExportSupplierDeleteTest extends TestCase
 
         $request = (new ServerRequestFactory())->createServerRequest('DELETE', '/api/suppliers/' . $this->supplierId)
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $current)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $actor, 'role' => 'admin']);
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $actor, 'role' => 'admin'])
+            ->withParsedBody(['confirm' => 'Smazat s.r.o.']);
         $response = Bootstrap::buildContainer()->get(SettingsAction::class)
             ->deleteSupplierById($request, new Response(), ['id' => (string) $this->supplierId]);
         $this->assertSame(200, $response->getStatusCode(), (string) $response->getBody());
