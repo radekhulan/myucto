@@ -334,6 +334,9 @@ final class AssetService
                         409,
                     );
                 }
+                // Okruh párování a rozpad saldokonta jako mazání v deníku ({@see translate()} převede kód).
+                (new \MyInvoice\Service\Accounting\JournalPairingUseGuard($this->db))->assertEntriesFree($supplierId, [$activationEntryId]);
+                (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$activationEntryId]);
 
                 $lock = $pdo->prepare(
                     'SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ? FOR UPDATE'

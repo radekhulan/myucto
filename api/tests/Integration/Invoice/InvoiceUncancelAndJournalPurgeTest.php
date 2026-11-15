@@ -150,6 +150,7 @@ final class InvoiceUncancelAndJournalPurgeTest extends StockTestCase
      * Force-delete smazal zápis faktury i s okruhem párování, ve kterém byla spárovaná
      * s úhradou, a úhrada zůstala spárovaná s ničím. Okruh s jiným zápisem zápis drží:
      * smazání v deníku se nepoužije a platí dosavadní cesta (retenční brána, storno).
+     * Uživatel se ale dozví skutečný důvod (okruh), ne jen retenční lhůtu.
      */
     public function testForceDeleteKeepsEntryPairedWithPayment(): void
     {
@@ -161,8 +162,11 @@ final class InvoiceUncancelAndJournalPurgeTest extends StockTestCase
 
         $res = $this->invoke(DeleteInvoiceAction::class, $supplierId, $invoiceId, [], ['force' => '1']);
 
-        self::assertSame(422, $res['status'], json_encode($res['body']));
-        self::assertSame('retention_period', $res['body']['error']['code'] ?? null, 'Bez smazání zápisu platí retenční brána.');
+        self::assertSame(409, $res['status'], json_encode($res['body']));
+        self::assertSame('entry_paired', $res['body']['error']['code'] ?? null);
+        self::assertStringContainsString('Otevřené položky - párování', (string) $res['body']['error']['message']);
+        self::assertTrue($res['body']['error']['retention_period'] ?? false, 'Retenční lhůta zůstává v odpovědi jako druhý důvod.');
+        self::assertSame($entryId, $res['body']['error']['entry_id'] ?? null);
         self::assertSame(1, $this->rowCount('journal_entries', $entryId), 'Spárovaný zápis se nesmí smazat.');
         self::assertSame(2, $this->pairingItems($pairing), 'Okruh s úhradou zůstal celý.');
         self::assertSame(1, $this->rowCount('invoices', $invoiceId));
@@ -181,9 +185,16 @@ final class InvoiceUncancelAndJournalPurgeTest extends StockTestCase
 
         $res = $this->invoke(DeleteInvoiceAction::class, $supplierId, $invoiceId, [], ['force' => '1']);
 
-        self::assertSame(422, $res['status'], json_encode($res['body']));
-        self::assertSame('retention_period', $res['body']['error']['code'] ?? null, 'Bez smazání zápisu platí retenční brána.');
+        self::assertSame(409, $res['status'], json_encode($res['body']));
+        self::assertSame('allocation_saldo_in_use', $res['body']['error']['code'] ?? null);
+        self::assertStringContainsString('saldokontu', (string) $res['body']['error']['message']);
         self::assertSame(1, $this->rowCount('journal_entries', $entryId), 'Zápis s rozpadem saldokonta se nesmí smazat.');
+
+        // Vědomé přehlasování retence jde dál dosavadní cestou: storno zápisu, faktura zmizí.
+        $acked = $this->invoke(DeleteInvoiceAction::class, $supplierId, $invoiceId, [], ['force' => '1', 'ack_retention' => '1']);
+        self::assertSame(200, $acked['status'], json_encode($acked['body']));
+        self::assertSame(0, $this->rowCount('invoices', $invoiceId));
+        self::assertSame(1, $this->rowCount('journal_entries', $entryId), 'Zápis s rozpadem zůstal a je stornovaný.');
     }
 
     public function testUncancelRefusedWhenReversalPairedWithAnotherEntry(): void

@@ -1154,6 +1154,10 @@ final class ClosingRepository
         try {
             (new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, new JournalEntryRepository($this->db, new \MyInvoice\Service\ActivityLogger($this->db))))->assertEntriesMutable($supplierId, [$entryId]);
             (new \MyInvoice\Service\Property\Services\Settlement\SettlementUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+            // Otevírací zápis i zápisy kroků uzávěrky (kurzové rozdíly, rezervy, časové rozlišení)
+            // leží v okně otevřených položek; okruh ani rozpad saldokonta nesmí odejít kaskádou.
+            (new \MyInvoice\Service\Accounting\JournalPairingUseGuard($this->db))->assertEntriesFree($supplierId, [$entryId]);
+            (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$entryId]);
         } catch (\MyInvoice\Service\Accounting\PostingException|\MyInvoice\Service\Property\Charges\Issuance\IssuanceException $e) {
             throw new \MyInvoice\Service\Accounting\Closing\ClosingException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }

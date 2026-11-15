@@ -15,6 +15,8 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Repository\InvoiceAttachmentRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentJournalPurge;
+use MyInvoice\Service\Accounting\JournalPairingUseGuard;
+use MyInvoice\Service\Accounting\JournalSettlementUseGuard;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\DocumentPaymentLinks;
@@ -187,6 +189,7 @@ final class DeleteInvoiceAction
         $counterReleased = [];
         $retentionOverride = null;
         $journalPurge = null;
+        $journalPurgeBlock = null;
 
         // A3 (audit H4): mazání zaúčtované faktury NESMÍ nechat v deníku aktivní sirotčí
         // zápis. Reverze aktivního zápisu + PDF/soubory + counter release + vlastní delete
@@ -223,6 +226,7 @@ final class DeleteInvoiceAction
                 $purge = $this->journalPurge->purge(
                     $supplierId, 'invoice', $deleteIds, $reverseMeta, 'invoice_force_delete', $lockedAck,
                 );
+                $journalPurgeBlock = $purge['blocked'];
                 if ($purge['blocked'] === null && $purge['deleted'] !== []) {
                     $journalPurge = $purge;
                     $allUnposted = !$this->hasPostingTrace($supplierId, $deleteIds);
@@ -266,6 +270,19 @@ final class DeleteInvoiceAction
                     if (!$acknowledged) {
                         if ($ownTx && $pdo->inTransaction()) {
                             $pdo->rollBack();
+                        }
+                        // Zápis by šel smazat, nebýt okruhu párování nebo rozpadu saldokonta:
+                        // uživatel má vědět, co zrušit, ne jen narazit na retenční lhůtu.
+                        if ($journalPurgeBlock !== null && in_array($journalPurgeBlock['code'],
+                                [JournalPairingUseGuard::CODE, JournalSettlementUseGuard::CODE], true)) {
+                            return Json::error(
+                                $response,
+                                (string) $journalPurgeBlock['code'],
+                                'Zápis faktury v deníku nejde smazat. ' . $journalPurgeBlock['message']
+                                    . ' Bez smazání zápisu fakturu chrání retenční lhůta: ' . $e->getMessage(),
+                                409,
+                                ['entry_id' => $journalPurgeBlock['entry_id'], 'retention_period' => true],
+                            );
                         }
                         return Json::error($response, 'retention_period', $e->getMessage(), 422);
                     }

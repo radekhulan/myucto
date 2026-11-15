@@ -21,6 +21,8 @@ use MyInvoice\Service\Accounting\JournalLineAmount;
  */
 final class JournalSettlementUseGuard
 {
+    public const CODE = 'allocation_saldo_in_use';
+
     public function __construct(private readonly Connection $db) {}
 
     /** Zápisy se smí smazat jen bez rozpadu (ani zrušeného předpisu, ten nese historii). */
@@ -113,7 +115,7 @@ final class JournalSettlementUseGuard
     public static function block(): array
     {
         return [
-            'code'    => 'allocation_saldo_in_use',
+            'code'    => self::CODE,
             'message' => 'Řádek zápisu je v saldokontu přiřazený dokladům nebo ostatní položce. Nejdřív přiřazení zrušte v saldokontu (předpis ostatní položky stornem položky).',
         ];
     }
