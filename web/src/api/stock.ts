@@ -1007,6 +1007,8 @@ interface StockReceiptProposalBase {
   unmatched_lines?: StockReceiptProposalBase['lines']
   /** Řádky bez kódu a bez EAN, které nejsou služba: člověk jim kartu vybere v okně příjemky. */
   uncoded_lines?: StockReceiptProposalBase['lines']
+  /** Faktura má řádek, který zbývá přijmout na sklad: podle něj se nabízí příjem. */
+  has_lines_to_receive?: boolean
   cost_candidates: Array<{
     purchase_invoice_item_id: number
     description: string

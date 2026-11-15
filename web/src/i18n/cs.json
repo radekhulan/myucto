@@ -16945,6 +16945,7 @@
       "match_code_ean": "Navrženo podle kódu jako EAN, zkontrolujte",
       "match_ean": "Přiřazeno podle EAN",
       "match_none": "Karta nenalezena, vyberte ji",
+      "match_uncoded": "Řádek bez kódu, kartu vyberte",
       "recalc_failed": "Množství a cenu pro vybranou kartu se nepodařilo načíst. Vyberte kartu znovu, nebo řádek vyřaďte zadáním množství 0.",
       "remember_code": "Zapamatovat kód {code} u této karty po zaúčtování, příště se řádek přiřadí sám",
       "remember_moves_from": "Kód se odebere z karty: {cards}",

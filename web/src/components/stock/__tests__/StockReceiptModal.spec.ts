@@ -109,12 +109,15 @@ describe('StockReceiptModal: párování podle kódu', () => {
     expect(wrapper.text()).toContain('Olej bez kódu')
     expect(wrapper.text()).toContain('Filtr bez kódu')
     expect(wrapper.text()).not.toContain('Karta nenalezena, vyberte ji')
+    const uncodedLabels = () => wrapper.text().split('Řádek bez kódu, kartu vyberte').length - 1
+    expect(uncodedLabels()).toBe(2)
 
     const select = wrapper.findAllComponents({ name: 'SearchableSelect' })[1]!
     await select.vm.$emit('search', 'olej')
     await flushPromises()
     await select.vm.$emit('update:modelValue', 60)
     await flushPromises()
+    expect(uncodedLabels()).toBe(1)
     expect(wrapper.text()).not.toContain('Zapamatovat kód')
 
     await wrapper.findAll('footer button')[1]!.trigger('click')
