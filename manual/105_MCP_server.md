@@ -1057,10 +1057,11 @@ Platí přitom:
   je klasifikace položek (druh nákladu, účet, členění DPH) a oprava nároku na odpočet,
   které jdou i u přijatého dokladu, dokud není zaúčtovaný. Před přijetím ukáže
   `get_invoice_posting`, jak se doklad zaúčtuje.
-- **Přijetí může doklad rovnou zaúčtovat.** Má-li firma zapnuté automatické
-  účtování přijatých faktur, aplikace doklad při přijetí zaúčtuje; u úhrady
-  hotově z pokladny založí výdajový pokladní doklad. Asistent to před přijetím
-  řekne a čeká na potvrzení.
+- **Přijetí přes asistenta doklad nezaúčtuje.** Má-li firma zapnuté automatické
+  účtování přijatých faktur, při přijetí přes MCP se zaúčtování odloží a doklad
+  zaúčtujete v aplikaci (fronta nezaúčtovaných dokladů, hromadné zaúčtování). U úhrady
+  hotově z pokladny vznikne výdajový pokladní doklad. Asistent přijetí provede až
+  po potvrzení.
 - **Zaúčtovat doklad asistent neumí.** Ruční zaúčtování není
   v katalogu MCP a běžný token je nepovoluje. U zaúčtovaného dokladu proto odmítne i změnu druhu dokladu,
   druhu nákladu, kurzu, nároku na odpočet, spárování se zálohou a storno, protože

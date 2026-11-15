@@ -74,6 +74,7 @@ final class TransitionPurchaseInvoiceStatusAction
         private readonly PurchaseInvoiceReceiver $receiver,
         private readonly PurchaseInvoiceApprovalService $approvals,
         private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
+        private readonly \MyInvoice\Service\Accounting\DocumentAutoPoster $autoPoster,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -327,8 +328,19 @@ final class TransitionPurchaseInvoiceStatusAction
         // idempotentní.
         $userId = isset($user['id']) ? (int) $user['id'] : null;
         $settlement = null;
+        $posting = null;
         if ($target === 'received' && !$offsetReverted) {
-            $settlement = $this->receiver->afterReceived($supplierId, $id, $userId, $ip, $request->getHeaderLine('User-Agent'));
+            $afterReceived = fn (): ?array => $this->receiver->afterReceived($supplierId, $id, $userId, $ip, $request->getHeaderLine('User-Agent'));
+            if (RequestAuthorization::isRestrictedBearer($request)) {
+                // Deník je pro token jen ke čtení: automatické zaúčtování podle politiky firmy
+                // se odloží a doklad zaúčtuje uživatel v aplikaci. Stejně jako párování banky.
+                [$settlement, $deferred] = $this->autoPoster->withDeferredPosting($afterReceived);
+                if ($deferred !== []) {
+                    $posting = ['action' => 'deferred', 'reason' => 'api_token'];
+                }
+            } else {
+                $settlement = $afterReceived();
+            }
         } else {
             // Platba kartou: zaúčtovaný / uhrazený doklad se spáruje s pohybem karty
             // (idempotentní, bez režimu karet no-op).
@@ -356,6 +368,9 @@ final class TransitionPurchaseInvoiceStatusAction
         $invoice = $this->repo->find($id, $supplierId);
         if ($invoice !== null && $settlement !== null && $settlement['status'] !== CashSettlementService::NOOP) {
             $invoice['_cash_settlement'] = $settlement;
+        }
+        if ($invoice !== null && $posting !== null) {
+            $invoice['posting'] = $posting;
         }
 
         return Json::ok($response, $invoice);

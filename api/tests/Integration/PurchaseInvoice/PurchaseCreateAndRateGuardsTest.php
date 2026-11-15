@@ -18,8 +18,10 @@ use Slim\Psr7\Response as Psr7Response;
 
 /**
  * Veřejné API přijatých faktur (audit MCP 2026-11):
- *  - POST /purchase-invoices neurčuje stav dokladu: `status: received` z těla by obešel
- *    přechod (schvalování, automatické zaúčtování, pokladní doklad);
+ *  - POST /purchase-invoices se `status: received` doklad založí jako koncept a přijme ho
+ *    stejným přechodem jako tlačítko Přijmout (dřív se stav zapsal rovnou a přechod
+ *    se obešel: schvalování, automatické zaúčtování, pokladní doklad); token automatické
+ *    zaúčtování odloží (deník je pro něj jen ke čtení);
  *  - zaokrouhlení zadané při založení se uloží stejně jako při úpravě;
  *  - POST /purchase-invoices/{id}/exchange-rate odmítne zaúčtovaný a stornovaný doklad,
  *    protože deník nepřeúčtuje;
@@ -95,12 +97,61 @@ final class PurchaseCreateAndRateGuardsTest extends TestCase
         }
     }
 
-    /** BEZ OPRAVY PADÁ: doklad vznikl rovnou jako přijatý s interním číslem, bez přechodu stavu. */
-    public function testCreateIgnoresStatusFromBody(): void
+    public function testCreateWithReceivedStatusRunsReceiveTransition(): void
     {
-        $id = $this->createInvoice(['status' => 'received']);
+        $created = $this->create(['status' => 'received']);
 
-        self::assertSame('draft', $this->column($id, 'status'), 'Stav určuje jen přechod, ne tělo POST.');
+        self::assertSame(201, $created['status'], json_encode($created['body'], JSON_UNESCAPED_UNICODE));
+        $id = (int) $created['body']['id'];
+        self::assertSame('received', $this->column($id, 'status'));
+        self::assertNotEmpty($this->column($id, 'varsymbol'), 'Přijetí přidělí interní číslo.');
+        self::assertSame(['requested' => 'received', 'result' => 'received'], $created['body']['status_transition'] ?? null);
+        self::assertNotFalse($this->auditCount($id, 'purchase_invoice.transitioned'), 'Přijetí prošlo přechodem (audit).');
+    }
+
+    public function testCreateRejectsOtherStatus(): void
+    {
+        $created = $this->create(['status' => 'booked']);
+
+        self::assertSame(400, $created['status']);
+        self::assertSame('validation_failed', $created['body']['error']['code'] ?? null);
+    }
+
+    /**
+     * BEZ OPRAVY PADÁ: `status: received` z těla zapsal stav rovnou a obešel přechod, takže
+     * firma s automatickým účtováním dostala přijatý nezaúčtovaný doklad mimo politiku,
+     * a token by po opravě přes přechod zaúčtoval, ačkoli je pro něj deník jen ke čtení.
+     */
+    public function testTokenCreateWithReceivedDefersAutoPosting(): void
+    {
+        $this->doubleEntryWithAutoPost();
+
+        $session = $this->create(['status' => 'received']);
+        self::assertSame(201, $session['status'], json_encode($session['body'], JSON_UNESCAPED_UNICODE));
+        self::assertNotNull($this->column((int) $session['body']['id'], 'booked_at'),
+            'Kontrola nastavení: relace podle politiky firmy zaúčtuje.');
+
+        $token = $this->create(['status' => 'received'], 'bearer');
+        self::assertSame(201, $token['status'], json_encode($token['body'], JSON_UNESCAPED_UNICODE));
+        $id = (int) $token['body']['id'];
+        self::assertSame('received', $this->column($id, 'status'));
+        self::assertNull($this->column($id, 'booked_at'), 'Token doklad nezaúčtuje.');
+        self::assertSame(0, $this->journalCount($id));
+        self::assertSame(['action' => 'deferred', 'reason' => 'api_token'], $token['body']['posting'] ?? null);
+    }
+
+    /** Přechod přijetí přes token (receive_purchase_invoice) odkládá zaúčtování stejně. */
+    public function testTokenReceiveTransitionDefersAutoPosting(): void
+    {
+        $this->doubleEntryWithAutoPost();
+        $id = $this->createInvoice();
+
+        $res = $this->transition($id, 'received', 'bearer');
+
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('received', $this->column($id, 'status'));
+        self::assertNull($this->column($id, 'booked_at'));
+        self::assertSame(['action' => 'deferred', 'reason' => 'api_token'], $res['body']['posting'] ?? null);
     }
 
     /** BEZ OPRAVY PADÁ: zaokrouhlení zadané při založení se ztratilo (ukládal ho jen PUT). */
@@ -177,6 +228,18 @@ final class PurchaseCreateAndRateGuardsTest extends TestCase
     /** @param array<string,mixed> $extra */
     private function createInvoice(array $extra = []): int
     {
+        $created = $this->create($extra);
+        self::assertSame(201, $created['status'], json_encode($created['body'], JSON_UNESCAPED_UNICODE));
+
+        return (int) $created['body']['id'];
+    }
+
+    /**
+     * @param array<string,mixed> $extra
+     * @return array{status:int, body:array<string,mixed>}
+     */
+    private function create(array $extra = [], string $auth = 'session'): array
+    {
         $body = $extra + [
             'vendor_id'             => $this->vendorId,
             'vendor_invoice_number' => 'GUARD-' . bin2hex(random_bytes(3)),
@@ -195,10 +258,53 @@ final class PurchaseCreateAndRateGuardsTest extends TestCase
                 'vat_rate_id'            => $this->vatRateId,
             ]],
         ];
-        $created = self::decode(($this->create)($this->request('POST', $body), new Psr7Response()));
-        self::assertSame(201, $created['status'], json_encode($created['body'], JSON_UNESCAPED_UNICODE));
+        $request = $this->request('POST', $body)->withAttribute(AuthMiddleware::ATTR_METHOD, $auth);
+        if ($auth === 'bearer') {
+            $request = $request->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['scope' => 'read_write']);
+        }
 
-        return (int) $created['body']['id'];
+        return self::decode(($this->create)($request, new Psr7Response()));
+    }
+
+    private function doubleEntryWithAutoPost(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+        $pdo = $this->db->pdo();
+        $period = $pdo->prepare("SELECT 1 FROM accounting_periods WHERE supplier_id = ? AND starts_on <= '2096-07-02' AND ends_on >= '2096-07-02'");
+        $period->execute([$this->supplierId]);
+        if ($period->fetchColumn() === false) {
+            $container->get(\MyInvoice\Repository\AccountingPeriodRepository::class)
+                ->create($this->supplierId, 2096, '2096-01-01', '2096-12-31');
+        }
+        $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry', auto_post_purchases = 1 WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $pdo->prepare(
+            "INSERT INTO auto_posting_policy (supplier_id, operation_type, level, updated_by)
+             VALUES (?, 'document.purchase', 'auto', ?)
+             ON DUPLICATE KEY UPDATE level = VALUES(level), updated_by = VALUES(updated_by)"
+        )->execute([$this->supplierId, $this->userId]);
+    }
+
+    private function journalCount(int $id): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ? AND source_type = 'purchase_invoice' AND source_id = ?"
+        );
+        $stmt->execute([$this->supplierId, $id]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function auditCount(int $id, string $action): int|false
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM activity_log WHERE entity_type = 'purchase_invoice' AND entity_id = ? AND action = ?"
+        );
+        $stmt->execute([$id, $action]);
+        $count = (int) $stmt->fetchColumn();
+
+        return $count > 0 ? $count : false;
     }
 
     private function markPosted(int $id): void

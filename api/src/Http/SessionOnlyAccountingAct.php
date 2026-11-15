@@ -21,8 +21,10 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * sdílená s běžným workflow, které token smí, takže rozhoduje až akce podle toho, co
  * požadavek znamená. Tady je to pravidlo jednou a dá se zavolat.
  *
- * Automatické zaúčtování, které si firma nastavila (vystavení faktury, přijetí přijaté
- * faktury), sem nepatří: je to volba firmy a token ho spouští stejně jako uživatel.
+ * Automatické zaúčtování, které si firma nastavila, sem nepatří: u vystavení faktury
+ * ho token spouští stejně jako uživatel. Přijetí přijaté faktury tokenem automatické
+ * zaúčtování odloží ({@see \MyInvoice\Service\Accounting\DocumentAutoPoster::withDeferredPosting()},
+ * `posting: {action: deferred, reason: api_token}`), stejně jako párování banky.
  *
  * Brána je `!actsAsSession()`, ne `isBearerAuth()`: požadavek bez metody ověření je
  * anonymní a projít nesmí (viz {@see RequestAuthorization::isSessionAuth()}). Token

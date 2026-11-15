@@ -669,8 +669,9 @@ export const PURCHASE_TOOLS = [
     description:
       'Převede doklad do stavu PŘIJATO. Z konceptu: přidělí interní číslo, doklad vstoupí do evidence '
       + 'DPH (odpočet v období podle DUZP a data přijetí), do závazků a do platebních příkazů. '
-      + 'MÁ-LI FIRMA ZAPNUTÉ AUTOMATICKÉ ÚČTOVÁNÍ PŘIJATÝCH FAKTUR, SERVER DOKLAD ROVNOU ZAÚČTUJE; '
-      + 'u hotovostní úhrady z pokladny vznikne výdajový pokladní doklad.\n\n'
+      + 'Automatické zaúčtování, které má firma zapnuté, se přes MCP ODLOŽÍ (odpověď `posting: {action: '
+      + '"deferred"}`): účetní deník je pro asistenta jen ke čtení, doklad zaúčtuje účetní v aplikaci. '
+      + 'U hotovostní úhrady z pokladny vznikne výdajový pokladní doklad.\n\n'
       + 'Vyžaduje-li koncept schválení manažerem střediska, server ho místo přijetí odešle ke schválení '
       + '(odpověď `approval_requested: true`, doklad zůstane konceptem a přijme se sám po schválení).\n\n'
       + 'Z uhrazeného dokladu tím zrušíš označení úhrady, ze stornovaného obnovíš doklad '
@@ -681,7 +682,7 @@ export const PURCHASE_TOOLS = [
     run: async (c, a, tool) => {
       const pi = await loadPurchase(c, a.id, tool);
       const action = {
-        draft: 'Přijmout se má koncept (vstoupí do evidence DPH a závazků; se zapnutým automatickým účtováním se zaúčtuje)',
+        draft: 'Přijmout se má koncept (vstoupí do evidence DPH a závazků; zaúčtuje ho účetní v aplikaci)',
         paid: 'U přijaté faktury se má zrušit označení úhrady',
         cancelled: 'Obnovit se má stornovaná přijatá faktura (vrátí se do evidence DPH a závazků)',
       }[pi?.status];

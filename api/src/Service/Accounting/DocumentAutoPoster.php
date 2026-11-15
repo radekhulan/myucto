@@ -45,6 +45,34 @@ final class DocumentAutoPoster
         private readonly \MyInvoice\Service\Accounting\Bank\BankPostingService $bankPosting,
     ) {}
 
+    /** Doklady, jejichž automatické zaúčtování se během {@see withDeferredPosting()} odložilo; null = neodkládá se. */
+    private ?array $deferred = null;
+
+    /**
+     * Spustí `$work` tak, že automatické zaúčtování ({@see maybeAutoPost()}) uvnitř nic
+     * nezapíše, jen si poznamená, co by zaúčtovalo. Pro API token bez plného zápisu
+     * (MCP, integrace), pro který je deník jen ke čtení: doklad zůstane nezaúčtovaný
+     * a zaúčtuje ho uživatel v aplikaci (fronta nezaúčtovaných, hromadné zaúčtování).
+     * Ostatní kroky toku (stav, pokladna, karta) proběhnou beze změny.
+     *
+     * @template T
+     * @param callable(): T $work
+     * @return array{0:T, 1:list<array{source_type:string, id:int}>} výsledek a odložené doklady
+     */
+    public function withDeferredPosting(callable $work): array
+    {
+        $outer = $this->deferred;
+        $this->deferred = [];
+        try {
+            $result = $work();
+            $deferred = $this->deferred;
+        } finally {
+            $this->deferred = $outer;
+        }
+
+        return [$result, $deferred];
+    }
+
     /**
      * Zaúčtuje jeden doklad a označí ho jako zaúčtovaný (booked_at/booked_by).
      * Idempotentní (PostingService dedupuje přes source_type+source_id). Převzatý
@@ -137,6 +165,13 @@ final class DocumentAutoPoster
                 $userAgent,
                 $supplierId,
             );
+            return;
+        }
+
+        if ($this->deferred !== null) {
+            $this->deferred[] = ['source_type' => $sourceType, 'id' => $docId];
+            $this->activity->log('accounting.auto_post_deferred', $userId, $sourceType, $docId,
+                ['reason' => 'api_token'], $ip, $userAgent, $supplierId);
             return;
         }
 

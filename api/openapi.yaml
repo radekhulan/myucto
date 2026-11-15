@@ -5135,7 +5135,8 @@ paths:
           description: |
             Validace neprošla (`validation_failed`, detaily v `error.fields`), klient
             neexistuje (`client_not_found`), odkaz míří na cizí firmu
-            (`invalid_reference`) nebo by zápis porušil integritu (`integrity_violation`).
+            (`invalid_reference`), kód měny `currency` firma nemá (`unknown_currency`)
+            nebo by zápis porušil integritu (`integrity_violation`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -11582,6 +11583,15 @@ paths:
     post:
       tags: [Purchase invoices]
       summary: Vytvoří draft přijaté faktury
+      description: |
+        Doklad vzniká jako koncept. S `status: received` se po založení přijme stejným přechodem
+        jako `POST /api/v1/purchase-invoices/{id}/transition` s `target=received` (schvalování
+        manažerem střediska, interní číslo, automatické zaúčtování podle politiky firmy, pokladní
+        doklad u úhrady hotově). Výsledek nese `status_transition`: `result` je `received`,
+        `approval_requested` (doklad zůstal konceptem a čeká na schválení), nebo `failed`
+        s `error` (doklad zůstal úplným konceptem). Přes API token bez plného zápisu se
+        automatické zaúčtování odloží (`posting: {action: deferred, reason: api_token}`),
+        doklad zaúčtuje uživatel v aplikaci. Jiný `status` než `draft` a `received` vrací 400.
       parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
       requestBody:
         required: true
@@ -11593,7 +11603,24 @@ paths:
           description: Created
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PurchaseInvoice' }
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/PurchaseInvoice' }
+                  - type: object
+                    properties:
+                      status_transition:
+                        type: object
+                        description: "Jen při `status: received` v těle."
+                        properties:
+                          requested: { type: string, enum: [received] }
+                          result: { type: string, enum: [received, approval_requested, failed] }
+                          error: { $ref: '#/components/schemas/Error' }
+                      posting:
+                        type: object
+                        description: Automatické zaúčtování odložené pro API token.
+                        properties:
+                          action: { type: string, enum: [deferred] }
+                          reason: { type: string, enum: [api_token] }
         '400': { description: Validation error }
 
   /api/v1/purchase-invoices/{id}:
@@ -11920,8 +11947,9 @@ paths:
         vrací 403 `token_write_forbidden` a provádí se v aplikaci (token s plným zápisem
         `system_write` ho provede jako uživatel v aplikaci). Totéž platí pro
         `target=cancelled` u zaúčtovaného dokladu (storno stornuje i zápis v deníku).
-        Ostatní přechody token smí; automatické zaúčtování při přijetí (`received`), které má firma
-        zapnuté, proběhne stejně jako z aplikace.
+        Ostatní přechody token smí. Automatické zaúčtování při přijetí (`received`), které
+        má firma zapnuté, se pro token bez plného zápisu odloží: odpověď nese
+        `posting: {action: deferred, reason: api_token}` a doklad zaúčtuje uživatel v aplikaci.
 
         Schvalování manažerem střediska: vyžaduje-li koncept schválení (typ dimenze
         se schvalováním a hodnota nad limitem), přechod na `received` doklad
@@ -34203,8 +34231,9 @@ paths:
       summary: Obnovení interně stornované faktury
       operationId: publicInvoicesIdUncancelPost
       description: |
-        Má-li faktura nebo její stornovací doklad zápisy v deníku, obnovení je smaže; přes
-        API token proto vrací 403 `token_write_forbidden` a provádí se v aplikaci.
+        Vyžaduje scope read_write. Má-li faktura nebo její stornovací doklad zápisy v deníku,
+        obnovení je smaže; přes API token proto vrací 403 `token_write_forbidden` a provádí
+        se v aplikaci.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - name: id
@@ -34234,7 +34263,6 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationFailed'
-      description: Vyžaduje scope read_write.
   /api/v1/invoices/{id}/refund-order/prefill:
     get:
       tags:
@@ -53064,7 +53092,7 @@ components:
           type: string
           example: CZK
           deprecated: true
-          description: "Legacy — kód měny (CZK, EUR, …) resolvuje se na `currency_id` v rámci supplier-a. Preferuj `currency_id`."
+          description: "Kód měny (CZK, EUR, …), resolvuje se na `currency_id` v rámci firmy. Kód, který firma v číselníku měn nemá, vrátí 400 `unknown_currency`. Při PUT bez `currency_id` kód měnu dokladu změní."
         language: { type: string, enum: [cs, en], description: "Default = language klienta (cs)" }
         reverse_charge: { type: boolean, description: "Přenesená daňová povinnost. Default = z klienta." }
         prices_include_vat: { type: boolean, default: false, description: "Ceny položek zadané včetně DPH (DPH shora koeficientem)." }
@@ -56476,7 +56504,8 @@ components:
           type: array
           description: "Účetní alokace celé rekapitulace; součty musí po sazbách přesně odpovídat dokladu. [] alokace zruší."
           items: { $ref: '#/components/schemas/PurchaseVatAllocation' }
-        rounding: { type: number, description: "Zaokrouhlení dokladu (POST i PUT); zapisuje se jen když je klíč přítomen. Stav dokladu tělo neurčuje, `status` se ignoruje, přijetí je přechod `POST /api/v1/purchase-invoices/{id}/transition`." }
+        rounding: { type: number, description: "Zaokrouhlení dokladu (POST i PUT); zapisuje se jen když je klíč přítomen." }
+        status: { type: string, enum: [draft, received], description: "Jen POST: `received` doklad po založení přijme přechodem stavu (viz POST /api/v1/purchase-invoices)." }
         vat_deduction: { type: string, enum: [full, none, proportional, reduced], default: full, description: "Nárok na odpočet DPH (none → mimo Knihu DPH/DPHDP3/KH; proportional → poměrný §75; reduced → krácený §76)." }
         vat_deduction_percent: { type: number, format: float, minimum: 0, maximum: 100, default: 100, description: "Procento odpočtu pro proportional (§75)." }
         tax_deductible: { type: boolean, default: true, description: "Daňová uznatelnost pro daň z příjmů (nezávislé na DPH)." }
