@@ -102,7 +102,9 @@ info:
     Ke konceptu ostatní položky smí token zapsat i dimenze hlavičky
     (`PUT /accounting/dimensions/documents/other-items/{id}`); u potvrzeného či
     zaúčtovaného dokladu a u konceptu z automaticky účtovaného opakování odpoví
-    `403 token_write_forbidden`. Dokument (např. smlouvu) k ostatní položce připojíte
+    `403 token_write_forbidden`. Totéž platí pro dimenze hlavičky a položek konceptu
+    vydané a přijaté faktury (`PUT /accounting/dimensions/documents/invoices/{id}`,
+    `.../purchase-invoices/{id}`). Dokument (např. smlouvu) k ostatní položce připojíte
     přes `POST /documents/{id}/links` s `entity_type: other_item`.
 
     Zaúčtování dokladu, storno zápisu, uzavření období, zaevidování opravy podle
@@ -5133,7 +5135,8 @@ paths:
           description: |
             Validace neprošla (`validation_failed`, detaily v `error.fields`), klient
             neexistuje (`client_not_found`), odkaz míří na cizí firmu
-            (`invalid_reference`) nebo by zápis porušil integritu (`integrity_violation`).
+            (`invalid_reference`), kód měny `currency` firma nemá (`unknown_currency`)
+            nebo by zápis porušil integritu (`integrity_violation`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -7573,7 +7576,9 @@ paths:
 
         Dobropis lze stornovat pouze v režimu `internal`. Stornovací doklad
         (`cancellation`) stornovat nelze. Storno je účetní akt — na zaúčtovaném
-        či uzamčeném dokladu ho blokuje zámek (Epic F6).
+        či uzamčeném dokladu ho blokuje zámek (Epic F6). Interní storno zaúčtované faktury
+        stornuje i její zápis v deníku, proto přes API token vrací 403 `token_write_forbidden`
+        (provádí se v aplikaci); dobropis (`credit_note`) token založit smí.
 
         Kalendář (`rent_calendar`, `advance_calendar`) se stornuje jen v režimu `internal`
         a spolu s ním i jeho neuhrazené splátky. Doklad splátky se opravuje jen dobropisem
@@ -11590,6 +11595,15 @@ paths:
     post:
       tags: [Purchase invoices]
       summary: Vytvoří draft přijaté faktury
+      description: |
+        Doklad vzniká jako koncept. S `status: received` se po založení přijme stejným přechodem
+        jako `POST /api/v1/purchase-invoices/{id}/transition` s `target=received` (schvalování
+        manažerem střediska, interní číslo, automatické zaúčtování podle politiky firmy, pokladní
+        doklad u úhrady hotově). Výsledek nese `status_transition`: `result` je `received`,
+        `approval_requested` (doklad zůstal konceptem a čeká na schválení), nebo `failed`
+        s `error` (doklad zůstal úplným konceptem). Přes API token bez plného zápisu se
+        automatické zaúčtování odloží (`posting: {action: deferred, reason: api_token}`),
+        doklad zaúčtuje uživatel v aplikaci. Jiný `status` než `draft` a `received` vrací 400.
       parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
       requestBody:
         required: true
@@ -11601,7 +11615,24 @@ paths:
           description: Created
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PurchaseInvoice' }
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/PurchaseInvoice' }
+                  - type: object
+                    properties:
+                      status_transition:
+                        type: object
+                        description: "Jen při `status: received` v těle."
+                        properties:
+                          requested: { type: string, enum: [received] }
+                          result: { type: string, enum: [received, approval_requested, failed] }
+                          error: { $ref: '#/components/schemas/Error' }
+                      posting:
+                        type: object
+                        description: Automatické zaúčtování odložené pro API token.
+                        properties:
+                          action: { type: string, enum: [deferred] }
+                          reason: { type: string, enum: [api_token] }
         '400': { description: Validation error }
 
   /api/v1/purchase-invoices/{id}:
@@ -11829,6 +11860,10 @@ paths:
         Pošle-li se `rate` (hodnota, nebo `null` pro vymazání) bez `rate_date` a `source`, nastaví
         se `rate_date` na `null` a `source` na `manual`, takže se trojice resetuje společně.
         Explicitní `null` v `source` se bere jako `manual`.
+
+        Zaúčtovaný doklad (`posted_document`) a storno (`not_editable`) endpoint odmítne s 409:
+        kurz mění korunové částky a tenhle endpoint deník nepřeúčtuje. Kurz zaúčtovaného dokladu
+        se mění úpravou dokladu (`PUT /api/v1/purchase-invoices/{id}`), která zápis dorovná.
       parameters:
         - in: path
           name: id
@@ -11847,6 +11882,7 @@ paths:
                 source: { type: string, enum: [cnb, manual, idoklad, fakturoid], default: manual }
       responses:
         '200': { description: OK }
+        '409': { description: Zaúčtovaný nebo stornovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/purchase-invoices/{id}/payment-calendar:
     parameters:
@@ -11921,9 +11957,11 @@ paths:
       description: |
         `target=booked` je ruční zaúčtování dokladu, tedy účetní úkon: přes API token
         vrací 403 `token_write_forbidden` a provádí se v aplikaci (token s plným zápisem
-        `system_write` ho provede jako uživatel v aplikaci). Ostatní přechody
-        token smí; automatické zaúčtování při přijetí (`received`), které má firma
-        zapnuté, proběhne stejně jako z aplikace.
+        `system_write` ho provede jako uživatel v aplikaci). Totéž platí pro
+        `target=cancelled` u zaúčtovaného dokladu (storno stornuje i zápis v deníku).
+        Ostatní přechody token smí. Automatické zaúčtování při přijetí (`received`), které
+        má firma zapnuté, se pro token bez plného zápisu odloží: odpověď nese
+        `posting: {action: deferred, reason: api_token}` a doklad zaúčtuje uživatel v aplikaci.
 
         Schvalování manažerem střediska: vyžaduje-li koncept schválení (typ dimenze
         se schvalováním a hodnota nad limitem), přechod na `received` doklad
@@ -32715,6 +32753,84 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /api/v1/accounting/dimensions/documents/invoices/{id}:
+    put:
+      tags:
+      - Accounting
+      summary: Dimenze konceptu vydané faktury
+      description: |
+        Nahradí dimenze hlavičky (ID typu → ID hodnoty z `GET /accounting/dimensions`), položek
+        (pořadí položky od 1, jak je vrací detail dokladu → mapa typ → hodnota) a rozpadu
+        (`splits`, pořadí 0 = hlavička). Vynechané `items` nebo `splits` zůstanou beze změny.
+        Firma musí mít dimenze zapnuté. Přes API token jen u KONCEPTU (u vystaveného,
+        přijatého nebo zaúčtovaného dokladu `403 token_write_forbidden`); koncept nemá řádky
+        v deníku, nic se nepřeúčtuje. Vyžaduje oprávnění zápisu `accounting` i `invoices`.
+      parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentDimensionsInput'
+      responses:
+        '200':
+          description: Uložené dimenze dokladu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDimensions'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /api/v1/accounting/dimensions/documents/purchase-invoices/{id}:
+    put:
+      tags:
+      - Accounting
+      summary: Dimenze konceptu přijaté faktury
+      description: |
+        Nahradí dimenze hlavičky (ID typu → ID hodnoty z `GET /accounting/dimensions`), položek
+        (pořadí položky od 1, jak je vrací detail dokladu → mapa typ → hodnota) a rozpadu
+        (`splits`, pořadí 0 = hlavička). Vynechané `items` nebo `splits` zůstanou beze změny.
+        Firma musí mít dimenze zapnuté. Přes API token jen u KONCEPTU (u vystaveného,
+        přijatého nebo zaúčtovaného dokladu `403 token_write_forbidden`); koncept nemá řádky
+        v deníku, nic se nepřeúčtuje. Vyžaduje oprávnění zápisu `accounting` i `purchase_invoices`.
+      parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentDimensionsInput'
+      responses:
+        '200':
+          description: Uložené dimenze dokladu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDimensions'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
   /api/v1/accounting/dimensions/journal/{id}:
     get:
       tags:
@@ -34277,6 +34393,10 @@ paths:
       - Invoices
       summary: Obnovení interně stornované faktury
       operationId: publicInvoicesIdUncancelPost
+      description: |
+        Vyžaduje scope read_write. Má-li faktura nebo její stornovací doklad zápisy v deníku,
+        obnovení je smaže; přes API token proto vrací 403 `token_write_forbidden` a provádí
+        se v aplikaci.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - name: id
@@ -34306,7 +34426,6 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationFailed'
-      description: Vyžaduje scope read_write.
   /api/v1/invoices/{id}/refund-order/prefill:
     get:
       tags:
@@ -53150,7 +53269,7 @@ components:
           type: string
           example: CZK
           deprecated: true
-          description: "Legacy — kód měny (CZK, EUR, …) resolvuje se na `currency_id` v rámci supplier-a. Preferuj `currency_id`."
+          description: "Kód měny (CZK, EUR, …), resolvuje se na `currency_id` v rámci firmy. Kód, který firma v číselníku měn nemá, vrátí 400 `unknown_currency`. Při PUT bez `currency_id` kód měnu dokladu změní."
         language: { type: string, enum: [cs, en], description: "Default = language klienta (cs)" }
         reverse_charge: { type: boolean, description: "Přenesená daňová povinnost. Default = z klienta." }
         prices_include_vat: { type: boolean, default: false, description: "Ceny položek zadané včetně DPH (DPH shora koeficientem)." }
@@ -55310,6 +55429,11 @@ components:
           type: [string, "null"]
           maxLength: 10
           description: "Účet položky (aktivní účet rozvrhu firmy mimo saldokontní, daňové a peněžní účty 311, 314, 321, 324, 325, 33x, 34x, 211, 221), jinak 400 validation_failed. Kromě výnosu smí být i rozvahový nebo nákladový (přefakturace). Vynecháno/NULL = účet produktu > kategorie > předkontace dokladu při zaúčtování. Kopie, dobropis, vyúčtování proformy i pravidelná fakturace ho přenášejí. Round-trip: uložení položek je DELETE + INSERT, nepošlete-li ho zpět, zanikne."
+        counter_account_code: { type: [string, "null"], maxLength: 10, description: "Protiúčet řádku (MD, pohledávka). Musí být v rámci dokladu jeden. Round-trip jako `revenue_account_code`." }
+        posting_rule_key: { type: [string, "null"], maxLength: 64, description: "Předkontace řádku (`GET /api/v1/accounting/posting-rules`); doplní účty, které řádek sám nemá. Round-trip jako `revenue_account_code`." }
+        seller_item_code: { type: [string, "null"], description: "Kód položky prodávajícího. Round-trip jako `revenue_account_code`." }
+        item_kind: { type: string, enum: [standard, text], default: standard, description: "`text` = textový řádek jen s popisem, bez částky a DPH." }
+        id: { type: integer, description: "Volitelné id uloženého řádku z detailu dokladu. Slouží ke spárování (vazba na výkaz práce, výběr sériových čísel); řádek se uloží s novým id." }
         oss_applicable: { type: boolean, default: false }
         oss_consumer_country: { type: [string, "null"], minLength: 2, maxLength: 2 }
         oss_rate_type: { type: [string, "null"], enum: [standard, reduced, second_reduced, parking, null] }
@@ -55723,7 +55847,7 @@ components:
 
     PurchaseInvoiceItemPayload:
       type: object
-      description: "Uložení řádků faktury je náhrada celého seznamu (DELETE + INSERT). Pole, která klient nepošle zpět, zaniknou. Výjimkou jsou `stock_item_id`, `seller_item_code`, `item_ean`, `intrastat_cn8_code` a `intrastat_country_of_origin`: chybí-li klíč v položce, která odpovídá uloženému řádku, převezme se uložená hodnota. Řádek se páruje podle `id`, bez něj podle pořadí, ale jen při shodném popisu. Explicitní `null` hodnotu smaže."
+      description: "Uložení řádků faktury je náhrada celého seznamu (DELETE + INSERT). Pole, která klient nepošle zpět, zaniknou. Výjimkou jsou `stock_item_id`, `seller_item_code`, `item_ean`, `intrastat_cn8_code`, `intrastat_country_of_origin`, `expense_account_code`, `counter_account_code` a `posting_rule_key`: chybí-li klíč v položce, která odpovídá uloženému řádku, převezme se uložená hodnota. Řádek se páruje podle `id`, bez něj podle pořadí, ale jen při shodném popisu. Explicitní `null` hodnotu smaže."
       required: [description, quantity, unit_price_without_vat, vat_rate_id]
       properties:
         id: { type: integer, description: "Volitelné id uloženého řádku (z detailu dokladu). Slouží jen ke spárování pro převzetí vynechaných sloupců; řádek se uloží s novým id." }
@@ -55737,7 +55861,9 @@ components:
         vat_classification_code: { type: [string, "null"] }
         is_fixed_asset: { type: boolean, default: false }
         expense_kind: { type: [string, "null"], enum: [service, material, small_asset, small_intangible, fixed_asset, null] }
-        expense_account_code: { type: [string, "null"], description: "Vlastní nákladový účet položky; NULL odvodí účet z druhu nákladu." }
+        expense_account_code: { type: [string, "null"], description: "Vlastní nákladový účet položky (MD); NULL odvodí účet z druhu nákladu. Vynechání a `null` stejně jako u `seller_item_code`." }
+        counter_account_code: { type: [string, "null"], description: "Protiúčet řádku (Dal, závazek). Musí být v rámci dokladu jeden. Vynechání a `null` stejně jako u `seller_item_code`." }
+        posting_rule_key: { type: [string, "null"], description: "Předkontace řádku (`GET /api/v1/accounting/posting-rules`); doplní účty, které řádek sám nemá. Vynechání a `null` stejně jako u `seller_item_code`." }
         accrual_from: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381) — začátek období. Jen spolu s `accrual_to`; neplatná dvojice se uloží jako bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381) — konec období (včetně)." }
         seller_item_code: { type: [string, "null"], maxLength: 80, description: "Kód položky dodavatele. Delší kód se nezkracuje, uloží se null. Vynechaný klíč převezme hodnotu uloženého řádku, explicitní `null` kód smaže (viz popis schématu)." }
@@ -56561,7 +56687,8 @@ components:
           type: array
           description: "Účetní alokace celé rekapitulace; součty musí po sazbách přesně odpovídat dokladu. [] alokace zruší."
           items: { $ref: '#/components/schemas/PurchaseVatAllocation' }
-        rounding: { type: number, description: "Jen PUT — zaokrouhlení dokladu; zapisuje se jen když je klíč přítomen." }
+        rounding: { type: number, description: "Zaokrouhlení dokladu (POST i PUT); zapisuje se jen když je klíč přítomen." }
+        status: { type: string, enum: [draft, received], description: "Jen POST: `received` doklad po založení přijme přechodem stavu (viz POST /api/v1/purchase-invoices)." }
         vat_deduction: { type: string, enum: [full, none, proportional, reduced], default: full, description: "Nárok na odpočet DPH (none → mimo Knihu DPH/DPHDP3/KH; proportional → poměrný §75; reduced → krácený §76)." }
         vat_deduction_percent: { type: number, format: float, minimum: 0, maximum: 100, default: 100, description: "Procento odpočtu pro proportional (§75)." }
         tax_deductible: { type: boolean, default: true, description: "Daňová uznatelnost pro daň z příjmů (nezávislé na DPH)." }
@@ -61709,6 +61836,27 @@ components:
       properties:
         header:
           $ref: '#/components/schemas/DimensionAssignmentMap'
+    DocumentDimensionsInput:
+      type: object
+      required:
+      - header
+      properties:
+        header:
+          $ref: '#/components/schemas/DimensionAssignmentMap'
+        items:
+          type: object
+          description: Pořadí položky od 1 → mapa ID typu → ID hodnoty. Pořadí, které chybí, dimenze nemá.
+          additionalProperties:
+            $ref: '#/components/schemas/DimensionAssignmentMap'
+        splits:
+          type: object
+          description: Pořadí položky (0 = hlavička) → ID typu → podíly hodnot.
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: array
+              items:
+                $ref: '#/components/schemas/DimensionSplitShare'
     DimensionSplitShare:
       type: object
       required:

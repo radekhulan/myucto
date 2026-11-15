@@ -9,10 +9,11 @@ namespace MyInvoice\Service\PurchaseInvoice;
  *
  * ── Co to opravuje ──────────────────────────────────────────────────────────────────
  * `PurchaseInvoiceRepository::replaceItems()` je DELETE + INSERT. Klient API, který o kódu
- * položky dodavatele, EAN, Intrastatu ani o vazbě na skladovou kartu neví, je v PUT
- * neposílá, a náhrada je tiše vynulovala. Na těch sloupcích přitom stojí párování řádku
- * s kartou při příjemce ({@see \MyInvoice\Service\Stock\PurchaseLineStockMatcher})
- * a hlášení Intrastat. Editor i MCP je posílají vždy, takže na ně se pravidlo nevztahuje.
+ * položky dodavatele, EAN, Intrastatu, vazbě na skladovou kartu ani o účtech a předkontaci
+ * řádku neví, je v PUT neposílá, a náhrada je tiše vynulovala. Na těch sloupcích přitom
+ * stojí párování řádku s kartou při příjemce ({@see \MyInvoice\Service\Stock\PurchaseLineStockMatcher}),
+ * hlášení Intrastat a zaúčtování řádku, které nastavila účetní. Editor i MCP je posílají
+ * vždy, takže na ně se pravidlo nevztahuje.
  *
  * ── Pravidla ────────────────────────────────────────────────────────────────────────
  * 1. Rozhoduje `array_key_exists()`, ne prázdná hodnota: explicitní `null` je pokyn
@@ -36,6 +37,9 @@ final class StoredPurchaseItemColumns
         'item_ean',
         'intrastat_cn8_code',
         'intrastat_country_of_origin',
+        'expense_account_code',
+        'counter_account_code',
+        'posting_rule_key',
     ];
 
     /**

@@ -600,6 +600,10 @@
     "write": true,
     "api": [
       [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
         "POST",
         "/api/invoices"
       ]
@@ -611,6 +615,15 @@
       [
         "POST",
         "/api/invoices/{id}/penalty"
+      ]
+    ]
+  },
+  "create_invoice_refund_order": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/refund-order"
       ]
     ]
   },
@@ -1426,12 +1439,42 @@
       ]
     ]
   },
+  "get_invoice_credit_note_offset": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/credit-note-offset"
+      ]
+    ]
+  },
   "get_invoice_isdoc": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/invoices/{id}/isdoc"
+      ]
+    ]
+  },
+  "get_invoice_posting": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/journal/for-document/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/for-document/purchase-invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/posting-preview/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/posting-preview/purchase-invoices/{id}"
       ]
     ]
   },
@@ -1823,6 +1866,15 @@
       ]
     ]
   },
+  "get_purchase_credit_note_offset": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/credit-note-offset"
+      ]
+    ]
+  },
   "get_purchase_invoice": {
     "write": false,
     "api": [
@@ -2153,6 +2205,15 @@
       ]
     ]
   },
+  "list_branding_profiles": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/branding-profiles"
+      ]
+    ]
+  },
   "list_cash_documents": {
     "write": false,
     "api": [
@@ -2340,6 +2401,15 @@
       ]
     ]
   },
+  "list_expense_rules": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/expense-rules"
+      ]
+    ]
+  },
   "list_fee_types": {
     "write": false,
     "api": [
@@ -2373,6 +2443,15 @@
       [
         "GET",
         "/api/invoices/{id}/attachments"
+      ]
+    ]
+  },
+  "list_invoice_number_series": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/number-series"
       ]
     ]
   },
@@ -2653,6 +2732,15 @@
       ]
     ]
   },
+  "list_posting_rules": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/posting-rules"
+      ]
+    ]
+  },
   "list_price_levels": {
     "write": false,
     "api": [
@@ -2850,6 +2938,15 @@
       ]
     ]
   },
+  "list_purchase_number_series": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/number-series"
+      ]
+    ]
+  },
   "list_purchase_payment_candidates": {
     "write": false,
     "api": [
@@ -2883,6 +2980,15 @@
       [
         "GET",
         "/api/recurring"
+      ]
+    ]
+  },
+  "list_revenue_categories": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/revenue-categories"
       ]
     ]
   },
@@ -2981,6 +3087,19 @@
       [
         "GET",
         "/api/invoices"
+      ]
+    ]
+  },
+  "list_vat_classifications": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/vat-classifications"
+      ],
+      [
+        "GET",
+        "/api/vat-classifications/lines"
       ]
     ]
   },
@@ -3207,12 +3326,30 @@
       ]
     ]
   },
+  "prefill_invoice_refund_order": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/refund-order/prefill"
+      ]
+    ]
+  },
   "preview_invoice_penalty": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/invoices/{id}/penalty/preview"
+      ]
+    ]
+  },
+  "preview_work_report_billing": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/work-report/billing-preview"
       ]
     ]
   },
@@ -3883,12 +4020,55 @@
       ]
     ]
   },
+  "set_invoice_credit_note_offset": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/invoices/{id}/credit-note-offset"
+      ],
+      [
+        "POST",
+        "/api/invoices/{id}/credit-note-offset"
+      ]
+    ]
+  },
+  "set_invoice_dimensions": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/dimensions/documents/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/accounting/dimensions/documents/invoices/{id}"
+      ]
+    ]
+  },
   "set_invoice_payment_schedule": {
     "write": true,
     "api": [
       [
         "GET",
         "/api/invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/invoices/{id}"
+      ]
+    ]
+  },
+  "set_invoice_project": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/project"
       ]
     ]
   },
@@ -3945,6 +4125,36 @@
       ]
     ]
   },
+  "set_purchase_credit_note_offset": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/purchase-invoices/{id}/credit-note-offset"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/credit-note-offset"
+      ]
+    ]
+  },
+  "set_purchase_invoice_dimensions": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/dimensions/documents/purchase-invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/accounting/dimensions/documents/purchase-invoices/{id}"
+      ]
+    ]
+  },
   "set_purchase_invoice_document_kind": {
     "write": true,
     "api": [
@@ -3964,6 +4174,10 @@
       [
         "GET",
         "/api/purchase-invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/exchange-rate"
       ]
     ]
   },
@@ -3973,6 +4187,10 @@
       [
         "GET",
         "/api/purchase-invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/purchase-invoices/{id}/expense-kinds"
       ]
     ]
   },
@@ -3995,6 +4213,19 @@
       [
         "POST",
         "/api/purchase-invoices/{id}/project"
+      ]
+    ]
+  },
+  "set_purchase_invoice_vat_treatment": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/vat-treatment"
       ]
     ]
   },
@@ -4218,6 +4449,19 @@
       [
         "GET",
         "/api/crm/top-vendors"
+      ]
+    ]
+  },
+  "transfer_work_report_billing": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/work-report/billing-preview"
+      ],
+      [
+        "POST",
+        "/api/invoices/{id}/work-report/billing-transfer"
       ]
     ]
   },

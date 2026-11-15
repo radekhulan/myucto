@@ -11,7 +11,8 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 
 | Oblast | Rozsah |
 |---|---|
-| Fakturace | čtení, vystavování, odesílání, evidence úhrad, upomínky |
+| Fakturace | čtení, koncepty vydaných a přijatých faktur včetně účtů, předkontací, členění DPH a dimenzí položek, vystavování, odesílání, evidence úhrad, upomínky, zápočet dobropisu, vratka, oprava nároku na odpočet přijaté faktury, náhled zaúčtování; storno jen nezaúčtovaného dokladu |
+| Číselníky dokladů | **jen čtení** (`src/codebook-tools.mjs`): kategorie tržeb, členění DPH, předkontace, číselné řady, brandingové profily, pravidla klasifikace nákladů |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
 | Zakázky | čtení i zápis — založení, úprava, archivace, rozpočty a ziskovost |
 | Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava názvu, popisu, tagů, vazeb a složky; složky (seznam, založení), tagy, soubory dokumentu, našeptávač vazeb; nahrání a stažení originálu. Koš, mazání a hromadné operace ne |
@@ -25,7 +26,7 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 | Pokladna a majetek | **jen čtení** — pokladny, pokladní doklady, pokladní kniha s průběžným zůstatkem; majetkové karty a plány odpisů, drobný majetek (karty, soupis, pohyby), přijaté faktury na majetek bez karty |
 | Ostatní pohledávky a závazky | čtení; zápis **jen konceptů**: založení, úprava, smazání, splátkový kalendář a opakování bez automatického účtování (`src/other-item-tools.mjs`) |
 | SVJ | **jen čtení**: registr a předpisy, karta jednotky s hrubými pohledávkami a oddělenými kredity, doložené role dlužníků a ručitelů, historie úhrad a rekonciliace |
-| Dimenze | **jen čtení**: typy a hodnoty, zisk a roční statistika, nepřímé cash flow, filtry výkazů a deníku, přiřazení dokladů a kontrola pravidel |
+| Dimenze | **jen čtení**: typy a hodnoty, zisk a roční statistika, nepřímé cash flow, filtry výkazů a deníku, přiřazení dokladů a kontrola pravidel; zápis jen ke konceptu faktury (`src/document-dimension-tools.mjs`) a ostatní položky |
 | Statistika | tržby, zisk, trendy, top odběratelé i dodavatelé, cash flow, platební morálka |
 | Všechny firmy | **jen čtení**: manažerské součty za přesné období, vývoj, roční predikce, prognóza toků, zůstatky a rizika přístupných firem přes `group_dashboard`; původní měny i samostatný přepočet CZK |
 | E-shop a sklad | **čtení i zápis** — zboží a obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky/výdejky/převodky, inventury; **jen čtení** — balení, individuální ceny zákazníků, cenové hladiny, nacenění pro odběratele, šarže a sériová čísla, lokace, prodejní objednávky, cyklické inventury |
@@ -65,10 +66,20 @@ opravné podání, a model nemá jak doložit jejich správnost. Vynucuje to i s
 i kdyby sem někdo takový nástroj přidal, dostane odmítnutí. Zdůvodnění je
 v hlavičce `src/tools.mjs`, při rozšiřování katalogu ho neobcházej. Výjimkou
 jsou koncepty ostatních pohledávek a závazků (včetně jejich dimenzí a připojené
-smlouvy) a analytické účty účtové osnovy
+smlouvy), dimenze konceptu vydané a přijaté faktury a analytické účty účtové osnovy
 (`create_analytic_account`, `update_analytic_account`), které server povoluje
 výčtem metoda a cesta (`BEARER_WRITE_EXCEPTIONS`); do deníku nic nezapisují.
-Syntetické účty a mazání účtů zůstávají ve webovém rozhraní.
+Syntetické účty a mazání účtů zůstávají ve webovém rozhraní. Storno a zrušení
+storna zaúčtované faktury odmítnou nástroje i server (`SessionOnlyAccountingAct`),
+protože by stornovaly nebo mazaly zápis v deníku.
+
+Úprava konceptu faktury posílá položky zpět celé, server je nahrazuje (DELETE +
+INSERT). Seznamy polí položek (`INVOICE_ITEM_FIELDS`, `PURCHASE_ITEM_FIELDS`,
+`RECURRING_ITEM_FIELDS`) proto musí znát každý sloupec, který server ukládá; hlídá
+to `test/item-field-coverage.test.mjs` proti `db/schema.snapshot.json`. Nový sloupec
+tabulky položek přidej do seznamu, nebo do výjimek testu se zdůvodněním. Položky
+nesou i své `id`, podle kterého server drží vazbu na výkaz práce a dimenze položek
+po vložení nebo odebrání řádku.
 
 Párování banky (`match_bank_transaction`, `resolve_bank_match_suggestion`) server
 povoluje, ale tokenem **nezaúčtuje**. V aplikaci po spárování automatika podle
@@ -209,8 +220,9 @@ src/index.mjs   vstupní bod — konfigurace, MCP handshake
 src/local-call.mjs  volání nástroje v lokálním serveru, mapování chyb
 src/tool-args.mjs   ověření argumentů proti inputSchema (obě cesty, i serverový MCP)
 src/client.mjs  HTTP klient — throttling, retry, hlavičky, serializace query
-src/tools.mjs   katalog nástrojů; moduly agend (bank-tools, client-tools,
-                accounting-read-tools, invoice-tools, purchase-tools …) se registrují v TOOLS
+src/tools.mjs   katalog nástrojů (jediné místo, kam se registruje nový nástroj nebo modul);
+                moduly agend: bank-tools, client-tools, accounting-read-tools,
+                invoice-tools, purchase-tools, codebook-tools, document-dimension-tools …
 src/tool-schema.mjs  stavební kameny schémat a čtecích nástrojů pro moduly agend
 test/           automatické testy katalogu a bezpečných zápisových vzorů
 ```

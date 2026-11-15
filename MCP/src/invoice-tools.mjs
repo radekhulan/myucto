@@ -17,7 +17,9 @@
  */
 
 import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
-import { CONFIRM, requireConfirm, confirmed, changed, merged, seg } from './tool-shared.mjs';
+import {
+  CONFIRM, PAYMENT_METHODS, PAYMENT_METHOD_HELP, requireConfirm, confirmed, changed, merged, seg,
+} from './tool-shared.mjs';
 import {
   invoiceLines, loadDraftInvoice, lineForPut, draftPayload, draftResult,
 } from './tools.mjs';
@@ -71,6 +73,23 @@ const invoiceSummary = (inv) => ({
 const getInvoice = (c, invoiceId, tool) => c.get(`/invoices/${seg(invoiceId)}`, null, tool);
 
 const ISSUED = ['issued', 'sent', 'reminded', 'paid'];
+
+/**
+ * Doklad má živý zápis v deníku, nebo zaúčtovaný pokladní doklad hotovostního vyrovnání.
+ * Storno by takový zápis stornovalo a to je účetní úkon, který token dělat nesmí.
+ */
+const hasJournalWrite = (inv) => Boolean(
+  inv?.booked_at || inv?.locked?.journal_entry_id || inv?.locked?.booked_at
+  || (inv?.cash_documents ?? []).some((doc) => doc?.status === 'posted'),
+);
+
+function refuseJournalWrite(inv, fallbackId, what) {
+  if (!hasJournalWrite(inv)) return;
+  throw new Error(
+    `NEPROVEDENO: ${invoiceLabel(inv, fallbackId)} je zaúčtovaná. ${what} by změnilo zápis v účetním deníku `
+    + 'a účetní deník je přes MCP jen ke čtení. Proveďte to v aplikaci (detail faktury).',
+  );
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rozpis plateb platebního kalendáře (§ 31 a § 31a ZDPH)
@@ -236,12 +255,16 @@ const RECURRING_FIELDS = [
   'increment_month_in_descriptions', 'auto_issue', 'auto_send_email', 'payment_variable_symbol',
 ];
 
-/** Pole řádku šablony, která server při náhradě položek ukládá. */
-const RECURRING_ITEM_FIELDS = [
-  'price_list_item_id', 'catalog_policy', 'description_source', 'catalog_price_source',
+/**
+ * Pole řádku šablony, která server při náhradě položek ukládá (`RecurringTemplateRepository::replaceItems`).
+ * Úplnost hlídá `item-field-coverage.test.mjs` proti `recurring_invoice_template_items`.
+ */
+export const RECURRING_ITEM_FIELDS = [
+  'item_kind', 'price_list_item_id', 'catalog_policy', 'description_source', 'catalog_price_source',
   'catalog_source_currency_code', 'catalog_source_unit_price', 'catalog_exchange_rate',
   'catalog_exchange_rate_date', 'description', 'quantity', 'duration_minutes', 'unit',
   'unit_price_without_vat', 'vat_rate_id', 'vat_classification_code', 'order_index',
+  'revenue_account_code', 'stock_item_id', 'warehouse_id',
   'oss_applicable', 'oss_consumer_country', 'oss_rate_type', 'oss_supply_type',
 ];
 
@@ -261,6 +284,10 @@ const RECURRING_ITEMS = {
     unit: str('Měrná jednotka, výchozí „ks".'),
     unit_price_without_vat: num('Jednotková cena (bez DPH, u šablony s `prices_include_vat` s DPH).'),
     vat_rate_id: int('ID sazby DPH, viz `list_vat_rates`. Sazbu nehádej.'),
+    revenue_account_code: str('Účet položky na vygenerované faktuře (`chart_of_accounts`). Bez zadání výchozí.', { maxLength: 10 }),
+    vat_classification_code: str('Kód členění DPH (`list_vat_classifications`, strana `sales`). Jen na výslovný pokyn.'),
+    stock_item_id: int('Vazba na skladovou kartu; generovaná faktura z ní vydá zboží.'),
+    warehouse_id: int('Sklad k výdeji; jen spolu se `stock_item_id`.'),
   }, ['description', 'quantity', 'unit_price_without_vat', 'vat_rate_id']),
 };
 
@@ -276,7 +303,8 @@ const RECURRING_INPUT = {
   invoice_type: str('Typ generovaného dokladu.', { enum: ['invoice', 'proforma'] }),
   project_id: int('Zakázka; musí patřit odběrateli. 0 zakázku ze šablony odebere.', { minimum: 0 }),
   language: str('Jazyk dokladů.', { enum: ['cs', 'en'] }),
-  payment_method: str('Způsob úhrady.', { enum: ['bank_transfer', 'card', 'cash', 'other'] }),
+  payment_method: str(PAYMENT_METHOD_HELP, { enum: PAYMENT_METHODS }),
+  branding_profile_id: int('Brandingový profil generovaných faktur (`list_branding_profiles`). 0 = výchozí identita firmy.', { minimum: 0 }),
   payment_due_days: int('Splatnost ve dnech (výchozí 14).', { minimum: 0, maximum: 365 }),
   payment_due_unit: str('Jednotka splatnosti.', { enum: ['days', 'month'] }),
   tax_date_mode: str(
@@ -292,7 +320,7 @@ const RECURRING_INPUT = {
   prices_include_vat: bool('Ceny položek jsou včetně DPH.'),
   reverse_charge: bool('Přenesená daňová povinnost.'),
   discount_percent: num('Sleva z celé faktury v procentech (0–100).', { minimum: 0, maximum: 100 }),
-  revenue_category_id: int('Pevná kategorie tržby.'),
+  revenue_category_id: int('Pevná kategorie tržby (`list_revenue_categories`).'),
   note_above_items: str('Poznámka nad položkami.'),
   note_below_items: str('Poznámka pod položkami.'),
   payment_variable_symbol: str('Pevný variabilní symbol pro platbu (jen číslice, max 10).'),
@@ -320,6 +348,7 @@ function recurringLabel(tpl, fallbackId) {
 const recurringInput = (a) => {
   const body = changed(a, RECURRING_FIELDS);
   if (body.project_id === 0) body.project_id = null;
+  if (body.branding_profile_id === 0) body.branding_profile_id = null;
   if (a.items !== undefined) body.items = a.items.map((item, index) => ({ unit: 'ks', ...item, order_index: index }));
   return body;
 };
@@ -364,8 +393,9 @@ export const INVOICE_TOOLS = [
     description:
       'Zruší VYSTAVENÝ doklad. NEVRATNÝ KROK S DAŇOVÝM DOPADEM: jen na výslovný pokyn uživatele.\n\n'
       + '`mode: "internal"` = interní storno chybně vystaveného dokladu, který odběratel '
-      + 'nepřevzal. Doklad dostane stav stornovaný a vypadne z evidence DPH i tržeb, zaúčtovaný '
-      + 'zápis se stornuje. V uzavřeném nebo uzamčeném období (podané DPH) ho aplikace odmítne.\n'
+      + 'nepřevzal. Doklad dostane stav stornovaný a vypadne z evidence DPH i tržeb. Jen u NEZAÚČTOVANÉHO '
+      + 'dokladu: zaúčtovaný (i se zaúčtovaným pokladním dokladem) nástroj odmítne, storno zápisu v deníku '
+      + 'dělá účetní v aplikaci. V uzavřeném nebo uzamčeném období (podané DPH) ho aplikace odmítne.\n'
       + '`mode: "credit_note"` = opravný daňový doklad (dobropis) k dokladu, který odběratel už má. '
       + 'Vznikne KONCEPT dobropisu se zápornými položkami a dnešním datem; ten je potřeba '
       + 'zkontrolovat a vystavit (`issue_invoice`). Dobropis sám jde stornovat jen interně.\n\n'
@@ -390,6 +420,7 @@ export const INVOICE_TOOLS = [
       if (invoice.invoice_type === 'credit_note' && a.mode !== 'internal') {
         throw new Error('Dobropis lze stornovat pouze interně (`mode: "internal"`).');
       }
+      if (a.mode === 'internal') refuseJournalWrite(invoice, a.id, 'Interní storno');
       requireConfirm(
         a,
         a.mode === 'internal' ? 'Interně stornovat se má' : 'K dokladu se má založit dobropis',
@@ -407,7 +438,8 @@ export const INVOICE_TOOLS = [
     title: 'Zrušit interní storno',
     description:
       'Vrátí omylem interně stornovanou fakturu nebo zálohu do stavu před stornem. Doklad se '
-      + 'vrací do evidence DPH svého původního období a podle nastavení firmy se znovu zaúčtuje. '
+      + 'vrací do evidence DPH svého původního období. Jen u faktury, která nebyla zaúčtovaná: '
+      + 'zrušení storna zaúčtované faktury maže zápisy v deníku a dělá ho účetní v aplikaci. '
       + 'Nejde, když byl doklad zrušen vystaveným dobropisem, ani v uzavřeném nebo uzamčeném období.\n\n'
       + 'Daňový dopad: jen na výslovný pokyn. Bez `confirm: true` nic neprovede a jen vypíše doklad.',
     inputSchema: schema({ id: id('ID stornované faktury nebo zálohy.'), confirm: CONFIRM }, ['id']),
@@ -418,6 +450,7 @@ export const INVOICE_TOOLS = [
       if (invoice?.status !== 'cancelled' || !['invoice', 'proforma'].includes(invoice?.invoice_type)) {
         throw new Error(`${invoiceLabel(invoice, a.id)}: zrušit storno lze jen u stornované faktury nebo zálohy.`);
       }
+      refuseJournalWrite(invoice, a.id, 'Zrušení storna');
       requireConfirm(a, 'Zrušit storno a obnovit se má', invoiceLabel(invoice, a.id));
       return { invoice: invoiceSummary(invoice), result: await c.post(`/invoices/${seg(a.id)}/uncancel`, {}, tool) };
     },
@@ -865,6 +898,168 @@ export const INVOICE_TOOLS = [
         );
       }
       return c.post('/invoices/bulk-reminder', { invoice_ids: ids }, tool);
+    },
+  },
+
+  {
+    name: 'set_invoice_project',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Zařadit vydanou fakturu k zakázce',
+    description:
+      'Přiřadí vydanou fakturu k zakázce, nebo ji z ní vyřadí (`project_id: 0`), i když už je vystavená nebo '
+      + 'zaúčtovaná: zakázka je jen analytický údaj pro marži zakázky, účty ani částky se nemění. Zakázka musí '
+      + 'patřit odběrateli faktury. U konceptu jde zakázka měnit i přes `update_invoice`.',
+    inputSchema: schema({
+      id: id('ID faktury.'),
+      project_id: int('ID zakázky (`list_projects`); 0 zakázku odebere.', { minimum: 0 }),
+    }, ['id', 'project_id']),
+    write: true,
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/project`, {
+      project_id: Number(a.project_id) > 0 ? a.project_id : null,
+    }, tool),
+  },
+
+  // ── Zápočet dobropisu, vratka, výkaz práce ───────────────────────────────
+  {
+    name: 'get_invoice_credit_note_offset',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Zápočet dobropisu s fakturou',
+    description:
+      'Zápočty, kterých se vydaný doklad účastní (jako dobropis i jako opravovaná faktura), a u dobropisu '
+      + 'bez zápočtu, jestli ho jde započíst (`can_offset`, `reason`). Zápočet sníží „zbývá uhradit" '
+      + 'opravované faktury o celý dobropis; do deníku ani evidence DPH nic nezapisuje.',
+    inputSchema: schema({ id: id('ID dobropisu nebo faktury.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/credit-note-offset`, null, tool),
+  },
+  {
+    name: 'set_invoice_credit_note_offset',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Započíst nebo zrušit zápočet dobropisu',
+    description:
+      '`action: "apply"` započte VYSTAVENÝ dobropis (`id`) proti faktuře, kterou opravuje: faktura pak '
+      + 'k úhradě ukáže jen rozdíl. Jde jen v plné výši dobropisu a jen když ho zbytek faktury pokryje; jinak '
+      + 'server vrátí důvod (`credit_note_offset_*`). Při vystavení dobropisu se to obvykle stane samo.\n'
+      + '`action: "revert"` zápočty dokladu zruší (odběratel přesto zaplatil celou fakturu); vyžaduje `confirm: true`.',
+    inputSchema: schema({
+      id: id('ID dobropisu (u `revert` i opravované faktury).'),
+      action: str('Započíst (`apply`), nebo zápočet zrušit (`revert`).', { enum: ['apply', 'revert'] }),
+      confirm: CONFIRM,
+    }, ['id', 'action']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const path = `/invoices/${seg(a.id)}/credit-note-offset`;
+      if (a.action === 'apply') return c.post(path, {}, tool);
+      requireConfirm(a, 'Zrušit se má zápočet dobropisu u dokladu', `#${a.id}`);
+      return c.del(path, tool);
+    },
+  },
+  {
+    name: 'prefill_invoice_refund_order',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Podklady k vratce odběrateli',
+    description:
+      'K dokladu, který máme odběrateli vyplatit (přeplatek, dobropis k zaplacené faktuře), vrátí částku, '
+      + 'variabilní symbol, známé účty odběratele a účty firmy, ze kterých lze platit (`payer_accounts`). '
+      + 'Vratku pak založí `create_invoice_refund_order`.',
+    inputSchema: schema({ id: id('ID dokladu k vyplacení.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/refund-order/prefill`, null, tool),
+  },
+  {
+    name: 'create_invoice_refund_order',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Vratka odběrateli (příkaz k úhradě)',
+    description:
+      'Připraví příkaz k úhradě s jednou platbou, kterou firma vrací odběrateli peníze k dokladu (přeplatek, '
+      + 'dobropis). NIC NEODESÍLÁ DO BANKY: soubor pro banku stáhne a odešle uživatel v aplikaci. Účet '
+      + 'odběratele a účet firmy vezmi z `prefill_invoice_refund_order`. Změna účtu příjemce je častý podvod, '
+      + 'proto vyžaduje `confirm: true`.',
+    inputSchema: schema({
+      id: id('ID dokladu k vyplacení.'),
+      payer_currency_id: id('Účet firmy, ze kterého se platí (`payer_accounts[].id`).'),
+      account_number: str('Číslo účtu odběratele (u českého účtu i s předčíslím); s `bank_code`, nebo místo nich `iban`.'),
+      bank_code: str('Kód banky, 4 číslice.'),
+      iban: str('IBAN odběratele (zahraniční účet).'),
+      payment_date: date('Požadované datum splatnosti příkazu; výchozí dnes.'),
+      save_to_client: bool('Uložit účet na kartu odběratele.'),
+      note: str('Poznámka k příkazu.'),
+      confirm: CONFIRM,
+    }, ['id', 'payer_currency_id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      requireConfirm(a, `Vratka k dokladu #${a.id} se má poslat na účet`,
+        a.iban ? `IBAN ${a.iban}` : `${a.account_number ?? '?'}/${a.bank_code ?? '?'}`);
+      return c.post(`/invoices/${seg(a.id)}/refund-order`, changed(a, [
+        'payer_currency_id', 'account_number', 'bank_code', 'iban', 'payment_date', 'save_to_client', 'note',
+      ]), tool);
+    },
+  },
+  {
+    name: 'preview_work_report_billing',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Cenová rekapitulace výkazu práce',
+    description:
+      'Spočítá z výkazu práce konceptu faktury položky podle cenového ujednání (paušál, pásma hodin) a vrátí, '
+      + 'co by `transfer_work_report_billing` na fakturu zapsal. Nic neukládá.',
+    inputSchema: schema({ id: id('ID konceptu faktury s výkazem práce.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/work-report/billing-preview`, null, tool),
+  },
+  {
+    name: 'transfer_work_report_billing',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Přenést výkaz práce do položek faktury',
+    description:
+      'Přenese cenovou rekapitulaci výkazu práce do položek KONCEPTU faktury: nahradí položky navázané na '
+      + 'paušál a pásma výkazu, ostatní položky zachová. Nástroj si nejdřív spočítá aktuální náhled '
+      + '(`preview_work_report_billing`) a přenese přesně ten. Starší souhrnnou položku výkazu nahradí '
+      + '`legacy_item_id`.',
+    inputSchema: schema({
+      id: id('ID konceptu faktury s výkazem práce.'),
+      legacy_item_id: id('ID staré souhrnné položky výkazu, kterou má přenos nahradit.'),
+    }, ['id']),
+    write: true,
+    run: async (c, a, tool) => {
+      const preview = await c.get(`/invoices/${seg(a.id)}/work-report/billing-preview`, null, tool);
+      if (typeof preview?.fingerprint !== 'string') {
+        throw new Error('Výkaz nemá cenové ujednání, ze kterého by šlo položky spočítat. Nastavte ho v aplikaci.');
+      }
+      return c.post(`/invoices/${seg(a.id)}/work-report/billing-transfer`, {
+        fingerprint: preview.fingerprint, ...changed(a, ['legacy_item_id']),
+      }, tool);
+    },
+  },
+  {
+    name: 'get_invoice_posting',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Zaúčtování faktury (zápis nebo náhled)',
+    description:
+      'Kontace vydané (`document_type: "invoices"`) nebo přijaté (`"purchase-invoices"`) faktury v podvojném '
+      + 'účetnictví. Zaúčtovaná faktura vrátí své zápisy v deníku (`posted: true`, i storna). Nezaúčtovaná vrátí '
+      + 'NÁHLED zápisu, jak by ho zaúčtování vytvořilo (`posted: false`): účty MD a Dal, částky a co je určilo. '
+      + 'Hodí se před přijetím nebo vystavením ke kontrole účtů, předkontací a střediska. Nic nezapisuje.',
+    inputSchema: schema({
+      document_type: str('Vydaná (`invoices`) nebo přijatá (`purchase-invoices`) faktura.', { enum: ['invoices', 'purchase-invoices'] }),
+      id: id('ID faktury.'),
+    }, ['document_type', 'id']),
+    write: false,
+    run: async (c, a, tool) => {
+      const doc = seg(a.document_type);
+      const posted = await c.get(`/accounting/journal/for-document/${doc}/${seg(a.id)}`, null, tool);
+      const entries = posted?.items ?? [];
+      if (entries.length > 0) return { posted: true, entries };
+      return { posted: false, preview: await c.get(`/accounting/journal/posting-preview/${doc}/${seg(a.id)}`, null, tool) };
     },
   },
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Accounting;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\OtherItemRepository;
 use MyInvoice\Repository\UserSupplierRepository;
@@ -76,6 +77,7 @@ final class DimensionAction
         private readonly OtherItemRepository $otherItems,
         private readonly OtherItemService $otherItemService,
         private readonly \MyInvoice\Service\Tenant\SupplierAccessResolver $supplierAccess,
+        private readonly Connection $db,
     ) {}
 
     // ── účtotvorná dimenze ──────────────────────────────────────────────────
@@ -335,21 +337,28 @@ final class DimensionAction
 
     /**
      * API token smí dimenze (středisko, projekt…) zapsat jen ke KONCEPTU ostatní
-     * pohledávky nebo závazku (ApiScopeMiddleware::BEARER_WRITE_EXCEPTIONS).
-     * U zaúčtovaného dokladu by uložení přerazítkovalo řádky deníku a koncept
-     * z opakování s automatickým účtováním zaúčtuje cron bez dalšího potvrzení;
-     * obojí zůstává webovému rozhraní. Middleware pouští jen cestu other-items,
-     * tady se to hlídá znovu, aby výjimka nezávisela jen na regexu cesty.
+     * pohledávky nebo závazku, vydané faktury a přijaté faktury
+     * (ApiScopeMiddleware::BEARER_WRITE_EXCEPTIONS). Koncept nemá řádky v deníku,
+     * takže se nic nepřerazítkuje. U zaúčtovaného dokladu by uložení přerazítkovalo
+     * řádky deníku a koncept z opakování s automatickým účtováním zaúčtuje cron bez
+     * dalšího potvrzení; obojí zůstává webovému rozhraní. Middleware pouští jen tyto
+     * cesty, tady se to hlídá znovu, aby výjimka nezávisela jen na regexu cesty.
      */
     private function assertTokenMayTagDocument(Request $request, int $supplierId, string $docType, int $docId): void
     {
         if (!RequestAuthorization::isRestrictedBearer($request)) {
             return;
         }
-        if ($docType !== 'other_item') {
-            throw new DimensionException('token_write_forbidden',
-                'Přes API token lze dimenze zapsat jen ke konceptu ostatní pohledávky nebo závazku.', 403);
-        }
+        match ($docType) {
+            'other_item' => $this->assertTokenMayTagOtherItem($request, $supplierId, $docId),
+            'invoice', 'purchase_invoice' => $this->assertTokenMayTagInvoiceDraft($request, $supplierId, $docType, $docId),
+            default => throw new DimensionException('token_write_forbidden',
+                'Přes API token lze dimenze zapsat jen ke konceptu ostatní pohledávky nebo závazku, vydané nebo přijaté faktury.', 403),
+        };
+    }
+
+    private function assertTokenMayTagOtherItem(Request $request, int $supplierId, int $docId): void
+    {
         if (!RequestAuthorization::allows($request, 'other_items', AccessLevel::WRITE)) {
             throw new DimensionException('forbidden', 'Chybí oprávnění k ostatním položkám.', 403);
         }
@@ -364,6 +373,31 @@ final class DimensionAction
         if ($this->otherItemService->belongsToAutoPostSchedule($supplierId, $docId)) {
             throw new DimensionException('token_write_forbidden',
                 'Koncept patří do opakování s automatickým účtováním. Dimenze mu lze změnit jen ve webovém rozhraní.', 403);
+        }
+    }
+
+    /**
+     * Koncept faktury: vydaný doklad se účtuje až vystavením, přijatý až přijetím, takže
+     * koncept nemá v deníku nic. Právo upravovat doklad musí token mít stejně jako na
+     * editaci konceptu (dimenze jsou součástí formuláře dokladu).
+     */
+    private function assertTokenMayTagInvoiceDraft(Request $request, int $supplierId, string $docType, int $docId): void
+    {
+        [$module, $table, $label] = $docType === 'invoice'
+            ? ['invoices', 'invoices', 'vydané faktury']
+            : ['purchase_invoices', 'purchase_invoices', 'přijaté faktury'];
+        if (!RequestAuthorization::allows($request, $module, AccessLevel::WRITE)) {
+            throw new DimensionException('forbidden', 'Chybí oprávnění upravovat ' . $label . '.', 403);
+        }
+        $stmt = $this->db->pdo()->prepare("SELECT status, booked_at FROM {$table} WHERE id = ? AND supplier_id = ?");
+        $stmt->execute([$docId, $supplierId]);
+        $doc = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($doc === false) {
+            throw new DimensionException('not_found', 'Doklad nebyl nalezen.', 404);
+        }
+        if ((string) $doc['status'] !== 'draft' || $doc['booked_at'] !== null) {
+            throw new DimensionException('token_write_forbidden',
+                'Přes API token lze dimenze faktury zapsat jen ke konceptu; u vystaveného, přijatého nebo zaúčtovaného dokladu je změňte ve webovém rozhraní.', 403);
         }
     }
 

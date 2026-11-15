@@ -71,6 +71,7 @@ final class UpdatePurchaseInvoiceAction
         private readonly \MyInvoice\Service\Document\AttachmentCheck\AttachmentCheckService $attachmentChecks,
         private readonly PurchaseFiledVatPeriod $filedPeriods,
         private readonly NumberSeriesSelection $numberSeries,
+        private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
     ) {}
 
     /**
@@ -395,11 +396,17 @@ final class UpdatePurchaseInvoiceAction
             // vědomá položka smíšeného dokladu, ne pozůstatek z doby před zatržením.
             $keepDomesticItemCodes = (bool) ($existing['reverse_charge'] ?? false);
             if (DocumentItemsPayload::replaces($body)) {
+                // Dimenze položek konceptu vrátí k položkám podle `id` z těla ({@see DraftItemDimensionRealign}).
+                $isDraft = (string) ($existing['status'] ?? '') === 'draft';
+                $dimensionsBefore = $isDraft ? $this->itemDimensions->snapshot('purchase_invoice', $id) : [];
                 $this->repo->replaceItems(
                     $id,
                     StoredPurchaseItemColumns::carryOver((array) $body['items'], (array) ($existing['items'] ?? [])),
                     $keepDomesticItemCodes,
                 );
+                if ($isDraft) {
+                    $this->itemDimensions->realign($supplierId, 'purchase_invoice', $id, $dimensionsBefore, (array) $body['items']);
+                }
             } else {
                 // Zatržení přenesené povinnosti nebo změna kódu v hlavičce bez položek
                 // v těle musí srovnat i tuzemské kódy uložených řádků (issue #119).

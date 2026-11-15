@@ -212,6 +212,10 @@
     "write": true,
     "api": [
       [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
         "POST",
         "/api/invoices"
       ]

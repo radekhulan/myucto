@@ -61,6 +61,7 @@ final class CreatePurchaseInvoiceAction
         private readonly PurchaseInvoiceSubmissionRepository $submissions,
         private readonly PurchaseInvoiceSubmissionCompletionService $submissionCompletion,
         private readonly NumberSeriesSelection $numberSeries,
+        private readonly TransitionPurchaseInvoiceStatusAction $transition,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -71,6 +72,17 @@ final class CreatePurchaseInvoiceAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        // Doklad vzniká vždy jako koncept. `status: received` z těla se provede až po
+        // založení stejným přechodem jako tlačítko Přijmout ({@see TransitionPurchaseInvoiceStatusAction}):
+        // schvalování, interní číslo, automatické zaúčtování i pokladní doklad. Dřív se
+        // stav zapsal rovnou a přechod se obešel. Strukturované importy volají repozitář přímo.
+        $requestedStatus = isset($body['status']) && $body['status'] !== '' ? (string) $body['status'] : null;
+        unset($body['status']);
+        if ($requestedStatus !== null && !in_array($requestedStatus, ['draft', 'received'], true)) {
+            return Json::error($response, 'validation_failed',
+                'Doklad jde založit jen jako koncept (`draft`) nebo přijatý (`received`); zaúčtování, úhrada a storno jsou samostatné přechody.',
+                400, ['fields' => ['status' => 'Povolené hodnoty: draft, received.']]);
+        }
         $submissionId = max(0, (int) ($body['submission_id'] ?? 0));
         if ($submissionId > 0) {
             if (RequestAuthorization::isClientType($request)
@@ -249,6 +261,10 @@ final class CreatePurchaseInvoiceAction
             // Až PO recompute — volba dominantního kódu váží podle total_with_vat, které
             // kalkulátor dopočítává.
             $this->repo->syncHeaderClassificationFromItems($id, $supplierId);
+            // Zaokrouhlení dokladu jako v PUT ({@see UpdatePurchaseInvoiceAction}), až po přepočtu.
+            if (array_key_exists('rounding', $body) && is_numeric($body['rounding'])) {
+                $this->repo->setRounding($id, $supplierId, (float) $body['rounding']);
+            }
             $this->repo->replaceVatAllocations(
                 $id,
                 $supplierId,
@@ -317,7 +333,21 @@ final class CreatePurchaseInvoiceAction
         } catch (\Throwable) {
         }
 
+        $transition = null;
+        if ($requestedStatus === 'received'
+            && $request->getAttribute(\MyInvoice\Action\Accounting\DraftPostingPreviewAction::ATTR) !== true) {
+            $transition = $this->receiveCreated($request, $id);
+        }
+
         $invoice = $this->repo->find($id, $supplierId);
+        if ($transition !== null && is_array($invoice)) {
+            $invoice['status_transition'] = $transition['status_transition'];
+            foreach (['posting', '_cash_settlement'] as $key) {
+                if (isset($transition[$key])) {
+                    $invoice[$key] = $transition[$key];
+                }
+            }
+        }
         // Non-blocking varování (např. dobropis s kladným součtem — viz issue #35).
         $warnings = PurchaseInvoiceValidation::warnings($invoice ?? []);
         // Neplátce + přesto uplatněn odpočet → upozorni (uživatel vědomě přepsal).
@@ -362,6 +392,42 @@ final class CreatePurchaseInvoiceAction
             $invoice['_warnings'] = $warnings;
         }
         return Json::ok($response, $invoice, 201);
+    }
+
+    /**
+     * Přijetí právě založeného konceptu tou samou akcí, jakou volá tlačítko Přijmout.
+     * Koncept je v tu chvíli úplný a uložený; když přechod neprojde (schválení, kolize
+     * čísla, zámek), zůstane konceptem a odpověď to řekne v `status_transition`.
+     *
+     * @return array{status_transition: array<string,mixed>, posting?: mixed, _cash_settlement?: mixed}
+     */
+    private function receiveCreated(Request $request, int $id): array
+    {
+        $response = ($this->transition)(
+            $request->withParsedBody(['target' => 'received'])->withQueryParams([]),
+            new \Slim\Psr7\Response(),
+            ['id' => (string) $id],
+        );
+        $response->getBody()->rewind();
+        $body = (array) json_decode((string) $response->getBody(), true);
+        if ($response->getStatusCode() >= 300) {
+            return ['status_transition' => [
+                'requested' => 'received',
+                'result'    => 'failed',
+                'error'     => $body['error'] ?? ['code' => 'transition_failed', 'message' => 'Doklad se nepodařilo přijmout.'],
+            ]];
+        }
+        $out = ['status_transition' => [
+            'requested' => 'received',
+            'result'    => !empty($body['approval_requested']) ? 'approval_requested' : (string) ($body['status'] ?? 'received'),
+        ]];
+        foreach (['posting', '_cash_settlement'] as $key) {
+            if (isset($body[$key])) {
+                $out[$key] = $body[$key];
+            }
+        }
+
+        return $out;
     }
 
     /**

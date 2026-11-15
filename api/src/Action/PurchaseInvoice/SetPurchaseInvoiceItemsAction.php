@@ -34,6 +34,7 @@ final class SetPurchaseInvoiceItemsAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly DocumentLockService $locks,
+        private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -93,7 +94,13 @@ final class SetPurchaseInvoiceItemsAction
         // Hlavička se tu nemění: přenesení v ní už bylo, kód 40/41 je vědomá tuzemská
         // položka smíšeného dokladu ({@see PurchaseInvoiceRepository::reconcileReverseChargeItemCodes()}).
         $items = StoredPurchaseItemColumns::carryOver($items, (array) ($existing['items'] ?? []));
+        // Dimenze položek konceptu vrátí k položkám podle `id` z těla ({@see DraftItemDimensionRealign}).
+        $isDraft = (string) ($existing['status'] ?? '') === 'draft';
+        $dimensionsBefore = $isDraft ? $this->itemDimensions->snapshot('purchase_invoice', $id) : [];
         $this->repo->replaceItems($id, $items, (bool) ($existing['reverse_charge'] ?? false));
+        if ($isDraft) {
+            $this->itemDimensions->realign($supplierId, 'purchase_invoice', $id, $dimensionsBefore, $items);
+        }
         $this->calc->recompute($id);
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

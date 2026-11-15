@@ -87,6 +87,7 @@ final class UpdateInvoiceAction
         private readonly \MyInvoice\Repository\TaxConstantsRepository $taxConstants,
         private readonly FiledVatPeriodLookup $filedPeriods,
         private readonly NumberSeriesSelection $numberSeries,
+        private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
         private readonly \MyInvoice\Service\Invoice\InvoiceIssueTaxGate $taxGate,
         private readonly \MyInvoice\Service\Accounting\DocumentPaymentLinks $paymentLinks,
     ) {}
@@ -413,7 +414,8 @@ final class UpdateInvoiceAction
         try {
             $body = $this->defaults->resolve($body, resolvedClient: $walkInClient);
         } catch (\InvalidArgumentException $e) {
-            return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
+            $code = $e instanceof \MyInvoice\Service\Invoice\UnknownCurrencyException ? $e::ERROR_CODE : 'integrity_violation';
+            return Json::error($response, $code, $e->getMessage(), 400);
         }
 
         // Derivace OSS pro API klienty — TOTÉŽ místo v pořadí jako u POST (viz
@@ -692,7 +694,13 @@ final class UpdateInvoiceAction
         }
         try {
             if (DocumentItemsPayload::replaces($body)) {
+                // Dimenze položek konceptu drží pořadí řádku; po vložení či odebrání řádku je
+                // vrátí k položkám podle `id` z těla (klient API, MCP).
+                $dimensionsBefore = !$isIssued ? $this->itemDimensions->snapshot('invoice', $id) : [];
                 $this->repo->replaceItems($id, (array) $body['items']);
+                if (!$isIssued) {
+                    $this->itemDimensions->realign((int) ($existing['supplier_id'] ?? 0), 'invoice', $id, $dimensionsBefore, (array) $body['items']);
+                }
             } elseif (($replay = self::storedItemsToReplay($body, $existing)) !== null) {
                 $this->repo->replaceItems($id, InvoiceItemTracking::fromStored($replay));
             }
@@ -972,6 +980,11 @@ final class UpdateInvoiceAction
         // Zakázka patří klientovi — při změně klienta se uložená nepřebírá.
         if (array_key_exists('client_id', $body) && (int) $body['client_id'] !== (int) ($existing['client_id'] ?? 0)) {
             $skip[] = 'project_id';
+        }
+        // Měna poslaná kódem bez `currency_id` je změna měny: uložené ID by kód přebilo
+        // (InvoiceDefaults ho čte, jen když ID chybí) a změna by se tiše neprovedla.
+        if (array_key_exists('currency', $body) && !array_key_exists('currency_id', $body)) {
+            $skip[] = 'currency_id';
         }
         // Kategorie tržby (legacy text + id) je jedna hodnota: poslaná půlka ruší i druhou.
         if (array_key_exists('revenue_category', $body) || array_key_exists('revenue_category_id', $body)) {

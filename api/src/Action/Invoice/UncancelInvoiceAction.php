@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Invoice;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -115,6 +116,17 @@ final class UncancelInvoiceAction
                 'Faktura spadá do uzavřeného nebo uzamčeného období — storno už nejde zrušit. Vystavte novou fakturu.',
                 409,
             );
+        }
+
+        // Zrušení storna maže zápisy faktury i stornovacího dokladu v deníku: ruční účetní
+        // úkon jen z relace. Bez zápisů (daňová evidence, nezaúčtovaná faktura) token smí.
+        $entries = $pdo->prepare(
+            "SELECT 1 FROM journal_entries WHERE supplier_id = ? AND source_type = 'invoice' AND source_id IN (?, ?) LIMIT 1"
+        );
+        $entries->execute([$supplierId, $id, $cancellationId]);
+        if ($entries->fetchColumn() !== false
+            && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Zrušení storna zaúčtované faktury'))) {
+            return $deny;
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

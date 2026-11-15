@@ -334,17 +334,23 @@ final class ApiScopeMiddlewareTest extends TestCase
         }
     }
 
-    /** Dimenze smí token zapsat jen ke konceptu ostatní položky; jiné doklady a náhled ne. */
-    public function testBearerReadWriteCanTagOnlyOtherItemDimensions(): void
+    /**
+     * Dimenze smí token zapsat jen ke konceptu ostatní položky a faktury (stav ověřuje
+     * DimensionAction); jiné doklady a náhled ne.
+     */
+    public function testBearerReadWriteCanTagOnlyDraftDocumentDimensions(): void
     {
-        $ok = $this->middleware()->process(
-            $this->bearer('PUT', '/api/accounting/dimensions/documents/other-items/12', 'read_write'),
-            $this->okHandler(),
-        );
-        self::assertSame(204, $ok->getStatusCode());
+        foreach (['other-items', 'invoices', 'purchase-invoices'] as $doc) {
+            $ok = $this->middleware()->process(
+                $this->bearer('PUT', "/api/accounting/dimensions/documents/$doc/12", 'read_write'),
+                $this->okHandler(),
+            );
+            self::assertSame(204, $ok->getStatusCode(), $doc);
+        }
 
         foreach ([
-            ['PUT', '/api/accounting/dimensions/documents/purchase-invoices/12'],
+            ['PUT', '/api/accounting/dimensions/documents/cash-documents/12'],
+            ['POST', '/api/accounting/dimensions/documents/invoices/12/preview'],
             ['PUT', '/api/accounting/dimensions/documents/assets/12'],
             ['POST', '/api/accounting/dimensions/documents/other-items/12/preview'],
             ['PUT', '/api/accounting/dimensions/journal/12'],
