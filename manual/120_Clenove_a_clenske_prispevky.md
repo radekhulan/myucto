@@ -12,7 +12,7 @@ Změny stavu se zapisují jako další revize přes **Změnit stav členství** 
 
 ### Oprava chyb v evidenci
 
-Dokud na záznamu nestojí předpis příspěvku, jdou chyby opravit. Akce v detailu člena se ukazují jen tehdy, když je oprava právě možná. Každá oprava se zapíše do auditní stopy.
+Dokud na záznamu nestojí předpis příspěvku, jdou chyby opravit. Akce opravy najdete v detailu člena v nabídce **…**. Když oprava právě možná není, je akce zašedlá a uvádí důvod. Každá oprava se zapíše do auditní stopy.
 
 - **Opravit kontakt a číslo** změní přiřazený kontakt nebo členské číslo, dokud člen nemá žádný předpis, ani stornovaný. Kontakt i číslo nesmí patřit jinému členovi. Oprava jen velikosti písmen v čísle je možná. Prohození čísel dvou členů udělejte přes dočasné číslo.
 - **Zrušit poslední revizi** (v nabídce **…**) zruší poslední platnou revizi, pokud na ní nestojí předpis, ani stornovaný. Revize stojí pod předpisem, když platí k jeho účetnímu datu nebo zasahuje do jeho období. Zadejte důvod. Zrušená revize zůstane v historii přeškrtnutá a zrušení se zapíše jako další revize s důvodem. Stav členství, nový předpis, hromadný předpis i přehled se pak řídí předchozí platnou revizí. Opravenou revizi můžete zapsat i ke stejnému dni. Postupně jde zrušit i starší revize. Rozpracovaný hromadný předpis opravu ani zrušení nebrání; položka dotčeného člena se při potvrzení dávky odmítne, protože se změnily její podklady, a člena zahrnete do nové dávky.

@@ -103,6 +103,12 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
         // Mimo horní mez aktivní dávky a mimo výběr druhé dávky smazání projde.
         $this->corrections->delete($this->supplier, $outside, $this->actor);
         self::assertNull($this->repository->member($this->supplier, $outside));
+        // Člena, kterého plnění už minulo (kurzor na něm) a do dávky ho nezapsalo, dávka nezachytí: smazání projde.
+        [$passed] = $this->bareMember('DEL-SEED-PASSED');
+        $this->pdo->prepare('UPDATE nonprofit_membership_batches SET seed_cursor=?,seed_until=? WHERE supplier_id=? AND id=?')
+            ->execute([$passed, $passed + 1000, $this->supplier, $active]);
+        $this->corrections->delete($this->supplier, $passed, $this->actor);
+        self::assertNull($this->repository->member($this->supplier, $passed));
     }
 
     public function testUnexpectedReferenceIsReportedAsMemberInUse(): void
