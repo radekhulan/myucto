@@ -35,6 +35,7 @@ use MyInvoice\Service\Stock\StockIssueService;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 
 /**
  * Přechod draft → issued:
@@ -132,7 +133,7 @@ final class IssueInvoiceAction
         if (
             InvoiceAmountPolicy::requiresPositiveDraftAmountToPay(
                 (string) ($invoice['invoice_type'] ?? 'invoice'),
-                $invoice['parent_invoice_id'] ?? null,
+                InvoiceAmountPolicy::advanceLinkId($invoice),
             )
             && !InvoiceAmountPolicy::hasPositiveAmountToPay($invoice)
             && !(InvoiceAmountPolicy::isAllowedRefundInvoice($invoice)
@@ -148,11 +149,14 @@ final class IssueInvoiceAction
         // by se zdanila podruhé. Draft DD smaž, nebo nejdřív stornuj finál.
         if ($invoice['invoice_type'] === 'tax_document' && (int) ($invoice['parent_invoice_id'] ?? 0) > 0) {
             $fin = $this->db->pdo()->prepare(
-                "SELECT 1 FROM invoices
-                  WHERE parent_invoice_id = ? AND invoice_type = 'invoice' AND status <> 'cancelled'
+                'SELECT 1 FROM invoices
+                  WHERE supplier_id = ? AND id IN (' . AdvanceDrawSql::finalIds('?', '?') . ")
+                    AND status <> 'cancelled'
                   LIMIT 1"
             );
-            $fin->execute([(int) $invoice['parent_invoice_id']]);
+            $supplierId = (int) $invoice['supplier_id'];
+            $proformaId = (int) $invoice['parent_invoice_id'];
+            $fin->execute([$supplierId, $supplierId, $proformaId, $proformaId, $supplierId]);
             if ($fin->fetchColumn() !== false) {
                 return Json::error(
                     $response,

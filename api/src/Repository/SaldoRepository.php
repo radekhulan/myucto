@@ -1244,12 +1244,14 @@ final class SaldoRepository
         }
         // Čerpání po dvojicích záloha × konečná faktura (`invoice_advance_deductions`, zrcadlo
         // purchase_advance_deductions): faktura, která vyúčtuje víc záloh, nebo záloha čerpaná
-        // víc fakturami. Platí od zaúčtování konečné faktury. Jen pro zálohový účet: zálohu
-        // inkasovanou přímo na 311 vypořádává konečná faktura poměrem ve fetchOpenInvoices.
+        // víc fakturami. Patří sem i faktura čerpající víc záloh odpočtovými řádky, která vazbu
+        // dokladu nemá ({@see AdvanceDeductionRepository::deductionsSource()}). Platí od zaúčtování
+        // konečné faktury. Jen pro zálohový účet: zálohu inkasovanou přímo na 311 vypořádává
+        // konečná faktura poměrem ve fetchOpenInvoices.
         $deductedCte = $onReceivable ? '' : ",
             deducted AS (
                 SELECT iad.advance_invoice_id AS invoice_id, SUM(iad.amount) AS amount
-                  FROM invoice_advance_deductions iad
+                  FROM " . AdvanceDeductionRepository::deductionsSource('invoice', $supplierId) . " iad
                   CROSS JOIN params x
                  WHERE iad.supplier_id = x.supplier_id
                    AND " . self::advanceDeductionCountsSql('iad', 'invoice', 'x.as_of') . '

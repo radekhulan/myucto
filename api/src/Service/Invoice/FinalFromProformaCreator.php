@@ -9,6 +9,7 @@ use MyInvoice\Repository\AdvanceDeductionRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Oss\OssItemCarryOver;
 use MyInvoice\Service\Stats\StatsRecomputer;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 
 /**
  * Vytvoří DRAFT finální faktury (typu `invoice`) k zaplacené proformě.
@@ -19,7 +20,8 @@ use MyInvoice\Service\Stats\StatsRecomputer;
  *     stejné transakce před voláním)
  *
  * Idempotence: pokud už existuje child faktura (`parent_invoice_id = proformaId`,
- * `invoice_type = 'invoice'`), vrátí její id a nevytvoří duplikát.
+ * `invoice_type = 'invoice'`, nebo faktura čerpající zálohu odpočtovým řádkem), vrátí její
+ * id a nevytvoří duplikát.
  *
  * Bezpečné vůči vnořeným transakcím — pokud caller už má otevřenou transakci,
  * neotevírá vlastní a neflushuje.
@@ -92,14 +94,16 @@ final class FinalFromProformaCreator
 
         $pdo = $this->db->pdo();
 
-        // Idempotence — pokud už existuje child final, vrátit její id
+        // Idempotence — pokud už existuje child final, vrátit její id. Patří sem i faktura,
+        // která zálohu čerpá odpočtovým řádkem spolu s dalšími zálohami (AdvanceDrawSql).
         $existing = $pdo->prepare(
-            "SELECT id FROM invoices
-              WHERE parent_invoice_id = ? AND invoice_type = 'invoice'
+            'SELECT id FROM invoices
+              WHERE supplier_id = ? AND id IN (' . AdvanceDrawSql::finalIds('?', '?') . ")
                 AND status <> 'cancelled'
               ORDER BY id LIMIT 1"
         );
-        $existing->execute([$proformaId]);
+        $supplierId = (int) $proforma['supplier_id'];
+        $existing->execute([$supplierId, $supplierId, $proformaId, $proformaId, $supplierId]);
         $existingId = $existing->fetchColumn();
         if ($existingId !== false) {
             return (int) $existingId;

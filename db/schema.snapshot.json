@@ -1199,7 +1199,8 @@
         "2293_api_token_system_write.sql",
         "2294_bank_posting_rule_skip_matching_card.sql",
         "2295_helios_import_map.sql",
-        "2296_eet_units_dis_import.sql"
+        "2296_eet_units_dis_import.sql",
+        "2297_invoice_item_advance_drawdown.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7280,6 +7281,7 @@
             "columns": {
                 "accrual_from": "date NULL DEFAULT NULL",
                 "accrual_to": "date NULL DEFAULT NULL",
+                "advance_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "asset_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "counter_account_code": "varchar(10) NULL DEFAULT NULL",
                 "description": "text NOT NULL",
@@ -7331,9 +7333,11 @@
                 "idx_ii_invoice": "BTREE (invoice_id, order_index)",
                 "idx_ii_small_asset": "BTREE (small_asset_id)",
                 "idx_invoice_items_oss": "BTREE (oss_applicable, oss_consumer_country)",
-                "idx_invoice_items_oss_manual_review": "BTREE (oss_needs_manual_review, oss_applicable, invoice_id)"
+                "idx_invoice_items_oss_manual_review": "BTREE (oss_needs_manual_review, oss_applicable, invoice_id)",
+                "ix_ii_advance_invoice": "BTREE (advance_invoice_id, invoice_id)"
             },
             "foreign_keys": {
+                "fk_ii_advance_invoice": "(advance_invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ii_asset": "(asset_id) -> assets (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ii_invoice": "(invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_ii_small_asset": "(small_asset_id) -> small_assets (id) ON UPDATE RESTRICT ON DELETE SET NULL",

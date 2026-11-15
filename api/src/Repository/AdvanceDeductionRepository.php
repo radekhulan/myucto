@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\DocumentPostingGroup;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 use PDO;
 
 /**
@@ -22,7 +23,9 @@ use PDO;
  *     samostatný daňový doklad k platbě, `parent_invoice_id` na proformu): saldokonto té
  *     záloze přičte celou stranu faktury a uzavře ji nejvýš na její částku. Přiřazená je
  *     proto strana do výše částky navázané zálohy, přebytek nad ní lze čerpat jinou zálohou,
- *   - každý řádek čerpání (převzatý z převodu i zadaný v saldokontu) svou částku.
+ *   - každý řádek čerpání (převzatý z převodu i zadaný v saldokontu) svou částku,
+ *   - vydaná faktura čerpající víc záloh odpočtovými řádky svůj základ odpočtu každé zálohy
+ *     ({@see deductionsSource()}).
  * Přeúčtování mezi analytikami zálohového účtu v témže zápisu (stejná částka na obou
  * stranách) čerpáním není.
  *
@@ -49,6 +52,26 @@ final class AdvanceDeductionRepository
             'invoice'          => 'invoice_advance_deductions',
             default            => throw new \InvalidArgumentException('Neplatný druh dokladu čerpání zálohy.'),
         };
+    }
+
+    /**
+     * Čerpání po dvojicích jako zdroj dotazu (`FROM <zdroj> t`, sloupce `id`, `supplier_id`,
+     * `final_invoice_id`, `advance_invoice_id`, `amount`, `source`): řádky tabulky čerpání
+     * a u vydaných faktur i čerpání vyznačené odpočtovými řádky faktury, která čerpá víc
+     * záloh ({@see AdvanceDrawSql::itemDraws()}, zdroj `invoice`, bez `id`). To se v saldokontu
+     * nezadává ani neruší, mění ho jen čerpání záloh v detailu konceptu faktury.
+     */
+    public static function deductionsSource(string $docType, int $supplierId): string
+    {
+        $table = self::table($docType);
+        if ($docType !== 'invoice') {
+            return $table;
+        }
+        return "(SELECT id, supplier_id, final_invoice_id, advance_invoice_id, amount, CAST(source AS CHAR(16)) AS source
+                   FROM {$table} WHERE supplier_id = {$supplierId}
+                 UNION ALL
+                 SELECT NULL, d.supplier_id, d.final_invoice_id, d.advance_invoice_id, d.amount, 'invoice'
+                   FROM (" . AdvanceDrawSql::itemDraws((string) $supplierId) . ') d)';
     }
 
     /** Strana zálohového účtu, kterou konečná faktura zálohu čerpá. */
@@ -453,7 +476,8 @@ final class AdvanceDeductionRepository
         }
         $only = $advanceIds === null ? '' : ' AND advance_invoice_id IN (' . implode(',', self::ids($advanceIds) ?: [0]) . ')';
         $stmt = $this->db->pdo()->prepare(
-            'SELECT advance_invoice_id, final_invoice_id, amount FROM ' . self::table($docType) . " WHERE supplier_id = ?{$only} ORDER BY id"
+            'SELECT advance_invoice_id, final_invoice_id, amount FROM ' . self::deductionsSource($docType, $supplierId)
+            . " t WHERE supplier_id = ?{$only} ORDER BY id IS NULL, id, final_invoice_id"
         );
         $stmt->execute([$supplierId]);
         $out = [];
@@ -556,7 +580,7 @@ final class AdvanceDeductionRepository
             return [];
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT final_invoice_id, SUM(amount) FROM ' . self::table($docType) . '
+            'SELECT final_invoice_id, SUM(amount) FROM ' . self::deductionsSource($docType, $supplierId) . ' t
               WHERE supplier_id = ? AND final_invoice_id IN (' . implode(',', $ids) . ')
               GROUP BY final_invoice_id'
         );
@@ -594,7 +618,7 @@ final class AdvanceDeductionRepository
      */
     public function overdeductedFinals(int $supplierId, string $docType, array $accountIds): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT DISTINCT final_invoice_id FROM ' . self::table($docType) . ' WHERE supplier_id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT DISTINCT final_invoice_id FROM ' . self::deductionsSource($docType, $supplierId) . ' t WHERE supplier_id = ?');
         $stmt->execute([$supplierId]);
         $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
         if ($ids === []) {
