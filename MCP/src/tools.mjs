@@ -57,6 +57,9 @@ import {
   CONFIRM, DOCUMENT_ENTITY_TYPES, changed, confirmed, merged, requireConfirm, seg,
 } from './tool-shared.mjs';
 import { FILE_TOOLS } from './file-tools.mjs';
+import { BANK_TOOLS } from './bank-tools.mjs';
+import { CLIENT_TOOLS } from './client-tools.mjs';
+import { ACCOUNTING_READ_TOOLS } from './accounting-read-tools.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -669,6 +672,10 @@ export const TOOLS = [
   ...PURCHASE_TOOLS,
   ...OTHER_ITEM_TOOLS,
   ...FILE_TOOLS,
+  // Banka, karta partnera, dokumenty a čtení účetnictví mimo faktury (rozšíření katalogu).
+  ...BANK_TOOLS,
+  ...CLIENT_TOOLS,
+  ...ACCOUNTING_READ_TOOLS,
   // ──────────────────────────────────────────────────────────────────────────
   // Diagnostika
   // ──────────────────────────────────────────────────────────────────────────
@@ -2719,16 +2726,27 @@ export const TOOLS = [
     apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit metadata dokumentu',
     description:
-      'Změní jen zadaný název, popis nebo kompletní sadu tagů dokumentu. '
+      'Změní jen zadaný název, popis, kompletní sadu tagů (list_document_tags) nebo složku dokumentu '
+      + '(`folder_id` z list_document_folders, 0 = přesun do kořene). '
       + 'Samotný soubor ani jeho vytěžený text nemění.',
     inputSchema: schema({
       id: int('ID dokumentu.'),
       title: str('Název dokumentu.'),
       description: str('Popis dokumentu; prázdný text popis odstraní.'),
       tags: { type: 'array', items: { type: 'string' }, description: 'Kompletní sada tagů.' },
+      folder_id: int('Cílová složka; 0 = kořen bez složky.', { minimum: 0 }),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.patch(`/documents/${seg(a.id)}`, changed(a, ['title', 'description', 'tags']), tool),
+    run: async (c, a, tool) => {
+      const fields = changed(a, ['title', 'description', 'tags']);
+      if (Object.keys(fields).length === 0 && a.folder_id === undefined) {
+        throw new Error('Zadej aspoň jedno z title, description, tags a folder_id.');
+      }
+      const result = Object.keys(fields).length > 0 ? await c.patch(`/documents/${seg(a.id)}`, fields, tool) : null;
+      if (a.folder_id === undefined) return result;
+      const moved = await c.post(`/documents/${seg(a.id)}/move`, { folder_id: a.folder_id === 0 ? null : a.folder_id }, tool);
+      return result === null ? moved : { ...result, moved };
+    },
   },
   {
     name: 'link_document',

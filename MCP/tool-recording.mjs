@@ -134,11 +134,45 @@ export function scenarios(tool) {
     delete_product_media: { media_id: 7 },
     allocate_other_item_payment: { bank_transaction_id: 7 },
     get_payroll_salary_result: { period: '2026-01' },
+    match_bank_transaction: { invoice_ids: [7] },
+    create_document_request: { description: 'Syntetický doklad' },
+    find_bank_payments_for_document: { invoice_id: 7 },
     create_analytic_account: { account_code: '378.800' },
   }[tool.name];
   if (minimal) cases.push({ args: { ...args, ...minimal } });
+  // Revize mzdy zadaná přímo: druhá větev nástroje (net-results bez dohledání běhu).
+  if (tool.name === 'get_payroll_salary_result') cases.push({ args: { ...args, revision_id: 7 } });
+  if (tool.name === 'find_bank_payments_for_document') cases.push({ args: { ...args, purchase_invoice_id: 7 } });
+  if (tool.name === 'create_document_request') cases.push({ args: { ...args, bank_transaction_id: 7 } });
+  if (tool.name === 'update_document') cases.push({ args: { id: 7, folder_id: 7 } });
+  if (tool.api === false) cases.push(...branchCases(tool, args));
+  // Nepovinné `id` přepíná seznam a detail (např. list_small_assets).
+  if (tool.api === false && 'id' in args && !(tool.inputSchema.required ?? []).includes('id')) {
+    const { id: unused, ...rest } = args;
+    cases.push({ args: rest });
+  }
   if (tool.name === 'delete_purchase_invoice_pdf') cases.push({ args, options: { pdfPath: 'synthetic.pdf' } });
   if (tool.name === 'uncancel_invoice') cases.push({ args, options: { status: 'cancelled' } });
+  return cases;
+}
+
+/**
+ * Nástroje mimo klientský katalog (`api: false`) se do manifestu rout zapisují jen
+ * z toho, co scénář skutečně zavolal. Parametr s výčtem nebo přepínač často mění
+ * cestu (`entity_type`, `type: fo|po`, `mode`, `decision`), takže výchozí vzorek by
+ * zachytil jen první větev a filtr nabídky podle role by o ostatních nevěděl.
+ * Projde proto každou hodnotu výčtu a obě hodnoty přepínače, každou zvlášť.
+ */
+function branchCases(tool, args) {
+  const cases = [];
+  for (const [key, property] of Object.entries(tool.inputSchema.properties ?? {})) {
+    if (key === 'confirm') continue;
+    const values = Array.isArray(property.enum) ? property.enum
+      : property.type === 'boolean' ? [true, false] : [];
+    for (const value of values) {
+      if (args[key] !== value) cases.push({ args: { ...args, [key]: value } });
+    }
+  }
   return cases;
 }
 
