@@ -97,6 +97,12 @@ describe('Membership correction flow', () => {
     expect(w.get('[data-section="corr-review"]').text()).toContain('Synthetic member →')
   })
 
+  it('cíl smazání ukazuje číslo a název z doby otevření', async () => {
+    const w = mounted({ mode: 'delete' })
+    await w.setProps({ label: 'Synthetic renamed member', member: { ...member, member_number: 'X2' } })
+    expect(w.get('[data-section="corr-delete-target"]').text()).toContain('M-1 · Synthetic member')
+  })
+
   it('jiná chyba než zastaralý podklad detail znovu nenačítá', async () => {
     api.updateMember.mockRejectedValueOnce({ response: { status: 409, data: { error: { code: 'nonprofit_membership_identity_conflict', message: 'Kolize.' } } } })
     const w = mounted({ mode: 'identity' })

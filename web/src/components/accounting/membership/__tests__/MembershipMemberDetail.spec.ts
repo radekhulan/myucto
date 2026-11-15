@@ -520,6 +520,71 @@ describe('Membership member detail after a correction', () => {
     w.unmount()
   })
 
+  it('hlášku o zavřené opravě nezapne načtení přeběhnuté novějším, které selhalo, a odložená obnova se neopakuje', async () => {
+    let release: (v: unknown) => void = () => {}
+    let fail: (e: unknown) => void = () => {}
+    api.member.mockResolvedValueOnce({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
+      .mockReturnValueOnce(new Promise(resolve => { release = resolve }))
+      .mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject }))
+    const w = mountedWithCorrection({ refreshVersion: 0 }); await flushPromises()
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    w.findComponent(CorrectionFlow).vm.$emit('stale'); await flushPromises()
+    await w.setProps({ refreshVersion: 1 }); await flushPromises()
+    // Přerušené načtení doběhne dřív, než novější selže.
+    release({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed }); await flushPromises()
+    fail({ response: { status: 500, data: { error: { code: 'server_error', message: 'Chyba.' } } } }); await flushPromises()
+    expect(w.find('[data-section="detail-error"]').exists()).toBe(true)
+    expect(w.find('[data-section="detail-stale"]').exists()).toBe(false)
+    expect(api.member).toHaveBeenCalledTimes(3)
+    w.unmount()
+  })
+
+  it('varování o zavřené opravě je vidět už během načítání a nepřenese se na jiného člena', async () => {
+    let release: (v: unknown) => void = () => {}
+    const ok = { ...detail([revision(1, '2020-01-01')], []), corrections: allowed }
+    api.member.mockResolvedValueOnce(ok).mockReturnValueOnce(new Promise(resolve => { release = resolve })).mockResolvedValue(ok)
+    const w = mountedWithCorrection(); await flushPromises()
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    w.findComponent(CorrectionFlow).vm.$emit('stale'); await flushPromises()
+    expect(w.find('[data-section="detail-stale"]').exists(), 'během načítání').toBe(true)
+    await w.setProps({ memberId: 10 }); await flushPromises()
+    release(ok); await flushPromises()
+    expect(w.find('[data-section="detail-stale"]').exists(), 'jiný člen').toBe(false)
+    w.unmount()
+  })
+
+  it('novější úspěšné načtení varování o zavřené opravě ponechá a další hláška detailu ho smaže', async () => {
+    let release: (v: unknown) => void = () => {}
+    const ok = { ...detail([revision(1, '2020-01-01')], []), corrections: allowed }
+    api.member.mockResolvedValueOnce(ok).mockReturnValueOnce(new Promise(resolve => { release = resolve })).mockResolvedValue(ok)
+    const w = mountedWithCorrection({ refreshVersion: 0 }); await flushPromises()
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    w.findComponent(CorrectionFlow).vm.$emit('stale'); await flushPromises()
+    await w.setProps({ refreshVersion: 1 }); await flushPromises()
+    release(ok); await flushPromises()
+    expect(w.find('[data-section="detail-stale"]').exists()).toBe(true)
+    await w.get('[data-action="change-status"]').trigger('click'); await flushPromises()
+    w.findComponent(RevisionForm).vm.$emit('done'); await flushPromises()
+    expect(w.find('[data-section="detail-notice"]').exists()).toBe(true)
+    expect(w.find('[data-section="detail-stale"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('zavření zastaralé opravy nespustí odloženou obnovu podruhé a Obnovit varování smaže', async () => {
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
+    const w = mountedWithCorrection({ refreshVersion: 0 }); await flushPromises()
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    w.findComponent(CorrectionFlow).vm.$emit('lock', true); await flushPromises()
+    await w.setProps({ refreshVersion: 1 }); await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(1)
+    w.findComponent(CorrectionFlow).vm.$emit('stale'); await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(2)
+    expect(w.find('[data-section="detail-stale"]').exists()).toBe(true)
+    await w.get('[data-action="reload"]').trigger('click'); await flushPromises()
+    expect(w.find('[data-section="detail-stale"]').exists()).toBe(false)
+    w.unmount()
+  })
+
   it('po zastaralé opravě s nezdařeným načtením hlášku o načtení neukáže', async () => {
     api.member.mockResolvedValueOnce({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
       .mockRejectedValueOnce({ response: { status: 500, data: { error: { code: 'server_error', message: 'Chyba.' } } } })

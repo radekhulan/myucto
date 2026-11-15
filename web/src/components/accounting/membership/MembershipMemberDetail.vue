@@ -32,6 +32,7 @@ const error = ref('')
 const notice = ref('')
 // Zavřená zastaralá oprava není úspěch: vlastní varovná hláška, zmizí s dalším otevřením opravy.
 const staleNotice = ref(false)
+watch([notice, error], ([message, failure]) => { if (message || failure) staleNotice.value = false })
 const issueOpen = ref(false)
 /** Formulář revize je u člena s historií sbalený za akcí „Změnit stav členství“. */
 const revisionOpen = ref(false)
@@ -111,8 +112,9 @@ async function correctionStale() {
   locks.value.correction = false
   refreshPending = false
   notice.value = ''
+  // Varování platí hned; chyba kteréhokoli dalšího načtení ho smaže (hlášky by si odporovaly), novější úspěšné nechá.
+  staleNotice.value = true
   await load()
-  staleNotice.value = !error.value
   emit('changed')
 }
 
@@ -185,7 +187,7 @@ const actions = computed<ActionItem[]>(() => [
   { key: 'fix-identity', label: t('nonprofitMembership.correction.title_identity'), icon: 'edit', tier: 'overflow',
     show: props.canManage && !!corrections.value && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !corrections.value?.can_edit_identity,
     disabledReason: formReason(corrections.value?.edit_identity_block), run: () => startCorrection('identity') },
-  { key: 'reload', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value || anyLocked.value || revisionDirty.value, disabledReason: revisionDirty.value ? t('nonprofitMembership.correction.closeFormFirst') : undefined, run: () => { void load() } },
+  { key: 'reload', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value || anyLocked.value || revisionDirty.value, disabledReason: revisionDirty.value ? t('nonprofitMembership.correction.closeFormFirst') : undefined, run: () => { staleNotice.value = false; void load() } },
   { key: 'close-detail', label: t('nonprofitMembership.close'), icon: 'x', disabled: anyLocked.value, run: () => emit('close') },
   { key: 'void-revision', label: t('nonprofitMembership.correction.title_void'), icon: 'uturn', tier: 'overflow', variant: 'danger',
     show: props.canManage && (!!voidable.value || !!corrections.value?.void_block) && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !voidable.value,
