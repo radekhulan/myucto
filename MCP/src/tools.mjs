@@ -403,7 +403,7 @@ export const INVOICE_ITEM_FIELDS = [
   'list_unit_price', 'manual_price', 'vat_rate_id', 'order_index', 'vat_classification_code',
   'stock_item_id', 'warehouse_id', 'small_asset_id', 'asset_id', 'accrual_from', 'accrual_to',
   'tracking_allocations', 'revenue_account_code', 'counter_account_code', 'posting_rule_key',
-  'seller_item_code', 'linked_work_report_id', 'work_report_billing_key', ...INVOICE_ITEM_OSS_FIELDS,
+  'seller_item_code', 'linked_work_report_id', 'work_report_billing_key', 'advance_invoice_id', ...INVOICE_ITEM_OSS_FIELDS,
 ];
 
 /**
