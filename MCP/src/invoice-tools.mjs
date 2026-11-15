@@ -508,11 +508,13 @@ export const INVOICE_TOOLS = [
     api: [
       ['GET', '/api/invoices/{id}/advance-drawdown'],
     ],
-    title: 'Zálohy k postupnému čerpání',
+    title: 'Zálohy k čerpání na faktuře',
     description:
       'Ke KONCEPTU faktury vrátí zálohové faktury téhož odběratele a měny, které mají vystavený '
-      + 'daňový doklad k platbě, s dosud nevyčerpanou částkou (`available`, s DPH). Čerpá se přes '
-      + '`apply_invoice_advance_drawdown`.',
+      + 'daňový doklad k platbě, s dosud nevyčerpanou částkou (`available` s DPH, `available_base` '
+      + 'bez DPH, bez čerpání tohoto konceptu) a s částkou, kterou z nich koncept čerpá teď (`drawn`, '
+      + '`drawn_base`). Faktura může čerpat víc záloh najednou; plnění faktury a čerpání po zálohách '
+      + 'ukazuje `advance_drawdown` v detailu faktury. Čerpá se přes `apply_invoice_advance_drawdown`.',
     inputSchema: schema({ id: id('ID konceptu faktury.') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/advance-drawdown`, null, tool),
@@ -522,22 +524,29 @@ export const INVOICE_TOOLS = [
     api: [
       ['POST', '/api/invoices/{id}/advance-drawdown'],
     ],
-    title: 'Odečíst část zálohy na faktuře',
+    title: 'Odečíst zálohu na faktuře',
     description:
-      'Postupné čerpání zálohy (smlouva s milníky): na KONCEPT běžné faktury s vlastními položkami '
-      + 'doplní záporné odpočtové řádky § 37a ZDPH na `amount` (s DPH) z dané zálohy a naváže fakturu '
-      + 'na zálohu. Záloha musí mít vystavený daňový doklad k platbě. Opakované volání odpočet '
-      + 'nahradí. Na rozdíl od `create_final_invoice_from_proforma` nekopíruje položky zálohy a jednu '
-      + 'zálohu může čerpat víc faktur, dokud se nevyčerpá.',
+      'Čerpání zálohy na KONCEPTU běžné faktury s vlastními položkami: doplní záporné odpočtové '
+      + 'řádky § 37a ZDPH z dané zálohy (`proforma_id`) po sazbách jejího daňového dokladu k platbě. '
+      + 'Faktura může čerpat víc záloh: volání přidá zálohu, nebo nahradí čerpání téže zálohy, '
+      + 'čerpání ostatních záloh na faktuře zůstává. Částka je `amount` (v měně dokladu, `basis` '
+      + '`gross` = s DPH, výchozí, nebo `net` = bez DPH), nebo `percent` = procento plnění faktury '
+      + '(součtu jejích řádků mimo odpočty záloh, typicky 30). Záloha musí mít vystavený daňový doklad '
+      + 'k platbě; jednu zálohu může čerpat víc faktur, dokud se nevyčerpá. Při čerpání víc záloh nesmí '
+      + 'odpočty převýšit plnění faktury. Na rozdíl od `create_final_invoice_from_proforma` nekopíruje '
+      + 'položky zálohy.',
     inputSchema: schema({
       id: id('ID konceptu faktury.'),
       proforma_id: id('ID zálohové faktury.'),
-      amount: num('Čerpaná částka zálohy s DPH v měně dokladu.', { exclusiveMinimum: 0 }),
-    }, ['id', 'proforma_id', 'amount']),
+      amount: num('Čerpaná částka zálohy v měně dokladu (podle `basis`). Zadejte `amount`, nebo `percent`.', { exclusiveMinimum: 0 }),
+      percent: num('Čerpaná část jako procento plnění faktury (s DPH). Zadejte `amount`, nebo `percent`.', { exclusiveMinimum: 0, maximum: 100 }),
+      basis: str('Základ částky `amount`: `gross` = s DPH (výchozí), `net` = bez DPH.', { enum: ['gross', 'net'] }),
+    }, ['id', 'proforma_id']),
     write: true,
+    // Právě jedno z `amount` a `percent` hlídá API (400 invalid_input), tady se jen přepošle.
     run: (c, a, tool) => c.post(
       `/invoices/${seg(a.id)}/advance-drawdown`,
-      { proforma_id: a.proforma_id, amount: a.amount },
+      { proforma_id: a.proforma_id, ...changed(a, ['amount', 'percent', 'basis']) },
       tool,
     ),
   },
@@ -548,14 +557,24 @@ export const INVOICE_TOOLS = [
       ['DELETE', '/api/invoices/{id}/advance-drawdown'],
     ],
     title: 'Odebrat čerpání zálohy z faktury',
-    description: 'Z KONCEPTU faktury odebere odpočtové řádky zálohy i vazbu na zálohovou fakturu. Vyžaduje `confirm: true`.',
-    inputSchema: schema({ id: id('ID konceptu faktury.'), confirm: CONFIRM }, ['id']),
+    description:
+      'Z KONCEPTU faktury odebere odpočtové řádky zálohy `proforma_id` (ostatní zálohy zůstanou), '
+      + 'bez `proforma_id` odpočty všech záloh i vazbu na zálohovou fakturu. Vyžaduje `confirm: true`.',
+    inputSchema: schema({
+      id: id('ID konceptu faktury.'),
+      proforma_id: id('ID zálohové faktury, jejíž čerpání se odebere. Bez něj se odeberou všechny zálohy.'),
+      confirm: CONFIRM,
+    }, ['id']),
     write: true,
     destructive: true,
     run: async (c, a, tool) => {
       const invoice = await loadDraftInvoice(c, a.id, tool);
-      requireConfirm(a, 'Odebrat se mají odpočtové řádky zálohy i její vazba', invoiceLabel(invoice, a.id));
-      return c.del(`/invoices/${seg(a.id)}/advance-drawdown`, tool);
+      requireConfirm(
+        a,
+        a.proforma_id ? `Odebrat se mají odpočtové řádky zálohy #${a.proforma_id}` : 'Odebrat se mají odpočtové řádky všech záloh i vazba na zálohu',
+        invoiceLabel(invoice, a.id),
+      );
+      return c.del(`/invoices/${seg(a.id)}/advance-drawdown`, tool, a.proforma_id ? { proforma_id: a.proforma_id } : undefined);
     },
   },
   {

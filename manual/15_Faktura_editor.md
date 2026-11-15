@@ -127,25 +127,46 @@ kterékoli strany:
 **Jak poznáte, že je hotovo:** zobrazí se zpráva „Záloha propojena.“ Tlačítko se nabídne jen
 tehdy, když u daného odběratele existuje vhodný nespárovaný protějšek.
 
-### 15.4.2 Čerpat jednu zálohu postupně víc fakturami (milníky)
+### 15.4.2 Čerpat zálohy na faktuře (víc záloh i postupně po milnících)
 
-Typicky smlouva o dílo: klient zaplatí při podpisu zálohu 30 % z ceny díla a každá faktura za
-milník pak odečte 30 % své ceny, dokud se záloha nevyčerpá. Záloha musí být zaplacená a mít
-vystavený daňový doklad k přijaté platbě.
+Konečná faktura může odečíst libovolný počet zaplacených záloh téhož odběratele a měny,
+každou zvlášť zadanou částkou. Jednu zálohu zase může čerpat víc faktur postupně, typicky
+smlouva o dílo: klient zaplatí při podpisu zálohu 30 % z ceny díla a každá faktura za milník
+odečte 30 % své ceny, dokud se záloha nevyčerpá. Čerpat lze jen zálohu, která je zaplacená
+a má vystavený daňový doklad k přijaté platbě.
 
-1. Založte běžnou fakturu s položkami milníku v plné ceně a uložte ji jako koncept.
-2. V detailu konceptu klikněte na **Odečíst zálohu**, vyberte zálohovou fakturu a zadejte
-   čerpanou částku včetně DPH. U zálohy vidíte, kolik z ní ještě zbývá.
-3. Na faktuře přibude záporná položka „Odpočet zálohy“ se základem i DPH v poměru daňového
-   dokladu k záloze. Fakturu zkontrolujte a vystavte.
+1. Založte běžnou fakturu s položkami plnění v plné ceně a uložte ji jako koncept.
+2. V detailu konceptu klikněte na **Odečíst zálohu**. Okno ukazuje **Plnění faktury** a jakou
+   část ještě nekryjí odečtené zálohy.
+3. Vyberte zálohovou fakturu. U každé zálohy vidíte čísla jejích daňových dokladů, kolik
+   z ní ještě zbývá a kolik z ní faktura už čerpá.
+4. Zadejte částku a zvolte, jak ji zadáváte: **s DPH**, **bez DPH**, nebo **% z plnění
+   faktury** (u procenta okno ukáže odpovídající částku s DPH). Výchozí částka je zbytek
+   zálohy, nejvýš ta část plnění, kterou ještě nekryjí jiné zálohy.
+5. Klikněte na **Odečíst**. Na faktuře přibudou záporné položky „Odpočet zálohy“ s číslem
+   zálohové faktury a jejího daňového dokladu, po sazbách DPH v poměru daňového dokladu.
+6. Okno zůstane otevřené: další zálohu přidáte stejně. Seznam **Čerpání na faktuře** ukazuje
+   odečtené zálohy, u každé je tlačítko **Odebrat**. Vybráním zálohy, kterou faktura už čerpá,
+   čerpání upravíte (**Upravit čerpání**).
+7. Okno zavřete, fakturu zkontrolujte a vystavte.
 
-Další milníky čerpají stejnou zálohu stejným postupem. Faktura, která zálohu vyčerpá, odečte
-přesný zbytek základu i daně, takže součet odpočtů sedí na daňový doklad k platbě. Víc, než ze
-zálohy zbývá, odečíst nejde. Odpočet z konceptu odeberete tlačítkem **Odebrat čerpání zálohy**.
+Faktura, která zálohu vyčerpá, odečte přesný zbytek základu i daně, takže součet odpočtů
+všech faktur sedí na daňový doklad k platbě. Víc, než ze zálohy zbývá, odečíst nejde. Čerpá-li
+faktura víc záloh, nesmí odpočty dohromady převýšit plnění faktury. Odpočty všech záloh
+odeberete tlačítkem **Odebrat čerpání záloh** v nabídce akcí.
 
-**Jak poznáte, že je hotovo:** faktura má odkaz na zálohovou fakturu a v položkách odpočet
-zálohy. Při zaúčtování každá faktura zúčtuje ze zálohy (MD 324 / D 311) jen základ, který sama
-odečetla, a zbytek zálohy zůstává na 324 pro další faktury.
+> [!NOTE]
+> Zálohu bez daňového dokladu k přijaté platbě takto čerpat nejde: daň z ní nebyla přiznaná,
+> takže by ji odpočet snížil, aniž by ji kdo přiznal. Takovou zálohu vyúčtujte tlačítkem
+> **Vystavit fakturu k záloze** v detailu zálohové faktury (úhrada zálohy se odečte mimo daň),
+> nebo v saldokontu. Fakturu s odečtenou úhradou zálohy bez daňového dokladu nejde kombinovat
+> s čerpáním dalších záloh.
+
+**Jak poznáte, že je hotovo:** faktura čerpající jednu zálohu má odkaz na zálohovou fakturu,
+faktura čerpající víc záloh má pruh **Faktura čerpá zálohy** s odkazy na všechny. V položkách
+je odpočet každé zálohy. Při zaúčtování faktura zúčtuje z každé zálohy (MD 324 / D 311) jen
+základ, který z ní sama odečetla, a zbytek zálohy zůstává na 324 pro další faktury. Kontrolní
+hlášení i přiznání k DPH vykáží rozdíl plnění a odpočtů po sazbách.
 
 ## 15.5 Krok za krokem: výkaz víceprací a materiálu
 
@@ -222,7 +243,7 @@ Rozdíl mezi stornem a dobropisem a zaúčtování dobropisu viz [§ 15.9.9](#15
 | „Fakturu nelze stornovat - nejdřív vyřešte pokladní doklad, kterým byla hotově inkasována (…)“ | Pokladní doklad nejde zrušit (třeba kvůli uzavřenému období) | Vyřešte pokladní doklad v Pokladně a storno zopakujte |
 | „Tento odkaz byl již použit nebo není platný“ | Schvalovací odkaz je jednorázový | Pošlete výkaz ke schválení znovu |
 | Uložení faktury s prodejem majetku skončí chybou | Karta majetku už byla prodána jiným dokladem, nebo je vyřazená | Vyberte jinou kartu, viz [§ 15.9.3](#1593-polozky) |
-| Doklad zálohy nelze automaticky zaúčtovat | Vyúčtovací faktura neodečítá zálohu podle daňového dokladu k platbě, faktury dohromady odečítají víc, než ze zálohy bylo, chybí zaúčtovaná úhrada zálohy, nebo je k proformě bez daňového dokladu víc vyúčtovacích faktur | Opravte odpočet ([§ 15.4.2](#1542-cerpat-jednu-zalohu-postupne-vic-fakturami-milniky)), zaúčtujte úhradu zálohy, nebo dořešte ručním zápisem, viz [§ 15.9.8](#1598-zalohova-faktura-a-danovy-doklad) |
+| Doklad zálohy nelze automaticky zaúčtovat | Vyúčtovací faktura neodečítá zálohu podle daňového dokladu k platbě, faktury dohromady odečítají víc, než ze zálohy bylo, chybí zaúčtovaná úhrada zálohy, nebo je k proformě bez daňového dokladu víc vyúčtovacích faktur | Opravte odpočet ([§ 15.4.2](#1542-cerpat-zalohy-na-fakture-vic-zaloh-i-postupne-po-milnicich)), zaúčtujte úhradu zálohy, nebo dořešte ručním zápisem, viz [§ 15.9.8](#1598-zalohova-faktura-a-danovy-doklad) |
 | Pole data se neuloží | Neplatné datum (např. `31. 2.`) | Opravte datum |
 | „Odběratel … je veden jako drobný zákazník bez adresy. Lze mu vystavit jen zjednodušený daňový doklad…“ | Klient je drobný zákazník a doklad není zjednodušená faktura | Zaškrtněte **Zjednodušený daňový doklad**, nebo doplňte na kartě klienta adresu a volbu **Drobný zákazník** vypněte |
 | „…zjednodušený daňový doklad lze vystavit jen do 10 000 Kč včetně daně…“ u drobného zákazníka | Doklad přesahuje limit § 30 ZDPH | Doplňte na kartě klienta adresu a vystavte běžnou fakturu, nebo prodej snižte |
@@ -298,7 +319,7 @@ kalendáře** s odkazy na ně.
 **Konečné vyúčtování záloh.** Skutečnou dodávku vyúčtujete běžnou fakturou. Zaplacená splátka
 platebního kalendáře je záloha s daňovým dokladem k platbě, takže ji odečtete stejně jako
 jinou zálohu: akcí **Vystavit fakturu k záloze** v detailu splátky, nebo **Odečíst zálohu**
-v detailu konceptu faktury ([§ 15.4.2](#1542-cerpat-jednu-zalohu-postupne-vic-fakturami-milniky)).
+v detailu konceptu faktury ([§ 15.4.2](#1542-cerpat-zalohy-na-fakture-vic-zaloh-i-postupne-po-milnicich)).
 Jedna faktura odečítá vždy jen jednu zálohu.
 
 #### Klient a zakázka
@@ -1092,10 +1113,11 @@ Z pohledu [Účetního deníku](52_Ucetni_denik.md) fungují tři doklady záloh
   skutečně **přijaté** zálohy, ne nominální částky proformy, takže i částečně zaplacená nebo
   jinak vyrovnaná proforma se zúčtuje správně.
 
-- **Zálohu s daňovým dokladem k platbě čerpanou postupně víc fakturami** (viz
-  [§ 15.4.2](#1542-cerpat-jednu-zalohu-postupne-vic-fakturami-milniky)) zúčtuje každá faktura
-  jen ve výši základu, který odečetla. Součet odpočtů všech faktur nesmí přesáhnout daňový
-  doklad k platbě a úhrada zálohy musí být zaúčtovaná.
+- **Zálohu s daňovým dokladem k platbě čerpanou postupně víc fakturami** a **víc záloh čerpaných
+  jednou fakturou** (viz [§ 15.4.2](#1542-cerpat-zalohy-na-fakture-vic-zaloh-i-postupne-po-milnicich))
+  zúčtuje faktura z každé zálohy jen ve výši základu, který z ní odečetla. Součet odpočtů všech
+  faktur jedné zálohy nesmí přesáhnout její daňový doklad k platbě a úhrada zálohy musí být
+  zaúčtovaná.
 
 > [!WARNING]
 > Mimo automatiku zůstává proforma **bez** daňového dokladu k platbě navázaná na **víc než

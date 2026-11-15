@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\AdvanceDrawLinks;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
@@ -230,13 +231,14 @@ final class StatementMatcher
      * dotaz vrátí obě — to ale není nejednoznačnost, jen dva pohledy na týž obchodní případ.
      * Vrací proformu; kam platbu navázat, rozhodne až logika přesměrování v doMatch().
      *
-     * Zúží jen PRÁVĚ pár 1 proforma + 1 finál s parent_invoice_id na ni. Tři a víc shod, dvě
+     * Zúží jen PRÁVĚ pár 1 proforma + 1 finál, který ji čerpá (parent_invoice_id, nebo u faktury
+     * čerpající víc záloh odpočtový řádek, {@see AdvanceDrawLinks}). Tři a víc shod, dvě
      * proformy nebo dva nepříbuzné doklady zůstanou nedotčené → dál `ambiguous_vs` (správně).
      *
      * @param list<array<string,mixed>> $matches
      * @return list<array<string,mixed>>
      */
-    private function collapseProformaFinalPair(array $matches): array
+    private function collapseProformaFinalPair(array $matches, int $supplierId): array
     {
         if (count($matches) !== 2) {
             return $matches;
@@ -246,7 +248,9 @@ final class StatementMatcher
             $final    = $matches[$f];
             if (($proforma['invoice_type'] ?? '') === 'proforma'
                 && ($final['invoice_type'] ?? '') === 'invoice'
-                && (int) ($final['parent_invoice_id'] ?? 0) === (int) $proforma['id']
+                && ((int) ($final['parent_invoice_id'] ?? 0) === (int) $proforma['id']
+                    || ((int) ($final['parent_invoice_id'] ?? 0) === 0
+                        && AdvanceDrawLinks::finalDrawsAdvance($this->db->pdo(), $supplierId, (int) $final['id'], (int) $proforma['id'])))
             ) {
                 return [$proforma];
             }
@@ -886,7 +890,7 @@ final class StatementMatcher
         // Pořadí je podstatné: pár „proforma + její finál" se zúží DŘÍV, než se sáhne po
         // doslovné shodě — jinak by přednost dostal finál („2408001") před proformou
         // („Z2408001") a přesměrování platby proforma→finál by se nikdy nespustilo.
-        $matches = $this->preferExactVsMatches($this->collapseProformaFinalPair($matches));
+        $matches = $this->preferExactVsMatches($this->collapseProformaFinalPair($matches, $supplierId));
         if (count($matches) > 1) {
             $matches = $this->resolveSharedPaymentVs($matches, $amount, $txCurrency, $exactTolerance);
             if (count($matches) !== 1) {
@@ -912,17 +916,8 @@ final class StatementMatcher
         // by spustila daňový doklad k platbě, který už finál nikdy neodečte (§ 37a).
         if (($inv['invoice_type'] ?? '') === 'proforma') {
             $proformaPaid = ($inv['status'] === 'paid');
-            $fin = $pdo->prepare(
-                "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type,
-                        i.parent_invoice_id, cur.code AS currency
-                   FROM invoices i
-                   JOIN currencies cur ON cur.id = i.currency_id
-                  WHERE i.parent_invoice_id = ? AND i.invoice_type = 'invoice'
-                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
-                  ORDER BY i.id LIMIT 1"
-            );
-            $fin->execute([(int) $inv['id']]);
-            $finRow = $fin->fetch(PDO::FETCH_ASSOC);
+            // Finál = vazba dokladu i faktura čerpající zálohu odpočtovým řádkem (víc záloh).
+            $finRow = AdvanceDrawLinks::firstFinalOf($pdo, $supplierId, (int) $inv['id'], ['issued', 'sent', 'reminded', 'paid']);
             if ($finRow) {
                 // Přesměruj na finál JEN když je co vybrat — finál nese otevřenou pohledávku
                 // NEBO proforma sama ještě není uhrazená (finál je doklad k úhradě). Když je
@@ -942,8 +937,10 @@ final class StatementMatcher
         // Zrcadlo přijaté strany ({@see AdvanceFinalMatchGuard}): platba, která odpovídá
         // neuhrazené proformě a ne zbytku vyúčtovací faktury, patří na PROFORMU — i když
         // VS (nebo přesměrování výš) míří na vyúčtovací fakturu.
-        if (($inv['invoice_type'] ?? '') === 'invoice' && !empty($inv['parent_invoice_id'])
-            && $this->advanceGuard()->issuedViolation($supplierId, (int) $inv['id'], $amount) !== null) {
+        // Faktura čerpající víc záloh vazbu dokladu nemá: zálohu, na kterou platba patří, určí strážce.
+        if (($inv['invoice_type'] ?? '') === 'invoice'
+            && (!empty($inv['parent_invoice_id']) || AdvanceDrawLinks::drawingByLines($pdo, [(int) $inv['id']]) !== [])
+            && ($advanceViolation = $this->advanceGuard()->issuedViolation($supplierId, (int) $inv['id'], $amount)) !== null) {
             $proforma = $pdo->prepare(
                 "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type,
                         i.parent_invoice_id, cur.code AS currency
@@ -951,7 +948,7 @@ final class StatementMatcher
                    JOIN currencies cur ON cur.id = i.currency_id
                   WHERE i.id = ? AND i.supplier_id = ? AND i.invoice_type = 'proforma'"
             );
-            $proforma->execute([(int) $inv['parent_invoice_id'], $supplierId]);
+            $proforma->execute([$advanceViolation['advance_id'], $supplierId]);
             $proformaRow = $proforma->fetch(PDO::FETCH_ASSOC);
             if ($proformaRow !== false) {
                 $inv = $proformaRow;

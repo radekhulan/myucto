@@ -215,8 +215,11 @@ Při ručním režimu daňového dokladu k platbě postupujte takto:
    vrátí již existující doklad.
 
 Čerpání vyžaduje vystavený daňový doklad k platbě, stejnou protistranu a měnu
-a nevyčerpanou částku zálohy; OSS nepodporuje. Opakované čerpání na stejném
-konceptu nahradí dosavadní odpočet. Odpojení vazby vydané i přijaté faktury
+a nevyčerpanou částku zálohy; OSS nepodporuje. Jeden koncept může čerpat víc
+záloh: každé volání `apply_invoice_advance_drawdown` přidá zálohu `proforma_id`,
+nebo nahradí čerpání téže zálohy, ostatní zálohy zůstanou. Částka je `amount`
+(`basis` `gross` s DPH, nebo `net` bez DPH), nebo `percent` z plnění faktury.
+Odpočty víc záloh nesmí převýšit plnění faktury. Odpojení vazby vydané i přijaté faktury
 a odebrání čerpání se provedou až s `confirm: true`. Bez potvrzení asistent
 ukáže náhled. Samotné odpojení vazby ponechá odečtenou zálohu na dokladu;
 odebrání čerpání odstraní i odpočtové řádky konceptu.
@@ -926,7 +929,7 @@ Kromě konceptu umí asistent s vydanými doklady totéž, co detail faktury v a
 | `get_invoice_posting` | zápis zaúčtované faktury v deníku, u nezaúčtované náhled kontace (i přijaté faktury) |
 | `clone_invoice` | založí koncept jako kopii dokladu |
 | `create_final_invoice_from_proforma` | ze zaplacené zálohy založí koncept finální faktury s odečtenou zálohou |
-| `list_invoice_advance_drawdown_candidates`, `apply_invoice_advance_drawdown`, `remove_invoice_advance_drawdown` | postupné čerpání jedné zálohy víc fakturami (milníky): na koncept faktury odečte zadanou část zálohy, nebo odpočet odebere |
+| `list_invoice_advance_drawdown_candidates`, `apply_invoice_advance_drawdown`, `remove_invoice_advance_drawdown` | čerpání záloh na konceptu faktury: faktura odečte jednu nebo víc záloh (každou zvlášť částkou s DPH, bez DPH, nebo procentem plnění faktury) a jednu zálohu může čerpat víc faktur (milníky); odebrat jde jednu zálohu (`proforma_id`), nebo všechny |
 | `list_invoice_advance_candidates`, `list_proforma_final_candidates`, `link_invoice_advance`, `unlink_invoice_advance` | ruční propojení faktury se zálohou a jeho zrušení |
 | `preview_invoice_penalty`, `create_invoice_penalty` | výpočet úroku z prodlení a koncept penalizační faktury |
 | `add_invoice_payment`, `delete_invoice_payment`, `unmark_invoice_paid` | evidence částečné i celé úhrady, smazání úhrady, vrácení stavu zaplaceno |

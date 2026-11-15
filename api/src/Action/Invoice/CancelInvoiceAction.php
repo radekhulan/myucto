@@ -34,6 +34,7 @@ use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockIssueService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 
 /**
  * Storno vystavené faktury. Dvě varianty:
@@ -115,13 +116,15 @@ final class CancelInvoiceAction
                 $payment->execute([$id]);
                 $proformaId = (int) ($payment->fetchColumn() ?: 0);
             }
+            // Finální faktura zálohy: vazba dokladu i čerpání odpočtovým řádkem (AdvanceDrawSql).
             $final = $this->db->pdo()->prepare(
-                "SELECT 1 FROM invoices
-                  WHERE supplier_id = ? AND parent_invoice_id = ?
-                    AND invoice_type = 'invoice' AND status <> 'cancelled'
+                'SELECT 1 FROM (' . AdvanceDrawSql::finalIds('?', '?') . ") fx
+                   JOIN invoices i ON i.id = fx.id
+                  WHERE i.status <> 'cancelled'
                   LIMIT 1"
             );
-            $final->execute([(int) $invoice['supplier_id'], $proformaId]);
+            $supplierId = (int) $invoice['supplier_id'];
+            $final->execute([$supplierId, $proformaId, $proformaId, $supplierId]);
             if ($proformaId > 0 && $final->fetchColumn() !== false) {
                 return Json::error(
                     $response,

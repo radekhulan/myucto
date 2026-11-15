@@ -35,6 +35,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Property\Charges\Issuance\IssuancePostingBatchContext;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Service\Vat\VatStatusService;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 use PDO;
 
 /**
@@ -3356,6 +3357,9 @@ final class PostingService
      * zúčtování ho z 311 zase vyrovná. DDKP musí být zaúčtovaný — jinak by se zbytek zálohy
      * spočítal z daně, která na 324 ještě neleží, a zúčtování by 324 přečerpalo.
      *
+     * Faktura čerpající víc záloh ({@see AdvanceDrawSql}) zúčtuje každou zálohu zvlášť jejím
+     * základem a hlídá přečerpání po zálohách ({@see multiAdvanceDeduction}).
+     *
      * Hlasitou chybou (advance_settlement_ambiguous) je proforma s víc než jednou
      * vyúčtovací fakturou (nejednoznačná částka) a proforma s DDKP, u které po odečtení
      * jeho daně nezbývá žádná zaúčtovaná úhrada k zúčtování.
@@ -3363,12 +3367,34 @@ final class PostingService
      * @param array<string,mixed> $inv hlavička vyúčtovací faktury (z fetchDocHeader)
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
      * @param float $receivable předpis na 311 v tomhle zápisu (strop zúčtování)
-     * @param array{active:bool, partial:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>} $deduction
+     * @param array{active:bool, partial:bool, multi:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>, groups:list<array<string,mixed>>} $deduction
      */
     private function appendAdvanceSettlementSale(int $supplierId, array $inv, array &$lines, float $receivable, array $deduction): void
     {
         if ((string) ($inv['invoice_type'] ?? 'invoice') !== 'invoice') {
             return; // jen finální vyúčtovací faktura (ne dobropis/proforma/DDKP)
+        }
+        if ($deduction['multi']) {
+            // Faktura čerpající víc záloh: každá záloha se zúčtuje svým základem jako postupné
+            // čerpání. Zúčtování dohromady nesmí převýšit předpis faktury, jinak by přeplatek
+            // nešlo přiřadit žádné záloze (čerpání služba omezuje plněním faktury).
+            if ($deduction['base'] > $receivable + self::ADVANCE_DEDUCTION_TOLERANCE_CZK) {
+                throw new PostingException(
+                    'advance_settlement_ambiguous',
+                    sprintf(
+                        'Vyúčtovací faktura #%d čerpá víc záloh se základem %.2f Kč, ale její předpis je jen %.2f Kč, '
+                            . 'odpočty záloh tedy převyšují plnění faktury a zúčtování nejde rozdělit mezi zálohy. '
+                            . 'Sniž čerpání záloh, nebo zaúčtuj ručně.',
+                        (int) $inv['id'],
+                        $deduction['base'],
+                        $receivable,
+                    ),
+                );
+            }
+            foreach ($deduction['groups'] as $group) {
+                $this->appendPartialAdvanceSettlementSale($supplierId, (int) $inv['id'], $group['advance_id'], $group['parent'], $lines, $receivable, $group);
+            }
+            return;
         }
         $parentId = (int) ($inv['parent_invoice_id'] ?? 0);
         if ($parentId <= 0) {
@@ -3440,7 +3466,7 @@ final class PostingService
      *
      * @param array<string,mixed> $parent hlavička proformy
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
-     * @param array{active:bool, partial:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>} $deduction
+     * @param array{base:float, drawn_vat:float} $deduction čerpání téhle zálohy fakturou
      */
     private function appendPartialAdvanceSettlementSale(
         int $supplierId,
@@ -3481,19 +3507,19 @@ final class PostingService
         $lines[] = $this->pairHint($this->line($recv, 'credit', $amount, null), 'pair_group', 'advance');
     }
 
-    /** Základ odečtený ze zálohy ostatními nestornovanými fakturami proformy (v Kč). */
+    /**
+     * Základ odečtený ze zálohy ostatními vystavenými nestornovanými fakturami proformy (v Kč).
+     * Odpočtové řádky zálohy určuje {@see AdvanceDrawSql::advanceLines()}.
+     */
     private function otherFinalsDrawnBase(int $supplierId, int $proformaId, int $invoiceId): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT f.id, f.exchange_rate, -SUM(ii.total_without_vat) AS base
-               FROM invoices f
-               JOIN invoice_items ii ON ii.invoice_id = f.id
-              WHERE f.supplier_id = ? AND f.parent_invoice_id = ? AND f.invoice_type = 'invoice'
-                AND f.status NOT IN ('draft', 'cancelled') AND f.id <> ?
-                AND ii.total_with_vat < 0 AND COALESCE(ii.item_kind, 'standard') <> 'discount'
-              GROUP BY f.id, f.exchange_rate"
+            'SELECT d.final_id, d.exchange_rate, -SUM(d.total_without_vat) AS base
+               FROM (' . AdvanceDrawSql::advanceLines('?', '?') . ") d
+              WHERE d.status NOT IN ('draft', 'cancelled') AND d.final_id <> ?
+              GROUP BY d.final_id, d.exchange_rate"
         );
-        $stmt->execute([$supplierId, $proformaId, $invoiceId]);
+        $stmt->execute([$proformaId, $supplierId, $supplierId, $proformaId, $invoiceId]);
         $sum = 0.0;
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             $rate = (float) ($row['exchange_rate'] ?? 0) > 0 ? (float) $row['exchange_rate'] : 1.0;
@@ -3756,6 +3782,9 @@ final class PostingService
      *   - `drawn_vat`: Σ daně ze zaúčtovaných DDKP (DPH evidence, stejný zdroj jako
      *     zaúčtování DDKP) — přesně to, co DDKP z účtu zálohy odčerpal.
      *   - `item_ids`: odpočtové řádky, které se nepočítají do vah rozpadu výnosu.
+     *   - `groups`: čerpání po zálohách u faktury, která čerpá víc záloh nebo zálohu jinou
+     *     než z hlavičky ({@see AdvanceDrawSql}); pak je `multi` = true a každá záloha se
+     *     zúčtuje zvlášť svým základem ({@see appendAdvanceSettlementSale}).
      *
      * Aktivní jen u vyúčtování proformy, která má živý DDKP („živý" = ne draft, ne storno;
      * vazba přes parent_invoice_id i přes invoice_payments.tax_document_invoice_id — stejná
@@ -3767,93 +3796,49 @@ final class PostingService
      *     OSS se daňový doklad k záloze nevydává).
      *
      * @param array<string,mixed> $inv hlavička vyúčtovací faktury
-     * @return array{active:bool, partial:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>}
+     * @return array{active:bool, partial:bool, multi:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>,
+     *               groups:list<array{advance_id:int, parent:array<string,mixed>, base:float, foreign_base:float, drawn_vat:float}>}
      */
     private function advanceDeduction(int $supplierId, int $invoiceId, array $inv, float $rate): array
     {
-        $none = ['active' => false, 'partial' => false, 'base' => 0.0, 'foreign_base' => 0.0, 'drawn_vat' => 0.0, 'item_ids' => []];
+        $none = ['active' => false, 'partial' => false, 'multi' => false, 'base' => 0.0, 'foreign_base' => 0.0,
+            'drawn_vat' => 0.0, 'item_ids' => [], 'groups' => []];
         if ((string) ($inv['invoice_type'] ?? 'invoice') !== 'invoice') {
             return $none;
         }
         $parentId = (int) ($inv['parent_invoice_id'] ?? 0);
-        if ($parentId <= 0) {
-            return $none;
-        }
-        $parent = $this->fetchDocHeader('invoices', $supplierId, $parentId);
-        if ($parent === null || (string) ($parent['invoice_type'] ?? '') !== 'proforma') {
-            return $none;
-        }
+        $parent = $parentId > 0 ? $this->fetchDocHeader('invoices', $supplierId, $parentId) : null;
+        $parentProforma = $parent !== null && (string) ($parent['invoice_type'] ?? '') === 'proforma' ? $parentId : 0;
 
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT td.id, td.varsymbol, td.tax_date, td.issue_date, "
-                    . DocumentPostingGroup::activePostingExistsSql("'invoice'", 'td.id', 'td.supplier_id') . " AS posted
-               FROM invoices td
-              WHERE td.supplier_id = ? AND td.invoice_type = 'tax_document'
-                AND td.status NOT IN ('draft', 'cancelled')
-                AND (td.parent_invoice_id = ?
-                     OR td.id IN (SELECT p.tax_document_invoice_id FROM invoice_payments p
-                                   WHERE p.invoice_id = ? AND p.tax_document_invoice_id IS NOT NULL))
-              ORDER BY td.id"
-        );
-        $stmt->execute([$supplierId, $parentId, $parentId]);
-        $taxDocs = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-        if ($taxDocs === []) {
-            return $none;
-        }
-
-        $ddkpGross = 0.0;
-        $drawnVat = 0.0;
-        foreach ($taxDocs as $td) {
-            $label = ($td['varsymbol'] ?: '#' . $td['id']);
-            [$tdNet, $tdVat] = $this->ledgerTotals(
-                $supplierId,
-                'sale',
-                (int) $td['id'],
-                (string) ($td['tax_date'] ?? $td['issue_date']),
-                (string) $td['issue_date'],
-            );
-            $tdHeader = $this->fetchDocHeader('invoices', $supplierId, (int) $td['id']);
-            [$tdOssNet, $tdOssVat] = $this->ossItemTotals((int) $td['id'], $this->fxRate($tdHeader ?? []));
-            $ddkpGross += $tdNet + $tdVat + $tdOssNet + $tdOssVat;
-
-            if ((int) $td['posted'] !== 1) {
-                if (self::cents($tdVat) === 0 && self::cents($tdOssVat) !== 0) {
-                    throw new PostingException(
-                        'advance_tax_document_oss',
-                        'Daňový doklad k přijaté platbě ' . $label . ' k proformě #' . $parentId . ' nese jen daň OSS. '
-                            . 'Samostatně se neúčtuje: v režimu OSS se daň z úplaty přiznává v OSS přiznání '
-                            . 'a daňový doklad k záloze se nevydává. Doklad stornuj a vyúčtování vystav bez něj, '
-                            . 'nebo zúčtuj zálohu ručním zápisem.',
-                    );
-                }
-                if (self::cents($tdVat) !== 0) {
-                    throw new PostingException(
-                        'advance_tax_document_unposted',
-                        'Daňový doklad k přijaté platbě ' . $label . ' k proformě #' . $parentId
-                            . ' není zaúčtovaný — zaúčtuj ho před vyúčtovací fakturou.',
-                    );
-                }
-                continue; // bez daně (neplátce): ze zálohy nic neodčerpal
-            }
-            $drawnVat += $tdVat;
-        }
-
+        // Odpočtové řádky po zálohách: vyznačená záloha řádku, jinak záloha z hlavičky.
         $items = $this->db->pdo()->prepare(
-            "SELECT id, total_without_vat, total_vat
-               FROM invoice_items
-              WHERE invoice_id = ? AND total_with_vat < 0 AND COALESCE(item_kind, 'standard') <> 'discount'"
+            'SELECT id, advance_invoice_id, total_without_vat, total_vat
+               FROM invoice_items ii
+              WHERE ii.invoice_id = ? AND ' . AdvanceDrawSql::deductionLine('ii')
         );
         $items->execute([$invoiceId]);
-        $foreignBase = 0.0;
-        $base = 0.0;
-        $gross = 0.0;
-        $ids = [];
-        foreach ($items->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            $ids[] = (int) $row['id'];
-            $foreignBase += -(float) $row['total_without_vat'];
-            $base += round(-(float) $row['total_without_vat'] * $rate, 2);
-            $gross += round(-((float) $row['total_without_vat'] + (float) $row['total_vat']) * $rate, 2);
+        $rows = $items->fetchAll(\PDO::FETCH_ASSOC);
+        $byAdvance = [];
+        foreach ($rows as $row) {
+            $advance = (int) ($row['advance_invoice_id'] ?? 0) ?: $parentProforma;
+            if ($advance > 0) {
+                $byAdvance[$advance][] = $row;
+            }
         }
+        if (array_diff(array_keys($byAdvance), [$parentProforma]) !== []) {
+            return $this->multiAdvanceDeduction($supplierId, $invoiceId, $inv, $rate, $parentProforma, $byAdvance);
+        }
+        if ($parentProforma === 0) {
+            return $none;
+        }
+
+        [$taxDocs, $ddkpGross, $drawnVat] = $this->advanceTaxDocuments($supplierId, $parentId);
+        if ($taxDocs === 0) {
+            return $none;
+        }
+
+        // Jediná záloha (z hlavičky): všechny odpočtové řádky faktury jsou její.
+        [$base, $foreignBase, $gross, $ids] = self::deductionTotals($rows, $rate);
 
         // Celé vyúčtování jedinou fakturou odečítá přesně DDKP. Jinak jde o postupné čerpání
         // zálohy víc fakturami (AdvancePartialDrawdown): každá nese kladný odpočet a všechny
@@ -3864,10 +3849,8 @@ final class PostingService
             $drawnTotal = $this->advanceDrawnGross($supplierId, $parentId, $invoiceId, $gross, $rate);
             // Odečet úhrad bez DDKP v hlavičce (advance_paid_amount) patří jen k celému
             // vyúčtování — při postupném čerpání by zúčtování nešlo rozdělit mezi faktury.
-            $paidOff = $this->db->pdo()->prepare('SELECT advance_paid_amount FROM invoices WHERE id = ? AND supplier_id = ?');
-            $paidOff->execute([$invoiceId, $supplierId]);
             $partial = self::cents($gross) > 0
-                && self::cents((float) $paidOff->fetchColumn()) === 0
+                && self::cents($this->advancePaidOff($supplierId, $invoiceId)) === 0
                 && $drawnTotal <= $ddkpGross + self::ADVANCE_DEDUCTION_TOLERANCE_CZK;
             if (!$partial) {
                 throw new PostingException(
@@ -3891,43 +3874,227 @@ final class PostingService
         return [
             'active'       => true,
             'partial'      => $partial,
+            'multi'        => false,
             'base'         => round($base, 2),
             'foreign_base' => round($foreignBase, 2),
             'drawn_vat'    => round($drawnVat, 2),
             'item_ids'     => $ids,
+            'groups'       => [],
         ];
+    }
+
+    /**
+     * Faktura čerpá víc záloh (nebo zálohu odlišnou od hlavičky): každá záloha musí mít
+     * živý DDKP, faktura z ní odečítá kladný odpočet a všechny faktury dohromady z ní
+     * nesmí odečíst víc, než DDKP přiznaly. Každá záloha se pak zúčtuje svým základem
+     * stejně jako postupné čerpání. Odečet úhrady bez DDKP v hlavičce (advance_paid_amount)
+     * nejde mezi zálohy rozdělit, a záloha z hlavičky bez vlastních odpočtových řádků taky ne.
+     *
+     * @param array<int, list<array<string,mixed>>> $byAdvance odpočtové řádky po zálohách
+     * @return array{active:bool, partial:bool, multi:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>,
+     *               groups:list<array{advance_id:int, parent:array<string,mixed>, base:float, foreign_base:float, drawn_vat:float}>}
+     */
+    private function multiAdvanceDeduction(int $supplierId, int $invoiceId, array $inv, float $rate, int $parentProforma, array $byAdvance): array
+    {
+        if ($parentProforma > 0 && !isset($byAdvance[$parentProforma])) {
+            throw new PostingException(
+                'advance_settlement_ambiguous',
+                'Vyúčtovací faktura #' . $invoiceId . ' čerpá odpočtovými řádky zálohy ' . implode(', ', array_map(static fn (int $id): string => '#' . $id, array_keys($byAdvance)))
+                    . ', ale záloha z hlavičky #' . $parentProforma . ' na ní žádný odpočet nemá, zúčtování záloh nejde určit. '
+                    . 'Oprav čerpání záloh v detailu faktury, nebo zaúčtuj ručně.',
+            );
+        }
+        if (self::cents($this->advancePaidOff($supplierId, $invoiceId)) !== 0) {
+            throw new PostingException(
+                'advance_settlement_ambiguous',
+                'Vyúčtovací faktura #' . $invoiceId . ' čerpá víc záloh a zároveň odečítá v hlavičce úhradu zálohy bez daňového '
+                    . 'dokladu. Odečet úhrady nejde přiřadit žádné ze záloh. Zruš odečet úhrady, nebo zaúčtuj ručně.',
+            );
+        }
+        ksort($byAdvance);
+        $groups = [];
+        $allIds = [];
+        $sumBase = 0.0;
+        $sumForeign = 0.0;
+        $sumVat = 0.0;
+        foreach ($byAdvance as $advanceId => $rows) {
+            $header = $this->fetchDocHeader('invoices', $supplierId, $advanceId);
+            if ($header === null || (string) ($header['invoice_type'] ?? '') !== 'proforma') {
+                throw new PostingException(
+                    'advance_settlement_ambiguous',
+                    'Odpočtový řádek vyúčtovací faktury #' . $invoiceId . ' čerpá doklad #' . $advanceId
+                        . ', který není zálohovou fakturou firmy. Zúčtování zálohy nejde určit.',
+                );
+            }
+            [$taxDocs, $ddkpGross, $drawnVat] = $this->advanceTaxDocuments($supplierId, $advanceId);
+            if ($taxDocs === 0) {
+                throw new PostingException(
+                    'advance_settlement_ambiguous',
+                    'Vyúčtovací faktura #' . $invoiceId . ' čerpá zálohu #' . $advanceId . ', která nemá živý daňový doklad '
+                        . 'k platbě. Odpočtem § 37a lze čerpat jen zálohu s daňovým dokladem.',
+                );
+            }
+            [$base, $foreignBase, $gross, $ids] = self::deductionTotals($rows, $rate);
+            $drawnTotal = $this->advanceDrawnGross($supplierId, $advanceId, $invoiceId, $gross, $rate);
+            if (self::cents($gross) <= 0 || $drawnTotal > $ddkpGross + self::ADVANCE_DEDUCTION_TOLERANCE_CZK) {
+                throw new PostingException(
+                    'advance_settlement_ambiguous',
+                    sprintf(
+                        'Vyúčtovací faktura #%d odečítá ze zálohy #%d %.2f Kč, ale její daňové doklady k platbě přiznaly '
+                            . '%.2f Kč (všechny vyúčtovací faktury zálohy odečítají %.2f Kč). Odpočty jedné zálohy nesmí '
+                            . 'dohromady přesáhnout její daňové doklady. Oprav čerpání záloh, nebo zaúčtuj ručně.',
+                        $invoiceId,
+                        $advanceId,
+                        $gross,
+                        $ddkpGross,
+                        $drawnTotal,
+                    ),
+                );
+            }
+            $groups[] = [
+                'advance_id'   => $advanceId,
+                'parent'       => $header,
+                'base'         => round($base, 2),
+                'foreign_base' => round($foreignBase, 2),
+                'drawn_vat'    => round($drawnVat, 2),
+            ];
+            $allIds = [...$allIds, ...$ids];
+            $sumBase += $base;
+            $sumForeign += $foreignBase;
+            $sumVat += $drawnVat;
+        }
+
+        return [
+            'active'       => true,
+            'partial'      => true,
+            'multi'        => true,
+            'base'         => round($sumBase, 2),
+            'foreign_base' => round($sumForeign, 2),
+            'drawn_vat'    => round($sumVat, 2),
+            'item_ids'     => $allIds,
+            'groups'       => $groups,
+        ];
+    }
+
+    /**
+     * Živé DDKP proformy: počet, Σ částky s daní (v Kč, i OSS) a Σ daně zaúčtovaných DDKP
+     * (DPH evidence, stejný zdroj jako zaúčtování DDKP). Nezaúčtovaný DDKP s daní je hlasitá
+     * chyba, stejně jako DDKP jen s daní OSS.
+     *
+     * @return array{0:int, 1:float, 2:float}
+     */
+    private function advanceTaxDocuments(int $supplierId, int $proformaId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT td.id, td.varsymbol, td.tax_date, td.issue_date, "
+                    . DocumentPostingGroup::activePostingExistsSql("'invoice'", 'td.id', 'td.supplier_id') . " AS posted
+               FROM invoices td
+              WHERE td.supplier_id = ? AND td.invoice_type = 'tax_document'
+                AND td.status NOT IN ('draft', 'cancelled')
+                AND (td.parent_invoice_id = ?
+                     OR td.id IN (SELECT p.tax_document_invoice_id FROM invoice_payments p
+                                   WHERE p.invoice_id = ? AND p.tax_document_invoice_id IS NOT NULL))
+              ORDER BY td.id"
+        );
+        $stmt->execute([$supplierId, $proformaId, $proformaId]);
+        $taxDocs = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        $ddkpGross = 0.0;
+        $drawnVat = 0.0;
+        foreach ($taxDocs as $td) {
+            $label = ($td['varsymbol'] ?: '#' . $td['id']);
+            [$tdNet, $tdVat] = $this->ledgerTotals(
+                $supplierId,
+                'sale',
+                (int) $td['id'],
+                (string) ($td['tax_date'] ?? $td['issue_date']),
+                (string) $td['issue_date'],
+            );
+            $tdHeader = $this->fetchDocHeader('invoices', $supplierId, (int) $td['id']);
+            [$tdOssNet, $tdOssVat] = $this->ossItemTotals((int) $td['id'], $this->fxRate($tdHeader ?? []));
+            $ddkpGross += $tdNet + $tdVat + $tdOssNet + $tdOssVat;
+
+            if ((int) $td['posted'] !== 1) {
+                if (self::cents($tdVat) === 0 && self::cents($tdOssVat) !== 0) {
+                    throw new PostingException(
+                        'advance_tax_document_oss',
+                        'Daňový doklad k přijaté platbě ' . $label . ' k proformě #' . $proformaId . ' nese jen daň OSS. '
+                            . 'Samostatně se neúčtuje: v režimu OSS se daň z úplaty přiznává v OSS přiznání '
+                            . 'a daňový doklad k záloze se nevydává. Doklad stornuj a vyúčtování vystav bez něj, '
+                            . 'nebo zúčtuj zálohu ručním zápisem.',
+                    );
+                }
+                if (self::cents($tdVat) !== 0) {
+                    throw new PostingException(
+                        'advance_tax_document_unposted',
+                        'Daňový doklad k přijaté platbě ' . $label . ' k proformě #' . $proformaId
+                            . ' není zaúčtovaný — zaúčtuj ho před vyúčtovací fakturou.',
+                    );
+                }
+                continue; // bez daně (neplátce): ze zálohy nic neodčerpal
+            }
+            $drawnVat += $tdVat;
+        }
+
+        return [count($taxDocs), $ddkpGross, $drawnVat];
+    }
+
+    /**
+     * Σ základu (Kč, po řádcích), základu v měně dokladu a částky s daní (Kč) odpočtových řádků.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return array{0:float, 1:float, 2:float, 3:list<int>}
+     */
+    private static function deductionTotals(array $rows, float $rate): array
+    {
+        $foreignBase = 0.0;
+        $base = 0.0;
+        $gross = 0.0;
+        $ids = [];
+        foreach ($rows as $row) {
+            $ids[] = (int) $row['id'];
+            $foreignBase += -(float) $row['total_without_vat'];
+            $base += round(-(float) $row['total_without_vat'] * $rate, 2);
+            $gross += round(-((float) $row['total_without_vat'] + (float) $row['total_vat']) * $rate, 2);
+        }
+        return [$base, $foreignBase, $gross, $ids];
+    }
+
+    private function advancePaidOff(int $supplierId, int $invoiceId): float
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT advance_paid_amount FROM invoices WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$invoiceId, $supplierId]);
+        return (float) $stmt->fetchColumn();
     }
 
     /**
      * Σ odpočtu zálohy (s DPH, v Kč) na všech nestornovaných vyúčtovacích fakturách proformy.
      * Odpočet vyúčtovávané faktury se bere z jejích řádků už spočítaný (`$ownGross`), ostatní
      * faktury kurzem dokladu vyúčtovávané faktury — postupné čerpání je jen ve stejné měně.
+     * Odpočtové řádky zálohy určuje {@see AdvanceDrawSql::advanceLines()}.
      */
     private function advanceDrawnGross(int $supplierId, int $proformaId, int $invoiceId, float $ownGross, float $rate): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT -COALESCE(SUM(ii.total_with_vat), 0)
-               FROM invoices f
-               JOIN invoice_items ii ON ii.invoice_id = f.id
-              WHERE f.supplier_id = ? AND f.parent_invoice_id = ? AND f.invoice_type = 'invoice'
-                AND f.status <> 'cancelled' AND f.id <> ?
-                AND ii.total_with_vat < 0 AND COALESCE(ii.item_kind, 'standard') <> 'discount'"
+            'SELECT -COALESCE(SUM(d.total_with_vat), 0)
+               FROM (' . AdvanceDrawSql::advanceLines('?', '?') . ") d
+              WHERE d.status <> 'cancelled' AND d.final_id <> ?"
         );
-        $stmt->execute([$supplierId, $proformaId, $invoiceId]);
+        $stmt->execute([$proformaId, $supplierId, $supplierId, $proformaId, $invoiceId]);
         return round($ownGross + round((float) $stmt->fetchColumn() * $rate, 2), 2);
     }
 
+    /** Nestornované vyúčtovací faktury proformy: vazba dokladu nebo vyznačený odpočtový řádek. */
     private function activeFinalInvoiceCount(int $supplierId, int $proformaId): int
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COUNT(*) FROM invoices
-              WHERE supplier_id = ? AND parent_invoice_id = ? AND invoice_type = 'invoice'
-                AND status <> 'cancelled'"
+            'SELECT COUNT(*) FROM (' . AdvanceDrawSql::finalIds('?', '?') . ") fx
+               JOIN invoices i ON i.id = fx.id
+              WHERE i.supplier_id = ? AND i.status <> 'cancelled'"
         );
-        $stmt->execute([$supplierId, $proformaId]);
+        $stmt->execute([$supplierId, $proformaId, $proformaId, $supplierId, $supplierId]);
         return (int) $stmt->fetchColumn();
     }
-
     /**
      * Živý DDKP (daňový doklad k platbě) navázaný na danou poskytnutou zálohu jako DÍTĚ
      * (parent_purchase_invoice_id, přetíženo dle document_kind; vydaná strana hledá DDKP

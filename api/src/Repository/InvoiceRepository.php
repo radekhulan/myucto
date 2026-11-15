@@ -19,6 +19,7 @@ use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
 
 /**
@@ -169,6 +170,14 @@ final class InvoiceRepository
     }
 
     private ?bool $hasManualPrice = null;
+
+    /** Záloha čerpaná odpočtovým řádkem (migrace 2298); starší instance sloupec nemají. */
+    private ?bool $hasAdvanceDraw = null;
+
+    private function supportsAdvanceDraw(): bool
+    {
+        return $this->hasAdvanceDraw ??= $this->db->hasColumn('invoice_items', 'advance_invoice_id');
+    }
 
     /** Příznak „cenu zadá člověk" (migrace 2274); starší instance ho nemají. */
     private function supportsManualPrice(): bool
@@ -340,12 +349,14 @@ final class InvoiceRepository
         //  - u dokladu s parent_invoice_id: rodič (proforma / původní faktura u storna/dobropisu)
         $row['final_invoice'] = null;
         if (($row['invoice_type'] ?? '') === 'proforma') {
+            // Vazba dokladu i faktura čerpající zálohu odpočtovým řádkem (AdvanceDrawSql).
             $ch = $pdo->prepare(
-                "SELECT id, varsymbol, status FROM invoices
-                  WHERE parent_invoice_id = ? AND invoice_type = 'invoice'
-                  ORDER BY id LIMIT 1"
+                'SELECT i.id, i.varsymbol, i.status FROM (' . AdvanceDrawSql::finalIds('?', '?') . ') fx
+                   JOIN invoices i ON i.id = fx.id
+                  ORDER BY i.id LIMIT 1'
             );
-            $ch->execute([$id]);
+            $sid = (int) $row['supplier_id'];
+            $ch->execute([$sid, $id, $id, $sid]);
             $c = $ch->fetch(PDO::FETCH_ASSOC);
             $row['final_invoice'] = $c === false ? null : [
                 'id' => (int) $c['id'], 'varsymbol' => $c['varsymbol'], 'status' => $c['status'],
@@ -362,11 +373,34 @@ final class InvoiceRepository
             ];
         }
 
+        // Čerpání záloh odpočtovými řádky (AdvancePartialDrawdown): plnění faktury a čerpání
+        // po zálohách. Řádek bez vyznačené zálohy patří záloze z hlavičky.
+        $row['advance_drawdown'] = null;
+        if (($row['invoice_type'] ?? '') === 'invoice') {
+            $parentProforma = ($row['parent_invoice']['invoice_type'] ?? null) === 'proforma'
+                ? (int) $row['parent_invoice']['id'] : null;
+            $summary = \MyInvoice\Service\Invoice\AdvancePartialDrawdown::summarize($row['items'], $parentProforma);
+            if ($summary['drawdowns'] !== []) {
+                $ids = array_map(static fn (array $d): int => $d['proforma_id'], $summary['drawdowns']);
+                $vs = $pdo->prepare(
+                    'SELECT id, varsymbol FROM invoices WHERE supplier_id = ? AND id IN (' . implode(',', $ids) . ')'
+                );
+                $vs->execute([(int) $row['supplier_id']]);
+                $numbers = $vs->fetchAll(PDO::FETCH_KEY_PAIR);
+                foreach ($summary['drawdowns'] as &$d) {
+                    $d['varsymbol'] = isset($numbers[$d['proforma_id']]) ? (string) $numbers[$d['proforma_id']] : null;
+                }
+                unset($d);
+            }
+            $row['advance_drawdown'] = $summary;
+        }
+
         // Existují u tohoto odběratele nespárované zálohy (proforma) k propojení?
         // Počítáme jen pro daňové doklady bez vazby — jinak nemá nabídka „spárovat" smysl.
         // UI tlačítko se schová, když je false (stejná podmínka jako advanceCandidates()).
         $row['has_advance_candidates'] = false;
-        if (($row['invoice_type'] ?? '') === 'invoice' && empty($row['parent_invoice_id'])) {
+        if (($row['invoice_type'] ?? '') === 'invoice' && empty($row['parent_invoice_id'])
+            && ($row['advance_drawdown']['drawdowns'] ?? []) === []) {
             $cand = $pdo->prepare(
                 "SELECT EXISTS (
                           SELECT 1 FROM invoices i
@@ -534,6 +568,9 @@ final class InvoiceRepository
         if (!empty($final['parent_invoice_id'])) {
             throw new \RuntimeException('Faktura už je propojena s jiným dokladem.');
         }
+        if (($final['advance_drawdown']['drawdowns'] ?? []) !== []) {
+            throw new \RuntimeException('Faktura už čerpá zálohy odpočtovými řádky. Další zálohu přidejte v detailu konceptu faktury (Odečíst zálohu).');
+        }
         if ((int) $final['client_id'] !== (int) $advance['client_id']) {
             throw new \RuntimeException('Záloha i finální faktura musí mít stejného odběratele.');
         }
@@ -668,6 +705,9 @@ final class InvoiceRepository
                 -- Faktura, která už čerpá zálohu v saldokontu, se vazbou nepáruje (linkAdvance ji odmítne).
                 AND NOT EXISTS (SELECT 1 FROM invoice_advance_deductions iad
                                  WHERE iad.supplier_id = i.supplier_id AND iad.final_invoice_id = i.id)
+                -- Ani faktura čerpající zálohy odpočtovými řádky (AdvanceDrawSql).
+                AND NOT EXISTS (SELECT 1 FROM invoice_items dii
+                                 WHERE dii.invoice_id = i.id AND dii.advance_invoice_id IS NOT NULL)
               ORDER BY (i.currency_id = ?) DESC,
                        ABS(i.total_with_vat - ?) ASC,
                        i.issue_date DESC, i.id DESC
@@ -723,6 +763,10 @@ final class InvoiceRepository
         }
         if ($this->supportsManualPrice()) {
             $ossSelect .= ', ii.manual_price';
+        }
+        // Záloha odpočtového řádku: editor ji posílá zpět, replaceItems() ji jinak zahodí.
+        if ($this->supportsAdvanceDraw()) {
+            $ossSelect .= ', ii.advance_invoice_id';
         }
         $stmt = $this->db->pdo()->prepare(
              'SELECT ii.id, ii.invoice_id, ii.description, ii.quantity, ii.duration_minutes, ii.unit,
@@ -1869,6 +1913,69 @@ final class InvoiceRepository
         return InvoiceHeaderDiscount::calculationItems($groups, self::clampDiscountPercent($discountPercent));
     }
 
+    /**
+     * Záloha odpočtového řádku (`advance_invoice_id`, čerpání záloh) přežije uložení položek
+     * (DELETE + INSERT). Řádek si smí ponechat jen zálohu, kterou už některý řádek faktury
+     * nesl: vazbu na jinou nebo cizí proformu klient nepodstrčí, nové čerpání vzniká jen
+     * čerpáním záloh ({@see \MyInvoice\Service\Invoice\AdvancePartialDrawdown}). Klient, který
+     * zálohu řádku nevrací (starší API, úprava položek přes MCP), ji dostane podle shodného
+     * popisu a sazby uloženého odpočtového řádku. Bez toho by faktura čerpající víc záloh
+     * po uložení ztratila čerpání a záporné řádky by se zaúčtovaly jako snížení výnosu.
+     *
+     * @param array<array-key,mixed> $items
+     * @return array<array-key,mixed>
+     */
+    public function carryAdvanceLinks(int $invoiceId, array $items): array
+    {
+        if (!$this->supportsAdvanceDraw()) {
+            return $items;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT advance_invoice_id, description, vat_rate_id FROM invoice_items
+              WHERE invoice_id = ? AND advance_invoice_id IS NOT NULL ORDER BY order_index, id'
+        );
+        $stmt->execute([$invoiceId]);
+        $pool = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $allowed = [];
+        foreach ($pool as $row) {
+            $allowed[(int) $row['advance_invoice_id']] = true;
+        }
+        $take = static function (array &$pool, ?int $advance, string $description, int $rateId): ?int {
+            foreach ($pool as $i => $row) {
+                if ((string) $row['description'] === $description && (int) $row['vat_rate_id'] === $rateId
+                    && ($advance === null || (int) $row['advance_invoice_id'] === $advance)) {
+                    unset($pool[$i]);
+                    return (int) $row['advance_invoice_id'];
+                }
+            }
+            return null;
+        };
+        $isDeduction = static fn (array $item): bool => !InvoiceItemKind::isText($item)
+            && ($item['item_kind'] ?? 'standard') !== 'discount'
+            && (float) ($item['unit_price_without_vat'] ?? 0) * (float) ($item['quantity'] ?? 1) < 0;
+        $pending = [];
+        foreach ($items as $k => $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $given = (int) ($item['advance_invoice_id'] ?? 0);
+            $item['advance_invoice_id'] = null;
+            if ($isDeduction($item)) {
+                if ($given > 0 && isset($allowed[$given])) {
+                    $item['advance_invoice_id'] = $given;
+                    $take($pool, $given, (string) ($item['description'] ?? ''), (int) ($item['vat_rate_id'] ?? 0));
+                } elseif (!array_key_exists('advance_invoice_id', (array) $items[$k])) {
+                    $pending[] = $k;
+                }
+            }
+            $items[$k] = $item;
+        }
+        foreach ($pending as $k) {
+            $items[$k]['advance_invoice_id'] = $take($pool, null, (string) ($items[$k]['description'] ?? ''), (int) ($items[$k]['vat_rate_id'] ?? 0));
+        }
+        return $items;
+    }
+
     public function replaceItems(int $invoiceId, array $items): void
     {
         $pdo = $this->db->pdo();
@@ -1905,6 +2012,9 @@ final class InvoiceRepository
             static fn (array $item): array => TimeBilling::normalizeInvoiceItem(InvoiceItemKind::normalize($item)),
             array_values($items),
         );
+
+        // Záloha odpočtového řádku (čerpání záloh): jen ta, kterou už řádky faktury nesly.
+        $items = $this->carryAdvanceLinks($invoiceId, $items);
 
         // Vazby na karty majetku (1177) se ověřují PŘED smazáním starých řádků — chybná vazba
         // tak nechá fakturu netknutou, místo aby ji nechala bez položek.
@@ -2001,6 +2111,10 @@ final class InvoiceRepository
         }
 
         if ($supportsBilling) array_push($ossColumns, 'linked_work_report_id', 'work_report_billing_key');
+        $supportsAdvanceDraw = $this->supportsAdvanceDraw();
+        if ($supportsAdvanceDraw) {
+            $ossColumns[] = 'advance_invoice_id';
+        }
 
         $stmt = $pdo->prepare(
             'INSERT INTO invoice_items
@@ -2076,6 +2190,9 @@ final class InvoiceRepository
                     $params[] = 0;
                 }
                 array_push($params, null, null);
+                if ($supportsAdvanceDraw) {
+                    $params[] = null;
+                }
                 $stmt->execute($params);
                 $maxOrder = max($maxOrder, $orderIndex);
                 continue;
@@ -2160,6 +2277,9 @@ final class InvoiceRepository
                 $params[] = $isDraft && !empty($item['manual_price']) && (float) ($item['unit_price_without_vat'] ?? 0) === 0.0 ? 1 : 0;
             }
             if ($supportsBilling) array_push($params, $item['linked_work_report_id'] ?? null, $item['work_report_billing_key'] ?? null);
+            if ($supportsAdvanceDraw) {
+                $params[] = self::positiveIdOrNull($item['advance_invoice_id'] ?? null);
+            }
             $stmt->execute($params);
 
             $maxOrder = max($maxOrder, $orderIndex);
@@ -2334,6 +2454,9 @@ final class InvoiceRepository
                 $params[] = 0;
             }
             array_push($params, null, null);
+            if ($this->supportsAdvanceDraw()) {
+                $params[] = null;   // slevový řádek žádnou zálohu nečerpá
+            }
             $stmt->execute($params);
         }
     }
@@ -3198,6 +3321,7 @@ final class InvoiceRepository
         }
         $row['linked_work_report_id'] = isset($row['linked_work_report_id']) ? (int) $row['linked_work_report_id'] : null;
         $row['work_report_billing_key'] = $row['work_report_billing_key'] ?? null;
+        $row['advance_invoice_id'] = isset($row['advance_invoice_id']) ? (int) $row['advance_invoice_id'] : null;
         $row['item_kind'] = (string) ($row['item_kind'] ?? 'standard');
         // Vybraná sériová čísla / šarže (2016) jdou ven jako seznam, prázdný bez výběru.
         // Řádek bez karty (smazaná karta: FK ON DELETE SET NULL) výběr nenabízí, jinak

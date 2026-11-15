@@ -14387,8 +14387,11 @@ paths:
         schema: { type: integer, format: int64 }
     get:
       tags: [InvoiceOps]
-      summary: Zálohy, ze kterých může koncept faktury postupně čerpat
-      description: Zálohové faktury téhož odběratele a měny s vystaveným daňovým dokladem k platbě a dosud nevyčerpanou částkou s DPH.
+      summary: Zálohy, ze kterých může koncept faktury čerpat
+      description: >-
+        Zálohové faktury téhož odběratele a měny s vystaveným daňovým dokladem k platbě a dosud
+        nevyčerpanou částkou (bez čerpání tohoto konceptu), i zálohy, které koncept čerpá teď.
+        Faktura může čerpat víc záloh najednou, jednu zálohu může čerpat víc faktur.
       responses:
         '200':
           description: OK
@@ -14403,22 +14406,35 @@ paths:
                     varsymbol: { type: string, nullable: true }
                     issue_date: { type: string, format: date }
                     total_with_vat: { type: number }
-                    available: { type: number }
+                    available: { type: number, description: Nevyčerpaná částka zálohy s DPH (bez čerpání tohoto konceptu). }
+                    available_base: { type: number, description: Totéž bez DPH. }
+                    drawn: { type: number, description: Kolik ze zálohy koncept čerpá teď (s DPH). }
+                    drawn_base: { type: number, description: Totéž bez DPH. }
+                    tax_documents: { type: string, description: Čísla daňových dokladů k platbě zálohy. }
         '409': { description: Doklad není koncept běžné faktury }
     post:
       tags: [InvoiceOps]
-      summary: Odečte na konceptu faktury část zálohy (postupné čerpání)
-      description: Nahradí odpočtové řádky § 37a na konceptu čerpáním `amount` (s DPH) ze zálohy a naváže fakturu na zálohu.
+      summary: Nastaví na konceptu faktury čerpání zálohy
+      description: >-
+        Doplní na koncept odpočtové řádky § 37a ze zálohy `proforma_id` po sazbách jejího daňového
+        dokladu k platbě, nebo nahradí čerpání téže zálohy; čerpání ostatních záloh na faktuře zůstává.
+        Částka je `amount` v měně dokladu (`basis` gross = s DPH, net = bez DPH), nebo `percent` =
+        procento plnění faktury s DPH (součtu řádků mimo odpočty záloh). Zadává se právě jedno z nich.
+        Faktura čerpající jedinou zálohu ji má v `parent_invoice_id`, faktura čerpající víc záloh
+        vazbu dokladu nemá a čerpání nese `advance_drawdown` a `items[].advance_invoice_id`.
+        Při čerpání víc záloh nesmí odpočty převýšit plnění faktury.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [proforma_id, amount]
+              required: [proforma_id]
               properties:
                 proforma_id: { type: integer, format: int64 }
-                amount: { type: number }
+                amount: { type: number, description: Čerpaná částka v měně dokladu. }
+                percent: { type: number, exclusiveMinimum: 0, maximum: 100, description: Procento plnění faktury s DPH (místo amount). }
+                basis: { type: string, enum: [gross, net], default: gross, description: Základ částky amount. }
       responses:
         '200':
           description: OK
@@ -14431,7 +14447,8 @@ paths:
                     type: object
                     properties:
                       proforma_id: { type: integer, format: int64 }
-                      amount: { type: number }
+                      amount: { type: number, description: Čerpání zálohy s DPH. }
+                      base: { type: number, description: Čerpání zálohy bez DPH. }
                       available: { type: number }
                       remaining: { type: number }
                   invoice: { $ref: '#/components/schemas/Invoice' }
@@ -14440,13 +14457,20 @@ paths:
     delete:
       tags: [InvoiceOps]
       summary: Odebere z konceptu faktury čerpání zálohy
+      description: S `proforma_id` odebere odpočtové řádky jen té zálohy, bez něj odpočty všech záloh i vazbu na zálohu.
+      parameters:
+        - in: query
+          name: proforma_id
+          required: false
+          schema: { type: integer, format: int64 }
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
-        '409': { description: Doklad není koncept běžné faktury }
+        '400': { description: Neplatná záloha }
+        '409': { description: Doklad není koncept běžné faktury, nebo faktura ze zálohy nečerpá }
 
   # ── Přijaté faktury — párování zálohy ────────────────────────────────────
   /api/v1/purchase-invoices/{id}/advance-candidates:
@@ -53128,6 +53152,26 @@ components:
         parent_invoice:
           type: [object, "null"]
           description: "Jen pokud je parent_invoice_id ({ id, varsymbol, status, invoice_type })"
+        advance_drawdown:
+          type: [object, "null"]
+          description: "Konečná faktura: plnění a čerpání záloh odpočtovými řádky § 37a (i víc záloh). Částky v měně dokladu. NULL u jiných typů dokladu."
+          properties:
+            supply:
+              type: object
+              description: "Plnění faktury, součet řádků mimo odpočty záloh."
+              properties:
+                gross: { type: number }
+                base: { type: number }
+            drawdowns:
+              type: array
+              items:
+                type: object
+                properties:
+                  proforma_id: { type: integer, format: int64 }
+                  varsymbol: { type: [string, "null"] }
+                  gross: { type: number, description: "Čerpání zálohy s DPH." }
+                  base: { type: number, description: "Čerpání zálohy bez DPH." }
+                  vat: { type: number }
         has_advance_candidates: { type: boolean, description: "UI flag — existují nespárované zálohy k propojení" }
         has_final_candidates: { type: boolean }
         sent_at: { type: [string, "null"], format: date-time, description: "Kdy byla naposledy odeslána emailem" }
@@ -55352,6 +55396,7 @@ components:
         accrual_from: { type: [string, "null"], format: date, description: "Začátek období, do kterého výnos řádku patří (časové rozlišení výnosů 384). NULL = bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Konec období výnosu řádku. Část výnosu za koncem účetního období odloží uzávěrka na 384 (MD výnos / D 384) a v dalším roce ji rozpustí." }
         seller_item_code: { type: [string, "null"], maxLength: 64, description: "Kód položky prodávajícího (ISDOC SellersItemIdentification). Import ho přebírá, páruje podle něj pravidla výnosů." }
+        advance_invoice_id: { type: [integer, "null"], description: "Zálohová faktura, ze které odpočtový řádek § 37a čerpá (čerpání záloh). NULL u odpočtového řádku = záloha z `parent_invoice_id`. Při uložení položek se zachová jen záloha, kterou řádky faktury už nesly; klient, který ji nepošle, ji dostane podle shodného popisu a sazby uloženého odpočtového řádku." }
         revenue_account_code: { type: [string, "null"], maxLength: 10, example: "604", description: "Účet položky: výnosový, nebo u přefakturace rozvahový či nákladový; saldokontní, daňové a peněžní účty (311, 314, 321, 324, 325, 33x, 34x, 211, 221) nejsou povolené. NULL = účet produktu (stock_item_id) > jeho kategorie > předkontace dokladu. Prodej majetku (asset_id / small_asset_id) má přednost." }
         small_asset_name: { type: [string, "null"], description: "Název navázané karty drobného majetku (read-only, z JOINu)." }
         asset_name: { type: [string, "null"], description: "Název navázané karty dlouhodobého majetku (read-only, z JOINu)." }

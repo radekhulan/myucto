@@ -51,6 +51,13 @@ final class MatchCandidateProvider
         $txCard = isset($tx['card_last4']) && \MyInvoice\Service\Bank\Card\CardNumberMask::isValidLast4((string) $tx['card_last4'])
             ? (string) $tx['card_last4']
             : null;
+        // Faktury čerpající zálohy jen odpočtovým řádkem (víc záloh, bez vazby dokladu): jeden dotaz.
+        $drawingByLines = $incoming
+            ? \MyInvoice\Service\Invoice\AdvanceDrawLinks::drawingByLines($this->db->pdo(), array_map(
+                static fn (array $row): int => (string) ($row['invoice_type'] ?? '') === 'invoice' && empty($row['parent_invoice_id']) ? (int) $row['id'] : 0,
+                $rows,
+            ))
+            : [];
         $base = [];
         foreach ($rows as $row) {
             // Doklad placený JINOU kartou není kandidát ani pro návrh (viz StatementMatcher).
@@ -64,7 +71,8 @@ final class MatchCandidateProvider
                 continue;
             }
             // Zrcadlo vydané strany: platba neuhrazené proformy se nenavrhuje na vyúčtovací fakturu.
-            if ($incoming && (string) ($row['invoice_type'] ?? '') === 'invoice' && !empty($row['parent_invoice_id'])
+            if ($incoming && (string) ($row['invoice_type'] ?? '') === 'invoice'
+                && (!empty($row['parent_invoice_id']) || isset($drawingByLines[(int) $row['id']]))
                 && (new \MyInvoice\Service\Bank\AdvanceFinalMatchGuard($this->db))
                     ->issuedViolation($supplierId, (int) $row['id'], $amount) !== null) {
                 continue;

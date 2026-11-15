@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\DocumentPostingGroup;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 use PDO;
 
 /**
@@ -22,7 +23,9 @@ use PDO;
  *     samostatný daňový doklad k platbě, `parent_invoice_id` na proformu): saldokonto té
  *     záloze přičte celou stranu faktury a uzavře ji nejvýš na její částku. Přiřazená je
  *     proto strana do výše částky navázané zálohy, přebytek nad ní lze čerpat jinou zálohou,
- *   - každý řádek čerpání (převzatý z převodu i zadaný v saldokontu) svou částku.
+ *   - každý řádek čerpání (převzatý z převodu i zadaný v saldokontu) svou částku,
+ *   - vydaná faktura čerpající víc záloh odpočtovými řádky svůj základ odpočtu každé zálohy
+ *     ({@see deductionsSource()}).
  * Přeúčtování mezi analytikami zálohového účtu v témže zápisu (stejná částka na obou
  * stranách) čerpáním není.
  *
@@ -49,6 +52,27 @@ final class AdvanceDeductionRepository
             'invoice'          => 'invoice_advance_deductions',
             default            => throw new \InvalidArgumentException('Neplatný druh dokladu čerpání zálohy.'),
         };
+    }
+
+    /**
+     * Čerpání po dvojicích jako zdroj dotazu (`FROM <zdroj> t`, sloupce `id`, `supplier_id`,
+     * `final_invoice_id`, `advance_invoice_id`, `amount`, `source`, `created_by`, `created_at`): řádky tabulky čerpání
+     * a u vydaných faktur i čerpání vyznačené odpočtovými řádky faktury, která čerpá víc
+     * záloh ({@see AdvanceDrawSql::itemDraws()}, zdroj `invoice`, bez `id`). To se v saldokontu
+     * nezadává ani neruší, mění ho jen čerpání záloh v detailu konceptu faktury.
+     */
+    public static function deductionsSource(string $docType, int $supplierId): string
+    {
+        $table = self::table($docType);
+        if ($docType !== 'invoice') {
+            return $table;
+        }
+        return "(SELECT id, supplier_id, final_invoice_id, advance_invoice_id, amount, CAST(source AS CHAR(16)) AS source,
+                        created_by, created_at
+                   FROM {$table} WHERE supplier_id = {$supplierId}
+                 UNION ALL
+                 SELECT NULL, d.supplier_id, d.final_invoice_id, d.advance_invoice_id, d.amount, 'invoice', NULL, NULL
+                   FROM (" . AdvanceDrawSql::itemDraws((string) $supplierId) . ') d)';
     }
 
     /** Strana zálohového účtu, kterou konečná faktura zálohu čerpá. */
@@ -344,12 +368,13 @@ final class AdvanceDeductionRepository
 
     /**
      * Čerpání zálohy (obě strany vazby se čtou stejně; `$by` = 'advance' nebo 'final').
+     * Patří sem i čerpání odpočtovými řádky vystavené faktury, která čerpá víc záloh
+     * (zdroj `invoice`, bez `id`, v saldokontu se neruší, mění ho jen oprava faktury).
      *
      * @return list<array<string,mixed>>
      */
     public function listFor(int $supplierId, string $docType, string $by, int $docId): array
     {
-        $table = self::table($docType);
         $docTable = self::docTable($docType);
         $numberSql = $docType === 'invoice'
             ? "COALESCE(NULLIF(%s.varsymbol, ''), CONCAT('#', %s.id))"
@@ -359,17 +384,18 @@ final class AdvanceDeductionRepository
         $stmt = $this->db->pdo()->prepare(
             "SELECT t.id, t.final_invoice_id, t.advance_invoice_id, t.amount, t.source, t.created_by, t.created_at,
                     {$no('f')} AS final_no, {$no('a')} AS advance_no
-               FROM {$table} t
+               FROM " . self::deductionsSource($docType, $supplierId) . " t
                JOIN {$docTable} f ON f.id = t.final_invoice_id AND f.supplier_id = t.supplier_id
                JOIN {$docTable} a ON a.id = t.advance_invoice_id AND a.supplier_id = t.supplier_id
               WHERE t.supplier_id = ? AND t.{$column} = ?
-              ORDER BY t.id"
+                AND (t.source <> 'invoice' OR f.status NOT IN ('draft', 'cancelled'))
+              ORDER BY t.id IS NULL, t.id, t.final_invoice_id"
         );
         $stmt->execute([$supplierId, $docId]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $posted = $this->postedEntries($supplierId, $docType, array_map(static fn (array $r): int => (int) $r['final_invoice_id'], $rows));
         return array_map(static fn (array $r): array => [
-            'id'           => (int) $r['id'],
+            'id'           => $r['id'] !== null ? (int) $r['id'] : null,
             'doc_type'     => $docType,
             'final_id'     => (int) $r['final_invoice_id'],
             'final_no'     => (string) $r['final_no'],
@@ -379,7 +405,7 @@ final class AdvanceDeductionRepository
             'source'       => (string) $r['source'],
             'posted_on'    => $posted[(int) $r['final_invoice_id']]['entry_date'] ?? null,
             'created_by'   => $r['created_by'] !== null ? (int) $r['created_by'] : null,
-            'created_at'   => (string) $r['created_at'],
+            'created_at'   => $r['created_at'] !== null ? (string) $r['created_at'] : null,
         ], $rows);
     }
 
@@ -453,7 +479,8 @@ final class AdvanceDeductionRepository
         }
         $only = $advanceIds === null ? '' : ' AND advance_invoice_id IN (' . implode(',', self::ids($advanceIds) ?: [0]) . ')';
         $stmt = $this->db->pdo()->prepare(
-            'SELECT advance_invoice_id, final_invoice_id, amount FROM ' . self::table($docType) . " WHERE supplier_id = ?{$only} ORDER BY id"
+            'SELECT advance_invoice_id, final_invoice_id, amount FROM ' . self::deductionsSource($docType, $supplierId)
+            . " t WHERE supplier_id = ?{$only} ORDER BY id IS NULL, id, final_invoice_id"
         );
         $stmt->execute([$supplierId]);
         $out = [];
@@ -556,7 +583,7 @@ final class AdvanceDeductionRepository
             return [];
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT final_invoice_id, SUM(amount) FROM ' . self::table($docType) . '
+            'SELECT final_invoice_id, SUM(amount) FROM ' . self::deductionsSource($docType, $supplierId) . ' t
               WHERE supplier_id = ? AND final_invoice_id IN (' . implode(',', $ids) . ')
               GROUP BY final_invoice_id'
         );
@@ -594,7 +621,7 @@ final class AdvanceDeductionRepository
      */
     public function overdeductedFinals(int $supplierId, string $docType, array $accountIds): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT DISTINCT final_invoice_id FROM ' . self::table($docType) . ' WHERE supplier_id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT DISTINCT final_invoice_id FROM ' . self::deductionsSource($docType, $supplierId) . ' t WHERE supplier_id = ?');
         $stmt->execute([$supplierId]);
         $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
         if ($ids === []) {

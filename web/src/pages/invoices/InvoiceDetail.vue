@@ -8,7 +8,8 @@ import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vu
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { invoicesApi, type Invoice, type WorkReport, type ApprovalStatus, type InvoiceAttachment, type AdvanceCandidate, type AdvanceDrawdownCandidate, type InvoicePayment, type PenaltyPreview, type RelatedBankTransaction } from '@/api/invoices'
+import { invoicesApi, type Invoice, type WorkReport, type ApprovalStatus, type InvoiceAttachment, type AdvanceCandidate, type AdvanceDrawdownCandidate, type InvoiceAdvanceDrawdown, type InvoicePayment, type PenaltyPreview, type RelatedBankTransaction } from '@/api/invoices'
+import { defaultDrawdownAmount, uncoveredSupply, type AdvanceDrawdownMode } from './invoiceAdvanceDrawdown'
 import { hasPaymentSchedule, isCalendarType } from '@/utils/invoiceCalendar'
 import {
   settingsApi,
@@ -1297,27 +1298,67 @@ async function unlinkAdvance(targetId?: number) {
   }
 }
 
-// ── Postupné čerpání zálohy (koncept faktury odečte část zaplacené zálohy) ──
+// ── Čerpání záloh (koncept faktury odečte jednu nebo víc zaplacených záloh, i jen část) ──
 const drawdownOpen = ref(false)
 const drawdownCandidates = ref<AdvanceDrawdownCandidate[]>([])
 const drawdownLoading = ref(false)
 const drawdownSaving = ref(false)
 const drawdownProformaId = ref<number | null>(null)
 const drawdownAmount = ref<number | null>(null)
+const drawdownMode = ref<AdvanceDrawdownMode>('gross')
 const drawdownError = ref('')
 
+const drawdownSummary = computed(() => invoice.value?.advance_drawdown ?? null)
+const drawdownList = computed(() => drawdownSummary.value?.drawdowns ?? [])
 const selectedDrawdown = computed(() =>
   drawdownCandidates.value.find(c => c.id === drawdownProformaId.value) ?? null)
-const drawdownAmountValid = computed(() => {
-  const c = selectedDrawdown.value
-  const a = Number(drawdownAmount.value)
-  return !!c && Number.isFinite(a) && a > 0 && a <= Number(c.available) + 0.005
+const drawdownLimit = computed(() => selectedDrawdown.value
+  ? drawdownLimitFor(selectedDrawdown.value, drawdownMode.value)
+  : 0)
+const drawdownPercentPreview = computed(() => {
+  const supply = Number(drawdownSummary.value?.supply.gross ?? 0)
+  return Math.round(supply * Number(drawdownAmount.value ?? 0)) / 100
 })
+const drawdownAmountValid = computed(() => {
+  const a = Number(drawdownAmount.value)
+  if (!selectedDrawdown.value || !Number.isFinite(a) || a <= 0) return false
+  if (drawdownMode.value === 'percent') return a <= 100 && drawdownPercentPreview.value <= drawdownLimit.value + 0.005
+  return a <= drawdownLimit.value + 0.005
+})
+
+function drawdownLimitFor(c: AdvanceDrawdownCandidate, mode: AdvanceDrawdownMode): number {
+  return mode === 'net' ? Number(c.available_base ?? c.available) : Number(c.available)
+}
 
 function selectDrawdown(id: number) {
   drawdownProformaId.value = id
   const c = drawdownCandidates.value.find(x => x.id === id)
-  drawdownAmount.value = c ? Number(c.available) : null
+  if (drawdownMode.value === 'percent') drawdownMode.value = 'gross'
+  drawdownAmount.value = c
+    ? defaultDrawdownAmount(c, drawdownMode.value, drawdownSummary.value)
+    : null
+}
+
+function setDrawdownMode(mode: AdvanceDrawdownMode) {
+  drawdownMode.value = mode
+  const c = selectedDrawdown.value
+  drawdownAmount.value = c ? defaultDrawdownAmount(c, mode, drawdownSummary.value) : null
+}
+
+async function loadDrawdownCandidates() {
+  if (!invoice.value) return
+  drawdownLoading.value = true
+  try {
+    drawdownCandidates.value = await invoicesApi.advanceDrawdownCandidates(invoice.value.id)
+    const pre = drawdownCandidates.value.find(c => !Number(c.drawn) && Number(c.available) > 0.005)
+      ?? drawdownCandidates.value[0]
+    if (pre) selectDrawdown(pre.id)
+    else drawdownProformaId.value = null
+  } catch (e) {
+    drawdownError.value = apiErrorMessage(e)
+  } finally {
+    drawdownLoading.value = false
+  }
 }
 
 async function openDrawdownModal() {
@@ -1326,18 +1367,9 @@ async function openDrawdownModal() {
   drawdownCandidates.value = []
   drawdownProformaId.value = null
   drawdownAmount.value = null
+  drawdownMode.value = 'gross'
   drawdownOpen.value = true
-  drawdownLoading.value = true
-  try {
-    drawdownCandidates.value = await invoicesApi.advanceDrawdownCandidates(invoice.value.id)
-    const current = invoice.value.parent_invoice?.id
-    const pre = drawdownCandidates.value.find(c => c.id === current) ?? drawdownCandidates.value[0]
-    if (pre) selectDrawdown(pre.id)
-  } catch (e) {
-    drawdownError.value = apiErrorMessage(e)
-  } finally {
-    drawdownLoading.value = false
-  }
+  await loadDrawdownCandidates()
 }
 
 async function confirmDrawdown() {
@@ -1345,14 +1377,32 @@ async function confirmDrawdown() {
   drawdownSaving.value = true
   drawdownError.value = ''
   try {
-    const r = await invoicesApi.applyAdvanceDrawdown(invoice.value.id, {
-      proforma_id: drawdownProformaId.value,
-      amount: Number(drawdownAmount.value),
-    })
+    const amount = Number(drawdownAmount.value)
+    const r = await invoicesApi.applyAdvanceDrawdown(invoice.value.id, drawdownMode.value === 'percent'
+      ? { proforma_id: drawdownProformaId.value, percent: amount }
+      : { proforma_id: drawdownProformaId.value, amount, basis: drawdownMode.value })
     invoice.value = r.invoice
-    drawdownOpen.value = false
     toast.success(t('invoice.advance_drawdown.applied'))
     invoicesApi.activity(r.invoice.id).then(a => { activity.value = a }).catch(() => {})
+    // Modal zůstává otevřený, ať jde přidat další zálohu.
+    await loadDrawdownCandidates()
+  } catch (e) {
+    drawdownError.value = apiErrorMessage(e)
+  } finally {
+    drawdownSaving.value = false
+  }
+}
+
+async function removeDrawdownOf(d: InvoiceAdvanceDrawdown) {
+  if (!invoice.value || drawdownSaving.value) return
+  if (!confirm(t('invoice.advance_drawdown.remove_one_confirm', { number: d.varsymbol || `#${d.proforma_id}` }))) return
+  drawdownSaving.value = true
+  drawdownError.value = ''
+  try {
+    invoice.value = await invoicesApi.removeAdvanceDrawdown(invoice.value.id, d.proforma_id)
+    toast.success(t('invoice.advance_drawdown.removed'))
+    invoicesApi.activity(invoice.value.id).then(a => { activity.value = a }).catch(() => {})
+    await loadDrawdownCandidates()
   } catch (e) {
     drawdownError.value = apiErrorMessage(e)
   } finally {
@@ -2105,7 +2155,8 @@ const invoiceActions = computed<ActionItem[]>(() => {
       show: isDraft.value && inv.invoice_type === 'invoice' && w && !lockedForMe.value, disabled: b,
       title: t('invoice.advance_drawdown.tooltip') as string, run: openDrawdownModal },
     { key: 'advance-drawdown-remove', label: t('invoice.advance_drawdown.remove'), icon: 'uturn', tier: 'overflow', variant: 'neutral',
-      show: isDraft.value && inv.invoice_type === 'invoice' && inv.parent_invoice?.invoice_type === 'proforma' && w && !lockedForMe.value,
+      show: isDraft.value && inv.invoice_type === 'invoice' && (inv.parent_invoice?.invoice_type === 'proforma' || drawdownList.value.length > 0)
+        && w && !lockedForMe.value,
       disabled: b, loading: busy.value === 'drawdown-remove', run: removeDrawdown },
     { key: 'wr', label: t('invoice.wr_btn'), icon: 'chart', tier: 'secondary', variant: 'primary',
       show: isDraft.value && inv.invoice_type !== 'tax_document' && w && !lockedForMe.value,
@@ -2743,6 +2794,21 @@ useWindowRefresh(async () => {
           {{ t('invoice.advance_link.unlink') }}
         </button>
       </div>
+      <!-- Faktura čerpá víc záloh (vazbu dokladu nemá) → odkazy na zálohy a úprava čerpání -->
+      <div v-else-if="drawdownList.length > 0" data-test="drawdown-banner"
+        class="flex flex-wrap items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm mb-4">
+        <span class="text-primary-700 min-w-0">
+          {{ t('invoice.advance_drawdown.linked_many') }}
+          <template v-for="(d, i) in drawdownList" :key="d.proforma_id">
+            <span v-if="i > 0">, </span>
+            <RouterLink :to="`/invoices/${d.proforma_id}`" class="font-mono font-medium hover:underline">{{ d.varsymbol || `#${d.proforma_id}` }}</RouterLink>
+          </template>
+        </span>
+        <button v-if="auth.canWrite('invoices') && !lockedForMe && isDraft" type="button" @click="openDrawdownModal()"
+          class="cursor-pointer whitespace-nowrap text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 shrink-0 bg-surface">
+          {{ t('invoice.advance_drawdown.edit') }}
+        </button>
+      </div>
       <!-- Daňový doklad bez vazby → nabídka spárovat se zálohou -->
       <div v-else-if="canPairAdvance"
         class="flex items-center justify-between gap-3 bg-neutral-50 border border-neutral-200 rounded-lg px-4 py-2.5 text-sm mb-4">
@@ -2776,45 +2842,85 @@ useWindowRefresh(async () => {
         </div>
       </div>
 
-      <!-- Modal postupného čerpání zálohy -->
-      <div v-if="drawdownOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="drawdownOpen = false">
-        <div class="bg-surface rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
+      <!-- Modal čerpání záloh: seznam čerpání na faktuře a přidání / úprava další zálohy -->
+      <div v-if="drawdownOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-test="drawdown-modal" @click.self="drawdownOpen = false">
+        <div class="bg-surface rounded-lg shadow-xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col">
           <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between">
             <h3 class="font-medium">{{ t('invoice.advance_drawdown.modal_title') }}</h3>
             <button type="button" @click="drawdownOpen = false" class="cursor-pointer text-neutral-400 hover:text-neutral-600">✕</button>
           </div>
-          <div class="p-4 overflow-y-auto space-y-3">
+          <div class="p-4 overflow-y-auto space-y-4">
+            <div v-if="drawdownSummary" class="text-sm text-neutral-600 flex flex-wrap justify-between gap-2" data-test="drawdown-supply">
+              <span>{{ t('invoice.advance_drawdown.supply') }}: <strong>{{ formatMoney(drawdownSummary.supply.gross, invoice.currency) }}</strong></span>
+              <span class="text-neutral-500">{{ t('invoice.advance_drawdown.supply_left') }}: {{ formatMoney(uncoveredSupply(drawdownSummary, 'gross'), invoice.currency) }}</span>
+            </div>
+            <div v-if="drawdownList.length > 0">
+              <h4 class="text-xs font-medium uppercase tracking-wide text-neutral-500 mb-1.5">{{ t('invoice.advance_drawdown.current') }}</h4>
+              <ul class="divide-y divide-neutral-100 border border-neutral-200 rounded-md" data-test="drawdown-current">
+                <li v-for="d in drawdownList" :key="d.proforma_id" class="px-3 py-2 flex flex-wrap items-center gap-2 text-sm">
+                  <RouterLink :to="`/invoices/${d.proforma_id}`" class="font-mono hover:underline">{{ d.varsymbol || `#${d.proforma_id}` }}</RouterLink>
+                  <span class="ml-auto text-right">
+                    {{ formatMoney(d.gross, invoice.currency) }}
+                    <span class="text-xs text-neutral-500">({{ t('invoice.advance_drawdown.mode_net') }} {{ formatMoney(d.base, invoice.currency) }})</span>
+                  </span>
+                  <button type="button" :disabled="drawdownSaving" data-test="drawdown-remove-one" @click="removeDrawdownOf(d)"
+                    class="cursor-pointer inline-flex items-center gap-1 whitespace-nowrap text-xs px-2 py-1 border border-danger-300 text-danger-700 rounded hover:bg-danger-50 disabled:opacity-50 bg-surface">
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.uturn" /></svg>
+                    {{ t('invoice.advance_drawdown.remove_one') }}
+                  </button>
+                </li>
+              </ul>
+            </div>
             <div v-if="drawdownLoading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
             <div v-else-if="drawdownCandidates.length === 0 && !drawdownError" class="text-sm text-neutral-500">{{ t('invoice.advance_drawdown.no_candidates') }}</div>
             <template v-else-if="drawdownCandidates.length > 0">
-              <ul class="space-y-2">
+              <h4 v-if="drawdownList.length > 0" class="text-xs font-medium uppercase tracking-wide text-neutral-500 -mb-2">{{ t('invoice.advance_drawdown.pick') }}</h4>
+              <ul class="space-y-2" data-test="drawdown-candidates">
                 <li v-for="cand in drawdownCandidates" :key="cand.id">
                   <label class="cursor-pointer flex items-center gap-3 px-3 py-2 border rounded-md"
                     :class="drawdownProformaId === cand.id ? 'border-primary-500 bg-primary-50' : 'border-neutral-200 hover:border-primary-400'">
                     <input type="radio" name="drawdown-proforma" :value="cand.id" :checked="drawdownProformaId === cand.id" @change="selectDrawdown(cand.id)" />
-                    <span class="font-mono text-sm">{{ cand.varsymbol || ('#' + cand.id) }}</span>
+                    <span class="min-w-0">
+                      <span class="font-mono text-sm">{{ cand.varsymbol || ('#' + cand.id) }}</span>
+                      <span v-if="cand.tax_documents" class="block text-xs text-neutral-500 truncate">{{ cand.tax_documents }}</span>
+                    </span>
                     <span class="text-xs text-neutral-500 ml-auto text-right">
                       {{ cand.issue_date ? formatDate(cand.issue_date) : '' }} · {{ t('invoice.advance_drawdown.total') }} {{ formatMoney(cand.total_with_vat, invoice.currency) }}
                       <br />{{ t('invoice.advance_drawdown.available') }} {{ formatMoney(cand.available, invoice.currency) }}
+                      <template v-if="Number(cand.drawn) > 0"><br /><span class="text-primary-700">{{ t('invoice.advance_drawdown.drawn') }} {{ formatMoney(Number(cand.drawn), invoice.currency) }}</span></template>
                     </span>
                   </label>
                 </li>
               </ul>
               <div>
-                <label class="block text-sm text-neutral-600 mb-1" for="drawdown-amount">{{ t('invoice.advance_drawdown.amount') }}</label>
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-1">
+                  <label class="text-sm text-neutral-600" for="drawdown-amount">{{ t('invoice.advance_drawdown.amount') }}</label>
+                  <div class="inline-flex flex-wrap rounded-md border border-neutral-300 overflow-hidden text-xs" role="group" data-test="drawdown-mode">
+                    <button v-for="m in (['gross', 'net', 'percent'] as const)" :key="m" type="button" :data-mode="m"
+                      class="cursor-pointer whitespace-nowrap px-2 py-1"
+                      :class="drawdownMode === m ? 'bg-primary-600 text-white' : 'bg-surface text-neutral-600 hover:bg-neutral-50'"
+                      @click="setDrawdownMode(m)">
+                      {{ t(`invoice.advance_drawdown.mode_${m}`) }}
+                    </button>
+                  </div>
+                </div>
                 <input id="drawdown-amount" v-model.number="drawdownAmount" type="number" step="0.01" min="0.01"
-                  :max="selectedDrawdown?.available" class="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm bg-surface" />
+                  :max="drawdownMode === 'percent' ? 100 : drawdownLimit" class="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm bg-surface" />
+                <p v-if="drawdownMode === 'percent'" class="text-xs text-neutral-600 mt-1" data-test="drawdown-percent-preview">
+                  {{ t('invoice.advance_drawdown.percent_preview', { amount: formatMoney(drawdownPercentPreview, invoice.currency) }) }}
+                </p>
                 <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.advance_drawdown.amount_hint') }}</p>
               </div>
             </template>
             <p v-if="drawdownError" class="text-sm text-danger-600">{{ drawdownError }}</p>
           </div>
-          <div class="px-5 py-3 border-t border-neutral-100 flex justify-end gap-2">
+          <div class="px-5 py-3 border-t border-neutral-100 flex flex-wrap justify-end gap-2">
             <button type="button" @click="drawdownOpen = false"
-              class="cursor-pointer text-sm px-3 py-1.5 border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('common.cancel') }}</button>
-            <button type="button" @click="confirmDrawdown" :disabled="!drawdownAmountValid || drawdownSaving"
-              class="cursor-pointer text-sm px-3 py-1.5 rounded-md bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50">
-              {{ t('invoice.advance_drawdown.confirm') }}
+              class="cursor-pointer whitespace-nowrap text-sm px-3 py-1.5 border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('invoice.advance_drawdown.close') }}</button>
+            <button type="button" data-test="drawdown-confirm" @click="confirmDrawdown" :disabled="!drawdownAmountValid || drawdownSaving"
+              class="cursor-pointer inline-flex items-center gap-1.5 whitespace-nowrap text-sm px-3 py-1.5 rounded-md bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.coin" /></svg>
+              {{ Number(selectedDrawdown?.drawn) > 0 ? t('invoice.advance_drawdown.confirm_update') : t('invoice.advance_drawdown.confirm') }}
             </button>
           </div>
         </div>

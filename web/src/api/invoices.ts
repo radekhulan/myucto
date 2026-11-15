@@ -91,13 +91,38 @@ export interface AdvanceDrawdownCandidate {
   varsymbol: string | null
   issue_date: string | null
   total_with_vat: number
+  /** Nevyčerpaná částka zálohy s DPH (bez čerpání tohoto konceptu). */
   available: number
+  /** Totéž bez DPH. */
+  available_base?: number
+  /** Kolik z ní koncept čerpá teď (s DPH / bez DPH). */
+  drawn?: number
+  drawn_base?: number
+  /** Čísla daňových dokladů k platbě zálohy. */
+  tax_documents?: string
 }
 
 export interface AdvanceDrawdownResult {
-  drawdown: { proforma_id: number; amount: number; available: number; remaining: number }
+  drawdown: { proforma_id: number; amount: number; base?: number; available: number; remaining: number }
   invoice: Invoice
 }
+
+/** Čerpání zálohy fakturou podle odpočtových řádků § 37a (v měně dokladu). */
+export interface InvoiceAdvanceDrawdown {
+  proforma_id: number
+  varsymbol: string | null
+  gross: number
+  base: number
+  vat: number
+}
+
+export interface InvoiceAdvanceDrawdownSummary {
+  /** Plnění faktury: součet řádků mimo odpočty záloh. */
+  supply: { gross: number; base: number }
+  drawdowns: InvoiceAdvanceDrawdown[]
+}
+
+export type AdvanceDrawdownBasis = 'gross' | 'net'
 
 export interface InvoiceOtherItem {
   id: number
@@ -198,6 +223,8 @@ export interface InvoiceItem {
   posting_rule_key?: string | null
   /** Kód položky prodávajícího z importu (ISDOC SellersItemIdentification), páruje podle něj pravidla výnosů. */
   seller_item_code?: string | null
+  /** Záloha, ze které odpočtový řádek § 37a čerpá. Round-trip, jinak replaceItems vazbu zahodí. */
+  advance_invoice_id?: number | null
   /** Název karty z JOINu (read-only) — našeptávač jím zobrazí vybranou položku bez dalšího dotazu. */
   small_asset_name?: string | null
   asset_name?: string | null
@@ -353,6 +380,8 @@ export interface Invoice {
   // u dokladu s parent_invoice_id → rodič (proforma / původní faktura).
   final_invoice?: { id: number; varsymbol: string | null; status: InvoiceStatus } | null
   parent_invoice?: { id: number; varsymbol: string | null; status: InvoiceStatus; invoice_type: InvoiceType } | null
+  /** Konečná faktura: plnění a čerpání záloh odpočtovými řádky (i víc záloh). */
+  advance_drawdown?: InvoiceAdvanceDrawdownSummary | null
   // U daňového dokladu bez vazby: existují u odběratele nespárované zálohy k propojení?
   has_advance_candidates?: boolean
   // U nepropojené proformy: existují u odběratele nepropojené daňové doklady k propojení?
@@ -1067,10 +1096,11 @@ export const invoicesApi = {
   // Postupné čerpání zálohy (koncept faktury odečte část daňového dokladu k záloze)
   advanceDrawdownCandidates: (id: number) =>
     api.get<AdvanceDrawdownCandidate[]>(`/invoices/${id}/advance-drawdown`).then(r => r.data),
-  applyAdvanceDrawdown: (id: number, body: { proforma_id: number; amount: number }) =>
+  applyAdvanceDrawdown: (id: number, body: { proforma_id: number; amount?: number; percent?: number; basis?: AdvanceDrawdownBasis }) =>
     api.post<AdvanceDrawdownResult>(`/invoices/${id}/advance-drawdown`, body).then(r => r.data),
-  removeAdvanceDrawdown: (id: number) =>
-    api.delete<Invoice>(`/invoices/${id}/advance-drawdown`).then(r => r.data),
+  /** Bez `proformaId` odebere čerpání všech záloh. */
+  removeAdvanceDrawdown: (id: number, proformaId?: number) =>
+    api.delete<Invoice>(`/invoices/${id}/advance-drawdown`, proformaId ? { params: { proforma_id: proformaId } } : undefined).then(r => r.data),
   clone: (id: number, opts?: { increment_month_in_descriptions?: boolean; issue_date?: string }) =>
     api.post<{ draft_id: number }>(`/invoices/${id}/clone`, opts || {}).then(r => r.data),
   bulkReissue: (invoiceIds: number[], opts?: { increment_month_in_descriptions?: boolean; issue_date?: string }) =>

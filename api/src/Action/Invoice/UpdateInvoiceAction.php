@@ -49,6 +49,7 @@ use MyInvoice\Service\Vat\FiledVatPeriodLookup;
 use MyInvoice\Support\ExchangeRateDate;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 
 final class UpdateInvoiceAction
 {
@@ -164,6 +165,9 @@ final class UpdateInvoiceAction
                     return $item;
                 }, $body['items']);
             }
+            // Záloha odpočtového řádku (čerpání víc záloh) ještě před validací: faktura krytá
+            // zálohami nemusí mít kladnou částku k úhradě (InvoiceAmountPolicy::advanceLinkId).
+            $body['items'] = $this->repo->carryAdvanceLinks($id, $body['items']);
         }
 
         // Částečný PUT (#113): vynechaný klíč = uložená hodnota, ne default nového dokladu.
@@ -306,10 +310,15 @@ final class UpdateInvoiceAction
             if ($existingType === 'proforma') {
                 $link = $this->db->pdo()->prepare(
                     "SELECT 1 FROM invoices
-                      WHERE parent_invoice_id = ? AND invoice_type IN ('invoice', 'tax_document')
-                        AND status <> 'cancelled' LIMIT 1"
+                      WHERE supplier_id = ? AND parent_invoice_id = ? AND invoice_type = 'tax_document'
+                        AND status <> 'cancelled'
+                     UNION ALL
+                     SELECT 1 FROM (" . AdvanceDrawSql::finalIds('?', '?') . ") fx
+                       JOIN invoices i ON i.id = fx.id
+                      WHERE i.status <> 'cancelled'
+                     LIMIT 1"
                 );
-                $link->execute([$id]);
+                $link->execute([$supplierId, $id, $supplierId, $id, $id, $supplierId]);
                 if ($link->fetchColumn() !== false) {
                     return Json::error(
                         $response,

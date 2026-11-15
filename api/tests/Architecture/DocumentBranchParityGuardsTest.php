@@ -129,7 +129,7 @@ final class DocumentBranchParityGuardsTest extends TestCase
         // takže přijatá větev musí DDKP rozlišit podle document_kind.
         'Service/Accounting/JournalLinkService.php' => [
             'hasRelatedMap'      => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
-            'advanceParentOf'    => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
+            'advanceParentsOf'   => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
             'withAdvanceChildren' => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
         ],
 

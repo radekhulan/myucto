@@ -3032,6 +3032,8 @@ function buildPayload(items: InvoiceItem[]): InvoicePayload {
         counter_account_code: (it.counter_account_code ?? '').trim() || null,
         posting_rule_key: it.posting_rule_key || null,
         seller_item_code: it.seller_item_code ?? null,
+        // Záloha odpočtového řádku (čerpání záloh): round-trip, jinak ji replaceItems zahodí.
+        advance_invoice_id: it.advance_invoice_id ?? null,
         oss_applicable: it.oss_applicable ?? false,
         oss_consumer_country: it.oss_applicable ? (it.oss_consumer_country || null) : null,
         // Prázdný typ sazby se posílá jako null, ne jako „standard" — dosazení základní

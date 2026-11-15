@@ -2292,15 +2292,19 @@ export interface SaldoAdvanceFinal {
 }
 
 export interface SaldoAdvanceDeduction {
-  id: number
+  /** null = čerpání odpočtovým řádkem faktury s víc zálohami (v saldokontu se neruší). */
+  id: number | null
   doc_type: SaldoSettleDocType
   final_id: number
   final_no: string
   advance_id: number
   advance_no: string
   amount: number
-  /** import = převzaté z převodu (v saldokontu se neruší), saldo = zadané v saldokontu. */
-  source: 'import' | 'saldo'
+  /**
+   * import = převzaté z převodu (v saldokontu se neruší), saldo = zadané v saldokontu,
+   * invoice = odpočtový řádek faktury, která čerpá víc záloh (mění ho jen oprava faktury).
+   */
+  source: 'import' | 'saldo' | 'invoice'
   posted_on: string | null
   deletable: boolean
 }

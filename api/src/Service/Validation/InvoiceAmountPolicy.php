@@ -38,6 +38,26 @@ final class InvoiceAmountPolicy
         return true;
     }
 
+    /**
+     * Záloha, kterou konečná faktura vyúčtovává: vazba dokladu (`parent_invoice_id`), nebo
+     * u faktury čerpající víc záloh záloha vyznačená na odpočtovém řádku
+     * ({@see \MyInvoice\Support\Sql\AdvanceDrawSql}). Faktura krytá zálohami se posuzuje stejně
+     * bez ohledu na to, kolik záloh čerpá.
+     */
+    public static function advanceLinkId(array $invoice): ?int
+    {
+        $parent = (int) ($invoice['parent_invoice_id'] ?? 0);
+        if ($parent > 0) {
+            return $parent;
+        }
+        foreach ((array) ($invoice['items'] ?? []) as $item) {
+            if (is_array($item) && (int) ($item['advance_invoice_id'] ?? 0) > 0) {
+                return (int) $item['advance_invoice_id'];
+            }
+        }
+        return null;
+    }
+
     public static function requiresPositiveAmountToPay(string $invoiceType): bool
     {
         return in_array($invoiceType, ['invoice', 'proforma'], true);
@@ -56,7 +76,7 @@ final class InvoiceAmountPolicy
         ?string $currency = null,
     ): ?string {
         $type = (string) ($data['invoice_type'] ?? 'invoice');
-        if (!self::requiresPositiveDraftAmountToPay($type, $data['parent_invoice_id'] ?? null)) {
+        if (!self::requiresPositiveDraftAmountToPay($type, self::advanceLinkId($data))) {
             return null;
         }
 
@@ -215,7 +235,7 @@ final class InvoiceAmountPolicy
     public static function canBeMarkedPaid(array $invoice): bool
     {
         $type = (string) ($invoice['invoice_type'] ?? 'invoice');
-        if ($type === 'invoice' && (int) ($invoice['parent_invoice_id'] ?? 0) > 0) {
+        if ($type === 'invoice' && self::advanceLinkId($invoice) !== null) {
             return true;
         }
         // Doklad k vyplacení se „zaplatí" vrácením peněz zákazníkovi (InvoicePaymentService::markRefunded).
@@ -238,7 +258,7 @@ final class InvoiceAmountPolicy
         // už přijatou úplatu (advance_paid_amount = brutto platby → amount_to_pay = 0),
         // takže se při vystavení označí jako zaplacený stejně jako finál krytý zálohou.
         return in_array((string) ($invoice['invoice_type'] ?? ''), ['invoice', 'tax_document'], true)
-            && (int) ($invoice['parent_invoice_id'] ?? 0) > 0
+            && self::advanceLinkId($invoice) !== null
             && (float) ($invoice['amount_to_pay'] ?? 0) <= 0.0;
     }
 

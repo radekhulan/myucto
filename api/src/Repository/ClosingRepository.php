@@ -1488,6 +1488,14 @@ final class ClosingRepository
                  GROUP BY ip.bank_transaction_id
             ), final_of AS (
                 " . self::firstFinalInvoiceSql($supplierId) . "
+            ), advance_311 AS (
+                " . self::advancePaidOn311Sql($supplierId) . "
+            ), advance_draw AS (
+                " . self::advanceDrawSql($supplierId) . "
+            ), draw_proforma AS (
+                SELECT DISTINCT proforma_id FROM advance_draw
+            ), draw_final AS (
+                SELECT final_id, SUM(drawn) AS drawn FROM advance_draw GROUP BY final_id
             ), bank_target AS (
                 -- Mapa bankovní transakce → cílový doklad a podíl úhrady (num/den).
                 -- Postavená PŘED sáhnutím na `bank_credit`, aby se deník pro 311
@@ -1505,8 +1513,10 @@ final class ClosingRepository
                 -- fakturou mu dává `doc` níž). Bez konečné faktury úhrada zůstane na
                 -- proformě a `JOIN booked` ji zahodí — přijatá záloha na 311 není
                 -- nesoulad zaplaceného dokladu, ukazuje ji saldokonto.
+                -- Záloha, kterou konečné faktury čerpají odpočtem (`draw_proforma`), zůstává
+                -- na proformě: každá faktura dostane jen svůj díl v `draw_final` níž.
                 SELECT ip.bank_transaction_id,
-                       COALESCE(ch.final_id, ip.invoice_id) AS invoice_id,
+                       COALESCE(CASE WHEN dp.proforma_id IS NULL THEN ch.final_id END, ip.invoice_id) AS invoice_id,
                        ip.amount AS num, a.total_alloc AS den
                   FROM invoice_payments ip
                   JOIN alloc a       ON a.bank_transaction_id = ip.bank_transaction_id
@@ -1517,6 +1527,7 @@ final class ClosingRepository
                   -- shodně se skupinou DDKP v `doc` níž; jinak by se úhrada rozpadla na
                   -- každou konečnou fakturu zvlášť a započetla se vícekrát.
                   LEFT JOIN final_of ch ON ch.proforma_id = pf.id
+                  LEFT JOIN draw_proforma dp ON dp.proforma_id = pf.id
                  WHERE ip.supplier_id = ?
                 UNION ALL
                 -- Větev 2 — úhrady spárované jen přes bank_transactions.matched_invoice_id
@@ -1614,15 +1625,18 @@ final class ClosingRepository
                        CASE WHEN i.invoice_type = 'credit_note' AND i.parent_invoice_id IS NOT NULL
                             THEN i.parent_invoice_id
                             WHEN i.invoice_type = 'tax_document' AND i.parent_invoice_id IS NOT NULL
-                            THEN COALESCE(ff.final_id, i.id)
+                            THEN COALESCE(CASE WHEN dpp.proforma_id IS NULL THEN ff.final_id END, i.id)
                             ELSE i.id END AS group_id,
                        b.booked,
                        COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0)
                          + COALESCE(so.settled, 0) + COALESCE(sg.settled, 0)
-                         + COALESCE(sm.settled, 0) + COALESCE(si.settled, 0) AS settled
+                         + COALESCE(sm.settled, 0) + COALESCE(si.settled, 0)
+                         + COALESCE(dfin.drawn, 0) AS settled
                   FROM booked b
                   JOIN invoices i ON i.id = b.invoice_id AND i.supplier_id = ?
                   LEFT JOIN final_of ff ON ff.proforma_id = i.parent_invoice_id
+                  LEFT JOIN draw_proforma dpp ON dpp.proforma_id = i.parent_invoice_id
+                  LEFT JOIN draw_final dfin ON dfin.final_id = i.id
                   LEFT JOIN settled_bank sb ON sb.invoice_id = i.id
                   LEFT JOIN settled_cash sc ON sc.invoice_id = i.id
                   LEFT JOIN settled_offset so ON so.invoice_id = i.id
@@ -1690,12 +1704,89 @@ final class ClosingRepository
      */
     private static function firstFinalInvoiceSql(int $supplierId): string
     {
-        return "SELECT fin.parent_invoice_id AS proforma_id, MIN(fin.id) AS final_id
-                  FROM invoices fin
-                 WHERE fin.supplier_id = {$supplierId} AND fin.parent_invoice_id IS NOT NULL
-                   AND fin.invoice_type NOT IN ('proforma', 'tax_document')
-                   AND fin.cancelled_at IS NULL
-                 GROUP BY fin.parent_invoice_id";
+        // Konečná faktura čerpající víc záloh vazbu dokladu nemá, proformu na ni váže
+        // odpočtový řádek ({@see \MyInvoice\Support\Sql\AdvanceDrawSql}).
+        return "SELECT lnk.proforma_id, MIN(lnk.final_id) AS final_id
+                  FROM (SELECT fin.parent_invoice_id AS proforma_id, fin.id AS final_id
+                          FROM invoices fin
+                         WHERE fin.supplier_id = {$supplierId} AND fin.parent_invoice_id IS NOT NULL
+                           AND fin.invoice_type NOT IN ('proforma', 'tax_document')
+                           AND fin.cancelled_at IS NULL
+                        UNION ALL
+                        SELECT fii.advance_invoice_id, fin.id
+                          FROM invoice_items fii
+                          JOIN invoices fin ON fin.id = fii.invoice_id
+                         WHERE fii.advance_invoice_id IS NOT NULL AND fin.supplier_id = {$supplierId}
+                           AND fin.invoice_type = 'invoice' AND fin.cancelled_at IS NULL) lnk
+                 GROUP BY lnk.proforma_id";
+    }
+
+    /**
+     * Proformy firmy, jejichž úhrada (banka nebo pokladna) je zaúčtovaná přímo na 311
+     * (`proforma_id`). Jen u nich se záloha na 311 vypořádává čerpáním konečných faktur;
+     * záloha přes 324 se na 311 nepotká. Bez placeholderů, firma literálem.
+     */
+    private static function advancePaidOn311Sql(int $supplierId): string
+    {
+        $on311 = "JOIN journal_entry_lines l3 ON l3.entry_id = e3.id AND l3.supplier_id = e3.supplier_id AND l3.side = 'credit'
+                  JOIN chart_of_accounts ca3 ON ca3.id = l3.account_id
+                  LEFT JOIN chart_of_accounts pa3 ON pa3.id = ca3.parent_id";
+        $where = "e3.posted_at IS NOT NULL AND e3.reversed_by IS NULL
+                  AND (ca3.account_code LIKE '311%' OR COALESCE(pa3.account_code, '') LIKE '311%')";
+        return "SELECT ip3.invoice_id AS proforma_id
+                  FROM invoice_payments ip3
+                  JOIN invoices pf3 ON pf3.id = ip3.invoice_id AND pf3.supplier_id = ip3.supplier_id AND pf3.invoice_type = 'proforma'
+                  JOIN journal_entries e3 ON e3.supplier_id = ip3.supplier_id AND e3.source_type = 'bank'
+                                         AND e3.source_id = ip3.bank_transaction_id
+                  {$on311}
+                 WHERE ip3.supplier_id = {$supplierId} AND ip3.bank_transaction_id IS NOT NULL AND {$where}
+                UNION
+                SELECT ip3.invoice_id
+                  FROM cash_documents cd3
+                  JOIN invoice_payments ip3 ON ip3.id = cd3.invoice_payment_id AND ip3.supplier_id = cd3.supplier_id
+                  JOIN invoices pf3 ON pf3.id = ip3.invoice_id AND pf3.supplier_id = ip3.supplier_id AND pf3.invoice_type = 'proforma'
+                  JOIN journal_entries e3 ON e3.supplier_id = cd3.supplier_id AND e3.source_type = 'cash' AND e3.source_id = cd3.id
+                  {$on311}
+                 WHERE cd3.supplier_id = {$supplierId} AND {$where}";
+    }
+
+    /**
+     * Čerpání zálohy uhrazené na 311 konečnými fakturami: `final_id`, `proforma_id`, `drawn`
+     * (Kč). Faktura s odpočtovými řádky zálohy ubírá jejich základ (daň zálohy z 311 odčerpal
+     * daňový doklad k platbě) a k nim odečet úhrady bez DDKP v hlavičce. Čerpá-li zálohu postupně víc faktur
+     * (milníky) nebo jedna faktura víc záloh, má tak každá faktura vyrovnaný jen svůj díl;
+     * úhrada zálohy a její DDKP pak do skupiny konečné faktury nepatří. Faktura bez odpočtových
+     * řádků zálohy (ručně navázaná, převzatá, vyúčtování jen odečtem v hlavičce) sem nepatří,
+     * zálohu jí dál přiřadí `final_of`.
+     * Vyžaduje CTE `advance_311`. Bez placeholderů, firma literálem.
+     */
+    private static function advanceDrawSql(int $supplierId): string
+    {
+        $rate = "CASE WHEN fcur.code = 'CZK' OR f.exchange_rate IS NULL OR f.exchange_rate <= 0 THEN 1 ELSE f.exchange_rate END";
+        $deduction = \MyInvoice\Support\Sql\AdvanceDrawSql::deductionLine('pii');
+        $lines = "SELECT -SUM(pii.total_without_vat) FROM invoice_items pii
+                   WHERE pii.invoice_id = f.id AND COALESCE(pii.advance_invoice_id, f.parent_invoice_id) = f.parent_invoice_id
+                     AND {$deduction}";
+        return "SELECT d.final_id, d.proforma_id, SUM(d.drawn) AS drawn
+                  FROM (SELECT f.id AS final_id, f.parent_invoice_id AS proforma_id,
+                               CASE WHEN COALESCE(({$lines}), 0) > 0.005
+                                    THEN ROUND((f.advance_paid_amount + ({$lines})) * {$rate}, 2) ELSE 0 END AS drawn
+                          FROM advance_311 a3
+                          JOIN invoices f ON f.supplier_id = {$supplierId} AND f.parent_invoice_id = a3.proforma_id
+                                         AND f.invoice_type = 'invoice' AND f.cancelled_at IS NULL
+                          JOIN currencies fcur ON fcur.id = f.currency_id
+                        UNION ALL
+                        SELECT f.id, pii.advance_invoice_id, ROUND(-SUM(pii.total_without_vat) * {$rate}, 2)
+                          FROM advance_311 a3
+                          JOIN invoice_items pii ON pii.advance_invoice_id = a3.proforma_id
+                          JOIN invoices f ON f.id = pii.invoice_id AND f.supplier_id = {$supplierId}
+                                         AND f.invoice_type = 'invoice' AND f.cancelled_at IS NULL
+                                         AND pii.advance_invoice_id <> COALESCE(f.parent_invoice_id, 0)
+                          JOIN currencies fcur ON fcur.id = f.currency_id
+                         WHERE {$deduction}
+                         GROUP BY f.id, pii.advance_invoice_id, fcur.code, f.exchange_rate) d
+                 WHERE d.drawn > 0.005
+                 GROUP BY d.final_id, d.proforma_id";
     }
 
     /**
