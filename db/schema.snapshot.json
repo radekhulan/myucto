@@ -1200,7 +1200,7 @@
         "2294_bank_posting_rule_skip_matching_card.sql",
         "2295_helios_import_map.sql",
         "2296_eet_units_dis_import.sql",
-        "2297_invoice_item_advance_drawdown.sql"
+        "2298_invoice_item_advance_drawdown.sql"
     ],
     "tables": {
         "abra_flexi_connections": {

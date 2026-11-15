@@ -171,7 +171,7 @@ final class InvoiceRepository
 
     private ?bool $hasManualPrice = null;
 
-    /** Záloha čerpaná odpočtovým řádkem (migrace 2297); starší instance sloupec nemají. */
+    /** Záloha čerpaná odpočtovým řádkem (migrace 2298); starší instance sloupec nemají. */
     private ?bool $hasAdvanceDraw = null;
 
     private function supportsAdvanceDraw(): bool

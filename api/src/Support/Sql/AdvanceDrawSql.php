@@ -9,10 +9,10 @@ namespace MyInvoice\Support\Sql;
  *
  * Čerpání nesou záporné odpočtové řádky § 37a konečné faktury (`invoice_type = 'invoice'`):
  * řádek se zápornou částkou mimo slevový. Zálohu, ze které řádek odečítá, určuje
- *   - `invoice_items.advance_invoice_id` (migrace 2297), vyznačený čerpáním záloh v detailu
+ *   - `invoice_items.advance_invoice_id` (migrace 2298), vyznačený čerpáním záloh v detailu
  *     faktury ({@see \MyInvoice\Service\Invoice\AdvancePartialDrawdown}),
  *   - jinak vazba dokladu `invoices.parent_invoice_id` (vyúčtování vystavené z proformy
- *     a doklady před migrací 2297).
+ *     a doklady před migrací 2298).
  * Faktura čerpající jedinou zálohu má tu zálohu i v `parent_invoice_id`, takže dosavadní
  * čtení vazby dokladu platí beze změny. Faktura čerpající víc záloh `parent_invoice_id`
  * nemá (jedna vazba by přisoudila celé čerpání jediné záloze) a její čerpání se čte jen
