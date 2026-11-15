@@ -636,6 +636,33 @@ describe('Membership workspace', () => {
     w.unmount()
   })
 
+  it('shows the year chip only when removing it changes the filter', async () => {
+    const current=appIsoDate().slice(0,4)
+    navigation.route.query = {}
+    let w=mounted();await flushPromises()
+    let bar=w.findComponent(FilterBar)
+    expect(bar.props('chips')).toEqual([])
+    expect(bar.props('activeCount')).toBe(0)
+    w.unmount()
+
+    navigation.route.query = {year: '2020'}
+    w=mounted();await flushPromises()
+    bar=w.findComponent(FilterBar)
+    expect(bar.props('chips')).toEqual([expect.objectContaining({key:'year',value:'2020'})])
+    bar.vm.$emit('clear','year');await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:Number(current)}))
+    expect(w.findComponent(FilterBar).props('chips')).toEqual([])
+    w.unmount()
+
+    navigation.route.query = {year: current, title_key: 'SYNTHETIC'}
+    w=mounted();await flushPromises()
+    bar=w.findComponent(FilterBar)
+    expect(bar.props('chips')).toEqual([expect.objectContaining({key:'year'}),expect.objectContaining({key:'title'})])
+    bar.vm.$emit('clear','year');await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:null,title_key:'SYNTHETIC'}))
+    w.unmount()
+  })
+
   it('applies clearing all filters during a batch once the batch unlocks', async () => {
     navigation.route.query = {year: '', title_key: 'SYNTHETIC', search: 'Synthetic'}
     const w=mounted();await flushPromises()
