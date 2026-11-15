@@ -15,7 +15,7 @@ const summary: InvoiceAdvanceDrawdownSummary = {
 
 const m = vi.hoisted(() => ({
   invoice: {} as Record<string, unknown>,
-  candidates: [] as Array<Record<string, unknown>>,
+  candidates: [] as AdvanceDrawdownCandidate[],
   apply: vi.fn(),
   remove: vi.fn(),
 }))
