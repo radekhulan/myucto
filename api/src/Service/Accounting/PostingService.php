@@ -4090,9 +4090,9 @@ final class PostingService
         $stmt = $this->db->pdo()->prepare(
             'SELECT COUNT(*) FROM (' . AdvanceDrawSql::finalIds('?', '?') . ") fx
                JOIN invoices i ON i.id = fx.id
-              WHERE i.status <> 'cancelled'"
+              WHERE i.supplier_id = ? AND i.status <> 'cancelled'"
         );
-        $stmt->execute([$supplierId, $proformaId, $proformaId, $supplierId]);
+        $stmt->execute([$supplierId, $proformaId, $proformaId, $supplierId, $supplierId]);
         return (int) $stmt->fetchColumn();
     }
     /**

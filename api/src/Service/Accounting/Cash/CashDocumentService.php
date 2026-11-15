@@ -2404,15 +2404,12 @@ final class CashDocumentService
             return;
         }
 
-        // Finální faktura z proformy — vazba parent_invoice_id (FinalFromProformaCreator).
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT varsymbol FROM invoices
-              WHERE supplier_id = ? AND parent_invoice_id = ? AND invoice_type = 'invoice'
-                AND status <> 'cancelled'
-              ORDER BY id LIMIT 1"
+        // Finální faktura z proformy: vazba parent_invoice_id (FinalFromProformaCreator), nebo
+        // faktura čerpající proformu odpočtovým řádkem spolu s dalšími zálohami.
+        $finalRow = \MyInvoice\Service\Invoice\AdvanceDrawLinks::firstFinalOf(
+            $this->db->pdo(), $supplierId, $invoiceId, ['draft', 'issued', 'sent', 'reminded', 'paid'],
         );
-        $stmt->execute([$supplierId, $invoiceId]);
-        $final = $stmt->fetchColumn();
+        $final = $finalRow === null ? false : (string) ($finalRow['varsymbol'] ?? '');
         if ($final !== false) {
             throw new CashException(
                 'followup_document_exists',

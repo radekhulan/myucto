@@ -10,6 +10,7 @@ use MyInvoice\Service\Accounting\AdvanceDeductionService;
 use MyInvoice\Service\Accounting\JournalSettlementException;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\Reports\SaldoService;
+use MyInvoice\Service\Bank\AdvanceFinalMatchGuard;
 use MyInvoice\Service\Invoice\AdvancePartialDrawdown;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
@@ -97,6 +98,13 @@ final class MultiAdvanceDrawdownTest extends BankPostingTestCase
         self::assertSame([$invoice => 1500.00], $deductions->deductedByFinal($this->supplierId, 'invoice', [$invoice]),
             'Saldokonto ví, kolik faktura čerpá, a nenabídne ho k ručnímu vyrovnání podruhé.');
 
+        // Dialog Vyrovnat v saldokontu ukáže čerpání zálohy odpočtovým řádkem faktury (bez zrušení).
+        $listed = $deductions->listFor($this->supplierId, 'invoice', 'advance', $pfB);
+        self::assertCount(1, $listed);
+        self::assertSame(['id' => null, 'final_id' => $invoice, 'amount' => 1000.00, 'source' => 'invoice'],
+            array_intersect_key($listed[0], array_flip(['id', 'final_id', 'amount', 'source'])));
+        self::assertSame(self::YEAR . '-06-20', $listed[0]['posted_on']);
+
         // Ruční vyrovnání v saldokontu čerpání faktury nezdvojí: celý odpočet už čerpají zálohy.
         try {
             $this->container->get(AdvanceDeductionService::class)->deduct($this->supplierId, [
@@ -113,6 +121,31 @@ final class MultiAdvanceDrawdownTest extends BankPostingTestCase
         self::assertSame(2, (int) $settled, 'Obě zálohy jsou vyúčtované.');
         self::assertSame($invoice, $this->container->get(FinalFromProformaCreator::class)->create($pfB, $this->userId),
             'Vyúčtování ze zálohy B vrátí fakturu, která ji čerpá, a nevystaví druhou.');
+    }
+
+    public function testPaymentOfUnpaidAdvanceBelongsToAdvanceNotToMultiAdvanceInvoice(): void
+    {
+        $client = $this->client('Odběratel nedoplacené zálohy');
+        [$pfA] = $this->paidAdvance('PF-MH-A', 'DD-MH-A', $client, 1000.00, 210.00, $this->rate21, 21.0);
+        // Záloha B je zaplacená jen z poloviny: DDKP na 605, doplatek 605 teprve přijde.
+        $pfB = $this->document('proforma', 'PF-MH-B', $client, 1000.00, 210.00, $this->rate21, 21.0);
+        $this->payProformaViaBank($pfB, 605.00);
+        $ddkpB = $this->document('tax_document', 'DD-MH-B', $client, 500.00, 105.00, $this->rate21, 21.0, $pfB, 1);
+        $this->postInvoiceEntry($ddkpB, self::YEAR . '-06-16');
+        $this->db->pdo()->prepare('UPDATE invoices SET paid_total = total_with_vat WHERE id = ?')->execute([$pfA]);
+        $this->db->pdo()->prepare('UPDATE invoices SET paid_total = 605 WHERE id = ?')->execute([$pfB]);
+
+        $invoice = $this->draft($client, [[3000.00, 630.00, $this->rate21, 21.0]]);
+        $this->drawdown->apply($this->supplierId, $invoice, $pfA, 1210.00);
+        $this->drawdown->apply($this->supplierId, $invoice, $pfB, 605.00);
+        $this->issue($invoice, 'FV-MH-1');
+        self::assertNull($this->parentOf($invoice));
+
+        $guard = $this->container->get(AdvanceFinalMatchGuard::class);
+        $violation = $guard->issuedViolation($this->supplierId, $invoice, 605.00);
+        self::assertNotNull($violation, 'Doplatek zálohy B patří na zálohu, ne na fakturu, která ji čerpá.');
+        self::assertSame($pfB, $violation['advance_id']);
+        self::assertNull($guard->issuedViolation($this->supplierId, $invoice, 1815.00), 'Doplatek faktury projde.');
     }
 
     public function testMilestoneDrawdownCombinesWithSecondAdvance(): void

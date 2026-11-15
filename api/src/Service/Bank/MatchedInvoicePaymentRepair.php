@@ -40,6 +40,11 @@ final class MatchedInvoicePaymentRepair
                         AND NOT EXISTS (SELECT 1 FROM invoices fin WHERE fin.parent_invoice_id = i.id
                             AND i.invoice_type = 'proforma' AND fin.invoice_type = 'invoice'
                             AND fin.status IN ('issued', 'sent', 'reminded', 'paid'))
+                        -- Finál čerpající proformu odpočtovým řádkem (faktura s víc zálohami).
+                        AND NOT EXISTS (SELECT 1 FROM invoice_items dii JOIN invoices fin ON fin.id = dii.invoice_id
+                                         WHERE dii.advance_invoice_id = i.id AND i.invoice_type = 'proforma'
+                                           AND fin.supplier_id = i.supplier_id AND fin.invoice_type = 'invoice'
+                                           AND fin.status IN ('issued', 'sent', 'reminded', 'paid'))
                         AND i.status IN ('issued', 'sent', 'reminded') AND i.paid_total = 0
                         AND i.amount_to_pay > 0
                         AND NOT EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.invoice_id = i.id)

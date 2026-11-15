@@ -30,8 +30,9 @@ final class ReceivablePredicate
         return "$alias.status IN ('issued', 'sent', 'reminded')
                 AND $alias.due_date $operator $todaySql
                 AND ($alias.invoice_type != 'proforma'
-                     OR NOT EXISTS (SELECT 1 FROM invoices ch
-                                     WHERE ch.parent_invoice_id = $alias.id AND ch.invoice_type = 'invoice'))
+                     OR (NOT EXISTS (SELECT 1 FROM invoices ch
+                                      WHERE ch.parent_invoice_id = $alias.id AND ch.invoice_type = 'invoice')
+                         AND NOT " . AdvanceDrawSql::advanceHasDrawLines($alias) . "))
                 AND $alias.invoice_type NOT IN ('rent_calendar','advance_calendar')
                 AND ($alias.invoice_type NOT IN ('invoice','proforma','tax_document') OR $alias.amount_to_pay - $alias.paid_total > 0)";
     }
