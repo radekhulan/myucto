@@ -230,9 +230,12 @@ final class MembershipAction
             $after = $this->queryInteger($query['after_claim_id'] ?? 0, 'after_claim_id', 0);
             $limit = $this->queryInteger($query['limit'] ?? 100, 'limit', 1, 100);
             $history = $this->members->history($supplier, $member['id']);
-            return ['member' => $member, 'history' => $history,
-                'corrections' => $this->corrections->availability($supplier, $member, $history),
-                'balance' => $this->reconciliation->memberBalance($supplier, $member['id'], $after, $limit)];
+            $detail = ['member' => $member, 'history' => $history];
+            // Dostupnost oprav čte předpisy, důkazy operací a dávky člena; počítá se jen pro toho, kdo smí opravovat.
+            if (RequestAuthorization::allows($request, 'accounting.journal.post', AccessLevel::WRITE)) {
+                $detail['corrections'] = $this->corrections->availability($supplier, $member, $history);
+            }
+            return $detail + ['balance' => $this->reconciliation->memberBalance($supplier, $member['id'], $after, $limit)];
         });
     }
 

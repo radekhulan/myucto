@@ -97,6 +97,10 @@ final class MembershipBatchRepository
                     $revision = $error === null ? MembershipRevisionTimeline::at($contexts[$member]['history'], $date) : null;
                     // Neprůkazná historie je viditelná chyba; pouze prokazatelně neaktivní člen se nevybírá.
                     if ($mode === 'active' && $error === null && $revision !== null && $revision['status'] !== 'active') continue;
+                    // Člen se všemi revizemi zrušenými (oprava chybného zadání) žádné členství nemá; smazat ho nejde, aby
+                    // zůstala stopa zrušení. Režim všech aktivních ho proto nevybírá. Člen bez jakékoli revize zůstává chybou.
+                    if ($mode === 'active' && $error === null && $revision === null && $contexts[$member]['history'] !== []
+                        && MembershipRevisionTimeline::effective($contexts[$member]['history']) === []) continue;
                     if ($revision === null && $error === null) $error = new MembershipException('nonprofit_membership_inactive', 'Členství není k účetnímu datu aktivní.', 409);
                     if ($current['member_count'] + ++$count > $maximum) throw new MembershipException('nonprofit_membership_batch_limit', 'Výběr přesahuje maximální velikost dávky.', 422);
                     $status = $error === null ? 'pending' : 'rejected';

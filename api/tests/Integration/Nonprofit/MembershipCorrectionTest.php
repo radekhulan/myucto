@@ -427,6 +427,35 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
         self::assertSame(5, json_decode($scrubbed, true)['before']['client_id']);
     }
 
+    /** Člen se všemi revizemi zrušenými nejde smazat ani ukončit; dávka všech aktivních ho nevybere ani jako chybu. */
+    public function testActiveBatchSkipsMemberWhoseRevisionsWereAllVoided(): void
+    {
+        $voided = $this->member('VOID-ALL-BATCH');
+        $this->void($voided, $this->lastRevision($voided), 1, 'void-all-batch');
+        [$bare] = $this->bareMember('VOID-ALL-BARE');
+        $active = $this->member('VOID-ALL-ACTIVE');
+        // Platná revize účinná až po účetním datu dávky (vstup v průběhu roku) je dál viditelně odmítnutá.
+        [$later] = $this->bareMember('VOID-ALL-LATER');
+        $this->revision($later, 'active', '2026-06-01', 0, 'void-all-later');
+        $created = $this->batches->create($this->supplier, ['template' => $this->template, 'selection_mode' => 'active', 'member_ids' => [],
+            'idempotency_key' => 'void-all-active'], $this->actor);
+        $batch = $created['batch']['id'];
+        $this->batches->prepare($this->supplier, $batch);
+        self::assertNull($this->batchRowStatus($batch, $voided));
+        // Člen bez jakékoli revize zůstává viditelnou chybou (zapomenutá první revize).
+        self::assertSame('rejected', $this->batchRowStatus($batch, $bare));
+        self::assertNotNull($this->batchRowStatus($batch, $active));
+        self::assertNotSame('rejected', $this->batchRowStatus($batch, $active));
+        self::assertSame('rejected', $this->batchRowStatus($batch, $later));
+        $q = $this->pdo->prepare('SELECT error_code FROM nonprofit_membership_batch_members WHERE supplier_id=? AND batch_id=? AND member_id=?');
+        $q->execute([$this->supplier, $batch, $later]);
+        self::assertSame('nonprofit_membership_inactive', $q->fetchColumn());
+        // Výslovně vybraný člen se zrušenými revizemi se ukáže jako odmítnutý, nezmizí bez vysvětlení.
+        $chosen = $this->batches->create($this->supplier, $this->input([$voided], 'void-all-selected'), $this->actor)['batch']['id'];
+        $this->batches->prepare($this->supplier, $chosen);
+        self::assertSame('rejected', $this->batchRowStatus($chosen, $voided));
+    }
+
     public function testCatalogSkipsMemberWhoseOnlyRevisionWasVoided(): void
     {
         $member = $this->member('VOID-ONLY');

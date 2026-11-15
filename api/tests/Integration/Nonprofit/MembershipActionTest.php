@@ -417,7 +417,12 @@ final class MembershipActionTest extends TestCase
     {
         $id = $this->activeMember('M-ACTION-FIX');
         $args = ['id' => (string) $id];
-        [$status, $detail] = $this->call('GET', 'member', null, $args, ['accounting' => 1]);
+        // Role jen ke čtení dostupnost oprav nedostane (ani se nepočítá); s právem zápisu ano.
+        [$status, $readOnly] = $this->call('GET', 'member', null, $args, ['accounting' => 1]);
+        self::assertSame(200, $status);
+        self::assertArrayNotHasKey('corrections', $readOnly);
+        self::assertArrayHasKey('balance', $readOnly);
+        [$status, $detail] = $this->call('GET', 'member', null, $args);
         self::assertSame(200, $status);
         self::assertTrue($detail['corrections']['can_edit_identity']);
         self::assertSame('nonprofit_membership_member_has_revisions', $detail['corrections']['delete_block']);
