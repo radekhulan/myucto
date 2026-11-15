@@ -15,6 +15,7 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\OtherItemKindService;
 use MyInvoice\Service\Ai\AccountingAssistantException;
 use MyInvoice\Service\Ai\AccountingAssistantService;
+use MyInvoice\Service\Ai\Assistant\ManualSearchService;
 use MyInvoice\Service\Ai\AiInternalDocumentValidator;
 use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Service\Document\DocumentTextExtractor;
@@ -93,6 +94,7 @@ final class AccountingAssistantServiceTest extends TestCase
             $c->get(VatStatusService::class),
             $c->get(AiInternalDocumentValidator::class),
             $c->get(OtherItemKindService::class),
+            new ManualSearchService(),
         );
     }
 
@@ -247,7 +249,7 @@ final class AccountingAssistantServiceTest extends TestCase
 
         self::assertStringContainsString('`other_items`', $this->sentPayload()['system']);
         $payload = $this->sentPayload();
-        self::assertArrayNotHasKey('tool_choice', $payload, 'dlouhá odpověď jde přes structured outputs, ne vynucený tool_use');
+        self::assertSame(['type' => 'auto'], $payload['tool_choice'] ?? null, 'dlouhá odpověď jde přes structured outputs, ne vynucený tool_use');
         self::assertSame('json_schema', $payload['output_config']['format']['type']);
         self::assertArrayHasKey('other_items', $payload['output_config']['format']['schema']['properties']);
         self::assertCount(1, $out['other_items']);

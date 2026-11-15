@@ -8,9 +8,11 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Ai\AccountingAssistantException;
 use MyInvoice\Service\Ai\AccountingAssistantService;
 use MyInvoice\Service\Ai\AiAssistantHistoryService;
+use MyInvoice\Service\Ai\Assistant\AssistantDataTools;
 use MyInvoice\Service\Document\DocumentViewerResolver;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -22,6 +24,8 @@ final class AiAssistantAction
     public function __construct(
         private readonly AccountingAssistantService $assistant,
         private readonly AiAssistantHistoryService $history,
+        private readonly AssistantDataTools $dataTools,
+        private readonly ActivityLogger $activity,
     ) {}
 
     /** GET /api/accounting/ai-assistant/status */
@@ -76,7 +80,9 @@ final class AiAssistantAction
                 in_array($body['include_chart'] ?? '0', ['1', 1, true, 'true'], true),
                 $body['model'] ?? null,
                 RequestAuthorization::canCreateInternalDocument($request),
+                $this->dataTools->forRequest($request),
             );
+            $this->auditToolCalls($supplierId, $userId, $result['tool_calls'] ?? []);
             if ($userId !== null) {
                 $attachments = [
                     ...array_map(static fn (array $f): array => ['kind' => 'file', 'name' => $f['name']], $files),
@@ -120,6 +126,28 @@ final class AiAssistantAction
         return $this->guarded($response, fn () => ['applied' => $this->history->markApplied(
             SupplierGuard::currentId($request), $this->requireUser($request), (int) $args['id'],
             (string) ($body['kind'] ?? ''), (int) ($body['index'] ?? -1), (int) ($body['target_id'] ?? 0))]);
+    }
+
+    /**
+     * Auditní stopa čtení dat asistentem: jen jména nástrojů a výsledek, bez argumentů
+     * a obsahu (mohou nést osobní údaje), stejně jako u ostatních AI akcí.
+     *
+     * @param list<array<string,mixed>> $trace
+     */
+    private function auditToolCalls(int $supplierId, ?int $userId, array $trace): void
+    {
+        if ($trace === []) {
+            return;
+        }
+        try {
+            $this->activity->log('ai.assistant_tools', $userId, 'supplier', $supplierId, [
+                'calls' => array_map(static fn (array $t): array => [
+                    'tool' => (string) ($t['tool'] ?? ''), 'status' => (string) ($t['status'] ?? ''),
+                ], array_values($trace)),
+            ], supplierId: $supplierId);
+        } catch (\Throwable) {
+            // Audit nesmí shodit už hotovou odpověď.
+        }
     }
 
     private function guarded(Response $response, callable $callback): Response
