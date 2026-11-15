@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -17,8 +17,9 @@ import AiMarkdown from '@/components/ai/AiMarkdown.vue'
 import AiJournalProposal from '@/components/ai/AiJournalProposal.vue'
 import AiOtherItemProposal from '@/components/ai/AiOtherItemProposal.vue'
 import AiInternalDocumentProposal from '@/components/ai/AiInternalDocumentProposal.vue'
+import AiToolTrace from '@/components/ai/AiToolTrace.vue'
 
-const { t } = useI18n()
+const { t, tm, rt } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
@@ -367,6 +368,31 @@ async function send() {
   }
 }
 
+// ── Příklady dotazů a průběh ─────────────────────────────────────────────────
+const questionInput = ref<HTMLTextAreaElement | null>(null)
+const examples = computed(() => (tm('accounting.ai_assistant.examples') as unknown[]).map(x => rt(x as never)))
+function useExample(text: string) {
+  question.value = text
+  void nextTick(() => questionInput.value?.focus())
+}
+
+// Server odpovídá najednou (bez streamování); průběh jen naznačuje kroky, které asistent dělá.
+const progressSteps = computed(() => (tm('accounting.ai_assistant.progress') as unknown[]).map(x => rt(x as never)))
+const progressIndex = ref(0)
+let progressTimer: ReturnType<typeof setInterval> | null = null
+watch(sending, (on) => {
+  if (progressTimer) clearInterval(progressTimer)
+  progressTimer = null
+  progressIndex.value = 0
+  if (on) {
+    progressTimer = setInterval(() => {
+      if (progressIndex.value < progressSteps.value.length - 1) progressIndex.value++
+    }, 4000)
+  }
+})
+onBeforeUnmount(() => { if (progressTimer) clearInterval(progressTimer) })
+const progressText = computed(() => progressSteps.value[progressIndex.value] ?? t('accounting.ai_assistant.thinking'))
+
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault()
@@ -627,7 +653,16 @@ onMounted(async () => {
         <div v-if="!messages.length" class="bg-primary-50 border border-primary-200 rounded-lg p-4 text-sm text-neutral-700">
           <p class="font-medium text-primary-800 mb-1">{{ t('accounting.ai_assistant.intro_title') }}</p>
           <p>{{ t('accounting.ai_assistant.intro_body') }}</p>
-          <p class="mt-2 text-neutral-500 italic">{{ t('accounting.ai_assistant.intro_example') }}</p>
+          <p class="mt-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">{{ t('accounting.ai_assistant.examples_title') }}</p>
+          <div class="mt-1.5 flex flex-wrap gap-1.5" data-test="ai-assistant-examples">
+            <button
+              v-for="(ex, ei) in examples"
+              :key="ei"
+              type="button"
+              class="cursor-pointer text-left px-2.5 py-1 rounded-full border border-primary-200 bg-surface text-primary-700 text-xs hover:bg-primary-100"
+              @click="useExample(ex)"
+            >{{ ex }}</button>
+          </div>
         </div>
 
         <template v-for="m in messages" :key="m.id">
@@ -648,6 +683,7 @@ onMounted(async () => {
           <div v-else class="flex justify-start">
             <div class="w-full max-w-[95%] rounded-lg rounded-bl-sm bg-surface border border-neutral-200 px-4 py-3 shadow-sm space-y-3">
               <AiMarkdown :text="m.content" />
+              <AiToolTrace :tool-calls="m.response?.tool_calls" :manual-sources="m.response?.manual_sources" />
               <p v-if="m.model" class="text-xs text-neutral-400">{{ t('accounting.ai_assistant.model') }}: {{ m.model }}</p>
 
               <ul v-if="m.response?.warnings?.length" class="space-y-1">
@@ -756,7 +792,7 @@ onMounted(async () => {
         <div v-if="sending" class="flex justify-start" role="status" aria-live="polite">
           <div class="inline-flex items-center gap-2 rounded-lg bg-surface border border-neutral-200 px-4 py-3 text-sm text-neutral-500 shadow-sm">
             <svg class="w-4 h-4 animate-spin text-primary-600" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" /><path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round" /></svg>
-            {{ t('accounting.ai_assistant.thinking') }}
+            {{ progressText }}
           </div>
         </div>
         <div ref="transcriptEnd"></div>
@@ -772,6 +808,7 @@ onMounted(async () => {
         @drop.prevent="onDrop"
       >
         <textarea
+          ref="questionInput"
           v-model="question"
           rows="4"
           :maxlength="MAX_QUESTION"

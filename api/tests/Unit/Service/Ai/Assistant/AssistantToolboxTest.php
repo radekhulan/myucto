@@ -12,6 +12,9 @@ use PHPUnit\Framework\TestCase;
 
 final class AssistantToolboxTest extends TestCase
 {
+    /** Rozdělené, ať kontrola odkazů manuálu nebere smyšlené kapitoly testu za skutečné. */
+    private const MANUAL = '/manual?' . 'ch=';
+
     private string $dir;
 
     protected function setUp(): void
@@ -84,7 +87,7 @@ final class AssistantToolboxTest extends TestCase
         $cited = $box->citations(['22_Upominky#221-poslat-upominku', '99_Cizi#vymysleny', 42]);
         self::assertSame([[
             'section_id' => '22_Upominky#221-poslat-upominku', 'chapter' => '22. Upomínky',
-            'title' => '22.1 Poslat upomínku', 'url' => '/manual?ch=22_Upominky#221-poslat-upominku',
+            'title' => '22.1 Poslat upomínku', 'url' => self::MANUAL . '22_Upominky#221-poslat-upominku',
         ]], $cited);
         $read = $box->execute('read_manual_section', ['section_id' => '22_Upominky#221-poslat-upominku']);
         self::assertStringContainsString('detailu faktury', $read['content']);

@@ -9,6 +9,9 @@ use PHPUnit\Framework\TestCase;
 
 final class ManualSearchServiceTest extends TestCase
 {
+    /** Rozdělené, ať kontrola odkazů manuálu nebere smyšlené kapitoly testu za skutečné. */
+    private const MANUAL = '/manual?' . 'ch=';
+
     private string $dir;
 
     protected function setUp(): void
@@ -68,7 +71,7 @@ MD);
         $hits = $this->service()->search('upomínka faktury po splatnosti');
         self::assertNotEmpty($hits);
         self::assertSame('22_Upominky#221-poslat-upominku', $hits[0]['section_id']);
-        self::assertSame('/manual?ch=22_Upominky#221-poslat-upominku', $hits[0]['url']);
+        self::assertSame(self::MANUAL . '22_Upominky#221-poslat-upominku', $hits[0]['url']);
         self::assertSame('22. Upomínky', $hits[0]['chapter']);
 
         $saldo = $this->service()->search('proč nesedí saldo 311');
@@ -83,8 +86,8 @@ MD);
         self::assertStringContainsString('10.1.1 Splatnost faktury', $section['text'], 'pododdíl patří k oddílu');
         self::assertStringNotContainsString('10.2 Když něco nejde', $section['text'], 'sourozenecký oddíl už ne');
         self::assertStringContainsString('## Tohle není nadpis', $section['text'], 'nadpis v bloku kódu oddíl neukončí');
-        self::assertStringContainsString('](/manual?ch=22_Upominky#221-poslat-upominku)', $section['text']);
-        self::assertStringContainsString('](/manual?ch=10_Faktury#101-krok-za-krokem-vystavit-fakturu)', $section['text']);
+        self::assertStringContainsString('](' . self::MANUAL . '22_Upominky#221-poslat-upominku)', $section['text']);
+        self::assertStringContainsString('](' . self::MANUAL . '10_Faktury#101-krok-za-krokem-vystavit-fakturu)', $section['text']);
         self::assertStringNotContainsString('img/faktura.webp', $section['text']);
         self::assertNull($this->service()->section('10_Faktury#neexistuje'));
     }

@@ -18747,7 +18747,7 @@
   "accounting": {
     "ai_assistant": {
       "title": "AI assistant",
-      "subtitle": "Ask about bookkeeping, attach documents and get proposed journal entries.",
+      "subtitle": "Ask about postings, company data or how to do something in the app. Attach documents and get journal entries suggested.",
       "clear_confirm": "Discard the whole conversation? Attached files and documents stay attached.",
       "unavailable_title": "The AI assistant is not available",
       "open_settings": "Open AI settings",
@@ -18762,8 +18762,7 @@
         "daily_limit": "The daily AI limit has been reached. Try again tomorrow."
       },
       "intro_title": "What you can ask",
-      "intro_body": "Describe the situation in your own words and optionally attach files from disk or documents from Documents. The assistant explains how to book it, offers journal entries, internal documents or other receivables and payables and suggests where to store the file in Documents. Nothing is posted without your confirmation.",
-      "intro_example": "For example: \"I uploaded a notarial deed and cash receipts to Documents, I need to create receivables for subscribed share capital.\"",
+      "intro_body": "Describe the situation in your own words and optionally attach files from disk or documents from Documents. The assistant looks up company data (with your permissions, read only) and procedures in the manual, explains how to post, suggests journal entries, internal documents or other receivables and payables, and proposes where to store a file in Documents. Nothing is posted without your confirmation.",
       "placeholder": "Type your bookkeeping question…",
       "model": "Model",
       "default_model": "Default ({model})",
@@ -18877,6 +18876,28 @@
         "upload_failed": "The file could not be uploaded.",
         "open_document": "Open document",
         "no_permission": "You are not allowed to upload to Documents."
+      },
+      "examples_title": "Try for example",
+      "examples": [
+        "Which issued invoices are overdue and how much in total?",
+        "How much does our largest customer owe us?",
+        "Why does the balance of account 324 not match?",
+        "What is still missing for last month's VAT return?",
+        "How do I create a manual journal entry in the app?",
+        "I uploaded a notarial deed to Documents, I need receivables for the subscribed registered capital."
+      ],
+      "progress": [
+        "The assistant is reading the question and company context…",
+        "Searching company data and the manual…",
+        "Going through the findings…",
+        "Preparing the answer…"
+      ],
+      "sources": {
+        "manual": "Manual sources",
+        "tools": "Data and tools used ({count})",
+        "errors": "failed: {count}",
+        "ok": "OK",
+        "failed": "Error"
       }
     },
     "locked_ack": {

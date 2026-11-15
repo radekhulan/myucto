@@ -33,6 +33,7 @@ describe('contextual manual for application menu', () => {
     ['/other-items', '52_Ucetni_denik'],
     ['/other-items/new', '52_Ucetni_denik'],
     ['/accounting/internal-documents', '52_Ucetni_denik'],
+    ['/accounting/ai-assistant', '123_AI_asistent'],
     ['/accounting/internal-documents/12/edit', '52_Ucetni_denik'],
     ['/accounting/nonprofit-membership', '120_Clenove_a_clenske_prispevky'],
     ['/accounting/nonprofit-membership/', '120_Clenove_a_clenske_prispevky'],

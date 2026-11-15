@@ -1,15 +1,28 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { renderMarkdown } from '@/utils/miniMarkdown'
 
 // Odpověď modelu je nedůvěryhodný text: renderMarkdown nejdřív escapuje celý
 // vstup a značky doplňuje až potom, takže v-html dostane jen vlastní HTML.
 const props = defineProps<{ text: string | null | undefined }>()
 const html = computed(() => renderMarkdown(props.text ?? ''))
+const router = useRouter()
+
+// Odkaz na stránku aplikace (cesta od `/`) otevře router v aktuálním okně; manuál,
+// API a cizí adresy zůstávají v nové záložce. Ctrl/Cmd/Shift klik nechá prohlížeči.
+function onClick(e: MouseEvent) {
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return
+  const a = (e.target as HTMLElement | null)?.closest?.('a')
+  const href = a?.getAttribute('href') ?? ''
+  if (!router || !href.startsWith('/') || href.startsWith('//') || /^\/(manual|api)(\/|\?|#|$)/.test(href)) return
+  e.preventDefault()
+  void router.push(href)
+}
 </script>
 
 <template>
-  <div class="ai-markdown text-sm leading-relaxed text-neutral-800 break-words" v-html="html"></div>
+  <div class="ai-markdown text-sm leading-relaxed text-neutral-800 break-words" @click="onClick" v-html="html"></div>
 </template>
 
 <style scoped>

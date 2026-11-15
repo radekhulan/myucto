@@ -100,6 +100,23 @@ export interface AiHistoryTurn {
   content: string
 }
 
+/** Krok asistenta s nástrojem (manuál, data firmy) — bez obsahu výsledku. */
+export interface AiToolCall {
+  tool: string
+  kind: 'manual' | 'data_describe' | 'data' | 'unknown' | string
+  label: string
+  detail: string
+  status: 'ok' | 'error' | string
+}
+
+/** Oddíl manuálu, ze kterého odpověď vychází. `url` míří do /manual. */
+export interface AiManualSource {
+  section_id: string
+  chapter: string
+  title: string
+  url: string
+}
+
 export interface AiAskResponse {
   answer: string
   journal_entries: AiJournalEntry[]
@@ -107,6 +124,8 @@ export interface AiAskResponse {
   internal_documents?: AiInternalDocument[]
   document_suggestions: AiDocumentSuggestion[]
   warnings: string[]
+  tool_calls?: AiToolCall[]
+  manual_sources?: AiManualSource[]
   provider: string
   model: string
   usage: { input_tokens: number; output_tokens: number }
@@ -148,6 +167,8 @@ export interface AiStoredMessage {
     journal_entries?: AiJournalEntry[]
     document_suggestions?: AiDocumentSuggestion[]
     warnings?: string[]
+    tool_calls?: AiToolCall[]
+    manual_sources?: AiManualSource[]
   } | null
   applied: AiApplied | null
   model: string | null
