@@ -18,7 +18,8 @@ use PDO;
  * Doklad, který se maže (admin force-delete) nebo kterému se ruší storno, nemá po
  * sobě nechat v deníku ani aktivní zápis, ani storno dvojici, která se jen vzájemně
  * ruší. Pokud by šly zápisy smazat ručně v deníku, udělá to tahle služba sama: stejnými
- * branami ({@see JournalEntryDeletionRules}) a se stejnou stopou v auditu jako
+ * branami ({@see JournalEntryDeletionRules}, okruh párování {@see JournalPairingUseGuard},
+ * rozpad saldokonta {@see JournalSettlementUseGuard}) a se stejnou stopou v auditu jako
  * {@see \MyInvoice\Action\Accounting\JournalAction::delete()} a
  * {@see \MyInvoice\Action\Accounting\JournalAction::deleteReversalPair()}.
  *
@@ -133,7 +134,22 @@ final class DocumentJournalPurge
         }
 
         $entryIds = [];
-        foreach ($groups as $group) foreach ($group['entries'] as $entry) $entryIds[] = (int) $entry['id'];
+        $entrySource = [];
+        foreach ($groups as $group) foreach ($group['entries'] as $entry) {
+            $entryIds[] = (int) $entry['id'];
+            $entrySource[(int) $entry['id']] = $group['source_id'];
+        }
+        // Okruh párování a rozpad saldokonta jako mazání v deníku. Odmítnutí je výsledek,
+        // ne výjimka: volající pokračuje dosavadní cestou (storno okruhy uvolní s auditem
+        // a rozpad nechá na původním zápisu), nebo vrátí důvod uživateli.
+        $paired = (new JournalPairingUseGuard($this->db))->pairedEntry($supplierId, $entryIds);
+        if ($paired !== null) {
+            return self::blocked($entrySource[$paired['entry_id']], $paired['entry_id'], JournalPairingUseGuard::block($paired));
+        }
+        $allocated = (new JournalSettlementUseGuard($this->db))->allocatedEntry($supplierId, $entryIds);
+        if ($allocated !== null) {
+            return self::blocked($entrySource[$allocated], $allocated, JournalSettlementUseGuard::block());
+        }
         (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, $entryIds);
         (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, $entryIds);
         (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, $entryIds);
@@ -205,9 +221,8 @@ final class DocumentJournalPurge
      * zápisem, ostatní položka), když účetní maže doklad i se zaúčtováním. Brány jsou
      * stejné jako u {@see \MyInvoice\Action\Accounting\JournalAction::delete()}: období
      * a zámek ({@see JournalEntryDeletionRules::blockSingle()}), navazující agendy
-     * (předpisy a platby SVJ, společné alokace, rozpad saldokonta) a skupina zaúčtování
-     * dokladu. Navíc odmítne zápis s řádky v okruhu párování: doklad zmizí celý a párování
-     * by kaskádou tiše odešlo i s protějšky v okruhu.
+     * (předpisy a platby SVJ, společné alokace, rozpad saldokonta, okruh párování
+     * {@see JournalPairingUseGuard}) a skupina zaúčtování dokladu.
      *
      * `$detachSource` uvolní zdrojový doklad (návrat do konceptu) až po všech kontrolách
      * a před smazáním zápisu (doklad na zápis odkazuje cizím klíčem) a vrací stav
@@ -251,12 +266,7 @@ final class DocumentJournalPurge
             throw new PostingException('entry_source_mismatch', 'Zápis nepatří k mazanému dokladu.', 409);
         }
 
-        $paired = $pdo->prepare('SELECT 1 FROM journal_line_pairing_items WHERE supplier_id = ? AND entry_id = ? LIMIT 1');
-        $paired->execute([$supplierId, $entryId]);
-        if ($paired->fetchColumn() !== false) {
-            throw new PostingException('entry_paired',
-                'Řádky zápisu jsou spárované v okruhu párování na účtu. Nejdřív je v párování účtu odeberte, pak doklad smažte.', 409);
-        }
+        (new JournalPairingUseGuard($this->db))->assertEntriesFree($supplierId, [$entryId]);
 
         $lock = $pdo->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ? FOR UPDATE');
         $lock->execute([$supplierId]);
@@ -350,16 +360,12 @@ final class DocumentJournalPurge
         if ($block !== null && empty($block['can_acknowledge'])) {
             return $block;
         }
-        $paired = $pdo->prepare('SELECT 1 FROM journal_line_pairing_items WHERE supplier_id = ? AND entry_id = ? LIMIT 1');
-        $paired->execute([$supplierId, $entryId]);
-        if ($paired->fetchColumn() !== false) {
-            return ['code' => 'entry_paired',
-                'message' => 'Řádky zápisu jsou spárované v okruhu párování na účtu. Nejdřív je v párování účtu odeberte, pak doklad smažte.'];
+        $paired = (new JournalPairingUseGuard($this->db))->pairedEntry($supplierId, [$entryId]);
+        if ($paired !== null) {
+            return JournalPairingUseGuard::block($paired);
         }
-        try {
-            (new JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$entryId]);
-        } catch (PostingException $e) {
-            return ['code' => $e->errorCode, 'message' => $e->getMessage()];
+        if ((new JournalSettlementUseGuard($this->db))->allocatedEntry($supplierId, [$entryId]) !== null) {
+            return JournalSettlementUseGuard::block();
         }
         return $block;
     }

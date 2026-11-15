@@ -26,9 +26,21 @@ final class JournalSettlementUseGuard
     /** Zápisy se smí smazat jen bez rozpadu (ani zrušeného předpisu, ten nese historii). */
     public function assertEntriesFree(int $supplierId, array $entryIds): void
     {
-        if ((new JournalSettlementRepository($this->db))->forEntries($supplierId, $entryIds) !== []) {
+        if ($this->allocatedEntry($supplierId, $entryIds) !== null) {
             throw self::inUse();
         }
+    }
+
+    /**
+     * První zápis sady s rozpadem na doklady saldokonta, pro volající, kteří odmítnutí
+     * vracejí jako výsledek ({@see DocumentJournalPurge::purge()}).
+     *
+     * @param list<int> $entryIds
+     */
+    public function allocatedEntry(int $supplierId, array $entryIds): ?int
+    {
+        $allocations = (new JournalSettlementRepository($this->db))->forEntries($supplierId, $entryIds);
+        return $allocations === [] ? null : $allocations[0]['entry_id'];
     }
 
     /**
@@ -97,12 +109,18 @@ final class JournalSettlementUseGuard
         }
     }
 
+    /** @return array{code:string, message:string} */
+    public static function block(): array
+    {
+        return [
+            'code'    => 'allocation_saldo_in_use',
+            'message' => 'Řádek zápisu je v saldokontu přiřazený dokladům nebo ostatní položce. Nejdřív přiřazení zrušte v saldokontu (předpis ostatní položky stornem položky).',
+        ];
+    }
+
     private static function inUse(): PostingException
     {
-        return new PostingException(
-            'allocation_saldo_in_use',
-            'Řádek zápisu je v saldokontu přiřazený dokladům nebo ostatní položce. Nejdřív přiřazení zrušte v saldokontu (předpis ostatní položky stornem položky).',
-            409,
-        );
+        $block = self::block();
+        return new PostingException($block['code'], $block['message'], 409);
     }
 }

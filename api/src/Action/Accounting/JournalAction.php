@@ -1272,6 +1272,8 @@ final class JournalAction
                 if ($ownTx) $pdo->rollBack();
                 return Json::error($response, 'not_found', 'Účetní zápis nenalezen.', 404);
             }
+            // Okruh párování by smazání odneslo kaskádou i s protějšky (pod zámkem zápisu).
+            (new \MyInvoice\Service\Accounting\JournalPairingUseGuard($this->db))->assertEntriesFree($supplierId, [$id]);
             $lock = $pdo->prepare(
                 'SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ? FOR UPDATE'
             );
@@ -1659,6 +1661,7 @@ final class JournalAction
                 if ($ownTx) $pdo->rollBack();
                 return Json::error($response, 'not_found', 'Protizápis nenalezen.', 404);
             }
+            (new \MyInvoice\Service\Accounting\JournalPairingUseGuard($this->db))->assertEntriesFree($supplierId, [$originalId, $reversalId]);
 
             // Řetěz stornování rozplétej odzadu: storno storna je samostatná dvojice.
             if ($reversal['reversed_by'] !== null || $original['reverses_entry_id'] !== null) {

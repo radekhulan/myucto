@@ -12,6 +12,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\OtherItemService;
+use MyInvoice\Service\Accounting\Reports\OpenItemsService;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -37,6 +38,7 @@ final class JournalReversalPairTest extends TestCase
     private Connection $db;
     private JournalAction $journalAction;
     private OtherItemService $otherItems;
+    private OpenItemsService $openItems;
     private AccountingPeriodRepository $periods;
 
     private int $supplierId = 0;
@@ -55,6 +57,7 @@ final class JournalReversalPairTest extends TestCase
             $this->db            = $container->get(Connection::class);
             $this->journalAction = $container->get(JournalAction::class);
             $this->otherItems    = $container->get(OtherItemService::class);
+            $this->openItems     = $container->get(OpenItemsService::class);
             $this->periods       = $container->get(AccountingPeriodRepository::class);
             $seeder              = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
@@ -300,6 +303,91 @@ final class JournalReversalPairTest extends TestCase
         self::assertGreaterThan(0, (int) $reversed['reversal_entry_id']);
     }
 
+    /**
+     * Smazání zápisu odneslo kaskádou jeho položky okruhu párování a protějšek zůstal
+     * spárovaný s řádkem, který už neexistuje. Deník musí odmítnout stejně jako mazání
+     * dokladu i se zápisem ({@see \MyInvoice\Service\Accounting\JournalPairingUseGuard}).
+     */
+    public function testDeleteRefusesEntryPairedWithAnotherEntry(): void
+    {
+        $entryId = $this->manualEntry('Spárovaná tržba');
+        $partnerId = $this->manualEntry('Protějšek v okruhu', 'credit');
+        $pairing = $this->pair211([$entryId, $partnerId]);
+
+        $res = $this->call('delete', 'DELETE', 'accountant', ['id' => (string) $entryId]);
+
+        self::assertSame(409, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('entry_paired', $res['body']['error']['code']);
+        self::assertStringContainsString('Otevřené položky - párování', $res['body']['error']['message']);
+        self::assertSame($pairing, (int) $res['body']['error']['pairing_id']);
+        self::assertSame(2, $this->countEntries([$entryId, $partnerId]));
+        self::assertSame(2, $this->pairingItems($pairing), 'Okruh zůstal celý.');
+
+        // Po zrušení okruhu v Otevřených položkách zápis smazat jde.
+        $this->openItems->delete($this->supplierId, [$pairing], ['user_id' => $this->userId, 'ip' => null, 'user_agent' => null]);
+        $res = $this->call('delete', 'DELETE', 'accountant', ['id' => (string) $entryId]);
+        self::assertSame(200, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, $this->countEntries([$entryId]));
+    }
+
+    /** Okruh, ze kterého po smazání nic nezbyde (jediný řádek), smazání neblokuje. */
+    public function testDeleteIgnoresCircleLeftWithoutOtherEntry(): void
+    {
+        $entryId = $this->manualEntry('Zbytek okruhu');
+        $partnerId = $this->manualEntry('Smazaný protějšek', 'credit');
+        $pairing = $this->pair211([$entryId, $partnerId]);
+        $this->db->pdo()->prepare('DELETE FROM journal_entries WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $partnerId]);
+
+        $res = $this->call('delete', 'DELETE', 'accountant', ['id' => (string) $entryId]);
+
+        self::assertSame(200, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, $this->pairingItems($pairing));
+    }
+
+    public function testReversalPairRefusedWhenPairedWithAnotherEntry(): void
+    {
+        [$entryId, $reversalId] = $this->reversedPair('Storno spárované s úhradou');
+        $partnerId = $this->manualEntry('Úhrada v okruhu se stornem');
+        $pairing = $this->pair211([$reversalId, $partnerId]);
+
+        $res = $this->call('deleteReversalPair', 'DELETE', 'accountant', ['id' => (string) $entryId]);
+
+        self::assertSame(409, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('entry_paired', $res['body']['error']['code']);
+        self::assertSame(3, $this->countEntries([$entryId, $reversalId, $partnerId]));
+        self::assertSame(2, $this->pairingItems($pairing));
+    }
+
+    /** Originál spárovaný se svým stornem: okruh zmizí s dvojicí celý, nic se neztratí. */
+    public function testReversalPairPairedWithItselfIsDeleted(): void
+    {
+        [$entryId, $reversalId] = $this->reversedPair('Storno spárované s originálem');
+        $pairing = $this->pair211([$entryId, $reversalId]);
+
+        $res = $this->call('deleteReversalPair', 'DELETE', 'accountant', ['id' => (string) $entryId]);
+
+        self::assertSame(200, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, $this->countEntries([$entryId, $reversalId]));
+        self::assertSame(0, $this->pairingItems($pairing));
+    }
+
+    /** Rozpad saldokonta drží storno dvojici stejně jako jeden zápis. */
+    public function testReversalPairRefusedWithSaldoAllocation(): void
+    {
+        [$entryId, $reversalId] = $this->reversedPair('Storno s rozpadem salda');
+        $line = $this->line211($reversalId);
+        $this->db->pdo()->prepare(
+            "INSERT INTO journal_settlement_allocations (supplier_id, entry_id, line_no, account_id, side, doc_type, doc_id, amount, kind)
+             VALUES (?, ?, ?, ?, ?, 'other_item', 1, 100, 'settlement')"
+        )->execute([$this->supplierId, $reversalId, $line['line_no'], $line['account_id'], $line['side']]);
+
+        $res = $this->call('deleteReversalPair', 'DELETE', 'accountant', ['id' => (string) $entryId]);
+
+        self::assertSame(409, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('allocation_saldo_in_use', $res['body']['error']['code']);
+        self::assertSame(2, $this->countEntries([$entryId, $reversalId]));
+    }
+
     public function testReversalFilterSeparatesBothSidesOfThePair(): void
     {
         [$entryId, $reversalId] = $this->reversedPair('Filtr storna');
@@ -354,18 +442,53 @@ final class JournalReversalPairTest extends TestCase
         return [$entryId, (int) $rev['body']['id']];
     }
 
-    private function manualEntry(string $description): int
+    private function manualEntry(string $description, string $cashSide = 'debit'): int
     {
         $res = $this->call('create', 'POST', 'accountant', [], [
             'entry_date'  => self::YEAR . '-06-15',
             'description' => $description,
             'lines' => [
-                ['account_code' => '211', 'side' => 'debit', 'amount' => 1000.00],
-                ['account_code' => '602', 'side' => 'credit', 'amount' => 1000.00],
+                ['account_code' => '211', 'side' => $cashSide, 'amount' => 1000.00],
+                ['account_code' => '602', 'side' => $cashSide === 'debit' ? 'credit' : 'debit', 'amount' => 1000.00],
             ],
         ]);
         self::assertSame(201, $res['status'], 'Fixture: manuální zápis se založí.');
         return (int) $res['body']['id'];
+    }
+
+    /** @return array{id:int, line_no:int, account_id:int, side:string} řádek zápisu na pokladně 211 */
+    private function line211(int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT l.id, l.line_no, l.account_id, l.side FROM journal_entry_lines l
+               JOIN chart_of_accounts ca ON ca.id = l.account_id AND ca.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND l.entry_id = ? AND ca.account_code LIKE '211%'
+              ORDER BY l.line_no LIMIT 1"
+        );
+        $stmt->execute([$this->supplierId, $entryId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertNotFalse($row, 'Fixture: zápis má řádek na 211.');
+        return ['id' => (int) $row['id'], 'line_no' => (int) $row['line_no'], 'account_id' => (int) $row['account_id'], 'side' => (string) $row['side']];
+    }
+
+    /**
+     * Okruh párování řádků 211 cestou Otevřených položek.
+     *
+     * @param list<int> $entryIds
+     */
+    private function pair211(array $entryIds): int
+    {
+        $lines = array_map(fn (int $id): array => $this->line211($id), $entryIds);
+        $pairing = $this->openItems->create($this->supplierId, $lines[0]['account_id'], array_column($lines, 'id'), null,
+            ['user_id' => $this->userId, 'ip' => null, 'user_agent' => null]);
+        return (int) $pairing['id'];
+    }
+
+    private function pairingItems(int $pairingId): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM journal_line_pairing_items WHERE supplier_id = ? AND pairing_id = ?');
+        $stmt->execute([$this->supplierId, $pairingId]);
+        return (int) $stmt->fetchColumn();
     }
 
     /** @param list<int> $ids */
