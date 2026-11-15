@@ -359,6 +359,13 @@ stejně jako účetní sestavy.
 
 Administrátor může krok vrátit tlačítkem **Vzít zpět otevření roku**.
 
+> [!NOTE]
+> Vrácení kroku, který zaúčtovaný zápis smaže (otevírací zápis, kurzové rozdíly, opravné položky, časové
+> rozlišení), i **Nahradit převzaté stavy vypočtenými** se odmítne, když je řádek mazaného zápisu spárovaný
+> s jiným zápisem v okruhu otevřených položek nebo rozepsaný na doklady v saldokontu. Okruh nejdřív zrušte
+> v opisu účtu na záložce **Otevřené položky - párování** ([kap. 55.8.5.1](55_Hlavni_kniha.md)), přiřazení
+> v saldokontu, a krok pak vraťte znovu. Smazání by jinak párování tiše odneslo.
+
 #### Převzaté počáteční stavy
 
 Následující rok může mít otevírací zápis už dřív, než rok otevřete v průvodci, typicky po převodu dat z jiného

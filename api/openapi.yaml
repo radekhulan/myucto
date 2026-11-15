@@ -5688,6 +5688,12 @@ paths:
 
         Doklad s historií evidence tržeb (platební událost, QR záměr, tržba EET)
         nelze smazat ani s `force=1` (409 `eet_history_exists`); jde jen stornovat.
+
+        Zápis, jehož řádek je spárovaný s jiným zápisem v okruhu otevřených položek
+        nebo rozepsaný na doklady saldokonta, se z deníku nesmaže. Brání-li smazání
+        faktury zároveň retenční lhůta, vrátí se místo 422 `retention_period` 409
+        `entry_paired` nebo `allocation_saldo_in_use` s `entry_id` a `retention_period: true`
+        (co zrušit, aby šel zápis smazat). S `ack_retention=1` se zápis stornuje.
       parameters:
         - in: query
           name: force
@@ -5706,7 +5712,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Doklad je uzamčený, nelze bezpečně stornovat jeho účetní či skladový zápis, nebo má historii EET (`eet_history_exists`)
+          description: Doklad je uzamčený, nelze bezpečně stornovat jeho účetní či skladový zápis, má historii EET (`eet_history_exists`), nebo zápis v retenční lhůtě drží okruh párování (`entry_paired`) či rozpad saldokonta (`allocation_saldo_in_use`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -19699,7 +19705,9 @@ paths:
       description: >-
         Účetní/admin. U karty v užívání atomicky odstraní i zápis zařazení.
         Operace je povolena jen bez potvrzených odpisů a technických zhodnocení;
-        zápis zařazení musí být v otevřeném a neuzamčeném období.
+        zápis zařazení musí být v otevřeném a neuzamčeném období a jeho řádky nesmí být
+        spárované s jiným zápisem v okruhu otevřených položek (409 `entry_paired`)
+        ani rozepsané na doklady saldokonta (409 `allocation_saldo_in_use`).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -21136,7 +21144,7 @@ paths:
     delete:
       tags: [Accounting]
       summary: Smaže importované GoPay XML, případné PDF a účetní zápisy vytvořené tímto importem
-      description: Zachová faktury, dobropisy, jejich úhrady a dříve existující bankovní zápisy. Dostupné pouze superadminovi a jen pro otevřené, nezamčené období.
+      description: Zachová faktury, dobropisy, jejich úhrady a dříve existující bankovní zápisy. Dostupné pouze superadminovi a jen pro otevřené, nezamčené období. Zápis spárovaný s jiným zápisem v okruhu otevřených položek (409 `gopay.entry_paired`) nebo rozepsaný na doklady saldokonta (409 `gopay.allocation_saldo_in_use`) se nesmaže.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }

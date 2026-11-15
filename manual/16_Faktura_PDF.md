@@ -739,9 +739,10 @@ se zápis i faktura smažou; přehlasovaný zámek je v activity logu.
 Když zápis smazat nejde (uzavřené období, řádek pohledávky spárovaný s jiným zápisem
 v okruhu otevřených položek nebo rozepsaný na doklady saldokonta), zůstává aktivní
 retenční ochrana účetních a daňových záznamů. V běžící retenční lhůtě proto použijte
-storno nebo dobropis. Chcete-li fakturu přesto smazat i se zápisem, nejdřív okruh zrušte
-v opisu účtu na záložce **Otevřené položky - párování**
-([kap. 55.8.5.1](55_Hlavni_kniha.md)), resp. přiřazení v saldokontu.
+storno nebo dobropis. Brání-li smazání zápisu okruh párování nebo rozpad saldokonta,
+hláška to řekne: okruh zrušte v opisu účtu na záložce **Otevřené položky - párování**
+([kap. 55.8.5.1](55_Hlavni_kniha.md)), resp. přiřazení v saldokontu, a fakturu pak
+smažte i se zápisem.
 
 Před skutečným smazáním systém ukáže podrobné varování podle stavu (jiné pro
 vystavenou, odeslanou, zaplacenou a stornovanou) s doporučenou alternativou
