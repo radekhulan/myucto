@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\JournalEntryAttachmentRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\ActivityLogger;
@@ -197,6 +198,131 @@ final class DocumentJournalPurge
         }
 
         return ['deleted' => $deleted, 'blocked' => null, 'attachments' => $attachmentRows];
+    }
+
+    /**
+     * Smaže aktivní zápis dokladu, který svůj zápis drží sám (interní doklad nad ručním
+     * zápisem, ostatní položka), když účetní maže doklad i se zaúčtováním. Brány jsou
+     * stejné jako u {@see \MyInvoice\Action\Accounting\JournalAction::delete()}: období
+     * a zámek ({@see JournalEntryDeletionRules::blockSingle()}), navazující agendy
+     * (předpisy a platby SVJ, společné alokace, rozpad saldokonta) a skupina zaúčtování
+     * dokladu. Navíc odmítne zápis s řádky v okruhu párování: doklad zmizí celý a párování
+     * by kaskádou tiše odešlo i s protějšky v okruhu.
+     *
+     * `$detachSource` uvolní zdrojový doklad (návrat do konceptu) až po všech kontrolách
+     * a před smazáním zápisu (doklad na zápis odkazuje cizím klíčem) a vrací stav
+     * dokladu [před, po] pro audit. Odmítnutí je {@see PostingException}; uzamčené datum
+     * nese v `context` `can_acknowledge`. Běží výhradně v transakci volajícího.
+     *
+     * @param 'manual'|'other_item' $sourceType zdroj zápisu (ruční zápis nemá `source_id`)
+     * @param array{user_id?:?int, ip?:?string, user_agent?:?string} $meta
+     * @param callable(): array{0:?string, 1:?string} $detachSource
+     * @return array{attachments: list<array<string,mixed>>, locked_override: ?string}
+     */
+    public function purgeEntry(
+        int $supplierId,
+        int $entryId,
+        string $sourceType,
+        ?int $sourceId,
+        array $meta,
+        string $reason,
+        bool $lockedAcknowledged,
+        callable $detachSource,
+    ): array {
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) {
+            throw new \LogicException('DocumentJournalPurge::purgeEntry musí běžet v transakci volajícího.');
+        }
+        // Pořadí zámků a kontrol jako mazání zápisu v deníku.
+        (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+        (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$entryId]);
+        (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+        (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+        (new JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$entryId]);
+
+        $byId = $pdo->prepare(self::ENTRY_SELECT . ' WHERE je.supplier_id = ? AND je.id = ? FOR UPDATE');
+        $byId->execute([$supplierId, $entryId]);
+        $entry = $byId->fetch(PDO::FETCH_ASSOC);
+        if ($entry === false) {
+            throw new PostingException('not_found', 'Účetní zápis nenalezen.', 404);
+        }
+        $entrySourceId = $entry['source_id'] === null ? null : (int) $entry['source_id'];
+        if ((string) $entry['source_type'] !== $sourceType || $entrySourceId !== $sourceId) {
+            throw new PostingException('entry_source_mismatch', 'Zápis nepatří k mazanému dokladu.', 409);
+        }
+
+        $paired = $pdo->prepare('SELECT 1 FROM journal_line_pairing_items WHERE supplier_id = ? AND entry_id = ? LIMIT 1');
+        $paired->execute([$supplierId, $entryId]);
+        if ($paired->fetchColumn() !== false) {
+            throw new PostingException('entry_paired',
+                'Řádky zápisu jsou spárované v okruhu párování na účtu. Nejdřív je v párování účtu odeberte, pak doklad smažte.', 409);
+        }
+
+        $lock = $pdo->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ? FOR UPDATE');
+        $lock->execute([$supplierId]);
+        $lockedUntil = $lock->fetchColumn();
+        $lockedUntil = ($lockedUntil === false || $lockedUntil === null) ? null : (string) $lockedUntil;
+        if ($block = JournalEntryDeletionRules::blockSingle($entry, $lockedUntil, $lockedAcknowledged)) {
+            throw new PostingException($block['code'], $block['message'], 409,
+                !empty($block['can_acknowledge']) ? ['can_acknowledge' => true] : []);
+        }
+        if ((new DocumentPostingGroup($this->db))->owner($supplierId, $entryId, true) !== null) {
+            throw new PostingException('entry_owned_by_document',
+                'Zápis je součástí zaúčtování jiného dokladu, smazat ho takto nelze.', 409);
+        }
+        $lockedOverride = JournalEntryDeletionRules::isDateLocked($entry, $lockedUntil) ? $lockedUntil : null;
+
+        [$statusFrom, $statusTo] = $detachSource();
+
+        (new \MyInvoice\Repository\AccountingSetupRepository($this->db))->detachReclassificationItemsFromEntries($supplierId, [$entryId]);
+        $attachmentRows = $this->attachments->list($entryId, $supplierId);
+        $lines = $this->journal->linesForEntry($entryId, $supplierId);
+        $delete = $pdo->prepare('DELETE FROM journal_entries WHERE id = ? AND supplier_id = ?');
+        try {
+            $delete->execute([$entryId, $supplierId]);
+        } catch (\PDOException $e) {
+            if (TransactionFailure::aborted($e) || ($e->errorInfo[0] ?? null) !== '23000') {
+                throw $e;
+            }
+            throw new PostingException('entry_delete_conflict',
+                'Zápis se nepodařilo smazat, protože na něj navazuje jiný záznam v účetnictví '
+                . '(například mzdová platba, zápočet nebo vyúčtování). Nic se nesmazalo.', 409);
+        }
+        if ($delete->rowCount() !== 1) {
+            throw new \RuntimeException('Účetní zápis se nepodařilo smazat.');
+        }
+
+        $this->logger->log(
+            'accounting.entry_deleted',
+            $meta['user_id'] ?? null,
+            'journal_entry',
+            $entryId,
+            [
+                'reason'               => $reason,
+                'period_id'            => (int) $entry['period_id'],
+                'entry_date'           => (string) $entry['entry_date'],
+                'document_no'          => $entry['document_no'],
+                'source_type'          => $sourceType,
+                'source_id'            => $sourceId,
+                'document_status_from' => $statusFrom,
+                'document_status_to'   => $statusTo,
+                'locked_override'      => $lockedOverride,
+                'lines'                => array_map(static fn (array $line): array => [
+                    'account_id'     => (int) $line['account_id'],
+                    'side'           => (string) $line['side'],
+                    'amount'         => (float) $line['amount'],
+                    'is_red_storno'  => (bool) $line['is_red_storno'],
+                    'currency_code'  => $line['currency_code'],
+                    'amount_foreign' => $line['amount_foreign'],
+                    'cost_center'    => $line['cost_center'],
+                ], $lines),
+            ],
+            $meta['ip'] ?? null,
+            $meta['user_agent'] ?? null,
+            $supplierId,
+        );
+
+        return ['attachments' => $attachmentRows, 'locked_override' => $lockedOverride];
     }
 
     /**

@@ -892,11 +892,15 @@ final class RoutePermissionMap
         ['GET', '#^/api/accounting/journal(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/journal(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::READ],
+        // Smazání zaúčtované položky maže i její zápis v deníku (akce ověří navíc `other_items`).
+        ['DELETE', '#^/api/accounting/other-items/[0-9]+/posted$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['*', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::WRITE],
-        // Interní doklady: práva ručního zápisu deníku. Zaúčtování, storno a hlavička nad
-        // existujícím zápisem jsou zápis do deníku, koncept jen jeho příprava.
+        // Interní doklady: práva ručního zápisu deníku. Zaúčtování, storno, smazání
+        // zaúčtovaného dokladu i se zápisem a hlavička nad existujícím zápisem jsou zápis
+        // do deníku, koncept jen jeho příprava.
         ['GET', '#^/api/accounting/internal-documents(/|$)#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/internal-documents/(?:[0-9]+/(?:post|reverse)|from-entry/[0-9]+)$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['DELETE', '#^/api/accounting/internal-documents/[0-9]+/posted$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['*', '#^/api/accounting/internal-documents(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
         ['GET', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::WRITE],

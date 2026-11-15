@@ -144,6 +144,55 @@ final class OtherItemAction
     }
 
     /**
+     * Poznámka vystaveného dokladu (popisný údaj mimo účetnictví), s auditem před a po.
+     * API token ji nemění (ApiScopeMiddleware), token upravuje jen koncepty.
+     */
+    public function updateText(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
+        return $this->run($response, function () use ($request, $args) {
+            $id = (int) $args['id'];
+            $body = (array) ($request->getParsedBody() ?? []);
+            if (!array_key_exists('note', $body)) {
+                throw new OtherItemException('validation_failed', 'Chybí pole note.');
+            }
+            $result = $this->service->updateNote($this->currentSupplierId($request), $id, $body['note'], $this->userId($request));
+            if ($result['before'] !== $result['after']) {
+                $this->log($request, 'other_item.text_updated', $id,
+                    ['note' => ['before' => $result['before'], 'after' => $result['after']]]);
+            }
+            return $result['item'];
+        });
+    }
+
+    /**
+     * Smazání zaúčtovaného dokladu i s jeho zápisem v deníku, bez storna. Práva jako
+     * mazání zápisu ostatní položky v deníku (JournalAction::delete): `other_items`,
+     * `accounting`, `accounting.journal.write` a `accounting.journal.post`.
+     */
+    public function deletePosted(Request $request, Response $response, array $args): Response
+    {
+        foreach (['other_items', 'accounting', 'accounting.journal.write', 'accounting.journal.post'] as $permission) {
+            if (!$this->requirePermission($request, $response, $permission, AccessLevel::WRITE, $err)) return $err;
+        }
+        return $this->run($response, function () use ($request, $args) {
+            $id = (int) $args['id'];
+            $result = $this->service->deletePosted($this->currentSupplierId($request), $id, $this->auditMeta($request),
+                RequestAuthorization::acknowledgesLockedPeriod($request));
+            $item = $result['item'];
+            $this->log($request, 'other_item.deleted_posted', $id, [
+                'document_no' => $item['document_no'],
+                'title' => $item['title'],
+                'amount' => $item['amount'],
+                'journal_entry_id' => $result['entry_id'],
+                'result_status' => $result['result_status'],
+                'locked_override' => $result['locked_override'],
+            ]);
+            return ['deleted' => true, 'journal_entry_id' => $result['entry_id'], 'status' => $result['result_status']];
+        });
+    }
+
+    /**
      * Vlastní kontace úhrad potvrzené nebo zaúčtované položky (koncept ji nese v úpravě).
      * Platí pro budoucí úhrady; webové rozhraní, token ji nemění.
      */

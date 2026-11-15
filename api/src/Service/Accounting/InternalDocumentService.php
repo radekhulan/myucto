@@ -48,6 +48,7 @@ final class InternalDocumentService
         private readonly ChartOfAccountsRepository $accounts,
         private readonly NumberSeriesSelection $numberSeriesSelection,
         private readonly NumberSeriesAllocator $numberSeries,
+        private readonly DocumentJournalPurge $journalPurge,
     ) {}
 
     public function get(int $supplierId, int $id): array
@@ -121,6 +122,144 @@ final class InternalDocumentService
             }
             $this->documents->deleteDraft($supplierId, $id);
         });
+    }
+
+    /**
+     * Popisné údaje vystaveného dokladu, které nemění účetnictví: poznámka jde doplnit
+     * u zaúčtovaného i stornovaného dokladu, popis jen u zaúčtovaného. Popis je zároveň
+     * popisem zápisu v deníku (zaúčtování ho tam přenáší), proto se mění společně s ním
+     * přes {@see JournalEntryRepository::updateDescription()}: v otevřeném období, se
+     * stejnými pojistkami a §35 auditem jako úprava popisu v deníku. Jinak by hlavička
+     * a zápis ukazovaly různý text. Koncept se upravuje celý ({@see update()}).
+     *
+     * @param array<string,mixed> $audit user_id, ip, user_agent
+     * @return array{document: array<string,mixed>, changes: array<string, array{before:?string, after:?string}>}
+     */
+    public function updateText(int $supplierId, int $id, array $input, array $audit): array
+    {
+        $userId = isset($audit['user_id']) ? (int) $audit['user_id'] : null;
+        $changes = TransactionFailure::retrying($this->db->pdo(), fn (): array => $this->inTransaction(function () use ($supplierId, $id, $input, $audit, $userId): array {
+            // Změna popisu sahá na zápis: pořadí zámků jako storno (období, hlavička, zápis).
+            if (array_key_exists('title', $input)) {
+                (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+            }
+            $doc = $this->documents->find($supplierId, $id, true)
+                ?? throw new InternalDocumentException('not_found', 'Interní doklad nebyl nalezen.', 404);
+            if ($doc['status'] === 'draft') {
+                throw new InternalDocumentException('is_draft', 'Koncept upravte v editaci dokladu.', 409);
+            }
+            $changes = [];
+            if (array_key_exists('note', $input)) {
+                $note = self::optional(is_scalar($input['note']) || $input['note'] === null ? $input['note'] : '', 10000);
+                if ($note !== $doc['note']) $changes['note'] = ['before' => $doc['note'], 'after' => $note];
+            }
+            if (array_key_exists('title', $input)) {
+                $title = trim(is_scalar($input['title']) ? (string) $input['title'] : '');
+                if ($title === '' || mb_strlen($title) > 255) {
+                    throw new InternalDocumentException('invalid_title', 'Zadejte popis dokladu do 255 znaků.');
+                }
+                if ($title !== $doc['title']) {
+                    if ($doc['status'] !== 'posted' || $doc['journal_entry_id'] === null) {
+                        throw new InternalDocumentException('title_locked',
+                            'Popis stornovaného dokladu už změnit nejde, doplnit lze jen poznámku.', 409);
+                    }
+                    $this->journal->updateDescription((int) $doc['journal_entry_id'], $supplierId, $title, $userId,
+                        isset($audit['ip']) ? (string) $audit['ip'] : null,
+                        isset($audit['user_agent']) ? (string) $audit['user_agent'] : null);
+                    $changes['title'] = ['before' => $doc['title'], 'after' => $title];
+                }
+            }
+            if ($changes !== []) {
+                $this->documents->updateText($supplierId, $id,
+                    isset($changes['title']) ? $changes['title']['after'] : $doc['title'],
+                    array_key_exists('note', $changes) ? $changes['note']['after'] : $doc['note'], $userId);
+            }
+            return $changes;
+        }));
+        return ['document' => $this->get($supplierId, $id), 'changes' => $changes];
+    }
+
+    /**
+     * Smazání zaúčtovaného dokladu i s jeho zápisem, bez storna. Smí jen to, co smí
+     * mazání zápisu v deníku ({@see DocumentJournalPurge::purgeEntry()}): otevřené období,
+     * uzamčené datum jen s vědomým potvrzením, žádný rozpad saldokonta, párování ani
+     * navazující agenda. Zápis se smaže, doklad vrátí do konceptu ({@see prepareEntryDeletion()})
+     * a koncept smaže, vše v jedné transakci.
+     *
+     * Číslo nové řady číselníku se vrátí do řady, je-li v ní poslední (jako u smazané
+     * faktury). Dosavadní řada ID je sdílená s ručními zápisy deníku a jejich smazání
+     * číslo nevrací, proto ho nevrací ani tady; mezera v řadě zůstane jako po smazání
+     * číslovaného ručního zápisu.
+     *
+     * @param array<string,mixed> $audit user_id, ip, user_agent
+     * @return array{document: array<string,mixed>, entry_id: int, number_released: bool, locked_override: ?string}
+     */
+    public function deletePosted(int $supplierId, int $id, array $audit, bool $lockedAcknowledged): array
+    {
+        $userId = isset($audit['user_id']) ? (int) $audit['user_id'] : null;
+        $result = TransactionFailure::retrying($this->db->pdo(), fn (): array => $this->inTransaction(function () use ($supplierId, $id, $audit, $userId, $lockedAcknowledged): array {
+            // Hlavička se zamyká až v detachSource: pořadí zámků jako mazání zápisu v deníku
+            // (období, zápis, hlavička), jinak by se s ním souběžné mazání zablokovalo.
+            $doc = $this->documents->find($supplierId, $id)
+                ?? throw new InternalDocumentException('not_found', 'Interní doklad nebyl nalezen.', 404);
+            self::assertPostedDeletable($doc);
+            $entryId = (int) $doc['journal_entry_id'];
+            $purged = $this->journalPurge->purgeEntry($supplierId, $entryId, 'manual', null, $audit,
+                'internal_document_delete', $lockedAcknowledged,
+                function () use ($supplierId, $id, $entryId, $userId): array {
+                    $locked = $this->documents->find($supplierId, $id, true);
+                    if ($locked === null || $locked['status'] !== 'posted' || (int) $locked['journal_entry_id'] !== $entryId) {
+                        throw new InternalDocumentException('changed', 'Doklad mezitím změnil jiný uživatel. Načtěte ho znovu.', 409);
+                    }
+                    self::assertPostedDeletable($locked);
+                    $this->prepareEntryDeletion($supplierId, $entryId, $userId);
+                    return ['posted', 'deleted'];
+                });
+            if (!$this->documents->deleteDraft($supplierId, $id)) {
+                throw new \RuntimeException('Interní doklad se nepodařilo smazat.');
+            }
+            return [
+                'document' => $doc,
+                'entry_id' => $entryId,
+                'number_released' => $this->releaseNumber($supplierId, $doc),
+                'locked_override' => $purged['locked_override'],
+                'attachments' => $purged['attachments'],
+            ];
+        }));
+        if (!$this->db->pdo()->inTransaction()) {
+            $this->journalPurge->cleanupAttachments($supplierId, $result['attachments']);
+        }
+        unset($result['attachments']);
+        return $result;
+    }
+
+    /** @param array<string,mixed> $doc */
+    private static function assertPostedDeletable(array $doc): void
+    {
+        if ($doc['status'] === 'draft') {
+            throw new InternalDocumentException('is_draft', 'Doklad je koncept, smažte ho běžným smazáním.', 409);
+        }
+        if ($doc['status'] !== 'posted' || $doc['journal_entry_id'] === null) {
+            throw new InternalDocumentException('not_posted',
+                'Smazat i se zápisem lze jen zaúčtovaný doklad. Stornovaný doklad zůstává v evidenci se stornem.', 409);
+        }
+        // Hlavička nad převzatým zápisem nese jen náhled kontace, zápis nevznikl z ní.
+        if (($doc['origin'] ?? 'draft') === 'journal') {
+            throw new InternalDocumentException('internal_document_use_detail',
+                'Doklad vznikl nad existujícím ručním zápisem. Smazat ho i se zápisem nelze, stornujte ho.', 409);
+        }
+    }
+
+    /** Číslo smazaného dokladu z nové řady číselníku se vrátí do řady, je-li poslední. */
+    private function releaseNumber(int $supplierId, array $doc): bool
+    {
+        $number = (string) ($doc['document_no'] ?? '');
+        $series = $this->numberSeries->nativeById($supplierId,
+            ($doc['number_series_id'] ?? null) !== null ? (int) $doc['number_series_id'] : null);
+        if ($number === '' || $series === null) return false;
+        $entryDate = (string) $doc['entry_date'];
+        return self::seriesGuard(fn (): bool => $this->numberSeries->releaseIfLatest($series, $number,
+            new \DateTimeImmutable($entryDate), 'PF', $this->manualEntries->fiscalYear($supplierId, $entryDate)));
     }
 
     /**

@@ -3383,6 +3383,8 @@ final class Routes
             $g->put   ('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'update']);
             $g->delete('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'delete']);
             $g->put   ('/other-items/{id:[0-9]+}/counterparty-account', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateCounterpartyAccount']);
+            $g->put   ('/other-items/{id:[0-9]+}/text',        [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateText']);
+            $g->delete('/other-items/{id:[0-9]+}/posted',      [\MyInvoice\Action\Accounting\OtherItemAction::class, 'deletePosted']);
             $g->post  ('/other-items/{id:[0-9]+}/post',        [\MyInvoice\Action\Accounting\OtherItemAction::class, 'post']);
             $g->post  ('/other-items/{id:[0-9]+}/reverse',     [\MyInvoice\Action\Accounting\OtherItemAction::class, 'reverse']);
             $g->post  ('/other-items/{id:[0-9]+}/repost',      [\MyInvoice\Action\Accounting\OtherItemAction::class, 'repost']);
@@ -3402,6 +3404,8 @@ final class Routes
             $g->get   ('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'get']);
             $g->put   ('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'update']);
             $g->delete('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'delete']);
+            $g->put   ('/internal-documents/{id:[0-9]+}/text',      [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'updateText']);
+            $g->delete('/internal-documents/{id:[0-9]+}/posted',    [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'deletePosted']);
             $g->post  ('/internal-documents/{id:[0-9]+}/post',      [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'post']);
             $g->post  ('/internal-documents/{id:[0-9]+}/reverse',   [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'reverse']);
             $g->post  ('/cash-documents',                      [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'create']);
