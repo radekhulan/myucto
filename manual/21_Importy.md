@@ -1216,6 +1216,16 @@ ověří přenesené hodnoty a vrátí transakci i nově vytvořené soubory. Pr
 obsahuje počty vytvořených, použitých a již převzatých řádků, rekonciliaci
 po tabulkách a `outside_scope` — nepřenesené neprázdné tabulky.
 
+Mzdové osobní údaje (rodná čísla, čísla účtů a další) jsou v exportu zašifrované
+klíčem zdrojové instalace a vázané na zdrojovou firmu. Obnova je dešifruje
+a zašifruje klíčem cílové instalace pro cílovou firmu; ověří přitom masku
+i otisk každé hodnoty. Při obnově do jiné instalace předejte klíče zdroje
+v souboru `--source-keys=SOUBOR` (JSON s hodnotami `secret_encryption_key`,
+`secret_encryption_previous_keys`, `payroll_hash_key` a `pepper` zdrojové
+instalace). Soubor musí mít práva jen pro vlastníka, mějte jej mimo archiv
+exportu a po obnově jej smažte. Šifrovaný údaj, který nejde dešifrovat, obnovu
+zastaví.
+
 Obnova přenáší partnery a jejich účty, měny, kategorie, střediska,
 účtovou osnovu, firemní předkontace, účetní období, zakázky a výkazy práce, faktury a jejich položky,
 pravidelné šablony, jednoduchý ceník, pokladnu, bankovní výpisy a transakce,
@@ -1254,6 +1264,17 @@ Obnova dále přenáší:
   vazby z faktur a pravidel banky a nastavení složky dokumentů. Zaúčtovaný doklad
   si ponechá svůj převzatý zápis deníku, obnova ho znovu neúčtuje.
 - **Historii** oprav účtování a kroků uzávěrky.
+- **Mzdy**: zaměstnance, pracovní poměry, nepřítomnosti, dovolenou, srážky
+  a exekuce, převzatá hlášení JMHZ, počáteční stavy a referenční součty převzetí
+  mezd. Osobní údaje zaměstnanců obnova přešifruje pro cílovou firmu (viz níže
+  `--source-keys`).
+- **Podání** DPH, kontrolních a souhrnných hlášení včetně odeslaných XML.
+- **Čerpání záloh** vydaných i přijatých dokladů, rozpad řádků deníku na doklady
+  saldokonta a párovací symboly řádků převzatých z jiného programu.
+- **Výkazy**: kategorie účetní jednotky, výjimky mapování řádků a přílohy.
+- **Nastavení účetnictví firmy** a **převodní mapu** z Heliosu.
+- **Auditní stopu** firmy, kterou obnova v cíli zapečetí do řetězu cílové
+  instalace. Na spravované instalaci se auditní stopa nepřenáší.
 - **Číselné řady a počítadla**: číselník řad, počítadla vydaných a přijatých
   dokladů, řady účetních dokladů a číslovací nastavení firmy (šablony čísel
   dokladů, období řady faktur, číslování přijatých dokladů). Další doklad
@@ -1292,8 +1313,9 @@ a další výše), nelze tímto importem dodatečně rozšířit. Pro úplný p�
 prázdnou cílovou firmu; opakování obnovy provedené současným profilem zůstává
 bez duplicit.
 
-Mzdy, skladové grafy, přihlašovací údaje a tokeny (bankovní spojení, e-mailové
-profily), auditní log, historii AI, importní úlohy a převodní mapy, návrhy
+Skladové grafy, přihlašovací údaje a tokeny (bankovní spojení, e-mailové
+profily), historii AI, importní úlohy a převodní mapy jiných programů než Helios, mzdové běhy
+vypočtené v MyÚčtu, návrhy
 a doporučení automatiky, mezipaměti, nálezy kontroly deníku, data bankovních
 API ani další tabulky mimo tento seznam obnova nepřenáší. Doklad s živou vazbou na nepodporovaný
 graf se odmítne, vazba se tiše nenuluje. Rovněž se odmítají nepodporovaná
