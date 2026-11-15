@@ -45333,6 +45333,7 @@ components:
         provider: { type: [string, 'null'] }
         model: { type: [string, 'null'], description: Výchozí model pro dotaz bez explicitní volby }
         supports_files: { type: boolean, description: 'false = poskytovatel neumí PDF ani obrázky (Ollama); textové přílohy jdou' }
+        supports_tools: { type: boolean, description: 'Výchozí model umí volat nástroje nad daty firmy a manuálem; účtový rozvrh se pak ve výchozím stavu nepřikládá' }
         models:
           type: array
           items: { type: string }

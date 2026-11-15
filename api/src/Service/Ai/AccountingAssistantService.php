@@ -89,11 +89,12 @@ final class AccountingAssistantService
         private readonly ManualSearchService $manual,
     ) {}
 
-    /** @return array{available:bool, reason:?string, provider:?string, model:?string, supports_files:bool, models:list<string>} */
+    /** @return array{available:bool, reason:?string, provider:?string, model:?string, supports_files:bool, supports_tools:bool, models:list<string>} */
     public function status(int $supplierId): array
     {
         $status = $this->ai->status($supplierId);
         $status['models'] = $status['available'] ? $this->ai->availableModels($supplierId) : [];
+        $status['supports_tools'] = $status['available'] && $this->ai->supportsToolCalling($supplierId);
         return $status;
     }
 

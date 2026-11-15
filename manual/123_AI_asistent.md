@@ -34,7 +34,8 @@ Asistent je dostupný firmám v podvojném účetnictví.
 2. Napište dotaz vlastními slovy. Na prázdné stránce můžete kliknout na některý z příkladů, vloží se do pole dotazu.
 3. Podle potřeby přiložte soubory tlačítkem **Přiložit soubory** nebo dokumenty tlačítkem **Přiložit z Dokumentů**.
    Volba **Přiložit účtový rozvrh firmy včetně analytik** pošle asistentovi váš účtový rozvrh, aby navrhoval
-   konkrétní analytické účty.
+   konkrétní analytické účty. Umí-li model pracovat s daty firmy, je volba ve výchozím stavu vypnutá, protože si
+   asistent účtový rozvrh přečte sám, jen když ho potřebuje. U modelu bez této schopnosti je zapnutá.
 4. Odešlete tlačítkem **Odeslat** nebo klávesami Ctrl+Enter. Během zpracování se ukazuje, co asistent právě dělá.
    Dotaz nad daty firmy obvykle trvá několik desítek sekund.
 5. Přečtěte odpověď. Pod ní najdete:

@@ -48,7 +48,10 @@ const reasonText = computed(() => {
 interface AttachedDoc { id: number; title: string }
 const files = ref<File[]>([])
 const docs = ref<AttachedDoc[]>([])
+// Účtový rozvrh: model s nástroji si ho přečte sám, přikládá se jen bez nástrojů.
 const includeChart = ref(true)
+const includeChartTouched = ref(false)
+watch(includeChart, () => { includeChartTouched.value = true }, { flush: 'sync' })
 const dragOver = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
@@ -538,6 +541,10 @@ async function uploadSuggestion(m: ChatMessage, i: number, fileIndex: number, fi
 onMounted(async () => {
   try {
     status.value = await aiAssistantApi.status()
+    if (!includeChartTouched.value && status.value?.supports_tools) {
+      includeChart.value = false
+      includeChartTouched.value = false
+    }
   } catch (e) {
     status.value = { available: false, reason: null, provider: null, model: null, supports_files: false }
     toast.error(aiErrorMessage(e, t('accounting.ai_assistant.status_failed')))

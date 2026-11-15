@@ -8,6 +8,8 @@ export interface AiAssistantStatus {
   provider: string | null
   model: string | null
   supports_files: boolean
+  /** Výchozí model umí volat nástroje (data firmy, manuál). */
+  supports_tools?: boolean
   models?: string[]
 }
 
