@@ -28,6 +28,7 @@ final class McpInternalRequest
     public function __construct(
         private readonly string $baseUrl,
         private readonly string $tmpDir,
+        private readonly ?string $sessionCookieName = null,
     ) {}
 
     /**
@@ -72,6 +73,16 @@ final class McpInternalRequest
         if ($multipart) {
             [$fields, $files, $this->tmpFiles] = (new McpMultipartParser())->parse($body, $contentType, $this->tmpDir);
             $request = $request->withParsedBody($fields)->withUploadedFiles($files);
+        }
+
+        // AI asistent volá katalog nástrojů s právy přihlášeného uživatele: místo tokenu
+        // nese jeho relaci. Pole plní jen PHP (AssistantDataTools), Node ho neposílá.
+        $sessionToken = $input['sessionToken'] ?? null;
+        if (is_string($sessionToken) && $sessionToken !== '' && $this->sessionCookieName !== null) {
+            if ($method !== 'GET' || $request->hasHeader('Authorization')) {
+                throw new \RuntimeException('Relace smí nést jen čtecí požadavek bez tokenu.');
+            }
+            $request = $request->withCookieParams([$this->sessionCookieName => $sessionToken]);
         }
 
         return $request->withAttribute('mcp.internal', true)

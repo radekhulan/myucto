@@ -69,6 +69,27 @@ final class StaffMcpToolPolicy
         return $allowed;
     }
 
+    /**
+     * Nabídka pro AI asistenta v aplikaci: rozhoduje role uživatele jen v aktuální firmě
+     * požadavku (asistent pracuje vždy nad ní). NULL = bez omezení (superadmin, správce firmy,
+     * nečitelný manifest). Práva dál ověřuje API při každém volání.
+     *
+     * @return list<string>|null
+     */
+    public function allowedForCurrentCompany(Request $request): ?array
+    {
+        $manifest = $this->manifest();
+        if ($manifest === null) return null;
+        $role = $this->roles->resolve($request);
+        if ($role->isSuperadmin() || ($role->isActive && $role->isCompanyAdmin())) return null;
+        $roles = $role->isActive ? [$role] : [];
+        $allowed = [];
+        foreach ($manifest as $name => $contract) {
+            if ($this->usable($request, $roles, $name, $contract['api'])) $allowed[] = $name;
+        }
+        return $allowed;
+    }
+
     /** Totéž rozhodnutí pro jediný nástroj (tools/call), bez procházení celého katalogu. */
     public function allows(Request $request, string $name): bool
     {
