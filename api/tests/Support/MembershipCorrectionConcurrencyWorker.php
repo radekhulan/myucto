@@ -35,12 +35,17 @@ try {
     $q = $pdo->prepare('SELECT COUNT(*) FROM nonprofit_membership_charge_cases WHERE supplier_id=? AND member_id=?');
     $q->execute([$supplier, $member]);
     $snapshotCases = (int) $q->fetchColumn();
+    $q = $pdo->prepare('SELECT client_id, member_number FROM nonprofit_members WHERE supplier_id=? AND id=?');
+    $q->execute([$supplier, $member]);
+    $row = $q->fetch(PDO::FETCH_ASSOC);
+    $identity = $row === false ? ['client_id' => 0, 'member_number' => ''] : ['client_id' => (int) $row['client_id'], 'member_number' => (string) $row['member_number']];
     file_put_contents($argv[1], json_encode(['ready' => true, 'snapshot_cases' => $snapshotCases,
         'connection_id' => (int) $pdo->query('SELECT CONNECTION_ID()')->fetchColumn()], JSON_THROW_ON_ERROR));
     $detail = match ($input['mode']) {
         'identity' => $service->updateIdentity($supplier, $member, $input['body'], $actor),
         'void' => $service->voidRevision($supplier, $member, (int) $input['revision'], $input['body'], $actor),
-        'delete' => $service->delete($supplier, $member, $actor),
+        // Smazání potvrzuje kontakt a číslo jako formulář: snímek z doby, kdy worker připravil požadavek.
+        'delete' => $service->delete($supplier, $member, $actor, $identity),
         default => throw new RuntimeException('Neplatná operace workeru.'),
     };
     if ($outer) $pdo->commit();

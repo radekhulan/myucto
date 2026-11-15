@@ -439,12 +439,28 @@ final class MembershipActionTest extends TestCase
             self::assertSame('session_required', $denied['error']['code']);
         }
         // Token s plným zápisem (system_write) jedná jako relace: projde bránou a narazí až na doménovou blokaci.
-        [$status, $viaToken] = $this->call('DELETE', 'deleteMember', null, $args, null, 'bearer', ['system_write' => true]);
+        $expected = ['expected_client_id' => (string) $this->client, 'expected_member_number' => 'M-ACTION-FIX'];
+        [$status, $viaToken] = $this->call('DELETE', 'deleteMember', null, $args, null, 'bearer', ['system_write' => true], $expected);
         self::assertSame(409, $status);
         self::assertSame('nonprofit_membership_member_has_revisions', $viaToken['error']['code']);
-        [$status, $blocked] = $this->call('DELETE', 'deleteMember', null, $args);
+        [$status, $blocked] = $this->call('DELETE', 'deleteMember', null, $args, query: $expected);
         self::assertSame(409, $status);
         self::assertSame('nonprofit_membership_member_has_revisions', $blocked['error']['code']);
+        // Smazání potvrzuje kontakt a číslo: bez nich 422, se zastaralými 409 dřív než doménová blokace.
+        foreach ([null, ['expected_client_id' => (string) $this->client], ['expected_client_id' => '0', 'expected_member_number' => 'M-ACTION-FIX'],
+            $expected + ['force' => '1'], ['expected_member_number' => ' '] + $expected, ['expected_member_number' => str_repeat('A', 81)] + $expected,
+            ['expected_client_id' => 'abc'] + $expected, ['expected_client_id' => ['1']] + $expected,
+            ['expected_client_id' => '9999999999999999999'] + $expected] as $query) {
+            [$status, $missing] = $this->call('DELETE', 'deleteMember', null, $args, query: $query);
+            self::assertSame([422, 'nonprofit_membership_invalid'], [$status, $missing['error']['code']], json_encode($query));
+        }
+        [$status, $stale] = $this->call('DELETE', 'deleteMember', null, $args, query: ['expected_member_number' => 'M-ACTION-OLD'] + $expected);
+        self::assertSame([409, 'nonprofit_membership_member_changed'], [$status, $stale['error']['code']]);
+        $this->pdo->prepare("INSERT INTO clients(supplier_id,company_name,street,city,zip,country_id,main_email,language,currency_default_id,is_customer,is_vendor)
+            SELECT supplier_id,'Synthetic other contact',street,city,zip,country_id,'other-contact@example.test',language,currency_default_id,1,0 FROM clients WHERE supplier_id=? AND id=?")
+            ->execute([$this->supplier, $this->client]);
+        [$status, $staleContact] = $this->call('DELETE', 'deleteMember', null, $args, query: ['expected_client_id' => (string) $this->pdo->lastInsertId()] + $expected);
+        self::assertSame([409, 'nonprofit_membership_member_changed'], [$status, $staleContact['error']['code']], 'souběžná změna kontaktu');
         [$status, $invalid] = $this->call('PUT', 'updateMember', ['client_id' => $this->client], $args);
         self::assertSame(422, $status);
         self::assertSame('nonprofit_membership_invalid', $invalid['error']['code']);
@@ -468,7 +484,7 @@ final class MembershipActionTest extends TestCase
         self::assertSame(['nonprofit_membership_member_update', 'nonprofit_membership_revision_void'], $q->fetchAll(\PDO::FETCH_COLUMN));
     }
 
-    private function call(string $httpMethod, string $method, ?array $body, array $args = [], ?array $permissions = null, string $auth = 'session', ?array $apiToken = null): array
+    private function call(string $httpMethod, string $method, ?array $body, array $args = [], ?array $permissions = null, string $auth = 'session', ?array $apiToken = null, ?array $query = null): array
     {
         $permissions ??= ['accounting' => 1, 'accounting.journal.post' => 2, 'accounting.templates' => 2];
         $request = (new ServerRequestFactory())->createServerRequest($httpMethod, '/api/accounting/nonprofit-membership')
@@ -478,6 +494,7 @@ final class MembershipActionTest extends TestCase
             ->withAttribute('auth.effective_role', new EffectiveRole(501, 'Synthetic membership role', 'staff', true, $permissions));
         if ($apiToken !== null) $request = $request->withAttribute(AuthMiddleware::ATTR_API_TOKEN, $apiToken);
         if ($body !== null) $request = $request->withParsedBody($body);
+        if ($query !== null) $request = $request->withQueryParams($query);
         $response = $this->action->{$method}($request, new Response(), $args);
         return [$response->getStatusCode(), json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR)];
     }

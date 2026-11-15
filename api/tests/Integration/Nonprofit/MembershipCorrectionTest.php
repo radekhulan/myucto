@@ -40,7 +40,7 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
     public function testMemberWithoutRevisionIsDeletedAndAudited(): void
     {
         [$member, $client] = $this->bareMember('DEL-OK');
-        $result = $this->corrections->delete($this->supplier, $member, $this->actor);
+        $result = $this->corrections->delete($this->supplier, $member, $this->actor, $this->expectedOf($member));
 
         self::assertSame(['deleted' => true, 'member_id' => $member], $result);
         self::assertNull($this->repository->member($this->supplier, $member));
@@ -53,16 +53,16 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
     public function testMemberWithRevisionOrVoidedRevisionOrChargeCannotBeDeleted(): void
     {
         $withRevision = $this->member('DEL-REV');
-        $this->assertCorrectionRejected('nonprofit_membership_member_has_revisions', fn () => $this->corrections->delete($this->supplier, $withRevision, $this->actor));
+        $this->assertCorrectionRejected('nonprofit_membership_member_has_revisions', fn () => $this->corrections->delete($this->supplier, $withRevision, $this->actor, $this->expectedOf($withRevision)));
 
         $voided = $this->member('DEL-VOID');
         $this->void($voided, $this->lastRevision($voided), 1, 'del-void');
-        $this->assertCorrectionRejected('nonprofit_membership_member_has_revisions', fn () => $this->corrections->delete($this->supplier, $voided, $this->actor));
+        $this->assertCorrectionRejected('nonprofit_membership_member_has_revisions', fn () => $this->corrections->delete($this->supplier, $voided, $this->actor, $this->expectedOf($voided)));
 
         $charged = $this->member('DEL-CHARGE');
         $this->issue($charged, 'del-charge');
         // Předpis má přednost (hláška o revizích by radila opravu, která u předpisu nejde).
-        $this->assertCorrectionRejected('nonprofit_membership_member_has_charges', fn () => $this->corrections->delete($this->supplier, $charged, $this->actor));
+        $this->assertCorrectionRejected('nonprofit_membership_member_has_charges', fn () => $this->corrections->delete($this->supplier, $charged, $this->actor, $this->expectedOf($charged)));
         foreach ([$withRevision, $voided, $charged] as $id) self::assertNotNull($this->repository->member($this->supplier, $id));
         self::assertSame(0, $this->auditCount(MembershipCorrectionService::AUDIT_MEMBER_DELETE));
     }
@@ -75,9 +75,9 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
         $batch = $created['batch']['id'];
         self::assertSame('rejected', $this->batchRowStatus($batch, $bare));
 
-        $this->assertCorrectionRejected('nonprofit_membership_member_in_batch', fn () => $this->corrections->delete($this->supplier, $bare, $this->actor));
+        $this->assertCorrectionRejected('nonprofit_membership_member_in_batch', fn () => $this->corrections->delete($this->supplier, $bare, $this->actor, $this->expectedOf($bare)));
         $this->batches->cancel($this->supplier, $batch, $this->actor);
-        $this->corrections->delete($this->supplier, $bare, $this->actor);
+        $this->corrections->delete($this->supplier, $bare, $this->actor, $this->expectedOf($bare));
 
         self::assertNull($this->batchRowStatus($batch, $bare));
         self::assertNotNull($this->batchRowStatus($batch, $other));
@@ -98,16 +98,16 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
         $this->pdo->prepare("UPDATE nonprofit_membership_batches SET phase='seeding',selection_mode='selected',selection_json=?,seed_cursor=0,seed_until=? WHERE supplier_id=? AND id=?")
             ->execute([json_encode([$selected, $outside + 1000]), $outside, $this->supplier, $chosen]);
 
-        $this->assertCorrectionRejected('nonprofit_membership_member_in_batch', fn () => $this->corrections->delete($this->supplier, $bare, $this->actor));
-        $this->assertCorrectionRejected('nonprofit_membership_member_in_batch', fn () => $this->corrections->delete($this->supplier, $selected, $this->actor));
+        $this->assertCorrectionRejected('nonprofit_membership_member_in_batch', fn () => $this->corrections->delete($this->supplier, $bare, $this->actor, $this->expectedOf($bare)));
+        $this->assertCorrectionRejected('nonprofit_membership_member_in_batch', fn () => $this->corrections->delete($this->supplier, $selected, $this->actor, $this->expectedOf($selected)));
         // Mimo horní mez aktivní dávky a mimo výběr druhé dávky smazání projde.
-        $this->corrections->delete($this->supplier, $outside, $this->actor);
+        $this->corrections->delete($this->supplier, $outside, $this->actor, $this->expectedOf($outside));
         self::assertNull($this->repository->member($this->supplier, $outside));
         // Člena, kterého plnění už minulo (kurzor na něm) a do dávky ho nezapsalo, dávka nezachytí: smazání projde.
         [$passed] = $this->bareMember('DEL-SEED-PASSED');
         $this->pdo->prepare('UPDATE nonprofit_membership_batches SET seed_cursor=?,seed_until=? WHERE supplier_id=? AND id=?')
             ->execute([$passed, $passed + 1000, $this->supplier, $active]);
-        $this->corrections->delete($this->supplier, $passed, $this->actor);
+        $this->corrections->delete($this->supplier, $passed, $this->actor, $this->expectedOf($passed));
         self::assertNull($this->repository->member($this->supplier, $passed));
     }
 
@@ -120,7 +120,7 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
         // Neodmítnutá položka bez operace v ukončené dávce: kontroly ji neznají, drží ji jen cizí klíč.
         $this->pdo->prepare("INSERT INTO nonprofit_membership_batch_members(supplier_id,batch_id,member_id,status,amount_cents) VALUES(?,?,?,'pending',50000)")
             ->execute([$this->supplier, $batch, $bare]);
-        $this->assertCorrectionRejected('nonprofit_membership_member_in_use', fn () => $this->corrections->delete($this->supplier, $bare, $this->actor));
+        $this->assertCorrectionRejected('nonprofit_membership_member_in_use', fn () => $this->corrections->delete($this->supplier, $bare, $this->actor, $this->expectedOf($bare)));
         self::assertNotNull($this->repository->member($this->supplier, $bare));
     }
 
@@ -360,7 +360,7 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
         $other = $this->member('DEL-FINISHED-OTHER');
         $batch = $this->batches->create($this->supplier, $this->input([$bare, $other], 'del-finished'), $this->actor)['batch']['id'];
         $this->pdo->prepare("UPDATE nonprofit_membership_batches SET phase='finished' WHERE supplier_id=? AND id=?")->execute([$this->supplier, $batch]);
-        $this->corrections->delete($this->supplier, $bare, $this->actor);
+        $this->corrections->delete($this->supplier, $bare, $this->actor, $this->expectedOf($bare));
         self::assertNull($this->batchRowStatus($batch, $bare));
         self::assertNotNull($this->batchRowStatus($batch, $other));
     }
@@ -397,7 +397,7 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
         $batch = $this->batches->create($this->supplier, $this->input([$bare, $other], 'del-counters'), $this->actor)['batch']['id'];
         $this->batches->cancel($this->supplier, $batch, $this->actor);
         $before = (new \MyInvoice\Repository\Nonprofit\Membership\MembershipBatchRepository($this->db))->summary($this->supplier, $batch);
-        $this->corrections->delete($this->supplier, $bare, $this->actor);
+        $this->corrections->delete($this->supplier, $bare, $this->actor, $this->expectedOf($bare));
         $after = (new \MyInvoice\Repository\Nonprofit\Membership\MembershipBatchRepository($this->db))->summary($this->supplier, $batch);
         self::assertSame([$before['total'] - 1, $before['rejected'] - 1], [$after['total'], $after['rejected']]);
         $this->assertCounters($batch);
@@ -613,4 +613,26 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
             $this->pdo->exec('ROLLBACK TO SAVEPOINT trigger_probe');
         }
     }
+
+    /** Snímek pro smazání musí mít kontakt i číslo ve správném typu (pořadí klíčů nehraje roli). */
+    public function testDeletionRequiresWellFormedConfirmedIdentity(): void
+    {
+        [$bare] = $this->bareMember('DEL-SHAPE');
+        $expected = $this->expectedOf($bare);
+        foreach ([['client_id' => $expected['client_id']], ['client_id' => (string) $expected['client_id'], 'member_number' => $expected['member_number']],
+            ['client_id' => $expected['client_id'], 'member_number' => 12]] as $shape) {
+            $this->assertCorrectionRejected('nonprofit_membership_invalid', fn () => $this->corrections->delete($this->supplier, $bare, $this->actor, $shape));
+        }
+        self::assertNotNull((new \MyInvoice\Repository\Nonprofit\Membership\MembershipRepository($this->db))->member($this->supplier, $bare));
+        $this->corrections->delete($this->supplier, $bare, $this->actor, ['member_number' => $expected['member_number'], 'client_id' => $expected['client_id']]);
+        self::assertNull((new \MyInvoice\Repository\Nonprofit\Membership\MembershipRepository($this->db))->member($this->supplier, $bare));
+    }
+
+    /** Kontakt a číslo člena, jak je potvrdí formulář smazání. */
+    private function expectedOf(int $member): array
+    {
+        $row = (new \MyInvoice\Repository\Nonprofit\Membership\MembershipRepository($this->db))->member($this->supplier, $member);
+        return ['client_id' => $row['client_id'], 'member_number' => $row['member_number']];
+    }
+
 }

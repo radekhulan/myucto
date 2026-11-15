@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest'
-const calls = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
+const calls = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), delete: vi.fn() }))
 const scope = vi.hoisted(() => ({ requested: '5' as string | null, domainLocked: false, currentSupplierId: 5 }))
 vi.mock('@/api/client', () => ({ api: calls }))
 vi.mock('@/workspace/supplierContext', () => ({ requestSupplierId: () => scope.requested }))
@@ -11,6 +11,7 @@ beforeEach(() => {
   scope.requested = '5'; scope.domainLocked = false; scope.currentSupplierId = 5
   calls.get.mockResolvedValue({ data: {} })
   calls.post.mockResolvedValue({ data: {} })
+  calls.delete.mockResolvedValue({ data: {} })
 })
 
 it('reads members, detail, claims and reconciliation pinned to the captured supplier with cursor paging', async () => {
@@ -79,4 +80,10 @@ it('uses paginated titles, full selection validation and date-dependent allowed 
   expect(calls.post.mock.calls.at(-1)?.slice(0,2)).toEqual(['/accounting/nonprofit-membership/batches/7/cancel',{}])
   await api.renewBatch(5,7)
   expect(calls.post.mock.calls.at(-1)?.slice(0,2)).toEqual(['/accounting/nonprofit-membership/batches/7/renew-preview',{}])
+})
+
+it('deletes a member with the confirmed contact and number as query parameters', async () => {
+  await api.deleteMember(5, 9, { client_id: 3, member_number: 'M-1' })
+  expect(calls.delete).toHaveBeenCalledWith('/accounting/nonprofit-membership/members/9',
+    { headers: { 'X-Supplier-Id': '5' }, params: { expected_client_id: 3, expected_member_number: 'M-1' } })
 })

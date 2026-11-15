@@ -103,16 +103,28 @@ final class MembershipCorrectionService
         }));
     }
 
-    public function delete(int $supplier, int $member, int $actor, ?string $ip = null, ?string $userAgent = null): array
+    /**
+     * @param array{client_id:int, member_number:string} $expected kontakt a číslo, které uživatel potvrdil;
+     *        souběžná změna jiným uživatelem smazání odmítne jako u opravy
+     */
+    public function delete(int $supplier, int $member, int $actor, array $expected, ?string $ip = null, ?string $userAgent = null): array
     {
         if ($actor <= 0) throw new MembershipException('nonprofit_membership_invalid', 'Smazání člena vyžaduje autora.');
-        return TransactionFailure::retrying($this->db->pdo(), fn (): array => (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplier, $member, $actor, $ip, $userAgent): array {
+        $keys = array_keys($expected);
+        sort($keys);
+        if ($keys !== ['client_id', 'member_number'] || !is_int($expected['client_id']) || !is_string($expected['member_number'])) {
+            throw new MembershipException('nonprofit_membership_invalid', 'Smazání člena vyžaduje původní kontakt a členské číslo.');
+        }
+        return TransactionFailure::retrying($this->db->pdo(), fn (): array => (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplier, $member, $actor, $ip, $userAgent, $expected): array {
             // Plnění dávky zamyká dávku a pak (cizím klíčem položky) člena; smazání proto zamyká plněné dávky
             // dřív než člena. Když plnění poslední stránky přepíná fázi dávky (mění index ix_nmb_phase, na kterém
             // smazání drží sdílený zámek), vznikne deadlock; obětí je smazání (nic nezapsalo), retry pak vrátí 409.
             // Zámek mezery v indexu pozdrží i založení nové dávky, ale jen při REPEATABLE READ (výchozí izolace).
             $seeding = $this->seedingBatchIds($supplier, $member, true);
             $current = $this->lockedMember($supplier, $member);
+            if ($current['client_id'] !== $expected['client_id'] || $current['member_number'] !== $expected['member_number']) {
+                throw new MembershipException('nonprofit_membership_member_changed', 'Člen se mezitím změnil. Načtěte ho znovu.', 409);
+            }
             // Předpis má přednost před revizemi: hláška o revizích radí opravit kontakt, což u předpisu nejde.
             if ($this->hasCharges($supplier, $member, true)) throw new MembershipException('nonprofit_membership_member_has_charges', 'Člen už má předpis, smazat ho nejde.', 409);
             $q = $this->db->pdo()->prepare('SELECT 1 FROM nonprofit_member_revisions WHERE supplier_id=? AND member_id=? LIMIT 1 LOCK IN SHARE MODE');

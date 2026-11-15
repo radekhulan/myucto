@@ -31,8 +31,16 @@ final class MembershipMemberService
             $q = $this->db->pdo()->prepare('SELECT id FROM clients WHERE supplier_id=? AND id=? FOR UPDATE');
             $q->execute([$supplier, $client]);
             if ($q->fetchColumn() === false) throw new MembershipException('nonprofit_membership_client_not_found', 'Klient nebyl nalezen v této organizaci.', 404);
-            return $this->members->byIdentity($supplier, $client, $memberNumber, true)
-                ?? $this->members->insertMember($supplier, $client, $memberNumber, $actor);
+            $existing = $this->members->byIdentity($supplier, $client, $memberNumber, true);
+            if ($existing !== null) return $existing;
+            try {
+                return $this->members->insertMember($supplier, $client, $memberNumber, $actor);
+            } catch (\PDOException $e) {
+                // Souběžná oprava čísla nebo kontaktu jiného člena (MembershipCorrectionService::updateIdentity)
+                // zámek organizace nebere; při READ COMMITTED doběhne kolize až na unikátní index.
+                if (TransactionFailure::aborted($e) || (int) ($e->errorInfo[1] ?? 0) !== 1062) throw $e;
+                throw new MembershipException('nonprofit_membership_identity_conflict', 'Klient nebo členské číslo už patří jinému členovi.', 409);
+            }
         }));
     }
 

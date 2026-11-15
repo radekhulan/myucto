@@ -31,8 +31,11 @@ final class MembershipCorrectionConcurrencyTest extends MembershipBatchReviewFix
         return $container;
     }
 
+    private ?string $duplicateTrigger = null;
+
     protected function tearDown(): void
     {
+        if ($this->duplicateTrigger !== null && isset($this->pdo)) $this->pdo->exec("DROP TRIGGER IF EXISTS {$this->duplicateTrigger}");
         parent::tearDown();
         if (isset($this->db)) $this->db->close();
     }
@@ -214,6 +217,47 @@ final class MembershipCorrectionConcurrencyTest extends MembershipBatchReviewFix
             foreach ([$readyFile, $resultFile] as $file) if (is_file($file)) unlink($file);
             if (is_dir($directory)) rmdir($directory);
         }
+    }
+
+    /**
+     * Kolize, kterou kontrola před zápisem nevidí (souběžné založení při READ COMMITTED), doběhne až na unikátní
+     * index. Okno mezi kontrolou a zápisem dvěma spojeními spolehlivě netrefíme, proto chybu 1062 vyvolá dočasný
+     * trigger přesně na zápisu. Oprava čísla i založení člena ji musí vrátit jako kolizi identity, ne 500.
+     */
+    public function testUniqueIndexCollisionOnIdentityCorrectionAndMemberCreationIsConflict(): void
+    {
+        $member = $this->bareMember('DUP-RACE');
+        $client = (new MembershipRepository($this->db))->member($this->supplier, $member)['client_id'];
+        $q = $this->pdo->prepare('SELECT default_currency_id FROM supplier WHERE id=?'); $q->execute([$this->supplier]);
+        $this->pdo->prepare("INSERT INTO clients(supplier_id,company_name,street,city,zip,country_id,main_email,language,currency_default_id,is_customer,is_vendor) VALUES(?,'Synthetic second member','Synthetic street','Synthetic city','10000',203,'dup-second@example.test','cs',?,1,0)")
+            ->execute([$this->supplier, (int) $q->fetchColumn()]);
+        $otherClient = (int) $this->pdo->lastInsertId();
+        $this->pdo->commit();
+        $corrections = new \MyInvoice\Service\Nonprofit\Membership\MembershipCorrectionService($this->db,
+            new MembershipRepository($this->db), new \MyInvoice\Service\ActivityLogger($this->db));
+        foreach ([
+            'oprava čísla' => ['UPDATE', fn () => $corrections->updateIdentity($this->supplier, $member, ['client_id' => $client,
+                'member_number' => 'SYN-DUP-NEW', 'expected_client_id' => $client, 'expected_member_number' => 'SYN-DUP-RACE'], $this->actor)],
+            'založení člena' => ['INSERT', fn () => $this->members->create($this->supplier, $otherClient, 'SYN-DUP-OTHER', $this->actor)],
+        ] as $label => [$event, $write]) {
+            // Náhodný název a omezení na firmu testu (vzor AssetReserveSourceProofTest): pozůstatek po pádu procesu
+            // nezasáhne jiné testy; úklid i v tearDown.
+            $this->duplicateTrigger = 'trg_test_nm_dup_' . bin2hex(random_bytes(6));
+            $this->pdo->exec("CREATE TRIGGER {$this->duplicateTrigger} BEFORE $event ON nonprofit_members FOR EACH ROW
+                IF NEW.supplier_id = {$this->supplier} THEN
+                    SIGNAL SQLSTATE '23000' SET MYSQL_ERRNO = 1062, MESSAGE_TEXT = 'Synthetic duplicate entry';
+                END IF");
+            try {
+                $write();
+                self::fail('Kolize na unikátním indexu: ' . $label);
+            } catch (\MyInvoice\Service\Nonprofit\Membership\MembershipException $e) {
+                self::assertSame(['nonprofit_membership_identity_conflict', 409], [$e->errorCode, $e->httpStatus], $label);
+            } finally {
+                $this->pdo->exec("DROP TRIGGER IF EXISTS {$this->duplicateTrigger}");
+                $this->duplicateTrigger = null;
+            }
+        }
+        self::assertSame('SYN-DUP-RACE', (new MembershipRepository($this->db))->member($this->supplier, $member)['member_number']);
     }
 
     private function bareMember(string $number): int

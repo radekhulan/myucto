@@ -255,8 +255,17 @@ final class MembershipAction
     public function deleteMember(Request $request, Response $response, array $args): Response
     {
         return $this->handle($request, $response, true, function (int $supplier) use ($request, $args): array {
+            // Potvrzený kontakt a číslo v dotazu (tělo u DELETE proxy a klienti neposílají spolehlivě).
+            $query = $request->getQueryParams();
+            $client = $query['expected_client_id'] ?? null;
+            $number = $query['expected_member_number'] ?? null;
+            if (!is_string($client) || preg_match('/^[1-9][0-9]{0,17}$/', $client) !== 1 || !is_string($number)
+                || trim($number) === '' || mb_strlen($number) > 80 || array_diff(array_keys($query), ['expected_client_id', 'expected_member_number']) !== []) {
+                throw new MembershipException('nonprofit_membership_invalid', 'Smazání člena vyžaduje původní kontakt a členské číslo.');
+            }
             [$ip, $agent] = $this->origin($request);
-            return $this->corrections->delete($supplier, (int) $args['id'], $this->actor($request), $ip, $agent);
+            return $this->corrections->delete($supplier, (int) $args['id'], $this->actor($request),
+                ['client_id' => (int) $client, 'member_number' => $number], $ip, $agent);
         });
     }
 

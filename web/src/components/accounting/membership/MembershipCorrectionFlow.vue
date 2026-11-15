@@ -19,7 +19,7 @@ import { useGuardedCommit } from './useGuardedCommit'
 type Mode = 'identity' | 'delete' | 'void'
 type Command =
   | { mode: 'identity'; member: number; body: MemberIdentityInput }
-  | { mode: 'delete'; member: number }
+  | { mode: 'delete'; member: number; expected: { client_id: number; member_number: string } }
   | { mode: 'void'; member: number; revision: number; body: MemberRevisionVoidInput }
 
 const props = defineProps<{ supplier: number; canManage: boolean; mode: Mode; member: MemberIdentity; label: string; revision?: MemberRevision | null; headRevisionNo: number }>()
@@ -42,7 +42,7 @@ const commit = useGuardedCommit<Command, Command>({
     if (command.mode === 'identity') return membershipApi.updateMember(supplier, command.member, command.body)
     // Opakování po nejisté odpovědi: člen už neexistuje, smazání tedy proběhlo. Jen kód nenalezeného člena,
     // jiná 404 (např. chybná routa) je chyba a detail se nezavře.
-    if (command.mode === 'delete') return membershipApi.deleteMember(supplier, command.member).catch(e => (errorStatus(e) === 404
+    if (command.mode === 'delete') return membershipApi.deleteMember(supplier, command.member, command.expected).catch(e => (errorStatus(e) === 404
       && apiErrorCode(e) === 'nonprofit_membership_member_not_found' ? { deleted: true, member_id: command.member } : Promise.reject(e)))
     return membershipApi.voidRevision(supplier, command.member, command.revision, command.body)
   },
@@ -78,7 +78,7 @@ function review() {
     command = { mode: 'identity', member: props.member.id, body: { client_id: form.clientId as number, member_number: form.number.trim(),
       expected_client_id: base.clientId, expected_member_number: base.number } }
   } else if (props.mode === 'delete') {
-    command = { mode: 'delete', member: props.member.id }
+    command = { mode: 'delete', member: props.member.id, expected: { client_id: base.clientId, member_number: base.number } }
   } else {
     command = { mode: 'void', member: props.member.id, revision: (base.revision as MemberRevision).id,
       body: { expected_revision: base.headRevisionNo, reason: form.reason.trim(), idempotency_key: crypto.randomUUID() } }

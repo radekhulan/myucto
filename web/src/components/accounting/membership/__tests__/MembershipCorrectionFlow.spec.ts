@@ -79,11 +79,12 @@ describe('Membership correction flow', () => {
   it.each([
     ['identity', 'updateMember', 'nonprofit_membership_member_changed'],
     ['void', 'voidRevision', 'nonprofit_membership_revision_changed'],
+    ['delete', 'deleteMember', 'nonprofit_membership_member_changed'],
   ] as const)('po 409 zastaralého podkladu (%s) ohlásí rodiči zastaralou opravu a nic dalšího nepošle', async (mode, call, code) => {
     api[call].mockRejectedValueOnce({ response: { status: 409, data: { error: { code, message: 'Změněno.' } } } })
     const w = mounted({ mode, revision })
     if (mode === 'identity') await w.get('[data-stub="client"]').trigger('click')
-    else await w.get('[data-field="corr-reason"]').setValue('Synthetic duplicate revision')
+    else if (mode === 'void') await w.get('[data-field="corr-reason"]').setValue('Synthetic duplicate revision')
     await confirm(w)
     expect(w.emitted('stale')).toHaveLength(1)
     expect(api[call]).toHaveBeenCalledTimes(1)
@@ -101,6 +102,13 @@ describe('Membership correction flow', () => {
     const w = mounted({ mode: 'delete' })
     await w.setProps({ label: 'Synthetic renamed member', member: { ...member, member_number: 'X2' } })
     expect(w.get('[data-section="corr-delete-target"]').text()).toContain('M-1 · Synthetic member')
+  })
+
+  it('smazání pošle kontakt a číslo z doby otevření, i když obnova detailu mezitím změní props', async () => {
+    const w = mounted({ mode: 'delete' })
+    await w.setProps({ member: { ...member, member_number: 'X2', client_id: 55 } })
+    await confirm(w)
+    expect(api.deleteMember).toHaveBeenCalledWith(5, 9, { client_id: 3, member_number: 'M-1' })
   })
 
   it('jiná chyba než zastaralý podklad detail znovu nenačítá', async () => {
