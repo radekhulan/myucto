@@ -14,7 +14,9 @@ final class MembershipReceivablePaymentAdapter
     {
         $claim = $this->balances->claim($supplier, $claimId)
             ?? throw new MembershipException('nonprofit_membership_claim_not_found', 'Pohledávka členského příspěvku nebyla nalezena.', 404);
-        if ($claim['reversal_claim_id'] !== null || $claim['reversed_by'] !== null || $claim['posted_at'] === null) {
+        // Bez platného pohledávkového řádku (receiptValiditySql) by cíl ukazoval na řádek 0 nebo vadnou pohledávku.
+        if ($claim['reversal_claim_id'] !== null || $claim['reversed_by'] !== null || $claim['posted_at'] === null
+            || (int) $claim['receipt_valid'] !== 1) {
             throw new MembershipException('nonprofit_membership_claim_not_payable', 'Pohledávka už není platným cílem úhrady.', 409);
         }
         return [

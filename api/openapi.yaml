@@ -3640,8 +3640,8 @@ paths:
       summary: Kurátorované členské pohledávky
       description: Pouze čtení s oprávněním accounting. Bez jmen, členských čísel, právních podkladů a interních otisků.
         Výsledek neopravňuje k finanční mutaci. Detail vrací stejnou obálku jako seznam. Úhrady vycházejí pouze ze
-        současných nativních bankovních a pokladních párování. Neprokázané částky zůstávají null. Historické datum
-        úhrad se nepřijímá.
+        současných nativních bankovních a pokladních párování. Předpis bez spárované úhrady (unreconciled) má celou
+        částku otevřenou; null vrací jen neprůkazný podklad (ambiguous). Historické datum úhrad se nepřijímá.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: query
@@ -3683,8 +3683,8 @@ paths:
       summary: Kurátorované členské pohledávky
       description: Pouze čtení s oprávněním accounting. Bez jmen, členských čísel, právních podkladů a interních otisků.
         Výsledek neopravňuje k finanční mutaci. Detail vrací stejnou obálku jako seznam. Úhrady vycházejí pouze ze
-        současných nativních bankovních a pokladních párování. Neprokázané částky zůstávají null. Historické datum
-        úhrad se nepřijímá.
+        současných nativních bankovních a pokladních párování. Předpis bez spárované úhrady (unreconciled) má celou
+        částku otevřenou; null vrací jen neprůkazný podklad (ambiguous). Historické datum úhrad se nepřijímá.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: path

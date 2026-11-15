@@ -16,6 +16,7 @@ use MyInvoice\Repository\Nonprofit\Membership\MembershipRepository;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipChargeService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipException;
 use MyInvoice\Service\Nonprofit\Membership\MembershipListFilter;
 use MyInvoice\Service\Nonprofit\Membership\MembershipMemberService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipPublicCatalog;
@@ -755,6 +756,22 @@ final class MembershipNativeTest extends TestCase
         self::assertCount(1, $detail['items']);
         self::assertSame('ambiguous', $detail['items'][0]['settlement']['status']);
         self::assertSame('unproven', $this->listRows()[0]['contribution']['status']);
+        // Veřejný katalog předpis tiše nevynechá: ověření uloženého důkazu poškozený deník odmítne.
+        try {
+            $this->catalog()->receivables($this->supplier, $member['id'], null, 25);
+            self::fail('Veřejný katalog vrátil předpisy bez pohledávkového řádku.');
+        } catch (MembershipException $e) {
+            self::assertSame('nonprofit_membership_ledger_mismatch', $e->errorCode);
+        }
+        // Předpis bez platného pohledávkového řádku nesmí být cílem úhrady (dřív řádek 0 a účet 0).
+        $claimId = (new MembershipChargeRepository($this->db))->claimForOperation($this->supplier, $issued['operation']['id'])['id'];
+        try {
+            (new MembershipReceivablePaymentAdapter($this->balances))->target($this->supplier, $claimId);
+            self::fail('Předpis bez pohledávkového řádku se nabídl jako cíl úhrady.');
+        } catch (MembershipException $e) {
+            self::assertSame('nonprofit_membership_claim_not_payable', $e->errorCode);
+            self::assertSame(409, $e->httpStatus);
+        }
     }
 
     private function payClaim(array $issued, string $amount, string $key): void
