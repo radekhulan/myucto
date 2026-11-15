@@ -118,6 +118,12 @@ final class AssistantDataToolsPermissionTest extends TestCase
         self::assertArrayNotHasKey('Authorization', $request['headers']);
         self::assertSame((string) $this->supplierId, $request['headers']['X-Supplier-Id'], 'firmu určuje server, ne Node');
         self::assertSame('search_clients', $request['headers']['X-MyUcto-Tool']);
+
+        // Při volání nástroje projde jen cesta z jeho manifestu.
+        self::assertNotNull($source->apiRequest(['url' => $base . '/clients?q=a', 'method' => 'GET'], 'search_clients'));
+        self::assertNull($source->apiRequest(['url' => $base . '/settings/supplier', 'method' => 'GET'], 'search_clients'));
+        self::assertNull($source->apiRequest(['url' => $base . '/clients', 'method' => 'GET'], 'list_unpaid_invoices'));
+        self::assertNotNull($source->apiRequest(['url' => $base . '/invoices?status=unpaid', 'method' => 'GET'], 'list_unpaid_invoices'));
     }
 
     private function unfilteredSource(ServerRequestInterface $request): McpAssistantDataSource

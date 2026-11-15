@@ -170,7 +170,8 @@ final class McpAssistantDataSource implements AssistantDataSource
                     NodeRelayIo::exportEnvironment();
                     $exported = true;
                 }
-                $request = ++$fetches <= self::MAX_FETCHES_PER_CALL ? $this->apiRequest($message) : null;
+                $request = ++$fetches <= self::MAX_FETCHES_PER_CALL
+                    ? $this->apiRequest($message, is_string($operation['name'] ?? null) ? $operation['name'] : null) : null;
                 try {
                     $reply = $request === null ? self::forbidden() : NodeRelayIo::internalApi($this->phpBinary, $request);
                 } catch (\Throwable) {
@@ -193,17 +194,19 @@ final class McpAssistantDataSource implements AssistantDataSource
     }
 
     /**
-     * Požadavek pro interní API, nebo null, když ho asistent nesmí poslat.
+     * Požadavek pro interní API, nebo null, když ho asistent nesmí poslat. Při volání
+     * nástroje projde jen cesta, kterou nástroj podle manifestu používá.
      *
      * @param array<string,mixed> $message
      * @return array<string,mixed>|null
      */
-    public function apiRequest(array $message): ?array
+    public function apiRequest(array $message, ?string $tool = null): ?array
     {
         $url = (string) ($message['url'] ?? '');
         if (strtoupper((string) ($message['method'] ?? '')) !== 'GET' || array_key_exists('bodyBase64', $message)
             || ((string) ($message['body'] ?? '')) !== ''
-            || !str_starts_with($url, rtrim($this->apiUrl, '/') . '/')) {
+            || !str_starts_with($url, rtrim($this->apiUrl, '/') . '/')
+            || ($tool !== null && !$this->toolUsesPath($tool, $url))) {
             return null;
         }
         $headers = ['X-MyUcto-Client' => 'ai-assistant', 'X-Supplier-Id' => (string) $this->supplierId];
@@ -220,6 +223,18 @@ final class McpAssistantDataSource implements AssistantDataSource
             'serverParams' => $this->serverParams,
             'sessionToken' => $this->sessionToken,
         ];
+    }
+
+    private function toolUsesPath(string $tool, string $url): bool
+    {
+        $path = (string) parse_url(substr($url, strlen(rtrim($this->apiUrl, '/'))), PHP_URL_PATH);
+        foreach ((array) ($this->routeManifest[$tool]['api'] ?? []) as $operation) {
+            if (($operation[0] ?? null) !== 'GET' || !is_string($operation[1] ?? null)) continue;
+            $template = substr($operation[1], strlen('/api'));
+            $pattern = '#^' . preg_replace('/\\\{[a-z_]+\\\}/', '[^/]+', preg_quote($template, '#')) . '$#D';
+            if (preg_match($pattern, rawurldecode($path)) === 1) return true;
+        }
+        return false;
     }
 
     /** @return array{status:int, headers:array<string,string>, body:string} */

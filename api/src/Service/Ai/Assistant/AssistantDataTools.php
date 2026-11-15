@@ -7,12 +7,14 @@ namespace MyInvoice\Service\Ai\Assistant;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Mcp\ClientMcpToolPolicy;
 use MyInvoice\Service\Mcp\HostedMcp;
 use MyInvoice\Service\Mcp\StaffMcpToolPolicy;
+use MyInvoice\Service\Tenant\TenantDomainContext;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Log\LoggerInterface;
 
@@ -41,6 +43,12 @@ final class AssistantDataTools
         $sessionToken = $request->getAttribute(AuthMiddleware::ATTR_TOKEN);
         if ($supplierId <= 0 || !RequestAuthorization::isSessionAuth($request)
             || !is_string($sessionToken) || $sessionToken === '') {
+            return null;
+        }
+        // Relace z vlastní domény firmy platí jen na ní; interní API běží na adrese
+        // instalace, kde by ji AuthMiddleware odmítl. Asistent tam zůstává u manuálu.
+        $domain = $request->getAttribute(TenantDomainMiddleware::ATTR_CONTEXT);
+        if ($domain instanceof TenantDomainContext && $domain->mode === TenantDomainContext::CUSTOM) {
             return null;
         }
         $script = $this->mcpDir . '/src/hosted-relay.mjs';
