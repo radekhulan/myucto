@@ -102,7 +102,9 @@ info:
     Ke konceptu ostatní položky smí token zapsat i dimenze hlavičky
     (`PUT /accounting/dimensions/documents/other-items/{id}`); u potvrzeného či
     zaúčtovaného dokladu a u konceptu z automaticky účtovaného opakování odpoví
-    `403 token_write_forbidden`. Dokument (např. smlouvu) k ostatní položce připojíte
+    `403 token_write_forbidden`. Totéž platí pro dimenze hlavičky a položek konceptu
+    vydané a přijaté faktury (`PUT /accounting/dimensions/documents/invoices/{id}`,
+    `.../purchase-invoices/{id}`). Dokument (např. smlouvu) k ostatní položce připojíte
     přes `POST /documents/{id}/links` s `entity_type: other_item`.
 
     Zaúčtování dokladu, storno zápisu, uzavření období, zaevidování opravy podle
@@ -32557,6 +32559,84 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /api/v1/accounting/dimensions/documents/invoices/{id}:
+    put:
+      tags:
+      - Accounting
+      summary: Dimenze konceptu vydané faktury
+      description: |
+        Nahradí dimenze hlavičky (ID typu → ID hodnoty z `GET /accounting/dimensions`), položek
+        (pořadí položky od 1, jak je vrací detail dokladu → mapa typ → hodnota) a rozpadu
+        (`splits`, pořadí 0 = hlavička). Vynechané `items` nebo `splits` zůstanou beze změny.
+        Firma musí mít dimenze zapnuté. Přes API token jen u KONCEPTU (u vystaveného,
+        přijatého nebo zaúčtovaného dokladu `403 token_write_forbidden`); koncept nemá řádky
+        v deníku, nic se nepřeúčtuje. Vyžaduje oprávnění zápisu `accounting` i `invoices`.
+      parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentDimensionsInput'
+      responses:
+        '200':
+          description: Uložené dimenze dokladu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDimensions'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /api/v1/accounting/dimensions/documents/purchase-invoices/{id}:
+    put:
+      tags:
+      - Accounting
+      summary: Dimenze konceptu přijaté faktury
+      description: |
+        Nahradí dimenze hlavičky (ID typu → ID hodnoty z `GET /accounting/dimensions`), položek
+        (pořadí položky od 1, jak je vrací detail dokladu → mapa typ → hodnota) a rozpadu
+        (`splits`, pořadí 0 = hlavička). Vynechané `items` nebo `splits` zůstanou beze změny.
+        Firma musí mít dimenze zapnuté. Přes API token jen u KONCEPTU (u vystaveného,
+        přijatého nebo zaúčtovaného dokladu `403 token_write_forbidden`); koncept nemá řádky
+        v deníku, nic se nepřeúčtuje. Vyžaduje oprávnění zápisu `accounting` i `purchase_invoices`.
+      parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentDimensionsInput'
+      responses:
+        '200':
+          description: Uložené dimenze dokladu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDimensions'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
   /api/v1/accounting/dimensions/journal/{id}:
     get:
       tags:
@@ -61538,6 +61618,27 @@ components:
       properties:
         header:
           $ref: '#/components/schemas/DimensionAssignmentMap'
+    DocumentDimensionsInput:
+      type: object
+      required:
+      - header
+      properties:
+        header:
+          $ref: '#/components/schemas/DimensionAssignmentMap'
+        items:
+          type: object
+          description: Pořadí položky od 1 → mapa ID typu → ID hodnoty. Pořadí, které chybí, dimenze nemá.
+          additionalProperties:
+            $ref: '#/components/schemas/DimensionAssignmentMap'
+        splits:
+          type: object
+          description: Pořadí položky (0 = hlavička) → ID typu → podíly hodnot.
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: array
+              items:
+                $ref: '#/components/schemas/DimensionSplitShare'
     DimensionSplitShare:
       type: object
       required:

@@ -25,9 +25,10 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response as Psr7Response;
 
 /**
- * Dimenze konceptu ostatní pohledávky nebo závazku přes veřejné API s tokenem
- * (MCP `set_other_item_dimensions`). Token smí jen koncept: u zaúčtovaného
- * dokladu by uložení přerazítkovalo řádky deníku, a to zůstává webovému rozhraní.
+ * Dimenze konceptu ostatní pohledávky nebo závazku, vydané a přijaté faktury přes
+ * veřejné API s tokenem (MCP `set_other_item_dimensions`, `set_invoice_dimensions`,
+ * `set_purchase_invoice_dimensions`). Token smí jen koncept: u zaúčtovaného dokladu
+ * by uložení přerazítkovalo řádky deníku, a to zůstává webovému rozhraní.
  */
 #[Group('integration')]
 final class OtherItemDimensionsPublicApiTest extends TestCase
@@ -92,7 +93,7 @@ final class OtherItemDimensionsPublicApiTest extends TestCase
         self::assertSame('token_write_forbidden', $res['body']['error']['code'] ?? null);
         self::assertSame($before, $this->dimensions->documentDimensions($this->scenarios->supplierId, 'other_item', $posted)['header']);
 
-        foreach (['purchase-invoices', 'assets', 'bank-transactions'] as $doc) {
+        foreach (['cash-documents', 'assets', 'bank-transactions'] as $doc) {
             $other = $this->call('PUT', "/api/v1/accounting/dimensions/documents/$doc/1", ['header' => $header]);
             self::assertSame(403, $other['status'], $doc);
             self::assertSame('token_write_forbidden', $other['body']['error']['code'] ?? null, $doc);
@@ -113,6 +114,80 @@ final class OtherItemDimensionsPublicApiTest extends TestCase
             ['header' => [$cc => $this->value($cc, 'REGR-C1')]], 'read_write', 'bearer', 'readonly');
         self::assertSame(403, $res['status']);
         self::assertSame([], $this->dimensions->documentDimensions($this->scenarios->supplierId, 'other_item', $draft)['header']);
+    }
+
+    /** BEZ OPRAVY PADÁ: token dimenze faktur nesměl zapsat vůbec, ani ke konceptu. */
+    public function testTokenSetsDimensionsOfInvoiceDrafts(): void
+    {
+        [$cc, $project] = [$this->scenarios->types()['cost_center'], $this->scenarios->types()['project']];
+        $header = [$cc => $this->value($cc, 'REGR-C1')];
+        $items = [1 => [$project => $this->value($project, 'REGR-P1')], 2 => [$project => $this->value($project, 'REGR-P2')]];
+
+        foreach ([['invoices', 'invoice', $this->invoiceDraft()], ['purchase-invoices', 'purchase_invoice', $this->purchaseDraft()]] as [$doc, $type, $id]) {
+            $res = $this->call('PUT', "/api/v1/accounting/dimensions/documents/$doc/$id", ['header' => $header, 'items' => $items]);
+            self::assertSame(200, $res['status'], $doc . ': ' . (json_encode($res['body'], JSON_UNESCAPED_UNICODE) ?: ''));
+            $saved = $this->dimensions->documentDimensions($this->scenarios->supplierId, $type, $id);
+            self::assertSame($header, $saved['header'], $doc);
+            self::assertSame($items, $saved['items'], $doc);
+
+            $denied = $this->call('PUT', "/api/v1/accounting/dimensions/documents/$doc/$id", ['header' => $header], 'read_write', 'bearer', 'readonly');
+            self::assertSame(403, $denied['status'], $doc);
+        }
+    }
+
+    public function testTokenCannotTagIssuedOrPostedInvoices(): void
+    {
+        $cc = $this->scenarios->types()['cost_center'];
+        $header = [$cc => $this->value($cc, 'REGR-C1')];
+        foreach ([['invoices', 'invoice', $this->scenarios->ids['settled']], ['purchase-invoices', 'purchase_invoice', $this->scenarios->ids['purchase']]] as [$doc, $type, $id]) {
+            $before = $this->dimensions->documentDimensions($this->scenarios->supplierId, $type, $id)['header'];
+            $res = $this->call('PUT', "/api/v1/accounting/dimensions/documents/$doc/$id", ['header' => $header]);
+            self::assertSame(403, $res['status'], $doc);
+            self::assertSame('token_write_forbidden', $res['body']['error']['code'] ?? null, $doc);
+            self::assertSame($before, $this->dimensions->documentDimensions($this->scenarios->supplierId, $type, $id)['header'], $doc);
+        }
+    }
+
+    private function invoiceDraft(): int
+    {
+        $pdo = $this->db->pdo();
+        $src = $pdo->query('SELECT client_id, currency_id FROM invoices WHERE id = ' . (int) $this->scenarios->ids['settled'])->fetch(\PDO::FETCH_ASSOC);
+        $date = OtherDocumentsPostingScenarios::YEAR . '-06-10';
+        $pdo->prepare(
+            'INSERT INTO invoices (supplier_id, invoice_type, client_id, issue_date, tax_date, due_date, currency_id,
+                                   reverse_charge, total_without_vat, total_vat, total_with_vat, paid_total, status, created_by)
+             VALUES (?, "invoice", ?, ?, ?, ?, ?, 0, 200, 0, 200, 0, "draft", ?)'
+        )->execute([$this->scenarios->supplierId, $src['client_id'], $date, $date, $date, $src['currency_id'], $this->userId]);
+        $id = (int) $pdo->lastInsertId();
+        $this->items('invoice_items', 'invoice_id', $id);
+        return $id;
+    }
+
+    private function purchaseDraft(): int
+    {
+        $pdo = $this->db->pdo();
+        $src = $pdo->query('SELECT vendor_id, currency_id FROM purchase_invoices WHERE id = ' . (int) $this->scenarios->ids['purchase'])->fetch(\PDO::FETCH_ASSOC);
+        $date = OtherDocumentsPostingScenarios::YEAR . '-06-11';
+        $pdo->prepare(
+            'INSERT INTO purchase_invoices (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, due_date,
+                                            received_at, currency_id, vendor_snapshot, total_with_vat, status, created_by)
+             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, "{}", 200, "draft", ?)'
+        )->execute([$this->scenarios->supplierId, $src['vendor_id'], 'DIM-' . random_int(100000, 999999), $date, $date, $date, $src['currency_id'], $this->userId]);
+        $id = (int) $pdo->lastInsertId();
+        $this->items('purchase_invoice_items', 'purchase_invoice_id', $id);
+        return $id;
+    }
+
+    private function items(string $table, string $parent, int $id): void
+    {
+        $vatRateId = (int) $this->db->pdo()->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn();
+        foreach ([0, 1] as $order) {
+            $this->db->pdo()->prepare(
+                "INSERT INTO {$table} ({$parent}, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
+                                       total_without_vat, total_vat, total_with_vat, order_index)
+                 VALUES (?, 'Syntetická položka', 1, 'ks', 100, ?, 0, 100, 0, 100, ?)"
+            )->execute([$id, $vatRateId, $order]);
+        }
     }
 
     private function draft(): int
