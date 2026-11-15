@@ -661,6 +661,18 @@ describe('Membership workspace', () => {
     bar.vm.$emit('clear','year');await flushPromises()
     expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:null,title_key:'SYNTHETIC'}))
     w.unmount()
+
+    // Stav úhrady vyžaduje rok: aktuální rok vedle titulu nejde odebrat, jiný rok se vrátí na aktuální.
+    navigation.route.query = {year: current, title_key: 'SYNTHETIC', payment_status: 'paid'}
+    w=mounted();await flushPromises()
+    expect(w.findComponent(FilterBar).props('chips')).not.toContainEqual(expect.objectContaining({key:'year'}))
+    w.unmount()
+    navigation.route.query = {year: '2020', title_key: 'SYNTHETIC', payment_status: 'paid'}
+    w=mounted();await flushPromises()
+    w.findComponent(FilterBar).vm.$emit('clear','year');await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:Number(current),title_key:'SYNTHETIC',payment_status:'paid'}))
+    expect(w.findComponent(FilterBar).props('chips')).not.toContainEqual(expect.objectContaining({key:'year'}))
+    w.unmount()
   })
 
   it('applies clearing all filters during a batch once the batch unlocks', async () => {

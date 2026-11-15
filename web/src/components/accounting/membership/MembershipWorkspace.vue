@@ -261,9 +261,11 @@ async function loadTitles(force = false) {
   } catch { if (alive && ticket === titlesTicket) {titlesError.value = true; titles.value = []} }
 }
 const titleOptions = computed(() => [...new Set([...titles.value, ...(titleKey.value ? [titleKey.value] : [])])].map(value => ({value, label: value})))
-// Výchozí aktuální rok bez titulu není aktivní filtr: jeho odebrání by vrátilo stejný rok.
+// Aktuální rok je výchozí filtr: štítek jen tehdy, když ho odebrání skutečně zruší (titul bez stavu úhrady,
+// který rok vyžaduje), nebo když jde o jiný rok, který se odebráním vrátí na aktuální.
 const yearChipRemovable = computed(() => !!appliedFilters.value.year
-  && (!!appliedFilters.value.title_key || String(appliedFilters.value.year) !== appIsoDate().slice(0,4)))
+  && (String(appliedFilters.value.year) !== appIsoDate().slice(0,4)
+    || (!!appliedFilters.value.title_key && appliedFilters.value.payment_status === 'all')))
 const filterChips = computed<FilterChip[]>(() => [
   ...(appliedFilters.value.search ? [{key: 'search', label: t('nonprofitMembership.listSearch'), value: appliedFilters.value.search}] : []),
   ...(yearChipRemovable.value ? [{key: 'year', label: t('nonprofitMembership.listYear'), value: String(appliedFilters.value.year)}] : []),
