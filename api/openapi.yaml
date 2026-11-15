@@ -16627,6 +16627,9 @@ paths:
         dokumenty a splátkový kalendář zachová. Vyžaduje navíc zápisová oprávnění
         other_items a accounting.journal.post. Spárované úhrady vrátí 409 has_payments, jiná
         navazující data (například mzdová platba) 409 entry_delete_conflict.
+        Řádek spárovaný s jiným zápisem v okruhu otevřených položek vrátí 409 entry_paired
+        (`pairing_id`, `account_id` v chybě), řádek rozepsaný na doklady saldokonta
+        409 allocation_saldo_in_use.
         Vždy jen pro otevřené období, mimo uzamčené datum a u zápisu bez storna.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
@@ -16647,7 +16650,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: Období není otevřené, datum je uzamčené, zápis je stornovaný, existuje pozdější odpis nebo typ zdroje nepodporuje přímé smazání
+          description: Období není otevřené, datum je uzamčené, zápis je stornovaný, existuje pozdější odpis, typ zdroje nepodporuje přímé smazání, řádek je v okruhu párování (`entry_paired`) nebo v rozpadu saldokonta (`allocation_saldo_in_use`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -17093,8 +17096,11 @@ paths:
         jen přestane být v deníku vidět. Lze zadat ID kterékoli ze stran.
 
         Odmítne se, když je některá strana v neotevřeném období nebo v uzamčené části
-        účetnictví, když na dvojici navazuje další storno, nebo když se zdroj zápisu ruší
-        vlastním workflow (mzdy, odpisy, reklasifikace).
+        účetnictví, když na dvojici navazuje další storno, když se zdroj zápisu ruší
+        vlastním workflow (mzdy, odpisy, reklasifikace), když je řádek některé strany
+        spárovaný s jiným zápisem v okruhu otevřených položek (`entry_paired`) nebo
+        rozepsaný na doklady saldokonta (`allocation_saldo_in_use`). Okruh, který leží
+        celý uvnitř dvojice, smazání nebrání.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -17111,7 +17117,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: Zavřené období, uzamčené datum, navazující storno nebo nepodporovaný zdroj
+          description: Zavřené období, uzamčené datum, navazující storno, nepodporovaný zdroj, okruh párování (`entry_paired`) nebo rozpad saldokonta (`allocation_saldo_in_use`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -22250,6 +22256,8 @@ paths:
         po draftu smazaném přes `?force=1` žádná díra nevzniká.
         Preferovanou cestou je storno (`/reverse`), které auditní stopu zachová.
         Doklad s evidovanou tržbou EET smazat nelze (409 `cash.error.eet_history_exists`).
+        Zápis spárovaný s jiným zápisem v okruhu otevřených položek (409 `entry_paired`)
+        nebo rozepsaný na doklady saldokonta (409 `allocation_saldo_in_use`) se nesmaže.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
