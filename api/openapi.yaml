@@ -16252,7 +16252,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Konverzace AI asistenta se zprávami; cizí konverzace vrací 404
-      description: Zpráva asistenta nese v `response` strukturovanou odpověď (other_items, internal_documents, journal_entries, document_suggestions, warnings) a v `applied` značky použitých návrhů {druh -> {index -> id}}; druh je journal_entry, other_item, internal_document nebo document.
+      description: Zpráva asistenta nese v `response` strukturovanou odpověď (other_items, internal_documents, journal_entries, document_suggestions, warnings, tool_calls = použité nástroje {tool, kind, label, detail, status} bez obsahu výsledků, manual_sources = citované oddíly manuálu {section_id, chapter, title, url}) a v `applied` značky použitých návrhů {druh -> {index -> id}}; druh je journal_entry, other_item, internal_document nebo document.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - { in: path, name: id, required: true, schema: { type: integer } }
@@ -16287,7 +16287,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Dostupnost AI asistenta účetní (poskytovatel, model, podpora PDF a obrázků)
-      description: Dotaz na asistenta (POST /api/accounting/ai-assistant/ask) je jen pro přihlášeného uživatele v aplikaci, API tokenem nejde. Volitelné multipart pole model vybere pro dotaz jednu hodnotu z models bez změny nastavení firmy.
+      description: Dotaz na asistenta (POST /api/accounting/ai-assistant/ask) je jen pro přihlášeného uživatele v aplikaci, API tokenem nejde. Asistent při dotazu čte data firmy čtecími nástroji katalogu MCP s právy přihlášeného uživatele. Volitelné multipart pole model vybere pro dotaz jednu hodnotu z models bez změny nastavení firmy.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       responses:
@@ -45496,6 +45496,7 @@ components:
         provider: { type: [string, 'null'] }
         model: { type: [string, 'null'], description: Výchozí model pro dotaz bez explicitní volby }
         supports_files: { type: boolean, description: 'false = poskytovatel neumí PDF ani obrázky (Ollama); textové přílohy jdou' }
+        supports_tools: { type: boolean, description: 'Výchozí model umí volat nástroje nad daty firmy a manuálem; účtový rozvrh se pak ve výchozím stavu nepřikládá' }
         models:
           type: array
           items: { type: string }

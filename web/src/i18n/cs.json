@@ -18770,7 +18770,7 @@
   "accounting": {
     "ai_assistant": {
       "title": "AI asistent",
-      "subtitle": "Zeptejte se na zaúčtování, přiložte doklady a nechte si navrhnout zápisy do deníku.",
+      "subtitle": "Zeptejte se na zaúčtování, na data firmy nebo na postup v aplikaci. Přiložte doklady a nechte si navrhnout zápisy.",
       "clear_confirm": "Zahodit celou konverzaci? Přiložené soubory a dokumenty zůstanou přiložené.",
       "unavailable_title": "AI asistent není k dispozici",
       "open_settings": "Otevřít nastavení AI",
@@ -18785,8 +18785,7 @@
         "daily_limit": "Denní limit volání AI je vyčerpaný. Zkuste to znovu zítra."
       },
       "intro_title": "Na co se můžete zeptat",
-      "intro_body": "Popište situaci vlastními slovy, případně přiložte soubory z disku nebo dokumenty z Dokumentů. Asistent vysvětlí, jak účtovat, nabídne zápisy do deníku, interní doklady nebo ostatní pohledávky a závazky a navrhne, kam soubor v Dokumentech uložit. Nic se nezaúčtuje bez vašeho potvrzení.",
-      "intro_example": "Například: „Přes dokumenty jsem vložila notářský zápis a pokladní doklady, potřebuji vytvořit pohledávky za upsaný základní kapitál.\"",
+      "intro_body": "Popište situaci vlastními slovy, případně přiložte soubory z disku nebo dokumenty z Dokumentů. Asistent si sám dohledá data firmy (s vašimi právy, jen ke čtení) a postupy v manuálu, vysvětlí, jak účtovat, nabídne zápisy do deníku, interní doklady nebo ostatní pohledávky a závazky a navrhne, kam soubor v Dokumentech uložit. Nic se nezaúčtuje bez vašeho potvrzení.",
       "placeholder": "Napište dotaz k účtování…",
       "model": "Model",
       "default_model": "Výchozí ({model})",
@@ -18900,6 +18899,28 @@
         "upload_failed": "Soubor se nepodařilo nahrát.",
         "open_document": "Otevřít dokument",
         "no_permission": "K nahrání do Dokumentů nemáte oprávnění."
+      },
+      "examples_title": "Zkuste například",
+      "examples": [
+        "Které vydané faktury jsou po splatnosti a kolik celkem?",
+        "Kolik nám dluží náš největší odběratel?",
+        "Proč nesedí saldo účtu 324?",
+        "Co ještě chybí do přiznání k DPH za minulý měsíc?",
+        "Jak v aplikaci udělám ruční zápis do účetního deníku?",
+        "Přes dokumenty jsem vložila notářský zápis, potřebuji vytvořit pohledávky za upsaný základní kapitál."
+      ],
+      "progress": [
+        "Asistent čte dotaz a kontext firmy…",
+        "Hledá v datech firmy a v manuálu…",
+        "Prochází nalezené údaje…",
+        "Připravuje odpověď…"
+      ],
+      "sources": {
+        "manual": "Zdroje z manuálu",
+        "tools": "Použitá data a nástroje ({count})",
+        "errors": "neúspěšné: {count}",
+        "ok": "OK",
+        "failed": "Chyba"
       }
     },
     "locked_ack": {

@@ -64,6 +64,7 @@ final class SystemWriteTokenGuardTest extends TestCase
         'Middleware/SessionLockMiddleware.php' => 'zámek relace',
         'Middleware/SupplierScopeMiddleware.php' => 'technický účet instance',
         'Security/RequestAuthorization.php' => 'helpery samotné',
+        'Service/Ai/Assistant/AssistantDataTools.php' => 'AI asistent čte data relací přihlášeného uživatele, token ji nemá',
         'Service/Auth/LoginPolicyService.php' => 'politika přihlášení',
         'Service/Auth/SensitiveOperationReauth.php' => 'opětovné ověření',
         'Service/Bank/Connector/BankOAuthCallbackHandler.php' => 'napojení banky',

@@ -9,6 +9,9 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\DocumentFolderRepository;
 use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\DocumentViewerContext;
+use MyInvoice\Service\Ai\Assistant\AssistantDataSource;
+use MyInvoice\Service\Ai\Assistant\AssistantToolbox;
+use MyInvoice\Service\Ai\Assistant\ManualSearchService;
 use MyInvoice\Service\Accounting\InternalDocumentService;
 use MyInvoice\Service\Accounting\OtherItemKindService;
 use MyInvoice\Service\Document\DocumentStorage;
@@ -26,6 +29,11 @@ use PDO;
  * závazku ({@see AiOtherItemNormalizer}) a interního dokladu
  * ({@see AiInternalDocumentNormalizer}, {@see AiInternalDocumentValidator}) založí až
  * uživatel běžnými endpointy těch agend.
+ *
+ * Asistent u poskytovatelů s voláním nástrojů pracuje ve smyčce ({@see self::askWithTools()}):
+ * model si sám čte manuál a data firmy čtecími nástroji katalogu MCP s právy přihlášeného
+ * uživatele ({@see AssistantToolbox}). Počet kol, volání, velikost výsledku i čas jsou omezené;
+ * po vyčerpání limitu model odpoví z toho, co zjistil.
  */
 final class AccountingAssistantService
 {
@@ -60,6 +68,13 @@ final class AccountingAssistantService
 
     private const UNAVAILABLE_REASONS = ['provider_not_configured', 'dpa_not_confirmed', 'residency_conflict'];
 
+    /** Kola s nástroji (bez závěrečného), volání nástrojů celkem a časový rozpočet smyčky. */
+    public const MAX_TOOL_ROUNDS = 6;
+    public const MAX_TOOL_CALLS = 12;
+    private const TOOL_LOOP_BUDGET_SECONDS = 75;
+    /** Celkový strop dotazu; drží odpověď pod časovým limitem webového serveru (nginx 120 s). */
+    private const TOOL_REQUEST_DEADLINE_SECONDS = 110;
+
     public function __construct(
         private readonly Connection $db,
         private readonly AiProviderHttpClient $ai,
@@ -71,13 +86,15 @@ final class AccountingAssistantService
         private readonly VatStatusService $vat,
         private readonly AiInternalDocumentValidator $internalDocuments,
         private readonly OtherItemKindService $otherItemKinds,
+        private readonly ManualSearchService $manual,
     ) {}
 
-    /** @return array{available:bool, reason:?string, provider:?string, model:?string, supports_files:bool, models:list<string>} */
+    /** @return array{available:bool, reason:?string, provider:?string, model:?string, supports_files:bool, supports_tools:bool, models:list<string>} */
     public function status(int $supplierId): array
     {
         $status = $this->ai->status($supplierId);
         $status['models'] = $status['available'] ? $this->ai->availableModels($supplierId) : [];
+        $status['supports_tools'] = $status['available'] && $this->ai->supportsToolCalling($supplierId);
         return $status;
     }
 
@@ -88,6 +105,8 @@ final class AccountingAssistantService
      * @param bool $allowInternalDocuments uživatel smí zakládat interní doklady
      *        ({@see \MyInvoice\Security\RequestAuthorization::canCreateInternalDocument()});
      *        bez práva model interní doklady nenavrhuje a server je zahodí
+     * @param AssistantDataSource|null $data čtecí nástroje nad daty firmy s právy uživatele;
+     *        null = asistent pracuje jen s manuálem
      * @return array<string,mixed>
      */
     public function ask(
@@ -100,6 +119,7 @@ final class AccountingAssistantService
         bool $includeChart,
         ?string $modelOverride = null,
         bool $allowInternalDocuments = false,
+        ?AssistantDataSource $data = null,
     ): array {
         $question = trim($question);
         if ($question === '' || mb_strlen($question) > self::MAX_QUESTION_CHARS) {
@@ -158,7 +178,14 @@ final class AccountingAssistantService
             . "## Dotaz\n" . $question . "\n";
 
         $system = $this->systemPrompt('assistant', $internalAllowed);
-        $result = $this->complete($supplierId, $system, $user, $this->askSchema(), 8000, $binary, $modelOverride);
+        $toolbox = null;
+        $model = $modelOverride ?? $this->ai->strongModelOverride($supplierId);
+        if ($this->ai->supportsToolCalling($supplierId, $model)) {
+            $toolbox = new AssistantToolbox($this->manual, $data);
+            $result = $this->askWithTools($supplierId, $system, $user, $binary, $model, $toolbox);
+        } else {
+            $result = $this->complete($supplierId, $system, $user, $this->askSchema(), 8000, $binary, $modelOverride);
+        }
         $data = $result['data'];
 
         $entries = AiJournalEntryNormalizer::normalize($data['journal_entries'] ?? [], $chartNames, $firm['today']);
@@ -186,10 +213,87 @@ final class AccountingAssistantService
             'journal_entries' => $entries,
             'document_suggestions' => $this->documentSuggestions($data['document_suggestions'] ?? [], count($files), $ids, $folderPaths),
             'warnings' => array_values(array_merge($warnings, $this->stringList($data['warnings'] ?? []))),
+            'tool_calls' => $toolbox?->trace() ?? [],
+            'manual_sources' => $toolbox?->citations($data['manual_sources'] ?? []) ?? [],
             'provider' => (string) $result['provider'],
             'model' => (string) $result['model'],
             'usage' => $this->usage($result),
         ];
+    }
+
+    /**
+     * Smyčka s nástroji: model volá nástroje, server je provede a vrátí výsledky, dokud
+     * model neodpoví. Po vyčerpání kol, volání nebo času dostane poslední kolo bez nástrojů.
+     * Když poskytovatel závěrečnou odpověď nevrátí podle schématu (Gemini), složí se
+     * odpověď samostatným dotazem z kontextu a zjištění z nástrojů.
+     *
+     * @param list<array{name:string,mime:string,bytes:string}> $binary
+     * @return array{data:array<string,mixed>, provider:string, model:string, usage:array<string,int>}
+     */
+    private function askWithTools(int $supplierId, string $system, string $user, array $binary, ?string $model, AssistantToolbox $toolbox): array
+    {
+        $started = microtime(true);
+        $system .= $toolbox->systemPrompt(self::MAX_TOOL_CALLS)
+            . "- Do `manual_sources` dej section_id oddílů manuálu, ze kterých odpověď vychází; jinak prázdné pole.\n";
+        try {
+            $conversation = $this->ai->startToolConversation($supplierId, $system, $user, $toolbox->definitions(),
+                $this->askSchema(), 8000, $binary, $model);
+        } catch (\Throwable) {
+            return $this->complete($supplierId, $system, $user, $this->askSchema(), 8000, $binary, $model);
+        }
+        $usage = ['input_tokens' => 0, 'output_tokens' => 0];
+        $log = [];
+        $calls = 0;
+        $draft = '';
+        $provider = $conversation->provider;
+        $usedModel = $conversation->model;
+        for ($round = 0; ; $round++) {
+            $elapsed = microtime(true) - $started;
+            $final = $round >= self::MAX_TOOL_ROUNDS || $calls >= self::MAX_TOOL_CALLS || $elapsed > self::TOOL_LOOP_BUDGET_SECONDS;
+            $r = $this->ai->toolRound($conversation, $final, (int) (self::TOOL_REQUEST_DEADLINE_SECONDS - $elapsed));
+            if (($r['ok'] ?? false) !== true) {
+                $code = (string) ($r['error'] ?? 'provider_error');
+                // Model nebo nasazení, které nástroje se schématem odmítne, odpoví postaru.
+                if ($round === 0 && $code === 'provider_http_400') {
+                    return $this->complete($supplierId, $system, $user, $this->askSchema(), 8000, $binary, $model);
+                }
+                throw $this->providerFailure($code);
+            }
+            $usage['input_tokens'] += (int) ($r['usage']['input_tokens'] ?? 0);
+            $usage['output_tokens'] += (int) ($r['usage']['output_tokens'] ?? 0);
+            $provider = (string) ($r['provider'] ?? $provider);
+            $usedModel = (string) ($r['model'] ?? $usedModel);
+            if (($r['calls'] ?? []) !== [] && !$final) {
+                $results = [];
+                foreach ($r['calls'] as $call) {
+                    if ($calls >= self::MAX_TOOL_CALLS) {
+                        $results[] = ['id' => $call['id'], 'name' => $call['name'], 'is_error' => true,
+                            'content' => 'Limit volání nástrojů je vyčerpaný. Odpověz z toho, co už víš.'];
+                        continue;
+                    }
+                    $calls++;
+                    $out = $toolbox->execute($call['name'], $call['arguments']);
+                    $results[] = ['id' => $call['id'], 'name' => $call['name'], 'content' => $out['content'], 'is_error' => $out['is_error']];
+                    $log[] = ['name' => $call['name'], 'arguments' => $call['arguments'], 'content' => $out['content']];
+                }
+                $this->ai->appendToolResults($conversation, $results);
+                continue;
+            }
+            if (is_array($r['data'] ?? null)) {
+                return ['data' => $r['data'], 'provider' => $provider, 'model' => $usedModel, 'usage' => $usage];
+            }
+            $draft = (string) ($r['text'] ?? '');
+            break;
+        }
+        $finalUser = $user . AssistantToolbox::transcriptBlock($log)
+            . ($draft !== '' ? "## Koncept odpovědi z předchozího kroku\n" . $draft . "\n\n" : '')
+            . "## Úkol\nZ kontextu a zjištění vrať závěrečnou odpověď na dotaz podle schématu.\n";
+        $result = $this->complete($supplierId, $system, $finalUser, $this->askSchema(), 8000, $binary, $model);
+        $result['usage'] = [
+            'input_tokens' => $usage['input_tokens'] + (int) ($result['usage']['input_tokens'] ?? 0),
+            'output_tokens' => $usage['output_tokens'] + (int) ($result['usage']['output_tokens'] ?? 0),
+        ];
+        return $result;
     }
 
     /** @return array<string,mixed> analýza uložená u dokumentu */
@@ -815,7 +919,7 @@ final class AccountingAssistantService
     {
         return [
             'type' => 'object', 'additionalProperties' => false,
-            'required' => ['answer', 'other_items', 'internal_documents', 'journal_entries', 'document_suggestions', 'warnings'],
+            'required' => ['answer', 'other_items', 'internal_documents', 'journal_entries', 'document_suggestions', 'warnings', 'manual_sources'],
             'properties' => [
                 'answer' => ['type' => 'string'],
                 'other_items' => $this->otherItemsSchema(),
@@ -837,6 +941,7 @@ final class AccountingAssistantService
                     ],
                 ],
                 'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'manual_sources' => ['type' => 'array', 'items' => ['type' => 'string']],
             ],
         ];
     }
@@ -913,14 +1018,7 @@ final class AccountingAssistantService
             true,
         );
         if (($result['ok'] ?? false) !== true || !is_array($result['data'] ?? null)) {
-            $code = (string) ($result['error'] ?? 'provider_error');
-            if (in_array($code, self::UNAVAILABLE_REASONS, true)) {
-                throw new AccountingAssistantException('ai_assistant.unavailable', $this->unavailableMessage($code), 503);
-            }
-            if ($code === 'attachments_unsupported') {
-                throw AccountingAssistantException::invalid('Nastavený AI poskytovatel neumí číst PDF ani obrázky.');
-            }
-            throw new AccountingAssistantException('ai_assistant.provider_error', 'AI poskytovatel vrátil chybu (' . $code . '). Zkuste to prosím znovu.', 502);
+            throw $this->providerFailure((string) ($result['error'] ?? 'provider_error'));
         }
         return [
             'data' => $result['data'],
@@ -928,6 +1026,20 @@ final class AccountingAssistantService
             'model' => (string) ($result['model'] ?? ''),
             'usage' => is_array($result['usage'] ?? null) ? $result['usage'] : [],
         ];
+    }
+
+    private function providerFailure(string $code): AccountingAssistantException
+    {
+        if (in_array($code, self::UNAVAILABLE_REASONS, true)) {
+            return new AccountingAssistantException('ai_assistant.unavailable', $this->unavailableMessage($code), 503);
+        }
+        if ($code === 'attachments_unsupported') {
+            return AccountingAssistantException::invalid('Nastavený AI poskytovatel neumí číst PDF ani obrázky.');
+        }
+        if ($code === 'provider_changed') {
+            return new AccountingAssistantException('ai_assistant.provider_error', 'Během dotazu se změnil AI poskytovatel. Zkuste to prosím znovu.', 409);
+        }
+        return new AccountingAssistantException('ai_assistant.provider_error', 'AI poskytovatel vrátil chybu (' . $code . '). Zkuste to prosím znovu.', 502);
     }
 
     /** @param array{usage:array<string,int>} $result @return array{input_tokens:int, output_tokens:int} */
