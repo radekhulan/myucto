@@ -98,6 +98,10 @@ final class MyuctoImportSealedValues
         if (!is_file($path) || !is_readable($path)) {
             throw new RuntimeException('Soubor s klíči zdrojové instalace nejde přečíst.');
         }
+        $mode = fileperms($path);
+        if ($mode !== false && ($mode & 0o077) !== 0) {
+            throw new RuntimeException('Soubor s klíči zdrojové instalace smí číst jen jeho vlastník (chmod 600).');
+        }
         $keys = json_decode((string) file_get_contents($path), true, 8, JSON_THROW_ON_ERROR);
         if (!is_array($keys) || array_is_list($keys)) {
             throw new RuntimeException('Soubor s klíči zdrojové instalace musí být objekt JSON.');

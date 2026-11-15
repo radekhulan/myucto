@@ -19,6 +19,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\ActivityLogHashChain;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Export\Instance\TenantScopeResolver;
 use PDO;
 use RuntimeException;
@@ -149,7 +150,8 @@ final class MyuctoImporter
             }
             $this->assertVatHistory($pdo, $tables->hasTable('supplier_vat_status_history') ? $tables->all('supplier_vat_status_history') : null, $sourceSupplier, $supplierId);
             $this->assertAccountingFramework($tables, $package['context']['supplier_accounting_frameworks'] ?? null, $sourceSupplier, $supplierId);
-            $this->assertAccountingModes($pdo, $package['context']['supplier_accounting_modes'] ?? null, $sourceSupplier, $supplierId);
+            $this->assertAccountingModes($pdo, $package['context']['supplier_accounting_modes'] ?? null, $sourceSupplier, $supplierId,
+                (string) $root['accounting_mode'], (string) $target['accounting_mode']);
             $stmt = $pdo->prepare('SELECT id FROM users WHERE id = ? AND is_active = 1');
             $stmt->execute([$actorId]);
             if ($stmt->fetchColumn() === false) {
@@ -476,8 +478,13 @@ final class MyuctoImporter
             } else {
                 $pdo->commit();
                 $this->files->commit();
-                // Přenesená auditní stopa se zapečetí do řetězu cílové instalace až po commitu.
-                (new ActivityLogHashChain($this->db))->sealPending();
+                // Přenesená auditní stopa se zapečetí do řetězu cílové instalace až po commitu. Data jsou
+                // zapsaná; nezapečetěné záznamy dopečetí další zápis, chyba se jen vykáže.
+                try {
+                    (new ActivityLogHashChain($this->db))->sealPending();
+                } catch (\Throwable $e) {
+                    $report['activity_log_sealing'] = 'odloženo: ' . $e->getMessage();
+                }
             }
             return $report;
         } catch (\Throwable $e) {
@@ -1044,9 +1051,9 @@ final class MyuctoImporter
             if (is_array($target)) {
                 $byPrefix = $target;
                 $target = null;
-                foreach ($byPrefix as $prefix => $table) {
+                foreach ($byPrefix as $prefix => $prefixTarget) {
                     if (str_starts_with((string) $row['source_key'], $prefix)) {
-                        $target = $table;
+                        $target = $prefixTarget;
                         break;
                     }
                 }
@@ -1314,13 +1321,23 @@ final class MyuctoImporter
         if (!$tables->hasTable(MyuctoImportProfile::ACTIVITY_TABLE) || $tables->isEmpty(MyuctoImportProfile::ACTIVITY_TABLE)) {
             return;
         }
+        // Spravovaná instance maže auditní stopu starší 14 dní podle id (ActivityLogHashChain::prune());
+        // historické záznamy s novým id by tu retenci i ověření řetězu rozbily, proto se nepřenášejí.
+        if ($this->config !== null && (new ManagedModeGuard($this->config))->isManaged()) {
+            $report['outside_scope'][MyuctoImportProfile::ACTIVITY_TABLE] = $tables->count(MyuctoImportProfile::ACTIVITY_TABLE);
+            return;
+        }
         if ($step !== null) {
             $step('Zápis: auditní stopa (' . $tables->count(MyuctoImportProfile::ACTIVITY_TABLE) . ' řádků)');
         }
+        $sourceSupplier = reset($map['supplier']) === $supplierId ? array_key_first($map['supplier']) : null;
         $inserter = new MyuctoBatchInserter($pdo, MyuctoImportProfile::ACTIVITY_TABLE);
         $rows = iterator_to_array($tables->rows(MyuctoImportProfile::ACTIVITY_TABLE));
         ksort($rows);
         foreach ($rows as $row) {
+            if ($sourceSupplier === null || MyuctoExportReader::id($row['supplier_id'] ?? null) !== (int) $sourceSupplier) {
+                throw new RuntimeException('Export obsahuje data jiné firmy: ' . MyuctoImportProfile::ACTIVITY_TABLE . '.');
+            }
             $entityId = null;
             if (($row['entity_id'] ?? null) !== null) {
                 $target = MyuctoImportProfile::ACTIVITY_ENTITY_TARGETS[(string) ($row['entity_type'] ?? '')] ?? null;
@@ -1735,7 +1752,7 @@ final class MyuctoImporter
      *
      * @param array<int|string,array<string,mixed>>|null $source
      */
-    private function assertAccountingModes(PDO $pdo, ?array $source, int $sourceSupplier, int $targetSupplier): void
+    private function assertAccountingModes(PDO $pdo, ?array $source, int $sourceSupplier, int $targetSupplier, string $sourceDefault, string $targetDefault): void
     {
         if ($source === null || $source === []) {
             return;
@@ -1753,12 +1770,13 @@ final class MyuctoImporter
         $targetByDate = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
         $dates = array_unique([...array_keys($sourceByDate), ...array_keys($targetByDate)]);
         sort($dates);
-        $left = null;
-        $right = null;
+        // Před prvním záznamem historie platí režim z karty firmy (AccountingModeRepository::forDate()).
+        $left = $sourceDefault;
+        $right = $targetDefault;
         foreach ($dates as $date) {
             $left = $sourceByDate[$date] ?? $left;
             $right = $targetByDate[$date] ?? $right;
-            if ($left !== null && $right !== null && $left !== $right) {
+            if ($left !== $right) {
                 throw new RuntimeException('Režim účetnictví cílové firmy se liší od exportu k ' . $date . '.');
             }
         }
@@ -2168,7 +2186,8 @@ final class MyuctoImporter
             $where .= ' AND supplier_id = ?';
             $values[] = $supplierId;
         }
-        $stmt = $pdo->prepare('SELECT id FROM `' . $table . '` WHERE ' . $where . ' FOR UPDATE');
+        // Globální číselník (bez firmy) je neměnný; zámek by blokoval mzdy ostatních firem po celou obnovu.
+        $stmt = $pdo->prepare('SELECT id FROM `' . $table . '` WHERE ' . $where . ($supplierId === null ? '' : ' FOR UPDATE'));
         $stmt->execute($values);
         $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
         if (count($ids) > 1) {
