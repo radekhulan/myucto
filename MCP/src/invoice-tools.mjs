@@ -17,7 +17,9 @@
  */
 
 import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
-import { CONFIRM, requireConfirm, confirmed, changed, merged, seg } from './tool-shared.mjs';
+import {
+  CONFIRM, PAYMENT_METHODS, PAYMENT_METHOD_HELP, requireConfirm, confirmed, changed, merged, seg,
+} from './tool-shared.mjs';
 import {
   invoiceLines, loadDraftInvoice, lineForPut, draftPayload, draftResult,
 } from './tools.mjs';
@@ -71,6 +73,23 @@ const invoiceSummary = (inv) => ({
 const getInvoice = (c, invoiceId, tool) => c.get(`/invoices/${seg(invoiceId)}`, null, tool);
 
 const ISSUED = ['issued', 'sent', 'reminded', 'paid'];
+
+/**
+ * Doklad má živý zápis v deníku, nebo zaúčtovaný pokladní doklad hotovostního vyrovnání.
+ * Storno by takový zápis stornovalo a to je účetní úkon, který token dělat nesmí.
+ */
+const hasJournalWrite = (inv) => Boolean(
+  inv?.booked_at || inv?.locked?.journal_entry_id || inv?.locked?.booked_at
+  || (inv?.cash_documents ?? []).some((doc) => doc?.status === 'posted'),
+);
+
+function refuseJournalWrite(inv, fallbackId, what) {
+  if (!hasJournalWrite(inv)) return;
+  throw new Error(
+    `NEPROVEDENO: ${invoiceLabel(inv, fallbackId)} je zaúčtovaná. ${what} by změnilo zápis v účetním deníku `
+    + 'a účetní deník je přes MCP jen ke čtení. Proveďte to v aplikaci (detail faktury).',
+  );
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rozpis plateb platebního kalendáře (§ 31 a § 31a ZDPH)
@@ -236,12 +255,16 @@ const RECURRING_FIELDS = [
   'increment_month_in_descriptions', 'auto_issue', 'auto_send_email', 'payment_variable_symbol',
 ];
 
-/** Pole řádku šablony, která server při náhradě položek ukládá. */
-const RECURRING_ITEM_FIELDS = [
-  'price_list_item_id', 'catalog_policy', 'description_source', 'catalog_price_source',
+/**
+ * Pole řádku šablony, která server při náhradě položek ukládá (`RecurringTemplateRepository::replaceItems`).
+ * Úplnost hlídá `item-field-coverage.test.mjs` proti `recurring_invoice_template_items`.
+ */
+export const RECURRING_ITEM_FIELDS = [
+  'item_kind', 'price_list_item_id', 'catalog_policy', 'description_source', 'catalog_price_source',
   'catalog_source_currency_code', 'catalog_source_unit_price', 'catalog_exchange_rate',
   'catalog_exchange_rate_date', 'description', 'quantity', 'duration_minutes', 'unit',
   'unit_price_without_vat', 'vat_rate_id', 'vat_classification_code', 'order_index',
+  'revenue_account_code', 'stock_item_id', 'warehouse_id',
   'oss_applicable', 'oss_consumer_country', 'oss_rate_type', 'oss_supply_type',
 ];
 
@@ -261,6 +284,10 @@ const RECURRING_ITEMS = {
     unit: str('Měrná jednotka, výchozí „ks".'),
     unit_price_without_vat: num('Jednotková cena (bez DPH, u šablony s `prices_include_vat` s DPH).'),
     vat_rate_id: int('ID sazby DPH, viz `list_vat_rates`. Sazbu nehádej.'),
+    revenue_account_code: str('Účet položky na vygenerované faktuře (`chart_of_accounts`). Bez zadání výchozí.', { maxLength: 10 }),
+    vat_classification_code: str('Kód členění DPH (`list_vat_classifications`, strana `sales`). Jen na výslovný pokyn.'),
+    stock_item_id: int('Vazba na skladovou kartu; generovaná faktura z ní vydá zboží.'),
+    warehouse_id: int('Sklad k výdeji; jen spolu se `stock_item_id`.'),
   }, ['description', 'quantity', 'unit_price_without_vat', 'vat_rate_id']),
 };
 
@@ -276,7 +303,8 @@ const RECURRING_INPUT = {
   invoice_type: str('Typ generovaného dokladu.', { enum: ['invoice', 'proforma'] }),
   project_id: int('Zakázka; musí patřit odběrateli. 0 zakázku ze šablony odebere.', { minimum: 0 }),
   language: str('Jazyk dokladů.', { enum: ['cs', 'en'] }),
-  payment_method: str('Způsob úhrady.', { enum: ['bank_transfer', 'card', 'cash', 'other'] }),
+  payment_method: str(PAYMENT_METHOD_HELP, { enum: PAYMENT_METHODS }),
+  branding_profile_id: int('Brandingový profil generovaných faktur (`list_branding_profiles`). 0 = výchozí identita firmy.', { minimum: 0 }),
   payment_due_days: int('Splatnost ve dnech (výchozí 14).', { minimum: 0, maximum: 365 }),
   payment_due_unit: str('Jednotka splatnosti.', { enum: ['days', 'month'] }),
   tax_date_mode: str(
@@ -292,7 +320,7 @@ const RECURRING_INPUT = {
   prices_include_vat: bool('Ceny položek jsou včetně DPH.'),
   reverse_charge: bool('Přenesená daňová povinnost.'),
   discount_percent: num('Sleva z celé faktury v procentech (0–100).', { minimum: 0, maximum: 100 }),
-  revenue_category_id: int('Pevná kategorie tržby.'),
+  revenue_category_id: int('Pevná kategorie tržby (`list_revenue_categories`).'),
   note_above_items: str('Poznámka nad položkami.'),
   note_below_items: str('Poznámka pod položkami.'),
   payment_variable_symbol: str('Pevný variabilní symbol pro platbu (jen číslice, max 10).'),
@@ -320,6 +348,7 @@ function recurringLabel(tpl, fallbackId) {
 const recurringInput = (a) => {
   const body = changed(a, RECURRING_FIELDS);
   if (body.project_id === 0) body.project_id = null;
+  if (body.branding_profile_id === 0) body.branding_profile_id = null;
   if (a.items !== undefined) body.items = a.items.map((item, index) => ({ unit: 'ks', ...item, order_index: index }));
   return body;
 };
@@ -364,8 +393,9 @@ export const INVOICE_TOOLS = [
     description:
       'Zruší VYSTAVENÝ doklad. NEVRATNÝ KROK S DAŇOVÝM DOPADEM: jen na výslovný pokyn uživatele.\n\n'
       + '`mode: "internal"` = interní storno chybně vystaveného dokladu, který odběratel '
-      + 'nepřevzal. Doklad dostane stav stornovaný a vypadne z evidence DPH i tržeb, zaúčtovaný '
-      + 'zápis se stornuje. V uzavřeném nebo uzamčeném období (podané DPH) ho aplikace odmítne.\n'
+      + 'nepřevzal. Doklad dostane stav stornovaný a vypadne z evidence DPH i tržeb. Jen u NEZAÚČTOVANÉHO '
+      + 'dokladu: zaúčtovaný (i se zaúčtovaným pokladním dokladem) nástroj odmítne, storno zápisu v deníku '
+      + 'dělá účetní v aplikaci. V uzavřeném nebo uzamčeném období (podané DPH) ho aplikace odmítne.\n'
       + '`mode: "credit_note"` = opravný daňový doklad (dobropis) k dokladu, který odběratel už má. '
       + 'Vznikne KONCEPT dobropisu se zápornými položkami a dnešním datem; ten je potřeba '
       + 'zkontrolovat a vystavit (`issue_invoice`). Dobropis sám jde stornovat jen interně.\n\n'
@@ -390,6 +420,7 @@ export const INVOICE_TOOLS = [
       if (invoice.invoice_type === 'credit_note' && a.mode !== 'internal') {
         throw new Error('Dobropis lze stornovat pouze interně (`mode: "internal"`).');
       }
+      if (a.mode === 'internal') refuseJournalWrite(invoice, a.id, 'Interní storno');
       requireConfirm(
         a,
         a.mode === 'internal' ? 'Interně stornovat se má' : 'K dokladu se má založit dobropis',
@@ -407,7 +438,8 @@ export const INVOICE_TOOLS = [
     title: 'Zrušit interní storno',
     description:
       'Vrátí omylem interně stornovanou fakturu nebo zálohu do stavu před stornem. Doklad se '
-      + 'vrací do evidence DPH svého původního období a podle nastavení firmy se znovu zaúčtuje. '
+      + 'vrací do evidence DPH svého původního období. Jen u faktury, která nebyla zaúčtovaná: '
+      + 'zrušení storna zaúčtované faktury maže zápisy v deníku a dělá ho účetní v aplikaci. '
       + 'Nejde, když byl doklad zrušen vystaveným dobropisem, ani v uzavřeném nebo uzamčeném období.\n\n'
       + 'Daňový dopad: jen na výslovný pokyn. Bez `confirm: true` nic neprovede a jen vypíše doklad.',
     inputSchema: schema({ id: id('ID stornované faktury nebo zálohy.'), confirm: CONFIRM }, ['id']),
@@ -418,6 +450,7 @@ export const INVOICE_TOOLS = [
       if (invoice?.status !== 'cancelled' || !['invoice', 'proforma'].includes(invoice?.invoice_type)) {
         throw new Error(`${invoiceLabel(invoice, a.id)}: zrušit storno lze jen u stornované faktury nebo zálohy.`);
       }
+      refuseJournalWrite(invoice, a.id, 'Zrušení storna');
       requireConfirm(a, 'Zrušit storno a obnovit se má', invoiceLabel(invoice, a.id));
       return { invoice: invoiceSummary(invoice), result: await c.post(`/invoices/${seg(a.id)}/uncancel`, {}, tool) };
     },

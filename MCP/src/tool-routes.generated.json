@@ -529,6 +529,14 @@
     "write": true,
     "api": [
       [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/codebooks/currencies"
+      ],
+      [
         "POST",
         "/api/invoices"
       ]
@@ -1906,6 +1914,15 @@
       ]
     ]
   },
+  "list_branding_profiles": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/branding-profiles"
+      ]
+    ]
+  },
   "list_cash_documents": {
     "write": false,
     "api": [
@@ -2014,6 +2031,15 @@
       ]
     ]
   },
+  "list_expense_rules": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/expense-rules"
+      ]
+    ]
+  },
   "list_fee_types": {
     "write": false,
     "api": [
@@ -2047,6 +2073,15 @@
       [
         "GET",
         "/api/invoices/{id}/attachments"
+      ]
+    ]
+  },
+  "list_invoice_number_series": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/number-series"
       ]
     ]
   },
@@ -2305,6 +2340,15 @@
       ]
     ]
   },
+  "list_posting_rules": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/posting-rules"
+      ]
+    ]
+  },
   "list_price_levels": {
     "write": false,
     "api": [
@@ -2494,6 +2538,15 @@
       ]
     ]
   },
+  "list_purchase_number_series": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/number-series"
+      ]
+    ]
+  },
   "list_purchase_payment_candidates": {
     "write": false,
     "api": [
@@ -2527,6 +2580,15 @@
       [
         "GET",
         "/api/recurring"
+      ]
+    ]
+  },
+  "list_revenue_categories": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/revenue-categories"
       ]
     ]
   },
@@ -2608,6 +2670,19 @@
       [
         "GET",
         "/api/invoices"
+      ]
+    ]
+  },
+  "list_vat_classifications": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/vat-classifications"
+      ],
+      [
+        "GET",
+        "/api/vat-classifications/lines"
       ]
     ]
   },
@@ -3415,11 +3490,32 @@
       ]
     ]
   },
+  "set_invoice_dimensions": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/dimensions/documents/invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/accounting/dimensions/documents/invoices/{id}"
+      ]
+    ]
+  },
   "set_invoice_payment_schedule": {
     "write": true,
     "api": [
       [
         "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "PUT",
         "/api/invoices/{id}"
       ]
     ]
@@ -3477,6 +3573,23 @@
       ]
     ]
   },
+  "set_purchase_invoice_dimensions": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/dimensions/documents/purchase-invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/accounting/dimensions/documents/purchase-invoices/{id}"
+      ]
+    ]
+  },
   "set_purchase_invoice_document_kind": {
     "write": true,
     "api": [
@@ -3496,6 +3609,10 @@
       [
         "GET",
         "/api/purchase-invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/exchange-rate"
       ]
     ]
   },
@@ -3505,6 +3622,10 @@
       [
         "GET",
         "/api/purchase-invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/purchase-invoices/{id}/expense-kinds"
       ]
     ]
   },
@@ -3877,6 +3998,10 @@
       [
         "GET",
         "/api/invoices"
+      ],
+      [
+        "GET",
+        "/api/codebooks/currencies"
       ]
     ]
   },
