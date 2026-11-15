@@ -243,8 +243,6 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['POST', '/api/invoices/12/rebuild-snapshots'],
             ['POST', '/api/bank-transactions/34/post'],
             ['POST', '/api/bank-transactions/34/unpost'],
-            // Zrušení párování zaúčtovaného pohybu stornuje zápis stejně jako unpost.
-            ['POST', '/api/bank-transactions/34/unmatch'],
             ['POST', '/api/reports/s74b/record'],
             ['POST', '/api/reports/s46/correction'],
             ['PUT',  '/api/tax/profile'],
@@ -258,6 +256,24 @@ final class ApiScopeMiddlewareTest extends TestCase
             );
             self::assertSame(403, $r->getStatusCode(), "$method $path musí být odmítnuto");
             self::assertSame('token_write_forbidden', $this->errorCode($r), "$method $path");
+        }
+    }
+
+    /**
+     * Párování banky token smí, včetně zrušení párování. Deník hlídá akce: po spárování
+     * tokenem nic nezaúčtuje a pohyb se zápisem v deníku tokenu neodpáruje
+     * (BankMatchTokenPostingTest). Zaúčtování a jeho zrušení zůstávají zavřené výš.
+     */
+    public function testBearerReadWriteCanMatchAndUnmatchBankTransactions(): void
+    {
+        foreach ([
+            ['POST', '/api/bank-transactions/34/match'],
+            ['POST', '/api/bank-transactions/34/match-document'],
+            ['POST', '/api/bank-transactions/34/unmatch'],
+            ['POST', '/api/bank-match-suggestions/5/accept'],
+        ] as [$method, $path]) {
+            $r = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            self::assertSame(204, $r->getStatusCode(), "bearer $method $path musí projít");
         }
     }
 

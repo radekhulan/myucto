@@ -8324,6 +8324,12 @@ paths:
         Odpověď má tři tvary podle toho, co se párovalo — vždy obsahuje `matched`,
         `paid_at` a `posting` (souhrn automatického zaúčtování, `null` když se
         neúčtovalo).
+
+        API token bez plného zápisu (MCP, integrace) jen páruje a do účetního deníku
+        nezapisuje: `posting` je `{action: deferred, reason: api_token}`. Spárovaný
+        pohyb zaúčtuje uživatel v aplikaci nebo plánovaný přepočet fronty automatiky
+        podle politiky automatického účtování firmy. Pohyb, který už má zápis v deníku,
+        token nepřepáruje (403 `token_write_forbidden`).
       requestBody:
         required: true
         content:
@@ -8408,7 +8414,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '403':
-          description: Chybí oprávnění k párování nebo změně úhrady dokladu.
+          description: |
+            Chybí oprávnění k párování nebo změně úhrady dokladu, nebo API token
+            páruje pohyb se zápisem v deníku (`token_write_forbidden`).
         '404':
           description: |
             Transakce nenalezena (`not_found`), faktura nenalezena nebo patří jiné
@@ -8457,15 +8465,16 @@ paths:
         zbývajících plateb — fakturu, kterou kryje jiná platba, nechá zaplacenou.
         Zaúčtovaný pohyb se stornuje; u zaúčtovaného pohybu proto endpoint vyžaduje
         stejná práva jako `unpost` (`bank.unpost` a zápis do účetnictví).
-        Přes API token je endpoint jen pro čtení (`token_write_forbidden`).
+        API token bez plného zápisu smí zrušit jen párování pohybu bez zápisu
+        v deníku, který nehradí zálohu; jinak `token_write_forbidden`.
       responses:
         '200':
           description: OK
         '403':
           description: |
             Chybí oprávnění k párování nebo změně úhrady dokladu, u zaúčtovaného pohybu
-            oprávnění odúčtovat banku (`forbidden`), nebo jde o volání API tokenem
-            (`token_write_forbidden`).
+            oprávnění odúčtovat banku (`forbidden`), nebo API token ruší párování pohybu
+            se zápisem v deníku či úhrady zálohy (`token_write_forbidden`).
         '409':
           description: |
             Zrušení párování odmítnuto — zápis leží v uzavřeném nebo zamčeném období
@@ -10640,6 +10649,9 @@ paths:
         kandidáta čtení i právo změnit úhradu (`invoices.mark_paid`, u přijatých
         faktur `purchase_invoices.transition`). Práva a dostupnost pohybu se
         kontrolují znovu při potvrzení návrhu.
+
+        API token bez plného zápisu pohyb jen spáruje a nezaúčtuje (`posting`
+        `{action: deferred, reason: api_token}`), stejně jako ruční párování.
       requestBody:
         required: false
         content:
@@ -10650,7 +10662,7 @@ paths:
                 candidate_index: { type: integer, minimum: 0, default: 0 }
       responses:
         '200': { description: Transakce byla spárována }
-        '403': { description: Chybí oprávnění k párování nebo změně úhrady dokladu }
+        '403': { description: 'Chybí oprávnění k párování nebo změně úhrady dokladu, nebo má pohyb zápis v deníku a volá API token (`token_write_forbidden`).' }
         '404': { description: Návrh nebyl nalezen v aktuální firmě }
         '409': { description: Návrh už byl vyřízen }
         '422': { description: Index kandidáta je mimo rozsah }
@@ -28693,6 +28705,26 @@ paths:
               schema: { $ref: '#/components/schemas/BankMovementPage' }
         '400': { description: 'Není zvolena firma.' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/bank-transactions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [Bank]
+      summary: Detail bankovního pohybu
+      description: |
+        Jeden pohyb ve stejném tvaru jako řádek `GET /bank-transactions`: stav párování,
+        navázaný doklad, stav zaúčtování (jen podvojné účetnictví) a korunový přepočet.
+        Vyžaduje čtení banky.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankMovement' }
+        '400': { description: 'Není zvolena firma.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/bank-transactions/payment-candidates:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -54216,7 +54248,10 @@ components:
       properties:
         action:
           type: string
-          description: "Co automatika udělala. `skipped` je výchozí, když služba akci nevrátila."
+          description: |
+            Co automatika udělala. `skipped` je výchozí, když služba akci nevrátila.
+            `deferred` (důvod `api_token`) = párování API tokenem, zaúčtování proběhne
+            až v aplikaci nebo plánovaným přepočtem podle politiky firmy.
         reason:
           type: string
           description: Doplňující důvod — přítomný jen když ho služba uvedla.
@@ -54537,6 +54572,19 @@ components:
           description: "Typy dimenzí z `dimensions`, které pohybu zapsalo pravidlo účtování při zaúčtování (ostatní jsou zadané ručně). Jen tam, kde je `dimensions`."
           items: { type: integer, format: int64 }
 
+    BankMovement:
+      description: Bankovní pohyb v přehledu napříč účty (`GET /bank-transactions`, `GET /bank-transactions/{id}`).
+      allOf:
+        - $ref: '#/components/schemas/BankTransaction'
+        - type: object
+          properties:
+            account_number: { type: string, description: Náš účet z výpisu. }
+            bank_code: { type: [string, "null"] }
+            account_label: { type: [string, "null"], description: Název našeho účtu z nastavení firmy. }
+            period_closed: { type: boolean, description: "Pohyb leží v uzavřeném nebo zamčeném účetním období. Mimo podvojné účetnictví vždy false." }
+            fx_rate: { type: [number, "null"], description: Kurz do CZK ke dni pohybu. }
+            amount_czk: { type: [number, "null"] }
+
     BankMovementPage:
       type: object
       description: Stránka seznamu bankovních pohybů (`GET /bank-transactions`).
@@ -54544,17 +54592,7 @@ components:
       properties:
         items:
           type: array
-          items:
-            allOf:
-              - $ref: '#/components/schemas/BankTransaction'
-              - type: object
-                properties:
-                  account_number: { type: string, description: Náš účet z výpisu. }
-                  bank_code: { type: [string, "null"] }
-                  account_label: { type: [string, "null"], description: Název našeho účtu z nastavení firmy. }
-                  period_closed: { type: boolean, description: "Pohyb leží v uzavřeném nebo zamčeném účetním období. Mimo podvojné účetnictví vždy false." }
-                  fx_rate: { type: [number, "null"], description: Kurz do CZK ke dni pohybu. }
-                  amount_czk: { type: [number, "null"] }
+          items: { $ref: '#/components/schemas/BankMovement' }
         total: { type: integer }
         page: { type: integer, minimum: 1 }
         per_page: { type: integer, minimum: 1, maximum: 100 }

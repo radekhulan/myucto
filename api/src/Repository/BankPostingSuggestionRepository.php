@@ -692,6 +692,7 @@ final class BankPostingSuggestionRepository
      *   account   — náš zdrojový účet (bs.account_number, normalizováno stejně jako u BankStatementAction::list).
      *   sort      — sloupec řazení z whitelistu {@see BankTransactionSort::KEYS} (jinak datum),
      *   direction — asc | desc (výchozí desc, nejnovější nahoře).
+     *   id        — jediný pohyb (detail `GET /bank-transactions/{id}`).
      */
     public function paginateUnposted(int $supplierId, int $limit, int $offset, array $filters = []): array
     {
@@ -718,6 +719,11 @@ final class BankPostingSuggestionRepository
         if (!$unpostedOnly && in_array($posting, ['unposted', 'posted'], true)) {
             $scopeSql .= ' AND ' . ($posting === 'unposted' ? 'NOT ' : '')
                 . BankTransactionPostingScope::existsSql($supplierId, 'bt.id');
+        }
+
+        if (isset($filters['id']) && (int) $filters['id'] > 0) {
+            $scopeSql .= ' AND bt.id = ?';
+            $scopeParams[] = (int) $filters['id'];
         }
 
         $year = isset($filters['year']) && (int) $filters['year'] > 0 ? (int) $filters['year'] : null;

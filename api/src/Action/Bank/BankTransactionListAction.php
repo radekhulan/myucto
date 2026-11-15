@@ -31,4 +31,20 @@ final class BankTransactionListAction
         $result['items'] = $this->clientAccess->redactTransactions($request, $result['items']);
         return Json::ok($response, $result);
     }
+
+    /** GET /api/bank-transactions/{id} — jeden pohyb ve tvaru řádku přehledu. */
+    public function detail(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = SupplierGuard::currentId($request);
+        if ($supplierId <= 0) {
+            return Json::error($response, 'no_supplier', 'Není zvolen dodavatel.', 400);
+        }
+        $id = (int) ($args['id'] ?? 0);
+        $result = $this->movements->list($supplierId, ['id' => $id, 'per_page' => 1], 'all', RequestAuthorization::isClientType($request));
+        $items = $this->clientAccess->redactTransactions($request, $result['items']);
+        if ($id <= 0 || $items === []) {
+            return Json::error($response, 'not_found', 'Transakce nenalezena.', 404);
+        }
+        return Json::ok($response, $items[0]);
+    }
 }

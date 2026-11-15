@@ -2396,13 +2396,21 @@ final class BankStatementAction
         $body = (array) ($request->getParsedBody() ?? []);
         $candidateIndex = (int) ($body['candidate_index'] ?? 0);
 
+        if (RequestAuthorization::isRestrictedBearer($request)) {
+            $owner = $this->db->pdo()->prepare('SELECT bank_transaction_id FROM bank_match_suggestions WHERE id = ? AND supplier_id = ?');
+            $owner->execute([(int) ($args['id'] ?? 0), $supplierId]);
+            $suggestedTxId = (int) $owner->fetchColumn();
+            $guard = $suggestedTxId > 0 ? $this->tokenJournalChangeError($request, $response, $suggestedTxId, false) : null;
+            if ($guard !== null) {
+                return $guard;
+            }
+        }
+
         try {
             $result = $this->matchV2->accept((int) ($args['id'] ?? 0), $supplierId, $userId, $candidateIndex,
                 RequestAuthorization::isClientType($request) ? fn (array $candidate, array $transaction) => $this->clientAccess->assertAvailableCandidate($request, $candidate, $transaction) : null);
             $transactionId = (int) ($result['bank_transaction_id'] ?? 0);
-            $posting = $transactionId > 0
-                ? $this->postingSummary($this->bankPosting->handleTransaction($transactionId, $userId ?: null))
-                : null;
+            $posting = $transactionId > 0 ? $this->postAfterMatch($request, $transactionId, $userId) : null;
             $result['posting'] = RequestAuthorization::isClientType($request) ? null : $posting;
             return Json::ok($response, $result);
         } catch (\DomainException $e) {
@@ -3246,6 +3254,8 @@ final class BankStatementAction
 
     private function manualMatchWithCurrentSource(Request $request, Response $response, array $args): Response
     {
+        $guard = $this->tokenJournalChangeError($request, $response, (int) ($args['id'] ?? 0), false);
+        if ($guard !== null) return $guard;
         if (!RequestAuthorization::isClientType($request)) return $this->performManualMatch($request, $response, $args);
         if (!RequestAuthorization::allows($request, 'bank.match', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Chybí oprávnění pro párování banky.', 403);
@@ -3548,7 +3558,7 @@ final class BankStatementAction
         $this->recordManualMatchV2($txId, SupplierGuard::currentId($request), $userId);
 
         // Automatizace: zaúčtování po spárování (M5 — „spárováno" × „spárováno a zaúčtováno").
-        $posting = $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+        $posting = $this->postAfterMatch($request, $txId, $userId);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.tx_manual_match', $userId ?: null, 'bank_transaction', $txId, [
@@ -3649,6 +3659,54 @@ final class BankStatementAction
             $this->payments->markCreditNoteRefunded($invoiceId, $supplierId, $postedAt);
         }
         return $covered;
+    }
+
+    /**
+     * Zaúčtování po spárování (M5). API token bez plného zápisu jen páruje: deník je pro něj
+     * jednosměrný ({@see \MyInvoice\Middleware\ApiScopeMiddleware}), takže pohyb zůstane
+     * spárovaný a nezaúčtovaný ({@see \MyInvoice\Service\Accounting\Bank\BankPostingService::deferMatchedPosting()}).
+     *
+     * @return array{action:string, reason?:string}|null
+     */
+    private function postAfterMatch(Request $request, int $txId, int $userId): ?array
+    {
+        if (RequestAuthorization::isRestrictedBearer($request)) {
+            return $this->bankPosting->deferMatchedPosting(SupplierGuard::currentId($request), $txId);
+        }
+        return $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+    }
+
+    /**
+     * Párování ani jeho zrušení tokenem bez plného zápisu nesmí sáhnout do deníku. U pohybu
+     * s živým zápisem (i nezaúčtovaným konceptem) by přepárování zápis přepsalo a zrušení
+     * párování ho stornovalo, zrušení úhrady zálohy navíc dorovnává její zúčtování. Takovou
+     * změnu udělá uživatel v aplikaci.
+     */
+    private function tokenJournalChangeError(Request $request, Response $response, int $txId, bool $unmatch): ?Response
+    {
+        if (!RequestAuthorization::isRestrictedBearer($request)) {
+            return null;
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $types = BankTransactionReleaseService::TRANSACTION_SOURCE_TYPES;
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM journal_entries
+              WHERE supplier_id = ? AND source_type IN (' . implode(',', array_fill(0, count($types), '?')) . ') AND source_id = ?
+                AND reversed_by IS NULL
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, ...$types, $txId]);
+        $journal = $stmt->fetchColumn() !== false;
+        $advances = $unmatch && !$journal
+            && array_merge(...array_values($this->bankPosting->advancesOfTransaction($supplierId, $txId))) !== [];
+        if (!$journal && !$advances) {
+            return null;
+        }
+        return Json::error($response, 'token_write_forbidden', $journal
+            ? 'Pohyb má zápis v účetním deníku. Párování zaúčtovaného pohybu přes API token měnit nelze, '
+                . 'zrušení párování nebo přepárování proveďte ve webovém rozhraní.'
+            : 'Pohyb hradí zálohu a zrušení párování by změnilo její zúčtování v deníku. '
+                . 'Proveďte ho ve webovém rozhraní.', 403);
     }
 
     /**
@@ -3987,7 +4045,7 @@ final class BankStatementAction
         $this->recordManualMatchV2($txId, SupplierGuard::currentId($request), $userId);
 
         // Automatizace: zaúčtování sloučené úhrady (split = 1 zápis s N řádky saldokonta).
-        $posting = $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+        $posting = $this->postAfterMatch($request, $txId, $userId);
 
         $result = ['matched' => true, 'split' => true, 'paid_at' => $postedAt, 'invoice_ids' => $invoiceIds, 'posting' => $posting];
         if ($finalDraftIds !== []) {
@@ -4085,7 +4143,7 @@ final class BankStatementAction
                     $paidStmt->execute(array_merge($requestedIds, [$supplierId]));
                     if ((int) $paidStmt->fetchColumn() === count($requestedIds)) {
                         self::commitAtomic($pdo, $own, $savepoint);
-                        $posting = $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+                        $posting = $this->postAfterMatch($request, $txId, $userId);
                         return Json::ok($response, [
                             'matched' => true,
                             'split' => true,
@@ -4288,7 +4346,7 @@ final class BankStatementAction
         }
 
         $this->recordManualMatchV2($txId, $supplierId, $userId);
-        $posting = $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+        $posting = $this->postAfterMatch($request, $txId, $userId);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.tx_manual_match_purchase_split', $userId ?: null, 'bank_transaction', $txId, [
             'purchase_invoice_ids' => $purchaseInvoiceIds,
@@ -4524,7 +4582,7 @@ final class BankStatementAction
         $this->recordManualMatchV2($txId, $supplierId, $userId);
 
         // Automatizace: zaúčtování úhrady přijaté faktury (321/221).
-        $posting = $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+        $posting = $this->postAfterMatch($request, $txId, $userId);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.tx_manual_match_purchase', $userId ?: null, 'bank_transaction', $txId, [
@@ -4565,6 +4623,8 @@ final class BankStatementAction
 
     private function unmatchWithCurrentSource(Request $request, Response $response, array $args): Response
     {
+        $guard = $this->tokenJournalChangeError($request, $response, (int) ($args['id'] ?? 0), true);
+        if ($guard !== null) return $guard;
         if (!RequestAuthorization::isClientType($request)) return $this->performUnmatch($request, $response, $args);
         if (!RequestAuthorization::allows($request, 'bank.match', AccessLevel::WRITE)) return Json::error($response, 'forbidden', 'Chybí oprávnění pro párování banky.', 403);
         $pdo = $this->db->pdo();
