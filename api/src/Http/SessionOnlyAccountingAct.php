@@ -15,7 +15,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * čtení po CESTÁCH (/api/accounting/*, /api/invoices/{id}/book …). Některé akce mimo ně
  * ale účetní úkon provedou samy: přechod přijaté faktury na `booked`, druh nákladu
  * u zaúčtovaného dokladu (přeúčtuje deník), vynucená úprava nebo smazání vystaveného či
- * zaúčtovaného dokladu a přebití zámku uzavřeného období přes `?force=1`. Cesta je tam
+ * zaúčtovaného dokladu, storno zaúčtované faktury (vydané i přijaté, stornuje zápis),
+ * zrušení storna zaúčtované faktury (maže zápisy) a přebití zámku uzavřeného období
+ * přes `?force=1`. Cesta je tam
  * sdílená s běžným workflow, které token smí, takže rozhoduje až akce podle toho, co
  * požadavek znamená. Tady je to pravidlo jednou a dá se zavolat.
  *

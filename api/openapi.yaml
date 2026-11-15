@@ -7575,7 +7575,9 @@ paths:
 
         Dobropis lze stornovat pouze v režimu `internal`. Stornovací doklad
         (`cancellation`) stornovat nelze. Storno je účetní akt — na zaúčtovaném
-        či uzamčeném dokladu ho blokuje zámek (Epic F6).
+        či uzamčeném dokladu ho blokuje zámek (Epic F6). Interní storno zaúčtované faktury
+        stornuje i její zápis v deníku, proto přes API token vrací 403 `token_write_forbidden`
+        (provádí se v aplikaci); dobropis (`credit_note`) token založit smí.
 
         Kalendář (`rent_calendar`, `advance_calendar`) se stornuje jen v režimu `internal`
         a spolu s ním i jeho neuhrazené splátky. Doklad splátky se opravuje jen dobropisem
@@ -11916,8 +11918,9 @@ paths:
       description: |
         `target=booked` je ruční zaúčtování dokladu, tedy účetní úkon: přes API token
         vrací 403 `token_write_forbidden` a provádí se v aplikaci (token s plným zápisem
-        `system_write` ho provede jako uživatel v aplikaci). Ostatní přechody
-        token smí; automatické zaúčtování při přijetí (`received`), které má firma
+        `system_write` ho provede jako uživatel v aplikaci). Totéž platí pro
+        `target=cancelled` u zaúčtovaného dokladu (storno stornuje i zápis v deníku).
+        Ostatní přechody token smí; automatické zaúčtování při přijetí (`received`), které má firma
         zapnuté, proběhne stejně jako z aplikace.
 
         Schvalování manažerem střediska: vyžaduje-li koncept schválení (typ dimenze
@@ -34199,6 +34202,9 @@ paths:
       - Invoices
       summary: Obnovení interně stornované faktury
       operationId: publicInvoicesIdUncancelPost
+      description: |
+        Má-li faktura nebo její stornovací doklad zápisy v deníku, obnovení je smaže; přes
+        API token proto vrací 403 `token_write_forbidden` a provádí se v aplikaci.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - name: id

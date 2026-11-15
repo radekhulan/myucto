@@ -122,6 +122,12 @@ final class TransitionPurchaseInvoiceStatusAction
                 return $deny;
             }
         }
+        // Storno zaúčtovaného dokladu stornuje i jeho zápis v deníku, a to je ruční účetní
+        // úkon jen z relace. Nezaúčtovaný doklad (koncept, přijatý bez zápisu) token stornovat smí.
+        if ($target === 'cancelled' && $lock->posted
+            && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Storno zaúčtované přijaté faktury'))) {
+            return $deny;
+        }
 
         $currentStatus = (string) $existing['status'];
         $allowed = self::TRANSITIONS[$currentStatus] ?? [];

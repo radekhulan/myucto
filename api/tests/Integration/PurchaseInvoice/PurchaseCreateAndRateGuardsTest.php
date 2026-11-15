@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\PurchaseInvoice;
 
 use MyInvoice\Action\PurchaseInvoice\CreatePurchaseInvoiceAction;
 use MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceExchangeRateAction;
+use MyInvoice\Action\PurchaseInvoice\TransitionPurchaseInvoiceStatusAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -21,7 +22,8 @@ use Slim\Psr7\Response as Psr7Response;
  *    přechod (schvalování, automatické zaúčtování, pokladní doklad);
  *  - zaokrouhlení zadané při založení se uloží stejně jako při úpravě;
  *  - POST /purchase-invoices/{id}/exchange-rate odmítne zaúčtovaný a stornovaný doklad,
- *    protože deník nepřeúčtuje.
+ *    protože deník nepřeúčtuje;
+ *  - API token zaúčtovanou fakturu nestornuje (storno zápisu je ruční účetní úkon).
  *
  * Data jsou syntetická (rok 2096), vše v transakci s rollbackem.
  */
@@ -113,18 +115,7 @@ final class PurchaseCreateAndRateGuardsTest extends TestCase
     public function testExchangeRateRefusedForPostedDocument(): void
     {
         $id = $this->createInvoice();
-        $pdo = $this->db->pdo();
-        $periodId = (int) $pdo->query(
-            "SELECT id FROM accounting_periods WHERE supplier_id = {$this->supplierId} ORDER BY id LIMIT 1"
-        )->fetchColumn();
-        if ($periodId === 0) {
-            self::markTestSkipped('Bez účetního období nelze založit zápis.');
-        }
-        $pdo->prepare(
-            "INSERT INTO journal_entries
-                (supplier_id, period_id, entry_date, description, source_type, source_id, posted_at)
-             VALUES (?, ?, '2096-07-02', 'Test zaúčtování', 'purchase_invoice', ?, NOW())"
-        )->execute([$this->supplierId, $periodId, $id]);
+        $this->markPosted($id);
         $before = $this->column($id, 'exchange_rate');
 
         $res = $this->setRate($id, 26.5);
@@ -144,6 +135,31 @@ final class PurchaseCreateAndRateGuardsTest extends TestCase
 
         self::assertSame(409, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
         self::assertSame('not_editable', $res['body']['error']['code'] ?? null);
+    }
+
+    /** BEZ OPRAVY PADÁ: token stornoval zaúčtovanou přijatou fakturu i s jejím zápisem v deníku. */
+    public function testTokenCannotCancelPostedDocument(): void
+    {
+        $id = $this->createInvoice();
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'received' WHERE id = ?")->execute([$id]);
+        $this->markPosted($id);
+
+        $res = $this->transition($id, 'cancelled', 'bearer');
+
+        self::assertSame(403, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('token_write_forbidden', $res['body']['error']['code'] ?? null);
+        self::assertSame('received', $this->column($id, 'status'));
+    }
+
+    public function testTokenMayCancelUnpostedDocument(): void
+    {
+        $id = $this->createInvoice();
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'received' WHERE id = ?")->execute([$id]);
+
+        $res = $this->transition($id, 'cancelled', 'bearer');
+
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('cancelled', $this->column($id, 'status'));
     }
 
     public function testExchangeRateAllowedForDraft(): void
@@ -183,6 +199,34 @@ final class PurchaseCreateAndRateGuardsTest extends TestCase
         self::assertSame(201, $created['status'], json_encode($created['body'], JSON_UNESCAPED_UNICODE));
 
         return (int) $created['body']['id'];
+    }
+
+    private function markPosted(int $id): void
+    {
+        $pdo = $this->db->pdo();
+        $periodId = (int) $pdo->query(
+            "SELECT id FROM accounting_periods WHERE supplier_id = {$this->supplierId} ORDER BY id LIMIT 1"
+        )->fetchColumn();
+        if ($periodId === 0) {
+            self::markTestSkipped('Bez účetního období nelze založit zápis.');
+        }
+        $pdo->prepare(
+            "INSERT INTO journal_entries
+                (supplier_id, period_id, entry_date, description, source_type, source_id, posted_at)
+             VALUES (?, ?, '2096-07-02', 'Test zaúčtování', 'purchase_invoice', ?, NOW())"
+        )->execute([$this->supplierId, $periodId, $id]);
+    }
+
+    /** @return array{status:int, body:array<string,mixed>} */
+    private function transition(int $id, string $target, string $auth): array
+    {
+        $request = $this->request('POST', ['target' => $target])->withAttribute(AuthMiddleware::ATTR_METHOD, $auth);
+        if ($auth === 'bearer') {
+            $request = $request->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['scope' => 'read_write']);
+        }
+        $action = Bootstrap::buildContainer()->get(TransitionPurchaseInvoiceStatusAction::class);
+
+        return self::decode($action($request, new Psr7Response(), ['id' => (string) $id]));
     }
 
     /** @return array{status:int, body:array<string,mixed>} */

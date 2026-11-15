@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Invoice;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -155,6 +156,12 @@ final class CancelInvoiceAction
         }
 
         if ($mode === 'internal') {
+            // Interní storno zaúčtované faktury stornuje i její zápis v deníku: ruční účetní
+            // úkon jen z relace. Dobropis (mode=credit_note) vzniká jako koncept a deníku se nedotkne.
+            if ($this->locks->forInvoice($invoice)->posted
+                && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Interní storno zaúčtované faktury'))) {
+                return $deny;
+            }
             return $this->internalCancel($request, $response, $invoice, $reason);
         }
         if ($mode === 'credit_note') {
@@ -193,7 +200,12 @@ final class CancelInvoiceAction
                 return Json::error($response, 'calendar_instalment_settled', 'Kalendář má uhrazené nebo dobropisované splátky. Nejdřív odeberte úhrady a stornujte dobropisy.', 409);
             }
             $instalment = $this->repo->find((int) $row['id']);
-            if ($deny = $this->denyIfLocked($request, $response, $this->locks->forInvoice($instalment), 'invoice', (int) $row['id'])) {
+            $instalmentLock = $this->locks->forInvoice($instalment);
+            if ($deny = $this->denyIfLocked($request, $response, $instalmentLock, 'invoice', (int) $row['id'])) {
+                return $deny;
+            }
+            if ($instalmentLock->posted
+                && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Storno kalendáře se zaúčtovanou splátkou'))) {
                 return $deny;
             }
             $loaded[] = $instalment;

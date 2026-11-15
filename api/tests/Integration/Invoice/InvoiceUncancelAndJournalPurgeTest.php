@@ -126,6 +126,44 @@ final class InvoiceUncancelAndJournalPurgeTest extends StockTestCase
         self::assertNotNull($this->lastLog('invoice.uncancelled', $invoiceId));
     }
 
+    /**
+     * BEZ OPRAVY PADÁ: API token (MCP) stornoval zaúčtovanou fakturu i se zápisem v deníku
+     * a zrušením storna zápisy mazal. Obojí je ruční účetní úkon jen z relace.
+     */
+    public function testTokenCannotCancelOrUncancelPostedInvoice(): void
+    {
+        $supplierId = $this->doubleEntrySupplier();
+        $invoiceId = $this->issuedInvoice($supplierId, 'FV-2099-T1');
+        $this->post($supplierId, $invoiceId);
+
+        $denied = $this->invoke(CancelInvoiceAction::class, $supplierId, $invoiceId, ['mode' => 'internal'], [], 'bearer');
+        self::assertSame(403, $denied['status'], json_encode($denied['body']));
+        self::assertSame('token_write_forbidden', $denied['body']['error']['code'] ?? null);
+        self::assertSame('issued', $this->invoiceRowById($invoiceId)['status']);
+
+        $cancel = $this->invoke(CancelInvoiceAction::class, $supplierId, $invoiceId, ['mode' => 'internal']);
+        self::assertSame(200, $cancel['status'], json_encode($cancel['body']));
+        $journal = $this->journalCount($supplierId);
+
+        $uncancel = $this->invoke(UncancelInvoiceAction::class, $supplierId, $invoiceId, [], [], 'bearer');
+        self::assertSame(403, $uncancel['status'], json_encode($uncancel['body']));
+        self::assertSame('token_write_forbidden', $uncancel['body']['error']['code'] ?? null);
+        self::assertSame($journal, $this->journalCount($supplierId), 'Zápisy v deníku zůstaly.');
+        self::assertSame('cancelled', $this->invoiceRowById($invoiceId)['status']);
+    }
+
+    /** Nezaúčtovanou fakturu token interně stornovat i vrátit smí, deník se nemění. */
+    public function testTokenMayCancelAndUncancelUnpostedInvoice(): void
+    {
+        $supplierId = $this->doubleEntrySupplier();
+        $invoiceId = $this->issuedInvoice($supplierId, 'FV-2099-T2');
+
+        $cancel = $this->invoke(CancelInvoiceAction::class, $supplierId, $invoiceId, ['mode' => 'internal'], [], 'bearer');
+        self::assertSame(200, $cancel['status'], json_encode($cancel['body']));
+        $uncancel = $this->invoke(UncancelInvoiceAction::class, $supplierId, $invoiceId, [], [], 'bearer');
+        self::assertSame(200, $uncancel['status'], json_encode($uncancel['body']));
+    }
+
     public function testUncancelBlockedWhenDateLocked(): void
     {
         $supplierId = $this->doubleEntrySupplier();
@@ -243,13 +281,16 @@ final class InvoiceUncancelAndJournalPurgeTest extends StockTestCase
      * @param array<string,mixed> $query
      * @return array{status:int, body:array<mixed>}
      */
-    private function invoke(string $actionClass, int $supplierId, int $invoiceId, array $body = [], array $query = []): array
+    private function invoke(string $actionClass, int $supplierId, int $invoiceId, array $body = [], array $query = [], string $auth = 'session'): array
     {
         $req = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/test')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
-            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, $auth);
+        if ($auth === 'bearer') {
+            $req = $req->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['scope' => 'read_write']);
+        }
         if ($body !== []) {
             $req = $req->withParsedBody($body);
         }

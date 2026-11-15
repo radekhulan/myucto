@@ -299,7 +299,18 @@ final class InvoiceCalendarFlowTest extends BankPostingTestCase
     /** @return array{status:int, body:mixed} */
     private function cancel(int $id): array
     {
-        return $this->callAction($this->container->get(CancelInvoiceAction::class), '__invoke', 'POST', 'admin', ['mode' => 'internal', 'reason' => 'test'], ['id' => (string) $id]);
+        // Storno zaúčtované splátky je účetní úkon jen z přihlášené relace (SessionOnlyAccountingAct).
+        $req = (new \Slim\Psr7\Factory\ServerRequestFactory())
+            ->createServerRequest('POST', '/api/invoices/' . $id . '/cancel')
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session')
+            ->withParsedBody(['mode' => 'internal', 'reason' => 'test']);
+        $resp = ($this->container->get(CancelInvoiceAction::class))($req, new \Slim\Psr7\Response(), ['id' => (string) $id]);
+        $resp->getBody()->rewind();
+        $decoded = json_decode((string) $resp->getBody(), true);
+
+        return ['status' => $resp->getStatusCode(), 'body' => is_array($decoded) ? $decoded : []];
     }
 
     /** @return list<array{id:int, status:string, invoice_type:string, tax_date:?string}> */
