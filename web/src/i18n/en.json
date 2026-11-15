@@ -42079,7 +42079,7 @@
       "nonprofit_membership_batch_invalid": "Check the batch rate, shared fields and selected members.",
       "nonprofit_membership_batch_not_found": "The batch was not found in this organisation.",
       "nonprofit_membership_batch_limit": "The selection exceeds the configured batch member limit.",
-      "nonprofit_membership_batch_selection_invalid": "Check the selected batch members.",
+      "nonprofit_membership_batch_selection_invalid": "The selection contains a member who was deleted or does not belong to this organisation. Refresh the list and select the members again.",
       "nonprofit_membership_batch_technical": "Technical failure for this member. Other results are retained.",
       "nonprofit_membership_batch_cancelled": "The batch was cancelled before this member was processed."
     },

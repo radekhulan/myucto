@@ -57,6 +57,25 @@ describe('Membership correction flow', () => {
     }
   })
 
+  it('očekává hodnoty z doby otevření, i když obnova detailu mezitím změní člena', async () => {
+    const w = mounted({ mode: 'identity' })
+    await w.get('[data-stub="client"]').trigger('click')
+    // Jiný uživatel mezitím změnil číslo; obnova detailu přepíše props, formulář drží rozepsané hodnoty.
+    await w.setProps({ member: { ...member, member_number: 'M-9' } })
+    await confirm(w)
+    expect(api.updateMember).toHaveBeenCalledWith(5, 9, expect.objectContaining({
+      client_id: 44, member_number: 'M-1', expected_client_id: 3, expected_member_number: 'M-1' }))
+  })
+
+  it('zruší revizi z doby otevření s jejím číslem hlavy, i když obnova nabídne jinou', async () => {
+    const w = mounted({ mode: 'void', revision })
+    await w.get('[data-field="corr-reason"]').setValue('Synthetic duplicate revision')
+    await w.setProps({ revision: { ...revision, id: 8, revision_no: 3 }, headRevisionNo: 3 })
+    expect(w.get('[data-section="corr-revision"]').text()).toContain('#2')
+    await confirm(w)
+    expect(api.voidRevision).toHaveBeenCalledWith(5, 9, 7, expect.objectContaining({ expected_revision: 2 }))
+  })
+
   it('explains an invalid form once, below the form, not again at the button', async () => {
     const w = mounted({ mode: 'identity' })
     expect(w.get('[data-section="corr-invalid"]').text()).toBe(cs.nonprofitMembership.correction.identityUnchanged)

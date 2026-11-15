@@ -41764,7 +41764,7 @@
       "nonprofit_membership_batch_invalid": "Zkontrolujte sazbu, společné údaje a výběr členů dávky.",
       "nonprofit_membership_batch_not_found": "Dávka nebyla v této organizaci nalezena.",
       "nonprofit_membership_batch_limit": "Výběr překračuje nastavený limit členů dávky.",
-      "nonprofit_membership_batch_selection_invalid": "Opravte výběr členů dávky.",
+      "nonprofit_membership_batch_selection_invalid": "Výběr obsahuje člena, který byl smazán nebo nepatří této organizaci. Obnovte seznam a vyberte členy znovu.",
       "nonprofit_membership_batch_technical": "Technická chyba člena. Ostatní výsledky zůstávají zachovány.",
       "nonprofit_membership_batch_cancelled": "Dávka byla zrušena dříve, než byl člen zpracován."
     },

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -13,7 +13,7 @@ import { useGuardedCommit } from './useGuardedCommit'
 interface RevisionCommand { member: number; body: MemberRevisionInput }
 
 const props = defineProps<{ supplier: number; canManage: boolean; member: MemberIdentity; history: MemberRevision[] }>()
-const emit = defineEmits<{ done: []; close: []; lock: [locked: boolean] }>()
+const emit = defineEmits<{ done: []; close: []; lock: [locked: boolean]; dirty: [dirty: boolean] }>()
 const { t } = useI18n()
 
 const inputForm = ref<HTMLFormElement | null>(null)
@@ -64,6 +64,10 @@ function review() {
 watch([form, () => head.value?.revision_no ?? 0, () => props.member.id], () => commit.touch(), { deep: true, flush: 'sync' })
 watch(() => props.supplier, () => { commit.reset(); notice.value = '' })
 watch(commit.locked, locked => emit('lock', locked))
+// Rozepsaný formulář hlásí rodiči, aby akce, které by ho zavřely, mohl zašednout (i samootevřený formulář první revize).
+const dirty = computed(() => form.status !== 'active' || !!form.effectiveFrom || !!form.reference.trim() || !!form.evidence.trim())
+watch(dirty, value => emit('dirty', value), { immediate: true })
+onBeforeUnmount(() => emit('dirty', false))
 
 const actions = computed<ActionItem[]>(() => [
   { key: 'rev-close', label: t('nonprofitMembership.close'), icon: 'x', show: !!last.value, disabled: commit.locked.value, run: () => emit('close') },

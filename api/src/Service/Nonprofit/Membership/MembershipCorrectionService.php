@@ -68,6 +68,7 @@ final class MembershipCorrectionService
         return TransactionFailure::retrying($this->db->pdo(), fn (): array => (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplier, $member, $input, $number, $client, $actor, $ip, $userAgent): array {
             $current = $this->lockedMember($supplier, $member);
             // Opakování po nejisté odpovědi: cílový stav už platí, vrátí se beze změny a bez dalšího auditu.
+            // Záměrně před kontrolou původních hodnot: stejný cíl nastavený jiným uživatelem nic nepřepíše.
             if ($current['client_id'] === $client && $current['member_number'] === $number) return $current;
             if ($current['client_id'] !== $input['expected_client_id'] || $current['member_number'] !== $input['expected_member_number']) {
                 throw new MembershipException('nonprofit_membership_member_changed', 'Člen se mezitím změnil. Načtěte ho znovu.', 409);
@@ -85,8 +86,15 @@ final class MembershipCorrectionService
                 $q->execute([$supplier, $column === 'client_id' ? $client : $number, $member]);
                 if ($q->fetchColumn() !== false) throw new MembershipException('nonprofit_membership_identity_conflict', 'Klient nebo členské číslo už patří jinému členovi.', 409);
             }
-            $q = $this->db->pdo()->prepare('UPDATE nonprofit_members SET client_id=?,member_number=? WHERE supplier_id=? AND id=?');
-            $q->execute([$client, $number, $supplier, $member]);
+            try {
+                $this->db->pdo()->prepare('UPDATE nonprofit_members SET client_id=?,member_number=? WHERE supplier_id=? AND id=?')
+                    ->execute([$client, $number, $supplier, $member]);
+            } catch (\PDOException $e) {
+                // Při READ COMMITTED zámek mezery neplatí a souběžné založení člena se stejným číslem nebo
+                // kontaktem doběhne až na unikátní index; je to tatáž kolize jako výše, ne chyba serveru.
+                if (TransactionFailure::aborted($e) || (int) ($e->errorInfo[1] ?? 0) !== 1062) throw $e;
+                throw new MembershipException('nonprofit_membership_identity_conflict', 'Klient nebo členské číslo už patří jinému členovi.', 409);
+            }
             $this->activity->log(self::AUDIT_MEMBER_UPDATE, $actor, 'nonprofit_member', $member, [
                 'before' => ['client_id' => $current['client_id'], 'member_number' => $current['member_number']],
                 'after' => ['client_id' => $client, 'member_number' => $number],

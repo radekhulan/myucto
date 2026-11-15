@@ -21,7 +21,7 @@ const ActionBar = defineComponent({
   setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; disabledReason?: string; tier?: string; show?: unknown; run: () => void }>)
     .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, 'data-tier': a.tier, disabled: a.disabled, 'data-reason': a.disabled ? a.disabledReason : undefined, onClick: a.run }, a.label))),
 })
-const RevisionForm = defineComponent({ name: 'MembershipRevisionForm', props: ['supplier', 'canManage', 'member', 'history'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'revision' }) })
+const RevisionForm = defineComponent({ name: 'MembershipRevisionForm', props: ['supplier', 'canManage', 'member', 'history'], emits: ['done', 'close', 'lock', 'dirty'], setup: () => () => h('div', { 'data-stub': 'revision' }) })
 const IssueFlow = defineComponent({ name: 'MembershipIssueFlow', props: ['supplier', 'canManage', 'member', 'history', 'periods'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'issue' }) })
 const ReverseFlow = defineComponent({ name: 'MembershipReverseFlow', props: ['supplier', 'canManage', 'member', 'claim', 'periods'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'reverse' }) })
 
@@ -391,6 +391,23 @@ describe('Membership member detail', () => {
       expect(w.findComponent(CorrectionFlow).exists()).toBe(false)
       if (opener === 'change-status') { w.findComponent(RevisionForm).vm.$emit('close'); await flushPromises() }
     }
+    w.unmount()
+  })
+
+  it('nezavře tiše rozepsanou první revizi samootevřenou u člena bez platné revize', async () => {
+    const corrections = { can_edit_identity: true, edit_identity_block: null, can_delete: true, delete_block: null,
+      voidable_revision_id: null, void_block: null, head_revision_no: 0 }
+    api.member.mockResolvedValue({ ...detail([], []), corrections })
+    const w = mountedWithCorrection(); await flushPromises()
+    expect(w.get('[data-action="fix-identity"]').attributes('disabled'), 'prázdný formulář opravy neblokuje').toBeUndefined()
+    w.findComponent(RevisionForm).vm.$emit('dirty', true); await flushPromises()
+    for (const key of ['fix-identity', 'delete-member']) {
+      expect(w.get(`[data-action="${key}"]`).attributes('disabled'), key).toBeDefined()
+      expect(w.get(`[data-action="${key}"]`).attributes('data-reason')).toBe(cs.nonprofitMembership.correction.closeFormFirst)
+    }
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    expect(w.findComponent(CorrectionFlow).exists()).toBe(false)
+    expect(w.find('[data-stub="revision"]').exists()).toBe(true)
     w.unmount()
   })
 

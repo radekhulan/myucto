@@ -47,6 +47,8 @@ final class MembershipRevisionTimelineTest extends TestCase
         yield 'jiné datum' => [[self::row(1, 1, '2026-01-01', 'active'), self::row(2, 2, '2026-02-01', 'active', voids: 1)]];
         yield 'jiný stav' => [[self::row(1, 1, '2026-01-01', 'active'), self::row(2, 2, '2026-01-01', 'ended', voids: 1)]];
         yield 'zrušení bez revize' => [[self::row(1, 1, '2026-01-01', 'active', voids: 9)]];
+        yield 'platná revize dřív než předchozí platná' => [[self::row(1, 1, '2026-07-01', 'active'), self::row(2, 2, '2026-01-01', 'ended')]];
+        yield 'po zrušení dřív než zbývající platná' => [[self::row(1, 1, '2026-07-01', 'active'), self::row(2, 2, '2026-09-01', 'ended'), self::row(3, 3, '2026-09-01', 'ended', voids: 2), self::row(4, 4, '2026-03-01', 'ended')]];
         yield 'odkaz mimo vrchol se shodným datem a stavem' => [[self::row(1, 1, '2026-01-01', 'active'), self::row(2, 2, '2026-01-01', 'active', voids: 9)]];
     }
 

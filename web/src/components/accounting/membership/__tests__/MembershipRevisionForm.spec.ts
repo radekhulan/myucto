@@ -55,6 +55,18 @@ beforeEach(() => {
 })
 
 describe('Membership revision form', () => {
+  it('hlásí rodiči rozepsaný formulář a po vyprázdnění i odpojení ho uvolní', async () => {
+    const w = mounted()
+    expect(w.emitted('dirty')?.at(-1)).toEqual([false])
+    await w.get('[data-field="rev-reference"]').setValue('Synthetic draft')
+    expect(w.emitted('dirty')?.at(-1)).toEqual([true])
+    await w.get('[data-field="rev-reference"]').setValue('  ')
+    expect(w.emitted('dirty')?.at(-1)).toEqual([false])
+    await w.get('[data-field="rev-evidence"]').setValue('Synthetic draft')
+    w.unmount()
+    expect(w.emitted('dirty')?.at(-1)).toEqual([false])
+  })
+
   it('does not arm a revision while the visible effective date is invalid', async () => {
     const w = mounted()
     await fill(w)

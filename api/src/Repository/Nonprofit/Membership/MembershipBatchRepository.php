@@ -66,7 +66,7 @@ final class MembershipBatchRepository
             $q->execute([$supplier, ...$chunk]);
             $found += count($q->fetchAll(PDO::FETCH_COLUMN));
         }
-        if ($found !== count($ids)) throw new MembershipException('nonprofit_membership_batch_selection_invalid', 'Výběr obsahuje člena mimo tuto organizaci.', 422);
+        if ($found !== count($ids)) throw new MembershipException('nonprofit_membership_batch_selection_invalid', 'Výběr obsahuje člena, který byl smazán nebo nepatří této organizaci. Obnovte seznam a vyberte členy znovu.', 422);
     }
 
     /** Právě jedna trvale uložená stránka; další požadavek naváže po commitu. */

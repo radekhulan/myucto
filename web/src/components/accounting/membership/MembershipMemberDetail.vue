@@ -156,7 +156,8 @@ onActivated(() => {
 
 // Oprava zavírá formulář revize, předpisu i storna. Rozepsaný text se nesmí ztratit tiše, proto jsou akce
 // oprav zašedlé s důvodem, dokud je jiný formulář otevřený; obdobně „Změnit stav“ při rozepsané opravě.
-const formOpen = computed(() => issueOpen.value || reverseClaim.value !== null || revisionOpen.value)
+const revisionDirty = ref(false)
+const formOpen = computed(() => issueOpen.value || reverseClaim.value !== null || revisionOpen.value || revisionDirty.value)
 const formReason = (block?: string | null) => (formOpen.value ? t('nonprofitMembership.correction.closeFormFirst') : blockReason(block))
 
 const actions = computed<ActionItem[]>(() => [
@@ -240,7 +241,7 @@ const actions = computed<ActionItem[]>(() => [
     <MembershipRevisionForm
       v-if="canManage && identity && !correction && (!valid.length || revisionOpen || locks.revision)"
       :supplier="supplier" :can-manage="canManage" :member="identity" :history="history"
-      @done="revisionFinished()" @close="revisionOpen = false" @lock="locks.revision = $event"
+      @done="revisionFinished()" @close="revisionOpen = false" @lock="locks.revision = $event" @dirty="revisionDirty = $event"
     />
 
     <MembershipIssueFlow

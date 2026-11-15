@@ -27,6 +27,10 @@ const emit = defineEmits<{ done: [mode: Mode, label: string]; close: []; lock: [
 const { t } = useI18n()
 
 const form = reactive({ clientId: props.member.client_id as number | null, clientLabel: props.label, number: props.member.member_number, reason: '' })
+// Podklad, ze kterého formulář vznikl. Obnova detailu mění props, ale očekávané hodnoty musí zůstat z doby otevření,
+// jinak by server souběžnou změnu jiného uživatele nepoznal a oprava by ji tiše přepsala (formulář je klíčovaný
+// režimem a členem, takže se podklad zachytí při každém otevření).
+const base = { clientId: props.member.client_id, number: props.member.member_number, revision: props.revision ?? null, headRevisionNo: props.headRevisionNo }
 
 const commit = useGuardedCommit<Command, Command>({
   supplier: () => props.supplier,
@@ -46,10 +50,10 @@ const invalid = computed(() => {
   if (props.mode === 'identity') {
     const number = form.number.trim()
     if (!form.clientId || !number || number.length > 80) return t('nonprofitMembership.correction.identityRequired')
-    if (form.clientId === props.member.client_id && number === props.member.member_number) return t('nonprofitMembership.correction.identityUnchanged')
+    if (form.clientId === base.clientId && number === base.number) return t('nonprofitMembership.correction.identityUnchanged')
   }
   if (props.mode === 'void') {
-    if (!props.revision) return t('nonprofitMembership.correction.voidUnavailable')
+    if (!base.revision) return t('nonprofitMembership.correction.voidUnavailable')
     const reason = form.reason.trim()
     if (!reason || reason.length > 500) return t('nonprofitMembership.correction.reasonRequired')
   }
@@ -69,12 +73,12 @@ function review() {
   let command: Command
   if (props.mode === 'identity') {
     command = { mode: 'identity', member: props.member.id, body: { client_id: form.clientId as number, member_number: form.number.trim(),
-      expected_client_id: props.member.client_id, expected_member_number: props.member.member_number } }
+      expected_client_id: base.clientId, expected_member_number: base.number } }
   } else if (props.mode === 'delete') {
     command = { mode: 'delete', member: props.member.id }
   } else {
-    command = { mode: 'void', member: props.member.id, revision: (props.revision as MemberRevision).id,
-      body: { expected_revision: props.headRevisionNo, reason: form.reason.trim(), idempotency_key: crypto.randomUUID() } }
+    command = { mode: 'void', member: props.member.id, revision: (base.revision as MemberRevision).id,
+      body: { expected_revision: base.headRevisionNo, reason: form.reason.trim(), idempotency_key: crypto.randomUUID() } }
   }
   commit.arm(command, command, props.supplier)
 }
@@ -106,11 +110,11 @@ const pending = computed(() => commit.review.value)
       <label :class="formLabel">{{ t('nonprofitMembership.correction.memberNumber') }}<input v-model="form.number" :class="field" maxlength="80" data-field="corr-number" /></label>
     </fieldset>
 
-    <div v-if="mode === 'void' && revision" class="space-y-3">
+    <div v-if="mode === 'void' && base.revision" class="space-y-3">
       <div class="flex flex-wrap items-center gap-2 text-sm" data-section="corr-revision">
-        <span class="font-medium">#{{ revision.revision_no }}</span>
-        <span :class="memberStatusBadge(revision.status)">{{ t(`nonprofitMembership.status_${revision.status}`) }}</span>
-        <span>{{ t('nonprofitMembership.sinceDate', { date: formatDate(revision.effective_from) }) }}</span>
+        <span class="font-medium">#{{ base.revision.revision_no }}</span>
+        <span :class="memberStatusBadge(base.revision.status)">{{ t(`nonprofitMembership.status_${base.revision.status}`) }}</span>
+        <span>{{ t('nonprofitMembership.sinceDate', { date: formatDate(base.revision.effective_from) }) }}</span>
       </div>
       <label :class="formLabel">{{ t('nonprofitMembership.correction.reason') }}
         <textarea v-model="form.reason" :class="textarea" maxlength="500" :disabled="commit.locked.value || !!pending" data-field="corr-reason" />
