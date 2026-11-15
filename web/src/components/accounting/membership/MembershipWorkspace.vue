@@ -19,6 +19,7 @@ import MembershipMemberDetail from './MembershipMemberDetail.vue'
 import MembershipReconciliation from './MembershipReconciliation.vue'
 import MembershipRates from './MembershipRates.vue'
 import MembershipBatchFlow from './MembershipBatchFlow.vue'
+import MembershipImportFlow from './MembershipImportFlow.vue'
 
 const props = defineProps<{ supplier: number; canManage: boolean; canManageRates?: boolean }>()
 const { t, te, tm, rt } = useI18n()
@@ -222,7 +223,7 @@ async function create() {
 watch(() => props.supplier, () => {
   cancelSearchTimer(); pendingRouteFilters = false; pendingFormFilters = false
   generation++; createTicket++; titlesTicket++; hydrating = true
-  checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false
+  checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false; importOpen.value = false
   search.value = ''; filterYear.value = appIsoDate().slice(0, 4); titleKey.value = ''; paymentStatus.value = 'all'
   selectionNotice.value = ''
   appliedFilters.value = {search: '', year: Number(filterYear.value), title_key: '', payment_status: 'all'}
@@ -240,8 +241,33 @@ onActivated(() => {
   void reloadAll()
 })
 
+const importOpen = ref(false), exporting = ref(false)
+/** Export použije filtry, podle kterých je seznam právě načtený, ne rozepsaný formulář. */
+async function exportMembers(format: 'xlsx' | 'csv') {
+  const supplier = props.supplier
+  exporting.value = true; error.value = ''
+  try {
+    const { blob, filename } = await membershipApi.exportMembers(supplier, format, appliedFilters.value)
+    if (!alive || supplier !== props.supplier) return
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url; link.download = filename; link.click()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    if (alive && supplier === props.supplier) error.value = membershipError({ t, te }, e)
+  } finally {
+    if (alive) exporting.value = false
+  }
+}
+function importChanged() {
+  dataVersion.value++; detailVersion.value++
+  void load()
+}
 const actions = computed<ActionItem[]>(() => [
   { key: 'batch-open', label: t('nonprofitMembership.batchTitle'), icon: 'plus', variant: 'primary', show: props.canManage, disabled: batchLocked.value || loading.value || !!error.value, run: () => { batchOpen.value = true } },
+  { key: 'import-open', label: t('nonprofitMembership.import.open'), icon: 'upload', variant: 'primary', show: props.canManage, disabled: importOpen.value, run: () => { importOpen.value = true } },
+  { key: 'export-xlsx', label: t('nonprofitMembership.exportXlsx'), icon: 'download', disabled: exporting.value || loading.value, run: () => { void exportMembers('xlsx') } },
+  { key: 'export-csv', label: t('nonprofitMembership.exportCsv'), icon: 'download', disabled: exporting.value || loading.value, run: () => { void exportMembers('csv') } },
   { key: 'reload-members', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value, run: reloadMembers },
 ])
 const createActions = computed<ActionItem[]>(() => [
@@ -357,6 +383,7 @@ watch(batchLocked, locked => {
     <p v-if="canManage && members.length" class="text-sm text-neutral-500">{{ t('nonprofitMembership.batchSelectedCount', {count: checkedMembers.length}) }}</p>
     <MembershipBatchFlow v-if="batchOpen" :key="supplier" :supplier="supplier" :can-manage="canManage" :periods="periods" :selected-member-ids="checkedMembers"
       @changed="batchChanged" @lock="batchLocked = $event" @close="batchOpen = false" />
+    <MembershipImportFlow v-if="importOpen && canManage" :key="`import-${supplier}`" :supplier="supplier" :can-manage="canManage" @changed="importChanged" @close="importOpen = false" />
 
     <details class="rounded-lg border border-neutral-200 bg-surface p-4" data-section="rates-management">
       <summary class="cursor-pointer font-semibold">{{ t('nonprofitMembership.ratesTitle') }}</summary>

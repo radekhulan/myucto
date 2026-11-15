@@ -19,6 +19,18 @@ export interface MemberRow {
   all_revisions_voided?: boolean
 }
 export interface MemberPage { items: MemberRow[]; next_after_id: number | null }
+/** Řádek náhledu nebo výsledku importu seznamu členů; reason je strojový kód důvodu. */
+export interface MembershipImportRow {
+  line: number; member_number: string; name?: string; status: 'new_revision' | 'new_member' | 'unchanged' | 'error'
+  reason?: string; params?: Record<string, string>; member_id?: number; client_id?: number | null; contact?: 'existing' | 'create'
+  new_status?: MemberStatus; effective_from?: string
+  outcome?: 'written' | 'failed'; failure?: string; failure_message?: string
+}
+export interface MembershipImportReport {
+  ok: boolean; dry_run: boolean; preview_hash: string
+  counts: { new_revision: number; new_member: number; unchanged: number; error: number }
+  rows: MembershipImportRow[]; written?: number; failed_writes?: number
+}
 export interface MembershipListFilters {search?: string; year?: number | null; title_key?: string; payment_status?: 'all' | 'paid' | 'unpaid' | 'unproven' | 'none'}
 
 export interface MemberIdentity { id: number; supplier_id: number; client_id: number; member_number: string; created_by: number; created_at?: string }
@@ -161,6 +173,19 @@ export const membershipApi = {
   selectionCheck: (supplier: number, memberIds: number[], filters: MembershipListFilters) => api.post<{member_ids: number[]}>(`${base}/members/selection-check`, {member_ids: memberIds, filters}, options(supplier)).then(r => r.data),
   titles: (supplier: number, year?: number, afterTitleKey?: string) => api.get<{items: string[]; next_after_title_key: string | null}>(`${base}/titles`, { ...options(supplier), params: { ...(year ? {year} : {}), ...(afterTitleKey ? {after_title_key: afterTitleKey} : {}), limit: 100 } }).then(r => r.data),
   members: (supplier: number, afterId = 0, limit = 50, filters: MembershipListFilters = {}) => api.get<MemberPage>(`${base}/members`, { ...options(supplier), params: { after_id: afterId, limit, ...filters, ...(filters.year === null ? {year: ''} : {}) } }).then(r => r.data),
+  /** Soubor seznamu se stejnými filtry jako seznam; přes axios kvůli X-Supplier-Id a přihlášení. */
+  exportMembers: async (supplier: number, format: 'xlsx' | 'csv', filters: MembershipListFilters = {}): Promise<{blob: Blob; filename: string}> => {
+    const r = await api.get(`${base}/members/export`, { ...options(supplier), responseType: 'blob', params: { format, ...filters, ...(filters.year === null ? {year: ''} : {}) } })
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(String(r.headers?.['content-disposition'] ?? ''))
+    return { blob: r.data as Blob, filename: match ? decodeURIComponent(match[1]) : `clenove.${format}` }
+  },
+  importMembers: (supplier: number, file: File, previewHash: string | null) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('dry_run', previewHash === null ? '1' : '0')
+    if (previewHash !== null) fd.append('preview_hash', previewHash)
+    return api.post<MembershipImportReport>(`${base}/members/import`, fd, { headers: { ...options(supplier).headers, 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
+  },
   member: (supplier: number, id: number, afterClaimId = 0, limit = 50) => api.get<MemberDetail>(`${base}/members/${id}`, { ...options(supplier), params: { after_claim_id: afterClaimId, limit } }).then(r => r.data),
   claim: (supplier: number, id: number) => api.get<ClaimRow>(`${base}/claims/${id}`, options(supplier)).then(r => r.data),
   classificationOptions: (supplier: number) => api.get<DimensionOverview>('/accounting/dimensions', options(supplier)).then(r => r.data),

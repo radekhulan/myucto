@@ -11,7 +11,7 @@ import type { MemberPage, MemberRow } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
 
-const api = vi.hoisted(() => ({ members: vi.fn(), createMember: vi.fn(), titles: vi.fn(), selectionCheck: vi.fn() }))
+const api = vi.hoisted(() => ({ members: vi.fn(), createMember: vi.fn(), titles: vi.fn(), selectionCheck: vi.fn(), exportMembers: vi.fn() }))
 const navigation = vi.hoisted(() => ({route: {query: {}} as {query: Record<string, string>}, replace: vi.fn()}))
 vi.mock('vue-router', async importOriginal => ({...await importOriginal<typeof import('vue-router')>(), useRoute: () => navigation.route, useRouter: () => ({replace: navigation.replace})}))
 const accounting = vi.hoisted(() => ({ listPeriods: vi.fn() }))
@@ -41,6 +41,7 @@ const SearchableSelect = defineComponent({ props: ['modelValue', 'options', 'dis
 }, [h('option', {value: ''}), ...(p.options as {value: string | number; label: string}[]).map(x => h('option', {value: x.value}, x.label))]) })
 const Detail = defineComponent({ name: 'MembershipMemberDetail', props: ['supplier', 'canManage', 'memberId', 'label', 'periods', 'refreshVersion'], emits: ['changed', 'close', 'deleted'], setup: () => () => h('div', { 'data-stub': 'detail' }, [h('h2', { tabindex: -1, 'data-focus': 'member-heading' })]) })
 const ClientFormModal = defineComponent({ name: 'ClientFormModal', emits: ['created', 'close'], setup: () => () => h('div', { 'data-stub': 'client-modal' }) })
+const ImportFlow = defineComponent({ name: 'MembershipImportFlow', props: ['supplier', 'canManage'], emits: ['changed', 'close'], setup: () => () => h('div', { 'data-stub': 'import' }) })
 const Reconciliation = defineComponent({ name: 'MembershipReconciliation', props: ['supplier', 'periods', 'dataVersion'], setup: () => () => h('div', { 'data-stub': 'reconciliation' }) })
 
 const row = (id: number, revision: Partial<MemberRow> = {}): MemberRow => ({
@@ -55,7 +56,7 @@ function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
     props: { supplier: 5, canManage: true, ...props },
     global: {
       plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })],
-      stubs: { ActionBar, SearchableSelect, ClientSearchSelect, ClientFormModal, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation, MembershipBatchFlow: true },
+      stubs: { ActionBar, SearchableSelect, ClientSearchSelect, ClientFormModal, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation, MembershipBatchFlow: true, MembershipImportFlow: ImportFlow },
     },
   })
 }
@@ -760,5 +761,41 @@ describe('Membership workspace', () => {
       expect(api.members).toHaveBeenCalledTimes(calls+1)
       expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({title_key:'SYNTHETIC',payment_status:'paid'}))
     } finally { vi.useRealTimers(); w.unmount() }
+  })
+
+  it('exportuje podle načtených filtrů, ne rozepsaného hledání, a import nabízí jen se zápisem', async () => {
+    api.exportMembers.mockResolvedValue({ blob: new Blob(['x']), filename: 'clenove-2026-06-01.csv' })
+    const createUrl = vi.fn(() => 'blob:x'), revoke = vi.fn()
+    Object.assign(URL, { createObjectURL: createUrl, revokeObjectURL: revoke })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const w = mounted(); await flushPromises()
+    await w.get('[data-field="member-search"]').setValue('Neodeslane')
+    await w.get('[data-action="export-csv"]').trigger('click'); await flushPromises()
+    expect(api.exportMembers).toHaveBeenCalledWith(5, 'csv', { search: '', year: Number(appIsoDate().slice(0, 4)), title_key: '', payment_status: 'all' })
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(revoke).toHaveBeenCalledWith('blob:x')
+    api.exportMembers.mockRejectedValueOnce({ response: { data: { error: { code: 'nonprofit_membership_list_year_required' } } } })
+    await w.get('[data-action="export-xlsx"]').trigger('click'); await flushPromises()
+    expect(w.get('[data-section="workspace-error"]').text()).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_list_year_required)
+    click.mockRestore(); w.unmount()
+
+    const reader = mounted({ canManage: false }); await flushPromises()
+    expect(reader.find('[data-action="import-open"]').exists()).toBe(false)
+    expect(reader.find('[data-action="export-xlsx"]').exists()).toBe(true)
+    reader.unmount()
+  })
+
+  it('po importu obnoví seznam i otevřený detail a panel zavře změna firmy', async () => {
+    const w = mounted(); await flushPromises()
+    await w.get('[data-action="import-open"]').trigger('click')
+    const panel = w.findComponent(ImportFlow)
+    expect(panel.exists()).toBe(true)
+    const calls = api.members.mock.calls.length
+    panel.vm.$emit('changed'); await flushPromises()
+    expect(api.members).toHaveBeenCalledTimes(calls + 1)
+    expect(w.findComponent(Reconciliation).props('dataVersion')).toBeGreaterThan(0)
+    await w.setProps({ supplier: 6 }); await flushPromises()
+    expect(w.findComponent(ImportFlow).exists()).toBe(false)
+    w.unmount()
   })
 })

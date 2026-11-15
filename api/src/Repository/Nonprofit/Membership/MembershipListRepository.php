@@ -297,6 +297,40 @@ final class MembershipListRepository
         return array_map('intval', array_column($q->fetchAll(PDO::FETCH_ASSOC), 'id'));
     }
 
+    /**
+     * Poslední nestornovaný předpis každého člena výběru ve stejném roce a označení jako seznam (export, krok 8).
+     * Jeden dotaz nad stránkou nejvýše 500 členů přes index případů člena, žádné čtení po členech.
+     *
+     * @param list<int> $memberIds
+     * @return array<int,array{title_key:string,period_from:string,period_to:string,amount_cents:string}>
+     */
+    public function latestClaims(int $supplier, array $memberIds, array $filter): array
+    {
+        if ($memberIds === []) {
+            return [];
+        }
+        if (count($memberIds) > 500) {
+            throw new \InvalidArgumentException('Výběr vyžaduje 1–500 členů.');
+        }
+        [$cases, $caseParams] = $this->caseCondition($filter, 'cc');
+        $marks = implode(',', array_fill(0, count($memberIds), '?'));
+        $q = $this->db->pdo()->prepare("WITH ranked AS (
+            SELECT STRAIGHT_JOIN cc.member_id,cc.title_key,cc.period_from,cc.period_to,CAST(c.amount_cents AS CHAR) amount_cents,
+              ROW_NUMBER() OVER (PARTITION BY cc.member_id ORDER BY cc.period_to DESC,cc.period_from DESC,cc.id DESC) rn
+            FROM nonprofit_membership_charge_cases cc FORCE INDEX(uq_nmcc_identity)
+              JOIN nonprofit_membership_charge_operations o ON o.supplier_id=cc.supplier_id AND o.case_id=cc.id AND o.id=cc.head_operation_id AND o.operation='issue'
+              JOIN nonprofit_membership_charge_claims c ON c.supplier_id=o.supplier_id AND c.operation_id=o.id AND c.kind='issue'
+            WHERE cc.supplier_id=? AND cc.member_id IN ({$marks}){$cases}
+          ) SELECT member_id,title_key,period_from,period_to,amount_cents FROM ranked WHERE rn=1");
+        $q->execute([$supplier, ...$memberIds, ...$caseParams]);
+        $out = [];
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[(int) $row['member_id']] = ['title_key' => $row['title_key'], 'period_from' => $row['period_from'],
+                'period_to' => $row['period_to'], 'amount_cents' => (string) $row['amount_cents']];
+        }
+        return $out;
+    }
+
     public function titles(int $supplier, ?int $year, string $after, int $limit): array
     {
         $limit = max(1, min(101, $limit));

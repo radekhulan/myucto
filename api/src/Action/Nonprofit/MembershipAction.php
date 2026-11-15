@@ -30,6 +30,10 @@ use MyInvoice\Service\Nonprofit\Membership\MembershipException;
 use MyInvoice\Service\Nonprofit\Membership\MembershipChargeRequest;
 use MyInvoice\Service\Nonprofit\Membership\MembershipMemberService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipReconciliationService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipImportService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipListExporter;
+use MyInvoice\Service\Accounting\Codebooks\CodebookImportException;
+use Psr\Http\Message\UploadedFileInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Log\LoggerInterface;
@@ -46,11 +50,16 @@ final class MembershipAction
     private readonly TenantReferenceGuard $tenantRefs;
     private readonly MembershipCorrectionService $corrections;
     private readonly IpMatcher $ipMatcher;
+    private readonly ActivityLogger $activity;
+
+    /** Velikost nahrávaného seznamu jako u importu číselníků. */
+    private const IMPORT_MAX_BYTES = 2 * 1024 * 1024;
 
     /** Audit a IP jsou povinné třídní parametry, aby je DI doplnil (volitelné autowire nevyplní a audit by nebyl zapečetěný). */
     public function __construct(private readonly Connection $db, PostingService $posting, ActivityLogger $activity, IpMatcher $ipMatcher, ?LoggerInterface $logger = null)
     {
         $this->ipMatcher = $ipMatcher;
+        $this->activity = $activity;
         $this->tenantRefs = new TenantReferenceGuard($db);
         $this->members = new MembershipRepository($db);
         $charges = new MembershipChargeRepository($db);
@@ -75,6 +84,84 @@ final class MembershipAction
             }
             return ['items' => $items, 'next_after_id' => $more ? $items[array_key_last($items)]['id'] : null];
         });
+    }
+
+    /**
+     * Export seznamu členů (XLSX/CSV) se stejnými filtry jako seznam. Stejné právo jako čtení seznamu,
+     * jen z přihlášené relace; soubor nenese adresy ani kontaktní údaje (krok 8 #321).
+     */
+    public function exportMembers(Request $request, Response $response): Response
+    {
+        if (!RequestAuthorization::actsAsSession($request)) {
+            return Json::error($response, 'token_endpoint_forbidden', 'API token má přístup pouze k veřejnému API (/api/v1). Tento endpoint je dostupný jen z webového rozhraní.', 403);
+        }
+        if (!$this->requirePermission($request, $response, 'accounting', AccessLevel::READ, $error)) return $error;
+        $query = $request->getQueryParams();
+        try {
+            if (array_diff(array_keys($query), ['format', 'search', 'year', 'title_key', 'payment_status']) !== []) {
+                throw new MembershipException('nonprofit_membership_invalid', 'Export přijímá jen formát a filtry seznamu.');
+            }
+            $format = $query['format'] ?? 'xlsx';
+            unset($query['format']);
+            $file = (new MembershipListExporter($this->db))->export($this->currentSupplierId($request), MembershipListFilter::parse($query), is_string($format) ? $format : '');
+        } catch (MembershipException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        }
+        $response->getBody()->write($file['bytes']);
+        return $response
+            ->withHeader('Content-Type', $file['mime'])
+            ->withHeader('Content-Disposition', 'attachment; filename="' . $file['filename'] . '"')
+            ->withHeader('Content-Length', (string) strlen($file['bytes']))
+            ->withHeader('Cache-Control', 'private, no-store');
+    }
+
+    /**
+     * Import seznamu členů: multipart `file`, `dry_run` (výchozí 1 = náhled) a u potvrzení `preview_hash`.
+     * Zápis jen s právem zápisu členské evidence a z přihlášené relace, stejně jako založení člena.
+     */
+    public function importMembers(Request $request, Response $response): Response
+    {
+        return $this->handle($request, $response, true, function (int $supplier) use ($request): array {
+            $body = (array) ($request->getParsedBody() ?? []);
+            if (array_diff(array_keys($body), ['dry_run', 'preview_hash']) !== []) {
+                throw new MembershipException('nonprofit_membership_invalid', 'Import přijímá jen soubor, dry_run a preview_hash.');
+            }
+            $dryRun = !in_array(strtolower(trim((string) ($body['dry_run'] ?? '1'))), ['0', 'false', 'no'], true);
+            $hash = isset($body['preview_hash']) && is_string($body['preview_hash']) ? $body['preview_hash'] : null;
+            [$content, $filename] = $this->uploadedList($request);
+            [$ip, $agent] = $this->origin($request);
+            try {
+                return (new MembershipImportService($this->db, $this->activity, $this->memberService))
+                    ->run($supplier, $this->actor($request), $content, $filename, $dryRun, $hash, $ip, $agent);
+            } catch (CodebookImportException $e) {
+                throw new MembershipException('nonprofit_membership_import_file_invalid', $e->getMessage(), $e->httpStatus === 415 ? 415 : 422);
+            }
+        });
+    }
+
+    /** @return array{0:string,1:string} obsah a název nahraného XLSX/CSV po kontrole velikosti, přípony a obsahu */
+    private function uploadedList(Request $request): array
+    {
+        $file = null;
+        foreach ($request->getUploadedFiles() as $node) {
+            if ($node instanceof UploadedFileInterface) {
+                $file = $node;
+                break;
+            }
+        }
+        if ($file === null || $file->getError() !== UPLOAD_ERR_OK) throw new MembershipException('nonprofit_membership_import_file_invalid', 'Nahrajte soubor XLSX nebo CSV.', 415);
+        if ((int) ($file->getSize() ?? 0) > self::IMPORT_MAX_BYTES) throw new MembershipException('nonprofit_membership_import_file_invalid', 'Soubor je větší než 2 MB.', 415);
+        $filename = (string) ($file->getClientFilename() ?? '');
+        $ext = strtolower((string) pathinfo($filename, PATHINFO_EXTENSION));
+        $content = (string) $file->getStream()->getContents();
+        $mime = $content === '' ? '' : (string) (new \finfo(FILEINFO_MIME_TYPE))->buffer($content);
+        $ok = match ($ext) {
+            'xlsx' => str_contains($mime, 'zip') || $mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'csv' => str_starts_with($mime, 'text/') || in_array($mime, ['application/csv', 'application/vnd.ms-excel', 'application/octet-stream'], true),
+            default => false,
+        };
+        if (!$ok) throw new MembershipException('nonprofit_membership_import_file_invalid', 'Podporované formáty jsou XLSX a CSV s odpovídajícím obsahem.', 415);
+        return [$content, $filename];
     }
 
     public function rates(Request $request, Response $response): Response

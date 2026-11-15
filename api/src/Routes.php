@@ -3248,6 +3248,8 @@ final class Routes
             $g->get('/nonprofit-dppo/acceptance', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'acceptance']);
             $g->post('/nonprofit-dppo/acceptance/{operation:accept|revoke}', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'changeAcceptance']);
             $g->get('/nonprofit-membership/members', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'members']);
+            $g->get('/nonprofit-membership/members/export', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'exportMembers']);
+            $g->post('/nonprofit-membership/members/import', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'importMembers']);
             $g->get('/nonprofit-membership/titles', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'titles']);
             $g->post('/nonprofit-membership/members/selection-check', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'selectionCheck']);
             $g->get('/nonprofit-membership/bank-candidates', [\MyInvoice\Action\Nonprofit\MembershipBankMatchAction::class, 'candidates']);

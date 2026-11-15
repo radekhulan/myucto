@@ -818,6 +818,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/accounting/nonprofit-membership/rates$#', 'accounting.templates', AccessLevel::WRITE],
         ['PUT', '#^/api/accounting/nonprofit-membership/rates/[0-9]+$#', 'accounting.templates', AccessLevel::WRITE],
         ['POST', '#^/api/accounting/nonprofit-membership/members/selection-check$#', 'accounting', AccessLevel::READ],
+        ['GET', '#^/api/accounting/nonprofit-membership/members/export$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/nonprofit-membership/members/import$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/nonprofit-membership/bank-candidates$#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/nonprofit-membership/bank-match$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/nonprofit-membership/batches(/[0-9]+)?$#', 'accounting', AccessLevel::READ],
