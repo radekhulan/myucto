@@ -829,6 +829,23 @@ final class InternalDocumentTest extends TestCase
         self::assertSame('posted', $this->service->get($this->supplierId, (int) $adopted['id'])['status']);
     }
 
+    public function testDeletingPostedDocumentReleasesLatestNumberOfNativeSeries(): void
+    {
+        $series = $this->container->get(\MyInvoice\Service\NumberSeries\NumberSeriesService::class)->create($this->supplierId, [
+            'doc_kind' => 'manual', 'name' => 'Syntetická řada', 'prefix' => 'SY', 'is_default' => true,
+        ], null);
+        $first = $this->service->post($this->supplierId, (int) $this->service->create($this->supplierId, $this->input(), null)['id'], $this->audit());
+        $second = $this->service->post($this->supplierId, (int) $this->service->create($this->supplierId, $this->input(), null)['id'], $this->audit());
+        self::assertSame((int) $series['id'], (int) $second['number_series_id']);
+        self::assertNotSame($first['document_no'], $second['document_no']);
+
+        // Nejdřív starší doklad: jeho číslo poslední není, v řadě zůstane mezera.
+        self::assertFalse($this->service->deletePosted($this->supplierId, (int) $first['id'], $this->audit(), false)['number_released']);
+        self::assertTrue($this->service->deletePosted($this->supplierId, (int) $second['id'], $this->audit(), false)['number_released']);
+        $third = $this->service->post($this->supplierId, (int) $this->service->create($this->supplierId, $this->input(), null)['id'], $this->audit());
+        self::assertSame($second['document_no'], $third['document_no']);
+    }
+
     private function manualEntry(array $meta = []): int
     {
         return $this->container->get(ManualJournalEntryService::class)->post($this->supplierId, [
