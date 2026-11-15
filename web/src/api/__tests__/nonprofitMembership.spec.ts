@@ -87,3 +87,26 @@ it('deletes a member with the confirmed contact and number as query parameters',
   expect(calls.delete).toHaveBeenCalledWith('/accounting/nonprofit-membership/members/9',
     { headers: { 'X-Supplier-Id': '5' }, params: { expected_client_id: 3, expected_member_number: 'M-1' } })
 })
+
+it('stáhne export s filtry seznamu a chybu z Blob odpovědi převede na kód', async () => {
+  calls.get.mockResolvedValueOnce({ data: new Blob(['x']), headers: { 'content-disposition': 'attachment; filename="clenove-2026-06-01.xlsx"' } })
+  const file = await api.exportMembers(5, 'xlsx', { search: '', year: null, title_key: 'T', payment_status: 'all' })
+  expect(file.filename).toBe('clenove-2026-06-01.xlsx')
+  expect(calls.get).toHaveBeenLastCalledWith('/accounting/nonprofit-membership/members/export',
+    { headers: { 'X-Supplier-Id': '5' }, responseType: 'blob', params: { format: 'xlsx', search: '', year: '', title_key: 'T', payment_status: 'all' } })
+  const rejection = { response: { status: 422, data: new Blob([JSON.stringify({ error: { code: 'nonprofit_membership_list_year_required' } })]) } }
+  calls.get.mockRejectedValueOnce(rejection)
+  await expect(api.exportMembers(5, 'csv', {})).rejects.toBe(rejection)
+  expect(rejection.response.data).toEqual({ error: { code: 'nonprofit_membership_list_year_required' } })
+})
+
+it('import pošle soubor jako multipart, náhled bez otisku a potvrzení s ním', async () => {
+  const file = new File(['x'], 'clenove.csv')
+  await api.importMembers(5, file, null)
+  await api.importMembers(5, file, 'a'.repeat(64))
+  const [first, second] = calls.post.mock.calls
+  expect(first![0]).toBe('/accounting/nonprofit-membership/members/import')
+  expect(first![2].headers).toEqual({ 'X-Supplier-Id': '5', 'Content-Type': 'multipart/form-data' })
+  expect([...(first![1] as FormData).entries()].map(([k, v]) => [k, typeof v === 'string' ? v : 'file'])).toEqual([['file', 'file'], ['dry_run', '1']])
+  expect([...(second![1] as FormData).entries()].map(([k, v]) => [k, typeof v === 'string' ? v : 'file'])).toEqual([['file', 'file'], ['dry_run', '0'], ['preview_hash', 'a'.repeat(64)]])
+})

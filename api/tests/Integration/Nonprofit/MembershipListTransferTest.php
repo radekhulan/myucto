@@ -123,7 +123,7 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
             'NEW-CLIENTIC;' . $freeClient . ';99999999;;active;2026-02-01;Synthetic application;',
             'SYN-PRE-BARE;;;;suspended;2026-02-01;Synthetic decision;',
         ]);
-        $report = $this->import->run($this->supplier, $this->actor, $csv, 'clenove.csv', true);
+        $report = $this->import->run($this->supplier, $this->actor, $csv, 'clenove.csv', true, canCreateContacts: true);
         $byNumber = [];
         foreach ($report['rows'] as $row) $byNumber[$row['member_number']] = [$row['status'], $row['reason'] ?? null];
         self::assertSame([
@@ -172,10 +172,10 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
             'CONF-LINK;' . $client . ';;;aktivní;15.3.2026;Synthetic application;',
         ]);
         $clientsBefore = $this->clientCount();
-        $preview = $this->import->run($this->supplier, $this->actor, $csv, 'clenove.csv', true);
+        $preview = $this->import->run($this->supplier, $this->actor, $csv, 'clenove.csv', true, canCreateContacts: true);
         self::assertTrue($preview['ok']);
         self::assertSame($clientsBefore, $this->clientCount(), 'Náhled nic nezapisuje.');
-        $result = $this->import->run($this->supplier, $this->actor, $csv, 'clenove.csv', false, $preview['preview_hash']);
+        $result = $this->import->run($this->supplier, $this->actor, $csv, 'clenove.csv', false, $preview['preview_hash'], canCreateContacts: true);
         self::assertSame([3, 0], [$result['written'], $result['failed_writes']]);
         self::assertSame(['written', 'written', 'written'], array_column($result['rows'], 'outcome'));
 
@@ -197,9 +197,9 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
 
         // Totéž znovu jiným uživatelem: vše beze změny, nic se nezdvojí a nepíše.
         $other = $this->otherActor();
-        $again = $this->import->run($this->supplier, $other, $csv, 'clenove.csv', true);
+        $again = $this->import->run($this->supplier, $other, $csv, 'clenove.csv', true, canCreateContacts: true);
         self::assertSame(['new_revision' => 0, 'new_member' => 0, 'unchanged' => 3, 'error' => 0], $again['counts']);
-        $repeat = $this->import->run($this->supplier, $other, $csv, 'clenove.csv', false, $again['preview_hash']);
+        $repeat = $this->import->run($this->supplier, $other, $csv, 'clenove.csv', false, $again['preview_hash'], canCreateContacts: true);
         self::assertSame(0, $repeat['written']);
         self::assertCount(count($history), $this->repository->history($this->supplier, $existing));
         self::assertSame($clientsBefore + 1, $this->clientCount());
@@ -312,6 +312,119 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
     {
         $valid = \MyInvoice\Service\Nonprofit\Membership\MembershipRevisionTimeline::effective($this->repository->history($this->supplier, $member));
         return $valid[array_key_last($valid)]['status'];
+    }
+
+    public function testContactCreationNeedsDirectoryPermission(): void
+    {
+        $csv = $this->csv(['PERM-NEW;;;Synthetic Permission Person;active;2026-02-01;Synthetic application;']);
+        $before = $this->clientCount();
+        $denied = $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true);
+        self::assertSame([['error', 'contact_create_forbidden']], array_map(static fn (array $r): array => [$r['status'], $r['reason']], $denied['rows']));
+        $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', false, $denied['preview_hash']));
+        self::assertSame($before, $this->clientCount());
+        // Akce rozhoduje podle práva clients.create (RequestAuthorization), ne podle práva zápisu členské evidence.
+        [, , $body] = $this->call('POST', 'importMembers', [], ['accounting' => 1, 'accounting.journal.post' => 2], 'session', $csv);
+        self::assertSame('contact_create_forbidden', json_decode($body, true)['rows'][0]['reason']);
+        [, , $body] = $this->call('POST', 'importMembers', [], ['accounting' => 1, 'accounting.journal.post' => 2, 'clients.create' => 2], 'session', $csv);
+        self::assertSame('new_member', json_decode($body, true)['rows'][0]['status']);
+    }
+
+    public function testSameUnknownIcForTwoNewMembersIsDuplicateAndArchivedContactIsSkipped(): void
+    {
+        $active = $this->client('ic-active', 'Synthetic Active IC', '23456789');
+        $archived = $this->client('ic-archived', 'Synthetic Archived IC', '23456789');
+        $this->pdo->prepare('UPDATE clients SET archived_at=NOW() WHERE supplier_id=? AND id=?')->execute([$this->supplier, $archived]);
+        $onlyArchived = $this->client('ic-only-archived', 'Synthetic Only Archived', '34567890');
+        $this->pdo->prepare('UPDATE clients SET archived_at=NOW() WHERE supplier_id=? AND id=?')->execute([$this->supplier, $onlyArchived]);
+        $csv = $this->csv([
+            'DUPIC-1;;11111111;Synthetic First;active;2026-02-01;Synthetic application;',
+            'DUPIC-2;;11111111;Synthetic Second;active;2026-02-01;Synthetic application;',
+            'ACTIVE-IC;;23456789;;active;2026-02-01;Synthetic application;',
+            'ARCH-IC;;34567890;Synthetic Fresh;active;2026-02-01;Synthetic application;',
+        ]);
+        $rows = array_column($this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true)['rows'], null, 'member_number');
+        self::assertSame(['error', 'duplicate_client'], [$rows['DUPIC-1']['status'], $rows['DUPIC-1']['reason']]);
+        self::assertSame(['error', 'duplicate_client'], [$rows['DUPIC-2']['status'], $rows['DUPIC-2']['reason']]);
+        self::assertSame(['new_member', 'existing', $active], [$rows['ACTIVE-IC']['status'], $rows['ACTIVE-IC']['contact'], $rows['ACTIVE-IC']['client_id']],
+            'Archivovaný kontakt se stejným IČO nedělá IČO nejednoznačným.');
+        self::assertSame(['new_member', 'create'], [$rows['ARCH-IC']['status'], $rows['ARCH-IC']['contact']], 'Jen archivovaný kontakt nového člena nedostane.');
+    }
+
+    public function testEarlierSameStatusThanPlannedRevisionIsConflictAndExcelYearIsNotDate(): void
+    {
+        $member = $this->member('PLAN-END');
+        $this->members->appendRevision($this->supplier, $member, ['status' => 'ended', 'effective_from' => '2027-01-01', 'expected_revision' => 1,
+            'idempotency_key' => 'plan-end', 'legal_basis' => $this->basis()], $this->actor);
+        $this->member('SERIAL');
+        $csv = $this->csv([
+            'SYN-PLAN-END;;;;ended;2026-12-01;Synthetic expulsion;',
+            'SERIAL-YEAR;;;Synthetic Year;active;2026;Synthetic application;',
+            'SERIAL-OLD;;;Synthetic Old;active;10000;Synthetic application;',
+            'SYN-SERIAL;;;;suspended;46113;Synthetic decision;',
+        ]);
+        $rows = array_column($this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true)['rows'], null, 'member_number');
+        self::assertSame(['error', 'effective_conflict', ['date' => '2027-01-01']], [$rows['SYN-PLAN-END']['status'], $rows['SYN-PLAN-END']['reason'], $rows['SYN-PLAN-END']['params']],
+            'Plánované ukončení od 1. 1. nesmí tiše pohltit ukončení od 1. 12.');
+        self::assertSame(['error', 'date_invalid'], [$rows['SERIAL-YEAR']['status'], $rows['SERIAL-YEAR']['reason']]);
+        self::assertSame(['error', 'date_invalid'], [$rows['SERIAL-OLD']['status'], $rows['SERIAL-OLD']['reason']], 'Sériové číslo 10000 je rok 1927, mimo rozsah.');
+        self::assertSame(['new_revision', '2026-04-01'], [$rows['SYN-SERIAL']['status'], $rows['SYN-SERIAL']['effective_from']], 'Pětimístné sériové číslo Excelu je datum.');
+        $later = $this->import->run($this->supplier, $this->actor, $this->csv(['SYN-PLAN-END;;;;ended;2027-02-01;Synthetic expulsion;']), 'a.csv', true);
+        self::assertSame([['unchanged', 'same_status']], array_map(static fn (array $r): array => [$r['status'], $r['reason']], $later['rows']));
+    }
+
+    public function testConcurrentImportOfSameRowIsAlreadyImportedNotFailed(): void
+    {
+        $member = $this->member('TWIN-A');
+        $csv = $this->csv(['SYN-TWIN-A;;;;suspended;2026-03-01;Synthetic decision;']);
+        $preview = $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true);
+        $other = $this->otherActor();
+        // Druhý uživatel potvrdí stejný soubor těsně před námi: stejný klíč, jiný autor.
+        $racing = new MembershipImportService($this->db, new ActivityLogger($this->db), $this->members, function (array $plan) use ($other): void {
+            $this->members->appendRevision($this->supplier, $plan['member_id'], ['status' => $plan['status'], 'effective_from' => $plan['effective_from'], 'expected_revision' => $plan['expected_revision'],
+                'idempotency_key' => $plan['idempotency_key'], 'legal_basis' => ['organisation_form' => 'association', 'relationship' => 'nonreciprocal_membership',
+                    'reference' => $plan['reference'], 'evidence' => $plan['evidence']]], $other);
+        });
+        $result = $racing->run($this->supplier, $this->actor, $csv, 'a.csv', false, $preview['preview_hash']);
+        self::assertSame([0, 0, 'already_imported'], [$result['written'], $result['failed_writes'], $result['rows'][0]['outcome']]);
+        self::assertCount(2, $this->repository->history($this->supplier, $member));
+    }
+
+    public function testUnexpectedFailureMidImportStillAuditsWrittenRows(): void
+    {
+        $this->member('BOOM-A');
+        $this->member('BOOM-B');
+        $csv = $this->csv(['SYN-BOOM-A;;;;suspended;2026-03-01;Synthetic decision;', 'SYN-BOOM-B;;;;suspended;2026-03-01;Synthetic decision;']);
+        $preview = $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true);
+        $calls = 0;
+        $failing = new MembershipImportService($this->db, new ActivityLogger($this->db), $this->members, function () use (&$calls): void {
+            if (++$calls === 2) throw new \RuntimeException('Synthetic infrastructure failure');
+        });
+        try {
+            $failing->run($this->supplier, $this->actor, $csv, 'a.csv', false, $preview['preview_hash']);
+            self::fail('Nečekaná chyba se nesmí spolknout.');
+        } catch (\RuntimeException $e) {
+            self::assertSame('Synthetic infrastructure failure', $e->getMessage());
+        }
+        $q = $this->pdo->prepare('SELECT payload FROM activity_log WHERE supplier_id=? AND action=?');
+        $q->execute([$this->supplier, MembershipImportService::AUDIT_IMPORT]);
+        self::assertSame(['new_members' => 0, 'new_revisions' => 1, 'failed' => 0], json_decode((string) $q->fetchColumn(), true));
+    }
+
+    public function testTooManyRowsHasOwnCodeAndCsvCountIsWholeNumber(): void
+    {
+        $lines = [];
+        for ($i = 1; $i <= 2001; $i++) $lines[] = "BIG-{$i};;;Synthetic Big {$i};active;2026-02-01;Synthetic application;";
+        [$status, , $body] = $this->call('POST', 'importMembers', [], null, 'session', $this->csv($lines));
+        self::assertSame([422, 'nonprofit_membership_import_too_many_rows'], [$status, json_decode($body, true)['error']['code']]);
+
+        $member = $this->member('CSV-COUNT');
+        $request = ['member_id' => $member] + $this->template;
+        $preview = $this->charges->previewIssue($this->supplier, $request);
+        $this->charges->confirmIssue($this->supplier, $request, $preview['expected_case_version'], $preview['preview_hash'], 'issue-csv-count', $this->actor);
+        $csv = (new MembershipListExporter($this->db, '2026-06-01'))->export($this->supplier, MembershipListFilter::parse(['year' => '2026']), 'csv')['bytes'];
+        $line = array_values(array_filter(explode("\n", $csv), static fn (string $l): bool => str_starts_with($l, 'SYN-CSV-COUNT;')))[0];
+        $cells = str_getcsv($line, ';', '"', '');
+        self::assertSame(['1', '500,00'], [$cells[6], $cells[7]], 'Počet předpisů je celé číslo, částky mají dvě desetinná místa.');
     }
 
     /** @return array<string,array<string,mixed>> členské číslo => sloupec => hodnota */

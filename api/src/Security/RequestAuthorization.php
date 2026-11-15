@@ -21,6 +21,15 @@ final class RequestAuthorization
                 && self::allows($request, 'accounting.journal.post', AccessLevel::WRITE)));
     }
 
+    /**
+     * Import seznamu členů smí kontakt založit jen tomu, kdo smí kontakty zakládat i v adresáři;
+     * samotné právo zápisu členské evidence hranici adresáře neobchází.
+     */
+    public static function canCreateContactsByMembershipImport(Request $request): bool
+    {
+        return self::allows($request, 'clients.create', AccessLevel::WRITE);
+    }
+
     /** MCP se uděluje samostatně; interní role zachovávají přístup přes správu tokenů. */
     public static function canUseMcp(Request $request, AccessLevel $minimum = AccessLevel::READ): bool
     {

@@ -41770,7 +41770,8 @@
       "nonprofit_membership_batch_cancelled": "Dávka byla zrušena dříve, než byl člen zpracován.",
       "nonprofit_membership_import_file_invalid": "Soubor nejde zpracovat. Nahrajte XLSX nebo CSV do 2 MB s hlavičkou exportu (Členské číslo, Nový stav, Platí od, Podklad).",
       "nonprofit_membership_import_changed": "Data se od náhledu změnila. Zkontrolujte nový náhled a potvrďte ho znovu.",
-      "nonprofit_membership_import_has_errors": "Import obsahuje chybné řádky, nic nebylo zapsáno."
+      "nonprofit_membership_import_has_errors": "Import obsahuje chybné řádky, nic nebylo zapsáno.",
+      "nonprofit_membership_import_too_many_rows": "Import přijme nejvýše 2000 řádků. Větší seznam rozdělte filtrem (rok, označení příspěvku, hledání) na víc souborů."
     },
     "ratesEmptyRequired": "Zatím tu není žádná sazba. Nejprve založte sazbu v číselníku.",
     "batchTitle": "Hromadný předpis příspěvků",
@@ -41870,7 +41871,9 @@
       "reason_name_too_long": "Jméno nebo název je delší než 190 znaků.",
       "reason_client_is_member": "Kontakt už je členem s číslem {number}.",
       "reason_duplicate_number": "Členské číslo je v souboru víckrát (řádky {lines}).",
-      "reason_duplicate_client": "Kontakt je v souboru u víc nových členů (řádky {lines})."
+      "reason_duplicate_client": "Kontakt nebo IČO je v souboru u víc nových členů (řádky {lines}).",
+      "reason_contact_create_forbidden": "Kontakt by se musel založit, ale nemáte právo zakládat kontakty. Uveďte ID nebo IČO existujícího kontaktu.",
+      "status_already_imported": "Už zapsáno"
     }
   },
   "propertyCharges": {

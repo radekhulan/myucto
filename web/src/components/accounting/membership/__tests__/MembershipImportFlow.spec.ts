@@ -130,3 +130,19 @@ describe('Membership import flow', () => {
     expect(w.find('[data-action="import-confirm"]').exists()).toBe(false)
   })
 })
+
+describe('Membership import flow – souběh', () => {
+  it('řádek zapsaný souběžným importem ukáže jako už zapsaný, ne jako chybu', async () => {
+    api.importMembers.mockResolvedValueOnce(preview).mockResolvedValueOnce({ ...preview, dry_run: false, written: 1, failed_writes: 0,
+      rows: [{ ...preview.rows[0], outcome: 'already_imported' }, { ...preview.rows[1], outcome: 'written' }, preview.rows[2]] })
+    const w = mounted()
+    await choose(w)
+    await w.get('[data-action="import-preview"]').trigger('click')
+    await flushPromises()
+    await w.get('[data-action="import-confirm"]').trigger('click')
+    await flushPromises()
+    const first = w.findAll('[data-section="import-row"]')[0]
+    expect(first.get('[data-field="import-status"]').text()).toBe(cs.nonprofitMembership.import.status_already_imported)
+    expect(first.get('[data-field="import-detail"]').text()).toBe(cs.nonprofitMembership.import.reason_already_imported)
+  })
+})

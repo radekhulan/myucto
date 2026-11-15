@@ -90,6 +90,7 @@ function statusClass(row: MembershipImportRow): string {
 }
 function detail(row: MembershipImportRow): string {
   if (row.outcome === 'failed') return membershipError({ t, te }, row.failure ?? '')
+  if (row.outcome === 'already_imported') return t('nonprofitMembership.import.reason_already_imported')
   if (row.reason) {
     const params = { ...(row.params ?? {}) }
     if (params.date) params.date = formatDate(params.date)
@@ -125,7 +126,7 @@ function detail(row: MembershipImportRow): string {
         <li v-for="row in rows" :key="row.line" class="flex flex-wrap items-start gap-x-3 gap-y-1 rounded border border-neutral-200 p-2 text-sm" data-section="import-row" :data-line="row.line">
           <span class="whitespace-nowrap text-neutral-500">{{ t('nonprofitMembership.import.line', { line: row.line }) }}</span>
           <span class="min-w-0 break-words font-medium">{{ row.member_number || '—' }}<template v-if="row.name"> · {{ row.name }}</template></span>
-          <span :class="[badgeBase, statusClass(row)]" data-field="import-status">{{ t(`nonprofitMembership.import.status_${row.outcome === 'failed' ? 'failed' : row.status}`) }}</span>
+          <span :class="[badgeBase, statusClass(row)]" data-field="import-status">{{ t(`nonprofitMembership.import.status_${row.outcome === 'failed' || row.outcome === 'already_imported' ? row.outcome : row.status}`) }}</span>
           <span class="basis-full break-words text-neutral-600" data-field="import-detail">{{ detail(row) }}</span>
         </li>
         <li v-if="!rows.length" class="text-sm text-neutral-500">{{ t('nonprofitMembership.import.noRows') }}</li>

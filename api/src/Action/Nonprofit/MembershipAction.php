@@ -132,8 +132,11 @@ final class MembershipAction
             [$ip, $agent] = $this->origin($request);
             try {
                 return (new MembershipImportService($this->db, $this->activity, $this->memberService))
-                    ->run($supplier, $this->actor($request), $content, $filename, $dryRun, $hash, $ip, $agent);
+                    ->run($supplier, $this->actor($request), $content, $filename, $dryRun, $hash, $ip, $agent,
+                        RequestAuthorization::canCreateContactsByMembershipImport($request));
             } catch (CodebookImportException $e) {
+                // Překročený počet řádků má vlastní kód, aby web řekl skutečný důvod (export může být delší).
+                if ($e->errorCode === 'too_many_rows') throw new MembershipException('nonprofit_membership_import_too_many_rows', $e->getMessage(), 422);
                 throw new MembershipException('nonprofit_membership_import_file_invalid', $e->getMessage(), $e->httpStatus === 415 ? 415 : 422);
             }
         });

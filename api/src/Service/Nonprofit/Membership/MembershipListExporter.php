@@ -38,7 +38,7 @@ final class MembershipListExporter
         $filename = 'clenove-' . $this->today() . '.' . $format;
         if ($format === 'csv') {
             $text = array_map(static fn (array $row): array => array_map(
-                static fn (array $cell): string => $cell[0] === 'n' ? number_format((float) $cell[1], 2, ',', '') : CsvWriter::safe($cell[1]), $row), $rows);
+                static fn (array $cell): string => match ($cell[0]) { 'n' => number_format((float) $cell[1], 2, ',', ''), 'i' => (string) (int) $cell[1], default => CsvWriter::safe($cell[1]) }, $row), $rows);
             return ['bytes' => CsvWriter::build(MembershipListColumns::headers(), $text), 'filename' => $filename, 'mime' => 'text/csv; charset=UTF-8'];
         }
         $book = new Spreadsheet();
@@ -63,7 +63,7 @@ final class MembershipListExporter
     }
 
     /**
-     * Buňky v pořadí MembershipListColumns; ['s', text] nebo ['n', částka v Kč].
+     * Buňky v pořadí MembershipListColumns; ['s', text], ['i', počet] nebo ['n', částka v Kč].
      * @return list<list<array{0:string,1:mixed}>>
      */
     public function rows(int $supplier, array $filter): array
@@ -90,7 +90,7 @@ final class MembershipListExporter
                     ['s', self::label($row)],
                     ['s', $now['status'] ?? ''],
                     ['s', $now['effective_from'] ?? ''],
-                    ['n', $dues['claim_count']],
+                    ['i', $dues['claim_count']],
                     ...array_map(static fn (?string $cents): array => $cents === null ? ['s', ''] : ['n', (int) $cents / 100.0],
                         [$dues['prescribed_cents'], $dues['paid_cents'], $dues['open_cents']]),
                     ['s', $dues['status']],
@@ -129,7 +129,7 @@ final class MembershipListExporter
         // Texty explicitně jako řetězec: číslo „042“ si drží nulu a „=…“ zůstane textem.
         foreach ($rows as $r => $cells) {
             foreach ($cells as $i => [$type, $value]) {
-                $type === 'n'
+                $type !== 's'
                     ? $sheet->setCellValue([$i + 1, $r + 2], $value)
                     : $sheet->setCellValueExplicit([$i + 1, $r + 2], (string) $value, DataType::TYPE_STRING);
             }

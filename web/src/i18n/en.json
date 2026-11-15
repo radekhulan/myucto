@@ -42085,7 +42085,8 @@
       "nonprofit_membership_batch_cancelled": "The batch was cancelled before this member was processed.",
       "nonprofit_membership_import_file_invalid": "The file cannot be processed. Upload an XLSX or CSV up to 2 MB with the export header (Členské číslo, Nový stav, Platí od, Podklad).",
       "nonprofit_membership_import_changed": "The data changed since the preview. Review the new preview and confirm it again.",
-      "nonprofit_membership_import_has_errors": "The import contains invalid rows; nothing was written."
+      "nonprofit_membership_import_has_errors": "The import contains invalid rows; nothing was written.",
+      "nonprofit_membership_import_too_many_rows": "The import accepts at most 2000 rows. Split a larger list into several files using the filters (year, contribution label, search)."
     },
     "ratesEmptyRequired": "There are no rates yet. Create a rate in the catalog first.",
     "batchTitle": "Batch membership charges",
@@ -42185,7 +42186,9 @@
       "reason_name_too_long": "The name is longer than 190 characters.",
       "reason_client_is_member": "The contact is already a member with number {number}.",
       "reason_duplicate_number": "The member number appears more than once in the file (rows {lines}).",
-      "reason_duplicate_client": "The contact appears with more than one new member (rows {lines})."
+      "reason_duplicate_client": "The contact or company ID appears with more than one new member (rows {lines}).",
+      "reason_contact_create_forbidden": "A contact would have to be created, but you are not allowed to create contacts. Enter the ID or company ID of an existing contact.",
+      "status_already_imported": "Already written"
     }
   },
   "fx504": {

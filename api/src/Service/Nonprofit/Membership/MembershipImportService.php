@@ -42,6 +42,7 @@ final class MembershipImportService extends AbstractCodebookImportService
     private ?string $expectedHash = null;
     private ?string $ip = null;
     private string $agent = '';
+    private bool $canCreateContacts = false;
 
     /** @param ?\Closure(array):void $beforeWrite volá se před zápisem každého řádku; testy jím simulují souběžnou změnu člena */
     public function __construct(
@@ -54,14 +55,15 @@ final class MembershipImportService extends AbstractCodebookImportService
     /**
      * Náhled (dryRun) nebo potvrzení. Vrací report s řádky, počty a preview_hash.
      * Potvrzení s jiným hashem než náhled vyhodí 409 se čerstvým náhledem v detailech.
+     * Bez $canCreateContacts (právo zakládat kontakty v adresáři) je řádek, který by kontakt založil, chybou.
      */
-    public function run(int $supplier, int $actor, string $content, string $filename, bool $dryRun, ?string $expectedHash = null, ?string $ip = null, string $agent = ''): array
+    public function run(int $supplier, int $actor, string $content, string $filename, bool $dryRun, ?string $expectedHash = null, ?string $ip = null, string $agent = '', bool $canCreateContacts = false): array
     {
         if ($actor <= 0) throw new MembershipException('nonprofit_membership_actor_required', 'Změna členské evidence vyžaduje autora.', 403);
         if (!$dryRun && ($expectedHash === null || preg_match('/^[0-9a-f]{64}$/D', $expectedHash) !== 1)) {
             throw new MembershipException('nonprofit_membership_invalid', 'Potvrzení importu vyžaduje otisk náhledu.');
         }
-        [$this->actor, $this->expectedHash, $this->ip, $this->agent] = [$actor, $expectedHash, $ip, $agent];
+        [$this->actor, $this->expectedHash, $this->ip, $this->agent, $this->canCreateContacts] = [$actor, $expectedHash, $ip, $agent, $canCreateContacts];
         $report = $this->import($supplier, $actor, $content, $filename, $dryRun);
         if (!isset($report['preview_hash'])) {
             // Chyba celého souboru (prázdný, chybí sloupec) ze sdíleného čtení.
@@ -94,29 +96,37 @@ final class MembershipImportService extends AbstractCodebookImportService
             throw new MembershipException('nonprofit_membership_import_has_errors', 'Import obsahuje chybné řádky, nic nebylo zapsáno.', 422, ['preview' => $report]);
         }
         $written = $failed = 0;
-        foreach ($plan as $index => $row) {
-            if (!in_array($row['status'], ['new_revision', 'new_member'], true)) continue;
-            try {
-                if ($this->beforeWrite !== null) ($this->beforeWrite)($row['plan']);
-                $result = $row['status'] === 'new_revision' ? $this->writeRevision($supplierId, $row['plan']) : $this->writeMember($supplierId, $row['plan']);
-                $plan[$index] += ['outcome' => 'written'] + $result;
-                $written++;
-            } catch (MembershipException $e) {
-                // Souběžná změna člena mezi náhledem a zápisem: řádek se odmítne, další pokračují
-                // a opakovaný import dokončí zbytek (revize i člen jsou idempotentní).
-                $plan[$index] += ['outcome' => 'failed', 'failure' => $e->errorCode, 'failure_message' => $e->getMessage()];
-                $failed++;
+        try {
+            foreach ($plan as $index => $row) {
+                if (!in_array($row['status'], ['new_revision', 'new_member'], true)) continue;
+                try {
+                    if ($this->beforeWrite !== null) ($this->beforeWrite)($row['plan']);
+                    $result = $row['status'] === 'new_revision' ? $this->writeRevision($supplierId, $row['plan']) : $this->writeMember($supplierId, $row['plan']);
+                    $plan[$index] += ['outcome' => 'written'] + $result;
+                    $written++;
+                } catch (MembershipException $e) {
+                    if ($row['status'] === 'new_revision' && $e->errorCode === 'nonprofit_membership_idempotency_conflict') {
+                        // Klíč je odvozený z obsahu řádku: revizi mezitím zapsal souběžný import téhož souboru.
+                        $plan[$index] += ['outcome' => 'already_imported'];
+                        continue;
+                    }
+                    // Souběžná změna člena mezi náhledem a zápisem: řádek se odmítne, další pokračují
+                    // a opakovaný import dokončí zbytek (revize i člen jsou idempotentní).
+                    $plan[$index] += ['outcome' => 'failed', 'failure' => $e->errorCode, 'failure_message' => $e->getMessage()];
+                    $failed++;
+                }
+            }
+        } finally {
+            // Audit zapsaných řádků i tehdy, když zápis přeruší nečekaná chyba (dřívější řádky už jsou potvrzené).
+            if ($written > 0 || $failed > 0) {
+                $this->activity->log(self::AUDIT_IMPORT, $this->actor, 'nonprofit_member', null, [
+                    'new_members' => count(array_filter($plan, static fn (array $row): bool => $row['status'] === 'new_member' && ($row['outcome'] ?? '') === 'written')),
+                    'new_revisions' => count(array_filter($plan, static fn (array $row): bool => $row['status'] === 'new_revision' && ($row['outcome'] ?? '') === 'written')),
+                    'failed' => $failed,
+                ], $this->ip, $this->agent, $supplierId);
             }
         }
-        $report = $this->report($plan, $hash, false) + ['written' => $written, 'failed_writes' => $failed];
-        if ($written > 0 || $failed > 0) {
-            $this->activity->log(self::AUDIT_IMPORT, $this->actor, 'nonprofit_member', null, [
-                'new_members' => count(array_filter($plan, static fn (array $row): bool => $row['status'] === 'new_member' && ($row['outcome'] ?? '') === 'written')),
-                'new_revisions' => count(array_filter($plan, static fn (array $row): bool => $row['status'] === 'new_revision' && ($row['outcome'] ?? '') === 'written')),
-                'failed' => $failed,
-            ], $this->ip, $this->agent, $supplierId);
-        }
-        return $report;
+        return $this->report($plan, $hash, false) + ['written' => $written, 'failed_writes' => $failed];
     }
 
     /**
@@ -163,7 +173,10 @@ final class MembershipImportService extends AbstractCodebookImportService
         }
         $newClients = [];
         foreach ($out as $i => $row) {
-            if ($row['status'] === 'new_member' && $row['plan']['client_id'] !== null) $newClients[$row['plan']['client_id']][] = $i;
+            if ($row['status'] !== 'new_member') continue;
+            // Tentýž existující kontakt, nebo totéž IČO zakládaného kontaktu: dva noví členové by sdíleli jednu osobu.
+            $identity = $row['plan']['client_id'] !== null ? 'id:' . $row['plan']['client_id'] : ($row['plan']['create_contact']['ic'] !== null ? 'ic:' . $row['plan']['create_contact']['ic'] : null);
+            if ($identity !== null) $newClients[$identity][] = $i;
         }
         foreach ([[$seenNumbers, 'duplicate_number'], [$newClients, 'duplicate_client']] as [$groups, $reason]) {
             foreach ($groups as $indexes) {
@@ -228,7 +241,9 @@ final class MembershipImportService extends AbstractCodebookImportService
             $base += ['new_status' => $status, 'effective_from' => $from];
             if (isset($known[self::revisionKey($member['id'], $revision)])) return $this->unchanged($base, 'already_imported', []);
             if ($last === null && $status !== 'active') return $this->error($base, 'initial_status');
-            if ($last !== null && $last['status'] === $status) return $this->unchanged($base, 'same_status', ['status' => $status, 'date' => $last['effective_from']]);
+            // Stejný stav platný už k zadanému dni je beze změny; dřívější datum než poslední (i budoucí) revize je chyba,
+            // jinak by plánované ukončení od 1. 1. tiše „pohltilo“ ukončení od 1. 12.
+            if ($last !== null && $last['status'] === $status && $from >= $last['effective_from']) return $this->unchanged($base, 'same_status', ['status' => $status, 'date' => $last['effective_from']]);
             if ($last !== null && $from <= $last['effective_from']) return $this->error($base, 'effective_conflict', ['date' => $last['effective_from']]);
             $expected = $history === [] ? 0 : $history[array_key_last($history)]['revision_no'];
             return $base + ['status' => 'new_revision', 'plan' => ['line' => $row['line'], 'kind' => 'revision', 'member_id' => $member['id'],
@@ -251,6 +266,7 @@ final class MembershipImportService extends AbstractCodebookImportService
             $name = trim($row['name']);
             if ($name === '') return $this->error($base, 'name_missing');
             if (mb_strlen($name) > 190) return $this->error($base, 'name_too_long');
+            if (!$this->canCreateContacts) return $this->error($base, 'contact_create_forbidden');
             $create = ['company_name' => $name, 'ic' => $ic];
             $client = null;
         }
@@ -374,7 +390,11 @@ final class MembershipImportService extends AbstractCodebookImportService
         return $out;
     }
 
-    /** @return array<string,list<array{id:int,ic:?string,member_number:?string}>> */
+    /**
+     * Aktivní kontakty podle IČO; archivovaný kontakt ani pokladní „hotovostní zákazník“ nového člena nedostane
+     * a vedle aktivního nedělá IČO nejednoznačným. Kontakt výslovně zadaný ID se bere i archivovaný.
+     * @return array<string,list<array{id:int,ic:?string,member_number:?string}>>
+     */
     private function clientsByIc(int $supplier, array $ics): array
     {
         $ics = array_values(array_unique($ics));
@@ -383,7 +403,7 @@ final class MembershipImportService extends AbstractCodebookImportService
             $marks = implode(',', array_fill(0, count($chunk), '?'));
             $q = $this->db->pdo()->prepare("SELECT c.id,c.ic,m.member_number FROM clients c FORCE INDEX(idx_clients_ic)
                 LEFT JOIN nonprofit_members m ON m.supplier_id=c.supplier_id AND m.client_id=c.id
-                WHERE c.ic IN ({$marks}) AND c.supplier_id=? ORDER BY c.id");
+                WHERE c.ic IN ({$marks}) AND c.supplier_id=? AND c.archived_at IS NULL AND c.is_walk_in=0 ORDER BY c.id");
             $q->execute([...$chunk, $supplier]);
             foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) $out[(string) $row['ic']][] = self::clientRow($row);
         }
@@ -424,9 +444,11 @@ final class MembershipImportService extends AbstractCodebookImportService
         if (preg_match('/^([0-9]{1,2})\.\s*([0-9]{1,2})\.\s*([0-9]{4})$/D', $value, $m) === 1) {
             return checkdate((int) $m[2], (int) $m[1], (int) $m[3]) ? sprintf('%04d-%02d-%02d', (int) $m[3], (int) $m[2], (int) $m[1]) : null;
         }
-        if (preg_match('/^[0-9]{4,6}$/D', $value) === 1) {
+        // Sériové číslo Excelu jen v rozumném rozsahu (1950–2150): „2026“ (= rok 1905) v buňce není datum.
+        // Délka do šesti číslic jen chrání převod před obřími čísly, rozsah rozhoduje kontrola data níže.
+        if (preg_match('/^[0-9]{1,6}$/D', $value) === 1) {
             $date = ExcelDate::excelToDateTimeObject((float) $value)->format('Y-m-d');
-            return IsoDate::isValid($date) ? $date : null;
+            return IsoDate::isValid($date) && $date >= '1950-01-01' && $date < '2151-01-01' ? $date : null;
         }
         return null;
     }

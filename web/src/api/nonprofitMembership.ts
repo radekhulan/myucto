@@ -24,7 +24,7 @@ export interface MembershipImportRow {
   line: number; member_number: string; name?: string; status: 'new_revision' | 'new_member' | 'unchanged' | 'error'
   reason?: string; params?: Record<string, string>; member_id?: number; client_id?: number | null; contact?: 'existing' | 'create'
   new_status?: MemberStatus; effective_from?: string
-  outcome?: 'written' | 'failed'; failure?: string; failure_message?: string
+  outcome?: 'written' | 'failed' | 'already_imported'; failure?: string; failure_message?: string
 }
 export interface MembershipImportReport {
   ok: boolean; dry_run: boolean; preview_hash: string
@@ -176,6 +176,14 @@ export const membershipApi = {
   /** Soubor seznamu se stejnými filtry jako seznam; přes axios kvůli X-Supplier-Id a přihlášení. */
   exportMembers: async (supplier: number, format: 'xlsx' | 'csv', filters: MembershipListFilters = {}): Promise<{blob: Blob; filename: string}> => {
     const r = await api.get(`${base}/members/export`, { ...options(supplier), responseType: 'blob', params: { format, ...filters, ...(filters.year === null ? {year: ''} : {}) } })
+      .catch(async (e: { response?: { data?: unknown } }) => {
+        // Chyba přijde jako Blob s JSON; převedeme ji, aby hláška šla podle kódu jako u ostatních volání.
+        const data = e?.response?.data
+        if (data instanceof Blob && e.response) {
+          try { e.response.data = JSON.parse(await data.text()) } catch { /* ponechat původní odpověď */ }
+        }
+        throw e
+      })
     const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(String(r.headers?.['content-disposition'] ?? ''))
     return { blob: r.data as Blob, filename: match ? decodeURIComponent(match[1]) : `clenove.${format}` }
   },
