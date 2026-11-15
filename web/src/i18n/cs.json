@@ -41416,7 +41416,7 @@
     "listStatus_unproven": "K prověření",
     "listStatus_none": "Bez předpisu pro zvolený titul nebo rok",
     "listPrescribed": "Předepsáno",
-    "listPaid": "Prokázaná úhrada",
+    "listPaid": "Úhrada",
     "listNoResults": "Zadaným filtrům neodpovídá žádný člen.",
     "rateRetryOptions": "Znovu načíst účty a dimenze",
     "ratePartialList": "Hledáte jen v načtených sazbách. Další sazby načtete tlačítkem vedle.",

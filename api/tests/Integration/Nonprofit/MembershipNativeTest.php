@@ -688,6 +688,48 @@ final class MembershipNativeTest extends TestCase
         return (new MembershipListRepository($this->db))->page($this->supplier, $after, $limit, $filter);
     }
 
+    public function testPairingOfTwoClaimsIsUnprovenInDetailListAndFilter(): void
+    {
+        $one = $this->member('SYN-SHARED-ONE', 'shared-one');
+        $two = $this->member('SYN-SHARED-TWO', 'shared-two');
+        $adapter = new MembershipReceivablePaymentAdapter($this->balances);
+        $charges = new MembershipChargeRepository($this->db);
+        $targets = [];
+        foreach ([$one, $two] as $member) {
+            $issued = $this->issue($member['id'], 'shared-' . $member['id']);
+            $targets[$member['id']] = $adapter->target($this->supplier, $charges->claimForOperation($this->supplier, $issued['operation']['id'])['id']);
+        }
+        $account = $targets[$one['id']]['journal_line']['account_id'];
+        $this->pdo->prepare("INSERT INTO bank_statements(supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date,imported_by) VALUES(?,'synthetic-shared.gpc',?,'1000000005','0100','CZK','2026-02-01',?)")
+            ->execute([$this->supplier, hash('sha256', 'synthetic shared ' . $this->supplier), $this->actor]);
+        $this->pdo->prepare("INSERT INTO bank_transactions(statement_id,posted_at,amount,currency,description,match_status) VALUES(?,'2026-02-01','30000.00','CZK','Synthetic shared payment','manual')")
+            ->execute([(int) $this->pdo->lastInsertId()]);
+        // Saldo okruhu (2 × 20 000 − 30 000) nepřesahuje předpis: ambiguous plyne jen z počtu členských předpisů.
+        $entry = $this->posting->postDocument($this->supplier, 'bank', (int) $this->pdo->lastInsertId(), [
+            ['account_code' => '221', 'side' => 'debit', 'amount' => '30000.00'], ['account_code' => '315.100', 'side' => 'credit', 'amount' => '30000.00'],
+        ], ['entry_date' => '2026-02-01', 'description' => 'Synthetic shared payment', 'posted' => true, 'posted_by' => $this->actor]);
+        $q = $this->pdo->prepare('SELECT line_no FROM journal_entry_lines WHERE supplier_id=? AND entry_id=? AND account_id=?');
+        $q->execute([$this->supplier, $entry, $account]);
+        (new JournalLinePairingRepository($this->db))->create($this->supplier, $account, [
+            $targets[$one['id']]['journal_line'], $targets[$two['id']]['journal_line'],
+            ['entry_id' => $entry, 'line_no' => (int) $q->fetchColumn(), 'account_id' => $account],
+        ], 'Synthetic shared payment of two claims', 'manual', $this->actor);
+
+        $reconciliation = new MembershipReconciliationService($this->balances);
+        foreach ([$one, $two] as $member) {
+            $detail = $reconciliation->memberBalance($this->supplier, $member['id']);
+            self::assertSame('ambiguous', $detail['items'][0]['settlement']['status']);
+            self::assertNull($detail['items'][0]['settlement']['open_cents']);
+        }
+        $statuses = array_column(array_map(fn (array $row): array => ['id' => $row['id'], 'status' => $row['contribution']['status']], $this->listRows()), 'status', 'id');
+        self::assertSame('unproven', $statuses[$one['id']]);
+        self::assertSame('unproven', $statuses[$two['id']]);
+        $unproven = array_column($this->listRows(['payment_status' => 'unproven']), 'id');
+        sort($unproven);
+        self::assertSame([$one['id'], $two['id']], $unproven);
+        self::assertSame([], $this->listRows(['payment_status' => 'paid']));
+    }
+
     public function testRefreshValidatesSelectionOutsideTheFirstPageAndFindsPersonalNames(): void
     {
         $one = $this->member('SYN-REVIEW-ONE', 'review-one');

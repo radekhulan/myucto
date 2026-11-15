@@ -388,9 +388,17 @@ final class MembershipActionTest extends TestCase
         self::assertSame(403, $status);
         [$status] = $this->call('GET', 'titles', null, [], ['accounting' => 1]);
         self::assertSame(200, $status);
+        [$status, $denied] = $this->call('GET', 'titles', null, [], ['accounting' => 1], 'bearer');
+        self::assertSame(403, $status);
+        self::assertSame('token_endpoint_forbidden', $denied['error']['code']);
+        // Token s plným zápisem (system_write) se chová jako relace i u nových čtecích akcí.
+        [$status] = $this->call('GET', 'titles', null, [], ['accounting' => 1], 'bearer', ['system_write' => true]);
+        self::assertSame(200, $status);
+        [$status] = $this->call('POST', 'selectionCheck', $body, [], ['accounting' => 1], 'bearer', ['system_write' => true]);
+        self::assertSame(200, $status);
     }
 
-    private function call(string $httpMethod, string $method, ?array $body, array $args = [], ?array $permissions = null, string $auth = 'session'): array
+    private function call(string $httpMethod, string $method, ?array $body, array $args = [], ?array $permissions = null, string $auth = 'session', ?array $apiToken = null): array
     {
         $permissions ??= ['accounting' => 1, 'accounting.journal.post' => 2, 'accounting.templates' => 2];
         $request = (new ServerRequestFactory())->createServerRequest($httpMethod, '/api/accounting/nonprofit-membership')
@@ -398,6 +406,7 @@ final class MembershipActionTest extends TestCase
             ->withAttribute(AuthMiddleware::ATTR_METHOD, $auth)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->actor, 'role' => 'accountant'])
             ->withAttribute('auth.effective_role', new EffectiveRole(501, 'Synthetic membership role', 'staff', true, $permissions));
+        if ($apiToken !== null) $request = $request->withAttribute(AuthMiddleware::ATTR_API_TOKEN, $apiToken);
         if ($body !== null) $request = $request->withParsedBody($body);
         $response = $this->action->{$method}($request, new Response(), $args);
         return [$response->getStatusCode(), json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR)];

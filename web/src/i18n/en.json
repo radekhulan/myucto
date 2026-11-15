@@ -41731,7 +41731,7 @@
     "listStatus_unproven": "Needs review",
     "listStatus_none": "No charge for the selected title or year",
     "listPrescribed": "Charged",
-    "listPaid": "Proven payment",
+    "listPaid": "Paid",
     "listNoResults": "No members match the selected filters.",
     "rateRetryOptions": "Reload accounts and dimensions",
     "ratePartialList": "Search covers loaded rates only. Use the button to load more.",
