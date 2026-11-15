@@ -319,6 +319,43 @@ final class PartialUpdateHeaderTest extends TestCase
         }
     }
 
+    /** BEZ OPRAVY PADÁ: POST /invoices ruční kurz z těla zahodil a uložil kurz ČNB. */
+    public function testCreateKeepsManualExchangeRate(): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id FROM currencies WHERE supplier_id = ? AND is_active = 1 AND code = 'EUR' ORDER BY id LIMIT 1"
+        );
+        $stmt->execute([$this->supplierId]);
+        $eur = (int) $stmt->fetchColumn();
+        if ($eur === 0) {
+            self::markTestSkipped('Dodavatel nemá aktivní EUR.');
+        }
+        $pdo = $this->db->pdo();
+        $cached = $pdo->prepare("SELECT * FROM exchange_rates WHERE currency_code = 'EUR' AND rate_date IN (?, ?)");
+        $cached->execute([self::ISSUE_DATE, self::TAX_DATE]);
+        $originalRates = $cached->fetchAll(\PDO::FETCH_ASSOC);
+        $insert = $pdo->prepare("REPLACE INTO exchange_rates (rate_date, currency_code, rate) VALUES (?, 'EUR', 25.0)");
+        try {
+            foreach ([self::ISSUE_DATE, self::TAX_DATE] as $date) {
+                $insert->execute([$date]);
+            }
+            $id = $this->createInvoice(null, $eur, ['exchange_rate' => 24.125]);
+            $row = $this->row($id);
+            self::assertEqualsWithDelta(24.125, (float) $row['exchange_rate'], 0.00001, 'Ruční kurz z POST se musí uložit.');
+            self::assertSame(self::TAX_DATE, $row['exchange_rate_date'], 'Rozhodný den ručního kurzu je DUZP.');
+
+            $id = $this->createInvoice(null, $eur);
+            self::assertSame(25.0, (float) $this->row($id)['exchange_rate'], 'Bez ručního kurzu platí ČNB.');
+        } finally {
+            $pdo->prepare("DELETE FROM exchange_rates WHERE currency_code = 'EUR' AND rate_date IN (?, ?)")
+                ->execute([self::ISSUE_DATE, self::TAX_DATE]);
+            $restore = $pdo->prepare('INSERT INTO exchange_rates (rate_date, currency_code, rate, fetched_at) VALUES (?, ?, ?, ?)');
+            foreach ($originalRates as $rate) {
+                $restore->execute([$rate['rate_date'], $rate['currency_code'], $rate['rate'], $rate['fetched_at']]);
+            }
+        }
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /** @var list<int> */
@@ -353,9 +390,10 @@ final class PartialUpdateHeaderTest extends TestCase
         return (int) $pdo->lastInsertId();
     }
 
-    private function createInvoice(?int $projectId = null, ?int $currencyId = null): int
+    /** @param array<string,mixed> $extra */
+    private function createInvoice(?int $projectId = null, ?int $currencyId = null, array $extra = []): int
     {
-        $created = self::decode(($this->create)($this->request('POST', [
+        $created = self::decode(($this->create)($this->request('POST', $extra + [
             'project_id'               => $projectId,
             'invoice_type'             => 'invoice',
             'client_id'                => $this->clientId,
