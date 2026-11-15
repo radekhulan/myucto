@@ -87,6 +87,7 @@ final class UpdateInvoiceAction
         private readonly \MyInvoice\Repository\TaxConstantsRepository $taxConstants,
         private readonly FiledVatPeriodLookup $filedPeriods,
         private readonly NumberSeriesSelection $numberSeries,
+        private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
         private readonly \MyInvoice\Service\Invoice\InvoiceIssueTaxGate $taxGate,
         private readonly \MyInvoice\Service\Accounting\DocumentPaymentLinks $paymentLinks,
     ) {}
@@ -692,7 +693,13 @@ final class UpdateInvoiceAction
         }
         try {
             if (DocumentItemsPayload::replaces($body)) {
+                // Dimenze položek konceptu drží pořadí řádku; po vložení či odebrání řádku je
+                // vrátí k položkám podle `id` z těla (klient API, MCP).
+                $dimensionsBefore = !$isIssued ? $this->itemDimensions->snapshot('invoice', $id) : [];
                 $this->repo->replaceItems($id, (array) $body['items']);
+                if (!$isIssued) {
+                    $this->itemDimensions->realign((int) ($existing['supplier_id'] ?? 0), 'invoice', $id, $dimensionsBefore, (array) $body['items']);
+                }
             } elseif (($replay = self::storedItemsToReplay($body, $existing)) !== null) {
                 $this->repo->replaceItems($id, InvoiceItemTracking::fromStored($replay));
             }
