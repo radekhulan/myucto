@@ -21618,6 +21618,68 @@ paths:
         '409': { description: Doklad není potvrzený ani zaúčtovaný (`other_items.error.counterparty_not_editable`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { description: Neplatný účet protistrany (`other_items.error.invalid_counterparty_account`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /api/v1/accounting/other-items/{id}/text:
+    put:
+      tags: [Accounting]
+      summary: Změní poznámku vystaveného dokladu
+      description: |
+        Poznámka je popisný údaj mimo účetnictví: jde změnit u potvrzeného, zaúčtovaného, stornovaného
+        i zrušeného dokladu, také v uzavřeném období. Ostatní pole tělo ignoruje (název tvoří popis
+        zápisu v deníku, účetní pole se mění stornem nebo přeúčtováním). Koncept vrací
+        `409 other_items.error.is_draft` (upravuje se přes `PUT /accounting/other-items/{id}`).
+        Změna se zapíše do aktivity dokladu (`other_item.text_updated` s hodnotou před a po).
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [note], properties: { note: { type: [string, 'null'], maxLength: 10000 } } } } }
+      responses:
+        '200': { description: Upravený doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Doklad je koncept (`other_items.error.is_draft`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Chybí pole note nebo je delší než 10 000 znaků, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/v1/accounting/other-items/{id}/posted:
+    delete:
+      tags: [Accounting]
+      summary: Smaže zaúčtovaný doklad i se zápisem v deníku bez storna
+      description: |
+        Odstraní chybný zaúčtovaný doklad i jeho zápis v deníku, za stejných podmínek jako
+        `DELETE /accounting/journal/{id}`: otevřené období (`409 period_not_open`), zápis bez storna,
+        uzamčené datum jen s vědomým potvrzením (`409 date_locked` s `can_acknowledge`, opakovat
+        s `?ack_locked=1`), řádky bez rozpadu saldokonta (`409 allocation_saldo_in_use`), mimo okruh
+        párování (`409 entry_paired`) a bez navazujících agend. Doklad navíc nesmí mít úhradu
+        (`other_items.error.has_payments`), být v platebním příkazu (`in_payment_order`), účtovat
+        navázanou fakturu (`linked_invoice`), být zdrojem opakování (`has_schedule`) ani mít historii
+        přeúčtování (`has_posting_history`); takový doklad se ruší stornem. Výskyt opakování se po
+        smazání zápisu jen zruší (`status: cancelled`), aby ho opakování nevytvořilo znovu.
+        Číslo se do řady nevrací. Vše proběhne v jedné transakci a zapíše se do auditu
+        (`accounting.entry_deleted` u zápisu, `other_item.deleted_posted` u dokladu).
+        Práva other_items, accounting, accounting.journal.write a accounting.journal.post (zápis).
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: ack_locked, schema: { type: string, enum: ['1'] }, description: Vědomé potvrzení zásahu do uzamčeného data (jen přihlášená relace). }
+      responses:
+        '200':
+          description: Doklad i zápis smazány
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, journal_entry_id, status]
+                properties:
+                  deleted: { type: boolean }
+                  journal_entry_id: { type: integer, format: int64, description: Smazaný zápis deníku }
+                  status: { type: string, enum: [deleted, cancelled], description: cancelled = zrušený výskyt opakování }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Smazání brání pravidlo deníku nebo navazující údaj (`period_not_open`, `date_locked`, `entry_paired`, `allocation_saldo_in_use`, `entry_delete_conflict`, `other_items.error.not_posted|has_payments|in_payment_order|linked_invoice|has_schedule|has_posting_history`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /api/v1/accounting/other-items/{id}/allocations:
     get:
       tags: [Accounting]
@@ -21928,7 +21990,7 @@ paths:
     delete:
       tags: [Accounting]
       summary: Smaže koncept
-      description: Zaúčtovaný doklad se nemaže, stornuje se (409 internal_documents.error.not_draft). Přes API token nedostupné.
+      description: Zaúčtovaný doklad tato cesta nemaže (409 internal_documents.error.not_draft); stornuje se, nebo se smaže i se zápisem přes `DELETE /accounting/internal-documents/{id}/posted`. Přes API token nedostupné.
       responses:
         '200': { description: Smazáno }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -21970,6 +22032,75 @@ paths:
         '403': { $ref: '#/components/responses/SystemWriteRequired' }
         '409': { description: 'Doklad není zaúčtovaný (`internal_documents.error.not_posted`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { description: 'Chybí důvod (`internal_documents.error.reason_required`), neplatné datum nebo storno do uzavřeného či zamčeného období (`period_not_open`, `date_locked`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/v1/accounting/internal-documents/{id}/text:
+    put:
+      tags: [Accounting]
+      summary: Změní poznámku (a popis) vystaveného interního dokladu
+      description: |
+        Poznámka jde změnit u zaúčtovaného i stornovaného dokladu, také v uzavřeném období, do
+        účetnictví se nepromítá. Popis (`title`) jde změnit jen u zaúčtovaného dokladu: je zároveň
+        popisem zápisu v deníku a mění se s ním stejně jako `PATCH /accounting/journal/{id}/description`
+        (otevřené období, jinak `409 period_not_open`; stornovaný doklad `409 internal_documents.error.title_locked`).
+        Řádky kontace, data a částky tělo ignoruje. Koncept vrací `409 internal_documents.error.is_draft`.
+        Změny se zapíší do aktivity dokladu (`internal_document.text_updated` s hodnotami před a po),
+        změna popisu i do auditu zápisu. Práva accounting.journal.write, u popisu navíc accounting (zápis).
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: [string, 'null'], maxLength: 10000 }
+                title: { type: string, minLength: 1, maxLength: 255 }
+      responses:
+        '200': { description: Upravený doklad, content: { application/json: { schema: { $ref: '#/components/schemas/InternalDocument' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Koncept, popis stornovaného dokladu nebo zápis v uzavřeném období (`internal_documents.error.is_draft|title_locked`, `period_not_open`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/internal-documents/{id}/posted:
+    delete:
+      tags: [Accounting]
+      summary: Smaže zaúčtovaný interní doklad i se zápisem v deníku bez storna
+      description: |
+        Odstraní chybný zaúčtovaný doklad i jeho ruční zápis, za stejných podmínek jako
+        `DELETE /accounting/journal/{id}`: otevřené období (`409 period_not_open`), zápis bez storna,
+        uzamčené datum jen s vědomým potvrzením (`409 date_locked` s `can_acknowledge`, opakovat
+        s `?ack_locked=1`), řádky bez rozpadu saldokonta (`409 allocation_saldo_in_use`), mimo okruh
+        párování (`409 entry_paired`) a bez navazujících agend. Stornovaný doklad
+        (`internal_documents.error.not_posted`) a hlavička nad převzatým ručním zápisem
+        (`internal_documents.error.internal_document_use_detail`) se nemažou. Číslo z nové řady
+        číselníku se vrátí do řady, je-li poslední (`number_released`); číslo dosavadní řady ID
+        sdílené s ručními zápisy se nevrací. Vše proběhne v jedné transakci a zapíše se do auditu
+        (`accounting.entry_deleted` u zápisu, `internal_document.deleted_posted` u dokladu).
+        Práva accounting, accounting.journal.write a accounting.journal.post (zápis).
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: ack_locked, schema: { type: string, enum: ['1'] }, description: Vědomé potvrzení zásahu do uzamčeného data (jen přihlášená relace). }
+      responses:
+        '200':
+          description: Doklad i zápis smazány
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, journal_entry_id, number_released]
+                properties:
+                  deleted: { type: boolean }
+                  journal_entry_id: { type: integer, format: int64, description: Smazaný zápis deníku }
+                  number_released: { type: boolean, description: Číslo se vrátilo do řady číselníku }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Smazání brání pravidlo deníku nebo stav dokladu (`period_not_open`, `date_locked`, `entry_paired`, `allocation_saldo_in_use`, `entry_delete_conflict`, `internal_documents.error.not_posted|is_draft|internal_document_use_detail`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/accounting/cash-documents:
     get:
@@ -45608,6 +45739,7 @@ components:
             amount_czk: { type: number }
             settled_outside_amount: { type: number, description: Část uhrazená mimo banku a pokladnu (zápočet, interní doklad, stav úhrady převzatý z jiného programu). Je součástí paid_amount. }
             paid_amount: { type: number, description: Alokované úhrady z banky a pokladny včetně settled_outside_amount. }
+            posted_deletion: { $ref: '#/components/schemas/PostedDeletion', description: Jen v detailu zaúčtovaného dokladu se zápisem v deníku }
             remaining_amount: { type: number, description: Saldo položky. U úvěru s rozdělenými splátkami jen jistina. }
             remaining_payment: { type: number, description: Kolik zbývá zaplatit; u rozdělených splátek i úrok a poplatek, jinak rovno remaining_amount. Jen detail. }
             has_split_installments: { type: boolean, description: Splátkový kalendář má aspoň jednu splátku rozdělenou na jistinu, úrok a poplatek. Jen detail. }
@@ -45718,6 +45850,17 @@ components:
           maxItems: 50
           description: Vazby na doklady (např. vydaná a přijatá faktura zápočtu); při zaúčtování se přenesou do vazeb zápisu deníku.
           items: { $ref: '#/components/schemas/InternalDocumentLink' }
+    PostedDeletion:
+      type: object
+      required: [allowed, needs_ack, code, message]
+      description: >-
+        Náhled serveru, zda jde zaúčtovaný doklad smazat i se zápisem v deníku (stejné brány jako
+        DELETE …/{id}/posted, bez zámků). Rozhoduje až samotné smazání.
+      properties:
+        allowed: { type: boolean, description: Smazání lze nabídnout (u uzamčeného data s potvrzením). }
+        needs_ack: { type: boolean, description: Zápis spadá do uzamčeného data, smazání chce vědomé potvrzení (`ack_locked=1`). }
+        code: { type: [string, 'null'], description: 'Kód brány, např. period_not_open, date_locked, entry_paired, allocation_saldo_in_use, has_payments.' }
+        message: { type: [string, 'null'], description: Vysvětlení pro uživatele, proč smazání nejde a zbývá storno. }
     InternalDocument:
       type: object
       required: [id, kind, title, document_date, entry_date, amount, status, document_links]
@@ -45743,6 +45886,7 @@ components:
         document_count: { type: integer, description: Jen v seznamu, počet připojených dokumentů }
         lines: { type: array, items: { $ref: '#/components/schemas/InternalDocumentLine' }, description: Jen v detailu }
         document_links: { type: array, items: { $ref: '#/components/schemas/InternalDocumentLink' } }
+        posted_deletion: { $ref: '#/components/schemas/PostedDeletion', description: Jen v detailu zaúčtovaného dokladu }
     NumberSeriesOptions:
       type: object
       required: [kind, multiple, default_id, series]
