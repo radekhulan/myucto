@@ -122,6 +122,9 @@ U aktivního zápisu ostatní pohledávky nebo závazku lze v otevřeném obdob�
 Zdrojová položka se vrátí do konceptu, její dokumenty a splátkový kalendář zůstanou připojené.
 Případné opakování se pozastaví. Spárované úhrady je nutné před smazáním odpojit.
 Akce vyžaduje oprávnění k zápisu do deníku, ostatním položkám a jejich účtování.
+Chybnou ostatní položku nebo interní doklad i se zápisem smažete za stejných pravidel přímo
+v detailu dokladu akcí **Smazat i se zápisem** ([§ 52.14.14.6](#5214146-storno-a-preuctovani),
+[§ 52.14.15.7](#5214157-smazani-zauctovaneho-dokladu-a-uprava-poznamky)).
 
 **Jak poznáte, že je hotovo:** Původní zápis má badge **Stornováno** a odkaz na stornující zápis, nebo je nahrazený opraveným zápisem. Doklad lze opět zaúčtovat.
 
@@ -1516,6 +1519,30 @@ Koncept se maže tlačítkem **Smazat**. Koncept vytvořený opakováním se mí
 smazání zruší, aby v rozvrhu zůstalo vidět, že termín byl vyřešen. Zdrojový
 koncept opakování smazat nejde.
 
+**Smazat i se zápisem** (v nabídce **…** detailu zaúčtované položky) odstraní chybnou
+položku i její zápis v deníku bez storna, jako by nikdy nebyla zaúčtovaná. Platí stejná
+pravidla jako pro **Smazat** v deníku:
+
+- zápis leží v **otevřeném** účetním období; po uzávěrce položku stornujte,
+- spadá-li zápis do **uzamčeného** data (typicky po podání přiznání k DPH), aplikace
+  před smazáním ukáže varování a smazání proběhne až po vědomém potvrzení účetního,
+- položka nemá spárované úhrady, není v platebním příkazu, neúčtuje navázanou fakturu,
+  není zdrojem opakování a nebyla přeúčtovaná,
+- řádky zápisu nejsou rozepsané na doklady v saldokontu ani spárované v okruhu párování.
+
+Když některé pravidlo smazání nedovolí, je akce neaktivní a po najetí myší ukáže důvod.
+Pak zbývá **Stornovat**, nebo nejdřív zrušit to, co na položce stojí (například odpojit
+úhradu). Výskyt opakování se po smazání zápisu zruší místo smazání, aby ho opakování
+nevytvořilo znovu. Číslo položky se do řady nevrací. Smazání se zapíše do historie
+položky i do auditu deníku.
+
+**Poznámku** vystavené položky (potvrzené, zaúčtované i stornované) doplníte v detailu
+odkazem **Upravit poznámku** u pole Poznámka. Poznámka se nepromítá do zaúčtování ani
+saldokonta, proto ji jde změnit i po uzávěrce. Změna se zapíše do historie položky
+s hodnotou před a po. Ostatní údaje zůstávají zamčené: název tvoří popis zápisu
+v deníku, účty mění **Přeúčtovat**, částky a data storno. Účet protistrany má vlastní
+úpravu u svého pole.
+
 #### 52.14.14.7 Opakování a splátkový kalendář
 
 V detailu v části **Opakování položky** nastavíte měsíční, čtvrtletní nebo roční
@@ -1579,8 +1606,10 @@ i zpětně k rozvahovému dni.
 #### 52.14.14.10 Oprávnění
 
 Agendu vidí uživatelé s oprávněním **Ostatní pohledávky a závazky** (čtení);
-zakládání, úpravy a úhrady vyžadují zápis. Zaúčtování a storno v podvojném
-účetnictví a každé přeúčtování potřebují navíc oprávnění zaúčtovat v deníku.
+zakládání, úpravy, poznámka vystavené položky a úhrady vyžadují zápis. Zaúčtování
+a storno v podvojném účetnictví a každé přeúčtování potřebují navíc oprávnění zaúčtovat
+v deníku. **Smazat i se zápisem** potřebuje stejná oprávnění jako smazání zápisu
+v deníku: zápis do agendy, do účetnictví, do deníku a zaúčtování v deníku.
 Přiřazení bankovní platby vyžaduje přístup k bance a párování, přiřazení
 pokladního dokladu přístup k pokladně. Připojené dokumenty vidí uživatel
 s přístupem k dokumentům. Druhy zakládá, skrývá a přejmenovává uživatel se zápisem
@@ -1866,6 +1895,8 @@ Tlačítko **Export CSV** stáhne doklady podle aktuálních filtrů.
 - **Zaúčtovaný doklad** stornujete v jeho detailu tlačítkem **Stornovat**. Vznikne
   protizápis k zápisu dokladu a doklad přejde do stavu **Stornováno**. Do zamčeného nebo
   uzavřeného období storno nepůjde, zvolte datum v otevřeném období.
+- **Chybný zaúčtovaný doklad** jde v otevřeném období smazat i se zápisem bez storna
+  (viz [§ 52.14.15.7](#5214157-smazani-zauctovaneho-dokladu-a-uprava-poznamky)).
 - Zápis interního dokladu nejde stornovat přímo v deníku, deník odkáže na detail dokladu.
   Smažete-li zápis v deníku, doklad se vrátí do konceptu a při novém zaúčtování dostane
   své původní číslo.
@@ -1884,8 +1915,10 @@ Přílohy (dohodu o zápočtu, podklad k odpisu) připojíte v detailu dokladu v
 **Přílohy**. Ukládají se do Dokumentů ve složce *Interní doklady/rok/měsíc*.
 
 Seznam a detail vidí uživatel s přístupem k účetnictví. Koncept zakládá a upravuje,
-kdo smí zapisovat ruční zápisy. Zaúčtování, storno a vytvoření dokladu nad ručním
-zápisem vyžadují oprávnění zaúčtovat v deníku.
+kdo smí zapisovat ruční zápisy; stejné oprávnění stačí na poznámku vystaveného dokladu,
+změna popisu potřebuje navíc zápis do účetnictví. Zaúčtování, storno a vytvoření dokladu
+nad ručním zápisem vyžadují oprávnění zaúčtovat v deníku. **Smazat i se zápisem** potřebuje
+stejná oprávnění jako smazání zápisu v deníku.
 
 #### 52.14.15.6 Návrh od AI asistenta
 
@@ -1895,6 +1928,35 @@ a D a součty, server ho zkontroluje stejnými pravidly jako zaúčtování ruč
 Po potvrzení vznikne koncept, nebo rovnou zaúčtovaný doklad, stejnou cestou jako z formuláře
 **Nový interní doklad**. Podrobnosti v
 [AI extrakci, § 25.3](25_AI_extrakce.md#253-krok-za-krokem-nastavit-poskytovatele-ai).
+
+#### 52.14.15.7 Smazání zaúčtovaného dokladu a úprava poznámky
+
+**Smazat i se zápisem** (v nabídce **…** detailu zaúčtovaného dokladu) odstraní chybný
+doklad i jeho zápis v deníku. Storno ani protizápis nevznikne, doklad z účetnictví zmizí,
+jako by nikdy nebyl zaúčtovaný. Smazání proběhne celé, nebo vůbec. Platí stejná pravidla
+jako pro **Smazat** v deníku:
+
+- zápis leží v **otevřeném** účetním období; po uzávěrce doklad stornujte,
+- spadá-li zápis do **uzamčeného** data (typicky po podání přiznání k DPH), aplikace
+  před smazáním ukáže varování a smazání proběhne až po vědomém potvrzení účetního,
+- doklad není stornovaný a nevznikl nad existujícím ručním zápisem,
+- řádky zápisu nejsou rozepsané na doklady v saldokontu ani spárované v okruhu párování
+  a na zápis nenavazuje jiná agenda (například předpis nebo platba SVJ, společná alokace).
+
+Když některé pravidlo smazání nedovolí, je akce neaktivní a po najetí myší ukáže důvod.
+Pak doklad stornujte, nebo nejdřív zrušte to, co na něm stojí. Navázané doklady zápočtu
+po smazání v saldokontu znovu ukážou původní zůstatek. Číslo z řady číselníku se vrátí
+do řady, je-li poslední vydané. Číslo z řady ID, kterou sdílí i ruční zápisy, se nevrací
+a v řadě zůstane mezera, stejně jako po smazání číslovaného ručního zápisu v deníku.
+Smazání se zapíše do historie dokladu i do auditu deníku.
+
+**Upravit poznámku** v detailu vystaveného dokladu doplní nebo změní poznámku u
+zaúčtovaného i stornovaného dokladu, také po uzávěrce: poznámka se do účetnictví nepromítá.
+U zaúčtovaného dokladu jde ve stejném dialogu změnit i **popis**. Popis je zároveň popisem
+zápisu v deníku a změní se i tam, proto to jde jen v otevřeném období (stejně jako úprava
+popisu zápisu tužkou v deníku). Řádky kontace, částky a data zůstávají zamčené, jejich
+opravu řeší storno nebo smazání. Každá změna se zapíše do historie dokladu s hodnotou
+před a po.
 
 ### 52.14.16 Jednoduchý zápis po dvojicích
 
