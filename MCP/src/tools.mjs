@@ -24,7 +24,15 @@
  * Druhou výjimkou jsou ANALYTICKÉ ÚČTY OSNOVY (create_analytic_account,
  * update_analytic_account): koncept potřebuje analytiku dřív, než ho účetní
  * zaúčtuje, a založení účtu nic neúčtuje. Syntetiku a mazání účtu server
- * tokenu odmítne.
+ * tokenu odmítne. Třetí jsou DIMENZE KONCEPTU vydané a přijaté faktury
+ * (set_invoice_dimensions, set_purchase_invoice_dimensions): koncept nemá
+ * v deníku nic, co by se přerazítkovalo.
+ *
+ * Storno ani zrušení storna ZAÚČTOVANÉ faktury (cancel_invoice, cancel_purchase_invoice,
+ * uncancel_invoice) MCP neprovede: stornovalo by nebo mazalo zápis v deníku. Odmítne
+ * ho nástroj i server (`SessionOnlyAccountingAct`). Automatické zaúčtování při
+ * vystavení a přijetí, které si firma zapnula, je volba firmy a probíhá stejně jako
+ * z aplikace.
  *
  * E-SHOP A SKLAD JSOU NAOPAK OBOUSMĚRNÉ — katalog zboží, číselníky, ceny,
  * dodavatelé, média, sklady, skladové doklady i inventury se dají přes API
@@ -1841,8 +1849,8 @@ export const TOOLS = [
     title: 'Přidat položku na koncept faktury',
     description:
       'Přidá položku na KONCEPT faktury, např. „přidej na koncept pro ACME dopravu, 1 ks, 350 Kč". '
-      + 'Existující položky zůstanou beze změny, včetně skrytých údajů (časové rozlišení, '
-      + 'sklad, OSS, pořadí).\n\n'
+      + 'Existující položky zůstanou beze změny, včetně skrytých údajů (účty a předkontace, časové '
+      + 'rozlišení, sklad, OSS, vazba na výkaz, dimenze).\n\n'
       + 'S `kind: "text"` přidá TEXTOVÝ ŘÁDEK mezi položky (nadpis, poznámka k části dokladu): '
       + 'stačí `description`, množství, cenu ani sazbu nezadávej. Do částek ani DPH nevstupuje.\n\n'
       + 'Doklad určíš `invoice_id`, nebo názvem odběratele (`client`) či zakázky (`project`); '
@@ -1983,7 +1991,7 @@ export const TOOLS = [
     title: 'Odebrat položku z konceptu faktury',
     description:
       'Odebere jednu položku KONCEPTU faktury, určenou `item_id` nebo pořadím `row` '
-      + '(1 = první, slevový řádek se nepočítá). Ostatní položky zůstanou beze změny. '
+      + '(1 = první, slevový řádek se nepočítá). Ostatní položky zůstanou beze změny včetně svých dimenzí. '
       + 'Jedinou položku odebrat nejde, doklad musí nějakou mít.\n\n'
       + 'Bez `confirm: true` nic neodebere a jen vrátí, která položka by zmizela.',
     inputSchema: schema({

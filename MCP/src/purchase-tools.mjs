@@ -501,7 +501,7 @@ export const PURCHASE_TOOLS = [
     title: 'Přidat položku na koncept přijaté faktury',
     description:
       'Přidá položku na KONCEPT přijaté faktury. Existující položky zůstanou beze změny včetně '
-      + 'skrytých údajů (druh nákladu, účet, časové rozlišení, sklad, pořadí).\n\n'
+      + 'skrytých údajů (druh nákladu, účty a předkontace, časové rozlišení, sklad, pořadí, dimenze).\n\n'
       + 'Sazbu DPH NEHÁDEJ: `vat_rate_id` je povinné a patří z dokladu (`list_vat_rates`). '
       + 'Cena je bez DPH, pokud doklad nemá `prices_include_vat`.',
     inputSchema: schema({
