@@ -9,6 +9,7 @@ use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Service\Accounting\JournalLinkService;
 use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Service\Bank\StatementMatcher;
+use MyInvoice\Service\Invoice\AdvancePartialDrawdown;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Tests\Integration\Accounting\Bank\BankPostingTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -185,6 +186,73 @@ final class AdvanceFullFlowTest extends BankPostingTestCase
         }
     }
 
+    /**
+     * Konečná faktura čerpá dvě zálohy najednou (bez vazby dokladu, čerpání nesou odpočtové
+     * řádky). Doplatek přijde pod VS první zálohy a párování ho přesměruje na konečnou
+     * fakturu. Saldokonto 311 i 324, K3 a vazby v deníku musí skončit stejně jako
+     * u vyúčtování jedné zálohy, i když firma vede zálohy přímo na 311.
+     */
+    #[DataProvider('variants')]
+    public function testInvoiceDrawingTwoAdvancesEndsSettledEverywhere(bool $advanceOn311): void
+    {
+        if ($advanceOn311) {
+            $this->advanceRulesOn311();
+        }
+        $client = $this->client('Odběratel dvou záloh');
+        [$pfA, $vsA, $txA, $bankA, $ddkpA, $ddkpEntryA] = $this->paidAdvanceWithTaxDocument($client, 1000.00);
+        [$pfB, , $txB, $bankB, $ddkpB, $ddkpEntryB] = $this->paidAdvanceWithTaxDocument($client, 500.00);
+
+        $final = $this->draftInvoice($client, 3000.00);
+        $drawdown = $this->container->get(AdvancePartialDrawdown::class);
+        $drawdown->apply($this->supplierId, $final, $pfA, 1210.00);
+        $drawdown->apply($this->supplierId, $final, $pfB, 605.00);
+        $this->issue($final);
+        $finalEntry = $this->ensurePosted($final);
+        $this->assertSettlementPair($finalEntry, $advanceOn311, 1500.00);
+
+        // Doplatek pod VS zálohy A: proforma je uhrazená, pohledávku nese konečná faktura.
+        $tx = $this->transaction($this->statement(), 1815.00, ['variable_symbol' => $vsA]);
+        $this->container->get(StatementMatcher::class)->matchBatch([$tx]);
+        self::assertSame($final, (int) $this->db->pdo()->query("SELECT matched_invoice_id FROM bank_transactions WHERE id = {$tx}")->fetchColumn(),
+            'Platba pod VS zálohy se přesměruje na konečnou fakturu, která zálohu čerpá.');
+        self::assertSame('posted', $this->service->handleTransaction($tx, $this->userId)['action']);
+        $bankFinal = $this->entryFor('bank', $tx);
+
+        $sum = $this->sums([$bankA, $bankB, $ddkpEntryA, $ddkpEntryB, $finalEntry, $bankFinal]);
+        self::assertSame(0, self::cents($sum['311'] ?? 0), '311 po vyúčtování a doplatku na nule.');
+        self::assertSame(0, self::cents($sum['324'] ?? 0), '324 po vyčerpání obou záloh na nule.');
+        self::assertSame(-63000, self::cents($sum['343.200'] ?? 0), '343 = daň z plnění 3000 právě jednou.');
+        self::assertSame(-300000, self::cents($sum['602'] ?? 0));
+
+        foreach (['311', '324'] as $code) {
+            $acc = $this->saldo($code, self::YEAR . '-12-31');
+            self::assertSame(0, self::cents($acc['difference']), "Konfrontace {$code}.");
+            self::assertNull($this->partnerOf($acc, $client), "Partner na {$code} nemá otevřenou položku.");
+        }
+        $flagged = array_filter(
+            (new ClosingRepository($this->db))->paidInvoicesOpenSaldo($this->supplierId, self::YEAR . '-12-31'),
+            static fn (array $r): bool => in_array((int) $r['id'], [$pfA, $pfB, $ddkpA, $ddkpB, $final], true),
+        );
+        self::assertSame([], array_values($flagged), 'K3 nesmí hlásit zálohový cyklus dvou záloh.');
+
+        $links = $this->container->get(JournalLinkService::class);
+        $fromBankB = array_map(
+            static fn (array $i): string => $i['source_type'] . ':' . $i['source_id'],
+            $links->related($this->supplierId, $this->journal->find($bankB, $this->supplierId))['items'],
+        );
+        self::assertContains('invoice:' . $final, $fromBankB, 'Z úhrady zálohy B vede vazba na konečnou fakturu.');
+        $bankRefs = array_values(array_unique(array_map(
+            static fn (array $i): int => (int) $i['source_id'],
+            array_filter(
+                $links->related($this->supplierId, $this->journal->find($finalEntry, $this->supplierId))['items'],
+                static fn (array $i): bool => $i['source_type'] === 'bank',
+            ),
+        )));
+        sort($bankRefs);
+        self::assertContains($txA, $bankRefs, 'Z konečné faktury vede vazba na úhradu zálohy A.');
+        self::assertContains($txB, $bankRefs, 'I na úhradu zálohy B.');
+    }
+
     // ── fixtury ──────────────────────────────────────────────────────────────
 
     private function advanceRulesOn311(): void
@@ -202,6 +270,49 @@ final class AdvanceFullFlowTest extends BankPostingTestCase
         ] as [$key, $debit, $credit]) {
             $stmt->execute([$this->supplierId, $key, 'Záloha na 311', $debit, $credit]);
         }
+    }
+
+    /**
+     * Záloha zaplacená bankou (automatické párování), daňový doklad k platbě vystavený
+     * a zaúčtovaný.
+     *
+     * @return array{0:int, 1:string, 2:int, 3:int, 4:int, 5:int} [proforma, VS, transakce, zápis banky, DDKP, zápis DDKP]
+     */
+    private function paidAdvanceWithTaxDocument(int $client, float $base): array
+    {
+        $vs = (string) random_int(700000000, 799999999);
+        $proforma = $this->proforma($vs, $client, $base);
+        $tx = $this->transaction($this->statement(), round($base * 1.21, 2), ['variable_symbol' => $vs]);
+        $this->container->get(StatementMatcher::class)->matchBatch([$tx]);
+        self::assertSame('posted', $this->service->handleTransaction($tx, $this->userId)['action']);
+        $ddkp = (int) $this->db->pdo()->query(
+            "SELECT id FROM invoices WHERE parent_invoice_id = {$proforma} AND invoice_type = 'tax_document'"
+        )->fetchColumn();
+        self::assertGreaterThan(0, $ddkp);
+        $this->issue($ddkp);
+        return [$proforma, $vs, $tx, $this->entryFor('bank', $tx), $ddkp, $this->ensurePosted($ddkp)];
+    }
+
+    private function draftInvoice(int $clientId, float $base): int
+    {
+        $pdo = $this->db->pdo();
+        $vat = round($base * 0.21, 2);
+        $pdo->prepare(
+            'INSERT INTO invoices
+                (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
+                 currency_id, reverse_charge, prices_include_vat, total_without_vat, total_vat, total_with_vat,
+                 paid_total, status, vat_classification_code, created_by)
+             VALUES (?, NULL, "invoice", ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 0, "draft", "1", ?)'
+        )->execute([$this->supplierId, $clientId, self::YEAR . '-06-25', self::YEAR . '-06-25', self::YEAR . '-07-09',
+            $this->currencyId, $base, $vat, $base + $vat, $this->userId]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO invoice_items
+                (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                 vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index)
+             VALUES (?, 'Dílo', 1, 'ks', ?, ?, 21.00, ?, ?, ?, 0)"
+        )->execute([$id, $base, $this->vatRateId, $base, $vat, $base + $vat]);
+        return $id;
     }
 
     private function proforma(string $vs, int $clientId, float $base): int

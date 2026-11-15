@@ -1690,12 +1690,21 @@ final class ClosingRepository
      */
     private static function firstFinalInvoiceSql(int $supplierId): string
     {
-        return "SELECT fin.parent_invoice_id AS proforma_id, MIN(fin.id) AS final_id
-                  FROM invoices fin
-                 WHERE fin.supplier_id = {$supplierId} AND fin.parent_invoice_id IS NOT NULL
-                   AND fin.invoice_type NOT IN ('proforma', 'tax_document')
-                   AND fin.cancelled_at IS NULL
-                 GROUP BY fin.parent_invoice_id";
+        // Konečná faktura čerpající víc záloh vazbu dokladu nemá, proformu na ni váže
+        // odpočtový řádek ({@see \MyInvoice\Support\Sql\AdvanceDrawSql}).
+        return "SELECT lnk.proforma_id, MIN(lnk.final_id) AS final_id
+                  FROM (SELECT fin.parent_invoice_id AS proforma_id, fin.id AS final_id
+                          FROM invoices fin
+                         WHERE fin.supplier_id = {$supplierId} AND fin.parent_invoice_id IS NOT NULL
+                           AND fin.invoice_type NOT IN ('proforma', 'tax_document')
+                           AND fin.cancelled_at IS NULL
+                        UNION ALL
+                        SELECT fii.advance_invoice_id, fin.id
+                          FROM invoice_items fii
+                          JOIN invoices fin ON fin.id = fii.invoice_id
+                         WHERE fii.advance_invoice_id IS NOT NULL AND fin.supplier_id = {$supplierId}
+                           AND fin.invoice_type = 'invoice' AND fin.cancelled_at IS NULL) lnk
+                 GROUP BY lnk.proforma_id";
     }
 
     /**
