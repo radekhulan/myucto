@@ -50,6 +50,8 @@ final class MyuctoImportProfile
         // opakování a kontace. Zaúčtované se převezmou se svými zápisy deníku, znovu se neúčtují.
         'other_item_kinds', 'other_items', 'other_item_installments', 'other_item_allocations',
         'other_item_schedules', 'other_item_schedule_occurrences', 'other_item_posting_profiles', 'other_item_posting_overrides',
+        // Rozpad řádků zápisů na doklady saldokonta a předpisy ostatních položek ze zůstatku.
+        'journal_settlement_allocations',
         // Nastavení dimenzí firmy: pravidla povinnosti, mapa účtotvorné dimenze, výchozí dimenze karet.
         'dimension_account_rules', 'dimension_account_map', 'dimension_defaults',
         'accounting_corrections', 'accounting_closing_steps',
@@ -138,6 +140,8 @@ final class MyuctoImportProfile
         'payroll_employer_settings' => ['key' => ['supplier_id'], 'refs' => ['default_office_id' => 'payroll_offices']],
         'payroll_module_state' => ['key' => ['supplier_id'], 'users' => ['activated_by']],
         'payroll_takeover_invariant_checks' => ['key' => ['supplier_id', 'source']],
+        // Párovací symbol řádku deníku ze zdrojového programu (saldo po řádcích, POHODA, Helios).
+        'journal_line_pairing' => ['key' => ['supplier_id', 'entry_id', 'line_no'], 'refs' => ['entry_id' => 'journal_entries']],
         // Mapa převodu z Heliosu: převzaté záznamy chrání před automatikou MyÚčta (TakenOverRecord).
         // Cíl `target_id` určuje druh (HELIOS_MAP_TARGETS).
         'helios_import_map' => ['key' => ['supplier_id', 'kind', 'source_key'], 'helios_map' => true],
@@ -160,6 +164,9 @@ final class MyuctoImportProfile
         'payment' => ['bank|' => 'payment_matches', 'cash|' => 'cash_documents'],
         // Srážka: dohoda o srážkách, nebo exekuce (podle reference dohody, MyuctoImporter::remapKeyless()).
         'payroll_deduction' => null, 'payroll_setup' => null, 'filing_lock_prev' => null,
+        // Srovnání salda převodem podle saldokonta Heliosu: ostatní položka a vyrovnaný doklad.
+        'saldo_item' => 'other_items',
+        'saldo_settled' => ['invoice|' => 'invoices', 'purchase_invoice|' => 'purchase_invoices'],
     ];
     /**
      * Auditní stopa firmy (`activity_log`): záznamy se přenesou s přemapovanou entitou a ID
@@ -358,6 +365,7 @@ final class MyuctoImportProfile
         'accounting_corrections' => ['entity_id'],
         'number_series' => ['scope_id'],
         'accounting_document_series' => ['register_id'],
+        'journal_settlement_allocations' => ['doc_id'],
     ];
     /**
      * Cíl polymorfních vazeb podle druhu v jiném sloupci řádku. Hodnota 0 znamená „bez
@@ -374,6 +382,8 @@ final class MyuctoImportProfile
             'revenue_category' => 'revenue_categories', 'bank_account' => 'supplier_bank_accounts', 'other_item_kind' => 'other_item_kinds']]],
         'accounting_document_series' => ['register_id' => ['series_code', ['cash_in' => 'cash_registers', 'cash_out' => 'cash_registers',
             'other_receivable' => 'other_item_kinds', 'other_payable' => 'other_item_kinds']]],
+        'journal_settlement_allocations' => ['doc_id' => ['doc_type', ['invoice' => 'invoices', 'purchase_invoice' => 'purchase_invoices',
+            'other_item' => 'other_items']]],
     ];
     /**
      * Druhé sloupce složených cizích klíčů, které neodkazují na `id` (prostředí podání,
