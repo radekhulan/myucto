@@ -253,6 +253,27 @@ final class SupplierDeleteDependencyTest extends TestCase
         self::assertSame([], $this->remainingRows($this->supplierC));
     }
 
+    public function testHierarchicalDimensionValuesAreDeletedWithoutDisablingForeignKeys(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id, code, name, kind) VALUES (?, 'STR', 'Střediska', 'cost_center')")
+            ->execute([$this->supplierC]);
+        $type = (int) $pdo->lastInsertId();
+        $value = $pdo->prepare('INSERT INTO dimension_values (type_id, supplier_id, parent_id, code, name) VALUES (?, ?, ?, ?, ?)');
+        $value->execute([$type, $this->supplierC, null, 'A', 'Divize A']);
+        $parent = (int) $pdo->lastInsertId();
+        $value->execute([$type, $this->supplierC, $parent, 'A1', 'Středisko A1']);
+        $value->execute([$type, $this->supplierC, $parent, 'A2', 'Středisko A2']);
+        $orphans = $this->orphanCount();
+
+        $result = (new \MyInvoice\Service\System\CompanyPurgeService($this->db))->purge($this->supplierC, true, true);
+
+        $this->supplierCDeleted = true;
+        self::assertNotContains('dimension_values', $result['cycle'], 'Hierarchie hodnot dimenzí se má smazat bez vypnutí kontroly cizích klíčů');
+        self::assertSame([], $this->remainingRows($this->supplierC));
+        self::assertSame($orphans, $this->orphanCount());
+    }
+
     public function testBlockedPurgeRollsBackEverythingAndRestoresTriggers(): void
     {
         $pdo = $this->db->pdo();
