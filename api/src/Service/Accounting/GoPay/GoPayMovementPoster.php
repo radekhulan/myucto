@@ -216,8 +216,9 @@ final class GoPayMovementPoster
     }
 
     /**
-     * Zápisy GoPay pohybů jde smazat jen v otevřeném a nezamčeném období a jen
-     * bez storna. Sdílí mazání vyúčtování i mazání úhrady s čekajícím pohybem.
+     * Zápisy GoPay pohybů jde smazat jen v otevřeném a nezamčeném období, jen
+     * bez storna a bez okruhu párování nebo rozpadu saldokonta. Sdílí mazání
+     * vyúčtování i mazání úhrady s čekajícím pohybem.
      *
      * @param list<int> $entryIds
      */
@@ -267,6 +268,17 @@ final class GoPayMovementPoster
                     409,
                 );
             }
+        }
+        // Stejně jako mazání v deníku: okruh párování a rozpad saldokonta by smazání odneslo kaskádou.
+        $paired = (new \MyInvoice\Service\Accounting\JournalPairingUseGuard($this->db))->pairedEntry($supplierId, $entryIds);
+        if ($paired !== null) {
+            $block = \MyInvoice\Service\Accounting\JournalPairingUseGuard::block($paired);
+            throw new GoPayException($block['code'], $subject . ': ' . $block['message'], 409,
+                ['entry_id' => $paired['entry_id'], 'pairing_id' => $paired['pairing_id'], 'account_id' => $paired['account_id']]);
+        }
+        if ((new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->allocatedEntry($supplierId, $entryIds) !== null) {
+            $block = \MyInvoice\Service\Accounting\JournalSettlementUseGuard::block();
+            throw new GoPayException($block['code'], $subject . ': ' . $block['message'], 409);
         }
     }
 

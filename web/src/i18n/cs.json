@@ -21979,6 +21979,7 @@
         "close_books": "Vzít zpět uzavření knih",
         "open_next": "Vzít zpět otevření roku"
       },
+      "pairings_released": "Nahrazené zápisy uvolnily párování otevřených položek: {count}. Dotčené řádky jsou zase otevřené, zkontrolujte je v opisu účtu na záložce Otevřené položky - párování.",
       "provisions": {
         "page_total": "Celkem na stránce",
         "book_page": "Zaúčtovat položky stránky",

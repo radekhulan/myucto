@@ -170,6 +170,8 @@ final class ClosingService
     private const ESTIMATE_MIN_RECURRING_MONTHS = 3;
     private const ESTIMATE_SAMPLE_SIZE = 3;
 
+    /** Hloubka vnoření {@see tx()}: počet uvolněných párování se čte jen v nejvnějším volání. */
+    private int $txDepth = 0;
 
     public function __construct(
         private readonly Connection $db,
@@ -6083,13 +6085,23 @@ final class ClosingService
     {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
+        $outermost = $this->txDepth === 0;
+        if ($outermost) {
+            // Počítadlo okruhů párování uvolněných smazanými zápisy ({@see ClosingRepository::takeReleasedPairings()}).
+            $this->closing->takeReleasedPairings();
+        }
         if ($ownTx) {
             $pdo->beginTransaction();
         }
+        $this->txDepth++;
         try {
             $result = $work();
             if ($ownTx) {
                 $pdo->commit();
+            }
+            if ($outermost && is_array($result)) {
+                $released = $this->closing->takeReleasedPairings();
+                $result['released_pairings'] = count(array_unique(array_column($released, 'pairing_id')));
             }
             return $result;
         } catch (PostingException $e) {
@@ -6102,6 +6114,8 @@ final class ClosingService
                 $pdo->rollBack();
             }
             throw $e;
+        } finally {
+            $this->txDepth--;
         }
     }
 

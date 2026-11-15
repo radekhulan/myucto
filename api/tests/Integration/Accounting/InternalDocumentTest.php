@@ -781,23 +781,27 @@ final class InternalDocumentTest extends TestCase
             (int) $this->service->create($this->supplierId, $this->input(), null)['id'], $this->audit());
         $entryId = (int) $posted['journal_entry_id'];
 
-        // Řádek zápisu v okruhu párování: smazání by párování tiše odneslo.
+        // Řádek zápisu v okruhu párování s jiným zápisem: smazání by párování tiše odneslo.
         $account = (int) $this->pdo->query("SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '311'")->fetchColumn();
+        $partnerId = $this->manualEntry(['document_no' => 'SYN-PAR']);
         $this->pdo->prepare('INSERT INTO journal_line_pairings (supplier_id, account_id) VALUES (?, ?)')->execute([$this->supplierId, $account]);
         $pairingId = (int) $this->pdo->lastInsertId();
-        $this->pdo->prepare('INSERT INTO journal_line_pairing_items (supplier_id, entry_id, line_no, pairing_id, account_id) VALUES (?, ?, 2, ?, ?)')
-            ->execute([$this->supplierId, $entryId, $pairingId, $account]);
+        $item = $this->pdo->prepare('INSERT INTO journal_line_pairing_items (supplier_id, entry_id, line_no, pairing_id, account_id) VALUES (?, ?, ?, ?, ?)');
+        $item->execute([$this->supplierId, $entryId, 2, $pairingId, $account]);
+        $item->execute([$this->supplierId, $partnerId, 2, $pairingId, $account]);
         try {
             $this->service->deletePosted($this->supplierId, (int) $posted['id'], $this->audit(), false);
             self::fail('Spárovaný zápis se nesmí smazat.');
         } catch (PostingException $e) {
             self::assertSame('entry_paired', $e->errorCode);
+            self::assertStringContainsString('Otevřené položky - párování', $e->getMessage());
         }
         self::assertSame('posted', $this->service->get($this->supplierId, (int) $posted['id'])['status']);
-        self::assertSame(1, $this->manualEntryCount());
+        self::assertSame(2, $this->manualEntryCount(), 'Zápis dokladu i protějšek z okruhu zůstaly.');
 
         // Rozpad řádku na doklady saldokonta stejně jako v deníku.
-        $this->pdo->prepare('DELETE FROM journal_line_pairing_items WHERE supplier_id = ? AND entry_id = ?')->execute([$this->supplierId, $entryId]);
+        $this->pdo->prepare('DELETE FROM journal_line_pairings WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $pairingId]);
+        $this->pdo->prepare('DELETE FROM journal_entries WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $partnerId]);
         $this->pdo->prepare(
             "INSERT INTO journal_settlement_allocations (supplier_id, entry_id, line_no, account_id, side, doc_type, doc_id, amount, kind)
              VALUES (?, ?, 2, ?, 'credit', 'other_item', 1, 100, 'settlement')"

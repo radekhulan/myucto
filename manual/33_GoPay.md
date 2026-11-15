@@ -152,7 +152,7 @@ Takové úhrady ukazuje sekce **Čeká na vyúčtování**. Součet sekce je č�
 
 Pokud úhradu nelze zaúčtovat hned (faktura ještě není zaúčtovaná, datum platby leží v zamčené části účetnictví), úhrada se uloží a v sekci zůstane s důvodem chyby. Tlačítko **Zaúčtovat úhrady čekající na vyúčtování** zaúčtuje tyto úhrady i starší GoPay úhrady bez zápisu. Opakované použití nic nezdvojí. Totéž dělá příkaz `php api/bin/gopay-post-pending.php --apply`.
 
-Smazání úhrady faktury smaže i její zápis ke dni platby, pokud leží v otevřeném a nezamčeném období. Úhradu, kterou už převzalo vyúčtování, smazat nelze. Nejdřív je potřeba smazat vyúčtování.
+Smazání úhrady faktury smaže i její zápis ke dni platby, pokud leží v otevřeném a nezamčeném období a jeho řádky nejsou spárované s jiným zápisem v okruhu otevřených položek (typicky s fakturou) ani rozepsané v saldokontu. Úhradu, kterou už převzalo vyúčtování, smazat nelze. Nejdřív je potřeba smazat vyúčtování.
 
 ### 33.8.2 Bankovní avízo a ruční spárování
 
@@ -191,7 +191,7 @@ Původní XML zůstává uložené u vyúčtování a lze je kdykoli znovu stáh
 
 Administrátor může importované vyúčtování smazat ze seznamu. Smazání odstraní původní XML, přiložené PDF, jednotlivé GoPay pohyby a účetní zápisy, které z nich modul vytvořil. Faktury, dobropisy a jejich úhrady zůstanou zachované. Pokud modul pro příchozí převod použil účetní zápis, který existoval už před zpracováním XML, tento zápis se nesmaže. Úhrady faktur zaúčtované ke dni platby se také nesmažou: vrátí se i se svým zápisem do sekce **Čeká na vyúčtování** a příští import je převezme znovu.
 
-Vyúčtování lze smazat jen tehdy, když všechny jeho účetní zápisy patří do otevřeného a nezamčeného období a nebyly stornované. Po smazání lze stejné XML znovu importovat.
+Vyúčtování lze smazat jen tehdy, když všechny jeho účetní zápisy patří do otevřeného a nezamčeného období, nebyly stornované a jejich řádky nejsou spárované s jiným zápisem v okruhu otevřených položek ani rozepsané na doklady v saldokontu (okruh nejdřív zrušte v opisu účtu na záložce **Otevřené položky - párování**). Po smazání lze stejné XML znovu importovat.
 
 ### 33.8.7 GoPay v daňové evidenci
 

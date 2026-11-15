@@ -45,7 +45,24 @@ final class ClosingRepository
      */
     private const NO_LATERAL_SPLIT = "SET STATEMENT optimizer_switch='split_materialized=off' FOR ";
 
+    /** @var list<array{pairing_id:int, entry_id:int, line_no:int}> okruhy uvolněné nahrazením zápisů od posledního {@see takeReleasedPairings()} */
+    private array $releasedPairings = [];
+
     public function __construct(private readonly Connection $db) {}
+
+    /**
+     * Položky okruhů párování, které uvolnily smazané zápisy uzávěrky od posledního volání,
+     * a vynulování počítadla. Volá ho {@see \MyInvoice\Service\Accounting\Closing\ClosingService}
+     * kolem každé akce kroku, aby počet uvolněných párování ukázal v odpovědi.
+     *
+     * @return list<array{pairing_id:int, entry_id:int, line_no:int}>
+     */
+    public function takeReleasedPairings(): array
+    {
+        $released = $this->releasedPairings;
+        $this->releasedPairings = [];
+        return $released;
+    }
 
     public function resultDecisionPeriods(int $supplierId, bool $forUpdate = false): array
     {
@@ -1154,6 +1171,8 @@ final class ClosingRepository
         try {
             (new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, new JournalEntryRepository($this->db, new \MyInvoice\Service\ActivityLogger($this->db))))->assertEntriesMutable($supplierId, [$entryId]);
             (new \MyInvoice\Service\Property\Services\Settlement\SettlementUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+            // Rozpad saldokonta systém neobnoví (předpis ostatní položky by osiřel), proto blokuje.
+            (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$entryId]);
         } catch (\MyInvoice\Service\Accounting\PostingException|\MyInvoice\Service\Property\Charges\Issuance\IssuanceException $e) {
             throw new \MyInvoice\Service\Accounting\Closing\ClosingException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }
@@ -1168,10 +1187,59 @@ final class ClosingRepository
         $linesStmt->execute([$entryId, $supplierId]);
         $lines = $linesStmt->fetchAll(PDO::FETCH_ASSOC);
 
+        $released = $this->releasePairings($supplierId, $entry);
+
         $pdo->prepare('DELETE FROM journal_entries WHERE id = ? AND supplier_id = ?')
             ->execute([$entryId, $supplierId]);
 
-        return ['entry' => $entry, 'lines' => $lines];
+        return ['entry' => $entry, 'lines' => $lines, 'released_pairings' => $released];
+    }
+
+    /**
+     * Systémový přepočet uzávěrky zápis jen nahrazuje (vzetí zpět kroku, opakovaný běh,
+     * náhrada převzatých počátečních stavů). Okruhy párování jeho řádků proto neblokují
+     * jako ruční mazání ({@see \MyInvoice\Service\Accounting\JournalPairingUseGuard}), ale
+     * uvolní se stejně jako při stornu ({@see JournalLinePairingRepository::releaseEntry()})
+     * a do auditu se zapíše, co se uvolnilo: okruhy, zápisy a účty všech jejich řádků.
+     *
+     * @param array<string,mixed> $entry
+     * @return list<array{pairing_id:int, entry_id:int, line_no:int}>
+     */
+    private function releasePairings(int $supplierId, array $entry): array
+    {
+        $entryId = (int) $entry['id'];
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.pairing_id, i.entry_id, i.line_no, i.account_id, ca.account_code
+               FROM journal_line_pairing_items i
+               JOIN chart_of_accounts ca ON ca.supplier_id = i.supplier_id AND ca.id = i.account_id
+              WHERE i.supplier_id = ?
+                AND i.pairing_id IN (SELECT o.pairing_id FROM journal_line_pairing_items o
+                                      WHERE o.supplier_id = ? AND o.entry_id = ?)
+              ORDER BY i.pairing_id, i.entry_id, i.line_no'
+        );
+        $stmt->execute([$supplierId, $supplierId, $entryId]);
+        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($items === []) {
+            return [];
+        }
+        $released = (new JournalLinePairingRepository($this->db))->releaseEntry($supplierId, $entryId);
+        $this->releasedPairings = [...$this->releasedPairings, ...$released];
+        (new \MyInvoice\Service\ActivityLogger($this->db))->log('accounting.pairing_released', null, 'journal_entry', $entryId, [
+            'reason'        => 'closing_replace',
+            'source_type'   => (string) $entry['source_type'],
+            'source_id'     => $entry['source_id'] === null ? null : (int) $entry['source_id'],
+            'pairing_count' => count(array_unique(array_column($items, 'pairing_id'))),
+            'entry_ids'     => array_values(array_unique(array_map('intval', array_column($items, 'entry_id')))),
+            'accounts'      => array_values(array_unique(array_column($items, 'account_code'))),
+            'items'         => array_map(static fn (array $i): array => [
+                'pairing_id'   => (int) $i['pairing_id'],
+                'entry_id'     => (int) $i['entry_id'],
+                'line_no'      => (int) $i['line_no'],
+                'account_code' => (string) $i['account_code'],
+            ], $items),
+            'released'      => $released,
+        ], null, null, $supplierId);
+        return $released;
     }
 
     /**

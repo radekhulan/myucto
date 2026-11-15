@@ -274,7 +274,7 @@ Druhé upozornění přijde, pokud je pokladna **po stornu v mínusu**, typicky 
 
 Storno **úhrady zálohové faktury**, ze které už vznikla finální faktura nebo daňový doklad k přijaté platbě, systém odmítne, takový doklad by po sobě zůstal vystavený. Zrušte proto nejdřív navazující doklad, teprve pak pokladní doklad; hláška uvede jeho číslo.
 
-**Trvalé smazání** zaúčtovaného dokladu (na rozdíl od storna po sobě nenechá žádnou stopu a v číselné řadě zůstane díra, číslo se znovu nepoužije) vyžaduje samostatné právo **Uzavřít pokladnu a trvale mazat doklady**. Smazat lze jen doklad v otevřeném a neuzamčeném období. Pro doklady, které už prošly přiznáním, použijte raději storno.
+**Trvalé smazání** zaúčtovaného dokladu (na rozdíl od storna po sobě nenechá žádnou stopu a v číselné řadě zůstane díra, číslo se znovu nepoužije) vyžaduje samostatné právo **Uzavřít pokladnu a trvale mazat doklady**. Smazat lze jen doklad v otevřeném a neuzamčeném období. Smazání se odmítne také, když je řádek zápisu dokladu spárovaný s jiným zápisem v okruhu otevřených položek (okruh nejdřív zrušte v opisu účtu na záložce **Otevřené položky - párování**) nebo rozepsaný na doklady v saldokontu. Pro doklady, které už prošly přiznáním, použijte raději storno.
 
 ### 32.11.7 Doklad vzniklý z faktury (hotovostní vyrovnání)
 

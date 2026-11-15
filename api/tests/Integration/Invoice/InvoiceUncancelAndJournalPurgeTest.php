@@ -11,7 +11,9 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\ManualJournalEntryService;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\Reports\OpenItemsService;
 use MyInvoice\Tests\Integration\Stock\StockTestCase;
 use PHPUnit\Framework\Attributes\Group;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -182,6 +184,95 @@ final class InvoiceUncancelAndJournalPurgeTest extends StockTestCase
         self::assertSame(2, $this->journalCount($supplierId));
     }
 
+    /**
+     * Force-delete smazal zápis faktury i s okruhem párování, ve kterém byla spárovaná
+     * s úhradou, a úhrada zůstala spárovaná s ničím. Okruh s jiným zápisem zápis drží:
+     * smazání v deníku se nepoužije a platí dosavadní cesta (retenční brána, storno).
+     * Uživatel se ale dozví skutečný důvod (okruh), ne jen retenční lhůtu.
+     */
+    public function testForceDeleteKeepsEntryPairedWithPayment(): void
+    {
+        $supplierId = $this->doubleEntrySupplier();
+        $invoiceId = $this->issuedInvoice($supplierId, 'FV-2099-P5');
+        $entryId = $this->post($supplierId, $invoiceId);
+        $paymentId = $this->payment($supplierId, $entryId);
+        $pairing = $this->pairReceivable($supplierId, [$entryId, $paymentId]);
+
+        $res = $this->invoke(DeleteInvoiceAction::class, $supplierId, $invoiceId, [], ['force' => '1']);
+
+        self::assertSame(409, $res['status'], json_encode($res['body']));
+        self::assertSame('entry_paired', $res['body']['error']['code'] ?? null);
+        self::assertStringContainsString('Otevřené položky - párování', (string) $res['body']['error']['message']);
+        self::assertTrue($res['body']['error']['retention_period'] ?? false, 'Retenční lhůta zůstává v odpovědi jako druhý důvod.');
+        self::assertSame($entryId, $res['body']['error']['entry_id'] ?? null);
+        self::assertSame(1, $this->rowCount('journal_entries', $entryId), 'Spárovaný zápis se nesmí smazat.');
+        self::assertSame(2, $this->pairingItems($pairing), 'Okruh s úhradou zůstal celý.');
+        self::assertSame(1, $this->rowCount('invoices', $invoiceId));
+    }
+
+    public function testForceDeleteKeepsEntryWithSaldoAllocation(): void
+    {
+        $supplierId = $this->doubleEntrySupplier();
+        $invoiceId = $this->issuedInvoice($supplierId, 'FV-2099-P6');
+        $entryId = $this->post($supplierId, $invoiceId);
+        $line = $this->receivableLine($supplierId, $entryId);
+        $this->db->pdo()->prepare(
+            "INSERT INTO journal_settlement_allocations (supplier_id, entry_id, line_no, account_id, side, doc_type, doc_id, amount, kind)
+             VALUES (?, ?, ?, ?, ?, 'invoice', ?, 100, 'settlement')"
+        )->execute([$supplierId, $entryId, $line['line_no'], $line['account_id'], $line['side'], $invoiceId]);
+
+        $res = $this->invoke(DeleteInvoiceAction::class, $supplierId, $invoiceId, [], ['force' => '1']);
+
+        self::assertSame(409, $res['status'], json_encode($res['body']));
+        self::assertSame('allocation_saldo_in_use', $res['body']['error']['code'] ?? null);
+        self::assertStringContainsString('saldokontu', (string) $res['body']['error']['message']);
+        self::assertSame(1, $this->rowCount('journal_entries', $entryId), 'Zápis s rozpadem saldokonta se nesmí smazat.');
+
+        // Vědomé přehlasování retence jde dál dosavadní cestou: storno zápisu, faktura zmizí.
+        $acked = $this->invoke(DeleteInvoiceAction::class, $supplierId, $invoiceId, [], ['force' => '1', 'ack_retention' => '1']);
+        self::assertSame(200, $acked['status'], json_encode($acked['body']));
+        self::assertSame(0, $this->rowCount('invoices', $invoiceId));
+        self::assertSame(1, $this->rowCount('journal_entries', $entryId), 'Zápis s rozpadem zůstal a je stornovaný.');
+    }
+
+    public function testUncancelRefusedWhenReversalPairedWithAnotherEntry(): void
+    {
+        $supplierId = $this->doubleEntrySupplier();
+        $invoiceId = $this->issuedInvoice($supplierId, 'FV-2099-U5');
+        $entryId = $this->post($supplierId, $invoiceId);
+        $cancel = $this->invoke(CancelInvoiceAction::class, $supplierId, $invoiceId, ['mode' => 'internal']);
+        self::assertSame(200, $cancel['status'], json_encode($cancel['body']));
+        $reversalId = $this->reversalOf($entryId);
+        $otherId = $this->payment($supplierId, $entryId);
+        $pairing = $this->pairReceivable($supplierId, [$reversalId, $otherId]);
+
+        $res = $this->invoke(UncancelInvoiceAction::class, $supplierId, $invoiceId);
+
+        self::assertSame(409, $res['status'], json_encode($res['body']));
+        self::assertSame('journal_entry_paired', $res['body']['error']['code'] ?? null);
+        self::assertStringContainsString('Otevřené položky - párování', (string) $res['body']['error']['message']);
+        self::assertSame('cancelled', $this->invoiceRowById($invoiceId)['status']);
+        self::assertSame(3, $this->journalCount($supplierId));
+        self::assertSame(2, $this->pairingItems($pairing));
+    }
+
+    /** Faktura spárovaná se svým stornem: okruh zmizí s dvojicí celý, zrušení storna projde. */
+    public function testUncancelDeletesPairWhoseCircleStaysInside(): void
+    {
+        $supplierId = $this->doubleEntrySupplier();
+        $invoiceId = $this->issuedInvoice($supplierId, 'FV-2099-U6');
+        $entryId = $this->post($supplierId, $invoiceId);
+        $cancel = $this->invoke(CancelInvoiceAction::class, $supplierId, $invoiceId, ['mode' => 'internal']);
+        self::assertSame(200, $cancel['status'], json_encode($cancel['body']));
+        $pairing = $this->pairReceivable($supplierId, [$entryId, $this->reversalOf($entryId)]);
+
+        $res = $this->invoke(UncancelInvoiceAction::class, $supplierId, $invoiceId);
+
+        self::assertSame(200, $res['status'], json_encode($res['body']));
+        self::assertSame(0, $this->journalCount($supplierId));
+        self::assertSame(0, $this->pairingItems($pairing));
+    }
+
     public function testUncancelRejectsInvoiceCancelledByCreditNote(): void
     {
         $supplierId = $this->createSupplier('tax_evidence', false, false);
@@ -265,6 +356,57 @@ final class InvoiceUncancelAndJournalPurgeTest extends StockTestCase
             $posting->buildFromInvoice($supplierId, $invoiceId),
             ['entry_date' => '2099-06-10', 'posted_by' => $this->userId, 'user_id' => $this->userId, 'posted' => true],
         );
+    }
+
+    /** @return array{id:int, line_no:int, account_id:int, account_code:string, side:string} řádek pohledávky 311 */
+    private function receivableLine(int $supplierId, int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT l.id, l.line_no, l.account_id, ca.account_code, l.side FROM journal_entry_lines l
+               JOIN chart_of_accounts ca ON ca.id = l.account_id AND ca.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND l.entry_id = ? AND ca.account_code LIKE '311%'
+              ORDER BY l.line_no LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $entryId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertNotFalse($row, 'Fixture: zápis faktury má řádek pohledávky.');
+        return ['id' => (int) $row['id'], 'line_no' => (int) $row['line_no'], 'account_id' => (int) $row['account_id'],
+            'account_code' => (string) $row['account_code'], 'side' => (string) $row['side']];
+    }
+
+    /** Syntetická úhrada na stejný účet pohledávky jako zápis faktury. */
+    private function payment(int $supplierId, int $invoiceEntryId): int
+    {
+        $receivable = $this->receivableLine($supplierId, $invoiceEntryId)['account_code'];
+        return $this->container->get(ManualJournalEntryService::class)->post($supplierId, [
+            ['account_code' => '221', 'side' => 'debit', 'amount' => 1210.0],
+            ['account_code' => $receivable, 'side' => 'credit', 'amount' => 1210.0],
+        ], ['entry_date' => '2099-06-20', 'description' => 'Syntetická úhrada', 'document_no' => null, 'posted' => true,
+            'posted_by' => $this->userId, 'user_id' => $this->userId]);
+    }
+
+    /** @param list<int> $entryIds */
+    private function pairReceivable(int $supplierId, array $entryIds): int
+    {
+        $lines = array_map(fn (int $id): array => $this->receivableLine($supplierId, $id), $entryIds);
+        return (int) $this->container->get(OpenItemsService::class)->create($supplierId, $lines[0]['account_id'],
+            array_column($lines, 'id'), null, ['user_id' => $this->userId, 'ip' => null, 'user_agent' => null])['id'];
+    }
+
+    private function reversalOf(int $entryId): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT reversed_by FROM journal_entries WHERE id = ?');
+        $stmt->execute([$entryId]);
+        $reversalId = (int) $stmt->fetchColumn();
+        self::assertGreaterThan(0, $reversalId, 'Fixture: zápis faktury je stornovaný.');
+        return $reversalId;
+    }
+
+    private function pairingItems(int $pairingId): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM journal_line_pairing_items WHERE pairing_id = ?');
+        $stmt->execute([$pairingId]);
+        return (int) $stmt->fetchColumn();
     }
 
     private function lockUntil(int $supplierId, string $date): void

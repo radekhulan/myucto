@@ -157,8 +157,11 @@ function handleApiError(e: any) {
 async function mutate(fn: () => Promise<unknown>, successMsg?: string) {
   busy.value = true
   try {
-    await fn()
+    const result = await fn()
     if (successMsg) toast.success(successMsg)
+    // Systémový přepočet nahrazuje zápisy a jejich okruhy párování uvolní (server je spočítá).
+    const released = Number((result as { released_pairings?: unknown } | null)?.released_pairings ?? 0)
+    if (released > 0) toast.warning(t('accounting.closing.pairings_released', { count: released }))
     await load()
     return true
   } catch (e: any) {

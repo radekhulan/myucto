@@ -317,10 +317,12 @@ final class CashDocumentService
             if ($doc === null) {
                 throw new CashException('validation', 'Pokladní doklad nenalezen.', 404);
             }
-            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId,
-                array_values(array_filter([(int) ($doc['journal_entry_id'] ?? 0), (int) ($doc['reversal_entry_id'] ?? 0)])));
-            (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId,
-                array_values(array_filter([(int) ($doc['journal_entry_id'] ?? 0), (int) ($doc['reversal_entry_id'] ?? 0)])));
+            $docEntryIds = array_values(array_filter([(int) ($doc['journal_entry_id'] ?? 0), (int) ($doc['reversal_entry_id'] ?? 0)]));
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, $docEntryIds);
+            (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, $docEntryIds);
+            // Stejně jako mazání v deníku: okruh párování a rozpad saldokonta by smazání odneslo kaskádou.
+            (new \MyInvoice\Service\Accounting\JournalPairingUseGuard($this->db))->assertEntriesFree($supplierId, $docEntryIds);
+            (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, $docEntryIds);
             $this->assertTaxDateUnlocked($supplierId, (string) ($doc['tax_date'] ?? $doc['issue_date']));
             $this->assertNoFollowUpDocuments($supplierId, $doc);
             $eetConflict = (new EetHistoryGuard($this->db))->cashDocumentConflict($supplierId, $id);

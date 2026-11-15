@@ -981,7 +981,11 @@ mechanismy podle toho, zda je období, kam zápis patří, ještě **otevřené*
   stav vrátí na **Přijatá**, platební stav zůstane zachovaný); bankovní pohyb se vrátí
   mezi nezaúčtované položky, takže jej lze zkontovat znovu. Tato možnost není dostupná
   v období, které se uzavírá, je uzavřené či schválené, ani u již stornovaného zápisu
-  nebo jeho protizápisu. Zápis v **části účetnictví uzamčené k datu** (typicky po podání
+  nebo jeho protizápisu. Smazání se odmítne také, když je řádek zápisu spárovaný
+  s jiným zápisem v okruhu otevřených položek (nejdřív ho z okruhu odeberte nebo okruh
+  zrušte v opisu účtu na záložce **Otevřené položky - párování**, viz
+  [kap. 55.8.5.1](55_Hlavni_kniha.md)) nebo rozepsaný na doklady v saldokontu
+  (přiřazení nejdřív zrušte v saldokontu). Zápis v **části účetnictví uzamčené k datu** (typicky po podání
   přiznání k DPH) smazat jde, ale až po potvrzení velkého varování: smazání změní údaje,
   které už mohly být vykázané finančnímu úřadu, a zásah je na odpovědnost účetního
   (zaškrtávací potvrzení). Přehlasovaný zámek se zapíše do auditního logu. Smazání se zaznamená
@@ -1179,7 +1183,10 @@ Smazání se odmítne, když:
   nebo schválené),
 - na dvojici **navazuje další storno** (storno storna) - řetěz se rozplétá odzadu, od
   posledního protizápisu,
-- se zdroj zápisu ruší **vlastním workflow** (mzdy, odpisy, reklasifikace).
+- se zdroj zápisu ruší **vlastním workflow** (mzdy, odpisy, reklasifikace),
+- je řádek některé strany **spárovaný s jiným zápisem** v okruhu otevřených položek
+  nebo **rozepsaný na doklady v saldokontu**. Okruh, ve kterém je jen původní zápis se
+  svým stornem, smazání nebrání a zmizí s dvojicí.
 
 Spadá-li datum některé strany do **uzamčené části účetnictví**
 (viz [§ 52.14.10](#521410-zamek-uctovani-k-datu)), smazání se provede až po potvrzení varování

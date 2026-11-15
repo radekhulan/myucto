@@ -21979,6 +21979,7 @@
         "close_books": "Undo closing the books",
         "open_next": "Undo opening the year"
       },
+      "pairings_released": "Replaced entries released open item pairings: {count}. The affected lines are open again; review them on the account statement, Open items - pairing tab.",
       "provisions": {
         "page_total": "Page total",
         "book_page": "Post this page",

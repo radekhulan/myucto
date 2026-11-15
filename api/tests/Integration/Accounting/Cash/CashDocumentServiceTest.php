@@ -837,6 +837,53 @@ final class CashDocumentServiceTest extends TestCase
         }
     }
 
+    /**
+     * Tvrdé smazání pokladního dokladu mazalo zápis i s okruhem párování a rozpadem
+     * saldokonta. Platí stejné brány jako mazání zápisu v deníku.
+     */
+    public function testDeleteDocumentRefusesPairedOrAllocatedEntry(): void
+    {
+        $reg = $this->makeRegister();
+        $sale = $this->service->create($this->supplierId, $this->sale($reg, 1000.00), $this->userId);
+        $other = $this->service->create($this->supplierId, $this->sale($reg, 1000.00), $this->userId);
+        $entryId = (int) $this->service->get($this->supplierId, $sale['id'])['journal_entry_id'];
+        $otherEntryId = (int) $this->service->get($this->supplierId, $other['id'])['journal_entry_id'];
+        $pdo = $this->db->pdo();
+        $line = $pdo->prepare('SELECT line_no, account_id, side FROM journal_entry_lines WHERE supplier_id = ? AND entry_id = ? ORDER BY line_no LIMIT 1');
+        $line->execute([$this->supplierId, $entryId]);
+        $cashLine = $line->fetch(PDO::FETCH_ASSOC);
+        $line->execute([$this->supplierId, $otherEntryId]);
+        $otherLine = $line->fetch(PDO::FETCH_ASSOC);
+
+        $pdo->prepare('INSERT INTO journal_line_pairings (supplier_id, account_id) VALUES (?, ?)')->execute([$this->supplierId, $cashLine['account_id']]);
+        $pairingId = (int) $pdo->lastInsertId();
+        $item = $pdo->prepare('INSERT INTO journal_line_pairing_items (supplier_id, entry_id, line_no, pairing_id, account_id) VALUES (?, ?, ?, ?, ?)');
+        $item->execute([$this->supplierId, $entryId, $cashLine['line_no'], $pairingId, $cashLine['account_id']]);
+        $item->execute([$this->supplierId, $otherEntryId, $otherLine['line_no'], $pairingId, $otherLine['account_id']]);
+        try {
+            $this->service->deleteDocument($this->supplierId, $sale['id']);
+            self::fail('Spárovaný zápis pokladního dokladu se nesmí smazat.');
+        } catch (PostingException $e) {
+            self::assertSame('entry_paired', $e->errorCode);
+        }
+        self::assertNotNull($this->journal->find($entryId, $this->supplierId));
+        self::assertSame(2, $this->countDocuments($reg));
+
+        $pdo->prepare('DELETE FROM journal_line_pairings WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $pairingId]);
+        $pdo->prepare(
+            "INSERT INTO journal_settlement_allocations (supplier_id, entry_id, line_no, account_id, side, doc_type, doc_id, amount, kind)
+             VALUES (?, ?, ?, ?, ?, 'other_item', 1, 100, 'settlement')"
+        )->execute([$this->supplierId, $entryId, $cashLine['line_no'], $cashLine['account_id'], $cashLine['side']]);
+        try {
+            $this->service->deleteDocument($this->supplierId, $sale['id']);
+            self::fail('Zápis s rozpadem saldokonta se nesmí smazat.');
+        } catch (PostingException $e) {
+            self::assertSame('allocation_saldo_in_use', $e->errorCode);
+        }
+        self::assertNotNull($this->journal->find($entryId, $this->supplierId));
+        self::assertSame(2, $this->countDocuments($reg));
+    }
+
     public function testDeleteDocumentInClosedPeriodRefused(): void
     {
         $reg = $this->makeRegister();

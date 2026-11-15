@@ -16,7 +16,7 @@ final class FrameworkConversionWorkflowTest extends TestCase
     use \MyInvoice\Tests\Support\SharedClassFixture;
     private $container;private Connection $db;private int $supplier;private int $source;private int $target;private int $actor;private ?array $converted=null;
     /** Testy, které začínají hotovou konverzí: dostanou ji ze sdílené fixture, konverzi samotnou ověřují ostatní testy. */
-    private const CONVERTED=['testNext504ForeignNativeCaseUsesProvedConversionOpening','testRehashedForeignOriginTamperCannotChangeNativeOpeningLineage','testGenericNativeOpeningInsertCannotDuplicateOwnedConversion','testSourceCloseRevertIsBlockedAfterConversion','testNativeOpeningMutationIsBlocked','testLateDecisionPersistMutationRollsBackEveryDecisionWrite','testCancelledConversionReleasesLiveSourceCloseAndPreservesHistoricalIdentity'];
+    private const CONVERTED=['testNext504ForeignNativeCaseUsesProvedConversionOpening','testRehashedForeignOriginTamperCannotChangeNativeOpeningLineage','testGenericNativeOpeningInsertCannotDuplicateOwnedConversion','testSourceCloseRevertIsBlockedAfterConversion','testNativeOpeningMutationIsBlocked','testLateDecisionPersistMutationRollsBackEveryDecisionWrite','testCancelledConversionReleasesLiveSourceCloseAndPreservesHistoricalIdentity','testCancellationRefusesPairedOrAllocatedOpening'];
     protected function setUp():void
     {
         $this->container=Bootstrap::buildContainer();$this->db=$this->container->get(Connection::class);$p=$this->db->pdo();
@@ -209,6 +209,20 @@ final class FrameworkConversionWorkflowTest extends TestCase
     {
         $result=$this->converted;$r=new FrameworkConversionRepository($this->db);$original=$r->receipt($this->supplier,$result['conversion_id'],true);$sourceEntry=(int)$original['source_entry_id'];$w=$this->container->get(FrameworkConversionWorkflow::class);$preview=$w->cancellationPreview($this->supplier,$result['conversion_id'],$this->actor);$w->cancel($this->supplier,$result['conversion_id'],$this->actor,$preview['receipt_hash'],$preview['preview_hash'],'synthetic-cancel-release');
         $this->container->get(ClosingService::class)->revertStep($this->supplier,$this->source,'close_books',$this->rv(),['user_id'=>$this->actor]);$cancelled=$r->receipt($this->supplier,$result['conversion_id'],true);self::assertNull($cancelled['source_entry_id']);self::assertSame($sourceEntry,$cancelled['receipt']['plan']['source_entry_id']);$q=$this->db->pdo()->prepare('SELECT id FROM journal_entries WHERE supplier_id=? AND id=?');$q->execute([$this->supplier,$sourceEntry]);self::assertFalse($q->fetchColumn());
+    }
+    /** Zrušení převodu maže otevírací zápis natvrdo: okruh párování ani rozpad saldokonta nad ním nesmí odejít kaskádou. */
+    public function testCancellationRefusesPairedOrAllocatedOpening():void
+    {
+        $opening=(int)$this->converted['opening_entry_id'];$p=$this->db->pdo();$w=$this->container->get(FrameworkConversionWorkflow::class);
+        $line=$p->prepare('SELECT line_no,account_id FROM journal_entry_lines WHERE supplier_id=? AND entry_id=? ORDER BY line_no LIMIT 1');$line->execute([$this->supplier,$opening]);$first=$line->fetch(\PDO::FETCH_ASSOC);
+        $p->prepare("INSERT INTO journal_settlement_allocations (supplier_id,entry_id,line_no,account_id,side,doc_type,doc_id,amount,kind) VALUES (?,?,?,?,'debit','other_item',1,100,'settlement')")->execute([$this->supplier,$opening,$first['line_no'],$first['account_id']]);
+        try{$w->cancellationPreview($this->supplier,$this->converted['conversion_id'],$this->actor);self::fail('Opening with saldo allocation must stay');}catch(\MyInvoice\Service\Accounting\Conversion\FrameworkConversionException $e){self::assertSame('conversion_already_consumed',$e->errorCode);}
+        $p->prepare('DELETE FROM journal_settlement_allocations WHERE supplier_id=? AND entry_id=?')->execute([$this->supplier,$opening]);
+        $p->prepare('INSERT INTO journal_line_pairings (supplier_id,account_id) VALUES (?,?)')->execute([$this->supplier,$first['account_id']]);$pairing=(int)$p->lastInsertId();
+        $p->prepare('INSERT INTO journal_line_pairing_items (supplier_id,entry_id,line_no,pairing_id,account_id) VALUES (?,?,?,?,?)')->execute([$this->supplier,$opening,$first['line_no'],$pairing,$first['account_id']]);
+        try{$w->cancellationPreview($this->supplier,$this->converted['conversion_id'],$this->actor);self::fail('Paired opening must stay');}catch(\MyInvoice\Service\Accounting\Conversion\FrameworkConversionException $e){self::assertSame('conversion_already_consumed',$e->errorCode);}
+        $p->prepare('DELETE FROM journal_line_pairings WHERE supplier_id=? AND id=?')->execute([$this->supplier,$pairing]);
+        self::assertArrayHasKey('receipt_hash',$w->cancellationPreview($this->supplier,$this->converted['conversion_id'],$this->actor),'Without pairing and allocation the cancellation is offered again');
     }
     private function dump():string
     {$out=[];foreach(['chart_of_accounts','accounting_account_definition_history','supplier_accounting_frameworks','journal_entries','journal_entry_lines','journal_entry_line_dimensions','journal_entry_line_dimension_splits','accounting_framework_conversions','accounting_framework_conversion_cells','accounting_framework_conversion_commands','accounting_framework_conversion_decisions','dimension_types','dimension_values'] as $table){$q=$this->db->pdo()->prepare('SELECT * FROM '.$table.' WHERE supplier_id=?');$q->execute([$this->supplier]);$out[$table]=$q->fetchAll(\PDO::FETCH_ASSOC);}return FrameworkConversionRepository::json($out);}
