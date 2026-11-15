@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Nonprofit\Membership;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Nonprofit\Membership\MembershipListFilter;
 use MyInvoice\Service\Nonprofit\Membership\MembershipReconciliationService;
 use PDO;
 
@@ -149,11 +150,15 @@ final class MembershipListRepository
         if ($filter['search'] === '') {
             return ['', []];
         }
-        $like = '%' . strtr($filter['search'], ['=' => '==', '%' => '=%', '_' => '=_']) . '%';
-        return [
-            " AND (m.member_number LIKE ? ESCAPE '=' OR c.company_name LIKE ? ESCAPE '=' OR c.first_name LIKE ? ESCAPE '=' OR c.last_name LIKE ? ESCAPE '=')",
-            [$like, $like, $like, $like],
-        ];
+        // Každé slovo musí sedět na číslo člena, název, jméno nebo příjmení: najde i celé zobrazené jméno v libovolném pořadí.
+        $sql = '';
+        $params = [];
+        foreach (MembershipListFilter::searchWords($filter['search']) as $word) {
+            $like = '%' . strtr($word, ['=' => '==', '%' => '=%', '_' => '=_']) . '%';
+            $sql .= " AND (m.member_number LIKE ? ESCAPE '=' OR c.company_name LIKE ? ESCAPE '=' OR c.first_name LIKE ? ESCAPE '=' OR c.last_name LIKE ? ESCAPE '=')";
+            array_push($params, $like, $like, $like, $like);
+        }
+        return [$sql, $params];
     }
 
     /**

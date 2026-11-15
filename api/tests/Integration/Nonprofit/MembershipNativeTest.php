@@ -743,6 +743,16 @@ final class MembershipNativeTest extends TestCase
         $filter['search'] = 'Rowan';
         self::assertSame([$two['id']], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter));
         self::assertSame('Rowan', $repo->page($this->supplier, 0, 50, $filter)[0]['last_name']);
+        // Celé zobrazené jméno v libovolném pořadí slov, i s členským číslem; každé slovo musí sedět.
+        foreach (['Synthetic Rowan', 'rowan  synthetic', 'SYN-REVIEW-TWO Rowan'] as $text) {
+            $filter['search'] = $text;
+            self::assertSame([$two['id']], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter), $text);
+            self::assertSame([$two['id']], array_column($repo->page($this->supplier, 0, 50, $filter), 'id'), $text);
+        }
+        $filter['search'] = 'Synthetic member';
+        self::assertSame([$one['id']], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter));
+        $filter['search'] = 'Rowan Nobody';
+        self::assertSame([], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter));
         self::assertSame([], $repo->matchingSelection($this->supplier + 100000, [$one['id'], $two['id']], $filter));
     }
 

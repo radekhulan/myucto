@@ -42,6 +42,7 @@ final class MembershipListFilterTest extends TestCase
         yield 'pole roku' => [['year' => []]];
         yield 'pole hledání' => [['search' => []]];
         yield 'dlouhé hledání' => [['search' => str_repeat('x', 161)]];
+        yield 'příliš mnoho slov hledání' => [['search' => 'a b c d e f g h i']];
         yield 'pole titulu' => [['title_key' => []]];
         yield 'neplatný titul' => [['title_key' => 'not a key']];
         yield 'cizí stav' => [['payment_status' => 'settled']];

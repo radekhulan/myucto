@@ -6,6 +6,9 @@ namespace MyInvoice\Service\Nonprofit\Membership;
 
 final class MembershipListFilter
 {
+    /** Každé slovo hledání přidá podmínku přes čtyři sloupce; strop drží dotaz krátký. */
+    public const MAX_SEARCH_WORDS = 8;
+
     public static function parse(array $query, ?\DateTimeImmutable $now = null): array
     {
         $search = $query['search'] ?? '';
@@ -20,6 +23,9 @@ final class MembershipListFilter
             self::invalid();
         }
         $search = trim($search);
+        if (count(self::searchWords($search)) > self::MAX_SEARCH_WORDS) {
+            self::invalid();
+        }
         $title = trim($title);
         if ($title !== '') {
             $title = MembershipChargeRequest::key($title, 'titulu');
@@ -38,6 +44,12 @@ final class MembershipListFilter
             throw new MembershipException('nonprofit_membership_list_year_required', 'Pro filtr stavu úhrady vyberte konkrétní rok.', 422);
         }
         return ['search' => $search, 'title_key' => $title, 'year' => $year, 'payment_status' => $status];
+    }
+
+    /** @return list<string> slova hledání bez opakování, stejná pro seznam i ověření výběru */
+    public static function searchWords(string $search): array
+    {
+        return array_values(array_unique(preg_split('/\s+/u', trim($search), -1, PREG_SPLIT_NO_EMPTY) ?: []));
     }
 
     private static function invalid(): never
