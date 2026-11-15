@@ -1044,7 +1044,14 @@ final class InvoicePdfRenderer
 
     private function parentVarsymbol(array $invoice): ?string
     {
-        if (!$invoice['parent_invoice_id']) return null;
+        if (!$invoice['parent_invoice_id']) {
+            // Faktura čerpající víc záloh vazbu dokladu nemá: odkaz nese čísla všech záloh.
+            $numbers = array_filter(array_map(
+                static fn (array $d): string => (string) ($d['varsymbol'] ?? ''),
+                (array) ($invoice['advance_drawdown']['drawdowns'] ?? []),
+            ), static fn (string $vs): bool => $vs !== '');
+            return $numbers === [] ? null : implode(', ', $numbers);
+        }
         $stmt = $this->db->pdo()->prepare('SELECT varsymbol FROM invoices WHERE id = ?');
         $stmt->execute([$invoice['parent_invoice_id']]);
         return $stmt->fetchColumn() ?: null;
