@@ -30,6 +30,8 @@ const nextAfter = ref<number | null>(null)
 const loading = ref(false)
 const error = ref('')
 const notice = ref('')
+// Zavřená zastaralá oprava není úspěch: vlastní varovná hláška, zmizí s dalším otevřením opravy.
+const staleNotice = ref(false)
 const issueOpen = ref(false)
 /** Formulář revize je u člena s historií sbalený za akcí „Změnit stav členství“. */
 const revisionOpen = ref(false)
@@ -107,8 +109,10 @@ async function revisionFinished() {
 async function correctionStale() {
   correction.value = null
   locks.value.correction = false
-  notice.value = t('nonprofitMembership.correction.staleClosed')
+  refreshPending = false
+  notice.value = ''
   await load()
+  staleNotice.value = !error.value
   emit('changed')
 }
 
@@ -136,6 +140,7 @@ async function startCorrection(mode: 'identity' | 'delete' | 'void') {
   if (anyLocked.value) return
   issueOpen.value = false; reverseClaim.value = null; revisionOpen.value = false
   correction.value = mode
+  staleNotice.value = false
   // Formulář je pod historií a předpisy; bez posunu by otevření zůstalo mimo obrazovku.
   await nextTick()
   correctionPane.value?.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -156,8 +161,8 @@ watch(() => props.refreshVersion, () => {
 watch(refreshBlocked, blocked => {
   if (!blocked && refreshPending) { refreshPending = false; void load() }
 })
-watch(() => props.memberId, () => { generation++; refreshPending = false; identity.value = null; history.value = []; corrections.value = null; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; notice.value = ''; void load() })
-watch(() => props.supplier, () => { generation++; refreshPending = false; loading.value = false; identity.value = null; history.value = []; corrections.value = null; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; notice.value = '' })
+watch(() => props.memberId, () => { generation++; refreshPending = false; identity.value = null; history.value = []; corrections.value = null; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; notice.value = ''; staleNotice.value = false; void load() })
+watch(() => props.supplier, () => { generation++; refreshPending = false; loading.value = false; identity.value = null; history.value = []; corrections.value = null; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; notice.value = ''; staleNotice.value = false })
 onBeforeUnmount(() => { alive = false; generation++ })
 onMounted(() => { void load() })
 let firstActivation = true
@@ -200,6 +205,7 @@ const actions = computed<ActionItem[]>(() => [
     <p v-if="error" role="alert" :class="errorBox" data-section="detail-error">{{ error }}</p>
     <p v-if="loading && !identity" role="status" class="text-sm text-neutral-500" data-section="detail-loading">{{ t('common.loading') }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-600" data-section="detail-notice">{{ notice }}</p>
+    <p v-if="staleNotice" role="alert" class="text-sm text-warning-700" data-section="detail-stale">{{ t('nonprofitMembership.correction.staleClosed') }}</p>
 
     <div v-if="identity" class="space-y-2" data-section="member-status">
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.clientRef', { client: label }) }}</p>

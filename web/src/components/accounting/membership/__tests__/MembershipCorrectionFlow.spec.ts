@@ -89,6 +89,14 @@ describe('Membership correction flow', () => {
     expect(api[call]).toHaveBeenCalledTimes(1)
   })
 
+  it('souhrn ukazuje původní název z doby otevření, i když obnova detailu změní props', async () => {
+    const w = mounted({ mode: 'identity' })
+    await w.get('[data-stub="client"]').trigger('click')
+    await w.setProps({ label: 'Synthetic renamed member' })
+    await w.get('[data-action="corr-review"]').trigger('click')
+    expect(w.get('[data-section="corr-review"]').text()).toContain('Synthetic member →')
+  })
+
   it('jiná chyba než zastaralý podklad detail znovu nenačítá', async () => {
     api.updateMember.mockRejectedValueOnce({ response: { status: 409, data: { error: { code: 'nonprofit_membership_identity_conflict', message: 'Kolize.' } } } })
     const w = mounted({ mode: 'identity' })

@@ -30,7 +30,7 @@ const form = reactive({ clientId: props.member.client_id as number | null, clien
 // Podklad, ze kterého formulář vznikl. Obnova detailu mění props, ale očekávané hodnoty musí zůstat z doby otevření,
 // jinak by server souběžnou změnu jiného uživatele nepoznal a oprava by ji tiše přepsala (formulář je klíčovaný
 // režimem a členem, takže se podklad zachytí při každém otevření).
-const base = { clientId: props.member.client_id, number: props.member.member_number, revision: props.revision ?? null, headRevisionNo: props.headRevisionNo }
+const base = { clientId: props.member.client_id, number: props.member.member_number, label: props.label, revision: props.revision ?? null, headRevisionNo: props.headRevisionNo }
 // Server odmítl zastaralý podklad: rodič opravu zavře a načte detail; opravu je třeba otevřít znovu nad aktuálními
 // údaji. Převzetí nového podkladu do rozepsaného formuláře by mohlo tiše vyměnit cíl (jiný kontakt, cizí revize).
 const STALE = ['nonprofit_membership_member_changed', 'nonprofit_membership_revision_changed']
@@ -125,13 +125,13 @@ const pending = computed(() => commit.review.value)
       </label>
     </div>
 
-    <p v-if="mode === 'delete'" class="text-sm" data-section="corr-delete-target">{{ t('nonprofitMembership.correction.deleteTarget', { member: `${member.member_number} · ${label}` }) }}</p>
+    <p v-if="mode === 'delete'" class="text-sm" data-section="corr-delete-target">{{ t('nonprofitMembership.correction.deleteTarget', { member: `${base.number} · ${base.label}` }) }}</p>
     <p v-if="invalidShown" class="text-sm text-warning-700" data-section="corr-invalid">{{ invalid }}</p>
 
     <ActionBar v-if="canManage && !pending" :actions="actions" />
     <div v-if="pending" class="space-y-3 rounded border border-neutral-200 p-3" data-section="corr-review">
       <dl v-if="pending.mode === 'identity'" class="grid gap-3 sm:grid-cols-2">
-        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.correction.client') }}</dt><dd>{{ label }} → {{ form.clientLabel }}</dd></div>
+        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.correction.client') }}</dt><dd>{{ base.label }} → {{ form.clientLabel }}</dd></div>
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.correction.memberNumber') }}</dt><dd>{{ pending.body.expected_member_number }} → {{ pending.body.member_number }}</dd></div>
       </dl>
       <p v-if="pending.mode === 'void'" class="text-sm" data-field="corr-review-reason">{{ pending.body.reason }}</p>
