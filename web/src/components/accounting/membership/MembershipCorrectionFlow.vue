@@ -7,6 +7,7 @@ import { formInput as field, formLabel, formTextarea as textarea } from '@/compo
 import { membershipApi, type MemberIdentity, type MemberIdentityInput, type MemberRevision, type MemberRevisionVoidInput } from '@/api/nonprofitMembership'
 import { formatDate } from '@/composables/useFormat'
 import type { Client } from '@/api/clients'
+import { apiErrorCode } from '@/api/errors'
 import { errorBox, errorStatus, memberStatusBadge, membershipMemberLabel } from './membershipFormat'
 import MembershipConfirmBar from './MembershipConfirmBar.vue'
 import { useGuardedCommit } from './useGuardedCommit'
@@ -32,8 +33,10 @@ const commit = useGuardedCommit<Command, Command>({
   canManage: () => props.canManage,
   send: (supplier, command) => {
     if (command.mode === 'identity') return membershipApi.updateMember(supplier, command.member, command.body)
-    // Opakování po nejisté odpovědi: člen už neexistuje, smazání tedy proběhlo.
-    if (command.mode === 'delete') return membershipApi.deleteMember(supplier, command.member).catch(e => (errorStatus(e) === 404 ? { deleted: true, member_id: command.member } : Promise.reject(e)))
+    // Opakování po nejisté odpovědi: člen už neexistuje, smazání tedy proběhlo. Jen kód nenalezeného člena,
+    // jiná 404 (např. chybná routa) je chyba a detail se nezavře.
+    if (command.mode === 'delete') return membershipApi.deleteMember(supplier, command.member).catch(e => (errorStatus(e) === 404
+      && apiErrorCode(e) === 'nonprofit_membership_member_not_found' ? { deleted: true, member_id: command.member } : Promise.reject(e)))
     return membershipApi.voidRevision(supplier, command.member, command.revision, command.body)
   },
   onDone: () => emit('done', props.mode, form.clientLabel),

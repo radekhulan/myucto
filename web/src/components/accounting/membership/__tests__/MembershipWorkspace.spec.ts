@@ -270,6 +270,16 @@ describe('Membership workspace', () => {
     w.unmount()
   })
 
+  it('člena se všemi revizemi zrušenými neoznačí jako člena, jehož členství teprve začne', async () => {
+    api.members.mockResolvedValue(page([row(3, { revision_no: null, effective_from: null, status: null, all_revisions_voided: true })]))
+    const w = mounted()
+    await flushPromises()
+    const text = w.get('[data-member="3"] [data-field="member-revision"]').text()
+    expect(text).toBe(cs.nonprofitMembership.allRevisionsVoided)
+    expect(text).not.toBe(cs.nonprofitMembership.noRevision)
+    w.unmount()
+  })
+
   it('pages members by cursor and appends them', async () => {
     api.members.mockResolvedValueOnce(page([row(1)], 1))
     api.members.mockResolvedValueOnce(page([row(2)], null))

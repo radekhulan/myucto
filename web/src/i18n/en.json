@@ -41829,6 +41829,7 @@
     "openMember": "Open",
     "clientFallback": "Contact no. {id}",
     "clientRef": "Contact: {client}",
+    "allRevisionsVoided": "All revisions are voided, the member has no membership. A batch charge for active members skips them.",
     "noRevision": "No membership revision, the membership has not started yet.",
     "futureRevision": "The latest revision has not started yet: {status} from {date}. Today's status is in the detail.",
     "sinceDate": "from {date}",
@@ -41856,6 +41857,8 @@
     "revisionAck": "I checked the status, the effective date and the evidence. The revision stays in the history; while it is the last valid one and no charge relies on it, it can be voided by a reversing revision.",
     "revisionDone": "The membership revision was written.",
     "correction": {
+      "closeCorrectionFirst": "Finish or close the correction in progress first.",
+      "closeFormFirst": "Finish or close the open form first so the entered data is not lost.",
       "title_identity": "Correct contact and number",
       "title_delete": "Delete member",
       "title_void": "Void last revision",
@@ -42020,6 +42023,7 @@
     "rateConfirmOverwrite": "Use rate and replace dimensions",
     "rateStartFirstDay": "A calendar rate period must start on the first day of a month.",
     "serverErrors": {
+      "invalid_reference": "The selected contact no longer exists in this organization. Reload the page and select the contact again.",
       "nonprofit_membership_rate_unavailable": "The selected rate is unavailable. Choose another rate.",
       "nonprofit_membership_rate_changed": "The rate has changed. Reload it.",
       "nonprofit_membership_rate_invalid": "Check the rate name, amount, accounts, title, period and evidence.",

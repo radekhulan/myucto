@@ -41514,6 +41514,7 @@
     "openMember": "Otevřít",
     "clientFallback": "Kontakt č. {id}",
     "clientRef": "Kontakt: {client}",
+    "allRevisionsVoided": "Všechny revize jsou zrušené, člen nemá členství. Hromadný předpis pro aktivní členy ho vynechá.",
     "noRevision": "Bez revize členství, členství zatím nezačalo.",
     "futureRevision": "Poslední revize teprve nastane: {status} od {date}. Dnešní stav je v detailu.",
     "sinceDate": "od {date}",
@@ -41541,6 +41542,8 @@
     "revisionAck": "Zkontroloval(a) jsem stav, datum účinnosti a doložení. Revize zůstane v historii; dokud je poslední platná a nestojí na ní předpis, jde ji zrušit protizápisem.",
     "revisionDone": "Revize členství je zapsána.",
     "correction": {
+      "closeCorrectionFirst": "Nejdřív dokončete nebo zavřete rozepsanou opravu.",
+      "closeFormFirst": "Nejdřív dokončete nebo zavřete otevřený formulář, aby se rozepsané údaje neztratily.",
       "title_identity": "Opravit kontakt a číslo",
       "title_delete": "Smazat člena",
       "title_void": "Zrušit poslední revizi",
@@ -41705,6 +41708,7 @@
     "rateConfirmOverwrite": "Použít sazbu a přepsat dimenze",
     "rateStartFirstDay": "Období kalendářní sazby musí začínat prvním dnem měsíce.",
     "serverErrors": {
+      "invalid_reference": "Vybraný kontakt už v této organizaci neexistuje. Obnovte stránku a vyberte kontakt znovu.",
       "nonprofit_membership_rate_unavailable": "Vybraná sazba není dostupná. Vyberte jinou sazbu.",
       "nonprofit_membership_rate_changed": "Sazba se změnila. Načtěte ji znovu.",
       "nonprofit_membership_rate_invalid": "Opravte název, částku, účty, titul, období a podklady sazby.",

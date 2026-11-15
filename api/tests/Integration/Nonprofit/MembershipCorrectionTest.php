@@ -427,6 +427,29 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
         self::assertSame(5, json_decode($scrubbed, true)['before']['client_id']);
     }
 
+    /**
+     * Pojistka pro pohledávku bez případu (poškozená data, FK obejitý importem): služba i trigger ji berou jako
+     * předpis, takže kontakt ani číslo nejde opravit. Běžně každá pohledávka případ má, proto test vkládá řádek
+     * s vypnutými cizími klíči uvnitř transakce testu.
+     */
+    public function testClaimWithoutCaseStillBlocksIdentityCorrection(): void
+    {
+        [$member, $client] = $this->bareMember('FIX-ORPHAN-CLAIM');
+        $this->pdo->exec('SET SESSION FOREIGN_KEY_CHECKS=0');
+        try {
+            $this->pdo->prepare("INSERT INTO nonprofit_membership_charge_claims(supplier_id,case_id,operation_id,member_id,client_id,kind,amount_cents,record_hash)
+                VALUES(?,?,?,?,?,'issue',50000,?)")->execute([$this->supplier, PHP_INT_MAX >> 1, PHP_INT_MAX >> 1, $member, $client, str_repeat('0', 64)]);
+        } finally {
+            $this->pdo->exec('SET SESSION FOREIGN_KEY_CHECKS=1');
+        }
+        $q = $this->pdo->prepare('SELECT COUNT(*) FROM nonprofit_membership_charge_cases WHERE supplier_id=? AND member_id=?');
+        $q->execute([$this->supplier, $member]);
+        self::assertSame(0, (int) $q->fetchColumn(), 'Fixture: člen nemá žádný případ, jen pohledávku.');
+        $this->assertCorrectionRejected('nonprofit_membership_member_has_charges', fn () => $this->corrections->updateIdentity($this->supplier, $member,
+            $this->identity($client, 'SYN-FIX-ORPHAN-CLAIM-2', $client, 'SYN-FIX-ORPHAN-CLAIM'), $this->actor));
+        $this->assertTriggerRejects("UPDATE nonprofit_members SET member_number='SYN-ORPHAN-RAW' WHERE supplier_id=? AND id=?", $member);
+    }
+
     /** Člen se všemi revizemi zrušenými nejde smazat ani ukončit; dávka všech aktivních ho nevybere ani jako chybu. */
     public function testActiveBatchSkipsMemberWhoseRevisionsWereAllVoided(): void
     {
@@ -454,6 +477,12 @@ final class MembershipCorrectionTest extends MembershipBatchReviewFixture
         $chosen = $this->batches->create($this->supplier, $this->input([$voided], 'void-all-selected'), $this->actor)['batch']['id'];
         $this->batches->prepare($this->supplier, $chosen);
         self::assertSame('rejected', $this->batchRowStatus($chosen, $voided));
+        // Seznam odliší člena se zrušenými revizemi od člena, kterému první revize teprve chybí.
+        $list = (new MembershipListRepository($this->db))->page($this->supplier, 0, 100, MembershipListFilter::parse(['year' => 2026]));
+        $flags = array_column(array_map(static fn (array $r): array => ['id' => (int) $r['id'], 'flag' => $r['all_revisions_voided']], $list['items'] ?? $list), 'flag', 'id');
+        self::assertTrue($flags[$voided]);
+        self::assertFalse($flags[$bare]);
+        self::assertFalse($flags[$active]);
     }
 
     public function testCatalogSkipsMemberWhoseOnlyRevisionWasVoided(): void

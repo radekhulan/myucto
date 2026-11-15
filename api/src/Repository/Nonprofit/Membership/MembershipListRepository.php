@@ -129,6 +129,7 @@ final class MembershipListRepository
                 $row[$field] = (int) $row[$field];
             }
             $row['revision_no'] = $row['revision_no'] === null ? null : (int) $row['revision_no'];
+            $row['all_revisions_voided'] = (int) $row['all_revisions_voided'] === 1;
             $row['contribution'] = [
                 'status' => $row['dues_status'],
                 'claim_count' => (int) $row['dues_count'],
@@ -269,7 +270,11 @@ final class MembershipListRepository
                 WHEN t.open_cents=0 THEN 'paid' ELSE 'unpaid' END dues_status
             FROM scope m LEFT JOIN totals t ON t.member_id=m.id
           ), paged AS (SELECT * FROM filtered{$statusFilter} ORDER BY id LIMIT {$limit})
-          SELECT p.*,r.revision_no,r.effective_from,r.status FROM paged p
+          SELECT p.*,r.revision_no,r.effective_from,r.status,
+            -- Člen má historii, ale žádnou platnou revizi: všechny revize byly zrušené (krok 7).
+            (r.id IS NULL AND EXISTS(SELECT 1 FROM nonprofit_member_revisions h FORCE INDEX(uq_nmr_revision)
+              WHERE h.supplier_id=p.supplier_id AND h.member_id=p.id)) all_revisions_voided
+          FROM paged p
             LEFT JOIN nonprofit_member_revisions r ON r.supplier_id=p.supplier_id AND r.id=(
               SELECT latest.id FROM nonprofit_member_revisions latest
               WHERE latest.supplier_id=p.supplier_id AND latest.member_id=p.id AND latest.voids_revision_id IS NULL

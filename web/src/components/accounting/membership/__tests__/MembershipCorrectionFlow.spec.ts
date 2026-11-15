@@ -112,6 +112,24 @@ describe('Membership correction flow', () => {
     w.unmount()
   })
 
+  it('nepovažuje jinou 404 za již provedené smazání', async () => {
+    api.deleteMember.mockRejectedValue({ response: { status: 404, data: { error: { code: 'not_found' } } } })
+    const w = mounted({ mode: 'delete' })
+    await confirm(w)
+    expect(w.emitted('done')).toBeUndefined()
+    expect(w.find('[data-section="corr-error"]').exists()).toBe(true)
+    w.unmount()
+  })
+
+  it('kontakt smazaný v jiné záložce hlásí konkrétní větou', async () => {
+    api.updateMember.mockRejectedValue({ response: { status: 400, data: { error: { code: 'invalid_reference', message: 'Neplatný odkaz.' } } } })
+    const w = mounted({ mode: 'identity' })
+    await w.get('[data-field="corr-number"]').setValue('M-NEW')
+    await confirm(w)
+    expect(w.get('[data-section="corr-error"]').text()).toBe(cs.nonprofitMembership.serverErrors.invalid_reference)
+    w.unmount()
+  })
+
   it('shows the translated server reason when the correction is rejected', async () => {
     api.deleteMember.mockRejectedValue({ response: { status: 409, data: { error: { code: 'nonprofit_membership_member_in_batch' } } } })
     const w = mounted({ mode: 'delete' })

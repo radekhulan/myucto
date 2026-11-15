@@ -14,6 +14,8 @@ export interface MemberRow {
   contribution?: {status: 'none' | 'paid' | 'unpaid' | 'unproven'; unpaired_count?: number; claim_count: number; prescribed_cents: string; paid_cents: string | null; open_cents: string | null}
   id: number; supplier_id: number; client_id: number; member_number: string; created_by: number; created_at?: string
   company_name?: string; first_name?: string; last_name?: string; revision_no: number | null; effective_from: string | null; status: MemberStatus | null
+  /** Člen má historii, ale všechny revize jsou zrušené (nemá členství). */
+  all_revisions_voided?: boolean
 }
 export interface MemberPage { items: MemberRow[]; next_after_id: number | null }
 export interface MembershipListFilters {search?: string; year?: number | null; title_key?: string; payment_status?: 'all' | 'paid' | 'unpaid' | 'unproven' | 'none'}

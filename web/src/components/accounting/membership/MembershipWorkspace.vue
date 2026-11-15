@@ -420,7 +420,7 @@ watch(batchLocked, locked => {
         <input v-if="canManage" type="checkbox" :checked="checkedMembers.includes(row.id)" :disabled="loading || batchLocked || (checkedMembers.length >= 500 && !checkedMembers.includes(row.id))" :aria-label="t('nonprofitMembership.batchSelectMember', {name: labelOf(row)})" data-action="batch-check-member" @change="checkMember(row.id, $event)" />
         <div class="min-w-0 flex-1 space-y-1 text-sm">
           <p class="break-words font-medium">{{ row.member_number }} · {{ labelOf(row) }}</p>
-          <p v-if="row.revision_no === null || row.effective_from === null || row.status === null" class="text-warning-700" data-field="member-revision">{{ t('nonprofitMembership.noRevision') }}</p>
+          <p v-if="row.revision_no === null || row.effective_from === null || row.status === null" class="text-warning-700" data-field="member-revision">{{ t(row.all_revisions_voided ? 'nonprofitMembership.allRevisionsVoided' : 'nonprofitMembership.noRevision') }}</p>
           <p v-else-if="row.effective_from > today" class="text-warning-700" data-field="member-revision">{{ t('nonprofitMembership.futureRevision', { status: t(`nonprofitMembership.status_${row.status}`), date: formatDate(row.effective_from) }) }}</p>
           <p v-else class="flex flex-wrap items-center gap-2" data-field="member-revision"><span :class="memberStatusBadge(row.status)" data-field="member-status">{{ t(`nonprofitMembership.status_${row.status}`) }}</span><span>{{ t('nonprofitMembership.sinceDate', { date: formatDate(row.effective_from) }) }}</span></p>
           <template v-if="row.contribution">

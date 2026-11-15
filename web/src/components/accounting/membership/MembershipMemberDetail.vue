@@ -154,21 +154,27 @@ onActivated(() => {
   void load()
 })
 
+// Oprava zavírá formulář revize, předpisu i storna. Rozepsaný text se nesmí ztratit tiše, proto jsou akce
+// oprav zašedlé s důvodem, dokud je jiný formulář otevřený; obdobně „Změnit stav“ při rozepsané opravě.
+const formOpen = computed(() => issueOpen.value || reverseClaim.value !== null || revisionOpen.value)
+const formReason = (block?: string | null) => (formOpen.value ? t('nonprofitMembership.correction.closeFormFirst') : blockReason(block))
+
 const actions = computed<ActionItem[]>(() => [
   { key: 'new-charge', label: t('nonprofitMembership.newCharge'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: anyLocked.value || loading.value || !valid.value.length, disabledReason: t('nonprofitMembership.newChargeNeedsRevision'), run: () => { reverseClaim.value = null; issueOpen.value = true } },
-  { key: 'change-status', label: t('nonprofitMembership.changeStatus'), icon: 'edit', show: props.canManage && valid.value.length > 0 && !revisionOpen.value, disabled: anyLocked.value || loading.value, run: () => { correction.value = null; revisionOpen.value = true } },
+  { key: 'change-status', label: t('nonprofitMembership.changeStatus'), icon: 'edit', show: props.canManage && valid.value.length > 0 && !revisionOpen.value, disabled: anyLocked.value || loading.value || correction.value !== null,
+    disabledReason: t('nonprofitMembership.correction.closeCorrectionFirst'), run: () => { correction.value = null; revisionOpen.value = true } },
   // Zablokovaná oprava zůstává v „…“ zašedlá s důvodem ze serveru, aby bylo vidět, proč nejde.
   { key: 'fix-identity', label: t('nonprofitMembership.correction.title_identity'), icon: 'edit', tier: 'overflow',
-    show: props.canManage && !!corrections.value && correction.value === null, disabled: anyLocked.value || loading.value || !corrections.value?.can_edit_identity,
-    disabledReason: blockReason(corrections.value?.edit_identity_block), run: () => startCorrection('identity') },
+    show: props.canManage && !!corrections.value && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !corrections.value?.can_edit_identity,
+    disabledReason: formReason(corrections.value?.edit_identity_block), run: () => startCorrection('identity') },
   { key: 'reload', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value || anyLocked.value, run: () => { void load() } },
   { key: 'close-detail', label: t('nonprofitMembership.close'), icon: 'x', disabled: anyLocked.value, run: () => emit('close') },
   { key: 'void-revision', label: t('nonprofitMembership.correction.title_void'), icon: 'uturn', tier: 'overflow', variant: 'danger',
-    show: props.canManage && (!!voidable.value || !!corrections.value?.void_block) && correction.value === null, disabled: anyLocked.value || loading.value || !voidable.value,
-    disabledReason: blockReason(corrections.value?.void_block), run: () => startCorrection('void') },
+    show: props.canManage && (!!voidable.value || !!corrections.value?.void_block) && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !voidable.value,
+    disabledReason: formReason(corrections.value?.void_block), run: () => startCorrection('void') },
   { key: 'delete-member', label: t('nonprofitMembership.correction.title_delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
-    show: props.canManage && !!corrections.value && correction.value === null, disabled: anyLocked.value || loading.value || !corrections.value?.can_delete,
-    disabledReason: blockReason(corrections.value?.delete_block), run: () => startCorrection('delete') },
+    show: props.canManage && !!corrections.value && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !corrections.value?.can_delete,
+    disabledReason: formReason(corrections.value?.delete_block), run: () => startCorrection('delete') },
 ])
 </script>
 
