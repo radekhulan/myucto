@@ -55,7 +55,7 @@ import { PURCHASE_TOOLS } from './purchase-tools.mjs';
 import { OTHER_ITEM_TOOLS } from './other-item-tools.mjs';
 import {
   CONFIRM, DOCUMENT_ENTITY_TYPES, PAYMENT_METHODS, PAYMENT_METHOD_HELP, changed, confirmed, merged,
-  nullIfEmpty, requireConfirm, resolveCurrency, seg,
+  nullIfEmpty, requireConfirm, seg,
 } from './tool-shared.mjs';
 import { FILE_TOOLS } from './file-tools.mjs';
 // Faktury: číselníky a dimenze konceptu (track mcp-fix).
@@ -481,8 +481,7 @@ function pickInvoiceLine(lines, a) {
 
 /**
  * Kompletní PUT payload konceptu: hlavička ze současného stavu přebitá změnami
- * a celý seznam položek. Měna se mění přes `currency_id` (kód převede volající
- * přes `resolveCurrency`), server pak k nové měně načte kurz.
+ * a celý seznam položek. Měna se mění kódem (`currency`), server k ní načte kurz.
  *
  * Odvozené hodnoty hlavičky se po změně vstupu neposílají, jinak by uložená
  * hodnota přebila přepočet: kód členění DPH hlavičky po změně daňového kontextu
@@ -491,6 +490,12 @@ function pickInvoiceLine(lines, a) {
  */
 export function draftPayload(invoice, changes, lines, { rederive = false } = {}) {
   const header = merged(invoice, changes, INVOICE_HEADER_FIELDS);
+  if (changes.currency !== undefined) {
+    // Explicitní null: server pak měnu dohledá podle kódu (InvoiceDefaults) místo toho,
+    // aby doplnil uloženou (`UpdateInvoiceAction::mergeStoredHeader`); bez něj byla změna měny tichý no-op.
+    header.currency_id = null;
+    header.currency = changes.currency;
+  }
   if (rederive && changes.vat_classification_code === undefined) delete header.vat_classification_code;
   if (changes.revenue_category_id !== undefined) delete header.revenue_category;
   for (const key of INVOICE_OPTIONAL_HEADER_FIELDS) {
@@ -1530,6 +1535,12 @@ export const TOOLS = [
       include_vat_breakdown: bool('Přidat rozpis DPH.'),
       include_posting_accounts: bool('Přidat předkontace účetních účtů.'),
       include_kh: bool('Přidat části kontrolního hlášení.'),
+      include_vat_classification: bool('Přidat členění plnění z evidence DPH a skutečné řádky přiznání.'),
+      sort_key: str('Řazení podle sloupce.', { enum: [
+        'number', 'client', 'type', 'issued', 'due', 'amount', 'status', 'paid_at', 'payment_method', 'booked_at',
+        'amount_czk', 'base', 'vat', 'total', 'project', 'sent_at', 'paid_total', 'remaining_amount',
+      ] }),
+      sort_dir: str('Směr řazení, výchozí sestupně.', { enum: ['asc', 'desc'] }),
       ...PAGING,
     }),
     write: false,
@@ -1537,6 +1548,8 @@ export const TOOLS = [
       q: a.query,
       page: a.page,
       per_page: a.per_page,
+      sort_key: a.sort_key,
+      sort_dir: a.sort_dir,
       filter: {
         status: a.status,
         type: a.type,
@@ -1559,6 +1572,7 @@ export const TOOLS = [
         include_vat_breakdown: a.include_vat_breakdown === undefined ? undefined : a.include_vat_breakdown ? 1 : 0,
         include_posting_accounts: a.include_posting_accounts === undefined ? undefined : a.include_posting_accounts ? 1 : 0,
         include_kh: a.include_kh === undefined ? undefined : a.include_kh ? 1 : 0,
+        include_vat_classification: a.include_vat_classification === undefined ? undefined : a.include_vat_classification ? 1 : 0,
       },
     }, tool),
   },
@@ -1614,7 +1628,6 @@ export const TOOLS = [
     name: 'create_invoice',
     api: [
       ['GET', '/api/invoices/{id}'],
-      ['GET', '/api/codebooks/currencies'],
       ['POST', '/api/invoices'],
     ],
     title: 'Vytvořit fakturu (koncept)',
@@ -1703,12 +1716,7 @@ export const TOOLS = [
       if (body.client_id === undefined && body.is_simplified !== true) {
         throw new Error('Zadejte odběratele (`client_id`, viz `search_clients`). Bez něj jde založit jen zjednodušený doklad (`is_simplified: true`).');
       }
-      if (body.currency !== undefined) {
-        const currency = await resolveCurrency(c, { currency: body.currency }, tool);
-        body.currency_id = currency.id;
-        delete body.currency;
-        if (currency.code === 'CZK') delete body.exchange_rate;
-      }
+      if (body.currency !== undefined) body.currency = String(body.currency).trim().toUpperCase();
       return checkCreatedSchedule(body, await c.post('/invoices', body, tool));
     },
   },
@@ -1734,7 +1742,6 @@ export const TOOLS = [
       ['GET', '/api/projects'],
       ['GET', '/api/clients'],
       ['GET', '/api/invoices'],
-      ['GET', '/api/codebooks/currencies'],
     ],
     title: 'Upravit hlavičku konceptu faktury',
     description:
@@ -1790,9 +1797,9 @@ export const TOOLS = [
       for (const key of ['vat_classification_code', 'income_tax_exempt_reason', 'supplier_order_number', 'payment_variable_symbol']) {
         if (changes[key] !== undefined) changes[key] = nullIfEmpty(changes[key]);
       }
-      if (a.currency !== undefined) {
-        const currency = await resolveCurrency(c, { currency: a.currency }, tool);
-        if (currency.id !== Number(invoice.currency_id)) changes.currency_id = currency.id;
+      const currencyCode = a.currency !== undefined ? String(a.currency).trim().toUpperCase() : undefined;
+      if (currencyCode !== undefined && currencyCode !== String(invoice.currency ?? '').toUpperCase()) {
+        changes.currency = currencyCode;
       }
       if (Object.keys(changes).length === 0) {
         throw new Error('Není co měnit. Zadejte aspoň jedno pole hlavičky, které se liší od dokladu.');
@@ -2038,9 +2045,10 @@ export const TOOLS = [
     inputSchema: schema({
       id: int('ID faktury.'),
       paid_at: date('Datum úhrady (RRRR-MM-DD). Výchozí dnes.'),
+      send_payment_thanks: bool('Poslat odběrateli děkovný e-mail za úhradu. E-mail nejde vzít zpět, jen na výslovný pokyn.'),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/mark-paid`, { paid_at: a.paid_at }, tool),
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/mark-paid`, changed(a, ['paid_at', 'send_payment_thanks']), tool),
   },
   {
     name: 'send_invoice_reminder',
@@ -2051,9 +2059,14 @@ export const TOOLS = [
     description:
       'Odešle upomínku k nezaplacené faktuře po splatnosti. Stejně jako `send_invoice` '
       + 'jde o nevratné odeslání e-mailu zákazníkovi — jen na výslovný pokyn.',
-    inputSchema: schema({ id: int('ID faktury.') }, ['id']),
+    inputSchema: schema({
+      id: int('ID faktury.'),
+      to: { type: 'array', items: { type: 'string' }, description: 'Přepis příjemců; jinak adresy pro upomínky z karty odběratele (`get_invoice_recipients` s `type: "reminders"`).' },
+      cc: { type: 'array', items: { type: 'string' }, description: 'Kopie.' },
+      bcc: { type: 'array', items: { type: 'string' }, description: 'Skrytá kopie.' },
+    }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/reminder`, {}, tool),
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/reminder`, changed(a, ['to', 'cc', 'bcc']), tool),
   },
   // ──────────────────────────────────────────────────────────────────────────
   // Výkazy práce a materiálu
@@ -2757,6 +2770,16 @@ export const TOOLS = [
       include_posting_accounts: bool('Přidat předkontace účetních účtů.'),
       include_kh: bool('Přidat části kontrolního hlášení.'),
       include_dimensions: bool('Přidat dimenze dokladů; vyžaduje právo číst účetnictví.'),
+      approval_status: str('Schvalování manažerem střediska.', { enum: ['none', 'pending', 'approved', 'rejected'] }),
+      has_visual_document: bool('Doklady s PDF nebo obrázkem dokladu (true), nebo bez něj (false), např. k doplnění originálu.'),
+      has_structured_source: bool('Doklady ze strukturovaného zdroje ISDOC nebo Pohoda XML (true), nebo bez něj (false).'),
+      include_review: bool('Přidat důvod, proč doklad potřebuje kontrolu vytěžení.'),
+      include_vat_classification: bool('Přidat členění plnění z evidence DPH a skutečné řádky přiznání.'),
+      sort_key: str('Řazení podle sloupce.', { enum: [
+        'number', 'vendor', 'vendor_number', 'kind', 'tax_date', 'due_date', 'amount', 'status', 'paid_at', 'booked_at',
+        'received_at', 'expense_category', 'base', 'vat', 'remaining_amount', 'project', 'payment_method',
+      ] }),
+      sort_dir: str('Směr řazení, výchozí sestupně.', { enum: ['asc', 'desc'] }),
       ...PAGING,
     }),
     write: false,
@@ -2764,6 +2787,8 @@ export const TOOLS = [
       q: a.query,
       page: a.page,
       per_page: a.per_page,
+      sort_key: a.sort_key,
+      sort_dir: a.sort_dir,
       filter: {
         status: a.status,
         vendor_id: a.vendor_id,
@@ -2788,6 +2813,11 @@ export const TOOLS = [
         date_to: a.date_to,
         unpaid_only: a.unpaid_only,
         include_dimensions: a.include_dimensions === undefined ? undefined : a.include_dimensions ? 1 : 0,
+        approval_status: a.approval_status,
+        has_visual_document: a.has_visual_document === undefined ? undefined : a.has_visual_document ? 1 : 0,
+        has_structured_source: a.has_structured_source === undefined ? undefined : a.has_structured_source ? 1 : 0,
+        include_review: a.include_review === undefined ? undefined : a.include_review ? 1 : 0,
+        include_vat_classification: a.include_vat_classification === undefined ? undefined : a.include_vat_classification ? 1 : 0,
       },
     }, tool),
   },

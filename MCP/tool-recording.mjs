@@ -43,6 +43,8 @@ export class RecordingClient {
     if (path === '/codebooks/currencies') return [{ id: 7, code: 'CZK' }, { id: 8, code: 'EUR' }];
     if (path === '/codebooks/cnb-rate') return { rate: 25, rate_date: '2026-01-01' };
     if (path === '/settings/supplier') return { default_hourly_rate: 900 };
+    if (/billing-preview$/.test(path)) return { items: [], fingerprint: 'a'.repeat(64) };
+    if (path.includes('/journal/for-document/')) return { items: [] };
     if (this.name === 'unlink_invoice_advance') return { ...row, parent_invoice_id: 8, advance_paid_amount: 100 };
     if (this.name === 'unlink_purchase_advance') return { ...row, linked_advance: { id: 8, total_with_vat: 100, currency: 'CZK' } };
     return row;
@@ -156,6 +158,12 @@ export function scenarios(tool) {
     cases.push({ args: { ...args, header: [{ type_id: 7, value_id: 7 }], items: [{ row: 1, dimensions: [{ type_id: 7, value_id: null }] }] } });
   }
   if (tool.name === 'list_vat_classifications') cases.push({ args: { ...args, include_return_lines: true } });
+  if (tool.name === 'get_invoice_posting') cases.push({ args: { ...args, document_type: 'purchase-invoices' } });
+  if (tool.name === 'create_invoice_refund_order') cases.push({ args: { ...args, account_number: '1000000005', bank_code: '0100' } });
+  if (['set_invoice_credit_note_offset', 'set_purchase_credit_note_offset'].includes(tool.name)) {
+    cases.push({ args: { ...args, action: 'revert' } });
+  }
+  if (tool.name === 'set_purchase_invoice_vat_treatment') cases.push({ args: { ...args, vat_deduction: 'none' } });
   return cases;
 }
 

@@ -9,6 +9,8 @@
  * `list_currencies`, `list_vat_rates`, `list_expense_categories`).
  */
 
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
+
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const bool = (description) => ({ type: 'boolean', description });
 const schema = (properties = {}, required = []) => ({
@@ -34,9 +36,8 @@ function postingRuleList(map, side) {
 export const CODEBOOK_TOOLS = [
   {
     name: 'list_revenue_categories',
-    api: [
-      ['GET', '/api/revenue-categories'],
-    ],
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Kategorie tržeb',
     description:
       'Číselník kategorií tržeb s ID pro `revenue_category_id` vydané faktury a šablony pravidelné '
@@ -47,10 +48,8 @@ export const CODEBOOK_TOOLS = [
   },
   {
     name: 'list_vat_classifications',
-    api: [
-      ['GET', '/api/vat-classifications'],
-      ['GET', '/api/vat-classifications/lines'],
-    ],
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Členění pro DPH a kontrolní hlášení',
     description:
       'Kódy členění plnění (`vat_classification_code`) pro položky a hlavičku faktur: řádek přiznání DPH '
@@ -76,9 +75,8 @@ export const CODEBOOK_TOOLS = [
   },
   {
     name: 'list_posting_rules',
-    api: [
-      ['GET', '/api/accounting/posting-rules'],
-    ],
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Předkontace',
     description:
       'Předkontace firmy (podvojné účetnictví): klíč (`key`) pro `posting_rule_key` na řádku faktury, '
@@ -95,9 +93,8 @@ export const CODEBOOK_TOOLS = [
   },
   {
     name: 'list_invoice_number_series',
-    api: [
-      ['GET', '/api/invoices/number-series'],
-    ],
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Číselné řady vydaných dokladů',
     description:
       'Číselné řady, ze kterých jde vydanému dokladu přidělit číslo (`number_series_id` v `create_invoice` '
@@ -110,9 +107,8 @@ export const CODEBOOK_TOOLS = [
   },
   {
     name: 'list_purchase_number_series',
-    api: [
-      ['GET', '/api/purchase-invoices/number-series'],
-    ],
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Číselné řady přijatých dokladů',
     description:
       'Číselné řady interního čísla přijatých faktur (`number_series_id` v `create_purchase_invoice` '
@@ -123,9 +119,8 @@ export const CODEBOOK_TOOLS = [
   },
   {
     name: 'list_branding_profiles',
-    api: [
-      ['GET', '/api/branding-profiles'],
-    ],
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Brandingové profily',
     description:
       'Aktivní brandingové profily firmy (jiné logo, hlavička, bankovní účet nebo patička na PDF) s ID pro '
@@ -136,9 +131,8 @@ export const CODEBOOK_TOOLS = [
   },
   {
     name: 'list_expense_rules',
-    api: [
-      ['GET', '/api/accounting/expense-rules'],
-    ],
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Pravidla klasifikace nákladů',
     description:
       'Pravidla, podle kterých aplikace přiřazuje položkám přijatých faktur druh nákladu (služba, materiál, '

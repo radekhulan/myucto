@@ -91,17 +91,14 @@ test('zjednodušený doklad nemusí mít odběratele, jiný doklad ano', async (
   assert.equal(client.writes()[0].body.cash_register_id, 2);
 });
 
-test('create_invoice pošle účty položky, měnu jako ID a ruční kurz', async () => {
-  const client = new FakeClient({
-    'GET /codebooks/currencies': [{ id: 1, code: 'CZK', is_default: true }, { id: 2, code: 'EUR', is_active: true }],
-  });
+test('create_invoice pošle účty položky, měnu a ruční kurz', async () => {
+  const client = new FakeClient();
   await run(client, 'create_invoice', {
     client_id: 8, currency: 'EUR', exchange_rate: 24.5, payment_method: 'offset', number_series_id: 3,
     items: [{ ...ITEM, revenue_account_code: '604', counter_account_code: '315', posting_rule_key: 'prodej.zbozi', vat_classification_code: '26' }],
   });
   const body = client.writes()[0].body;
-  assert.equal(body.currency_id, 2);
-  assert.equal('currency' in body, false);
+  assert.equal(body.currency, 'EUR');
   assert.equal(body.exchange_rate, 24.5);
   assert.equal(body.payment_method, 'offset');
   assert.equal(body.number_series_id, 3);
@@ -258,4 +255,52 @@ test('číselníky volají správné cesty a předkontace filtrují podle strany
   for (const name of ['list_posting_rules', 'list_revenue_categories', 'list_vat_classifications', 'list_branding_profiles']) {
     assert.equal(TOOLS_BY_NAME.get(name).write, false, name);
   }
+});
+
+// ── Oprava DPH, zaúčtování, zápočet, výkaz ─────────────────────────────────
+
+test('oprava DPH přijaté faktury vyžaduje potvrzení a zaúčtovanou odmítne', async () => {
+  const posted = new FakeClient({ 'GET /purchase-invoices/40': purchase({ booked_at: '2026-10-01' }) });
+  await assert.rejects(run(posted, 'set_purchase_invoice_vat_treatment', { id: 40, vat_deduction: 'none', confirm: true }), /zaúčtovaná/);
+
+  const client = new FakeClient({ 'GET /purchase-invoices/40': purchase() });
+  await assert.rejects(run(client, 'set_purchase_invoice_vat_treatment', { id: 40, vat_deduction: 'none' }), /NEPROVEDENO/);
+  await assert.rejects(run(client, 'set_purchase_invoice_vat_treatment', { id: 40, vat_deduction: 'proportional', confirm: true }),
+    /procento/);
+  assert.deepEqual(client.writes(), []);
+  await run(client, 'set_purchase_invoice_vat_treatment', {
+    id: 40, vat_deduction: 'proportional', vat_deduction_percent: 60, items: [{ row: 2, vat_classification_code: '23' }], confirm: true,
+  });
+  assert.deepEqual(client.writes()[0], {
+    method: 'POST', path: '/purchase-invoices/40/vat-treatment', tool: 'set_purchase_invoice_vat_treatment',
+    body: { vat_deduction: 'proportional', vat_deduction_percent: 60, items: [{ id: 502, vat_classification_code: '23' }] },
+  });
+});
+
+test('zaúčtování faktury: zaúčtovaná vrátí zápisy, nezaúčtovaná náhled', async () => {
+  const posted = new FakeClient({ 'GET /accounting/journal/for-document/invoices/42': { items: [{ id: 9 }] } });
+  assert.deepEqual(await run(posted, 'get_invoice_posting', { document_type: 'invoices', id: 42 }), { posted: true, entries: [{ id: 9 }] });
+  const draft = new FakeClient({
+    'GET /accounting/journal/for-document/purchase-invoices/40': { items: [] },
+    'GET /accounting/journal/posting-preview/purchase-invoices/40': { lines: [{ account_code: '518' }] },
+  });
+  assert.deepEqual(await run(draft, 'get_invoice_posting', { document_type: 'purchase-invoices', id: 40 }),
+    { posted: false, preview: { lines: [{ account_code: '518' }] } });
+});
+
+test('přenos výkazu pošle otisk aktuálního náhledu', async () => {
+  const client = new FakeClient({ 'GET /invoices/42/work-report/billing-preview': { items: [], fingerprint: 'f'.repeat(64) } });
+  await run(client, 'transfer_work_report_billing', { id: 42 });
+  assert.deepEqual(client.writes()[0].body, { fingerprint: 'f'.repeat(64) });
+});
+
+test('zápočet dobropisu: započtení bez potvrzení, zrušení s potvrzením', async () => {
+  const client = new FakeClient();
+  await run(client, 'set_invoice_credit_note_offset', { id: 43, action: 'apply' });
+  await assert.rejects(run(client, 'set_purchase_credit_note_offset', { id: 41, action: 'revert' }), /NEPROVEDENO/);
+  await run(client, 'set_purchase_credit_note_offset', { id: 41, action: 'revert', confirm: true });
+  assert.deepEqual(client.writes().map(({ method, path }) => [method, path]), [
+    ['POST', '/invoices/43/credit-note-offset'],
+    ['DELETE', '/purchase-invoices/41/credit-note-offset'],
+  ]);
 });

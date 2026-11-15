@@ -758,14 +758,21 @@ test('změna DUZP nechá server znovu odvodit zařazení všech položek', async
 });
 
 /** BEZ OPRAVY PADÁ: MCP poslal kód měny bez `currency_id` a server doplnil uloženou měnu, změna se tiše neprovedla. */
-test('změna měny se posílá jako ID z číselníku a zakázku jde odebrat nulou', async () => {
+test('změna měny pošle kód s currency_id null a zakázku jde odebrat nulou', async () => {
   const client = draftClient();
-  client.responses['GET /codebooks/currencies'] = [{ id: 1, code: 'CZK', is_default: true }, { id: 2, code: 'EUR', is_active: true }];
   await tool('update_invoice').run(client, { invoice_id: 42, currency: 'eur', project_id: 0 }, 'update_invoice');
   const body = putOf(client);
-  assert.equal(body.currency_id, 2);
-  assert.equal('currency' in body, false);
+  assert.equal(body.currency, 'EUR');
+  assert.equal(body.currency_id, null);
   assert.equal(body.project_id, null);
+});
+
+test('stejná měna se jako změna neposílá', async () => {
+  const client = draftClient();
+  await tool('update_invoice').run(client, { invoice_id: 42, currency: 'czk', due_date: '2026-11-01' }, 'update_invoice');
+  const body = putOf(client);
+  assert.equal(body.currency_id, 1);
+  assert.equal('currency' in body, false);
 });
 
 /** BEZ OPRAVY PADÁ: hlavička nesla uložený kód DPH i po změně přenesené povinnosti a server ho nepřepočítal. */

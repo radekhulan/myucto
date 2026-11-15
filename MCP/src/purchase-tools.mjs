@@ -865,6 +865,101 @@ export const PURCHASE_TOOLS = [
     },
   },
 
+  {
+    name: 'set_purchase_invoice_vat_treatment',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Opravit nárok na odpočet a členění DPH přijaté faktury',
+    description:
+      'Oprava DPH zařazení PŘIJATÉ (i zaplacené) faktury bez storna: nárok na odpočet (`vat_deduction`, '
+      + 'u poměrného i procento), kód členění hlavičky a kódy položek. Částky, data ani dodavatel se nemění. '
+      + 'Koncept se opravuje `update_purchase_invoice` a `update_purchase_invoice_item`.\n\n'
+      + 'Mění evidenci DPH, proto vždy vyžaduje `confirm: true`. Zaúčtovaný doklad nástroj odmítne (oprava '
+      + 'by ho přeúčtovala, to dělá účetní v aplikaci). Doklad v podaném období DPH server odmítne '
+      + '(`period_filed`): opravu po podání dělá správce firmy v aplikaci. Bez zadaných změn jen vrátí současné zařazení.',
+    inputSchema: schema({
+      id: id('ID přijaté faktury.'),
+      vat_deduction: str('Nárok na odpočet: `full` plný, `none` bez nároku, `proportional` poměrný (§ 75), `reduced` krácený (§ 76).', { enum: VAT_DEDUCTIONS }),
+      vat_deduction_percent: num('Procento odpočtu u `proportional`.', { minimum: 0, maximum: 100 }),
+      vat_classification_code: { type: ['string', 'null'], description: 'Kód členění hlavičky (`list_vat_classifications`, strana `purchase`); null ho smaže.' },
+      items: {
+        type: 'array',
+        description: 'Kódy členění položek. Položku určí `item_id` nebo pořadí `row`.',
+        items: schema({
+          ...ITEM_PICK,
+          vat_classification_code: str('Kód členění položky (`list_vat_classifications`, strana `purchase`).', { minLength: 1 }),
+        }, ['vat_classification_code']),
+      },
+      confirm: CONFIRM,
+    }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const pi = await loadPurchase(c, a.id, tool);
+      if (pi?.status === 'cancelled') throw new Error('Stornovaný doklad nelze upravit.');
+      refuseIfPosted(pi, a.id, 'Oprava DPH zařazení');
+      const body = changed(a, ['vat_deduction', 'vat_deduction_percent', 'vat_classification_code']);
+      if (a.items !== undefined) {
+        const items = pi.items ?? [];
+        body.items = a.items.map((entry) => ({
+          id: Number(items[pickLine(items, entry)].id), vat_classification_code: entry.vat_classification_code,
+        }));
+      }
+      if (Object.keys(body).length === 0) {
+        // Bez změny jen ukáže současné zařazení, ať model ví, co opravuje.
+        return {
+          id: Number(a.id), changed: false, vat_deduction: pi.vat_deduction ?? null,
+          vat_deduction_percent: pi.vat_deduction_percent ?? null, vat_classification_code: pi.vat_classification_code ?? null,
+          items: (pi.items ?? []).map((item, index) => ({
+            row: index + 1, id: item.id, description: item.description, vat_classification_code: item.vat_classification_code ?? null,
+          })),
+        };
+      }
+      if (body.vat_deduction === 'proportional' && body.vat_deduction_percent === undefined && pi.vat_deduction !== 'proportional') {
+        throw new Error('U poměrného odpočtu zadejte i procento (`vat_deduction_percent`).');
+      }
+      const summary = Object.entries(body).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(', ');
+      requireConfirm(a, `U přijaté faktury ${purchaseLabel(pi, a.id)} se má změnit DPH zařazení`, summary);
+      return c.post(`${BASE}/${seg(a.id)}/vat-treatment`, body, tool);
+    },
+  },
+  {
+    name: 'get_purchase_credit_note_offset',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Zápočet přijatého dobropisu s fakturou',
+    description:
+      'Zápočty, kterých se přijatý doklad účastní (jako dobropis i jako opravovaná faktura), a u dobropisu bez '
+      + 'zápočtu, jestli ho jde započíst (`can_offset`, `reason`). Zápočet sníží částku k úhradě faktury o celý '
+      + 'dobropis; do deníku ani evidence DPH nic nezapisuje.',
+    inputSchema: schema({ id: id('ID přijatého dobropisu nebo faktury.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`${BASE}/${seg(a.id)}/credit-note-offset`, null, tool),
+  },
+  {
+    name: 'set_purchase_credit_note_offset',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Započíst nebo zrušit zápočet přijatého dobropisu',
+    description:
+      '`action: "apply"` započte PŘIJATÝ dobropis (`id`) proti faktuře, kterou opravuje: dodavateli se pak '
+      + 'zaplatí jen rozdíl. Jen v plné výši dobropisu; jinak server vrátí důvod (`credit_note_offset_*`). '
+      + '`action: "revert"` zápočty dokladu zruší; vyžaduje `confirm: true`.',
+    inputSchema: schema({
+      id: id('ID přijatého dobropisu (u `revert` i opravované faktury).'),
+      action: str('Započíst (`apply`), nebo zápočet zrušit (`revert`).', { enum: ['apply', 'revert'] }),
+      confirm: CONFIRM,
+    }, ['id', 'action']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const path = `${BASE}/${seg(a.id)}/credit-note-offset`;
+      if (a.action === 'apply') return c.post(path, {}, tool);
+      requireConfirm(a, 'Zrušit se má zápočet přijatého dobropisu u dokladu', `#${a.id}`);
+      return c.del(path, tool);
+    },
+  },
+
   // ──────────────────────────────────────────────────────────────────────────
   // Zálohy
   // ──────────────────────────────────────────────────────────────────────────

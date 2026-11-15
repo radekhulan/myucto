@@ -10,6 +10,7 @@
  * které nástroje na položky posílají (`DraftItemDimensionRealign`).
  */
 
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
 import { seg } from './tool-shared.mjs';
 
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -58,14 +59,10 @@ function dropSplitTypes(splits, row, changes) {
 /** Nástroj na dimenze konceptu jednoho druhu faktury; role se posuzují zvlášť pro vydané a přijaté. */
 function setDimensionsTool(name, docType) {
   const doc = DOCUMENTS[docType];
-  const base = `/api/accounting/dimensions/documents/${docType}/{id}`;
   return {
     name,
-    api: [
-      ['GET', `/api${doc.path}/{id}`],
-      ['GET', base],
-      ['PUT', base],
-    ],
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: `Nastavit dimenze konceptu: ${doc.label.toLowerCase()}`,
     description:
       `Nastaví dimenze (středisko, zakázku, projekt…) hlavičce nebo položkám KONCEPTU (${doc.label.toLowerCase()}). `

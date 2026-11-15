@@ -533,10 +533,6 @@
         "/api/invoices/{id}"
       ],
       [
-        "GET",
-        "/api/codebooks/currencies"
-      ],
-      [
         "POST",
         "/api/invoices"
       ]
@@ -548,6 +544,15 @@
       [
         "POST",
         "/api/invoices/{id}/penalty"
+      ]
+    ]
+  },
+  "create_invoice_refund_order": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/refund-order"
       ]
     ]
   },
@@ -1285,12 +1290,42 @@
       ]
     ]
   },
+  "get_invoice_credit_note_offset": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/credit-note-offset"
+      ]
+    ]
+  },
   "get_invoice_isdoc": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/invoices/{id}/isdoc"
+      ]
+    ]
+  },
+  "get_invoice_posting": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/journal/for-document/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/for-document/purchase-invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/posting-preview/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/posting-preview/purchase-invoices/{id}"
       ]
     ]
   },
@@ -1637,6 +1672,15 @@
       [
         "GET",
         "/api/property/catalog/unit-legal-roles/{id}"
+      ]
+    ]
+  },
+  "get_purchase_credit_note_offset": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/credit-note-offset"
       ]
     ]
   },
@@ -2866,12 +2910,30 @@
       ]
     ]
   },
+  "prefill_invoice_refund_order": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/refund-order/prefill"
+      ]
+    ]
+  },
   "preview_invoice_penalty": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/invoices/{id}/penalty/preview"
+      ]
+    ]
+  },
+  "preview_work_report_billing": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/work-report/billing-preview"
       ]
     ]
   },
@@ -3490,16 +3552,29 @@
       ]
     ]
   },
+  "set_invoice_credit_note_offset": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/invoices/{id}/credit-note-offset"
+      ],
+      [
+        "POST",
+        "/api/invoices/{id}/credit-note-offset"
+      ]
+    ]
+  },
   "set_invoice_dimensions": {
     "write": true,
     "api": [
       [
         "GET",
-        "/api/invoices/{id}"
+        "/api/accounting/dimensions/documents/invoices/{id}"
       ],
       [
         "GET",
-        "/api/accounting/dimensions/documents/invoices/{id}"
+        "/api/invoices/{id}"
       ],
       [
         "PUT",
@@ -3517,6 +3592,15 @@
       [
         "PUT",
         "/api/invoices/{id}"
+      ]
+    ]
+  },
+  "set_invoice_project": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/project"
       ]
     ]
   },
@@ -3573,16 +3657,29 @@
       ]
     ]
   },
+  "set_purchase_credit_note_offset": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/purchase-invoices/{id}/credit-note-offset"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/credit-note-offset"
+      ]
+    ]
+  },
   "set_purchase_invoice_dimensions": {
     "write": true,
     "api": [
       [
         "GET",
-        "/api/purchase-invoices/{id}"
+        "/api/accounting/dimensions/documents/purchase-invoices/{id}"
       ],
       [
         "GET",
-        "/api/accounting/dimensions/documents/purchase-invoices/{id}"
+        "/api/purchase-invoices/{id}"
       ],
       [
         "PUT",
@@ -3648,6 +3745,19 @@
       [
         "POST",
         "/api/purchase-invoices/{id}/project"
+      ]
+    ]
+  },
+  "set_purchase_invoice_vat_treatment": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/vat-treatment"
       ]
     ]
   },
@@ -3831,6 +3941,19 @@
       ]
     ]
   },
+  "transfer_work_report_billing": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/work-report/billing-preview"
+      ],
+      [
+        "POST",
+        "/api/invoices/{id}/work-report/billing-transfer"
+      ]
+    ]
+  },
   "trial_balance": {
     "write": false,
     "api": [
@@ -3998,10 +4121,6 @@
       [
         "GET",
         "/api/invoices"
-      ],
-      [
-        "GET",
-        "/api/codebooks/currencies"
       ]
     ]
   },
