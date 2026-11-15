@@ -324,23 +324,26 @@ Podstatné vlastnosti:
 |---|---|
 | Fakturace | čtení, založení, úprava a smazání konceptu (hlavička i jednotlivé položky), vystavování, odesílání a příjemci, storno a dobropis, kopie dokladu, vyúčtování a propojení zálohy, penalizační faktura, evidence a mazání úhrad, daňový doklad k platbě, platební kalendář s rozpisem plateb, ISDOC, upomínky jednotlivě i hromadně |
 | Pravidelná fakturace | čtení šablon a vygenerovaných faktur, založení, úprava, smazání, pozastavení, obnovení, přeplánování a ruční vygenerování faktury |
-| Odběratelé | vyhledání, založení a úprava karty, dotažení údajů z ARES |
+| Odběratelé | vyhledání, založení a úprava karty, dotažení údajů z ARES, bankovní účty partnera, ověření plátcovství DPH, zakázky klienta, duplicitní karty, archivace a obnovení karty |
+| Banka | výpisy, zůstatky účtů, přehled a detail pohybů, kandidáti párování, ruční spárování s jedním i více doklady, zrušení párování nezaúčtovaného pohybu, ignorování, přijetí a zamítnutí návrhu, koncept přijaté faktury z platby; **párování se přes MCP nezaúčtuje** (viz [§ 105.8.8.7](#105887-banka-a-parovani-plateb)) |
 | Přijaté faktury | čtení, založení a úprava konceptu (hlavička i jednotlivé položky), přijetí, úhrada, storno, zálohy, zakázka, druh nákladu, účet dodavatele, příprava příkazu k úhradě; zaúčtování a odeslání do banky ne (viz [§ 105.8.8.4](#105884-prijate-faktury)) |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
 | Zakázky | **čtení i zápis** - založení, úprava, archivace, rozpočty a ziskovost |
-| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava tagů a vazeb; nahrání a stažení originálu |
+| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava názvu, popisu, tagů, vazeb a složky; složky, tagy a soubory dokumentu; nahrání a stažení originálu |
+| Požadavky na doklady | čtení, vyžádání dokladu od klienta (i k bankovnímu pohybu), uzavření a znovuotevření požadavku |
 | Soubory a přílohy | stažení PDF a ISDOC vydané faktury, příloh, PDF přijaté faktury a originálu dokumentu; nahrání přílohy faktury, PDF přijaté faktury, dokumentu a obrázku ke zboží; založení přijaté faktury ze souboru ISDOC (viz [§ 105.8.8.6](#105886-soubory-a-prilohy)) |
 | Kniha jízd | **čtení i zápis** - vozidla, jízdy a tankování; daňový souhrn jen ke čtení |
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
-| Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář - **jen čtení** |
-| Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník včetně dvojic jednoduchého zápisu a formy zápisu firmy: **jen čtení** ([§ 105.8.15](#105815-jednoduchy-zapis-a-dvojice-v-deniku)); výjimkou jsou koncepty ostatních pohledávek a závazků a založení či úprava analytického účtu v osnově |
+| Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář, kontroly před podáním DPH (změny po podání, § 46, § 74b, koeficient, spojené osoby), detail podání s platebními údaji, odhad daně OSVČ, rozhodnutí FÚ o zálohách, roční daňové konstanty - **jen čtení** |
+| Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník včetně dvojic jednoduchého zápisu a formy zápisu firmy, historie a vazby zápisu, zápisy faktury, otevřené položky, fronty zaúčtování, nálezy kontrol období, vypořádání DPH a měsíční přehled pro klienta: **jen čtení** ([§ 105.8.15](#105815-jednoduchy-zapis-a-dvojice-v-deniku)); výjimkou jsou koncepty ostatních pohledávek a závazků a založení či úprava analytického účtu v osnově |
 | Ostatní pohledávky a závazky | čtení dokladů, úhrad, opakování a splátek; **zápis jen konceptů**: založení, úprava, smazání, splátkový kalendář (i vyčtený ze smlouvy), opakování bez automatického účtování, dimenze a připojení smlouvy. Nic se nezaúčtuje ([§ 105.8.8.5](#105885-ostatni-pohledavky-a-zavazky)) |
+| Pokladna a majetek | pokladny, pokladní doklady a pokladní kniha, majetkové karty a plány odpisů, drobný majetek, přijaté faktury na majetek bez karty - **jen čtení** |
 | Dimenze | typy a hodnoty, zisk, roční a měsíční vývoj, manažerské cash flow, rozvaha a výsledovka s filtrem dimenze, přiřazení na dokladech a kontrola pravidel - **jen čtení** |
 | Statistika | tržby, zisk, trendy, top odběratelé a dodavatelé, cash flow, platební morálka, koncentrace, riziko odchodu |
 | Všechny firmy | manažerské součty přístupných firem za přesné období, měsíční vývoj, roční predikce, cashflow, zůstatky a rizika přes `group_dashboard`; původní měny i samostatný přepočet CZK |
 | E-shop a sklad | **kompletní správa včetně zápisu** - zboží, obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky a výdejky, inventury (viz [§ 105.8.9](#10589-e-shop-a-sklad)) |
 | Objednávky u dodavatele | **čtení i zápis** - založení, odeslání, potvrzení, uzavření, storno, příjemka z objednávky a hromadné objednání podle návrhu doplnění zásob ([§ 105.8.9](#10589-e-shop-a-sklad)) |
-| Mzdy | čtení zaměstnanců, pracovních podmínek a výsledků; změna sjednané mzdy, mzdové vstupy, přesčasy a absence; řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
+| Mzdy | čtení zaměstnanců, pracovních podmínek, mzdových běhů a výsledků po zaměstnancích; změna sjednané mzdy, mzdové vstupy, přesčasy a absence; řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
 
 V režimu jen pro čtení (`MYUCTO_READ_ONLY=1`, [§ 105.8.4](#10584-nastaveni))
@@ -673,6 +676,16 @@ Podrobnosti v [§ 105.8.7.4](#105874-uprava-konceptu-faktury).
 
 Podrobnosti v [§ 105.8.7.5](#105875-dalsi-prace-s-vydanymi-fakturami).
 
+**Banka a doklady**
+
+- „Které příchozí platby z října ještě nejsou spárované? Ke každé navrhni fakturu.“
+- „Spáruj platbu 24 200 Kč od ACME s fakturami 2026041 a 2026042.“ *(token čtení a zápis)*
+- „U plateb kartou bez dokladu vyžádej od klienta účtenky.“ *(token čtení a zápis)*
+- „Co čeká ve frontě k zaúčtování a proč se to nezaúčtovalo samo?“
+- „Ukaž mi doklady změněné po podání DPH za 3. čtvrtletí.“
+
+Podrobnosti v [§ 105.8.8.7](#105887-banka-a-parovani-plateb).
+
 **Pravidelná fakturace** *(token čtení a zápis)*
 
 - „Založ pro ACME měsíční paušál 5 000 Kč za správu serveru, vždy k 1. dni v měsíci.“
@@ -970,9 +983,21 @@ něj nic nezaúčtuje ani neopraví.
 #### 105.8.8.2 Dokumenty
 
 MCP umí dokumenty vypsat, hledat v názvu, popisu i vytěženém textu, přečíst
-omezený úsek textu, upravit název, popis a tagy a připojit dokument k odběrateli,
-dokladu nebo zakázce. Dlouhý text se vrací po částech nejvýše 50 000 znaků.
-Platí stejná firemní a osobní oprávnění jako v aplikaci.
+omezený úsek textu, upravit název, popis a tagy, přesunout dokument do složky
+a připojit ho k odběrateli, dokladu nebo zakázce. Dlouhý text se vrací po částech
+nejvýše 50 000 znaků. Platí stejná firemní a osobní oprávnění jako v aplikaci.
+
+Asistent zná strom složek a umí založit novou složku, takže dokument nahraje nebo
+přesune rovnou na správné místo. Vypíše také tagy používané ve firmě, aby nevznikaly
+duplicitní tagy s jiným zápisem, a soubory dokumentu (hlavní soubor a přílohy).
+Při připojování dokumentu najde cílový doklad, klienta nebo zakázku podle čísla
+či názvu. Složky, dokumenty ani koš nemaže.
+
+Chybějící doklad si asistent umí od klienta vyžádat: založí požadavek na doklad,
+který klient uvidí v portálu, nejlépe přímo k bankovnímu pohybu bez dokladu
+(popis, částka a datum se předvyplní z platby). Požadavek umí také uzavřít, když
+doklad přišel jinou cestou, nebo vrátit klientovi k doplnění. Požadavek tím
+neposílá e-mailem a nic nemaže.
 
 Soubor umí asistent do Dokumentů i nahrát a originál stáhnout, postup a limity
 popisuje [§ 105.8.8.6](#105886-soubory-a-prilohy). Pro práci s obsahem dokumentu je
@@ -1190,6 +1215,37 @@ Pro nahrání musí mít token oprávnění čtení a zápis a v režimu jen pro
 nahrávací nástroje nenabízejí. Doklad v uzavřeném období aplikace změnit
 nedovolí stejně jako v aplikaci. Smazání přílohy nebo PDF a náhrada už
 archivovaného PDF vyžadují potvrzení ([§ 105.8.9.4](#105894-potvrzovani-nevratnych-kroku)).
+
+#### 105.8.8.7 Banka a párování plateb
+
+Asistent čte bankovní výpisy a zůstatky účtů a pracuje s jednotlivými pohyby napříč
+účty: najde nespárované nebo nezaúčtované platby, dohledá platbu podle protistrany,
+VS nebo částky a k pohybu navrhne doklady. Umí i opačný směr, tedy k faktuře najít
+volné platby, a hledá sloučené úhrady, kdy jedna platba hradí víc faktur.
+
+S tokenem čtení a zápis asistent pohyb spáruje s jedním nebo více doklady, zruší
+párování, označí pohyb jako ignorovaný (například převod mezi vlastními účty),
+přijme nebo zamítne návrh párování z výpisu a z odchozí platby bez dokladu založí
+koncept přijaté faktury. Zrušení párování vyžaduje potvrzení.
+
+**Párování přes MCP se nezaúčtuje.** V aplikaci se spárovaná platba podle politiky
+automatického účtování firmy rovnou zaúčtuje. Přes MCP (API token) se pohyb jen
+spáruje a do účetního deníku se nic nezapíše. Spárovanou platbu pak zaúčtujete
+v aplikaci (Automat, fronta K zaúčtování) nebo ji zpracuje ranní přepočet fronty
+automatiky podle stejné politiky firmy: buď ji zaúčtuje, nebo ji nabídne
+k potvrzení. Platí to i pro přijetí návrhu párování. Čekající návrh kontace
+z doby před spárováním (např. pravidlo pro platbu bez dokladu) se při spárování
+odloží, aby ho nikdo nepotvrdil proti spárované úhradě.
+
+Pohyb, který už má zápis v deníku, asistent nepřepáruje ani neodpáruje; zrušení
+párování by zápis stornovalo a to patří účetní v aplikaci. Stejně tak nezruší
+párování platby zálohy, protože by se změnilo zúčtování zálohy. Zaúčtování
+a zrušení zaúčtování pohybu, přepárování celého výpisu, nahrání a smazání výpisu
+ani AI návrh kontace přes MCP nejdou. Náhled, jak by se pohyb zaúčtoval, si
+asistent zobrazit může.
+
+Podle nastavení firmy může po spárování odejít poděkování za platbu, stejně jako
+při párování v aplikaci.
 
 ### 105.8.9 E-shop a sklad
 

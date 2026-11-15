@@ -223,7 +223,9 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         // se tiskne na faktury a do QR platby. Token je smí jen číst; změnu
         // příjemce plateb dělá správce ve webovém rozhraní (openapi: mutace jen přes UI).
         '#^/api/settings/currencies(/|$)#',
-        '#^/api/bank-transactions/[0-9]+/unmatch$#',
+        // Párování a jeho zrušení (`match`, `unmatch`, přijetí návrhu) token smí, ale do
+        // deníku nezasáhne: BankStatementAction pohyb po spárování nezaúčtuje a pohyb se
+        // zápisem v deníku tokenu nepřepáruje ani neodpáruje (403 token_write_forbidden).
         '#^/api/accounting(/|$)#',
         '#^/api/reports(/|$)#',
         '#^/api/tax(/|$)#',

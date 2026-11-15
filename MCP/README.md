@@ -14,11 +14,15 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 | Fakturace | čtení, vystavování, odesílání, evidence úhrad, upomínky |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
 | Zakázky | čtení i zápis — založení, úprava, archivace, rozpočty a ziskovost |
-| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava tagů a vazeb; nahrání a stažení originálu |
+| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava názvu, popisu, tagů, vazeb a složky; složky (seznam, založení), tagy, soubory dokumentu, našeptávač vazeb; nahrání a stažení originálu. Koš, mazání a hromadné operace ne |
+| Požadavky na doklady | čtení; založení (i k bankovnímu pohybu), uzavření a znovuotevření; mazání ne |
+| Banka | výpisy a jejich transakce, zůstatky účtů, přehled a detail pohybů napříč účty, kandidáti párování (i sloučená úhrada), volné platby k dokladu, náhled zaúčtování; **zápis jen párování**: spárování s jedním i více doklady, zrušení párování nezaúčtovaného pohybu, ignorování, přijetí a zamítnutí návrhu, koncept přijaté faktury z odchozí platby (`src/bank-tools.mjs`). Párování do deníku nezapisuje, viz níže |
+| Partneři | čtení i zápis karty; bankovní účty partnera, ověření plátcovství DPH, zakázky klienta, duplicitní karty, archivace (`src/client-tools.mjs`); přidání bankovního účtu a smazání karty ne |
 | Kniha jízd | čtení i zápis — vozidla, jízdy, tankování; daňový souhrn jen ke čtení |
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
-| Daně | **jen čtení** — odhad DPH (měsíc i kvartál), KH, SH, daň z příjmů, kalendář |
-| Účetnictví | **jen čtení** — obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník |
+| Daně | **jen čtení** — odhad DPH (měsíc i kvartál), KH, SH, daň z příjmů, kalendář, kontroly před podáním DPH (změny po podání, § 46, § 74b, koeficient, spojené osoby), detail podání s platebními údaji, odhad daně OSVČ, rozhodnutí FÚ o zálohách, roční daňové konstanty |
+| Účetnictví | **jen čtení** — obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník a kontext zápisu, zápisy faktury, otevřené položky, fronty zaúčtování (ruční i banka), nálezy kontrol období, vypořádání DPH, měsíční přehled pro klienta (`src/accounting-read-tools.mjs`) |
+| Pokladna a majetek | **jen čtení** — pokladny, pokladní doklady, pokladní kniha s průběžným zůstatkem; majetkové karty a plány odpisů, drobný majetek (karty, soupis, pohyby), přijaté faktury na majetek bez karty |
 | Ostatní pohledávky a závazky | čtení; zápis **jen konceptů**: založení, úprava, smazání, splátkový kalendář a opakování bez automatického účtování (`src/other-item-tools.mjs`) |
 | SVJ | **jen čtení**: registr a předpisy, karta jednotky s hrubými pohledávkami a oddělenými kredity, doložené role dlužníků a ručitelů, historie úhrad a rekonciliace |
 | Dimenze | **jen čtení**: typy a hodnoty, zisk a roční statistika, nepřímé cash flow, filtry výkazů a deníku, přiřazení dokladů a kontrola pravidel |
@@ -26,7 +30,7 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 | Všechny firmy | **jen čtení**: manažerské součty za přesné období, vývoj, roční predikce, prognóza toků, zůstatky a rizika přístupných firem přes `group_dashboard`; původní měny i samostatný přepočet CZK |
 | E-shop a sklad | **čtení i zápis** — zboží a obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky/výdejky/převodky, inventury; **jen čtení** — balení, individuální ceny zákazníků, cenové hladiny, nacenění pro odběratele, šarže a sériová čísla, lokace, prodejní objednávky, cyklické inventury |
 | Ceník služeb | **jen čtení** — položky, ceny po měnách, individuální ceny zákazníků a výsledná cena (jen firmy bez skladového modulu) |
-| Mzdy | čtení osob a výsledků; změna sjednané mzdy od data se zachováním historie, mzdové vstupy, přesčasy a nové absence; schvalování absencí a řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
+| Mzdy | čtení osob, běhů a výsledků po zaměstnancích; změna sjednané mzdy od data se zachováním historie, mzdové vstupy, přesčasy a nové absence; schvalování absencí a řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
 
 Mzdové nástroje zachovávají rozlišení sjednání: `remuneration_type: null`
@@ -65,6 +69,17 @@ smlouvy) a analytické účty účtové osnovy
 (`create_analytic_account`, `update_analytic_account`), které server povoluje
 výčtem metoda a cesta (`BEARER_WRITE_EXCEPTIONS`); do deníku nic nezapisují.
 Syntetické účty a mazání účtů zůstávají ve webovém rozhraní.
+
+Párování banky (`match_bank_transaction`, `resolve_bank_match_suggestion`) server
+povoluje, ale tokenem **nezaúčtuje**. V aplikaci po spárování automatika podle
+politiky firmy rovnou zaúčtuje úhradu. Pro API token bez plného zápisu
+(`RequestAuthorization::isRestrictedBearer`) vrátí `posting: {action: "deferred",
+reason: "api_token"}`, čekající návrhy kontace pohybu odloží a spárovaný pohyb
+zaúčtuje uživatel v aplikaci nebo ranní přepočet fronty (`cron-automation-digest`,
+`StaleSuggestionSweep`) podle politiky automatického účtování firmy. Pohyb, který
+už má zápis v deníku, token nepřepáruje ani neodpáruje (`403 token_write_forbidden`)
+a zrušení párování úhrady zálohy také ne. Zaúčtování (`post`), jeho zrušení
+(`unpost`), přepárování výpisu, nahrání a smazání výpisu ani AI kontace v katalogu nejsou.
 
 Karta SVJ (`property_receivable_card`) vyžaduje `unit_id`, `as_of` a `known_at` včetně
 času a offsetu. Vrací doložený historický stav podle tehdejší znalosti. Zachovejte
@@ -194,7 +209,9 @@ src/index.mjs   vstupní bod — konfigurace, MCP handshake
 src/local-call.mjs  volání nástroje v lokálním serveru, mapování chyb
 src/tool-args.mjs   ověření argumentů proti inputSchema (obě cesty, i serverový MCP)
 src/client.mjs  HTTP klient — throttling, retry, hlavičky, serializace query
-src/tools.mjs   katalog nástrojů (jediné místo, kam se přidává nový nástroj)
+src/tools.mjs   katalog nástrojů; moduly agend (bank-tools, client-tools,
+                accounting-read-tools, invoice-tools, purchase-tools …) se registrují v TOOLS
+src/tool-schema.mjs  stavební kameny schémat a čtecích nástrojů pro moduly agend
 test/           automatické testy katalogu a bezpečných zápisových vzorů
 ```
 
@@ -229,6 +246,10 @@ něj serverový MCP nabídne interní roli (mimo správce firmy a superadmina) j
 nástroje, jejichž každou routu role smí aspoň v jedné z jejích firem. Nástroj
 mimo klientský katalog, jehož scénář k API nedojde, generátor odmítne; doplňte
 pro něj vzorové argumenty v `tool-recording.mjs`.
+Scénář nástroje s `api: false` projde automaticky každou hodnotu parametru
+s výčtem a obě hodnoty přepínače a u nepovinného `id` i variantu bez něj, protože
+právě ty často mění cestu (`type: fo|po`, `entity_type`, `mode`, `decision`).
+Větev, kterou tím nepokryjete (např. jiný povinný parametr), doplňte ručně.
 
 `npm test` kontroluje shodu manifestu s deklaracemi i skutečná volání nástrojů
 nad zaznamenávajícím klientem. Pro každou novou větev doplňte syntetický scénář

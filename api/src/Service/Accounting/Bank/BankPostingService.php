@@ -3762,6 +3762,25 @@ final class BankPostingService
     }
 
     /**
+     * Spárování bez zaúčtování: náhrada {@see handleTransaction()} pro API token bez plného
+     * zápisu (MCP, integrace), pro který je deník jen ke čtení
+     * ({@see \MyInvoice\Middleware\ApiScopeMiddleware}).
+     *
+     * Zápis nevznikne. Čekající návrhy kontace pohybu (např. pravidlo „platba bez dokladu"
+     * z doby před spárováním) se odloží, aby je nikdo neschválil proti spárované úhradě.
+     * Spárovaný pohyb bez návrhu pak převezme přepočet fronty ({@see StaleSuggestionSweep})
+     * a zaúčtuje nebo navrhne podle politiky automatického účtování firmy, případně ho
+     * zaúčtuje uživatel v aplikaci.
+     *
+     * @return array{action:string, reason:string}
+     */
+    public function deferMatchedPosting(int $supplierId, int $txId): array
+    {
+        $this->suggestions->supersedePendingForTx($supplierId, $txId, 'deferred_api_token');
+        return ['action' => 'deferred', 'reason' => 'api_token'];
+    }
+
+    /**
      * Guard pro ignore transakce (M3c): zaúčtovanou SPÁROVANOU tx nelze ignorovat (409),
      * zaúčtovanou nespárovanou lze (zápis zůstává), jinak pending suggestion tx → superseded.
      * Best-effort mimo double_entry (no-op).
