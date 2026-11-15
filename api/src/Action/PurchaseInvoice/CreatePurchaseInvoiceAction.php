@@ -71,6 +71,10 @@ final class CreatePurchaseInvoiceAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        // Stav určuje jen přechod ({@see TransitionPurchaseInvoiceStatusAction}): ten hlídá
+        // schvalování, automatické zaúčtování i pokladní doklad. Rovnou přijatý doklad
+        // zakládají jen strukturované importy, a ty volají repozitář přímo.
+        unset($body['status']);
         $submissionId = max(0, (int) ($body['submission_id'] ?? 0));
         if ($submissionId > 0) {
             if (RequestAuthorization::isClientType($request)
@@ -249,6 +253,10 @@ final class CreatePurchaseInvoiceAction
             // Až PO recompute — volba dominantního kódu váží podle total_with_vat, které
             // kalkulátor dopočítává.
             $this->repo->syncHeaderClassificationFromItems($id, $supplierId);
+            // Zaokrouhlení dokladu jako v PUT ({@see UpdatePurchaseInvoiceAction}), až po přepočtu.
+            if (array_key_exists('rounding', $body) && is_numeric($body['rounding'])) {
+                $this->repo->setRounding($id, $supplierId, (float) $body['rounding']);
+            }
             $this->repo->replaceVatAllocations(
                 $id,
                 $supplierId,

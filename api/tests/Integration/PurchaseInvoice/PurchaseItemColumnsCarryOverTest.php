@@ -16,7 +16,7 @@ use Slim\Psr7\Response as Psr7Response;
 
 /**
  * Náhrada položek přijaté faktury nesmí tiše smazat kód položky dodavatele, EAN,
- * Intrastat ani vazbu na skladovou kartu, když je klient API neposlal
+ * Intrastat, vazbu na skladovou kartu ani účty a předkontaci řádku, když je klient API neposlal
  * ({@see \MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns}).
  *
  * BEZ OPRAVY PADÁ: `replaceItems()` je DELETE + INSERT a vynechaný klíč se uložil jako NULL.
@@ -29,6 +29,9 @@ final class PurchaseItemColumnsCarryOverTest extends StockTestCase
         'item_ean'                    => '4006381333931',
         'intrastat_cn8_code'          => '84713000',
         'intrastat_country_of_origin' => 'DE',
+        'expense_account_code'        => '518',
+        'counter_account_code'        => '325',
+        'posting_rule_key'            => 'syntetic.rule-1',
     ];
 
     private int $sid = 0;
@@ -67,7 +70,8 @@ final class PurchaseItemColumnsCarryOverTest extends StockTestCase
         self::assertSame(self::STORED + ['stock_item_id' => $this->cardId], self::codes($rows[0]),
             'Vynechané klíče převezmou hodnotu uloženého řádku.');
         self::assertSame(['seller_item_code' => 'DOD-XYZ-2', 'item_ean' => null, 'intrastat_cn8_code' => null,
-            'intrastat_country_of_origin' => null, 'stock_item_id' => null], self::codes($rows[1]));
+            'intrastat_country_of_origin' => null, 'expense_account_code' => null, 'counter_account_code' => null,
+            'posting_rule_key' => null, 'stock_item_id' => null], self::codes($rows[1]));
     }
 
     #[DataProvider('endpoints')]
@@ -158,7 +162,8 @@ final class PurchaseItemColumnsCarryOverTest extends StockTestCase
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, description, quantity, stock_item_id, seller_item_code, item_ean,
-                    intrastat_cn8_code, intrastat_country_of_origin
+                    intrastat_cn8_code, intrastat_country_of_origin, expense_account_code,
+                    counter_account_code, posting_rule_key
                FROM purchase_invoice_items WHERE purchase_invoice_id = ? ORDER BY order_index, id'
         );
         $stmt->execute([$piId]);
