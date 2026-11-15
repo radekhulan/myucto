@@ -132,6 +132,18 @@ describe('SaldoAdvanceSettleDialog', () => {
     expect(wrapper.emitted('done')).toHaveLength(1)
   })
 
+  it('ukáže čerpání odpočtovým řádkem faktury s víc zálohami a nenabídne jeho zrušení', async () => {
+    m.candidates.mockResolvedValue(candidates([], [
+      { id: null, doc_type: 'invoice', final_id: 41, final_no: 'FV-41', advance_id: 7, advance_no: 'ZF-7', amount: 500, source: 'invoice', posted_on: '2099-07-15', deletable: false },
+    ]))
+    const wrapper = mount(SaldoAdvanceSettleDialog, { props: { items: [target(7, 700)], asOf: '2099-12-31' } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('FV-41')
+    expect(wrapper.text()).toContain('accounting.saldo_settle.advance_source_invoice')
+    expect(wrapper.findAll('button').filter(b => b.attributes('aria-label') === 'accounting.saldo_settle.advance_delete')).toHaveLength(0)
+  })
+
   it('uzavřené období přebije správce po potvrzení', async () => {
     m.admin = true
     m.candidates.mockResolvedValue(candidates([final(11, 1000, { amount_match: true })]))

@@ -20438,6 +20438,7 @@
       "advance_existing": "Čerpání zálohy",
       "advance_source_saldo": "zadáno v saldokontu",
       "advance_source_import": "z převodu",
+      "advance_source_invoice": "odpočet na faktuře",
       "advance_delete": "Zrušit čerpání",
       "advance_delete_confirm": "Zrušit čerpání zálohy touto fakturou? Záloha bude v saldokontu znovu otevřená.",
       "advance_deleted": "Čerpání zálohy zrušeno",

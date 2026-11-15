@@ -20438,6 +20438,7 @@
       "advance_existing": "Advance deductions",
       "advance_source_saldo": "entered in the ledger",
       "advance_source_import": "from data migration",
+      "advance_source_invoice": "deduction on invoice",
       "advance_delete": "Cancel deduction",
       "advance_delete_confirm": "Cancel the deduction of this advance by this invoice? The advance will be open again in the ledger.",
       "advance_deleted": "Advance deduction cancelled",
