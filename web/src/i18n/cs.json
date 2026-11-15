@@ -507,7 +507,18 @@
     "remaining_payment_hint": "Součet nezaplacených splátek. Saldo položky snižuje jen jistina, úrok a poplatek se zaúčtují s úhradou.",
     "allocation_split": "jistina {principal}, úrok {interest}, poplatek {fee}",
     "allocation_split_hint": "Platba se rozdělí podle splátek: nejdřív úrok, pak poplatek a nakonec jistina.",
-    "linked_invoice": "Navázaná faktura"
+    "linked_invoice": "Navázaná faktura",
+    "edit_note": "Upravit poznámku",
+    "edit_note_hint": "Poznámka je jen interní text dokladu, do zaúčtování ani saldokonta se nepromítá. Ostatní údaje zůstávají zamčené, jejich opravu řeší storno nebo přeúčtování.",
+    "note_saved": "Poznámka uložena.",
+    "delete_posted": "Smazat i se zápisem",
+    "delete_posted_title": "Smazat zaúčtovaný doklad",
+    "delete_posted_intro": "Doklad {number} se smaže úplně, včetně svého zápisu v deníku. Storno ani protizápis nevznikne, z účetnictví i saldokonta zmizí.",
+    "delete_posted_rules": "Smazat jde jen chybný doklad v otevřeném účetním období bez úhrad, stejně jako zápis v deníku. Doklad s úhradou nejdřív odpárujte, uzavřený doklad stornujte.",
+    "delete_posted_locked": "Doklad spadá do uzamčeného období. Před smazáním budete požádáni o vědomé potvrzení.",
+    "delete_posted_done": "Doklad i jeho zápis v deníku byly smazány.",
+    "delete_posted_cancelled": "Zápis v deníku byl smazán a výskyt opakování zrušen, aby ho opakování nevytvořilo znovu.",
+    "delete_posted_blocked": "Smazat nelze: {reason} Doklad můžete stornovat."
   },
   "internal_documents": {
     "title": "Interní doklady",
@@ -631,7 +642,19 @@
     "journal_reversal_of": "Zápis je stornem interního dokladu",
     "open_document": "Otevřít interní doklad",
     "from_entry_hint": "Ruční zápis zatím nemá interní doklad.",
-    "from_entry": "Vytvořit interní doklad"
+    "from_entry": "Vytvořit interní doklad",
+    "edit_text": "Upravit poznámku",
+    "edit_text_title": "Poznámka a popis dokladu",
+    "edit_text_hint": "Poznámka je jen interní text dokladu, do účetnictví se nepromítá. Řádky kontace, částky a data zůstávají zamčené, jejich opravu řeší storno.",
+    "edit_text_title_hint": "Popis je zároveň popisem zápisu v deníku a změní se i tam. Jde to jen v otevřeném účetním období.",
+    "text_saved": "Poznámka uložena.",
+    "delete_posted": "Smazat i se zápisem",
+    "delete_posted_title": "Smazat zaúčtovaný doklad",
+    "delete_posted_intro": "Doklad {number} se smaže úplně, včetně svého zápisu v deníku. Storno ani protizápis nevznikne, z účetnictví zmizí, jako by doklad nikdy nebyl zaúčtovaný.",
+    "delete_posted_rules": "Smazat jde jen chybný doklad v otevřeném účetním období, stejně jako zápis v deníku. Doklad, který už vstoupil do výkazů nebo je uzavřený, stornujte.",
+    "delete_posted_locked": "Doklad spadá do uzamčeného období. Před smazáním budete požádáni o vědomé potvrzení.",
+    "delete_posted_done": "Doklad i jeho zápis v deníku byly smazány.",
+    "delete_posted_blocked": "Smazat nelze: {reason} Doklad můžete stornovat."
   },
   "invoice_default_note": {
     "title": "Výchozí poznámka pod položkami",

@@ -241,6 +241,15 @@ final class InternalDocumentRepository
         ]);
     }
 
+    /** Popisné údaje vystaveného dokladu (popis, poznámka); kontace a stav se nemění. */
+    public function updateText(int $supplierId, int $id, string $title, ?string $note, ?int $userId): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE internal_documents SET title = ?, note = ?, updated_by = ?, row_version = row_version + 1
+              WHERE id = ? AND supplier_id = ? AND status <> 'draft'"
+        )->execute([$title, $note, $userId, $id, $supplierId]);
+    }
+
     /** Číslo už nese jiný interní doklad firmy (unikát uq_internal_document_no). */
     public function documentNoTaken(int $supplierId, string $documentNo, ?int $exceptId = null): bool
     {

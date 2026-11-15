@@ -594,6 +594,258 @@ final class InternalDocumentTest extends TestCase
         }
     }
 
+    public function testPostedDocumentNoteAndTitleCanBeChangedWithAudit(): void
+    {
+        $action = $this->container->get(InternalDocumentAction::class);
+        $write = ['accounting' => 2, 'accounting.journal.write' => 2];
+        $posted = $this->service->post($this->supplierId,
+            (int) $this->service->create($this->supplierId, $this->input(), null)['id'], $this->audit());
+        $id = (int) $posted['id'];
+        $entryId = (int) $posted['journal_entry_id'];
+        $linesBefore = $this->lines($entryId);
+
+        $note = $action->updateText($this->request('PUT', $write)->withParsedBody(['note' => 'Doplněná poznámka']),
+            new Response(), ['id' => (string) $id]);
+        self::assertSame(200, $note->getStatusCode());
+        self::assertSame('Doplněná poznámka', $this->data($note)['note']);
+        self::assertSame('posted', $this->data($note)['status']);
+
+        // Popis je i popisem zápisu v deníku: mění se společně, kontace zůstává.
+        $title = $action->updateText($this->request('PUT', $write)->withParsedBody(['title' => 'Opravený popis']),
+            new Response(), ['id' => (string) $id]);
+        self::assertSame(200, $title->getStatusCode());
+        self::assertSame('Opravený popis', $this->data($title)['title']);
+        self::assertSame('Opravený popis', $this->entry($entryId)['description']);
+        self::assertSame($linesBefore, $this->lines($entryId));
+        self::assertEquals(1500.0, $this->data($title)['amount']);
+
+        $log = $this->pdo->prepare("SELECT payload FROM activity_log WHERE entity_type = 'internal_document' AND entity_id = ?
+            AND action = 'internal_document.text_updated' ORDER BY id");
+        $log->execute([$id]);
+        $payloads = array_map(static fn (string $p): array => json_decode($p, true), $log->fetchAll(PDO::FETCH_COLUMN));
+        self::assertSame(['before' => 'Syntetický zápočet', 'after' => 'Doplněná poznámka'], $payloads[0]['note'] ?? null);
+        self::assertSame(['before' => 'Zápočet pohledávky a závazku', 'after' => 'Opravený popis'], $payloads[1]['title'] ?? null);
+
+        // Účetní pole touto cestou neprojdou.
+        $ignored = $action->updateText($this->request('PUT', $write)->withParsedBody(['note' => 'N', 'entry_date' => self::YEAR . '-01-01',
+            'lines' => [['account_code' => '518', 'side' => 'debit', 'amount' => 1]]]), new Response(), ['id' => (string) $id]);
+        self::assertSame(200, $ignored->getStatusCode());
+        self::assertSame(self::YEAR . '-03-31', $this->data($ignored)['entry_date']);
+        self::assertSame($linesBefore, $this->lines($entryId));
+
+        // Uzavřené období: popis zápisu se měnit nesmí, poznámka ano.
+        $this->container->get(AccountingPeriodRepository::class)->setStatus($this->periodId, $this->supplierId, 'closed');
+        $closed = $action->updateText($this->request('PUT', $write)->withParsedBody(['title' => 'Po uzávěrce']),
+            new Response(), ['id' => (string) $id]);
+        self::assertSame(409, $closed->getStatusCode());
+        self::assertSame('period_not_open', $this->error($closed));
+        self::assertSame('Opravený popis', $this->service->get($this->supplierId, $id)['title']);
+        $closedNote = $action->updateText($this->request('PUT', $write)->withParsedBody(['note' => 'Po uzávěrce']),
+            new Response(), ['id' => (string) $id]);
+        self::assertSame(200, $closedNote->getStatusCode());
+        self::assertSame('Po uzávěrce', $this->data($closedNote)['note']);
+
+        // Koncept se upravuje v editaci, bez práva zápisu nic.
+        $draft = $this->service->create($this->supplierId, $this->input(), null);
+        $denied = $action->updateText($this->request('PUT', $write)->withParsedBody(['note' => 'x']), new Response(), ['id' => (string) $draft['id']]);
+        self::assertSame('internal_documents.error.is_draft', $this->error($denied));
+        self::assertSame(403, $action->updateText($this->request('PUT', ['accounting' => 1])->withParsedBody(['note' => 'x']),
+            new Response(), ['id' => (string) $id])->getStatusCode());
+    }
+
+    public function testReversedDocumentKeepsTitleButAcceptsNote(): void
+    {
+        $posted = $this->service->post($this->supplierId,
+            (int) $this->service->create($this->supplierId, $this->input(), null)['id'], $this->audit());
+        $this->service->reverse($this->supplierId, (int) $posted['id'], 'Chybný zápočet', null, $this->audit());
+        $doc = $this->service->updateText($this->supplierId, (int) $posted['id'], ['note' => 'Vysvětlení storna'], $this->audit());
+        self::assertSame('Vysvětlení storna', $doc['document']['note']);
+        try {
+            $this->service->updateText($this->supplierId, (int) $posted['id'], ['title' => 'Nový popis'], $this->audit());
+            self::fail('Popis stornovaného dokladu měnit nelze.');
+        } catch (InternalDocumentException $e) {
+            self::assertSame('title_locked', $e->errorCode);
+        }
+    }
+
+    public function testDeletingPostedDocumentRemovesEntryAtomically(): void
+    {
+        $action = $this->container->get(InternalDocumentAction::class);
+        $write = ['accounting' => 2, 'accounting.journal.write' => 2];
+        $posted = $this->service->post($this->supplierId,
+            (int) $this->service->create($this->supplierId, $this->input([
+                'document_links' => [['doc_type' => 'bank', 'doc_id' => $this->bankTransaction($this->supplierId)]],
+            ]), null)['id'], $this->audit());
+        $id = (int) $posted['id'];
+        $entryId = (int) $posted['journal_entry_id'];
+
+        // Bez práva zaúčtovat (stejně jako mazání zápisu v deníku) nic.
+        $denied = $action->deletePosted($this->request('DELETE', $write), new Response(), ['id' => (string) $id]);
+        self::assertSame(403, $denied->getStatusCode());
+        self::assertSame('posted', $this->service->get($this->supplierId, $id)['status']);
+
+        // Běžné smazání dál maže jen koncept.
+        $draftOnly = $action->delete($this->request('DELETE', $write + ['accounting.journal.post' => 2]), new Response(), ['id' => (string) $id]);
+        self::assertSame(409, $draftOnly->getStatusCode());
+
+        $deleted = $action->deletePosted($this->request('DELETE', $write + ['accounting.journal.post' => 2]), new Response(), ['id' => (string) $id]);
+        self::assertSame(200, $deleted->getStatusCode());
+        self::assertSame($entryId, $this->data($deleted)['journal_entry_id']);
+        self::assertFalse($this->data($deleted)['number_released']);
+
+        try {
+            $this->service->get($this->supplierId, $id);
+            self::fail('Doklad musí být smazaný.');
+        } catch (InternalDocumentException $e) {
+            self::assertSame(404, $e->httpStatus);
+        }
+        self::assertSame(0, $this->manualEntryCount());
+        foreach (['journal_entry_lines' => 'entry_id', 'journal_entry_document_links' => 'entry_id'] as $table => $column) {
+            $left = $this->pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE supplier_id = ? AND {$column} = ?");
+            $left->execute([$this->supplierId, $entryId]);
+            self::assertSame(0, (int) $left->fetchColumn(), $table);
+        }
+        $balance = $this->pdo->prepare('SELECT COUNT(*) FROM journal_entry_lines WHERE supplier_id = ?');
+        $balance->execute([$this->supplierId]);
+        self::assertSame(0, (int) $balance->fetchColumn());
+
+        $log = $this->pdo->prepare("SELECT action, entity_type, payload FROM activity_log
+            WHERE supplier_id = ? AND ((entity_type = 'internal_document' AND entity_id = ?) OR (entity_type = 'journal_entry' AND entity_id = ?))
+            ORDER BY id");
+        $log->execute([$this->supplierId, $id, $entryId]);
+        $rows = $log->fetchAll(PDO::FETCH_ASSOC);
+        $byAction = array_column($rows, 'payload', 'action');
+        self::assertArrayHasKey('accounting.entry_deleted', $byAction);
+        $entryLog = json_decode((string) $byAction['accounting.entry_deleted'], true);
+        self::assertSame('internal_document_delete', $entryLog['reason']);
+        self::assertSame($posted['document_no'], $entryLog['document_no']);
+        self::assertCount(2, $entryLog['lines']);
+        $docLog = json_decode((string) ($byAction['internal_document.deleted_posted'] ?? 'null'), true);
+        self::assertSame($posted['document_no'], $docLog['document_no'] ?? null);
+        self::assertSame($entryId, $docLog['journal_entry_id'] ?? null);
+    }
+
+    public function testDeletingPostedDocumentRespectsClosedAndLockedPeriod(): void
+    {
+        $action = $this->container->get(InternalDocumentAction::class);
+        $perms = ['accounting' => 2, 'accounting.journal.write' => 2, 'accounting.journal.post' => 2];
+        $posted = $this->service->post($this->supplierId,
+            (int) $this->service->create($this->supplierId, $this->input(), null)['id'], $this->audit());
+        $args = ['id' => (string) $posted['id']];
+        $preview = fn (): array => $this->data($action->get($this->request('GET', ['accounting' => 1]), new Response(), $args))['posted_deletion'];
+        self::assertSame(['allowed' => true, 'needs_ack' => false, 'code' => null, 'message' => null], $preview());
+
+        $this->pdo->prepare(
+            'INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)'
+        )->execute([$this->supplierId, self::YEAR . '-06-30']);
+        self::assertTrue($preview()['allowed']);
+        self::assertTrue($preview()['needs_ack']);
+        self::assertSame('date_locked', $preview()['code']);
+        $locked = $action->deletePosted($this->request('DELETE', $perms), new Response(), $args);
+        self::assertSame(409, $locked->getStatusCode());
+        self::assertSame('date_locked', $this->error($locked));
+        $locked->getBody()->rewind();
+        self::assertTrue(json_decode((string) $locked->getBody(), true)['error']['can_acknowledge'] ?? false);
+        self::assertSame('posted', $this->service->get($this->supplierId, (int) $posted['id'])['status']);
+        self::assertSame(1, $this->manualEntryCount());
+
+        $this->pdo->prepare('UPDATE accounting_supplier_settings SET locked_until = NULL WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+        $this->container->get(AccountingPeriodRepository::class)->setStatus($this->periodId, $this->supplierId, 'closed');
+        self::assertFalse($preview()['allowed']);
+        self::assertSame('period_not_open', $preview()['code']);
+        $closed = $action->deletePosted($this->request('DELETE', $perms), new Response(), $args);
+        self::assertSame(409, $closed->getStatusCode());
+        self::assertSame('period_not_open', $this->error($closed));
+        self::assertSame('posted', $this->service->get($this->supplierId, (int) $posted['id'])['status']);
+        self::assertSame(1, $this->manualEntryCount());
+
+        // Uzamčené datum projde po vědomém potvrzení (jako v deníku), uzavřené období nikdy.
+        $this->container->get(AccountingPeriodRepository::class)->setStatus($this->periodId, $this->supplierId, 'open');
+        $this->pdo->prepare('UPDATE accounting_supplier_settings SET locked_until = ? WHERE supplier_id = ?')
+            ->execute([self::YEAR . '-06-30', $this->supplierId]);
+        $acknowledged = $action->deletePosted($this->request('DELETE', $perms)->withQueryParams(['ack_locked' => '1']),
+            new Response(), $args);
+        self::assertSame(200, $acknowledged->getStatusCode());
+        self::assertSame(0, $this->manualEntryCount());
+        $log = $this->pdo->prepare("SELECT payload FROM activity_log WHERE entity_type = 'journal_entry' AND entity_id = ?
+            AND action = 'accounting.entry_deleted'");
+        $log->execute([(int) $posted['journal_entry_id']]);
+        self::assertSame(self::YEAR . '-06-30', json_decode((string) $log->fetchColumn(), true)['locked_override'] ?? null);
+    }
+
+    public function testDeletingPostedDocumentRefusesPairedReversedAndAdoptedDocuments(): void
+    {
+        $posted = $this->service->post($this->supplierId,
+            (int) $this->service->create($this->supplierId, $this->input(), null)['id'], $this->audit());
+        $entryId = (int) $posted['journal_entry_id'];
+
+        // Řádek zápisu v okruhu párování: smazání by párování tiše odneslo.
+        $account = (int) $this->pdo->query("SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '311'")->fetchColumn();
+        $this->pdo->prepare('INSERT INTO journal_line_pairings (supplier_id, account_id) VALUES (?, ?)')->execute([$this->supplierId, $account]);
+        $pairingId = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare('INSERT INTO journal_line_pairing_items (supplier_id, entry_id, line_no, pairing_id, account_id) VALUES (?, ?, 2, ?, ?)')
+            ->execute([$this->supplierId, $entryId, $pairingId, $account]);
+        try {
+            $this->service->deletePosted($this->supplierId, (int) $posted['id'], $this->audit(), false);
+            self::fail('Spárovaný zápis se nesmí smazat.');
+        } catch (PostingException $e) {
+            self::assertSame('entry_paired', $e->errorCode);
+        }
+        self::assertSame('posted', $this->service->get($this->supplierId, (int) $posted['id'])['status']);
+        self::assertSame(1, $this->manualEntryCount());
+
+        // Rozpad řádku na doklady saldokonta stejně jako v deníku.
+        $this->pdo->prepare('DELETE FROM journal_line_pairing_items WHERE supplier_id = ? AND entry_id = ?')->execute([$this->supplierId, $entryId]);
+        $this->pdo->prepare(
+            "INSERT INTO journal_settlement_allocations (supplier_id, entry_id, line_no, account_id, side, doc_type, doc_id, amount, kind)
+             VALUES (?, ?, 2, ?, 'credit', 'other_item', 1, 100, 'settlement')"
+        )->execute([$this->supplierId, $entryId, $account]);
+        try {
+            $this->service->deletePosted($this->supplierId, (int) $posted['id'], $this->audit(), false);
+            self::fail('Zápis s rozpadem saldokonta se nesmí smazat.');
+        } catch (PostingException $e) {
+            self::assertSame('allocation_saldo_in_use', $e->errorCode);
+        }
+        self::assertSame(1, $this->manualEntryCount());
+        $this->pdo->prepare('DELETE FROM journal_settlement_allocations WHERE supplier_id = ? AND entry_id = ?')->execute([$this->supplierId, $entryId]);
+
+        $this->service->reverse($this->supplierId, (int) $posted['id'], 'Chybný zápočet', null, $this->audit());
+        try {
+            $this->service->deletePosted($this->supplierId, (int) $posted['id'], $this->audit(), false);
+            self::fail('Stornovaný doklad se maže jen se stornem.');
+        } catch (InternalDocumentException $e) {
+            self::assertSame('not_posted', $e->errorCode);
+        }
+
+        $adopted = $this->service->createFromEntry($this->supplierId, $this->manualEntry(['document_no' => 'SYN-3']), [], $this->audit())['document'];
+        try {
+            $this->service->deletePosted($this->supplierId, (int) $adopted['id'], $this->audit(), false);
+            self::fail('Hlavičku nad převzatým zápisem nelze smazat i se zápisem.');
+        } catch (InternalDocumentException $e) {
+            self::assertSame('internal_document_use_detail', $e->errorCode);
+        }
+        self::assertSame('posted', $this->service->get($this->supplierId, (int) $adopted['id'])['status']);
+    }
+
+    public function testDeletingPostedDocumentReleasesLatestNumberOfNativeSeries(): void
+    {
+        $series = $this->container->get(\MyInvoice\Service\NumberSeries\NumberSeriesService::class)->create($this->supplierId, [
+            'doc_kind' => 'manual', 'name' => 'Syntetická řada', 'prefix' => 'SY', 'is_default' => true,
+        ], null);
+        $first = $this->service->post($this->supplierId, (int) $this->service->create($this->supplierId, $this->input(), null)['id'], $this->audit());
+        $second = $this->service->post($this->supplierId, (int) $this->service->create($this->supplierId, $this->input(), null)['id'], $this->audit());
+        self::assertSame((int) $series['id'], (int) $second['number_series_id']);
+        self::assertNotSame($first['document_no'], $second['document_no']);
+
+        // Nejdřív starší doklad: jeho číslo poslední není, v řadě zůstane mezera.
+        self::assertFalse($this->service->deletePosted($this->supplierId, (int) $first['id'], $this->audit(), false)['number_released']);
+        self::assertTrue($this->service->deletePosted($this->supplierId, (int) $second['id'], $this->audit(), false)['number_released']);
+        $third = $this->service->post($this->supplierId, (int) $this->service->create($this->supplierId, $this->input(), null)['id'], $this->audit());
+        self::assertSame($second['document_no'], $third['document_no']);
+    }
+
     private function manualEntry(array $meta = []): int
     {
         return $this->container->get(ManualJournalEntryService::class)->post($this->supplierId, [

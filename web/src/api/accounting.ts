@@ -2657,6 +2657,18 @@ export interface PostingOriginItemAccount {
   used: boolean
 }
 
+/**
+ * Náhled serveru, zda jde zaúčtovaný doklad (interní doklad, ostatní položka) smazat
+ * i se zápisem v deníku. `needs_ack` = uzamčené datum, smazání chce vědomé potvrzení;
+ * `allowed: false` nese důvod, proč zbývá storno. Rozhoduje až samotné smazání.
+ */
+export interface PostedDeletion {
+  allowed: boolean
+  needs_ack: boolean
+  code: string | null
+  message: string | null
+}
+
 export const accountingApi = {
   // Účtová osnova
   listAccounts: (opts?: { tree?: boolean; includeInactive?: boolean; supplierId?: number }) => {

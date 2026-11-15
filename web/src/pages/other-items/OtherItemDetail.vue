@@ -20,6 +20,8 @@ import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import OtherItemPostingLines from '@/components/accounting/OtherItemPostingLines.vue'
 import OtherItemPostingRules from '@/components/accounting/OtherItemPostingRules.vue'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
+import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
+import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
 import { formatAccountNumber } from '@/utils/bankAccount'
@@ -166,6 +168,51 @@ async function saveCounterparty() {
     item.value = await otherItemsApi.updateCounterpartyAccount(id.value, counterpartyInput.value.trim() || null)
     counterpartyEditing.value = false
     toast.success(t('other_items.counterparty_saved'))
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    busy.value = false
+  }
+}
+
+// Poznámku vystaveného dokladu jde doplnit kdykoli, do účetnictví se nepromítá.
+const canEditNote = computed(() => auth.canWrite('other_items') && !!item.value && item.value.status !== 'draft')
+const noteEditing = ref(false)
+const noteInput = ref('')
+function startNoteEdit() {
+  noteInput.value = item.value?.note || ''
+  noteEditing.value = true
+}
+async function saveNote() {
+  if (!item.value || busy.value) return
+  busy.value = true
+  try {
+    item.value = await otherItemsApi.updateText(id.value, noteInput.value.trim() || null)
+    noteEditing.value = false
+    toast.success(t('other_items.note_saved'))
+    await load()
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    busy.value = false
+  }
+}
+
+// Smazání zaúčtovaného dokladu i se zápisem: stejná práva jako smazání jeho zápisu v deníku.
+const canDeletePosted = computed(() => isDoubleEntry.value && auth.canWrite('other_items') && auth.canWrite('accounting')
+  && auth.canWrite('accounting.journal.write') && auth.canWrite('accounting.journal.post'))
+const postedDeletion = computed(() => item.value?.posted_deletion ?? null)
+const deleteOpen = ref(false)
+const lockedAck = useLockedPeriodAck()
+async function removePosted() {
+  if (!item.value || busy.value) return
+  deleteOpen.value = false
+  busy.value = true
+  try {
+    const result = await lockedAck.run(ack => otherItemsApi.removePosted(id.value, ack))
+    if (result === null) return
+    toast.success(t(result.status === 'cancelled' ? 'other_items.delete_posted_cancelled' : 'other_items.delete_posted_done'))
+    await router.push({ name: 'other-items' })
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('common.error'))
   } finally {
@@ -324,6 +371,12 @@ const actions = computed<ActionItem[]>(() => {
       run: () => { reverseReason.value = ''; reverseDate.value = appIsoDate(); reverseOpen.value = true } },
     { key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
       show: current.status === 'draft' && auth.canWrite('other_items'), disabled: busy.value, run: () => void remove() },
+    { key: 'delete_posted', label: t('other_items.delete_posted'), icon: 'trash', tier: 'overflow', variant: 'danger',
+      show: current.status === 'posted' && canDeletePosted.value && !!postedDeletion.value,
+      disabled: busy.value || !postedDeletion.value?.allowed,
+      disabledReason: postedDeletion.value && !postedDeletion.value.allowed
+        ? t('other_items.delete_posted_blocked', { reason: postedDeletion.value.message || '' }) : undefined,
+      run: () => { deleteOpen.value = true } },
   ]
 })
 
@@ -398,7 +451,32 @@ onMounted(load)
               <dt class="text-neutral-500">{{ t('other_items.linked_invoice') }}</dt>
               <dd><RouterLink :to="`/invoices/${item.linked_invoice.id}`" class="font-mono text-primary-700 hover:underline">{{ item.linked_invoice.varsymbol || `#${item.linked_invoice.id}` }}</RouterLink></dd>
             </div>
-            <div class="sm:col-span-2"><dt class="text-neutral-500">{{ t('other_items.note') }}</dt><dd class="whitespace-pre-wrap">{{ item.note || '–' }}</dd></div>
+            <div class="sm:col-span-2">
+              <dt class="text-neutral-500">{{ t('other_items.note') }}</dt>
+              <dd v-if="!noteEditing" class="flex flex-wrap items-start gap-2">
+                <span class="whitespace-pre-wrap" data-test="note">{{ item.note || '–' }}</span>
+                <button v-if="canEditNote" type="button" data-test="note-edit" class="inline-flex items-center gap-1 text-xs text-primary-700 hover:underline whitespace-nowrap" @click="startNoteEdit">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                  {{ t('other_items.edit_note') }}
+                </button>
+              </dd>
+              <dd v-else>
+                <form class="space-y-2" data-test="note-form" @submit.prevent="saveNote">
+                  <textarea v-model="noteInput" maxlength="10000" rows="4" :aria-label="t('other_items.note')" class="block w-full rounded-md border border-neutral-300 bg-surface p-2 text-sm" />
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button type="submit" :disabled="busy" :class="btnFilled('primary')" class="whitespace-nowrap">
+                      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                      {{ t('common.save') }}
+                    </button>
+                    <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="noteEditing = false">
+                      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                      {{ t('common.cancel') }}
+                    </button>
+                  </div>
+                </form>
+                <p class="mt-1 text-xs text-neutral-500">{{ t('other_items.edit_note_hint') }}</p>
+              </dd>
+            </div>
           </dl>
         </section>
         <section class="rounded-lg border border-neutral-200 bg-surface p-4">
@@ -497,6 +575,26 @@ onMounted(load)
         <p v-else-if="item.currency !== 'CZK'" class="mt-3 text-sm text-neutral-500">{{ t('other_items.foreign_payment_hint') }}</p>
       </section>
     </template>
+    <Modal v-if="deleteOpen && item" :title="t('other_items.delete_posted_title')" width-class="max-w-lg" @close="deleteOpen = false">
+      <div class="space-y-3 text-sm">
+        <p class="text-neutral-700">{{ t('other_items.delete_posted_intro', { number: item.document_no || '' }) }}</p>
+        <p class="text-neutral-600">{{ t('other_items.delete_posted_rules') }}</p>
+        <p v-if="postedDeletion?.needs_ack" class="rounded-md border border-warning-500/40 bg-warning-50 p-3 text-warning-700">{{ t('other_items.delete_posted_locked') }}</p>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="deleteOpen = false">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button type="button" :disabled="busy" :class="btnFilled('danger')" class="whitespace-nowrap" data-test="delete-posted-confirm" @click="removePosted">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            {{ t('other_items.delete_posted') }}
+          </button>
+        </div>
+      </template>
+    </Modal>
+    <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
     <Modal v-if="reverseOpen" :title="t(isDoubleEntry ? 'other_items.reverse' : 'other_items.cancel')" width-class="max-w-lg" @close="reverseOpen = false">
       <form id="other-item-reverse" class="space-y-4" @submit.prevent="reverse">
         <p class="text-sm text-neutral-600">{{ t(isDoubleEntry ? 'other_items.confirm_reverse' : 'other_items.confirm_cancel') }}</p>
