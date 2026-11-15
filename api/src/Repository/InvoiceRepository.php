@@ -351,12 +351,12 @@ final class InvoiceRepository
         if (($row['invoice_type'] ?? '') === 'proforma') {
             // Vazba dokladu i faktura čerpající zálohu odpočtovým řádkem (AdvanceDrawSql).
             $ch = $pdo->prepare(
-                'SELECT id, varsymbol, status FROM invoices
-                  WHERE supplier_id = ? AND id IN (' . AdvanceDrawSql::finalIds('?', '?') . ')
-                  ORDER BY id LIMIT 1'
+                'SELECT i.id, i.varsymbol, i.status FROM (' . AdvanceDrawSql::finalIds('?', '?') . ') fx
+                   JOIN invoices i ON i.id = fx.id
+                  ORDER BY i.id LIMIT 1'
             );
             $sid = (int) $row['supplier_id'];
-            $ch->execute([$sid, $sid, $id, $id, $sid]);
+            $ch->execute([$sid, $id, $id, $sid]);
             $c = $ch->fetch(PDO::FETCH_ASSOC);
             $row['final_invoice'] = $c === false ? null : [
                 'id' => (int) $c['id'], 'varsymbol' => $c['varsymbol'], 'status' => $c['status'],

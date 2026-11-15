@@ -54,9 +54,11 @@ final class AdvanceDrawSql
     }
 
     /**
-     * Id konečných faktur zálohy `$advanceExpr` (pro `id IN (…)`): vazba dokladu nebo aspoň
-     * jeden vyznačený odpočtový řádek. Všechny stavy, filtr stavu je na volajícím. Oba výrazy
-     * se vyskytnou dvakrát.
+     * Konečné faktury zálohy `$advanceExpr` (odvozená tabulka se sloupcem `id`): vazba dokladu
+     * nebo aspoň jeden vyznačený odpočtový řádek. Všechny stavy, filtr stavu je na volajícím.
+     * Připojuje se `FROM (…) fx JOIN invoices i ON i.id = fx.id`, ne jako `id IN (…)`: to by
+     * MariaDB vyhodnotila jako závislý poddotaz pro každý doklad firmy. Výrazy jdou v pořadí
+     * firma, záloha, záloha, firma.
      */
     public static function finalIds(string $supplierExpr, string $advanceExpr): string
     {

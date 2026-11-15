@@ -21,7 +21,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * víc fakturami), viz {@see AdvancePartialDrawdown}.
  *
  *   GET    /api/invoices/{id}/advance-drawdown  zálohy odběratele s nevyčerpanou částkou a čerpáním konceptu
- *   POST   /api/invoices/{id}/advance-drawdown  body: {proforma_id, amount | percent, basis?} — nastaví čerpání
+ *   POST   /api/invoices/{id}/advance-drawdown  body: {proforma_id, amount | percent, basis?}: nastaví čerpání
  *          zálohy (částka nebo procento plnění faktury, basis gross = s DPH, net = bez DPH)
  *   DELETE /api/invoices/{id}/advance-drawdown  odebere čerpání zálohy `?proforma_id=`, bez něj všech záloh
  */

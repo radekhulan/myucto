@@ -353,17 +353,17 @@ final class AdvanceSettlementSync
     {
         // Vydaná strana: vazba dokladu i faktura čerpající zálohu odpočtovým řádkem (AdvanceDrawSql).
         $sql = $side === 'sale'
-            ? 'SELECT id FROM invoices
-                WHERE supplier_id = ? AND id IN (' . AdvanceDrawSql::finalIds('?', '?') . ")
-                  AND status NOT IN ('draft', 'cancelled')
-                ORDER BY id"
+            ? 'SELECT i.id FROM (' . AdvanceDrawSql::finalIds('?', '?') . ") fx
+                 JOIN invoices i ON i.id = fx.id
+                WHERE i.status NOT IN ('draft', 'cancelled')
+                ORDER BY i.id"
             : "SELECT id FROM purchase_invoices
                 WHERE supplier_id = ? AND advance_purchase_invoice_id = ? AND document_kind = 'invoice'
                   AND status NOT IN ('draft', 'cancelled')
                 ORDER BY id";
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($side === 'sale'
-            ? [$supplierId, $supplierId, $advanceId, $advanceId, $supplierId]
+            ? [$supplierId, $advanceId, $advanceId, $supplierId]
             : [$supplierId, $advanceId]);
         $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
         // Víc konečných faktur k jedné proformě builder odmítne (advance_settlement_ambiguous);

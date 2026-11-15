@@ -34,8 +34,8 @@ use MyInvoice\Service\Invoice\MultiPurposeVoucher;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Property\Charges\Issuance\IssuancePostingBatchContext;
 use MyInvoice\Service\Report\VatLedgerService;
-use MyInvoice\Support\Sql\AdvanceDrawSql;
 use MyInvoice\Service\Vat\VatStatusService;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 use PDO;
 
 /**
@@ -3357,6 +3357,9 @@ final class PostingService
      * zúčtování ho z 311 zase vyrovná. DDKP musí být zaúčtovaný — jinak by se zbytek zálohy
      * spočítal z daně, která na 324 ještě neleží, a zúčtování by 324 přečerpalo.
      *
+     * Faktura čerpající víc záloh ({@see AdvanceDrawSql}) zúčtuje každou zálohu zvlášť jejím
+     * základem a hlídá přečerpání po zálohách ({@see multiAdvanceDeduction}).
+     *
      * Hlasitou chybou (advance_settlement_ambiguous) je proforma s víc než jednou
      * vyúčtovací fakturou (nejednoznačná částka) a proforma s DDKP, u které po odečtení
      * jeho daně nezbývá žádná zaúčtovaná úhrada k zúčtování.
@@ -3364,9 +3367,6 @@ final class PostingService
      * @param array<string,mixed> $inv hlavička vyúčtovací faktury (z fetchDocHeader)
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
      * @param float $receivable předpis na 311 v tomhle zápisu (strop zúčtování)
-     * Faktura čerpající víc záloh ({@see AdvanceDrawSql}) zúčtuje každou zálohu zvlášť jejím
-     * základem a hlídá přečerpání po zálohách ({@see multiAdvanceDeduction}).
-     *
      * @param array{active:bool, partial:bool, multi:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>, groups:list<array<string,mixed>>} $deduction
      */
     private function appendAdvanceSettlementSale(int $supplierId, array $inv, array &$lines, float $receivable, array $deduction): void
@@ -3382,8 +3382,8 @@ final class PostingService
                 throw new PostingException(
                     'advance_settlement_ambiguous',
                     sprintf(
-                        'Vyúčtovací faktura #%d čerpá víc záloh se základem %.2f Kč, ale její předpis je jen %.2f Kč — '
-                            . 'odpočty záloh převyšují plnění faktury a zúčtování nejde rozdělit mezi zálohy. '
+                        'Vyúčtovací faktura #%d čerpá víc záloh se základem %.2f Kč, ale její předpis je jen %.2f Kč, '
+                            . 'odpočty záloh tedy převyšují plnění faktury a zúčtování nejde rozdělit mezi zálohy. '
                             . 'Sniž čerpání záloh, nebo zaúčtuj ručně.',
                         (int) $inv['id'],
                         $deduction['base'],
@@ -3900,7 +3900,7 @@ final class PostingService
             throw new PostingException(
                 'advance_settlement_ambiguous',
                 'Vyúčtovací faktura #' . $invoiceId . ' čerpá odpočtovými řádky zálohy ' . implode(', ', array_map(static fn (int $id): string => '#' . $id, array_keys($byAdvance)))
-                    . ', ale záloha z hlavičky #' . $parentProforma . ' na ní žádný odpočet nemá — zúčtování záloh nejde určit. '
+                    . ', ale záloha z hlavičky #' . $parentProforma . ' na ní žádný odpočet nemá, zúčtování záloh nejde určit. '
                     . 'Oprav čerpání záloh v detailu faktury, nebo zaúčtuj ručně.',
             );
         }
@@ -3908,7 +3908,7 @@ final class PostingService
             throw new PostingException(
                 'advance_settlement_ambiguous',
                 'Vyúčtovací faktura #' . $invoiceId . ' čerpá víc záloh a zároveň odečítá v hlavičce úhradu zálohy bez daňového '
-                    . 'dokladu — odečet úhrady nejde přiřadit žádné ze záloh. Zruš odečet úhrady, nebo zaúčtuj ručně.',
+                    . 'dokladu. Odečet úhrady nejde přiřadit žádné ze záloh. Zruš odečet úhrady, nebo zaúčtuj ručně.',
             );
         }
         ksort($byAdvance);
@@ -3923,7 +3923,7 @@ final class PostingService
                 throw new PostingException(
                     'advance_settlement_ambiguous',
                     'Odpočtový řádek vyúčtovací faktury #' . $invoiceId . ' čerpá doklad #' . $advanceId
-                        . ', který není zálohovou fakturou firmy — zúčtování zálohy nejde určit.',
+                        . ', který není zálohovou fakturou firmy. Zúčtování zálohy nejde určit.',
                 );
             }
             [$taxDocs, $ddkpGross, $drawnVat] = $this->advanceTaxDocuments($supplierId, $advanceId);
@@ -3942,7 +3942,7 @@ final class PostingService
                     sprintf(
                         'Vyúčtovací faktura #%d odečítá ze zálohy #%d %.2f Kč, ale její daňové doklady k platbě přiznaly '
                             . '%.2f Kč (všechny vyúčtovací faktury zálohy odečítají %.2f Kč). Odpočty jedné zálohy nesmí '
-                            . 'dohromady přesáhnout její daňové doklady — oprav čerpání záloh, nebo zaúčtuj ručně.',
+                            . 'dohromady přesáhnout její daňové doklady. Oprav čerpání záloh, nebo zaúčtuj ručně.',
                         $invoiceId,
                         $advanceId,
                         $gross,
@@ -4088,11 +4088,11 @@ final class PostingService
     private function activeFinalInvoiceCount(int $supplierId, int $proformaId): int
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT COUNT(*) FROM invoices
-              WHERE supplier_id = ? AND id IN (' . AdvanceDrawSql::finalIds('?', '?') . ")
-                AND status <> 'cancelled'"
+            'SELECT COUNT(*) FROM (' . AdvanceDrawSql::finalIds('?', '?') . ") fx
+               JOIN invoices i ON i.id = fx.id
+              WHERE i.status <> 'cancelled'"
         );
-        $stmt->execute([$supplierId, $supplierId, $proformaId, $proformaId, $supplierId]);
+        $stmt->execute([$supplierId, $proformaId, $proformaId, $supplierId]);
         return (int) $stmt->fetchColumn();
     }
     /**

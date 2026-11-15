@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Repository\AdvanceDeductionRepository;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Accounting\AdvanceDeductionService;
+use MyInvoice\Service\Accounting\JournalSettlementException;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Service\Invoice\AdvancePartialDrawdown;
@@ -94,6 +96,16 @@ final class MultiAdvanceDrawdownTest extends BankPostingTestCase
         $deductions = $this->container->get(AdvanceDeductionRepository::class);
         self::assertSame([$invoice => 1500.00], $deductions->deductedByFinal($this->supplierId, 'invoice', [$invoice]),
             'Saldokonto ví, kolik faktura čerpá, a nenabídne ho k ručnímu vyrovnání podruhé.');
+
+        // Ruční vyrovnání v saldokontu čerpání faktury nezdvojí: celý odpočet už čerpají zálohy.
+        try {
+            $this->container->get(AdvanceDeductionService::class)->deduct($this->supplierId, [
+                ['doc_type' => 'invoice', 'advance_id' => $pfA, 'final_id' => $invoice, 'amount' => 100.00],
+            ], $this->userId);
+            self::fail('Ruční čerpání nad odpočet faktury má selhat.');
+        } catch (JournalSettlementException $e) {
+            self::assertSame('final_overdeducted', $e->errorCode);
+        }
 
         $settled = $this->db->pdo()->query(
             "SELECT COUNT(*) FROM invoices p WHERE p.id IN ({$pfA}, {$pfB}) AND " . AdvanceSettledSql::proforma('p')

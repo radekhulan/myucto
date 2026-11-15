@@ -47,7 +47,7 @@ final class MultiAdvanceVatReportTest extends TestCase
     protected function setUp(): void
     {
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
-            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
+            $this->markTestSkipped('cfg.php neexistuje, test vyžaduje DB.');
         }
         try {
             $c = Bootstrap::buildContainer();

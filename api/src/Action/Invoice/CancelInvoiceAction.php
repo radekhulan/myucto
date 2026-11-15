@@ -117,13 +117,13 @@ final class CancelInvoiceAction
             }
             // Finální faktura zálohy: vazba dokladu i čerpání odpočtovým řádkem (AdvanceDrawSql).
             $final = $this->db->pdo()->prepare(
-                'SELECT 1 FROM invoices
-                  WHERE supplier_id = ? AND id IN (' . AdvanceDrawSql::finalIds('?', '?') . ")
-                    AND status <> 'cancelled'
+                'SELECT 1 FROM (' . AdvanceDrawSql::finalIds('?', '?') . ") fx
+                   JOIN invoices i ON i.id = fx.id
+                  WHERE i.status <> 'cancelled'
                   LIMIT 1"
             );
             $supplierId = (int) $invoice['supplier_id'];
-            $final->execute([$supplierId, $supplierId, $proformaId, $proformaId, $supplierId]);
+            $final->execute([$supplierId, $proformaId, $proformaId, $supplierId]);
             if ($proformaId > 0 && $final->fetchColumn() !== false) {
                 return Json::error(
                     $response,

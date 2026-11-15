@@ -94,16 +94,16 @@ final class FinalFromProformaCreator
 
         $pdo = $this->db->pdo();
 
-        // Idempotence — pokud už existuje child final, vrátit její id. Patří sem i faktura,
+        // Idempotence: pokud už existuje child final, vrátit její id. Patří sem i faktura,
         // která zálohu čerpá odpočtovým řádkem spolu s dalšími zálohami (AdvanceDrawSql).
         $existing = $pdo->prepare(
-            'SELECT id FROM invoices
-              WHERE supplier_id = ? AND id IN (' . AdvanceDrawSql::finalIds('?', '?') . ")
-                AND status <> 'cancelled'
-              ORDER BY id LIMIT 1"
+            'SELECT i.id FROM (' . AdvanceDrawSql::finalIds('?', '?') . ") fx
+               JOIN invoices i ON i.id = fx.id
+              WHERE i.status <> 'cancelled'
+              ORDER BY i.id LIMIT 1"
         );
         $supplierId = (int) $proforma['supplier_id'];
-        $existing->execute([$supplierId, $supplierId, $proformaId, $proformaId, $supplierId]);
+        $existing->execute([$supplierId, $proformaId, $proformaId, $supplierId]);
         $existingId = $existing->fetchColumn();
         if ($existingId !== false) {
             return (int) $existingId;

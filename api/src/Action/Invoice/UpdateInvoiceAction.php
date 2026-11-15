@@ -309,9 +309,13 @@ final class UpdateInvoiceAction
             if ($existingType === 'proforma') {
                 $link = $this->db->pdo()->prepare(
                     "SELECT 1 FROM invoices
-                      WHERE supplier_id = ? AND status <> 'cancelled'
-                        AND ((parent_invoice_id = ? AND invoice_type = 'tax_document')
-                             OR id IN (" . AdvanceDrawSql::finalIds('?', '?') . ')) LIMIT 1'
+                      WHERE supplier_id = ? AND parent_invoice_id = ? AND invoice_type = 'tax_document'
+                        AND status <> 'cancelled'
+                     UNION ALL
+                     SELECT 1 FROM (" . AdvanceDrawSql::finalIds('?', '?') . ") fx
+                       JOIN invoices i ON i.id = fx.id
+                      WHERE i.status <> 'cancelled'
+                     LIMIT 1"
                 );
                 $link->execute([$supplierId, $id, $supplierId, $id, $id, $supplierId]);
                 if ($link->fetchColumn() !== false) {
