@@ -103,6 +103,15 @@ async function revisionFinished() {
   emit('changed')
 }
 
+// Zastaralý podklad opravy: oprava se zavře, detail i seznam se načtou znovu a uživatel ji otevře nad aktuálními údaji.
+async function correctionStale() {
+  correction.value = null
+  locks.value.correction = false
+  notice.value = t('nonprofitMembership.correction.staleClosed')
+  await load()
+  emit('changed')
+}
+
 async function correctionFinished(mode: 'identity' | 'delete' | 'void', label: string) {
   // Formulář se odpojí dřív, než stihne ohlásit uvolnění zámku; jinak by akce detailu zůstaly zašedlé.
   correction.value = null
@@ -171,7 +180,7 @@ const actions = computed<ActionItem[]>(() => [
   { key: 'fix-identity', label: t('nonprofitMembership.correction.title_identity'), icon: 'edit', tier: 'overflow',
     show: props.canManage && !!corrections.value && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !corrections.value?.can_edit_identity,
     disabledReason: formReason(corrections.value?.edit_identity_block), run: () => startCorrection('identity') },
-  { key: 'reload', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value || anyLocked.value, run: () => { void load() } },
+  { key: 'reload', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value || anyLocked.value || revisionDirty.value, disabledReason: revisionDirty.value ? t('nonprofitMembership.correction.closeFormFirst') : undefined, run: () => { void load() } },
   { key: 'close-detail', label: t('nonprofitMembership.close'), icon: 'x', disabled: anyLocked.value, run: () => emit('close') },
   { key: 'void-revision', label: t('nonprofitMembership.correction.title_void'), icon: 'uturn', tier: 'overflow', variant: 'danger',
     show: props.canManage && (!!voidable.value || !!corrections.value?.void_block) && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !voidable.value,
@@ -237,7 +246,7 @@ const actions = computed<ActionItem[]>(() => [
         :key="`${correction}-${identity.id}`"
         :supplier="supplier" :can-manage="canManage" :mode="correction" :member="identity" :label="label"
         :revision="correction === 'void' ? voidable : null" :head-revision-no="corrections?.head_revision_no ?? 0"
-        @done="(mode, label) => correctionFinished(mode, label)" @close="correction = null" @lock="locks.correction = $event" @stale="load()"
+        @done="(mode, label) => correctionFinished(mode, label)" @close="correction = null" @lock="locks.correction = $event" @stale="correctionStale()"
       />
     </div>
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
@@ -30,12 +30,10 @@ const form = reactive({ clientId: props.member.client_id as number | null, clien
 // Podklad, ze kterého formulář vznikl. Obnova detailu mění props, ale očekávané hodnoty musí zůstat z doby otevření,
 // jinak by server souběžnou změnu jiného uživatele nepoznal a oprava by ji tiše přepsala (formulář je klíčovaný
 // režimem a členem, takže se podklad zachytí při každém otevření).
-const base = reactive({ clientId: props.member.client_id, number: props.member.member_number, revision: props.revision ?? null, headRevisionNo: props.headRevisionNo })
-// Server odmítl zastaralý podklad: detail se načte znovu a podklad se převezme z nových údajů. Rozepsané hodnoty
-// zůstanou a uživatel je potvrdí vědomě proti aktuálnímu stavu (jinak by každé další potvrzení skončilo stejnou 409).
+const base = { clientId: props.member.client_id, number: props.member.member_number, revision: props.revision ?? null, headRevisionNo: props.headRevisionNo }
+// Server odmítl zastaralý podklad: rodič opravu zavře a načte detail; opravu je třeba otevřít znovu nad aktuálními
+// údaji. Převzetí nového podkladu do rozepsaného formuláře by mohlo tiše vyměnit cíl (jiný kontakt, cizí revize).
 const STALE = ['nonprofit_membership_member_changed', 'nonprofit_membership_revision_changed']
-const rebased = ref(false)
-let awaitingRefresh = false
 
 const commit = useGuardedCommit<Command, Command>({
   supplier: () => props.supplier,
@@ -85,28 +83,12 @@ function review() {
     command = { mode: 'void', member: props.member.id, revision: (base.revision as MemberRevision).id,
       body: { expected_revision: base.headRevisionNo, reason: form.reason.trim(), idempotency_key: crypto.randomUUID() } }
   }
-  rebased.value = false
   commit.arm(command, command, props.supplier)
 }
 
 watch([form, () => props.headRevisionNo, () => props.member.id, () => props.member.member_number, () => props.member.client_id], () => commit.touch(), { deep: true, flush: 'sync' })
 watch(() => props.supplier, () => commit.reset())
-watch(commit.errorKind, kind => {
-  if (!STALE.includes(kind)) return
-  awaitingRefresh = true
-  rebased.value = false
-  emit('stale')
-})
-watch([() => props.member.client_id, () => props.member.member_number, () => props.headRevisionNo, () => props.revision?.id ?? null], () => {
-  if (!awaitingRefresh) return
-  awaitingRefresh = false
-  // Pole, která uživatel neměnil, převezmou nové hodnoty; změněná zůstanou jako jeho záměr.
-  if (form.clientId === base.clientId && props.member.client_id !== base.clientId) { form.clientId = props.member.client_id; form.clientLabel = props.label }
-  if (form.number === base.number) form.number = props.member.member_number
-  Object.assign(base, { clientId: props.member.client_id, number: props.member.member_number, revision: props.revision ?? null, headRevisionNo: props.headRevisionNo })
-  commit.reset()
-  rebased.value = true
-})
+watch(commit.errorKind, kind => { if (STALE.includes(kind)) emit('stale') })
 watch(commit.locked, locked => emit('lock', locked))
 
 const title = computed(() => t(`nonprofitMembership.correction.title_${props.mode}`))
@@ -124,7 +106,6 @@ const pending = computed(() => commit.review.value)
     <h3 class="font-semibold">{{ title }}</h3>
     <p class="text-sm text-neutral-500">{{ t(`nonprofitMembership.correction.help_${mode}`) }}</p>
     <p v-if="commit.error.value" role="alert" :class="errorBox" data-section="corr-error">{{ commit.error.value }}</p>
-    <p v-if="rebased" role="status" class="text-sm text-warning-700" data-section="corr-rebased">{{ t('nonprofitMembership.correction.rebased') }}</p>
 
     <fieldset v-if="mode === 'identity'" :disabled="commit.locked.value || !!pending" class="grid gap-3 sm:grid-cols-2">
       <div :class="formLabel">{{ t('nonprofitMembership.correction.client') }}

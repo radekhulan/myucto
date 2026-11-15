@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
+import { KeepAlive, defineComponent, h, ref } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Detail from '../MembershipMemberDetail.vue'
@@ -502,13 +502,33 @@ describe('Membership member detail after a correction', () => {
     w.unmount()
   })
 
-  it('po odmítnutí zastaralé opravy načte detail znovu', async () => {
+  it('po odmítnutí zastaralé opravy ji zavře, načte detail i seznam a vyzve k novému otevření', async () => {
     api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
     const w = mountedWithCorrection(); await flushPromises()
     await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
     w.findComponent(CorrectionFlow).vm.$emit('stale'); await flushPromises()
     expect(api.member).toHaveBeenCalledTimes(2)
-    expect(w.findComponent(CorrectionFlow).exists()).toBe(true)
+    expect(w.findComponent(CorrectionFlow).exists()).toBe(false)
+    expect(w.text()).toContain(cs.nonprofitMembership.correction.staleClosed)
+    expect(w.emitted('changed')).toHaveLength(1)
+    expect(w.get('[data-action="fix-identity"]').attributes('disabled')).toBeUndefined()
+    w.unmount()
+  })
+
+  it('ruční Obnovit i návrat do záložky počkají na rozepsanou první revizi', async () => {
+    api.member.mockResolvedValue({ ...detail([], []), corrections: allowed })
+    const shown = ref(true)
+    const Host = defineComponent({ setup: () => () => h(KeepAlive, null, [shown.value ? h(Detail, { supplier: 5, canManage: true, memberId: 9, label: 'Synthetic member', periods: [period] }) : h('div')]) })
+    const w = mount(Host, { attachTo: document.body, global: { plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
+      stubs: { ActionBar, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow, MembershipCorrectionFlow: CorrectionFlow } } })
+    await flushPromises()
+    w.findComponent(RevisionForm).vm.$emit('dirty', true); await flushPromises()
+    expect(w.get('[data-action="reload"]').attributes('disabled')).toBeDefined()
+    shown.value = false; await flushPromises()
+    shown.value = true; await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(1)
+    w.findComponent(RevisionForm).vm.$emit('dirty', false); await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(2)
     w.unmount()
   })
 

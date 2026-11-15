@@ -62,17 +62,13 @@ final class MembershipRevisionTimeline
     {
         $ordered = self::effective($history);
         usort($ordered, static fn (array $a, array $b): int => [$a['effective_from'], $a['id']] <=> [$b['effective_from'], $b['id']]);
-        $seen = [];
+        // Dvě platné revize ke stejnému dni odmítne už effective() (datum mezi platnými roste).
         foreach ($ordered as $index => &$row) {
             if (!is_int($row['id'] ?? null) || $row['id'] <= 0 || !is_int($row['revision_no'] ?? null) || $row['revision_no'] <= 0
                 || !in_array($row['status'] ?? null, ['active', 'suspended', 'ended'], true)) {
                 throw new MembershipException('nonprofit_membership_revision_corrupt', 'Historie členství není průkazná.', 409);
             }
             self::date((string) ($row['effective_from'] ?? ''));
-            if (isset($seen[$row['effective_from']])) {
-                throw new MembershipException('nonprofit_membership_effective_conflict', 'Ke stejnému dni už existuje jiná revize členství.', 409);
-            }
-            $seen[$row['effective_from']] = true;
             $row['effective_to'] = $ordered[$index + 1]['effective_from'] ?? null;
         }
         unset($row);
