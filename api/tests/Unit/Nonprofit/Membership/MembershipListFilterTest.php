@@ -19,6 +19,16 @@ final class MembershipListFilterTest extends TestCase
         );
     }
 
+    public function testSearchSplitsOnUnicodeSpacesAndIgnoresBlankText(): void
+    {
+        $query = ['year' => '2026'];
+        self::assertSame('', MembershipListFilter::parse($query + ['search' => "\u{00A0} \t\u{2009}"])['search']);
+        self::assertSame('Jan Novák jan', MembershipListFilter::parse($query + ['search' => "\u{00A0}Jan\u{00A0}\u{00A0}Novák\tjan Jan "])['search']);
+        self::assertSame(['Jan', 'Novák', 'jan'], MembershipListFilter::searchWords('Jan Novák jan Jan'));
+        // Počet slov hlídá jen délka textu.
+        self::assertCount(9, MembershipListFilter::searchWords(MembershipListFilter::parse($query + ['search' => 'a b c d e f g h i'])['search']));
+    }
+
     public function testExplicitNullYearFromJsonBodyMeansNoYearLikeEmptyQueryValue(): void
     {
         $query = ['title_key' => 'SYNTHETIC', 'payment_status' => 'all'];
@@ -42,7 +52,7 @@ final class MembershipListFilterTest extends TestCase
         yield 'pole roku' => [['year' => []]];
         yield 'pole hledání' => [['search' => []]];
         yield 'dlouhé hledání' => [['search' => str_repeat('x', 161)]];
-        yield 'příliš mnoho slov hledání' => [['search' => 'a b c d e f g h i']];
+        yield 'neplatné UTF-8 hledání' => [['search' => "Jan \xFF"]];
         yield 'pole titulu' => [['title_key' => []]];
         yield 'neplatný titul' => [['title_key' => 'not a key']];
         yield 'cizí stav' => [['payment_status' => 'settled']];

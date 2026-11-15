@@ -717,6 +717,9 @@ final class MembershipNativeTest extends TestCase
 
         $reconciliation = new MembershipReconciliationService($this->balances);
         foreach ([$one, $two] as $member) {
+            // Okruh je jinak platný: K prověření plyne jen z počtu členských předpisů.
+            $evidence = array_values($this->balances->pairingEvidence($this->supplier, $this->balances->claimsForMember($this->supplier, $member['id'])))[0];
+            self::assertSame([0, 2, 1000000], [$evidence['invalid_count'], $evidence['membership_claim_count'], $evidence['net_cents']]);
             $detail = $reconciliation->memberBalance($this->supplier, $member['id']);
             self::assertSame('ambiguous', $detail['items'][0]['settlement']['status']);
             self::assertNull($detail['items'][0]['settlement']['open_cents']);
@@ -753,6 +756,18 @@ final class MembershipNativeTest extends TestCase
         self::assertSame([$one['id']], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter));
         $filter['search'] = 'Rowan Nobody';
         self::assertSame([], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter));
+        // Znak % je doslovný i ve víceslovném hledání.
+        $filter['search'] = '% Rowan';
+        self::assertSame([], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter));
+        // Víc slov i v cestách se stavem úhrady: bez předpisu (NOT EXISTS) a s předpisem (dávky předpisů).
+        $none = MembershipListFilter::parse(['year' => 2026, 'search' => 'Rowan Synthetic', 'payment_status' => 'none']);
+        self::assertSame([$two['id']], array_column($repo->page($this->supplier, 0, 50, $none), 'id'));
+        self::assertSame([$two['id']], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $none));
+        $this->issue($two['id'], 'review-two-search');
+        $unpaid = MembershipListFilter::parse(['year' => 2026, 'search' => 'Rowan Synthetic', 'payment_status' => 'unpaid']);
+        self::assertSame([$two['id']], array_column($repo->page($this->supplier, 0, 50, $unpaid), 'id'));
+        self::assertSame([$two['id']], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $unpaid));
+        self::assertSame([], $repo->page($this->supplier, 0, 50, $none));
         self::assertSame([], $repo->matchingSelection($this->supplier + 100000, [$one['id'], $two['id']], $filter));
     }
 

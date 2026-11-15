@@ -6,9 +6,6 @@ namespace MyInvoice\Service\Nonprofit\Membership;
 
 final class MembershipListFilter
 {
-    /** Každé slovo hledání přidá podmínku přes čtyři sloupce; strop drží dotaz krátký. */
-    public const MAX_SEARCH_WORDS = 8;
-
     public static function parse(array $query, ?\DateTimeImmutable $now = null): array
     {
         $search = $query['search'] ?? '';
@@ -18,14 +15,13 @@ final class MembershipListFilter
         // Chybějící rok znamená aktuální rok; prázdný řetězec z adresy i null z JSON těla znamenají „bez roku“.
         $year = array_key_exists('year', $query) ? ($query['year'] ?? '') : (int) $today->format('Y');
         $status = $query['payment_status'] ?? 'all';
-        if (!is_string($search) || mb_strlen(trim($search)) > 160 || !is_string($title)
+        if (!is_string($search) || !mb_check_encoding($search, 'UTF-8') || mb_strlen(trim($search)) > 160 || !is_string($title)
             || !in_array($status, ['all', 'paid', 'unpaid', 'unproven', 'none'], true)) {
             self::invalid();
         }
-        $search = trim($search);
-        if (count(self::searchWords($search)) > self::MAX_SEARCH_WORDS) {
-            self::invalid();
-        }
+        // Unicode mezery (i pevná) oddělují slova jako obyčejná; samé mezery znamenají bez hledání.
+        // Počet slov omezuje délka 160 znaků.
+        $search = implode(' ', self::searchWords($search));
         $title = trim($title);
         if ($title !== '') {
             $title = MembershipChargeRequest::key($title, 'titulu');
@@ -49,7 +45,7 @@ final class MembershipListFilter
     /** @return list<string> slova hledání bez opakování, stejná pro seznam i ověření výběru */
     public static function searchWords(string $search): array
     {
-        return array_values(array_unique(preg_split('/\s+/u', trim($search), -1, PREG_SPLIT_NO_EMPTY) ?: []));
+        return array_values(array_unique(preg_split('/[\s\p{Z}]+/u', $search, -1, PREG_SPLIT_NO_EMPTY) ?: []));
     }
 
     private static function invalid(): never
