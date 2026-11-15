@@ -135,7 +135,8 @@ final class CreateInvoiceAction
         try {
             $body = $this->defaults->resolve($body, forNewInvoice: true);
         } catch (\InvalidArgumentException $e) {
-            return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
+            $code = $e instanceof \MyInvoice\Service\Invoice\UnknownCurrencyException ? $e::ERROR_CODE : 'integrity_violation';
+            return Json::error($response, $code, $e->getMessage(), 400);
         }
 
         // Derivace OSS pro API klienty. Běží PŘED validací schválně: kontrola „zahraniční

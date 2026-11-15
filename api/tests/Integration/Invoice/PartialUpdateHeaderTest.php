@@ -357,10 +357,10 @@ final class PartialUpdateHeaderTest extends TestCase
     }
 
     /**
-     * Kontrakt, na který spoléhá MCP `update_invoice`: změna měny kódem s explicitním
-     * `currency_id: null`. Bez null by server doplnil uloženou měnu a změna by se tiše neprovedla.
+     * BEZ OPRAVY PADÁ: měna zadaná kódem se při PUT tiše neprovedla (uložené `currency_id`
+     * kód přebilo) a neznámý kód doklad založil ve výchozí měně místo chyby.
      */
-    public function testCurrencyChangeByCodeWithNullId(): void
+    public function testCurrencyByCodeChangesOrFailsClearly(): void
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT id FROM currencies WHERE supplier_id = ? AND is_active = 1 AND code = 'EUR' ORDER BY id LIMIT 1"
@@ -374,11 +374,24 @@ final class PartialUpdateHeaderTest extends TestCase
 
         $res = $this->put($id, ['currency' => 'EUR']);
         self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
-        self::assertSame($this->currencyId, (int) $this->row($id)['currency_id'], 'Samotný kód měnu nezmění (uložené currency_id má přednost).');
-
-        $res = $this->put($id, ['currency' => 'EUR', 'currency_id' => null]);
-        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
         self::assertSame($eur, (int) $this->row($id)['currency_id']);
+
+        // Kontrakt MCP `update_invoice`: kód s explicitním `currency_id: null`.
+        $res = $this->put($id, ['currency' => 'czk', 'currency_id' => null]);
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame($this->currencyId, (int) $this->row($id)['currency_id']);
+
+        $res = $this->put($id, ['currency' => 'XQZ']);
+        self::assertSame(400, $res['status']);
+        self::assertSame('unknown_currency', $res['body']['error']['code'] ?? null);
+        self::assertSame($this->currencyId, (int) $this->row($id)['currency_id'], 'Neznámá měna doklad nezmění.');
+
+        $created = self::decode(($this->create)($this->request('POST', [
+            'client_id' => $this->clientId, 'currency' => 'XQZ',
+            'items' => [['description' => 'X', 'quantity' => 1, 'unit_price_without_vat' => 1, 'vat_rate_id' => $this->vatRateId]],
+        ]), new Psr7Response()));
+        self::assertSame(400, $created['status'], json_encode($created['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('unknown_currency', $created['body']['error']['code'] ?? null);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

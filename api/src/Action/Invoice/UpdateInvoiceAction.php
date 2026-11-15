@@ -414,7 +414,8 @@ final class UpdateInvoiceAction
         try {
             $body = $this->defaults->resolve($body, resolvedClient: $walkInClient);
         } catch (\InvalidArgumentException $e) {
-            return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
+            $code = $e instanceof \MyInvoice\Service\Invoice\UnknownCurrencyException ? $e::ERROR_CODE : 'integrity_violation';
+            return Json::error($response, $code, $e->getMessage(), 400);
         }
 
         // Derivace OSS pro API klienty — TOTÉŽ místo v pořadí jako u POST (viz
@@ -979,6 +980,11 @@ final class UpdateInvoiceAction
         // Zakázka patří klientovi — při změně klienta se uložená nepřebírá.
         if (array_key_exists('client_id', $body) && (int) $body['client_id'] !== (int) ($existing['client_id'] ?? 0)) {
             $skip[] = 'project_id';
+        }
+        // Měna poslaná kódem bez `currency_id` je změna měny: uložené ID by kód přebilo
+        // (InvoiceDefaults ho čte, jen když ID chybí) a změna by se tiše neprovedla.
+        if (array_key_exists('currency', $body) && !array_key_exists('currency_id', $body)) {
+            $skip[] = 'currency_id';
         }
         // Kategorie tržby (legacy text + id) je jedna hodnota: poslaná půlka ruší i druhou.
         if (array_key_exists('revenue_category', $body) || array_key_exists('revenue_category_id', $body)) {
