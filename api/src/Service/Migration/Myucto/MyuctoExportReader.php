@@ -147,7 +147,10 @@ final class MyuctoExportReader
             $tables = MyuctoRowStore::create($this->tempDir);
             $skipped = [];
             $bytes = 0;
-            $groups = [$manifest['sections']['data']['tables'], $manifest['sections']['data']['shared_tables'] ?? []];
+            // Ze sdílených mzdových číselníků jen tabulky s globálním klíčem: obnova je v cíli
+            // dohledá podle přirozeného klíče, nezakládá je.
+            $groups = [$manifest['sections']['data']['tables'], $manifest['sections']['data']['shared_tables'] ?? [],
+                array_intersect_key((array) ($manifest['sections']['data']['shared_payroll_tables'] ?? []), MyuctoImportProfile::GLOBAL_KEYS)];
             foreach ($groups as $group) {
                 foreach ($group as $table => $info) {
                     if (!is_string($table) || !preg_match('/\A[a-z][a-z0-9_]*\z/D', $table) || !is_array($info)
@@ -156,7 +159,7 @@ final class MyuctoExportReader
                     }
                     $keyless = in_array($table, [...MyuctoImportProfile::KEYLESS_JOURNAL_TABLES, ...array_keys(MyuctoImportProfile::KEYLESS_TABLES)], true);
                     $supported = $keyless || in_array($table, [...MyuctoImportProfile::TABLES, ...MyuctoImportProfile::CONFIG_TABLES, ...MyuctoImportProfile::CONTEXT_TABLES,
-                        MyuctoImportProfile::ENTRY_FORM_HISTORY_TABLE, 'supplier', ...array_keys(MyuctoImportProfile::GLOBAL_KEYS)], true);
+                        MyuctoImportProfile::ENTRY_FORM_HISTORY_TABLE, MyuctoImportProfile::ACTIVITY_TABLE, 'supplier', ...array_keys(MyuctoImportProfile::GLOBAL_KEYS)], true);
                     // Kontextová tabulka se jen čte ke kontrole a v protokolu zůstává mimo rozsah převodu.
                     if (in_array($table, MyuctoImportProfile::CONTEXT_TABLES, true) && $info['rows'] > 0) {
                         $skipped[$table] = $info['rows'];

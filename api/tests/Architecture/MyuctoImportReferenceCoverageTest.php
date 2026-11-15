@@ -87,6 +87,7 @@ final class MyuctoImportReferenceCoverageTest extends TestCase
                     continue;
                 }
                 if (isset($definition['refs'][$column]) || isset($definition['polymorphic'][$column])
+                    || (($definition['helios_map'] ?? false) && $column === 'target_id')
                     || in_array($column, $definition['detached'] ?? [], true) || in_array($column, $definition['users'] ?? [], true)) {
                     continue;
                 }
@@ -97,6 +98,23 @@ final class MyuctoImportReferenceCoverageTest extends TestCase
             }
         }
         self::assertSame([], $missing, 'Vazba tabulky bez id nemá rozhodnutí v MyuctoImportProfile::KEYLESS_TABLES.');
+    }
+
+    public function testHeliosMapKindsTargetImportedTables(): void
+    {
+        foreach (MyuctoImportProfile::HELIOS_MAP_TARGETS as $kind => $target) {
+            foreach (is_array($target) ? $target : [$target] as $table) {
+                if ($table !== null) {
+                    self::assertContains($table, MyuctoImportProfile::TABLES, "Druh mapy převodu {$kind} míří na tabulku, kterou obnova nepřenáší.");
+                }
+            }
+        }
+        foreach (['payroll_deduction_agreements', 'payroll_enforcement_cases'] as $table) {
+            self::assertContains($table, MyuctoImportProfile::TABLES);
+        }
+        foreach (array_merge(MyuctoImportProfile::ACTIVITY_ENTITY_TARGETS, MyuctoImportProfile::ACTIVITY_PAYLOAD_TARGETS) as $table) {
+            self::assertTrue(in_array($table, [...MyuctoImportProfile::TABLES, 'supplier', 'users'], true), "Auditní stopa míří na {$table}, kterou obnova nepřenáší.");
+        }
     }
 
     public function testDerivedDecisionsAreConsistent(): void

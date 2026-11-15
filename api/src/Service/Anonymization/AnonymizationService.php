@@ -572,20 +572,7 @@ final class AnonymizationService
         $supplierId = (int) ($row['supplier_id'] ?? 0);
         $entityId = (int) ($row[$spec['entity']] ?? 0);
         $type = $spec['type_column'] !== null ? (string) ($row[$spec['type_column']] ?? '') : $spec['field'];
-        [$field, $kind] = match ($type) {
-            'birth_number', 'personal_identifier' => [PayrollSensitiveField::PERSONAL_IDENTIFIER, 'birth_number'],
-            'tax_family_identifier' => [PayrollSensitiveField::TAX_FAMILY_IDENTIFIER, 'birth_number'],
-            'ecp', 'vcp', 'health_insurance_number' => [PayrollSensitiveField::PERSONAL_IDENTIFIER, 'shape'],
-            'foreign_tax_identifier' => [PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER, 'shape'],
-            'email', 'contact_email' => [PayrollSensitiveField::CONTACT_EMAIL, 'email'],
-            'phone', 'contact_phone' => [PayrollSensitiveField::CONTACT_PHONE, 'phone'],
-            'bank_account' => [PayrollSensitiveField::BANK_ACCOUNT, 'bank_account'],
-            'person_external_identifier' => [PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER, 'shape'],
-            'employment_external_identifier' => [PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER, 'shape'],
-            'registration_a1_profile' => [PayrollSensitiveField::REGISTRATION_A1_PROFILE, 'json'],
-            'external_jmhz_payload' => [PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD, 'json'],
-            default => throw new \RuntimeException("Neznámý typ šifrované hodnoty: {$type}"),
-        };
+        [$field, $kind] = AnonymizationPolicy::sealedField($type);
         $sensitive = $this->sensitive ?? throw new \LogicException('Šifrování není připravené.');
         $revealer = $this->revealer ?? $sensitive;
         try {

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Anonymization;
 
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+
 /**
  * Rozhodnutí pro KAŽDÝ textový sloupec databáze: pseudonymizovat, jak, nebo ponechat.
  *
@@ -895,5 +897,29 @@ final class AnonymizationPolicy
             'masked' => $parts[3] === '-' ? null : $parts[3],
             'entity' => $parts[4],
         ];
+    }
+
+    /**
+     * Pole mzdového údaje a druh hodnoty podle typu ze strategie `sealed:` (nebo podle
+     * sloupce typu řádku). Sdílí ho anonymizace i obnova firmy z Kompletního exportu.
+     *
+     * @return array{0:PayrollSensitiveField,1:string}
+     */
+    public static function sealedField(string $type): array
+    {
+        return match ($type) {
+            'birth_number', 'personal_identifier' => [PayrollSensitiveField::PERSONAL_IDENTIFIER, 'birth_number'],
+            'tax_family_identifier' => [PayrollSensitiveField::TAX_FAMILY_IDENTIFIER, 'birth_number'],
+            'ecp', 'vcp', 'health_insurance_number' => [PayrollSensitiveField::PERSONAL_IDENTIFIER, 'shape'],
+            'foreign_tax_identifier' => [PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER, 'shape'],
+            'email', 'contact_email' => [PayrollSensitiveField::CONTACT_EMAIL, 'email'],
+            'phone', 'contact_phone' => [PayrollSensitiveField::CONTACT_PHONE, 'phone'],
+            'bank_account' => [PayrollSensitiveField::BANK_ACCOUNT, 'bank_account'],
+            'person_external_identifier' => [PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER, 'shape'],
+            'employment_external_identifier' => [PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER, 'shape'],
+            'registration_a1_profile' => [PayrollSensitiveField::REGISTRATION_A1_PROFILE, 'json'],
+            'external_jmhz_payload' => [PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD, 'json'],
+            default => throw new \RuntimeException("Neznámý typ šifrované hodnoty: {$type}"),
+        };
     }
 }

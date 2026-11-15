@@ -121,6 +121,13 @@ enum PayrollRevealPurpose: string
     case MIGRATION_VERIFY = 'storage:migration_verify';
 
     /**
+     * Obnova firmy z Kompletního exportu do jiné firmy nebo instalace: šifra je vázaná
+     * na firmu a řádek zdroje (a klíč zdrojové instalace), proto se údaj odhalí a hned
+     * zapečetí pro cílový řádek; ven z procesu neteče.
+     */
+    case RESTORE_RESEAL = 'storage:restore_reseal';
+
+    /**
      * Je odhalení zákonnou náležitostí dokumentu nebo podání?
      *
      * Rozlišení je tu proto, aby budoucí auditní zápis uměl oddělit systémový

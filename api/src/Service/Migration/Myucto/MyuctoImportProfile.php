@@ -10,10 +10,10 @@ use MyInvoice\Repository\DimensionAssignmentRepository;
 final class MyuctoImportProfile
 {
     /** Prvních 16 znaků otisku je součástí cesty importovaných souborů, takže dvojtečka musí stát až za nimi. */
-    public const VERSION = 'company-other-items-v1';
+    public const VERSION = 'company-payroll-v1';
     /** Starší profily, jejichž obnova se shodnými daty je pro aktuální profil úplná. */
     public const COMPATIBLE_VERSIONS = ['classifications-v1', 'posting-groups-v1', 'vat-clearing-runs-v1', 'company-complete-v1',
-        'company-dimensions-v1'];
+        'company-dimensions-v1', 'company-other-items-v1'];
     public const TABLES = [
         'currencies', 'revenue_categories', 'expense_categories', 'cost_centers',
         'chart_of_accounts', 'vat_classifications', 'accounting_periods', 'clients', 'client_bank_accounts',
@@ -39,6 +39,10 @@ final class MyuctoImportProfile
         'document_folders', 'documents', 'document_files', 'document_dms_messages', 'document_extractions', 'invoice_pdfs',
         'dimension_types', 'dimension_values',
         'internal_documents', 'journal_entry_document_links', 'journal_entry_templates', 'journal_entry_template_lines', 'journal_entry_notes',
+        // Čerpání záloh konečnými doklady (vydané i přijaté).
+        'invoice_advance_deductions', 'purchase_advance_deductions',
+        // Podání (DPH, KH, SH, daň z příjmů) jako archiv odeslaných XML; obnova je znovu neodesílá.
+        'tax_submissions',
         'income_tax_returns', 'tax_advance_schedules',
         'bank_posting_rules', 'bank_counterparty_map', 'bank_card_merchant_map', 'expense_classification_rules',
         'bank_rule_templates', 'auto_posting_policy',
@@ -50,6 +54,35 @@ final class MyuctoImportProfile
         'dimension_account_rules', 'dimension_account_map', 'dimension_defaults',
         'accounting_corrections', 'accounting_closing_steps',
         'number_series', 'accounting_document_series',
+        // Výkazy: kategorie účetní jednotky zmrazená uzávěrkou, výjimky mapování účtů a přílohy.
+        'entity_category_history', 'statement_account_overrides', 'statement_notes',
+        // Mzdy: pracoviště a instituce, politika zaměstnavatele, složky, osoby a jejich údaje,
+        // pracovní poměry, nepřítomnosti, srážky a exekuce, převzaté JMHZ a počáteční stavy.
+        // Pořadí sleduje povinné vazby (exekuce až po dokumentech DMS).
+        ...self::PAYROLL_GRAPH_TABLES,
+    ];
+    /**
+     * Mzdové tabulky s vlastním `id`. Šifrované osobní údaje obnova přešifruje pro cílovou
+     * firmu ({@see MyuctoImportSealedValues}); mzdový modul cíle nesmí mít vlastní data.
+     */
+    public const PAYROLL_GRAPH_TABLES = [
+        'payroll_offices', 'payroll_office_registration_versions',
+        'payroll_institutions', 'payroll_institution_accounts',
+        'payroll_employer_policies', 'payroll_employer_policy_audit',
+        'payroll_component_definitions', 'payroll_component_jmhz_mappings',
+        'payroll_employees', 'payroll_person_identifiers', 'payroll_person_identity_history', 'payroll_person_addresses',
+        'payroll_person_contacts', 'payroll_person_accounts', 'payroll_person_external_ids', 'payroll_person_health_coverage_history',
+        'payroll_person_social_discount_claims', 'payroll_person_social_jurisdictions', 'payroll_person_tax_declarations',
+        'payroll_person_tax_residences', 'payroll_dependants', 'payroll_person_tax_child_claims', 'payroll_payout_rules',
+        'payroll_employments', 'payroll_employment_terms', 'payroll_employment_events', 'payroll_employment_external_ids',
+        'payroll_employment_terminations', 'payroll_recurring_components',
+        'payroll_average_earning_snapshots', 'payroll_absences', 'payroll_leave_ledger',
+        'payroll_deduction_agreements', 'payroll_deduction_agreement_versions',
+        'payroll_enforcement_cases', 'payroll_enforcement_case_documents', 'payroll_enforcement_case_parties',
+        'payroll_enforcement_claims', 'payroll_enforcement_events', 'payroll_enforcement_recipient_instructions',
+        'payroll_enforcement_person_month_evidence',
+        'payroll_external_jmhz_submissions', 'payroll_external_jmhz_submission_forms',
+        'payroll_statutory_accumulator_openings', 'payroll_migration_reference_totals',
     ];
     /**
      * Tabulky bez vlastního `id` mimo deník. `key` je přirozený klíč řádku v cíli, `refs`
@@ -97,6 +130,58 @@ final class MyuctoImportProfile
         'purchase_invoice_counters' => ['key' => ['supplier_id', 'period'], 'counter' => ['last_number']],
         'number_series_counters' => ['key' => ['series_id', 'period_key'], 'refs' => ['series_id' => 'number_series'],
             'counter' => ['last_number']],
+        // Nastavení účetnictví firmy (úroveň automatiky, kurzy, uzamčení): nová firma má výchozí
+        // řádek, první obnova ho nahradí nastavením zdroje (REPLACED_SETUP_TABLES).
+        'accounting_supplier_settings' => ['key' => ['supplier_id']],
+        // Mzdy: profil výplaty osoby, nastavení zaměstnavatele, stav modulu a kontrola převzetí.
+        'payroll_employee_profiles' => ['key' => ['supplier_id', 'employee_id'], 'refs' => ['employee_id' => 'payroll_employees']],
+        'payroll_employer_settings' => ['key' => ['supplier_id'], 'refs' => ['default_office_id' => 'payroll_offices']],
+        'payroll_module_state' => ['key' => ['supplier_id'], 'users' => ['activated_by']],
+        'payroll_takeover_invariant_checks' => ['key' => ['supplier_id', 'source']],
+        // Mapa převodu z Heliosu: převzaté záznamy chrání před automatikou MyÚčta (TakenOverRecord).
+        // Cíl `target_id` určuje druh (HELIOS_MAP_TARGETS).
+        'helios_import_map' => ['key' => ['supplier_id', 'kind', 'source_key'], 'helios_map' => true],
+    ];
+    /**
+     * Druh záznamu mapy převodu z Heliosu => převáděná tabulka cíle. `null` = hodnota
+     * není ID řádku (příznak, zakódované datum) a přenáší se beze změny. Úhrada míří
+     * podle předpony klíče na párování banky, nebo na pokladní doklad; srážka ze mzdy
+     * na dohodu o srážkách, nebo na exekuci. Druh mimo seznam obnova odmítne.
+     */
+    public const HELIOS_MAP_TARGETS = [
+        'account' => 'chart_of_accounts', 'period' => 'accounting_periods', 'journal_entry' => 'journal_entries',
+        'invoice' => 'invoices', 'purchase_invoice' => 'purchase_invoices', 'partner' => 'clients', 'partner_new' => 'clients',
+        'doc_currency' => 'currencies', 'bank_statement' => 'bank_statements', 'bank_transaction' => 'bank_transactions',
+        'cash_document' => 'cash_documents', 'cash_register' => 'cash_registers', 'asset_card' => 'assets', 'asset_small' => 'small_assets',
+        'dimension_type' => 'dimension_types', 'dim_cost_center' => 'dimension_values', 'dim_cost_circle' => 'dimension_values',
+        'dim_project' => 'dimension_values', 'dim_vehicle' => 'dimension_values', 'filing' => 'tax_submissions',
+        'payroll_person' => 'payroll_employees', 'payroll_employment' => 'payroll_employments', 'payroll_month' => 'payroll_employments',
+        'payroll_institution' => 'payroll_institutions', 'payroll_jmhz' => 'payroll_external_jmhz_submissions',
+        'payment' => ['bank|' => 'payment_matches', 'cash|' => 'cash_documents'],
+        // Srážka: dohoda o srážkách, nebo exekuce (podle reference dohody, MyuctoImporter::remapKeyless()).
+        'payroll_deduction' => null, 'payroll_setup' => null, 'filing_lock_prev' => null,
+    ];
+    /**
+     * Auditní stopa firmy (`activity_log`): záznamy se přenesou s přemapovanou entitou a ID
+     * v payloadu a v cíli se znovu zapečetí do řetězu cílové instalace. Druh entity =>
+     * tabulka; klíč payloadu => tabulka (seznam ID i jednotlivé ID, i v řádcích `lines`).
+     */
+    public const ACTIVITY_TABLE = 'activity_log';
+    public const ACTIVITY_ENTITY_TARGETS = [
+        'invoice' => 'invoices', 'purchase_invoice' => 'purchase_invoices', 'journal_entry' => 'journal_entries',
+        'accounting_period' => 'accounting_periods', 'client' => 'clients', 'bank_statement' => 'bank_statements',
+        'bank_transaction' => 'bank_transactions', 'cash_document' => 'cash_documents', 'asset' => 'assets',
+        'payroll_employee' => 'payroll_employees', 'payroll_employment' => 'payroll_employments', 'payroll_module_state' => 'supplier',
+        'document' => 'documents', 'other_item' => 'other_items',
+    ];
+    public const ACTIVITY_PAYLOAD_TARGETS = [
+        'entry_id' => 'journal_entries', 'fx_reversal_entry_id' => 'journal_entries', 'entry_ids' => 'journal_entries',
+        'taken_over_entry_ids' => 'journal_entries', 'reversal_entry_id' => 'journal_entries',
+        'next_period_id' => 'accounting_periods', 'period_id' => 'accounting_periods',
+        'invoice_ids' => 'invoices', 'purchase_ids' => 'purchase_invoices', 'invoice_id' => 'invoices', 'purchase_invoice_id' => 'purchase_invoices',
+        'account_id' => 'chart_of_accounts', 'dependant_id' => 'payroll_dependants', 'claim_id' => 'payroll_person_tax_child_claims',
+        'employee_id' => 'payroll_employees', 'employment_id' => 'payroll_employments',
+        'overridden_by' => 'users', 'user_id' => 'users',
     ];
     /**
      * Výchozí nastavení, které nová firma dostane při založení nebo při prvním otevření
@@ -105,6 +190,7 @@ final class MyuctoImportProfile
      * nastavením zdroje. Hodnota je podmínka, která řádky cíle za výchozí považuje.
      */
     public const REPLACED_SETUP_TABLES = [
+        'accounting_supplier_settings' => '1 = 1',
         'bank_rule_templates' => '1 = 1',
         'auto_posting_policy' => '1 = 1',
         'pdf_signature_output_settings' => '1 = 1',
@@ -118,7 +204,7 @@ final class MyuctoImportProfile
      * Tabulky, které se z exportu jen čtou ke kontrole shody s cílem. Nepřevádějí se,
      * nejsou v otisku dat a protokol je dál vede mimo rozsah převodu.
      */
-    public const CONTEXT_TABLES = ['supplier_accounting_frameworks'];
+    public const CONTEXT_TABLES = ['supplier_accounting_frameworks', 'supplier_accounting_modes'];
     /**
      * Forma účetního zápisu zdroje: historie formy a k deníku patřící posouzení zápisů bez
      * dvojic a storna dvojic. Obnova je přenáší vlastní cestou (historie nahradí výchozí
@@ -135,7 +221,15 @@ final class MyuctoImportProfile
     ];
     /** Tabulky účetnictví: když je export nese, musí cíl vést stejný účetní rámec (vyhláška 500/504). */
     public const FRAMEWORK_BOUND_TABLES = ['chart_of_accounts', 'accounting_periods', 'journal_entries'];
-    public const GLOBAL_KEYS = ['countries' => ['iso2'], 'vat_rates' => ['code', 'rate_percent', 'country']];
+    public const GLOBAL_KEYS = ['countries' => ['iso2'], 'vat_rates' => ['code', 'rate_percent', 'country'],
+        // Balíček specifikace JMHZ (sdílený mzdový číselník exportu): mapování složek na atributy JMHZ.
+        'payroll_jmhz_spec_packages' => ['package_key']];
+    /**
+     * Globální číselníky, které zakládají migrace se stejnými ID v každé instalaci a export
+     * je nenese (verze výkazů pro výjimky mapování účtů). Vazba si ID ponechá, obnova jen
+     * ověří, že v cíli existuje.
+     */
+    public const SEEDED_GLOBAL_TABLES = ['statement_versions'];
     public const REUSE_KEYS = [
         'currencies' => ['code', 'decimals'], 'chart_of_accounts' => ['account_code'],
         'revenue_categories' => ['code'], 'expense_categories' => ['code'],
@@ -181,12 +275,27 @@ final class MyuctoImportProfile
             'cash_document_id' => 'cash_documents', 'classified_by' => 'users'],
         'de_movement_classification_history' => ['changed_by' => 'users'],
         'tax_evidence_bank_rules' => ['created_by' => 'users'],
-        'vat_clearing_runs' => ['entry_id' => 'journal_entries', 'computed_by' => 'users'],
+        'vat_clearing_runs' => ['entry_id' => 'journal_entries', 'computed_by' => 'users', 'submission_id' => 'tax_submissions'],
         'documents' => ['deleted_by' => 'users'],
         'document_extractions' => ['document_id' => 'documents'],
         'journal_entry_templates' => ['created_by' => 'users'],
         'journal_entry_notes' => ['created_by' => 'users', 'updated_by' => 'users'],
-        'income_tax_returns' => ['created_by' => 'users', 'finalized_by' => 'users'],
+        'income_tax_returns' => ['created_by' => 'users', 'finalized_by' => 'users', 'last_submission_id' => 'tax_submissions'],
+        'tax_submissions' => ['submitted_by' => 'users', 'generated_by' => 'users'],
+        'statement_notes' => ['updated_by' => 'users'],
+        // Mzdy: autoři a schvalovatelé (obnova je přiřadí aktérovi), vazby bez cizího klíče
+        // a vazby, které ve schématu nesou jen druhý sloupec složeného klíče.
+        'payroll_absences' => ['requested_by' => 'users', 'decided_by' => 'users', 'childbirth_recorded_by' => 'users'],
+        'payroll_average_earning_snapshots' => ['created_by' => 'users', 'approved_by' => 'users'],
+        'payroll_employer_policies' => ['created_by' => 'users', 'updated_by' => 'users'],
+        'payroll_employer_policy_audit' => ['actor_user_id' => 'users'],
+        'payroll_leave_ledger' => ['created_by' => 'users'],
+        'payroll_migration_reference_totals' => ['employee_id' => 'payroll_employees', 'employment_id' => 'payroll_employments'],
+        'payroll_person_tax_child_claims' => ['superseded_by_id' => 'payroll_person_tax_child_claims'],
+        'payroll_deduction_agreement_versions' => ['employee_id' => 'payroll_employees'],
+        'payroll_employment_external_ids' => ['employee_id' => 'payroll_employees'],
+        'payroll_component_jmhz_mappings' => ['spec_package_id' => 'payroll_jmhz_spec_packages'],
+        'statement_account_overrides' => ['created_by' => 'users', 'version_id' => 'statement_versions'],
         'tax_advance_schedules' => ['source_return_id' => 'income_tax_returns'],
         'accounting_closing_steps' => ['done_by' => 'users'],
         'number_series' => ['created_by' => 'users'],
@@ -218,10 +327,17 @@ final class MyuctoImportProfile
         'internal_documents' => ['number_series_id'],
         'document_extractions' => ['document_id'],
         'tax_advance_schedules' => ['source_return_id'],
+        // Starší export podání nenese; běh zúčtování a přiznání si ponechají formulář a čas podání.
+        'vat_clearing_runs' => ['submission_id'],
+        'income_tax_returns' => ['last_submission_id'],
         'bank_posting_rules' => ['last_rejected_tx_id', 'other_item_id'],
     ];
     /** Identifikátory datové schránky (ISDS), nikoli vazby na řádky databáze. */
-    public const PRESERVED_IDS = ['idoklad_id', 'fakturoid_id', 'import_batch_id', 'dm_id', 'sender_box_id', 'recipient_box_id'];
+    public const PRESERVED_IDS = ['idoklad_id', 'fakturoid_id', 'import_batch_id', 'dm_id', 'sender_box_id', 'recipient_box_id',
+        // Kód mzdových pravidel (`cz-payroll-2026.compensation-averages.v1`), stejný v každé instalaci.
+        'ruleset_id',
+        // Registrační číslo uživatele při dočasném přidělení agenturou (JMHZ), ne řádek databáze.
+        'jmhz_assignment_user_foreign_id'];
     /**
      * Deterministické klíče zdaňovacího období ({@see \MyInvoice\Service\Accounting\Vat\VatClearingService::sourceIdFor()}),
      * nikoli ID řádku. Mezi instancemi znamenají totéž období, proto se přenáší beze změny.
@@ -259,6 +375,19 @@ final class MyuctoImportProfile
         'accounting_document_series' => ['register_id' => ['series_code', ['cash_in' => 'cash_registers', 'cash_out' => 'cash_registers',
             'other_receivable' => 'other_item_kinds', 'other_payable' => 'other_item_kinds']]],
     ];
+    /**
+     * Druhé sloupce složených cizích klíčů, které neodkazují na `id` (prostředí podání,
+     * kopie zaměstnance kvůli vlastnictví, rok a druh výpočtu u řetězu počátečních stavů).
+     * Hodnota se buď ponechá, nebo ji přemapuje vlastní vazba z EXTRA_REFERENCES.
+     */
+    public const COMPOSITE_FK_COLUMNS = [
+        'payroll_employment_external_ids' => ['environment', 'employee_id'],
+        'payroll_person_external_ids' => ['environment'],
+        'payroll_deduction_agreement_versions' => ['employee_id'],
+        'payroll_statutory_accumulator_openings' => ['employee_id', 'tax_year', 'calculation_kind'],
+        // Atribut JMHZ je kód atributu ve slovníku balíčku, balíček mapuje GLOBAL_KEYS.
+        'payroll_component_jmhz_mappings' => ['spec_package_id', 'target_attribute_id'],
+    ];
     /** Tabulky s `id`, jejichž řádek s polymorfní vazbou mimo export (smazaný doklad) obnova vynechá a vykáže. */
     public const TOLERANT_TABLES = ['accounting_corrections'];
     /**
@@ -273,13 +402,11 @@ final class MyuctoImportProfile
         'work_reports' => ['billing_template_id'],
         'invoices' => ['price_level_id'],
         'purchase_invoice_items' => ['expense_rule_id'],
-        // Podání DPH obnova nepřenáší; běh zúčtování si ponechá formulář, variantu i čas podání.
-        'vat_clearing_runs' => ['submission_id'],
         // Skupiny firem, vozidla, podání, finální snímky přiznání, návrhy
         // automatiky a podpisové profily obnova nepřenáší.
         'dimension_types' => ['supplier_group_id'],
         'dimension_values' => ['supplier_group_id', 'car_id'],
-        'income_tax_returns' => ['last_submission_id', 'final_snapshot_id'],
+        'income_tax_returns' => ['final_snapshot_id'],
         'accounting_corrections' => ['suggestion_id'],
     ];
     /**

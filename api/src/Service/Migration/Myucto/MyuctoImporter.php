@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Myucto;
 
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\SchemaMetadataProvider;
 use MyInvoice\Repository\AccountingFrameworkRepository;
@@ -13,7 +14,11 @@ use MyInvoice\Service\Accounting\AccountingFrameworkService;
 use MyInvoice\Service\Accounting\EntryForm\EntryForm;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\UnusedAccountingPeriods;
+use MyInvoice\Repository\Payroll\JmhzSpecPackageRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\ActivityLogHashChain;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 use MyInvoice\Service\Export\Instance\TenantScopeResolver;
 use PDO;
 use RuntimeException;
@@ -27,13 +32,20 @@ final class MyuctoImporter
     private array $fkReferences = [];
     /** @var array<string,int> vynechané vazby uvnitř JSON hodnot (vazba konceptu interního dokladu) */
     private array $droppedLinks = [];
+    /** Přešifrování mzdových údajů pro cílovou firmu; null = obnova šifrované údaje odmítne. */
+    private ?MyuctoImportSealedValues $sealed = null;
+    /** @var array<string,true> reference dohod o srážkách (mapa převodu: srážka = dohoda, jinak exekuce) */
+    private array $deductionReferences = [];
+    /** @var array<string,int> otisky, které obnova přepočítala pro cílovou firmu, po sloupcích */
+    private array $rehashed = [];
 
     public function __construct(
         private readonly Connection $db,
         private readonly TenantScopeResolver $scopes,
         private readonly MyuctoImportFiles $files,
         ?UnusedAccountingPeriods $unusedPeriods = null,
-        ?ActivityLogger $activity = null
+        ?ActivityLogger $activity = null,
+        private readonly ?Config $config = null
     )
     {
         $this->unusedPeriods = $unusedPeriods ?? new UnusedAccountingPeriods($db);
@@ -44,6 +56,8 @@ final class MyuctoImporter
      * @param array<string,mixed> $package výstup {@see MyuctoExportReader::read()}; tabulky jako
      *        {@see MyuctoRowStore}, nebo pole (převod zálohy MyInvoice, testy)
      * @param null|callable(string):void $progress průběh po tabulkách
+     * @param MyuctoImportSealedValues|null $sealed přešifrování mzdových údajů s klíči zdrojové
+     *        instalace; null = zdroj je tatáž instalace (klíče z konfigurace cíle)
      */
     public function import(
         array $package,
@@ -51,7 +65,8 @@ final class MyuctoImporter
         int $actorId,
         string $source,
         bool $dryRun = true,
-        ?callable $progress = null
+        ?callable $progress = null,
+        ?MyuctoImportSealedValues $sealed = null
     ): array
     {
         if (!preg_match('/\A[a-zA-Z0-9._-]{1,80}\z/D', $source)) {
@@ -88,6 +103,12 @@ final class MyuctoImporter
         $schema = SchemaMetadataProvider::load($pdo);
         $this->fkReferences = [];
         $this->droppedLinks = [];
+        $this->rehashed = [];
+        $this->deductionReferences = [];
+        foreach ($tables->rows('payroll_deduction_agreements') as $agreement) {
+            $this->deductionReferences[(string) ($agreement['agreement_reference'] ?? '')] = true;
+        }
+        $this->sealed = $sealed ?? ($this->config !== null ? MyuctoImportSealedValues::create($this->config, null) : null);
         $step('Kontrola exportu: vazby a hodnoty');
         [$dropped, $softDetached] = $this->pruneOutsideGraph($tables);
         $this->validateRows($tables, $sourceSupplier, $schema);
@@ -128,6 +149,7 @@ final class MyuctoImporter
             }
             $this->assertVatHistory($pdo, $tables->hasTable('supplier_vat_status_history') ? $tables->all('supplier_vat_status_history') : null, $sourceSupplier, $supplierId);
             $this->assertAccountingFramework($tables, $package['context']['supplier_accounting_frameworks'] ?? null, $sourceSupplier, $supplierId);
+            $this->assertAccountingModes($pdo, $package['context']['supplier_accounting_modes'] ?? null, $sourceSupplier, $supplierId);
             $stmt = $pdo->prepare('SELECT id FROM users WHERE id = ? AND is_active = 1');
             $stmt->execute([$actorId]);
             if ($stmt->fetchColumn() === false) {
@@ -173,7 +195,13 @@ final class MyuctoImporter
             foreach (MyuctoImportProfile::GLOBAL_KEYS as $table => $keys) {
                 foreach ($tables->rows($table) as $id => $row) {
                     $map[$table][$id] = $this->lookup($pdo, $table, $keys, $row, null)
+                        ?? $this->installGlobal($pdo, $table, $keys, $row)
                         ?? throw new RuntimeException('Chybí shodný globální číselník: ' . $table . ':' . $id . '.');
+                }
+            }
+            foreach (MyuctoImportProfile::SEEDED_GLOBAL_TABLES as $table) {
+                foreach ($pdo->query('SELECT id FROM `' . $table . '`')->fetchAll(PDO::FETCH_COLUMN) as $id) {
+                    $map[$table][(int) $id] = (int) $id;
                 }
             }
             $sharedMap = $this->mapSharedDimensions($pdo, $shared, $target['supplier_group_id'] === null ? null : (int) $target['supplier_group_id']);
@@ -239,8 +267,10 @@ final class MyuctoImporter
             if ($previous === false) {
                 $this->assertNoExtraTargetPostingRules($pdo, $supplierId, array_keys($reused['posting_rules'] ?? []), $map);
             }
-            $ready = ['supplier' => [$sourceSupplier => true], 'countries' => array_fill_keys(array_keys($map['countries'] ?? []), true),
-                'vat_rates' => array_fill_keys(array_keys($map['vat_rates'] ?? []), true)];
+            $ready = ['supplier' => [$sourceSupplier => true]];
+            foreach ([...array_keys(MyuctoImportProfile::GLOBAL_KEYS), ...MyuctoImportProfile::SEEDED_GLOBAL_TABLES] as $global) {
+                $ready[$global] = array_fill_keys(array_keys($map[$global] ?? []), true);
+            }
             foreach ([$reused, $existing] as $group) {
                 foreach ($group as $table => $ids) {
                     $ready[$table] = ($ready[$table] ?? []) + $ids;
@@ -345,6 +375,9 @@ final class MyuctoImporter
             $step('Zápis: řádky bez vlastního ID');
             $this->restoreKeylessJournal($pdo, $tables, $map, $supplierId, $actorId, $previous === false, $schema, $report);
             $this->restoreKeylessTables($pdo, $tables, $map, $supplierId, $actorId, $previous === false, $schema, $report, $step);
+            if ($previous === false) {
+                $this->restoreActivityLog($pdo, $tables, $map, $supplierId, $actorId, $report, $step);
+            }
             if ($previous === false && ($package['manifest']['origin']['type'] ?? null) !== 'myinvoice-backup') {
                 $report['numbering_adopted'] = $this->adoptSupplierNumbering($pdo, $root, $target, $supplierId, $schema);
             }
@@ -392,6 +425,12 @@ final class MyuctoImporter
                                 if ($column === 'updated_at' && $table !== 'de_movement_classification') {
                                     continue;
                                 }
+                                if ($this->sealed !== null && MyuctoImportSealedValues::isCiphertextColumn($table, $column)) {
+                                    if (!$this->sealed->sameCiphertext($table, $column, $actual, $value, $actual[$column] ?? null)) {
+                                        throw new RuntimeException('Rekonciliace: liší se ' . $table . '.' . $column . ' (zdrojové ID ' . $id . ').');
+                                    }
+                                    continue;
+                                }
                                 if (!$this->same($value, $actual[$column] ?? null, $schema['columns'][$table][$column]['DATA_TYPE'])) {
                                     throw new RuntimeException('Rekonciliace: liší se ' . $table . '.' . $column . ' (zdrojové ID ' . $id . ').');
                                 }
@@ -421,6 +460,13 @@ final class MyuctoImporter
                     }
                 }
             }
+            if ($this->sealed !== null && $this->sealed->resealedCount() > 0) {
+                $report['resealed'] = $this->sealed->resealedCount();
+            }
+            if ($this->rehashed !== []) {
+                ksort($this->rehashed);
+                $report['rehashed'] = $this->rehashed;
+            }
             foreach (['detached', 'dropped', 'replaced_setup'] as $section) {
                 ksort($report[$section]);
             }
@@ -430,6 +476,8 @@ final class MyuctoImporter
             } else {
                 $pdo->commit();
                 $this->files->commit();
+                // Přenesená auditní stopa se zapečetí do řetězu cílové instalace až po commitu.
+                (new ActivityLogHashChain($this->db))->sealPending();
             }
             return $report;
         } catch (\Throwable $e) {
@@ -577,9 +625,13 @@ final class MyuctoImporter
                     if ($value !== null && !is_scalar($value)) {
                         throw new RuntimeException('Neplatná hodnota řádku exportu.');
                     }
+                    if (($schema['columns'][$table][$column]['GENERATION_EXPRESSION'] ?? '') !== '') {
+                        continue;
+                    }
                     if ($value !== null && $column !== 'id' && (str_ends_with($column, '_id') || str_ends_with($column, '_by'))
                         && !isset($this->references($table, $schema, $row)[$column])
                         && !in_array($column, MyuctoImportProfile::PRESERVED_IDS, true)
+                        && !in_array($column, MyuctoImportProfile::COMPOSITE_FK_COLUMNS[$table] ?? [], true)
                         && !in_array($column, MyuctoImportProfile::POLYMORPHIC_REFERENCES[$table] ?? [], true)
                         && !in_array($column, MyuctoImportProfile::PERIOD_KEYS[$table] ?? [], true)
                         && !in_array($column, MyuctoImportProfile::DETACHED_REFERENCES[$table] ?? [], true)) {
@@ -957,6 +1009,7 @@ final class MyuctoImporter
      */
     private function remapKeyless(string $table, array $definition, array $row, array $map, int $supplierId, int $actorId, array $columns, array &$report): ?array
     {
+        MyuctoImportSealedValues::assertNoUnknownCiphertext($table, $row);
         $out = $row;
         if (isset($columns['supplier_id'])) {
             $out['supplier_id'] = $supplierId;
@@ -981,6 +1034,37 @@ final class MyuctoImporter
                 return null;
             }
             $out[$column] = $mapped;
+        }
+        if ($definition['helios_map'] ?? false) {
+            $kind = (string) ($row['kind'] ?? '');
+            if (!array_key_exists($kind, MyuctoImportProfile::HELIOS_MAP_TARGETS)) {
+                throw new RuntimeException('Nepodporovaný druh mapy převodu z Heliosu: ' . $kind . '.');
+            }
+            $target = MyuctoImportProfile::HELIOS_MAP_TARGETS[$kind];
+            if (is_array($target)) {
+                $byPrefix = $target;
+                $target = null;
+                foreach ($byPrefix as $prefix => $table) {
+                    if (str_starts_with((string) $row['source_key'], $prefix)) {
+                        $target = $table;
+                        break;
+                    }
+                }
+                if ($target === null) {
+                    throw new RuntimeException('Nepodporovaný klíč mapy převodu z Heliosu: ' . $kind . '.');
+                }
+            } elseif ($kind === 'payroll_deduction') {
+                $target = isset($this->deductionReferences[(string) $row['source_key']]) ? 'payroll_deduction_agreements' : 'payroll_enforcement_cases';
+            }
+            if ($target !== null) {
+                $mapped = $map[$target][MyuctoExportReader::id($row['target_id'] ?? null)] ?? null;
+                if ($mapped === null) {
+                    // Záznam převodu, jehož cíl ve zdroji už neexistuje (smazaný zápis): nic nechrání.
+                    $report['dropped'][$table . '.' . $kind] = ($report['dropped'][$table . '.' . $kind] ?? 0) + 1;
+                    return null;
+                }
+                $out['target_id'] = $mapped;
+            }
         }
         foreach ($definition['users'] ?? [] as $column) {
             if (($out[$column] ?? null) !== null) {
@@ -1089,6 +1173,271 @@ final class MyuctoImporter
             $restored[] = array_replace($link, ['doc_id' => $newId]);
         }
         return $restored === [] ? null : json_encode($restored, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * Mzdové hodnoty, které nesou ID nebo firmu uvnitř textu či otisku: odkaz na dítě
+     * (`dependant-<id>`) a na účet výplaty (`account:<id>`) se přemapují, otisk počátečního
+     * stavu a položky knihy dovolené se přepočítá vzorcem aplikace z cílové firmy a ID,
+     * snímek politiky zaměstnavatele v auditu dostane cílové ID. Otisk se přepočítá jen tehdy,
+     * když zdrojový otisk odpovídá témuž vzorci; jinak zůstane a obnova ho vykáže.
+     *
+     * @param array<string,mixed> $row
+     * @param array<string,mixed> $out
+     * @param array<string,array<int|string,int>> $map
+     * @return array<string,mixed>
+     */
+    private function remapPayrollValues(string $table, array $row, array $out, array $map): array
+    {
+        if ($table === 'payroll_person_tax_child_claims'
+            && preg_match('/\Adependant-([0-9]+)\z/D', (string) ($row['child_reference'] ?? ''), $m) === 1) {
+            $out['child_reference'] = 'dependant-' . ($map['payroll_dependants'][(int) $m[1]]
+                ?? throw new RuntimeException('Chybí zdrojová vazba payroll_person_tax_child_claims.child_reference → payroll_dependants.'));
+        }
+        if ($table === 'payroll_payout_rules'
+            && preg_match('/\Aaccount:([0-9]+)\z/D', (string) ($row['destination_reference'] ?? ''), $m) === 1) {
+            $out['destination_reference'] = 'account:' . ($map['payroll_person_accounts'][(int) $m[1]]
+                ?? throw new RuntimeException('Chybí zdrojová vazba payroll_payout_rules.destination_reference → payroll_person_accounts.'));
+        }
+        if ($table === 'payroll_employment_events' && ($row['diff_json'] ?? null) !== null) {
+            $diff = json_decode((string) $row['diff_json'], true, 64, JSON_THROW_ON_ERROR);
+            if (is_array($diff) && is_array($diff['office_id'] ?? null)) {
+                foreach (['from', 'to'] as $side) {
+                    $value = $diff['office_id'][$side] ?? null;
+                    if ($value !== null) {
+                        $diff['office_id'][$side] = $map['payroll_offices'][MyuctoExportReader::id($value)]
+                            ?? throw new RuntimeException('Chybí zdrojová vazba payroll_employment_events.diff_json.office_id → payroll_offices.');
+                    }
+                }
+                $out['diff_json'] = json_encode($diff, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            }
+        }
+        if ($table === 'payroll_statutory_accumulator_openings') {
+            $hash = fn (array $r): string => hash('sha256', CanonicalJson::encode([
+                'schema_version' => 'payroll-statutory-opening.v1',
+                'supplier_id' => (int) $r['supplier_id'],
+                'employee_id' => (int) $r['employee_id'],
+                'year' => (int) $r['tax_year'],
+                'calculation_kind' => (string) $r['calculation_kind'],
+                'values' => json_decode((string) $r['values_json'], true, 512, JSON_THROW_ON_ERROR),
+                'source_reference' => trim((string) ($r['source_reference'] ?? '')),
+                'evidence' => json_decode((string) $r['evidence_json'], true, 512, JSON_THROW_ON_ERROR),
+                'replaces_opening_id' => $r['replaces_opening_id'] === null ? null : (int) $r['replaces_opening_id'],
+            ]));
+            $out = $this->rehash($table, 'record_hash', $row, $out, $hash);
+        }
+        if ($table === 'payroll_leave_ledger') {
+            $product = static fn (array $r): string => hash('sha256', CanonicalJson::encode([
+                'effective_date' => (string) $r['effective_date'],
+                'employment_id' => (int) $r['employment_id'],
+                'entry_type' => (string) $r['entry_type'],
+                'leave_year' => (int) $r['leave_year'],
+                'minutes_delta' => (int) $r['minutes_delta'],
+                'reason' => trim((string) $r['reason']),
+                'reversal_of_id' => $r['reversal_of_id'] === null ? null : (int) $r['reversal_of_id'],
+                'source_absence_id' => $r['source_absence_id'] === null ? null : (int) $r['source_absence_id'],
+                'supplier_id' => (int) $r['supplier_id'],
+                'support_status' => (string) $r['support_status'],
+            ]), true);
+            $termination = static fn (array $r): string => hash('sha256', 'termination-leave-reversal:' . (int) $r['reversal_of_id'], true);
+            $source = (string) ($row['source_hash'] ?? '');
+            if (($row['reversal_of_id'] ?? null) !== null && hash_equals($termination($row), $source)) {
+                $out = $this->rehash($table, 'source_hash', $row, $out, $termination);
+            } else {
+                $out = $this->rehash($table, 'source_hash', $row, $out, $product);
+            }
+        }
+        if ($table === 'payroll_employer_policy_audit' && ($row['snapshot_json'] ?? null) !== null) {
+            $snapshot = json_decode((string) $row['snapshot_json'], true, 64, JSON_THROW_ON_ERROR);
+            if (is_array($snapshot) && hash_equals(hash('sha256', (string) $row['snapshot_json']), (string) ($row['snapshot_hash'] ?? ''))) {
+                foreach (['id' => 'payroll_employer_policies', 'supplier_id' => 'supplier', 'created_by' => 'users', 'updated_by' => 'users'] as $key => $reference) {
+                    if (($snapshot[$key] ?? null) !== null) {
+                        $snapshot[$key] = $reference === 'users' ? $out['actor_user_id'] ?? null
+                            : ($map[$reference][MyuctoExportReader::id($snapshot[$key])] ?? throw new RuntimeException('Chybí zdrojová vazba snímku politiky zaměstnavatele.'));
+                    }
+                }
+                $out['snapshot_json'] = json_encode($snapshot, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                $out['snapshot_hash'] = hash('sha256', $out['snapshot_json']);
+                $this->rehashed[$table . '.snapshot_hash'] = ($this->rehashed[$table . '.snapshot_hash'] ?? 0) + 1;
+            } else {
+                $this->rehashed[$table . '.snapshot_hash (ponechán)'] = ($this->rehashed[$table . '.snapshot_hash (ponechán)'] ?? 0) + 1;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @param array<string,mixed> $out
+     * @param callable(array<string,mixed>):string $formula
+     * @return array<string,mixed>
+     */
+    private function rehash(string $table, string $column, array $row, array $out, callable $formula): array
+    {
+        if (hash_equals($formula($row), (string) ($row[$column] ?? ''))) {
+            $out[$column] = $formula($out);
+            $this->rehashed[$table . '.' . $column] = ($this->rehashed[$table . '.' . $column] ?? 0) + 1;
+        } else {
+            $this->rehashed[$table . '.' . $column . ' (ponechán)'] = ($this->rehashed[$table . '.' . $column . ' (ponechán)'] ?? 0) + 1;
+        }
+        return $out;
+    }
+
+    /**
+     * Globální číselník, který cíl ještě nemá: balíček specifikace JMHZ přibalený k aplikaci
+     * se nainstaluje stejně, jako ho instaluje mzdový modul při prvním použití.
+     *
+     * @param list<string> $keys
+     * @param array<string,mixed> $row
+     */
+    private function installGlobal(PDO $pdo, string $table, array $keys, array $row): ?int
+    {
+        if ($table !== 'payroll_jmhz_spec_packages' || !is_string($row['package_key'] ?? null)) {
+            return null;
+        }
+        $manifest = (new JmhzSpecPackageCatalog())->load($row['package_key'], is_string($row['manifest_sha256'] ?? null) ? $row['manifest_sha256'] : null);
+        (new JmhzSpecPackageRepository($this->db))->install($manifest);
+        return $this->lookup($pdo, $table, $keys, $row, null);
+    }
+
+    /**
+     * Auditní stopa firmy ze zdroje. Řetěz hashů patří instalaci, ne firmě, proto se záznamy
+     * vloží bez pečeti a zapečetí se do řetězu cíle po commitu (stejně jako odložené pečetění
+     * aplikace); čas a akce zůstanou, entita a ID v payloadu se přemapují, autor je aktér
+     * obnovy. ID v payloadu, které obnova nezná, zůstane a vykáže se.
+     *
+     * @param array<string,array<int|string,int>> $map
+     * @param null|callable(string):void $step
+     */
+    private function restoreActivityLog(PDO $pdo, MyuctoRowStore $tables, array $map, int $supplierId, int $actorId, array &$report, ?callable $step): void
+    {
+        if (!$tables->hasTable(MyuctoImportProfile::ACTIVITY_TABLE) || $tables->isEmpty(MyuctoImportProfile::ACTIVITY_TABLE)) {
+            return;
+        }
+        if ($step !== null) {
+            $step('Zápis: auditní stopa (' . $tables->count(MyuctoImportProfile::ACTIVITY_TABLE) . ' řádků)');
+        }
+        $inserter = new MyuctoBatchInserter($pdo, MyuctoImportProfile::ACTIVITY_TABLE);
+        $rows = iterator_to_array($tables->rows(MyuctoImportProfile::ACTIVITY_TABLE));
+        ksort($rows);
+        foreach ($rows as $row) {
+            $entityId = null;
+            if (($row['entity_id'] ?? null) !== null) {
+                $target = MyuctoImportProfile::ACTIVITY_ENTITY_TARGETS[(string) ($row['entity_type'] ?? '')] ?? null;
+                $entityId = $target === 'supplier' ? $supplierId : ($target === null ? null : ($map[$target][MyuctoExportReader::id($row['entity_id'])] ?? null));
+                if ($entityId === null) {
+                    $report['detached']['activity_log.entity_id'] = ($report['detached']['activity_log.entity_id'] ?? 0) + 1;
+                }
+            }
+            $payload = $row['payload'] ?? null;
+            if ($payload !== null && $payload !== '') {
+                $decoded = json_decode((string) $payload, true, 512, JSON_THROW_ON_ERROR);
+                if (is_array($decoded)) {
+                    $payload = json_encode($this->remapActivityPayload($decoded, $map, $actorId, $report),
+                        JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                }
+            }
+            $inserter->add(['supplier_id' => $supplierId, 'user_id' => ($row['user_id'] ?? null) === null ? null : $actorId,
+                'action' => $row['action'], 'entity_type' => $row['entity_type'] ?? null, 'entity_id' => $entityId,
+                'payload' => $payload, 'ip' => $row['ip'] ?? null, 'user_agent' => $row['user_agent'] ?? null,
+                'created_at' => $row['created_at']]);
+            $report['created'][MyuctoImportProfile::ACTIVITY_TABLE] = ($report['created'][MyuctoImportProfile::ACTIVITY_TABLE] ?? 0) + 1;
+        }
+        $inserter->flush();
+    }
+
+    /**
+     * @param array<array-key,mixed> $payload
+     * @param array<string,array<int|string,int>> $map
+     * @return array<array-key,mixed>
+     */
+    private function remapActivityPayload(array $payload, array $map, int $actorId, array &$report): array
+    {
+        $mapId = function (string $target, mixed $value) use ($map, $actorId, &$report): mixed {
+            if (!is_int($value) && !(is_string($value) && ctype_digit($value))) {
+                return $value;
+            }
+            if ($target === 'users') {
+                return $actorId;
+            }
+            $mapped = $map[$target][(int) $value] ?? null;
+            if ($mapped === null) {
+                $report['detached']['activity_log.payload'] = ($report['detached']['activity_log.payload'] ?? 0) + 1;
+                return null;
+            }
+            return $mapped;
+        };
+        foreach ($payload as $key => $value) {
+            if (is_array($value) && !array_is_list($value)) {
+                $payload[$key] = $this->remapActivityPayload($value, $map, $actorId, $report);
+                continue;
+            }
+            if (is_array($value) && is_string($key) && isset(MyuctoImportProfile::ACTIVITY_PAYLOAD_TARGETS[$key])) {
+                $payload[$key] = array_values(array_filter(array_map(
+                    static fn (mixed $v): mixed => $mapId(MyuctoImportProfile::ACTIVITY_PAYLOAD_TARGETS[$key], $v), $value),
+                    static fn (mixed $v): bool => $v !== null));
+                continue;
+            }
+            if (is_array($value)) {
+                $payload[$key] = array_map(fn (mixed $item): mixed => is_array($item) ? $this->remapActivityPayload($item, $map, $actorId, $report) : $item, $value);
+                continue;
+            }
+            if (!is_string($key) || $value === null) {
+                continue;
+            }
+            $target = MyuctoImportProfile::ACTIVITY_PAYLOAD_TARGETS[$key] ?? match ($key) {
+                'source_id' => $this->journalSourceTable((string) ($payload['source_type'] ?? '')),
+                'document_id' => MyuctoImportProfile::DOCUMENT_TYPES[(string) ($payload['document_type'] ?? '')] ?? null,
+                'project_id' => 'projects',
+                default => null,
+            };
+            if ($target !== null) {
+                $payload[$key] = $mapId($target, $value);
+            } elseif ((str_ends_with($key, '_id') || str_ends_with($key, '_by')) && (is_int($value) || ctype_digit((string) $value))) {
+                $report['detached']['activity_log.payload_kept.' . $key] = ($report['detached']['activity_log.payload_kept.' . $key] ?? 0) + 1;
+            }
+        }
+        return $payload;
+    }
+
+    private function journalSourceTable(string $sourceType): ?string
+    {
+        return match ($sourceType) {
+            'invoice', 'provision' => 'invoices', 'purchase_invoice' => 'purchase_invoices', 'cash' => 'cash_documents',
+            'bank' => 'bank_transactions', 'asset', 'asset_disposal' => 'assets', 'depreciation' => 'depreciation_entries',
+            'offset' => 'offset_agreements', 'settlement' => 'invoice_settlements', 'other_item' => 'other_items',
+            'closing', 'opening', 'income_tax', 'deferred_tax', 'profit_distribution', 'stock' => 'accounting_periods',
+            default => null,
+        };
+    }
+
+    /**
+     * Souhrn podání DPH nese snímek dokladů období (`document_refs`): kontrola „změny po podání"
+     * podle něj hledá doklady upravené po podání. ID dokladů se přemapují; odkaz na doklad,
+     * který export nenese (ve zdroji smazaný), se vynechá a vykáže.
+     */
+    private function remapSubmissionSummary(string $json, array $map): string
+    {
+        $summary = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($summary) || !is_array($summary['document_refs'] ?? null)) {
+            return $json;
+        }
+        $refs = [];
+        foreach ($summary['document_refs'] as $ref) {
+            $reference = is_array($ref) ? (['sale' => 'invoices', 'purchase' => 'purchase_invoices', 'cash' => 'cash_documents'][(string) ($ref['source'] ?? '')] ?? null) : null;
+            if ($reference === null) {
+                throw new RuntimeException('Nepodporovaný druh dokladu v souhrnu podání.');
+            }
+            $id = $ref['invoice_id'] ?? null;
+            $newId = (is_int($id) || (is_string($id) && ctype_digit($id))) ? ($map[$reference][(int) $id] ?? null) : null;
+            if ($newId === null) {
+                $this->droppedLinks['tax_submissions.document_refs'] = ($this->droppedLinks['tax_submissions.document_refs'] ?? 0) + 1;
+                continue;
+            }
+            $refs[] = array_replace($ref, ['invoice_id' => $newId]);
+        }
+        $summary['document_refs'] = $refs;
+        return json_encode($summary, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
     }
 
     /**
@@ -1379,6 +1728,42 @@ final class MyuctoImporter
         }
     }
 
+    /**
+     * Historie režimu účetnictví (podvojné, daňová evidence) se nepřenáší, firma ji má
+     * od založení. Nese-li ji export, musí cíl ke každému datu vést stejný režim, jinak
+     * by převzatý deník nebo evidence neodpovídaly režimu firmy.
+     *
+     * @param array<int|string,array<string,mixed>>|null $source
+     */
+    private function assertAccountingModes(PDO $pdo, ?array $source, int $sourceSupplier, int $targetSupplier): void
+    {
+        if ($source === null || $source === []) {
+            return;
+        }
+        $sourceByDate = [];
+        foreach ($source as $row) {
+            if (MyuctoExportReader::id($row['supplier_id'] ?? null) !== $sourceSupplier
+                || !is_string($row['effective_from'] ?? null) || isset($sourceByDate[$row['effective_from']])) {
+                throw new RuntimeException('Neplatná historie režimu účetnictví v exportu.');
+            }
+            $sourceByDate[$row['effective_from']] = (string) ($row['accounting_mode'] ?? '');
+        }
+        $stmt = $pdo->prepare('SELECT effective_from, accounting_mode FROM supplier_accounting_modes WHERE supplier_id = ? ORDER BY effective_from FOR UPDATE');
+        $stmt->execute([$targetSupplier]);
+        $targetByDate = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+        $dates = array_unique([...array_keys($sourceByDate), ...array_keys($targetByDate)]);
+        sort($dates);
+        $left = null;
+        $right = null;
+        foreach ($dates as $date) {
+            $left = $sourceByDate[$date] ?? $left;
+            $right = $targetByDate[$date] ?? $right;
+            if ($left !== null && $right !== null && $left !== $right) {
+                throw new RuntimeException('Režim účetnictví cílové firmy se liší od exportu k ' . $date . '.');
+            }
+        }
+    }
+
     private function assertVatHistory(
         PDO $pdo,
         ?array $source,
@@ -1459,7 +1844,10 @@ final class MyuctoImporter
                     // Složený FK (type_id, id) na hodnotu dimenze: typ mapuje vlastní FK nebo EXTRA_REFERENCES.
                     if ($fk['REFERENCED_TABLE_NAME'] === 'dimension_values' && $fk['REFERENCED_COLUMN_NAME'] === 'type_id') continue;
                     if ($fk['REFERENCED_COLUMN_NAME'] !== 'id') {
-                        throw new RuntimeException('Nepodporovaná reference schématu.');
+                        // Druhý sloupec složeného FK (prostředí podání, kopie zaměstnance, rok): hodnotu
+                        // ponechá, nebo ji přemapuje vlastní vazba z EXTRA_REFERENCES.
+                        if (in_array($fk['COLUMN_NAME'], MyuctoImportProfile::COMPOSITE_FK_COLUMNS[$table] ?? [], true)) continue;
+                        throw new RuntimeException('Nepodporovaná reference schématu: ' . $table . '.' . $fk['COLUMN_NAME'] . '.');
                     }
                     $this->fkReferences[$table][$fk['COLUMN_NAME']] = $fk['REFERENCED_TABLE_NAME'];
                 }
@@ -1560,6 +1948,10 @@ final class MyuctoImporter
         if (in_array($table, ['other_item_posting_profiles', 'other_item_posting_overrides'], true) && ($row['dimensions_json'] ?? null) !== null) {
             $out['dimensions_json'] = $this->remapDimensionList((string) $row['dimensions_json'], $map, $table);
         }
+        $out = $this->remapPayrollValues($table, $row, $out, $map);
+        if ($table === 'tax_submissions' && ($row['summary_json'] ?? null) !== null) {
+            $out['summary_json'] = $this->remapSubmissionSummary((string) $row['summary_json'], $map);
+        }
         if ($table === 'accounting_closing_steps' && ($row['step_key'] ?? null) === 'provisions' && ($row['payload'] ?? null) !== null) {
             $payload = json_decode((string) $row['payload'], true, 512, JSON_THROW_ON_ERROR);
             $changed = false;
@@ -1575,6 +1967,11 @@ final class MyuctoImporter
             if ($changed) {
                 $out['payload'] = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
             }
+        }
+        MyuctoImportSealedValues::assertNoUnknownCiphertext($table, $row);
+        if (MyuctoImportSealedValues::covers($table)) {
+            $out = ($this->sealed ?? throw new RuntimeException('Export nese šifrované mzdové údaje; obnova potřebuje klíče zdrojové instalace.'))
+                ->reseal($table, $row, $out);
         }
         foreach ($out as $column => $_) {
             if (($schema['columns'][$table][$column]['GENERATION_EXPRESSION'] ?? '') !== '') {
