@@ -114,6 +114,8 @@ final class OtherItemPostedChangesTest extends TestCase
         $id = (int) $posted['id'];
         $entryId = (int) $posted['journal_entry_id'];
 
+        $preview = $this->data($this->action->get($this->request('GET', ['other_items' => 1]), new Response(), ['id' => (string) $id]))['posted_deletion'];
+        self::assertTrue($preview['allowed']);
         $denied = $this->action->deletePosted($this->request('DELETE', ['other_items' => 2, 'accounting' => 2, 'accounting.journal.write' => 2]),
             new Response(), ['id' => (string) $id]);
         self::assertSame(403, $denied->getStatusCode());
@@ -202,6 +204,13 @@ final class OtherItemPostedChangesTest extends TestCase
     {
         $entries = fn (): int => (int) $this->pdo->query("SELECT COUNT(*) FROM journal_entries WHERE supplier_id = {$this->supplierId}")->fetchColumn();
         $before = $entries();
+        $preview = $this->data($this->action->get($this->request('GET', ['other_items' => 1]), new Response(), ['id' => (string) $id]))['posted_deletion'] ?? null;
+        if ($code !== 'not_posted') {
+            self::assertFalse($preview['allowed'] ?? true, $code);
+            self::assertSame($code, $preview['code'] ?? null);
+        } else {
+            self::assertNull($preview);
+        }
         $response = $this->action->deletePosted($this->request('DELETE', self::PERMS), new Response(), ['id' => (string) $id]);
         self::assertSame(409, $response->getStatusCode(), $code);
         self::assertSame('other_items.error.' . $code, $this->error($response));

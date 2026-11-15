@@ -358,6 +358,23 @@ final class OtherItemService
             'locked_override' => $purged['locked_override']];
     }
 
+    /**
+     * Smí rozhraní nabídnout smazání zaúčtovaného dokladu i se zápisem? Náhled bez zámků,
+     * rozhoduje až {@see deletePosted()}.
+     *
+     * @param array<string,mixed> $item
+     * @return array{allowed:bool, needs_ack:bool, code:?string, message:?string}
+     */
+    public function postedDeletion(int $supplierId, array $item): array
+    {
+        try {
+            $this->assertPostedDeletable($supplierId, $item);
+        } catch (OtherItemException $e) {
+            return ['allowed' => false, 'needs_ack' => false, 'code' => $e->errorCode, 'message' => $e->getMessage()];
+        }
+        return DocumentJournalPurge::verdict($this->journalPurge->entryBlock($supplierId, (int) $item['journal_entry_id']));
+    }
+
     /** @param array<string,mixed> $item */
     private function assertPostedDeletable(int $supplierId, array $item): void
     {

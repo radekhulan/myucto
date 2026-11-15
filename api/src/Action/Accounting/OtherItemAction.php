@@ -97,7 +97,14 @@ final class OtherItemAction
     public function get(Request $request, Response $response, array $args): Response
     {
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::READ, $err)) return $err;
-        return $this->run($response, fn () => $this->service->get($this->currentSupplierId($request), (int) $args['id']));
+        return $this->run($response, function () use ($request, $args): array {
+            $supplierId = $this->currentSupplierId($request);
+            $item = $this->service->get($supplierId, (int) $args['id']);
+            if ($item['status'] === 'posted' && $item['journal_entry_id'] !== null) {
+                $item['posted_deletion'] = $this->service->postedDeletion($supplierId, $item);
+            }
+            return $item;
+        });
     }
 
     public function create(Request $request, Response $response): Response

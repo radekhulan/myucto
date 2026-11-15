@@ -233,6 +233,24 @@ final class InternalDocumentService
         return $result;
     }
 
+    /**
+     * Smí rozhraní nabídnout smazání zaúčtovaného dokladu i se zápisem? Náhled bez zámků,
+     * rozhoduje až {@see deletePosted()}. `needs_ack` = uzamčené datum, smazání chce
+     * vědomé potvrzení.
+     *
+     * @param array<string,mixed> $doc
+     * @return array{allowed:bool, needs_ack:bool, code:?string, message:?string}
+     */
+    public function postedDeletion(int $supplierId, array $doc): array
+    {
+        try {
+            self::assertPostedDeletable($doc);
+        } catch (InternalDocumentException $e) {
+            return ['allowed' => false, 'needs_ack' => false, 'code' => $e->errorCode, 'message' => $e->getMessage()];
+        }
+        return DocumentJournalPurge::verdict($this->journalPurge->entryBlock($supplierId, (int) $doc['journal_entry_id']));
+    }
+
     /** @param array<string,mixed> $doc */
     private static function assertPostedDeletable(array $doc): void
     {

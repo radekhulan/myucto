@@ -507,7 +507,18 @@
     "remaining_payment_hint": "Sum of unpaid installments. Only the principal reduces the item balance; interest and fee are posted with the payment.",
     "allocation_split": "principal {principal}, interest {interest}, fee {fee}",
     "allocation_split_hint": "The payment is split by installments: interest first, then the fee and finally the principal.",
-    "linked_invoice": "Linked invoice"
+    "linked_invoice": "Linked invoice",
+    "edit_note": "Edit note",
+    "edit_note_hint": "The note is internal text of the document and does not affect the posting or the subledger. Other fields stay locked; correct them with a reversal or reposting.",
+    "note_saved": "Note saved.",
+    "delete_posted": "Delete with entry",
+    "delete_posted_title": "Delete posted document",
+    "delete_posted_intro": "Document {number} will be deleted completely, including its journal entry. No reversal is created; it disappears from the accounts and the subledger.",
+    "delete_posted_rules": "Only an incorrect document in an open accounting period without payments can be deleted, the same as a journal entry. Unlink payments first; reverse a closed document.",
+    "delete_posted_locked": "The document falls into a locked period. You will be asked to confirm the deletion explicitly.",
+    "delete_posted_done": "The document and its journal entry have been deleted.",
+    "delete_posted_cancelled": "The journal entry was deleted and the recurring occurrence cancelled so that the schedule does not create it again.",
+    "delete_posted_blocked": "Cannot be deleted: {reason} You can reverse the document."
   },
   "internal_documents": {
     "title": "Internal documents",
@@ -631,7 +642,19 @@
     "journal_reversal_of": "The entry reverses internal document",
     "open_document": "Open internal document",
     "from_entry_hint": "This manual entry has no internal document yet.",
-    "from_entry": "Create internal document"
+    "from_entry": "Create internal document",
+    "edit_text": "Edit note",
+    "edit_text_title": "Document note and description",
+    "edit_text_hint": "The note is internal text of the document and does not affect the accounts. Lines, amounts and dates stay locked; correct them with a reversal.",
+    "edit_text_title_hint": "The description is also the description of the journal entry and changes there too. This is possible only in an open accounting period.",
+    "text_saved": "Note saved.",
+    "delete_posted": "Delete with entry",
+    "delete_posted_title": "Delete posted document",
+    "delete_posted_intro": "Document {number} will be deleted completely, including its journal entry. No reversal is created; it disappears from the accounts as if it had never been posted.",
+    "delete_posted_rules": "Only an incorrect document in an open accounting period can be deleted, the same as a journal entry. Reverse a document that has already been reported or closed.",
+    "delete_posted_locked": "The document falls into a locked period. You will be asked to confirm the deletion explicitly.",
+    "delete_posted_done": "The document and its journal entry have been deleted.",
+    "delete_posted_blocked": "Cannot be deleted: {reason} You can reverse the document."
   },
   "invoice_default_note": {
     "title": "Default note below items",

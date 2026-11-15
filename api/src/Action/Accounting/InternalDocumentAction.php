@@ -68,7 +68,14 @@ final class InternalDocumentAction
     public function get(Request $request, Response $response, array $args): Response
     {
         if (!$this->guard($request, $response, 'accounting', AccessLevel::READ, $err)) return $err;
-        return $this->run($request, $response, fn () => $this->service->get($this->currentSupplierId($request), (int) $args['id']));
+        return $this->run($request, $response, function () use ($request, $args): array {
+            $supplierId = $this->currentSupplierId($request);
+            $doc = $this->service->get($supplierId, (int) $args['id']);
+            if ($doc['status'] === 'posted') {
+                $doc['posted_deletion'] = $this->service->postedDeletion($supplierId, $doc);
+            }
+            return $doc;
+        });
     }
 
     public function create(Request $request, Response $response): Response

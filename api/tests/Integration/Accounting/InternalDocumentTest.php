@@ -732,11 +732,16 @@ final class InternalDocumentTest extends TestCase
         $posted = $this->service->post($this->supplierId,
             (int) $this->service->create($this->supplierId, $this->input(), null)['id'], $this->audit());
         $args = ['id' => (string) $posted['id']];
+        $preview = fn (): array => $this->data($action->get($this->request('GET', ['accounting' => 1]), new Response(), $args))['posted_deletion'];
+        self::assertSame(['allowed' => true, 'needs_ack' => false, 'code' => null, 'message' => null], $preview());
 
         $this->pdo->prepare(
             'INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?)
              ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)'
         )->execute([$this->supplierId, self::YEAR . '-06-30']);
+        self::assertTrue($preview()['allowed']);
+        self::assertTrue($preview()['needs_ack']);
+        self::assertSame('date_locked', $preview()['code']);
         $locked = $action->deletePosted($this->request('DELETE', $perms), new Response(), $args);
         self::assertSame(409, $locked->getStatusCode());
         self::assertSame('date_locked', $this->error($locked));
@@ -748,6 +753,8 @@ final class InternalDocumentTest extends TestCase
         $this->pdo->prepare('UPDATE accounting_supplier_settings SET locked_until = NULL WHERE supplier_id = ?')
             ->execute([$this->supplierId]);
         $this->container->get(AccountingPeriodRepository::class)->setStatus($this->periodId, $this->supplierId, 'closed');
+        self::assertFalse($preview()['allowed']);
+        self::assertSame('period_not_open', $preview()['code']);
         $closed = $action->deletePosted($this->request('DELETE', $perms), new Response(), $args);
         self::assertSame(409, $closed->getStatusCode());
         self::assertSame('period_not_open', $this->error($closed));

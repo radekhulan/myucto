@@ -326,6 +326,59 @@ final class DocumentJournalPurge
     }
 
     /**
+     * Náhled bran {@see purgeEntry()} pro rozhraní, bez zámků a bez zápisu: nabídnout
+     * smazání dokladu i se zápisem, nebo rovnou vysvětlit, proč zbývá storno. Hlídá období
+     * a zámek ({@see JournalEntryDeletionRules::blockSingle()}), okruh párování a rozpad
+     * saldokonta. Navazující agendy (SVJ, alokace) a souběh ověří až smazání samo.
+     *
+     * @return array{code:string, message:string, can_acknowledge?:bool}|null
+     */
+    public function entryBlock(int $supplierId, int $entryId): ?array
+    {
+        $pdo = $this->db->pdo();
+        $byId = $pdo->prepare(self::ENTRY_SELECT . ' WHERE je.supplier_id = ? AND je.id = ?');
+        $byId->execute([$supplierId, $entryId]);
+        $entry = $byId->fetch(PDO::FETCH_ASSOC);
+        if ($entry === false) {
+            return ['code' => 'not_found', 'message' => 'Účetní zápis nenalezen.'];
+        }
+        $lock = $pdo->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ?');
+        $lock->execute([$supplierId]);
+        $lockedUntil = $lock->fetchColumn();
+        $lockedUntil = ($lockedUntil === false || $lockedUntil === null) ? null : (string) $lockedUntil;
+        $block = JournalEntryDeletionRules::blockSingle($entry, $lockedUntil);
+        if ($block !== null && empty($block['can_acknowledge'])) {
+            return $block;
+        }
+        $paired = $pdo->prepare('SELECT 1 FROM journal_line_pairing_items WHERE supplier_id = ? AND entry_id = ? LIMIT 1');
+        $paired->execute([$supplierId, $entryId]);
+        if ($paired->fetchColumn() !== false) {
+            return ['code' => 'entry_paired',
+                'message' => 'Řádky zápisu jsou spárované v okruhu párování na účtu. Nejdřív je v párování účtu odeberte, pak doklad smažte.'];
+        }
+        try {
+            (new JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$entryId]);
+        } catch (PostingException $e) {
+            return ['code' => $e->errorCode, 'message' => $e->getMessage()];
+        }
+        return $block;
+    }
+
+    /**
+     * Výsledek {@see entryBlock()} pro rozhraní: uzamčené datum smazání nabídne
+     * s vědomým potvrzením (`needs_ack`), jiná brána ho zakáže s vysvětlením.
+     *
+     * @param array{code:string, message:string, can_acknowledge?:bool}|null $block
+     * @return array{allowed:bool, needs_ack:bool, code:?string, message:?string}
+     */
+    public static function verdict(?array $block): array
+    {
+        if ($block === null) return ['allowed' => true, 'needs_ack' => false, 'code' => null, 'message' => null];
+        $ack = !empty($block['can_acknowledge']);
+        return ['allowed' => $ack, 'needs_ack' => $ack, 'code' => $block['code'], 'message' => $block['message']];
+    }
+
+    /**
      * Soubory příloh smazaných zápisů, na které už nic neukazuje. Volat až po commitu.
      *
      * @param list<array<string,mixed>> $attachmentRows
