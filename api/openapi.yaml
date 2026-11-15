@@ -20379,6 +20379,10 @@ paths:
         Admin-only. Pořadí vynuceno: open_next → close_books → fx_revaluation;
         mazané řádky jdou dumpem do activity_log. Asistované zápisy
         estimates/deferrals se nemažou — stornují se jednotlivě.
+        Okruhy párování otevřených položek nad mazanými zápisy se uvolní (audit
+        `accounting.pairing_released` s okruhy, zápisy a účty); odpověď nese
+        `released_pairings` = počet uvolněných okruhů. Řádek rozepsaný na doklady
+        saldokonta revert zastaví (409 `allocation_saldo_in_use`).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -20488,6 +20492,8 @@ paths:
         nepošle `replace_taken_over_opening: true` s důvodem — pak se převzaté
         zápisy smažou (auditní událost `accounting.opening_takeover_replaced`
         s dumpem) a zaúčtuje se vypočtený zápis (`opening_source = replaced`).
+        Okruhy párování nad nahrazenými zápisy se uvolní, odpověď nese
+        `released_pairings` (počet uvolněných okruhů, jako u všech akcí kroků uzávěrky).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }

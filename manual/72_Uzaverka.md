@@ -360,11 +360,13 @@ stejně jako účetní sestavy.
 Administrátor může krok vrátit tlačítkem **Vzít zpět otevření roku**.
 
 > [!NOTE]
-> Vrácení kroku, který zaúčtovaný zápis smaže (otevírací zápis, kurzové rozdíly, opravné položky, časové
-> rozlišení), i **Nahradit převzaté stavy vypočtenými** se odmítne, když je řádek mazaného zápisu spárovaný
-> s jiným zápisem v okruhu otevřených položek nebo rozepsaný na doklady v saldokontu. Okruh nejdřív zrušte
-> v opisu účtu na záložce **Otevřené položky - párování** ([kap. 55.8.5.1](55_Hlavni_kniha.md)), přiřazení
-> v saldokontu, a krok pak vraťte znovu. Smazání by jinak párování tiše odneslo.
+> Vrácení kroku, opakovaný běh kroku, který svůj starý zápis smaže (otevírací zápis, kurzové rozdíly, opravné
+> položky, časové rozlišení, zásoby, daň), i **Nahradit převzaté stavy vypočtenými** zápisy jen nahrazují.
+> Párování řádků mazaného zápisu v okruzích otevřených položek proto nebrání: okruhy se uvolní stejně jako
+> při stornu, dotčené řádky protějšků jsou znovu otevřené a aplikace po akci ohlásí počet uvolněných párování.
+> Co se uvolnilo (okruhy, zápisy, účty), je v auditním logu. Spárujte je znovu v opisu účtu na záložce
+> **Otevřené položky - párování** ([kap. 55.8.5.1](55_Hlavni_kniha.md)). Řádek rozepsaný na doklady v saldokontu
+> akci dál zastaví; přiřazení nejdřív zrušte v saldokontu.
 
 #### Převzaté počáteční stavy
 
