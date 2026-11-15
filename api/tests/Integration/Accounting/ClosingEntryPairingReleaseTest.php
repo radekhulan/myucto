@@ -10,27 +10,32 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
+use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\PostingService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Revert kroku uzávěrky a náhrada převzatého otevíracího zápisu mažou zápisy natvrdo
- * ({@see ClosingRepository::deleteClosingEntry()}, {@see ClosingRepository::deleteOpeningEntry()}).
- * Otevírací zápis i kurzové rozdíly, rezervy a časové rozlišení leží v okně otevřených
- * položek, takže jejich řádky bývají spárované. Smazání nesmí okruh ani rozpad
- * saldokonta odnést kaskádou, stejně jako mazání v deníku.
+ * Revert kroku uzávěrky, opakovaný běh a náhrada převzatého otevíracího zápisu mažou
+ * zápisy natvrdo ({@see ClosingRepository::deleteClosingEntry()},
+ * {@see ClosingRepository::deleteOpeningEntry()}). Otevírací zápis i kurzové rozdíly,
+ * rezervy a časové rozlišení leží v okně otevřených položek, takže jejich řádky bývají
+ * spárované. Systémový přepočet zápis jen nahrazuje, proto okruh neblokuje: uvolní ho
+ * jako storno, zapíše do auditu a krok vrátí počet uvolněných párování. Dřív okruh
+ * odešel kaskádou beze stopy. Rozpad saldokonta dál blokuje, ten systém neobnoví.
  *
  * Vše v transakci, kterou tearDown rollbackne.
  */
 #[Group('integration')]
-final class ClosingEntryPairingGuardTest extends TestCase
+final class ClosingEntryPairingReleaseTest extends TestCase
 {
     private const YEAR = 2099;
 
     private Connection $db;
     private ClosingRepository $closing;
+    private ClosingService $service;
     private PostingService $posting;
+    private AccountingPeriodRepository $periods;
 
     private int $supplierId = 0;
     private bool $inTx = false;
@@ -45,9 +50,11 @@ final class ClosingEntryPairingGuardTest extends TestCase
             $container = Bootstrap::buildContainer();
             $this->db      = $container->get(Connection::class);
             $this->closing = $container->get(ClosingRepository::class);
+            $this->service = $container->get(ClosingService::class);
             $this->posting = $container->get(PostingService::class);
             $seeder        = $container->get(ChartOfAccountsSeeder::class);
             $periods       = $container->get(AccountingPeriodRepository::class);
+            $this->periods = $periods;
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -76,41 +83,50 @@ final class ClosingEntryPairingGuardTest extends TestCase
         }
     }
 
-    public function testRevertedFxRevaluationKeepsPairedEntry(): void
+    public function testRevertedStepReleasesPairingAndReportsCount(): void
+    {
+        $period = $this->periods->findForDate($this->supplierId, self::YEAR . '-06-30');
+        $periodId = (int) $period['id'];
+        $entryId = $this->entry('income_tax', $periodId);
+        $partnerId = $this->entry('manual', 991003);
+        $pairing = $this->pair($entryId, $partnerId);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closing' WHERE supplier_id = ? AND id = ?")
+            ->execute([$this->supplierId, $periodId]);
+        $rowVersion = (int) $this->periods->findById($this->supplierId, $periodId)['row_version'];
+
+        $result = $this->service->revertStep($this->supplierId, $periodId, 'income_tax', $rowVersion, ['user_id' => null]);
+
+        self::assertSame(1, $result['released_pairings'], 'Krok hlásí počet uvolněných párování.');
+        self::assertSame(0, $this->entryCount($entryId));
+        self::assertSame(1, $this->entryCount($partnerId), 'Protějšek z okruhu zůstal.');
+        self::assertSame(0, $this->pairingItems($pairing), 'Okruh se rozpustil, protějšek je zase otevřený.');
+        $audit = $this->audit($entryId);
+        self::assertSame('closing_replace', $audit['reason']);
+        self::assertSame(1, $audit['pairing_count']);
+        self::assertEqualsCanonicalizing([$entryId, $partnerId], $audit['entry_ids']);
+        self::assertSame(['311'], $audit['accounts']);
+    }
+
+    public function testRevertedFxRevaluationReleasesPairing(): void
     {
         $fxSourceId = 9_990_000_001;
         $entryId = $this->entry('fx_revaluation', $fxSourceId);
         $pairing = $this->pair($entryId, $this->entry('manual', 991001));
 
-        try {
-            $this->closing->deleteClosingEntry($this->supplierId, 'fx_revaluation', $fxSourceId);
-            self::fail('Spárovaný zápis kurzových rozdílů se nesmí smazat.');
-        } catch (ClosingException $e) {
-            self::assertSame('entry_paired', $e->errorCode);
-        }
-        self::assertSame(1, $this->entryCount($entryId));
-        self::assertSame(2, $this->pairingItems($pairing));
+        $dump = $this->closing->deleteClosingEntry($this->supplierId, 'fx_revaluation', $fxSourceId);
 
-        // Bez okruhu revert projde (kontrola nic jiného nemění).
-        $this->db->pdo()->prepare('DELETE FROM journal_line_pairings WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $pairing]);
-        self::assertNotNull($this->closing->deleteClosingEntry($this->supplierId, 'fx_revaluation', $fxSourceId));
+        self::assertNotNull($dump);
+        self::assertCount(2, $dump['released_pairings'], 'Uvolněná položka zápisu i rozpuštěný zbytek okruhu.');
         self::assertSame(0, $this->entryCount($entryId));
+        self::assertSame(0, $this->pairingItems($pairing));
+        self::assertSame(1, count(array_unique(array_column($this->closing->takeReleasedPairings(), 'pairing_id'))));
+        self::assertSame([], $this->closing->takeReleasedPairings(), 'Počítadlo se po přečtení vynuluje.');
     }
 
-    public function testReplacedOpeningEntryKeepsPairedAndAllocatedLines(): void
+    public function testReplacedOpeningEntryReleasesPairingButKeepsSaldoAllocation(): void
     {
         $openingId = $this->entry('opening', null);
         $pairing = $this->pair($openingId, $this->entry('manual', 991002));
-
-        try {
-            $this->closing->deleteOpeningEntry($this->supplierId, $openingId);
-            self::fail('Spárovaný otevírací zápis se nesmí smazat.');
-        } catch (ClosingException $e) {
-            self::assertSame('entry_paired', $e->errorCode);
-        }
-        self::assertSame(1, $this->entryCount($openingId));
-
-        $this->db->pdo()->prepare('DELETE FROM journal_line_pairings WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $pairing]);
         $line = $this->firstLine($openingId);
         $this->db->pdo()->prepare(
             "INSERT INTO journal_settlement_allocations (supplier_id, entry_id, line_no, account_id, side, doc_type, doc_id, amount, kind)
@@ -123,6 +139,27 @@ final class ClosingEntryPairingGuardTest extends TestCase
             self::assertSame('allocation_saldo_in_use', $e->errorCode);
         }
         self::assertSame(1, $this->entryCount($openingId));
+        self::assertSame(2, $this->pairingItems($pairing), 'Odmítnutí okruh nechá být.');
+
+        $this->db->pdo()->prepare('DELETE FROM journal_settlement_allocations WHERE supplier_id = ? AND entry_id = ?')
+            ->execute([$this->supplierId, $openingId]);
+        $dump = $this->closing->deleteOpeningEntry($this->supplierId, $openingId);
+
+        self::assertNotNull($dump);
+        self::assertNotEmpty($dump['released_pairings']);
+        self::assertSame(0, $this->entryCount($openingId));
+        self::assertSame(0, $this->pairingItems($pairing));
+    }
+
+    /** @return array<string,mixed> */
+    private function audit(int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT payload FROM activity_log WHERE supplier_id = ? AND action = 'accounting.pairing_released'
+                AND entity_type = 'journal_entry' AND entity_id = ? ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$this->supplierId, $entryId]);
+        return (array) json_decode((string) $stmt->fetchColumn(), true);
     }
 
     /** Zaúčtuje zápis 311 / 602 a přepíše mu zdroj (uzávěrkové zápisy vznikají mimo PostingService). */

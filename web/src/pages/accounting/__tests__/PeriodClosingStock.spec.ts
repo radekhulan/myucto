@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   runStep: vi.fn(),
   revertStep: vi.fn(),
   listAccounts: vi.fn(),
+  warning: vi.fn(),
 }))
 
 // closingApi — v testu se volá jen state() (na mount); ostatní metody komponenta
@@ -45,7 +46,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }),
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: m.warning, info: vi.fn() }),
 }))
 
 // formatMoney/formatDate — deterministické (bez Intl), ať asserty čtou syrové hodnoty.
@@ -91,6 +92,7 @@ describe('PeriodClosing.vue — krok zásob (stock)', () => {
     m.state.mockReset()
     m.runStep.mockReset()
     m.revertStep.mockReset()
+    m.warning.mockReset()
     m.listAccounts.mockReset()
     m.listAccounts.mockResolvedValue([])
   })
@@ -142,6 +144,22 @@ describe('PeriodClosing.vue — krok zásob (stock)', () => {
     const stockBtns = wrapper.findAll('button').map((b) => b.text())
     expect(stockBtns.some((t) => t.includes('accounting.closing.stock.post'))).toBe(true)
     expect(stockBtns.some((t) => t.includes('accounting.closing.stock.revert'))).toBe(true)
+  })
+
+  it('(d) vzetí kroku zpět ohlásí počet uvolněných párování otevřených položek', async () => {
+    m.state.mockResolvedValue(makeState({ steps: [stockStep({ entry_ids: { closing: 501 } } as unknown as ClosingStepPayload)], can_revert_stock: true }))
+    m.revertStep.mockResolvedValue({ dumps: {}, released_pairings: 2 })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    await selectStock(wrapper)
+
+    const revert = wrapper.findAll('button').find((b) => b.text().includes('accounting.closing.stock.revert'))
+    await revert!.trigger('click')
+    await flushPromises()
+
+    expect(m.revertStep).toHaveBeenCalledWith(1, 'stock', 3)
+    expect(m.warning).toHaveBeenCalledWith('accounting.closing.pairings_released')
   })
 
   it('(c) při vypnutém skladu je krok neblokující — netýká se, žádné akční tlačítko', async () => {
