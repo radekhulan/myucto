@@ -1443,7 +1443,9 @@ final class ClosingRepository
      * místa: mapa transakce → doklad se staví napřed v `bank_target` (dvě disjunktní
      * větve) a teprve ta se joinuje na `bank_credit`. Nový odkaz na `bank_credit`
      * nebo `booked` = další plný průchod deníkem. K rozkladu na LATERAL DERIVED viz
-     * {@see self::NO_LATERAL_SPLIT}.
+     * {@see self::NO_LATERAL_SPLIT}. Bankovní zápisy se berou po idx_je_supplier_source:
+     * bez něj optimizer začínal plným průchodem řádků deníku všech firem instalace.
+     * Konečnou fakturu proformy dává jediná agregace {@see firstFinalInvoiceSql}.
      *
      * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float}>
      */
@@ -1469,7 +1471,7 @@ final class ClosingRepository
             ), bank_credit AS (
                 SELECT e.source_id AS bank_transaction_id,
                        SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_credit
-                  FROM journal_entries e
+                  FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
@@ -1484,6 +1486,8 @@ final class ClosingRepository
                   FROM invoice_payments ip
                  WHERE ip.supplier_id = ? AND ip.bank_transaction_id IS NOT NULL
                  GROUP BY ip.bank_transaction_id
+            ), final_of AS (
+                " . self::firstFinalInvoiceSql($supplierId) . "
             ), bank_target AS (
                 -- Mapa bankovní transakce → cílový doklad a podíl úhrady (num/den).
                 -- Postavená PŘED sáhnutím na `bank_credit`, aby se deník pro 311
@@ -1502,7 +1506,7 @@ final class ClosingRepository
                 -- proformě a `JOIN booked` ji zahodí — přijatá záloha na 311 není
                 -- nesoulad zaplaceného dokladu, ukazuje ji saldokonto.
                 SELECT ip.bank_transaction_id,
-                       COALESCE(ch.id, ip.invoice_id) AS invoice_id,
+                       COALESCE(ch.final_id, ip.invoice_id) AS invoice_id,
                        ip.amount AS num, a.total_alloc AS den
                   FROM invoice_payments ip
                   JOIN alloc a       ON a.bank_transaction_id = ip.bank_transaction_id
@@ -1512,13 +1516,7 @@ final class ClosingRepository
                   -- Zálohu čerpanou postupně víc fakturami (milníky) nese jen první z nich,
                   -- shodně se skupinou DDKP v `doc` níž; jinak by se úhrada rozpadla na
                   -- každou konečnou fakturu zvlášť a započetla se vícekrát.
-                  LEFT JOIN invoices ch ON ch.id = (
-                                SELECT MIN(fin.id) FROM invoices fin
-                                 WHERE fin.supplier_id = ip.supplier_id
-                                   AND fin.parent_invoice_id = pf.id
-                                   AND fin.invoice_type NOT IN ('proforma', 'tax_document')
-                                   AND fin.cancelled_at IS NULL
-                            )
+                  LEFT JOIN final_of ch ON ch.proforma_id = pf.id
                  WHERE ip.supplier_id = ?
                 UNION ALL
                 -- Větev 2 — úhrady spárované jen přes bank_transactions.matched_invoice_id
@@ -1616,13 +1614,7 @@ final class ClosingRepository
                        CASE WHEN i.invoice_type = 'credit_note' AND i.parent_invoice_id IS NOT NULL
                             THEN i.parent_invoice_id
                             WHEN i.invoice_type = 'tax_document' AND i.parent_invoice_id IS NOT NULL
-                            THEN COALESCE((
-                                SELECT MIN(fin.id) FROM invoices fin
-                                 WHERE fin.supplier_id = i.supplier_id
-                                   AND fin.parent_invoice_id = i.parent_invoice_id
-                                   AND fin.invoice_type NOT IN ('proforma', 'tax_document')
-                                   AND fin.cancelled_at IS NULL
-                            ), i.id)
+                            THEN COALESCE(ff.final_id, i.id)
                             ELSE i.id END AS group_id,
                        b.booked,
                        COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0)
@@ -1630,6 +1622,7 @@ final class ClosingRepository
                          + COALESCE(sm.settled, 0) + COALESCE(si.settled, 0) AS settled
                   FROM booked b
                   JOIN invoices i ON i.id = b.invoice_id AND i.supplier_id = ?
+                  LEFT JOIN final_of ff ON ff.proforma_id = i.parent_invoice_id
                   LEFT JOIN settled_bank sb ON sb.invoice_id = i.id
                   LEFT JOIN settled_cash sc ON sc.invoice_id = i.id
                   LEFT JOIN settled_offset so ON so.invoice_id = i.id
@@ -1684,6 +1677,25 @@ final class ClosingRepository
             $supplierId, $asOf, $asOf,          // final SELECT
         ]);
         return array_map(static fn (array $r): array => self::castPaidSaldoRow($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * První konečná faktura každé proformy firmy: `proforma_id`, `final_id`. Úhradu proformy
+     * i DDKP k ní K3 přiřazuje této faktuře (záloha čerpaná víc fakturami jen té první).
+     *
+     * Jedna agregace místo závislého poddotazu za každou úhradu a každý DDKP: ten na
+     * produkci s neaktuálními statistikami šel po indexu jen na `supplier_id` a za každou
+     * úhradu proformy prošel všechny faktury firmy (desítky milionů řádků, 9 až 26 s).
+     * Agregace jde po idx_inv_supplier_parent. Bez placeholderů, firma literálem.
+     */
+    private static function firstFinalInvoiceSql(int $supplierId): string
+    {
+        return "SELECT fin.parent_invoice_id AS proforma_id, MIN(fin.id) AS final_id
+                  FROM invoices fin
+                 WHERE fin.supplier_id = {$supplierId} AND fin.parent_invoice_id IS NOT NULL
+                   AND fin.invoice_type NOT IN ('proforma', 'tax_document')
+                   AND fin.cancelled_at IS NULL
+                 GROUP BY fin.parent_invoice_id";
     }
 
     /**
@@ -1780,7 +1792,7 @@ final class ClosingRepository
             ), bank_debit AS (
                 SELECT e.source_id AS bank_transaction_id,
                        SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_debit
-                  FROM journal_entries e
+                  FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
@@ -2517,7 +2529,7 @@ final class ClosingRepository
             ), bank_credit AS (
                 SELECT e.source_id AS bank_transaction_id,
                        SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_credit
-                  FROM journal_entries e
+                  FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
@@ -2646,7 +2658,7 @@ final class ClosingRepository
             ), bank_debit AS (
                 SELECT e.source_id AS bank_transaction_id,
                        SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_debit
-                  FROM journal_entries e
+                  FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id

@@ -1200,6 +1200,7 @@
         "2294_bank_posting_rule_skip_matching_card.sql",
         "2295_helios_import_map.sql",
         "2296_eet_units_dis_import.sql",
+        "2297_invoices_supplier_parent_index.sql",
         "2298_invoice_item_advance_drawdown.sql"
     ],
     "tables": {
@@ -7607,6 +7608,7 @@
                 "idx_inv_supplier": "BTREE (supplier_id)",
                 "idx_inv_supplier_calendar": "BTREE (supplier_id, calendar_id)",
                 "idx_inv_supplier_efftax": "BTREE (supplier_id, effective_tax_date)",
+                "idx_inv_supplier_parent": "BTREE (supplier_id, parent_invoice_id)",
                 "idx_inv_supplier_payment_vs": "BTREE (supplier_id, payment_variable_symbol)",
                 "idx_inv_supplier_payment_vs_key": "BTREE (supplier_id, payment_variable_symbol_match_key)",
                 "idx_inv_supplier_status_due": "BTREE (supplier_id, status, due_date)",
