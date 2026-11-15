@@ -107,6 +107,10 @@ final class PurchaseSettledExpr
      *     tak ho zaúčtuje banka: 321 jde ven v nominálu kurzem předpisu a rozdíl je kurzový
      *     (`BankPostingService::buildOutgoingCzkCardFx`). Mimo toleranci se přepočte kurzem
      *     dokladu — pak jde o skutečnou částečnou úhradu.
+     *   - Cizoměnový pohyb ke korunovému dokladu (platba z devizového účtu) se převede kurzem,
+     *     za který banka pohyb zaúčtovala (Kč zápisu pohybu / částka pohybu); v toleranci
+     *     je to úhrada celého dokladu. Doklad označený jako uhrazený (kurzový rozdíl účetní
+     *     vyrovnala zvlášť) a nezaúčtovaný pohyb platí jako dosud za celý nominál.
      *   - Jiná kombinace (cizí měna pohybu × jiná měna dokladu, třeba USD faktura placená
      *     z eurového účtu) se převést neumí. Banka ji automaticky nezaúčtuje
      *     (`cross_currency`), účetní ji zaúčtuje ručně celou i s kurzovým rozdílem — proto
@@ -134,6 +138,15 @@ final class PurchaseSettledExpr
         $txCurrency = "UPPER(COALESCE(NULLIF({$bt}.currency, ''), NULLIF({$bs}.currency, ''), 'CZK'))";
         $nominalLocal = "ROUND({$d}amount_to_pay * {$d}exchange_rate, 2)";
 
+        // Kurz, za který banka cizoměnový pohyb zaúčtovala: Kč zápisu pohybu / částka pohybu.
+        // NULL, když pohyb zaúčtovaný není (pak platí dosavadní úhrada celého nominálu).
+        $bookedRate = "(SELECT SUM(CASE WHEN bl.side = 'debit' THEN bl.signed_amount ELSE 0 END) / NULLIF(ABS({$bt}.amount), 0)
+                          FROM journal_entries be
+                          JOIN journal_entry_lines bl ON bl.entry_id = be.id AND bl.supplier_id = be.supplier_id
+                         WHERE be.supplier_id = {$bs}.supplier_id AND be.source_type = 'bank' AND be.source_id = {$bt}.id
+                           AND be.posted_at IS NOT NULL AND be.reversed_by IS NULL)";
+        $local = "ROUND({$pm}.amount * {$bookedRate}, 2)";
+
         // Bez GREATEST(): výraz běží i v jednotkových testech nad SQLite.
         return sprintf(
             "CASE WHEN %9\$s.id IS NULL OR %1\$s = UPPER(%2\$s.code) THEN %10\$s * %3\$s.amount
@@ -142,6 +155,11 @@ final class PurchaseSettledExpr
                               OR ABS(%3\$s.amount - ABS(%6\$s)) <= ABS(%6\$s) * %8\$s
                             THEN %5\$samount_to_pay
                             ELSE %10\$s * ROUND(%3\$s.amount / %5\$sexchange_rate, 2) END
+                  WHEN UPPER(%2\$s.code) = '%4\$s' AND %5\$sstatus <> 'paid' AND %11\$s IS NOT NULL THEN
+                       CASE WHEN ABS(%11\$s - ABS(%5\$samount_to_pay)) <= %7\$s
+                              OR ABS(%11\$s - ABS(%5\$samount_to_pay)) <= ABS(%5\$samount_to_pay) * %8\$s
+                            THEN %5\$samount_to_pay
+                            ELSE %10\$s * %11\$s END
                   ELSE %5\$samount_to_pay END",
             $txCurrency,
             $docCurrency,
@@ -154,6 +172,7 @@ final class PurchaseSettledExpr
                 . ' ELSE ' . self::sqlNumber(FxPaymentSettlement::MATCH_TOLERANCE_PCT) . ' END)',
             $bt,
             "(CASE WHEN {$bt}.amount > 0 THEN -1 ELSE 1 END)",
+            $local,
         );
     }
 

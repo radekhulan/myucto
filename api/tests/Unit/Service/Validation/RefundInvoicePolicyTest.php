@@ -171,9 +171,14 @@ final class RefundInvoicePolicyTest extends TestCase
         self::assertFalse(CreditNoteRefundExpr::isRefundedAsOf('invoice', 'paid', '2099-05-20', '2099-12-31', -608.0, 7));
         self::assertFalse(CreditNoteRefundExpr::isRefundedAsOf('invoice', 'paid', '2099-05-20', '2099-12-31', 608.0, null));
         self::assertFalse(CreditNoteRefundExpr::isRefundedAsOf('invoice', 'issued', null, '2099-12-31', -608.0, null));
+        // Záporná zálohová faktura (vrácení zálohy z převodu) je doklad k vyplacení stejně jako faktura.
+        self::assertTrue(CreditNoteRefundExpr::isRefundedAsOf('proforma', 'paid', '2099-05-20', '2099-12-31', -25000.0, null));
+        self::assertFalse(CreditNoteRefundExpr::isRefundedAsOf('proforma', 'paid', '2099-05-20', '2099-12-31', 25000.0, null));
+        self::assertFalse(CreditNoteRefundExpr::isRefundedAsOf('proforma', 'sent', null, '2099-12-31', -25000.0, null));
+        self::assertFalse(CreditNoteRefundExpr::isRefundedAsOf('tax_document', 'paid', '2099-05-20', '2099-12-31', -608.0, null));
 
         $sql = CreditNoteRefundExpr::refundedAsOfSql('d');
-        self::assertStringContainsString("d.invoice_type = 'invoice' AND d.amount_to_pay < 0 AND d.parent_invoice_id IS NULL", $sql);
+        self::assertStringContainsString("d.invoice_type IN ('invoice', 'proforma') AND d.amount_to_pay < 0 AND d.parent_invoice_id IS NULL", $sql);
         self::assertSame(1, substr_count($sql, '?'));
     }
 }

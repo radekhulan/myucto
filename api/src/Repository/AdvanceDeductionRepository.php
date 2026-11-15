@@ -259,7 +259,7 @@ final class AdvanceDeductionRepository
         $accounts = implode(',', $accountIds);
         $sql = "SELECT d.id, d.{$partnerCol} AS partner_id, {$numberSql} AS doc_no, d.issue_date,
                        {$linkedSql} AS linked_capacity,
-                       e.id AS entry_id, e.description AS entry_description, l.account_id, l.side, l.signed_amount
+                       e.id AS entry_id, e.description AS entry_description, l.account_id, l.side, l.signed_amount, l.is_red_storno
                   FROM {$table} d
                   JOIN currencies cur ON cur.id = d.currency_id
                   JOIN (" . DocumentPostingGroup::entriesSql($docType, $supplierId) . ") de ON de.doc_id = d.id
@@ -511,6 +511,15 @@ final class AdvanceDeductionRepository
      */
     private static function deductibleOfEntry(array $lines, string $side): float
     {
+        // Červené storno na opačné straně (převod z programu, který čerpání zálohy účtuje
+        // zápornou částkou na straně vzniku, např. Helios) má účinek strany čerpání.
+        $lines = array_map(static function (array $l): array {
+            if (!empty($l['is_red_storno'])) {
+                $l['side'] = $l['side'] === 'debit' ? 'credit' : 'debit';
+                $l['signed_amount'] = -(float) $l['signed_amount'];
+            }
+            return $l;
+        }, $lines);
         $opposite = [];
         foreach ($lines as $l) {
             if ($l['side'] !== $side) {
@@ -599,18 +608,56 @@ final class AdvanceDeductionRepository
                     'deducted' => $f['deducted'], 'linked_share' => $f['linked_share'], 'excess' => round(-$f['unassigned'], 2)];
             }
         }
-        // Živě zaúčtovaná faktura, které na zálohovém účtu nezbyl žádný řádek strany čerpání.
+        // Živě zaúčtovaná faktura mimo výpočet výše (cizí měna, nebo jí na zálohovém účtu nezbyl
+        // žádný řádek strany čerpání): čerpání se porovná se stranou čerpání zaúčtování v Kč.
         $missing = array_values(array_diff($ids, array_keys($finals)));
         $posted = $this->postedEntries($supplierId, $docType, $missing);
         if ($posted !== []) {
             $deducted = $this->deductedByFinal($supplierId, $docType, array_keys($posted));
             $docs = $this->documents($supplierId, $docType, array_keys($posted));
+            $deductibleCzk = $this->deductibleCzk($supplierId, $docType, $accountIds, array_keys($posted));
             foreach (array_keys($posted) as $id) {
-                $out[] = ['doc_id' => $id, 'doc_no' => $docs[$id]['doc_no'] ?? '#' . $id, 'deductible' => 0.0,
-                    'deducted' => $deducted[$id] ?? 0.0, 'linked_share' => 0.0, 'excess' => $deducted[$id] ?? 0.0];
+                $deductible = $deductibleCzk[$id] ?? 0.0;
+                $excess = round(($deducted[$id] ?? 0.0) - $deductible, 2);
+                if ($excess < self::TOLERANCE) {
+                    continue;
+                }
+                $out[] = ['doc_id' => $id, 'doc_no' => $docs[$id]['doc_no'] ?? '#' . $id, 'deductible' => $deductible,
+                    'deducted' => $deducted[$id] ?? 0.0, 'linked_share' => 0.0, 'excess' => $excess];
             }
         }
         usort($out, static fn (array $a, array $b): int => $a['doc_id'] <=> $b['doc_id']);
+        return $out;
+    }
+
+    /**
+     * Strana čerpání živého zaúčtování konečných faktur na zálohovém účtu v Kč, i u faktury
+     * v cizí měně. Červené storno na straně vzniku zálohy má účinek strany čerpání.
+     *
+     * @param list<int> $accountIds
+     * @param list<int> $ids
+     * @return array<int,float>
+     */
+    private function deductibleCzk(int $supplierId, string $docType, array $accountIds, array $ids): array
+    {
+        $ids = self::ids($ids);
+        if ($ids === [] || $accountIds === []) {
+            return [];
+        }
+        $side = self::deductionSide($docType);
+        $accounts = implode(',', array_map('intval', $accountIds));
+        $stmt = $this->db->pdo()->query(
+            "SELECT de.doc_id, SUM(CASE WHEN l.side = '{$side}' THEN l.signed_amount WHEN l.is_red_storno = 1 THEN -l.signed_amount ELSE 0 END)
+               FROM (" . DocumentPostingGroup::entriesSql($docType, $supplierId) . ") de
+               JOIN journal_entries e ON e.id = de.entry_id AND e.supplier_id = {$supplierId} AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id AND l.account_id IN ({$accounts})
+              WHERE de.doc_id IN (" . implode(',', $ids) . ')
+              GROUP BY de.doc_id'
+        );
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_NUM) as [$id, $amount]) {
+            $out[(int) $id] = round((float) $amount, 2);
+        }
         return $out;
     }
 
