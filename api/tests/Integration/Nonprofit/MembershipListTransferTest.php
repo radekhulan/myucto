@@ -674,10 +674,13 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         foreach (['SYN-XLSX-APO', '', '', '', 'ended', '2026-07-01', "'-usnesení", ''] as $i => $value) {
             $sheet->setCellValueExplicit([$i + 1, 2], $value, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
         }
-        $path = tempnam(sys_get_temp_dir(), 'nmx_') . '.xlsx';
+        $base = tempnam(sys_get_temp_dir(), 'nmx_');
+        $path = $base . '.xlsx';
         (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($book))->save($path);
+        $book->disconnectWorksheets();
         $bytes = (string) file_get_contents($path);
         @unlink($path);
+        @unlink($base);
         $preview = $this->import->run($this->supplier, $this->actor, $bytes, 'a.xlsx', true);
         $this->import->run($this->supplier, $this->actor, $bytes, 'a.xlsx', false, $preview['preview_hash']);
         $q = $this->pdo->prepare('SELECT legal_basis_json FROM nonprofit_member_revisions WHERE supplier_id=? AND member_id=? ORDER BY revision_no DESC LIMIT 1');

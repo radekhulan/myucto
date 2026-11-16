@@ -158,7 +158,7 @@ final class MembershipListExporter
 
     /**
      * Text, který sám začíná apostrofem (členské číslo „'-1“), dostane ještě jeden: import úvodní apostrof před
-     * =+-@, koncem řádku i dalším apostrofem odebírá (MembershipImportService::unescape), takže export a import
+     * =+-@, tabulátorem, koncem řádku i dalším apostrofem odebírá (MembershipImportService::unescape), takže export a import
      * vrátí přesně stejnou hodnotu a „'-1“ nesplyne s číslem „-1“. Volá se na surovou hodnotu před CsvWriter::safe.
      */
     private static function quoteApostrophe(string $value): string
