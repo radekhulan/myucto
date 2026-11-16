@@ -1766,8 +1766,8 @@ const mobileSheetActions = computed<SheetAction[]>(() => {
         actions.push({ key: 'receipt', to: '/invoices/new?simplified=1', label: t('nav.mobile.receipt'), hint: t('nav.mobile.receipt_hint'), icon: MOBILE_ICONS.receipt })
       }
     }
-    if (!clientExperience.value && auth.canWrite('projects.create')) {
-      actions.push({ key: 'project', to: '/projects/new', label: t('nav.mobile.new_project'), hint: t('nav.mobile.new_project_hint'), icon: ICONS.projects })
+    if (auth.canRead('invoices')) {
+      actions.push({ key: 'invoices', to: '/invoices', label: t('nav.invoices'), hint: t('nav.mobile.issued_invoices_hint'), icon: ICONS.invoices })
     }
     if (can('/clients/new')) {
       actions.push({ key: 'client', to: '/clients/new', label: t('nav.mobile.new_client'), hint: t('nav.mobile.new_client_hint'), icon: ICONS.clients })

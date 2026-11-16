@@ -29,7 +29,9 @@ describe('mobilní rám aplikace', () => {
     expect(snippet("if (can('/invoices/new'))")).toContain("to: '/invoices/new'")
     expect(snippet("if (can('/purchase-invoices/new'))")).toContain("to: '/purchase-invoices/new'")
     expect(snippet("if (can('/clients/new?role=vendor'))")).toContain("to: '/clients/new?role=vendor'")
-    expect(snippet("auth.canWrite('projects.create')")).toContain("to: '/projects/new'")
+    // Místo nové zakázky vede velká dlaždice prodeje na seznam vydaných faktur.
+    expect(snippet("if (auth.canRead('invoices'))")).toContain("to: '/invoices',")
+    expect(appLayout).not.toContain("to: '/projects/new'")
     // Fotoaparát jen tomu, kdo smí vytěžovat, stejně jako AI import v menu.
     expect(appLayout).toMatch(/if \(canExtractPurchase\.value\) \{\s*actions\.push\(\{ key: 'capture', capture: true/)
   })
