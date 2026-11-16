@@ -139,8 +139,8 @@ watch(() => selected.value?.id, async id => {
 
 async function load(append = false) {
   const ticket = ++generation, supplier = props.supplier
-  // Nové načtení seznamu (jiný filtr, obnova) ruší starou hlášku exportu; ta platila pro předchozí výběr.
-  exportError.value = ''
+  // Nové načtení seznamu (jiný filtr, obnova) ruší starou hlášku exportu; „Načíst další“ výběr nemění.
+  if (!append) exportError.value = ''
   const selectedIds = [...checkedMembers.value]
   // Obnova ponechá zobrazený seznam, dokud nepřijdou nová data; vyprázdní ho jen změna filtrů nebo firmy.
   loading.value = true; error.value = ''

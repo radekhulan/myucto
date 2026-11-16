@@ -821,4 +821,15 @@ describe('Membership workspace', () => {
     expect(w.get('[data-action="batch-open"]').attributes('disabled')).toBeDefined()
     click.mockRestore(); w.unmount()
   })
+
+  it('„Načíst další“ hlášku exportu nezruší, výběr se tím nemění', async () => {
+    api.members.mockResolvedValueOnce(page([row(1)], 1)).mockResolvedValueOnce(page([row(2)], null))
+    api.exportMembers.mockRejectedValueOnce({ response: { data: { error: { code: 'nonprofit_membership_export_too_large' } } } })
+    const w = mounted(); await flushPromises()
+    await w.get('[data-action="export-xlsx"]').trigger('click'); await flushPromises()
+    await w.get('[data-action="more-members"]').trigger('click'); await flushPromises()
+    expect(w.findAll('[data-section="member-row"]')).toHaveLength(2)
+    expect(w.get('[data-section="export-error"]').text()).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_export_too_large)
+    w.unmount()
+  })
 })

@@ -512,8 +512,13 @@ final class MembershipImportService extends AbstractCodebookImportService
      */
     private static function fromWindows1250(string $content): string
     {
-        $converted = preg_match('/[\xC2-\xDF][\x80-\xBF]|[\xE0-\xEF][\x80-\xBF]{2}/', $content) === 1
-            ? false : @iconv('WINDOWS-1250', 'UTF-8', $content);
+        // Poměr, ne výskyt: i čisté cp1250 obsahuje dvojice, které vypadají jako UTF-8 („ČÍŽEK“ = C8 CD 8E,
+        // „Úštěk“ = DA 9A). V poškozeném UTF-8 platné sekvence pokrývají většinu vysokých bajtů (vadný je jeden
+        // nebo dva), v cp1250 je většina vysokých bajtů osamocená (á, í, ě mezi písmeny ASCII).
+        $high = preg_match_all('/[\x80-\xFF]/', $content);
+        preg_match_all('/[\xC2-\xDF][\x80-\xBF]|[\xE0-\xEF][\x80-\xBF]{2}|[\xF0-\xF4][\x80-\xBF]{3}/', $content, $sequences);
+        $covered = array_sum(array_map('strlen', $sequences[0]));
+        $converted = $covered * 2 > $high ? false : @iconv('WINDOWS-1250', 'UTF-8', $content);
         if (!is_string($converted)) {
             throw new MembershipException('nonprofit_membership_import_encoding', 'Soubor není v kódování UTF-8 ani Windows-1250. Uložte ho jako XLSX nebo CSV UTF-8.', 422);
         }

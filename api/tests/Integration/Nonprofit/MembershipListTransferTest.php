@@ -506,6 +506,18 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         $legacy = (string) iconv('UTF-8', 'WINDOWS-1250', $this->csv(['SYN-UNDEF;;;;pozastavené;1. 3. 2026;Usnesení výboru;']));
         $error = $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, str_replace('Usnesen', "Usnesen\x81", $legacy), 'excel.csv', true));
         self::assertSame('nonprofit_membership_import_encoding', $error->errorCode);
+        // Poškozené UTF-8, kde jediný znak mimo ASCII je čtyřbajtový.
+        $emoji = "member number;name;new status;effective from;reference\nNEW-EMO;Synthetic \u{1F389}\xFF;active;2026-02-01;Synthetic application\n";
+        $error = $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, $emoji, 'a.csv', true, canCreateContacts: true));
+        self::assertSame('nonprofit_membership_import_encoding', $error->errorCode);
+    }
+
+    public function testCp1250CsvWithUppercaseDiacriticsIsRead(): void
+    {
+        // Verzálky s diakritikou vedle š/ž/ť tvoří v cp1250 dvojice podobné UTF-8 (Í Ž = CD 8E, Ú š = DA 9A).
+        $legacy = (string) iconv('UTF-8', 'WINDOWS-1250', $this->csv(['NEW-CAPS;;;ČÍŽEK VÝŠKOVÁ Úštěk;active;1. 2. 2026;Přihláška;']));
+        $rows = $this->import->run($this->supplier, $this->actor, $legacy, 'excel.csv', true, canCreateContacts: true)['rows'];
+        self::assertSame(['new_member', 'ČÍŽEK VÝŠKOVÁ Úštěk'], [$rows[0]['status'], $rows[0]['name']]);
     }
 
     public function testConcurrentImportOfSameNewMemberIsAlreadyImported(): void
