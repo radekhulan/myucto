@@ -512,13 +512,12 @@ final class MembershipImportService extends AbstractCodebookImportService
      */
     private static function fromWindows1250(string $content): string
     {
-        // Poměr, ne výskyt: i čisté cp1250 obsahuje dvojice, které vypadají jako UTF-8 („ČÍŽEK“ = C8 CD 8E,
-        // „Úštěk“ = DA 9A). V poškozeném UTF-8 platné sekvence pokrývají většinu vysokých bajtů (vadný je jeden
-        // nebo dva), v cp1250 je většina vysokých bajtů osamocená (á, í, ě mezi písmeny ASCII).
-        $high = preg_match_all('/[\x80-\xFF]/', $content);
-        preg_match_all('/[\xC2-\xDF][\x80-\xBF]|[\xE0-\xEF][\x80-\xBF]{2}|[\xF0-\xF4][\x80-\xBF]{3}/', $content, $sequences);
-        $covered = array_sum(array_map('strlen', $sequences[0]));
-        $converted = $covered * 2 > $high ? false : @iconv('WINDOWS-1250', 'UTF-8', $content);
+        // Podpis UTF-8, ne libovolná vícebajtová dvojice: česká a latinková písmena mají v UTF-8 úvodní bajt C3–C5
+        // (á = C3 A1, č = C4 8D, ž = C5 BE), typografické uvozovky a pomlčky E2 80–82 xx a emoji F0–F4 + 3 bajty.
+        // V cp1250 jsou C3–C5 vzácná Ă, Ä, Ĺ; česká velká písmena s diakritikou (Á Č É Ě Í Ď Ň Ó Ř Ů Ú Ý = C1–DD
+        // mimo C3–C5) za nimi s Š/Ž/Ť sice tvoří dvojice podobné UTF-8 („RŮŽIČKA“ = D9 8E), podpis ale nemají.
+        $utf8 = preg_match('/[\xC3-\xC5][\x80-\xBF]|\xE2[\x80-\x82][\x80-\xBF]|[\xF0-\xF4][\x80-\xBF]{3}/', $content) === 1;
+        $converted = $utf8 ? false : @iconv('WINDOWS-1250', 'UTF-8', $content);
         if (!is_string($converted)) {
             throw new MembershipException('nonprofit_membership_import_encoding', 'Soubor není v kódování UTF-8 ani Windows-1250. Uložte ho jako XLSX nebo CSV UTF-8.', 422);
         }

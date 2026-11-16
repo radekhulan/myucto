@@ -251,7 +251,8 @@ const importOpen = ref(false), exporting = ref(false)
  * Chyba exportu má vlastní hlášku: nesmí smazat chybu načtení seznamu (ta blokuje hromadný předpis) ani ji zastoupit.
  */
 async function exportMembers(format: 'xlsx' | 'csv') {
-  const supplier = props.supplier
+  // Generace seznamu: odpověď exportu, která dorazí až po novém načtení (jiný filtr), už nic neohlásí.
+  const supplier = props.supplier, ticket = generation
   exporting.value = true; exportError.value = ''
   try {
     const { blob, filename } = await membershipApi.exportMembers(supplier, format, appliedFilters.value)
@@ -261,7 +262,7 @@ async function exportMembers(format: 'xlsx' | 'csv') {
     link.href = url; link.download = filename; link.click()
     URL.revokeObjectURL(url)
   } catch (e) {
-    if (alive && supplier === props.supplier) exportError.value = membershipError({ t, te }, e)
+    if (alive && supplier === props.supplier && ticket === generation) exportError.value = membershipError({ t, te }, e)
   } finally {
     if (alive) exporting.value = false
   }

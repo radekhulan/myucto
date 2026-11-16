@@ -832,4 +832,15 @@ describe('Membership workspace', () => {
     expect(w.get('[data-section="export-error"]').text()).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_export_too_large)
     w.unmount()
   })
+
+  it('chyba exportu, která dorazí až po novém načtení seznamu, se neukáže u nového výběru', async () => {
+    let reject: (e: unknown) => void = () => {}
+    api.exportMembers.mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail }))
+    const w = mounted(); await flushPromises()
+    await w.get('[data-action="export-xlsx"]').trigger('click')
+    await w.get('[data-action="reload-members"]').trigger('click'); await flushPromises()
+    reject({ response: { data: { error: { code: 'nonprofit_membership_export_too_large' } } } }); await flushPromises()
+    expect(w.find('[data-section="export-error"]').exists()).toBe(false)
+    w.unmount()
+  })
 })

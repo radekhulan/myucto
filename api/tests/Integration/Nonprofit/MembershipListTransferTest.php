@@ -518,6 +518,22 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         $legacy = (string) iconv('UTF-8', 'WINDOWS-1250', $this->csv(['NEW-CAPS;;;ČÍŽEK VÝŠKOVÁ Úštěk;active;1. 2. 2026;Přihláška;']));
         $rows = $this->import->run($this->supplier, $this->actor, $legacy, 'excel.csv', true, canCreateContacts: true)['rows'];
         self::assertSame(['new_member', 'ČÍŽEK VÝŠKOVÁ Úštěk'], [$rows[0]['status'], $rows[0]['name']]);
+        // Bez ředění českou hlavičkou: ASCII hlavička a jediné jméno, jehož vysoké bajty skoro všechny tvoří dvojice
+        // podobné UTF-8 (Ů Ž = D9 8E, Ř Í = D8 CD). Poměr bajtů by soubor odmítl, podpis UTF-8 v něm není.
+        $ascii = "member number;name;new status;effective from;reference\nNEW-RUZ;JAN RŮŽIČKA KŘÍŽOVÁ;active;1. 2. 2026;prihlaska\n";
+        $rows = $this->import->run($this->supplier, $this->actor, (string) iconv('UTF-8', 'WINDOWS-1250', $ascii), 'excel.csv', true, canCreateContacts: true)['rows'];
+        self::assertSame(['new_member', 'JAN RŮŽIČKA KŘÍŽOVÁ'], [$rows[0]['status'], $rows[0]['name']]);
+    }
+
+    public function testMixedUtf8AndCp1250FileIsRejected(): void
+    {
+        // Jméno v UTF-8 (á = C3 A1), podklad v cp1250 (í, č): převodem z cp1250 by vznikl kontakt „JĂˇn“.
+        $mixed = "member number;name;new status;effective from;reference\nNEW-MIX;Ján Novak;active;2026-02-01;Usnesen\xED \xE8. 5\n";
+        $error = $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, $mixed, 'a.csv', true, canCreateContacts: true));
+        self::assertSame('nonprofit_membership_import_encoding', $error->errorCode);
+        // Typografická pomlčka v UTF-8 (E2 80 93) vedle cp1250 bajtu.
+        $dash = "member number;name;new status;effective from;reference\nNEW-DASH;Synthetic \u{2013} Spolek;active;2026-02-01;Usnesen\xED\n";
+        self::assertSame('nonprofit_membership_import_encoding', $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, $dash, 'a.csv', true, canCreateContacts: true))->errorCode);
     }
 
     public function testConcurrentImportOfSameNewMemberIsAlreadyImported(): void
