@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -15,7 +15,8 @@ import type { Client } from '@/api/clients'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
 import { badgeBase, errorBox, membershipError, memberStatusBadge, membershipMemberLabel } from './membershipFormat'
-import MembershipMemberDetail from './MembershipMemberDetail.vue'
+import { memberDetailPath, membershipListNotice } from './membershipPage'
+import { useRowLink } from '@/composables/useRowLink'
 import MembershipReconciliation from './MembershipReconciliation.vue'
 import MembershipRates from './MembershipRates.vue'
 import MembershipBatchFlow from './MembershipBatchFlow.vue'
@@ -42,13 +43,10 @@ const exportError = ref('')
 /** Pořadí spuštěných exportů: stažení i odemčení akcí patří jen poslednímu (změna firmy ho také zneplatní). */
 let exportRun = 0
 const selectionNotice = ref('')
-const selected = ref<{ id: number; label: string } | null>(null)
 const clientId = ref<number | null>(null)
 const clientLabel = ref('')
 const memberNumber = ref('')
 const creating = ref(false)
-const root = ref<HTMLElement | null>(null)
-const detailPane = ref<HTMLElement | null>(null)
 const dataVersion = ref(0)
 const route = useRoute(), router = useRouter()
 const titles = ref<string[]>([]), titlesError = ref(false)
@@ -95,26 +93,27 @@ function applyFilters(syncUrl = true, forceTitles = false) {
   void load()
 }
 const checkedMembers = ref<number[]>([]), batchOpen = ref(false), batchLocked = ref(false)
-const detailVersion = ref(0)
-// Uložená dávka nebo předpis v detailu mohou založit nový titul, proto se obnoví i výběr titulů.
-function batchChanged() { dataVersion.value++; detailVersion.value++; void load(); void loadTitles(true) }
-/** Výmaz mění čísla a jména v seznamu i v otevřeném detailu. */
-async function membersErased() {
-  dataVersion.value++; detailVersion.value++
-  await load()
-  const row = members.value.find(x => x.id === selected.value?.id)
-  if (row && selected.value) selected.value = { ...selected.value, label: labelOf(row) }
+// Uložená dávka může založit nový titul, proto se obnoví i výběr titulů.
+function batchChanged() { dataVersion.value++; void load(); void loadTitles(true) }
+/** Výmaz mění čísla a jména v seznamu. */
+async function membersErased() { dataVersion.value++; await load() }
+
+/**
+ * Výběr do hromadného předpisu přežije otevření detailu člena (seznam se přitom odpojí): drží se v sessionStorage
+ * pro firmu a použité filtry. Po návratu ho load() jako každou obnovu ověří na serveru (smazaný člen z něj vypadne).
+ */
+const selectionKey = () => `myinvoice.membership.selection.${props.supplier}.${JSON.stringify(appliedFilters.value)}`
+function storeSelection() {
+  try {
+    if (checkedMembers.value.length) sessionStorage.setItem(selectionKey(), JSON.stringify(checkedMembers.value))
+    else sessionStorage.removeItem(selectionKey())
+  } catch { /* úložiště nedostupné: výběr platí jen do opuštění seznamu */ }
 }
-function memberChanged() { dataVersion.value++; void load(); void loadTitles(true) }
-/** Smazaný člen zmizí z výběru i detailu; fokus jde na nadpis seznamu. */
-async function memberDeleted() {
-  const id = selected.value?.id
-  if (id !== undefined) checkedMembers.value = checkedMembers.value.filter(x => x !== id)
-  selected.value = null
-  // Potvrzení jako ostatní úspěšné akce stránky; hláška výběru je varování a mizí s ním.
-  notice.value = t('nonprofitMembership.correction.done_delete')
-  await nextTick()
-  root.value?.querySelector<HTMLElement>('[data-focus="members-heading"]')?.focus()
+function restoreSelection() {
+  try {
+    const ids: unknown = JSON.parse(sessionStorage.getItem(selectionKey()) ?? '[]')
+    if (Array.isArray(ids)) checkedMembers.value = ids.filter((id): id is number => Number.isInteger(id) && id > 0).slice(0, 500)
+  } catch { checkedMembers.value = [] }
 }
 function checkMember(id: number, event: Event) {
   if (!props.canManage || batchLocked.value || loading.value) return
@@ -133,8 +132,14 @@ const labelOf = (row: MemberRow) => row.erased
   ? t('nonprofitMembership.erasure.erasedMemberLabel', { id: row.id })
   : membershipMemberLabel(row) || t('nonprofitMembership.clientFallback', { id: row.client_id })
 
-function openMember(row: MemberRow) {
-  selected.value = { id: row.id, label: labelOf(row) }
+const navigateRow = useRowLink()
+/**
+ * Detail člena je samostatná stránka jako detail kontaktu (Ctrl+klik a prostřední tlačítko ho otevřou v novém panelu).
+ * Rozpracovaný hromadný předpis nebo import by odchodem ze seznamu zmizel, proto se tehdy detail otevře v novém panelu.
+ */
+function openMember(row: MemberRow, event?: MouseEvent) {
+  const keepList = batchOpen.value || importOpen.value
+  navigateRow(memberDetailPath(row.id), keepList ? new MouseEvent('click', { ctrlKey: true }) : event)
 }
 
 // Řazení zůstává podle id: seznam jde keyset stránkováním po id, jiné pořadí by potřebovalo nový index.
@@ -164,27 +169,6 @@ function revisionState(row: MemberRow): RevisionState {
 }
 const checkDisabled = (id: number) => loading.value || batchLocked.value || (checkedMembers.value.length >= 500 && !checkedMembers.value.includes(id))
 
-/**
- * Po zavření detailu se fokus vrací na tlačítko řádku, ze kterého se detail otevřel.
- * Tabulka i karty jsou v DOM současně (přepíná je container query), proto bereme viditelné tlačítko.
- */
-async function closeMember() {
-  const id = selected.value?.id
-  selected.value = null
-  await nextTick()
-  if (id === undefined) return
-  const buttons = Array.from(root.value?.querySelectorAll<HTMLElement>(`[data-member="${id}"] [data-action="open-member"], [data-member-card="${id}"] [data-action="open-member"]`) ?? [])
-  const target = buttons.find(el => el.getClientRects().length > 0) ?? buttons[0]
-    ?? root.value?.querySelector<HTMLElement>('[data-focus="members-heading"]')
-  target?.focus()
-}
-
-watch(() => selected.value?.id, async id => {
-  if (id === undefined) return
-  await nextTick()
-  detailPane.value?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-  detailPane.value?.querySelector<HTMLElement>('[data-focus="member-heading"]')?.focus({ preventScroll: true })
-})
 
 async function load(append = false) {
   const ticket = ++generation, supplier = props.supplier
@@ -257,15 +241,15 @@ function onClientCreated(client: Client) {
 
 async function create() {
   if (!props.canManage || creating.value || !clientId.value || !numberValid.value) return
-  const ticket = ++createTicket, supplier = props.supplier, body = { client_id: clientId.value, member_number: memberNumber.value.trim() }, label = clientLabel.value
+  const ticket = ++createTicket, supplier = props.supplier, body = { client_id: clientId.value, member_number: memberNumber.value.trim() }
   creating.value = true; error.value = ''; notice.value = ''
   try {
     const created = await membershipApi.createMember(supplier, body)
     if (!alive || ticket !== createTicket || supplier !== props.supplier) return
     notice.value = t('nonprofitMembership.memberCreated')
-    selected.value = { id: created.id, label: label || t('nonprofitMembership.clientFallback', { id: created.client_id }) }
     clientId.value = null; clientLabel.value = ''; memberNumber.value = ''
-    await load()
+    // Jako u kontaktu rovnou detail nového člena: tam se zapisuje jeho první revize.
+    navigateRow(memberDetailPath(created.id))
   } catch (e) {
     if (alive && ticket === createTicket) error.value = membershipError({t, te}, e)
   } finally {
@@ -281,13 +265,19 @@ watch(() => props.supplier, () => {
   selectionNotice.value = ''
   appliedFilters.value = {search: '', year: Number(filterYear.value), title_key: '', payment_status: 'all'}
   hydrating = false; titles.value = []
-  members.value = []; nextAfter.value = null; periods.value = []; selected.value = null
+  members.value = []; nextAfter.value = null; periods.value = []
   clientId.value = null; clientLabel.value = ''; memberNumber.value = ''
   creating.value = false; error.value = ''; notice.value = ''
   void reloadAll()
 })
 onBeforeUnmount(() => { cancelSearchTimer(); alive = false; titlesTicket++; generation++; createTicket++ })
-onMounted(() => { void reloadAll() })
+onMounted(() => {
+  // Hláška akce z detailu, který se zavřel (smazání člena).
+  if (membershipListNotice.value) { notice.value = membershipListNotice.value; membershipListNotice.value = '' }
+  restoreSelection()
+  void reloadAll()
+})
+watch(checkedMembers, storeSelection, { deep: true })
 let firstActivation = true
 onActivated(() => {
   if (firstActivation) { firstActivation = false; return }
@@ -318,7 +308,7 @@ async function exportMembers(format: 'xlsx' | 'csv') {
   }
 }
 function importChanged() {
-  dataVersion.value++; detailVersion.value++
+  dataVersion.value++
   void load()
 }
 const actions = computed<ActionItem[]>(() => [
@@ -430,7 +420,7 @@ watch(batchLocked, locked => {
 </script>
 
 <template>
-  <div ref="root" class="space-y-5">
+  <div class="space-y-5">
     <h1 class="text-xl font-semibold">{{ t('nonprofitMembership.title') }}</h1>
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.help') }}</p>
     <p v-if="!canManage" role="status" class="text-sm text-neutral-500" data-section="readonly">{{ t('nonprofitMembership.readonly') }}</p>
@@ -475,14 +465,6 @@ watch(batchLocked, locked => {
       <ClientFormModal v-if="clientModalOpen" @created="onClientCreated" @close="clientModalOpen = false" />
     </section>
 
-    <div :class="selected ? 'grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]' : ''" data-section="members-layout">
-    <div v-if="selected" ref="detailPane" class="min-w-0 scroll-mt-4 self-start lg:sticky lg:top-4 lg:order-last" data-section="member-detail-pane">
-      <MembershipMemberDetail
-        :key="selected.id"
-        :supplier="supplier" :can-manage="canManage" :member-id="selected.id" :label="selected.label" :periods="periods" :refresh-version="detailVersion"
-        @changed="memberChanged" @close="closeMember()" @deleted="memberDeleted()" @relabel="selected && (selected.label = $event)"
-      />
-    </div>
     <section class="min-w-0 space-y-3" data-section="members" :aria-busy="loading ? 'true' : 'false'">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h2 tabindex="-1" class="font-semibold focus:outline-none" data-focus="members-heading">{{ t('nonprofitMembership.members') }}</h2>
@@ -536,10 +518,10 @@ watch(batchLocked, locked => {
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <!-- Lepivá první buňka dědí pozadí řádku. Globální zebra a hover jsou poloprůhledné a obsah posunutých
-                   buněk by pod ní prosvítal, proto má řádek tady vždy neprůhledné pozadí (otevřený člen, sudý řádek, hover). -->
-              <tr v-for="row in members" :key="row.id" :class="['cursor-pointer', selected?.id === row.id ? 'bg-primary-50' : 'even:bg-neutral-50 hover:bg-neutral-100']"
-                data-section="member-row" :data-member="row.id" :aria-current="selected?.id === row.id ? 'true' : undefined"
-                @click="openMember(row)">
+                   buněk by pod ní prosvítal, proto má řádek tady vždy neprůhledné pozadí (sudý řádek, hover). -->
+              <tr v-for="row in members" :key="row.id" class="cursor-pointer even:bg-neutral-50 hover:bg-neutral-100"
+                data-section="member-row" :data-member="row.id"
+                @click="openMember(row, $event)" @auxclick.prevent="openMember(row, $event)">
                 <td class="px-3 py-2.5">
                   <div class="flex items-center gap-3">
                     <label v-if="canManage" class="-my-2 flex shrink-0 cursor-pointer py-2" @click.stop>
@@ -548,7 +530,8 @@ watch(batchLocked, locked => {
                         data-action="batch-check-member" @change="checkMember(row.id, $event)" />
                     </label>
                     <span class="shrink-0 whitespace-nowrap font-mono text-xs text-neutral-500" data-field="member-number">{{ row.member_number }}</span>
-                    <span class="max-w-[14rem] truncate font-medium text-neutral-900" :title="labelOf(row)" data-field="member-name">{{ labelOf(row) }}</span>
+                    <RouterLink class="row-link max-w-[14rem] truncate font-medium text-neutral-900" :to="memberDetailPath(row.id)" :title="labelOf(row)" data-field="member-name"
+                      @click.stop.prevent="openMember(row, $event)" @auxclick.stop>{{ labelOf(row) }}</RouterLink>
                   </div>
                 </td>
                 <td v-if="tbl.isVisible('membership')" class="whitespace-nowrap px-3 py-2.5 text-xs">
@@ -569,7 +552,7 @@ watch(batchLocked, locked => {
                 <td v-if="tbl.isVisible('open')" class="whitespace-nowrap px-3 py-2.5 text-right font-mono tabular-nums" data-field="contribution-open">{{ row.contribution?.claim_count ? money(row.contribution.open_cents) : '—' }}</td>
                 <td class="px-3 py-1.5 text-right">
                   <!-- Pod šířkou xl jen ikona, aby se tabulka vešla; popisek nese aria-label a title. -->
-                  <button type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" :aria-label="t('nonprofitMembership.openMember')" :title="t('nonprofitMembership.openMember')" data-action="open-member" @click.stop="openMember(row)">
+                  <button type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" :aria-label="t('nonprofitMembership.openMember')" :title="t('nonprofitMembership.openMember')" data-action="open-member" @click.stop="openMember(row, $event)" @auxclick.stop.prevent="openMember(row, $event)">
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg><span class="hidden xl:inline">{{ t('nonprofitMembership.openMember') }}</span>
                   </button>
                 </td>
@@ -580,8 +563,8 @@ watch(batchLocked, locked => {
 
         <!-- Mobil: karty -->
         <div v-if="members.length" class="divide-y divide-neutral-100 md:hidden">
-          <div v-for="row in members" :key="`m-${row.id}`" :class="['cursor-pointer px-4 py-3 hover:bg-neutral-50', selected?.id === row.id ? 'bg-primary-50' : '']"
-            data-section="member-card" :data-member-card="row.id" :aria-current="selected?.id === row.id ? 'true' : undefined" @click="openMember(row)">
+          <div v-for="row in members" :key="`m-${row.id}`" class="cursor-pointer px-4 py-3 hover:bg-neutral-50"
+            data-section="member-card" :data-member-card="row.id" @click="openMember(row, $event)" @auxclick.prevent="openMember(row, $event)">
             <div class="flex items-start gap-3">
               <label v-if="canManage" class="-m-3 flex shrink-0 cursor-pointer p-3" @click.stop>
                 <input type="checkbox" class="mt-0.5 h-5 w-5 cursor-pointer rounded border-neutral-300 text-primary-600"
@@ -606,7 +589,7 @@ watch(batchLocked, locked => {
                   </p>
                 </template>
               </div>
-              <button type="button" :class="[btnOutline('primary'), 'shrink-0 whitespace-nowrap']" data-action="open-member" @click.stop="openMember(row)">
+              <button type="button" :class="[btnOutline('primary'), 'shrink-0 whitespace-nowrap']" data-action="open-member" @click.stop="openMember(row, $event)" @auxclick.stop.prevent="openMember(row, $event)">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>{{ t('nonprofitMembership.openMember') }}
               </button>
             </div>
@@ -620,7 +603,6 @@ watch(batchLocked, locked => {
         </div>
       </div>
     </section>
-    </div>
 
     <MembershipReconciliation v-if="periods.length" :supplier="supplier" :periods="periods" :data-version="dataVersion" />
   </div>

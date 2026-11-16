@@ -41768,6 +41768,7 @@
     "listStatus_unpaid": "Unpaid",
     "listStatus_unproven": "Needs review",
     "listStatus_none": "No charge for the selected title or year",
+    "backToList": "← Back to members",
     "listColumns": {
       "selectedCount": "Selected for batch: {count} of 500",
       "name": "Member",

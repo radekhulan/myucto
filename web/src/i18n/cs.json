@@ -41453,6 +41453,7 @@
     "listStatus_unpaid": "Neuhrazeno",
     "listStatus_unproven": "K prověření",
     "listStatus_none": "Bez předpisu pro zvolený titul nebo rok",
+    "backToList": "← Zpět na seznam členů",
     "listColumns": {
       "selectedCount": "Vybráno pro dávku: {count} z 500",
       "name": "Člen",

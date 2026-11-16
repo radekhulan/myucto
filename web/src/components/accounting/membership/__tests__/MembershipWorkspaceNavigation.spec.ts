@@ -27,7 +27,7 @@ async function mounted() {
   delete config.global.components.RouterLink
   const w = mount(Workspace, {props: {supplier: 5, canManage: true}, global: {
     plugins: [router, createI18n({legacy: false, locale: 'cs', messages: {cs, en}})],
-    stubs: {ActionBar, MembershipBatchFlow: Batch, MembershipRates: empty, ClientSearchSelect: empty, MembershipMemberDetail: empty, MembershipReconciliation: empty},
+    stubs: {ActionBar, MembershipBatchFlow: Batch, MembershipRates: empty, ClientSearchSelect: empty, MembershipReconciliation: empty},
   }})
   if (link) config.global.components.RouterLink = link
   await flushPromises()
@@ -36,6 +36,8 @@ async function mounted() {
   return {w, router, batch: w.findComponent(Batch)}
 }
 beforeEach(() => {
+  // Výběr do dávky se drží v sessionStorage; testy ho nesmí sdílet.
+  sessionStorage.clear()
   vi.clearAllMocks()
   api.members.mockImplementation(async (_supplier, _after, _limit, filters) => ({items: [{...member, company_name: 'Synthetic ' + filters.year}], next_after_id: null}))
   api.selectionCheck.mockImplementation(async (_supplier, member_ids) => ({member_ids}))

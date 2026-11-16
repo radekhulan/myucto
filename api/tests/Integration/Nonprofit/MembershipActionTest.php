@@ -136,6 +136,10 @@ final class MembershipActionTest extends TestCase
         [$status, $detail] = $this->call('GET', 'member', null, ['id' => (string) $member['id']], ['accounting' => 1], 'session');
         self::assertSame(200, $status);
         self::assertSame(1800000, $detail['balance']['page_active_claim_cents']);
+        // Samostatná stránka detailu zobrazí jméno kontaktu bez seznamu.
+        self::assertSame('Synthetic action member', $detail['member']['company_name']);
+        self::assertArrayHasKey('first_name', $detail['member']);
+        self::assertArrayHasKey('last_name', $detail['member']);
         [$status, $list] = $this->call('GET', 'members', null, [], ['accounting' => 1], 'session');
         self::assertSame(200, $status);
         self::assertSame('active', $list['items'][0]['status']);

@@ -7,14 +7,14 @@ import type { AccountingPeriod } from '@/api/accounting'
 import { membershipApi, type ClaimRow, type MemberCorrections, type MemberIdentity, type MemberRevision } from '@/api/nonprofitMembership'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
-import { badgeBase, errorBox, errorCode, membershipError, formatDateRange, memberStatusBadge, revisionAt, validRevisions, voidedRevisions, warningBox } from './membershipFormat'
+import { badgeBase, errorBox, errorCode, membershipError, membershipMemberLabel, formatDateRange, memberStatusBadge, revisionAt, validRevisions, voidedRevisions, warningBox } from './membershipFormat'
 import MembershipCorrectionFlow from './MembershipCorrectionFlow.vue'
 import MembershipIssueFlow from './MembershipIssueFlow.vue'
 import MembershipReverseFlow from './MembershipReverseFlow.vue'
 import MembershipRevisionForm from './MembershipRevisionForm.vue'
 import MembershipSettlement from './MembershipSettlement.vue'
 
-const props = defineProps<{ supplier: number; canManage: boolean; memberId: number; label: string; periods: AccountingPeriod[]; refreshVersion?: number }>()
+const props = defineProps<{ supplier: number; canManage: boolean; memberId: number; label?: string; periods: AccountingPeriod[]; refreshVersion?: number }>()
 const emit = defineEmits<{ changed: []; close: []; deleted: []; relabel: [label: string] }>()
 const { t, te } = useI18n()
 
@@ -53,7 +53,10 @@ const upcoming = computed(() => valid.value.filter(r => r.effective_from > today
 const voidable = computed(() => history.value.find(r => r.id === corrections.value?.voidable_revision_id) ?? null)
 const revisionDirty = ref(false)
 const anyLocked = computed(() => locks.value.revision || locks.value.issue || locks.value.reverse || locks.value.correction)
-const member = computed(() => ({ id: props.memberId, member_number: identity.value?.member_number ?? '', label: props.label }))
+/** Jméno kontaktu ze serveru (aktuální i po opravě kontaktu); popisek ze seznamu jen do prvního načtení. */
+// Vymazaný člen nemá jméno ani v detailu, stejně jako v seznamu.
+const displayLabel = computed(() => erased.value ? t('nonprofitMembership.erasure.erasedMemberLabel', { id: props.memberId }) : (identity.value && membershipMemberLabel(identity.value)) || props.label || (identity.value ? t('nonprofitMembership.clientFallback', { id: identity.value.client_id }) : ''))
+const member = computed(() => ({ id: props.memberId, member_number: identity.value?.member_number ?? '', label: displayLabel.value }))
 
 const issued = computed(() => claims.value.filter(c => c.reversal_claim_id === null).reduce((sum, c) => sum + c.amount_cents, 0))
 const caseSymbols = computed(() => Object.fromEntries(claims.value.filter(c => c.variable_symbol)
@@ -205,7 +208,7 @@ const actions = computed<ActionItem[]>(() => [
 <template>
   <section class="space-y-5 rounded-lg border border-neutral-200 bg-surface p-4" data-section="member-detail">
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <h2 ref="heading" tabindex="-1" class="min-w-0 break-words text-lg font-semibold focus:outline-none" data-focus="member-heading">{{ identity ? `${identity.member_number} · ${label}` : label }}</h2>
+      <h1 ref="heading" tabindex="-1" class="min-w-0 break-words text-xl font-semibold focus:outline-none" data-focus="member-heading">{{ identity ? `${identity.member_number} · ${displayLabel}` : displayLabel }}</h1>
       <ActionBar :actions="actions" />
     </div>
     <p v-if="error" role="alert" :class="errorBox" data-section="detail-error">{{ error }}</p>
@@ -215,7 +218,7 @@ const actions = computed<ActionItem[]>(() => [
     <p v-if="erased" role="status" :class="warningBox" data-section="detail-erased">{{ t('nonprofitMembership.erasure.detailErased') }}</p>
 
     <div v-if="identity" class="space-y-2" data-section="member-status">
-      <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.clientRef', { client: label }) }}</p>
+      <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.clientRef', { client: displayLabel }) }}</p>
       <p v-if="current" data-field="status-today">
         {{ t('nonprofitMembership.statusToday', { date: formatDate(today) }) }}:
         <span :class="memberStatusBadge(current.status)">{{ t(`nonprofitMembership.status_${current.status}`) }}</span>
@@ -257,7 +260,7 @@ const actions = computed<ActionItem[]>(() => [
     <div v-if="manage && identity && correction" ref="correctionPane" class="scroll-mt-4">
       <MembershipCorrectionFlow
         :key="`${correction}-${identity.id}`"
-        :supplier="supplier" :can-manage="canManage" :mode="correction" :member="identity" :label="label"
+        :supplier="supplier" :can-manage="canManage" :mode="correction" :member="identity" :label="displayLabel"
         :revision="correction === 'void' ? voidable : null" :head-revision-no="corrections?.head_revision_no ?? 0"
         @done="(mode, label) => correctionFinished(mode, label)" @close="correction = null" @lock="locks.correction = $event" @stale="correctionStale()"
       />

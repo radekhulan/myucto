@@ -64,6 +64,20 @@ beforeEach(() => {
 })
 
 describe('Membership member detail', () => {
+  it('names the member from the contact the server returns, so the page works without the list', async () => {
+    const named = detail([revision(1, '2020-01-01')], [])
+    api.member.mockResolvedValue({ ...named, member: { ...named.member, company_name: '', first_name: 'Syntetická', last_name: 'Osoba' } })
+    const w = mounted({ label: undefined }); await flushPromises()
+    expect(w.get('[data-focus="member-heading"]').text()).toBe('M-1 · Syntetická Osoba')
+    expect(w.get('[data-focus="member-heading"]').element.tagName).toBe('H1')
+    w.unmount()
+    // Bez jména kontaktu i bez popisku ze seznamu: náhradní označení podle kontaktu.
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], []))
+    const fallback = mounted({ label: undefined }); await flushPromises()
+    expect(fallback.get('[data-focus="member-heading"]').text()).toBe(`M-1 · ${cs.nonprofitMembership.clientFallback.replace('{id}', '3')}`)
+    fallback.unmount()
+  })
+
   it('defers an external refresh while a single-charge confirmation is locked', async () => {
     const w=mounted({refreshVersion:0});await flushPromises()
     await w.get('[data-action="new-charge"]').trigger('click');await flushPromises()

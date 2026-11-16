@@ -1,10 +1,11 @@
 import { appIsoDate } from '@/utils/date'
-import { config, flushPromises, mount } from '@vue/test-utils'
+import { config, flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { defineComponent, h, KeepAlive, ref, reactive } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatDate } from '@/composables/useFormat'
 import Workspace from '../MembershipWorkspace.vue'
+import { membershipListNotice } from '../membershipPage'
 import MembershipBatchFlow from '../MembershipBatchFlow.vue'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import type { MemberPage, MemberRow } from '@/api/nonprofitMembership'
@@ -22,6 +23,10 @@ vi.mock('@/api/accounting', () => ({ accountingApi: accounting }))
 config.global.directives = { ...config.global.directives, 'column-labels': {} }
 vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: () => Promise.resolve(), getPagePrefs: () => ({ value: {} }), patchPagePrefs: vi.fn() }))
 vi.mock('@/api/clients', () => ({ clientsApi: {} }))
+// Detail člena je samostatná stránka; řádek jen naviguje (Ctrl+klik a prostřední tlačítko do nového panelu).
+const rowLink = vi.hoisted(() => ({ navigate: vi.fn() }))
+vi.mock('@/composables/useRowLink', () => ({ useRowLink: () => rowLink.navigate }))
+config.global.stubs = { ...config.global.stubs, RouterLink: RouterLinkStub }
 vi.mock('@/api/nonprofitDppo', () => ({ nonprofitDppoApi: { profile: vi.fn() } }))
 
 const ActionBar = defineComponent({
@@ -43,7 +48,6 @@ const ClientSearchSelect = defineComponent({
 const SearchableSelect = defineComponent({ props: ['modelValue', 'options', 'disabled'], emits: ['update:modelValue'], setup: (p, {emit, attrs}) => () => h('select', { ...attrs, value: p.modelValue ?? '', disabled: p.disabled,
   onChange: (e: Event) => { const option = (p.options as {value: string | number}[]).find(x => String(x.value) === (e.target as HTMLSelectElement).value); emit('update:modelValue', option?.value ?? null) },
 }, [h('option', {value: ''}), ...(p.options as {value: string | number; label: string}[]).map(x => h('option', {value: x.value}, x.label))]) })
-const Detail = defineComponent({ name: 'MembershipMemberDetail', props: ['supplier', 'canManage', 'memberId', 'label', 'periods', 'refreshVersion'], emits: ['changed', 'close', 'deleted'], setup: () => () => h('div', { 'data-stub': 'detail' }, [h('h2', { tabindex: -1, 'data-focus': 'member-heading' })]) })
 const ClientFormModal = defineComponent({ name: 'ClientFormModal', emits: ['created', 'close'], setup: () => () => h('div', { 'data-stub': 'client-modal' }) })
 const ImportFlow = defineComponent({ name: 'MembershipImportFlow', props: ['supplier', 'canManage'], emits: ['changed', 'close'], setup: () => () => h('div', { 'data-stub': 'import' }) })
 const Reconciliation = defineComponent({ name: 'MembershipReconciliation', props: ['supplier', 'periods', 'dataVersion'], setup: () => () => h('div', { 'data-stub': 'reconciliation' }) })
@@ -60,13 +64,19 @@ function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
     props: { supplier: 5, canManage: true, ...props },
     global: {
       plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })],
-      stubs: { ActionBar, SearchableSelect, ClientSearchSelect, ClientFormModal, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation, MembershipBatchFlow: true, MembershipImportFlow: ImportFlow },
+      stubs: { ActionBar, SearchableSelect, ClientSearchSelect, ClientFormModal, MembershipReconciliation: Reconciliation, MembershipBatchFlow: true, MembershipImportFlow: ImportFlow },
     },
   })
 }
 
+const DETAIL = (id: number) => `/accounting/nonprofit-membership/members/${id}`
+/** Poslední navigace řádku: cíl a zda jde do nového panelu (Ctrl). */
+const lastNavigation = () => { const [to, event] = rowLink.navigate.mock.lastCall ?? []; return { to, newPanel: !!(event as MouseEvent | undefined)?.ctrlKey } }
+
 beforeEach(() => {
   vi.clearAllMocks()
+  sessionStorage.clear()
+  membershipListNotice.value = ''
   navigation.route = reactive({query: {}})
   navigation.replace.mockImplementation(({query}: {query: Record<string, string>}) => {navigation.route.query = query; return Promise.resolve()})
   api.titles.mockResolvedValue({items: ['SYNTHETIC'], next_after_title_key: null})
@@ -157,43 +167,71 @@ describe('Membership workspace', () => {
     expect(w.get('[data-member="1"] [data-action="open-member"]').attributes('aria-label')).toBe(cs.nonprofitMembership.openMember)
     await w.get('[data-member-card="1"] [data-action="batch-check-member"]').setValue(true)
     expect((w.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(true)
-    expect(w.findComponent(Detail).exists()).toBe(false)
+    // Zaškrtnutí detail neotevírá; klik na kartu i na buňku řádku otevře samostatnou stránku člena.
+    expect(rowLink.navigate).not.toHaveBeenCalled()
     await w.get('[data-member-card="2"]').trigger('click');await flushPromises()
-    expect(w.findComponent(Detail).props('memberId')).toBe(2)
-    expect(w.get('[data-member="2"]').classes()).toContain('bg-primary-50')
-    expect(w.get('[data-member="1"]').classes()).not.toContain('bg-primary-50')
+    expect(lastNavigation()).toEqual({ to: DETAIL(2), newPanel: false })
     await w.get('[data-member="1"] td:nth-child(3)').trigger('click');await flushPromises()
-    expect(w.findComponent(Detail).props('memberId')).toBe(1)
+    expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: false })
     w.unmount()
   })
 
+  it('opens a member as a separate page like a contact, with a real link and a new panel on Ctrl+click', async () => {
+    const w=mounted();await flushPromises()
+    expect(w.find('[data-section="member-detail-pane"]').exists()).toBe(false)
+    expect(w.get('[data-member="1"] [data-field="member-name"]').findComponent(RouterLinkStub).props('to')).toBe(DETAIL(1))
+    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
+    expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: false })
+    await w.get('[data-member="2"]').trigger('click', { ctrlKey: true });await flushPromises()
+    expect(lastNavigation()).toEqual({ to: DETAIL(2), newPanel: true })
+    // Tabulka zůstává celá: sloupce se otevřením nemění.
+    expect(w.findAll('thead th').map(th => th.text())).toEqual(expect.arrayContaining([cs.nonprofitMembership.listColumns.membership, cs.nonprofitMembership.listColumns.prescribed]))
+    w.unmount()
+  })
+
+  it('opens a member in a new panel while a batch or an import is open, so the unsaved work stays', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
+    expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: true })
+    w.findComponent(MembershipBatchFlow).vm.$emit('close');await flushPromises()
+    await w.get('[data-action="import-open"]').trigger('click');await flushPromises()
+    await w.get('[data-member-card="2"]').trigger('click');await flushPromises()
+    expect(lastNavigation()).toEqual({ to: DETAIL(2), newPanel: true })
+    w.findComponent(ImportFlow).vm.$emit('close');await flushPromises()
+    await w.get('[data-member="3"]').trigger('click');await flushPromises()
+    expect(lastNavigation()).toEqual({ to: DETAIL(3), newPanel: false })
+    w.unmount()
+  })
+
+  it('keeps the batch selection when the list is left for a member detail and comes back', async () => {
+    const first=mounted();await flushPromises()
+    await first.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await first.get('[data-member="2"] [data-action="batch-check-member"]').setValue(true)
+    first.unmount()
+    // Návrat: výběr se obnoví a jako u každé obnovy ověří na serveru (člen 2 mezitím filtru nevyhovuje).
+    api.selectionCheck.mockResolvedValueOnce({member_ids: [1]})
+    const back=mounted();await flushPromises()
+    expect(api.selectionCheck).toHaveBeenCalledWith(5, [1,2], expect.objectContaining({payment_status:'all'}))
+    expect((back.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(true)
+    expect((back.get('[data-member="2"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
+    expect(back.text()).toContain(cs.nonprofitMembership.listSelectionRefreshed)
+    back.unmount()
+    // Jiná firma ani jiné filtry výběr nepřevezmou.
+    const other=mounted({supplier:6});await flushPromises()
+    expect((other.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
+    other.unmount()
+    navigation.route.query = {search: 'Synthetic'}
+    const filtered=mounted();await flushPromises()
+    expect((filtered.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
+    filtered.unmount()
+  })
   it('hides the selection column without write access', async () => {
     const w=mounted({canManage:false});await flushPromises()
     expect(w.find('[data-action="batch-check-member"]').exists()).toBe(false)
     expect(w.get('[data-member="1"]').findAll('td')[0].get('[data-field="member-number"]').text()).toBe('M-1')
     expect(w.find('[data-section="batch-selected-count"]').exists()).toBe(false)
     w.unmount()
-  })
-
-  it('returns focus to the open button of the visible phone card after closing the detail', async () => {
-    const rects = vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(function (this: Element) {
-      return (this.closest('[data-member-card]') ? [{}] : []) as unknown as DOMRectList
-    })
-    try {
-      const w = mount(Workspace, {
-        attachTo: document.body,
-        props: { supplier: 5, canManage: true },
-        global: {
-          plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
-          stubs: { ActionBar, ClientSearchSelect, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation },
-        },
-      })
-      await flushPromises()
-      await w.get('[data-member-card="2"] [data-action="open-member"]').trigger('click');await flushPromises()
-      w.findComponent(Detail).vm.$emit('close');await flushPromises()
-      expect(document.activeElement).toBe(w.get('[data-member-card="2"] [data-action="open-member"]').element)
-      w.unmount()
-    } finally { rects.mockRestore() }
   })
 
   it('offers clearing filters from an empty filtered list, but not while a batch is locked', async () => {
@@ -216,23 +254,23 @@ describe('Membership workspace', () => {
     locked.unmount()
   })
 
-  it('confirms a deleted member like other successful actions and closes the detail', async () => {
+  it('confirms a member deleted on its detail page once the list is shown again', async () => {
+    membershipListNotice.value = cs.nonprofitMembership.correction.done_delete
     const w=mounted();await flushPromises()
-    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
-    w.findComponent(Detail).vm.$emit('deleted');w.findComponent(Detail).vm.$emit('changed');await flushPromises()
     expect(w.get('[data-section="workspace-notice"]').text()).toBe(cs.nonprofitMembership.correction.done_delete)
-    expect(w.findComponent(Detail).exists()).toBe(false)
+    expect(membershipListNotice.value).toBe('')
     w.unmount()
+    const again=mounted();await flushPromises()
+    expect(again.find('[data-section="workspace-notice"]').exists()).toBe(false)
+    again.unmount()
   })
-
   it('clears batch selection when a data refresh removes members from the current filter', async () => {
     const w=mounted();await flushPromises()
     await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
-    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
     await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
     api.members.mockResolvedValueOnce(page([]))
     api.selectionCheck.mockResolvedValueOnce({member_ids: []})
-    w.findComponent(Detail).vm.$emit('changed');await flushPromises()
+    await w.get('[data-action="reload-members"]').trigger('click');await flushPromises()
     expect(w.findComponent(MembershipBatchFlow).props('selectedMemberIds')).toEqual([])
     w.unmount()
   })
@@ -296,18 +334,15 @@ describe('Membership workspace', () => {
     expect(w.find('[data-member="2"] [data-field="contribution-unpaired"]').exists()).toBe(false)
     w.unmount()
   })
-  it('passes selected members into a batch and invalidates the existing detail when any batch part completes', async () => {
+  it('passes selected members into a batch and reloads the list when any batch part completes', async () => {
     const w=mounted();await flushPromises()
     await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
-    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
     await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
     const batch=w.findComponent(MembershipBatchFlow)
     expect(batch.props('selectedMemberIds')).toEqual([1])
-    expect(w.findComponent(Detail).props('refreshVersion')).toBe(0)
     batch.vm.$emit('changed');await flushPromises()
-    expect(w.findComponent(Detail).props('refreshVersion')).toBe(1)
-    expect(w.findComponent(Detail).props('memberId')).toBe(1)
     expect(api.members).toHaveBeenCalledTimes(2)
+    expect(w.findComponent(Reconciliation).props('dataVersion')).toBe(1)
     w.unmount()
   })
   it('refreshes the register and accounting periods after returning to a cached workspace', async () => {
@@ -316,7 +351,7 @@ describe('Membership workspace', () => {
       setup: () => () => h(KeepAlive, null, { default: () => visible.value ? h(Workspace, { supplier: 5, canManage: false }) : null }),
     }), { global: {
       plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
-      stubs: { ActionBar, ClientSearchSelect, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation },
+      stubs: { ActionBar, ClientSearchSelect, MembershipReconciliation: Reconciliation },
     } })
     await flushPromises()
     expect(api.members).toHaveBeenCalledTimes(1)
@@ -389,46 +424,16 @@ describe('Membership workspace', () => {
     w.unmount()
   })
 
-  it('opens a member with the stable number and contact label', async () => {
+  it('shows the stable number and contact label as the link to the member page', async () => {
     const w = mounted()
     await flushPromises()
-    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click')
-    const detail = w.findComponent(Detail)
-    expect(detail.props()).toMatchObject({ supplier: 5, canManage: true, memberId: 1, label: 'Synthetic member 1' })
-    expect(detail.props('periods')).toHaveLength(1)
+    const link = w.get('[data-member="1"] [data-field="member-name"]')
+    expect(link.text()).toBe('Synthetic member 1')
+    expect(w.get('[data-member="1"] [data-field="member-number"]').text()).toBe('M-1')
+    await link.trigger('click');await flushPromises()
+    expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: false })
     w.unmount()
   })
-
-  it('opens the member detail as a master-detail pane above the list and scrolls it into view', async () => {
-    const scroll = vi.mocked(Element.prototype.scrollIntoView)
-    const w = mounted()
-    await flushPromises()
-    expect(w.find('[data-section="member-detail-pane"]').exists()).toBe(false)
-    await w.get('[data-member="2"] [data-action="open-member"]').trigger('click')
-    await flushPromises()
-    const layout = w.get('[data-section="members-layout"]')
-    expect(layout.classes()).toContain('lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]')
-    const children = Array.from(layout.element.children).map(el => el.getAttribute('data-section'))
-    expect(children).toEqual(['member-detail-pane', 'members'])
-    const pane = w.get('[data-section="member-detail-pane"]')
-    expect(pane.find('[data-stub="detail"]').exists()).toBe(true)
-    expect(pane.classes()).toContain('lg:sticky')
-    expect(scroll).toHaveBeenCalledTimes(1)
-    expect(scroll.mock.contexts[0]).toBe(pane.element)
-    expect(w.get('[data-member="2"]').attributes('aria-current')).toBe('true')
-    expect(w.get('[data-member="1"]').attributes('aria-current')).toBeUndefined()
-
-    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click')
-    await flushPromises()
-    expect(scroll).toHaveBeenCalledTimes(2)
-    expect(w.findComponent(Detail).props('memberId')).toBe(1)
-    w.findComponent(Detail).vm.$emit('close')
-    await flushPromises()
-    expect(w.find('[data-section="member-detail-pane"]').exists()).toBe(false)
-    expect(w.get('[data-section="members-layout"]').classes()).not.toContain('lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]')
-    w.unmount()
-  })
-
   it('creates a member only on explicit request from a chosen contact and a member number', async () => {
     const w = mounted()
     await flushPromises()
@@ -441,9 +446,9 @@ describe('Membership workspace', () => {
     await flushPromises()
     expect(api.createMember).toHaveBeenCalledTimes(1)
     expect(api.createMember).toHaveBeenCalledWith(5, { client_id: 3, member_number: 'M-9' })
-    expect(w.findComponent(Detail).props()).toMatchObject({ memberId: 9, label: 'Synthetic client 3' })
+    // Jako u kontaktu: po založení rovnou stránka nového člena (zapíše se mu první revize).
+    expect(lastNavigation()).toEqual({ to: DETAIL(9), newPanel: false })
     expect(w.get('[data-section="workspace-notice"]').text()).toBe(cs.nonprofitMembership.memberCreated)
-    expect(api.members).toHaveBeenCalledTimes(2)
     w.unmount()
   })
 
@@ -473,7 +478,7 @@ describe('Membership workspace', () => {
     await w.get('[data-action="create-member"]').trigger('click')
     await flushPromises()
     expect(w.get('[data-section="workspace-error"]').text()).toContain(cs.nonprofitMembership.serverErrors.nonprofit_membership_identity_conflict)
-    expect(w.find('[data-stub="detail"]').exists()).toBe(false)
+    expect(rowLink.navigate).not.toHaveBeenCalled()
     w.unmount()
   })
 
@@ -485,7 +490,7 @@ describe('Membership workspace', () => {
     expect(w.get('[data-section="readonly"]').text()).toBe(cs.nonprofitMembership.readonly)
     expect(w.findAll('[data-section="member-row"]')).toHaveLength(3)
     await w.get('[data-member="1"] [data-action="open-member"]').trigger('click')
-    expect(w.findComponent(Detail).props('canManage')).toBe(false)
+    expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: false })
     w.unmount()
   })
 
@@ -500,16 +505,6 @@ describe('Membership workspace', () => {
     expect(w.text()).not.toContain('M-99')
     expect(api.members).toHaveBeenLastCalledWith(6, 0, 50, expect.objectContaining({search:'',title_key:'',payment_status:'all'}))
     expect(w.findAll('[data-section="member-row"]')).toHaveLength(3)
-    w.unmount()
-  })
-
-  it('closes an open member when the supplier changes', async () => {
-    const w = mounted()
-    await flushPromises()
-    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click')
-    expect(w.find('[data-stub="detail"]').exists()).toBe(true)
-    await w.setProps({ supplier: 6 })
-    expect(w.find('[data-stub="detail"]').exists()).toBe(false)
     w.unmount()
   })
 
@@ -530,59 +525,6 @@ describe('Membership workspace', () => {
     await flushPromises()
     expect(w.find('[data-section="members-loading"]').exists()).toBe(true)
     expect(w.find('[data-section="members-empty"]').exists()).toBe(false)
-    w.unmount()
-  })
-
-  it('moves focus into the opened detail and back to the row button after closing it', async () => {
-    const w = mount(Workspace, {
-      attachTo: document.body,
-      props: { supplier: 5, canManage: true },
-      global: {
-        plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
-        stubs: { ActionBar, ClientSearchSelect, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation },
-      },
-    })
-    await flushPromises()
-    await w.get('[data-member="2"] [data-action="open-member"]').trigger('click')
-    await flushPromises()
-    expect(document.activeElement?.getAttribute('data-focus')).toBe('member-heading')
-    w.findComponent(Detail).vm.$emit('close')
-    await flushPromises()
-    expect(document.activeElement).toBe(w.get('[data-member="2"] [data-action="open-member"]').element)
-    w.unmount()
-  })
-
-  it('tells the period check that its result is outdated after a write in the member detail', async () => {
-    const w = mounted()
-    await flushPromises()
-    expect(w.findComponent(Reconciliation).props('dataVersion')).toBe(0)
-    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click')
-    await flushPromises()
-    w.findComponent(Detail).vm.$emit('changed')
-    await flushPromises()
-    expect(w.findComponent(Reconciliation).props('dataVersion')).toBe(1)
-    expect(api.members).toHaveBeenCalledTimes(2)
-    w.unmount()
-  })
-
-  it('returns focus to the list heading when the closed member is no longer in the list', async () => {
-    const w = mount(Workspace, {
-      attachTo: document.body,
-      props: { supplier: 5, canManage: true },
-      global: {
-        plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
-        stubs: { ActionBar, ClientSearchSelect, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation },
-      },
-    })
-    await flushPromises()
-    await w.get('[data-member="2"] [data-action="open-member"]').trigger('click')
-    await flushPromises()
-    api.members.mockResolvedValue(page([row(1)]))
-    w.findComponent(Detail).vm.$emit('changed')
-    await flushPromises()
-    w.findComponent(Detail).vm.$emit('close')
-    await flushPromises()
-    expect(document.activeElement?.getAttribute('data-focus')).toBe('members-heading')
     w.unmount()
   })
 
@@ -680,7 +622,7 @@ describe('Membership workspace', () => {
     } finally { vi.useRealTimers(); w.unmount() }
   })
 
-  it('reloads titles after a saved batch or a change in member detail', async () => {
+  it('reloads titles after a saved batch', async () => {
     const w=mounted();await flushPromises()
     await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
     await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
@@ -689,9 +631,6 @@ describe('Membership workspace', () => {
     w.findComponent(MembershipBatchFlow).vm.$emit('changed');await flushPromises()
     expect(api.titles).toHaveBeenCalledTimes(before+1)
     expect(w.get('[data-field="member-title"]').findAll('option').map(o => o.text())).toContain('SYNTHETIC-NEW')
-    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
-    w.findComponent(Detail).vm.$emit('changed');await flushPromises()
-    expect(api.titles).toHaveBeenCalledTimes(before+2)
     w.unmount()
   })
 
@@ -711,13 +650,14 @@ describe('Membership workspace', () => {
 
   it('reloads titles for the applied year, not for an unapplied year in the form', async () => {
     const w=mounted();await flushPromises()
+    // Dávka otevřená před chybou roku (s chybou seznamu se hromadný předpis otevřít nedá).
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
     vi.useFakeTimers()
     try {
       await w.get('[data-field="member-year"]').setValue('9999')
       await vi.advanceTimersByTimeAsync(300);await flushPromises()
       expect(w.get('[data-section="workspace-error"]').text()).toBe(cs.nonprofitMembership.listNeedPeriod)
-      await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
-      w.findComponent(Detail).vm.$emit('changed');await flushPromises()
+      w.findComponent(MembershipBatchFlow).vm.$emit('changed');await flushPromises()
       expect(api.titles).toHaveBeenLastCalledWith(5,Number(appIsoDate().slice(0,4)),undefined)
       expect(w.find('[data-section="titles-error"]').exists()).toBe(false)
     } finally { vi.useRealTimers(); w.unmount() }
@@ -886,7 +826,7 @@ describe('Membership workspace', () => {
     reader.unmount()
   })
 
-  it('po importu obnoví seznam i otevřený detail a panel zavře změna firmy', async () => {
+  it('po importu obnoví seznam a panel zavře změna firmy', async () => {
     const w = mounted(); await flushPromises()
     await w.get('[data-action="import-open"]').trigger('click')
     const panel = w.findComponent(ImportFlow)
