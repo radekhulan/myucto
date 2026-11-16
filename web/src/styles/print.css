@@ -104,9 +104,13 @@
   .table-sticky-first tbody td:first-child {
     position: static !important;
   }
-  /* Vrstva pod obsahem lepivé buňky (main.css) by se bez sticky kotvila
-     k cizímu předkovi. V tisku nic neposouvá, takže ji nepotřebujeme. */
-  .table-sticky-first tbody td:first-child::before {
+  /* Vrstvy lepivé buňky (main.css) v tisku nepotřebujeme, nic se tu neposouvá.
+     ::after by se bez sticky kotvil k cizímu předkovi a bílý podklad by při
+     tisku s pozadím zakryl tint řádku, buňka tak dědí barvu řádku jako dřív. */
+  .table-sticky-first tbody td:first-child {
+    background-image: none;
+  }
+  .table-sticky-first tbody td:first-child::after {
     display: none;
   }
 
