@@ -41453,8 +41453,16 @@
     "listStatus_unpaid": "Neuhrazeno",
     "listStatus_unproven": "K prověření",
     "listStatus_none": "Bez předpisu pro zvolený titul nebo rok",
-    "listPrescribed": "Předepsáno",
-    "listPaid": "Úhrada",
+    "listColumns": {
+      "select": "Výběr do hromadného předpisu",
+      "name": "Člen",
+      "membership": "Členství",
+      "payment": "Stav úhrady",
+      "prescribed": "Předepsáno",
+      "paid": "Uhrazeno",
+      "open": "Zbývá",
+      "actions": "Akce"
+    },
     "listNoResults": "Zadaným filtrům neodpovídá žádný člen.",
     "rateRetryOptions": "Znovu načíst účty a dimenze",
     "ratePartialList": "Hledáte jen v načtených sazbách. Další sazby načtete tlačítkem vedle.",

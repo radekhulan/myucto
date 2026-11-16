@@ -1,5 +1,5 @@
 import { appIsoDate } from '@/utils/date'
-import { flushPromises, mount } from '@vue/test-utils'
+import { config, flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, KeepAlive, ref, reactive } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -17,6 +17,10 @@ vi.mock('vue-router', async importOriginal => ({...await importOriginal<typeof i
 const accounting = vi.hoisted(() => ({ listPeriods: vi.fn() }))
 vi.mock('@/api/nonprofitMembership', () => ({ membershipApi: api }))
 vi.mock('@/api/accounting', () => ({ accountingApi: accounting }))
+// Preference tabulky (sloupce, hustota) se v testu nenačítají ze serveru.
+// Direktiva popisků sloupců se registruje v main.ts; v testu stačí prázdná.
+config.global.directives = { ...config.global.directives, 'column-labels': {} }
+vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: () => Promise.resolve(), getPagePrefs: () => ({ value: {} }), patchPagePrefs: vi.fn() }))
 vi.mock('@/api/clients', () => ({ clientsApi: {} }))
 vi.mock('@/api/nonprofitDppo', () => ({ nonprofitDppoApi: { profile: vi.fn() } }))
 
@@ -135,6 +139,30 @@ describe('Membership workspace', () => {
     w.unmount()
   })
 
+  it('renders members as a table with a phone card sharing the batch selection and opening on click', async () => {
+    const w=mounted();await flushPromises()
+    const rowEl=w.get('[data-member="1"]')
+    expect(rowEl.element.tagName).toBe('TR')
+    expect(rowEl.findAll('td').map(td => td.text())).toEqual(expect.arrayContaining(['M-1', 'Synthetic member 1']))
+    expect(w.findAll('thead th').map(th => th.text())).toEqual(expect.arrayContaining([cs.nonprofitMembership.memberNumber, cs.nonprofitMembership.listColumns.prescribed, cs.nonprofitMembership.listColumns.paid, cs.nonprofitMembership.listColumns.open]))
+    await w.get('[data-member-card="1"] [data-action="batch-check-member"]').setValue(true)
+    expect((w.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(true)
+    expect(w.findComponent(Detail).exists()).toBe(false)
+    await w.get('[data-member-card="2"]').trigger('click');await flushPromises()
+    expect(w.findComponent(Detail).props('memberId')).toBe(2)
+    expect(w.get('[data-member="2"]').attributes('data-row-active')).toBe('true')
+    await w.get('[data-member="1"] td:nth-child(3)').trigger('click');await flushPromises()
+    expect(w.findComponent(Detail).props('memberId')).toBe(1)
+    w.unmount()
+  })
+
+  it('hides the selection column without write access', async () => {
+    const w=mounted({canManage:false});await flushPromises()
+    expect(w.find('[data-action="batch-check-member"]').exists()).toBe(false)
+    expect(w.get('[data-member="1"]').findAll('td')[0].text()).toBe('M-1')
+    w.unmount()
+  })
+
   it('confirms a deleted member like other successful actions and closes the detail', async () => {
     const w=mounted();await flushPromises()
     await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
@@ -189,8 +217,12 @@ describe('Membership workspace', () => {
     api.members.mockResolvedValue(page([row(1,{contribution:{status:'unproven',claim_count:1,prescribed_cents:'50000',paid_cents:null,open_cents:null}})]))
     const w=mounted();await flushPromises()
     expect(w.get('[data-field="contribution-status"]').text()).toBe(cs.nonprofitMembership.listStatus_unproven)
-    expect(w.get('[data-field="contribution-amounts"]').text()).toContain('—')
-    expect(w.get('[data-field="contribution-amounts"]').text()).toContain('500,00')
+    expect(w.get('[data-member="1"] [data-field="contribution-prescribed"]').text()).toContain('500,00')
+    expect(w.get('[data-member="1"] [data-field="contribution-paid"]').text()).toBe('—')
+    expect(w.get('[data-member="1"] [data-field="contribution-open"]').text()).toBe('—')
+    // Mobilní karta ukazuje tytéž částky v jednom řádku.
+    expect(w.get('[data-member-card="1"] [data-field="contribution-amounts"]').text()).toContain('500,00')
+    expect(w.get('[data-member-card="1"] [data-field="contribution-amounts"]').text()).toContain('—')
     expect(w.find('[data-field="contribution-unpaired"]').exists()).toBe(false)
     w.unmount()
   })

@@ -41768,8 +41768,16 @@
     "listStatus_unpaid": "Unpaid",
     "listStatus_unproven": "Needs review",
     "listStatus_none": "No charge for the selected title or year",
-    "listPrescribed": "Charged",
-    "listPaid": "Paid",
+    "listColumns": {
+      "select": "Select for bulk charge",
+      "name": "Member",
+      "membership": "Membership",
+      "payment": "Payment status",
+      "prescribed": "Charged",
+      "paid": "Paid",
+      "open": "Outstanding",
+      "actions": "Actions"
+    },
     "listNoResults": "No members match the selected filters.",
     "rateRetryOptions": "Reload accounts and dimensions",
     "ratePartialList": "Search covers loaded rates only. Use the button to load more.",
