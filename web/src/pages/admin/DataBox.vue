@@ -13,7 +13,7 @@
  *    (§ 17 odst. 3 zák. 300/2008 Sb.) a rozjede lhůty, takže se zapíná
  *    vědomě, s vysvětlením, a ne přepínačem bez kontextu.
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { isAxiosError } from 'axios'
@@ -775,6 +775,30 @@ function canReprocess(message: InboxMessage): boolean {
   return message.local_content_state === 'available'
     && message.document_id !== null
     && message.classification !== 'unclassified'
+    && message.classification !== 'delivery_receipt'
+    && message.direction !== 'sent'
+}
+
+/** Výzvu k odstranění vad posílá úřad nám; naše vlastní odeslaná zpráva jí být nemůže. */
+function canRecordNotice(message: InboxMessage): boolean {
+  return message.direction !== 'sent' && message.classification !== 'delivery_receipt'
+}
+
+/**
+ * Spárovaná zpráva vede na své podání: daňové na detail v Daních, ostatní na
+ * řádek v Odchozích podáních. Bez odkazu vypadala doručenka jako nezpracovaná.
+ */
+function matchedTaxSubmissionLink(message: InboxMessage) {
+  if (message.matched_outbox_artifact_kind !== 'tax_submission' || !message.matched_outbox_artifact_id) return null
+  return { name: 'reports-submissions', query: { submission_id: String(message.matched_outbox_artifact_id) } }
+}
+
+async function showMatchedOutbox(message: InboxMessage) {
+  if (message.matched_outbox_id === null) return
+  focusOutboxId.value = message.matched_outbox_id
+  tab.value = 'outbox'
+  await nextTick()
+  document.querySelector('[data-test="outbox-focused"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
 async function reprocessInboxMessage(message: InboxMessage) {
@@ -3060,6 +3084,21 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
                 <span v-if="m.sender_ident" class="break-all text-neutral-500">{{ t('databox.inboxBrowse.fileMark', { mark: m.sender_ident }) }}</span>
               </div>
 
+              <div v-if="m.matched_outbox_id !== null" class="mt-2 text-xs" data-test="inbox-matched-outbox">
+                <span class="text-success-700">{{ t('databox.inbox.matchedTo') }}</span>
+                <RouterLink
+                  v-if="matchedTaxSubmissionLink(m)"
+                  :to="matchedTaxSubmissionLink(m)!"
+                  class="ml-1 break-words text-primary-700 hover:underline"
+                >{{ m.matched_outbox_subject || t('databox.inbox.matchedSubmission') }}</RouterLink>
+                <button
+                  v-else
+                  type="button"
+                  class="ml-1 cursor-pointer break-words text-left text-primary-700 hover:underline"
+                  @click="showMatchedOutbox(m)"
+                >{{ m.matched_outbox_subject || t('databox.inbox.matchedSubmission') }}</button>
+              </div>
+
               <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
                 <div>
                   <dt class="text-xs uppercase text-neutral-400">{{ t('databox.inbox.deliveredAt') }}</dt>
@@ -3141,7 +3180,7 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
                   </svg>
                   {{ m.read_at ? t('databox.inboxBrowse.markUnread') : t('databox.inboxBrowse.markRead') }}
                 </button>
-                <button type="button" :class="btnOutlineSm('warning')" @click="startNoticeFromMessage(m)">
+                <button v-if="canRecordNotice(m)" type="button" :class="btnOutlineSm('warning')" @click="startNoticeFromMessage(m)">
                   <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" />
                   </svg>
@@ -3279,6 +3318,20 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
                     >
                       {{ t(`databox.classification.${m.classification}`) }}
                     </span>
+                    <div v-if="m.matched_outbox_id !== null" class="mt-1 max-w-[14rem] text-xs" data-test="inbox-matched-outbox">
+                      <span class="text-success-700">{{ t('databox.inbox.matchedTo') }}</span>
+                      <RouterLink
+                        v-if="matchedTaxSubmissionLink(m)"
+                        :to="matchedTaxSubmissionLink(m)!"
+                        class="block break-words text-primary-700 hover:underline"
+                      >{{ m.matched_outbox_subject || t('databox.inbox.matchedSubmission') }}</RouterLink>
+                      <button
+                        v-else
+                        type="button"
+                        class="block cursor-pointer break-words text-left text-primary-700 hover:underline"
+                        @click="showMatchedOutbox(m)"
+                      >{{ m.matched_outbox_subject || t('databox.inbox.matchedSubmission') }}</button>
+                    </div>
                   </td>
                   <td class="whitespace-nowrap px-3 py-2">{{ m.delivered_at ?? '—' }}</td>
                   <!--
@@ -3359,7 +3412,7 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
                         </svg>
                         {{ m.read_at ? t('databox.inboxBrowse.markUnread') : t('databox.inboxBrowse.markRead') }}
                       </button>
-                      <button type="button" :class="btnOutlineSm('warning')" @click="startNoticeFromMessage(m)">
+                      <button v-if="canRecordNotice(m)" type="button" :class="btnOutlineSm('warning')" @click="startNoticeFromMessage(m)">
                         <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" />
                         </svg>

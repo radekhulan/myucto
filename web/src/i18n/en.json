@@ -34477,6 +34477,8 @@
       "reprocessAlreadyDone": "This protocol is already processed. An accepted document is never overwritten, so nothing about the submission changes.",
       "reprocessManual": "The message could not be linked automatically ({code}). It stays for manual review.",
       "reprocessNotApplicable": "There is no automatic processing for this message.",
+      "matchedTo": "Attached to submission:",
+      "matchedSubmission": "open submission",
       "lastOkAt": "Last successful collection: {at}",
       "unreachable": "The data box cannot be reached (failed attempts: {count}). We therefore do not know whether new messages are waiting — the empty list below does not mean there are none."
     },

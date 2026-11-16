@@ -34477,6 +34477,8 @@
       "reprocessAlreadyDone": "Tenhle protokol už je zpracovaný. Jednou přijatý doklad se nepřepisuje, na stavu podání se nic nemění.",
       "reprocessManual": "Zprávu se nepodařilo navázat automaticky ({code}). Zůstává k ručnímu posouzení.",
       "reprocessNotApplicable": "K téhle zprávě aplikace žádné automatické zpracování nemá.",
+      "matchedTo": "Připojeno k podání:",
+      "matchedSubmission": "otevřít podání",
       "lastOkAt": "Naposledy úspěšně vybráno: {at}",
       "unreachable": "Na datovou schránku se nedaří dovolat (neúspěšných pokusů: {count}). Nevíme tedy, jestli tam nové zprávy jsou - prázdný seznam níž to neznamená."
     },

@@ -385,11 +385,18 @@ final class SubmissionInboxRepository
                     m.category_id, m.category_source, m.direction, m.read_at, m.read_by,
                     c.code AS category_code, c.name AS category_name,
                     dm.sender_ref_number, dm.recipient_ref_number, dm.recipient_ident,
+                    mo.subject AS matched_outbox_subject,
+                    mo.artifact_kind AS matched_outbox_artifact_kind,
+                    mo.artifact_id AS matched_outbox_artifact_id,
                     (SELECT COUNT(*) FROM documents attachment
                       WHERE attachment.parent_document_id = m.document_id
                         AND attachment.supplier_id = m.supplier_id
                         AND attachment.deleted_at IS NULL) AS attachment_count'
-            . $from . $where
+            . $from
+            // Ke spárované zprávě (doručenka, protokol úřadu) se ukazuje podání,
+            // ke kterému patří. Bez toho vypadala doručenka jako nezpracovaná.
+            . ' LEFT JOIN submission_outbox mo ON mo.id = m.matched_outbox_id AND mo.supplier_id = m.supplier_id'
+            . $where
             . ' ORDER BY ' . $orderBy
             . ' LIMIT ' . $query->limit . ' OFFSET ' . $query->offset,
         );
@@ -1128,7 +1135,7 @@ final class SubmissionInboxRepository
                 $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
             }
         }
-        foreach (['hidden_by', 'local_content_purged_by', 'lifecycle_row_version', 'category_id', 'read_by', 'attachment_count'] as $key) {
+        foreach (['hidden_by', 'local_content_purged_by', 'lifecycle_row_version', 'category_id', 'read_by', 'attachment_count', 'matched_outbox_artifact_id'] as $key) {
             if (array_key_exists($key, $row)) {
                 $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
             }
