@@ -12,6 +12,7 @@ import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { downloadApiFile } from '@/utils/downloadFile'
 import DateInput from '@/components/ui/DateInput.vue'
+import SubmissionDeadlineCard from '@/components/reports/SubmissionDeadlineCard.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -74,14 +75,6 @@ const monthOptions = computed(() =>
 )
 // Distinct roky z dat (issue #33).
 const yearOptions = useYearOptions('combined', year)
-
-const daysToDeadline = computed(() => {
-  if (!preview.value?.summary.submission_deadline) return null
-  const d = new Date(preview.value.summary.submission_deadline)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return Math.ceil((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-})
 
 // Popisky typů plnění (k_pln_eu) dle DPHSHV XSD — pořadí MUSÍ sedět s backendem
 // (SouhrnneHlaseniBuilder::VAT_CODE_TO_SH_TYPE): 0=zboží, 1=přemístění majetku,
@@ -210,18 +203,8 @@ onMounted(() => { void initialize() })
             {{ t('reports.shv.total_rounding_hint', { exact: formatMoney(preview.summary.total_amount_exact, 'CZK') }) }}
           </div>
         </div>
-        <div v-if="preview.summary.submission_deadline" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
-          <div class="text-xs uppercase tracking-wide text-neutral-500 font-medium mb-1">{{ t('reports.dph.deadline') }}</div>
-          <div class="text-xl font-bold font-mono"
-            :class="(daysToDeadline ?? 999) < 0 ? 'text-danger-500' : (daysToDeadline ?? 999) <= 7 ? 'text-warning-600' : 'text-neutral-900'">
-            {{ preview.summary.submission_deadline }}
-          </div>
-          <div class="text-xs mt-1"
-            :class="(daysToDeadline ?? 999) < 0 ? 'text-danger-500' : (daysToDeadline ?? 999) <= 7 ? 'text-warning-600' : 'text-neutral-500'">
-            <template v-if="daysToDeadline !== null && daysToDeadline >= 0">{{ t('reports.dph.deadline_in', { n: daysToDeadline }) }}</template>
-            <template v-else-if="daysToDeadline !== null">{{ t('reports.dph.deadline_passed', { n: Math.abs(daysToDeadline) }) }}</template>
-          </div>
-        </div>
+        <SubmissionDeadlineCard v-if="preview.summary.submission_deadline"
+          :deadline="preview.summary.submission_deadline" :filed-at="preview.summary.filed_at" />
       </div>
 
       <!-- Rows table -->

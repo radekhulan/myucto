@@ -827,6 +827,11 @@ final class DphPriznaniBuilder
             'tax_due'                 => round($vlastniDan, 2),
             'is_excess_deduction'     => $vlastniDan < 0,
             'submission_deadline'     => $deadline,
+            // Podání v řádné lhůtě už evidované → karta termínu nehlásí prodlení. U dodatečného
+            // běží vlastní lhůta od zjištění, tam odpočet zůstává.
+            'filed_at'                => $isAmendment ? null : $this->variantGuard->filedAt(
+                $supplierId, 'dphdp3', $year, $quarter !== null ? null : $month, $quarter, ['B', 'O'],
+            ),
             // C7' — typ podání (řádné/opravné/dodatečné) + podklady dodatečného přiznání.
             'variant'                 => $variant,
             'dapdph_forma'            => $forma,

@@ -17,6 +17,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 import PendingApprovalVatNotice from '@/components/reports/PendingApprovalVatNotice.vue'
 import VatBookSectionActions from '@/components/reports/VatBookSectionActions.vue'
 import DphCrossCheckDocumentLink from '@/components/reports/DphCrossCheckDocumentLink.vue'
+import SubmissionDeadlineCard from '@/components/reports/SubmissionDeadlineCard.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -272,15 +273,6 @@ function formatMonthLabel(period: string): string {
   if (!y || !m) return period
   return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('cs-CZ', { month: 'short', year: '2-digit' })
 }
-
-// Deadline countdown
-const daysToDeadline = computed(() => {
-  if (!preview.value?.summary.submission_deadline) return null
-  const deadline = new Date(preview.value.summary.submission_deadline)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return Math.ceil((deadline.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-})
 
 watch([ready, year, month, effectivePeriod, variant, dZjist, reason], () => {
   if (!ready.value) {
@@ -572,18 +564,8 @@ onMounted(() => { void initialize() })
           </div>
         </div>
         <!-- Deadline countdown -->
-        <div v-if="preview.summary.submission_deadline" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
-          <div class="text-xs uppercase tracking-wide text-neutral-500 font-medium mb-1">{{ t('reports.dph.deadline') }}</div>
-          <div class="text-xl font-bold font-mono"
-            :class="(daysToDeadline ?? 999) < 0 ? 'text-danger-500' : (daysToDeadline ?? 999) <= 7 ? 'text-warning-600' : 'text-neutral-900'">
-            {{ preview.summary.submission_deadline }}
-          </div>
-          <div class="text-xs mt-1"
-            :class="(daysToDeadline ?? 999) < 0 ? 'text-danger-500' : (daysToDeadline ?? 999) <= 7 ? 'text-warning-600' : 'text-neutral-500'">
-            <template v-if="daysToDeadline !== null && daysToDeadline >= 0">{{ t('reports.dph.deadline_in', { n: daysToDeadline }) }}</template>
-            <template v-else-if="daysToDeadline !== null">{{ t('reports.dph.deadline_passed', { n: Math.abs(daysToDeadline) }) }}</template>
-          </div>
-        </div>
+        <SubmissionDeadlineCard v-if="preview.summary.submission_deadline"
+          :deadline="preview.summary.submission_deadline" :filed-at="preview.summary.filed_at" />
       </div>
 
       <!-- Predikce DPH pro zvolené období (zahrnuje vystavené i koncepty) -->

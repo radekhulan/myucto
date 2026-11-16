@@ -30569,6 +30569,8 @@
       "deadline": "Submission deadline",
       "deadline_in": "{n} days left",
       "deadline_passed": "{n} days past!",
+      "filed_on": "Filed on {date}",
+      "filed_late": "Filed on {date}, {n} days after the deadline",
       "monthly_trend": "VAT trend (12 months)",
       "net_due": "Net tax / refund",
       "download_xml": "Download XML",

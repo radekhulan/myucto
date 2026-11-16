@@ -30569,6 +30569,8 @@
       "deadline": "Termín podání",
       "deadline_in": "Zbývá {n} dní",
       "deadline_passed": "{n} dní po termínu!",
+      "filed_on": "Podáno {date}",
+      "filed_late": "Podáno {date}, po termínu o {n} dní",
       "monthly_trend": "Vývoj DPH (12 měsíců)",
       "net_due": "Vlastní daň / vratka",
       "download_xml": "Stáhnout XML",
