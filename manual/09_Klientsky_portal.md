@@ -99,7 +99,7 @@ jen údaje přečte AI. Před nahráním vidíte měsíční čerpání společn
 spotřebuje jeden pokus i při chybě, duplicitě nebo načtení ISDOC. Pokusy se nevracejí a čerpání se obnovuje každý měsíc.
 Po vyčerpání můžete zadávat ručně nebo požádat účetní o zvýšení limitu. Použitý model nastavuje účetní. Podrobnosti najdete v [AI extrakci](25_AI_extrakce.md#254-krok-za-krokem-importovat-prijate-faktury-z-pdf).
 
-Tlačítko **Náhled** otevře PDF nebo obrázek na široké obrazovce vpravo vedle přehledu, na menší obrazovce v dialogu. Výběrem jiného dokladu se náhled přepne. Vlastní předání ve stavu **Předáno** můžete přes **Smazat předání** odstranit, dokud účetní nezačala zpracování. Potvrzení vyřadí podání z přehledu a přesune originál do koše Dokumentů. Pokud doklad odpovídal na požadavek účetní, požadavek se znovu otevře.
+Tlačítko **Náhled** otevře PDF nebo obrázek na široké obrazovce vpravo vedle přehledu, na menší obrazovce v dialogu. Výběrem jiného dokladu se náhled přepne. Vlastní předání můžete přes **Smazat předání** odstranit, dokud účetní nezačala zpracování. Smazat jde i předání, které účetní odmítla nebo vrátila k doplnění, pokud z něj nevznikl doklad. Potvrzení vyřadí podání z přehledu a přesune originál do koše Dokumentů. Pokud doklad odpovídal na požadavek účetní, požadavek se znovu otevře.
 
 Když účetní vyžádá čitelnější soubor, stav je **Čeká na doplnění**. Při odmítnutí uvidíte stav **Odmítnuto** a důvod účetní. V obou případech klikněte na **Nahrát náhradu** a vyberte nový soubor. Původní podání zůstane v historii a další náhradu už nenabízí.
 

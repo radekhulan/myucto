@@ -332,7 +332,7 @@ final class PurchaseInvoiceSubmissionRepository
      *
      * @return array<string,mixed>|null
      */
-    public function deleteFromQueue(int $id, int $supplierId, ?int $ownerId = null, bool $pendingOnly = false): ?array
+    public function deleteFromQueue(int $id, int $supplierId, ?int $ownerId = null, bool $clientScope = false): ?array
     {
         $row = $this->find($id, $supplierId);
         if ($row === null || (!in_array((string) $row['status'], ['submitted', 'needs_information', 'rejected'], true)
@@ -359,8 +359,9 @@ final class PurchaseInvoiceSubmissionRepository
             $sql .= ' AND submitted_by = ?';
             $params[] = $ownerId;
         }
-        if ($pendingOnly) {
-            $sql .= " AND status = 'submitted' AND processing_started_at IS NULL AND extraction_status <> 'running'";
+        if ($clientScope) {
+            $sql .= " AND (status IN ('rejected','needs_information')
+                          OR (status = 'submitted' AND processing_started_at IS NULL AND extraction_status <> 'running'))";
         }
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
