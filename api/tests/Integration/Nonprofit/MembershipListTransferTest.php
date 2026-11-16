@@ -584,6 +584,55 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
     }
 
     /** @return array<string,array<string,mixed>> členské číslo => sloupec => hodnota */
+    public function testIcLongerThanContactFormAllowsIsErrorAndMatchedContactIsNamedInPreview(): void
+    {
+        // Formulář kontaktu (Validation::client) přijme jen 8 číslic; import nesmí založit kontakt, který adresář neuloží.
+        $padded = $this->client('ic-padded', 'Synthetic Padded Contact', '01234567');
+        $byId = $this->client('ic-by-id', 'Synthetic Contact By Id', null);
+        $csv = $this->csv([
+            'IC-LONG;;123456789;Synthetic Long IC;active;2026-02-01;Synthetic application;',
+            'IC-SHORT;;1234567;;active;2026-02-01;Synthetic application;',
+            'IC-BYID;' . $byId . ';;;active;2026-02-01;Synthetic application;',
+        ]);
+        $before = $this->clientCount();
+        $rows = array_column($this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true)['rows'], null, 'member_number');
+        self::assertSame(['error', 'ic_invalid'], [$rows['IC-LONG']['status'], $rows['IC-LONG']['reason']]);
+        // Doplněné nuly mohou spárovat cizí kontakt: náhled proto ukáže jeho jméno.
+        self::assertSame(['new_member', 'existing', $padded, 'Synthetic Padded Contact'],
+            [$rows['IC-SHORT']['status'], $rows['IC-SHORT']['contact'], $rows['IC-SHORT']['client_id'], $rows['IC-SHORT']['contact_name'] ?? null]);
+        self::assertSame('Synthetic Contact By Id', $rows['IC-BYID']['contact_name'] ?? null);
+        self::assertSame($before, $this->clientCount());
+    }
+
+    public function testExportIsAuditedWithoutSearchedText(): void
+    {
+        $this->member('AUDIT-EXP');
+        $before = $this->auditCount('report.accounting_export');
+        [$status] = $this->call('GET', 'exportMembers', ['year' => '2026', 'format' => 'csv', 'search' => 'Synthetic Secret Name'], ['accounting' => 1]);
+        self::assertSame(200, $status);
+        self::assertSame($before + 1, $this->auditCount('report.accounting_export'));
+        $q = $this->pdo->prepare("SELECT payload FROM activity_log WHERE supplier_id=? AND action='report.accounting_export' ORDER BY id DESC LIMIT 1");
+        $q->execute([$this->supplier]);
+        $details = (string) $q->fetchColumn();
+        self::assertStringContainsString('nonprofit_members', $details);
+        self::assertStringNotContainsString('Synthetic Secret Name', $details, 'Hledaný text může být jméno člena.');
+        // Odmítnutý export se neauditní.
+        $this->call('GET', 'exportMembers', ['year' => '2026', 'format' => 'pdf'], ['accounting' => 1]);
+        self::assertSame($before + 1, $this->auditCount('report.accounting_export'));
+    }
+
+    public function testApostropheBeforeLineBreakFromCsvExportIsRemovedOnImport(): void
+    {
+        // CsvWriter::safe chrání i buňku začínající koncem řádku; import musí apostrof odebrat stejně jako u „=“.
+        $csv = self::HEADER . "\n" . "NL-NEW;;;\"'\nSynthetic Newline Person\";active;2026-02-01;Synthetic application;\n";
+        $preview = $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true);
+        self::assertSame('new_member', $preview['rows'][0]['status'], json_encode($preview['rows'][0]));
+        $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', false, $preview['preview_hash'], canCreateContacts: true);
+        $q = $this->pdo->prepare('SELECT c.company_name FROM clients c JOIN nonprofit_members m ON m.client_id=c.id AND m.supplier_id=c.supplier_id WHERE m.supplier_id=? AND m.member_number=?');
+        $q->execute([$this->supplier, 'NL-NEW']);
+        self::assertSame('Synthetic Newline Person', $q->fetchColumn());
+    }
+
     private function exportRows(array $query): array
     {
         $rows = iterator_to_array((new MembershipListExporter($this->db, '2026-06-01'))->rows($this->supplier, MembershipListFilter::parse($query)), false);

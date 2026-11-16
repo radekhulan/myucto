@@ -279,6 +279,8 @@ final class MembershipImportService extends AbstractCodebookImportService
         }
         if ($client !== null && $client['member_number'] !== null) return $this->error($base, 'client_is_member', ['number' => $client['member_number']]);
         $base['client_id'] = $clientId;
+        // Jméno spárovaného kontaktu, aby uživatel v náhledu poznal záměnu (IČO s doplněnými nulami, překlep v ID).
+        if ($client !== null) $base['contact_name'] = $client['name'];
         return $base + ['status' => 'new_member', 'contact' => $create === null ? 'existing' : 'create',
             'plan' => ['line' => $row['line'], 'kind' => 'member', 'member_number' => $row['member_number'], 'client_id' => $clientId, 'create_contact' => $create] + $revision];
     }
@@ -426,14 +428,14 @@ final class MembershipImportService extends AbstractCodebookImportService
         return $out;
     }
 
-    /** @return array<int,array{id:int,ic:?string,member_number:?string}> */
+    /** @return array<int,array{id:int,ic:?string,member_number:?string,name:string}> */
     private function clientsById(int $supplier, array $ids): array
     {
         $ids = array_values(array_unique($ids));
         $out = [];
         foreach (array_chunk($ids, 500) as $chunk) {
             $marks = implode(',', array_fill(0, count($chunk), '?'));
-            $q = $this->db->pdo()->prepare("SELECT c.id,c.ic,m.member_number FROM clients c
+            $q = $this->db->pdo()->prepare("SELECT c.id,c.ic,m.member_number,COALESCE(NULLIF(TRIM(c.company_name),''),TRIM(CONCAT_WS(' ',c.first_name,c.last_name))) name FROM clients c
                 LEFT JOIN nonprofit_members m ON m.supplier_id=c.supplier_id AND m.client_id=c.id
                 WHERE c.supplier_id=? AND c.id IN ({$marks})");
             $q->execute([$supplier, ...$chunk]);
@@ -445,7 +447,7 @@ final class MembershipImportService extends AbstractCodebookImportService
     /**
      * Aktivní kontakty podle IČO; archivovaný kontakt ani pokladní „hotovostní zákazník“ nového člena nedostane
      * a vedle aktivního nedělá IČO nejednoznačným. Kontakt výslovně zadaný ID se bere i archivovaný.
-     * @return array<string,list<array{id:int,ic:?string,member_number:?string}>>
+     * @return array<string,list<array{id:int,ic:?string,member_number:?string,name:string}>>
      */
     private function clientsByIc(int $supplier, array $ics): array
     {
@@ -453,7 +455,7 @@ final class MembershipImportService extends AbstractCodebookImportService
         $out = [];
         foreach (array_chunk($ics, 500) as $chunk) {
             $marks = implode(',', array_fill(0, count($chunk), '?'));
-            $q = $this->db->pdo()->prepare("SELECT c.id,c.ic,m.member_number FROM clients c FORCE INDEX(idx_clients_ic)
+            $q = $this->db->pdo()->prepare("SELECT c.id,c.ic,m.member_number,COALESCE(NULLIF(TRIM(c.company_name),''),TRIM(CONCAT_WS(' ',c.first_name,c.last_name))) name FROM clients c FORCE INDEX(idx_clients_ic)
                 LEFT JOIN nonprofit_members m ON m.supplier_id=c.supplier_id AND m.client_id=c.id
                 WHERE c.ic IN ({$marks}) AND c.supplier_id=? AND c.archived_at IS NULL AND c.is_walk_in=0 ORDER BY c.id");
             $q->execute([...$chunk, $supplier]);
@@ -477,14 +479,18 @@ final class MembershipImportService extends AbstractCodebookImportService
 
     private static function clientRow(array $row): array
     {
-        return ['id' => (int) $row['id'], 'ic' => $row['ic'] === null || $row['ic'] === '' ? null : (string) $row['ic'], 'member_number' => $row['member_number']];
+        return ['id' => (int) $row['id'], 'ic' => $row['ic'] === null || $row['ic'] === '' ? null : (string) $row['ic'], 'member_number' => $row['member_number'],
+            'name' => (string) $row['name']];
     }
 
-    /** IČO jen z číslic; Excel z buňky čísla ztratí úvodní nuly, proto doplnění na 8 míst. */
+    /**
+     * IČO jen z číslic, nejvýše 8 jako ve formuláři kontaktu (Validation::client); Excel z buňky čísla ztratí
+     * úvodní nuly, proto doplnění na 8 míst. Delší hodnota je překlep: kontakt s ní by adresář pak neuložil.
+     */
     private static function ic(string $value): ?string
     {
         $digits = preg_replace('/\s+/u', '', $value) ?? '';
-        if (preg_match('/^[0-9]{1,20}$/D', $digits) !== 1) return null;
+        if (preg_match('/^[0-9]{1,8}$/D', $digits) !== 1) return null;
         return strlen($digits) < 8 ? str_pad($digits, 8, '0', STR_PAD_LEFT) : $digits;
     }
 
@@ -526,10 +532,10 @@ final class MembershipImportService extends AbstractCodebookImportService
         return $converted;
     }
 
-    /** CSV export chrání buňky začínající =, +, -, @ apostrofem (CsvWriter::safe); import ho zase odebere. */
+    /** CSV export chrání buňky začínající =, +, -, @, tabulátorem a koncem řádku apostrofem (CsvWriter::safe); import ho zase odebere. */
     private static function unescape(string $value): string
     {
-        return strlen($value) > 1 && $value[0] === "'" && str_contains("=+-@\t\r", $value[1]) ? substr($value, 1) : $value;
+        return strlen($value) > 1 && $value[0] === "'" && str_contains("=+-@\t\r\n", $value[1]) ? substr($value, 1) : $value;
     }
 
     private function members(): MembershipMemberService

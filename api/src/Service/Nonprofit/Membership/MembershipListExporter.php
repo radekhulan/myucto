@@ -29,7 +29,8 @@ final class MembershipListExporter
     /**
      * @param int $xlsxLimit nejvíc členů v XLSX: sešit drží všechny buňky v paměti (~9 MB na 1000 členů),
      *                       (měřeno: 4000 členů +60 MB, 10 000 +129 MB); 5000 se vejde i do memory_limit 128M,
-     *                       CSV jde proudem bez stropu (10 000 členů +24 MB); testy limit zmenšují
+     *                       CSV strop nemá: řádky čte generátorem, hotový soubor ale drží v paměti jako
+     *                       řetězec (10 000 členů +24 MB, zhruba 2,4 kB na člena); testy limit zmenšují
      */
     public function __construct(private readonly Connection $db, private readonly ?string $today = null, private readonly int $xlsxLimit = 5000) {}
 
@@ -39,7 +40,7 @@ final class MembershipListExporter
         if (!in_array($format, ['xlsx', 'csv'], true)) {
             throw new MembershipException('nonprofit_membership_invalid', 'Podporované formáty exportu jsou XLSX a CSV.');
         }
-        // Řádky jdou po stránkách generátorem rovnou do zapisovače; celý seznam se nesestavuje v PHP poli.
+        // Řádky jdou po stránkách generátorem rovnou do zapisovače; pole řádků celého seznamu nevzniká, výsledný soubor ano.
         $rows = $this->rows($supplier, $filter);
         $filename = 'clenove-' . $this->today() . '.' . $format;
         if ($format === 'csv') {

@@ -21,7 +21,15 @@ let alive = true
 onBeforeUnmount(() => { alive = false })
 
 function pick(event: Event) {
-  const chosen = (event.target as HTMLInputElement).files?.[0] ?? null
+  choose((event.target as HTMLInputElement).files?.[0] ?? null)
+}
+
+function drop(event: DragEvent) {
+  if (busy.value) return
+  choose(event.dataTransfer?.files?.[0] ?? null)
+}
+
+function choose(chosen: File | null) {
   error.value = ''; notice.value = ''
   report.value = null; step.value = 'upload'
   if (!chosen) { file.value = null; return }
@@ -100,7 +108,11 @@ function detail(row: MembershipImportRow): string {
     return te(key) ? t(key, params) : t('nonprofitMembership.error')
   }
   const change = row.new_status && row.effective_from ? t('nonprofitMembership.import.change', { status: t(`nonprofitMembership.status_${row.new_status}`), date: formatDate(row.effective_from) }) : ''
-  if (row.status === 'new_member') return [change, t(row.contact === 'create' ? 'nonprofitMembership.import.contactCreate' : 'nonprofitMembership.import.contactExisting')].filter(Boolean).join(' · ')
+  if (row.status === 'new_member') {
+    const contact = row.contact === 'create' ? t('nonprofitMembership.import.contactCreate')
+      : row.contact_name ? t('nonprofitMembership.import.contactExistingNamed', { name: row.contact_name }) : t('nonprofitMembership.import.contactExisting')
+    return [change, contact].filter(Boolean).join(' · ')
+  }
   return change
 }
 </script>
@@ -109,10 +121,22 @@ function detail(row: MembershipImportRow): string {
   <section class="space-y-3 rounded-lg border border-neutral-200 bg-surface p-4" data-section="member-import">
     <h2 class="font-semibold">{{ t('nonprofitMembership.import.title') }}</h2>
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.import.help') }}</p>
-    <label v-if="step === 'upload'" class="block text-sm">
-      <span class="font-medium">{{ t('nonprofitMembership.import.file') }}</span>
-      <input ref="input" type="file" accept=".xlsx,.csv" class="mt-1 block w-full text-sm" :disabled="busy" data-field="import-file" @change="pick" />
-    </label>
+    <template v-if="step === 'upload'">
+      <!-- Stejný výběr souboru jako import číselníků (CodebookImportDialog); input zůstává dosažitelný klávesnicí. -->
+      <label class="block cursor-pointer rounded-lg border-2 border-dashed border-neutral-300 p-6 text-center transition hover:border-primary-400 hover:bg-primary-50/30 focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-500/40"
+             data-section="import-drop" @dragover.prevent @drop.prevent="drop">
+        <input ref="input" type="file" accept=".xlsx,.csv" class="sr-only" :disabled="busy" data-field="import-file" @change="pick" />
+        <svg class="mx-auto mb-2 h-8 w-8 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 0 1-.88-7.9 5 5 0 0 1 9.9-1A5.5 5.5 0 0 1 18.5 16H17m-5-4v9m0-9l-3 3m3-3l3 3" />
+        </svg>
+        <span class="block text-sm font-medium text-neutral-700">{{ t('nonprofitMembership.import.dropHint') }}</span>
+        <span class="mt-1 block text-xs text-neutral-500">{{ t('nonprofitMembership.import.file') }}</span>
+      </label>
+      <div v-if="file" class="flex justify-between gap-2 rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700" data-section="import-file-name">
+        <span class="truncate font-mono">{{ file.name }}</span>
+        <span class="shrink-0 text-neutral-400">{{ Math.max(1, Math.round(file.size / 1024)) }} kB</span>
+      </div>
+    </template>
     <p v-if="error" role="alert" :class="errorBox" data-section="import-error">{{ error }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-600" data-section="import-notice">{{ notice }}</p>
     <p v-if="busy" role="status" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>

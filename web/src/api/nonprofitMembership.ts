@@ -22,7 +22,7 @@ export interface MemberPage { items: MemberRow[]; next_after_id: number | null }
 /** Řádek náhledu nebo výsledku importu seznamu členů; reason je strojový kód důvodu. */
 export interface MembershipImportRow {
   line: number; member_number: string; name?: string; status: 'new_revision' | 'new_member' | 'unchanged' | 'error'
-  reason?: string; params?: Record<string, string>; member_id?: number; client_id?: number | null; contact?: 'existing' | 'create'
+  reason?: string; params?: Record<string, string>; member_id?: number; client_id?: number | null; contact?: 'existing' | 'create'; contact_name?: string
   new_status?: MemberStatus; effective_from?: string
   outcome?: 'written' | 'failed' | 'already_imported'; failure?: string; failure_message?: string
 }

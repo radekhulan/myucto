@@ -109,6 +109,13 @@ final class MembershipAction
         } catch (MembershipException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
         }
+        // Soubor nese jména a čísla členů: stažení zapsat do aktivity jako ostatní účetní exporty (report.accounting_export).
+        [$ip, $agent] = $this->origin($request);
+        $this->activity->log('report.accounting_export', $this->userId($request), 'report', null,
+            // Hledaný text může být jméno, do aktivity jde jen příznak.
+            ['report' => 'nonprofit_members', 'format' => $format, 'search' => trim((string) ($query['search'] ?? '')) !== '']
+                + array_intersect_key($query, array_flip(['year', 'title_key', 'payment_status'])),
+            $ip, $agent, $this->currentSupplierId($request));
         $response->getBody()->write($file['bytes']);
         return $response
             ->withHeader('Content-Type', $file['mime'])

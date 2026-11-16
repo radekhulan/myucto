@@ -76,6 +76,37 @@ describe('Membership import flow', () => {
     expect(w.find('[data-action="import-confirm"]').exists()).toBe(false)
   })
 
+  it('u existujícího kontaktu ukáže v náhledu jeho jméno', async () => {
+    api.importMembers.mockResolvedValueOnce({ ...preview, rows: [
+      { line: 2, member_number: 'SYN-IC', status: 'new_member', contact: 'existing', client_id: 7, contact_name: 'Synthetic Contact s.r.o.', new_status: 'active', effective_from: '2026-02-01' },
+      { line: 3, member_number: 'SYN-OLD', status: 'new_member', contact: 'existing', client_id: 8, new_status: 'active', effective_from: '2026-02-01' },
+    ] })
+    const w = mounted()
+    await choose(w)
+    await w.get('[data-action="import-preview"]').trigger('click')
+    await flushPromises()
+    const rows = w.findAll('[data-field="import-detail"]')
+    expect(rows[0].text()).toContain('existující kontakt Synthetic Contact s.r.o.')
+    expect(rows[1].text()).toContain(cs.nonprofitMembership.import.contactExisting)
+  })
+
+  it('přijme soubor přetažený do zóny výběru a ukáže jeho název a velikost', async () => {
+    api.importMembers.mockResolvedValueOnce(preview)
+    const w = mounted()
+    const file = new File(['x'.repeat(3000)], 'pretazeny.csv')
+    await w.get('[data-section="import-drop"]').trigger('drop', { dataTransfer: { files: [file] } })
+    expect(w.get('[data-section="import-file-name"]').text()).toContain('pretazeny.csv')
+    expect(w.get('[data-section="import-file-name"]').text()).toContain('3 kB')
+    await w.get('[data-action="import-preview"]').trigger('click')
+    await flushPromises()
+    expect(api.importMembers).toHaveBeenLastCalledWith(5, file, null)
+    // Nepovolený typ přetažený do zóny se odmítne stejně jako vybraný.
+    await w.get('[data-action="import-other"]').trigger('click')
+    await w.get('[data-section="import-drop"]').trigger('drop', { dataTransfer: { files: [new File(['x'], 'clenove.pdf')] } })
+    expect(w.get('[data-section="import-error"]').text()).toBe(cs.nonprofitMembership.import.fileInvalid)
+    expect(w.find('[data-section="import-file-name"]').exists()).toBe(false)
+  })
+
   it('s chybným řádkem nejde potvrdit a filtr ukáže jen chyby', async () => {
     api.importMembers.mockResolvedValueOnce(withError)
     const w = mounted('en')
