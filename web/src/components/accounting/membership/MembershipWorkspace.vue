@@ -227,7 +227,7 @@ async function create() {
 watch(() => props.supplier, () => {
   cancelSearchTimer(); pendingRouteFilters = false; pendingFormFilters = false
   generation++; createTicket++; titlesTicket++; hydrating = true
-  checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false; importOpen.value = false; exportError.value = ''
+  checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false; importOpen.value = false; exportError.value = ''; exporting.value = false
   search.value = ''; filterYear.value = appIsoDate().slice(0, 4); titleKey.value = ''; paymentStatus.value = 'all'
   selectionNotice.value = ''
   appliedFilters.value = {search: '', year: Number(filterYear.value), title_key: '', payment_status: 'all'}
@@ -264,7 +264,7 @@ async function exportMembers(format: 'xlsx' | 'csv') {
   } catch (e) {
     if (alive && supplier === props.supplier && ticket === generation) exportError.value = membershipError({ t, te }, e)
   } finally {
-    if (alive) exporting.value = false
+    if (alive && supplier === props.supplier) exporting.value = false
   }
 }
 function importChanged() {

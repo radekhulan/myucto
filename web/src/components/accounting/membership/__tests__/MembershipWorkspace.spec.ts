@@ -857,4 +857,14 @@ describe('Membership workspace', () => {
     expect(w.get('[data-action="more-members"]').attributes('disabled')).toBeUndefined()
     click.mockRestore(); w.unmount()
   })
+
+  it('export staré firmy nezablokuje akce nové firmy', async () => {
+    api.exportMembers.mockReturnValueOnce(new Promise(() => {}))
+    const w = mounted(); await flushPromises()
+    await w.get('[data-action="export-csv"]').trigger('click')
+    expect(w.get('[data-action="export-xlsx"]').attributes('disabled')).toBeDefined()
+    await w.setProps({ supplier: 6 }); await flushPromises()
+    expect(w.get('[data-action="export-xlsx"]').attributes('disabled')).toBeUndefined()
+    w.unmount()
+  })
 })

@@ -516,7 +516,8 @@ final class MembershipImportService extends AbstractCodebookImportService
         // (á = C3 A1, č = C4 8D, ž = C5 BE), typografické uvozovky a pomlčky E2 80–82 xx a emoji F0–F4 + 3 bajty.
         // V cp1250 jsou C3–C5 vzácná Ă, Ä, Ĺ; česká velká písmena s diakritikou (Á Č É Ě Í Ď Ň Ó Ř Ů Ú Ý = C1–DD
         // mimo C3–C5) za nimi s Š/Ž/Ť sice tvoří dvojice podobné UTF-8 („RŮŽIČKA“ = D9 8E), podpis ale nemají.
-        // Dál BOM (náš CSV export ho zapisuje) a cyrilice (D0/D1 + 80–BF; v cp1250 Đ/Ń před Š/Ž se nepíše).
+        // Dál BOM (náš CSV export ho zapisuje) a cyrilice (D0/D1 + 80–BF). V cp1250 by to bylo Đ/Ń před Š/Ž nebo
+        // před typografií („POZNAŃ”); takový soubor se bezpečně odmítne s radou uložit XLSX nebo CSV UTF-8.
         $utf8 = preg_match('/^\xEF\xBB\xBF|[\xC3-\xC5][\x80-\xBF]|[\xD0\xD1][\x80-\xBF]|\xE2[\x80-\x82][\x80-\xBF]|[\xF0-\xF4][\x80-\xBF]{3}/', $content) === 1;
         $converted = $utf8 ? false : @iconv('WINDOWS-1250', 'UTF-8', $content);
         if (!is_string($converted)) {
