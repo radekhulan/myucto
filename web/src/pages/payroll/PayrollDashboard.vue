@@ -42,6 +42,8 @@ const saving = ref(false)
 const capabilities = ref<PayrollCapabilitiesResponse | null>(null)
 const currentPeriod = payrollWorkingPeriod()
 const startPeriod = ref(localPayrollPeriod())
+const editingStart = ref(false)
+const newStartPeriod = ref('')
 const currentRun = ref<PayrollRun | null>(null)
 const setupCheck = ref<PayrollSetupCheck | null>(null)
 const guide = ref<InstanceType<typeof PayrollGuide> | null>(null)
@@ -141,6 +143,18 @@ const actions = computed<ActionItem[]>(() => [
     variant: 'neutral',
     show: canConfigure.value,
     to: { name: 'payroll-settings' },
+  },
+  // První období jde měnit jen během nastavení; pak už jen posun dopředu
+  // za převzaté měsíce na stránce běhů. Pravidla hlídá server.
+  {
+    key: 'change-start',
+    label: t('payroll.activation.change_start'),
+    icon: 'calendar',
+    tier: 'overflow',
+    variant: 'neutral',
+    show: canConfigure.value && state.value?.status === 'setup',
+    disabled: saving.value,
+    run: openStartChange,
   },
   // Zrušení rozdělaného nastavení není nic, k čemu by měl být uživatel vyzýván
   // — patří mezi pokročilé akce v „…", ne vedle hlavních tlačítek. Ve stavu
@@ -252,6 +266,37 @@ async function disableSetup() {
       label: t('common.undo'),
       handler: () => void restoreSetup(previousPeriod),
     })
+  } catch (error: any) {
+    if (error?.response?.data?.error?.code === 'row_version_conflict') {
+      toast.warning(t('payroll.activation.conflict'))
+      await load()
+    } else {
+      toast.error(error?.response?.data?.error?.message || t('payroll.activation.failed'))
+    }
+  } finally {
+    saving.value = false
+  }
+}
+
+function openStartChange() {
+  newStartPeriod.value = state.value?.start_period ?? startPeriod.value
+  editingStart.value = true
+}
+
+async function saveStartChange() {
+  if (!state.value || !newStartPeriod.value) return
+  saving.value = true
+  try {
+    const updated = await payrollApi.setActivation({
+      enabled: true,
+      start_period: newStartPeriod.value,
+      row_version: state.value.row_version,
+    })
+    if (capabilities.value) capabilities.value.state = updated
+    startPeriod.value = newStartPeriod.value
+    editingStart.value = false
+    toast.success(t('payroll.activation.change_start_saved'))
+    void loadMonthStatus()
   } catch (error: any) {
     if (error?.response?.data?.error?.code === 'row_version_conflict') {
       toast.warning(t('payroll.activation.conflict'))
@@ -399,6 +444,48 @@ onMounted(load)
       </section>
 
       <div v-else class="space-y-6">
+        <section
+          v-if="editingStart && state.status === 'setup'"
+          class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6"
+          data-test="change-start"
+        >
+          <div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div class="max-w-2xl">
+              <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.activation.change_start_title') }}</h2>
+              <p class="mt-1 text-sm text-neutral-600">{{ t('payroll.activation.change_start_description') }}</p>
+              <p class="mt-2 text-sm text-warning-700">{{ t('payroll.activation.change_start_openings') }}</p>
+            </div>
+            <div class="flex flex-wrap items-end gap-3">
+              <label class="block">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">
+                  {{ t('payroll.activation.start_period') }}
+                </span>
+                <input
+                  v-model="newStartPeriod"
+                  type="month"
+                  min="2024-01"
+                  class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  data-test="change-start-period"
+                >
+              </label>
+              <button
+                :class="btnFilled('primary')"
+                class="whitespace-nowrap"
+                :disabled="saving || !newStartPeriod || newStartPeriod === state.start_period"
+                data-test="change-start-save"
+                @click="saveStartChange"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+                {{ saving ? t('common.saving') : t('payroll.activation.change_start_save') }}
+              </button>
+              <button :class="btnOutline('neutral')" class="whitespace-nowrap" :disabled="saving" @click="editingStart = false">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+                {{ t('common.cancel') }}
+              </button>
+            </div>
+          </div>
+        </section>
+
         <section
           v-if="setupBlockers.length > 0"
           class="rounded-xl border border-warning-500/40 bg-warning-50 p-4 sm:p-6"

@@ -11400,7 +11400,13 @@
       "disabled": "Zahájení nastavení mezd bylo zrušeno.",
       "failed": "Aktivaci mzdového modulu se nepodařilo uložit.",
       "conflict": "Nastavení mezitím změnil jiný uživatel. Načetl se aktuální stav.",
-      "no_permission": "Mzdy může zapnout jen uživatel s právem na nastavení mezd. Požádejte prosím správce firmy."
+      "no_permission": "Mzdy může zapnout jen uživatel s právem na nastavení mezd. Požádejte prosím správce firmy.",
+      "change_start": "Změnit první mzdové období",
+      "change_start_title": "Změnit první mzdové období",
+      "change_start_description": "Měsíc, od kterého mzdy počítá MyÚčto. Měnit ho jde jen během nastavení mezd. Měsíce před ním patří do počátečních stavů kumulací u zaměstnanců.",
+      "change_start_openings": "Posouváte-li první období zpět, převzaté počáteční stavy mohou pokrývat i měsíc, který teď spočítá MyÚčto. Převod z předchozího programu je po zopakování srovná sám, ručně zadané stavy upravte na kartě pracovního vztahu. Výpočet běhu jinak skončí chybou, aby se měsíc nezapočetl dvakrát.",
+      "change_start_save": "Uložit první období",
+      "change_start_saved": "První mzdové období je změněné."
     },
     "dashboard": {
       "start_period": "Počáteční období",
@@ -15167,7 +15173,7 @@
     "month_guide": {
       "title": "Průvodce měsícem mezd",
       "subtitle": "Měsíční uzávěrka mezd v sedmi krocích. U každého kroku vidíte, co je hotové a co zbývá, a hlavní tlačítko vás pošle na obrazovku, kde se to udělá. Průvodce sám nic nepočítá ani neodesílá.",
-      "before_start": "Období {period} předchází prvnímu mzdovému období, které vedete v MyÚčtu ({start}). Měsíce zpracované v předchozím programu se tu nezpracovávají, patří do počátečních stavů kumulací u zaměstnanců. Pokud má tenhle měsíc spočítat MyÚčto, změňte první mzdové období v Mzdy → Aktivace mzdové agendy.",
+      "before_start": "Období {period} předchází prvnímu mzdovému období, které vedete v MyÚčtu ({start}). Měsíce zpracované v předchozím programu se tu nezpracovávají, patří do počátečních stavů kumulací u zaměstnanců. Pokud má tenhle měsíc spočítat MyÚčto, změňte první mzdové období na přehledu Mezd (nabídka … → Změnit první mzdové období). Jde to jen během nastavení mezd.",
       "open_start": "Otevřít {start}",
       "period": "Období",
       "load_failed": "Průvodce měsícem se nepodařilo načíst.",
@@ -15555,7 +15561,7 @@
     "move_success": "Doklad je v příchozích dokladech firmy {company}.",
     "move_success_duplicate": "Firma {company} už stejný doklad měla, tady byl vyřazen.",
     "portal_delete": "Smazat předání",
-    "portal_delete_confirm": "Smazat předání souboru „{name}“? Podání zmizí z přehledu a originál se přesune do koše Dokumentů. Smazání je možné jen před zahájením zpracování účetní.",
+    "portal_delete_confirm": "Smazat předání souboru „{name}“? Podání zmizí z přehledu a originál se přesune do koše Dokumentů. Smazat jde předání, které účetní ještě nezačala zpracovávat, a také odmítnuté nebo vrácené k doplnění.",
     "portal_delete_success": "Předání bylo smazáno a originál je v koši Dokumentů.",
     "delete_confirm": "Smazat „{name}\" z fronty? Podání zmizí a originál se přesune do koše Dokumentů, odkud ho vysypání koše smaže i z disku.",
     "delete_success": "Doklad byl vyřazen z fronty a originál je v koši Dokumentů.",

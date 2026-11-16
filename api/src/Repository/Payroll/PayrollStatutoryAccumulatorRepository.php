@@ -662,6 +662,50 @@ final class PayrollStatutoryAccumulatorRepository
     }
 
     /**
+     * Počáteční stav smí pokrývat jen měsíce PŘED počítaným obdobím.
+     *
+     * Převod z předchozího programu zapisuje počáteční stav za měsíce před
+     * prvním mzdovým obdobím. Když firma první období posune zpět (rozpracovaný
+     * měsíc má přepočítat MyÚčto), zůstane v počátečním stavu i měsíc, který
+     * teď počítá běh, a započetl by se do kumulace dvakrát. Pozná se to podle
+     * rozpisu měsíců v dokladu počátečního stavu a u daně i podle počtu
+     * uzavřených měsíců, který před měsícem M nemůže přesáhnout M − 1.
+     *
+     * @param array<string,mixed> $opening
+     */
+    private static function assertOpeningPrecedesPeriod(
+        array $opening,
+        string $periodStart,
+        string $calculationKind,
+    ): void {
+        $month = (int) substr($periodStart, 5, 2);
+        $covered = [];
+        $months = $opening['evidence']['months'] ?? [];
+        foreach (is_array($months) ? $months : [] as $row) {
+            if (is_array($row) && is_int($row['month'] ?? null) && $row['month'] >= $month) {
+                $covered[] = $row['month'];
+            }
+        }
+        $completed = $calculationKind === 'income_tax'
+            ? (int) ($opening['values']['completed_months'] ?? 0)
+            : 0;
+        if ($covered === [] && $completed <= $month - 1) {
+            return;
+        }
+        sort($covered);
+        $through = $covered === [] ? $completed : max($covered);
+
+        throw new PayrollStatutoryAccumulatorUnavailableException(sprintf(
+            'Počáteční stav kumulací pokrývá měsíce až do %d., ale MyÚčto počítá už %d. měsíc, '
+            . 'takže by se započetl dvakrát. Opravte počáteční stav na kartě pracovního vztahu '
+            . 'tak, aby končil %d. měsícem, nebo zopakujte převod z předchozího programu.',
+            $through,
+            $month,
+            $month - 1,
+        ));
+    }
+
+    /**
      * Sečte kumulaci a zapečetí ji otiskem.
      *
      * Sdílené jádro dotazované i dávkové cesty — kdyby existovalo dvakrát, mohly
@@ -682,6 +726,9 @@ final class PayrollStatutoryAccumulatorRepository
         array $entries,
         bool $wholeYear = false,
     ): array {
+        if (!$wholeYear) {
+            self::assertOpeningPrecedesPeriod($opening, $periodStart, $calculationKind);
+        }
         $totals = $opening['values'];
         foreach ($entries as $entry) {
             foreach ($entry['values'] as $field => $value) {

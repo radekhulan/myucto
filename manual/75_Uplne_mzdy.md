@@ -318,6 +318,16 @@ aby nezmizely vazby na běhy, platby, dokumenty a podání. Vypnutí **Vést mzd
 skryje mzdy z menu, mzdová data se ale nemažou a po opětovném zapnutí zůstanou
 dostupná.
 
+Dokud jsou mzdy ve stavu nastavení, jde první mzdové období změnit na
+`Mzdy → Přehled mezd` volbou **Změnit první mzdové období** v nabídce „…".
+Posun zpět se hodí, když má rozpracovaný měsíc z předchozího programu spočítat
+MyÚčto. Nejde ho posunout přes převzatý mzdový běh a dopředu přes běh, který už
+MyÚčto spočítalo. Po posunu zpět zkontrolujte počáteční stavy kumulací: smějí
+končit měsícem před novým prvním obdobím. Převod z předchozího programu je po
+zopakování srovná sám, ručně zadané stavy upravte na kartě pracovního vztahu.
+Dokud počáteční stav pokrývá počítaný měsíc, výpočet běhu skončí chybou, aby se
+měsíc do ročních kumulací nezapočetl dvakrát.
+
 ### 75.7.2 Průvodce prvním nastavením mezd
 
 Průvodce **Rozjezd mezd krok za krokem** na `Mzdy → Přehled mezd` má jedenáct

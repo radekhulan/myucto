@@ -1552,7 +1552,8 @@ final class PayrollRunReadinessService
                 . 'Mzdový běh za něj nejde založit. Měsíce zpracované v předchozím programu '
                 . 'patří do počátečních stavů kumulací u zaměstnanců, ne do mzdových běhů. '
                 . 'Pokud má tenhle měsíc spočítat MyÚčto, změňte první mzdové období '
-                . 'v Mzdy → Aktivace mzdové agendy.',
+                . 'na přehledu Mezd (nabídka … → Změnit první mzdové období). Jde to jen během '
+                . 'nastavení mezd.',
                 PayrollPeriodLabel::monthYear($periodStart),
                 PayrollPeriodLabel::monthYear((string) $startPeriod),
             ),

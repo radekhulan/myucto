@@ -11400,7 +11400,13 @@
       "disabled": "Payroll setup has been cancelled.",
       "failed": "The payroll activation could not be saved.",
       "conflict": "Another user changed the settings. The current state has been reloaded.",
-      "no_permission": "Only a user with payroll settings permission can turn payroll on. Please ask your company administrator."
+      "no_permission": "Only a user with payroll settings permission can turn payroll on. Please ask your company administrator.",
+      "change_start": "Change first payroll period",
+      "change_start_title": "Change first payroll period",
+      "change_start_description": "The month from which MyÚčto calculates payroll. It can be changed only during payroll setup. Months before it belong to the employees’ opening cumulative balances.",
+      "change_start_openings": "If you move the first period back, carried-over opening balances may also cover the month MyÚčto will now calculate. Repeating the transfer from the previous program aligns them automatically; adjust manually entered balances on the employment record. Otherwise the run calculation stops with an error so the month is not counted twice.",
+      "change_start_save": "Save first period",
+      "change_start_saved": "The first payroll period has been changed."
     },
     "dashboard": {
       "start_period": "Starting period",
@@ -15167,7 +15173,7 @@
     "month_guide": {
       "title": "Payroll month guide",
       "subtitle": "The monthly payroll close in seven steps. Each step shows what is done and what is left, and its main button takes you to the screen where the work is done. The guide itself neither calculates nor sends anything.",
-      "before_start": "The period {period} precedes the first payroll period you keep in MyÚčto ({start}). Months processed in the previous program are not handled here, they belong to the employees’ opening cumulative balances. If MyÚčto should calculate this month, change the first payroll period in Payroll → Payroll activation.",
+      "before_start": "The period {period} precedes the first payroll period you keep in MyÚčto ({start}). Months processed in the previous program are not handled here, they belong to the employees’ opening cumulative balances. If MyÚčto should calculate this month, change the first payroll period on the Payroll overview (menu … → Change first payroll period). This is possible only during payroll setup.",
       "open_start": "Open {start}",
       "period": "Period",
       "load_failed": "The month guide could not be loaded.",
@@ -15555,7 +15561,7 @@
     "move_success": "The document is now in the incoming documents of {company}.",
     "move_success_duplicate": "{company} already had the same document; it was removed here.",
     "portal_delete": "Delete submission",
-    "portal_delete_confirm": "Delete the submission of \"{name}\"? It will disappear from the list and its original will move to the Documents trash. This is available only before your accountant starts processing it.",
+    "portal_delete_confirm": "Delete the submission of \"{name}\"? It will disappear from the list and its original will move to the Documents trash. This is possible before your accountant starts processing it, and also for submissions that were rejected or returned for more information.",
     "portal_delete_success": "The submission was deleted and its original is in the Documents trash.",
     "delete_confirm": "Delete \"{name}\" from the queue? The submission disappears and the original moves to the Documents trash, where emptying the trash removes it from disk too.",
     "delete_success": "The document left the queue and its original is in the Documents trash.",
