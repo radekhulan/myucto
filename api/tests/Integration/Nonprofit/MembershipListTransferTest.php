@@ -661,7 +661,8 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         self::assertStringContainsString('nonprofit_members', $details);
         self::assertStringNotContainsString('Synthetic Secret Name', $details, 'Hledaný text může být jméno člena.');
         // Odmítnutý export se neauditní.
-        $this->call('GET', 'exportMembers', ['year' => '2026', 'format' => 'pdf'], ['accounting' => 1]);
+        [$status, , $body] = $this->call('GET', 'exportMembers', ['year' => '2026', 'format' => 'pdf'], ['accounting' => 1]);
+        self::assertSame([422, 'nonprofit_membership_invalid'], [$status, json_decode($body, true)['error']['code']]);
         [$status, , $body] = $this->call('GET', 'exportMembers', ['year' => '2026', 'format' => 'csv', 'title_key' => 'Synthetic Name In Title'], ['accounting' => 1]);
         self::assertSame([422, 'nonprofit_membership_invalid'], [$status, json_decode($body, true)['error']['code']]);
         self::assertSame($before + 1, $this->auditCount('report.accounting_export'), 'Odmítnutý formát ani neplatný filtr se neauditují.');

@@ -543,7 +543,12 @@ final class MembershipImportService extends AbstractCodebookImportService
         return $converted;
     }
 
-    /** CSV export chrání buňky začínající =, +, -, @, tabulátorem a koncem řádku apostrofem (CsvWriter::safe); import ho zase odebere. */
+    /**
+     * CSV export chrání buňky začínající =, +, -, @, tabulátorem a koncem řádku apostrofem (CsvWriter::safe); import ho
+     * zase odebere, v CSV i XLSX. Vědomý kompromis: text, který sám začíná apostrofem před jedním z těch znaků
+     * („'-15/2026“), o apostrof přijde. Týká se jen nově zapisovaného podkladu, doložení a jména; stávající revize
+     * import s hodnotami ze souboru neporovnává.
+     */
     private static function unescape(string $value): string
     {
         return strlen($value) > 1 && $value[0] === "'" && str_contains("=+-@\t\r\n", $value[1]) ? substr($value, 1) : $value;
