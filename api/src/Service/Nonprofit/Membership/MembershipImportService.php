@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\Codebooks\AbstractCodebookImportService;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxRules;
+use MyInvoice\Service\Validation;
 use PDO;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
@@ -43,6 +44,7 @@ final class MembershipImportService extends AbstractCodebookImportService
     private ?string $ip = null;
     private string $agent = '';
     private bool $canCreateContacts = false;
+    private bool $csv = false;
 
     /** @param ?\Closure(array):void $beforeWrite volá se před zápisem každého řádku; testy jím simulují souběžnou změnu člena */
     public function __construct(
@@ -64,8 +66,9 @@ final class MembershipImportService extends AbstractCodebookImportService
             throw new MembershipException('nonprofit_membership_invalid', 'Potvrzení importu vyžaduje otisk náhledu.');
         }
         [$this->actor, $this->expectedHash, $this->ip, $this->agent, $this->canCreateContacts] = [$actor, $expectedHash, $ip, $agent, $canCreateContacts];
+        $this->csv = strtolower((string) pathinfo($filename, PATHINFO_EXTENSION)) === 'csv';
         // „CSV (oddělený středníkem)“ z českého Excelu je v cp1250; sdílené čtení počítá s UTF-8.
-        if (strtolower((string) pathinfo($filename, PATHINFO_EXTENSION)) === 'csv' && !mb_check_encoding($content, 'UTF-8')) {
+        if ($this->csv && !mb_check_encoding($content, 'UTF-8')) {
             $content = self::fromWindows1250($content);
         }
         $report = $this->import($supplier, $actor, $content, $filename, $dryRun);
@@ -143,7 +146,8 @@ final class MembershipImportService extends AbstractCodebookImportService
     {
         $parsed = [];
         foreach ($rows as $line => $cols) {
-            $value = fn (string $field): string => self::unescape($this->col($cols, $map, $field));
+            // Ochranný apostrof přidává jen CSV export (CsvWriter::safe); v XLSX je apostrof obsah buňky.
+            $value = fn (string $field): string => $this->csv ? self::unescape($this->col($cols, $map, $field)) : $this->col($cols, $map, $field);
             $parsed[] = ['line' => $line, 'member_number' => $value('member_number'), 'client_id' => $value('client_id'), 'ic' => $value('ic'),
                 'name' => $value('name'), 'new_status' => $value('new_status'), 'new_from' => $value('new_from'),
                 'reference' => $value('reference'), 'evidence' => $value('evidence')];
@@ -274,6 +278,10 @@ final class MembershipImportService extends AbstractCodebookImportService
             if ($name === '') return $this->error($base, 'name_missing');
             if (mb_strlen($name) > 190) return $this->error($base, 'name_too_long');
             if (!$this->canCreateContacts) return $this->error($base, 'contact_create_forbidden');
+            // Formulář kontaktu na špatný kontrolní součet upozorní (Validation::clientWarnings); import varování
+            // potvrdit neumí, proto řádek odmítne: typicky vypadlá číslice, kterou doplnění nul skryje.
+            if ($ic !== null && !Validation::icChecksumValid($ic)) return $this->error($base, 'ic_checksum_invalid', ['ic' => $ic]);
+            $base['contact_ic'] = $ic;
             $create = ['company_name' => $name, 'ic' => $ic];
             $client = null;
         }
@@ -486,6 +494,8 @@ final class MembershipImportService extends AbstractCodebookImportService
     /**
      * IČO jen z číslic, nejvýše 8 jako ve formuláři kontaktu (Validation::client); Excel z buňky čísla ztratí
      * úvodní nuly, proto doplnění na 8 míst. Delší hodnota je překlep: kontakt s ní by adresář pak neuložil.
+     * Mezery se odeberou, protože IČO bývá v tabulkách formátované po skupinách („123 45 678“); do kontaktu
+     * jde vždy jen 8 číslic, které formulář přijme.
      */
     private static function ic(string $value): ?string
     {

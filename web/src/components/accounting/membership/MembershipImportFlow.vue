@@ -109,7 +109,8 @@ function detail(row: MembershipImportRow): string {
   }
   const change = row.new_status && row.effective_from ? t('nonprofitMembership.import.change', { status: t(`nonprofitMembership.status_${row.new_status}`), date: formatDate(row.effective_from) }) : ''
   if (row.status === 'new_member') {
-    const contact = row.contact === 'create' ? t('nonprofitMembership.import.contactCreate')
+    const contact = row.contact === 'create'
+      ? (row.contact_ic ? t('nonprofitMembership.import.contactCreateIc', { ic: row.contact_ic }) : t('nonprofitMembership.import.contactCreate'))
       : row.contact_name ? t('nonprofitMembership.import.contactExistingNamed', { name: row.contact_name }) : t('nonprofitMembership.import.contactExisting')
     return [change, contact].filter(Boolean).join(' · ')
   }

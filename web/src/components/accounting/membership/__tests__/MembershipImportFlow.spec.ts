@@ -76,10 +76,11 @@ describe('Membership import flow', () => {
     expect(w.find('[data-action="import-confirm"]').exists()).toBe(false)
   })
 
-  it('u existujícího kontaktu ukáže v náhledu jeho jméno', async () => {
+  it('u existujícího kontaktu ukáže jeho jméno a u zakládaného IČO', async () => {
     api.importMembers.mockResolvedValueOnce({ ...preview, rows: [
       { line: 2, member_number: 'SYN-IC', status: 'new_member', contact: 'existing', client_id: 7, contact_name: 'Synthetic Contact s.r.o.', new_status: 'active', effective_from: '2026-02-01' },
       { line: 3, member_number: 'SYN-OLD', status: 'new_member', contact: 'existing', client_id: 8, new_status: 'active', effective_from: '2026-02-01' },
+      { line: 4, member_number: 'SYN-ICNEW', status: 'new_member', contact: 'create', client_id: null, contact_ic: '12345679', new_status: 'active', effective_from: '2026-02-01' },
     ] })
     const w = mounted()
     await choose(w)
@@ -88,6 +89,7 @@ describe('Membership import flow', () => {
     const rows = w.findAll('[data-field="import-detail"]')
     expect(rows[0].text()).toContain('existující kontakt Synthetic Contact s.r.o.')
     expect(rows[1].text()).toContain(cs.nonprofitMembership.import.contactExisting)
+    expect(rows[2].text()).toContain('založí se nový kontakt s IČO 12345679')
   })
 
   it('přijme soubor přetažený do zóny výběru a ukáže jeho název a velikost', async () => {

@@ -105,7 +105,8 @@ final class MembershipAction
             unset($query['format']);
             // XLSX do stropu 5000 členů trvá jednotky sekund; výchozí limit 30 s by na pomalém serveru nestačil.
             @set_time_limit(300);
-            $file = (new MembershipListExporter($this->db))->export($this->currentSupplierId($request), MembershipListFilter::parse($query), is_string($format) ? $format : '');
+            $filter = MembershipListFilter::parse($query);
+            $file = (new MembershipListExporter($this->db))->export($this->currentSupplierId($request), $filter, is_string($format) ? $format : '');
         } catch (MembershipException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
         }
@@ -113,8 +114,9 @@ final class MembershipAction
         [$ip, $agent] = $this->origin($request);
         $this->activity->log('report.accounting_export', $this->userId($request), 'report', null,
             // Hledaný text může být jméno, do aktivity jde jen příznak.
-            ['report' => 'nonprofit_members', 'format' => $format, 'search' => trim((string) ($query['search'] ?? '')) !== '']
-                + array_intersect_key($query, array_flip(['year', 'title_key', 'payment_status'])),
+            // Filtr až po ověření (MembershipListFilter::parse), ne surová adresa.
+            ['report' => 'nonprofit_members', 'format' => $format, 'search' => $filter['search'] !== '', 'year' => $filter['year'],
+                'title_key' => $filter['title_key'], 'payment_status' => $filter['payment_status']],
             $ip, $agent, $this->currentSupplierId($request));
         $response->getBody()->write($file['bytes']);
         return $response

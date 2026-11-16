@@ -168,7 +168,7 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         $client = $this->client('conf-client', 'Synthetic Confirm Contact', null);
         $csv = $this->csv([
             'SYN-CONF-A;;;;ended;2026-06-30;Synthetic board decision;Synthetic minutes',
-            'CONF-NEW;;87654321;Synthetic New Person;active;2026-03-01;Synthetic application;',
+            'CONF-NEW;;87654326;Synthetic New Person;active;2026-03-01;Synthetic application;',
             'CONF-LINK;' . $client . ';;;aktivní;15.3.2026;Synthetic application;',
         ]);
         $clientsBefore = $this->clientCount();
@@ -187,7 +187,7 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         $new = $this->memberByNumber('CONF-NEW');
         $q = $this->pdo->prepare('SELECT company_name,ic,is_vat_payer FROM clients WHERE supplier_id=? AND id=?');
         $q->execute([$this->supplier, $new['client_id']]);
-        self::assertSame(['company_name' => 'Synthetic New Person', 'ic' => '87654321', 'is_vat_payer' => 0], array_map(static fn ($v) => is_numeric($v) && strlen((string) $v) === 1 ? (int) $v : $v, $q->fetch(\PDO::FETCH_ASSOC)));
+        self::assertSame(['company_name' => 'Synthetic New Person', 'ic' => '87654326', 'is_vat_payer' => 0], array_map(static fn ($v) => is_numeric($v) && strlen((string) $v) === 1 ? (int) $v : $v, $q->fetch(\PDO::FETCH_ASSOC)));
         $newHistory = $this->repository->history($this->supplier, $new['id']);
         self::assertSame(['active', '2026-03-01', 'Synthetic application'], [$newHistory[0]['status'], $newHistory[0]['effective_from'], $newHistory[0]['legal_basis']['evidence']],
             'Prázdné doložení převezme podklad.');
@@ -334,13 +334,13 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         $active = $this->client('ic-active', 'Synthetic Active IC', '23456789');
         $archived = $this->client('ic-archived', 'Synthetic Archived IC', '23456789');
         $this->pdo->prepare('UPDATE clients SET archived_at=NOW() WHERE supplier_id=? AND id=?')->execute([$this->supplier, $archived]);
-        $onlyArchived = $this->client('ic-only-archived', 'Synthetic Only Archived', '34567890');
+        $onlyArchived = $this->client('ic-only-archived', 'Synthetic Only Archived', '34567895');
         $this->pdo->prepare('UPDATE clients SET archived_at=NOW() WHERE supplier_id=? AND id=?')->execute([$this->supplier, $onlyArchived]);
         $csv = $this->csv([
-            'DUPIC-1;;11111111;Synthetic First;active;2026-02-01;Synthetic application;',
-            'DUPIC-2;;11111111;Synthetic Second;active;2026-02-01;Synthetic application;',
+            'DUPIC-1;;11111119;Synthetic First;active;2026-02-01;Synthetic application;',
+            'DUPIC-2;;11111119;Synthetic Second;active;2026-02-01;Synthetic application;',
             'ACTIVE-IC;;23456789;;active;2026-02-01;Synthetic application;',
-            'ARCH-IC;;34567890;Synthetic Fresh;active;2026-02-01;Synthetic application;',
+            'ARCH-IC;;34567895;Synthetic Fresh;active;2026-02-01;Synthetic application;',
         ]);
         $rows = array_column($this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true)['rows'], null, 'member_number');
         self::assertSame(['error', 'duplicate_client'], [$rows['DUPIC-1']['status'], $rows['DUPIC-1']['reason']]);
@@ -481,7 +481,7 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
             // Řádek s existujícím kontaktem, souběžný import pod stejným číslem jiný existující kontakt.
             ["RACE-ID;{$mine};;;{$basis}", "RACE-ID;{$theirs};;;{$basis}"],
             // Zakládaný kontakt se stejným názvem, ale jiným IČO.
-            ["RACE-IC;;45678901;Synthetic Same Name;{$basis}", "RACE-IC;;56789012;Synthetic Same Name;{$basis}"],
+            ["RACE-IC;;45678901;Synthetic Same Name;{$basis}", "RACE-IC;;56789017;Synthetic Same Name;{$basis}"],
         ];
         foreach ($cases as [$ours, $concurrent]) {
             $csv = $this->csv([$ours]);
@@ -583,7 +583,6 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         self::assertSame([422, 'nonprofit_membership_import_file_invalid'], [$status, json_decode($body, true)['error']['code']]);
     }
 
-    /** @return array<string,array<string,mixed>> členské číslo => sloupec => hodnota */
     public function testIcLongerThanContactFormAllowsIsErrorAndMatchedContactIsNamedInPreview(): void
     {
         // Formulář kontaktu (Validation::client) přijme jen 8 číslic; import nesmí založit kontakt, který adresář neuloží.
@@ -601,7 +600,49 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         self::assertSame(['new_member', 'existing', $padded, 'Synthetic Padded Contact'],
             [$rows['IC-SHORT']['status'], $rows['IC-SHORT']['contact'], $rows['IC-SHORT']['client_id'], $rows['IC-SHORT']['contact_name'] ?? null]);
         self::assertSame('Synthetic Contact By Id', $rows['IC-BYID']['contact_name'] ?? null);
+        // Chybný řádek blokuje i potvrzení: kontakt s IČO, které formulář odmítne, nevznikne.
+        $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', false, str_repeat('0', 64), canCreateContacts: true));
         self::assertSame($before, $this->clientCount());
+    }
+
+    public function testNewContactIcNeedsValidCheckDigitAndPreviewShowsIt(): void
+    {
+        // 1234567 → 01234567 nemá platný kontrolní součet mod 11 (typicky vypadlá číslice); 12345679 má.
+        $csv = $this->csv([
+            'CHK-BAD;;1234567;Synthetic Bad Check;active;2026-02-01;Synthetic application;',
+            'CHK-OK;;123 45 679;Synthetic Good Check;active;2026-02-01;Synthetic application;',
+            // Okrajové větve mod 11 po doplnění nul: zbytek 0 → číslice 1 (00000001), zbytek 1 → číslice 0 (00000060).
+            'CHK-R0;;1;Synthetic Remainder Zero;active;2026-02-01;Synthetic application;',
+            'CHK-R1;;60;Synthetic Remainder One;active;2026-02-01;Synthetic application;',
+            'CHK-R1-BAD;;61;Synthetic Remainder One Bad;active;2026-02-01;Synthetic application;',
+        ]);
+        $rows = array_column($this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true)['rows'], null, 'member_number');
+        self::assertSame(['error', 'ic_checksum_invalid', ['ic' => '01234567']], [$rows['CHK-BAD']['status'], $rows['CHK-BAD']['reason'], $rows['CHK-BAD']['params']]);
+        self::assertSame(['new_member', 'create', '12345679'], [$rows['CHK-OK']['status'], $rows['CHK-OK']['contact'], $rows['CHK-OK']['contact_ic'] ?? null],
+            'IČO formátované mezerami po skupinách se přijme a náhled ukáže, s jakým IČO kontakt vznikne.');
+        self::assertSame(['new_member', '00000001'], [$rows['CHK-R0']['status'], $rows['CHK-R0']['contact_ic'] ?? null]);
+        self::assertSame(['new_member', '00000060'], [$rows['CHK-R1']['status'], $rows['CHK-R1']['contact_ic'] ?? null]);
+        self::assertSame(['error', 'ic_checksum_invalid'], [$rows['CHK-R1-BAD']['status'], $rows['CHK-R1-BAD']['reason']]);
+    }
+
+    public function testApostropheInXlsxCellIsContentNotCsvProtection(): void
+    {
+        $member = $this->member('XLSX-APO');
+        $book = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $book->getActiveSheet();
+        foreach (explode(';', self::HEADER) as $i => $header) $sheet->setCellValueExplicit([$i + 1, 1], $header, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+        foreach (['SYN-XLSX-APO', '', '', '', 'ended', '2026-07-01', "'-usnesení", ''] as $i => $value) {
+            $sheet->setCellValueExplicit([$i + 1, 2], $value, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+        }
+        $path = tempnam(sys_get_temp_dir(), 'nmx_') . '.xlsx';
+        (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($book))->save($path);
+        $bytes = (string) file_get_contents($path);
+        @unlink($path);
+        $preview = $this->import->run($this->supplier, $this->actor, $bytes, 'a.xlsx', true);
+        $this->import->run($this->supplier, $this->actor, $bytes, 'a.xlsx', false, $preview['preview_hash']);
+        $q = $this->pdo->prepare('SELECT legal_basis_json FROM nonprofit_member_revisions WHERE supplier_id=? AND member_id=? ORDER BY revision_no DESC LIMIT 1');
+        $q->execute([$this->supplier, $member]);
+        self::assertSame("'-usnesení", json_decode((string) $q->fetchColumn(), true)['reference']);
     }
 
     public function testExportIsAuditedWithoutSearchedText(): void
@@ -618,7 +659,12 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         self::assertStringNotContainsString('Synthetic Secret Name', $details, 'Hledaný text může být jméno člena.');
         // Odmítnutý export se neauditní.
         $this->call('GET', 'exportMembers', ['year' => '2026', 'format' => 'pdf'], ['accounting' => 1]);
-        self::assertSame($before + 1, $this->auditCount('report.accounting_export'));
+        $this->call('GET', 'exportMembers', ['year' => '2026', 'format' => 'csv', 'title_key' => 'Synthetic Name In Title'], ['accounting' => 1]);
+        self::assertSame($before + 1, $this->auditCount('report.accounting_export'), 'Odmítnutý formát ani neplatný filtr se neauditují.');
+        $this->call('GET', 'exportMembers', ['year' => '2026', 'format' => 'csv', 'title_key' => ' CP-2026 '], ['accounting' => 1]);
+        $q->execute([$this->supplier]);
+        self::assertSame(['report' => 'nonprofit_members', 'format' => 'csv', 'search' => false, 'year' => 2026, 'title_key' => 'CP-2026', 'payment_status' => 'all'],
+            json_decode((string) $q->fetchColumn(), true), 'Do aktivity jde ověřený filtr.');
     }
 
     public function testApostropheBeforeLineBreakFromCsvExportIsRemovedOnImport(): void
@@ -633,6 +679,7 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         self::assertSame('Synthetic Newline Person', $q->fetchColumn());
     }
 
+    /** @return array<string,array<string,mixed>> členské číslo => sloupec => hodnota */
     private function exportRows(array $query): array
     {
         $rows = iterator_to_array((new MembershipListExporter($this->db, '2026-06-01'))->rows($this->supplier, MembershipListFilter::parse($query)), false);
