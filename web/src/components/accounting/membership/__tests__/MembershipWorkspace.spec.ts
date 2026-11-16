@@ -859,12 +859,41 @@ describe('Membership workspace', () => {
   })
 
   it('export staré firmy nezablokuje akce nové firmy', async () => {
-    api.exportMembers.mockReturnValueOnce(new Promise(() => {}))
+    let resolve: (v: unknown) => void = () => {}
+    api.exportMembers.mockReturnValueOnce(new Promise(done => { resolve = done }))
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     const w = mounted(); await flushPromises()
     await w.get('[data-action="export-csv"]').trigger('click')
     expect(w.get('[data-action="export-xlsx"]').attributes('disabled')).toBeDefined()
     await w.setProps({ supplier: 6 }); await flushPromises()
     expect(w.get('[data-action="export-xlsx"]').attributes('disabled')).toBeUndefined()
-    w.unmount()
+    // Soubor staré firmy se po přepnutí nestáhne.
+    resolve({ blob: new Blob(['a']), filename: 'a.csv' }); await flushPromises()
+    expect(click).not.toHaveBeenCalled()
+    click.mockRestore(); w.unmount()
+  })
+
+  it('starší export nestáhne soubor ani neodemkne akce, když mezitím běží novější (i po A → B → A)', async () => {
+    const pending: Array<(v: unknown) => void> = []
+    api.exportMembers.mockImplementation(() => new Promise(done => { pending.push(done) }))
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const w = mounted(); await flushPromises()
+    await w.get('[data-action="export-csv"]').trigger('click')
+    await w.setProps({ supplier: 6 }); await flushPromises()
+    await w.get('[data-action="export-csv"]').trigger('click')
+    pending[0]!({ blob: new Blob(['a']), filename: 'a.csv' }); await flushPromises()
+    expect(w.get('[data-action="export-xlsx"]').attributes('disabled')).toBeDefined()
+    expect(click).not.toHaveBeenCalled()
+    await w.setProps({ supplier: 5 }); await flushPromises()
+    await w.get('[data-action="export-csv"]').trigger('click')
+    pending[1]!({ blob: new Blob(['b']), filename: 'b.csv' }); await flushPromises()
+    expect(w.get('[data-action="export-xlsx"]').attributes('disabled')).toBeDefined()
+    expect(click).not.toHaveBeenCalled()
+    pending[2]!({ blob: new Blob(['c']), filename: 'c.csv' }); await flushPromises()
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(w.get('[data-action="export-xlsx"]').attributes('disabled')).toBeUndefined()
+    click.mockRestore(); api.exportMembers.mockReset(); w.unmount()
   })
 })

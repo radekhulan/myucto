@@ -32,6 +32,8 @@ const error = ref('')
 const notice = ref('')
 // Chyba exportu: vlastní hláška, aby nemazala chybu načtení seznamu (ta blokuje hromadný předpis).
 const exportError = ref('')
+/** Pořadí spuštěných exportů: stažení i odemčení akcí patří jen poslednímu (změna firmy ho také zneplatní). */
+let exportRun = 0
 const selectionNotice = ref('')
 const selected = ref<{ id: number; label: string } | null>(null)
 const clientId = ref<number | null>(null)
@@ -227,7 +229,7 @@ async function create() {
 watch(() => props.supplier, () => {
   cancelSearchTimer(); pendingRouteFilters = false; pendingFormFilters = false
   generation++; createTicket++; titlesTicket++; hydrating = true
-  checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false; importOpen.value = false; exportError.value = ''; exporting.value = false
+  checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false; importOpen.value = false; exportError.value = ''; exporting.value = false; exportRun++
   search.value = ''; filterYear.value = appIsoDate().slice(0, 4); titleKey.value = ''; paymentStatus.value = 'all'
   selectionNotice.value = ''
   appliedFilters.value = {search: '', year: Number(filterYear.value), title_key: '', payment_status: 'all'}
@@ -252,19 +254,20 @@ const importOpen = ref(false), exporting = ref(false)
  */
 async function exportMembers(format: 'xlsx' | 'csv') {
   // Generace seznamu: odpověď exportu, která dorazí až po novém načtení (jiný filtr), už nic neohlásí.
-  const supplier = props.supplier, ticket = generation
+  // Běh exportu: o stažení a odemčení akcí rozhoduje jen poslední spuštěný export této firmy (i po A → B → A).
+  const supplier = props.supplier, ticket = generation, run = ++exportRun
   exporting.value = true; exportError.value = ''
   try {
     const { blob, filename } = await membershipApi.exportMembers(supplier, format, appliedFilters.value)
-    if (!alive || supplier !== props.supplier) return
+    if (!alive || run !== exportRun) return
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url; link.download = filename; link.click()
     URL.revokeObjectURL(url)
   } catch (e) {
-    if (alive && supplier === props.supplier && ticket === generation) exportError.value = membershipError({ t, te }, e)
+    if (alive && run === exportRun && ticket === generation) exportError.value = membershipError({ t, te }, e)
   } finally {
-    if (alive && supplier === props.supplier) exporting.value = false
+    if (alive && run === exportRun) exporting.value = false
   }
 }
 function importChanged() {
