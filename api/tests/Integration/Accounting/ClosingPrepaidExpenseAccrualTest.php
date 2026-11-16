@@ -241,6 +241,41 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
 
     // ── rozpuštění v N+1 (open_next) ───────────────────────────────────────────
 
+    /**
+     * Náklad a sleva se stejným obdobím a částkou, ale různým střediskem dají celkem nulu:
+     * odklad i rozpuštění přes openNext přesto vzniknou po střediscích, bez řádku 381.
+     */
+    public function testZeroTotalStillDefersAndReleasesPerDimensionOnOpenNext(): void
+    {
+        $dimensions = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Dimension\DimensionService::class);
+        $dimensions->setEnabled($this->supplierId, true);
+        $center = (int) $dimensions->ensureDefaultTypes($this->supplierId, ['stredisko'])['cost_center'];
+        $a = (int) $dimensions->createValue($this->supplierId, $center, ['code' => 'S-A', 'name' => 'Středisko A'])['id'];
+        $b = (int) $dimensions->createValue($this->supplierId, $center, ['code' => 'S-B', 'name' => 'Středisko B'])['id'];
+        $pi = $this->purchase('PF-2091-ZERO', 0.00, self::YEAR . '-11-15');
+        $this->item($pi, 36600.00, '2091-07-01', '2092-06-30', '548');
+        $this->item($pi, -36600.00, '2091-07-01', '2092-06-30', '548');
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            ['account_code' => '548', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '548', 'side' => 'credit', 'amount' => 36600.00, 'dimensions' => [$center => $b]],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))->replaceDocumentDimensions($this->supplierId, 'purchase_invoice', $pi, [], [
+            1 => [$center => $a],
+            2 => [$center => $b],
+        ]);
+
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $release = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId));
+        self::assertNotNull($release, 'Rozpuštění vznikne i při nulovém součtu.');
+        $lines = $this->entryLines((int) $release['id']);
+        self::assertEqualsWithDelta(18200.00, $this->sideAmount($lines, '548', 'debit'), 0.001);
+        self::assertEqualsWithDelta(18200.00, $this->sideAmount($lines, '548', 'credit'), 0.001);
+        self::assertEqualsWithDelta(0.0, $this->sideAmount($lines, '381', 'debit') + $this->sideAmount($lines, '381', 'credit'), 0.001);
+    }
+
     public function testAccrualIsReleasedInNextPeriodOnOpenNext(): void
     {
         $pi = $this->purchase('PF-2091-ALLIANZ', 36600.00, self::YEAR . '-11-15');

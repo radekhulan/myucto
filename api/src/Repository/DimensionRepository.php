@@ -276,15 +276,17 @@ final class DimensionRepository
             return [];
         }
         [$vis, $params] = $this->visibleSql($supplierId, 'v');
-        $marks = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT ' . self::VALUE_COLUMNS . " FROM dimension_values v WHERE v.id IN ({$marks}) AND {$vis}"
-        );
-        $stmt->execute([...$ids, ...$params]);
         $out = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $row = self::castValue($row);
-            $out[$row['id']] = $row;
+        foreach (array_chunk($ids, 1000) as $chunk) {
+            $marks = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT ' . self::VALUE_COLUMNS . " FROM dimension_values v WHERE v.id IN ({$marks}) AND {$vis}"
+            );
+            $stmt->execute([...$chunk, ...$params]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $row = self::castValue($row);
+                $out[$row['id']] = $row;
+            }
         }
         return $out;
     }

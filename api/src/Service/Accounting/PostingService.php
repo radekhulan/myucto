@@ -295,8 +295,13 @@ final class PostingService
         // na analytiku z mapy, rozpad typu rozdělí řádek po analytikách. Až po razítkování
         // a rozpadech dokladu — rozhoduje výsledná dimenze řádku, ať ji dal doklad, položka,
         // produkt, pravidlo nebo volající (mzdy, ruční zápis). Bez mapy beze změny.
-        $routed = (new DimensionAccountRouter($this->db))
-            ->apply($supplierId, $resolved, $entryDate, $this->singleAnalyticMap($supplierId, $entryDate, $currentRead), $currentRead);
+        // Časové rozlišení (odklad a rozpuštění 381/384) bere účet i dimenze z živého zápisu
+        // dokladu, ze kterého částku přesouvá; dnešní mapa ho přesměrovat nesmí, jinak by se
+        // odkládalo z analytiky, na které náklad či výnos neleží.
+        $routed = in_array($sourceType, ['deferred_revenue_accrual', 'prepaid_expense_accrual'], true)
+            ? $resolved
+            : (new DimensionAccountRouter($this->db))
+                ->apply($supplierId, $resolved, $entryDate, $this->singleAnalyticMap($supplierId, $entryDate, $currentRead), $currentRead);
         if ($routed !== $resolved) {
             $resolved = $this->dimensionStamper()->linkColumns($supplierId, $routed);
         }
@@ -4853,6 +4858,11 @@ final class PostingService
             }
             foreach (['dimension_origins', 'dimension_split_origins'] as $field) {
                 if (isset($line[$field]) && is_array($line[$field])) $resolvedLine[$field] = $line[$field];
+            }
+            // Zdrojové řádky dokladu, ze kterých časové rozlišení dimenze převzalo; ověřuje je
+            // SystemDimensionWritePolicy::carriedAccrualAssignments() a do deníku se neukládají.
+            if (isset($line['dimension_carry_lines']) && is_array($line['dimension_carry_lines'])) {
+                $resolvedLine['dimension_carry_lines'] = array_values(array_map('intval', $line['dimension_carry_lines']));
             }
             // cizoměnová stopa (jen saldokontní řádky cizoměnových dokladů)
             if (isset($line['currency_code'])) {

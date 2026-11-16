@@ -7,10 +7,12 @@ namespace MyInvoice\Tests\Integration\Accounting;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\PostingService;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -236,6 +238,177 @@ final class ClosingDeferredRevenueAccrualTest extends TestCase
         self::assertEqualsWithDelta(0.0, $this->balance384AsOf('2092-12-31'), 0.005, '384 se jednoletým předplatným rozpustí celý.');
     }
 
+    /**
+     * Firma bez dimenzí: odklad i rozpuštění přes veřejné openNext mají jeden řádek na účet
+     * a žádné dimenze — stejně jako před přenosem dimenzí.
+     */
+    public function testWithoutDimensionsEntriesKeepOneLinePerAccount(): void
+    {
+        $invoiceId = $this->invoice('20910020', 36600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $this->postInvoice($invoiceId, 36600.00, self::YEAR . '-07-01');
+
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        foreach ([ClosingSourceId::deferredRevenueAccrual($this->periodId), ClosingSourceId::deferredRevenueAccrualRelease($this->periodId)] as $sourceId) {
+            $entry = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', $sourceId);
+            self::assertNotNull($entry);
+            $codes = array_map(static fn (array $l): string => (string) $l['account_code'], $this->entryLines((int) $entry['id']));
+            sort($codes);
+            self::assertSame(['384', '602'], $codes);
+            self::assertSame([], (new DimensionAssignmentRepository($this->db))->entryLineDimensions($this->supplierId, (int) $entry['id']));
+        }
+    }
+
+    /**
+     * Vydaná faktura se dvěma položkami na 602 a různými středisky (rozlišená jen jedna)
+     * a dobropis s rozlišeným obdobím a třetím střediskem: odklad i rozpuštění v openNext
+     * jdou po střediscích, dobropis na opačné straně, a 384 se vyrovná.
+     */
+    public function testOpenNextReleasesPerItemDimensionAndCreditNoteFlipsSide(): void
+    {
+        $dimensions = Bootstrap::buildContainer()->get(DimensionService::class);
+        $dimensions->setEnabled($this->supplierId, true);
+        $center = (int) $dimensions->ensureDefaultTypes($this->supplierId, ['stredisko'])['cost_center'];
+        $a = (int) $dimensions->createValue($this->supplierId, $center, ['code' => 'S-A', 'name' => 'Středisko A'])['id'];
+        $b = (int) $dimensions->createValue($this->supplierId, $center, ['code' => 'S-B', 'name' => 'Středisko B'])['id'];
+        $c = (int) $dimensions->createValue($this->supplierId, $center, ['code' => 'S-C', 'name' => 'Středisko C'])['id'];
+
+        $invoiceId = $this->invoice('20910021', 46600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $this->item($invoiceId, 10000.00, null, null);
+        $dimensions->saveDocument($this->supplierId, 'invoice', $invoiceId, [], [1 => [$center => $a], 2 => [$center => $b]]);
+        $this->postBuilt($invoiceId, self::YEAR . '-07-01');
+        $creditId = $this->invoice('20910022', -18300.00, self::YEAR . '-08-01', 'credit_note', $invoiceId);
+        $this->item($creditId, -18300.00, '2091-07-01', '2092-06-30');
+        $dimensions->saveDocument($this->supplierId, 'invoice', $creditId, [$center => $c], []);
+        $this->postBuilt($creditId, self::YEAR . '-08-01');
+
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $defer = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($this->periodId));
+        $release = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId));
+        self::assertNotNull($defer);
+        self::assertNotNull($release);
+        self::assertSame([
+            '602|' . $a => ['debit', 1_820_000],
+            '602|' . $c => ['credit', 910_000],
+        ], $this->revenueByCenter((int) $defer['id'], $center), 'Odklad jen z rozlišených položek, dobropis na D.');
+        self::assertSame([
+            '602|' . $a => ['credit', 1_820_000],
+            '602|' . $c => ['debit', 910_000],
+        ], $this->revenueByCenter((int) $release['id'], $center), 'Rozpuštění zrcadlí odklad po středisku.');
+        self::assertEqualsWithDelta(0.0, $this->balance384AsOf('2092-12-31'), 0.005);
+    }
+
+    /**
+     * Faktura a dobropis se stejným obdobím a částkou, ale různým střediskem dají celkem nulu:
+     * odklad i rozpuštění přes openNext přesto vzniknou po střediscích, bez řádku 384.
+     */
+    public function testZeroTotalStillDefersAndReleasesPerDimensionOnOpenNext(): void
+    {
+        [$center, $a, , $c] = $this->centers();
+        $invoiceId = $this->invoice('20910023', 36600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $this->dimensionService()->saveDocument($this->supplierId, 'invoice', $invoiceId, [$center => $a], []);
+        $this->postBuilt($invoiceId, self::YEAR . '-07-01');
+        $creditId = $this->invoice('20910024', -36600.00, self::YEAR . '-08-01', 'credit_note', $invoiceId);
+        $this->item($creditId, -36600.00, '2091-07-01', '2092-06-30');
+        $this->dimensionService()->saveDocument($this->supplierId, 'invoice', $creditId, [$center => $c], []);
+        $this->postBuilt($creditId, self::YEAR . '-08-01');
+
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        foreach ([ClosingSourceId::deferredRevenueAccrual($this->periodId) => ['debit', 'credit'], ClosingSourceId::deferredRevenueAccrualRelease($this->periodId) => ['credit', 'debit']] as $sourceId => [$sideA, $sideC]) {
+            $entry = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', $sourceId);
+            self::assertNotNull($entry, 'Zápis vznikne i při nulovém součtu.');
+            self::assertSame(['602|' . $a => [$sideA, 1_820_000], '602|' . $c => [$sideC, 1_820_000]], $this->revenueByCenter((int) $entry['id'], $center));
+            self::assertEqualsWithDelta(0.0, $this->sideAmount($this->entryLines((int) $entry['id']), '384', 'credit') + $this->sideAmount($this->entryLines((int) $entry['id']), '384', 'debit'), 0.001);
+        }
+    }
+
+    /**
+     * Odklad zaúčtovaný uzávěrkou ještě bez dimenzí se mimo 504 rozpustí přes openNext také
+     * bez dimenzí (zrcadlí odklad), i když doklad středisko nese.
+     */
+    public function testLegacyDeferralWithoutDimensionsIsReleasedWithoutThemOnOpenNext(): void
+    {
+        [$center, $a] = $this->centers();
+        $invoiceId = $this->invoice('20910025', 36600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $this->dimensionService()->saveDocument($this->supplierId, 'invoice', $invoiceId, [$center => $a], []);
+        $this->postBuilt($invoiceId, self::YEAR . '-07-01');
+
+        $this->driveCloseWithAccrual();
+        $defer = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($this->periodId));
+        self::assertNotNull($defer);
+        $this->db->pdo()->prepare('DELETE d FROM journal_entry_line_dimensions d JOIN journal_entry_lines l ON l.id = d.line_id WHERE l.entry_id = ?')
+            ->execute([(int) $defer['id']]);
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $release = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId));
+        self::assertNotNull($release);
+        self::assertSame(['602|-' => ['credit', 1_820_000]], $this->revenueByCenter((int) $release['id'], $center));
+    }
+
+    /** @return array{0:int,1:int,2:int,3:int} typ střediska a hodnoty A, B, C */
+    private function centers(): array
+    {
+        $dimensions = $this->dimensionService();
+        $dimensions->setEnabled($this->supplierId, true);
+        $center = (int) $dimensions->ensureDefaultTypes($this->supplierId, ['stredisko'])['cost_center'];
+        $out = [$center];
+        foreach (['S-A', 'S-B', 'S-C'] as $code) {
+            $out[] = (int) $dimensions->createValue($this->supplierId, $center, ['code' => $code, 'name' => 'Středisko ' . $code])['id'];
+        }
+        return $out;
+    }
+
+    private function dimensionService(): DimensionService
+    {
+        return Bootstrap::buildContainer()->get(DimensionService::class);
+    }
+
+    /**
+     * Dávkové čtení dokladových dimenzí položek vydané faktury skládá vrstvy stejně jako
+     * zaúčtování ({@see \MyInvoice\Service\Accounting\Dimension\DimensionStamper::itemDimensions()}):
+     * textový řádek uprostřed se do pořadí položek počítá, slevový řádek také, položka bez
+     * vlastní hodnoty dostane výchozí středisko odběratele.
+     */
+    public function testBatchItemDimensionsOfIssuedInvoiceMatchStamper(): void
+    {
+        [$center, $a, $b, $c] = $this->centers();
+        (new \MyInvoice\Repository\DimensionDefaultRepository($this->db))->replace($this->supplierId, 'client', $this->clientId, [$center => $b]);
+        $invoiceId = $this->invoice('20910026', 1500.00, self::YEAR . '-07-01');
+        $first = $this->item($invoiceId, 1000.00, '2091-07-01', '2092-06-30');
+        $text = $this->item($invoiceId, 0.00, null, null);
+        $discount = $this->item($invoiceId, -100.00, null, null);
+        $last = $this->item($invoiceId, 600.00, null, null);
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE invoice_items SET item_kind = 'text', description = 'Poznámka', order_index = 1 WHERE id = ?")->execute([$text]);
+        $pdo->prepare("UPDATE invoice_items SET item_kind = 'discount', order_index = 2 WHERE id = ?")->execute([$discount]);
+        $pdo->prepare('UPDATE invoice_items SET order_index = 3 WHERE id = ?')->execute([$last]);
+        $this->dimensionService()->saveDocument($this->supplierId, 'invoice', $invoiceId, [], [1 => [$center => $a], 4 => [$center => $c]]);
+
+        $batch = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Closing\AccrualDeferralService::class)
+            ->documentItemDimensions($this->supplierId, 'invoice', [$invoiceId]);
+
+        $expected = [];
+        foreach ((new \MyInvoice\Service\Accounting\Dimension\DimensionStamper($this->db))->itemDimensions($this->supplierId, 'invoice', $invoiceId) as $itemId => $line) {
+            $expected[$itemId] = array_intersect_key($line, ['dimensions' => 1, 'dimension_splits' => 1]);
+        }
+        self::assertSame([$center => $a], $expected[$first]['dimensions'] ?? null, 'Fixture: první položka má vlastní středisko.');
+        self::assertSame([$center => $c], $expected[$last]['dimensions'] ?? null, 'Fixture: čtvrtý řádek (po textu a slevě) má středisko C.');
+        self::assertEquals($expected, $batch[$invoiceId] ?? null);
+    }
+
     /** Faktura rozúčtovaná rovnou na 384 nese odklad sama, uzávěrka ji neodkládá podruhé. */
     public function testPreviewSkipsInvoiceAlreadyPostedTo384(): void
     {
@@ -335,6 +508,33 @@ final class ClosingDeferredRevenueAccrualTest extends TestCase
             ['account_code' => '311', 'side' => $credit ? 'credit' : 'debit', 'amount' => abs($base)],
             ['account_code' => $revenueAccount, 'side' => $credit ? 'debit' : 'credit', 'amount' => abs($base)],
         ], ['entry_date' => $date, 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+    }
+
+    /** Zaúčtuje fakturu skutečnou účtovací cestou (builder + razítkování dimenzí dokladu). */
+    private function postBuilt(int $invoiceId, string $date): void
+    {
+        $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, $this->posting->buildFromInvoice($this->supplierId, $invoiceId), [
+            'entry_date' => $date, 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId,
+        ]);
+    }
+
+    /** @return array<string,array{0:string,1:int}> „6xx|středisko" => [strana, haléře] výnosových řádků zápisu */
+    private function revenueByCenter(int $entryId, int $centerType): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT l.id, a.account_code, l.side, l.amount
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.entry_id = ? AND l.supplier_id = ? AND a.account_code LIKE \'6%\''
+        );
+        $stmt->execute([$entryId, $this->supplierId]);
+        $dims = (new DimensionAssignmentRepository($this->db))->entryLineDimensions($this->supplierId, $entryId);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $line) {
+            $out[$line['account_code'] . '|' . ($dims[(int) $line['id']][$centerType] ?? '-')] = [(string) $line['side'], (int) round((float) $line['amount'] * 100)];
+        }
+        ksort($out);
+        return $out;
     }
 
     private function balance384AsOf(string $date): float

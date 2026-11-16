@@ -759,7 +759,8 @@ Při zaúčtování:
 - Mapa platí podle data účetního případu. Rozvahové účty se nemapují nikdy, DPH
   ani kontrolní hlášení se nemění.
 - Náhled kontace před zaúčtováním ukáže, kam se syntetika přesune.
-- Časové rozlišení (381, 384) odkládá a rozpouští náklad i výnos z týchž analytik.
+- Časové rozlišení (381, 384) odkládá a rozpouští náklad i výnos z týchž analytik
+  a se stejnými dimenzemi, které nese řádek dokladu (viz [§ 72.4.4](72_Uzaverka.md#7244-kroky-4-a-5-dohadne-polozky-a-casove-rozliseni)).
 
 Změna dimenze u zaúčtovaného dokladu, která by přesunula řádek na jinou
 analytiku, se do deníku tiše nepromítne: řádek si ponechá dosavadní dimenzi
