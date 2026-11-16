@@ -41769,14 +41769,18 @@
     "listStatus_unproven": "Needs review",
     "listStatus_none": "No charge for the selected title or year",
     "listColumns": {
-      "select": "Select for bulk charge",
+      "selectedCount": "Selected for batch: {count} of 500",
       "name": "Member",
       "membership": "Membership",
       "payment": "Payment status",
       "prescribed": "Charged",
       "paid": "Paid",
       "open": "Outstanding",
-      "actions": "Actions"
+      "actions": "Actions",
+      "future": "{status} from {date}",
+      "noRevision": "Not started",
+      "voided": "Revisions voided",
+      "statusNone": "No charge"
     },
     "listNoResults": "No members match the selected filters.",
     "rateRetryOptions": "Reload accounts and dimensions",

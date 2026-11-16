@@ -41454,14 +41454,18 @@
     "listStatus_unproven": "K prověření",
     "listStatus_none": "Bez předpisu pro zvolený titul nebo rok",
     "listColumns": {
-      "select": "Výběr do hromadného předpisu",
+      "selectedCount": "Vybráno pro dávku: {count} z 500",
       "name": "Člen",
       "membership": "Členství",
       "payment": "Stav úhrady",
       "prescribed": "Předepsáno",
       "paid": "Uhrazeno",
       "open": "Zbývá",
-      "actions": "Akce"
+      "actions": "Akce",
+      "future": "{status} od {date}",
+      "noRevision": "Členství nezačalo",
+      "voided": "Revize zrušené",
+      "statusNone": "Bez předpisu"
     },
     "listNoResults": "Zadaným filtrům neodpovídá žádný člen.",
     "rateRetryOptions": "Znovu načíst účty a dimenze",

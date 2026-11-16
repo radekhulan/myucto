@@ -139,8 +139,7 @@ function openMember(row: MemberRow) {
 
 // Řazení zůstává podle id: seznam jde keyset stránkováním po id, jiné pořadí by potřebovalo nový index.
 const COLUMNS: ColumnDef[] = [
-  { key: 'number', labelKey: 'nonprofitMembership.memberNumber', required: true },
-  { key: 'name', labelKey: 'nonprofitMembership.listColumns.name', required: true },
+  { key: 'member', labelKey: 'nonprofitMembership.listColumns.name', required: true },
   { key: 'membership', labelKey: 'nonprofitMembership.listColumns.membership' },
   { key: 'payment', labelKey: 'nonprofitMembership.listColumns.payment' },
   { key: 'prescribed', labelKey: 'nonprofitMembership.listColumns.prescribed' },
@@ -152,6 +151,17 @@ const hasListFilters = computed(() => !!appliedFilters.value.search || !!applied
 const money = (cents: string | null) => formatMoneyMinor(cents === null ? null : Number(cents))
 const contributionBadge = (status: NonNullable<MemberRow['contribution']>['status']) => [badgeBase,
   status === 'paid' ? 'bg-success-50 text-success-700' : status === 'unpaid' ? 'bg-danger-50 text-danger-600' : status === 'unproven' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600']
+type RevisionState = { kind: 'current'; status: NonNullable<MemberRow['status']>; date: string } | { kind: 'future' | 'none' | 'voided'; full: string; short: string }
+function revisionState(row: MemberRow): RevisionState {
+  if (row.revision_no === null || row.effective_from === null || row.status === null) {
+    return row.all_revisions_voided
+      ? { kind: 'voided', full: t('nonprofitMembership.allRevisionsVoided'), short: t('nonprofitMembership.listColumns.voided') }
+      : { kind: 'none', full: t('nonprofitMembership.noRevision'), short: t('nonprofitMembership.listColumns.noRevision') }
+  }
+  const params = { status: t(`nonprofitMembership.status_${row.status}`), date: formatDate(row.effective_from) }
+  if (row.effective_from > today.value) return { kind: 'future', full: t('nonprofitMembership.futureRevision', params), short: t('nonprofitMembership.listColumns.future', params) }
+  return { kind: 'current', status: row.status, date: formatDate(row.effective_from) }
+}
 const checkDisabled = (id: number) => loading.value || batchLocked.value || (checkedMembers.value.length >= 500 && !checkedMembers.value.includes(id))
 
 /**
@@ -429,7 +439,6 @@ watch(batchLocked, locked => {
     <p v-if="selectionNotice" role="status" class="text-sm text-warning-700">{{ selectionNotice }}</p>
     <ActionBar :actions="actions" />
     <p v-if="exportError" role="alert" :class="errorBox" data-section="export-error">{{ exportError }}</p>
-    <p v-if="canManage && members.length" class="text-sm text-neutral-500">{{ t('nonprofitMembership.batchSelectedCount', {count: checkedMembers.length}) }}</p>
     <MembershipBatchFlow v-if="batchOpen" :key="supplier" :supplier="supplier" :can-manage="canManage" :periods="periods" :selected-member-ids="checkedMembers"
       @changed="batchChanged" @lock="batchLocked = $event" @close="batchOpen = false" />
     <MembershipImportFlow v-if="importOpen && canManage" :key="`import-${supplier}`" :supplier="supplier" :can-manage="canManage" @changed="importChanged" @close="importOpen = false" />
@@ -477,6 +486,7 @@ watch(batchLocked, locked => {
     <section class="min-w-0 space-y-3" data-section="members" :aria-busy="loading ? 'true' : 'false'">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h2 tabindex="-1" class="font-semibold focus:outline-none" data-focus="members-heading">{{ t('nonprofitMembership.members') }}</h2>
+        <p v-if="canManage && members.length" class="min-w-0 flex-1 text-sm text-neutral-500" :title="t('nonprofitMembership.batchSelectedCount', {count: checkedMembers.length})" data-section="batch-selected-count">{{ t('nonprofitMembership.listColumns.selectedCount', {count: checkedMembers.length}) }}<span class="sr-only">. {{ t('nonprofitMembership.batchSelectedCount', {count: checkedMembers.length}) }}</span></p>
         <div class="flex flex-wrap items-center gap-2">
           <ColumnPicker class="hidden md:block" :ctrl="tbl" />
           <DensityToggle class="hidden md:block" :ctrl="tbl" />
@@ -499,7 +509,7 @@ watch(batchLocked, locked => {
       <!-- Obnova nechává zobrazené řádky; kostra tabulky jen do příchodu první stránky. -->
       <p v-if="loading && members.length" role="status" class="text-sm text-neutral-500" data-section="members-loading">{{ t('common.loading') }}</p>
       <div v-if="loading || members.length || !error" class="rounded-lg border border-neutral-200 bg-surface shadow-sm">
-        <TableSkeleton v-if="loading && !members.length" :rows="5" :cols="canManage ? 7 : 6" data-section="members-loading" />
+        <div v-if="loading && !members.length" data-section="members-loading"><span class="sr-only">{{ t('common.loading') }}</span><TableSkeleton :rows="5" :cols="7" /></div>
         <div v-else-if="!members.length && !error" data-section="members-empty">
           <EmptyState v-if="hasListFilters" variant="filtered" :title="t('nonprofitMembership.listNoResults')" :cta="batchLocked ? undefined : t('common.empty_state.clear_filters')" dense @action="clearFilter()" />
           <template v-else>
@@ -515,9 +525,7 @@ watch(batchLocked, locked => {
           <table v-column-labels="tbl" class="w-full text-sm table-sticky-first" :class="tbl.densityClass.value">
             <thead class="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500">
               <tr>
-                <th v-if="canManage" scope="col" class="w-10 px-3 py-2.5 text-center"><span class="sr-only">{{ t('nonprofitMembership.listColumns.select') }}</span></th>
-                <th v-if="tbl.isVisible('number')" scope="col" class="px-3 py-2.5 text-left font-medium">{{ t('nonprofitMembership.memberNumber') }}</th>
-                <th v-if="tbl.isVisible('name')" scope="col" class="px-3 py-2.5 text-left font-medium">{{ t('nonprofitMembership.listColumns.name') }}</th>
+                <th scope="col" class="px-3 py-2.5 text-left font-medium">{{ t('nonprofitMembership.listColumns.name') }}</th>
                 <th v-if="tbl.isVisible('membership')" scope="col" class="px-3 py-2.5 text-left font-medium">{{ t('nonprofitMembership.listColumns.membership') }}</th>
                 <th v-if="tbl.isVisible('payment')" scope="col" class="px-3 py-2.5 text-left font-medium">{{ t('nonprofitMembership.listColumns.payment') }}</th>
                 <th v-if="tbl.isVisible('prescribed')" scope="col" class="px-3 py-2.5 text-right font-medium">{{ t('nonprofitMembership.listColumns.prescribed') }}</th>
@@ -527,25 +535,32 @@ watch(batchLocked, locked => {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="row in members" :key="row.id" class="cursor-pointer hover:bg-neutral-50"
-                data-section="member-row" :data-member="row.id" :data-row-active="selected?.id === row.id" :aria-current="selected?.id === row.id ? 'true' : undefined"
+              <!-- Lepivá první buňka dědí pozadí řádku. Globální zebra a hover jsou poloprůhledné a obsah posunutých
+                   buněk by pod ní prosvítal, proto má řádek tady vždy neprůhledné pozadí (otevřený člen, sudý řádek, hover). -->
+              <tr v-for="row in members" :key="row.id" :class="['cursor-pointer', selected?.id === row.id ? 'bg-primary-50' : 'even:bg-neutral-50 hover:bg-neutral-100']"
+                data-section="member-row" :data-member="row.id" :aria-current="selected?.id === row.id ? 'true' : undefined"
                 @click="openMember(row)">
-                <td v-if="canManage" class="px-3 py-2.5 text-center" @click.stop>
-                  <input type="checkbox" class="h-4 w-4 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
-                    :checked="checkedMembers.includes(row.id)" :disabled="checkDisabled(row.id)" :aria-label="t('nonprofitMembership.batchSelectMember', {name: labelOf(row)})"
-                    data-action="batch-check-member" @change="checkMember(row.id, $event)" />
+                <td class="px-3 py-2.5">
+                  <div class="flex items-center gap-3">
+                    <label v-if="canManage" class="-my-2 flex shrink-0 cursor-pointer py-2" @click.stop>
+                      <input type="checkbox" class="h-4 w-4 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
+                        :checked="checkedMembers.includes(row.id)" :disabled="checkDisabled(row.id)" :aria-label="t('nonprofitMembership.batchSelectMember', {name: labelOf(row)})"
+                        data-action="batch-check-member" @change="checkMember(row.id, $event)" />
+                    </label>
+                    <span class="shrink-0 whitespace-nowrap font-mono text-xs text-neutral-500" data-field="member-number">{{ row.member_number }}</span>
+                    <span class="max-w-[14rem] truncate font-medium text-neutral-900" :title="labelOf(row)" data-field="member-name">{{ labelOf(row) }}</span>
+                  </div>
                 </td>
-                <td v-if="tbl.isVisible('number')" class="whitespace-nowrap px-3 py-2.5 font-mono text-xs">{{ row.member_number }}</td>
-                <td v-if="tbl.isVisible('name')" class="px-3 py-2.5"><div class="max-w-[16rem] truncate font-medium text-neutral-900" :title="labelOf(row)">{{ labelOf(row) }}</div></td>
-                <td v-if="tbl.isVisible('membership')" class="px-3 py-2.5 text-xs">
-                  <span v-if="row.revision_no === null || row.effective_from === null || row.status === null" class="text-warning-700" data-field="member-revision">{{ t(row.all_revisions_voided ? 'nonprofitMembership.allRevisionsVoided' : 'nonprofitMembership.noRevision') }}</span>
-                  <span v-else-if="row.effective_from > today" class="text-warning-700" data-field="member-revision">{{ t('nonprofitMembership.futureRevision', { status: t(`nonprofitMembership.status_${row.status}`), date: formatDate(row.effective_from) }) }}</span>
-                  <span v-else class="flex flex-wrap items-center gap-x-2 gap-y-1" data-field="member-revision"><span :class="memberStatusBadge(row.status)" data-field="member-status">{{ t(`nonprofitMembership.status_${row.status}`) }}</span><span class="whitespace-nowrap text-neutral-600">{{ t('nonprofitMembership.sinceDate', { date: formatDate(row.effective_from) }) }}</span></span>
+                <td v-if="tbl.isVisible('membership')" class="whitespace-nowrap px-3 py-2.5 text-xs">
+                  <template v-for="rev in [revisionState(row)]" :key="rev.kind">
+                    <span v-if="rev.kind === 'current'" class="flex items-center gap-2" data-field="member-revision"><span :class="memberStatusBadge(rev.status)" data-field="member-status">{{ t(`nonprofitMembership.status_${rev.status}`) }}</span><span class="text-neutral-600">{{ t('nonprofitMembership.sinceDate', { date: rev.date }) }}</span></span>
+                    <span v-else class="text-warning-700" :title="rev.full" data-field="member-revision">{{ rev.short }}<span class="sr-only">. {{ rev.full }}</span></span>
+                  </template>
                 </td>
                 <td v-if="tbl.isVisible('payment')" class="px-3 py-2.5 text-xs">
                   <template v-if="row.contribution">
-                    <span :class="contributionBadge(row.contribution.status)" data-field="contribution-status">{{ t(`nonprofitMembership.listStatus_${row.contribution.status}`) }}</span>
-                    <div v-if="row.contribution.unpaired_count" class="mt-1 text-neutral-500" data-field="contribution-unpaired">{{ t('nonprofitMembership.listUnpaired', {count: row.contribution.unpaired_count}) }}</div>
+                    <span :class="contributionBadge(row.contribution.status)" :title="t(`nonprofitMembership.listStatus_${row.contribution.status}`)" data-field="contribution-status">{{ row.contribution.status === 'none' ? t('nonprofitMembership.listColumns.statusNone') : t(`nonprofitMembership.listStatus_${row.contribution.status}`) }}</span>
+                    <div v-if="row.contribution.unpaired_count" class="mt-1 whitespace-nowrap text-neutral-500" data-field="contribution-unpaired">{{ t('nonprofitMembership.listUnpaired', {count: row.contribution.unpaired_count}) }}</div>
                   </template>
                   <span v-else class="text-neutral-300">—</span>
                 </td>
@@ -553,8 +568,9 @@ watch(batchLocked, locked => {
                 <td v-if="tbl.isVisible('paid')" class="whitespace-nowrap px-3 py-2.5 text-right font-mono tabular-nums" data-field="contribution-paid">{{ row.contribution?.claim_count ? money(row.contribution.paid_cents) : '—' }}</td>
                 <td v-if="tbl.isVisible('open')" class="whitespace-nowrap px-3 py-2.5 text-right font-mono tabular-nums" data-field="contribution-open">{{ row.contribution?.claim_count ? money(row.contribution.open_cents) : '—' }}</td>
                 <td class="px-3 py-1.5 text-right">
-                  <button type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" data-action="open-member" @click.stop="openMember(row)">
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>{{ t('nonprofitMembership.openMember') }}
+                  <!-- Pod šířkou xl jen ikona, aby se tabulka vešla; popisek nese aria-label a title. -->
+                  <button type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" :aria-label="t('nonprofitMembership.openMember')" :title="t('nonprofitMembership.openMember')" data-action="open-member" @click.stop="openMember(row)">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg><span class="hidden xl:inline">{{ t('nonprofitMembership.openMember') }}</span>
                   </button>
                 </td>
               </tr>
@@ -574,13 +590,14 @@ watch(batchLocked, locked => {
               </label>
               <div class="min-w-0 flex-1 space-y-1 text-sm">
                 <p class="break-words font-medium text-neutral-900"><span class="font-mono text-xs text-neutral-500">{{ row.member_number }}</span> · {{ labelOf(row) }}</p>
-                <p v-if="row.revision_no === null || row.effective_from === null || row.status === null" class="text-xs text-warning-700">{{ t(row.all_revisions_voided ? 'nonprofitMembership.allRevisionsVoided' : 'nonprofitMembership.noRevision') }}</p>
-                <p v-else-if="row.effective_from > today" class="text-xs text-warning-700">{{ t('nonprofitMembership.futureRevision', { status: t(`nonprofitMembership.status_${row.status}`), date: formatDate(row.effective_from) }) }}</p>
-                <p v-else class="flex flex-wrap items-center gap-2 text-xs"><span :class="memberStatusBadge(row.status)">{{ t(`nonprofitMembership.status_${row.status}`) }}</span><span class="text-neutral-600">{{ t('nonprofitMembership.sinceDate', { date: formatDate(row.effective_from) }) }}</span></p>
+                <template v-for="rev in [revisionState(row)]" :key="rev.kind">
+                  <p v-if="rev.kind === 'current'" class="flex flex-wrap items-center gap-2 text-xs" data-field="member-revision"><span :class="memberStatusBadge(rev.status)" data-field="member-status">{{ t(`nonprofitMembership.status_${rev.status}`) }}</span><span class="text-neutral-600">{{ t('nonprofitMembership.sinceDate', { date: rev.date }) }}</span></p>
+                  <p v-else class="text-xs text-warning-700" data-field="member-revision">{{ rev.full }}</p>
+                </template>
                 <template v-if="row.contribution">
                   <p class="flex flex-wrap items-center gap-2 text-xs">
-                    <span :class="contributionBadge(row.contribution.status)">{{ t(`nonprofitMembership.listStatus_${row.contribution.status}`) }}</span>
-                    <span v-if="row.contribution.unpaired_count" class="text-neutral-500">{{ t('nonprofitMembership.listUnpaired', {count: row.contribution.unpaired_count}) }}</span>
+                    <span :class="contributionBadge(row.contribution.status)" data-field="contribution-status">{{ t(`nonprofitMembership.listStatus_${row.contribution.status}`) }}</span>
+                    <span v-if="row.contribution.unpaired_count" class="text-neutral-500" data-field="contribution-unpaired">{{ t('nonprofitMembership.listUnpaired', {count: row.contribution.unpaired_count}) }}</span>
                   </p>
                   <p v-if="row.contribution.claim_count" class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-neutral-500" data-field="contribution-amounts">
                     <span class="whitespace-nowrap">{{ t('nonprofitMembership.listColumns.prescribed') }}: <span class="font-mono tabular-nums text-neutral-700">{{ money(row.contribution.prescribed_cents) }}</span></span>

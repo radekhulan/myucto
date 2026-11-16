@@ -143,14 +143,25 @@ describe('Membership workspace', () => {
     const w=mounted();await flushPromises()
     const rowEl=w.get('[data-member="1"]')
     expect(rowEl.element.tagName).toBe('TR')
-    expect(rowEl.findAll('td').map(td => td.text())).toEqual(expect.arrayContaining(['M-1', 'Synthetic member 1']))
-    expect(w.findAll('thead th').map(th => th.text())).toEqual(expect.arrayContaining([cs.nonprofitMembership.memberNumber, cs.nonprofitMembership.listColumns.prescribed, cs.nonprofitMembership.listColumns.paid, cs.nonprofitMembership.listColumns.open]))
+    // Výběr, číslo a jméno jsou v první (lepivé) buňce, aby identifikace člena při posunu nezmizela.
+    const first=rowEl.findAll('td')[0]
+    expect(first.find('[data-action="batch-check-member"]').exists()).toBe(true)
+    expect(first.get('[data-field="member-number"]').text()).toBe('M-1')
+    expect(first.get('[data-field="member-name"]').text()).toBe('Synthetic member 1')
+    expect(w.findAll('thead th').map(th => th.text())).toEqual(expect.arrayContaining([cs.nonprofitMembership.listColumns.name, cs.nonprofitMembership.listColumns.prescribed, cs.nonprofitMembership.listColumns.paid, cs.nonprofitMembership.listColumns.open]))
+    const count = w.get('[data-section="members"] [data-section="batch-selected-count"]')
+    expect(count.text()).toContain(cs.nonprofitMembership.listColumns.selectedCount.replace('{count}', '0'))
+    expect(count.attributes('title')).toBe(cs.nonprofitMembership.batchSelectedCount.replace('{count}', '0'))
+    // Sudé řádky mají neprůhledné pozadí, jinak by pod lepivou buňkou prosvítal posunutý obsah.
+    expect(w.get('[data-member="2"]').classes()).toContain('even:bg-neutral-50')
+    expect(w.get('[data-member="1"] [data-action="open-member"]').attributes('aria-label')).toBe(cs.nonprofitMembership.openMember)
     await w.get('[data-member-card="1"] [data-action="batch-check-member"]').setValue(true)
     expect((w.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(true)
     expect(w.findComponent(Detail).exists()).toBe(false)
     await w.get('[data-member-card="2"]').trigger('click');await flushPromises()
     expect(w.findComponent(Detail).props('memberId')).toBe(2)
-    expect(w.get('[data-member="2"]').attributes('data-row-active')).toBe('true')
+    expect(w.get('[data-member="2"]').classes()).toContain('bg-primary-50')
+    expect(w.get('[data-member="1"]').classes()).not.toContain('bg-primary-50')
     await w.get('[data-member="1"] td:nth-child(3)').trigger('click');await flushPromises()
     expect(w.findComponent(Detail).props('memberId')).toBe(1)
     w.unmount()
@@ -159,8 +170,50 @@ describe('Membership workspace', () => {
   it('hides the selection column without write access', async () => {
     const w=mounted({canManage:false});await flushPromises()
     expect(w.find('[data-action="batch-check-member"]').exists()).toBe(false)
-    expect(w.get('[data-member="1"]').findAll('td')[0].text()).toBe('M-1')
+    expect(w.get('[data-member="1"]').findAll('td')[0].get('[data-field="member-number"]').text()).toBe('M-1')
+    expect(w.find('[data-section="batch-selected-count"]').exists()).toBe(false)
     w.unmount()
+  })
+
+  it('returns focus to the open button of the visible phone card after closing the detail', async () => {
+    const rects = vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(function (this: Element) {
+      return (this.closest('[data-member-card]') ? [{}] : []) as unknown as DOMRectList
+    })
+    try {
+      const w = mount(Workspace, {
+        attachTo: document.body,
+        props: { supplier: 5, canManage: true },
+        global: {
+          plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
+          stubs: { ActionBar, ClientSearchSelect, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation },
+        },
+      })
+      await flushPromises()
+      await w.get('[data-member-card="2"] [data-action="open-member"]').trigger('click');await flushPromises()
+      w.findComponent(Detail).vm.$emit('close');await flushPromises()
+      expect(document.activeElement).toBe(w.get('[data-member-card="2"] [data-action="open-member"]').element)
+      w.unmount()
+    } finally { rects.mockRestore() }
+  })
+
+  it('offers clearing filters from an empty filtered list, but not while a batch is locked', async () => {
+    navigation.route.query = {search: 'Nobody'}
+    api.members.mockResolvedValue(page([]))
+    const w=mounted();await flushPromises()
+    const cta=w.get('[data-section="members-empty"] [data-empty-state="filtered"] [data-test="empty-state-cta"]')
+    api.members.mockResolvedValue(page([row(1)]))
+    await cta.trigger('click');await flushPromises()
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({search:''}))
+    expect(w.findAll('[data-section="member-row"]')).toHaveLength(1)
+    w.unmount()
+
+    navigation.route.query = {search: 'Nobody'}
+    api.members.mockResolvedValue(page([]))
+    const locked=mounted();await flushPromises()
+    await locked.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    locked.findComponent(MembershipBatchFlow).vm.$emit('lock', true);await flushPromises()
+    expect(locked.find('[data-test="empty-state-cta"]').exists()).toBe(false)
+    locked.unmount()
   })
 
   it('confirms a deleted member like other successful actions and closes the detail', async () => {
@@ -296,9 +349,17 @@ describe('Membership workspace', () => {
     expect(current.get('[data-field="member-status"]').classes()).toEqual(expect.arrayContaining(['rounded-full', 'bg-success-50', 'text-success-600']))
     expect(current.classes()).not.toContain('text-warning-700')
     const future = w.get('[data-member="2"] [data-field="member-revision"]')
-    expect(future.text()).toBe(cs.nonprofitMembership.futureRevision.replace('{status}', cs.nonprofitMembership.status_ended).replace('{date}', formatDate('2999-01-01')))
+    const futureFull = cs.nonprofitMembership.futureRevision.replace('{status}', cs.nonprofitMembership.status_ended).replace('{date}', formatDate('2999-01-01'))
+    // Tabulka ukáže krátký text, plné znění je v title a pro čtečku; karta ukazuje plné znění.
+    expect(future.text()).toContain(cs.nonprofitMembership.listColumns.future.replace('{status}', cs.nonprofitMembership.status_ended).replace('{date}', formatDate('2999-01-01')))
+    expect(future.attributes('title')).toBe(futureFull)
+    expect(future.get('.sr-only').text()).toContain(futureFull)
+    expect(future.find('[data-field="member-status"]').exists()).toBe(false)
     expect(future.classes()).toContain('text-warning-700')
-    expect(w.get('[data-member="3"] [data-field="member-revision"]').text()).toBe(cs.nonprofitMembership.noRevision)
+    expect(w.get('[data-member-card="2"] [data-field="member-revision"]').text()).toBe(futureFull)
+    expect(w.get('[data-member-card="1"] [data-field="member-status"]').text()).toBe(cs.nonprofitMembership.status_active)
+    expect(w.get('[data-member="3"] [data-field="member-revision"]').attributes('title')).toBe(cs.nonprofitMembership.noRevision)
+    expect(w.get('[data-member-card="3"] [data-field="member-revision"]').text()).toBe(cs.nonprofitMembership.noRevision)
     expect(w.get('[data-member="3"]').text()).toContain(cs.nonprofitMembership.clientFallback.replace('{id}', '13'))
     w.unmount()
   })
@@ -307,7 +368,9 @@ describe('Membership workspace', () => {
     api.members.mockResolvedValue(page([row(3, { revision_no: null, effective_from: null, status: null, all_revisions_voided: true })]))
     const w = mounted()
     await flushPromises()
-    const text = w.get('[data-member="3"] [data-field="member-revision"]').text()
+    expect(w.get('[data-member="3"] [data-field="member-revision"]').attributes('title')).toBe(cs.nonprofitMembership.allRevisionsVoided)
+    expect(w.get('[data-member="3"] [data-field="member-revision"]').text()).toContain(cs.nonprofitMembership.listColumns.voided)
+    const text = w.get('[data-member-card="3"] [data-field="member-revision"]').text()
     expect(text).toBe(cs.nonprofitMembership.allRevisionsVoided)
     expect(text).not.toBe(cs.nonprofitMembership.noRevision)
     w.unmount()
