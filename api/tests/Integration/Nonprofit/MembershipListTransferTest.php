@@ -534,6 +534,11 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         // Typografická pomlčka v UTF-8 (E2 80 93) vedle cp1250 bajtu.
         $dash = "member number;name;new status;effective from;reference\nNEW-DASH;Synthetic \u{2013} Spolek;active;2026-02-01;Usnesen\xED\n";
         self::assertSame('nonprofit_membership_import_encoding', $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, $dash, 'a.csv', true, canCreateContacts: true))->errorCode);
+        // Export s BOM, k němuž někdo připsal řádek v cp1250, a jméno v cyrilici vedle podkladu v cp1250.
+        $bom = "\xEF\xBB\xBFmember number;name;new status;effective from;reference\nNEW-BOM;Novak;active;2026-02-01;Usnesen\xED\n";
+        self::assertSame('nonprofit_membership_import_encoding', $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, $bom, 'a.csv', true, canCreateContacts: true))->errorCode);
+        $cyrillic = "member number;name;new status;effective from;reference\nNEW-CYR;Олена Шевченко;active;2026-02-01;Usnesen\xED\n";
+        self::assertSame('nonprofit_membership_import_encoding', $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, $cyrillic, 'a.csv', true, canCreateContacts: true))->errorCode);
     }
 
     public function testConcurrentImportOfSameNewMemberIsAlreadyImported(): void

@@ -473,7 +473,7 @@ watch(batchLocked, locked => {
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>{{ t('nonprofitMembership.openMember') }}
         </button>
       </div>
-      <button v-if="nextAfter !== null" type="button" :class="btnOutline('neutral')" data-action="more-members" :disabled="loading" @click="load(true)">
+      <button v-if="nextAfter !== null" type="button" :class="btnOutline('neutral')" data-action="more-members" :disabled="loading || exporting" @click="load(true)">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>{{ t('nonprofitMembership.moreMembers') }}
       </button>
     </section>

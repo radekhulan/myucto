@@ -843,4 +843,18 @@ describe('Membership workspace', () => {
     expect(w.find('[data-section="export-error"]').exists()).toBe(false)
     w.unmount()
   })
+
+  it('během exportu je „Načíst další“ zašedlé, aby odpověď exportu nepřišla o hlášku', async () => {
+    let resolve: (v: unknown) => void = () => {}
+    api.members.mockResolvedValueOnce(page([row(1)], 1))
+    api.exportMembers.mockReturnValueOnce(new Promise(done => { resolve = done }))
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const w = mounted(); await flushPromises()
+    await w.get('[data-action="export-xlsx"]').trigger('click')
+    expect(w.get('[data-action="more-members"]').attributes('disabled')).toBeDefined()
+    resolve({ blob: new Blob(['x']), filename: 'clenove.xlsx' }); await flushPromises()
+    expect(w.get('[data-action="more-members"]').attributes('disabled')).toBeUndefined()
+    click.mockRestore(); w.unmount()
+  })
 })
