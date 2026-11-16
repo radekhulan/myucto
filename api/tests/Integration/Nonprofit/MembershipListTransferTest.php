@@ -641,12 +641,16 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         }
         // Kontrakt XLSX: buňka nese zdvojený apostrof, který import zase odebere.
         $xlsx = (new MembershipListExporter($this->db, '2026-06-01'))->export($this->supplier, MembershipListFilter::parse(['year' => '2026']), 'xlsx')['bytes'];
-        $path = tempnam(sys_get_temp_dir(), 'nmq_') . '.xlsx';
+        $base = tempnam(sys_get_temp_dir(), 'nmq_');
+        $path = $base . '.xlsx';
         file_put_contents($path, $xlsx);
-        $sheet = (new \PhpOffice\PhpSpreadsheet\Reader\Xlsx())->load($path)->getActiveSheet();
+        $book = (new \PhpOffice\PhpSpreadsheet\Reader\Xlsx())->load($path);
         @unlink($path);
+        @unlink($base);
+        $sheet = $book->getActiveSheet();
         $numbers = [];
         for ($r = 2; $r <= $sheet->getHighestRow(); $r++) $numbers[] = (string) $sheet->getCell([1, $r])->getValue();
+        $book->disconnectWorksheets();
         self::assertContains("''-1", $numbers);
         self::assertContains('-1', $numbers, 'XLSX jiné texty nechrání, buňka je textová.');
         // Změna stavu u řádku „'-1“ v CSV exportu dostane člen „'-1“, ne „-1“.

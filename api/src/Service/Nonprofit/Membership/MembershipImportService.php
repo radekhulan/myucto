@@ -548,7 +548,7 @@ final class MembershipImportService extends AbstractCodebookImportService
      * sám začíná apostrofem, zdvojí (MembershipListExporter::quoteApostrophe); import jeden apostrof zase odebere, v CSV
      * i XLSX (CSV export uložený z Excelu jako XLSX nese apostrof jako obsah buňky). Export a import tak vrátí přesně
      * stejnou hodnotu ve všech sloupcích včetně členského čísla („'-1“ nesplyne s „-1“). Jen text napsaný ručně do
-     * souboru, který začíná apostrofem před jedním z těch znaků, o apostrof přijde; klíč idempotence i párování
+     * souboru, který začíná apostrofem před jedním z těch znaků nebo dalším apostrofem, o apostrof přijde; klíč idempotence i párování
      * pracují s hodnotou po odebrání. Ručně zapsané „'-1“ proto znamená člena „-1“, přesně jak ho zapisuje CSV export.
      */
     private static function unescape(string $value): string
