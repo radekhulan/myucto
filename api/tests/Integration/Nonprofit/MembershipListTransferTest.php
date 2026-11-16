@@ -427,10 +427,66 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         self::assertSame(['1', '500,00'], [$cells[6], $cells[7]], 'Počet předpisů je celé číslo, částky mají dvě desetinná místa.');
     }
 
+    public function testNumbersEqualByCollationAreDuplicateAndCp1250CsvIsRead(): void
+    {
+        $this->member('DIA-C');
+        $csv = $this->csv(['SYN-DIA-C;;;;suspended;2026-03-01;Synthetic decision;', 'SYN-DIA-Č;;;;suspended;2026-04-01;Synthetic decision;']);
+        $rows = $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true)['rows'];
+        self::assertSame([['error', 'duplicate_number'], ['error', 'duplicate_number']], array_map(static fn (array $r): array => [$r['status'], $r['reason']], $rows),
+            'DB kolace nerozlišuje diakritiku: obě čísla jsou tentýž člen.');
+
+        $legacy = (string) iconv('UTF-8', 'WINDOWS-1250', $this->csv(['SYN-DIA-C;;;;pozastavené;1. 3. 2026;Usnesení výboru;']));
+        self::assertFalse(mb_check_encoding($legacy, 'UTF-8'));
+        $rows = $this->import->run($this->supplier, $this->actor, $legacy, 'excel.csv', true)['rows'];
+        self::assertSame(['new_revision', 'suspended'], [$rows[0]['status'], $rows[0]['new_status']]);
+    }
+
+    public function testConcurrentImportOfSameNewMemberIsAlreadyImported(): void
+    {
+        $csv = $this->csv(['TWIN-NEW;;;Synthetic Twin Person;active;2026-02-01;Synthetic application;']);
+        $preview = $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true);
+        $other = $this->otherActor();
+        $before = $this->clientCount();
+        // Dvojklik nebo druhý uživatel: stejný soubor se potvrdí těsně před naším zápisem.
+        $racing = new MembershipImportService($this->db, new ActivityLogger($this->db), $this->members, function () use ($csv, $preview, $other): void {
+            (new MembershipImportService($this->db, new ActivityLogger($this->db), $this->members))
+                ->run($this->supplier, $other, $csv, 'a.csv', false, $preview['preview_hash'], canCreateContacts: true);
+        });
+        $result = $racing->run($this->supplier, $this->actor, $csv, 'a.csv', false, $preview['preview_hash'], canCreateContacts: true);
+        self::assertSame([0, 0, 'already_imported'], [$result['written'], $result['failed_writes'], $result['rows'][0]['outcome']]);
+        self::assertSame($before + 1, $this->clientCount(), 'Kontakt založený naším pokusem se vrátil s jeho transakcí.');
+    }
+
+    public function testXlsxExportHasMemberCapButCsvStreamsEverything(): void
+    {
+        foreach (['CAP-A', 'CAP-B', 'CAP-C'] as $number) $this->member($number);
+        $exporter = new MembershipListExporter($this->db, '2026-06-01', 2);
+        $filter = MembershipListFilter::parse(['year' => '2026']);
+        $error = $this->rejected(fn () => $exporter->export($this->supplier, $filter, 'xlsx'));
+        self::assertSame(['nonprofit_membership_export_too_large', 422], [$error->errorCode, $error->httpStatus]);
+        $csv = $exporter->export($this->supplier, $filter, 'csv')['bytes'];
+        self::assertSame(3, substr_count($csv, "\nSYN-CAP-"), 'CSV strop nemá.');
+        self::assertSame('clenove-2026-06-01.xlsx', (new MembershipListExporter($this->db, '2026-06-01', 3))->export($this->supplier, $filter, 'xlsx')['filename']);
+    }
+
+    public function testOversizedUnpackedXlsxIsFileErrorNotRowLimit(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'k8zip');
+        $zip = new \ZipArchive();
+        $zip->open($path, \ZipArchive::OVERWRITE);
+        $zip->addFromString('[Content_Types].xml', '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>');
+        $zip->addFromString('xl/padding.bin', str_repeat("\0", 21_000_000));
+        $zip->close();
+        $bytes = (string) file_get_contents($path);
+        @unlink($path);
+        [$status, , $body] = $this->call('POST', 'importMembers', [], null, 'session', $bytes, 'clenove.xlsx');
+        self::assertSame([422, 'nonprofit_membership_import_file_invalid'], [$status, json_decode($body, true)['error']['code']]);
+    }
+
     /** @return array<string,array<string,mixed>> členské číslo => sloupec => hodnota */
     private function exportRows(array $query): array
     {
-        $rows = (new MembershipListExporter($this->db, '2026-06-01'))->rows($this->supplier, MembershipListFilter::parse($query));
+        $rows = iterator_to_array((new MembershipListExporter($this->db, '2026-06-01'))->rows($this->supplier, MembershipListFilter::parse($query)), false);
         $headers = MembershipListColumns::headers();
         $out = [];
         foreach ($rows as $cells) {

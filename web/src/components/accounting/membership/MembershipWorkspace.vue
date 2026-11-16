@@ -265,7 +265,7 @@ function importChanged() {
 }
 const actions = computed<ActionItem[]>(() => [
   { key: 'batch-open', label: t('nonprofitMembership.batchTitle'), icon: 'plus', variant: 'primary', show: props.canManage, disabled: batchLocked.value || loading.value || !!error.value, run: () => { batchOpen.value = true } },
-  { key: 'import-open', label: t('nonprofitMembership.import.open'), icon: 'upload', variant: 'primary', show: props.canManage, disabled: importOpen.value, run: () => { importOpen.value = true } },
+  { key: 'import-open', label: t('nonprofitMembership.import.open'), icon: 'upload', show: props.canManage, disabled: importOpen.value, run: () => { importOpen.value = true } },
   { key: 'export-xlsx', label: t('nonprofitMembership.exportXlsx'), icon: 'download', disabled: exporting.value || loading.value, run: () => { void exportMembers('xlsx') } },
   { key: 'export-csv', label: t('nonprofitMembership.exportCsv'), icon: 'download', disabled: exporting.value || loading.value, run: () => { void exportMembers('csv') } },
   { key: 'reload-members', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value, run: reloadMembers },

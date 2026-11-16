@@ -130,13 +130,17 @@ final class MembershipAction
             $hash = isset($body['preview_hash']) && is_string($body['preview_hash']) ? $body['preview_hash'] : null;
             [$content, $filename] = $this->uploadedList($request);
             [$ip, $agent] = $this->origin($request);
+            // Potvrzení zapisuje až 2000 řádků po jednom (~17 dotazů na řádek); výchozí limit 30 s by ho
+            // na pomalejším serveru přerušil fatální chybou uprostřed, kdy už neproběhne ani audit.
+            if (!$dryRun) @set_time_limit(600);
             try {
                 return (new MembershipImportService($this->db, $this->activity, $this->memberService))
                     ->run($supplier, $this->actor($request), $content, $filename, $dryRun, $hash, $ip, $agent,
                         RequestAuthorization::canCreateContactsByMembershipImport($request));
             } catch (CodebookImportException $e) {
                 // Překročený počet řádků má vlastní kód, aby web řekl skutečný důvod (export může být delší).
-                if ($e->errorCode === 'too_many_rows') throw new MembershipException('nonprofit_membership_import_too_many_rows', $e->getMessage(), 422);
+                // Sdílené čtení dává kód too_many_rows i příliš velkému rozbalenému XLSX; rozliší je jen text.
+                if ($e->errorCode === 'too_many_rows' && str_contains($e->getMessage(), 'řádků')) throw new MembershipException('nonprofit_membership_import_too_many_rows', $e->getMessage(), 422);
                 throw new MembershipException('nonprofit_membership_import_file_invalid', $e->getMessage(), $e->httpStatus === 415 ? 415 : 422);
             }
         });

@@ -26,7 +26,11 @@ final class MembershipListExporter
     private const PAGE = 500;
     private const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-    public function __construct(private readonly Connection $db, private readonly ?string $today = null) {}
+    /**
+     * @param int $xlsxLimit nejvíc členů v XLSX: sešit drží všechny buňky v paměti (~9 MB na 1000 členů),
+     *                       10 000 se vejde i do menšího memory_limit; CSV jde proudem bez stropu (testy limit zmenšují)
+     */
+    public function __construct(private readonly Connection $db, private readonly ?string $today = null, private readonly int $xlsxLimit = 10000) {}
 
     /** @return array{bytes:string, filename:string, mime:string} */
     public function export(int $supplier, array $filter, string $format): array
@@ -34,15 +38,23 @@ final class MembershipListExporter
         if (!in_array($format, ['xlsx', 'csv'], true)) {
             throw new MembershipException('nonprofit_membership_invalid', 'Podporované formáty exportu jsou XLSX a CSV.');
         }
+        // Řádky jdou po stránkách generátorem rovnou do zapisovače; celý seznam se nesestavuje v PHP poli.
         $rows = $this->rows($supplier, $filter);
         $filename = 'clenove-' . $this->today() . '.' . $format;
         if ($format === 'csv') {
-            $text = array_map(static fn (array $row): array => array_map(
-                static fn (array $cell): string => match ($cell[0]) { 'n' => number_format((float) $cell[1], 2, ',', ''), 'i' => (string) (int) $cell[1], default => CsvWriter::safe($cell[1]) }, $row), $rows);
+            $text = (static function (iterable $rows): \Generator {
+                foreach ($rows as $row) yield array_map(static fn (array $cell): string => match ($cell[0]) {
+                    'n' => number_format((float) $cell[1], 2, ',', ''), 'i' => (string) (int) $cell[1], default => CsvWriter::safe($cell[1]) }, $row);
+            })($rows);
             return ['bytes' => CsvWriter::build(MembershipListColumns::headers(), $text), 'filename' => $filename, 'mime' => 'text/csv; charset=UTF-8'];
         }
         $book = new Spreadsheet();
-        $this->sheet($book->getActiveSheet(), 'Členové', MembershipListColumns::headers(), $rows);
+        try {
+            $this->sheet($book->getActiveSheet(), 'Členové', MembershipListColumns::headers(), $rows, $this->xlsxLimit);
+        } catch (MembershipException $e) {
+            $book->disconnectWorksheets();
+            throw $e;
+        }
         $guide = [];
         foreach (MembershipListColumns::all() as $column) {
             $guide[] = [['s', $column['header']], ['s', $column['required']], ['s', implode(', ', $column['aliases'])], ['s', $column['note']]];
@@ -64,14 +76,13 @@ final class MembershipListExporter
 
     /**
      * Buňky v pořadí MembershipListColumns; ['s', text], ['i', počet] nebo ['n', částka v Kč].
-     * @return list<list<array{0:string,1:mixed}>>
+     * @return \Generator<int,list<array{0:string,1:mixed}>>
      */
-    public function rows(int $supplier, array $filter): array
+    public function rows(int $supplier, array $filter): \Generator
     {
         $list = new MembershipListRepository($this->db);
         $members = new MembershipRepository($this->db);
         $today = $this->today();
-        $out = [];
         $after = 0;
         do {
             $page = $list->page($supplier, $after, self::PAGE, $filter);
@@ -83,7 +94,7 @@ final class MembershipListExporter
                 $now = MembershipRevisionTimeline::at($histories[$row['id']] ?? [], $today);
                 $dues = $row['contribution'];
                 $claim = $claims[$row['id']] ?? null;
-                $out[] = [
+                yield [
                     ['s', $row['member_number']],
                     ['s', (string) $row['client_id']],
                     ['s', ''],
@@ -101,7 +112,6 @@ final class MembershipListExporter
             }
             $after = $page[array_key_last($page)]['id'];
         } while (count($page) === self::PAGE);
-        return $out;
     }
 
     /** Stejné zobrazení jako membershipMemberLabel na webu: název, jinak jméno a příjmení. */
@@ -116,8 +126,8 @@ final class MembershipListExporter
         return $this->today ?? (new \DateTimeImmutable())->setTimezone(new \DateTimeZone(date_default_timezone_get()))->format('Y-m-d');
     }
 
-    /** @param list<string> $headers @param list<list<array{0:string,1:mixed}>> $rows */
-    private function sheet(Worksheet $sheet, string $title, array $headers, array $rows): void
+    /** @param list<string> $headers @param iterable<list<array{0:string,1:mixed}>> $rows */
+    private function sheet(Worksheet $sheet, string $title, array $headers, iterable $rows, int $limit = PHP_INT_MAX): void
     {
         $sheet->setTitle($title);
         foreach ($headers as $i => $header) {
@@ -127,12 +137,17 @@ final class MembershipListExporter
         $sheet->getStyle("A1:{$last}1")->getFont()->setBold(true);
         $sheet->getStyle("A1:{$last}1")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('EEEEEE');
         // Texty explicitně jako řetězec: číslo „042“ si drží nulu a „=…“ zůstane textem.
-        foreach ($rows as $r => $cells) {
+        $r = 0;
+        foreach ($rows as $cells) {
+            if ($r >= $limit) {
+                throw new MembershipException('nonprofit_membership_export_too_large', 'Export XLSX má nejvýše ' . $limit . ' členů. Použijte CSV nebo seznam zužte filtrem.', 422);
+            }
             foreach ($cells as $i => [$type, $value]) {
                 $type !== 's'
                     ? $sheet->setCellValue([$i + 1, $r + 2], $value)
                     : $sheet->setCellValueExplicit([$i + 1, $r + 2], (string) $value, DataType::TYPE_STRING);
             }
+            $r++;
         }
         for ($i = 1; $i <= count($headers); $i++) {
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($i))->setAutoSize(true);

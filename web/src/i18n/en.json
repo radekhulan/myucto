@@ -42086,7 +42086,8 @@
       "nonprofit_membership_import_file_invalid": "The file cannot be processed. Upload an XLSX or CSV up to 2 MB with the export header (Členské číslo, Nový stav, Platí od, Podklad).",
       "nonprofit_membership_import_changed": "The data changed since the preview. Review the new preview and confirm it again.",
       "nonprofit_membership_import_has_errors": "The import contains invalid rows; nothing was written.",
-      "nonprofit_membership_import_too_many_rows": "The import accepts at most 2000 rows. Split a larger list into several files using the filters (year, contribution label, search)."
+      "nonprofit_membership_import_too_many_rows": "The import accepts at most 2000 rows. Delete the unchanged rows from the file (only rows with a new status and new members are needed), or narrow the export by search or payment status.",
+      "nonprofit_membership_export_too_large": "The XLSX export holds at most 10,000 members. Use the CSV export, or narrow the list with the filters."
     },
     "ratesEmptyRequired": "There are no rates yet. Create a rate in the catalog first.",
     "batchTitle": "Batch membership charges",

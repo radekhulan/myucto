@@ -64,6 +64,11 @@ final class MembershipImportService extends AbstractCodebookImportService
             throw new MembershipException('nonprofit_membership_invalid', 'Potvrzení importu vyžaduje otisk náhledu.');
         }
         [$this->actor, $this->expectedHash, $this->ip, $this->agent, $this->canCreateContacts] = [$actor, $expectedHash, $ip, $agent, $canCreateContacts];
+        // „CSV (oddělený středníkem)“ z českého Excelu je v cp1250; sdílené čtení počítá s UTF-8.
+        if (strtolower((string) pathinfo($filename, PATHINFO_EXTENSION)) === 'csv' && !mb_check_encoding($content, 'UTF-8')) {
+            $converted = iconv('WINDOWS-1250', 'UTF-8', $content);
+            if (is_string($converted)) $content = $converted;
+        }
         $report = $this->import($supplier, $actor, $content, $filename, $dryRun);
         if (!isset($report['preview_hash'])) {
             // Chyba celého souboru (prázdný, chybí sloupec) ze sdíleného čtení.
@@ -105,7 +110,8 @@ final class MembershipImportService extends AbstractCodebookImportService
                     $plan[$index] += ['outcome' => 'written'] + $result;
                     $written++;
                 } catch (MembershipException $e) {
-                    if ($row['status'] === 'new_revision' && $e->errorCode === 'nonprofit_membership_idempotency_conflict') {
+                    if (($row['status'] === 'new_revision' && $e->errorCode === 'nonprofit_membership_idempotency_conflict')
+                        || ($row['status'] === 'new_member' && $this->memberImported($supplierId, $row['plan']))) {
                         // Klíč je odvozený z obsahu řádku: revizi mezitím zapsal souběžný import téhož souboru.
                         $plan[$index] += ['outcome' => 'already_imported'];
                         continue;
@@ -169,7 +175,8 @@ final class MembershipImportService extends AbstractCodebookImportService
         // Totéž číslo (bez ohledu na velikost písmen) nebo tentýž kontakt nového člena dvakrát v souboru.
         foreach ($out as $i => $row) {
             if ($row['member_number'] === '') continue;
-            $seenNumbers[mb_strtolower($row['member_number'])][] = $i;
+            // Existující člen podle nalezeného ID (kolace DB nerozlišuje diakritiku ani velikost písmen), nový podle čísla.
+            $seenNumbers[isset($members[$row['line']]) ? 'm:' . $members[$row['line']]['id'] : 'n:' . mb_strtolower($row['member_number'])][] = $i;
         }
         $newClients = [];
         foreach ($out as $i => $row) {
@@ -309,6 +316,15 @@ final class MembershipImportService extends AbstractCodebookImportService
                 'ic' => $plan['create_contact']['ic'], 'source' => self::AUDIT_IMPORT], $this->ip, $this->agent, $supplier);
         }
         return $result;
+    }
+
+    /** Nového člena z řádku mezitím založil souběžný import téhož souboru: číslo existuje a nese revizi s klíčem řádku. */
+    private function memberImported(int $supplier, array $plan): bool
+    {
+        $q = $this->db->pdo()->prepare('SELECT id FROM nonprofit_members WHERE supplier_id=? AND member_number=?');
+        $q->execute([$supplier, $plan['member_number']]);
+        $member = $q->fetchColumn();
+        return $member !== false && $this->existingKeys($supplier, [self::revisionKey((int) $member, $plan)]) !== [];
     }
 
     private function revisionInput(array $plan, int $expected, string $key): array
