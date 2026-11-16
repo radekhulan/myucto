@@ -20,7 +20,7 @@ final class MembershipListColumns
     {
         return [
             'member_number' => ['header' => 'Členské číslo', 'aliases' => ['cislo clena', 'member number', 'member_number'], 'required' => 'ano',
-                'note' => 'Existující člen se páruje jen podle členského čísla. Neznámé číslo = nový člen.'],
+                'note' => 'Existující člen se páruje jen podle členského čísla. Neznámé číslo = nový člen. Text, který sám začíná apostrofem, má v souboru apostrof zdvojený (\'\'-1 = číslo \'-1); import jeden odebere.'],
             'client_id' => ['header' => 'ID kontaktu', 'aliases' => ['client_id', 'contact id', 'id klienta'], 'required' => 'ne',
                 'note' => 'Nový člen: existující kontakt v adresáři. U existujícího člena musí odpovídat jeho kontaktu.'],
             'ic' => ['header' => 'IČO', 'aliases' => ['ic', 'ico', 'company id'], 'required' => 'ne',

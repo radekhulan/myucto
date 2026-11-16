@@ -146,8 +146,8 @@ final class MembershipImportService extends AbstractCodebookImportService
     {
         $parsed = [];
         foreach ($rows as $line => $cols) {
-            // Ochranný apostrof přidává CSV export (CsvWriter::safe). Odebírá se i z XLSX: CSV export otevřený v Excelu
-            // a uložený jako XLSX ho nese jako obsah buňky. Skutečný text začínající „'=“ apod. je vzácnější než tahle cesta.
+            // Ochranný a zdvojený apostrof z exportu (CsvWriter::safe, MembershipListExporter::quoteApostrophe) odebírá
+            // unescape v CSV i XLSX; pravidla a kompromis popisuje její docblock.
             $value = fn (string $field): string => self::unescape($this->col($cols, $map, $field));
             $parsed[] = ['line' => $line, 'member_number' => $value('member_number'), 'client_id' => $value('client_id'), 'ic' => $value('ic'),
                 'name' => $value('name'), 'new_status' => $value('new_status'), 'new_from' => $value('new_from'),
@@ -549,7 +549,7 @@ final class MembershipImportService extends AbstractCodebookImportService
      * i XLSX (CSV export uložený z Excelu jako XLSX nese apostrof jako obsah buňky). Export a import tak vrátí přesně
      * stejnou hodnotu ve všech sloupcích včetně členského čísla („'-1“ nesplyne s „-1“). Jen text napsaný ručně do
      * souboru, který začíná apostrofem před jedním z těch znaků, o apostrof přijde; klíč idempotence i párování
-     * pracují s hodnotou po odebrání.
+     * pracují s hodnotou po odebrání. Ručně zapsané „'-1“ proto znamená člena „-1“, přesně jak ho zapisuje CSV export.
      */
     private static function unescape(string $value): string
     {

@@ -639,16 +639,24 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
             self::assertSame([$quoted, $plain], [$byNumber["'-1"]['member_id'] ?? null, $byNumber['-1']['member_id'] ?? null], $format);
             self::assertSame(0, $report['counts']['error'], $format);
         }
+        // Kontrakt XLSX: buňka nese zdvojený apostrof, který import zase odebere.
+        $xlsx = (new MembershipListExporter($this->db, '2026-06-01'))->export($this->supplier, MembershipListFilter::parse(['year' => '2026']), 'xlsx')['bytes'];
+        $path = tempnam(sys_get_temp_dir(), 'nmq_') . '.xlsx';
+        file_put_contents($path, $xlsx);
+        $sheet = (new \PhpOffice\PhpSpreadsheet\Reader\Xlsx())->load($path)->getActiveSheet();
+        @unlink($path);
+        $numbers = [];
+        for ($r = 2; $r <= $sheet->getHighestRow(); $r++) $numbers[] = (string) $sheet->getCell([1, $r])->getValue();
+        self::assertContains("''-1", $numbers);
+        self::assertContains('-1', $numbers, 'XLSX jiné texty nechrání, buňka je textová.');
         // Změna stavu u řádku „'-1“ v CSV exportu dostane člen „'-1“, ne „-1“.
         $csv = (new MembershipListExporter($this->db, '2026-06-01'))->export($this->supplier, MembershipListFilter::parse(['year' => '2026']), 'csv')['bytes'];
-        $lines = explode("
-", $csv);
+        $lines = explode("\n", $csv);
         foreach ($lines as &$line) {
             if (str_starts_with($line, "''-1;")) $line = implode(';', array_slice(explode(';', $line), 0, 13)) . ';active;2026-02-01;Synthetic application;';
         }
         unset($line);
-        $preview = $this->import->run($this->supplier, $this->actor, implode("
-", $lines), 'a.csv', true);
+        $preview = $this->import->run($this->supplier, $this->actor, implode("\n", $lines), 'a.csv', true);
         $changed = array_values(array_filter($preview['rows'], static fn (array $row): bool => $row['status'] === 'new_revision'));
         self::assertSame([[$quoted, "'-1"]], array_map(static fn (array $row): array => [$row['member_id'], $row['member_number']], $changed));
     }
