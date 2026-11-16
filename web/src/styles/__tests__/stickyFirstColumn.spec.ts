@@ -20,10 +20,12 @@ const SRC = resolve(__dirname, '../..')
 const mainCss = readFileSync(join(SRC, 'styles/main.css'), 'utf8')
 const printCss = readFileSync(join(SRC, 'styles/print.css'), 'utf8')
 
+/** Těla všech pravidel, jejichž seznam selektorů je právě `selector` (bez skupin s jinými selektory). */
 function rule(css: string, selector: string): string | null {
-  const at = css.indexOf(`${selector} {`)
-  if (at < 0) return null
-  return css.slice(at, css.indexOf('}', at))
+  const bodies = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(m => m[1].trim() === selector)
+    .map(m => m[2])
+  return bodies.length ? bodies.join('\n') : null
 }
 
 function vueFiles(dir: string): string[] {
