@@ -223,7 +223,7 @@ async function create() {
 watch(() => props.supplier, () => {
   cancelSearchTimer(); pendingRouteFilters = false; pendingFormFilters = false
   generation++; createTicket++; titlesTicket++; hydrating = true
-  checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false; importOpen.value = false
+  checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false; importOpen.value = false; exportError.value = ''
   search.value = ''; filterYear.value = appIsoDate().slice(0, 4); titleKey.value = ''; paymentStatus.value = 'all'
   selectionNotice.value = ''
   appliedFilters.value = {search: '', year: Number(filterYear.value), title_key: '', payment_status: 'all'}
@@ -241,11 +241,14 @@ onActivated(() => {
   void reloadAll()
 })
 
-const importOpen = ref(false), exporting = ref(false)
-/** Export použije filtry, podle kterých je seznam právě načtený, ne rozepsaný formulář. */
+const importOpen = ref(false), exporting = ref(false), exportError = ref('')
+/**
+ * Export použije filtry, podle kterých je seznam právě načtený, ne rozepsaný formulář.
+ * Chyba exportu má vlastní hlášku: nesmí smazat chybu načtení seznamu (ta blokuje hromadný předpis) ani ji zastoupit.
+ */
 async function exportMembers(format: 'xlsx' | 'csv') {
   const supplier = props.supplier
-  exporting.value = true; error.value = ''
+  exporting.value = true; exportError.value = ''
   try {
     const { blob, filename } = await membershipApi.exportMembers(supplier, format, appliedFilters.value)
     if (!alive || supplier !== props.supplier) return
@@ -254,7 +257,7 @@ async function exportMembers(format: 'xlsx' | 'csv') {
     link.href = url; link.download = filename; link.click()
     URL.revokeObjectURL(url)
   } catch (e) {
-    if (alive && supplier === props.supplier) error.value = membershipError({ t, te }, e)
+    if (alive && supplier === props.supplier) exportError.value = membershipError({ t, te }, e)
   } finally {
     if (alive) exporting.value = false
   }
@@ -380,6 +383,7 @@ watch(batchLocked, locked => {
     <p v-if="notice" role="status" class="text-sm text-success-600" data-section="workspace-notice">{{ notice }}</p>
     <p v-if="selectionNotice" role="status" class="text-sm text-warning-700">{{ selectionNotice }}</p>
     <ActionBar :actions="actions" />
+    <p v-if="exportError" role="alert" :class="errorBox" data-section="export-error">{{ exportError }}</p>
     <p v-if="canManage && members.length" class="text-sm text-neutral-500">{{ t('nonprofitMembership.batchSelectedCount', {count: checkedMembers.length}) }}</p>
     <MembershipBatchFlow v-if="batchOpen" :key="supplier" :supplier="supplier" :can-manage="canManage" :periods="periods" :selected-member-ids="checkedMembers"
       @changed="batchChanged" @lock="batchLocked = $event" @close="batchOpen = false" />

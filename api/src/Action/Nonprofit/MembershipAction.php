@@ -103,6 +103,8 @@ final class MembershipAction
             }
             $format = $query['format'] ?? 'xlsx';
             unset($query['format']);
+            // XLSX do stropu 5000 členů trvá jednotky sekund; výchozí limit 30 s by na pomalém serveru nestačil.
+            @set_time_limit(300);
             $file = (new MembershipListExporter($this->db))->export($this->currentSupplierId($request), MembershipListFilter::parse($query), is_string($format) ? $format : '');
         } catch (MembershipException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);

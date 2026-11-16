@@ -441,6 +441,71 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         self::assertSame(['new_revision', 'suspended'], [$rows[0]['status'], $rows[0]['new_status']]);
     }
 
+    public function testNewNumbersEqualByCollationAreDuplicateInPreview(): void
+    {
+        $csv = $this->csv([
+            'NOVY-C;;;Synthetic Jan;active;2026-01-01;Synthetic general meeting;',
+            'NOVY-Č;;;Synthetic Petr;active;2026-01-01;Synthetic general meeting;',
+            'novy-d;;;Synthetic Eva;active;2026-01-01;Synthetic general meeting;',
+            'NOVY-D2;;;Synthetic Ota;active;2026-01-01;Synthetic general meeting;',
+        ]);
+        $rows = array_column($this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true)['rows'], null, 'member_number');
+        self::assertSame(['error', 'duplicate_number', ['lines' => '2, 3']], [$rows['NOVY-C']['status'], $rows['NOVY-C']['reason'], $rows['NOVY-C']['params']],
+            'Unikátní index čísla nerozlišuje diakritiku: druhý člen by se při zápisu ztratil.');
+        self::assertSame(['error', 'duplicate_number'], [$rows['NOVY-Č']['status'], $rows['NOVY-Č']['reason']]);
+        self::assertSame(['new_member', 'new_member'], [$rows['novy-d']['status'], $rows['NOVY-D2']['status']]);
+    }
+
+    public function testDifferentPersonWithSameNumberAndBasisIsNotReportedAsAlreadyImported(): void
+    {
+        $csv = $this->csv(['NOVY-X;;;Synthetic Petr;active;2026-01-01;Synthetic general meeting;']);
+        $preview = $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true);
+        // Mezi náhledem a zápisem jiný import založí pod stejným číslem jinou osobu se stejným podkladem.
+        $racing = new MembershipImportService($this->db, new ActivityLogger($this->db), $this->members, function (): void {
+            $other = $this->csv(['NOVY-X;;;Synthetic Jan;active;2026-01-01;Synthetic general meeting;']);
+            $service = new MembershipImportService($this->db, new ActivityLogger($this->db), $this->members);
+            $first = $service->run($this->supplier, $this->actor, $other, 'b.csv', true, canCreateContacts: true);
+            $service->run($this->supplier, $this->actor, $other, 'b.csv', false, $first['preview_hash'], canCreateContacts: true);
+        });
+        $result = $racing->run($this->supplier, $this->actor, $csv, 'a.csv', false, $preview['preview_hash'], canCreateContacts: true);
+        self::assertSame(['failed', 'nonprofit_membership_identity_conflict'], [$result['rows'][0]['outcome'], $result['rows'][0]['failure']],
+            'Klíč revize kontakt nenese: shoda čísla a podkladu nestačí k tvrzení, že je řádek zapsaný.');
+    }
+
+    public function testConcurrentMemberWithOtherContactOrOtherIcIsNotAlreadyImported(): void
+    {
+        $mine = $this->client('race-mine', 'Synthetic Mine', null);
+        $theirs = $this->client('race-theirs', 'Synthetic Theirs', null);
+        $basis = 'active;2026-01-01;Synthetic general meeting;';
+        $cases = [
+            // Řádek s existujícím kontaktem, souběžný import pod stejným číslem jiný existující kontakt.
+            ["RACE-ID;{$mine};;;{$basis}", "RACE-ID;{$theirs};;;{$basis}"],
+            // Zakládaný kontakt se stejným názvem, ale jiným IČO.
+            ["RACE-IC;;45678901;Synthetic Same Name;{$basis}", "RACE-IC;;56789012;Synthetic Same Name;{$basis}"],
+        ];
+        foreach ($cases as [$ours, $concurrent]) {
+            $csv = $this->csv([$ours]);
+            $preview = $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true);
+            $racing = new MembershipImportService($this->db, new ActivityLogger($this->db), $this->members, function () use ($concurrent): void {
+                $service = new MembershipImportService($this->db, new ActivityLogger($this->db), $this->members);
+                $first = $service->run($this->supplier, $this->actor, $this->csv([$concurrent]), 'b.csv', true, canCreateContacts: true);
+                $service->run($this->supplier, $this->actor, $this->csv([$concurrent]), 'b.csv', false, $first['preview_hash'], canCreateContacts: true);
+            });
+            $result = $racing->run($this->supplier, $this->actor, $csv, 'a.csv', false, $preview['preview_hash'], canCreateContacts: true);
+            self::assertSame('failed', $result['rows'][0]['outcome'], $ours);
+        }
+    }
+
+    public function testCp1250ByteOutsideCodePageDoesNotBreakTheFile(): void
+    {
+        $this->member('UNDEF');
+        // 0x81 cp1250 nedefinuje; bez //IGNORE by převod selhal a hlavička s diakritikou by nesedla.
+        $legacy = (string) iconv('UTF-8', 'WINDOWS-1250', $this->csv(['SYN-UNDEF;;;;pozastavené;1. 3. 2026;Usnesení výboru;'])) ;
+        $legacy = str_replace('Usnesen', "Usnesen\x81", $legacy);
+        $rows = $this->import->run($this->supplier, $this->actor, $legacy, 'excel.csv', true)['rows'];
+        self::assertSame(['new_revision', 'suspended'], [$rows[0]['status'], $rows[0]['new_status']]);
+    }
+
     public function testConcurrentImportOfSameNewMemberIsAlreadyImported(): void
     {
         $csv = $this->csv(['TWIN-NEW;;;Synthetic Twin Person;active;2026-02-01;Synthetic application;']);

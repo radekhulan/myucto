@@ -28,9 +28,10 @@ final class MembershipListExporter
 
     /**
      * @param int $xlsxLimit nejvíc členů v XLSX: sešit drží všechny buňky v paměti (~9 MB na 1000 členů),
-     *                       10 000 se vejde i do menšího memory_limit; CSV jde proudem bez stropu (testy limit zmenšují)
+     *                       (měřeno: 4000 členů +60 MB, 10 000 +129 MB); 5000 se vejde i do memory_limit 128M,
+     *                       CSV jde proudem bez stropu (10 000 členů +24 MB); testy limit zmenšují
      */
-    public function __construct(private readonly Connection $db, private readonly ?string $today = null, private readonly int $xlsxLimit = 10000) {}
+    public function __construct(private readonly Connection $db, private readonly ?string $today = null, private readonly int $xlsxLimit = 5000) {}
 
     /** @return array{bytes:string, filename:string, mime:string} */
     public function export(int $supplier, array $filter, string $format): array

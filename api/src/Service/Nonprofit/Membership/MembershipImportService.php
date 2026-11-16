@@ -66,7 +66,8 @@ final class MembershipImportService extends AbstractCodebookImportService
         [$this->actor, $this->expectedHash, $this->ip, $this->agent, $this->canCreateContacts] = [$actor, $expectedHash, $ip, $agent, $canCreateContacts];
         // „CSV (oddělený středníkem)“ z českého Excelu je v cp1250; sdílené čtení počítá s UTF-8.
         if (strtolower((string) pathinfo($filename, PATHINFO_EXTENSION)) === 'csv' && !mb_check_encoding($content, 'UTF-8')) {
-            $converted = iconv('WINDOWS-1250', 'UTF-8', $content);
+            // //IGNORE: bajty, které cp1250 nedefinuje, se vynechají místo selhání celého převodu.
+            $converted = @iconv('WINDOWS-1250', 'UTF-8//IGNORE', $content);
             if (is_string($converted)) $content = $converted;
         }
         $report = $this->import($supplier, $actor, $content, $filename, $dryRun);
@@ -172,11 +173,12 @@ final class MembershipImportService extends AbstractCodebookImportService
         foreach ($parsed as $row) {
             $out[] = $this->classify($row, $members[$row['line']] ?? null, $histories, $clients, $byIc, $known);
         }
-        // Totéž číslo (bez ohledu na velikost písmen) nebo tentýž kontakt nového člena dvakrát v souboru.
+        // Totéž číslo (podle kolace DB) nebo tentýž kontakt nového člena dvakrát v souboru.
+        $groups = $this->numberGroups(array_filter(array_column($out, 'member_number', 'line'), static fn (string $n, int $line): bool => $n !== '' && mb_strlen($n) <= 80 && !isset($members[$line]), ARRAY_FILTER_USE_BOTH));
         foreach ($out as $i => $row) {
-            if ($row['member_number'] === '') continue;
-            // Existující člen podle nalezeného ID (kolace DB nerozlišuje diakritiku ani velikost písmen), nový podle čísla.
-            $seenNumbers[isset($members[$row['line']]) ? 'm:' . $members[$row['line']]['id'] : 'n:' . mb_strtolower($row['member_number'])][] = $i;
+            if ($row['member_number'] === '' || mb_strlen($row['member_number']) > 80) continue;
+            // Existující člen podle nalezeného ID, nový podle skupiny čísel v kolaci sloupce (velikost písmen ani diakritika nerozhoduje).
+            $seenNumbers[isset($members[$row['line']]) ? 'm:' . $members[$row['line']]['id'] : $groups[$row['line']]][] = $i;
         }
         $newClients = [];
         foreach ($out as $i => $row) {
@@ -318,13 +320,47 @@ final class MembershipImportService extends AbstractCodebookImportService
         return $result;
     }
 
-    /** Nového člena z řádku mezitím založil souběžný import téhož souboru: číslo existuje a nese revizi s klíčem řádku. */
+    /**
+     * Nového člena z řádku mezitím založil souběžný import téhož souboru: číslo
+     * existuje, nese revizi s klíčem řádku a kontakt odpovídá řádku (zadaný kontakt, nebo zakládaný se stejným
+     * názvem a IČO). Klíč revize kontakt neobsahuje, takže bez této kontroly by jiný člen se stejným podkladem
+     * vydával cizí řádek za zapsaný.
+     */
     private function memberImported(int $supplier, array $plan): bool
     {
-        $q = $this->db->pdo()->prepare('SELECT id FROM nonprofit_members WHERE supplier_id=? AND member_number=?');
+        $q = $this->db->pdo()->prepare('SELECT m.id,m.client_id,c.company_name,c.ic FROM nonprofit_members m
+            JOIN clients c ON c.supplier_id=m.supplier_id AND c.id=m.client_id WHERE m.supplier_id=? AND m.member_number=?');
         $q->execute([$supplier, $plan['member_number']]);
-        $member = $q->fetchColumn();
-        return $member !== false && $this->existingKeys($supplier, [self::revisionKey((int) $member, $plan)]) !== [];
+        $member = $q->fetch(PDO::FETCH_ASSOC);
+        if ($member === false) return false;
+        $contact = $plan['create_contact'];
+        $sameContact = $contact === null
+            ? (int) $member['client_id'] === $plan['client_id']
+            : $member['company_name'] === $contact['company_name'] && ($member['ic'] === '' ? null : $member['ic']) === $contact['ic'];
+        return $sameContact && $this->existingKeys($supplier, [self::revisionKey((int) $member['id'], $plan)]) !== [];
+    }
+
+    /**
+     * Skupiny čísel nových členů podle kolace sloupce member_number (jako unikátní index): čísla, která se liší
+     * jen velikostí písmen nebo diakritikou, jsou pro databázi totéž číslo. Jeden dotaz pro celý soubor.
+     * @param array<int,string> $numbers řádek => číslo
+     * @return array<int,string> řádek => klíč skupiny
+     */
+    private function numberGroups(array $numbers): array
+    {
+        if ($numbers === []) return [];
+        $values = 'SELECT ? line,? num' . str_repeat(' UNION ALL SELECT ?,?', count($numbers) - 1);
+        $params = [];
+        foreach ($numbers as $line => $number) array_push($params, $line, $number);
+        $collation = (string) $this->db->pdo()->query("SELECT COLLATION_NAME FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='nonprofit_members' AND COLUMN_NAME='member_number'")->fetchColumn();
+        if (preg_match('/^utf8mb4_[a-z0-9_]+$/D', $collation) !== 1) throw new \LogicException('Neznámá kolace členského čísla.');
+        $q = $this->db->pdo()->prepare("WITH input AS ({$values})
+            SELECT line, MIN(line) OVER (PARTITION BY CONVERT(num USING utf8mb4) COLLATE {$collation}) grp FROM input");
+        $q->execute($params);
+        $out = [];
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) $out[(int) $row['line']] = 'n:' . $row['grp'];
+        return $out;
     }
 
     private function revisionInput(array $plan, int $expected, string $key): array
