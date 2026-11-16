@@ -544,14 +544,16 @@ final class MembershipImportService extends AbstractCodebookImportService
     }
 
     /**
-     * CSV export chrání buňky začínající =, +, -, @, tabulátorem a koncem řádku apostrofem (CsvWriter::safe); import ho
-     * zase odebere, v CSV i XLSX. Vědomý kompromis: text, který sám začíná apostrofem před jedním z těch znaků
-     * („'-15/2026“), o apostrof přijde. Týká se jen nově zapisovaného podkladu, doložení a jména; stávající revize
-     * import s hodnotami ze souboru neporovnává.
+     * Export chrání buňky začínající =, +, -, @, tabulátorem a koncem řádku apostrofem (CsvWriter::safe) a text, který
+     * sám začíná apostrofem, zdvojí (MembershipListExporter::quoteApostrophe); import jeden apostrof zase odebere, v CSV
+     * i XLSX (CSV export uložený z Excelu jako XLSX nese apostrof jako obsah buňky). Export a import tak vrátí přesně
+     * stejnou hodnotu ve všech sloupcích včetně členského čísla („'-1“ nesplyne s „-1“). Jen text napsaný ručně do
+     * souboru, který začíná apostrofem před jedním z těch znaků, o apostrof přijde; klíč idempotence i párování
+     * pracují s hodnotou po odebrání.
      */
     private static function unescape(string $value): string
     {
-        return strlen($value) > 1 && $value[0] === "'" && str_contains("=+-@\t\r\n", $value[1]) ? substr($value, 1) : $value;
+        return strlen($value) > 1 && $value[0] === "'" && str_contains("=+-@\t\r\n'", $value[1]) ? substr($value, 1) : $value;
     }
 
     private function members(): MembershipMemberService

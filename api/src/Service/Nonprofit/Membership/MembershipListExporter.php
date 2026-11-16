@@ -46,7 +46,7 @@ final class MembershipListExporter
         if ($format === 'csv') {
             $text = (static function (iterable $rows): \Generator {
                 foreach ($rows as $row) yield array_map(static fn (array $cell): string => match ($cell[0]) {
-                    'n' => number_format((float) $cell[1], 2, ',', ''), 'i' => (string) (int) $cell[1], default => CsvWriter::safe($cell[1]) }, $row);
+                    'n' => number_format((float) $cell[1], 2, ',', ''), 'i' => (string) (int) $cell[1], default => CsvWriter::safe(self::quoteApostrophe((string) $cell[1])) }, $row);
             })($rows);
             return ['bytes' => CsvWriter::build(MembershipListColumns::headers(), $text), 'filename' => $filename, 'mime' => 'text/csv; charset=UTF-8'];
         }
@@ -147,12 +147,22 @@ final class MembershipListExporter
             foreach ($cells as $i => [$type, $value]) {
                 $type !== 's'
                     ? $sheet->setCellValue([$i + 1, $r + 2], $value)
-                    : $sheet->setCellValueExplicit([$i + 1, $r + 2], (string) $value, DataType::TYPE_STRING);
+                    : $sheet->setCellValueExplicit([$i + 1, $r + 2], self::quoteApostrophe((string) $value), DataType::TYPE_STRING);
             }
             $r++;
         }
         for ($i = 1; $i <= count($headers); $i++) {
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($i))->setAutoSize(true);
         }
+    }
+
+    /**
+     * Text, který sám začíná apostrofem (členské číslo „'-1“), dostane ještě jeden: import úvodní apostrof před
+     * =+-@, koncem řádku i dalším apostrofem odebírá (MembershipImportService::unescape), takže export a import
+     * vrátí přesně stejnou hodnotu a „'-1“ nesplyne s číslem „-1“. Volá se na surovou hodnotu před CsvWriter::safe.
+     */
+    private static function quoteApostrophe(string $value): string
+    {
+        return str_starts_with($value, "'") ? "'" . $value : $value;
     }
 }

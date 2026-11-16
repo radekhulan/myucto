@@ -627,6 +627,32 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         self::assertSame(['error', 'ic_checksum_invalid'], [$rows['CHK-R1-BAD']['status'], $rows['CHK-R1-BAD']['reason']]);
     }
 
+    public function testNumberStartingWithApostropheRoundTripsAndDoesNotMergeWithPlainNumber(): void
+    {
+        // Členské číslo je volný text: „'-1“ a „-1“ jsou dva členové a export s importem je nesmí slít.
+        $quoted = $this->members->create($this->supplier, $this->client('apo-quoted', 'Synthetic Quoted Number', null), "'-1", $this->actor)['id'];
+        $plain = $this->members->create($this->supplier, $this->client('apo-plain', 'Synthetic Plain Number', null), '-1', $this->actor)['id'];
+        foreach (['xlsx', 'csv'] as $format) {
+            $file = (new MembershipListExporter($this->db, '2026-06-01'))->export($this->supplier, MembershipListFilter::parse(['year' => '2026']), $format);
+            $report = $this->import->run($this->supplier, $this->actor, $file['bytes'], $file['filename'], true);
+            $byNumber = array_column($report['rows'], null, 'member_number');
+            self::assertSame([$quoted, $plain], [$byNumber["'-1"]['member_id'] ?? null, $byNumber['-1']['member_id'] ?? null], $format);
+            self::assertSame(0, $report['counts']['error'], $format);
+        }
+        // Změna stavu u řádku „'-1“ v CSV exportu dostane člen „'-1“, ne „-1“.
+        $csv = (new MembershipListExporter($this->db, '2026-06-01'))->export($this->supplier, MembershipListFilter::parse(['year' => '2026']), 'csv')['bytes'];
+        $lines = explode("
+", $csv);
+        foreach ($lines as &$line) {
+            if (str_starts_with($line, "''-1;")) $line = implode(';', array_slice(explode(';', $line), 0, 13)) . ';active;2026-02-01;Synthetic application;';
+        }
+        unset($line);
+        $preview = $this->import->run($this->supplier, $this->actor, implode("
+", $lines), 'a.csv', true);
+        $changed = array_values(array_filter($preview['rows'], static fn (array $row): bool => $row['status'] === 'new_revision'));
+        self::assertSame([[$quoted, "'-1"]], array_map(static fn (array $row): array => [$row['member_id'], $row['member_number']], $changed));
+    }
+
     public function testCsvProtectionApostropheIsRemovedAlsoFromXlsxSavedFromCsvExport(): void
     {
         $member = $this->member('XLSX-APO');
