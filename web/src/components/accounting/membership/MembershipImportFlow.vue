@@ -53,7 +53,8 @@ async function send(confirming: boolean) {
     const fresh = (e as { response?: { data?: { error?: { details?: { preview?: MembershipImportReport } } } } })?.response?.data?.error?.details?.preview
     if (fresh) { report.value = fresh; step.value = 'preview' }
     error.value = membershipError({ t, te }, e)
-    if (errorCode(e) === 'nonprofit_membership_import_file_invalid') { report.value = null; step.value = 'upload' }
+    // Chyba celého souboru (formát, kódování, počet řádků): náhled neplatí, vybere se soubor znovu.
+    if (['nonprofit_membership_import_file_invalid', 'nonprofit_membership_import_encoding', 'nonprofit_membership_import_too_many_rows'].includes(errorCode(e))) { report.value = null; step.value = 'upload' }
   } finally {
     if (alive) busy.value = false
   }

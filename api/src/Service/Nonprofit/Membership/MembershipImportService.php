@@ -66,9 +66,7 @@ final class MembershipImportService extends AbstractCodebookImportService
         [$this->actor, $this->expectedHash, $this->ip, $this->agent, $this->canCreateContacts] = [$actor, $expectedHash, $ip, $agent, $canCreateContacts];
         // „CSV (oddělený středníkem)“ z českého Excelu je v cp1250; sdílené čtení počítá s UTF-8.
         if (strtolower((string) pathinfo($filename, PATHINFO_EXTENSION)) === 'csv' && !mb_check_encoding($content, 'UTF-8')) {
-            // //IGNORE: bajty, které cp1250 nedefinuje, se vynechají místo selhání celého převodu.
-            $converted = @iconv('WINDOWS-1250', 'UTF-8//IGNORE', $content);
-            if (is_string($converted)) $content = $converted;
+            $content = self::fromWindows1250($content);
         }
         $report = $this->import($supplier, $actor, $content, $filename, $dryRun);
         if (!isset($report['preview_hash'])) {
@@ -354,6 +352,8 @@ final class MembershipImportService extends AbstractCodebookImportService
         foreach ($numbers as $line => $number) array_push($params, $line, $number);
         $collation = (string) $this->db->pdo()->query("SELECT COLLATION_NAME FROM information_schema.COLUMNS
             WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='nonprofit_members' AND COLUMN_NAME='member_number'")->fetchColumn();
+        // Struktura je daná migrací (utf8mb4_unicode_ci) a odchylku hlásí Diagnostika; jiná kolace je porušená
+        // instalace, ne vstup uživatele, proto chyba serveru místo validační hlášky.
         if (preg_match('/^utf8mb4_[a-z0-9_]+$/D', $collation) !== 1) throw new \LogicException('Neznámá kolace členského čísla.');
         $q = $this->db->pdo()->prepare("WITH input AS ({$values})
             SELECT line, MIN(line) OVER (PARTITION BY CONVERT(num USING utf8mb4) COLLATE {$collation}) grp FROM input");
@@ -503,6 +503,21 @@ final class MembershipImportService extends AbstractCodebookImportService
             return IsoDate::isValid($date) && $date >= '1950-01-01' && $date < '2151-01-01' ? $date : null;
         }
         return null;
+    }
+
+    /**
+     * Převod CSV z cp1250. Soubor s platnými vícebajtovými znaky UTF-8 je poškozené UTF-8, ne cp1250: převodem by
+     * se diakritika rozpadla („Ján“ → „JĂˇn“) a do adresáře by se zapsala zkomolená jména. Bajt, který cp1250
+     * nedefinuje, Excel nezapíše; takový soubor také odmítneme, místo abychom znaky tiše vynechali.
+     */
+    private static function fromWindows1250(string $content): string
+    {
+        $converted = preg_match('/[\xC2-\xDF][\x80-\xBF]|[\xE0-\xEF][\x80-\xBF]{2}/', $content) === 1
+            ? false : @iconv('WINDOWS-1250', 'UTF-8', $content);
+        if (!is_string($converted)) {
+            throw new MembershipException('nonprofit_membership_import_encoding', 'Soubor není v kódování UTF-8 ani Windows-1250. Uložte ho jako XLSX nebo CSV UTF-8.', 422);
+        }
+        return $converted;
     }
 
     /** CSV export chrání buňky začínající =, +, -, @ apostrofem (CsvWriter::safe); import ho zase odebere. */

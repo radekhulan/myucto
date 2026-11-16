@@ -41772,7 +41772,8 @@
       "nonprofit_membership_import_changed": "Data se od náhledu změnila. Zkontrolujte nový náhled a potvrďte ho znovu.",
       "nonprofit_membership_import_has_errors": "Import obsahuje chybné řádky, nic nebylo zapsáno.",
       "nonprofit_membership_import_too_many_rows": "Import přijme nejvýše 2000 řádků. Smažte ze souboru řádky beze změny (stačí řádky s vyplněným novým stavem a noví členové), nebo export zužte hledáním či stavem úhrady.",
-      "nonprofit_membership_export_too_large": "Export XLSX má nejvýše 5000 členů. Použijte Export CSV, nebo seznam zužte filtrem."
+      "nonprofit_membership_export_too_large": "Export XLSX má nejvýše 5000 členů. Použijte Export CSV, nebo seznam zužte filtrem.",
+      "nonprofit_membership_import_encoding": "Soubor není v kódování UTF-8 ani Windows-1250 nebo obsahuje poškozené znaky. Uložte ho jako XLSX nebo CSV UTF-8."
     },
     "ratesEmptyRequired": "Zatím tu není žádná sazba. Nejprve založte sazbu v číselníku.",
     "batchTitle": "Hromadný předpis příspěvků",

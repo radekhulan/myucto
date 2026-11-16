@@ -146,3 +146,18 @@ describe('Membership import flow – souběh', () => {
     expect(first.get('[data-field="import-detail"]').text()).toBe(cs.nonprofitMembership.import.reason_already_imported)
   })
 })
+
+describe('Membership import flow – chyby celého souboru', () => {
+  it.each(['nonprofit_membership_import_encoding', 'nonprofit_membership_import_too_many_rows'])('%s vrátí výběr souboru s přeloženou hláškou', async code => {
+    api.importMembers.mockResolvedValueOnce(preview).mockRejectedValueOnce({ response: { data: { error: { code } } } })
+    const w = mounted()
+    await choose(w)
+    await w.get('[data-action="import-preview"]').trigger('click')
+    await flushPromises()
+    await w.get('[data-action="import-confirm"]').trigger('click')
+    await flushPromises()
+    expect(w.get('[data-section="import-error"]').text()).toBe((cs.nonprofitMembership.serverErrors as Record<string, string>)[code])
+    expect(w.find('[data-section="import-rows"]').exists()).toBe(false)
+    expect(w.find('[data-field="import-file"]').exists()).toBe(true)
+  })
+})

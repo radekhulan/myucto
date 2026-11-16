@@ -496,14 +496,16 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         }
     }
 
-    public function testCp1250ByteOutsideCodePageDoesNotBreakTheFile(): void
+    public function testBrokenUtf8OrUndefinedCp1250ByteIsEncodingErrorNotGarbledNames(): void
     {
-        $this->member('UNDEF');
-        // 0x81 cp1250 nedefinuje; bez //IGNORE by převod selhal a hlavička s diakritikou by nesedla.
-        $legacy = (string) iconv('UTF-8', 'WINDOWS-1250', $this->csv(['SYN-UNDEF;;;;pozastavené;1. 3. 2026;Usnesení výboru;'])) ;
-        $legacy = str_replace('Usnesen', "Usnesen\x81", $legacy);
-        $rows = $this->import->run($this->supplier, $this->actor, $legacy, 'excel.csv', true)['rows'];
-        self::assertSame(['new_revision', 'suspended'], [$rows[0]['status'], $rows[0]['new_status']]);
+        // UTF-8 s jediným vadným bajtem: převod z cp1250 by z „Jána“ udělal „JĂˇna“ (všechny bajty cp1250 zná) a zapsal ho.
+        $broken = "member number;name;new status;effective from;reference\nNEW-UTF;Synthetic Jána\xFF;active;2026-02-01;Synthetic application\n";
+        $error = $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, $broken, 'a.csv', true, canCreateContacts: true));
+        self::assertSame(['nonprofit_membership_import_encoding', 422], [$error->errorCode, $error->httpStatus]);
+        // Bajt 0x81 cp1250 nedefinuje a Excel ho nezapíše: soubor odmítneme, místo abychom znaky tiše vynechali.
+        $legacy = (string) iconv('UTF-8', 'WINDOWS-1250', $this->csv(['SYN-UNDEF;;;;pozastavené;1. 3. 2026;Usnesení výboru;']));
+        $error = $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, str_replace('Usnesen', "Usnesen\x81", $legacy), 'excel.csv', true));
+        self::assertSame('nonprofit_membership_import_encoding', $error->errorCode);
     }
 
     public function testConcurrentImportOfSameNewMemberIsAlreadyImported(): void

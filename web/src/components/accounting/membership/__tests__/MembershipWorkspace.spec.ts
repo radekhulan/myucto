@@ -780,6 +780,9 @@ describe('Membership workspace', () => {
     // Chyba exportu nezablokuje hromadný předpis (ten hlídá jen chyba načtení seznamu).
     expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
     expect(w.get('[data-action="batch-open"]').attributes('disabled')).toBeUndefined()
+    // Nové načtení seznamu (jiný výběr) starou hlášku exportu zruší.
+    await w.get('[data-action="reload-members"]').trigger('click'); await flushPromises()
+    expect(w.find('[data-section="export-error"]').exists()).toBe(false)
     click.mockRestore(); w.unmount()
 
     const reader = mounted({ canManage: false }); await flushPromises()

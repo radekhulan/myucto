@@ -30,6 +30,8 @@ const periods = ref<AccountingPeriod[]>([])
 const loading = ref(false)
 const error = ref('')
 const notice = ref('')
+// Chyba exportu: vlastní hláška, aby nemazala chybu načtení seznamu (ta blokuje hromadný předpis).
+const exportError = ref('')
 const selectionNotice = ref('')
 const selected = ref<{ id: number; label: string } | null>(null)
 const clientId = ref<number | null>(null)
@@ -137,6 +139,8 @@ watch(() => selected.value?.id, async id => {
 
 async function load(append = false) {
   const ticket = ++generation, supplier = props.supplier
+  // Nové načtení seznamu (jiný filtr, obnova) ruší starou hlášku exportu; ta platila pro předchozí výběr.
+  exportError.value = ''
   const selectedIds = [...checkedMembers.value]
   // Obnova ponechá zobrazený seznam, dokud nepřijdou nová data; vyprázdní ho jen změna filtrů nebo firmy.
   loading.value = true; error.value = ''
@@ -241,7 +245,7 @@ onActivated(() => {
   void reloadAll()
 })
 
-const importOpen = ref(false), exporting = ref(false), exportError = ref('')
+const importOpen = ref(false), exporting = ref(false)
 /**
  * Export použije filtry, podle kterých je seznam právě načtený, ne rozepsaný formulář.
  * Chyba exportu má vlastní hlášku: nesmí smazat chybu načtení seznamu (ta blokuje hromadný předpis) ani ji zastoupit.
