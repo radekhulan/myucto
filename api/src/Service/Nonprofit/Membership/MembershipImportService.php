@@ -146,8 +146,9 @@ final class MembershipImportService extends AbstractCodebookImportService
     {
         $parsed = [];
         foreach ($rows as $line => $cols) {
-            // Ochranný apostrof přidává jen CSV export (CsvWriter::safe); v XLSX je apostrof obsah buňky.
-            $value = fn (string $field): string => $this->csv ? self::unescape($this->col($cols, $map, $field)) : $this->col($cols, $map, $field);
+            // Ochranný apostrof přidává CSV export (CsvWriter::safe). Odebírá se i z XLSX: CSV export otevřený v Excelu
+            // a uložený jako XLSX ho nese jako obsah buňky. Skutečný text začínající „'=“ apod. je vzácnější než tahle cesta.
+            $value = fn (string $field): string => self::unescape($this->col($cols, $map, $field));
             $parsed[] = ['line' => $line, 'member_number' => $value('member_number'), 'client_id' => $value('client_id'), 'ic' => $value('ic'),
                 'name' => $value('name'), 'new_status' => $value('new_status'), 'new_from' => $value('new_from'),
                 'reference' => $value('reference'), 'evidence' => $value('evidence')];

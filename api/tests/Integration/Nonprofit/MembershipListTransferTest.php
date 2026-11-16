@@ -601,7 +601,9 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
             [$rows['IC-SHORT']['status'], $rows['IC-SHORT']['contact'], $rows['IC-SHORT']['client_id'], $rows['IC-SHORT']['contact_name'] ?? null]);
         self::assertSame('Synthetic Contact By Id', $rows['IC-BYID']['contact_name'] ?? null);
         // Chybný řádek blokuje i potvrzení: kontakt s IČO, které formulář odmítne, nevznikne.
-        $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', false, str_repeat('0', 64), canCreateContacts: true));
+        $preview = $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true);
+        $error = $this->rejected(fn () => $this->import->run($this->supplier, $this->actor, $csv, 'a.csv', false, $preview['preview_hash'], canCreateContacts: true));
+        self::assertSame(['nonprofit_membership_import_has_errors', 422], [$error->errorCode, $error->httpStatus]);
         self::assertSame($before, $this->clientCount());
     }
 
@@ -625,7 +627,7 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         self::assertSame(['error', 'ic_checksum_invalid'], [$rows['CHK-R1-BAD']['status'], $rows['CHK-R1-BAD']['reason']]);
     }
 
-    public function testApostropheInXlsxCellIsContentNotCsvProtection(): void
+    public function testCsvProtectionApostropheIsRemovedAlsoFromXlsxSavedFromCsvExport(): void
     {
         $member = $this->member('XLSX-APO');
         $book = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
@@ -642,7 +644,8 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         $this->import->run($this->supplier, $this->actor, $bytes, 'a.xlsx', false, $preview['preview_hash']);
         $q = $this->pdo->prepare('SELECT legal_basis_json FROM nonprofit_member_revisions WHERE supplier_id=? AND member_id=? ORDER BY revision_no DESC LIMIT 1');
         $q->execute([$this->supplier, $member]);
-        self::assertSame("'-usnesení", json_decode((string) $q->fetchColumn(), true)['reference']);
+        // CSV export otevřený v Excelu a uložený jako XLSX nese ochranný apostrof jako obsah buňky.
+        self::assertSame('-usnesení', json_decode((string) $q->fetchColumn(), true)['reference']);
     }
 
     public function testExportIsAuditedWithoutSearchedText(): void
@@ -659,7 +662,8 @@ final class MembershipListTransferTest extends MembershipBatchReviewFixture
         self::assertStringNotContainsString('Synthetic Secret Name', $details, 'Hledaný text může být jméno člena.');
         // Odmítnutý export se neauditní.
         $this->call('GET', 'exportMembers', ['year' => '2026', 'format' => 'pdf'], ['accounting' => 1]);
-        $this->call('GET', 'exportMembers', ['year' => '2026', 'format' => 'csv', 'title_key' => 'Synthetic Name In Title'], ['accounting' => 1]);
+        [$status, , $body] = $this->call('GET', 'exportMembers', ['year' => '2026', 'format' => 'csv', 'title_key' => 'Synthetic Name In Title'], ['accounting' => 1]);
+        self::assertSame([422, 'nonprofit_membership_invalid'], [$status, json_decode($body, true)['error']['code']]);
         self::assertSame($before + 1, $this->auditCount('report.accounting_export'), 'Odmítnutý formát ani neplatný filtr se neauditují.');
         $this->call('GET', 'exportMembers', ['year' => '2026', 'format' => 'csv', 'title_key' => ' CP-2026 '], ['accounting' => 1]);
         $q->execute([$this->supplier]);
