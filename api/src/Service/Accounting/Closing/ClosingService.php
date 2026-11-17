@@ -1592,10 +1592,18 @@ final class ClosingService
             }
             $debit = (string) ($rule['debit_account_code'] ?? '381');
             $credit = (string) ($rule['credit_account_code'] ?? '501');
-            $lines = [
-                ['account_code' => $debit, 'side' => 'debit', 'amount' => $total],
-                ['account_code' => $credit, 'side' => 'credit', 'amount' => $total],
-            ];
+            $expenseLines = [];
+            foreach ($this->smallAssetAccrualCreditLines($supplierId, $period, $preview, $credit, $total) as $line) {
+                $amount = round((float) $line['amount'], 2);
+                if ((int) round($amount * 100) !== 0) {
+                    $expenseLines[] = ['side' => $amount > 0 ? 'credit' : 'debit', 'amount' => abs($amount)] + $line;
+                }
+            }
+            // Dobropis na jiné kombinaci dá řádek 501 i na straně MD. Jednoduchá forma zápisu
+            // takový zápis 1 : N nerozloží (501 proti 501), proto v ní má každý řádek 501 vlastní
+            // protějšek na 381 stejně jako odklad 381 z faktur; složená nese saldo jedním řádkem.
+            $lines = $this->accrualPairs($supplierId, $endsOn, $expenseLines, $debit, true)
+                ?? [['account_code' => $debit, 'side' => 'debit', 'amount' => $total], ...$expenseLines];
             $this->assertKnownCodes($supplierId, $lines);
 
             $existing = $this->journal->findBySource($supplierId, 'small_asset_accrual', $sourceId);
@@ -2228,6 +2236,260 @@ final class ClosingService
             $total = round($total + $release, 2);
         }
         return ['by_account' => AccrualDeferralService::amountsByAccount($byLine), 'lines' => array_values($byLine), 'total' => $total];
+    }
+
+    /**
+     * Řádky D 501 zápisu odkladu drobného majetku s dimenzemi nákladu, který se odkládá
+     * ({@see AccrualDeferralService::smallAssetAllocations()}). pro_rata dělí odklad každé
+     * karty podle zápisu jejího dokladu (položka přijaté faktury, pokladní doklad). Paušál
+     * dělí celkovou částku poměrem obratu 501 drobného majetku po kombinacích dimenzí, tedy
+     * podle položek faktur, ze kterých má bázi; bázi z karet (bez zaúčtovaného 501) dělí
+     * podle dokladů karet. Karta bez dokladu dimenze nemá a zůstává na řádku bez nich.
+     * U účetní jednotky podle vyhlášky 504/2002 Sb. ale nákladový řádek osy činnosti nést
+     * musí: karta bez dokladu nebo doklad bez nich je validační chyba s výzvou doplnit vazbu.
+     *
+     * @param array<string,mixed> $period
+     * @param array<string,mixed> $preview výstup {@see smallAssetAccrualPreview()}
+     * @return list<array<string,mixed>> řádky s `account_code`, `amount` (se znaménkem) a dimenzemi
+     */
+    private function smallAssetAccrualCreditLines(int $supplierId, array $period, array $preview, string $credit, float $total): array
+    {
+        $startsOn = (string) $period['starts_on'];
+        $endsOn = (string) $period['ends_on'];
+        $cards = [];
+        foreach ($this->smallAssets->additionsBetween($supplierId, $startsOn, $endsOn) as $card) {
+            $cards[(int) $card['id']] = $card;
+        }
+        $cardSource = static fn (array $card): array => [
+            'purchase_invoice_id' => $card['purchase_invoice_id'] ?? null,
+            'item_id' => $card['purchase_invoice_item_id'] ?? null,
+            'cash_document_id' => $card['cash_document_id'] ?? null,
+            'small_asset_id' => (int) $card['id'],
+        ];
+        // Inventární číslo (jinak id) odliší stejnojmenné karty ve výčtu hlášky.
+        $cardLabel = static function (array $card): string {
+            $inventory = trim((string) ($card['inventory_number'] ?? ''));
+            return 'karta „' . (string) $card['name'] . '“ (' . ($inventory !== '' ? $inventory : '#' . (int) $card['id']) . ')';
+        };
+        // [částka, zdroj, popis pro chybu]
+        $parts = [];
+        if ($preview['mode'] === 'flat_pct') {
+            $expenseItems = (float) $preview['breakdown_501_small_asset'] > 0.005
+                ? $this->smallAssetReport->smallAssetExpenseItems($supplierId, $startsOn, $endsOn)
+                : [];
+            if ($expenseItems !== []) {
+                foreach ($expenseItems as $item) {
+                    $number = trim((string) ($item['vendor_invoice_number'] ?? ''));
+                    // Váha v Kč: faktury v cizí měně se dělí podle částky, kterou nese jejich zápis.
+                    $vendor = trim((string) ($item['vendor_name'] ?? ''));
+                    $parts[] = [$item['weight_czk'], $item, 'přijatá faktura ' . ($number !== '' ? $number : '#' . $item['purchase_invoice_id'])
+                        . ($vendor !== '' ? ' (' . $vendor . ')' : ''), $item['amount']];
+                }
+            } else {
+                foreach ($cards as $card) {
+                    $parts[] = [round((float) ($card['price'] ?? 0), 2), $cardSource($card), $cardLabel($card)];
+                }
+            }
+        } else {
+            foreach ($preview['items'] as $item) {
+                $card = $cards[(int) $item['small_asset_id']] ?? null;
+                if ($card !== null) {
+                    $parts[] = [(float) $item['deferred_amount'], $cardSource($card), $cardLabel($card)];
+                }
+            }
+        }
+        // Váhy v Kč platí, dokud jejich součet má znaménko celku a je aspoň polovinou součtu
+        // absolutních hodnot (dobropisy nepřesáhnou třetinu faktur). Dobropis v cizí měně proti
+        // faktuře v Kč by jinak součet přiblížil nule nebo otočil a faktor dělení (celek z báze
+        // v měně dokladu / součet vah) by vyletěl. Pak se dělí částkami v měně dokladu; bez záloh
+        // v bázi je jejich součet báze a faktor přesně paušální procento. Zálohy zůstávají v bázi
+        // (převzatý rozpis 501), ve vahách ne, a faktor pak procento přesahuje.
+        $weights = array_column($parts, 0);
+        $weightSum = array_sum($weights);
+        $absSum = array_sum(array_map('abs', $weights));
+        if ($preview['mode'] === 'flat_pct' && $weights !== []
+            && ($weightSum * $total <= 0.0 || abs($weightSum) < 0.5 * $absSum)) {
+            $docParts = array_map(static fn (array $p): array => [$p[3] ?? $p[0], $p[1], $p[2]], $parts);
+            // Částky v měně dokladu se znaménkem opačným než celek (zálohy v bázi): zůstávají váhy
+            // v Kč, mají-li znaménko celku; nemá-li ho ani jedno, dělení se odmítne níže.
+            if (array_sum(array_column($docParts, 0)) * $total > 0.0 || $weightSum * $total <= 0.0) {
+                $parts = $docParts;
+            }
+        }
+        $parts = array_values(array_filter($parts, static fn (array $p): bool => (int) round($p[0] * 100) !== 0));
+
+        // Ve 504 musí každý nákladový řádek nést osu činnosti (SystemDimensionSourcePolicy::activityRule);
+        // ostatní osy vyžadují pravidla účtů a hlídá je až zaúčtování.
+        $activityTypeId = null;
+        if ($this->roleProfile($supplierId, $endsOn)->framework === AccountingFrameworkService::CZ_504) {
+            $stmt = $this->db->pdo()->prepare("SELECT id FROM dimension_types WHERE supplier_id = ? AND system_key = 'activity'");
+            $stmt->execute([$supplierId]);
+            // Bez typu činnosti (katalog nezaložen) zaúčtování osy nevyžaduje, kontrola se vynechá.
+            $found = $stmt->fetchColumn();
+            $activityTypeId = $found === false ? null : (int) $found;
+        }
+        $cache = [AccrualDeferralService::CACHE_POSTING_DATE => $endsOn];
+        $this->accruals->preloadSmallAssetAllocations($supplierId, array_column($parts, 1), $cache);
+        $byLine = [];
+        $unlinked = [];
+        $withoutAxes = [];
+        foreach ($parts as [$amount, $source, $label]) {
+            $allocations = $this->accruals->smallAssetAllocations($supplierId, $source, $credit, $cache);
+            if ($activityTypeId !== null) {
+                if ($allocations === null) {
+                    $unlinked[self::smallAssetPartKey($source)] = $label;
+                } elseif (array_filter($allocations, static fn (array $a): bool => !isset($a['dimensions'][$activityTypeId]) && !isset($a['dimension_splits'][$activityTypeId])) !== []) {
+                    $withoutAxes[self::smallAssetPartKey($source)] = $label;
+                }
+            }
+            AccrualDeferralService::addLines($byLine, AccrualDeferralService::spreadByAllocation(
+                $amount,
+                $allocations ?? [['account_code' => $credit, 'account_share' => 1.0, 'part' => 1.0]],
+            ));
+        }
+        if ($unlinked !== [] || $withoutAxes !== []) {
+            throw new ClosingException(
+                'small_asset_document_missing',
+                'Časové rozlišení drobného majetku nelze zaúčtovat: náklad 501 musí u účetní jednotky podle vyhlášky 504/2002 Sb. '
+                . 'nést osy činnosti zaúčtovaného dokladu.'
+                . ($unlinked === [] ? '' : ' Doplň u karty vazbu na přijatou fakturu nebo pokladní doklad: ' . implode(', ', $unlinked) . '.')
+                . ($withoutAxes === [] ? '' : ' Zaúčtuj doklad s osami činnosti, případně kartu navaž na konečnou fakturu (doklad není zaúčtovaný, je to záloha, nebo jeho náklad osy nenese): ' . implode(', ', $withoutAxes) . '.'),
+                422,
+            );
+        }
+        if ($preview['mode'] !== 'flat_pct') {
+            return array_values($byLine);
+        }
+        // Paušál: celek se dělí poměrem obratu (v Kč) kombinací; haléřový rozdíl proti celku
+        // (zaokrouhlení po řádcích) jde na řádek s největší částkou.
+        // Nezbylo podle čeho dělit (rozpis jen ze záloh, dobropisy vše vyruší): mimo 504 jeden řádek
+        // bez dimenzí jako dosud, ve 504 by řádek bez osy činnosti nešel zaúčtovat.
+        $undivided = static function () use ($activityTypeId, $credit, $total): array {
+            if ($activityTypeId !== null) {
+                throw new ClosingException(
+                    'small_asset_document_missing',
+                    'Časové rozlišení drobného majetku nelze zaúčtovat: náklad 501 musí u účetní jednotky podle vyhlášky 504/2002 Sb. '
+                    . 'nést osy činnosti, ale v rozpisu 501 není zaúčtovaná faktura drobného majetku, podle které by se odklad rozdělil '
+                    . '(jen zálohy, nebo dobropisy faktury vyruší či převáží). Zaúčtuj konečnou fakturu, případně použij poměrné rozlišení.',
+                    422,
+                );
+            }
+            return [['account_code' => $credit, 'amount' => $total]];
+        };
+        // Součet vah se znaménkem opačným, než má celek (dobropisy převáží faktury, celek drží
+        // kladný jen záloha v bázi), by obrátil znaménka všech řádků: odklad by náklad činnosti
+        // naopak přidal. Takové dělení nemá smysl, stejně jako nulový součet.
+        $weightSum = array_sum(array_column($parts, 0));
+        if ($weightSum * $total <= 0.0 || abs($weightSum) < 0.005) {
+            return $undivided();
+        }
+        $factor = $total / $weightSum;
+        $sum = 0.0;
+        $largest = null;
+        foreach ($byLine as $k => $line) {
+            $byLine[$k]['amount'] = round((float) $line['amount'] * $factor, 2);
+            $sum = round($sum + $byLine[$k]['amount'], 2);
+            if ($largest === null || abs($byLine[$k]['amount']) > abs($byLine[$largest]['amount'])) {
+                $largest = $k;
+            }
+        }
+        if ($largest === null) {
+            return $undivided();
+        }
+        $byLine[$largest]['amount'] = round($byLine[$largest]['amount'] + $total - $sum, 2);
+        return array_values($byLine);
+    }
+
+    /** Klíč zdroje ve výčtu hlášky: karta, jinak přijatá faktura (stejné číslo mají i faktury různých dodavatelů). */
+    private static function smallAssetPartKey(array $source): string
+    {
+        return isset($source['small_asset_id']) ? 'card:' . (int) $source['small_asset_id'] : 'invoice:' . (int) ($source['purchase_invoice_id'] ?? 0);
+    }
+
+    /**
+     * Řádky zápisu rozpuštění odkladu drobného majetku k datu `$entryDate`: zrcadlo odkladu
+     * ({@see smallAssetReleaseLines()}) po dvojicích, jak je odklad nesl.
+     *
+     * Odklad ze složené formy nese saldo jedním řádkem 381. S dobropisem na jiné kombinaci
+     * (501 na obou stranách) ho jednoduchá forma k datu rozpuštění 1 : N nerozloží, proto
+     * dostane každý řádek 501 vlastní protějšek na 381 ({@see accrualPairs()}) s přiřazením
+     * řádku 381 odkladu; 381 se po dimenzi rozpustí stejně jako zrcadlo.
+     *
+     * @param array<string,mixed> $deferEntry
+     * @return list<array<string,mixed>>
+     */
+    private function smallAssetReleaseEntryLines(int $supplierId, array $deferEntry, string $entryDate): array
+    {
+        $lines = $this->smallAssetReleaseLines($supplierId, $deferEntry, $entryDate);
+        $paired = PairGroups::consecutive($lines, 'small_asset');
+        $defer = array_values(array_filter($lines, static fn (array $l): bool => !str_starts_with((string) $l['account_code'], '5')));
+        $expense = array_values(array_filter($lines, static fn (array $l): bool => str_starts_with((string) $l['account_code'], '5')));
+        if (count($defer) !== 1 || count(array_unique(array_column($expense, 'side'))) < 2) {
+            return $paired;
+        }
+        $pairs = $this->accrualPairs($supplierId, $entryDate, $expense, (string) $defer[0]['account_code'], false);
+        if ($pairs === null) {
+            return $paired;
+        }
+        $assignment = array_diff_key($defer[0], ['account_code' => 1, 'side' => 1, 'amount' => 1]);
+        return array_map(static fn (array $l): array => $l['account_code'] === $defer[0]['account_code'] ? $l + $assignment : $l, $pairs);
+    }
+
+    /**
+     * Řádky rozpuštění odkladu drobného majetku v N+1: přesné zrcadlo (prohozené strany)
+     * zaúčtovaného zápisu odkladu včetně dimenzí řádků a jejich původu (ve 504 osy činnosti
+     * nákladu 501). Převzetí z řádku odkladu (`dimension_carry_lines`) dovolí nést i hodnotu,
+     * která se mezitím uzavřela, stejně jako odklad sám.
+     *
+     * Odklad bez os činnosti se do roku podle vyhlášky 504/2002 Sb. nedostane: ve 504 ho krok
+     * bez os nezaúčtuje (kromě firmy bez katalogu os, který zakládá už nastavení rámce)
+     * a převod rámce s odkladem drobného majetku ve zdrojovém období odmítne
+     * {@see \MyInvoice\Service\Accounting\Conversion\FrameworkConversionPendingOwners::assertSupported()}.
+     * Proto se tu na rozdíl od {@see AccrualDeferralService::markLegacyDeferrals()} nic nedopočítává.
+     *
+     * @param array<string,mixed> $deferEntry zápis odkladu s řádky ({@see findEntryWithLines()})
+     * @param string $entryDate datum zápisu rozpuštění (osnova k tomu dni)
+     * @return list<array<string,mixed>>
+     */
+    private function smallAssetReleaseLines(int $supplierId, array $deferEntry, string $entryDate): array
+    {
+        $assignments = new DimensionAssignmentRepository($this->db);
+        $origins = $assignments->entryLineOrigins($supplierId, (int) $deferEntry['id']);
+        $splitOrigins = $assignments->entryLineSplitOrigins($supplierId, (int) $deferEntry['id']);
+        // Politika uzná převzetí jen z výsledkového řádku: řádek 381 (v jednoduché formě nese
+        // osy svého protějšku 501) proto odkazuje na řádky 501 odkladu, ne sám na sebe.
+        $expenseIds = [];
+        foreach ($deferEntry['lines'] as $l) {
+            if (str_starts_with((string) $l['account_code'], '5')) {
+                $expenseIds[] = (int) $l['id'];
+            }
+        }
+        // Nákladová analytika odkladu (účet dokladu) k datu rozpuštění deaktivovaná (přestavba
+        // osnovy k 1. 1.): rozpuštění jde na její syntetiku (první tři znaky kódu, i u analytiky
+        // bez tečky), kterou zaúčtování vede podle osnovy k tomu dni, stejně jako odklad z analytiky
+        // neaktivní k rozvahovému dni ({@see AccrualDeferralService::smallAssetAllocations()}).
+        // Řádek 381 se nemění (zůstatek musí odejít z něj).
+        $chart = (new ChartOfAccountsRepository($this->db))->codeToIdMap($supplierId, $entryDate);
+        $lines = [];
+        foreach ($deferEntry['lines'] as $l) {
+            $code = (string) $l['account_code'];
+            if (str_starts_with($code, '5') && strlen($code) > 3 && !($chart[$code]['is_active'] ?? false)) {
+                $code = substr($code, 0, 3);
+            }
+            $carry = str_starts_with((string) $l['account_code'], '5') ? [(int) $l['id']] : $expenseIds;
+            $assignment = array_filter([
+                'dimensions' => $l['dimensions'] ?? [],
+                'dimension_splits' => $l['dimension_splits'] ?? [],
+                'dimension_origins' => $origins[$l['id']] ?? [],
+                'dimension_split_origins' => $splitOrigins[$l['id']] ?? [],
+            ], static fn (array $value): bool => $value !== []);
+            $lines[] = [
+                'account_code' => $code,
+                'side' => $l['side'] === 'debit' ? 'credit' : 'debit',
+                'amount' => (float) $l['amount'],
+            ] + $assignment + ($assignment === [] || $carry === [] ? [] : ['dimension_carry_lines' => $carry]);
+        }
+        return $lines;
     }
 
     /**
@@ -4466,14 +4728,7 @@ final class ClosingService
             $smallAssetReleaseId = null;
             $saDeferEntry = $this->findEntryWithLines($supplierId, 'small_asset_accrual', ClosingSourceId::smallAssetAccrual($periodId));
             if ($saDeferEntry !== null && $saDeferEntry['posted_at'] !== null && ($saDeferEntry['lines'] ?? []) !== []) {
-                $relLines = [];
-                foreach ($saDeferEntry['lines'] as $l) {
-                    $relLines[] = [
-                        'account_code' => (string) $l['account_code'],
-                        'side' => $l['side'] === 'debit' ? 'credit' : 'debit',
-                        'amount' => (float) $l['amount'],
-                    ];
-                }
+                $relLines = $this->smallAssetReleaseEntryLines($supplierId, $saDeferEntry, $nextStart);
                 $relSourceId = ClosingSourceId::smallAssetAccrualRelease($periodId);
                 $existingRel = $this->journal->findBySource($supplierId, 'small_asset_accrual', $relSourceId);
                 $relDocNo = $existingRel !== null && $existingRel['document_no'] !== null

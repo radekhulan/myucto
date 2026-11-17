@@ -570,8 +570,12 @@ Změna dimenzí karty se promítne do jejích už zaúčtovaných zápisů majet
 změnila zápis uzavřeného období, odmítne se celé uložení karty. Přepíší se jen typy, které
 karta určuje: dimenze jiného typu zadaná ručně na řádku zápisu (například projekt
 u odpisu) zůstane. Totéž platí pro ostatní pohledávky a závazky a pro zápočty.
-Drobný majetek dimenze nese z přijaté faktury nákupu; časové rozlišení drobného
-majetku v uzávěrce je souhrnný zápis za období a dimenze nemá.
+Drobný majetek dimenze nese z přijaté faktury nákupu. Časové rozlišení drobného majetku
+v uzávěrce dělí řádek 501 podle dimenzí zápisu dokladu, ze kterého náklad pochází
+([§ 72](72_Uzaverka.md)); karta bez vazby na doklad zůstává mimo vyhlášku 504/2002 Sb.
+na řádku bez dimenzí, u vyhlášky 504/2002 Sb. ji krok odmítne (při poměrném rozlišení a u paušálu, který se dělí podle karet; u paušálu z faktur rozpisu 501
+rozhodují faktury rozpisu). Řádek jde z analytiky účtu 501, na které náklad
+v zápisu dokladu leží; účtotvorná dimenze ho dodatečně nepřesměruje.
 
 ### 114.11.9 Produkt a kategorie
 

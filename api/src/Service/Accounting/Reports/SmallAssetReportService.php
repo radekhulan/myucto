@@ -107,39 +107,12 @@ final class SmallAssetReportService
      */
     public function expenseBreakdown(int $supplierId, string $from, string $to): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT pii.expense_kind,
-                    COALESCE(pi.tax_date, pi.issue_date) AS doc_date,
-                    pi.id AS purchase_invoice_id,
-                    pi.vendor_invoice_number,
-                    pi.status,
-                    c.company_name AS vendor_name,
-                    pii.description,
-                    pii.quantity,
-                    pii.total_without_vat
-               FROM purchase_invoice_items pii
-               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
-               LEFT JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = pi.supplier_id
-              WHERE pi.supplier_id = ?
-                AND pii.expense_kind IN (?, ?)
-                AND pi.status <> \'cancelled\'
-                AND COALESCE(pi.tax_date, pi.issue_date) BETWEEN ? AND ?
-              ORDER BY pii.expense_kind, doc_date, pi.id, pii.order_index'
-        );
-        $stmt->execute([
-            $supplierId,
-            ExpenseKind::Material->value,
-            ExpenseKind::SmallAsset->value,
-            $from,
-            $to,
-        ]);
-
         $groups = [
             ExpenseKind::Material->value => ['expense_kind' => ExpenseKind::Material->value, 'rows' => [], 'total' => 0.0, 'document_ids' => []],
             ExpenseKind::SmallAsset->value => ['expense_kind' => ExpenseKind::SmallAsset->value, 'rows' => [], 'total' => 0.0, 'document_ids' => []],
         ];
         $total = 0.0;
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($this->expenseRows($supplierId, $from, $to) as $row) {
             $kind = (string) $row['expense_kind'];
             $amount = round((float) $row['total_without_vat'], 2);
             $groups[$kind]['rows'][] = [
@@ -170,6 +143,87 @@ final class SmallAssetReportService
             'groups' => $out,
             'total' => $total,
         ];
+    }
+
+    /**
+     * Řádky drobného majetku z rozpisu 501 ({@see expenseBreakdown()}): přijatá faktura,
+     * položka a částka. Stejný výběr jako rozpis, ze kterého paušál časového rozlišení
+     * bere bázi, takže se podle nich báze dělí po dimenzích zápisů faktur.
+     *
+     * `weight_czk` je částka v Kč kurzem dokladu (bez kurzu v měně dokladu), podle ní se
+     * paušál dělí po dimenzích; `amount` zůstává v měně dokladu jako báze rozpisu.
+     *
+     * @return list<array{purchase_invoice_id:int, item_id:int, vendor_invoice_number:?string, vendor_name:?string, amount:float, weight_czk:float}>
+     */
+    public function smallAssetExpenseItems(int $supplierId, string $from, string $to): array
+    {
+        $out = [];
+        foreach ($this->expenseRows($supplierId, $from, $to) as $row) {
+            // Zálohová výzva a daňový doklad k záloze náklad neúčtují (zápis nemají, resp. jen
+            // 343/314): dimenze nákladu nenesou, do vah po dimenzích nepatří. Báze rozpisu je
+            // beze změny.
+            if ((string) $row['expense_kind'] === ExpenseKind::SmallAsset->value
+                && !in_array((string) $row['document_kind'], ['advance', 'tax_document'], true)) {
+                $out[] = [
+                    'purchase_invoice_id' => (int) $row['purchase_invoice_id'],
+                    'item_id' => (int) $row['item_id'],
+                    'vendor_invoice_number' => $row['vendor_invoice_number'] === null ? null : (string) $row['vendor_invoice_number'],
+                    'vendor_name' => $row['vendor_name'] === null ? null : (string) $row['vendor_name'],
+                    'amount' => round((float) $row['total_without_vat'], 2),
+                    'weight_czk' => round((float) $row['total_without_vat'] * $this->czkRate($row), 2),
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /** Kurz dokladu na Kč; bez kurzu (koncept) 1, aby se doklad z dělení nevytratil. */
+    private function czkRate(array $row): float
+    {
+        $rate = (float) ($row['exchange_rate'] ?? 0);
+        return (string) ($row['currency_code'] ?? 'CZK') === 'CZK' || $rate <= 0.0 ? 1.0 : $rate;
+    }
+
+    /**
+     * Řádky faktur materiálu a drobného majetku za období (výběr {@see expenseBreakdown()}).
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function expenseRows(int $supplierId, string $from, string $to): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT pii.expense_kind,
+                    pii.id AS item_id,
+                    COALESCE(pi.tax_date, pi.issue_date) AS doc_date,
+                    pi.id AS purchase_invoice_id,
+                    pi.vendor_invoice_number,
+                    pi.status,
+                    pi.document_kind,
+                    c.company_name AS vendor_name,
+                    pii.description,
+                    pii.quantity,
+                    pii.total_without_vat,
+                    pi.exchange_rate,
+                    cur.code AS currency_code
+               FROM purchase_invoice_items pii
+               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
+               LEFT JOIN currencies cur ON cur.id = pi.currency_id
+               LEFT JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = pi.supplier_id
+              WHERE pi.supplier_id = ?
+                AND pii.expense_kind IN (?, ?)
+                AND pi.status <> \'cancelled\'
+                AND COALESCE(pi.tax_date, pi.issue_date) BETWEEN ? AND ?
+              ORDER BY pii.expense_kind, doc_date, pi.id, pii.order_index'
+        );
+        $stmt->execute([
+            $supplierId,
+            ExpenseKind::Material->value,
+            ExpenseKind::SmallAsset->value,
+            $from,
+            $to,
+        ]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /** @param list<array<string,mixed>> $rows */

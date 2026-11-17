@@ -37,6 +37,7 @@ final class AccrualDeferralService
     private const CACHE_DRIVING_TYPES = '@driving_types';
     /** Datum zápisu odkladu či rozpuštění, které výpočet připravuje (aktivita účtů k němu). */
     public const CACHE_POSTING_DATE = '@posting_date';
+    private const CACHE_ITEM_ACCOUNTS = '@item_accounts';
 
     /** Tolerance shody podílů rozpadu (podíl se ukládá na 10 desetinných míst). */
     private const SHARE_TOLERANCE = 0.000001;
@@ -439,9 +440,10 @@ final class AccrualDeferralService
      * @param int $docId id faktury, přijaté faktury, resp. id zápisu členského předpisu
      * @param array<string,float> $accounts účet => podíl položky
      * @param array<string,mixed> $cache mezipaměť zápisů jednoho výpočtu (podle dokladu)
+     * @param bool $unmatched nastaví se na true, zůstal-li některý účet bez kombinace zápisu
      * @return list<array<string,mixed>> kombinace: account_code, account_share, part, dimenze, dimension_carry_lines
      */
-    public function dimensionAllocations(int $supplierId, string $docType, int $docId, ?int $itemId, array $accounts, array &$cache): array
+    public function dimensionAllocations(int $supplierId, string $docType, int $docId, ?int $itemId, array $accounts, array &$cache, bool &$unmatched = false): array
     {
         $key = $docType . ':' . $docId;
         if (!isset($cache[$key])) {
@@ -485,6 +487,7 @@ final class AccrualDeferralService
                 $candidates = array_values(array_filter($all, static fn (array $group): bool => $group['weight'] > 0.0));
             }
             if ($candidates === []) {
+                $unmatched = true;
                 $out[] = ['account_code' => $account, 'account_share' => (float) $share, 'part' => 1.0];
                 continue;
             }
@@ -588,6 +591,159 @@ final class AccrualDeferralService
     public function prepaidExpenseAllocations(int $supplierId, array $row, array $accounts, array &$cache): array
     {
         return $this->dimensionAllocations($supplierId, 'purchase_invoice', (int) $row['purchase_invoice_id'], (int) $row['item_id'], $accounts, $cache);
+    }
+
+    /**
+     * Rozpad odkladu drobného majetku (D 501, {@see ClosingService::runSmallAssetAccrual()})
+     * na dimenze zápisu dokladu, ze kterého náklad pochází: položka přijaté faktury podle
+     * účtů položky, přijatá faktura bez položky a pokladní doklad podle svých nákladových
+     * řádků. Z dokladu se přebírají dimenze i analytika syntetiky účtu pravidla
+     * (`$creditAccount`), na které náklad v zápisu leží, poměrem podle účtů a kombinací.
+     *
+     * @param array{purchase_invoice_id?:?int, item_id?:?int, cash_document_id?:?int} $source
+     * @param array<string,mixed> $cache mezipaměť výpočtu ({@see preloadSmallAssetAllocations()})
+     * @return list<array<string,mixed>>|null kombinace jako {@see dimensionAllocations()}; null = bez dokladu
+     */
+    public function smallAssetAllocations(int $supplierId, array $source, string $creditAccount, array &$cache): ?array
+    {
+        $purchaseInvoiceId = (int) ($source['purchase_invoice_id'] ?? 0);
+        $itemId = (int) ($source['item_id'] ?? 0);
+        $cashId = (int) ($source['cash_document_id'] ?? 0);
+        if ($purchaseInvoiceId > 0 && $itemId > 0) {
+            // Účty položky se dohledávají (trasa zaúčtování faktury, několik dotazů na fakturu)
+            // jen tam, kde rozhodují: nese-li zápis jediný nákladový účet s jedinou kombinací,
+            // je to kombinace položky. Jiný nákladový účet na dokladu (položka přepsaná na 518,
+            // služba) rozhoduje, kam položka patří. Nezaúčtovaný doklad (koncept v bázi
+            // paušálu) dimenze nemá a jeho trasa by mohla selhat na kurzu, nedohledává se.
+            $accounts = $this->documentExpenseAccounts($supplierId, 'purchase_invoice', $purchaseInvoiceId, $creditAccount, $cache);
+            $groups = $cache['purchase_invoice:' . $purchaseInvoiceId]['groups'] ?? [];
+            $analytics = $cache['purchase_invoice:' . $purchaseInvoiceId]['analytics'] ?? [];
+            $expenseAccounts = array_filter(array_keys($groups), static fn (int|string $account): bool => str_starts_with((string) $account, '5'));
+            $item = null;
+            // Nesou-li všechny nákladové řádky dokladu stejné přiřazení (typicky firma bez dimenzí)
+            // a syntetiku pravidla jediný účet, na položce nezáleží: trasa se přeskočí. Přiřazení
+            // zahrnuje i původ hodnot, který odklad převezme, proto ho rozliší i stejné dimenze
+            // s jiným původem. Víc analytik syntetiky pravidla (501.100 a 501.900 s jinou daňovou
+            // uznatelností) rozhoduje o účtu odkladu, proto trasu vyžaduje i bez dimenzí.
+            // Trasa se počítá po fakturách stejně jako u odkladu 381 ({@see prepaidExpenseAccounts()}),
+            // jednou za fakturu a jen u faktur, kde rozhoduje.
+            $signatures = [];
+            foreach ($expenseAccounts as $account) {
+                foreach ($groups[$account] as $group) {
+                    $signatures[(string) json_encode($group['assignment'])] = true;
+                }
+            }
+            $ownAccounts = array_filter($expenseAccounts, static fn (int|string $account): bool => str_starts_with((string) $account, substr($creditAccount, 0, 3)));
+            if (count($signatures) > 1 || count($ownAccounts) > 1) {
+                $cache[self::CACHE_ITEM_ACCOUNTS] ??= [];
+                if (!isset($cache[self::CACHE_ITEM_ACCOUNTS][$purchaseInvoiceId])) {
+                    try {
+                        $this->prepaidExpenseAccounts($supplierId, ['purchase_invoice_id' => $purchaseInvoiceId, 'item_id' => $itemId], $cache[self::CACHE_ITEM_ACCOUNTS]);
+                    } catch (ClosingException) {
+                        // Trasa zaúčtování dnes neprojde (kurz, mapa účtů změněná po zaúčtování):
+                        // zápis dokladu platí, dělí se poměrem jeho nákladů. Výpadek platí pro celou
+                        // fakturu, další položky trasu neopakují.
+                        $cache[self::CACHE_ITEM_ACCOUNTS][$purchaseInvoiceId] = [];
+                    }
+                }
+                // Jen účty, které trasa položce opravdu dala; položka mimo trasu (bez záložního
+                // 518 z prepaidExpenseAccounts) i účet mimo zápis by dimenze nenašly nebo by
+                // převzaly cizí náklad: zůstává poměr nákladových účtů dokladu. Kód z pravidla,
+                // který zápis přesměroval na analytiku syntetiky, najde svou skupinu přes analytiky
+                // zápisu stejně jako odklad 381 ({@see dimensionAllocations()}).
+                $itemAccounts = $cache[self::CACHE_ITEM_ACCOUNTS][$purchaseInvoiceId][$itemId] ?? [];
+                if (array_intersect_key($itemAccounts, $groups + $analytics) !== []) {
+                    [$accounts, $item] = [$itemAccounts, $itemId];
+                }
+            }
+            $unmatched = false;
+            $allocations = $this->dimensionAllocations($supplierId, 'purchase_invoice', $purchaseInvoiceId, $item, $accounts, $cache, $unmatched);
+            if ($item !== null && $unmatched) {
+                // Účet z pravidla (syntetika), který zápis přesměroval na analytiku, nenašel kombinaci
+                // položky (položka po zaúčtování změnila dimenzi): místo řádku bez dimenzí se dělí
+                // poměrem nákladů dokladu, i co do účtů zápisu. Účet přepsaný na
+                // položce vrací trasa už jako analytiku zápisu, sem se nedostane.
+                $allocations = $this->dimensionAllocations($supplierId, 'purchase_invoice', $purchaseInvoiceId, null, $this->documentExpenseAccounts($supplierId, 'purchase_invoice', $purchaseInvoiceId, $creditAccount, $cache), $cache);
+            }
+        } elseif ($purchaseInvoiceId > 0 || $cashId > 0) {
+            [$docType, $docId] = $purchaseInvoiceId > 0 ? ['purchase_invoice', $purchaseInvoiceId] : ['cash', $cashId];
+            $allocations = $this->dimensionAllocations($supplierId, $docType, $docId, null, $this->documentExpenseAccounts($supplierId, $docType, $docId, $creditAccount, $cache), $cache);
+        } else {
+            return null;
+        }
+        // Odklad snižuje náklad tam, kde leží v zápisu dokladu: na analytice syntetiky pravidla
+        // (501.100 z účtotvorné dimenze či z položky), stejně jako odklad 381. Jiná syntetika
+        // (položka přepsaná na 518) i analytika k datu odkladu neaktivní zůstávají na účtu pravidla.
+        // Podíl účtu ({@see spreadByAllocation()} dělí nejdřív po účtech) je součet vah jeho
+        // kombinací, uvnitř účtu dělí váha kombinace.
+        $synthetic = substr($creditAccount, 0, 3);
+        $out = [];
+        $shares = [];
+        foreach ($allocations as $allocation) {
+            $account = (string) $allocation['account_code'];
+            if ($account !== $creditAccount && (!str_starts_with($account, $synthetic) || !$this->activeOnPostingDate($supplierId, $account, $cache))) {
+                $account = $creditAccount;
+            }
+            $weight = (float) $allocation['account_share'] * (float) $allocation['part'];
+            $shares[$account] = ($shares[$account] ?? 0.0) + $weight;
+            $out[] = ['account_code' => $account, 'account_share' => 0.0, 'part' => $weight]
+                + array_diff_key($allocation, ['account_code' => 1, 'account_share' => 1, 'part' => 1]);
+        }
+        foreach ($out as $i => $allocation) {
+            $out[$i]['account_share'] = $shares[$allocation['account_code']];
+        }
+        return $out;
+    }
+
+    /**
+     * Nákladové účty dokladu bez položky (pokladní doklad, přijatá faktura bez vazby na
+     * položku) s podílem podle obratu: nejdřív účty syntetiky účtu pravidla (501), jinak
+     * všechny nákladové účty dokladu. Nese-li doklad na 501 i jiný náklad (materiál pro jinou
+     * činnost), dělí se odklad poměrem obou; přesné rozlišení dává jen vazba karty na položku.
+     *
+     * @param array<string,mixed> $cache
+     * @return array<string,float> účet => podíl
+     */
+    private function documentExpenseAccounts(int $supplierId, string $docType, int $docId, string $creditAccount, array &$cache): array
+    {
+        $key = $docType . ':' . $docId;
+        if (!isset($cache[$key])) {
+            $this->preloadDimensionGroups($supplierId, $docType, [$docId], $cache);
+        }
+        $weights = [];
+        foreach ($cache[$key]['groups'] ?? [] as $account => $groups) {
+            if (str_starts_with((string) $account, '5')) {
+                $weights[(string) $account] = array_sum(array_column($groups, 'weight'));
+            }
+        }
+        $synthetic = substr($creditAccount, 0, 3);
+        $own = array_filter($weights, static fn (string $account): bool => str_starts_with($account, $synthetic), ARRAY_FILTER_USE_KEY);
+        $weights = $own !== [] ? $own : $weights;
+        $sum = array_sum($weights);
+        if ($weights === [] || $sum <= 0.0) {
+            return $weights === [] ? [$creditAccount => 1.0] : array_map(static fn (): float => 1 / count($weights), $weights);
+        }
+        return array_map(static fn (float $w): float => $w / $sum, $weights);
+    }
+
+    /**
+     * Dávkově načte kombinace dimenzí zápisů dokladů karet a položek drobného majetku.
+     *
+     * @param list<array{purchase_invoice_id?:?int, item_id?:?int, cash_document_id?:?int}> $sources
+     * @param array<string,mixed> $cache
+     */
+    public function preloadSmallAssetAllocations(int $supplierId, array $sources, array &$cache): void
+    {
+        $invoices = $cash = [];
+        foreach ($sources as $source) {
+            if ((int) ($source['purchase_invoice_id'] ?? 0) > 0) {
+                $invoices[] = (int) $source['purchase_invoice_id'];
+            } elseif ((int) ($source['cash_document_id'] ?? 0) > 0) {
+                $cash[] = (int) $source['cash_document_id'];
+            }
+        }
+        $this->preloadDimensionGroups($supplierId, 'purchase_invoice', $invoices, $cache);
+        $this->preloadDimensionGroups($supplierId, 'cash', $cash, $cache);
     }
 
     /**
@@ -884,7 +1040,7 @@ final class AccrualDeferralService
      * spolu s daty zápisů. Kombinace s nulovým obratem zůstává (váha 0): je kandidátem
      * párování položky, do poměrného dělení nevstupuje.
      *
-     * @param 'invoice'|'purchase_invoice'|'nonprofit_membership' $docType
+     * @param 'invoice'|'purchase_invoice'|'cash'|'nonprofit_membership' $docType
      * @param list<int> $docIds id dokladů, u členského předpisu id jeho zápisu
      * @param array<string,mixed> $cache
      */
@@ -903,6 +1059,22 @@ final class AccrualDeferralService
         $dates = [];
         if ($docType === 'nonprofit_membership') {
             $entryDocs = array_combine($docIds, $docIds);
+        } elseif ($docType === 'cash') {
+            // Pokladní doklad skupinu zaúčtování nemá ({@see DocumentPostingGroup::activeMany()}
+            // zná jen faktury), účtuje ho přímý zápis se zdrojem dokladu. Koncept a stornovaný
+            // zápis vyřadí dotaz na řádky níže.
+            foreach (array_chunk($docIds, 500) as $chunk) {
+                $marks = implode(',', array_fill(0, count($chunk), '?'));
+                $stmt = $this->db->pdo()->prepare(
+                    "SELECT je.id, je.source_id
+                       FROM journal_entries je FORCE INDEX (idx_je_supplier_source)
+                      WHERE je.supplier_id = ? AND je.source_type = 'cash' AND je.source_id IN ({$marks})"
+                );
+                $stmt->execute([$supplierId, ...$chunk]);
+                foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $entry) {
+                    $entryDocs[(int) $entry['id']] = (int) $entry['source_id'];
+                }
+            }
         } else {
             foreach (array_chunk($docIds, 500) as $chunk) {
                 foreach ((new DocumentPostingGroup($this->db))->activeMany($supplierId, $docType, $chunk) as $docId => $entries) {

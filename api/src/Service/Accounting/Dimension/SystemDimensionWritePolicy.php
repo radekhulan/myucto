@@ -301,7 +301,7 @@ final class SystemDimensionWritePolicy
     }
 
     /**
-     * Přiřazení, která zápis časového rozlišení (odklad a rozpuštění 381/384) převzal ze
+     * Přiřazení, která zápis časového rozlišení (odklad a rozpuštění 381/384, drobný majetek 381/501) převzal ze
      * živých výsledkových řádků dokladu ({@see \MyInvoice\Service\Accounting\Closing\AccrualDeferralService::dimensionAllocations()}).
      * Platí jako zachovaná: hodnotu uzavřenou až po zaúčtování dokladu smí odklad nést dál,
      * protože jen zrcadlí řádek, který ji už nese. Uznává se jen u zdrojů uzávěrky, a jen
@@ -313,7 +313,7 @@ final class SystemDimensionWritePolicy
      */
     private function carriedAccrualAssignments(array $header, array $lines): array
     {
-        if (!in_array((string) ($header['source_type'] ?? ''), ['deferred_revenue_accrual', 'prepaid_expense_accrual'], true)) {
+        if (!in_array((string) ($header['source_type'] ?? ''), ['deferred_revenue_accrual', 'prepaid_expense_accrual', 'small_asset_accrual'], true)) {
             return [];
         }
         $ids = [];

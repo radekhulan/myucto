@@ -255,7 +255,10 @@ Měsíční kontrola porovnává náklady řádků označených jako drobný maj
 varování, ne automatický zápis.
 
 Uzávěrka může nabídnout volitelné časové rozlišení nákladu drobného majetku. Nejde o daňový odpis. Použije účetní politiku
-období a předkontaci 381/501, v dalším období vytvoří zrcadlové rozpuštění. Bez doložené doby užitku a významnosti návrh
+období a předkontaci 381/501, v dalším období vytvoří zrcadlové rozpuštění. Řádek 501 přebírá analytiku 501 a dimenze zápisu dokladu karty,
+proto u účetní jednotky podle vyhlášky 504/2002 Sb. musí mít při poměrném rozlišení i u paušálu, který se dělí podle karet, každá rozlišovaná karta vazbu na
+zaúčtovanou přijatou fakturu nebo pokladní doklad s osami činnosti. U paušálu z rozpisu 501 musí být zaúčtované s osami
+činnosti faktury rozpisu. Bez doložené doby užitku a významnosti návrh
 nepotvrzujte, podrobnosti jsou v kapitole [Uzávěrka](72_Uzaverka.md).
 
 ### 27.9.5 Sestavy

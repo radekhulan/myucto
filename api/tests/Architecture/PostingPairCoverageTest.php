@@ -87,7 +87,7 @@ final class PostingPairCoverageTest extends TestCase
             'Service/Accounting/Closing/ClosingService.php::runProfitDistribution::postDocument' => ['shape' => 'grouped', 'test' => self::PAIRER . '::testPairGroupKeepsGroupsApartAndIsDroppedFromOutput'],
             'Service/Accounting/Closing/ClosingService.php::runProfitDistribution::prepareDocumentLines' => ['shape' => 'grouped', 'test' => self::PAIRER . '::testPairGroupKeepsGroupsApartAndIsDroppedFromOutput'],
             'Service/Accounting/Closing/ClosingService.php::runProvisions::postDocument' => ['shape' => 'hub', 'test' => $hub],
-            'Service/Accounting/Closing/ClosingService.php::runSmallAssetAccrual::postDocument' => ['shape' => 'one', 'test' => $one],
+            'Service/Accounting/Closing/ClosingService.php::runSmallAssetAccrual::postDocument' => ['shape' => 'one', 'test' => 'Integration\Accounting\ClosingSmallAssetAccrualTest::testSingleEntryFormPostsFlatPctWithCreditNoteOnOtherCostCenter'],
             'Service/Accounting/Closing/ClosingService.php::runStockValuation::postDocument' => ['shape' => 'grouped', 'test' => self::AUTO . '::testClosingEntryIsPairedByConsecutiveGroups'],
             'Service/Accounting/Closing/SecuritiesDebt504Workflow.php::execute::postDocument' => ['shape' => 'out', 'reason' => 'dluhové cenné papíry rámce 504'],
             'Service/Accounting/Conversion/FrameworkConversionResultDecision.php::confirm::postDocument' => ['shape' => 'out', 'reason' => 'převod účetního rámce 500/504'],

@@ -297,8 +297,11 @@ final class PostingService
         // produkt, pravidlo nebo volající (mzdy, ruční zápis). Bez mapy beze změny.
         // Časové rozlišení (odklad a rozpuštění 381/384) bere účet i dimenze z živého zápisu
         // dokladu, ze kterého částku přesouvá; dnešní mapa ho přesměrovat nesmí, jinak by se
-        // odkládalo z analytiky, na které náklad či výnos neleží.
-        $routed = in_array($sourceType, ['deferred_revenue_accrual', 'prepaid_expense_accrual'], true)
+        // odkládalo z analytiky, na které náklad či výnos neleží. Stejně drobný majetek
+        // (381/501): účet bere ze zápisu dokladu, jinak účet pravidla. Řádek bez dokladu
+        // dimenzi nemá (výchozí hodnoty pravidel podle účtu pro uzávěrku neplatí,
+        // DimensionRuleService::RULE_SOURCES), takže by ho mapa ani dřív nepřesměrovala.
+        $routed = in_array($sourceType, ['deferred_revenue_accrual', 'prepaid_expense_accrual', 'small_asset_accrual'], true)
             ? $resolved
             : (new DimensionAccountRouter($this->db))
                 ->apply($supplierId, $resolved, $entryDate, $this->singleAnalyticMap($supplierId, $entryDate, $currentRead), $currentRead);
