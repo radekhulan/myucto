@@ -82,4 +82,27 @@ final class CompanyIdNormalizerTest extends TestCase
         self::assertSame('CZ699000123', CompanyIdNormalizer::dic('CZ699000123'));
         self::assertSame('CZ699000123', CompanyIdNormalizer::dic('CZ 699 000 123'));
     }
+
+    // ── nameKey() ────────────────────────────────────────────────────────
+
+    public function testNameKeyIgnoresLegalFormCaseDiacriticsAndPunctuation(): void
+    {
+        $key = CompanyIdNormalizer::nameKey('Syntetická Dodávka, spol. s r.o.');
+        self::assertSame('synteticka dodavka', $key);
+        self::assertSame($key, CompanyIdNormalizer::nameKey('SYNTETICKA DODAVKA s.r.o.'));
+        self::assertSame($key, CompanyIdNormalizer::nameKey('Syntetická dodávka sro'));
+        self::assertSame('vzorova', CompanyIdNormalizer::nameKey('Vzorová a.s.'));
+    }
+
+    public function testNameKeyKeepsLegalFormTokensInsideName(): void
+    {
+        self::assertSame('as servis', CompanyIdNormalizer::nameKey('AS Servis s.r.o.'));
+        self::assertNotSame(CompanyIdNormalizer::nameKey('Alfa Beta s.r.o.'), CompanyIdNormalizer::nameKey('Alfa s.r.o.'));
+    }
+
+    public function testNameKeyEmptyReturnsNull(): void
+    {
+        self::assertNull(CompanyIdNormalizer::nameKey(null));
+        self::assertNull(CompanyIdNormalizer::nameKey(' , . '));
+    }
 }

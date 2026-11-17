@@ -63,4 +63,40 @@ final class CompanyIdNormalizer
         $clean = strtoupper($clean);
         return $clean !== '' ? $clean : null;
     }
+
+    /** Právní formy jako sledy tokenů po {@see self::nameKey()} normalizaci, delší dřív. */
+    private const LEGAL_FORM_SUFFIXES = [
+        'spol s r o', 'sp z o o', 's r o', 'v o s', 'k s', 'z s', 'z u', 'o p s', 'a s',
+        'sro', 'as', 'spol', 'gmbh', 'ltd', 'llc', 'inc', 'plc', 'se', 'ag', 'kg', 'sa',
+    ];
+
+    /**
+     * Klíč názvu firmy pro tolerantní porovnání: malá písmena, bez diakritiky,
+     * interpunkce a koncové právní formy. „Novák, spol. s r.o." i „NOVAK s.r.o."
+     * dají „novak". Právní forma se odstraňuje jen na konci názvu, uprostřed může
+     * být součástí jména.
+     */
+    public static function nameKey(?string $name): ?string
+    {
+        $lower = mb_strtolower(trim((string) $name), 'UTF-8');
+        $ascii = strtr($lower, [
+            'á' => 'a', 'č' => 'c', 'ď' => 'd', 'é' => 'e', 'ě' => 'e', 'í' => 'i',
+            'ň' => 'n', 'ó' => 'o', 'ř' => 'r', 'š' => 's', 'ť' => 't', 'ú' => 'u',
+            'ů' => 'u', 'ý' => 'y', 'ž' => 'z', 'ä' => 'a', 'ô' => 'o', 'ĺ' => 'l',
+            'ľ' => 'l', 'ŕ' => 'r', 'ü' => 'u', 'ö' => 'o', 'ß' => 'ss', 'à' => 'a',
+            'è' => 'e', 'ç' => 'c', 'ê' => 'e', 'î' => 'i', 'û' => 'u', 'ł' => 'l',
+            'ą' => 'a', 'ę' => 'e', 'ś' => 's', 'ź' => 'z', 'ż' => 'z', 'ć' => 'c', 'ń' => 'n',
+        ]);
+        $key = trim((string) preg_replace('/[^a-z0-9]+/', ' ', $ascii));
+        do {
+            $before = $key;
+            foreach (self::LEGAL_FORM_SUFFIXES as $form) {
+                if ($key !== $form && str_ends_with($key, ' ' . $form)) {
+                    $key = rtrim(substr($key, 0, -strlen($form)));
+                    break;
+                }
+            }
+        } while ($key !== $before);
+        return $key !== '' ? $key : null;
+    }
 }
