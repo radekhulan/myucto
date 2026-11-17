@@ -22,6 +22,8 @@ tento průvodce nepřevádí, to je samostatná kapitola
   měsíců, srážky, dovolenou a podání, která PAMICA odeslala.
 - Převod skončil chybou nebo rozdílem v protokolu.
 - Chcete po převodu ověřit, že přepočet v MyÚčtu sedí na to, co PAMICA podala.
+- Mzdy počítáte dál v PAMICA a do účetnictví v MyÚčtu chcete každý měsíc
+  načíst jen jejich zaúčtování ([§ 108.10](#10810-mesicni-zauctovani-mezd-z-pamicy-xml)).
 
 <!-- cols: 24 40 36 -->
 | Fáze | Co udělat | Kde |
@@ -653,10 +655,12 @@ se zůstatek nepřevede a protokol na to upozorní.
   u nepřítomnosti jako poznámku, ale nepoužije ji: náhradu si MyÚčto počítá
   z průměrného výdělku a rozvržených směn. Vnucená cizí částka by ten výpočet
   obešla.
-- **Zaúčtování mezd (`MZzauct`).** Účetní zápisy se nepřenášejí: mzdy se do
-  účetnictví zaúčtují až v MyÚčtu, podle jeho vlastního nastavení. Převzaté
-  zápisy by proti převedeným dokladům vyrobily duplicitu. Z převzatého
-  zaúčtování se bere jen podklad pro nastavení kontací (§ 108.9.11).
+- **Zaúčtování mezd (`MZzauct`).** Převod celých mezd účetní zápisy
+  nepřenáší: mzdy se do účetnictví zaúčtují až v MyÚčtu, podle jeho vlastního
+  nastavení. Převzaté zápisy by proti převedeným dokladům vyrobily duplicitu.
+  Z převzatého zaúčtování se bere jen podklad pro nastavení kontací
+  (§ 108.9.11). Kdo mzdy dál počítá v PAMICE a do MyÚčta převádět nebude,
+  načítá zaúčtování každého měsíce zvlášť (§ 108.10).
 - **Zákonné pojištění odpovědnosti zaměstnavatele.** Export ho nevede.
 
 ### 108.9.7 Nemocenská přes přelom
@@ -796,8 +800,10 @@ Kontace mezd (které mzdové plnění jde na který účet) má původní progra
 nastavené a export je nese. MyÚčto z nich odvodí **návrh nastavení**, takže
 je nemusíte naklikat znovu.
 
-Není to import účetních zápisů. Mzdy se zaúčtují až v MyÚčtu podle tohoto
-nastavení; převzaté zápisy by proti převedeným dokladům vznikly dvakrát.
+Není to import účetních zápisů. Mzdy převedené do MyÚčta se zaúčtují až
+v MyÚčtu podle tohoto nastavení; převzaté zápisy by proti převedeným dokladům
+vznikly dvakrát. Zaúčtování mezd, které dál počítá PAMICA, se načítá
+samostatně (§ 108.10).
 
 U každého mzdového plnění obrazovka ukáže, **z čeho odvozený účet vyšel**:
 kolik řádků převzatého zaúčtování za ním stojí, kolik přes něj prošlo peněz
@@ -915,7 +921,118 @@ spočítaný mzdový běh. Potom převod volbu nemění. Zákonné zaokrouhlení
 (§ 142 odst. 2 zákoníku práce) zapnete v Nastavení mezd
 ([§ 90.3](90_Nastaveni_mezd.md#903-krok-za-krokem-zamestnavatel-a-mzdove-uctarny)).
 
-## 108.10 Související kapitoly
+## 108.10 Měsíční zaúčtování mezd z PAMICY (XML)
+
+**Cesta: `Systém → Přechod z jiných účetních systémů → PAMICA`** (soubor
+rozpozná i `Nákup → Import`)
+
+Když mzdy dál počítá PAMICA a v MyÚčtu vedete účetnictví, nepřevádíte mzdy,
+ale každý měsíc načtete jen jejich **zaúčtování**: mzdové náklady a závazky
+z mezd. Je to samostatná cesta, nezávislá na převodu celých mezd výše;
+zaměstnance ani mzdové vstupy nezakládá. Funkce je pro firmy v podvojném
+účetnictví.
+
+> [!WARNING]
+> Za měsíc, jehož zaúčtování načítáte z PAMICY, nepočítejte mzdy v modulu
+> Mzdy v MyÚčtu. Zaúčtování mzdového běhu by mzdové náklady a závazky
+> zaúčtovalo podruhé.
+
+### 108.10.1 Export zaúčtování z PAMICY
+
+1. V PAMICA zpracujte mzdy měsíce a otevřete jejich zaúčtování.
+2. Předkontace nastavte **přímo na účty** ve tvaru MD/Dal, například
+   `521000/331000` pro hrubé mzdy nebo `524000/336001` pro sociální pojištění
+   placené firmou. Jinou předkontaci MyÚčto zaúčtovat neumí a náhled ji
+   ohlásí.
+3. Závazky na čisté mzdy zaměstnanců veďte **bez zaúčtování** (předkontace
+   `BEZ` s účtem závazku, například `BEZ331000`). Závazek na účtu 331 vznikl
+   už zaúčtováním hrubé mzdy, výplata se jen eviduje k úhradě.
+4. Zaúčtování nechte vytvořit **souhrnně za firmu**, ne po zaměstnancích.
+   Interní doklad pak nese jeden řádek za každou dvojici účtů a v účetnictví
+   nejsou mzdy jednotlivých lidí. Závazky na výplatu zůstávají po
+   zaměstnancích, protože každý má vlastní účet pro platební příkaz.
+5. Zaúčtování vyvezte do XML pro POHODU. Vznikne soubor
+   `_PAMICA_<IČO>_<číslo>.xml` v kódování Windows-1250; soubor neupravujte.
+
+### 108.10.2 Nahrání a náhled
+
+V průvodci PAMICA v kroku **Export z PAMICA** vyberte místo ZIP souboru
+toto XML a klikněte **Nahrát**. Průvodce formát pozná sám a místo převodu
+mezd ukáže náhled zaúčtování. XML, které zaúčtováním mezd není, pokračuje
+převodem mezd jako dosud.
+
+Stejný soubor rozpozná i import v `Nákup → Import`. Přijaté faktury z něj
+nevzniknou: soubor se z dávky vyčlení, ostatní soubory se importují jako
+obvykle a u vyčleněného souboru je tlačítko **Zobrazit náhled
+zaúčtování**. Náhled i načtení jsou stejné jako v průvodci. Soubor zabalený
+v ZIP nahrajte do průvodce samostatně.
+
+Náhled nic neukládá. Ukáže měsíc a párovací symbol PAMICY (např.
+`MZ202603`), interní doklad s řádky MD a Dal a ostatní závazky
+s protistranou, variabilním a konstantním symbolem, splatností, účtem
+protistrany, zaúčtováním nebo příznakem *bez zaúčtování* a částkou. Nad
+nimi jsou kontroly:
+
+<!-- cols: 30 70 -->
+| Kontrola | Co znamená |
+|---|---|
+| IČO | IČO v souboru se musí shodovat s IČO firmy. Soubor jiné firmy se nenačte. |
+| Měsíc | Pro datum účetního případu musí existovat účetní období a měsíc nesmí být uzamčený ani v uzavřeném období. |
+| Načtení | Stejný měsíc (IČO a párovací symbol) ještě nebyl načten (§ 108.10.4). |
+| Účty | Každý účet PAMICY musí mít účet v účtové osnově (pravidla níže). |
+| Účet 331 | Co interní doklad zaúčtuje na Dal účtu zaměstnanců, musí ostatní závazky srazit na MD nebo převzít jako závazky bez zaúčtování. Rozdíl náhled ukáže jako upozornění. |
+| Účet protistrany | Neplatné číslo účtu náhled ohlásí; závazek se načte bez něj a účet doplníte v jeho detailu. |
+
+**Účty.** PAMICA uvádí účty šestimístně. MyÚčto hledá v účtové osnově
+nejdřív stejný kód, potom analytiku s tečkou (`336001` → `336.001`)
+a u analytiky `000` syntetiku (`521000` → `521`), pokud ji osnova analyticky
+nečlení. Chybí-li analytika pod existující syntetikou, náhled ji navrhne
+a po zaškrtnutí **Založit chybějící analytické účty** ji načtení založí se
+stejným typem jako syntetika. Chybějící syntetický účet načtení zastaví,
+založte ho v `Účetnictví → Účtová osnova`.
+
+### 108.10.3 Co vznikne
+
+Po kliknutí **Načíst zaúčtování** vznikne v jedné transakci (chyba kdekoli
+vrátí vše zpět):
+
+- **Interní doklad** v `Účetnictví → Interní doklady`, zaúčtovaný k datu
+  účetního případu z PAMICY s číslem z řady interních dokladů. Například
+  hrubé mzdy 30 000 Kč jako zápis `521 / 331`.
+- **Ostatní závazky** v `Ostatní závazky`, každý se svou protistranou,
+  variabilním symbolem, splatností a účtem protistrany. Konstantní symbol je
+  v poznámce. Závazek se zaúčtováním má na straně Dal účet závazku
+  a na straně MD účty položek. Například sociální pojištění 9 570 Kč:
+  `524 / 336.001` 7 440 Kč (pojistné placené firmou) a `331 / 336.001`
+  2 130 Kč (pojistné zaměstnanců).
+- **Závazky bez zaúčtování** (čisté mzdy) se jen potvrdí, vlastní zápis
+  v deníku nemají a leží na účtu 331. Výplata z banky je pak zaúčtuje
+  `331 / 221` a účet 331 se vyrovná.
+
+Protistranu dohledá MyÚčto v adresáři podle názvu, jinak založí novou kartu.
+U zaměstnance se na kartu zapíše jen jméno; adresa ani jiné osobní údaje
+z PAMICY se nepřebírají. Výplata v hotovosti je závazek bez protistrany.
+
+Závazky pak platíte jako ostatní závazky: jdou do platebního příkazu
+a úhrada se spáruje z bankovního výpisu.
+
+### 108.10.4 Ochrana proti druhému načtení
+
+Načtení se pamatuje podle IČO a párovacího symbolu měsíce. Druhé nahrání
+téhož měsíce, i z nového exportu s jiným číslem, MyÚčto odmítne se zprávou,
+kdy byl měsíc načten. Opravu načtete znovu až po stornu interního dokladu
+a všech ostatních závazků z prvního načtení.
+
+### 108.10.5 Oprávnění
+
+Náhled vidí uživatel se čtením účetnictví a ostatních závazků. Načtení
+zakládá a účtuje interní doklad a ostatní závazky, proto potřebuje zápis
+ručních zápisů deníku, jejich zaúčtování a zápis ostatních závazků
+(`accounting.journal.write`, `accounting.journal.post`, `other_items`).
+Založení chybějících analytik navíc vyžaduje zápis do účetnictví
+(`accounting`). Načtení se zapíše do historie aktivit.
+
+## 108.11 Související kapitoly
 
 - [Přechod z POHODY](107_Prechod_z_POHODY.md)
 - [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md)

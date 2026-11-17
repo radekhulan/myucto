@@ -14,6 +14,7 @@ import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 import MigrationDifferences from '@/components/migration/MigrationDifferences.vue'
 import MigrationNonprofitNotice from '@/components/migration/MigrationNonprofitNotice.vue'
+import PayrollPostingImport from '@/components/migration/PayrollPostingImport.vue'
 import { formatBytes } from '@/components/documents/docFormat'
 import { migrationYearLabel } from '@/utils/migrationYear'
 
@@ -155,6 +156,24 @@ const {
   refreshPreview: true,
   restoreParams,
 })
+
+/*
+ * PAMICA: vedle ZIP exportu celých mezd přijímá průvodce i XML se zaúčtováním mezd
+ * (dataPack pro POHODU). Formát pozná server ({@link PayrollPostingImport}); když XML
+ * zaúčtováním není, pokračuje se převodem mezd jako dosud.
+ */
+const postingFile = ref<File | null>(null)
+function startUpload(): void {
+  if (props.system === 'pamica' && file.value && /\.xml$/i.test(file.value.name)) {
+    postingFile.value = file.value
+    return
+  }
+  void doUpload()
+}
+function postingNotDetected(): void {
+  postingFile.value = null
+  void doUpload()
+}
 
 const steps = computed(() => [1, 2, 3, 4].map(number => ({ number, label: tt(`step${number}`) })))
 // Průběh zpracování exportu na serveru v procentech; bez počtu kroků jen pulzující pruh.
@@ -422,8 +441,8 @@ async function start(mode: 'dry_run' | 'import'): Promise<void> {
 const canWrite = computed(() => missingRights.value.length === 0)
 
 const actions = computed<ActionItem[]>(() => {
-  if (currentStep.value === 1) return [
-    { key: 'upload', label: busy.value ? (uploadPercent.value !== null ? tt('uploading_percent', { percent: uploadPercent.value }) : tt('uploading')) : tt('upload'), icon: 'upload', tier: 'primary', variant: 'primary', disabled: !file.value, disabledReason: tt('choose_file_first'), loading: busy.value, run: doUpload },
+  if (currentStep.value === 1) return postingFile.value ? [] : [
+    { key: 'upload', label: busy.value ? (uploadPercent.value !== null ? tt('uploading_percent', { percent: uploadPercent.value }) : tt('uploading')) : tt('upload'), icon: 'upload', tier: 'primary', variant: 'primary', disabled: !file.value, disabledReason: tt('choose_file_first'), loading: busy.value, run: startUpload },
   ]
   if (currentStep.value === 2) return [
     { key: 'continue', label: tt('continue'), icon: 'check', tier: 'primary', variant: 'primary', disabled: blocked.value, disabledReason: blockedReason.value, run: () => { currentStep.value = 3 } },
@@ -480,6 +499,9 @@ const actions = computed<ActionItem[]>(() => {
 
     <section class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
       <div v-if="busy && !upload && currentStep === 1 && !file && !processing" class="py-12 text-center text-neutral-400">{{ t('common.loading') }}</div>
+
+      <PayrollPostingImport v-else-if="currentStep === 1 && postingFile" :file="postingFile"
+        @close="postingFile = null" @not-posting="postingNotDetected" />
 
       <template v-else-if="currentStep === 1">
         <h2 class="mb-1 text-lg font-semibold">{{ tt('upload_title') }}</h2>
@@ -573,9 +595,14 @@ const actions = computed<ActionItem[]>(() => {
           </ul>
         </div>
 
+        <div v-if="props.system === 'pamica'" class="mb-5 rounded-lg border border-primary-500/30 bg-primary-50 px-4 py-3 text-sm text-primary-700" data-testid="pamica-posting-help">
+          <h3 class="mb-1 font-medium">{{ t('pamica.posting_help_title') }}</h3>
+          <p>{{ t('pamica.posting_help') }}</p>
+        </div>
+
         <label class="block max-w-xl text-sm font-medium">
           {{ tt('choose_file') }}
-          <input type="file" accept=".zip" class="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm" data-testid="pohoda-input" :disabled="busy" @change="onFile" />
+          <input type="file" :accept="props.system === 'pamica' ? '.zip,.xml' : '.zip'" class="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm" data-testid="pohoda-input" :disabled="busy" @change="onFile" />
         </label>
         <div v-if="uploadPercent !== null || processing" class="mt-4 max-w-xl space-y-2 rounded-md border border-primary-200 bg-primary-50/50 px-3 py-3" data-testid="pohoda-progress">
           <div class="text-sm font-medium text-primary-700">

@@ -500,6 +500,7 @@ final class GlobalSeedTables
         'payroll_period_export_download_grants', 'payroll_period_export_job_attempts',
         'payroll_period_export_job_part_attempts', 'payroll_period_export_job_parts',
         'payroll_period_export_jobs', 'payroll_period_exports', 'payroll_period_ownership',
+        'payroll_posting_imports',
         'payroll_person_accounts', 'payroll_person_addresses', 'payroll_person_contacts',
         'payroll_person_external_ids', 'payroll_person_foreign_permits',
         'payroll_person_health_coverage_history', 'payroll_person_health_minimum_reductions',

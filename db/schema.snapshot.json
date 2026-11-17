@@ -1201,7 +1201,8 @@
         "2295_helios_import_map.sql",
         "2296_eet_units_dis_import.sql",
         "2297_invoices_supplier_parent_index.sql",
-        "2298_invoice_item_advance_drawdown.sql"
+        "2298_invoice_item_advance_drawdown.sql",
+        "2300_payroll_posting_imports.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -18858,6 +18859,36 @@
                 "chk_payroll_posting_batch_hashes": "`target_hash` regexp '^[0-9a-f]{64}$' and `delta_hash` regexp '^[0-9a-f]{64}$'",
                 "chk_payroll_posting_batch_state": "`status` = 'prepared' and `journal_entry_id` is null and `posted_at` is null or `status` = 'posted' and `journal_entry_id` is not null and `posted_at` is not null or `status` = 'no_change' and `journal_entry_id` is null and `posted_at` is not null or `status` = 'reversed' and `posted_at` is not null"
             }
+        },
+        "payroll_posting_imports": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "file_name": "varchar(255) NULL DEFAULT NULL",
+                "file_sha256": "char(64) NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "internal_document_ids": "longtext NOT NULL",
+                "other_item_ids": "longtext NOT NULL",
+                "pack_id": "varchar(64) NULL DEFAULT NULL",
+                "period": "char(7) NOT NULL",
+                "source_application": "varchar(20) NOT NULL",
+                "source_ico": "varchar(16) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "sym_par": "varchar(40) NOT NULL",
+                "total_amount": "decimal(14,2) NOT NULL DEFAULT 0.00"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_payroll_posting_import_period": "BTREE (supplier_id, period)",
+                "uq_payroll_posting_import_source": "UNIQUE BTREE (supplier_id, source_application, source_ico, sym_par)"
+            },
+            "foreign_keys": {
+                "fk_payroll_posting_import_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "payroll_posting_map_proposals": {
             "type": "BASE TABLE",

@@ -895,6 +895,10 @@ final class RoutePermissionMap
         // Smazání zaúčtované položky maže i její zápis v deníku (akce ověří navíc `other_items`).
         ['DELETE', '#^/api/accounting/other-items/[0-9]+/posted$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['*', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::WRITE],
+        // Zaúčtování mezd z PAMICY: náhled čte, načtení zakládá a účtuje interní doklad
+        // a ostatní závazky (akce ověří navíc `accounting.journal.write` a `other_items`).
+        ['POST', '#^/api/accounting/payroll-posting-imports/preview$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/payroll-posting-imports/apply$#', 'accounting.journal.post', AccessLevel::WRITE],
         // Interní doklady: práva ručního zápisu deníku. Zaúčtování, storno, smazání
         // zaúčtovaného dokladu i se zápisem a hlavička nad existujícím zápisem jsou zápis
         // do deníku, koncept jen jeho příprava.
