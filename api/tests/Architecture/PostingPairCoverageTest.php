@@ -19,7 +19,8 @@ use PHPUnit\Framework\TestCase;
  * Výjimka se uděluje METODĚ (soubor::metoda::volání), ne souboru.
  *
  * Podoby:
- *  - `one`     jedna dvojice MD/Dal;
+ *  - `one`     jedna dvojice MD/Dal, případně N dvojic shodných částek, které párovač
+ *              spáruje v pořadí;
  *  - `hub`     jeden řádek proti N (311, 321, 221, 211, 315 …), párovač ho rozdělí;
  *  - `grouped` builder skládá po dvojicích a označí je (PairGroups, pair_group, pair_role);
  *  - `builder` řádky z builderů PostingService (faktury, přijaté faktury, zálohy);
@@ -72,18 +73,21 @@ final class PostingPairCoverageTest extends TestCase
             'Service/Accounting/Closing/ClosingService.php::createAssistedEntry::postDocument' => ['shape' => 'one', 'test' => $one],
             'Service/Accounting/Closing/ClosingService.php::createLegalReserve504::postDocument' => ['shape' => 'out', 'reason' => 'zákonné rezervy rámce 504 (neziskovky)'],
             'Service/Accounting/Closing/ClosingService.php::openNext::postDocument' => ['shape' => 'grouped', 'test' => self::AUTO . '::testOpeningEntryIsPairedByConsecutiveGroups'],
-            'Service/Accounting/Closing/ClosingService.php::runDeferredRevenueAccrual::postDocument' => ['shape' => 'hub', 'test' => $hub],
+            // Časové rozlišení: složená forma jeden řádek 381/384 proti N (ClosingPrepaidExpenseAccrualTest::
+            // testCompositeEntryFormKeepsOneDeferralLineWithCreditNote), jednoduchá forma N dvojic shodných
+            // částek (ClosingService::accrualPairs), které párovač páruje v pořadí; totéž rozpuštění v openNext.
+            'Service/Accounting/Closing/ClosingService.php::runDeferredRevenueAccrual::postDocument' => ['shape' => 'one', 'test' => 'Integration\Accounting\ClosingDeferredRevenueAccrualTest::testSingleEntryFormDefersAndReleasesCreditNoteOnOtherCostCenter'],
             'Service/Accounting/Closing/ClosingService.php::runDeferredTax::postDocument' => ['shape' => 'one', 'test' => $one],
             'Service/Accounting/Closing/ClosingService.php::runFxRevaluation::postDocument' => ['shape' => 'grouped', 'test' => self::AUTO . '::testClosingEntryIsPairedByConsecutiveGroups'],
             'Service/Accounting/Closing/ClosingService.php::runIncomeTax::postDocument' => ['shape' => 'one', 'test' => $one],
             'Service/Accounting/Closing/ClosingService.php::runLegalProvisions504::postDocument' => ['shape' => 'out', 'reason' => 'zákonné opravné položky rámce 504'],
-            'Service/Accounting/Closing/ClosingService.php::runPrepaidExpenseAccrual::postDocument' => ['shape' => 'hub', 'test' => $hub],
+            'Service/Accounting/Closing/ClosingService.php::runPrepaidExpenseAccrual::postDocument' => ['shape' => 'one', 'test' => 'Integration\Accounting\ClosingPrepaidExpenseAccrualTest::testSingleEntryFormDefersAndReleasesCreditNoteOnOtherCostCenter'],
             'Service/Accounting/Closing/ClosingService.php::runProfitDistribution504::postDocument' => ['shape' => 'out', 'reason' => 'rozdělení výsledku rámce 504'],
             'Service/Accounting/Closing/ClosingService.php::runProfitDistribution504::prepareDocumentLines' => ['shape' => 'out', 'reason' => 'rozdělení výsledku rámce 504'],
             'Service/Accounting/Closing/ClosingService.php::runProfitDistribution::postDocument' => ['shape' => 'grouped', 'test' => self::PAIRER . '::testPairGroupKeepsGroupsApartAndIsDroppedFromOutput'],
             'Service/Accounting/Closing/ClosingService.php::runProfitDistribution::prepareDocumentLines' => ['shape' => 'grouped', 'test' => self::PAIRER . '::testPairGroupKeepsGroupsApartAndIsDroppedFromOutput'],
             'Service/Accounting/Closing/ClosingService.php::runProvisions::postDocument' => ['shape' => 'hub', 'test' => $hub],
-            'Service/Accounting/Closing/ClosingService.php::runSmallAssetAccrual::postDocument' => ['shape' => 'one', 'test' => $one],
+            'Service/Accounting/Closing/ClosingService.php::runSmallAssetAccrual::postDocument' => ['shape' => 'one', 'test' => 'Integration\Accounting\ClosingSmallAssetAccrualTest::testSingleEntryFormPostsFlatPctWithCreditNoteOnOtherCostCenter'],
             'Service/Accounting/Closing/ClosingService.php::runStockValuation::postDocument' => ['shape' => 'grouped', 'test' => self::AUTO . '::testClosingEntryIsPairedByConsecutiveGroups'],
             'Service/Accounting/Closing/SecuritiesDebt504Workflow.php::execute::postDocument' => ['shape' => 'out', 'reason' => 'dluhové cenné papíry rámce 504'],
             'Service/Accounting/Conversion/FrameworkConversionResultDecision.php::confirm::postDocument' => ['shape' => 'out', 'reason' => 'převod účetního rámce 500/504'],

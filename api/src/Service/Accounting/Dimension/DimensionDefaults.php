@@ -54,6 +54,44 @@ final class DimensionDefaults
     }
 
     /**
+     * {@see resolve()} pro víc dokladů najednou: zakázka > klient (dodavatel), se stejným
+     * filtrem neaktivních hodnot a typů. Čte dávkou, počet dotazů nezávisí na počtu dokladů.
+     *
+     * @param array<int,array{0:?int,1:?int}> $parties klíč (doklad) => [klient, zakázka]
+     * @return array<int,array<int,int>> klíč => typ => hodnota (jen neprázdné)
+     */
+    public function resolveMany(int $supplierId, array $parties): array
+    {
+        $clientIds = $projectIds = [];
+        foreach ($parties as [$clientId, $projectId]) {
+            if ($clientId !== null && $clientId > 0) {
+                $clientIds[] = $clientId;
+            }
+            if ($projectId !== null && $projectId > 0) {
+                $projectIds[] = $projectId;
+            }
+        }
+        $repo = new DimensionDefaultRepository($this->db);
+        $byProject = $repo->forEntities($supplierId, 'project', $projectIds);
+        $byClient = $repo->forEntities($supplierId, 'client', $clientIds);
+        if ($byProject === [] && $byClient === []) {
+            return [];
+        }
+        $context = $this->mergeContext($supplierId, [...array_values($byProject), ...array_values($byClient)]);
+        $out = [];
+        foreach ($parties as $key => [$clientId, $projectId]) {
+            $header = self::mergeLayers([
+                'project:' . (int) $projectId => $byProject[(int) $projectId] ?? [],
+                'client:' . (int) $clientId => $byClient[(int) $clientId] ?? [],
+            ], $context)['header'];
+            if ($header !== []) {
+                $out[$key] = $header;
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Výchozí dimenze položek z produktu: produkt > jeho kategorie > nadřízené kategorie,
      * typ po typu (Účtování podle dimenzí, F1). Volá je předvyplnění položky v editoru
      * i {@see DimensionStamper}, takže položka bez vlastních dimenzí dostane při
@@ -76,13 +114,15 @@ final class DimensionDefaults
         if ($own === [] && $categories === []) {
             return [];
         }
+        // Typy a hodnoty jedním čtením pro všechny produkty, ne po produktech.
+        $context = $this->mergeContext($supplierId, [...array_values($own), ...array_values($categories)]);
         $out = [];
         foreach ($productIds as $productId) {
             $layers = ['product:' . $productId => $own[$productId] ?? []];
             foreach ($chains[$productId] ?? [] as $categoryId) {
                 $layers['product_category:' . $categoryId] = $categories[$categoryId] ?? [];
             }
-            $merged = $this->merge($supplierId, $layers);
+            $merged = self::mergeLayers($layers, $context);
             if ($merged['header'] === []) {
                 continue;
             }
@@ -722,27 +762,49 @@ final class DimensionDefaults
      */
     private function merge(int $supplierId, array $layers): array
     {
+        return self::mergeLayers($layers, $this->mergeContext($supplierId, array_values($layers)));
+    }
+
+    /**
+     * Aktivní typy a hodnoty vrstev pro {@see mergeLayers()}; bez hodnot se nečte nic.
+     *
+     * @param list<array<int,int>> $layers typ => hodnota
+     * @return array{types:array<int,true>, values:array<int,array<string,mixed>>}
+     */
+    private function mergeContext(int $supplierId, array $layers): array
+    {
         $all = [];
         foreach ($layers as $dims) {
             array_push($all, ...array_values($dims));
         }
         if ($all === []) {
-            return ['header' => [], 'sources' => [], 'origins' => []];
+            return ['types' => [], 'values' => []];
         }
         $dimRepo = new DimensionRepository($this->db);
         $types = [];
         foreach ($dimRepo->listTypes($supplierId, false) as $t) {
             $types[$t['id']] = true;
         }
-        $values = $dimRepo->valuesByIds($supplierId, $all);
+        return ['types' => $types, 'values' => $dimRepo->valuesByIds($supplierId, $all)];
+    }
+
+    /**
+     * Složí vrstvy typ po typu: bere první vrstvu s aktivní hodnotou aktivního typu.
+     *
+     * @param array<string,array<int,int>> $layers zdroj => typ => hodnota, v pořadí přednosti
+     * @param array{types:array<int,true>, values:array<int,array<string,mixed>>} $context výstup {@see mergeContext()}
+     * @return array{header:array<int,int>, sources:array<int,string>, origins:array<int,array{origin:string,ref:string}>}
+     */
+    private static function mergeLayers(array $layers, array $context): array
+    {
         $header = [];
         $sources = [];
         $origins = [];
         foreach ($layers as $source => $dims) {
             foreach ($dims as $typeId => $valueId) {
-                $value = $values[$valueId] ?? null;
+                $value = $context['values'][$valueId] ?? null;
                 if (isset($header[$typeId]) || $value === null || !$value['is_active']
-                    || $value['type_id'] !== $typeId || !isset($types[$typeId])) {
+                    || $value['type_id'] !== $typeId || !isset($context['types'][$typeId])) {
                     continue;
                 }
                 $header[$typeId] = $valueId;

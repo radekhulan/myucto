@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipBalanceRepository;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipChargeRepository;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipRepository;
@@ -225,6 +226,47 @@ final class MembershipActionTest extends TestCase
         self::assertSame(200, $status);
         $afterReverse = $closing->deferredRevenueAccrualPreview($this->supplier, $this->period);
         self::assertSame([], array_values(array_filter($afterReverse['items'], fn (array $item): bool => $item['source'] === 'nonprofit_membership')));
+    }
+
+    /** Ve 504 se odklad předpisu zaúčtuje s osami činnosti a jejich původem ze zápisu předpisu. */
+    public function testDeferralOfChargeIsPostedWithAxesOfChargeEntry(): void
+    {
+        $member = $this->activeMember('M-ACTION-DEFER-504');
+        $charge = $this->charge($member, '2026-07-01', '2027-06-30', '2026-07-01', '12000.00');
+        [, $preview] = $this->call('POST', 'preview', ['operation' => 'issue', 'request' => $charge]);
+        [$status, $confirmed] = $this->call('POST', 'confirm', ['operation' => 'issue', 'request' => $charge,
+            'expected_case_version' => $preview['expected_case_version'], 'preview_hash' => $preview['preview_hash'], 'idempotency_key' => 'membership-action-defer-504']);
+        self::assertSame(200, $status);
+        $stmt = $this->pdo->prepare("SELECT journal_entry_id FROM nonprofit_membership_charge_operations WHERE supplier_id = ? AND case_id = ? AND operation = 'issue'");
+        $stmt->execute([$this->supplier, (int) $confirmed['case']['id']]);
+        $chargeEntry = (int) $stmt->fetchColumn();
+        $this->pdo->prepare("INSERT INTO chart_of_accounts(supplier_id,account_code,name,account_type) VALUES(?,'384','Synthetic 384','liability')")->execute([$this->supplier]);
+        $this->pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->period]);
+        $stmt = $this->pdo->prepare('SELECT row_version FROM accounting_periods WHERE id = ?');
+        $stmt->execute([$this->period]);
+
+        $run = $this->container->get(ClosingService::class)->runDeferredRevenueAccrual($this->supplier, $this->period, (int) $stmt->fetchColumn(), ['user_id' => $this->actor, 'posted_by' => $this->actor]);
+
+        self::assertSame(5950.68, $run['total']);
+        $source = $this->revenueAssignment($chargeEntry, 'credit');
+        self::assertNotSame([], $source['dimensions'], 'Předpis ve 504 nese osy činnosti.');
+        self::assertSame($source, $this->revenueAssignment((int) $run['entry_id'], 'debit'));
+    }
+
+    /** @return array{dimensions:array<int,int>, origins:array<int,array{origin:string,ref:?string}>} jediný řádek 684.100 zápisu */
+    private function revenueAssignment(int $entryId, string $side): array
+    {
+        $stmt = $this->pdo->prepare("SELECT l.id FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+            WHERE l.supplier_id = ? AND l.entry_id = ? AND a.account_code = '684.100' AND l.side = ?");
+        $stmt->execute([$this->supplier, $entryId, $side]);
+        $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        self::assertCount(1, $ids);
+        $repo = new DimensionAssignmentRepository($this->db);
+        $dims = $repo->entryLineDimensions($this->supplier, $entryId)[$ids[0]] ?? [];
+        $origins = $repo->entryLineOrigins($this->supplier, $entryId)[$ids[0]] ?? [];
+        ksort($dims);
+        ksort($origins);
+        return ['dimensions' => $dims, 'origins' => $origins];
     }
 
     private function activeMember(string $number): int
