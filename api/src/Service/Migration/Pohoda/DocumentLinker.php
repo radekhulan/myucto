@@ -70,6 +70,8 @@ final class DocumentLinker
                 $bankDocs[$number . '#' . $tx['date'] . '#' . $tx['id']] = $tx['id'];
             }
         }
+        $year = $ctx->year();
+        $yearStart = $ctx->calendar->periodStart($year);
         $orphans = [];
         $openingAdvances = [];
         foreach ([
@@ -84,7 +86,17 @@ final class DocumentLinker
         ] as [$source, $sourceType, $docType, $docs, $retype]) {
             foreach ($docs as $docKey => $docId) {
                 [$number, $date] = array_pad(explode('#', (string) $docKey, 3), 2, null);
-                $entries = $index[$source][$number] ?? [];
+                // Číselné řady POHODY (pokladna, banka, faktury bez roku v řadě) se v každé
+                // agendě opakují: zápisy čísla z jiné agendy patří jinému dokladu. Pohyb banky
+                // bere jen zápisy své agendy stejně jako {@see bankBooking()}, ostatní doklady
+                // zápisy jiné agendy jen tehdy, když jejich agenda žádný nemá (doklad minulého
+                // období převzatý do agendy, zaúčtovaný minulou agendou).
+                $all = $index[$source][$number] ?? [];
+                $entries = self::agendaEntries($all, $year, $yearStart, $docType === 'bank');
+                if (count($entries) < count($all)) {
+                    $this->dropForeignLinks($ctx->supplierId, $retype ?? $sourceType, $docType, (int) $docId,
+                        array_values(array_diff(array_column($all, 'id'), array_column($entries, 'id'))));
+                }
                 if ($docType === 'bank' && count($entries) > 1 && $date !== null) {
                     $sameDay = array_values(array_filter($entries, static fn (array $e): bool => $e['date'] === $date));
                     $entries = $sameDay !== [] ? $sameDay : $entries;
@@ -1444,7 +1456,7 @@ final class DocumentLinker
      * Zápisy deníku převedené z Pohody: zdroj → číslo dokladu → zápisy v pořadí data.
      * Staví se z mapy převodu, takže funguje i pro zápisy z dřívějšího běhu.
      *
-     * @return array<string,array<string,list<array{date:string,id:int}>>>
+     * @return array<string,array<string,list<array{year:int,date:string,id:int}>>>
      */
     private function journalIndex(int $supplierId, ?int $year = null, ?FiscalCalendar $calendar = null): array
     {
@@ -1455,14 +1467,11 @@ final class DocumentLinker
             if (count($parts) < 4 || $parts[2] === '') {
                 continue; // otevírací zápis "rok|PS"
             }
-            // Deník agendy vede i doklady po konci jejího roku, takže zápis roku `$year`
-            // mohla přinést už agenda minulého roku.
-            if ($year !== null && (int) $parts[0] !== $year
-                && !((int) $parts[0] === $year - 1 && ($parts[3] ?? '') >= $yearStart)) {
+            [$agenda, $source, $number, $date] = $parts;
+            if ($year !== null && !self::inAgendaYear((int) $agenda, $date, $year, $yearStart)) {
                 continue;
             }
-            [, $source, $number, $date] = $parts;
-            $index[$source][$number][$date . '|' . str_pad((string) $entryId, 12, '0', STR_PAD_LEFT)] = ['date' => $date, 'id' => $entryId];
+            $index[$source][$number][$date . '|' . str_pad((string) $entryId, 12, '0', STR_PAD_LEFT)] = ['year' => (int) $agenda, 'date' => $date, 'id' => $entryId];
         }
         foreach ($index as &$docs) {
             foreach ($docs as &$entries) {
@@ -1471,6 +1480,58 @@ final class DocumentLinker
             }
         }
         return $index;
+    }
+
+    /**
+     * Zápis převedený z agendy roku `$entryYear` patří do agendy roku `$year`. Deník agendy
+     * vede i doklady po konci jejího roku, takže zápis roku `$year` mohla přinést už agenda
+     * minulého roku.
+     */
+    public static function inAgendaYear(int $entryYear, string $date, int $year, string $yearStart): bool
+    {
+        return $entryYear === $year || ($entryYear === $year - 1 && $date >= $yearStart);
+    }
+
+    /**
+     * Zápisy čísla dokladu, které patří dokladu převáděné agendy roku `$year`. Má-li číslo
+     * zápisy v této agendě, platí jen ty: stejné číslo v jiné agendě je jiný doklad (POHODA
+     * čísluje pokladnu, banku i řady bez roku v každé agendě znovu). Bez zápisu v agendě
+     * zůstávají zápisy ostatních agend - doklad minulého období převzatý do agendy zaúčtovala
+     * minulá agenda. `$strict` je vynechá i tehdy (pohyb banky patří jen do své agendy).
+     *
+     * @param list<array{year:int,date:string,id:int}> $entries
+     * @return list<array{year:int,date:string,id:int}>
+     */
+    public static function agendaEntries(array $entries, int $year, string $yearStart, bool $strict = false): array
+    {
+        $own = array_values(array_filter($entries, static fn (array $e): bool => self::inAgendaYear($e['year'], $e['date'], $year, $yearStart)));
+        return $own !== [] || $strict ? $own : $entries;
+    }
+
+    /**
+     * Opakovaný převod uklidí vazby, které dřívější převod dal dokladu na zápis stejného čísla
+     * z jiné agendy ({@see agendaEntries()}), a pokladní doklad přestane ukazovat na takový
+     * zápis. Jen vazby převodu na zápis, který vlastní jiný doklad - vlastní zápis dokladu
+     * ani ruční vazby uživatele se nemění. Zdroj (`source_id`) pak doklad dostane v {@see link()}.
+     *
+     * @param list<int> $foreignIds zápisy čísla dokladu z jiných agend
+     */
+    private function dropForeignLinks(int $supplierId, string $ownerType, string $docType, int $docId, array $foreignIds): void
+    {
+        $in = implode(',', array_fill(0, count($foreignIds), '?'));
+        $owned = "e.supplier_id = ? AND e.id IN ({$in}) AND e.source_id IS NOT NULL AND NOT (e.source_type = ? AND e.source_id = ?)";
+        $params = [$supplierId, ...$foreignIds, $ownerType, $docId];
+        $this->db->pdo()->prepare(
+            "DELETE l FROM journal_entry_document_links l JOIN journal_entries e ON e.id = l.entry_id
+              WHERE l.supplier_id = ? AND l.doc_type = ? AND l.doc_id = ? AND l.note = ? AND {$owned}"
+        )->execute([$supplierId, $docType, $docId, $this->entries->linkNote(), ...$params]);
+        if ($docType === 'cash') {
+            $this->db->pdo()->prepare(
+                "UPDATE cash_documents d JOIN journal_entries e ON e.id = d.journal_entry_id
+                    SET d.journal_entry_id = NULL
+                  WHERE d.id = ? AND d.supplier_id = ? AND {$owned}"
+            )->execute([$docId, $supplierId, ...$params]);
+        }
     }
 
     /**

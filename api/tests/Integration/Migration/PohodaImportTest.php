@@ -2486,6 +2486,115 @@ final class PohodaImportTest extends TestCase
         );
         $fee->execute([$supplierId, SyntheticPohodaExport::NEXT_YEAR . '-01-01']);
         self::assertSame(['unmatched'], $fee->fetchAll(\PDO::FETCH_COLUMN));
+        // Nezaúčtovaný pohyb nedostane ani vazbu na zápis loňského pohybu stejného čísla (#386).
+        $links = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM journal_entry_document_links l JOIN bank_transactions t ON t.id = l.doc_id
+               JOIN bank_statements s ON s.id = t.statement_id
+              WHERE l.supplier_id = ? AND l.doc_type = 'bank' AND s.supplier_id = ? AND t.bank_ref = 'BAN0010003' AND t.posted_at >= ?"
+        );
+        $links->execute([$supplierId, $supplierId, SyntheticPohodaExport::NEXT_YEAR . '-01-01']);
+        self::assertSame(0, (int) $links->fetchColumn());
+    }
+
+    /**
+     * POHODA čísluje pokladnu (a řady bez roku) v každé agendě znovu: pokladní doklad i faktura
+     * agendy následujícího roku se stejným číslem jako loňský doklad dostanou vlastní zápis,
+     * ne zápis loňského dokladu (#386).
+     */
+    public function testDocumentsWithRepeatedNumberGetOwnEntryInNextYear(): void
+    {
+        $supplierId = $this->supplier();
+        $number = SyntheticPohodaExport::CASH_REPEATED_NUMBER;
+        $invoice = SyntheticPohodaExport::ISSUED_REPEATED_NUMBER;
+        $y1 = SyntheticPohodaExport::write($this->tmp . '/y1', unbooked: true);
+        SyntheticPohodaExport::withCashReceipt($y1, $number, SyntheticPohodaExport::YEAR . '-03-10', 300);
+        SyntheticPohodaExport::withIssuedInvoice($y1, $invoice, '2026901', SyntheticPohodaExport::YEAR . '-03-11', 1000);
+        $first = $this->importer->run($supplierId, $this->userId, PohodaExport::open($y1), false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+
+        $y2 = SyntheticPohodaExport::writeNextYear($this->tmp . '/y2');
+        SyntheticPohodaExport::withCashReceipt($y2, $number, SyntheticPohodaExport::NEXT_YEAR . '-03-10', 400);
+        SyntheticPohodaExport::withIssuedInvoice($y2, $invoice, '2027901', SyntheticPohodaExport::NEXT_YEAR . '-03-11', 2000);
+        $next = $this->importer->run($supplierId, $this->userId, PohodaExport::open($y2), false);
+        self::assertSame(0, self::stepCounts($next, 'link')['orphans'] ?? 0, $this->explain($next));
+
+        $invoices = $this->db->pdo()->prepare(
+            "SELECT i.issue_date, i.total_without_vat,
+                    (SELECT GROUP_CONCAT(e.entry_date) FROM journal_entries e
+                      WHERE e.supplier_id = i.supplier_id AND e.source_type = 'invoice' AND e.source_id = i.id AND e.reversed_by IS NULL) AS own_entries,
+                    (SELECT GROUP_CONCAT(DISTINCT e.entry_date) FROM journal_entry_document_links l JOIN journal_entries e ON e.id = l.entry_id
+                      WHERE l.supplier_id = i.supplier_id AND l.doc_type = 'invoice' AND l.doc_id = i.id) AS linked_entries
+               FROM invoices i WHERE i.supplier_id = ? AND i.payment_variable_symbol IN ('2026901', '2027901') ORDER BY i.issue_date"
+        );
+        $invoices->execute([$supplierId]);
+        $i1 = SyntheticPohodaExport::YEAR . '-03-11';
+        $i2 = SyntheticPohodaExport::NEXT_YEAR . '-03-11';
+        self::assertSame([[$i1, '1000.00', $i1, $i1], [$i2, '2000.00', $i2, $i2]],
+            array_map(static fn (array $r): array => array_map(static fn ($v): ?string => $v === null ? null : (string) $v, $r), $invoices->fetchAll(\PDO::FETCH_NUM)));
+
+        $docs = $this->db->pdo()->prepare(
+            "SELECT d.issue_date, d.total_amount,
+                    (SELECT GROUP_CONCAT(e.entry_date) FROM journal_entries e
+                      WHERE e.supplier_id = d.supplier_id AND e.source_type = 'cash' AND e.source_id = d.id AND e.reversed_by IS NULL) AS own_entries,
+                    (SELECT e.entry_date FROM journal_entries e WHERE e.id = d.journal_entry_id) AS cash_entry,
+                    (SELECT GROUP_CONCAT(e.entry_date ORDER BY e.entry_date) FROM journal_entry_document_links l JOIN journal_entries e ON e.id = l.entry_id
+                      WHERE l.supplier_id = d.supplier_id AND l.doc_type = 'cash' AND l.doc_id = d.id) AS linked_entries
+               FROM cash_documents d WHERE d.supplier_id = ? AND d.description = 'Tržba v hotovosti' ORDER BY d.issue_date"
+        );
+        $y1Date = SyntheticPohodaExport::YEAR . '-03-10';
+        $y2Date = SyntheticPohodaExport::NEXT_YEAR . '-03-10';
+        $expected = [
+            [$y1Date, '300.00', $y1Date, $y1Date, $y1Date],
+            [$y2Date, '400.00', $y2Date, $y2Date, $y2Date],
+        ];
+        $docs->execute([$supplierId]);
+        self::assertSame($expected, array_map(static fn (array $r): array => array_map(static fn ($v): ?string => $v === null ? null : (string) $v, $r), $docs->fetchAll(\PDO::FETCH_NUM)));
+
+        // Stav po dřívějším převodu: doklad druhého roku bez vlastního zápisu, s vazbou
+        // i odkazem na zápis loňského dokladu. Opakovaný převod ho opraví.
+        $pdo = $this->db->pdo();
+        $ids = $pdo->prepare("SELECT d.id, e.id FROM cash_documents d JOIN journal_entries e ON e.supplier_id = d.supplier_id AND e.source_type = 'cash' AND e.source_id = d.id
+            WHERE d.supplier_id = ? AND d.description = 'Tržba v hotovosti' ORDER BY d.issue_date");
+        $ids->execute([$supplierId]);
+        [[, $e1], [$d2, $e2]] = array_map(static fn (array $r): array => array_map('intval', $r), $ids->fetchAll(\PDO::FETCH_NUM));
+        $pdo->prepare('UPDATE journal_entries SET source_id = NULL WHERE id = ?')->execute([$e2]);
+        $pdo->prepare('UPDATE cash_documents SET journal_entry_id = ? WHERE id = ?')->execute([$e1, $d2]);
+        $pdo->prepare("INSERT INTO journal_entry_document_links (supplier_id, entry_id, doc_type, doc_id, note) VALUES (?, ?, 'cash', ?, 'Převzato z Pohody')")
+            ->execute([$supplierId, $e1, $d2]);
+        $this->importer->run($supplierId, $this->userId, PohodaExport::open($y2), false);
+        $docs->execute([$supplierId]);
+        self::assertSame($expected, array_map(static fn (array $r): array => array_map(static fn ($v): ?string => $v === null ? null : (string) $v, $r), $docs->fetchAll(\PDO::FETCH_NUM)));
+    }
+
+    /**
+     * Ostatní závazek se stejným číslem v agendě následujícího roku: zápis loňského dokladu
+     * stejného čísla se mu nepřičte, takže převod nehlásí „víc zápisů v deníku" (#386).
+     * Číslo ostatní položky je ve firmě jedinečné, doklad proto narazí na obsazené číslo.
+     */
+    public function testOtherItemWithRepeatedNumberIsNotTakenAsHavingMoreEntries(): void
+    {
+        $supplierId = $this->supplier();
+        $number = SyntheticPohodaExport::OTHER_ITEM_REPEATED_NUMBER;
+        $y1 = SyntheticPohodaExport::write($this->tmp . '/y1', unbooked: true);
+        SyntheticPohodaExport::withOtherCommitment($y1, $number, SyntheticPohodaExport::YEAR . '-02-07', 250);
+        $first = $this->importer->run($supplierId, $this->userId, PohodaExport::open($y1), false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+
+        $y2 = SyntheticPohodaExport::writeNextYear($this->tmp . '/y2');
+        SyntheticPohodaExport::withOtherCommitment($y2, $number, SyntheticPohodaExport::NEXT_YEAR . '-02-07', 260);
+        $next = $this->importer->run($supplierId, $this->userId, PohodaExport::open($y2), false);
+        $codes = array_column((array) ($next->toArray()['steps'][array_search('other_items', array_column($next->toArray()['steps'], 'key'), true)]['messages'] ?? []), 'code');
+        self::assertNotContains('other_item_review', $codes, $this->explain($next));
+        self::assertContains('number_taken', $codes, $this->explain($next));
+
+        $items = $this->db->pdo()->prepare(
+            'SELECT oi.issued_on, oi.amount, e.entry_date FROM other_items oi LEFT JOIN journal_entries e ON e.id = oi.journal_entry_id
+              WHERE oi.supplier_id = ? AND oi.document_no = ? ORDER BY oi.issued_on'
+        );
+        $items->execute([$supplierId, $number]);
+        $y1Date = SyntheticPohodaExport::YEAR . '-02-07';
+        self::assertSame([[$y1Date, '250.00', $y1Date]],
+            array_map(static fn (array $r): array => array_map(static fn ($v): ?string => $v === null ? null : (string) $v, $r), $items->fetchAll(\PDO::FETCH_NUM)));
     }
 
     /** Úhradu, kterou uživatel mezi převody spároval v MyÚčtu, převod nezdvojí. */
