@@ -177,12 +177,15 @@ function toggleMember(id: number) {
   else if (checkedMembers.value.length < 500) checkedMembers.value.push(id)
 }
 /** Klávesnice jako v seznamu faktur: j/k pohyb po řádcích, Enter otevře člena, x vybere do dávky, Esc zruší výběr. */
+// Jen na záložce členů: na ostatních záložkách patří Enter, x i Esc jejich vlastním prvkům.
+const onMembersTab = () => tab.value === 'members'
 const { activeIndex } = useListKeyboard({
-  count: () => (tab.value === 'members' ? members.value.length : 0),
-  open: index => { const row = members.value[index]; if (row) openMember(row) },
-  toggle: index => { const row = members.value[index]; if (row) toggleMember(row.id) },
-  clear: () => { if (!batchLocked.value) checkedMembers.value = [] },
+  count: () => (onMembersTab() ? members.value.length : 0),
+  open: index => { const row = members.value[index]; if (onMembersTab() && row) openMember(row) },
+  toggle: index => { const row = members.value[index]; if (onMembersTab() && row) toggleMember(row.id) },
+  clear: () => { if (onMembersTab() && !batchLocked.value) checkedMembers.value = [] },
 })
+watch(tab, () => { activeIndex.value = -1 })
 
 /** Po návratu z detailu fokus na odkaz člena; tabulka i karty jsou v DOM, bere se viditelný. */
 function focusMember(id: number) {

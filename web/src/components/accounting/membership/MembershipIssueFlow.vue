@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useI18n } from 'vue-i18n'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import DialogActions from '@/components/ui/DialogActions.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import { formDateInput as dateInput, formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -399,7 +399,7 @@ const classificationRows = computed(() => {
 const retryActions = computed<ActionItem[]>(() => [
   { key: 'classification-retry', label: t('nonprofitMembership.classificationRetry'), icon: 'cycle', tier: 'primary', variant: 'warning', disabled: inputsLocked.value, run: () => { void loadClassification() } },
 ])
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   { key: 'issue-preview', label: t(props.batchMode ? 'nonprofitMembership.batchPrepare' : 'nonprofitMembership.preview'), icon: 'eye', tier: 'primary', variant: 'primary', loading: commit.previewing.value, disabled: !props.canManage || !!problem.value || commit.busy.value || inputsLocked.value || !!pendingRate.value, disabledReason: problem.value || undefined, run: () => { void runPreview() } },
   { key: 'issue-close', label: t('nonprofitMembership.close'), icon: 'x', show: !props.batchMode, disabled: inputsLocked.value, run: () => emit('close') },
 ])
@@ -407,7 +407,7 @@ const actions = computed<ActionItem[]>(() => [
 
 <template>
   <section class="space-y-4" data-section="issue-flow">
-    <div ref="ratePicker"><MembershipRates :key="supplier" :supplier="supplier" :can-manage="false" selectable :allow-manual="!batchMode" :disabled="inputsLocked || !!pendingRate" @selected="applyRate" /></div>
+    <div ref="ratePicker" data-draft-ignore><MembershipRates :key="supplier" :supplier="supplier" :can-manage="false" selectable :allow-manual="!batchMode" :disabled="inputsLocked || !!pendingRate" @selected="applyRate" /></div>
     <div v-if="pendingRate" :class="warningBox" role="alert" data-section="rate-overwrite">
       <p>{{ t('nonprofitMembership.rateOverwriteDimensions') }}</p>
       <div class="mt-2 flex flex-wrap gap-2">

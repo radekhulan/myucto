@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ActionItem } from '@/components/ui/ActionBar.vue'
-import DialogActions from '@/components/ui/DialogActions.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import { formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import { membershipApi, type MemberIdentity, type MemberIdentityInput, type MemberRevision, type MemberRevisionVoidInput } from '@/api/nonprofitMembership'
@@ -93,7 +92,7 @@ watch(commit.errorKind, kind => { if (STALE.includes(kind)) emit('stale') })
 watch(commit.locked, locked => emit('lock', locked))
 
 const tone = computed(() => (props.mode === 'identity' ? 'success' : 'danger'))
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   { key: 'corr-close', label: t('nonprofitMembership.close'), icon: 'x', disabled: commit.locked.value, run: () => emit('close') },
   { key: 'corr-review', label: t('nonprofitMembership.review'), icon: 'eye', tier: 'primary', variant: props.mode === 'identity' ? 'primary' : 'danger',
     disabled: !props.canManage || !!invalid.value || commit.busy.value || commit.locked.value, disabledReason: invalidShown.value ? undefined : invalid.value || undefined, run: review },

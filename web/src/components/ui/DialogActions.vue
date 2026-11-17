@@ -10,13 +10,15 @@ import { useModalFooter } from './modalFooter'
  * patičky (provideModalFooter v Modal), mimo okno nebo s `inline` zůstanou na místě.
  * Akce popisuje stejný ActionItem jako ActionBar, takže formulář jen mění komponentu, ne svůj stav.
  */
-const props = defineProps<{ actions: ActionItem[]; inline?: boolean }>()
-const footer = useModalFooter()
+/** Jen tlačítka: odkazy (to, href, download) a nabídku „…“ (tier overflow) patička dialogu nemá. */
+export type DialogAction = Omit<ActionItem, 'to' | 'href' | 'download' | 'tier'> & { tier?: 'primary' | 'secondary' }
+const props = defineProps<{ actions: DialogAction[]; inline?: boolean }>()
+const footer = useModalFooter(() => !props.inline)
 const visible = computed(() => props.actions.filter(a => a.show === undefined || !!a.show))
 const ordered = computed(() => [...visible.value.filter(a => a.tier !== 'primary'), ...visible.value.filter(a => a.tier === 'primary')])
 /** Důvod zašednutí je vidět i bez najetí myší (dotyk, čtečka), stejně jako u ActionBar. */
 const notes = computed(() => [...new Set(visible.value.filter(a => a.disabled && a.disabledReason).map(a => a.disabledReason as string))])
-const classOf = (a: ActionItem) => [a.tier === 'primary' ? btnFilled(a.variant ?? 'primary') : btnOutline(a.variant ?? 'neutral'), 'whitespace-nowrap']
+const classOf = (a: DialogAction) => [a.tier === 'primary' ? btnFilled(a.variant ?? 'primary') : btnOutline(a.variant ?? 'neutral'), 'whitespace-nowrap']
 const target = computed(() => (props.inline ? null : footer.target.value))
 </script>
 

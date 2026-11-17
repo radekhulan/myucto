@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ActionItem } from '@/components/ui/ActionBar.vue'
-import DialogActions from '@/components/ui/DialogActions.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import { warningBox } from './membershipFormat'
 
 /** `tone`: potvrzení zápisu je `success`, storno (protizápis) `danger` podle sémantiky akčních tlačítek. */
@@ -10,7 +9,7 @@ const props = withDefaults(defineProps<{ acknowledged: boolean; busy: boolean; u
 const emit = defineEmits<{ 'update:acknowledged': [value: boolean]; confirm: []; cancel: []; discard: [] }>()
 const { t } = useI18n()
 
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   {
     key: 'confirm', label: props.confirmLabel ?? t(props.uncertain ? 'nonprofitMembership.retrySame' : 'nonprofitMembership.confirm'), icon: 'check', tier: 'primary', variant: props.tone, loading: props.busy,
     disabled: props.busy || !props.acknowledged || !props.canManage || !!props.blockedReason,

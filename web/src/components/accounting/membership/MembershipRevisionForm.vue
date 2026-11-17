@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ActionItem } from '@/components/ui/ActionBar.vue'
-import DialogActions from '@/components/ui/DialogActions.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import { formDateInput as dateInput, formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import { membershipApi, type MemberIdentity, type MemberRevision, type MemberRevisionInput, type MemberStatus } from '@/api/nonprofitMembership'
@@ -70,7 +69,7 @@ const dirty = computed(() => form.status !== 'active' || !!form.effectiveFrom ||
 watch(dirty, value => emit('dirty', value), { immediate: true })
 onBeforeUnmount(() => emit('dirty', false))
 
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   { key: 'rev-close', label: t('nonprofitMembership.close'), icon: 'x', show: !!last.value, disabled: commit.locked.value, run: () => emit('close') },
   { key: 'rev-review', label: t('nonprofitMembership.review'), icon: 'eye', tier: 'primary', variant: 'primary', disabled: !props.canManage || !!invalid.value || commit.busy.value || commit.locked.value, disabledReason: invalid.value || undefined, run: review },
 ])

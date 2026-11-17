@@ -3,7 +3,7 @@ import { computed, onActivated, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { formInput as field, formLabel } from '@/components/ui/formStyles'
-import { btnFilled, btnIconSm, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
 import {
@@ -173,17 +173,14 @@ onBeforeUnmount(() => { alive = false })
 
     <div v-if="proposals.length" class="space-y-2" data-section="erasure-proposals">
       <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitMembership.erasure.proposals') }}</h3>
-      <!-- Návrhy jako tabulka se zebrou jako ostatní seznamy; otevřený návrh je zvýrazněný. -->
+      <!-- Návrhy jako řádky seznamu členů: klik na řádek nebo na název otevře návrh; otevřený je zvýrazněný. -->
       <div class="overflow-x-auto rounded-lg border border-neutral-200">
         <table class="w-full text-sm">
           <tbody class="divide-y divide-neutral-100">
-            <tr v-for="p in proposals" :key="p.id" :class="detail?.proposal.id === p.id ? 'bg-primary-50/40' : ''" data-field="erasure-proposal">
-              <td class="px-4 py-2.5 font-medium">{{ t('nonprofitMembership.erasure.proposalTitle', { id: p.id, date: formatDate(p.as_of) }) }}</td>
+            <tr v-for="p in proposals" :key="p.id" class="cursor-pointer hover:bg-neutral-50" :class="detail?.proposal.id === p.id ? 'bg-primary-50/40' : ''" data-field="erasure-proposal" @click="!busy && show(p.id)">
+              <td class="px-4 py-2.5"><button type="button" class="row-link cursor-pointer text-left font-medium text-neutral-900 disabled:cursor-default" :disabled="busy" data-action="erasure-show" @click.stop="show(p.id)">{{ t('nonprofitMembership.erasure.proposalTitle', { id: p.id, date: formatDate(p.as_of) }) }}</button></td>
               <td class="whitespace-nowrap px-4 py-2.5"><span :class="statusBadge(p.status)">{{ t(`nonprofitMembership.erasure.status_${p.status}`) }}</span></td>
               <td class="px-4 py-2.5 text-neutral-500">{{ t('nonprofitMembership.erasure.proposalCounts', { total: p.item_count ?? 0, done: p.done_count ?? 0, skipped: p.skipped_count ?? 0 }) }}</td>
-              <td class="px-4 py-2 text-right">
-                <button type="button" :class="btnIconSm('primary')" :title="t('nonprofitMembership.erasure.show')" :aria-label="t('nonprofitMembership.erasure.show')" data-action="erasure-show" :disabled="busy" @click="show(p.id)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg></button>
-              </td>
             </tr>
           </tbody>
         </table>

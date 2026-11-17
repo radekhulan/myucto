@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ActionItem } from '@/components/ui/ActionBar.vue'
-import DialogActions from '@/components/ui/DialogActions.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import { formDateInput as dateInput, formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import type { AccountingPeriod } from '@/api/accounting'
@@ -86,7 +85,7 @@ const frozenRequest = computed(() => {
 })
 const accounts = computed(() => commit.review.value?.original?.proof?.accounts)
 
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   { key: 'reverse-preview', label: t('nonprofitMembership.preview'), icon: 'eye', tier: 'primary', variant: 'primary', loading: commit.previewing.value, disabled: !props.canManage || !!problem.value || commit.busy.value || commit.locked.value, disabledReason: problem.value || undefined, run: () => { void runPreview() } },
   { key: 'reverse-close', label: t('nonprofitMembership.close'), icon: 'x', disabled: commit.locked.value, run: () => emit('close') },
 ])

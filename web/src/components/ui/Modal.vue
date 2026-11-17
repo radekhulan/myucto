@@ -30,6 +30,8 @@ let scrollLocked = false
 const stackId = Symbol('modal')
 /** Patička i pro tlačítka formuláře uvnitř okna (DialogActions), nejen pro slot #footer. */
 const footer = provideModalFooter()
+// Zařazení do pořadí oken už při vytvoření: setup rodiče běží před vnořeným oknem, onMounted naopak.
+pushModal(stackId, () => paneId.value, () => paneActive.value)
 function setFooter(el: unknown) { footer.target.value = el instanceof HTMLElement ? el : null }
 
 /**
@@ -60,7 +62,6 @@ function onKey(e: KeyboardEvent) {
 }
 
 onMounted(() => {
-  pushModal(stackId, () => paneId.value, () => paneActive.value)
   document.addEventListener('keydown', onKey)
   window.addEventListener('resize', measurePreview)
   measurePreview()

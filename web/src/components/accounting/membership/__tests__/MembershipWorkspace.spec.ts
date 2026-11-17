@@ -1166,6 +1166,13 @@ describe('Membership workspace', () => {
     expect(w.get('[data-member="1"]').attributes('data-row-active')).toBe('true')
     await key('Enter')
     expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: false })
+    // Na jiné záložce klávesy seznamu nepůsobí (Enter, x i Esc patří jejím prvkům).
+    rowLink.navigate.mockClear()
+    await w.get('[data-tab="rates"]').trigger('click'); await flushPromises()
+    await key('j'); await key('x'); await key('Enter'); await key('Escape')
+    expect(rowLink.navigate).not.toHaveBeenCalled()
+    expect((w.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
+    expect((w.get('[data-member="2"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(true)
     w.unmount()
   })
 })

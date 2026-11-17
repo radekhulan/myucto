@@ -4,12 +4,12 @@ import { createPinia } from 'pinia'
 import { defineComponent, h, ref } from 'vue'
 import Modal from '@/components/ui/Modal.vue'
 import DialogActions from '@/components/ui/DialogActions.vue'
-import type { ActionItem } from '@/components/ui/ActionBar.vue'
+import type { DialogAction } from '@/components/ui/DialogActions.vue'
 
 afterEach(() => { document.body.innerHTML = '' })
 
 const run = vi.fn()
-const actions: ActionItem[] = [
+const actions: DialogAction[] = [
   { key: 'confirm', label: 'Synthetic confirm', icon: 'check', tier: 'primary', variant: 'success', disabled: true, disabledReason: 'Synthetic reason', run },
   { key: 'cancel', label: 'Synthetic cancel', icon: 'x', run },
   { key: 'hidden', label: 'Synthetic hidden', show: false, run },
@@ -42,6 +42,7 @@ describe('DialogActions', () => {
     await flushPromises()
     const footer = document.querySelector('[role="dialog"] footer') as HTMLElement
     expect(footer.querySelector('button')).toBeNull()
+    expect(footer.style.display).toBe('none')
     expect(document.querySelector('[role="dialog"] [data-action="cancel"]')).not.toBeNull()
     show.value = false; await flushPromises()
     expect(footer.style.display).toBe('none')

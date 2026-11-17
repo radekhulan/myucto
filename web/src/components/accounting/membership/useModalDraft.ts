@@ -10,10 +10,14 @@ import { useI18n } from 'vue-i18n'
 export function useModalDraft() {
   const { t } = useI18n()
   const touched = ref(false)
-  /** Posluchač na obal obsahu okna (@input a @change); psaní do hledání a našeptávače se nepočítá. */
+  /**
+   * Posluchač na obal obsahu okna (@input a @change). Nepočítá se pole hledání (type="search") a prvky
+   * označené `data-draft-ignore` (výběr sazby v předpisu jen hledá, nic nevyplňuje).
+   */
   function mark(event?: Event) {
     const target = event?.target
-    if (target instanceof HTMLInputElement && (target.type === 'search' || target.getAttribute('role') === 'combobox')) return
+    if (target instanceof HTMLInputElement && target.type === 'search') return
+    if (target instanceof Element && target.closest('[data-draft-ignore]')) return
     touched.value = true
   }
   /** Po uložení nebo zavření: další zavření se už neptá. */

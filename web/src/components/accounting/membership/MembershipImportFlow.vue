@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { ActionItem } from '@/components/ui/ActionBar.vue'
-import DialogActions from '@/components/ui/DialogActions.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import { membershipApi, type MembershipImportReport, type MembershipImportRow } from '@/api/nonprofitMembership'
 import { formatDate } from '@/composables/useFormat'
 import { errorBox, loudBadge, quietBadge, errorCode, membershipError, warningBox } from './membershipFormat'
@@ -83,7 +82,7 @@ const rows = computed<MembershipImportRow[]>(() => {
   return onlyProblems.value ? all.filter(row => row.status === 'error' || row.outcome === 'failed') : all
 })
 
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   { key: 'import-preview', label: t('nonprofitMembership.import.preview'), icon: 'eye', tier: 'primary', variant: 'primary', show: step.value === 'upload',
     disabled: !file.value || busy.value, disabledReason: t('nonprofitMembership.import.chooseFile'), run: () => { void send(false) } },
   { key: 'import-confirm', label: t('nonprofitMembership.import.confirm'), icon: 'check', tier: 'primary', variant: 'success', show: step.value === 'preview' && props.canManage,

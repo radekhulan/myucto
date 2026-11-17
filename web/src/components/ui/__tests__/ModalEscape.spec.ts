@@ -102,4 +102,16 @@ describe('Modal a Escape v pracovní ploše a s nabídkou akcí', () => {
     expect(closed).toEqual(['A'])
     A.unmount(); B.unmount()
   })
+
+  it('vnořené okno vykreslené naráz s rodičem zavře Escape jako první', async () => {
+    const closed: string[] = []
+    const Both = defineComponent({ setup: () => () => h(Modal, { title: 'Parent', onClose: () => closed.push('parent') }, () => [
+      h(Modal, { title: 'Child', onClose: () => closed.push('child') }, () => h('p', 'child')),
+    ]) })
+    const w = mount(Both, { attachTo: document.body, global: { plugins: [createPinia()] } })
+    await flushPromises()
+    escape(); await flushPromises()
+    expect(closed).toEqual(['child'])
+    w.unmount()
+  })
 })

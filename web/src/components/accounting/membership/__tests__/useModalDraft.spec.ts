@@ -12,8 +12,8 @@ function host() {
       draft = useModalDraft()
       return () => h('div', { onInput: draft.mark, onChange: draft.mark }, [
         h('input', { type: 'search', 'data-test': 'search' }),
-        h('input', { role: 'combobox', 'data-test': 'combobox' }),
-        h('input', { 'data-test': 'field' }),
+        h('div', { 'data-draft-ignore': '' }, [h('input', { role: 'combobox', 'data-test': 'rate' })]),
+        h('input', { role: 'combobox', 'data-test': 'contact' }),
       ])
     },
   })
@@ -22,14 +22,14 @@ function host() {
 }
 
 describe('useModalDraft', () => {
-  it('nepočítá psaní do hledání ani našeptávače jako rozepsaný formulář', async () => {
+  it('nepočítá hledání (pole search, výběr sazby) jako rozepsaný formulář, hledání kontaktu ano', async () => {
     const confirm = vi.spyOn(window, 'confirm')
     const { w, draft } = host()
     await w.get('[data-test="search"]').trigger('input')
-    await w.get('[data-test="combobox"]').trigger('input')
+    await w.get('[data-test="rate"]').trigger('input')
     expect(draft().confirmClose()).toBe(true)
     expect(confirm).not.toHaveBeenCalled()
-    await w.get('[data-test="field"]').trigger('input')
+    await w.get('[data-test="contact"]').trigger('input')
     confirm.mockReturnValueOnce(false)
     expect(draft().confirmClose()).toBe(false)
     expect(confirm).toHaveBeenCalledWith(cs.nonprofitMembership.closeUnsavedConfirm)

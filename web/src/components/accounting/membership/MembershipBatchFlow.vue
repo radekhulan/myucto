@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import DialogActions from '@/components/ui/DialogActions.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import { membershipApi, type MembershipIssueRequest, type MembershipBatchDetail, type MembershipBatchCreate, type MembershipBatchRecent } from '@/api/nonprofitMembership'
 import type { AccountingPeriod } from '@/api/accounting'
 import type { DimensionOverview } from '@/api/dimensions'
@@ -191,7 +191,7 @@ async function cancelBatch() {
   } finally {if (alive && ticket === epoch) {busy.value = false; void loadRecent()}}
 }
 
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   {key: 'batch-prepare', label: t('nonprofitMembership.batchContinuePreview'), icon: 'eye', tier: 'primary', variant: 'primary', show: !!detail.value && ['seeding', 'preparing'].includes(detail.value.batch.phase), disabled: busy.value || !props.canManage, run: () => {void work('prepare')}},
   {key: 'batch-renew', label: t('nonprofitMembership.batchRenewPreview'), icon: 'eye', variant: 'primary', show: !!detail.value && ['ready', 'posting'].includes(detail.value.batch.phase) && approvalExpired.value && props.canManage, disabled: busy.value, run: () => {void renewPreview()}},
   {key: 'batch-cancel', label: t('nonprofitMembership.batchCancel'), icon: 'x', variant: 'warning', show: !!detail.value && ['seeding','preparing','ready','posting'].includes(detail.value.batch.phase) && props.canManage, disabled: busy.value, run: () => {cancelling.value = true}},

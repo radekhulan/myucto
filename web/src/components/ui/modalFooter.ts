@@ -1,4 +1,4 @@
-import { computed, inject, onBeforeUnmount, provide, ref, type InjectionKey, type Ref } from 'vue'
+import { computed, inject, onBeforeUnmount, provide, ref, watch, type InjectionKey, type Ref } from 'vue'
 
 /**
  * Patička okna (Modal) pro tlačítka formuláře, který v okně leží jako samostatná komponenta.
@@ -17,12 +17,19 @@ export function provideModalFooter(): ModalFooter {
   return footer
 }
 
-/** Volá DialogActions: patička nejbližšího okna, nebo null mimo okno. */
-export function useModalFooter() {
+/**
+ * Volá DialogActions: patička nejbližšího okna, nebo null mimo okno. Patičku obsadí (a tím zobrazí) jen
+ * dokud `uses()` platí; tlačítka vykreslená na místě (inline) prázdnou patičku neukazují.
+ */
+export function useModalFooter(uses: () => boolean = () => true) {
   const footer = inject(modalFooterKey, null)
-  if (footer) {
-    footer.claims.value++
-    onBeforeUnmount(() => { footer.claims.value-- })
+  let claimed = false
+  const set = (on: boolean) => {
+    if (!footer || on === claimed) return
+    footer.claims.value += on ? 1 : -1
+    claimed = on
   }
+  watch(uses, on => set(on), { immediate: true })
+  onBeforeUnmount(() => set(false))
   return { target: computed(() => footer?.target.value ?? null) }
 }
