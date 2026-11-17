@@ -2285,7 +2285,11 @@
     "support_notice": "Tento import je určen pro menší množství dat. Převody z jiných systémů jejich výrobci nepodporují a export dat se mezi verzemi i jednotlivými instalacemi liší, proto {recommend}. V rámci placeného servisu vám s převodem rádi pomůžeme a upravíme ho na míru, typicky jde o práci do 10 hodin v ceně 1 500 Kč/h + DPH. Ať importujete sami, nebo s námi, převzatá data si vždy ověřte.",
     "support_notice_recommend": "doporučujeme {contact} a import svěřit nám",
     "support_notice_contact": "kontaktovat naši podporu",
-    "support_notice_link": "Kontaktovat podporu"
+    "support_notice_link": "Kontaktovat podporu",
+    "custom_tag": "Na míru",
+    "custom_title": "Helios, MRP-K/S, Money S4",
+    "custom_hint": "Převod dat z Heliosu, MRP-K/S a Money S4 jsme už pro klienty připravovali. Rádi ho připravíme na míru i pro vás.",
+    "custom_contact": "Kontaktovat podporu"
   },
   "maintenance_notice": {
     "title": "Plánovaná údržba",

@@ -2285,7 +2285,11 @@
     "support_notice": "This import is intended for smaller amounts of data. Migrations from other systems are not supported by their vendors and data exports differ between versions and installations, so {recommend}. As part of our paid service we will be happy to help with the migration and tailor it to your needs; it typically takes up to 10 hours at CZK 1,500/h + VAT. Whether you import on your own or with us, always verify the transferred data.",
     "support_notice_recommend": "we recommend {contact} and leaving the import to us",
     "support_notice_contact": "contacting our support",
-    "support_notice_link": "Contact support"
+    "support_notice_link": "Contact support",
+    "custom_tag": "Tailored",
+    "custom_title": "Helios, MRP-K/S, Money S4",
+    "custom_hint": "We have already transferred data from Helios, MRP-K/S and Money S4 for our clients. We will be happy to prepare a tailored transfer for you too.",
+    "custom_contact": "Contact support"
   },
   "maintenance_notice": {
     "title": "Planned maintenance",
