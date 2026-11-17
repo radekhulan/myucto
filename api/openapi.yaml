@@ -22242,6 +22242,19 @@ paths:
         krýt dluh blokovaný potvrzeným QR příkazem čekajícím na banku (422
         `cash.error.eet_qr_pending`). Povinnou tržbu mimo podporovaný rozsah (cizí měna) doklad
         nezaúčtuje (422 `cash.error.eet_unsupported_scenario`).
+
+        Úhrada cizoměnového dokladu z korunové pokladny: `total_amount` jsou skutečně přijaté
+        nebo vydané koruny. Přijatou fakturu nebo účtenku (`document_kind` invoice | receipt)
+        lze uhradit jen celou a jen dosud neuhrazenou; koruny se musí vejít do kurzové tolerance
+        vůči zbytku přepočtenému kurzem dokladu (jinak 422 `cash.error.fx_amount_out_of_tolerance`
+        s `params` {remaining, currency_code, expected_czk, tolerance_czk}, u částečně uhrazeného dokladu 422
+        `cash.error.cross_currency_partial_unsupported`). Vydaná faktura se v toleranci uhradí
+        celá, menší částka se přepočte kurzem dokladu na částečnou úhradu. Saldokonto se odúčtuje
+        kurzem předpisu, rozdíl proti korunám jde na kurzovou ztrátu 563 nebo zisk 663. Uhrazená
+        částka v měně dokladu je v detailu dokladu jako `settled_document_amount`. Cizoměnovou
+        zálohu, daňový doklad k platbě, vratku ani výplatu dokladu k vyplacení pokladna nehradí
+        (422 `cash.error.foreign_currency_invoice` / `foreign_currency_proforma`), valutová
+        pokladna faktury nehradí vůbec (`foreign_register_purpose_unsupported`).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
@@ -22255,22 +22268,29 @@ paths:
   /api/v1/accounting/cash-documents/unpaid:
     get:
       tags: [Accounting]
-      summary: Našeptávač nezaplacených FV/PF (jen CZK) pro úhradu hotově
+      summary: Našeptávač nezaplacených FV/PF pro úhradu z korunové pokladny
       description: |
-        Vrací doklady, na kterých ještě něco zbývá k úhradě. `remaining` je zbytek,
-        ne brutto: u přijaté faktury se odečítá uhrazená záloha (`amount_to_pay`)
+        Vrací doklady, na kterých ještě něco zbývá k úhradě. `remaining` je zbytek
+        v měně dokladu, ne brutto: u přijaté faktury se odečítá uhrazená záloha (`amount_to_pay`)
         i už zaúčtované úhrady (bankovní i hotovostní), takže doklad krytý zálohou
         se nenabízí vůbec. U vydaných faktur je v seznamu i zálohová faktura
         (`invoice_type = proforma`, příznak `is_proforma`) — hotově se hradit smí,
         ale úhrada spustí vystavení finálního dokladu nebo daňového dokladu
         k přijaté platbě. Platební kalendář se nenabízí.
+
+        Cizoměnové doklady se nabízejí k úhradě korunami: vydaná faktura (ne zálohová)
+        a dosud neuhrazená přijatá faktura nebo účtenka, vždy s kurzem dokladu. Takový řádek
+        nese navíc `exchange_rate` (kurz dokladu), `remaining_czk` (zbytek přepočtený kurzem
+        dokladu) a `czk_tolerance` (kurzová tolerance v Kč, ve které koruny uhradí celý zbytek).
+        Vratka (`refundable=1`) nabízí jen korunové doklady.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: kind, required: true, schema: { type: string, enum: [invoice, purchase_invoice] } }
         - { in: query, name: q, schema: { type: string } }
         - { in: query, name: limit, schema: { type: integer, default: 20 } }
+        - { in: query, name: refundable, description: "1 = doklady pro vratku úhrady nebo výplatu dokladu k vyplacení (jen v Kč)", schema: { type: string, enum: ['0', '1'] } }
       responses:
-        '200': { description: "OK — položky {id, kind, number, partner_name, partner_ic, partner_dic, total, paid, remaining, currency_code, issued_on} + `invoice_type`/`is_proforma` (FV) nebo `document_kind` (PF)", content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: integer }, kind: { type: string, enum: [invoice, purchase_invoice] }, number: { type: string }, partner_name: { type: string }, partner_ic: { type: string, nullable: true, description: "IČ odběratele (FV) nebo dodavatele (PF)" }, partner_dic: { type: string, nullable: true, description: "DIČ odběratele (FV) nebo dodavatele (PF)" }, total: { type: number }, paid: { type: number }, remaining: { type: number }, currency_code: { type: string }, issued_on: { type: string, format: date }, invoice_type: { type: string }, is_proforma: { type: boolean }, document_kind: { type: string } } } } } } }
+        '200': { description: "OK — položky {id, kind, number, partner_name, partner_ic, partner_dic, total, paid, remaining, currency_code, issued_on} + `invoice_type`/`is_proforma` (FV) nebo `document_kind` (PF); u cizoměnového dokladu navíc `exchange_rate`, `remaining_czk`, `czk_tolerance`", content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: integer }, kind: { type: string, enum: [invoice, purchase_invoice] }, number: { type: string }, partner_name: { type: string }, partner_ic: { type: string, nullable: true, description: "IČ odběratele (FV) nebo dodavatele (PF)" }, partner_dic: { type: string, nullable: true, description: "DIČ odběratele (FV) nebo dodavatele (PF)" }, total: { type: number }, paid: { type: number }, remaining: { type: number, description: "Zbytek v měně dokladu" }, currency_code: { type: string }, issued_on: { type: string, format: date }, invoice_type: { type: string }, is_proforma: { type: boolean }, document_kind: { type: string }, exchange_rate: { type: number, description: "Kurz dokladu (jen cizoměnový doklad)" }, remaining_czk: { type: number, description: "Zbytek přepočtený kurzem dokladu (jen cizoměnový doklad)" }, czk_tolerance: { type: number, description: "Kurzová tolerance v Kč, ve které koruny uhradí celý zbytek (jen cizoměnový doklad)" } } } } } } }
 
   /api/v1/accounting/cash-documents/number-series:
     get:

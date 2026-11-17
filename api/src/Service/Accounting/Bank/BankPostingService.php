@@ -22,6 +22,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Accounting\AutoPostingPolicyService;
 use MyInvoice\Service\Accounting\ForeignCurrencyAccountPolicy;
+use MyInvoice\Service\Accounting\FxSettlementPosting;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\OperationType;
 use MyInvoice\Service\Accounting\Pair\JournalPairer;
@@ -1245,125 +1246,32 @@ final class BankPostingService
     }
 
     /**
-     * Saldokontní účet, na kterém je předpis dokladu. Pravidlo úhrady dává syntetiku (321,
-     * 311); vede-li firma saldokonto na analytice (převzaté účetnictví: předpis na 321.001),
-     * musí úhrada odúčtovat tutéž analytiku - jinak předpis na analytice zůstane otevřený
-     * a úhrada visí na syntetice. Jen když předpis má pod syntetikou právě jednu analytiku;
-     * předpis na syntetice (běžná firma) nebo víc analytik = kód z pravidla beze změny.
-     *
-     * Platí i pro cizoměnové větve: převod z cizího programu zakládá doklad v cizí měně
-     * s předpisem na analytice ze zdroje ({@see \MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover}).
-     * Kurzový rozdíl jde na 563/663, saldokonto se odúčtuje na účtu předpisu. Vratky
-     * dobropisů zůstávají u kódu z pravidla.
-     */
-    private function predpisSaldoCode(int $supplierId, int $entryId, string $code): string
-    {
-        if (preg_match('/^\d{3}$/', $code) !== 1) {
-            return $code;
-        }
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT DISTINCT a.account_code
-               FROM journal_entry_lines l
-               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
-              WHERE l.supplier_id = ? AND l.entry_id = ? AND a.account_code LIKE CONCAT(?, '.%')"
-        );
-        $stmt->execute([$supplierId, $entryId, $code]);
-        $codes = $stmt->fetchAll(PDO::FETCH_COLUMN);
-        return count($codes) === 1 ? (string) $codes[0] : $code;
-    }
-
-    /**
-     * Aktivní předpis dokladu, proti kterému se úhrada odúčtuje. Nativní doklad (jen přímý
-     * zápis, případně skupina s jediným přímým členem) se čte beze změny přes findBySource.
-     * Doklad se skupinou zaúčtování ({@see DocumentPostingGroup}) má předpis, dokud skupina
-     * drží aktivní člen: ruční storno přímého člena převzatého dokladu předpis neruší.
+     * Aktivní předpis dokladu, proti kterému se úhrada odúčtuje ({@see FxSettlementPosting::predpis()}).
      *
      * @return array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int}
      */
     private function predpis(int $supplierId, string $docType, int $docId, bool $requirePosted, string $notPostedMessage): array
     {
-        $group = (new DocumentPostingGroup($this->db))->active($supplierId, $docType, $docId);
-        if (DocumentPostingGroup::hasOwnedEntries($group) && !DocumentPostingGroup::isSingleDirectEntry($group, $docType, $docId)) {
-            return [
-                'grouped' => true,
-                'entry_ids' => array_map(static fn (array $entry): int => (int) $entry['id'], $group),
-                'doc_type' => $docType,
-                'doc_id' => $docId,
-            ];
-        }
-        $entry = $this->journal->findBySource($supplierId, $docType, $docId);
-        if ($entry === null
-            || ($requirePosted && ($entry['posted_at'] ?? null) === null)
-            || ($entry['reversed_by'] ?? null) !== null
-        ) {
-            throw new PostingException('document_not_posted', $notPostedMessage);
-        }
-        return ['grouped' => false, 'entry_ids' => [(int) $entry['id']], 'doc_type' => $docType, 'doc_id' => $docId];
+        return $this->fxSettlement()->predpis($supplierId, $docType, $docId, $requirePosted, $notPostedMessage);
     }
 
     /**
-     * Saldokontní účet předpisu a zápisy, které ho nesou. U nativního předpisu beze změny
-     * {@see predpisSaldoCode}. Ve skupině se účet bere jen z aktivních členů, které saldokontní
-     * řádek (účet z pravidla nebo jeho analytika) skutečně nesou; každý člen se vyhodnotí
-     * stejně jako nativní zápis. Nenese-li ho žádný člen, nebo ho dva nesou na různých účtech,
-     * úhrada se automaticky nezaúčtuje: odhad by nechal otevřené saldo na jiném účtu.
-     * Kurz předpisu se u skupiny bere z cizoměnové stopy saldokontních řádků nosičů.
+     * Saldokontní účet předpisu a zápisy, které ho nesou ({@see FxSettlementPosting::predpisSaldo()}).
      *
      * @param array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int} $predpis
      * @return array{code:string, entry_ids:list<int>, fx_rate:?float}
      */
     private function predpisSaldo(int $supplierId, array $predpis, string $code): array
     {
-        if (!$predpis['grouped']) {
-            return [
-                'code' => $this->predpisSaldoCode($supplierId, $predpis['entry_ids'][0], $code),
-                'entry_ids' => $predpis['entry_ids'],
-                'fx_rate' => null,
-            ];
-        }
-        $byEntry = [];
-        foreach ((new DocumentPostingGroup($this->db))->lines($supplierId, $predpis['entry_ids']) as $line) {
-            $account = (string) $line['account_code'];
-            if ($account === $code || str_starts_with($account, $code . '.')) {
-                $byEntry[(int) $line['entry_id']][] = $line;
-            }
-        }
-        $label = ($predpis['doc_type'] === 'invoice' ? 'vydané faktury #' : 'přijaté faktury #') . $predpis['doc_id'];
-        if ($byEntry === []) {
-            throw new PostingException(
-                'posting_group_saldo_ambiguous',
-                'Žádný aktivní zápis skupiny zaúčtování ' . $label . ' nenese saldokontní řádek na účtu ' . $code
-                    . '. Úhradu zaúčtujte ručně.',
-            );
-        }
-        $codes = [];
-        $rates = [];
-        foreach ($byEntry as $lines) {
-            $analytics = array_values(array_unique(array_filter(
-                array_map(static fn (array $line): string => (string) $line['account_code'], $lines),
-                static fn (string $account): bool => str_starts_with($account, $code . '.'),
-            )));
-            $codes[] = preg_match('/^\d{3}$/', $code) === 1 && count($analytics) === 1 ? $analytics[0] : $code;
-            foreach ($lines as $line) {
-                if ($line['currency_code'] !== null && $line['fx_rate'] !== null && (float) $line['fx_rate'] > 0) {
-                    $rates[] = (string) (float) $line['fx_rate'];
-                }
-            }
-        }
-        $codes = array_values(array_unique($codes));
-        $rates = array_values(array_unique($rates));
-        if (count($codes) > 1 || count($rates) > 1) {
-            throw new PostingException(
-                'posting_group_saldo_ambiguous',
-                'Saldokonto ' . $label . ' nesou ve skupině zaúčtování různé účty nebo kurzy ('
-                    . implode(', ', count($codes) > 1 ? $codes : $rates) . '). Úhradu zaúčtujte ručně.',
-            );
-        }
-        return [
-            'code' => $codes[0],
-            'entry_ids' => array_keys($byEntry),
-            'fx_rate' => $rates === [] ? null : (float) $rates[0],
-        ];
+        return $this->fxSettlement()->predpisSaldo($supplierId, $predpis, $code);
+    }
+
+    private ?FxSettlementPosting $fxSettlement = null;
+
+    /** Sdílené zaúčtování cizoměnové úhrady (banka i pokladna, {@see FxSettlementPosting}). */
+    private function fxSettlement(): FxSettlementPosting
+    {
+        return $this->fxSettlement ??= new FxSettlementPosting($this->db, $this->postingRules, $this->journal);
     }
 
     private function incomingPurchaseRefundCounter(int $supplierId, int $pfId): string
@@ -1832,80 +1740,30 @@ final class BankPostingService
     }
 
     /**
-     * Kurz předpisu z cizoměnové stopy saldokontního řádku deníku (§35 — kurz zafixovaný
-     * při zaúčtování, i kdyby se exchange_rate hlavičky dokladu později změnil). Fallback
-     * na exchange_rate dokladu, když stopa chybí (předpis bez FX stopy).
-     *
-     * Skupina zaúčtování bere kurz ze saldokontních řádků svých nosičů ({@see predpisSaldo}),
-     * bez stopy z ostatních řádků těchže nosičů.
+     * Kurz předpisu ({@see FxSettlementPosting::predpisFxRate()}).
      *
      * @param array{code:string, entry_ids:list<int>, fx_rate:?float} $saldo
      * @param array<string,mixed> $doc
      */
     private function predpisFxRate(int $supplierId, array $saldo, array $doc): float
     {
-        if ($saldo['fx_rate'] !== null) {
-            return $saldo['fx_rate'];
-        }
-        foreach ($saldo['entry_ids'] as $entryId) {
-            foreach ($this->journal->linesForEntry($entryId, $supplierId) as $l) {
-                if ($l['currency_code'] !== null && $l['fx_rate'] !== null && (float) $l['fx_rate'] > 0) {
-                    return (float) $l['fx_rate'];
-                }
-            }
-        }
-        $rate = isset($doc['exchange_rate']) ? (float) $doc['exchange_rate'] : 0.0;
-        if ($rate > 0) {
-            return $rate;
-        }
-        throw new PostingException('missing_exchange_rate', 'Předpis dokladu nemá kurz pro přepočet cizoměnové úhrady.');
+        return $this->fxSettlement()->predpisFxRate($supplierId, $saldo, $doc);
     }
 
     /**
-     * Doplní vyrovnávací řádek kurzového rozdílu: ΣMD − ΣD dosud sestavených řádků > 0
-     * (banka přinesla víc / závazek byl vyšší v CZK) → kurzový ZISK 663 D, < 0 → kurzová
-     * ZTRÁTA 563 MD. Nula (kurz úhrady == kurz předpisu) → žádný řádek. Účty z kontací
-     * fx.gain/fx.loss (jako FxRevaluationService), bez stropu (kurzový rozdíl je legitimní).
+     * Vyrovnávací řádek kurzového rozdílu 563/663 ({@see FxSettlementPosting::appendFxDifference()}).
      *
      * @param list<array{account_code:string, side:string, amount:float}> $lines
      */
     private function appendFxDifference(array &$lines, int $supplierId, string $entryDate, float $remainderCzk = 0.0, bool $incoming = true): void
     {
-        $balance = PostingService::balanceCents($lines);
-        $diff = $balance['debit'] - $balance['credit'];
-        $profile = AccountRoleResolver::fromConnection($this->db)->forDate($supplierId, $entryDate);
-        $remainderCents = (int) round(abs($remainderCzk) * 100.0);
-        if ($remainderCents > 0) {
-            $lines[] = $incoming
-                ? $this->supplementaryLine($profile->account('rounding.gain'), 'credit', $remainderCents / 100.0)
-                : $this->supplementaryLine($profile->account('rounding.loss'), 'debit', $remainderCents / 100.0);
-            $diff += $incoming ? -$remainderCents : $remainderCents;
-        }
-        if ($diff === 0) {
-            return;
-        }
-        [$loss, $gain] = $this->fxResultAccounts($supplierId, $entryDate);
-        if ($diff > 0) {
-            $lines[] = $this->supplementaryLine($gain, 'credit', $diff / 100.0);
-        } else {
-            $lines[] = $this->supplementaryLine($loss, 'debit', -$diff / 100.0);
-        }
+        $this->fxSettlement()->appendFxDifference($lines, $supplierId, $entryDate, $remainderCzk, $incoming);
     }
 
-    /**
-     * FX role k datu platby zachovávají kontace 500. Protiúčet je dynamický
-     * (saldokonto/banka daného případu), proto seed nese jen jednu stranu.
-     *
-     * @return array{0:string, 1:string} [loss, gain]
-     */
+    /** @return array{0:string, 1:string} [loss, gain] */
     private function fxResultAccounts(int $supplierId, string $entryDate): array
     {
-        $lossRule = $this->postingRules->resolve($supplierId, 'fx.loss');
-        $gainRule = $this->postingRules->resolve($supplierId, 'fx.gain');
-        $profile = AccountRoleResolver::fromConnection($this->db)->forDate($supplierId, $entryDate);
-        $loss = $profile->account('fx.loss', $lossRule['debit_account_code'] ?? null);
-        $gain = $profile->account('fx.gain', $gainRule['credit_account_code'] ?? null);
-        return [(string) $loss, (string) $gain];
+        return $this->fxSettlement()->fxResultAccounts($supplierId, $entryDate);
     }
 
     /**
@@ -1922,18 +1780,14 @@ final class BankPostingService
     }
 
     /**
-     * Doplní saldokontnímu řádku cizoměnovou stopu (§4/12 — souběžné vedení v cizí měně;
-     * podklad pro přecenění §24/6). amount zůstává v CZK (hodnota předpisu).
+     * Cizoměnová stopa saldokontního řádku ({@see FxSettlementPosting::withFxTrace()}).
      *
      * @param array{account_code:string, side:string, amount:float} $line
      * @return array{account_code:string, side:string, amount:float, currency_code:string, fx_rate:float, amount_foreign:float}
      */
     private function withFxTrace(array $line, string $currency, float $fxRate, float $foreign): array
     {
-        $line['currency_code'] = $currency;
-        $line['fx_rate'] = $fxRate;
-        $line['amount_foreign'] = round($foreign, 2);
-        return $line;
+        return FxSettlementPosting::withFxTrace($line, $currency, $fxRate, $foreign);
     }
 
     /**
@@ -4484,15 +4338,10 @@ final class BankPostingService
         );
     }
 
-    /**
-     * Doplňkový řádek úhrady (haléřové vyrovnání, kurzový rozdíl). V jednoduchém zápisu
-     * se páruje postupně s hlavním řádkem strany (JournalPairer, role `rounding`), takže
-     * hromadná úhrada s rozdílem zůstane rozdělitelná na dvojice. Složená firma klíč
-     * nevidí, zaúčtování ho zahodí.
-     */
+    /** Doplňkový řádek úhrady ({@see FxSettlementPosting::supplementaryLine()}). */
     private function supplementaryLine(string $code, string $side, float $amount): array
     {
-        return $this->line($code, $side, $amount) + ['pair_role' => JournalPairer::ROLE_ROUNDING];
+        return FxSettlementPosting::supplementaryLine($code, $side, $amount);
     }
 
     /** @param array<string,mixed> $line */

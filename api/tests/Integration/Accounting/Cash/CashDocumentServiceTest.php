@@ -504,14 +504,16 @@ final class CashDocumentServiceTest extends TestCase
         if ($eurId === 0) {
             self::markTestSkipped('Měna EUR není v číselníku.');
         }
+        // Korunová úhrada cizoměnové FV potřebuje kurz dokladu (CashForeignSettlementTest);
+        // faktura bez kurzu se z pokladny uhradit nedá.
         $eurInvoice = $this->saleInvoice('FV-2099-102', $client, 100.00, $eurId);
         try {
             $this->service->create($this->supplierId, $this->doc([
                 'purpose' => 'invoice_payment', 'doc_type' => 'in', 'total_amount' => 100.00, 'invoice_id' => $eurInvoice,
             ], $reg), $this->userId);
-            self::fail('Úhrada cizoměnové FV musí selhat.');
+            self::fail('Úhrada cizoměnové FV bez kurzu musí selhat.');
         } catch (CashException $e) {
-            self::assertSame('foreign_currency_invoice', $e->errorCode);
+            self::assertSame('fx_rate_unavailable', $e->errorCode);
         }
     }
 
@@ -542,7 +544,7 @@ final class CashDocumentServiceTest extends TestCase
             self::assertSame('partial_purchase_payment', $e->errorCode);
         }
 
-        // PF v EUR → chyba.
+        // PF v EUR bez kurzu → chyba (korunová úhrada s kurzem: CashForeignSettlementTest).
         $eurId = (int) ($this->db->pdo()->query("SELECT id FROM currencies WHERE code = 'EUR' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
         if ($eurId !== 0) {
             $pfEur = $this->purchaseInvoice('PF-2099-102', $vendor, 100.00, $eurId);
@@ -550,9 +552,9 @@ final class CashDocumentServiceTest extends TestCase
                 $this->service->create($this->supplierId, $this->doc([
                     'purpose' => 'purchase_payment', 'doc_type' => 'out', 'total_amount' => 100.00, 'purchase_invoice_id' => $pfEur,
                 ], $reg), $this->userId);
-                self::fail('Úhrada cizoměnové PF musí selhat.');
+                self::fail('Úhrada cizoměnové PF bez kurzu musí selhat.');
             } catch (CashException $e) {
-                self::assertSame('foreign_currency_invoice', $e->errorCode);
+                self::assertSame('fx_rate_unavailable', $e->errorCode);
             }
         }
     }
