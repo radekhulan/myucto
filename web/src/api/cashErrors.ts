@@ -39,6 +39,8 @@ interface ApiErrorShape {
  * formátu aplikace (oddělovač tisíců, měna), ne jako `12100`.
  */
 const MONEY_PARAMS = ['remaining', 'amount', 'limit'] as const
+/** Korunové hodnoty u úhrady cizoměnového dokladu — vždy v Kč, bez ohledu na `currency_code`. */
+const CZK_PARAMS = ['expected_czk', 'tolerance_czk'] as const
 
 function readError(e: unknown): { code: string; message: string; params: Record<string, unknown> | null } {
   const err = (e as ApiErrorShape)?.response?.data?.error
@@ -51,6 +53,9 @@ function readError(e: unknown): { code: string; message: string; params: Record<
     params = { ...raw }
     for (const key of MONEY_PARAMS) {
       if (typeof raw[key] === 'number') params[key] = formatMoney(raw[key] as number, currency)
+    }
+    for (const key of CZK_PARAMS) {
+      if (typeof raw[key] === 'number') params[key] = formatMoney(raw[key] as number, 'CZK')
     }
   }
   return {

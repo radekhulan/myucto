@@ -968,8 +968,13 @@ Zrušení volby smaže pokladní doklad i jeho zápis a vrátí fakturu do před
 Ručně vystaveného pokladního dokladu se vyrovnání nikdy nedotkne. Podrobnosti, včetně chování při selhání a při stornu,
 jsou u vydané faktury v [§ 15.2.7](15_Faktura_editor.md#1592-hlavicka), u přijaté faktury platí zrcadlově.
 
-Nepodporuje se **cizoměnová faktura**, **valutová pokladna** a **daňový doklad k poskytnuté záloze (DDKP)**, ten se
-samostatně nehradí. V těchto případech se vyrovnání jen přeskočí (s informativní hláškou) a faktura se normálně uloží.
+Cizoměnovou fakturu nebo účtenku korunová pokladna uhradí v korunách: zbytek přepočtený kurzem dokladu, ke dni dokladu,
+bez kurzového rozdílu. Platili-li jste jinou korunovou částkou, pořiďte úhradu ručně v
+[Pokladně](32_Pokladna.md#326-krok-za-krokem-uhrada-faktury-z-pokladny), rozdíl se zaúčtuje jako kurzový.
+
+Nepodporuje se **valutová pokladna**, **cizoměnová záloha**, cizoměnový doklad bez kurzu a **daňový doklad k poskytnuté
+záloze (DDKP)**, ten se samostatně nehradí. V těchto případech se vyrovnání jen přeskočí (s informativní hláškou)
+a faktura se normálně uloží.
 
 ### 23.11.14 Detail přijaté faktury
 

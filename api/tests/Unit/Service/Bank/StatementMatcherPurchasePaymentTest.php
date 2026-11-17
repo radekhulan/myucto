@@ -41,7 +41,7 @@ final class StatementMatcherPurchasePaymentTest extends TestCase
             CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER); CREATE TABLE journal_entry_lines (id INTEGER PRIMARY KEY, entry_id INTEGER, supplier_id INTEGER, side TEXT, signed_amount REAL);
             INSERT INTO bank_statements (id) VALUES (1);
             CREATE TABLE cash_documents (id INTEGER PRIMARY KEY, supplier_id INTEGER, purchase_invoice_id INTEGER,
-                doc_type TEXT, status TEXT, total_amount REAL, currency_code TEXT DEFAULT 'CZK', amount_foreign REAL);
+                doc_type TEXT, status TEXT, total_amount REAL, currency_code TEXT DEFAULT 'CZK', amount_foreign REAL, settled_document_amount REAL);
             CREATE TABLE other_item_allocations (bank_transaction_id INTEGER);
             CREATE TABLE bank_transfer_matches (out_transaction_id INTEGER, in_transaction_id INTEGER);
             CREATE TABLE payment_matches (id INTEGER PRIMARY KEY, invoice_id INTEGER, supplier_id INTEGER, bank_transaction_id INTEGER,

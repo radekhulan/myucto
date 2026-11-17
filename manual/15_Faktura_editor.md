@@ -550,7 +550,7 @@ Kde hotovostní vyrovnání nefunguje:
 |---|---|
 | **Zálohová (proforma) faktura**, storno faktura, splátkový a platební kalendář | Výběr pokladny se vůbec nezobrazí. Úhrada zálohy totiž zakládá navazující finální doklad nebo daňový doklad k platbě, a ten by pozdější zrušení volby neumělo vzít zpět. Zálohu inkasujte hotově přímo v [Pokladně](32_Pokladna.md#32113-hlavicka-dokladu-a-ucel) |
 | **Pravidelné (opakované) fakturace** | Šablona pole „Pokladna“ nemá. Vygenerovaná faktura sice zdědí způsob úhrady „Hotově“, ale pokladnu ne, takže **žádný doklad nevznikne a faktura zůstane neuhrazená**. Totéž platí pro finální fakturu vystavenou ze zálohy |
-| **Cizoměnová faktura** | Vyrovnání se přeskočí („Cizoměnový doklad z pokladny hradit nelze.“) |
+| **Cizoměnová faktura** | Korunová pokladna ji uhradí v korunách: zbytek přepočtený kurzem faktury, ke dni faktury, bez kurzového rozdílu. Faktura bez kurzu se přeskočí. Platil-li odběratel jinou korunovou částkou, pořiďte úhradu ručně v [Pokladně](32_Pokladna.md#326-krok-za-krokem-uhrada-faktury-z-pokladny) |
 | **Valutová pokladna** | Nenabízí se |
 | **Faktura už uhrazená jinou cestou** | Vyrovnání se přeskočí, aby úhradu nezdvojilo |
 

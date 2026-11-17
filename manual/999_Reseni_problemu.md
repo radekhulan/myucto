@@ -549,9 +549,12 @@ faktury ve stavu „nezaplaceno".
 #### 999.5.6.6 Valutová pokladna nenabízí úhradu faktury nebo převod
 
 Není to chyba oprávnění. Valutová pokladna podporuje PPD Prodej/Ostatní a VPD
-Nákup/Ostatní s kurzem a CZK protihodnotou. Úhrada cizoměnové faktury přes 311/321
-a valutový převod přes 261 nejsou podporované a systém je záměrně blokuje. Proveďte
-doložený ruční zápis v deníku. V daňové evidenci je pokladna pouze korunová.
+Nákup/Ostatní s kurzem a CZK protihodnotou. Úhradu faktury ani valutový převod přes 261
+nepodporuje a systém je záměrně blokuje. Cizoměnovou fakturu nebo účtenku uhraďte
+z korunové pokladny korunami, rozdíl proti kurzu dokladu se zaúčtuje jako kurzový
+(563/663, viz [§ 32.6](32_Pokladna.md#326-krok-za-krokem-uhrada-faktury-z-pokladny)).
+Valutový převod zaúčtujte doloženým ručním zápisem v deníku. V daňové evidenci je
+pokladna pouze korunová.
 
 #### 999.5.6.7 AI kontace nic nenavrhla
 

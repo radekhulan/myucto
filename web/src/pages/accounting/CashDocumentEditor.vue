@@ -468,8 +468,45 @@ function pickUnpaid(o: UnpaidDocumentOption) {
   form.partner_dic = o.partner_dic ?? ''
   form.description = t(`cash.purpose.${form.purpose}`) + ' ' + o.number
   // U vratky nabídni jako výchozí částku to, co je uhrazeno; jinak zbytek k úhradě.
-  form.total_amount = isPurchaseRefund.value ? o.paid : o.remaining
+  // Cizoměnový doklad se hradí korunami: výchozí je zbytek přepočtený kurzem dokladu.
+  form.total_amount = isPurchaseRefund.value ? o.paid : (o.remaining_czk ?? o.remaining)
 }
+
+/**
+ * Korunová úhrada cizoměnového dokladu z korunové pokladny. Pravidla jsou táž jako
+ * na serveru (`FxPaymentSettlement`): koruny v kurzové toleranci uhradí celý zbytek,
+ * menší částka je u vydané faktury částečná úhrada přepočtená kurzem dokladu, přijatý
+ * doklad se hradí jen celý. Rozdíl proti kurzu dokladu je kurzový zisk nebo ztráta;
+ * přesně se zaúčtuje kurzem předpisu, tady jde o náhled.
+ */
+const fxSettlement = computed(() => {
+  const o = selectedUnpaid.value
+  if (!o || isForeign.value || isPurchaseRefund.value || isInvoiceRefund.value) return null
+  if (!(Number(o.exchange_rate) > 0) || o.remaining_czk === undefined || o.currency_code.toUpperCase() === 'CZK') return null
+  const rate = Number(o.exchange_rate)
+  const czk = Number(form.total_amount) || 0
+  const expected = Number(o.remaining_czk)
+  const tolerance = Number(o.czk_tolerance ?? 0)
+  const purchase = form.purpose === 'purchase_payment'
+  const full = czk > 0 && Math.abs(czk - expected) <= tolerance
+  const partialForeign = !full && !purchase && czk > 0 && czk < expected ? Math.round((czk / rate) * 100) / 100 : null
+  const saldoCzk = full ? expected : partialForeign !== null ? Math.round(partialForeign * rate * 100) / 100 : 0
+  // Příjem nad hodnotou dokladu = zisk, výdaj nad hodnotou dokladu = ztráta.
+  const diff = full || partialForeign !== null ? Math.round((czk - saldoCzk) * 100) / 100 : 0
+  return {
+    currency: o.currency_code.toUpperCase(),
+    rate,
+    remaining: Number(o.remaining),
+    expected,
+    tolerance,
+    full,
+    partialForeign,
+    valid: full || partialForeign !== null,
+    saldoCzk,
+    diff: Math.abs(diff),
+    gain: purchase ? diff < 0 : diff > 0,
+  }
+})
 // Korunový ekvivalent jde ukázat jen u ručního kurzu — kurz ČNB zná až backend.
 const czkEquivalent = computed<number | null>(() => {
   if (!isForeign.value) return null
@@ -506,9 +543,10 @@ const eetRefundAmount = computed<number | null>(() => {
 
 // PF: úhrada jen v plné výši (R4) → částka readonly. U vratky se naopak vrací
 // libovolná část, takže částka zůstává editovatelná.
+// Cizoměnový doklad se hradí skutečnými korunami, takže částka zůstává editovatelná.
 const amountReadonly = computed(() =>
   (form.purpose === 'purchase_payment' && !isPurchaseRefund.value || isInvoiceRefund.value)
-  && selectedUnpaid.value !== null,
+  && selectedUnpaid.value !== null && fxSettlement.value === null,
 )
 
 // ── Našeptávač partnera z číselníku klientů ─────────────────────────────────
@@ -599,6 +637,13 @@ const saleOver10k = computed(() =>
 
 // ── Live náhled zaúčtování (MD/D) ────────────────────────────────────────────
 interface PreviewLine { account_code: string; side: 'debit' | 'credit'; amount: number }
+/** Kurzový rozdíl korunové úhrady cizoměnového dokladu: zisk 663 D, ztráta 563 MD. */
+function pushFxDifference(push: (code: string, side: 'debit' | 'credit', amount: number) => void) {
+  const fx = fxSettlement.value
+  if (!fx?.valid || fx.diff <= 0) return
+  if (fx.gain) push(ruleAccount('fx.gain', 'credit', '663'), 'credit', fx.diff)
+  else push(ruleAccount('fx.loss', 'debit', '563'), 'debit', fx.diff)
+}
 const previewLines = computed<PreviewLine[]>(() => {
   const total = Number(form.total_amount) || 0
   const cash = registerAccount.value
@@ -623,7 +668,8 @@ const previewLines = computed<PreviewLine[]>(() => {
         push(cash, 'credit', total)
       } else {
         push(cash, 'debit', total)
-        push(ruleAccount('payment.receivable.cash', 'credit', '311'), 'credit', total)
+        push(ruleAccount('payment.receivable.cash', 'credit', '311'), 'credit', fxSettlement.value?.valid ? fxSettlement.value.saldoCzk : total)
+        pushFxDifference(push)
       }
       break
     case 'purchase_payment':
@@ -631,8 +677,9 @@ const previewLines = computed<PreviewLine[]>(() => {
         push(cash, 'debit', total)
         push(ruleAccount('payment.payable.cash', 'debit', '321'), 'credit', total)
       } else {
-        push(ruleAccount('payment.payable.cash', 'debit', '321'), 'debit', total)
+        push(ruleAccount('payment.payable.cash', 'debit', '321'), 'debit', fxSettlement.value?.valid ? fxSettlement.value.saldoCzk : total)
         push(cash, 'credit', total)
+        pushFxDifference(push)
       }
       break
     case 'transfer':
@@ -947,7 +994,7 @@ const phoneFooterActions = computed<RowAction[]>(() => [
                     {{ t('cash.form.proforma_badge') }}
                   </span>
                 </span>
-                <span class="text-neutral-500 font-mono">{{ t('cash.form.remaining') }} {{ formatMoney(o.remaining) }}</span>
+                <span class="text-neutral-500 font-mono whitespace-nowrap">{{ t('cash.form.remaining') }} {{ formatMoney(o.remaining, o.currency_code) }}</span>
               </li>
               <li v-if="unpaidTruncated" class="px-3 py-2 text-xs text-neutral-500 border-t border-neutral-100 bg-neutral-50">
                 {{ t('cash.form.unpaid_truncated', { count: UNPAID_PAGE_SIZE }) }}
@@ -1066,6 +1113,37 @@ const phoneFooterActions = computed<RowAction[]>(() => [
               </button>
             </div>
           </div>
+        </div>
+
+        <!-- Korunová úhrada cizoměnového dokladu: kurz dokladu, přepočet a kurzový rozdíl. -->
+        <div v-if="fxSettlement" class="max-md:-order-1 rounded-md border px-3 py-2 text-sm space-y-1"
+          :class="fxSettlement.valid ? 'border-primary-200 bg-primary-50 text-primary-800' : 'border-warning-200 bg-warning-50 text-warning-800'"
+          data-test="cash-fx-settlement">
+          <p class="font-medium">{{ t('cash.form.fx_settlement_title') }}</p>
+          <p class="font-mono text-xs">
+            {{ t('cash.form.fx_settlement_rate', { rate: fxSettlement.rate, currency: fxSettlement.currency }) }}
+            · {{ t('cash.form.fx_settlement_expected', {
+              foreign: formatMoney(fxSettlement.remaining, fxSettlement.currency),
+              czk: formatMoney(fxSettlement.expected),
+            }) }}
+          </p>
+          <p class="text-xs">
+            {{ form.purpose === 'purchase_payment'
+              ? t('cash.form.fx_settlement_purchase_hint', { tolerance: formatMoney(fxSettlement.tolerance) })
+              : t('cash.form.fx_settlement_invoice_hint', { tolerance: formatMoney(fxSettlement.tolerance) }) }}
+          </p>
+          <p v-if="!fxSettlement.valid" class="text-xs font-medium" data-test="cash-fx-out-of-tolerance">
+            {{ t('cash.form.fx_settlement_out_of_tolerance') }}
+          </p>
+          <p v-else-if="fxSettlement.partialForeign !== null" class="text-xs font-medium">
+            {{ t('cash.form.fx_settlement_partial', { foreign: formatMoney(fxSettlement.partialForeign, fxSettlement.currency) }) }}
+          </p>
+          <p v-else class="text-xs font-medium font-mono" data-test="cash-fx-difference">
+            {{ fxSettlement.diff <= 0
+              ? t('cash.form.fx_settlement_none')
+              : t(fxSettlement.gain ? 'cash.form.fx_settlement_gain' : 'cash.form.fx_settlement_loss', { amount: formatMoney(fxSettlement.diff) }) }}
+          </p>
+          <p v-if="fxSettlement.valid && fxSettlement.diff > 0" class="text-xs opacity-80">{{ t('cash.form.fx_settlement_estimate') }}</p>
         </div>
 
         <!-- Valutová pokladna: ruční kurz. Bez tohohle pole byl doklad s chybějícím

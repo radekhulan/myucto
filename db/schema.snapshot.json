@@ -1201,7 +1201,8 @@
         "2295_helios_import_map.sql",
         "2296_eet_units_dis_import.sql",
         "2297_invoices_supplier_parent_index.sql",
-        "2298_invoice_item_advance_drawdown.sql"
+        "2298_invoice_item_advance_drawdown.sql",
+        "2299_cash_document_settled_document_amount.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3984,6 +3985,7 @@
                 "register_id": "bigint(20) unsigned NOT NULL",
                 "reversal_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "rule_key": "varchar(64) NULL DEFAULT NULL",
+                "settled_document_amount": "decimal(15,2) NULL DEFAULT NULL",
                 "status": "enum('draft','posted','reversed') NOT NULL DEFAULT 'draft'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_date": "date NULL DEFAULT NULL",
