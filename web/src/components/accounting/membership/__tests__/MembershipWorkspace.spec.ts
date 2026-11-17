@@ -1026,6 +1026,7 @@ describe('Membership workspace', () => {
 
 
   it('keeps every window open while its write is running and closes it otherwise', async () => {
+    const confirm = vi.spyOn(window, 'confirm')
     const modalOf = (w: ReturnType<typeof mounted>, title: string) => w.findAllComponents(Modal).find(m => m.props('title') === title)
     // Založení: rozběhnuté uložení ani otevřené okno nového kontaktu okno nezavře.
     let finish: (v: unknown) => void = () => {}
@@ -1043,11 +1044,24 @@ describe('Membership workspace', () => {
     expect(w.find('[data-section="create-member"]').exists()).toBe(true)
     finish({ id: 9, supplier_id: 5, client_id: 3, member_number: 'M-9', created_by: 1 }); await flushPromises()
     expect(w.find('[data-section="create-member"]').exists()).toBe(false)
-    // Bez rozběhnutého zápisu se okno zavře a formulář se vyprázdní.
+    // Úspěšné založení se při zavření na nic neptá (formulář je uložený).
+    expect(confirm).not.toHaveBeenCalled()
+    // Rozepsaný formulář: zavření se zeptá jako správa kategorií datové schránky; Zrušit okno nechá.
     await w.get('[data-action="create-open"]').trigger('click')
     await w.get('[data-section="create-member"] [data-field="member-number"]').setValue('M-10')
+    confirm.mockReturnValueOnce(false)
+    modalOf(w, cs.nonprofitMembership.createTitle)!.vm.$emit('close'); await flushPromises()
+    expect(confirm).toHaveBeenCalledWith(cs.nonprofitMembership.closeUnsavedConfirm)
+    expect((w.get('[data-section="create-member"] [data-field="member-number"]').element as HTMLInputElement).value).toBe('M-10')
+    confirm.mockReturnValueOnce(true)
+    await w.get('[data-action="create-cancel"]').trigger('click'); await flushPromises()
+    expect(w.find('[data-section="create-member"]').exists()).toBe(false)
+    // Nevyplněné okno se zavře bez dotazu.
+    confirm.mockClear()
+    await w.get('[data-action="create-open"]').trigger('click')
     modalOf(w, cs.nonprofitMembership.createTitle)!.vm.$emit('close'); await flushPromises()
     expect(w.find('[data-section="create-member"]').exists()).toBe(false)
+    expect(confirm).not.toHaveBeenCalled()
 
     // Hromadný předpis a import: zamčený tok okno drží, odemčený ho pustí.
     await w.get('[data-action="batch-open"]').trigger('click'); await flushPromises()
@@ -1142,6 +1156,29 @@ describe('Membership workspace', () => {
     await w.setProps({ supplier: 6 }); await flushPromises()
     await w.get('[data-action="import-open"]').trigger('click'); await flushPromises()
     w.findAllComponents(Modal).find(m => m.props('title') === cs.nonprofitMembership.import.title)!.vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(ImportFlow).exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('asks before closing a batch or an import with unsaved input, not after a saved part', async () => {
+    const confirm = vi.spyOn(window, 'confirm')
+    const w = mounted(); await flushPromises()
+    await w.get('[data-action="batch-open"]').trigger('click'); await flushPromises()
+    w.findComponent(MembershipBatchFlow).trigger('input')
+    confirm.mockReturnValueOnce(false)
+    w.findAllComponents(Modal).find(m => m.props('title') === cs.nonprofitMembership.batchTitle)!.vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(MembershipBatchFlow).exists()).toBe(true)
+    w.findComponent(MembershipBatchFlow).vm.$emit('changed'); await flushPromises()
+    confirm.mockClear()
+    w.findAllComponents(Modal).find(m => m.props('title') === cs.nonprofitMembership.batchTitle)!.vm.$emit('close'); await flushPromises()
+    expect(confirm).not.toHaveBeenCalled()
+    expect(w.findComponent(MembershipBatchFlow).exists()).toBe(false)
+
+    await w.get('[data-action="import-open"]').trigger('click'); await flushPromises()
+    w.findComponent(ImportFlow).trigger('change')
+    confirm.mockReturnValueOnce(true)
+    w.findComponent(ImportFlow).vm.$emit('close'); await flushPromises()
+    expect(confirm).toHaveBeenCalledWith(cs.nonprofitMembership.closeUnsavedConfirm)
     expect(w.findComponent(ImportFlow).exists()).toBe(false)
     w.unmount()
   })

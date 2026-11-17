@@ -6,6 +6,7 @@ import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import Modal from '@/components/ui/Modal.vue'
 import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
 import { useToast } from '@/composables/useToast'
+import { useModalDraft } from './useModalDraft'
 import type { AccountingPeriod } from '@/api/accounting'
 import { membershipApi, type ClaimRow, type MemberCorrections, type MemberIdentity, type MemberRevision } from '@/api/nonprofitMembership'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
@@ -21,6 +22,8 @@ const props = defineProps<{ supplier: number; canManage: boolean; memberId: numb
 const emit = defineEmits<{ changed: []; deleted: []; relabel: [label: string] }>()
 const { t, te } = useI18n()
 const toast = useToast()
+/** Rozepsaný formulář v okně: zavření se nejdřív zeptá (vzor datové schránky). */
+const draft = useModalDraft()
 
 const identity = ref<MemberIdentity | null>(null)
 const history = ref<MemberRevision[]>([])
@@ -102,6 +105,7 @@ async function refreshClaim(row: ClaimRow) {
 }
 
 async function finished(message: string) {
+  draft.reset()
   // Okno se zavře dřív, než formulář stihne ohlásit uvolnění zámku; jinak by akce detailu zůstaly zašedlé.
   issueOpen.value = false; locks.value.issue = false
   reverseClaim.value = null; locks.value.reverse = false
@@ -111,6 +115,7 @@ async function finished(message: string) {
 }
 
 async function revisionFinished() {
+  draft.reset()
   // Stejně jako u předpisu: zámek uvolní detail, jinak by se pod přehledem objevil formulář první revize.
   revisionOpen.value = false; locks.value.revision = false; revisionDirty.value = false
   confirmDone(t('nonprofitMembership.revisionDone'))
@@ -120,6 +125,7 @@ async function revisionFinished() {
 
 // Zastaralý podklad opravy: oprava se zavře, detail i seznam se načtou znovu a uživatel ji otevře nad aktuálními údaji.
 async function correctionStale() {
+  draft.reset()
   correction.value = null
   locks.value.correction = false
   refreshPending = false
@@ -130,6 +136,7 @@ async function correctionStale() {
 }
 
 async function correctionFinished(mode: 'identity' | 'delete' | 'void', label: string) {
+  draft.reset()
   // Formulář se odpojí dřív, než stihne ohlásit uvolnění zámku; jinak by akce detailu zůstaly zašedlé.
   correction.value = null
   locks.value.correction = false
@@ -171,8 +178,8 @@ watch(() => props.refreshVersion, () => {
 watch(refreshBlocked, blocked => {
   if (!blocked && refreshPending) { refreshPending = false; void load() }
 })
-watch(() => props.memberId, () => { generation++; refreshPending = false; identity.value = null; history.value = []; corrections.value = null; erased.value = false; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; staleNotice.value = false; void load() })
-watch(() => props.supplier, () => { generation++; refreshPending = false; loading.value = false; identity.value = null; history.value = []; corrections.value = null; erased.value = false; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; staleNotice.value = false })
+watch(() => props.memberId, () => { draft.reset(); generation++; refreshPending = false; identity.value = null; history.value = []; corrections.value = null; erased.value = false; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; staleNotice.value = false; void load() })
+watch(() => props.supplier, () => { draft.reset(); generation++; refreshPending = false; loading.value = false; identity.value = null; history.value = []; corrections.value = null; erased.value = false; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; staleNotice.value = false })
 onBeforeUnmount(() => { alive = false; generation++ })
 onMounted(() => { void load() })
 let firstActivation = true
@@ -209,10 +216,15 @@ const actions = computed<ActionItem[]>(() => [
  * rozběhnutý zápis by jinak ztratil, kam ohlásit výsledek.
  */
 const memberTitle = computed(() => (identity.value ? `${identity.value.member_number} · ${displayLabel.value}` : displayLabel.value))
-function closeIssue() { if (!locks.value.issue) issueOpen.value = false }
-function closeReverse() { if (!locks.value.reverse) reverseClaim.value = null }
-function closeCorrection() { if (!locks.value.correction) correction.value = null }
-function closeRevision() { if (!locks.value.revision && !revisionDirty.value) revisionOpen.value = false }
+function closeIssue() { if (!locks.value.issue && draft.confirmClose()) issueOpen.value = false }
+function closeReverse() { if (!locks.value.reverse && draft.confirmClose()) reverseClaim.value = null }
+function closeCorrection() { if (!locks.value.correction && draft.confirmClose()) correction.value = null }
+function closeRevision() {
+  if (locks.value.revision) return
+  // Formulář revize hlásí rozepsanost sám (i bez psaní, např. změnou stavu ve výběru).
+  if (revisionDirty.value) draft.mark()
+  if (draft.confirmClose()) revisionOpen.value = false
+}
 
 /** Akce řádku předpisu jako v ostatních hustých tabulkách: ikona obnovy a storno v jednom místě. */
 function claimActions(claim: ClaimRow): RowAction[] {
@@ -370,26 +382,30 @@ function claimActions(claim: ClaimRow): RowAction[] {
         :key="`${correction}-${identity.id}`"
         :supplier="supplier" :can-manage="canManage" :mode="correction" :member="identity" :label="displayLabel"
         :revision="correction === 'void' ? voidable : null" :head-revision-no="corrections?.head_revision_no ?? 0"
-        @done="(mode, label) => correctionFinished(mode, label)" @close="correction = null" @lock="locks.correction = $event" @stale="correctionStale()"
+        @done="(mode, label) => correctionFinished(mode, label)" @close="closeCorrection" @lock="locks.correction = $event" @stale="correctionStale()"
+        @input="draft.mark" @change="draft.mark"
       />
     </Modal>
     <Modal v-if="manage && identity && !correction && revisionOpen" :title="`${t('nonprofitMembership.revisionTitle')} · ${memberTitle}`" width-class="max-w-2xl" @close="closeRevision">
       <MembershipRevisionForm
         :supplier="supplier" :can-manage="canManage" :member="identity" :history="history"
-        @done="revisionFinished()" @close="revisionOpen = false" @lock="locks.revision = $event" @dirty="revisionDirty = $event"
+        @done="revisionFinished()" @close="closeRevision" @lock="locks.revision = $event" @dirty="revisionDirty = $event"
+        @input="draft.mark" @change="draft.mark"
       />
     </Modal>
     <Modal v-if="manage && issueOpen" :title="`${t('nonprofitMembership.issueTitle')} · ${memberTitle}`" width-class="max-w-4xl" @close="closeIssue">
       <MembershipIssueFlow
         :supplier="supplier" :can-manage="canManage" :member="member" :history="history" :periods="periods" :case-symbols="caseSymbols"
-        @done="finished(t('nonprofitMembership.issueDone'))" @close="issueOpen = false" @lock="locks.issue = $event"
+        @done="finished(t('nonprofitMembership.issueDone'))" @close="closeIssue" @lock="locks.issue = $event"
+        @input="draft.mark" @change="draft.mark"
       />
     </Modal>
     <Modal v-if="manage && reverseClaim" :title="`${t('nonprofitMembership.reverseTitle')} · ${memberTitle}`" width-class="max-w-2xl" @close="closeReverse">
       <MembershipReverseFlow
         :key="reverseClaim.claim_id"
         :supplier="supplier" :can-manage="canManage" :member="member" :claim="reverseClaim" :periods="periods"
-        @done="finished(t('nonprofitMembership.reverseDone'))" @close="reverseClaim = null" @lock="locks.reverse = $event"
+        @done="finished(t('nonprofitMembership.reverseDone'))" @close="closeReverse" @lock="locks.reverse = $event"
+        @input="draft.mark" @change="draft.mark"
       />
     </Modal>
   </div>

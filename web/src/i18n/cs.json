@@ -41982,7 +41982,8 @@
       "dates": "Účetní datum a splatnost",
       "settlement": "Úhrada"
     },
-    "batchSelectionLimit": "Do hromadného předpisu jde vybrat nejvýše 500 členů. Pro všechny aktivní členy zvolte v hromadném předpisu možnost Všichni aktivní k účetnímu datu."
+    "batchSelectionLimit": "Do hromadného předpisu jde vybrat nejvýše 500 členů. Pro všechny aktivní členy zvolte v hromadném předpisu možnost Všichni aktivní k účetnímu datu.",
+    "closeUnsavedConfirm": "Máte neuložené změny. Zavřít bez uložení?"
   },
   "propertyCharges": {
     "account": "Účet (volitelné)",

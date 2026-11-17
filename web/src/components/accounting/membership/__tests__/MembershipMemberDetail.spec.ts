@@ -724,3 +724,42 @@ describe('Membership member detail – zámky oken, vymazaný člen a načítán
     w.unmount()
   })
 })
+
+describe('Membership member detail – rozepsaný formulář v okně', () => {
+  it('se před zavřením zeptá, po zápisu a bez psaní ne', async () => {
+    const confirm = vi.spyOn(window, 'confirm')
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], [claim(31, 100000, unreconciled)]))
+    const w = mounted(); await flushPromises()
+    // Bez psaní se okno zavře hned.
+    await w.get('[data-action="new-charge"]').trigger('click')
+    w.findComponent(Modal).vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(IssueFlow).exists()).toBe(false)
+    expect(confirm).not.toHaveBeenCalled()
+    // Rozepsaný předpis: Zrušit nechá okno, vlastní Zavřít toku jde přes stejný dotaz.
+    await w.get('[data-action="new-charge"]').trigger('click')
+    await w.findComponent(IssueFlow).trigger('input')
+    confirm.mockReturnValueOnce(false)
+    w.findComponent(Modal).vm.$emit('close'); await flushPromises()
+    expect(confirm).toHaveBeenCalledWith(cs.nonprofitMembership.closeUnsavedConfirm)
+    expect(w.findComponent(IssueFlow).exists()).toBe(true)
+    confirm.mockReturnValueOnce(true)
+    w.findComponent(IssueFlow).vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(IssueFlow).exists()).toBe(false)
+    // Po zápisu se další zavření neptá.
+    confirm.mockClear()
+    await w.get('[data-claim="31"] [data-action="reverse-claim"]').trigger('click')
+    await w.findComponent(ReverseFlow).trigger('input')
+    w.findComponent(ReverseFlow).vm.$emit('done'); await flushPromises()
+    await w.get('[data-action="new-charge"]').trigger('click')
+    w.findComponent(Modal).vm.$emit('close'); await flushPromises()
+    expect(confirm).not.toHaveBeenCalled()
+    // Revize hlásí rozepsanost sama (změna stavu ve výběru); dřív okno nešlo zavřít vůbec, teď se zeptá.
+    await w.get('[data-action="change-status"]').trigger('click')
+    w.findComponent(RevisionForm).vm.$emit('dirty', true)
+    confirm.mockReturnValueOnce(true)
+    w.findComponent(Modal).vm.$emit('close'); await flushPromises()
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(w.findComponent(RevisionForm).exists()).toBe(false)
+    w.unmount()
+  })
+})

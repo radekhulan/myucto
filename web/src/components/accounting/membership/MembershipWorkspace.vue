@@ -27,6 +27,7 @@ import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import Modal from '@/components/ui/Modal.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import { useToast } from '@/composables/useToast'
+import { useModalDraft } from './useModalDraft'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -35,6 +36,8 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 const props = defineProps<{ supplier: number; canManage: boolean; canManageRates?: boolean; canReadErasure?: boolean; canWriteErasure?: boolean }>()
 const { t, te, tm, rt } = useI18n()
 const toast = useToast()
+/** Rozepsaný formulář v okně (založení, dávka, import): zavření se nejdřív zeptá (vzor datové schránky). */
+const draft = useModalDraft()
 
 const members = ref<MemberRow[]>([])
 const nextAfter = ref<number | null>(null)
@@ -130,7 +133,7 @@ function applyFilters(syncUrl = true, forceTitles = false) {
 }
 const checkedMembers = ref<number[]>([]), batchOpen = ref(false), batchLocked = ref(false)
 // Uložená dávka může založit nový titul, proto se obnoví i výběr titulů.
-function batchChanged() { dataVersion.value++; void load(); void loadTitles(true) }
+function batchChanged() { draft.reset(); dataVersion.value++; void load(); void loadTitles(true) }
 /** Výmaz mění čísla a jména v seznamu. */
 async function membersErased() { dataVersion.value++; await load() }
 
@@ -271,10 +274,10 @@ function onClientCreated(client: Client) {
   clientModalOpen.value = false
 }
 
-function openCreate() { createError.value = ''; createOpen.value = true }
+function openCreate() { draft.reset(); createError.value = ''; createOpen.value = true }
 /** Okno se během ukládání nezavře: odpověď by jinak neměla kam ohlásit chybu. */
 function closeCreate() {
-  if (creating.value || clientModalOpen.value) return
+  if (creating.value || clientModalOpen.value || !draft.confirmClose()) return
   createOpen.value = false; clientModalOpen.value = false
   clientId.value = null; clientLabel.value = ''; memberNumber.value = ''; createError.value = ''
 }
@@ -285,7 +288,7 @@ async function create() {
   try {
     const created = await membershipApi.createMember(supplier, body)
     if (!alive || ticket !== createTicket || supplier !== props.supplier) return
-    creating.value = false
+    creating.value = false; draft.reset()
     closeCreate()
     // Jako u kontaktu rovnou detail nového člena (tam se zapisuje jeho první revize); oznámení přežije přechod.
     toast.success(t('nonprofitMembership.memberCreated'))
@@ -298,7 +301,7 @@ async function create() {
 }
 
 watch(() => props.supplier, () => {
-  cancelSearchTimer(); pendingRouteFilters = false; pendingFormFilters = false
+  draft.reset(); cancelSearchTimer(); pendingRouteFilters = false; pendingFormFilters = false
   generation++; createTicket++; titlesTicket++; hydrating = true
   checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false; importOpen.value = false; importLocked.value = false; exportError.value = ''; exporting.value = false; exportRun++
   search.value = ''; filterYear.value = appIsoDate().slice(0, 4); titleKey.value = ''; paymentStatus.value = 'all'
@@ -358,6 +361,7 @@ async function exportMembers(format: 'xlsx' | 'csv') {
   }
 }
 function importChanged() {
+  draft.reset()
   dataVersion.value++
   void load()
 }
@@ -365,15 +369,16 @@ function importChanged() {
 const actions = computed<ActionItem[]>(() => [
   { key: 'create-open', label: t('nonprofitMembership.createTitle'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: batchLocked.value, run: openCreate },
   { key: 'batch-open', label: t('nonprofitMembership.batchTitle'), icon: 'doc', variant: 'primary', show: props.canManage, disabled: batchLocked.value || loading.value || !!error.value, run: openBatch },
-  { key: 'import-open', label: t('nonprofitMembership.import.open'), icon: 'upload', show: props.canManage, disabled: importOpen.value, run: () => { importOpen.value = true } },
+  { key: 'import-open', label: t('nonprofitMembership.import.open'), icon: 'upload', show: props.canManage, disabled: importOpen.value, run: () => { draft.reset(); importOpen.value = true } },
   { key: 'export-xlsx', label: t('nonprofitMembership.exportXlsx'), icon: 'download', tier: 'overflow', disabled: exporting.value || loading.value, run: () => { void exportMembers('xlsx') } },
   { key: 'export-csv', label: t('nonprofitMembership.exportCsv'), icon: 'download', tier: 'overflow', disabled: exporting.value || loading.value, run: () => { void exportMembers('csv') } },
   { key: 'reload-members', label: t('nonprofitMembership.reload'), icon: 'cycle', tier: 'overflow', disabled: loading.value, run: reloadMembers },
 ])
 /** Hromadný předpis patří k seznamu: otevře se na záložce členů nad aktuálním výběrem. */
-function openBatch() { setTab('members'); batchOpen.value = true }
+function openBatch() { draft.reset(); setTab('members'); batchOpen.value = true }
 /** Rozpracovanou dávku (zamčený výběr a filtry) okno nezavře, jinak by běžící kroky ztratily kontext. */
-function closeBatch() { if (!batchLocked.value) batchOpen.value = false }
+function closeBatch() { if (!batchLocked.value && draft.confirmClose()) batchOpen.value = false }
+function closeImport() { if (!importLocked.value && draft.confirmClose()) { importOpen.value = false; importLocked.value = false } }
 const createActions = computed<ActionItem[]>(() => [
   { key: 'create-member', label: t('nonprofitMembership.createMember'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: creating.value || !clientId.value || !numberValid.value, disabledReason: t('nonprofitMembership.createNeedsInput'), run: () => { void create() } },
   { key: 'create-cancel', label: t('common.cancel'), icon: 'x', disabled: creating.value, run: closeCreate },
@@ -674,7 +679,7 @@ watch(batchLocked, locked => {
     </BulkActionBar>
 
     <Modal v-if="createOpen && canManage" :title="t('nonprofitMembership.createTitle')" width-class="max-w-xl" @close="closeCreate">
-      <form class="space-y-4" data-section="create-member" @submit.prevent="create()">
+      <form class="space-y-4" data-section="create-member" @submit.prevent="create()" @input="draft.mark" @change="draft.mark">
         <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.createHelp') }}</p>
         <p v-if="createError" role="alert" :class="errorBox" data-section="create-error">{{ createError }}</p>
         <fieldset :disabled="creating" class="grid gap-3">
@@ -699,10 +704,10 @@ watch(batchLocked, locked => {
 
     <Modal v-if="batchOpen" :title="t('nonprofitMembership.batchTitle')" width-class="max-w-4xl" @close="closeBatch">
       <MembershipBatchFlow :key="supplier" :supplier="supplier" :can-manage="canManage" :periods="periods" :selected-member-ids="checkedMembers"
-        @changed="batchChanged" @lock="batchLocked = $event" @close="batchOpen = false" />
+        @changed="batchChanged" @lock="batchLocked = $event" @close="closeBatch" @input="draft.mark" @change="draft.mark" />
     </Modal>
-    <Modal v-if="importOpen && canManage" :title="t('nonprofitMembership.import.title')" width-class="max-w-3xl" @close="!importLocked && (importOpen = false)">
-      <MembershipImportFlow :key="`import-${supplier}`" :supplier="supplier" :can-manage="canManage" @changed="importChanged" @lock="importLocked = $event" @close="importOpen = false; importLocked = false" />
+    <Modal v-if="importOpen && canManage" :title="t('nonprofitMembership.import.title')" width-class="max-w-3xl" @close="closeImport">
+      <MembershipImportFlow :key="`import-${supplier}`" :supplier="supplier" :can-manage="canManage" @changed="importChanged" @lock="importLocked = $event" @close="closeImport" @input="draft.mark" @change="draft.mark" />
     </Modal>
   </div>
 </template>

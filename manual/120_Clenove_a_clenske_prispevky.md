@@ -4,7 +4,7 @@ V podvojném účetnictví podle vyhlášky 504 otevřete **Účetnictví → Č
 
 Postup je vždy stejný: založte člena, zapište mu první revizi členství a teprve potom předpis příspěvku. Dokud není evidován žádný člen, stránka tyto tři kroky vypíše.
 
-Stránka má záložky **Členové**, **Sazby**, **Kontrola s účetnictvím** (jen když firma má účetní období) a **Výmaz údajů** (jen s právem k výmazu). Vybraná záložka je součástí adresy stránky, takže na ni vede i odkaz. V hlavičce stránky jsou akce **Nový člen**, **Hromadný předpis příspěvků** a **Import ze souboru**; export a **Načíst znovu** najdete v nabídce **…**. Formuláře (založení člena, hromadný předpis, import, nový předpis, storno, změna stavu a opravy) se otevírají v okně nad stránkou. Okno s rozběhnutým zápisem nejde zavřít, dokud zápis neskončí. Potvrzení dokončené akce se zobrazí jako krátké oznámení v rohu obrazovky.
+Stránka má záložky **Členové**, **Sazby**, **Kontrola s účetnictvím** (jen když firma má účetní období) a **Výmaz údajů** (jen s právem k výmazu). Vybraná záložka je součástí adresy stránky, takže na ni vede i odkaz. V hlavičce stránky jsou akce **Nový člen**, **Hromadný předpis příspěvků** a **Import ze souboru**; export a **Načíst znovu** najdete v nabídce **…**. Formuláře (založení člena, hromadný předpis, import, nový předpis, storno, změna stavu a opravy) se otevírají v okně nad stránkou. Okno s rozběhnutým zápisem nejde zavřít, dokud zápis neskončí. Když do okna něco vyplníte a zavíráte ho bez uložení (křížkem, Escapem nebo klikem mimo okno), aplikace se nejdřív zeptá, jestli neuložené změny zahodit. Potvrzení dokončené akce se zobrazí jako krátké oznámení v rohu obrazovky.
 
 ## 120.1 Založení a historie člena
 
