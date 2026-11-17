@@ -79,6 +79,25 @@ final class ActivityLogHashChain
         'nonprofit_membership_member_update',
         'nonprofit_membership_member_delete',
         'nonprofit_membership_revision_void',
+        // Atestace redakce ({@see redact()}); bez ní by verify() redigovaný záznam nepřijal.
+        self::REDACTION_ACTION,
+    ];
+
+    /** Článek řetězu, který zapisuje každou redakci auditního záznamu. */
+    public const REDACTION_ACTION = 'activity_log.redacted';
+
+    /**
+     * Akce, jejichž payload smí přepsat schválený výmaz osobních údajů ({@see redact()}).
+     * Jen auditní stopa oprav členské evidence (#321, krok 7), která nese členské číslo, kontakt
+     * a volný důvod, a založení a úprava kontaktu, který výmaz člena anonymizoval (název, IČO,
+     * e-mailové kontakty). Po výmazu nesmí osobní údaj držet dál. Jiné akce redigovat nejde.
+     */
+    public const REDACTABLE_ACTIONS = [
+        'nonprofit_membership_member_update',
+        'nonprofit_membership_member_delete',
+        'nonprofit_membership_revision_void',
+        'client.created',
+        'client.updated',
     ];
 
     /** Klíč `app_meta` s hranicí promazané části řetězu. */
@@ -349,13 +368,17 @@ final class ActivityLogHashChain
                 $chainWhere = ' AND seal_seq >= ' . (int) $fromSeq;
             }
         }
+        $redactions = $this->db->hasTable('activity_log_redactions')
+            ? ', (SELECT r.redacted_digest FROM activity_log_redactions r WHERE r.activity_log_id = activity_log.id) AS redacted_digest'
+            : ', NULL AS redacted_digest';
         $stmt = $pdo->query(
-            'SELECT ' . self::selectList() . ', prev_hash, hash' . ($deferred ? ', seal_seq' : '') . '
+            'SELECT ' . self::selectList() . ', prev_hash, hash' . ($deferred ? ', seal_seq' : '') . $redactions . '
                FROM activity_log WHERE hash IS NOT NULL' . $chainWhere
             . ($deferred ? ' ORDER BY seal_seq, id' : ' ORDER BY id')
         );
 
         $prunedBelow = $deferred ? ($this->pruneMark()['below_seq'] ?? null) : null;
+        $attestations = null;
         $pastPruned = false;
         $checked = 0;
         $firstId = null;
@@ -385,7 +408,19 @@ final class ActivityLogHashChain
 
             $data = array_intersect_key($row, array_flip(self::HASHED_COLUMNS));
             $prevOfRow = $row['prev_hash'] !== null ? (string) $row['prev_hash'] : null;
-            if (!in_array((string) $row['hash'], $this->hashCandidates($data, $prevOfRow), true)) {
+            // Redigovaný záznam (schválený výmaz osobních údajů) drží původní hash, na který řetěz
+            // navazuje; obsah dokládá otisk redakce svázaný s tímto hashem. Platí jen pro akci
+            // z allowlistu a jen s atestací redakce zapsanou jako článek řetězu.
+            if ($row['redacted_digest'] !== null) {
+                $attestations ??= $this->redactionAttestations($deferredFrom);
+                $proven = in_array((string) $row['action'], self::REDACTABLE_ACTIONS, true)
+                    && is_string($attestations[$id] ?? null)
+                    && hash_equals((string) $attestations[$id], (string) $row['redacted_digest'])
+                    && hash_equals((string) $row['redacted_digest'], self::redactionDigest((string) $row['hash'], $data, $prevOfRow));
+            } else {
+                $proven = in_array((string) $row['hash'], $this->hashCandidates($data, $prevOfRow), true);
+            }
+            if (!$proven) {
                 $broken[] = ['id' => $id, 'reason' => 'obsah záznamu neodpovídá jeho hashi (byl změněn)'];
             }
 
@@ -400,6 +435,80 @@ final class ActivityLogHashChain
             'broken' => $broken,
             'ok' => $broken === [],
         ];
+    }
+
+    /**
+     * Přepíše payload auditního záznamu při schváleném výmazu osobních údajů a zachová průkaznost řetězu.
+     *
+     * Hash záznamu se nemění: následující článek na něj navazuje a přepočet by z řetězu udělal
+     * tvrzení bez důkazní hodnoty. Před přepisem se ověří, že původní obsah odpovídá hashi;
+     * nový obsah pak dokládá otisk redakce svázaný s původním hashem ({@see verify()}).
+     * Nezapečetěný záznam se zapečetí až nad novým obsahem, otisk redakce proto nemá.
+     * Volá se jen uvnitř transakce volajícího, který drží důvod (zdroj a jeho ID) v dokladu výmazu.
+     *
+     * @param array<string,mixed> $payload nový payload
+     */
+    public function redact(int $id, array $payload, string $source, int $sourceId): void
+    {
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) {
+            throw new \LogicException('Redakce auditního záznamu musí běžet v transakci výmazu.');
+        }
+        // Hlava řetězu se uvnitř obchodní transakce ZÁMĚRNĚ nezamyká (pod REPEATABLE READ by redakce končila
+        // chybou 1020 a řadila za sebe pečetění celé instance, viz hlavička třídy). Redigují se záznamy staré
+        // nejméně rok: zapečetěné, nebo nechráněná historie, kterou pečetění nečte. Souběh s pečetěním čerstvého
+        // záznamu by zapečetil původní obsah bez otisku redakce; verify() ho pak ohlásí, tiše neprojde.
+        $stmt = $pdo->prepare('SELECT ' . self::selectList() . ', prev_hash, hash FROM activity_log WHERE id = ? FOR UPDATE');
+        $stmt->execute([$id]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false) {
+            throw new \RuntimeException('Auditní záznam k redakci neexistuje.');
+        }
+        if (!in_array((string) $row['action'], self::REDACTABLE_ACTIONS, true)) {
+            throw new \LogicException('Akci ' . (string) $row['action'] . ' redigovat nejde.');
+        }
+        $done = $pdo->prepare('SELECT 1 FROM activity_log_redactions WHERE activity_log_id = ?');
+        $done->execute([$id]);
+        if ($done->fetchColumn() !== false) {
+            throw new \RuntimeException('Auditní záznam už byl redigovaný.');
+        }
+        $data = array_intersect_key($row, array_flip(self::HASHED_COLUMNS));
+        $prev = $row['prev_hash'] !== null ? (string) $row['prev_hash'] : null;
+        if ($row['hash'] !== null && !in_array((string) $row['hash'], $this->hashCandidates($data, $prev), true)) {
+            throw new \RuntimeException('Auditní záznam neodpovídá svému hashi, redigovat ho nejde.');
+        }
+        $encoded = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $pdo->prepare('UPDATE activity_log SET payload = ? WHERE id = ?')->execute([$encoded, $id]);
+        $digest = $row['hash'] === null ? null : self::redactionDigest((string) $row['hash'], ['payload' => $encoded] + $data, $prev);
+        $pdo->prepare('INSERT INTO activity_log_redactions (activity_log_id, supplier_id, redacted_digest, source, source_id) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$id, $row['supplier_id'], $digest, $source, $sourceId]);
+        // Redakce je sama článkem řetězu: bez zřetězené atestace by stačil jeden UPDATE a INSERT a zásah
+        // do minulého záznamu by verify() nepoznal. Takhle je každá redakce vidět v auditní stopě.
+        $pdo->prepare('INSERT INTO activity_log (supplier_id, user_id, action, entity_type, entity_id, payload, ip, user_agent) VALUES (?, NULL, ?, ?, ?, ?, NULL, NULL)')
+            ->execute([$row['supplier_id'], self::REDACTION_ACTION, 'activity_log', $id,
+                json_encode(['redacted_action' => (string) $row['action'], 'digest' => $digest, 'source' => $source, 'source_id' => $sourceId], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)]);
+        $this->seal((int) $pdo->lastInsertId());
+    }
+
+    /**
+     * Atestace redakcí: id redigovaného záznamu → otisk z atestačního článku řetězu.
+     *
+     * @return array<int,?string>
+     */
+    private function redactionAttestations(?int $deferredFrom): array
+    {
+        // Atestace musí být zapečetěný článek za redigovaným záznamem; nezapečetěnou uznáme jen v okně
+        // odloženého pečetění (nad deferred_from_id), ne v mezeře pod ním, kam by šla podstrčit napořád.
+        $pending = $deferredFrom === null ? '' : ' OR id >= ' . $deferredFrom;
+        $stmt = $this->db->pdo()->prepare("SELECT entity_id, payload FROM activity_log FORCE INDEX(idx_al_action)
+            WHERE action = ? AND entity_type = 'activity_log' AND id > entity_id AND (hash IS NOT NULL{$pending}) ORDER BY id");
+        $stmt->execute([self::REDACTION_ACTION]);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $payload = json_decode((string) $row['payload'], true);
+            if (is_array($payload) && array_key_exists('digest', $payload)) $out[(int) $row['entity_id']] = is_string($payload['digest']) ? $payload['digest'] : null;
+        }
+        return $out;
     }
 
     /**
@@ -606,6 +715,16 @@ final class ActivityLogHashChain
             ->fetchColumn();
 
         return $this->watermark = ($value === false || $value === null) ? null : (int) $value;
+    }
+
+    /**
+     * Otisk redigovaného obsahu svázaný s původním hashem záznamu ({@see redact()}).
+     *
+     * @param array<string,mixed> $row  `created_at` v UTC
+     */
+    private static function redactionDigest(string $originalHash, array $row, ?string $prevHash): string
+    {
+        return hash('sha256', implode("\x1F", ['activity_log_redaction.v1', $originalHash, self::hashOf($row, $prevHash)]));
     }
 
     /**

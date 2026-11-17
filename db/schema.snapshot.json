@@ -1204,7 +1204,8 @@
         "2298_invoice_item_advance_drawdown.sql",
         "2299_membership_list_indexes.sql",
         "2300_membership_variable_symbol.sql",
-        "2301_membership_correctability.sql"
+        "2301_membership_correctability.sql",
+        "2302_activity_log_redactions.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -2206,6 +2207,27 @@
             "checks": {
                 "chk_alch_singleton": "`id` = 1"
             }
+        },
+        "activity_log_redactions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "activity_log_id": "bigint(20) unsigned NOT NULL",
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "redacted_digest": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "source": "varchar(64) NOT NULL COLLATE ascii_bin",
+                "source_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (activity_log_id)",
+                "ix_alr_source": "BTREE (source, source_id)"
+            },
+            "foreign_keys": {
+                "fk_alr_log": "(activity_log_id) -> activity_log (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "ai_assistant_conversations": {
             "type": "BASE TABLE",
