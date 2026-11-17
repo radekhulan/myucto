@@ -36,7 +36,7 @@ import { stockApi, type StockItemSearchResult } from '@/api/stock'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
 import { projectsApi, type Project } from '@/api/projects'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
-import { allocationsHaveMixedDeduction, headerDiffersFromAllocations, itemConflictsWithHeader, itemVatState, type HeaderVat } from './purchaseVatTreatment'
+import { allocationDeductionKey, allocationsHaveMixedDeduction, headerDeductionFromAllocations, headerDiffersFromAllocations, itemConflictsWithHeader, itemVatState, type HeaderVat } from './purchaseVatTreatment'
 import { settingsApi } from '@/api/settings'
 import { usePaneDom } from '@/composables/usePaneDom'
 import AutomationBadge from '@/components/automation/AutomationBadge.vue'
@@ -952,6 +952,7 @@ function populate(inv: PurchaseInvoice) {
     vatOverrides.value[String(o.rate)] = { base: o.base, vat: o.vat }
   }
   vatAllocations.value = (inv.vat_allocations ?? []).map(a => ({ ...a }))
+  allocationDeductionBaseline = allocationDeductionKey(vatAllocations.value)
   // Existující faktura: plátcovství čteme ze SNAPSHOTU dokladu (migrace 0133), který si
   // fakturu drží k datu plnění. ZÁMĚRNĚ NEvoláme online ARES/VIES lookup — ten se ptá na
   // dnešní stav a persistoval by ho na klienta, čímž by u historické faktury příznak
@@ -1228,6 +1229,16 @@ const vatOverrides = ref<Record<string, { base: number; vat: number }>>({})
 const vatAllocations = ref<PurchaseVatAllocation[]>([])
 const hasVatAllocations = computed(() => vatAllocations.value.length > 0)
 const mixedAllocationDeduction = computed(() => allocationsHaveMixedDeduction(vatAllocations.value))
+// Jednotný nárok rozpisu se po změně v rozpisu propíše do nároku v Klasifikaci. Načtení
+// dokladu uloženou hlavičku nepřepisuje: výchozí stav je nárok rozpisu při načtení.
+let allocationDeductionBaseline: string | null = null
+watch(() => allocationDeductionKey(vatAllocations.value), () => {
+  const next = headerDeductionFromAllocations(vatAllocations.value, allocationDeductionBaseline, form.value.vendor_is_vat_payer)
+  allocationDeductionBaseline = allocationDeductionKey(vatAllocations.value)
+  if (!next) return
+  form.value.vat_deduction = next.vat_deduction
+  form.value.vat_deduction_percent = next.vat_deduction_percent
+})
 
 function accountExists(code: string): boolean {
   return accountingAccounts.value.some(a => a.is_active && a.account_code === code)
@@ -2876,7 +2887,7 @@ useWindowTitle(
                   </div>
                   <div class="sm:col-span-2">
                     <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_allocation.deduction') }}</label>
-                    <select v-model="a.vat_deduction" :disabled="a.usage_type === 'personal' || a.usage_type === 'mixed'"
+                    <select v-model="a.vat_deduction" :disabled="a.usage_type === 'personal' || a.usage_type === 'mixed'" data-test="allocation-vat-deduction"
                       class="w-full h-9 px-2 border border-neutral-300 rounded text-sm bg-surface disabled:bg-neutral-100">
                       <option value="full">{{ t('purchase_invoice.vat_deduction.full') }}</option>
                       <option value="none">{{ t('purchase_invoice.vat_deduction.none') }}</option>
