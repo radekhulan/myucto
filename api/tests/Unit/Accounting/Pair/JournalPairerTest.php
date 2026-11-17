@@ -391,4 +391,33 @@ final class JournalPairerTest extends TestCase
         self::assertSame([5 => [50 => 1.0]], $out[1]['dimension_splits']);
         self::assertSame($lines[2], $out[2], 'Řádek bez dvojice zůstává beze změny.');
     }
+
+    /**
+     * Odkaz na řádek dokladu (`dimension_carry_lines`) jde s převzatými hodnotami na protějšek,
+     * aby politika dimenzí i u něj uznala hodnotu uzavřenou po zaúčtování dokladu. Protějšek,
+     * kterému se nic nedoplnilo, odkaz nedostane.
+     */
+    public function testShareAnalyticsCarriesSourceLineReferenceWithCopiedDimensions(): void
+    {
+        $lines = [
+            ['account_id' => 1, 'side' => 'debit', 'amount' => '10.00', 'pair_no' => 1,
+                'dimensions' => [1 => 10], 'dimension_carry_lines' => [42]],
+            ['account_id' => 2, 'side' => 'credit', 'amount' => '10.00', 'pair_no' => 1, 'dimension_carry_lines' => [7]],
+            ['account_id' => 1, 'side' => 'debit', 'amount' => '5.00', 'pair_no' => 2,
+                'dimensions' => [1 => 10], 'dimension_carry_lines' => [43]],
+            ['account_id' => 2, 'side' => 'credit', 'amount' => '5.00', 'pair_no' => 2, 'dimensions' => [1 => 11]],
+            ['account_id' => 1, 'side' => 'debit', 'amount' => '4.00', 'pair_no' => 3,
+                'dimension_splits' => [1 => [10 => 0.5, 11 => 0.5]], 'dimension_carry_lines' => [44]],
+            ['account_id' => 2, 'side' => 'credit', 'amount' => '4.00', 'pair_no' => 3],
+        ];
+
+        $out = JournalPairer::shareAnalytics($lines);
+
+        self::assertSame([1 => 10], $out[1]['dimensions']);
+        self::assertSame([7, 42], $out[1]['dimension_carry_lines']);
+        self::assertSame($lines[0], $out[0]);
+        self::assertSame($lines[3], $out[3], 'Typ, který protějšek už má, se nepřebírá, ani odkaz.');
+        self::assertSame([1 => [10 => 0.5, 11 => 0.5]], $out[5]['dimension_splits']);
+        self::assertSame([44], $out[5]['dimension_carry_lines'], 'Odkaz jde i s převzatým rozpadem.');
+    }
 }

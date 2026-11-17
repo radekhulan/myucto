@@ -13,7 +13,10 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog;
+use MyInvoice\Service\Accounting\EntryForm\EntryForm;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\PostingService;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -149,15 +152,19 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
 
     /**
      * Druh činnosti uzavřený až po zaúčtování dokladu: odklad i rozpuštění ho jen přebírají
-     * z živého řádku dokladu, takže krok uzávěrky projde.
+     * z živého řádku dokladu, takže krok uzávěrky projde. V jednoduché formě zápisu dostane
+     * osy výnosového řádku i jeho protějšek 384 (párovač), a s nimi i odkaz na řádek dokladu.
      */
-    public function testDeferralAndReleaseCarryValueClosedAfterPosting(): void
+    #[DataProvider('entryFormProvider')]
+    public function testDeferralAndReleaseCarryValueClosedAfterPosting(bool $single): void
     {
+        $this->singleForm($single);
         $this->postedRevenue('20910503');
         $this->closeActivityKind();
 
         $run = $this->closing->runDeferredRevenueAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
         $this->assertCarriesAxes((int) $run['entry_id'], '684.100', 'debit', 18200.00);
+        $this->assertCounterpartAxes((int) $run['entry_id'], '384', $single);
 
         $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
         $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
@@ -166,14 +173,242 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
             'entry_date' => (self::YEAR + 1) . '-01-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId,
         ]);
         $this->assertCarriesAxes($entryId, '684.100', 'credit', 18200.00);
+        $this->assertCounterpartAxes($entryId, '384', $single);
+    }
+
+    /**
+     * Jednoduchá forma, dva výnosové řádky s různým druhem činnosti, oba uzavřené po zaúčtování:
+     * každý řádek 684 dostane vlastní protějšek 384 a ten nese osy i odkaz právě svého páru,
+     * při odkladu i rozpuštění. Varianta s dobropisem na druhém druhu činnosti má výsledkové
+     * řádky na obou stranách (dobropis −18 300 odloží −9 100).
+     */
+    #[DataProvider('secondDocumentProvider')]
+    public function testSingleFormPairsEachClosedValueWithItsOwn384(bool $creditNote): void
+    {
+        $this->singleForm(true);
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name) SELECT type_id, supplier_id, 'OTHER', 'Jiná činnost' FROM dimension_values WHERE supplier_id = ? AND code = 'SUBS'")
+            ->execute([$this->supplierId]);
+        $other = (int) $pdo->lastInsertId();
+        $kindType = (int) $pdo->query("SELECT type_id FROM dimension_values WHERE id = {$other}")->fetchColumn();
+        $otherAxes = array_replace($this->axes, [$kindType => $other]);
+        $invoiceId = $this->postRevenueDocument('20910510', 36600.00, $this->axes);
+        $this->postRevenueDocument('20910511', $creditNote ? -18300.00 : 36600.00, $otherAxes, $creditNote ? $invoiceId : null);
+        $pdo->prepare("UPDATE dimension_values SET is_active = 0 WHERE supplier_id = ? AND code IN ('SUBS', 'OTHER')")->execute([$this->supplierId]);
+        $pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
+        $subs = $this->axes[$kindType];
+        $second = $creditNote ? 9100.00 : 18200.00;
+
+        $run = $this->closing->runDeferredRevenueAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->assertPairsByKind((int) $run['entry_id'], $kindType, [
+            '684.100' => [$subs => ['debit', 18200.00], $other => [$creditNote ? 'credit' : 'debit', $second]],
+            '384' => [$subs => ['credit', 18200.00], $other => [$creditNote ? 'debit' : 'credit', $second]],
+        ]);
+
+        $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $lines = $this->invokePrivate('deferredRevenueLines', $release['lines'], (float) $release['total'], true, (self::YEAR + 1) . '-01-01');
+        $entryId = $this->posting->postDocument($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId), $lines, [
+            'entry_date' => (self::YEAR + 1) . '-01-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId,
+        ]);
+        $this->assertPairsByKind($entryId, $kindType, [
+            '684.100' => [$subs => ['credit', 18200.00], $other => [$creditNote ? 'debit' : 'credit', $second]],
+            '384' => [$subs => ['debit', 18200.00], $other => [$creditNote ? 'credit' : 'debit', $second]],
+        ]);
+    }
+
+    /** @return array<string,array{bool}> */
+    public static function secondDocumentProvider(): array
+    {
+        return ['dvě faktury' => [false], 'faktura a dobropis' => [true]];
+    }
+
+    /**
+     * Zaúčtovaná faktura (nebo dobropis k $parentId) s výnosem 684.100 na zadaných osách.
+     *
+     * @param array<int,int> $axes
+     */
+    private function postRevenueDocument(string $number, float $base, array $axes, ?int $parentId = null): int
+    {
+        $date = self::YEAR . '-07-01';
+        $this->db->pdo()->prepare(
+            'INSERT INTO invoices
+                (supplier_id, varsymbol, invoice_type, parent_invoice_id, client_id, issue_date, tax_date, due_date,
+                 currency_id, reverse_charge, total_without_vat, total_vat, total_with_vat, paid_total, status,
+                 vat_classification_code, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, 0, "sent", "1", ?)'
+        )->execute([$this->supplierId, $number, $parentId === null ? 'invoice' : 'credit_note', $parentId, $this->clientId,
+            $date, $date, $date, $this->currencyId, $base, $base, $this->userId]);
+        $invoiceId = (int) $this->db->pdo()->lastInsertId();
+        $this->item($invoiceId, $base, $date, (self::YEAR + 1) . '-06-30');
+        $credit = $base < 0;
+        $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, [
+            ['account_code' => '311', 'side' => $credit ? 'credit' : 'debit', 'amount' => abs($base)],
+            ['account_code' => '684.100', 'side' => $credit ? 'debit' : 'credit', 'amount' => abs($base), 'dimensions' => $axes, 'dimension_origins' => $this->origins()],
+        ], ['entry_date' => $date, 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        return $invoiceId;
+    }
+
+    /**
+     * Řádky zápisu na účtech podle druhu činnosti: strana a částka každého řádku.
+     *
+     * @param array<string,array<int,array{0:string,1:float}>> $expected účet => druh činnosti => [strana, částka]
+     */
+    private function assertPairsByKind(int $entryId, int $kindType, array $expected): void
+    {
+        $dims = (new DimensionAssignmentRepository($this->db))->entryLineDimensions($this->supplierId, $entryId);
+        foreach ($expected as $code => $byKind) {
+            $lines = $this->linesOn($entryId, (string) $code);
+            self::assertCount(count($byKind), $lines, "Řádky {$code}.");
+            $actual = [];
+            foreach ($lines as $line) {
+                $actual[$dims[(int) $line['id']][$kindType] ?? 0] = [$line['side'], round((float) $line['amount'], 2)];
+            }
+            ksort($actual);
+            ksort($byKind);
+            self::assertSame($byKind, $actual, "Účet {$code}: každý řádek nese druh činnosti svého páru.");
+        }
+    }
+
+    /**
+     * Hodnota uzavřená až mezi odkladem a dalšími kroky: opakované spuštění kroku odkladu
+     * (přepis zápisu) i rozpuštění v N+1 projdou, výnosy (384) i náklady (381).
+     */
+    #[DataProvider('entryFormProvider')]
+    public function testRerunAndReleaseCarryValueClosedAfterDeferral(bool $single): void
+    {
+        $this->singleForm($single);
+        $this->postedRevenue('20910512');
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'open' WHERE id = ?")->execute([$this->periodId]);
+        $this->postedPrepaid();
+        $this->closing->runDeferredRevenueAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->runPrepaidExpenseAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closeActivityKind();
+
+        $revenue = $this->closing->runDeferredRevenueAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $prepaid = $this->closing->runPrepaidExpenseAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->assertCarriesAxes((int) $revenue['entry_id'], '684.100', 'debit', 18200.00);
+        $this->assertCounterpartAxes((int) $revenue['entry_id'], '384', $single);
+        $this->assertCarriesAxes((int) $prepaid['entry_id'], '518', 'credit', 18200.00);
+        $this->assertCounterpartAxes((int) $prepaid['entry_id'], '381', $single);
+
+        $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        foreach ([
+            ['deferredRevenueReleaseForPeriod', 'deferredRevenueLines', 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId), '684.100', 'credit', '384'],
+            ['prepaidExpenseReleaseForPeriod', 'prepaidExpenseLines', 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId), '518', 'debit', '381'],
+        ] as [$releaseFor, $linesFor, $sourceType, $sourceId, $account, $side, $counterpart]) {
+            $release = $this->invokePrivate($releaseFor, self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+            $lines = $this->invokePrivate($linesFor, $release['lines'], (float) $release['total'], true, (self::YEAR + 1) . '-01-01');
+            $entryId = $this->posting->postDocument($this->supplierId, $sourceType, $sourceId, $lines, [
+                'entry_date' => (self::YEAR + 1) . '-01-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId,
+            ]);
+            $this->assertCarriesAxes($entryId, $account, $side, 18200.00);
+            $this->assertCounterpartAxes($entryId, $counterpart, $single);
+        }
+    }
+
+    /**
+     * Výnosový řádek rozpadlý mezi dva druhy činnosti, z nichž jeden se po zaúčtování uzavřel:
+     * odklad převezme rozpad, v jednoduché formě i na protějšek 384.
+     */
+    #[DataProvider('entryFormProvider')]
+    public function testDeferralCarriesSplitWithValueClosedAfterPosting(bool $single): void
+    {
+        $this->singleForm($single);
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name) SELECT type_id, supplier_id, 'OTHER', 'Jiná činnost' FROM dimension_values WHERE supplier_id = ? AND code = 'SUBS'")
+            ->execute([$this->supplierId]);
+        $other = (int) $pdo->lastInsertId();
+        $kindType = (int) $pdo->query("SELECT type_id FROM dimension_values WHERE id = {$other}")->fetchColumn();
+        $split = [$kindType => [$this->axes[$kindType] => 0.5, $other => 0.5]];
+        $origins = $this->origins();
+        $splitOrigins = [$kindType => $origins[$kindType]];
+        unset($origins[$kindType]);
+        $invoiceId = $this->invoice('20910513', 36600.00);
+        $this->item($invoiceId, 36600.00, self::YEAR . '-07-01', (self::YEAR + 1) . '-06-30');
+        $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 36600.00],
+            ['account_code' => '684.100', 'side' => 'credit', 'amount' => 36600.00,
+                'dimensions' => array_diff_key($this->axes, [$kindType => true]), 'dimension_origins' => $origins,
+                'dimension_splits' => $split, 'dimension_split_origins' => $splitOrigins],
+        ], ['entry_date' => self::YEAR . '-07-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        $this->closeActivityKind();
+        $pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
+
+        $run = $this->closing->runDeferredRevenueAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $entryId = (int) $run['entry_id'];
+        $repo = new DimensionAssignmentRepository($this->db);
+        $splits = $repo->lineSplits($this->supplierId, array_map(static fn (array $l): int => (int) $l['id'], [
+            ...$this->linesOn($entryId, '684.100'), ...$this->linesOn($entryId, '384'),
+        ]));
+        self::assertCount(1, $this->linesOn($entryId, '684.100'));
+        self::assertCount(1, $this->linesOn($entryId, '384'));
+        $revenueLine = (int) $this->linesOn($entryId, '684.100')[0]['id'];
+        $counterLine = (int) $this->linesOn($entryId, '384')[0]['id'];
+        $expected = [$this->axes[$kindType], $other];
+        sort($expected);
+        $values = array_keys($splits[$revenueLine][$kindType] ?? []);
+        sort($values);
+        self::assertSame($expected, $values, 'Odklad nese rozpad řádku dokladu.');
+        $values = array_keys($splits[$counterLine][$kindType] ?? []);
+        sort($values);
+        self::assertSame($single ? $expected : [], $values);
+
+        // Rozpuštění v N+1 nese rozpad také a jde zaúčtovat.
+        $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $lines = $this->invokePrivate('deferredRevenueLines', $release['lines'], (float) $release['total'], true, (self::YEAR + 1) . '-01-01');
+        $releaseId = $this->posting->postDocument($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId), $lines, [
+            'entry_date' => (self::YEAR + 1) . '-01-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId,
+        ]);
+        foreach (['684.100' => $expected, '384' => $single ? $expected : []] as $code => $want) {
+            $codeLines = $this->linesOn($releaseId, (string) $code);
+            self::assertCount(1, $codeLines);
+            $line = (int) $codeLines[0]['id'];
+            $values = array_keys($repo->lineSplits($this->supplierId, [$line])[$line][$kindType] ?? []);
+            sort($values);
+            self::assertSame($want, $values, "Rozpuštění {$code} nese rozpad.");
+        }
+    }
+
+    /** Náklady příštích období (381) se stejně: hodnota uzavřená po zaúčtování přijaté faktury. */
+    #[DataProvider('entryFormProvider')]
+    public function testPrepaidDeferralAndReleaseCarryValueClosedAfterPosting(bool $single): void
+    {
+        $this->singleForm($single);
+        $this->postedPrepaid();
+        $this->closeActivityKind();
+
+        $run = $this->closing->runPrepaidExpenseAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->assertCarriesAxes((int) $run['entry_id'], '518', 'credit', 18200.00);
+        $this->assertCounterpartAxes((int) $run['entry_id'], '381', $single);
+
+        $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $release = $this->invokePrivate('prepaidExpenseReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $lines = $this->invokePrivate('prepaidExpenseLines', $release['lines'], (float) $release['total'], true, (self::YEAR + 1) . '-01-01');
+        $entryId = $this->posting->postDocument($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId), $lines, [
+            'entry_date' => (self::YEAR + 1) . '-01-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId,
+        ]);
+        $this->assertCarriesAxes($entryId, '518', 'debit', 18200.00);
+        $this->assertCounterpartAxes($entryId, '381', $single);
+    }
+
+    /** @return array<string,array{bool}> */
+    public static function entryFormProvider(): array
+    {
+        return ['složená forma' => [false], 'jednoduchá forma' => [true]];
     }
 
     /**
      * Odkaz na živý výnosový řádek, který uzavřenou hodnotu nenese (jiný druh činnosti),
-     * ji nepropustí: převzít jde jen hodnotu, kterou uvedený řádek skutečně nese.
+     * ji nepropustí: převzít jde jen hodnotu, kterou uvedený řádek skutečně nese, v obou formách
+     * zápisu. Vlastní hodnotu protějšku 384 ověřuje {@see testCounterpartOwnClosedValueIsRefusedWhenSourceLineDoesNotCarryIt()}.
      */
-    public function testClosedValueIsRefusedWhenReferencedLineDoesNotCarryIt(): void
+    #[DataProvider('entryFormProvider')]
+    public function testClosedValueIsRefusedWhenReferencedLineDoesNotCarryIt(bool $single): void
     {
+        $this->singleForm($single);
         $pdo = $this->db->pdo();
         $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name) SELECT type_id, supplier_id, 'OTHER', 'Jiná činnost' FROM dimension_values WHERE supplier_id = ? AND code = 'SUBS'")
             ->execute([$this->supplierId]);
@@ -256,9 +491,12 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
     /**
      * Ve 504 starý odklad bez dimenzí: rozpuštění si ponechá jen osy činnosti dokladu (bez
      * nich by nešlo zaúčtovat), ostatní dimenze (středisko) zrcadlí odklad a nenese je.
+     * Rozpuštění jde zaúčtovat i s osou uzavřenou po zaúčtování dokladu, v obou formách zápisu.
      */
-    public function testReleaseIn504KeepsOnlyActivityAxesAfterDeferralWithoutDimensions(): void
+    #[DataProvider('entryFormProvider')]
+    public function testReleaseIn504KeepsOnlyActivityAxesAfterDeferralWithoutDimensions(bool $single): void
     {
+        $this->singleForm($single);
         $pdo = $this->db->pdo();
         $pdo->prepare("INSERT INTO dimension_types (supplier_id, code, name, kind) VALUES (?, 'stredisko-504', 'Středisko', 'custom')")->execute([$this->supplierId]);
         $centerType = (int) $pdo->lastInsertId();
@@ -276,6 +514,7 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
             ->execute([(int) $run['entry_id']]);
         $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
 
+        $this->closeActivityKind();
         $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
 
         self::assertCount(1, $release['lines']);
@@ -284,6 +523,7 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
         $expected = $this->axes;
         ksort($expected);
         self::assertSame($expected, $dims);
+        $this->postLegacyRelease('deferredRevenueLines', 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId), $release, '384', $single);
     }
 
     /**
@@ -333,14 +573,20 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
         self::assertSame($expected, $dims, 'Rozpuštění nese jen osy činnosti rozlišené položky.');
     }
 
-    /** Náklady (381) ve 504 se starým odkladem bez dimenzí: rozpuštění nese osy dokladu. */
-    public function testPrepaidReleaseIn504CarriesAxesAfterDeferralWithoutDimensions(): void
+    /**
+     * Náklady (381) ve 504 se starým odkladem bez dimenzí: rozpuštění nese osy dokladu a jde
+     * zaúčtovat i s osou uzavřenou po zaúčtování dokladu, v obou formách zápisu.
+     */
+    #[DataProvider('entryFormProvider')]
+    public function testPrepaidReleaseIn504CarriesAxesAfterDeferralWithoutDimensions(bool $single): void
     {
+        $this->singleForm($single);
         $run = $this->postedPrepaidAndRun();
         $this->db->pdo()->prepare('DELETE d FROM journal_entry_line_dimensions d JOIN journal_entry_lines l ON l.id = d.line_id WHERE l.entry_id = ?')
             ->execute([(int) $run['entry_id']]);
         $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
 
+        $this->closeActivityKind();
         $release = $this->invokePrivate('prepaidExpenseReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
 
         self::assertCount(1, $release['lines']);
@@ -349,6 +595,67 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
         $expected = $this->axes;
         ksort($expected);
         self::assertSame($expected, $dims);
+        $this->postLegacyRelease('prepaidExpenseLines', 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId), $release, '381', $single);
+    }
+
+    /**
+     * Zaúčtuje rozpuštění starého odkladu v N+1; protějšek 381/384 nese v jednoduché formě
+     * osy činnosti svého páru, ve složené je bez dimenzí.
+     *
+     * @param array<string,mixed> $release
+     */
+    private function postLegacyRelease(string $linesFor, string $sourceType, int $sourceId, array $release, string $counterpart, bool $single): void
+    {
+        $lines = $this->invokePrivate($linesFor, $release['lines'], (float) $release['total'], true, (self::YEAR + 1) . '-01-01');
+        $entryId = $this->posting->postDocument($this->supplierId, $sourceType, $sourceId, $lines, [
+            'entry_date' => (self::YEAR + 1) . '-01-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId,
+        ]);
+        $this->assertCounterpartAxes($entryId, $counterpart, $single);
+    }
+
+    /**
+     * Protějšek 384 s vlastní uzavřenou hodnotou druhu činnosti, kterou řádek dokladu nese:
+     * párovač mu doplní ostatní osy i s odkazem a odkaz hodnotu propustí. Bez přenosu odkazu
+     * by zápis padl. Pozitivní kontrola k {@see testCounterpartOwnClosedValueIsRefusedWhenSourceLineDoesNotCarryIt()}.
+     */
+    public function testCounterpartOwnClosedValueCarriedBySourceLineIsAccepted(): void
+    {
+        $this->singleForm(true);
+        $this->postedRevenue('20910515');
+        $line = $this->lastRevenueLine();
+        $kindType = (int) $this->db->pdo()->query("SELECT type_id FROM dimension_values WHERE supplier_id = {$this->supplierId} AND code = 'SUBS'")->fetchColumn();
+        $this->closeActivityKind();
+
+        $entryId = $this->posting->postDocument($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($this->periodId), [
+            ['account_code' => '684.100', 'side' => 'debit', 'amount' => 100.00, 'dimensions' => $this->axes, 'dimension_carry_lines' => [$line]],
+            ['account_code' => '384', 'side' => 'credit', 'amount' => 100.00, 'dimensions' => [$kindType => $this->axes[$kindType]]],
+        ], ['entry_date' => self::YEAR . '-12-31', 'posted' => true, 'posted_by' => $this->userId, 'allow_closing_period' => true]);
+
+        $this->assertCounterpartAxes($entryId, '384', true);
+    }
+
+    /**
+     * Protějšek 384 s vlastní uzavřenou hodnotou druhu činnosti, kterou řádek dokladu nenese:
+     * odkaz převzatý od páru ji nepropustí (uzná se jen hodnota, kterou odkazovaný řádek nese).
+     * Protipříklad: projde i bez přenosu odkazu, chrání zúžení v politice dimenzí.
+     */
+    public function testCounterpartOwnClosedValueIsRefusedWhenSourceLineDoesNotCarryIt(): void
+    {
+        $this->singleForm(true);
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name) SELECT type_id, supplier_id, 'OTHER', 'Jiná činnost' FROM dimension_values WHERE supplier_id = ? AND code = 'SUBS'")
+            ->execute([$this->supplierId]);
+        $other = (int) $pdo->lastInsertId();
+        $kindType = (int) $pdo->query("SELECT type_id FROM dimension_values WHERE id = {$other}")->fetchColumn();
+        $this->postedRevenue('20910514');
+        $line = $this->lastRevenueLine();
+        $pdo->prepare("UPDATE dimension_values SET is_active = 0 WHERE id = ?")->execute([$other]);
+
+        $this->expectExceptionMessage('Uzavřenou hodnotu systémové dimenze nelze nově přiřadit.');
+        $this->posting->postDocument($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($this->periodId), [
+            ['account_code' => '684.100', 'side' => 'debit', 'amount' => 100.00, 'dimensions' => $this->axes, 'dimension_carry_lines' => [$line]],
+            ['account_code' => '384', 'side' => 'credit', 'amount' => 100.00, 'dimensions' => [$kindType => $other]],
+        ], ['entry_date' => self::YEAR . '-12-31', 'posted' => true, 'posted_by' => $this->userId, 'allow_closing_period' => true]);
     }
 
     /** Převzetí uzavřené hodnoty platí jen pro zápisy časového rozlišení, ne pro ruční zápis. */
@@ -386,6 +693,13 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
      */
     private function postedPrepaidAndRun(): array
     {
+        $this->postedPrepaid();
+        return $this->closing->runPrepaidExpenseAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+    }
+
+    /** Zaúčtovaná přijatá faktura z {@see postedPrepaidAndRun()}, rok ve stavu uzavírání. */
+    private function postedPrepaid(): void
+    {
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email,
@@ -415,8 +729,29 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
             ['account_code' => '321', 'side' => 'credit', 'amount' => 36600.00],
         ], ['entry_date' => $date, 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
         $pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
+    }
 
-        return $this->closing->runPrepaidExpenseAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+    private function singleForm(bool $single): void
+    {
+        if ($single) {
+            Bootstrap::buildContainer()->get(EntryFormService::class)
+                ->schedule($this->supplierId, self::YEAR . '-01-01', EntryForm::Single, $this->userId);
+        }
+    }
+
+    /**
+     * Protějšek 381/384: v jednoduché formě je zápis po dvojicích a nese osy výsledkového
+     * řádku (párovač), ve složené formě zůstává bez dimenzí.
+     */
+    private function assertCounterpartAxes(int $entryId, string $accountCode, bool $single): void
+    {
+        $lines = $this->linesOn($entryId, $accountCode);
+        self::assertCount(1, $lines);
+        $actual = (new DimensionAssignmentRepository($this->db))->entryLineDimensions($this->supplierId, $entryId)[(int) $lines[0]['id']] ?? [];
+        ksort($actual);
+        $expected = $single ? $this->axes : [];
+        ksort($expected);
+        self::assertSame($expected, $actual);
     }
 
     /** Zaúčtovaná faktura s výnosem na 684.100 (osy hlavní činnosti) a obdobím přes rozvahový den; rok se uzavírá. */
