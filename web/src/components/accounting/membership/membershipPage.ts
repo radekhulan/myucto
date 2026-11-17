@@ -13,7 +13,7 @@ export const memberDetailPath = (id: number) => `${MEMBERSHIP_LIST_PATH}/members
  * předpisu a otevřeného člena uloží sem. Detail z toho vezme odkaz zpět, seznam po návratu výběr a fokus.
  * Platí jen pro tutéž firmu a filtry a jen krátce; obnovený výběr seznam jako každou obnovu ověří na serveru.
  */
-export interface MembershipListHandoff { supplier: number; pane: string | null; path: string; filters: MembershipListFilters; ids: number[]; openedId: number | null; at: number }
+export interface MembershipListHandoff { supplier: number; pane: string | null; returning: boolean; path: string; filters: MembershipListFilters; ids: number[]; openedId: number | null; at: number }
 const HANDOFF_KEY = 'myinvoice.membership.listHandoff'
 const HANDOFF_TTL_MS = 30 * 60 * 1000
 
@@ -33,7 +33,7 @@ export function readListHandoff(supplier: number, pane: string | null): Membersh
     if (h.supplier !== supplier || (h.pane ?? null) !== pane || typeof h.at !== 'number' || Date.now() - h.at > HANDOFF_TTL_MS) return null
     if (typeof h.path !== 'string' || (h.path !== MEMBERSHIP_LIST_PATH && !h.path.startsWith(`${MEMBERSHIP_LIST_PATH}?`))) return null
     const ids = Array.isArray(h.ids) ? h.ids.filter((id): id is number => Number.isInteger(id) && id > 0).slice(0, 500) : []
-    return { supplier, pane, path: h.path, filters: h.filters as MembershipListFilters, ids, openedId: Number.isInteger(h.openedId) ? h.openedId as number : null, at: h.at }
+    return { supplier, pane, returning: h.returning === true, path: h.path, filters: h.filters as MembershipListFilters, ids, openedId: Number.isInteger(h.openedId) ? h.openedId as number : null, at: h.at }
   } catch { return null }
 }
 
@@ -41,7 +41,16 @@ export function readListHandoff(supplier: number, pane: string | null): Membersh
 export function forgetMemberInHandoff(supplier: number, pane: string | null, memberId: number): void {
   const handoff = readListHandoff(supplier, pane)
   if (!handoff) return
-  saveListHandoff({ ...handoff, ids: handoff.ids.filter(id => id !== memberId), openedId: handoff.openedId === memberId ? null : handoff.openedId })
+  saveListHandoff({ ...handoff, returning: true, ids: handoff.ids.filter(id => id !== memberId), openedId: handoff.openedId === memberId ? null : handoff.openedId })
+}
+
+/**
+ * Návrat z detailu na seznam (odkaz Zpět, smazání): jen tehdy seznam převezme výběr a fokus. Seznam otevřený
+ * z menu nebo jinou cestou předání nepoužije, i když má stejnou adresu.
+ */
+export function markListReturn(supplier: number, pane: string | null): void {
+  const handoff = readListHandoff(supplier, pane)
+  if (handoff) saveListHandoff({ ...handoff, returning: true })
 }
 
 export function clearListHandoff(): void {

@@ -181,14 +181,19 @@ function closeOnScroll(e: Event) {
   if (isPhone.value && menuRef.value && e.target instanceof Node && menuRef.value.contains(e.target)) return
   close()
 }
-function onKey(e: KeyboardEvent) { if (paneActive.value && e.key === 'Escape') close() }
+// Capture na dokumentu: rozbalenou nabídku zavře dřív, než Escape dojde k oknu (Modal), a okno tak zůstane.
+function onKey(e: KeyboardEvent) {
+  if (!paneActive.value || e.key !== 'Escape') return
+  if (open.value) e.preventDefault()
+  close()
+}
 onMounted(() => {
-  window.addEventListener('keydown', onKey)
+  document.addEventListener('keydown', onKey, true)
   window.addEventListener('scroll', closeOnScroll, true)
   window.addEventListener('resize', close)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onKey)
+  document.removeEventListener('keydown', onKey, true)
   window.removeEventListener('scroll', closeOnScroll, true)
   window.removeEventListener('resize', close)
 })

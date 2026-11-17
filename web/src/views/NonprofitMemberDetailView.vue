@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { accountingApi, type AccountingPeriod } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import MembershipMemberDetail from '@/components/accounting/membership/MembershipMemberDetail.vue'
-import { forgetMemberInHandoff, MEMBERSHIP_LIST_PATH, readListHandoff, useMembershipAccess } from '@/components/accounting/membership/membershipPage'
+import { forgetMemberInHandoff, markListReturn, MEMBERSHIP_LIST_PATH, readListHandoff, useMembershipAccess } from '@/components/accounting/membership/membershipPage'
 import { usePaneId } from '@/workspace/paneActivity'
 
 /** Detail člena jako samostatná stránka, stejně jako detail kontaktu: celá šířka, vlastní adresa, otevření v novém panelu. */
@@ -53,7 +53,7 @@ onBeforeUnmount(() => { alive = false; ticket++ })
   <MembershipMemberDetail v-if="pageSupplier && supplierId === pageSupplier && memberId" :key="memberId" :supplier="pageSupplier" :can-manage="canManage" :member-id="memberId" :periods="periods"
     @deleted="deleted()">
     <template #back>
-      <RouterLink :to="backTo" class="text-sm text-neutral-600 hover:text-neutral-900" data-action="back-to-list">{{ t('nonprofitMembership.backToList') }}</RouterLink>
+      <RouterLink :to="backTo" class="text-sm text-neutral-600 hover:text-neutral-900" data-action="back-to-list" @click="markListReturn(pageSupplier, pane)">{{ t('nonprofitMembership.backToList') }}</RouterLink>
     </template>
   </MembershipMemberDetail>
 </template>

@@ -50,18 +50,18 @@ it('keeps the detail read-only without posting write permission', async () => {
 const filters = { search: 'Synthetic', year: 2026, title_key: '', payment_status: 'all' as const }
 it('returns to the list with the filters the list handed over, otherwise to the plain list', async () => {
   // Panely mají paměťovou historii bez history.state.back; adresu předává seznam při otevření člena.
-  saveListHandoff({ supplier: 5, pane: null, path: '/accounting/nonprofit-membership?year=2026&search=Synthetic', filters, ids: [1], openedId: 7 })
+  saveListHandoff({ supplier: 5, pane: null, returning: false, path: '/accounting/nonprofit-membership?year=2026&search=Synthetic', filters, ids: [1], openedId: 7 })
   const w = mounted(); await flushPromises()
   expect(w.get('[data-action="back-to-list"]').text()).toBe(cs.nonprofitMembership.backToList)
   expect(w.getComponent(RouterLinkStub).props('to')).toBe('/accounting/nonprofit-membership?year=2026&search=Synthetic')
   w.unmount()
 
   // Předání jiné firmy nebo cizí adresa: přímý odkaz vede na seznam bez filtrů.
-  saveListHandoff({ supplier: 6, pane: null, path: '/accounting/nonprofit-membership?year=2026', filters, ids: [], openedId: 7 })
+  saveListHandoff({ supplier: 6, pane: null, returning: false, path: '/accounting/nonprofit-membership?year=2026', filters, ids: [], openedId: 7 })
   const otherCompany = mounted(); await flushPromises()
   expect(otherCompany.getComponent(RouterLinkStub).props('to')).toBe('/accounting/nonprofit-membership')
   otherCompany.unmount()
-  saveListHandoff({ supplier: 5, pane: null, path: '/clients/3', filters, ids: [], openedId: 7 })
+  saveListHandoff({ supplier: 5, pane: null, returning: false, path: '/clients/3', filters, ids: [], openedId: 7 })
   const foreign = mounted(); await flushPromises()
   expect(foreign.getComponent(RouterLinkStub).props('to')).toBe('/accounting/nonprofit-membership')
   foreign.unmount()
@@ -95,10 +95,19 @@ it('renders nothing without a current company', async () => {
 })
 
 it('removes a deleted member from the handed-over selection so the list does not warn about it', async () => {
-  saveListHandoff({ supplier: 5, pane: null, path: '/accounting/nonprofit-membership?year=2026', filters, ids: [1, 7], openedId: 7 })
+  saveListHandoff({ supplier: 5, pane: null, returning: false, path: '/accounting/nonprofit-membership?year=2026', filters, ids: [1, 7], openedId: 7 })
   const w = mounted(); await flushPromises()
   w.findComponent(Detail).vm.$emit('deleted'); await flushPromises()
   expect(nav.replace).toHaveBeenCalledWith('/accounting/nonprofit-membership?year=2026')
   expect(readListHandoff(5, null)).toMatchObject({ ids: [1], openedId: null })
+  w.unmount()
+})
+
+it('marks the way back on the back link so only that return restores the list state', async () => {
+  saveListHandoff({ supplier: 5, pane: null, returning: false, path: '/accounting/nonprofit-membership?year=2026', filters, ids: [1], openedId: 7 })
+  const w = mounted(); await flushPromises()
+  expect(readListHandoff(5, null)?.returning).toBe(false)
+  await w.get('[data-action="back-to-list"]').trigger('click')
+  expect(readListHandoff(5, null)?.returning).toBe(true)
   w.unmount()
 })

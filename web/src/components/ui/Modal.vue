@@ -56,7 +56,7 @@ function onKey(e: KeyboardEvent) {
 }
 
 onMounted(() => {
-  pushModal(stackId, paneId.value)
+  pushModal(stackId, () => paneId.value, () => paneActive.value)
   document.addEventListener('keydown', onKey)
   window.addEventListener('resize', measurePreview)
   measurePreview()

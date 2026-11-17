@@ -108,7 +108,7 @@ describe('RowActionsMenu', () => {
     await flushPromises()
     expect((document.activeElement as HTMLElement).textContent).toContain('Druhá')
 
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     await flushPromises()
     expect(document.querySelector('[role="menu"]')).toBeNull()
     expect(document.activeElement).toBe(trigger.element)

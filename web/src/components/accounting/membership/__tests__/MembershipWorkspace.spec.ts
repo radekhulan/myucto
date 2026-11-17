@@ -5,7 +5,7 @@ import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatDate } from '@/composables/useFormat'
 import Workspace from '../MembershipWorkspace.vue'
-import { readListHandoff, saveListHandoff } from '../membershipPage'
+import { markListReturn, readListHandoff, saveListHandoff } from '../membershipPage'
 import MembershipBatchFlow from '../MembershipBatchFlow.vue'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import type { MemberPage, MemberRow } from '@/api/nonprofitMembership'
@@ -222,6 +222,7 @@ describe('Membership workspace', () => {
     await first.get('[data-member="3"] [data-action="open-member"]').trigger('click')
     expect(readListHandoff(5, null)).toMatchObject({ path: '/accounting/nonprofit-membership?year=2026&search=Synthetic', ids: [1,2], openedId: 3 })
     first.unmount()
+    markListReturn(5, null)
     // Návrat: výběr se obnoví jednou a jako u každé obnovy ověří na serveru (člen 2 mezitím filtru nevyhovuje).
     api.selectionCheck.mockResolvedValueOnce({member_ids: [1]})
     const back=mount(Workspace, { attachTo: document.body, props: { supplier: 5, canManage: true }, global: { plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })], stubs: { ActionBar, ClientSearchSelect, MembershipReconciliation: Reconciliation } } })
@@ -247,13 +248,14 @@ describe('Membership workspace', () => {
     expect(toast.warning).toHaveBeenCalledWith(cs.nonprofitMembership.listSelectionCleared)
     await w.get('[data-member="1"] [data-action="open-member"]').trigger('click')
     w.unmount()
+    markListReturn(5, null)
     navigation.route = reactive({query: {}})
     const back=mounted();await flushPromises()
     expect(api.selectionCheck).not.toHaveBeenCalledWith(5, [1,2], expect.anything())
     expect((back.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
     back.unmount()
 
-    saveListHandoff({ supplier: 5, pane: null, path: '/accounting/nonprofit-membership', filters: {search:'',year:Number(appIsoDate().slice(0,4)),title_key:'',payment_status:'all'}, ids: [1], openedId: 1 })
+    saveListHandoff({ supplier: 5, pane: null, returning: true, path: '/accounting/nonprofit-membership', filters: {search:'',year:Number(appIsoDate().slice(0,4)),title_key:'',payment_status:'all'}, ids: [1], openedId: 1 })
     const other=mounted({supplier:6});await flushPromises()
     expect((other.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
     other.unmount()
@@ -1068,12 +1070,12 @@ describe('Membership workspace', () => {
   it('restores a handed-over selection only on the way back to the same list in the same panel', async () => {
     const filters = { search: '', year: Number(appIsoDate().slice(0, 4)), title_key: '', payment_status: 'all' as const }
     // Jiný panel (sdílené sessionStorage) výběr nepřevezme.
-    saveListHandoff({ supplier: 5, pane: 'other-pane', path: '/accounting/nonprofit-membership', filters, ids: [1], openedId: 1 })
+    saveListHandoff({ supplier: 5, pane: 'other-pane', returning: true, path: '/accounting/nonprofit-membership', filters, ids: [1], openedId: 1 })
     const otherPane = mounted(); await flushPromises()
     expect((otherPane.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
     otherPane.unmount()
     // Seznam otevřený jinou cestou (menu bez filtrů v adrese) starý výběr tiše neobnoví.
-    saveListHandoff({ supplier: 5, pane: null, path: '/accounting/nonprofit-membership?year=2026', filters, ids: [1], openedId: 1 })
+    saveListHandoff({ supplier: 5, pane: null, returning: true, path: '/accounting/nonprofit-membership?year=2026', filters, ids: [1], openedId: 1 })
     navigation.route = reactive({ query: {}, fullPath: '/accounting/nonprofit-membership' }) as typeof navigation.route
     const viaMenu = mounted(); await flushPromises()
     expect((viaMenu.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
@@ -1088,7 +1090,7 @@ describe('Membership workspace', () => {
   it('after a member was deleted on its page, returns focus to the list heading without a selection warning', async () => {
     const filters = { search: '', year: Number(appIsoDate().slice(0, 4)), title_key: '', payment_status: 'all' as const }
     // Detail smazaného člena ho z předání vyřadil (forgetMemberInHandoff): zůstal jen člen 1, otevřený není žádný.
-    saveListHandoff({ supplier: 5, pane: null, path: '/accounting/nonprofit-membership', filters, ids: [1], openedId: null })
+    saveListHandoff({ supplier: 5, pane: null, returning: true, path: '/accounting/nonprofit-membership', filters, ids: [1], openedId: null })
     const w = mount(Workspace, { attachTo: document.body, props: { supplier: 5, canManage: true }, global: { plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })], stubs: { ActionBar, SearchableSelect, ClientSearchSelect, ClientFormModal, MembershipReconciliation: Reconciliation, MembershipBatchFlow: true, MembershipImportFlow: ImportFlow, Modal, BulkActionBar, MembershipRates: true } } })
     await flushPromises()
     expect(toast.warning).not.toHaveBeenCalled()
@@ -1099,7 +1101,7 @@ describe('Membership workspace', () => {
   it('explains the 500 member selection limit on a greyed checkbox', async () => {
     const filters = { search: '', year: Number(appIsoDate().slice(0, 4)), title_key: '', payment_status: 'all' as const }
     const ids = Array.from({ length: 500 }, (_, index) => 1000 + index)
-    saveListHandoff({ supplier: 5, pane: null, path: '/accounting/nonprofit-membership', filters, ids, openedId: null })
+    saveListHandoff({ supplier: 5, pane: null, returning: true, path: '/accounting/nonprofit-membership', filters, ids, openedId: null })
     const w = mounted(); await flushPromises()
     const box = w.get('[data-member="1"] [data-action="batch-check-member"]')
     expect(box.attributes('disabled')).toBeDefined()
@@ -1120,6 +1122,27 @@ describe('Membership workspace', () => {
     const reconciliation = w.findComponent(Reconciliation)
     await w.get('[data-tab="members"]').trigger('click'); await flushPromises()
     expect(reconciliation.exists()).toBe(true)
+    w.unmount()
+  })
+
+  it('does not restore a handed-over selection when the list is opened again from the menu', async () => {
+    const filters = { search: '', year: Number(appIsoDate().slice(0, 4)), title_key: '', payment_status: 'all' as const }
+    // Detail se opustil jinam než odkazem Zpět: předání není označené jako návrat, i když adresa sedí.
+    saveListHandoff({ supplier: 5, pane: null, returning: false, path: '/accounting/nonprofit-membership', filters, ids: [1], openedId: 1 })
+    const w = mounted(); await flushPromises()
+    expect((w.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
+    expect(api.selectionCheck).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('does not let a running import of the previous company keep the next import window locked', async () => {
+    const w = mounted(); await flushPromises()
+    await w.get('[data-action="import-open"]').trigger('click'); await flushPromises()
+    w.findComponent(ImportFlow).vm.$emit('lock', true); await flushPromises()
+    await w.setProps({ supplier: 6 }); await flushPromises()
+    await w.get('[data-action="import-open"]').trigger('click'); await flushPromises()
+    w.findAllComponents(Modal).find(m => m.props('title') === cs.nonprofitMembership.import.title)!.vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(ImportFlow).exists()).toBe(false)
     w.unmount()
   })
 })

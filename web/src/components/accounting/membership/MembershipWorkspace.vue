@@ -161,7 +161,7 @@ const paneKey = () => (paneId.value === null ? null : String(paneId.value))
 function goToMember(id: number, event?: MouseEvent) {
   const keepList = batchOpen.value || importOpen.value || exporting.value
   const newPanel = keepList || !!event && (event.ctrlKey || event.metaKey || event.button === 1)
-  if (!newPanel) saveListHandoff({ supplier: props.supplier, pane: paneKey(), path: route?.fullPath || MEMBERSHIP_LIST_PATH, filters: appliedFilters.value, ids: [...checkedMembers.value], openedId: id })
+  if (!newPanel) saveListHandoff({ supplier: props.supplier, pane: paneKey(), returning: false, path: route?.fullPath || MEMBERSHIP_LIST_PATH, filters: appliedFilters.value, ids: [...checkedMembers.value], openedId: id })
   navigateRow(memberDetailPath(id), keepList ? new MouseEvent('click', { ctrlKey: true }) : event)
 }
 function openMember(row: MemberRow, event?: MouseEvent) { if (event?.button === 2) return; goToMember(row.id, event) }
@@ -300,7 +300,7 @@ async function create() {
 watch(() => props.supplier, () => {
   cancelSearchTimer(); pendingRouteFilters = false; pendingFormFilters = false
   generation++; createTicket++; titlesTicket++; hydrating = true
-  checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false; importOpen.value = false; exportError.value = ''; exporting.value = false; exportRun++
+  checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false; importOpen.value = false; importLocked.value = false; exportError.value = ''; exporting.value = false; exportRun++
   search.value = ''; filterYear.value = appIsoDate().slice(0, 4); titleKey.value = ''; paymentStatus.value = 'all'
   appliedFilters.value = {search: '', year: Number(filterYear.value), title_key: '', payment_status: 'all'}
   hydrating = false; titles.value = []
@@ -316,7 +316,7 @@ onMounted(async () => {
   // Jen návrat odkazem Zpět z detailu: stejný panel, stejná adresa seznamu i filtry (menu ani jiný panel ne).
   const handoff = readListHandoff(props.supplier, paneKey())
   let restored = false, focusId: number | null = null
-  if (handoff && handoff.path === (route?.fullPath || MEMBERSHIP_LIST_PATH) && JSON.stringify(handoff.filters) === JSON.stringify(appliedFilters.value)) {
+  if (handoff?.returning && handoff.path === (route?.fullPath || MEMBERSHIP_LIST_PATH) && JSON.stringify(handoff.filters) === JSON.stringify(appliedFilters.value)) {
     clearListHandoff()
     checkedMembers.value = props.canManage ? handoff.ids : []
     restored = true; focusId = handoff.openedId
