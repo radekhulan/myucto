@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import type { ActionItem } from '@/components/ui/ActionBar.vue'
+import DialogActions from '@/components/ui/DialogActions.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import { formDateInput as dateInput, formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import { membershipApi, type MemberIdentity, type MemberRevision, type MemberRevisionInput, type MemberStatus } from '@/api/nonprofitMembership'
@@ -94,7 +95,7 @@ const actions = computed<ActionItem[]>(() => [
     </fieldset>
     </form>
     <p v-if="invalid && (form.effectiveFrom || form.reference || form.evidence)" class="text-sm text-warning-700" data-section="rev-invalid">{{ invalid }}</p>
-    <ActionBar v-if="canManage && !commit.review.value" :actions="actions" />
+    <DialogActions v-if="canManage && !commit.review.value" :actions="actions" />
     <div v-if="commit.review.value" class="space-y-3 rounded border border-neutral-200 p-3" data-section="rev-preview">
       <h4 class="font-semibold">{{ t('nonprofitMembership.revisionReview') }}</h4>
       <dl class="grid gap-3 sm:grid-cols-3">

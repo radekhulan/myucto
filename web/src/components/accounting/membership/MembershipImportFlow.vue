@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import type { ActionItem } from '@/components/ui/ActionBar.vue'
+import DialogActions from '@/components/ui/DialogActions.vue'
 import { membershipApi, type MembershipImportReport, type MembershipImportRow } from '@/api/nonprofitMembership'
 import { formatDate } from '@/composables/useFormat'
 import { errorBox, loudBadge, quietBadge, errorCode, membershipError, warningBox } from './membershipFormat'
@@ -158,6 +159,6 @@ function detail(row: MembershipImportRow): string {
         <li v-if="!rows.length" class="text-sm text-neutral-500">{{ t('nonprofitMembership.import.noRows') }}</li>
       </ul>
     </template>
-    <ActionBar :actions="actions" />
+    <DialogActions :actions="actions" />
   </section>
 </template>

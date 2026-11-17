@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import type { ActionItem } from '@/components/ui/ActionBar.vue'
+import DialogActions from '@/components/ui/DialogActions.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import { formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import { membershipApi, type MemberIdentity, type MemberIdentityInput, type MemberRevision, type MemberRevisionVoidInput } from '@/api/nonprofitMembership'
@@ -126,7 +127,7 @@ const pending = computed(() => commit.review.value)
     <p v-if="mode === 'delete'" class="text-sm" data-section="corr-delete-target">{{ t('nonprofitMembership.correction.deleteTarget', { member: `${base.number} · ${base.label}` }) }}</p>
     <p v-if="invalidShown" class="text-sm text-warning-700" data-section="corr-invalid">{{ invalid }}</p>
 
-    <ActionBar v-if="canManage && !pending" :actions="actions" />
+    <DialogActions v-if="canManage && !pending" :actions="actions" />
     <div v-if="pending" class="space-y-3 rounded border border-neutral-200 p-3" data-section="corr-review">
       <dl v-if="pending.mode === 'identity'" class="grid gap-3 sm:grid-cols-2">
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.correction.client') }}</dt><dd>{{ base.label }} → {{ form.clientLabel }}</dd></div>

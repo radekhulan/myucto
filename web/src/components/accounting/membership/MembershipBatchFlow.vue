@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import DialogActions from '@/components/ui/DialogActions.vue'
 import { membershipApi, type MembershipIssueRequest, type MembershipBatchDetail, type MembershipBatchCreate, type MembershipBatchRecent } from '@/api/nonprofitMembership'
 import type { AccountingPeriod } from '@/api/accounting'
 import type { DimensionOverview } from '@/api/dimensions'
@@ -259,7 +260,7 @@ onBeforeUnmount(() => {alive = false; epoch++; recentTicket++; dimensionsTicket+
         <span class="whitespace-nowrap tabular-nums">{{ formatMoneyMinor(row.amount_cents) }}</span>
       </div>
       <ActionBar :actions="pageActions" />
-      <MembershipConfirmBar v-if="['ready', 'posting'].includes(detail.batch.phase) && canManage && !cancelling && !approvalExpired"
+      <MembershipConfirmBar v-if="['ready', 'posting'].includes(detail.batch.phase) && canManage && !cancelling && !approvalExpired" inline
         v-model:acknowledged="acknowledged" :busy="busy" :uncertain="false" :can-manage="canManage" :show-cancel="false" ack-field="batch-ack"
         :ack-label="t('nonprofitMembership.batchAck')" :confirm-label="t(detail.batch.phase === 'posting' ? 'nonprofitMembership.batchContinuePosting' : 'nonprofitMembership.batchConfirm')"
         :blocked-reason="!classificationVisible ? t('nonprofitMembership.classificationProofMissing') : !detail.batch.approval_token ? t('nonprofitMembership.batchNeedNewPreview') : undefined"
@@ -273,7 +274,7 @@ onBeforeUnmount(() => {alive = false; epoch++; recentTicket++; dimensionsTicket+
         ]" />
       </div>
     </template>
-    <ActionBar :actions="actions" />
+    <DialogActions :actions="actions" />
     <details class="space-y-3 rounded border border-neutral-200 p-3" data-section="batch-recent">
       <summary class="cursor-pointer font-medium">{{ t('nonprofitMembership.batchRecent') }}</summary>
       <p v-if="recentError" role="alert" :class="errorBox">{{ recentError }}</p>

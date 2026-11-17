@@ -37,7 +37,7 @@ const preview = (): MembershipPreview => ({
 function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
   return mount(Flow, {
     props: { supplier: 5, canManage: true, member: { id: 9, member_number: 'M-1', label: 'Synthetic member' }, claim: claim(), periods: [period], ...props },
-    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DateInput } },
+    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DialogActions: ActionBar, DateInput } },
   })
 }
 async function fill(w: ReturnType<typeof mounted>) {

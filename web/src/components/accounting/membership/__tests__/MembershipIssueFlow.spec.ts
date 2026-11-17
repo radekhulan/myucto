@@ -106,7 +106,7 @@ const overview = (supplier = 5) => ({
 function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
   return mount(Flow, {
     props: { supplier: 5, canManage: true, member: { id: 9, member_number: 'M-1', label: 'Synthetic member' }, history: [revision], periods: [period], ...props },
-    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DateInput, SearchableSelect, RouterLink, MembershipRates: true } },
+    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DialogActions: ActionBar, DateInput, SearchableSelect, RouterLink, MembershipRates: true } },
   })
 }
 async function fill(w: ReturnType<typeof mounted>, omit: string[] = []) {

@@ -4,6 +4,7 @@ import { usePaneActivity, usePaneId } from '@/workspace/paneActivity'
 import { lockBodyScroll, unlockBodyScroll } from '@/utils/bodyScrollLock'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import { closesOnEscape, pushModal, removeModal } from './modalStack'
+import { provideModalFooter } from './modalFooter'
 
 /**
  * Generic modal — backdrop, ESC close, click-outside close, sticky header/footer.
@@ -27,6 +28,9 @@ const paneId = usePaneId()
 let scrollLocked = false
 /** Pořadí otevřených oken: Escape zavírá jen to nejvrchnější (okno kontaktu nad oknem člena). */
 const stackId = Symbol('modal')
+/** Patička i pro tlačítka formuláře uvnitř okna (DialogActions), nejen pro slot #footer. */
+const footer = provideModalFooter()
+function setFooter(el: unknown) { footer.target.value = el instanceof HTMLElement ? el : null }
 
 /**
  * Otevřený náhled originálu vedle formuláře (DocumentPreviewSplit) modál nezakrývá: backdrop
@@ -96,7 +100,7 @@ void props
         <div class="min-h-0 flex-1 overflow-y-auto p-5">
           <slot />
         </div>
-        <footer v-if="$slots.footer" class="shrink-0 border-t border-neutral-200 px-5 py-4">
+        <footer v-show="$slots.footer || footer.claims.value > 0" :ref="setFooter" class="shrink-0 border-t border-neutral-200 px-5 py-4">
           <slot name="footer" />
         </footer>
       </div>

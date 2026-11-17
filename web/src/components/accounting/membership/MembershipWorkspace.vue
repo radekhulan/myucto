@@ -17,6 +17,7 @@ import { appIsoDate } from '@/utils/date'
 import { errorBox, loudBadge, quietBadge, membershipError, memberStatusBadge, membershipMemberLabel } from './membershipFormat'
 import { clearListHandoff, MEMBERSHIP_LIST_PATH, memberDetailPath, readListHandoff, saveListHandoff } from './membershipPage'
 import { useRowLink } from '@/composables/useRowLink'
+import { useListKeyboard } from '@/composables/useListKeyboard'
 import { usePaneId } from '@/workspace/paneActivity'
 import MembershipReconciliation from './MembershipReconciliation.vue'
 import MembershipRates from './MembershipRates.vue'
@@ -168,6 +169,20 @@ function goToMember(id: number, event?: MouseEvent) {
   navigateRow(memberDetailPath(id), keepList ? new MouseEvent('click', { ctrlKey: true }) : event)
 }
 function openMember(row: MemberRow, event?: MouseEvent) { if (event?.button === 2) return; goToMember(row.id, event) }
+
+/** Výběr řádku do dávky klávesou (x) se stejnými podmínkami jako zaškrtávátko. */
+function toggleMember(id: number) {
+  if (!props.canManage || batchLocked.value || loading.value) return
+  if (checkedMembers.value.includes(id)) checkedMembers.value = checkedMembers.value.filter(x => x !== id)
+  else if (checkedMembers.value.length < 500) checkedMembers.value.push(id)
+}
+/** Klávesnice jako v seznamu faktur: j/k pohyb po řádcích, Enter otevře člena, x vybere do dávky, Esc zruší výběr. */
+const { activeIndex } = useListKeyboard({
+  count: () => (tab.value === 'members' ? members.value.length : 0),
+  open: index => { const row = members.value[index]; if (row) openMember(row) },
+  toggle: index => { const row = members.value[index]; if (row) toggleMember(row.id) },
+  clear: () => { if (!batchLocked.value) checkedMembers.value = [] },
+})
 
 /** Po návratu z detailu fokus na odkaz člena; tabulka i karty jsou v DOM, bere se viditelný. */
 function focusMember(id: number) {
@@ -582,7 +597,7 @@ watch(batchLocked, locked => {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="row in members" :key="row.id" class="cursor-pointer hover:bg-neutral-50"
+              <tr v-for="(row, index) in members" :key="row.id" class="cursor-pointer hover:bg-neutral-50" :data-row-active="index === activeIndex"
                 data-section="member-row" :data-member="row.id"
                 @click="openMember(row, $event)" @auxclick.prevent="openMember(row, $event)">
                 <td class="px-3 py-2.5">

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import type { ActionItem } from '@/components/ui/ActionBar.vue'
+import DialogActions from '@/components/ui/DialogActions.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import { formDateInput as dateInput, formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import type { AccountingPeriod } from '@/api/accounting'
@@ -114,7 +115,7 @@ const actions = computed<ActionItem[]>(() => [
       <label :class="[formLabel, 'sm:col-span-2']">{{ t('nonprofitMembership.reverseReason') }}<textarea v-model="form.reason" :class="textarea" maxlength="2000" data-field="reverse-reason" /></label>
     </fieldset>
     </form>
-    <ActionBar v-if="canManage && !commit.review.value" :actions="actions" />
+    <DialogActions v-if="canManage && !commit.review.value" :actions="actions" />
     <div v-if="commit.review.value && frozenRequest" class="space-y-3 rounded border border-neutral-200 p-3" data-section="reverse-preview">
       <h4 class="font-semibold">{{ t('nonprofitMembership.reviewTitle') }}</h4>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.advisory') }}</p>

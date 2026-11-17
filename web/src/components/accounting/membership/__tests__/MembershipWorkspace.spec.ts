@@ -1153,4 +1153,19 @@ describe('Membership workspace', () => {
     expect(w.findComponent(ImportFlow).exists()).toBe(false)
     w.unmount()
   })
+
+  it('moves through members with j/k, opens one with Enter and selects it for a batch with x like the invoice list', async () => {
+    const w = mount(Workspace, { attachTo: document.body, props: { supplier: 5, canManage: true }, global: { plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })], stubs: { ActionBar, SearchableSelect, ClientSearchSelect, ClientFormModal, MembershipReconciliation: Reconciliation, MembershipBatchFlow: true, MembershipImportFlow: ImportFlow, Modal, BulkActionBar, MembershipRates: true } } })
+    await flushPromises()
+    const key = async (k: string) => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true })); await flushPromises() }
+    await key('j'); await key('j')
+    expect(w.get('[data-member="2"]').attributes('data-row-active')).toBe('true')
+    await key('x')
+    expect((w.get('[data-member="2"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(true)
+    await key('k')
+    expect(w.get('[data-member="1"]').attributes('data-row-active')).toBe('true')
+    await key('Enter')
+    expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: false })
+    w.unmount()
+  })
 })

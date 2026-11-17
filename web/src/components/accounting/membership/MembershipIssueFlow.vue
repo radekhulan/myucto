@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useI18n } from 'vue-i18n'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import DialogActions from '@/components/ui/DialogActions.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import { formDateInput as dateInput, formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -492,7 +493,7 @@ const actions = computed<ActionItem[]>(() => [
         <li v-for="item in visibleProblems" :key="item">{{ item }}</li>
       </ul>
     </div>
-    <ActionBar v-if="canManage && !commit.review.value" :actions="actions" />
+    <DialogActions v-if="canManage && !commit.review.value" :actions="actions" :inline="batchMode" />
     <div v-if="commit.review.value && frozenRequest" class="space-y-3 rounded border border-neutral-200 p-3" data-section="issue-preview">
       <h4 class="font-semibold">{{ t('nonprofitMembership.reviewTitle') }}</h4>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.advisory') }}</p>

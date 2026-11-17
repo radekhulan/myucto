@@ -29,7 +29,7 @@ const revision: MemberRevision = {
 function mounted(props: { mode: 'identity' | 'delete' | 'void' } & Record<string, unknown>, locale = 'cs') {
   return mount(Flow, {
     props: { supplier: 5, canManage: true, member, label: 'Synthetic member', headRevisionNo: 2, revision: null, ...props },
-    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, ClientSearchSelect } },
+    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DialogActions: ActionBar, ClientSearchSelect } },
   })
 }
 async function confirm(w: ReturnType<typeof mounted>) {
