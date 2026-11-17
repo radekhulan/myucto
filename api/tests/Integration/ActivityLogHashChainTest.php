@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\ActivityLogHashChain;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -38,6 +39,8 @@ final class ActivityLogHashChainTest extends TestCase
     /** Id, od kterého se ověřuje — cizí záznamy v sadě jsou pro tenhle test šum. */
     private int $from = 0;
     private ?\Closure $restorePruneMark = null;
+    /** @var list<int> návrhy výmazu založené testem (úklid v tearDown) */
+    private array $erasureProposals = [];
 
     protected function setUp(): void
     {
@@ -85,6 +88,10 @@ final class ActivityLogHashChainTest extends TestCase
         if ($this->cleanup) {
             $pdo->prepare('DELETE FROM activity_log WHERE id >= ?')->execute([$this->from]);
             $pdo->prepare('UPDATE activity_log_chain_head SET deferred_from_id = ? WHERE id = 1')->execute([$this->deferredFrom]);
+            foreach ($this->erasureProposals as $proposal) {
+                $pdo->prepare('DELETE FROM nonprofit_membership_erasure_items WHERE proposal_id = ?')->execute([$proposal]);
+                $pdo->prepare('DELETE FROM nonprofit_membership_erasure_proposals WHERE id = ?')->execute([$proposal]);
+            }
         }
         $this->db->close();
     }
@@ -320,13 +327,14 @@ final class ActivityLogHashChainTest extends TestCase
      */
     public function testRedactionKeepsChainVerifiable(): void
     {
+        [$supplier, $item] = $this->erasureItem('done');
         $this->write('test.a');
-        $id = $this->write('nonprofit_membership_member_update', ['before' => ['member_number' => 'SYN-1', 'client_id' => 5]]);
+        $id = $this->write('nonprofit_membership_member_update', ['before' => ['member_number' => 'SYN-1', 'client_id' => 5]], $supplier);
         $this->write('test.c');
         $hash = $this->row($id)['hash'];
         self::assertNotNull($hash);
 
-        $this->redactInTransaction($id, ['before' => ['member_number' => '[vymazáno]', 'client_id' => null]]);
+        $this->redactInTransaction($id, ['before' => ['member_number' => '[vymazáno]', 'client_id' => null]], MembershipErasureService::REDACTION_SOURCE, $item);
 
         self::assertSame($hash, $this->row($id)['hash'], 'Hash redigovaného záznamu se nemění.');
         $attestation = $this->db->pdo()->prepare('SELECT hash FROM activity_log WHERE action = ? AND entity_id = ? AND id >= ?');
@@ -360,12 +368,73 @@ final class ActivityLogHashChainTest extends TestCase
         self::assertSame('{"reason":"Changed"}', $this->payload($tampered), 'Odmítnutá redakce nic nezměnila.');
     }
 
-    private function redactInTransaction(int $id, array $payload): void
+    /**
+     * Redakce musí stát na skutečně provedeném výmazu: atestaci i otisk redakce dopočítá každý, kdo může
+     * zapisovat do databáze (stejně jako redact()). Zdroj mimo výmaz členů, nedokončená nebo neexistující
+     * položka, položka jiné firmy a payload jiného tvaru, než jaký výmaz zapisuje, verify() neprojdou.
+     */
+    public function testRedactionWithoutCompletedErasureOrWithForeignPayloadIsDetected(): void
+    {
+        [$supplier, $done] = $this->erasureItem('done');
+        [, $pending] = $this->erasureItem('pending');
+        $missing = $done + 1_000_000;
+        $source = MembershipErasureService::REDACTION_SOURCE;
+        $member = ['member_number' => 'SYN-3', 'reason' => 'Synthetic reason', 'client_id' => 7];
+        $redacted = MembershipErasureService::redactAuditPayload($member);
+        $cases = [
+            'legit' => ['nonprofit_membership_member_update', $supplier, $redacted, $source, $done, true],
+            'legit_client' => ['client.updated', $supplier, ['redacted' => MembershipErasureService::REDACTED], $source, $done, true],
+            'pending_item' => ['nonprofit_membership_member_update', $supplier, $redacted, $source, $pending, false],
+            'missing_item' => ['nonprofit_membership_member_update', $supplier, $redacted, $source, $missing, false],
+            'foreign_source' => ['nonprofit_membership_member_update', $supplier, $redacted, 'test', $done, false],
+            'foreign_supplier' => ['nonprofit_membership_member_update', null, $redacted, $source, $done, false],
+            'member_payload' => ['nonprofit_membership_revision_void', $supplier, ['reason' => 'Rewritten history'], $source, $done, false],
+            'client_payload' => ['client.updated', $supplier, ['redacted' => MembershipErasureService::REDACTED, 'name' => 'Rewritten'], $source, $done, false],
+        ];
+        $ids = [];
+        foreach ($cases as $label => [$action, $owner, , , , ]) {
+            $ids[$label] = $this->write($action, $member, $owner);
+        }
+        $this->write('test.c');
+        foreach ($cases as $label => [, , $payload, $redactionSource, $sourceId, ]) {
+            $this->redactInTransaction($ids[$label], $payload, $redactionSource, $sourceId);
+        }
+
+        $broken = array_column($this->chain->verify($this->from)['broken'], 'id');
+        foreach ($cases as $label => [, , , , , $valid]) {
+            $valid
+                ? self::assertNotContains($ids[$label], $broken, 'Platná redakce: ' . $label)
+                : self::assertContains($ids[$label], $broken, 'Podvržená redakce: ' . $label);
+        }
+    }
+
+    /**
+     * Položka výmazu (s vlastním návrhem) u existující firmy; zapisuje se mimo transakci, uklízí tearDown.
+     *
+     * @return array{0:int,1:int} firma, položka
+     */
+    private function erasureItem(string $outcome): array
+    {
+        if (!$this->db->hasTable('nonprofit_membership_erasure_items')) {
+            self::markTestSkipped('Migrace 2305 neproběhla.');
+        }
+        $pdo = $this->db->pdo();
+        $supplier = $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
+        self::assertNotNull($supplier, 'Test DB nemá žádnou firmu.');
+        $pdo->prepare("INSERT INTO nonprofit_membership_erasure_proposals (supplier_id, status, as_of) VALUES (?, 'executed', '2032-01-02')")->execute([(int) $supplier]);
+        $proposal = (int) $pdo->lastInsertId();
+        $this->erasureProposals[] = $proposal;
+        $pdo->prepare("INSERT INTO nonprofit_membership_erasure_items (supplier_id, proposal_id, member_id, subject, governing_rule, ended_on, retained_until, outcome)
+            VALUES (?, ?, 999999999, 'member', 'membership_only', '2026-06-30', '2031-12-31', ?)")->execute([(int) $supplier, $proposal, $outcome]);
+        return [(int) $supplier, (int) $pdo->lastInsertId()];
+    }
+
+    private function redactInTransaction(int $id, array $payload, string $source = 'test', int $sourceId = 1): void
     {
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
-            $this->chain->redact($id, $payload, 'test', 1);
+            $this->chain->redact($id, $payload, $source, $sourceId);
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
@@ -391,15 +460,17 @@ final class ActivityLogHashChainTest extends TestCase
         // Jeho smazání přeruší řetěz u následujícího článku; test proto kontroluje jen redigovaný záznam.
         $this->db->pdo()->prepare("INSERT INTO activity_log (action, payload) VALUES ('test.placeholder', NULL)")->execute();
         $placeholder = (int) $this->db->pdo()->lastInsertId();
-        $forged = $this->write('nonprofit_membership_member_update', ['member_number' => 'SYN-2']);
-        $other = $this->write('invoice.sent', ['to' => 'synthetic@example.test']);
+        // Redakce stojí na dokončené položce výmazu a má jeho tvar; chybět smí jen atestace.
+        [$supplier, $item] = $this->erasureItem('done');
+        $forged = $this->write('nonprofit_membership_member_update', ['member_number' => 'SYN-2'], $supplier);
+        $other = $this->write('invoice.sent', ['to' => 'synthetic@example.test'], $supplier);
         $this->write('test.c');
         $pdo = $this->db->pdo();
         foreach ([$forged, $other] as $id) {
             $pdo->prepare('UPDATE activity_log SET payload = ? WHERE id = ?')->execute(['{"changed":true}', $id]);
             $digest = $this->redactionDigestOf($id);
-            $pdo->prepare("INSERT INTO activity_log_redactions (activity_log_id, supplier_id, redacted_digest, source, source_id) VALUES (?, NULL, ?, 'test', 1)")
-                ->execute([$id, $digest]);
+            $pdo->prepare('INSERT INTO activity_log_redactions (activity_log_id, supplier_id, redacted_digest, source, source_id) VALUES (?, ?, ?, ?, ?)')
+                ->execute([$id, $supplier, $digest, MembershipErasureService::REDACTION_SOURCE, $item]);
         }
         // Atestace jen pro záznam mimo allowlist (a zapečetěná jako běžný článek).
         $this->logger->log(ActivityLogHashChain::REDACTION_ACTION, null, 'activity_log', $other, ['digest' => $this->redactionDigestOf($other)]);
@@ -541,9 +612,9 @@ final class ActivityLogHashChainTest extends TestCase
      * `lastInsertId()` se použít NEDÁ: zapečetění uvnitř `log()` provede UPDATE, po kterém
      * už hodnota neodpovídá vloženému řádku. Id se proto dohledá podle akce.
      */
-    private function write(string $action, ?array $payload = null): int
+    private function write(string $action, ?array $payload = null, ?int $supplier = null): int
     {
-        $this->logger->log($action, null, null, null, $payload);
+        $this->logger->log($action, null, null, null, $payload, null, null, $supplier);
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT id FROM activity_log WHERE action = ? ORDER BY id DESC LIMIT 1'

@@ -313,6 +313,7 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
         $rows = array_map(fn (int $member): array => $this->j6Rows($this->operationIds($member)), $members);
         $proposal = $this->erasure->create($this->supplier, $this->actor, null);
         $this->erasure->approve($this->supplier, $proposal['id'], $this->actor);
+        $this->endCoolingOff($proposal['id']);
         foreach ($members as $forge => $member) $this->sealWithAnchor($member, $forge);
 
         (new MembershipJ6SourceFacts($this->db))->capture($this->supplier, $rows['honest'], false);
@@ -558,6 +559,7 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
         // Neschválený návrh pečeť nepustí ani pro osobní cestu.
         $this->assertImmutable(fn () => $forge('$.member.member_number'));
         $this->erasure->approve($this->supplier, $proposal['id'], $this->actor);
+        $this->endCoolingOff($proposal['id']);
         // Schválený návrh pustí jen osobní cesty; finanční obsah důkazu ne.
         $this->assertImmutable(fn () => $forge('$.classification'));
         $this->assertImmutable(fn () => $forge('$.accounts'));
@@ -566,6 +568,40 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
             ->execute([$item, str_repeat('a', 64), $revision]));
         $forge('$.member.member_number');
         self::assertSame($item, (int) $this->pdo->query('SELECT erasure_item_id FROM nonprofit_membership_charge_operations WHERE id=' . $operation)->fetchColumn());
+    }
+
+    /**
+     * Odkladná lhůta (schvaluje tentýž člověk, který navrhl) platí i pro přímý zápis do databáze:
+     * trigger pečeť ani pseudonym čísla nepustí dřív než MembershipErasureService::executable().
+     */
+    public function testTriggerRejectsSealDuringCoolingOff(): void
+    {
+        $member = $this->ended('COOL', charge: 'reverse');
+        $proposal = $this->erasure->create($this->supplier, $this->actor, null);
+        $item = $this->itemOf($this->erasures->items($this->supplier, $proposal['id']), $member)['id'];
+        $this->erasure->approve($this->supplier, $proposal['id'], $this->actor);
+        self::assertSame(1, (int) $this->pdo->query("SELECT executable_from > UTC_TIMESTAMP() FROM nonprofit_membership_erasure_proposals WHERE id={$proposal['id']}")->fetchColumn());
+        $revision = $this->repository->history($this->supplier, $member)[0]['id'];
+        $operation = $this->operationIds($member)[0];
+        $command = (int) $this->pdo->query('SELECT command_id FROM nonprofit_membership_charge_operations WHERE id=' . $operation)->fetchColumn();
+        $seals = [
+            fn () => $this->pdo->prepare("UPDATE nonprofit_member_revisions SET legal_basis_json=JSON_SET(legal_basis_json,'$.reference',''),erasure_item_id=?,erased_digest=? WHERE id=?")
+                ->execute([$item, str_repeat('a', 64), $revision]),
+            fn () => $this->pdo->prepare("UPDATE nonprofit_membership_charge_operations SET proof_json=JSON_SET(proof_json,'$.member.member_number','forged'),erasure_item_id=?,erased_digest=? WHERE id=?")
+                ->execute([$item, str_repeat('a', 64), $operation]),
+            fn () => $this->pdo->prepare("UPDATE nonprofit_membership_charge_commands SET request_json=JSON_SET(request_json,'$.request.reason',''),erasure_item_id=?,erased_digest=? WHERE id=?")
+                ->execute([$item, str_repeat('a', 64), $command]),
+        ];
+        foreach ($seals as $seal) $this->assertImmutable($seal);
+        // Pseudonym čísla po dokončené položce: ani ten ne, dokud lhůta běží.
+        $this->pdo->prepare("UPDATE nonprofit_membership_erasure_items SET outcome='done' WHERE id=?")->execute([$item]);
+        $this->assertImmutable(fn () => $this->pdo->prepare('UPDATE nonprofit_members SET member_number=? WHERE id=?')->execute(['vymazano-' . $member, $member]));
+        $this->pdo->prepare("UPDATE nonprofit_membership_erasure_items SET outcome='pending' WHERE id=?")->execute([$item]);
+
+        $this->endCoolingOff($proposal['id']);
+        foreach ($seals as $seal) $seal();
+        self::assertSame($item, (int) $this->pdo->query('SELECT erasure_item_id FROM nonprofit_member_revisions WHERE id=' . $revision)->fetchColumn());
+        self::assertSame($item, (int) $this->pdo->query('SELECT erasure_item_id FROM nonprofit_membership_charge_commands WHERE id=' . $command)->fetchColumn());
     }
 
     /**

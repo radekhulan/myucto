@@ -11,7 +11,8 @@
 -- pečeť výmazu (erasure_item_id + erased_digest). Ověřovače přijmou změněný obsah jen
 -- s platnou pečetí (MembershipErasureSeal); jakákoli jiná změna dál končí 409.
 -- Triggery dovolí jedinou změnu osobních cest JSONu, a to jen s pečetí k prováděné položce
--- schváleného návrhu tohoto člena; zbytek obsahu se musí shodovat. Auditní stopu oprav
+-- schváleného návrhu tohoto člena po odkladné lhůtě (executable_from v UTC, stejně jako
+-- MembershipErasureService::executable()); zbytek obsahu se musí shodovat. Auditní stopu oprav
 -- redaguje ActivityLogHashChain::redact() nad tabulkou z migrace 2302.
 --
 -- Idempotence: CREATE TABLE / ADD COLUMN / ADD INDEX / FOREIGN KEY IF NOT EXISTS,
@@ -105,6 +106,7 @@ BEGIN
  IF EXISTS(SELECT 1 FROM nonprofit_membership_erasure_items i WHERE i.supplier_id=OLD.supplier_id AND i.member_id=OLD.id AND i.subject='member' AND i.outcome='done') THEN
   IF NOT (NEW.client_id<=>OLD.client_id) OR CAST(OLD.member_number AS BINARY)=CONCAT('vymazano-',OLD.id) OR CAST(NEW.member_number AS BINARY)<>CONCAT('vymazano-',OLD.id)
      OR NOT EXISTS(SELECT 1 FROM nonprofit_membership_erasure_items i JOIN nonprofit_membership_erasure_proposals p ON p.supplier_id=i.supplier_id AND p.id=i.proposal_id AND p.status='approved'
+       AND (p.executable_from IS NULL OR p.executable_from<=UTC_TIMESTAMP())
        WHERE i.supplier_id=OLD.supplier_id AND i.member_id=OLD.id AND i.subject='member' AND i.outcome='done') THEN
    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='nonprofit_membership_immutable';
   END IF;
@@ -126,6 +128,7 @@ BEGIN
     OR NOT (NEW.request_hash<=>OLD.request_hash) OR NOT (NEW.parent_hash<=>OLD.parent_hash) OR NOT (NEW.record_hash<=>OLD.record_hash)
     OR NOT (NEW.created_by<=>OLD.created_by) OR NOT (NEW.created_at<=>OLD.created_at) OR NOT (NEW.recorded_at_utc<=>OLD.recorded_at_utc)
     OR NOT EXISTS(SELECT 1 FROM nonprofit_membership_erasure_items i JOIN nonprofit_membership_erasure_proposals p ON p.supplier_id=i.supplier_id AND p.id=i.proposal_id AND p.status='approved'
+       AND (p.executable_from IS NULL OR p.executable_from<=UTC_TIMESTAMP())
       WHERE i.supplier_id=OLD.supplier_id AND i.id=NEW.erasure_item_id AND i.member_id=OLD.member_id AND i.subject='member' AND i.outcome='pending')
     OR NOT JSON_EQUALS(JSON_SET(OLD.legal_basis_json,'$.reference','','$.evidence',''), JSON_SET(NEW.legal_basis_json,'$.reference','','$.evidence',''))
     OR NOT JSON_EQUALS(JSON_SET(OLD.request_json,'$.reason','','$.legal_basis.reference','','$.legal_basis.evidence',''),
@@ -163,6 +166,7 @@ BEGIN
     OR NOT (NEW.receipt_json<=>OLD.receipt_json) OR NOT (NEW.parent_hash<=>OLD.parent_hash) OR NOT (NEW.record_hash<=>OLD.record_hash)
     OR NOT (NEW.created_by<=>OLD.created_by) OR NOT (NEW.created_at<=>OLD.created_at)
     OR NOT EXISTS(SELECT 1 FROM nonprofit_membership_erasure_items i JOIN nonprofit_membership_erasure_proposals p ON p.supplier_id=i.supplier_id AND p.id=i.proposal_id AND p.status='approved'
+       AND (p.executable_from IS NULL OR p.executable_from<=UTC_TIMESTAMP())
       JOIN nonprofit_membership_charge_cases c ON c.supplier_id=i.supplier_id AND c.member_id=i.member_id
       WHERE i.supplier_id=OLD.supplier_id AND i.id=NEW.erasure_item_id AND c.id=OLD.case_id AND i.subject='member' AND i.outcome='pending')
     OR COALESCE(JSON_LENGTH(NEW.proof_json,'$.membership_intervals'),0)<>n OR NOT JSON_EQUALS(old_mask,new_mask) THEN
@@ -183,6 +187,7 @@ BEGIN
       JOIN nonprofit_membership_charge_cases c ON c.supplier_id=i.supplier_id AND c.member_id=i.member_id
       JOIN nonprofit_membership_charge_operations o ON o.supplier_id=c.supplier_id AND o.case_id=c.id
       JOIN nonprofit_membership_erasure_proposals p ON p.supplier_id=i.supplier_id AND p.id=i.proposal_id AND p.status='approved'
+       AND (p.executable_from IS NULL OR p.executable_from<=UTC_TIMESTAMP())
       WHERE i.supplier_id=OLD.supplier_id AND i.id=NEW.erasure_item_id AND o.command_id=OLD.id AND i.subject='member' AND i.outcome='pending')
     OR NOT JSON_EQUALS(JSON_SET(OLD.request_json,'$.request.reason','','$.request.variable_symbol','','$.request.legal_title.reference','','$.request.legal_title.evidence',''),
       JSON_SET(NEW.request_json,'$.request.reason','','$.request.variable_symbol','','$.request.legal_title.reference','','$.request.legal_title.evidence','')) THEN

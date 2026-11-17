@@ -70,6 +70,12 @@ final class MembershipContactErasure
      * Tabulky, které kontakt používají mimo členskou evidenci a jeho vlastní data. Jeden dotaz
      * se samostatným EXISTS pro každou vazbu (po indexu cizího klíče).
      *
+     * Každý poddotaz je zamykající čtení: nezamykající čtení pod REPEATABLE READ by četlo snímek
+     * z dřívějška v transakci výmazu a doklad vystavený na kontakt souběžně (commit po vzniku
+     * snímku) by nevidělo, takže by sdílený kontakt anonymizovalo. Se snímkovou izolací InnoDB
+     * MariaDB takové čtení odvolá chybou 1020 a výmaz se opakuje s novým snímkem; obojí je bezpečné.
+     * Sdílený zámek zároveň zadrží souběžný výmaz nalezené vazby až do konce výmazu.
+     *
      * @return list<string>
      */
     private function otherUses(int $supplier, int $client, int $member): array
@@ -78,21 +84,21 @@ final class MembershipContactErasure
         $params = [];
         foreach ($this->references() as $index => [$table, $column]) {
             if ($table === 'nonprofit_members') {
-                $parts[] = "EXISTS(SELECT 1 FROM nonprofit_members WHERE supplier_id=? AND client_id=? AND id<>?) AS u{$index}";
+                $parts[] = "EXISTS(SELECT 1 FROM nonprofit_members WHERE supplier_id=? AND client_id=? AND id<>? LOCK IN SHARE MODE) AS u{$index}";
                 array_push($params, $supplier, $client, $member);
             } elseif ($table === 'nonprofit_membership_charge_claims') {
-                $parts[] = "EXISTS(SELECT 1 FROM nonprofit_membership_charge_claims WHERE supplier_id=? AND client_id=? AND member_id<>?) AS u{$index}";
+                $parts[] = "EXISTS(SELECT 1 FROM nonprofit_membership_charge_claims WHERE supplier_id=? AND client_id=? AND member_id<>? LOCK IN SHARE MODE) AS u{$index}";
                 array_push($params, $supplier, $client, $member);
             } elseif ($table === 'document_links') {
                 // Dokument připojený ke kontaktu (např. sken přihlášky) nese osobní údaj a kontakt drží.
-                $parts[] = "EXISTS(SELECT 1 FROM document_links FORCE INDEX(idx_dl_supplier_entity_document) WHERE supplier_id=? AND entity_type='client' AND entity_id=?) AS u{$index}";
+                $parts[] = "EXISTS(SELECT 1 FROM document_links FORCE INDEX(idx_dl_supplier_entity_document) WHERE supplier_id=? AND entity_type='client' AND entity_id=? LOCK IN SHARE MODE) AS u{$index}";
                 array_push($params, $supplier, $client);
             } elseif ($this->hasSupplier($table)) {
                 // Index cizího klíče začíná u složeného klíče firmou; s firmou dotaz index využije vždy.
-                $parts[] = "EXISTS(SELECT 1 FROM `{$table}` WHERE supplier_id=? AND `{$column}`=?) AS u{$index}";
+                $parts[] = "EXISTS(SELECT 1 FROM `{$table}` WHERE supplier_id=? AND `{$column}`=? LOCK IN SHARE MODE) AS u{$index}";
                 array_push($params, $supplier, $client);
             } else {
-                $parts[] = "EXISTS(SELECT 1 FROM `{$table}` WHERE `{$column}`=?) AS u{$index}";
+                $parts[] = "EXISTS(SELECT 1 FROM `{$table}` WHERE `{$column}`=? LOCK IN SHARE MODE) AS u{$index}";
                 $params[] = $client;
             }
         }

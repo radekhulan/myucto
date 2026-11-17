@@ -7,6 +7,7 @@ namespace MyInvoice\Service;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\LoggingPdo;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureService;
 
 /**
  * Zřetězení auditní stopy hashem — § 33a ZoÚ.
@@ -382,7 +383,9 @@ final class ActivityLogHashChain
         }
         $redactions = $this->db->hasTable('activity_log_redactions')
             ? ', (SELECT r.redacted_digest FROM activity_log_redactions r WHERE r.activity_log_id = activity_log.id) AS redacted_digest'
-            : ', NULL AS redacted_digest';
+              . ', (SELECT r.source FROM activity_log_redactions r WHERE r.activity_log_id = activity_log.id) AS redaction_source'
+              . ', (SELECT r.source_id FROM activity_log_redactions r WHERE r.activity_log_id = activity_log.id) AS redaction_source_id'
+            : ', NULL AS redacted_digest, NULL AS redaction_source, NULL AS redaction_source_id';
         $stmt = $pdo->query(
             'SELECT ' . self::selectList() . ', prev_hash, hash' . ($deferred ? ', seal_seq' : '') . $redactions . '
                FROM activity_log WHERE hash IS NOT NULL' . $chainWhere
@@ -391,6 +394,7 @@ final class ActivityLogHashChain
 
         $prunedBelow = $deferred ? ($this->pruneMark()['below_seq'] ?? null) : null;
         $attestations = null;
+        $erasures = null;
         $pastPruned = false;
         $checked = 0;
         $firstId = null;
@@ -422,10 +426,16 @@ final class ActivityLogHashChain
             $prevOfRow = $row['prev_hash'] !== null ? (string) $row['prev_hash'] : null;
             // Redigovaný záznam (schválený výmaz osobních údajů) drží původní hash, na který řetěz
             // navazuje; obsah dokládá otisk redakce svázaný s tímto hashem. Platí jen pro akci
-            // z allowlistu a jen s atestací redakce zapsanou jako článek řetězu.
+            // z allowlistu a jen s atestací redakce zapsanou jako článek řetězu. Redakce musí navíc stát
+            // na dokončené položce výmazu téže firmy a payload musí mít tvar, který výmaz zapisuje;
+            // atestaci a otisk umí dopočítat každý, kdo může zapisovat do databáze.
             if ($row['redacted_digest'] !== null) {
                 $attestations ??= $this->redactionAttestations($deferredFrom);
+                $erasures ??= $this->completedErasureItems();
                 $proven = in_array((string) $row['action'], self::REDACTABLE_ACTIONS, true)
+                    && $row['redaction_source'] === MembershipErasureService::REDACTION_SOURCE
+                    && isset($erasures[(int) $row['supplier_id'] . ':' . (int) $row['redaction_source_id']])
+                    && self::redactedPayloadShape((string) $row['action'], $row['payload'])
                     && is_string($attestations[$id] ?? null)
                     && hash_equals((string) $attestations[$id], (string) $row['redacted_digest'])
                     && hash_equals((string) $row['redacted_digest'], self::redactionDigest((string) $row['hash'], $data, $prevOfRow));
@@ -521,6 +531,45 @@ final class ActivityLogHashChain
             if (is_array($payload) && array_key_exists('digest', $payload)) $out[(int) $row['entity_id']] = is_string($payload['digest']) ? $payload['digest'] : null;
         }
         return $out;
+    }
+
+    /**
+     * Dokončené položky výmazu, na které odkazuje některá redakce: "firma:id položky" → true.
+     * Jeden dotaz pro všechny redakce (index zdroje redakce, primární klíč položky).
+     *
+     * @return array<string,true>
+     */
+    private function completedErasureItems(): array
+    {
+        if (!$this->db->hasTable('nonprofit_membership_erasure_items')) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare("SELECT DISTINCT i.supplier_id, i.id FROM activity_log_redactions r
+            JOIN nonprofit_membership_erasure_items i ON i.id = r.source_id
+            WHERE r.source = ? AND i.outcome = 'done'");
+        $stmt->execute([MembershipErasureService::REDACTION_SOURCE]);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_NUM) as [$supplier, $item]) {
+            $out[(int) $supplier . ':' . (int) $item] = true;
+        }
+        return $out;
+    }
+
+    /**
+     * Má redigovaný payload tvar, který zapisuje výmaz? Kontakt nese jen značku výmazu, auditní stopa
+     * oprav člena je pevným bodem {@see MembershipErasureService::redactAuditPayload()}: jiný obsah
+     * (i s dopočítaným otiskem) redakcí není.
+     */
+    private static function redactedPayloadShape(string $action, mixed $payload): bool
+    {
+        $decoded = is_string($payload) ? json_decode($payload, true) : null;
+        if (!is_array($decoded)) {
+            return false;
+        }
+        if ($action === 'client.created' || $action === 'client.updated') {
+            return $decoded === ['redacted' => MembershipErasureService::REDACTED];
+        }
+        return MembershipErasureService::redactAuditPayload($decoded) === $decoded;
     }
 
     /**
