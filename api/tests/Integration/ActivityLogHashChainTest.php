@@ -454,8 +454,11 @@ final class ActivityLogHashChainTest extends TestCase
 
         $base = tempnam(sys_get_temp_dir(), 'seal');
         $script = $base . '.php';
+        // Potomek nejdřív ohlásí id svého spojení, aby rodič sledoval právě jeho čekání na zámek.
         file_put_contents($script, '<?php require ' . var_export(dirname(__DIR__, 2) . '/vendor/autoload.php', true) . ';'
-            . ' \MyInvoice\Bootstrap::buildContainer()->get(\MyInvoice\Service\ActivityLogHashChain::class)->sealPending();');
+            . ' $c = \MyInvoice\Bootstrap::buildContainer();'
+            . ' echo $c->get(\MyInvoice\Infrastructure\Database\Connection::class)->pdo()->query("SELECT CONNECTION_ID()")->fetchColumn(), "\n"; fflush(STDOUT);'
+            . ' $c->get(\MyInvoice\Service\ActivityLogHashChain::class)->sealPending();');
         $env = getenv();
         $env['MYINVOICE_DB_NAME'] = (string) $pdo->query('SELECT DATABASE()')->fetchColumn();
         $pipes = [];
@@ -466,10 +469,9 @@ final class ActivityLogHashChainTest extends TestCase
             self::assertIsResource($child);
             // Výstup potomka se čte průběžně: plná roura by ho zablokovala a příčina pádu by se ztratila.
             foreach ([1, 2] as $stream) stream_set_blocking($pipes[$stream], false);
-            // Čekání jen na zámek, který drží tato transakce redakce (sdílený server může mít jiná čekání).
-            $waits = $pdo->prepare('SELECT COUNT(*) FROM information_schema.INNODB_LOCK_WAITS w
-                JOIN information_schema.INNODB_TRX blocker ON blocker.trx_id = w.blocking_trx_id
-                WHERE blocker.trx_mysql_thread_id = CONNECTION_ID()');
+            // Čekání na zámek jen spojení potomka (sdílený server může mít jiná čekání). INNODB_LOCK_WAITS
+            // MariaDB 11.8 neplní; stav transakce potomka v INNODB_TRX ano.
+            $waits = $pdo->prepare("SELECT COUNT(*) FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id = ? AND trx_state = 'LOCK WAIT'");
             $waited = false;
             for ($i = 0; $i < 600; $i++) {
                 foreach ([1, 2] as $stream) $output .= (string) stream_get_contents($pipes[$stream]);
@@ -478,21 +480,33 @@ final class ActivityLogHashChainTest extends TestCase
                     $exit = $status['exitcode'];
                     break;
                 }
-                $waits->execute();
+                if (preg_match('/^(\d+)\n/', $output, $match) !== 1) {
+                    usleep(50_000);
+                    continue;
+                }
+                $waits->execute([(int) $match[1]]);
                 if ((int) $waits->fetchColumn() > 0) {
                     $waited = true;
                     break;
                 }
                 usleep(50_000);
             }
-            self::assertTrue($waited || $exit !== null, 'Pečetění ve druhém spojení nedoběhlo ani nečekalo: ' . $output);
+            self::assertTrue($waited || $exit !== null, 'Pečetění ve druhém spojení do 30 s nedoběhlo, visí na nedokončené redakci: ' . $output);
             $pdo->commit();
-            foreach ([1, 2] as $stream) {
-                stream_set_blocking($pipes[$stream], true);
-                $output .= (string) stream_get_contents($pipes[$stream]);
+            // Obě roury se dočítají souběžně bez blokování: potomek plnící stderr by jinak čekal na rodiče
+            // čtoucího stdout do konce a test by visel.
+            for ($i = 0; $i < 600 && $exit === null; $i++) {
+                foreach ([1, 2] as $stream) $output .= (string) stream_get_contents($pipes[$stream]);
+                $status = proc_get_status($child);
+                if (!$status['running']) $exit = $status['exitcode'];
+                else usleep(50_000);
             }
-            if ($exit === null) $exit = proc_close($child);
-            else proc_close($child);
+            foreach ([1, 2] as $stream) $output .= (string) stream_get_contents($pipes[$stream]);
+            if ($exit === null) {
+                proc_terminate($child);
+                self::fail('Pečetění ve druhém spojení po commitu redakce nedoběhlo: ' . $output);
+            }
+            proc_close($child);
             $child = null;
             self::assertFalse($waited, 'Pečetění čekalo na nedokončenou redakci místo přeskočení řádku.');
             self::assertSame(0, $exit, $output);
