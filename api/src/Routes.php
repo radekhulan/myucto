@@ -3401,6 +3401,9 @@ final class Routes
             $g->post  ('/other-items/{id:[0-9]+}/allocations', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'allocate']);
             $g->post  ('/other-items/{id:[0-9]+}/match-bank-transaction', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'matchBankTransaction']);
             $g->delete('/other-items/{id:[0-9]+}/allocations/{allocation_id:[0-9]+}', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'unallocate']);
+            // Měsíční zaúčtování mezd z PAMICY: interní doklad + ostatní závazky (migrace 2300).
+            $g->post  ('/payroll-posting-imports/preview',          [\MyInvoice\Action\Accounting\PayrollPostingImportAction::class, 'preview']);
+            $g->post  ('/payroll-posting-imports/apply',            [\MyInvoice\Action\Accounting\PayrollPostingImportAction::class, 'apply']);
             // Interní doklady (migrace 2193). Specifické cesty PŘED generickým /internal-documents/{id}.
             $g->get   ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'list']);
             $g->post  ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'create']);

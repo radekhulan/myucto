@@ -6,6 +6,7 @@ import ImportReportPanel from '@/components/exchange/ImportReportPanel.vue'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import AiNotConfiguredNotice from '@/components/purchase/AiNotConfiguredNotice.vue'
+import PayrollPostingImport from '@/components/migration/PayrollPostingImport.vue'
 import { useFileImportJob } from '@/composables/useFileImportJob'
 import { purchaseInvoicesApi, type InboxScanResult } from '@/api/purchaseInvoices'
 import { integrationsApi, type AiProviderInfo } from '@/api/integrations'
@@ -55,7 +56,18 @@ function onDrop(e: DragEvent) {
   pick(e.dataTransfer?.files ?? null)
 }
 const submit = () => start(failed)
-const clear = reset
+
+// Zaúčtování mezd z PAMICY: server ho z dávky vyčlení (žádná přijatá faktura) a tady se
+// nabídne týž náhled a načtení jako v průvodci PAMICA. Soubor z balíčku ZIP se tu znovu
+// odeslat nedá, ten jde nahrát přímo do průvodce.
+const postingRows = computed(() => (report.value?.results ?? [])
+  .filter(row => row.code === 'payroll_posting')
+  .map(row => ({ name: row.file, file: files.value.find(f => f.name === row.file) ?? null })))
+const postingFile = ref<File | null>(null)
+const clear = () => {
+  postingFile.value = null
+  reset()
+}
 const statusBadge = (s: string) => {
   if (s === 'created') return 'bg-success-50 text-success-600 border-success-500/40'
   if (s === 'skipped') return 'bg-warning-50 text-warning-600 border-warning-500/40'
@@ -311,6 +323,26 @@ async function runScan() {
         </div>
         </div><!-- /border-t scan inbox wrap -->
       </div>
+    </div>
+
+    <!-- Zaúčtování mezd z PAMICY vyčleněné z dávky: vlastní náhled a načtení. -->
+    <div v-if="postingRows.length" class="mt-4 max-w-3xl rounded-lg border border-primary-500/30 bg-primary-50 px-4 py-3 text-sm text-primary-700" data-testid="import-payroll-posting">
+      <p class="font-medium">{{ t('payroll_posting_import.detected_title') }}</p>
+      <p class="mt-1">{{ t('payroll_posting_import.detected_hint') }}</p>
+      <ul class="mt-2 space-y-2">
+        <li v-for="row in postingRows" :key="row.name" class="flex flex-wrap items-center gap-2">
+          <span class="font-mono text-xs break-all">{{ row.name }}</span>
+          <button v-if="row.file" type="button" :class="btnOutline('primary')" class="whitespace-nowrap"
+            :data-testid="`import-payroll-posting-open-${row.name}`" @click="postingFile = row.file">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye"/></svg>
+            {{ t('payroll_posting_import.open_preview') }}
+          </button>
+          <RouterLink v-else :to="{ name: 'imports-pamica' }" class="font-medium underline hover:no-underline">{{ t('payroll_posting_import.open_wizard') }}</RouterLink>
+        </li>
+      </ul>
+    </div>
+    <div v-if="postingFile" class="mt-4 max-w-6xl rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
+      <PayrollPostingImport :file="postingFile" @close="postingFile = null" @not-posting="postingFile = null" />
     </div>
 
     <!-- Report. Po zahození dávky se zavře — jinak by dál ukazoval doklady, které

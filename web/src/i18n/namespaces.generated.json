@@ -125,6 +125,7 @@
     "payroll_absence",
     "payroll_bank",
     "payroll_imports",
+    "payroll_posting_import",
     "payroll_travel",
     "pending_documents",
     "period_filter",
@@ -416,6 +417,7 @@
       "dimensions",
       "export",
       "imports",
+      "payroll_posting_import",
       "purchase_invoice"
     ],
     "invoices-import": [
@@ -423,6 +425,7 @@
       "dimensions",
       "export",
       "imports",
+      "payroll_posting_import",
       "purchase_invoice"
     ],
     "purchase-invoices": [
@@ -448,6 +451,7 @@
       "dimensions",
       "export",
       "imports",
+      "payroll_posting_import",
       "purchase_invoice"
     ],
     "purchase-invoices-import": [
@@ -455,6 +459,7 @@
       "dimensions",
       "export",
       "imports",
+      "payroll_posting_import",
       "purchase_invoice"
     ],
     "imports-overview": [
@@ -478,6 +483,7 @@
       "imports",
       "migration_nonprofit_notice",
       "pamica",
+      "payroll_posting_import",
       "pohoda",
       "premier"
     ],
@@ -486,6 +492,7 @@
       "imports",
       "migration_nonprofit_notice",
       "pamica",
+      "payroll_posting_import",
       "pohoda",
       "premier"
     ],
