@@ -800,11 +800,39 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     background-color: var(--color-neutral-50);
     z-index: 2;
   }
+  /*
+   * Lepivá buňka musí být neprůhledná, jinak pod ní při posunu prosvítají
+   * odjeté buňky. Barva řádku ale bývá poloprůhledná (zebra, hover, aktivní
+   * řádek, row-flash, utility typu bg-danger-50/40), takže samotné
+   * `inherit` nestačí. Skládáme proto dvě vrstvy:
+   *   1. background-image = neprůhledný podklad plochy (kreslí se nad
+   *      zděděnou barvou buňky, ta je tím schovaná),
+   *   2. ::after = zděděná barva řádku přes podklad.
+   * Buňka je sticky se z-indexem, tedy vlastní kontext vrstvení, takže
+   * ::after se z-index:-1 leží nad jejím pozadím a pod obsahem.
+   * Barvu dál určuje řádek (stavové tinty, utility na <tr>), tady se jen
+   * vrství. box-shadow: inherit přenese na ::after i lištu aktivního řádku,
+   * jinak by ji neprůhledná barva řádku (hover:bg-neutral-50) zakryla.
+   * ::after, ne ::before: ::before buňky patří popisku sloupce
+   * (`.column-labels td[data-column-label]::before`).
+   * Stránka sem nepřidává vlastní pozadí první buňky (scoped styl mimo vrstvu
+   * by podklad i tint přebil); hlídá to stickyFirstColumn.spec.ts.
+   */
   .table-sticky-first tbody td:first-child {
     background-color: inherit;
+    background-image: linear-gradient(var(--color-surface), var(--color-surface));
     z-index: 1;
   }
-  /* Default bg pro řádky aby td:first-child{bg:inherit} nebyl průhledný.
+  .table-sticky-first tbody td:first-child::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-color: inherit;
+    box-shadow: inherit;
+    pointer-events: none;
+  }
+  /* Default bg pro řádky (liché řádky bez zebry).
      :where() drží specificitu na 0, takže Tailwind utility (bg-warning-50,
      hover:bg-neutral-50, …) na <tr> stále vyhrávají. */
   :where(.table-sticky-first tbody tr) {
