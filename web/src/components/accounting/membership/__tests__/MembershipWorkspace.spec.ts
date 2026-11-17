@@ -5,7 +5,7 @@ import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatDate } from '@/composables/useFormat'
 import Workspace from '../MembershipWorkspace.vue'
-import { membershipListNotice } from '../membershipPage'
+import { membershipDetailNotice, membershipListNotice, readListHandoff, saveListHandoff } from '../membershipPage'
 import MembershipBatchFlow from '../MembershipBatchFlow.vue'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import type { MemberPage, MemberRow } from '@/api/nonprofitMembership'
@@ -13,7 +13,7 @@ import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
 
 const api = vi.hoisted(() => ({ members: vi.fn(), createMember: vi.fn(), titles: vi.fn(), selectionCheck: vi.fn(), exportMembers: vi.fn() }))
-const navigation = vi.hoisted(() => ({route: {query: {}} as {query: Record<string, string>}, replace: vi.fn()}))
+const navigation = vi.hoisted(() => ({route: {query: {}} as {query: Record<string, string>; fullPath?: string}, replace: vi.fn()}))
 vi.mock('vue-router', async importOriginal => ({...await importOriginal<typeof import('vue-router')>(), useRoute: () => navigation.route, useRouter: () => ({replace: navigation.replace})}))
 const accounting = vi.hoisted(() => ({ listPeriods: vi.fn() }))
 vi.mock('@/api/nonprofitMembership', () => ({ membershipApi: api }))
@@ -76,7 +76,7 @@ const lastNavigation = () => { const [to, event] = rowLink.navigate.mock.lastCal
 beforeEach(() => {
   vi.clearAllMocks()
   sessionStorage.clear()
-  membershipListNotice.value = ''
+  membershipListNotice.value = ''; membershipDetailNotice.value = ''
   navigation.route = reactive({query: {}})
   navigation.replace.mockImplementation(({query}: {query: Record<string, string>}) => {navigation.route.query = query; return Promise.resolve()})
   api.titles.mockResolvedValue({items: ['SYNTHETIC'], next_after_title_key: null})
@@ -204,27 +204,72 @@ describe('Membership workspace', () => {
     w.unmount()
   })
 
-  it('keeps the batch selection when the list is left for a member detail and comes back', async () => {
+  it('hands the list address, batch selection and opened member over to a detail in the same panel', async () => {
+    navigation.route = reactive({query: {year: '2026', search: 'Synthetic'}, fullPath: '/accounting/nonprofit-membership?year=2026&search=Synthetic'}) as typeof navigation.route
     const first=mounted();await flushPromises()
     await first.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
     await first.get('[data-member="2"] [data-action="batch-check-member"]').setValue(true)
+    await first.get('[data-member="3"] [data-action="open-member"]').trigger('click')
+    expect(readListHandoff(5)).toMatchObject({ path: '/accounting/nonprofit-membership?year=2026&search=Synthetic', ids: [1,2], openedId: 3 })
     first.unmount()
-    // Návrat: výběr se obnoví a jako u každé obnovy ověří na serveru (člen 2 mezitím filtru nevyhovuje).
+    // Návrat: výběr se obnoví jednou a jako u každé obnovy ověří na serveru (člen 2 mezitím filtru nevyhovuje).
     api.selectionCheck.mockResolvedValueOnce({member_ids: [1]})
-    const back=mounted();await flushPromises()
-    expect(api.selectionCheck).toHaveBeenCalledWith(5, [1,2], expect.objectContaining({payment_status:'all'}))
+    const back=mount(Workspace, { attachTo: document.body, props: { supplier: 5, canManage: true }, global: { plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })], stubs: { ActionBar, ClientSearchSelect, MembershipReconciliation: Reconciliation } } })
+    await flushPromises()
+    expect(api.selectionCheck).toHaveBeenCalledWith(5, [1,2], expect.objectContaining({search:'Synthetic'}))
     expect((back.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(true)
     expect((back.get('[data-member="2"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
     expect(back.text()).toContain(cs.nonprofitMembership.listSelectionRefreshed)
+    // Fokus na řádek člena, ze kterého se detail otevřel.
+    expect(document.activeElement).toBe(back.get('[data-member="3"] [data-action="open-member"]').element)
+    expect(readListHandoff(5)).toBeNull()
     back.unmount()
-    // Jiná firma ani jiné filtry výběr nepřevezmou.
+    const again=mounted();await flushPromises()
+    expect((again.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
+    again.unmount()
+  })
+
+  it('does not revive a selection cancelled by a filter change, nor hand it to another company', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-member="2"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-field="member-payment-status"]').setValue('unpaid');await flushPromises()
+    expect(w.text()).toContain(cs.nonprofitMembership.listSelectionCleared)
+    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click')
+    w.unmount()
+    navigation.route = reactive({query: {}})
+    const back=mounted();await flushPromises()
+    expect(api.selectionCheck).not.toHaveBeenCalledWith(5, [1,2], expect.anything())
+    expect((back.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
+    back.unmount()
+
+    saveListHandoff({ supplier: 5, path: '/accounting/nonprofit-membership', filters: {search:'',year:Number(appIsoDate().slice(0,4)),title_key:'',payment_status:'all'}, ids: [1], openedId: 1 })
     const other=mounted({supplier:6});await flushPromises()
     expect((other.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
     other.unmount()
-    navigation.route.query = {search: 'Synthetic'}
-    const filtered=mounted();await flushPromises()
-    expect((filtered.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
-    filtered.unmount()
+  })
+
+  it('opens a member in a new panel without a handoff on Ctrl+click, while exporting, and after creating during a batch', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"]').trigger('click', { ctrlKey: true })
+    expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: true })
+    expect(readListHandoff(5)).toBeNull()
+    // Běžící export by odchodem ze seznamu tiše skončil.
+    api.exportMembers.mockReturnValueOnce(new Promise(() => {}))
+    await w.get('[data-action="export-xlsx"]').trigger('click');await flushPromises()
+    await w.get('[data-member="2"] [data-action="open-member"]').trigger('click')
+    expect(lastNavigation()).toEqual({ to: DETAIL(2), newPanel: true })
+    w.unmount()
+    // Založení člena s otevřeným hromadným předpisem: dávka zůstane, detail v novém panelu s potvrzením.
+    const b=mounted();await flushPromises()
+    await b.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    await b.get('[data-field="member-client"]').setValue('3')
+    await b.get('[data-field="member-number"]').setValue('M-9')
+    await b.get('[data-action="create-member"]').trigger('click');await flushPromises()
+    expect(lastNavigation()).toEqual({ to: DETAIL(9), newPanel: true })
+    expect(b.findComponent(MembershipBatchFlow).exists()).toBe(true)
+    expect(membershipDetailNotice.value).toBe(cs.nonprofitMembership.memberCreated)
+    b.unmount()
   })
   it('hides the selection column without write access', async () => {
     const w=mounted({canManage:false});await flushPromises()

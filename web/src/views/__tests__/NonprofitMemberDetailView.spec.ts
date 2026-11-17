@@ -5,7 +5,7 @@ import { createI18n } from 'vue-i18n'
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
 import View from '../NonprofitMemberDetailView.vue'
-import { membershipListNotice } from '@/components/accounting/membership/membershipPage'
+import { membershipDetailNotice, membershipListNotice, saveListHandoff } from '@/components/accounting/membership/membershipPage'
 
 const auth = vi.hoisted(() => ({ user: { id: 1 } as { id: number } | null, csrfToken: 'synthetic-csrf', can: vi.fn() }))
 // Reaktivní jako skutečný store: přepnutí firmy musí stránka zaznamenat.
@@ -27,8 +27,8 @@ beforeEach(() => {
   supplier.currentSupplierId = 5
   nav.route = { params: { id: '7' } }
   accounting.listPeriods.mockResolvedValue([period])
-  membershipListNotice.value = ''
-  window.history.replaceState({}, '')
+  membershipListNotice.value = ''; membershipDetailNotice.value = ''
+  sessionStorage.clear()
 })
 
 it('shows the member from the route as a full page with accounting periods and write rights', async () => {
@@ -45,8 +45,10 @@ it('keeps the detail read-only without posting write permission', async () => {
   w.unmount()
 })
 
-it('returns to the list with the filters the user came from, otherwise to the plain list', async () => {
-  window.history.replaceState({ back: '/accounting/nonprofit-membership?year=2026&search=Synthetic' }, '')
+const filters = { search: 'Synthetic', year: 2026, title_key: '', payment_status: 'all' as const }
+it('returns to the list with the filters the list handed over, otherwise to the plain list', async () => {
+  // Panely mají paměťovou historii bez history.state.back; adresu předává seznam při otevření člena.
+  saveListHandoff({ supplier: 5, path: '/accounting/nonprofit-membership?year=2026&search=Synthetic', filters, ids: [1], openedId: 7 })
   const w = mounted(); await flushPromises()
   expect(w.get('[data-action="back-to-list"]').text()).toBe(cs.nonprofitMembership.backToList)
   expect(w.getComponent(RouterLinkStub).props('to')).toBe('/accounting/nonprofit-membership?year=2026&search=Synthetic')
@@ -54,11 +56,15 @@ it('returns to the list with the filters the user came from, otherwise to the pl
   expect(nav.push).toHaveBeenCalledWith('/accounting/nonprofit-membership?year=2026&search=Synthetic')
   w.unmount()
 
-  // Předchozí stránka není seznam členů (přímý odkaz, jiná agenda): návrat na seznam bez filtrů.
-  window.history.replaceState({ back: '/clients/3' }, '')
-  const direct = mounted(); await flushPromises()
-  expect(direct.getComponent(RouterLinkStub).props('to')).toBe('/accounting/nonprofit-membership')
-  direct.unmount()
+  // Předání jiné firmy nebo cizí adresa: přímý odkaz vede na seznam bez filtrů.
+  saveListHandoff({ supplier: 6, path: '/accounting/nonprofit-membership?year=2026', filters, ids: [], openedId: 7 })
+  const otherCompany = mounted(); await flushPromises()
+  expect(otherCompany.getComponent(RouterLinkStub).props('to')).toBe('/accounting/nonprofit-membership')
+  otherCompany.unmount()
+  saveListHandoff({ supplier: 5, path: '/clients/3', filters, ids: [], openedId: 7 })
+  const foreign = mounted(); await flushPromises()
+  expect(foreign.getComponent(RouterLinkStub).props('to')).toBe('/accounting/nonprofit-membership')
+  foreign.unmount()
 })
 
 it('leaves a deleted member without a way back to its address and lets the list confirm the deletion', async () => {
@@ -72,8 +78,19 @@ it('leaves a deleted member without a way back to its address and lets the list 
 
 it('goes to the list when the company changes, because the member belongs to the previous one', async () => {
   const w = mounted(); await flushPromises()
-  supplier.currentSupplierId = 6; await nextTick(); await flushPromises()
+  supplier.currentSupplierId = 6; await nextTick()
+  // Člen se pod novou firmou ani na okamžik nenačítá.
+  expect(w.findComponent(Detail).exists()).toBe(false)
+  await flushPromises()
   expect(nav.replace).toHaveBeenCalledWith('/accounting/nonprofit-membership')
+  w.unmount()
+})
+
+it('confirms a member created on the list once its page is shown', async () => {
+  membershipDetailNotice.value = cs.nonprofitMembership.memberCreated
+  const w = mounted(); await flushPromises()
+  expect(w.get('[data-section="member-page-notice"]').text()).toBe(cs.nonprofitMembership.memberCreated)
+  expect(membershipDetailNotice.value).toBe('')
   w.unmount()
 })
 

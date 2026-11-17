@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -15,7 +15,7 @@ import type { Client } from '@/api/clients'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
 import { badgeBase, errorBox, membershipError, memberStatusBadge, membershipMemberLabel } from './membershipFormat'
-import { memberDetailPath, membershipListNotice } from './membershipPage'
+import { clearListHandoff, MEMBERSHIP_LIST_PATH, memberDetailPath, membershipDetailNotice, membershipListNotice, readListHandoff, saveListHandoff } from './membershipPage'
 import { useRowLink } from '@/composables/useRowLink'
 import MembershipReconciliation from './MembershipReconciliation.vue'
 import MembershipRates from './MembershipRates.vue'
@@ -47,6 +47,7 @@ const clientId = ref<number | null>(null)
 const clientLabel = ref('')
 const memberNumber = ref('')
 const creating = ref(false)
+const root = ref<HTMLElement | null>(null)
 const dataVersion = ref(0)
 const route = useRoute(), router = useRouter()
 const titles = ref<string[]>([]), titlesError = ref(false)
@@ -98,23 +99,6 @@ function batchChanged() { dataVersion.value++; void load(); void loadTitles(true
 /** Výmaz mění čísla a jména v seznamu. */
 async function membersErased() { dataVersion.value++; await load() }
 
-/**
- * Výběr do hromadného předpisu přežije otevření detailu člena (seznam se přitom odpojí): drží se v sessionStorage
- * pro firmu a použité filtry. Po návratu ho load() jako každou obnovu ověří na serveru (smazaný člen z něj vypadne).
- */
-const selectionKey = () => `myinvoice.membership.selection.${props.supplier}.${JSON.stringify(appliedFilters.value)}`
-function storeSelection() {
-  try {
-    if (checkedMembers.value.length) sessionStorage.setItem(selectionKey(), JSON.stringify(checkedMembers.value))
-    else sessionStorage.removeItem(selectionKey())
-  } catch { /* úložiště nedostupné: výběr platí jen do opuštění seznamu */ }
-}
-function restoreSelection() {
-  try {
-    const ids: unknown = JSON.parse(sessionStorage.getItem(selectionKey()) ?? '[]')
-    if (Array.isArray(ids)) checkedMembers.value = ids.filter((id): id is number => Number.isInteger(id) && id > 0).slice(0, 500)
-  } catch { checkedMembers.value = [] }
-}
 function checkMember(id: number, event: Event) {
   if (!props.canManage || batchLocked.value || loading.value) return
   selectionNotice.value = ''
@@ -135,11 +119,21 @@ const labelOf = (row: MemberRow) => row.erased
 const navigateRow = useRowLink()
 /**
  * Detail člena je samostatná stránka jako detail kontaktu (Ctrl+klik a prostřední tlačítko ho otevřou v novém panelu).
- * Rozpracovaný hromadný předpis nebo import by odchodem ze seznamu zmizel, proto se tehdy detail otevře v novém panelu.
+ * Rozpracovaný hromadný předpis, import nebo běžící export by odchodem ze seznamu zmizel, proto se tehdy detail
+ * otevře v novém panelu. Při odchodu ve stejném panelu seznam předá adresu s filtry, výběr a otevřeného člena.
  */
-function openMember(row: MemberRow, event?: MouseEvent) {
-  const keepList = batchOpen.value || importOpen.value
-  navigateRow(memberDetailPath(row.id), keepList ? new MouseEvent('click', { ctrlKey: true }) : event)
+function goToMember(id: number, event?: MouseEvent) {
+  const keepList = batchOpen.value || importOpen.value || exporting.value
+  const newPanel = keepList || !!event && (event.ctrlKey || event.metaKey || event.button === 1)
+  if (!newPanel) saveListHandoff({ supplier: props.supplier, path: route?.fullPath || MEMBERSHIP_LIST_PATH, filters: appliedFilters.value, ids: [...checkedMembers.value], openedId: id })
+  navigateRow(memberDetailPath(id), keepList ? new MouseEvent('click', { ctrlKey: true }) : event)
+}
+function openMember(row: MemberRow, event?: MouseEvent) { goToMember(row.id, event) }
+
+/** Po návratu z detailu fokus na tlačítko řádku člena; tabulka i karty jsou v DOM, bere se viditelné. */
+function focusMember(id: number) {
+  const buttons = Array.from(root.value?.querySelectorAll<HTMLElement>(`[data-member="${id}"] [data-action="open-member"], [data-member-card="${id}"] [data-action="open-member"]`) ?? [])
+  ;(buttons.find(el => el.getClientRects().length > 0) ?? buttons[0])?.focus()
 }
 
 // Řazení zůstává podle id: seznam jde keyset stránkováním po id, jiné pořadí by potřebovalo nový index.
@@ -248,8 +242,9 @@ async function create() {
     if (!alive || ticket !== createTicket || supplier !== props.supplier) return
     notice.value = t('nonprofitMembership.memberCreated')
     clientId.value = null; clientLabel.value = ''; memberNumber.value = ''
-    // Jako u kontaktu rovnou detail nového člena: tam se zapisuje jeho první revize.
-    navigateRow(memberDetailPath(created.id))
+    // Jako u kontaktu rovnou detail nového člena (tam se zapisuje jeho první revize); potvrzení ukáže detail.
+    membershipDetailNotice.value = t('nonprofitMembership.memberCreated')
+    goToMember(created.id)
   } catch (e) {
     if (alive && ticket === createTicket) error.value = membershipError({t, te}, e)
   } finally {
@@ -271,13 +266,20 @@ watch(() => props.supplier, () => {
   void reloadAll()
 })
 onBeforeUnmount(() => { cancelSearchTimer(); alive = false; titlesTicket++; generation++; createTicket++ })
-onMounted(() => {
+onMounted(async () => {
   // Hláška akce z detailu, který se zavřel (smazání člena).
   if (membershipListNotice.value) { notice.value = membershipListNotice.value; membershipListNotice.value = '' }
-  restoreSelection()
-  void reloadAll()
+  // Návrat z detailu ve stejném panelu: výběr do dávky platí jen pro stejné filtry; load() ho ověří na serveru.
+  const handoff = readListHandoff(props.supplier)
+  let focusId: number | null = null
+  if (handoff && JSON.stringify(handoff.filters) === JSON.stringify(appliedFilters.value)) {
+    clearListHandoff()
+    checkedMembers.value = props.canManage ? handoff.ids : []
+    focusId = handoff.openedId
+  }
+  await reloadAll()
+  if (focusId !== null && alive) { await nextTick(); focusMember(focusId) }
 })
-watch(checkedMembers, storeSelection, { deep: true })
 let firstActivation = true
 onActivated(() => {
   if (firstActivation) { firstActivation = false; return }
@@ -420,7 +422,7 @@ watch(batchLocked, locked => {
 </script>
 
 <template>
-  <div class="space-y-5">
+  <div ref="root" class="space-y-5">
     <h1 class="text-xl font-semibold">{{ t('nonprofitMembership.title') }}</h1>
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.help') }}</p>
     <p v-if="!canManage" role="status" class="text-sm text-neutral-500" data-section="readonly">{{ t('nonprofitMembership.readonly') }}</p>
