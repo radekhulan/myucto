@@ -65,7 +65,9 @@ Soubor má typicky příponu `.gpc` nebo `.abo`, někdy `.txt`, a velikost řád
 **Jak poznáte, že je hotovo:** Aplikace ukáže výsledek ve tvaru „Importováno: 12 transakcí, automaticky spárováno 8.“ (u více souborů najednou „Hromadný upload: … importováno, … duplicit.“). Výpis je v seznamu a faktury, které se spárovaly, jsou označené jako zaplacené. Jestliže se některé pohyby shodují s již evidovanými, zobrazí se samostatné varování s počty **nalezeno / založeno / přeskočeno jako duplicita**. Zkontrolujte je, zvlášť pokud nejde o očekávaný překryv výpisů.
 
 > [!TIP]
-> Místo GPC můžete nahrát **PDF výpis**. Pro Creditas, ČSOB, Českou spořitelnu, KB, MONETA a Raiffeisenbank stačí nahrát rovnou PDF: systém ho deterministicky rozparsuje na transakce (bez AI) a ověří, že součet sedí na počáteční a konečný zůstatek z hlavičky (na haléř přesně). Dál to funguje úplně stejně jako GPC. Je to užitečné u bank, které GPC/ABO export nenabízejí (Banka CREDITAS), nebo u účtu, který ho nemá zapnutý.
+> Místo GPC můžete nahrát **PDF výpis**. Pro Creditas, ČSOB, Českou spořitelnu, KB, MONETA, Raiffeisenbank a Revolut Business stačí nahrát rovnou PDF: systém ho deterministicky rozparsuje na transakce (bez AI) a ověří, že součet sedí na počáteční a konečný zůstatek z hlavičky (na haléř přesně). Dál to funguje úplně stejně jako GPC. Je to užitečné u bank, které GPC/ABO export nenabízejí (Banka CREDITAS, Revolut), nebo u účtu, který ho nemá zapnutý.
+>
+> Výpis z **Revolut Business** (česky i anglicky) se přiřadí k účtu podle IBANu: u bankovního účtu firmy v záložce *Měny a účty* vyplňte IBAN (LT…), číslo účtu může zůstat prázdné. Revolut nemá variabilní symbol, reference platby zůstává v popisu pohybu. U platby kartou v cizí měně je částka v měně účtu, původní částka a kurz jsou v popisu.
 
 Co aplikace při importu udělá, popisuje [§ 29.13.1](#29131-import-vypisu-kontroly-a-vysledek). Vypisuje-li aplikace po nahrání varování, že se párování nepodařilo dokončit, postupujte podle [§ 29.10](#2910-krok-za-krokem-vypis-s-nezpracovanymi-pohyby).
 

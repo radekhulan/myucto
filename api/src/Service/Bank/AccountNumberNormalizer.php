@@ -243,7 +243,23 @@ final class AccountNumberNormalizer
             }
         }
         $ibanPart = is_string($iban) ? self::czechSlovakIbanAccountPart($iban) : null;
-        return $ibanPart !== null && self::equals($ibanPart, $statementAccount);
+        if ($ibanPart !== null) {
+            return self::equals($ibanPart, $statementAccount);
+        }
+        // Zahraniční účet (Revolut LT…) nemá domácí číslo účtu: výpis nese celý IBAN
+        // a porovnává se s celým uloženým IBANem.
+        $foreign = is_string($iban) ? self::foreignIban($iban) : null;
+        return $foreign !== null && $foreign === self::foreignIban($statementAccount);
+    }
+
+    /** Kompaktní IBAN mimo CZ/SK, jinak null. */
+    private static function foreignIban(string $value): ?string
+    {
+        $compact = strtoupper((string) preg_replace('/\s+/', '', $value));
+        if (preg_match('/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/D', $compact) !== 1 || self::czechSlovakIbanAccountPart($compact) !== null) {
+            return null;
+        }
+        return $compact;
     }
 
     /**

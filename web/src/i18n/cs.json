@@ -26400,7 +26400,7 @@
     "subtitle": "Import GPC/ABO výpisů + auto-matching na faktury podle VS.",
     "scan_folder": "Skenovat adresář",
     "upload_gpc": "Nahrát GPC/ABO nebo PDF",
-    "upload_hint": "GPC/ABO výpis se importuje přímo; PDF (Creditas, ČSOB, Česká spořitelna, KB, MONETA, Raiffeisenbank) se automaticky rozparsuje na transakce.",
+    "upload_hint": "GPC/ABO výpis se importuje přímo; PDF (Creditas, ČSOB, Česká spořitelna, KB, MONETA, Raiffeisenbank, Revolut) se automaticky rozparsuje na transakce.",
     "no_data": "Žádné výpisy. Nahrajte první GPC soubor přes tlačítko nahoře.",
     "no_data_filtered": "Žádné výpisy neodpovídají zvolenému filtru.",
     "show_all": "Zobrazit vše",

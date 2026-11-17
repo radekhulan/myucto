@@ -382,7 +382,7 @@ Otisk SHA-256 souboru se shoduje s dříve importovaným výpisem. Buď:
 #### 999.5.4.2 PDF výpis se nenahraje nebo nesedí zůstatek
 
 PDF import je deterministický a podporuje aktuální rozvržení výpisů **Banky CREDITAS,
-ČSOB a KB**. Naskenovaný obrázek bez textové vrstvy, PDF jiné banky nebo nové neznámé
+ČSOB, České spořitelny, KB, MONETA Money Bank, Raiffeisenbank a Revolut Business**. Naskenovaný obrázek bez textové vrstvy, PDF jiné banky nebo nové neznámé
 rozvržení se neodhaduje pomocí AI a import se odmítne.
 
 - Ověřte, že jde o originální PDF stažené z bankovnictví, ne tisk do PDF nebo sken.

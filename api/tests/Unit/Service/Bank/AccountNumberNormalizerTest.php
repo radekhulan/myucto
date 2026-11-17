@@ -179,6 +179,16 @@ final class AccountNumberNormalizerTest extends TestCase
         self::assertTrue(AccountNumberNormalizer::matchesAny('0000192000145399', 'CZ6508000000192000145399', null));
     }
 
+    /** Výpis Revolut nese jen zahraniční IBAN; účet firmy ho má v poli IBAN bez domácího čísla. */
+    public function testMatchesAnyForeignIbanOnly(): void
+    {
+        self::assertTrue(AccountNumberNormalizer::matchesAny('LT633250001234567890', null, 'LT63 3250 0012 3456 7890'));
+        self::assertTrue(AccountNumberNormalizer::matchesAny('LT633250001234567890', '', 'lt633250001234567890'));
+        self::assertTrue(AccountNumberNormalizer::matchesAny('LT633250001234567890', 'LT63 3250 0012 3456 7890', null));
+        self::assertFalse(AccountNumberNormalizer::matchesAny('LT633250001234567891', null, 'LT633250001234567890'));
+        self::assertFalse(AccountNumberNormalizer::matchesAny('3250001234567890', null, 'LT633250001234567890'));
+    }
+
     public function testMatchesAnyRejectsDifferentAccount(): void
     {
         self::assertFalse(AccountNumberNormalizer::matchesAny('1000000005', '1000000006', 'CZ6508000000192000145399'));
