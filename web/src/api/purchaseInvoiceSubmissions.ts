@@ -193,8 +193,9 @@ export const purchaseInvoiceSubmissionsApi = {
     ).then(r => r.data),
   get: (id: number) =>
     api.get<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}`).then(r => r.data),
-  extract: (id: number) =>
-    api.post<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}/extract`, {}).then(r => r.data),
+  extract: (id: number, withoutItems = false) =>
+    api.post<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}/extract`,
+      withoutItems ? { without_items: true } : {}).then(r => r.data),
   needsInformation: (id: number, reason: string) =>
     api.post<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}/needs-information`, { reason }).then(r => r.data),
   reject: (id: number, reason: string) =>

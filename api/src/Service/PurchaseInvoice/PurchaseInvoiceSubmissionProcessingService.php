@@ -25,8 +25,12 @@ final class PurchaseInvoiceSubmissionProcessingService
         private readonly PurchaseInvoiceSubmissionCompletionService $completion,
     ) {}
 
-    /** @return array{purchase_invoice_id:int,source:string,duplicate:bool} */
-    public function extract(int $id, int $supplierId, int $userId, bool $allowAi): array
+    /**
+     * @param bool $withoutItems AI vytěžení bez rozpisu položek (jeden řádek na sazbu DPH);
+     *        strukturovaný ISDOC se zakládá vždy z vlastních položek.
+     * @return array{purchase_invoice_id:int,source:string,duplicate:bool}
+     */
+    public function extract(int $id, int $supplierId, int $userId, bool $allowAi, bool $withoutItems = false): array
     {
         $before = $this->submissions->find($id, $supplierId);
         if ($before === null) {
@@ -121,7 +125,7 @@ final class PurchaseInvoiceSubmissionProcessingService
                         403,
                     );
                 }
-                $result = $this->ai->extractAndCreate($supplierId, $userId, $bytes, null, $name);
+                $result = $this->ai->extractAndCreate($supplierId, $userId, $bytes, null, $name, withoutItems: $withoutItems);
                 $buyer = (array) (($result['ai_data'] ?? [])['customer'] ?? []);
                 if (!$result['ok'] || (int) ($result['purchase_invoice_id'] ?? 0) <= 0) {
                     throw new PurchaseInvoiceSubmissionException(
