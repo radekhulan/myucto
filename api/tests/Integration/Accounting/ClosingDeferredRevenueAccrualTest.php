@@ -708,7 +708,8 @@ final class ClosingDeferredRevenueAccrualTest extends TestCase
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $line) {
             $out[$line['account_code'] . '|' . ($dims[(int) $line['id']][$centerType] ?? '-')] = [(string) $line['side'], (int) round((float) $line['amount'] * 100)];
         }
-        ksort($out);
+        // Přirozené řazení: id střediska v klíči se porovná jako číslo („602|98“ před „602|100“).
+        ksort($out, SORT_NATURAL);
         return $out;
     }
 

@@ -455,7 +455,7 @@ final class DimensionAccountMapPostingTest extends TestCase
         foreach ($release['lines'] as $line) {
             $released[$line['account_code'] . '|' . ($line['dimensions'][$this->centerType] ?? '-')] = (int) round($line['amount'] * 100);
         }
-        ksort($released);
+        ksort($released, SORT_NATURAL);
         self::assertSame($deferred, $released, 'Rozpuštění vrací na tutéž analytiku a středisko, co odklad vzal.');
     }
 
@@ -723,7 +723,7 @@ final class DimensionAccountMapPostingTest extends TestCase
         foreach ($lines as $line) {
             $sides[$line['account_code'] . '|' . ($line['dimensions'][$this->centerType] ?? '-')] = [$line['side'], (int) round($line['amount'] * 100)];
         }
-        ksort($sides);
+        ksort($sides, SORT_NATURAL);
         self::assertSame([
             '518|' . $this->fve => ['debit', $expected],
             '518|' . $this->office => ['credit', $expected],
@@ -1302,7 +1302,8 @@ final class DimensionAccountMapPostingTest extends TestCase
             $k = $code . '|' . ($dims[(int) $line['id']][$this->centerType] ?? '-');
             $out[$k] = ($out[$k] ?? 0) + (int) round((float) $line['amount'] * 100);
         }
-        ksort($out);
+        // Přirozené řazení: id střediska v klíči se porovná jako číslo („518|98“ před „518|100“).
+        ksort($out, SORT_NATURAL);
         return $out;
     }
 
@@ -1326,7 +1327,7 @@ final class DimensionAccountMapPostingTest extends TestCase
             $k = $code . '|' . ($parts === [] ? '-' : implode(',', $parts));
             $out[$k] = ($out[$k] ?? 0) + (int) round((float) $line['amount'] * 100);
         }
-        ksort($out);
+        ksort($out, SORT_NATURAL);
         return $out;
     }
 
