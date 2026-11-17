@@ -48,9 +48,11 @@ describe('mobilní rám aplikace', () => {
     const header = snippet('<template v-if="phoneNavigation">', 400)
     expect(header).toContain('<WorkspaceWindowButton')
     expect(header).toContain('data-testid="mobile-windows"')
-    const drawerRow = snippet(`<div :class="phoneNavigation ? 'flex items-center gap-1.5'`, 400)
+    const drawerRow = appLayout.match(/<template v-if="phoneNavigation">\s*<LanguageToggle[\s\S]*?<\/template>/)?.[0]
+    expect(drawerRow).toBeDefined()
     expect(drawerRow).not.toContain('WorkspaceWindowButton')
     expect(drawerRow).toContain('<WorkspaceFavoritesButton')
+    expect(drawerRow).toMatch(/<ThemeToggle[^>]*\/>\s*<FullscreenToggle\s*\/>/)
   })
 
   it('zásuvka i nabídky nechávají hlavičku a spodní lištu volné', () => {
