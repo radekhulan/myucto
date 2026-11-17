@@ -39,6 +39,15 @@ final class AccrualDeferralService
     public const CACHE_POSTING_DATE = '@posting_date';
     private const CACHE_ITEM_ACCOUNTS = '@item_accounts';
 
+    /**
+     * Zdroje zápisů, které účtuje uzávěrka a otevření dalšího roku ({@see ClosingService}).
+     * Vazba „Souvisí" na takový zápis neznamená, že doklad nese odklad sám.
+     */
+    private const CLOSING_SOURCE_TYPES = [
+        'closing', 'opening', 'deferred_revenue_accrual', 'prepaid_expense_accrual', 'small_asset_accrual',
+        'fx_revaluation', 'income_tax', 'deferred_tax', 'provision', 'profit_distribution',
+    ];
+
     /** Tolerance shody podílů rozpadu (podíl se ukládá na 10 desetinných míst). */
     private const SHARE_TOLERANCE = 0.000001;
 
@@ -57,7 +66,7 @@ final class AccrualDeferralService
      * Doklad, který odklad nese už sám ({@see deferredOnDocumentSql}), se neodkládá podruhé.
      *
      * `$asOfInJournal` (výkaz mimo deník) navíc vyžaduje zaúčtovaný nestornovaný zápis
-     * dokladu v [costFrom..asOf] (náklad musí ve výkazu být, uzávěrku nezaúčtovaný doklad
+     * skupiny zaúčtování dokladu v [costFrom..asOf] (náklad musí ve výkazu být, uzávěrku nezaúčtovaný doklad
      * zastaví už kontrolou) a vyřadí doklady, jejichž odklad k tomu dni zaúčtovala
      * uzávěrka ({@see deferredByClosingSql}).
      *
@@ -69,13 +78,12 @@ final class AccrualDeferralService
         $journalSql = '';
         $params = [$supplierId, $afterDate, $costFrom, $costTo];
         if ($asOfInJournal !== null) {
-            $journalSql = 'AND EXISTS (SELECT 1 FROM journal_entries pje
-                                 WHERE pje.supplier_id = pi.supplier_id
-                                   AND pje.source_type = \'purchase_invoice\' AND pje.source_id = pi.id
-                                   AND pje.posted_at IS NOT NULL AND pje.reversed_by IS NULL
-                                   AND pje.entry_date >= ? AND pje.entry_date <= ?)
+            // Zaúčtovaný doklad pozná podle skupiny zaúčtování, stejně jako předběžná kontrola
+            // uzávěrky: převzatý doklad účtují zápisy, které vlastní, ne přímý zápis.
+            $journalSql = 'AND ' . DocumentPostingGroup::postedEntryExistsSql('purchase_invoice', 'pi.id', 'pi.supplier_id', 'pje',
+                'AND pje.entry_date >= ? AND pje.entry_date <= ?') . '
                 AND NOT ' . self::deferredByClosingSql('prepaid_expense_accrual', 'pi.supplier_id', 'pi.effective_cost_date');
-            array_push($params, $costFrom, $asOfInJournal, $asOfInJournal);
+            array_push($params, $costFrom, $asOfInJournal, $costFrom, $asOfInJournal, $asOfInJournal);
         }
         $stmt = $this->db->pdo()->prepare(
             'SELECT pii.id AS item_id, pii.purchase_invoice_id, pii.description,
@@ -95,7 +103,7 @@ final class AccrualDeferralService
                 AND NOT ' . self::deferredOnDocumentSql('purchase_invoice', 'pi.supplier_id', 'pi.id') . '
               ORDER BY pi.id, pii.order_index, pii.id'
         );
-        array_push($params, $deferPrefix, $deferPrefix);
+        array_push($params, ...self::deferredOnDocumentParams($deferPrefix));
         $stmt->execute($params);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
     }
@@ -137,7 +145,7 @@ final class AccrualDeferralService
                 AND NOT ' . self::deferredOnDocumentSql('purchase_invoice', 'pi.supplier_id', 'pi.id') . '
               ORDER BY pi.id, pii.order_index, pii.id'
         );
-        $stmt->execute([$supplierId, $originEndsOn, $targetEnd, $originEndsOn, $deferPrefix, $deferPrefix]);
+        $stmt->execute([$supplierId, $originEndsOn, $targetEnd, $originEndsOn, ...self::deferredOnDocumentParams($deferPrefix)]);
         return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
     }
 
@@ -241,7 +249,8 @@ final class AccrualDeferralService
 
     /**
      * Řádky vydaných faktur s obdobím výnosu přesahujícím `afterDate`, jejichž zaúčtovaný
-     * a nestornovaný zápis faktury leží v [postedFrom..postedTo]. Odklad: zápis v uzavíraném
+     * a nestornovaný zápis skupiny zaúčtování (přímý i vlastněný zápis převzatého dokladu)
+     * leží v [postedFrom..postedTo]. Odklad: zápis v uzavíraném
      * období; rozpuštění: zápis kdykoli do konce období, ze kterého se otevírá, a jen v období,
      * jehož odklad zaúčtovala uzávěrka (`$release`, {@see deferredByClosingSql}). Výkaz mimo
      * deník (`$asOfInJournal`) naopak vyřadí doklady, jejichž odklad k tomu dni zaúčtovala
@@ -264,19 +273,18 @@ final class AccrualDeferralService
                 AND ii.accrual_to IS NOT NULL
                 AND ii.accrual_to > ?
                 AND (? IS NULL OR ii.accrual_from <= ?)
-                AND EXISTS (SELECT 1 FROM journal_entries je
-                             WHERE je.supplier_id = i.supplier_id
-                               AND je.source_type = \'invoice\' AND je.source_id = i.id
-                               AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL
+                AND ' . DocumentPostingGroup::postedEntryExistsSql('invoice', 'i.id', 'i.supplier_id', 'je', '
                                AND je.entry_date <= ?
                                AND (? IS NULL OR je.entry_date >= ?)
-                               ' . $closingSql . ')
+                               ' . $closingSql) . '
                 AND NOT ' . self::deferredOnDocumentSql('invoice', 'i.supplier_id', 'i.id') . '
               ORDER BY i.id, ii.order_index, ii.id'
         );
-        $params = [$supplierId, $afterDate, $startsBy, $startsBy, $postedTo, $postedFrom, $postedFrom, ...$closingParams];
-        $params[] = $deferPrefix;
-        $params[] = $deferPrefix;
+        // Zápisy dokladu určuje skupina zaúčtování (přímý zápis i zápisy převzatého dokladu),
+        // stejně jako předběžná kontrola nezaúčtovaných dokladů; podmínka zápisu se váže
+        // za každou větev skupiny.
+        $entryParams = [$postedTo, $postedFrom, $postedFrom, ...$closingParams];
+        $params = [$supplierId, $afterDate, $startsBy, $startsBy, ...$entryParams, ...$entryParams, ...self::deferredOnDocumentParams($deferPrefix)];
         $stmt->execute($params);
         $rows = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $row) {
@@ -375,17 +383,24 @@ final class AccrualDeferralService
         if (!isset($contexts[$invoiceId])) {
             $resolved = $this->posting->issuedItemRevenueAccounts($supplierId, $invoiceId);
             $resolved['mapped'] = $this->posting->itemAccountsByDimension($supplierId, 'invoice', $invoiceId, $resolved['accounts']);
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT DISTINCT coa.account_code
-                   FROM journal_entries je
-                   JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.supplier_id = je.supplier_id
-                   JOIN chart_of_accounts coa   ON coa.id = jel.account_id
-                  WHERE je.supplier_id = ? AND je.source_type = \'invoice\' AND je.source_id = ?
-                    AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL
-                    AND coa.account_code LIKE \'6%\''
-            );
-            $stmt->execute([$supplierId, $invoiceId]);
-            $posted = $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [];
+            // Výnosové účty všech zápisů skupiny zaúčtování (přímý zápis i zápisy převzatého
+            // dokladu): účet, který nese jen přímý zápis, by u převzaté faktury odložil výnos
+            // z cizí položky.
+            $posted = [];
+            $entryIds = array_map(static fn (array $entry): int => (int) $entry['id'],
+                (new DocumentPostingGroup($this->db))->active($supplierId, 'invoice', $invoiceId));
+            if ($entryIds !== []) {
+                $marks = implode(',', array_fill(0, count($entryIds), '?'));
+                $stmt = $this->db->pdo()->prepare(
+                    "SELECT DISTINCT coa.account_code
+                       FROM journal_entry_lines jel
+                       JOIN chart_of_accounts coa ON coa.id = jel.account_id
+                      WHERE jel.supplier_id = ? AND jel.entry_id IN ({$marks})
+                        AND coa.account_code LIKE '6%'"
+                );
+                $stmt->execute([$supplierId, ...$entryIds]);
+                $posted = $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [];
+            }
             $contexts[$invoiceId] = $resolved + ['single' => count($posted) === 1 ? (string) $posted[0] : null];
         }
         $context = $contexts[$invoiceId];
@@ -788,9 +803,8 @@ final class AccrualDeferralService
      *
      * Doklad se k období odkladu přiřazuje stejným datem, jakým ho rozpuštění vybírá
      * ({@see deferredByClosingSql()}): přijatá faktura datem nákladu
-     * (`effective_cost_date`, {@see prepaidExpenseReleaseRows()}), výnosový doklad datem
-     * svého přímého zápisu ({@see deferredRevenueRows()}); zápisy skupiny zaúčtování výběr
-     * neurčují.
+     * (`effective_cost_date`, {@see prepaidExpenseReleaseRows()}), výnosový doklad daty
+     * zápisů své skupiny zaúčtování ({@see deferredRevenueRows()}).
      *
      * @param 'deferred_revenue_accrual'|'prepaid_expense_accrual' $sourceType zápis odkladu
      * @param array<string,mixed> $cache
@@ -1053,8 +1067,8 @@ final class AccrualDeferralService
         // Zápis => doklad. Fakturu účtuje přímý zápis se zdrojem dokladu i zápisy, které
         // doklad vlastní ve skupině zaúčtování (převod z programu, který účtuje po řádcích);
         // informativní vazby „Souvisí“ zaúčtováním nejsou. Členský předpis je zápis sám.
-        // Datum pro starý odklad ({@see markLegacyDeferrals()}) jen z hlavičky přímého zápisu,
-        // podle kterého doklad vybírá i rozpuštění; převzatý doklad ho může mít bez řádku 5xx/6xx.
+        // Data pro starý odklad ({@see markLegacyDeferrals()}) z hlaviček všech zápisů skupiny,
+        // podle kterých doklad vybírá i rozpuštění; převzatý doklad je může mít bez řádku 5xx/6xx.
         $entryDocs = [];
         $dates = [];
         if ($docType === 'nonprofit_membership') {
@@ -1080,9 +1094,7 @@ final class AccrualDeferralService
                 foreach ((new DocumentPostingGroup($this->db))->activeMany($supplierId, $docType, $chunk) as $docId => $entries) {
                     foreach ($entries as $entry) {
                         $entryDocs[(int) $entry['id']] = (int) $docId;
-                        if ((string) $entry['source_type'] === $docType && (int) $entry['source_id'] === (int) $docId) {
-                            $dates[(int) $docId][(string) $entry['entry_date']] = true;
-                        }
+                        $dates[(int) $docId][(string) $entry['entry_date']] = true;
                     }
                 }
             }
@@ -1493,26 +1505,28 @@ final class AccrualDeferralService
     }
 
     /**
-     * Podmínka „doklad nese odklad už sám": vlastní zápis dokladu (`$docType`, id dokladu)
-     * nebo zápis k dokladu připojený vazbou (ruční interní doklad, převzatý zápis) účtuje
-     * na účet časového rozlišení. Prefix účtu se váže dvakrát (`?`, `?`).
+     * Podmínka „doklad nese odklad už sám": zápis skupiny zaúčtování dokladu (přímý zápis
+     * i zápisy převzatého dokladu, {@see DocumentPostingGroup::postedEntryExistsSql()}) nebo
+     * zápis k dokladu připojený vazbou „Souvisí" (ruční interní doklad) účtuje na účet
+     * časového rozlišení. Parametry váže {@see deferredOnDocumentParams()}.
      *
      * Faktura rozúčtovaná rovnou na 381/384 má odklad v knihách od zaúčtování a rozpouští
      * ho účetní stejnou cestou. Uzávěrka by ji odložila podruhé a openNext rozpustil
      * dvakrát. Rozpad zápisu na položky deník nezná, proto se vyřazuje celý doklad.
+     *
+     * Vazba „Souvisí" na zápis, který zaúčtovala uzávěrka nebo otevření roku
+     * ({@see CLOSING_SOURCE_TYPES}), vlastním odkladem dokladu není: účetní ji připojí kvůli
+     * dohledatelnosti a odklad z uzávěrky by jinak sám sobě zablokoval rozpuštění.
      */
     private static function deferredOnDocumentSql(string $docType, string $supplierSql, string $docIdSql): string
     {
-        return "(EXISTS (SELECT 1
-                   FROM journal_entries xje
-                   JOIN journal_entry_lines xl ON xl.entry_id = xje.id AND xl.supplier_id = xje.supplier_id
-                   JOIN chart_of_accounts xa   ON xa.id = xl.account_id
-                  WHERE xje.supplier_id = {$supplierSql}
-                    AND xje.source_type = '{$docType}'
-                    AND xje.source_id = {$docIdSql}
-                    AND xje.posted_at IS NOT NULL
-                    AND xje.reversed_by IS NULL
-                    AND xa.account_code LIKE ?)
+        $closingTypes = "'" . implode("', '", self::CLOSING_SOURCE_TYPES) . "'";
+        return '(' . DocumentPostingGroup::postedEntryExistsSql($docType, $docIdSql, $supplierSql, 'xje', '
+                    AND EXISTS (SELECT 1
+                          FROM journal_entry_lines xl
+                          JOIN chart_of_accounts xa ON xa.id = xl.account_id
+                         WHERE xl.supplier_id = xje.supplier_id AND xl.entry_id = xje.id
+                           AND xa.account_code LIKE ?)') . "
              OR EXISTS (SELECT 1
                    FROM journal_entry_document_links xdl
                    JOIN journal_entries xje    ON xje.supplier_id = xdl.supplier_id AND xje.id = xdl.entry_id
@@ -1523,7 +1537,19 @@ final class AccrualDeferralService
                     AND xdl.doc_id = {$docIdSql}
                     AND xje.posted_at IS NOT NULL
                     AND xje.reversed_by IS NULL
+                    AND xje.source_type NOT IN ({$closingTypes})
                     AND xa.account_code LIKE ?))";
+    }
+
+    /**
+     * Parametry {@see deferredOnDocumentSql()}: prefix účtu časového rozlišení za obě větve
+     * skupiny zaúčtování a za vazby „Souvisí".
+     *
+     * @return list<string>
+     */
+    private static function deferredOnDocumentParams(string $deferPrefix): array
+    {
+        return [$deferPrefix, $deferPrefix, $deferPrefix];
     }
 
     // ── poměr dnů ─────────────────────────────────────────────────────────────

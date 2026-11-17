@@ -65,6 +65,39 @@ final class DocumentPostingGroup
     }
 
     /**
+     * SQL podmínka „doklad má zaúčtovaný nestornovaný zápis skupiny zaúčtování, který splňuje
+     * `$condition`": přímý zápis se zdrojem dokladu, nebo zápis, který doklad vlastní ve
+     * skupině zaúčtování. Výběr zápisů je shodný s {@see activeMany()}; informativní vazby
+     * „Souvisí" zaúčtováním nejsou. Nativní doklad skupinu nemá, výsledek je u něj totožný
+     * s dotazem jen na přímý zápis.
+     *
+     * `$condition` je SQL nad aliasem zápisu `$alias` (začíná `AND`) a v dotazu se objeví
+     * dvakrát, jednou za větev: poziční parametry v ní volající váže dvakrát po sobě. Větve
+     * jdou po idx_je_supplier_source a uq_jdp_doc_entry. Argumenty jsou SQL výrazy
+     * volajícího, nikdy uživatelský vstup.
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     */
+    public static function postedEntryExistsSql(string $docType, string $docIdSql, string $supplierIdSql, string $alias, string $condition = ''): string
+    {
+        if (!in_array($docType, ['invoice', 'purchase_invoice'], true)) {
+            throw new \InvalidArgumentException('Nepodporovaný doklad skupiny zaúčtování.');
+        }
+        if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/D', $alias) !== 1) {
+            throw new \InvalidArgumentException('Neplatný alias účetního zápisu.');
+        }
+        return "(EXISTS (SELECT 1 FROM journal_entries {$alias} FORCE INDEX (idx_je_supplier_source)
+                  WHERE {$alias}.supplier_id = {$supplierIdSql} AND {$alias}.source_type = '{$docType}'
+                    AND {$alias}.source_id = {$docIdSql}
+                    AND {$alias}.posted_at IS NOT NULL AND {$alias}.reversed_by IS NULL {$condition})
+             OR EXISTS (SELECT 1 FROM journal_document_postings {$alias}_jdp FORCE INDEX (uq_jdp_doc_entry)
+                  JOIN journal_entries {$alias} ON {$alias}.supplier_id = {$alias}_jdp.supplier_id AND {$alias}.id = {$alias}_jdp.entry_id
+                  WHERE {$alias}_jdp.supplier_id = {$supplierIdSql} AND {$alias}_jdp.doc_type = '{$docType}'
+                    AND {$alias}_jdp.doc_id = {$docIdSql}
+                    AND {$alias}.posted_at IS NOT NULL AND {$alias}.reversed_by IS NULL {$condition}))";
+    }
+
+    /**
      * Aktivní vazby předpisů celé firmy pro kontrolu integrity. UNION odstraní
      * dvojí výskyt přímého člena, který je zároveň vlastněný skupinou. Na rozdíl
      * od hasActive() jde o dávkový přehled, nikdy o dotaz pro každý doklad zvlášť.

@@ -575,12 +575,12 @@ final class ClosingDeferredRevenueAccrualTest extends TestCase
     }
 
     /**
-     * Rozpuštění vybírá výnosový doklad podle data přímého zápisu, a stejné datum proto
-     * rozhoduje i o starém odkladu bez dimenzí (markLegacyDeferrals). Člen skupiny
-     * zaúčtování s jiným datem do dat dokladu nepatří; přímý zápis převzatého dokladu
-     * přitom nemusí mít výnosový řádek (převod účtuje DPH a výnos zvlášť).
+     * Rozpuštění vybírá výnosový doklad podle dat zápisů jeho skupiny zaúčtování (#383),
+     * a stejná data proto rozhodují i o starém odkladu bez dimenzí (markLegacyDeferrals).
+     * Přímý zápis převzatého dokladu přitom nemusí mít výnosový řádek (převod účtuje DPH
+     * a výnos zvlášť), datum vlastněného zápisu do dat dokladu patří.
      */
-    public function testEntryDatesOfInvoiceComeOnlyFromDirectEntry(): void
+    public function testEntryDatesOfInvoiceComeFromAllGroupEntries(): void
     {
         [$center, $a] = $this->centers();
         $invoiceId = $this->invoice('20910032', 36600.00, self::YEAR . '-07-01');
@@ -600,8 +600,82 @@ final class ClosingDeferredRevenueAccrualTest extends TestCase
         Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Closing\AccrualDeferralService::class)
             ->preloadDeferredRevenueAllocations($this->supplierId, [['source' => 'invoice', 'invoice_id' => $invoiceId]], $cache);
 
-        self::assertSame([self::YEAR . '-07-01'], $cache['invoice:' . $invoiceId]['entry_dates']);
+        self::assertEqualsCanonicalizing([self::YEAR . '-07-01', self::YEAR . '-03-01'], $cache['invoice:' . $invoiceId]['entry_dates']);
         self::assertCount(1, $cache['invoice:' . $invoiceId]['groups']['602'], 'Dimenze nese vlastněný zápis.');
+    }
+
+    /**
+     * #383, scénář 1: výnos faktury účtuje jen ruční zápis ve skupině zaúčtování (převzatý
+     * doklad, přímý zápis nemá). Předběžná kontrola ji bere jako zaúčtovanou, krok ji proto
+     * musí odložit a openNext rozpustit.
+     */
+    public function testInvoicePostedOnlyByGroupEntryIsDeferredAndReleased(): void
+    {
+        $invoiceId = $this->invoice('20910040', 36600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $owned = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 36600.00],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 36600.00],
+        ], ['entry_date' => self::YEAR . '-07-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        (new \MyInvoice\Service\Accounting\DocumentPostingGroup($this->db))->attach($this->supplierId, 'invoice', $invoiceId, [$owned]);
+
+        $preview = $this->closing->deferredRevenueAccrualPreview($this->supplierId, $this->periodId);
+        self::assertSame([$invoiceId], array_column($preview['items'], 'invoice_id'));
+        self::assertEqualsWithDelta(18200.00, (float) ($preview['by_account']['602'] ?? 0.0), 0.001);
+
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $open = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        self::assertNotNull($open['deferred_revenue_release_entry_id']);
+        self::assertEqualsWithDelta(0.0, $this->balance384AsOf('2092-12-31'), 0.005);
+    }
+
+    /**
+     * #383, scénář 2: přímý zápis nese jinou položku na 604, položku s obdobím výnosu nese
+     * zápis ve skupině na 602. Výnosový účet se bere ze všech zápisů skupiny, odklad tedy
+     * jde z 602, ne z jediného účtu přímého zápisu.
+     */
+    public function testRevenueAccountComesFromAllGroupEntriesNotOnlyDirectOne(): void
+    {
+        $invoiceId = $this->invoice('20910041', 46600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $this->item($invoiceId, 10000.00, null, null);
+        $opts = ['entry_date' => self::YEAR . '-07-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId];
+        $direct = $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 10000.00],
+            ['account_code' => '604', 'side' => 'credit', 'amount' => 10000.00],
+        ], $opts);
+        $owned = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 36600.00],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 36600.00],
+        ], $opts);
+        (new \MyInvoice\Service\Accounting\DocumentPostingGroup($this->db))->attach($this->supplierId, 'invoice', $invoiceId, [$direct, $owned]);
+
+        $preview = $this->closing->deferredRevenueAccrualPreview($this->supplierId, $this->periodId);
+
+        self::assertSame(['602'], array_map('strval', array_keys($preview['by_account'])));
+        self::assertEqualsWithDelta(18200.00, (float) $preview['by_account']['602'], 0.001);
+    }
+
+    /**
+     * #383, scénář 4: účetní naváže zápis odkladu z uzávěrky k faktuře jako „Souvisí".
+     * Taková vazba není vlastní odklad dokladu a rozpuštění nesmí zablokovat.
+     */
+    public function testRelatedLinkToClosingDeferralDoesNotBlockRelease(): void
+    {
+        $invoiceId = $this->invoice('20910042', 36600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $this->postInvoice($invoiceId, 36600.00, self::YEAR . '-07-01');
+
+        $this->driveCloseWithAccrual();
+        $defer = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($this->periodId));
+        self::assertNotNull($defer);
+        (new \MyInvoice\Repository\JournalEntryDocumentLinkRepository($this->db))->add((int) $defer['id'], $this->supplierId, 'invoice', $invoiceId, null, $this->userId);
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $open = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertNotNull($open['deferred_revenue_release_entry_id'], 'Vazba „Souvisí" na odklad z uzávěrky rozpuštění neblokuje.');
+        self::assertEqualsWithDelta(0.0, $this->balance384AsOf('2092-12-31'), 0.005);
     }
 
     /** @return array{0:int,1:int,2:int,3:int} typ střediska a hodnoty A, B, C */

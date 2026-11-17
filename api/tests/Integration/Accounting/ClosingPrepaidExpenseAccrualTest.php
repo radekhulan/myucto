@@ -698,6 +698,30 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
         self::assertEqualsWithDelta(0.0, $this->balance381AsOf('2092-12-31'), 0.005);
     }
 
+    /**
+     * #383, scénář 3: přijatou fakturu účtuje jen zápis ve skupině zaúčtování. Krok uzávěrky
+     * ji odloží (výběr nezávisí na zápisu), a stejně ji musí upravit i průběžné časové
+     * rozlišení ve výkazech, jinak výkaz nadhodnotí náklad.
+     */
+    public function testInterimAccrualTakesDocumentPostedOnlyByOwnedEntry(): void
+    {
+        $pi = $this->purchase('PF-2091-INTERIM', 36600.00, self::YEAR . '-11-15');
+        $this->item($pi, 36600.00, '2091-07-01', '2092-06-30', '518');
+        $owned = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 36600.00],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 36600.00],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        (new \MyInvoice\Service\Accounting\DocumentPostingGroup($this->db))->attach($this->supplierId, 'purchase_invoice', $pi, [$owned]);
+
+        $closingStep = $this->closing->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId);
+        $interim = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\InterimAccrualAdjustment::class)
+            ->compute($this->supplierId, self::STARTS_ON, self::ENDS_ON);
+
+        self::assertEqualsWithDelta(18200.00, (float) $closingStep['total'], 0.001);
+        self::assertEqualsWithDelta(18200.00, $interim['prepaid_expense'], 0.001, 'Výkaz rozliší stejný náklad jako krok uzávěrky.');
+        self::assertEqualsWithDelta(-18200.00, $interim['deltas']['518'] ?? 0.0, 0.001);
+    }
+
     /** Verzovaná změna účtu od data (stejná cesta jako úprava osnovy v aplikaci). */
     private function changeAccount(string $code, string $from, array $changes): void
     {
