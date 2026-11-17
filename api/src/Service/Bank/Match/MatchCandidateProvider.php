@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Bank\Match;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Bank\BankMessageNormalizer;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
+use MyInvoice\Service\Bank\PurchasePaymentKinds;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
@@ -241,7 +242,7 @@ final class MatchCandidateProvider
                            GROUP BY f.advance_purchase_invoice_id) fin ON fin.advance_id = p.id
               WHERE p.supplier_id = ?
                 AND {$statusCondition}
-                AND p.document_kind IN ('invoice','advance')
+                AND " . PurchasePaymentKinds::bankPayableSql('p') . "
                 AND (ABS(DATEDIFF(p.due_date, ?)) <= ? OR ABS(DATEDIFF(p.issue_date, ?)) <= ?)";
         $stmt = $this->db->pdo()->prepare(
             'SELECT * FROM (' . $branch("p.status IN ('received','booked')") . ' UNION ALL '

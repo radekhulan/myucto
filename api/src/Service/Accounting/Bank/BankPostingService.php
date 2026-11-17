@@ -42,6 +42,7 @@ use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Bank\BankTransactionContext;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
+use MyInvoice\Service\Bank\PurchasePaymentKinds;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Currency\ExchangeRateUnavailableException;
@@ -1061,7 +1062,7 @@ final class BankPostingService
             $purchaseId = (int) $allocation['purchase_invoice_id'];
             $foreign = round((float) ($allocation['purchase_amount_to_pay'] ?? 0.0), 2);
             $currency = strtoupper((string) ($allocation['purchase_currency'] ?? ''));
-            if ((string) ($allocation['purchase_document_kind'] ?? '') !== 'invoice'
+            if (!PurchasePaymentKinds::allowsCrossCurrency((string) ($allocation['purchase_document_kind'] ?? ''))
                 || !in_array((string) ($allocation['purchase_status'] ?? ''), ['booked', 'paid'], true)
                 || $currency === ''
                 || $currency === FxPaymentSettlement::LOCAL_CURRENCY
@@ -1107,7 +1108,7 @@ final class BankPostingService
         $purchase = $this->loadPurchase($supplierId, $purchaseId);
         if ($purchase === null
             || (string) $purchase['currency'] === 'CZK'
-            || (string) $purchase['document_kind'] === 'advance'
+            || !PurchasePaymentKinds::allowsCrossCurrency((string) $purchase['document_kind'])
             || (float) ($purchase['amount_to_pay'] ?? 0) <= 0.0
         ) {
             throw new PostingException('fx_not_supported', 'Křížovou měnu této přijaté faktury nelze automaticky zaúčtovat.');
@@ -1816,6 +1817,9 @@ final class BankPostingService
             // CZK odúčtování závazku nelze spolehlivě odvodit — proto ne automaticky.
             throw new PostingException('cross_currency', 'Měna úhrady neodpovídá měně přijaté faktury #' . $pfId . '.');
         }
+        // Úhrada ve stejné cizí měně jako doklad: vylučuje se jen záloha (314). Výčet
+        // PurchasePaymentKinds::CROSS_CURRENCY tu záměrně neplatí, ten vymezuje korunovou
+        // úhradu cizoměnového dokladu, ne úhradu v měně dokladu.
         if ((string) $pf['document_kind'] === 'advance') {
             throw new PostingException('fx_not_supported', 'Cizoměnová poskytnutá záloha se zatím neúčtuje automaticky.');
         }

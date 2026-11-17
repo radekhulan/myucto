@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\PurchaseInvoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\PurchasePaymentKinds;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 
 /** Úhrady evidované před potvrzením konceptu; netvoří platbu ani účetní zápis. */
@@ -27,7 +28,7 @@ final class PurchaseReceivedPaymentStatus
             $this->db->pdo()->prepare(
                 "UPDATE purchase_invoices pi SET status = 'paid', paid_at = ?
                   WHERE pi.supplier_id = ? AND pi.id = ? AND pi.status = 'received'
-                    AND pi.document_kind IN ('invoice', 'advance') AND pi.amount_to_pay > 0.005
+                    AND " . PurchasePaymentKinds::bankPayableSql('pi') . " AND pi.amount_to_pay > 0.005
                     AND ({$remaining}) <= 0.005"
             )->execute([$paidDate, $supplierId, $id]);
         }
