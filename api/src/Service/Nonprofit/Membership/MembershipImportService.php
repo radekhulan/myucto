@@ -234,11 +234,15 @@ final class MembershipImportService extends AbstractCodebookImportService
         }
         if ($member !== null) {
             $base['member_id'] = $member['id'];
+            // Vymazaný člen (#321, krok 10) se nemění; náhled to řekne dřív, než zápis řádek odmítne.
+            if (MembershipErasureService::isErasedMember($member)) return $this->error($base, 'member_erased');
             $client = $clients[$member['client_id']] ?? null;
             if (($clientId !== null && $clientId !== $member['client_id']) || ($ic !== null && ($client === null || $client['ic'] !== $ic))) {
                 return $this->error($base, 'contact_mismatch');
             }
             if (!$change) return $this->unchanged($base, 'no_change', []);
+        } elseif (MembershipErasureService::isReservedNumber($this->db, $row['member_number'])) {
+            return $this->error($base, 'number_reserved');
         } elseif (!$change) {
             return $this->error($base, 'new_member_needs_change');
         }

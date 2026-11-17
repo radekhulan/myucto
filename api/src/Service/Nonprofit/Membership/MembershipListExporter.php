@@ -98,7 +98,8 @@ final class MembershipListExporter
                 $claim = $claims[$row['id']] ?? null;
                 yield [
                     ['s', $row['member_number']],
-                    ['s', (string) $row['client_id']],
+                    // Vymazaný člen: ani ID kontaktu (zachovaný kontakt by soubor znovu propojil s osobou).
+                    ['s', ($row['erased'] ?? false) ? '' : (string) $row['client_id']],
                     ['s', ''],
                     ['s', self::label($row)],
                     ['s', $now['status'] ?? ''],

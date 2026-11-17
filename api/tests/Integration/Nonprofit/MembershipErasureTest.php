@@ -18,6 +18,10 @@ use MyInvoice\Service\Nonprofit\Membership\MembershipErasureAssessment;
 use MyInvoice\Service\Nonprofit\Membership\MembershipErasureSeal;
 use MyInvoice\Service\Nonprofit\Membership\MembershipErasureService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipException;
+use MyInvoice\Service\Nonprofit\Membership\MembershipImportService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipListColumns;
+use MyInvoice\Service\Nonprofit\Membership\MembershipListExporter;
+use MyInvoice\Service\Nonprofit\Membership\MembershipListFilter;
 use MyInvoice\Service\Nonprofit\Membership\MembershipStoredProof;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxRules;
 use MyInvoice\Service\Tax\Nonprofit\SourceFacts\MembershipJ6SourceFacts;
@@ -341,6 +345,75 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
         self::assertSame(['skipped_changed', 'already_erased'], [$row['outcome'], $row['skip_reason']]);
     }
 
+    public function testImportPreviewRejectsErasedMemberAndReservedNumberAndExportHidesContact(): void
+    {
+        $member = $this->ended('XFER');
+        $other = $this->member('XFER-OTHER');
+        $this->eraseAll();
+
+        $rows = iterator_to_array((new MembershipListExporter($this->db, $this->today))->rows($this->supplier, MembershipListFilter::parse(['year' => '2031'])), false);
+        $named = [];
+        foreach ($rows as $cells) {
+            $row = array_combine(MembershipListColumns::headers(), array_map(static fn (array $cell): mixed => $cell[1], $cells));
+            $named[$row['Členské číslo']] = $row;
+        }
+        $erased = $named[MembershipErasureService::placeholderNumber($member)];
+        // Zachovaný kontakt by soubor znovu propojil s osobou: ani jméno, ani ID kontaktu.
+        self::assertSame(['', ''], [$erased['ID kontaktu'], $erased['Jméno / název']]);
+        self::assertNotSame('', $named['SYN-XFER-OTHER']['ID kontaktu']);
+
+        $import = new MembershipImportService($this->db, new ActivityLogger($this->db), $this->members);
+        $csv = "Členské číslo;ID kontaktu;IČO;Jméno / název;Nový stav;Platí od;Podklad;Doložení\n"
+            . MembershipErasureService::placeholderNumber($member) . ";;;;active;2032-02-01;Synthetic decision;\n"
+            . "VYMAZANO-999999;;;Synthetic new;active;2032-02-01;Synthetic decision;\n"
+            . "vymazáno-{$other};;;Synthetic new;active;2032-02-01;Synthetic decision;\n";
+        $report = $import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true);
+        self::assertSame([['error', 'member_erased'], ['error', 'number_reserved'], ['error', 'number_reserved']],
+            array_map(static fn (array $r): array => [$r['status'], $r['reason']], $report['rows']));
+    }
+
+    public function testNumberCollidingWithPseudonymInDatabaseCollationIsReserved(): void
+    {
+        foreach (['vymazano-5', 'VYMAZANO-5', 'vymazáno-57', 'výmazano-1', "vy\u{200B}mazano-1", "vy\u{1}mazano-1", "vymazano-\u{20DD}1", 'vymazano-abc', 'ｖｙｍａｚａｎｏ-1'] as $number) {
+            self::assertTrue(MembershipErasureService::isReservedNumber($this->db, $number), bin2hex($number));
+        }
+        foreach (['vymazan-5', 'clen-vymazano-1', 'vymazano', 'SYN-1'] as $number) {
+            self::assertFalse(MembershipErasureService::isReservedNumber($this->db, $number), $number);
+        }
+        $other = $this->member('COLL');
+        $this->assertRejected('nonprofit_membership_member_number_reserved', fn () => $this->members->create($this->supplier, (int) $this->pdo->query("SELECT client_id FROM nonprofit_members WHERE id={$other}")->fetchColumn(), "vymazáno-{$other}", $this->actor));
+    }
+
+    public function testLegacyNumberLikePseudonymIsNotErasedAndCollisionSkipsErasure(): void
+    {
+        // Čísla zapsaná před rezervací (tabulka členů je nasazená dřív než výmaz).
+        $victim = $this->ended('LEGACY-VICTIM');
+        $holder = $this->member('LEGACY-HOLDER');
+        $own = $this->member('LEGACY-OWN');
+        $this->pdo->prepare('UPDATE nonprofit_members SET member_number=? WHERE id=?')->execute(['VYMAZANO-' . $victim, $holder]);
+        $this->pdo->prepare('UPDATE nonprofit_members SET member_number=? WHERE id=?')->execute(['Vymazáno-' . $own, $own]);
+
+        // Pseudonym se pozná bajtově v PHP i v SQL; starší číslo „Vymazáno-{id}“ člena není vymazaný člen.
+        $erased = fn (int $id): int => (int) $this->pdo->query('SELECT ' . MembershipListRepository::erasedSql('m') . " FROM nonprofit_members m WHERE id={$id}")->fetchColumn();
+        self::assertSame(0, $erased($own));
+        self::assertFalse(MembershipErasureService::isErasedMember($this->repository->member($this->supplier, $own)));
+        // Oprava kontaktu s nezměněným starším číslem projde, i když by nové takové číslo bylo vyhrazené.
+        $current = $this->repository->member($this->supplier, $own);
+        $same = ['client_id' => $current['client_id'], 'member_number' => $current['member_number'],
+            'expected_client_id' => $current['client_id'], 'expected_member_number' => $current['member_number']];
+        self::assertSame($own, $this->corrections->updateIdentity($this->supplier, $own, $same, $this->actor)['id']);
+
+        $this->eraseAll();
+        $item = $this->itemOf($this->erasures->items($this->supplier, $this->lastProposal()), $victim);
+        self::assertSame(['skipped_changed', 'number_conflict'], [$item['outcome'], $item['skip_reason']]);
+        self::assertSame('VYMAZANO-' . $victim, $this->repository->member($this->supplier, $holder)['member_number']);
+    }
+
+    private function lastProposal(): int
+    {
+        return (int) $this->pdo->query("SELECT MAX(id) FROM nonprofit_membership_erasure_proposals WHERE supplier_id={$this->supplier}")->fetchColumn();
+    }
+
     public function testTriggerRejectsSealWithoutPendingItemOfThatMember(): void
     {
         $member = $this->ended('TRIG');
@@ -584,9 +657,13 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
     {
         $broken = $this->ended('TECH');
         $fine = $this->ended('TECH-OK');
-        // Pseudonym už nese jiný člen (data mimo službu): přepis čísla narazí na unikátní index.
-        $holder = $this->bareFor('TECH-HOLDER');
-        $this->pdo->prepare('UPDATE nonprofit_members SET member_number=? WHERE id=?')->execute(['vymazano-' . $broken, $holder]);
+        // Neočekávaná chyba databáze uprostřed výmazu (po zapečetění, před dokončením položky).
+        $real = new MembershipContactErasure($this->db);
+        $contacts = $this->createStub(MembershipContactErasure::class);
+        $contacts->method('erase')->willReturnCallback(static function (int $supplier, int $client, int $member) use ($real, $broken): array {
+            if ($member === $broken) throw new \PDOException('Synthetic database failure');
+            return $real->erase($supplier, $client, $member);
+        });
         $proposal = $this->erasure->create($this->supplier, $this->actor, null);
         $this->erasure->approve($this->supplier, $proposal['id'], $this->actor);
         $this->endCoolingOff($proposal['id']);
@@ -594,7 +671,7 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
         $logger->expects(self::once())->method('error')->with('Membership erasure item failed', self::callback(static fn (array $c): bool => $c['exception'] instanceof \PDOException));
         $assessment = new MembershipErasureAssessment($this->db, new MembershipListRepository($this->db), new RetentionHoldRepository($this->db), $this->erasures);
         $logged = new MembershipErasureService($this->db, $this->repository, $this->chargeRepository, $this->erasures, $assessment,
-            new MembershipContactErasure($this->db), new ActivityLogger($this->db), new ActivityLogHashChain($this->db), $logger, fn (): string => $this->today);
+            $contacts, new ActivityLogger($this->db), new ActivityLogHashChain($this->db), $logger, fn (): string => $this->today);
         $result = $logged->execute($this->supplier, $proposal['id'], $this->actor, MembershipErasureService::EXECUTE_CONFIRMATION);
 
         self::assertSame(['done' => 1, 'skipped_changed' => 1, 'skipped_hold' => 0], $result['summary']);

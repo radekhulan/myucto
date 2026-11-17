@@ -70,7 +70,8 @@ final class MembershipCorrectionService
         }
         $number = trim($input['member_number']);
         if ($number === '' || mb_strlen($number) > 80) throw new MembershipException('nonprofit_membership_invalid', 'Členské číslo musí mít 1–80 znaků.');
-        MembershipErasureService::assertMemberNumberAllowed($number);
+        // Nezměněné číslo (zapsané před rezervací) nebrání opravě kontaktu.
+        if ($number !== $input['expected_member_number']) MembershipErasureService::assertMemberNumberAllowed($this->db, $number);
         $client = $input['client_id'];
         return TransactionFailure::retrying($this->db->pdo(), fn (): array => (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplier, $member, $input, $number, $client, $actor, $ip, $userAgent): array {
             $current = $this->lockedMember($supplier, $member);

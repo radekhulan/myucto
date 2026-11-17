@@ -287,7 +287,8 @@ final class MembershipListRepository
     /** Vymazaný člen (MembershipErasureService::isErasedMember) jako SQL nad aliasem člena. */
     public static function erasedSql(string $member): string
     {
-        return "({$member}.member_number=CONCAT('vymazano-',{$member}.id))";
+        // Bajtově jako MembershipErasureService::isErasedMember(): starší číslo „VYMAZANO-57“ člena 57 není pseudonym.
+        return "(CAST({$member}.member_number AS BINARY)=CONCAT('vymazano-',{$member}.id))";
     }
 
     /**

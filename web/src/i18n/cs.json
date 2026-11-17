@@ -41764,6 +41764,7 @@
         "member_missing": "člen už v evidenci není",
         "history_unproven": "historie členství není průkazná",
         "already_erased": "údaje už byly vymazány",
+        "number_conflict": "členské číslo „vymazano-…“ už má jiný člen; přečíslujte ho",
         "audit_unproven": "auditní záznam není průkazný",
         "technical_error": "technická chyba, údaje člena zůstaly beze změny"
       }
@@ -41926,6 +41927,8 @@
       "reason_no_change": "Nový stav není vyplněný.",
       "reason_same_status": "Člen už je ve stavu {status} od {date}.",
       "reason_already_imported": "Řádek už byl zapsán dřívějším importem.",
+      "reason_member_erased": "Údaje člena byly vymazány; import jeho členství nemění.",
+      "reason_number_reserved": "Číslo začínající „vymazano-“ je vyhrazené pro vymazané členy.",
       "reason_number_missing": "Chybí členské číslo.",
       "reason_number_too_long": "Členské číslo je delší než 80 znaků.",
       "reason_client_id_invalid": "ID kontaktu musí být kladné celé číslo.",

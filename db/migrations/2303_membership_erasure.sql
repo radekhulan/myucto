@@ -103,7 +103,7 @@ BEGIN
   SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='nonprofit_membership_immutable';
  END IF;
  IF EXISTS(SELECT 1 FROM nonprofit_membership_erasure_items i WHERE i.supplier_id=OLD.supplier_id AND i.member_id=OLD.id AND i.subject='member' AND i.outcome='done') THEN
-  IF NOT (NEW.client_id<=>OLD.client_id) OR OLD.member_number=CONCAT('vymazano-',OLD.id) OR NEW.member_number<>CONCAT('vymazano-',OLD.id)
+  IF NOT (NEW.client_id<=>OLD.client_id) OR CAST(OLD.member_number AS BINARY)=CONCAT('vymazano-',OLD.id) OR CAST(NEW.member_number AS BINARY)<>CONCAT('vymazano-',OLD.id)
      OR NOT EXISTS(SELECT 1 FROM nonprofit_membership_erasure_items i JOIN nonprofit_membership_erasure_proposals p ON p.supplier_id=i.supplier_id AND p.id=i.proposal_id AND p.status='approved'
        WHERE i.supplier_id=OLD.supplier_id AND i.member_id=OLD.id AND i.subject='member' AND i.outcome='done') THEN
    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='nonprofit_membership_immutable';

@@ -24,7 +24,7 @@ final class MembershipMemberService
         if ($supplier <= 0 || $client <= 0 || $actor <= 0 || $memberNumber === '' || mb_strlen($memberNumber) > 80) {
             throw new MembershipException('nonprofit_membership_invalid', 'Člen vyžaduje klienta, členské číslo a autora.');
         }
-        MembershipErasureService::assertMemberNumberAllowed($memberNumber);
+        MembershipErasureService::assertMemberNumberAllowed($this->db, $memberNumber);
         return TransactionFailure::retrying($this->db->pdo(), fn (): array => (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplier, $client, $memberNumber, $actor): array {
             $q = $this->db->pdo()->prepare('SELECT id FROM supplier WHERE id=? FOR UPDATE');
             $q->execute([$supplier]);

@@ -42079,6 +42079,7 @@
         "member_missing": "member no longer exists",
         "history_unproven": "membership history is not provable",
         "already_erased": "data already erased",
+        "number_conflict": "another member already has the number “vymazano-…”; renumber them",
         "audit_unproven": "audit record is not provable",
         "technical_error": "technical error, the member's data were left unchanged"
       }
@@ -42241,6 +42242,8 @@
       "reason_no_change": "The new status is empty.",
       "reason_same_status": "The member is already {status} since {date}.",
       "reason_already_imported": "This row was already written by an earlier import.",
+      "reason_member_erased": "The member's personal data was erased; the import does not change their membership.",
+      "reason_number_reserved": "Numbers starting with “vymazano-” are reserved for erased members.",
       "reason_number_missing": "The member number is missing.",
       "reason_number_too_long": "The member number is longer than 80 characters.",
       "reason_client_id_invalid": "The contact ID must be a positive whole number.",

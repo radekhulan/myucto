@@ -30651,7 +30651,7 @@
         "trg_nfr_insert": "BEFORE INSERT ON nonprofit_funding_revisions #8ef193715bd5844a87d770d92e7eb9b550d9c2eb",
         "trg_nlp_immutable_delete": "BEFORE DELETE ON nonprofit_legal_profiles #14114d6f757030293ceadac8f5ac999e5e0188fa",
         "trg_nlp_immutable_update": "BEFORE UPDATE ON nonprofit_legal_profiles #14114d6f757030293ceadac8f5ac999e5e0188fa",
-        "trg_nm_immutable_update": "BEFORE UPDATE ON nonprofit_members #d97f6f2431d8724f6f75d20e3e1f0e79986aebcf",
+        "trg_nm_immutable_update": "BEFORE UPDATE ON nonprofit_members #a145ba3ec5aa3d3e686c47628ba90ab936be1fc6",
         "trg_nmcc_guard_update": "BEFORE UPDATE ON nonprofit_membership_charge_cases #6c2a7a4e0c545851941b22f2f96d111a5263b2f5",
         "trg_nmcc_immutable_delete": "BEFORE DELETE ON nonprofit_membership_charge_cases #b6e16ca403b6b8a607604546967555ea319ac4e1",
         "trg_nmclaim_immutable_delete": "BEFORE DELETE ON nonprofit_membership_charge_claims #b6e16ca403b6b8a607604546967555ea319ac4e1",

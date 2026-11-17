@@ -93,12 +93,34 @@ final class MembershipErasureService
         }
     }
 
-    /** Pseudonym vymazaného člena je vyhrazený (porovnání v databázi nerozlišuje velikost písmen). */
-    public static function assertMemberNumberAllowed(string $number): void
+    /** Pseudonym vymazaného člena je vyhrazený. */
+    public static function assertMemberNumberAllowed(Connection $db, string $number): void
     {
-        if (preg_match('/^vymazano-[0-9]+$/iD', $number) === 1) {
+        if (self::isReservedNumber($db, $number)) {
             throw new MembershipException('nonprofit_membership_member_number_reserved', 'Členské číslo ve tvaru „vymazano-…“ je vyhrazené pro vymazané členy.');
         }
+    }
+
+    /**
+     * Číslo, které kolace sloupce member_number vidí jako „vymazano-…“: nerozlišuje velikost písmen ani diakritiku
+     * a přeskakuje ignorované znaky. „vymazáno-57“ by se jinak srazilo s pseudonymem člena 57 na unikátním indexu
+     * a jeho výmaz by trvale selhal. Rozhoduje databáze (váhy kolace), ne napodobení kolace v PHP; vyhrazená je
+     * celá předpona.
+     */
+    public static function isReservedNumber(Connection $db, string $number): bool
+    {
+        $collation = self::numberCollation($db);
+        $q = $db->pdo()->prepare("SELECT LEFT(WEIGHT_STRING(CONVERT(? USING utf8mb4) COLLATE {$collation}), LENGTH(WEIGHT_STRING(CONVERT(? USING utf8mb4) COLLATE {$collation})))
+            = WEIGHT_STRING(CONVERT(? USING utf8mb4) COLLATE {$collation})");
+        $q->execute([$number, 'vymazano-', 'vymazano-']);
+        return (int) $q->fetchColumn() === 1;
+    }
+
+    private static function numberCollation(Connection $db): string
+    {
+        $name = (string) $db->pdo()->query("SELECT COLLATION_NAME FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='nonprofit_members' AND COLUMN_NAME='member_number'")->fetchColumn();
+        return preg_match('/^utf8mb4_[a-z0-9_]+$/D', $name) === 1 ? $name : 'utf8mb4_unicode_ci';
     }
 
     /** Posouzení ke dnešku: stránka ukončených členů a smazaní členové se stopou v auditu. */
@@ -279,6 +301,11 @@ final class MembershipErasureService
         $row = $this->members->member($supplier, $member, true) ?? throw new MembershipErasureSkip('skipped_changed', 'member_missing');
         $fresh = $this->assessment->members($supplier, $this->today(), 0, 1, [$member], $item['proposal_id'])['items'];
         $this->assertFresh($fresh[0] ?? null, 'not_ended');
+        // Číslo jiného člena, které kolace vidí jako pseudonym (zapsané před rezervací), by výmaz zastavilo
+        // na unikátním indexu až po přepisu; přeskočí se hned se srozumitelným důvodem.
+        $taken = $this->db->pdo()->prepare('SELECT 1 FROM nonprofit_members WHERE supplier_id=? AND member_number=? AND id<>? LIMIT 1');
+        $taken->execute([$supplier, self::placeholderNumber($member), $member]);
+        if ($taken->fetchColumn() !== false) throw new MembershipErasureSkip('skipped_changed', 'number_conflict');
         try {
             // Celý řetěz se před přepisem ověří původním pravidlem; pečeť nesmí vzniknout nad neprůkazným obsahem.
             $history = $this->members->history($supplier, $member, true);

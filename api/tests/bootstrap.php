@@ -30,6 +30,7 @@ require __DIR__ . '/../vendor/autoload.php';
 \DG\BypassFinals::allowPaths([
     '*/api/src/Infrastructure/Database/ReadOnlySnapshot.php',
     '*/api/src/Service/ActivityLogHashChain.php',
+    '*/api/src/Service/Nonprofit/Membership/MembershipContactErasure.php',
     '*/api/src/Repository/BankEmailNoticeRepository.php',
     '*/api/src/Service/Bank/EmailNotice/Parser/BankEmailNoticeParserRepository.php',
     '*/api/src/Service/Migration/Myucto/MyuctoExportReader.php',
