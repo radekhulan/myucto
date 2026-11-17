@@ -403,7 +403,64 @@ final class ClosingSmallAssetAccrualTest extends TestCase
         self::assertLessThan(22000.0, (float) $item['deferred_amount']);
     }
 
+    /**
+     * #385: báze paušálu (rozpis 501) je obrat 501 v Kč. Faktura v EUR se počítá kurzem dokladu,
+     * zálohová výzva a daňový doklad k záloze náklad neúčtují (nese ho konečná faktura)
+     * a nezaúčtovaný koncept do báze nepatří. Stejné číslo ukazuje sestava Rozpis 501.
+     */
+    public function testFlatPctBaseIsCzkTurnoverWithoutAdvancesAndDrafts(): void
+    {
+        $eurId = (int) ($this->db->pdo()->query("SELECT id FROM currencies WHERE code = 'EUR' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
+        if ($eurId === 0) {
+            self::markTestSkipped('Chybí měna EUR.');
+        }
+        $this->smallAssetDocument('DM385-EUR', 1000.00, 'invoice', 'received', $eurId, 25.0);
+        $advance = $this->smallAssetDocument('DM385-ZAL', 10000.00, 'advance');
+        $final = $this->smallAssetDocument('DM385-KON', 10000.00);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET advance_purchase_invoice_id = ? WHERE id = ?')->execute([$advance, $final]);
+        $this->smallAssetDocument('DM385-DDZ', 10000.00, 'tax_document');
+        $this->smallAssetDocument('DM385-KONCEPT', 5000.00, 'invoice', 'draft');
+
+        $breakdown = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\SmallAssetReportService::class)
+            ->expenseBreakdown($this->supplierId, self::STARTS_ON, self::ENDS_ON);
+        $group = array_values(array_filter($breakdown['groups'], static fn (array $g): bool => $g['expense_kind'] === 'small_asset'))[0];
+        $preview = $this->closing->smallAssetAccrualPreview($this->supplierId, $this->periodId, 'flat_pct', 50.0);
+
+        self::assertEqualsWithDelta(35000.00, (float) $group['total'], 0.001, 'Rozpis 501 = obrat 501 v Kč (25 000 + 10 000).');
+        self::assertSame([25000.0, 10000.0], array_map(static fn (array $r): float => $r['amount'], $group['rows']));
+        self::assertEqualsWithDelta(35000.00, (float) $preview['breakdown_501_small_asset'], 0.001);
+        self::assertEqualsWithDelta(17500.00, (float) $preview['total'], 0.001);
+    }
+
     // ── helpers ────────────────────────────────────────────────────────────────
+
+    /** Přijatý doklad s jedinou položkou drobného majetku (bez zápisu); vrací id dokladu. */
+    private function smallAssetDocument(string $number, float $net, string $kind = 'invoice', string $status = 'received', ?int $currencyId = null, ?float $rate = null): int
+    {
+        $pdo = $this->db->pdo();
+        $vatRateId = (int) $pdo->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn();
+        $issue = self::YEAR . '-08-01';
+        $pdo->prepare(
+            'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email, currency_default_id)
+             VALUES (?, ?, "Ulice 1", "Praha", "11000", ?, "dm-vendor@example.com", ?)'
+        )->execute([$this->supplierId, 'Dodavatel ' . $number, $this->czId, $this->currencyId]);
+        $vendorId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO purchase_invoices
+                (supplier_id, vendor_id, vendor_invoice_number, vendor_snapshot, document_kind,
+                 vat_deduction, issue_date, tax_date, due_date, received_at, currency_id, exchange_rate, reverse_charge,
+                 is_fixed_asset, total_without_vat, total_vat, total_with_vat, status, vat_classification_code, created_by)
+             VALUES (?, ?, ?, "{}", ?, "none", ?, ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, ?, "40", ?)'
+        )->execute([$this->supplierId, $vendorId, $number, $kind, $issue, $issue, $issue, $issue, $currencyId ?? $this->currencyId, $rate, $net, $net, $status, $this->userId]);
+        $piId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO purchase_invoice_items
+                (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                 vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index, expense_kind)
+             VALUES (?, 'Drobný majetek', 1, 'ks', ?, ?, 0, ?, 0, ?, 0, 'small_asset')"
+        )->execute([$piId, $net, $vatRateId, $net, $net]);
+        return $piId;
+    }
 
     private function setDuration(int $id, string $inUseDate, int $months): void
     {

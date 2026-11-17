@@ -130,7 +130,8 @@ Fyzické smazání používejte jen pro chybně založenou kartu. Běžné vyřa
 2. Zvolte sestavu a datum či období:
    - **Soupis drobného majetku k datu** (pole **Ke dni**),
    - **Přírůstky a úbytky za období** (pole **Od** a **Do**),
-   - **Rozpis 501 dle druhu výdaje** (pole **Od** a **Do**).
+   - **Rozpis 501 dle druhu výdaje** (pole **Od** a **Do**). Částky jsou v Kč kurzem dokladu jako náklad v hlavní
+     knize; zálohové výzvy, daňové doklady k záloze, koncepty ani stornované doklady v rozpisu nejsou.
 3. Klikněte na **PDF** nebo **XLSX**.
 4. Při inventuře porovnejte sestavu s fyzickou existencí, inventárními štítky, umístěním a odpovědnými osobami.
 

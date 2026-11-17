@@ -2280,10 +2280,11 @@ final class ClosingService
             if ($expenseItems !== []) {
                 foreach ($expenseItems as $item) {
                     $number = trim((string) ($item['vendor_invoice_number'] ?? ''));
-                    // Váha v Kč: faktury v cizí měně se dělí podle částky, kterou nese jejich zápis.
+                    // Váha v Kč kurzem dokladu, stejně jako báze rozpisu: součet vah je báze
+                    // a faktor dělení přesně paušální procento.
                     $vendor = trim((string) ($item['vendor_name'] ?? ''));
                     $parts[] = [$item['weight_czk'], $item, 'přijatá faktura ' . ($number !== '' ? $number : '#' . $item['purchase_invoice_id'])
-                        . ($vendor !== '' ? ' (' . $vendor . ')' : ''), $item['amount']];
+                        . ($vendor !== '' ? ' (' . $vendor . ')' : '')];
                 }
             } else {
                 foreach ($cards as $card) {
@@ -2296,24 +2297,6 @@ final class ClosingService
                 if ($card !== null) {
                     $parts[] = [(float) $item['deferred_amount'], $cardSource($card), $cardLabel($card)];
                 }
-            }
-        }
-        // Váhy v Kč platí, dokud jejich součet má znaménko celku a je aspoň polovinou součtu
-        // absolutních hodnot (dobropisy nepřesáhnou třetinu faktur). Dobropis v cizí měně proti
-        // faktuře v Kč by jinak součet přiblížil nule nebo otočil a faktor dělení (celek z báze
-        // v měně dokladu / součet vah) by vyletěl. Pak se dělí částkami v měně dokladu; bez záloh
-        // v bázi je jejich součet báze a faktor přesně paušální procento. Zálohy zůstávají v bázi
-        // (převzatý rozpis 501), ve vahách ne, a faktor pak procento přesahuje.
-        $weights = array_column($parts, 0);
-        $weightSum = array_sum($weights);
-        $absSum = array_sum(array_map('abs', $weights));
-        if ($preview['mode'] === 'flat_pct' && $weights !== []
-            && ($weightSum * $total <= 0.0 || abs($weightSum) < 0.5 * $absSum)) {
-            $docParts = array_map(static fn (array $p): array => [$p[3] ?? $p[0], $p[1], $p[2]], $parts);
-            // Částky v měně dokladu se znaménkem opačným než celek (zálohy v bázi): zůstávají váhy
-            // v Kč, mají-li znaménko celku; nemá-li ho ani jedno, dělení se odmítne níže.
-            if (array_sum(array_column($docParts, 0)) * $total > 0.0 || $weightSum * $total <= 0.0) {
-                $parts = $docParts;
             }
         }
         $parts = array_values(array_filter($parts, static fn (array $p): bool => (int) round($p[0] * 100) !== 0));

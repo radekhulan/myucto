@@ -100,8 +100,10 @@ final class SmallAssetReportService
      * ROK BERE Z DATA PLNĚNÍ (fallback vystavení), shodně s ExpenseClassificationService
      * a se zaúčtováním — doklad se běžně účtuje za loňsko.
      *
-     * STORNOVANÉ DOKLADY VEN: `status='cancelled'` se neúčtuje, takže do rozpisu 501
-     * nepatří — jinak by sestava ukazovala náklad, který v hlavní knize není.
+     * DO 501 JEN TO, CO SE NA 501 ÚČTUJE ({@see expenseRows()}): stornovaný doklad, koncept,
+     * zálohová výzva ani daňový doklad k záloze náklad neúčtují, náklad nese až konečná
+     * faktura. Částky jsou v Kč kurzem dokladu jako náklad v hlavní knize. Z rozpisu bere
+     * bázi i paušál časového rozlišení drobného majetku a kontrola karet v uzávěrce.
      *
      * @return array<string,mixed>
      */
@@ -114,7 +116,7 @@ final class SmallAssetReportService
         $total = 0.0;
         foreach ($this->expenseRows($supplierId, $from, $to) as $row) {
             $kind = (string) $row['expense_kind'];
-            $amount = round((float) $row['total_without_vat'], 2);
+            $amount = self::amountCzk($row);
             $groups[$kind]['rows'][] = [
                 'doc_date' => (string) $row['doc_date'],
                 'purchase_invoice_id' => (int) $row['purchase_invoice_id'],
@@ -150,8 +152,8 @@ final class SmallAssetReportService
      * položka a částka. Stejný výběr jako rozpis, ze kterého paušál časového rozlišení
      * bere bázi, takže se podle nich báze dělí po dimenzích zápisů faktur.
      *
-     * `weight_czk` je částka v Kč kurzem dokladu (bez kurzu v měně dokladu), podle ní se
-     * paušál dělí po dimenzích; `amount` zůstává v měně dokladu jako báze rozpisu.
+     * `weight_czk` i `amount` jsou částka v Kč kurzem dokladu, stejně jako báze rozpisu;
+     * podle ní se paušál dělí po dimenzích.
      *
      * @return list<array{purchase_invoice_id:int, item_id:int, vendor_invoice_number:?string, vendor_name:?string, amount:float, weight_czk:float}>
      */
@@ -159,33 +161,40 @@ final class SmallAssetReportService
     {
         $out = [];
         foreach ($this->expenseRows($supplierId, $from, $to) as $row) {
-            // Zálohová výzva a daňový doklad k záloze náklad neúčtují (zápis nemají, resp. jen
-            // 343/314): dimenze nákladu nenesou, do vah po dimenzích nepatří. Báze rozpisu je
-            // beze změny.
-            if ((string) $row['expense_kind'] === ExpenseKind::SmallAsset->value
-                && !in_array((string) $row['document_kind'], ['advance', 'tax_document'], true)) {
+            if ((string) $row['expense_kind'] === ExpenseKind::SmallAsset->value) {
+                $amount = self::amountCzk($row);
                 $out[] = [
                     'purchase_invoice_id' => (int) $row['purchase_invoice_id'],
                     'item_id' => (int) $row['item_id'],
                     'vendor_invoice_number' => $row['vendor_invoice_number'] === null ? null : (string) $row['vendor_invoice_number'],
                     'vendor_name' => $row['vendor_name'] === null ? null : (string) $row['vendor_name'],
-                    'amount' => round((float) $row['total_without_vat'], 2),
-                    'weight_czk' => round((float) $row['total_without_vat'] * $this->czkRate($row), 2),
+                    'amount' => $amount,
+                    'weight_czk' => $amount,
                 ];
             }
         }
         return $out;
     }
 
-    /** Kurz dokladu na Kč; bez kurzu (koncept) 1, aby se doklad z dělení nevytratil. */
-    private function czkRate(array $row): float
+    /**
+     * Základ řádku v Kč kurzem dokladu (§ 4/12 ZoÚ), jak ho nese zápis faktury. Doklad v Kč
+     * má kurz 1; zaúčtovaný doklad v cizí měně kurz má vždy (bez něj zaúčtovat nejde).
+     *
+     * @param array<string,mixed> $row
+     */
+    private static function amountCzk(array $row): float
     {
         $rate = (float) ($row['exchange_rate'] ?? 0);
-        return (string) ($row['currency_code'] ?? 'CZK') === 'CZK' || $rate <= 0.0 ? 1.0 : $rate;
+        $rate = (string) ($row['currency_code'] ?? 'CZK') === 'CZK' || $rate <= 0.0 ? 1.0 : $rate;
+        return round((float) $row['total_without_vat'] * $rate, 2);
     }
 
     /**
      * Řádky faktur materiálu a drobného majetku za období (výběr {@see expenseBreakdown()}).
+     * Jen doklady, které náklad na 501 účtují: bez stornovaných a konceptů (zaúčtování je
+     * vynechává) a bez zálohových výzev a daňových dokladů k záloze (účtují jen zálohu
+     * a DPH, náklad nese konečná faktura). Jinak by se záloha i konečná faktura započetly
+     * dvakrát a rozpis by se rozešel s obratem 501.
      *
      * @return list<array<string,mixed>>
      */
@@ -211,7 +220,8 @@ final class SmallAssetReportService
                LEFT JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = pi.supplier_id
               WHERE pi.supplier_id = ?
                 AND pii.expense_kind IN (?, ?)
-                AND pi.status <> \'cancelled\'
+                AND pi.status NOT IN (\'cancelled\', \'draft\')
+                AND pi.document_kind NOT IN (\'advance\', \'tax_document\')
                 AND COALESCE(pi.tax_date, pi.issue_date) BETWEEN ? AND ?
               ORDER BY pii.expense_kind, doc_date, pi.id, pii.order_index'
         );

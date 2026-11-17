@@ -384,18 +384,20 @@ final class ClosingSmallAssetAccrual504Test extends TestCase
 
         $run = $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
 
-        // Báze rozpisu 501 se sčítá v měně dokladu; dělí se poměrem 30 000 : 25 000 Kč.
+        // Báze rozpisu 501 je v Kč (30 000 + 25 000) → odklad 27 500 dělený 30 000 : 25 000 Kč (#385).
         $total = (float) $run['total'];
+        self::assertEqualsWithDelta(27500.00, $total, 0.001);
         $byKind = $this->creditByActivityKind((int) $run['entry_id']);
         self::assertEqualsWithDelta(round($total * 30000 / 55000, 2), $byKind[$this->axes[$this->activityKindTypeId]] ?? 0.0, 0.011);
         self::assertEqualsWithDelta(round($total * 25000 / 55000, 2), $byKind[$other[$this->activityKindTypeId]] ?? 0.0, 0.011);
     }
 
     /**
-     * Dobropis v EUR váhu faktury v Kč skoro vyrovná (1 000 Kč proti 39,90 EUR po 25 Kč):
-     * dělí se částkami v měně dokladu, žádný řádek nepřesáhne celek a strany osám zůstanou.
+     * Dobropis v EUR fakturu v Kč skoro vyrovná (1 000 Kč proti 39,90 EUR po 25 Kč = 997,50 Kč):
+     * báze i váhy jsou v Kč, takže odklad je paušál z čistých 2,50 Kč a každá osa dostane
+     * přesně paušál ze své částky; strany osám zůstanou (#385).
      */
-    public function testFlatPctWithMixedSignCzkWeightsSplitsByDocumentAmounts(): void
+    public function testFlatPctWithMixedSignSplitsByCzkAmounts(): void
     {
         $eurId = (int) ($this->db->pdo()->query("SELECT id FROM currencies WHERE code = 'EUR' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
         if ($eurId === 0) {
@@ -410,14 +412,14 @@ final class ClosingSmallAssetAccrual504Test extends TestCase
         $run = $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
 
         $entryId = (int) $run['entry_id'];
-        self::assertEqualsWithDelta(480.05, (float) $run['total'], 0.001);
+        self::assertEqualsWithDelta(1.25, (float) $run['total'], 0.001);
         $dims = (new DimensionAssignmentRepository($this->db))->entryLineDimensions($this->supplierId, $entryId);
         $bySide = [];
         foreach ($this->linesOn($entryId, self::DM) as $line) {
             $bySide[$line['side']][] = [(int) ($dims[(int) $line['id']][$this->activityKindTypeId] ?? 0), round((float) $line['amount'], 2)];
         }
         self::assertSame([[$this->axes[$this->activityKindTypeId], 500.0]], $bySide['credit'] ?? []);
-        self::assertSame([[$other[$this->activityKindTypeId], 19.95]], $bySide['debit'] ?? []);
+        self::assertSame([[$other[$this->activityKindTypeId], 498.75]], $bySide['debit'] ?? []);
     }
 
     /**
@@ -445,23 +447,7 @@ final class ClosingSmallAssetAccrual504Test extends TestCase
         self::assertEqualsWithDelta(round($total * 25000 / 54900, 2), $byKind[$other[$this->activityKindTypeId]] ?? 0.0, 0.011);
     }
 
-    /** Dva koncepty se stejným číslem od různých dodavatelů: hláška jmenuje oba. */
-    public function testDraftsWithSameNumberFromDifferentVendorsAreBothListed(): void
-    {
-        $this->smallAssetPurchase('DM504-22', 36500.00);
-        $this->purchase('DUP-1', 1000.00, null, false, 'draft');
-        $this->purchase('DUP-1', 2000.00, null, false, 'draft');
-        $this->toClosing();
-
-        try {
-            $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
-            self::fail('Nezaúčtované koncepty musí ve 504 skončit validační chybou.');
-        } catch (ClosingException $e) {
-            self::assertSame(2, substr_count($e->getMessage(), 'přijatá faktura DUP-1'), $e->getMessage());
-        }
-    }
-
-    /** Zálohová výzva s položkou drobného majetku v rozpisu 501: do dělení nevstupuje a krok nezablokuje. */
+    /** Zálohová výzva s položkou drobného majetku: náklad 501 neúčtuje, do báze ani do dělení nevstupuje (#385). */
     public function testFlatPctIgnoresAdvanceInvoiceInWeights(): void
     {
         $this->smallAssetPurchase('DM504-23', 36500.00);
@@ -470,7 +456,7 @@ final class ClosingSmallAssetAccrual504Test extends TestCase
 
         $run = $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
 
-        // Báze rozpisu zálohu dál obsahuje (převzaté chování), celý odklad nese osy faktury.
+        self::assertEqualsWithDelta(18250.00, (float) $run['total'], 0.001);
         $this->assertCarriesAxes((int) $run['entry_id'], self::DM, 'credit', (float) $run['total'], $this->axes);
     }
 
@@ -483,58 +469,38 @@ final class ClosingSmallAssetAccrual504Test extends TestCase
 
         $run = $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
 
+        self::assertEqualsWithDelta(18250.00, (float) $run['total'], 0.001);
         $this->assertCarriesAxes((int) $run['entry_id'], self::DM, 'credit', (float) $run['total'], $this->axes);
     }
 
-    /** Rozpis 501 jen ze zálohy a žádná karta: ve 504 srozumitelná 422 s výzvou zaúčtovat konečnou fakturu. */
-    public function testFlatPctWithOnlyAdvanceInBaseIsRejectedWithGuidance(): void
+    /** Rozpis 501 jen ze zálohy a žádná karta: záloha náklad neúčtuje, nic se neodkládá (#385). */
+    public function testFlatPctWithOnlyAdvanceInBaseDefersNothing(): void
     {
         $this->purchase('DM504-28Z', 36500.00, null, false, 'received', [], null, null, 'advance');
         $this->toClosing();
 
-        try {
-            $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
-            self::fail('Odklad bez dokladu s osami musí ve 504 skončit validační chybou.');
-        } catch (ClosingException $e) {
-            self::assertSame('small_asset_document_missing', $e->errorCode);
-            self::assertStringContainsString('Zaúčtuj konečnou fakturu', $e->getMessage());
-        }
+        $run = $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
+
+        self::assertNull($run['entry_id']);
+        self::assertEqualsWithDelta(0.0, (float) $run['total'], 0.001);
     }
 
-    /** Hranice pravidla vah: dobropis 40 % faktur (nad třetinou) → dělí se částkami v měně dokladu. */
-    public function testFlatPctCreditNoteAboveThirdSplitsByDocumentAmounts(): void
+    /** Dobropis 40 % faktur v Kč vedle faktury v EUR: báze i váhy v Kč, každá osa nese paušál ze své částky. */
+    public function testFlatPctLargeCreditNoteSplitsByCzkAmounts(): void
     {
         [$a, $b] = $this->mixedCurrencyBase(-40000.00);
-        // Měna dokladu: A 75 000 − 40 000 = 35 000, B 1 000 EUR; báze 36 000 → odklad 18 000.
+        // Kč: A 75 000 − 40 000 = 35 000, B 1 000 EUR × 25 = 25 000; báze 60 000 → odklad 30 000.
         self::assertEqualsWithDelta(17500.00, $a, 0.011);
-        self::assertEqualsWithDelta(500.00, $b, 0.011);
+        self::assertEqualsWithDelta(12500.00, $b, 0.011);
     }
 
-    /** Hranice pravidla vah: dobropis 20 % faktur (pod třetinou) → váhy v Kč zůstávají. */
-    public function testFlatPctCreditNoteBelowThirdKeepsCzkWeights(): void
+    /** Dobropis 20 % faktur: totéž, odklad je paušál z částky v Kč každé osy. */
+    public function testFlatPctSmallCreditNoteSplitsByCzkAmounts(): void
     {
         [$a, $b] = $this->mixedCurrencyBase(-20000.00);
-        // Kč: A 55 000, B 25 000; báze 56 000 → odklad 28 000 dělený 55 : 25.
-        self::assertEqualsWithDelta(19250.00, $a, 0.011);
-        self::assertEqualsWithDelta(8750.00, $b, 0.011);
-    }
-
-    /** Těsně pod hranicí: dobropis 30 % faktur → váhy v Kč zůstávají. */
-    public function testFlatPctCreditNoteJustBelowThirdKeepsCzkWeights(): void
-    {
-        [$a, $b] = $this->mixedCurrencyBase(-30000.00);
-        // Kč: A 45 000, B 25 000; báze 46 000 → odklad 23 000 dělený 45 : 25.
-        self::assertEqualsWithDelta(14785.71, $a, 0.011);
-        self::assertEqualsWithDelta(8214.29, $b, 0.011);
-    }
-
-    /** Těsně nad hranicí: dobropis 36 % faktur → dělí se částkami v měně dokladu. */
-    public function testFlatPctCreditNoteJustAboveThirdSplitsByDocumentAmounts(): void
-    {
-        [$a, $b] = $this->mixedCurrencyBase(-36000.00);
-        // Měna dokladu: A 39 000, B 1 000 EUR; báze 40 000 → odklad 20 000.
-        self::assertEqualsWithDelta(19500.00, $a, 0.011);
-        self::assertEqualsWithDelta(500.00, $b, 0.011);
+        // Kč: A 55 000, B 25 000; báze 80 000 → odklad 40 000.
+        self::assertEqualsWithDelta(27500.00, $a, 0.011);
+        self::assertEqualsWithDelta(12500.00, $b, 0.011);
     }
 
     /** Rozpis jen ze zálohy, ale karta z pokladního dokladu s osami: odklad se dělí podle karty. */
@@ -550,43 +516,25 @@ final class ClosingSmallAssetAccrual504Test extends TestCase
     }
 
     /**
-     * Záloha drží bázi kladnou, dobropis (osa B) převáží fakturu (osa A): dělení by obrátilo
-     * znaménka řádků. Ve 504 srozumitelná 422, ne MD 501 na ose A.
+     * Záloha mimo bázi, dobropis (osa B) převáží fakturu (osa A): rozpis 501 je záporný, paušál
+     * proto bere bázi z karet a dělí se podle dokladů karet. Bez zálohy v bázi už se dělení
+     * s obrácenými znaménky nedostane (#385).
      */
-    public function testFlatPctCreditNotesOutweighingInvoicesAreRejectedIn504(): void
+    public function testFlatPctCreditNotesOutweighingInvoicesFallBackToCards(): void
     {
-        $this->creditNotesOutweighInvoices();
-
-        try {
-            $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
-            self::fail('Dělení s obrácenými znaménky musí ve 504 skončit validační chybou.');
-        } catch (ClosingException $e) {
-            self::assertSame('small_asset_document_missing', $e->errorCode);
-            self::assertStringContainsString('převáží', $e->getMessage());
-        }
-    }
-
-    /** Totéž mimo 504 (rok před přechodem): jeden řádek D 501 bez dimenzí, jako před dimenzemi. */
-    public function testFlatPctCreditNotesOutweighingInvoicesStayUndividedOutside504(): void
-    {
-        $this->db->pdo()->prepare('UPDATE supplier_accounting_frameworks SET effective_from = ? WHERE supplier_id = ?')
-            ->execute([(self::YEAR + 1) . '-01-01', $this->supplierId]);
         $this->creditNotesOutweighInvoices();
 
         $run = $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
 
-        $lines = $this->linesOn((int) $run['entry_id'], '501');
-        self::assertCount(1, $lines);
-        self::assertSame('credit', $lines[0]['side']);
-        self::assertEqualsWithDelta(4000.00, (float) $lines[0]['amount'], 0.001);
-        self::assertSame([], (new DimensionAssignmentRepository($this->db))->entryLineDimensions($this->supplierId, (int) $run['entry_id'])[(int) $lines[0]['id']] ?? []);
+        self::assertEqualsWithDelta(500.00, (float) $run['total'], 0.001);
+        $this->assertCarriesAxes((int) $run['entry_id'], self::DM, 'credit', 500.00, $this->axes);
     }
 
     /**
-     * Záloha v bázi, faktura 1 000 EUR po 25 Kč (osa A), dobropis −10 000 Kč (osa B): v měně
-     * dokladu dobropis převáží, v Kč ne. Dělí se podle vah v Kč, krok nesmí odmítnout.
+     * Záloha mimo bázi, faktura 1 000 EUR po 25 Kč (osa A), dobropis −10 000 Kč (osa B): báze
+     * 15 000 Kč, dělí se podle vah v Kč (#385).
      */
-    public function testFlatPctKeepsCzkWeightsWhenOnlyDocumentAmountsFlipSign(): void
+    public function testFlatPctBaseExcludesAdvanceAndSplitsByCzkWeights(): void
     {
         $eurId = $this->eurId();
         $other = $this->axes;
@@ -598,11 +546,11 @@ final class ClosingSmallAssetAccrual504Test extends TestCase
 
         $run = $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
 
-        // Báze 10 000 + 1 000 − 10 000 = 1 000 → odklad 500; Kč: A 25 000, B −10 000.
-        self::assertEqualsWithDelta(500.00, (float) $run['total'], 0.001);
+        // Báze v Kč 25 000 − 10 000 = 15 000 → odklad 7 500; A 12 500, B −5 000.
+        self::assertEqualsWithDelta(7500.00, (float) $run['total'], 0.001);
         $signed = $this->signedByActivityKind((int) $run['entry_id']);
-        self::assertEqualsWithDelta(833.33, $signed[$this->axes[$this->activityKindTypeId]] ?? 0.0, 0.011);
-        self::assertEqualsWithDelta(-333.33, $signed[$other[$this->activityKindTypeId]] ?? 0.0, 0.011);
+        self::assertEqualsWithDelta(12500.00, $signed[$this->axes[$this->activityKindTypeId]] ?? 0.0, 0.011);
+        self::assertEqualsWithDelta(-5000.00, $signed[$other[$this->activityKindTypeId]] ?? 0.0, 0.011);
     }
 
     /** Záloha 10 000, faktura 1 000 (osa A), dobropis −3 000 (osa B): báze 8 000, součet vah −2 000. */
@@ -616,8 +564,8 @@ final class ClosingSmallAssetAccrual504Test extends TestCase
         $this->toClosing();
     }
 
-    /** Součet vah v Kč opačného znaménka než báze (+1 000 Kč, −200 EUR): dělí se částkami v měně dokladu. */
-    public function testFlatPctNegativeCzkWeightSumSplitsByDocumentAmounts(): void
+    /** Rozpis 501 v Kč záporný (+1 000 Kč, −200 EUR po 25 Kč): báze z karet, dělí se podle dokladu karty (#385). */
+    public function testFlatPctNegativeCzkBreakdownFallsBackToCards(): void
     {
         $eurId = $this->eurId();
         $other = $this->axes;
@@ -628,10 +576,10 @@ final class ClosingSmallAssetAccrual504Test extends TestCase
 
         $run = $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
 
-        self::assertEqualsWithDelta(400.00, (float) $run['total'], 0.001);
+        self::assertEqualsWithDelta(500.00, (float) $run['total'], 0.001);
         $signed = $this->signedByActivityKind((int) $run['entry_id']);
         self::assertEqualsWithDelta(500.00, $signed[$this->axes[$this->activityKindTypeId]] ?? 0.0, 0.001);
-        self::assertEqualsWithDelta(-100.00, $signed[$other[$this->activityKindTypeId]] ?? 0.0, 0.001);
+        self::assertArrayNotHasKey($other[$this->activityKindTypeId], $signed);
     }
 
     /**
@@ -695,10 +643,10 @@ final class ClosingSmallAssetAccrual504Test extends TestCase
     }
 
     /**
-     * Váhy v Kč se vynulují (faktura 1 000 Kč, dobropis 40 EUR po 25 Kč na jiné ose): paušál se
-     * dělí podle částek v měně dokladu a řádky dál nesou osy.
+     * Rozpis 501 v Kč se vynuluje (faktura 1 000 Kč, dobropis 40 EUR po 25 Kč na jiné ose):
+     * paušál bere bázi z karet a odklad nese osy dokladu karty (#385).
      */
-    public function testFlatPctWithZeroCzkWeightsSplitsByDocumentAmounts(): void
+    public function testFlatPctWithZeroCzkBreakdownFallsBackToCards(): void
     {
         $eurId = (int) ($this->db->pdo()->query("SELECT id FROM currencies WHERE code = 'EUR' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
         if ($eurId === 0) {
@@ -713,14 +661,14 @@ final class ClosingSmallAssetAccrual504Test extends TestCase
         $run = $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
 
         $entryId = (int) $run['entry_id'];
-        self::assertEqualsWithDelta(480.00, (float) $run['total'], 0.001);
+        self::assertEqualsWithDelta(500.00, (float) $run['total'], 0.001);
         $dims = (new DimensionAssignmentRepository($this->db))->entryLineDimensions($this->supplierId, $entryId);
         $bySide = [];
         foreach ($this->linesOn($entryId, self::DM) as $line) {
             $bySide[$line['side']][] = [(int) ($dims[(int) $line['id']][$this->activityKindTypeId] ?? 0), round((float) $line['amount'], 2)];
         }
         self::assertSame([[$this->axes[$this->activityKindTypeId], 500.0]], $bySide['credit'] ?? []);
-        self::assertSame([[$other[$this->activityKindTypeId], 20.0]], $bySide['debit'] ?? []);
+        self::assertSame([], $bySide['debit'] ?? []);
     }
 
     /**
@@ -771,23 +719,18 @@ final class ClosingSmallAssetAccrual504Test extends TestCase
         }
     }
 
-    /** Nezaúčtovaný koncept v bázi paušálu: hláška jmenuje číslo faktury a nemluví o kartě. */
-    public function testFlatPctDraftInvoiceIsNamedByNumber(): void
+    /** Nezaúčtovaný koncept náklad 501 nenese: do báze paušálu nepatří a krok nezablokuje (#385). */
+    public function testFlatPctBaseExcludesDraftInvoices(): void
     {
         $this->smallAssetPurchase('DM504-12', 36500.00);
-        [$draftId] = $this->purchase('DM504-KONCEPT', 1000.00, null, false, 'draft');
+        $this->purchase('DM504-KONCEPT', 1000.00, null, false, 'draft');
+        $this->purchase('DM504-KONCEPT', 2000.00, null, false, 'draft');
         $this->toClosing();
 
-        try {
-            $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
-            self::fail('Nezaúčtovaný doklad v bázi paušálu musí ve 504 skončit validační chybou.');
-        } catch (ClosingException $e) {
-            self::assertSame('small_asset_document_missing', $e->errorCode);
-            self::assertStringContainsString('přijatá faktura DM504-KONCEPT', $e->getMessage());
-            self::assertStringNotContainsString('#' . $draftId, $e->getMessage());
-            self::assertStringNotContainsString('Doplň u karty vazbu', $e->getMessage());
-            self::assertStringNotContainsString('DM504-12', $e->getMessage());
-        }
+        $run = $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
+
+        self::assertEqualsWithDelta(18250.00, (float) $run['total'], 0.001);
+        $this->assertCarriesAxes((int) $run['entry_id'], self::DM, 'credit', 18250.00, $this->axes);
     }
 
     /** Opakovaný běh kroku přepíše zápis: řádek 501 s osami zůstane jeden. */
