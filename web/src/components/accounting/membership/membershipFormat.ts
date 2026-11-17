@@ -45,7 +45,7 @@ const fillTones: Record<BadgeTone, string> = {
   neutral: 'bg-neutral-100 text-neutral-700',
   primary: 'bg-primary-50 text-primary-700',
 }
-export const quietBadge = (tone: BadgeTone) => `badge badge-quiet text-xs ${dotTones[tone]}`
+export const quietBadge = (tone: BadgeTone) => `badge badge-quiet px-2 py-0.5 text-xs ${dotTones[tone]}`
 export const loudBadge = (tone: BadgeTone) => `badge badge-loud rounded-full px-2 py-0.5 text-xs ${fillTones[tone]}`
 
 const statusTones: Record<MemberStatus, BadgeTone> = { active: 'success', suspended: 'warning', ended: 'neutral' }
@@ -58,7 +58,7 @@ export function memberStatusBadge(status: MemberStatus): string {
 export const errorBox = 'rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700'
 
 /** Upozornění ve stejném tvaru jako chybová hláška. */
-export const warningBox = 'rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-700'
+export const warningBox = 'rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800'
 
 /**
  * Platné revize v pořadí řetězu. Zrcadlí `MembershipRevisionTimeline::effective()`: rušící článek

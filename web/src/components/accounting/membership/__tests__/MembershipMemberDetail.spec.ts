@@ -25,7 +25,7 @@ const ActionBar = defineComponent({
     .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, 'data-tier': a.tier, disabled: a.disabled, 'data-reason': a.disabled ? a.disabledReason : undefined, onClick: a.run }, a.label))),
 })
 // Formuláře detailu jsou v okně; v testu se vykreslí na místě i s nadpisem.
-const Modal = defineComponent({ name: 'Modal', props: ['title', 'widthClass'], emits: ['close'], setup: (p, { slots }) => () => h('div', { 'data-stub': 'modal', 'data-title': p.title }, slots.default?.()) })
+const Modal = defineComponent({ name: 'Modal', props: ['title', 'widthClass'], emits: ['close'], setup: (p, { slots }) => () => h('div', { 'data-stub': 'modal', 'data-title': p.title }, [slots.default?.(), slots.footer?.()]) })
 // Akce řádku předpisu jako tlačítka s klíčem, stavem a důvodem zašednutí.
 const RowActionsMenu = defineComponent({
   props: ['actions', 'inlineCount', 'iconOnly'],
@@ -559,7 +559,7 @@ describe('Membership member detail after a correction', () => {
     expect(api.member).toHaveBeenCalledTimes(2)
     expect(w.findComponent(CorrectionFlow).exists()).toBe(false)
     expect(w.get('[data-section="detail-stale"]').text()).toBe(cs.nonprofitMembership.correction.staleClosed)
-    expect(w.get('[data-section="detail-stale"]').classes()).toContain('text-warning-700')
+    expect(w.get('[data-section="detail-stale"]').classes()).toContain('text-warning-800')
     expect(w.find('[data-section="detail-notice"]').exists()).toBe(false)
     expect(w.emitted('changed')).toHaveLength(1)
     expect(w.get('[data-action="fix-identity"]').attributes('disabled')).toBeUndefined()

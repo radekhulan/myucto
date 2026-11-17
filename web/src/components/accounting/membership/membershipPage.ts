@@ -12,6 +12,10 @@ export const memberDetailPath = (id: number) => `${MEMBERSHIP_LIST_PATH}/members
  * (žádné `history.state.back`) a seznam se odchodem odpojí, takže si adresu s filtry, výběr do hromadného
  * předpisu a otevřeného člena uloží sem. Detail z toho vezme odkaz zpět, seznam po návratu výběr a fokus.
  * Platí jen pro tutéž firmu a filtry a jen krátce; obnovený výběr seznam jako každou obnovu ověří na serveru.
+ *
+ * Proč ne sdílený useListNavigation (šipky mezi doklady a odkaz zpět u faktur): ten stránkuje čísly stránek
+ * (fetchPage(page)), kdežto seznam členů jde kurzorem po id (keyset). Hlavně ale seznam předává i výběr do
+ * hromadného předpisu, který useListNavigation nenese.
  */
 export interface MembershipListHandoff { supplier: number; pane: string | null; returning: boolean; path: string; filters: MembershipListFilters; ids: number[]; openedId: number | null; at: number }
 const HANDOFF_KEY = 'myinvoice.membership.listHandoff'

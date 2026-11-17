@@ -8,7 +8,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { formInput as field, formLabel } from '@/components/ui/formStyles'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
-import { btnFilled, btnIconSm, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { accountingApi, type AccountingPeriod } from '@/api/accounting'
 import { membershipApi, type MemberRow, type MembershipListFilters } from '@/api/nonprofitMembership'
 import type { Client } from '@/api/clients'
@@ -169,10 +169,10 @@ function goToMember(id: number, event?: MouseEvent) {
 }
 function openMember(row: MemberRow, event?: MouseEvent) { if (event?.button === 2) return; goToMember(row.id, event) }
 
-/** Po návratu z detailu fokus na tlačítko řádku člena; tabulka i karty jsou v DOM, bere se viditelné. */
+/** Po návratu z detailu fokus na odkaz člena; tabulka i karty jsou v DOM, bere se viditelný. */
 function focusMember(id: number) {
-  const buttons = Array.from(root.value?.querySelectorAll<HTMLElement>(`[data-member="${id}"] [data-action="open-member"], [data-member-card="${id}"] [data-action="open-member"]`) ?? [])
-  ;(buttons.find(el => el.getClientRects().length > 0) ?? buttons[0])?.focus()
+  const links = Array.from(root.value?.querySelectorAll<HTMLElement>(`[data-member="${id}"] [data-field="member-name"], [data-member-card="${id}"] [data-field="member-name"]`) ?? [])
+  ;(links.find(el => el.getClientRects().length > 0) ?? links[0])?.focus()
 }
 
 // Řazení zůstává podle id: seznam jde keyset stránkováním po id, jiné pořadí by potřebovalo nový index.
@@ -379,10 +379,6 @@ function openBatch() { draft.reset(); setTab('members'); batchOpen.value = true 
 /** Rozpracovanou dávku (zamčený výběr a filtry) okno nezavře, jinak by běžící kroky ztratily kontext. */
 function closeBatch() { if (!batchLocked.value && draft.confirmClose()) batchOpen.value = false }
 function closeImport() { if (!importLocked.value && draft.confirmClose()) { importOpen.value = false; importLocked.value = false } }
-const createActions = computed<ActionItem[]>(() => [
-  { key: 'create-member', label: t('nonprofitMembership.createMember'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: creating.value || !clientId.value || !numberValid.value, disabledReason: t('nonprofitMembership.createNeedsInput'), run: () => { void create() } },
-  { key: 'create-cancel', label: t('common.cancel'), icon: 'x', disabled: creating.value, run: closeCreate },
-])
 
 /** Tituly závisí jen na firmě a roce; bez vynucení je pro rok, který se už načítá nebo načetl, nečteme znovu. */
 async function loadTitles(force = false) {
@@ -406,6 +402,13 @@ async function loadTitles(force = false) {
     titles.value = items
   } catch { if (alive && ticket === titlesTicket) {titlesError.value = true; titles.value = []} }
 }
+/** Roky do výběru jako v ostatních seznamech: roky účetních období, aktuální rok a rok z adresy. */
+const yearOptions = computed(() => {
+  const years = new Set<number>(periods.value.map(period => period.fiscal_year))
+  years.add(Number(appIsoDate().slice(0, 4)))
+  if (/^\d{4}$/.test(String(filterYear.value))) years.add(Number(filterYear.value))
+  return [...years].sort((a, b) => b - a)
+})
 const titleOptions = computed(() => [...new Set([...titles.value, ...(titleKey.value ? [titleKey.value] : [])])].map(value => ({value, label: value})))
 // Aktuální rok je výchozí filtr: štítek jen tehdy, když ho odebrání skutečně zruší (titul bez stavu úhrady,
 // který rok vyžaduje), nebo když jde o jiný rok, který se odebráním vrátí na aktuální.
@@ -447,14 +450,8 @@ watch(search, () => {
   cancelSearchTimer()
   searchTimeout = setTimeout(() => {searchTimeout = null; if (alive) applyFilters()}, 300)
 }, {flush: 'sync'})
-// Rozepsaný rok (např. „202“) ještě není filtr: seznam i tituly načteme až po stejné prodlevě jako u hledání.
-watch(filterYear, () => {
-  if (hydrating) return
-  cancelSearchTimer()
-  searchTimeout = setTimeout(() => {searchTimeout = null; if (alive) applyFilters()}, 300)
-}, {flush: 'sync'})
-// Běží-li prodleva rozepsaného roku nebo hledání, výběr titulu či stavu ji jen znovu naplánuje.
-watch([titleKey, paymentStatus], () => {
+// Běží-li prodleva rozepsaného hledání, výběr roku, titulu či stavu ji jen znovu naplánuje.
+watch([filterYear, titleKey, paymentStatus], () => {
   if (hydrating) return
   if (searchTimeout === null) {applyFilters(); return}
   cancelSearchTimer()
@@ -532,8 +529,11 @@ watch(batchLocked, locked => {
               class="h-9 w-full rounded-md border border-neutral-300 pl-9 pr-3 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 disabled:opacity-50 max-md:h-10 max-md:text-base" />
           </div>
         </template>
-        <input v-model="filterYear" type="number" min="1900" max="9998" step="1" :placeholder="t('nonprofitMembership.listYearShort')" :aria-label="t('nonprofitMembership.listYear')" :title="t('nonprofitMembership.listYear')" :disabled="batchLocked" data-field="member-year"
-          class="h-9 w-28 rounded-md border border-neutral-300 bg-surface px-3 text-sm tabular-nums disabled:opacity-50" />
+        <select v-model="filterYear" :aria-label="t('nonprofitMembership.listYear')" :title="t('nonprofitMembership.listYear')" :disabled="batchLocked" data-field="member-year"
+          class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm tabular-nums disabled:opacity-50">
+          <option value="">{{ t('nonprofitMembership.listYearAll') }}</option>
+          <option v-for="year in yearOptions" :key="year" :value="String(year)">{{ year }}</option>
+        </select>
         <div class="min-w-48 max-w-xs flex-1">
           <SearchableSelect :model-value="titleKey || null" :options="titleOptions" :disabled="batchLocked" :placeholder="t('nonprofitMembership.listTitleAll')" :aria-label="t('nonprofitMembership.titleKey')" :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" data-field="member-title" @update:model-value="titleKey = typeof $event === 'string' ? $event : ''" />
         </div>
@@ -579,13 +579,10 @@ watch(batchLocked, locked => {
                 <th v-if="tbl.isVisible('prescribed')" scope="col" class="px-3 py-2.5 text-right font-medium">{{ t('nonprofitMembership.listColumns.prescribed') }}</th>
                 <th v-if="tbl.isVisible('paid')" scope="col" class="px-3 py-2.5 text-right font-medium">{{ t('nonprofitMembership.listColumns.paid') }}</th>
                 <th v-if="tbl.isVisible('open')" scope="col" class="px-3 py-2.5 text-right font-medium">{{ t('nonprofitMembership.listColumns.open') }}</th>
-                <th scope="col" class="px-3 py-2.5"><span class="sr-only">{{ t('nonprofitMembership.listColumns.actions') }}</span></th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <!-- Lepivá první buňka dědí pozadí řádku. Globální zebra a hover jsou poloprůhledné a obsah posunutých
-                   buněk by pod ní prosvítal, proto má řádek tady vždy neprůhledné pozadí (sudý řádek, hover). -->
-              <tr v-for="row in members" :key="row.id" class="cursor-pointer even:bg-neutral-50 hover:bg-neutral-100"
+              <tr v-for="row in members" :key="row.id" class="cursor-pointer hover:bg-neutral-50"
                 data-section="member-row" :data-member="row.id"
                 @click="openMember(row, $event)" @auxclick.prevent="openMember(row, $event)">
                 <td class="px-3 py-2.5">
@@ -616,12 +613,6 @@ watch(batchLocked, locked => {
                 <td v-if="tbl.isVisible('prescribed')" class="whitespace-nowrap px-3 py-2.5 text-right font-mono tabular-nums" data-field="contribution-prescribed">{{ row.contribution?.claim_count ? money(row.contribution.prescribed_cents) : '—' }}</td>
                 <td v-if="tbl.isVisible('paid')" class="whitespace-nowrap px-3 py-2.5 text-right font-mono tabular-nums" data-field="contribution-paid">{{ row.contribution?.claim_count ? money(row.contribution.paid_cents) : '—' }}</td>
                 <td v-if="tbl.isVisible('open')" class="whitespace-nowrap px-3 py-2.5 text-right font-mono tabular-nums" data-field="contribution-open">{{ row.contribution?.claim_count ? money(row.contribution.open_cents) : '—' }}</td>
-                <td class="px-3 py-1.5 text-right">
-                  <!-- Ikona jako v ostatních hustých seznamech; popisek nese aria-label a title. -->
-                  <button type="button" :class="btnIconSm('primary')" :aria-label="t('nonprofitMembership.openMember')" :title="t('nonprofitMembership.openMember')" data-action="open-member" @click.stop="openMember(row, $event)" @auxclick.stop.prevent="openMember(row, $event)">
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
-                  </button>
-                </td>
               </tr>
             </tbody>
           </table>
@@ -638,7 +629,7 @@ watch(batchLocked, locked => {
                   data-action="batch-check-member" @change="checkMember(row.id, $event)" />
               </label>
               <div class="min-w-0 flex-1 space-y-1 text-sm">
-                <p class="break-words font-medium text-neutral-900"><span class="font-mono text-xs text-neutral-500">{{ row.member_number }}</span> · {{ labelOf(row) }}</p>
+                <p class="break-words font-medium text-neutral-900"><span class="font-mono text-xs text-neutral-500">{{ row.member_number }}</span> · <RouterLink class="row-link text-neutral-900" :to="memberDetailPath(row.id)" data-field="member-name" @click.stop.prevent="openMember(row, $event)" @auxclick.stop>{{ labelOf(row) }}</RouterLink></p>
                 <template v-for="rev in [revisionState(row)]" :key="rev.kind">
                   <p v-if="rev.kind === 'current'" class="flex flex-wrap items-center gap-2 text-xs" data-field="member-revision"><span :class="memberStatusBadge(rev.status)" data-field="member-status">{{ t(`nonprofitMembership.status_${rev.status}`) }}</span><span class="text-neutral-500">{{ t('nonprofitMembership.sinceDate', { date: rev.date }) }}</span></p>
                   <p v-else class="text-xs text-warning-700" data-field="member-revision">{{ rev.full }}</p>
@@ -655,9 +646,6 @@ watch(batchLocked, locked => {
                   </p>
                 </template>
               </div>
-              <button type="button" :class="[btnIconSm('primary'), 'shrink-0']" :aria-label="t('nonprofitMembership.openMember')" :title="t('nonprofitMembership.openMember')" data-action="open-member" @click.stop="openMember(row, $event)" @auxclick.stop.prevent="openMember(row, $event)">
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
-              </button>
             </div>
           </div>
         </div>
@@ -671,7 +659,6 @@ watch(batchLocked, locked => {
     </section>
 
     <section v-if="tab === 'rates'" id="membership-panel-rates" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" role="tabpanel" aria-labelledby="membership-tab-rates" data-section="rates-management">
-      <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitMembership.ratesTitle') }}</h2>
       <MembershipRates :key="supplier" :supplier="supplier" :can-manage="!!canManageRates" />
     </section>
 
@@ -681,7 +668,6 @@ watch(batchLocked, locked => {
     </div>
 
     <section v-if="tab === 'erasure' && canReadErasure" id="membership-panel-erasure" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" role="tabpanel" aria-labelledby="membership-tab-erasure" data-section="erasure-management">
-      <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitMembership.erasure.title') }}</h2>
       <MembershipErasure :key="supplier" :supplier="supplier" :can-write="!!canWriteErasure" :open="tab === 'erasure'" @erased="membersErased" />
     </section>
 
@@ -693,7 +679,7 @@ watch(batchLocked, locked => {
     </BulkActionBar>
 
     <Modal v-if="createOpen && canManage" :title="t('nonprofitMembership.createTitle')" width-class="max-w-xl" @close="closeCreate">
-      <form class="space-y-4" data-section="create-member" @submit.prevent="create()" @input="draft.mark" @change="draft.mark">
+      <form id="membership-create-form" class="space-y-4" data-section="create-member" @submit.prevent="create()" @input="draft.mark" @change="draft.mark">
         <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.createHelp') }}</p>
         <p v-if="createError" role="alert" :class="errorBox" data-section="create-error">{{ createError }}</p>
         <fieldset :disabled="creating" class="grid gap-3">
@@ -711,9 +697,17 @@ watch(batchLocked, locked => {
           </div>
           <label :class="formLabel">{{ t('nonprofitMembership.memberNumber') }}<input v-model="memberNumber" :class="field" maxlength="80" data-field="member-number" /></label>
         </fieldset>
-        <ActionBar :actions="createActions" />
+        <p v-if="!creating && (!clientId || !numberValid)" class="text-xs text-neutral-500" data-section="create-hint">{{ t('nonprofitMembership.createNeedsInput') }}</p>
       </form>
       <ClientFormModal v-if="clientModalOpen" @created="onClientCreated" @close="clientModalOpen = false" />
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" :disabled="creating" data-action="create-cancel" @click="closeCreate">{{ t('common.cancel') }}</button>
+          <button type="submit" form="membership-create-form" :class="[btnFilled('primary'), 'whitespace-nowrap']" :disabled="creating || !clientId || !numberValid" data-action="create-member" @click.prevent="create()">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>{{ creating ? t('common.saving') : t('nonprofitMembership.createMember') }}
+          </button>
+        </div>
+      </template>
     </Modal>
 
     <Modal v-if="batchOpen" :title="t('nonprofitMembership.batchTitle')" width-class="max-w-4xl" @close="closeBatch">

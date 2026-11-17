@@ -54,7 +54,7 @@ const SearchableSelect = defineComponent({ props: ['modelValue', 'options', 'dis
 const ClientFormModal = defineComponent({ name: 'ClientFormModal', emits: ['created', 'close'], setup: () => () => h('div', { 'data-stub': 'client-modal' }) })
 const ImportFlow = defineComponent({ name: 'MembershipImportFlow', props: ['supplier', 'canManage'], emits: ['changed', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'import' }) })
 // Okno a lišta hromadných akcí se v testu vykreslí na místě (bez teleportu).
-const Modal = defineComponent({ name: 'Modal', props: ['title', 'widthClass'], emits: ['close'], setup: (p, { slots }) => () => h('div', { 'data-stub': 'modal', 'data-title': p.title }, slots.default?.()) })
+const Modal = defineComponent({ name: 'Modal', props: ['title', 'widthClass'], emits: ['close'], setup: (p, { slots }) => () => h('div', { 'data-stub': 'modal', 'data-title': p.title }, [slots.default?.(), slots.footer?.()]) })
 const BulkActionBar = defineComponent({ name: 'BulkActionBar', props: ['count'], emits: ['clear'], setup: (p, { slots }) => () => (p.count as number) > 0 ? h('div', { 'data-stub': 'bulk-bar', 'data-count': p.count }, slots.default?.()) : null })
 const Reconciliation = defineComponent({ name: 'MembershipReconciliation', props: ['supplier', 'periods', 'dataVersion'], setup: () => () => h('div', { 'data-stub': 'reconciliation' }) })
 
@@ -92,7 +92,7 @@ beforeEach(() => {
   api.titles.mockResolvedValue({items: ['SYNTHETIC'], next_after_title_key: null})
   api.selectionCheck.mockImplementation((_supplier: number, ids: number[]) => Promise.resolve({member_ids: ids}))
   Element.prototype.scrollIntoView = vi.fn()
-  accounting.listPeriods.mockResolvedValue([period])
+  accounting.listPeriods.mockResolvedValue([{ ...period, id: 10, fiscal_year: 2025 }, period, { ...period, id: 12, fiscal_year: 2027 }])
   api.members.mockResolvedValue(page([
     row(1),
     row(2, { revision_no: 2, effective_from: '2999-01-01', status: 'ended' }),
@@ -171,9 +171,6 @@ describe('Membership workspace', () => {
     expect(w.findAll('thead th').map(th => th.text())).toEqual(expect.arrayContaining([cs.nonprofitMembership.listColumns.name, cs.nonprofitMembership.listColumns.prescribed, cs.nonprofitMembership.listColumns.paid, cs.nonprofitMembership.listColumns.open]))
     // Počet vybraných nese lišta hromadných akcí; bez výběru se nevykresluje.
     expect(w.find('[data-stub="bulk-bar"]').exists()).toBe(false)
-    // Sudé řádky mají neprůhledné pozadí, jinak by pod lepivou buňkou prosvítal posunutý obsah.
-    expect(w.get('[data-member="2"]').classes()).toContain('even:bg-neutral-50')
-    expect(w.get('[data-member="1"] [data-action="open-member"]').attributes('aria-label')).toBe(cs.nonprofitMembership.openMember)
     await w.get('[data-member-card="1"] [data-action="batch-check-member"]').setValue(true)
     expect((w.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(true)
     expect(w.get('[data-stub="bulk-bar"]').attributes('data-count')).toBe('1')
@@ -190,7 +187,7 @@ describe('Membership workspace', () => {
     const w=mounted();await flushPromises()
     expect(w.find('[data-section="member-detail-pane"]').exists()).toBe(false)
     expect(w.get('[data-member="1"] [data-field="member-name"]').findComponent(RouterLinkStub).props('to')).toBe(DETAIL(1))
-    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
+    await w.get('[data-member="1"] [data-field="member-name"]').trigger('click');await flushPromises()
     expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: false })
     await w.get('[data-member="2"]').trigger('click', { ctrlKey: true });await flushPromises()
     expect(lastNavigation()).toEqual({ to: DETAIL(2), newPanel: true })
@@ -202,7 +199,7 @@ describe('Membership workspace', () => {
   it('opens a member in a new panel while a batch or an import is open, so the unsaved work stays', async () => {
     const w=mounted();await flushPromises()
     await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
-    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
+    await w.get('[data-member="1"] [data-field="member-name"]').trigger('click');await flushPromises()
     expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: true })
     w.findComponent(MembershipBatchFlow).vm.$emit('close');await flushPromises()
     await w.get('[data-action="import-open"]').trigger('click');await flushPromises()
@@ -219,7 +216,7 @@ describe('Membership workspace', () => {
     const first=mounted();await flushPromises()
     await first.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
     await first.get('[data-member="2"] [data-action="batch-check-member"]').setValue(true)
-    await first.get('[data-member="3"] [data-action="open-member"]').trigger('click')
+    await first.get('[data-member="3"] [data-field="member-name"]').trigger('click')
     expect(readListHandoff(5, null)).toMatchObject({ path: '/accounting/nonprofit-membership?year=2026&search=Synthetic', ids: [1,2], openedId: 3 })
     first.unmount()
     markListReturn(5, null)
@@ -232,7 +229,7 @@ describe('Membership workspace', () => {
     expect((back.get('[data-member="2"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
     expect(toast.warning).toHaveBeenCalledWith(cs.nonprofitMembership.listSelectionRefreshed)
     // Fokus na řádek člena, ze kterého se detail otevřel.
-    expect(document.activeElement).toBe(back.get('[data-member="3"] [data-action="open-member"]').element)
+    expect(document.activeElement).toBe(back.get('[data-member="3"] [data-field="member-name"]').element)
     expect(readListHandoff(5, null)).toBeNull()
     back.unmount()
     const again=mounted();await flushPromises()
@@ -246,7 +243,7 @@ describe('Membership workspace', () => {
     await w.get('[data-member="2"] [data-action="batch-check-member"]').setValue(true)
     await w.get('[data-field="member-payment-status"]').setValue('unpaid');await flushPromises()
     expect(toast.warning).toHaveBeenCalledWith(cs.nonprofitMembership.listSelectionCleared)
-    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click')
+    await w.get('[data-member="1"] [data-field="member-name"]').trigger('click')
     w.unmount()
     markListReturn(5, null)
     navigation.route = reactive({query: {}})
@@ -269,7 +266,7 @@ describe('Membership workspace', () => {
     // Běžící export by odchodem ze seznamu tiše skončil.
     api.exportMembers.mockReturnValueOnce(new Promise(() => {}))
     await w.get('[data-action="export-xlsx"]').trigger('click');await flushPromises()
-    await w.get('[data-member="2"] [data-action="open-member"]').trigger('click')
+    await w.get('[data-member="2"] [data-field="member-name"]').trigger('click')
     expect(lastNavigation()).toEqual({ to: DETAIL(2), newPanel: true })
     w.unmount()
     // Rozběhnutý hromadný předpis zamyká založení člena: jeho okno by se otevřelo nad dávkou.
@@ -552,7 +549,7 @@ describe('Membership workspace', () => {
     expect(w.find('[data-action="create-member"]').exists()).toBe(false)
     expect(w.get('[data-section="readonly"]').text()).toBe(cs.nonprofitMembership.readonly)
     expect(w.findAll('[data-section="member-row"]')).toHaveLength(3)
-    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click')
+    await w.get('[data-member="1"] [data-field="member-name"]').trigger('click')
     expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: false })
     w.unmount()
   })
@@ -626,24 +623,20 @@ describe('Membership workspace', () => {
     rates.unmount()
   })
 
-  it('waits until the year is typed before loading members or titles', async () => {
+  it('chooses the year from a select like other lists and applies it at once', async () => {
     const w=mounted();await flushPromises()
-    vi.useFakeTimers()
-    try {
-      const members=api.members.mock.calls.length, titles=api.titles.mock.calls.length
-      for (const value of ['2','20','202','2025']) {
-        await w.get('[data-field="member-year"]').setValue(value)
-        await vi.advanceTimersByTimeAsync(100)
-        expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
-      }
-      expect(api.members).toHaveBeenCalledTimes(members)
-      expect(api.titles).toHaveBeenCalledTimes(titles)
-      await vi.advanceTimersByTimeAsync(300);await flushPromises()
-      expect(api.members).toHaveBeenCalledTimes(members+1)
-      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2025}))
-      expect(api.titles).toHaveBeenCalledTimes(titles+1)
-      expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
-    } finally { vi.useRealTimers(); w.unmount() }
+    const year = w.get('[data-field="member-year"]')
+    expect(year.element.tagName).toBe('SELECT')
+    const options = year.findAll('option').map(o => o.attributes('value'))
+    expect(options[0]).toBe('')
+    expect(options).toEqual(expect.arrayContaining(['2025', '2026', '2027', appIsoDate().slice(0, 4)]))
+    expect(year.findAll('option')[0].text()).toBe(cs.nonprofitMembership.listYearAll)
+    const members=api.members.mock.calls.length
+    await year.setValue('2025');await flushPromises()
+    expect(api.members).toHaveBeenCalledTimes(members+1)
+    expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2025}))
+    expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
+    w.unmount()
   })
 
   it('keeps the current rows visible while a refresh is loading', async () => {
@@ -684,21 +677,6 @@ describe('Membership workspace', () => {
       await w.get('[data-field="member-search"]').setValue('Synthetic')
       await vi.advanceTimersByTimeAsync(300);await flushPromises()
       expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2025,search:'Synthetic'}))
-      expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
-    } finally { vi.useRealTimers(); w.unmount() }
-  })
-
-  it('loads titles for a year typed before a batch lock once the batch unlocks', async () => {
-    const w=mounted();await flushPromises()
-    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
-    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
-    vi.useFakeTimers()
-    try {
-      await w.get('[data-field="member-year"]').setValue('2025')
-      w.findComponent(MembershipBatchFlow).vm.$emit('lock', true);await flushPromises()
-      await vi.advanceTimersByTimeAsync(300);await flushPromises()
-      expect(api.titles).not.toHaveBeenCalledWith(5,2025,undefined)
-      w.findComponent(MembershipBatchFlow).vm.$emit('lock', false);await flushPromises()
       expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
     } finally { vi.useRealTimers(); w.unmount() }
   })
@@ -835,20 +813,6 @@ describe('Membership workspace', () => {
       await vi.advanceTimersByTimeAsync(300);await flushPromises()
       expect(api.titles).toHaveBeenCalledTimes(before+1)
       expect(api.titles).toHaveBeenLastCalledWith(5,2025,undefined)
-    } finally { vi.useRealTimers(); w.unmount() }
-  })
-
-  it('does not apply a partially typed year when the status changes during the delay', async () => {
-    const w=mounted();await flushPromises()
-    vi.useFakeTimers()
-    try {
-      await w.get('[data-field="member-year"]').setValue('202')
-      await w.get('[data-field="member-payment-status"]').setValue('unpaid')
-      expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
-      await w.get('[data-field="member-year"]').setValue('2025')
-      await vi.advanceTimersByTimeAsync(300);await flushPromises()
-      expect(w.find('[data-section="workspace-error"]').exists()).toBe(false)
-      expect(api.members).toHaveBeenLastCalledWith(5,0,50,expect.objectContaining({year:2025,payment_status:'unpaid'}))
     } finally { vi.useRealTimers(); w.unmount() }
   })
 

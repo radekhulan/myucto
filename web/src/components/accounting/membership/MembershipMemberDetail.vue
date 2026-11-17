@@ -204,7 +204,7 @@ const actions = computed<ActionItem[]>(() => [
   { key: 'fix-identity', label: t('nonprofitMembership.correction.title_identity'), icon: 'edit', tier: 'overflow',
     show: manage.value && !!corrections.value && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !corrections.value?.can_edit_identity,
     disabledReason: formReason(corrections.value?.edit_identity_block), run: () => startCorrection('identity') },
-  { key: 'reload', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value || anyLocked.value || revisionDirty.value, disabledReason: revisionDirty.value ? t('nonprofitMembership.correction.closeFormFirst') : undefined, run: () => { staleNotice.value = false; void load() } },
+  { key: 'reload', label: t('nonprofitMembership.reload'), icon: 'cycle', tier: 'overflow', disabled: loading.value || anyLocked.value || revisionDirty.value, disabledReason: revisionDirty.value ? t('nonprofitMembership.correction.closeFormFirst') : undefined, run: () => { staleNotice.value = false; void load() } },
   { key: 'void-revision', label: t('nonprofitMembership.correction.title_void'), icon: 'uturn', tier: 'overflow', variant: 'danger',
     show: manage.value && (!!voidable.value || !!corrections.value?.void_block) && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !voidable.value,
     disabledReason: formReason(corrections.value?.void_block), run: () => startCorrection('void') },
@@ -344,7 +344,7 @@ function claimActions(claim: ClaimRow): RowAction[] {
               <th scope="col" class="px-4 py-2 text-right font-medium">{{ t('nonprofitMembership.detailColumns.amount') }}</th>
               <th scope="col" class="px-4 py-2 text-left font-medium">{{ t('nonprofitMembership.detailColumns.dates') }}</th>
               <th scope="col" class="px-4 py-2 text-left font-medium">{{ t('nonprofitMembership.detailColumns.settlement') }}</th>
-              <th scope="col" class="px-4 py-2"><span class="sr-only">{{ t('nonprofitMembership.listColumns.actions') }}</span></th>
+              <th scope="col" class="px-4 py-2"><span class="sr-only">{{ t('common.actions') }}</span></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">

@@ -41776,7 +41776,6 @@
       "prescribed": "Charged",
       "paid": "Paid",
       "open": "Outstanding",
-      "actions": "Actions",
       "future": "{status} from {date}",
       "noRevision": "Not started",
       "voided": "Revisions voided",
@@ -42299,10 +42298,10 @@
     },
     "batchSelectionLimit": "Up to 500 members can be selected for a batch charge. For all active members, choose All active on the accounting date in the batch charge.",
     "closeUnsavedConfirm": "You have unsaved changes. Close without saving?",
-    "listYearShort": "Year",
     "listTitleAll": "All contributions",
     "firstRevision": "Record first revision",
-    "firstRevisionHint": "A charge needs the first revision. Choose Record first revision."
+    "firstRevisionHint": "A charge needs the first revision. Choose Record first revision.",
+    "listYearAll": "All years"
   },
   "fx504": {
     "case_nominal_unproven": "The journal entry has no proven amount in the foreign currency. Verify the supporting evidence and any links to documents or payments, then refresh the preview.",

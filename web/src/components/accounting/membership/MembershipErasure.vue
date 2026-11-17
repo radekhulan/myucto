@@ -206,7 +206,7 @@ onBeforeUnmount(() => { alive = false })
         <button type="submit" :class="btnFilled('danger')" class="whitespace-nowrap" data-action="erasure-execute" :disabled="busy || !confirmed"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>{{ started ? t('nonprofitMembership.erasure.continue') : t('nonprofitMembership.erasure.execute') }}</button>
       </form>
       <ul class="divide-y divide-neutral-100 rounded-lg border border-neutral-200 text-sm" data-section="erasure-items">
-        <li v-for="item in detail.items" :key="item.id" class="space-y-1 px-4 py-2.5 even:bg-neutral-50" data-field="erasure-item">
+        <li v-for="item in detail.items" :key="item.id" class="space-y-1 px-4 py-2.5" data-field="erasure-item">
           <p class="break-words font-medium">{{ itemLabel(item) }}</p>
           <p class="text-neutral-500">{{ t(`nonprofitMembership.erasure.rule_${item.governing_rule}`, { until: formatDate(item.retained_until), ended: formatDate(item.ended_on) }) }}</p>
           <p :class="outcomeTone(item.outcome)">{{ t(`nonprofitMembership.erasure.outcome_${item.outcome}`) }}<template v-if="item.skip_reason"> · {{ reason(item.skip_reason) }}</template>

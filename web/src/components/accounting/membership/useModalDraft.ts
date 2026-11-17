@@ -10,8 +10,12 @@ import { useI18n } from 'vue-i18n'
 export function useModalDraft() {
   const { t } = useI18n()
   const touched = ref(false)
-  /** Posluchač na obal obsahu okna (@input a @change). */
-  function mark() { touched.value = true }
+  /** Posluchač na obal obsahu okna (@input a @change); psaní do hledání a našeptávače se nepočítá. */
+  function mark(event?: Event) {
+    const target = event?.target
+    if (target instanceof HTMLInputElement && (target.type === 'search' || target.getAttribute('role') === 'combobox')) return
+    touched.value = true
+  }
   /** Po uložení nebo zavření: další zavření se už neptá. */
   function reset() { touched.value = false }
   /** Smí se okno zavřít? Rozepsané se zavře jen po potvrzení. */
