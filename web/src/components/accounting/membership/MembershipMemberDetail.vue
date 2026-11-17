@@ -195,8 +195,10 @@ const formOpen = computed(() => issueOpen.value || reverseClaim.value !== null |
 const formReason = (block?: string | null) => (formOpen.value ? t('nonprofitMembership.correction.closeFormFirst') : blockReason(block))
 
 const actions = computed<ActionItem[]>(() => [
-  { key: 'new-charge', label: t('nonprofitMembership.newCharge'), icon: 'plus', tier: 'primary', variant: 'primary', show: manage.value, disabled: anyLocked.value || loading.value || !valid.value.length, disabledReason: t('nonprofitMembership.newChargeNeedsRevision'), run: () => { reverseClaim.value = null; issueOpen.value = true } },
-  { key: 'change-status', label: t('nonprofitMembership.changeStatus'), icon: 'edit', show: manage.value && valid.value.length > 0 && !revisionOpen.value, disabled: anyLocked.value || loading.value || correction.value !== null,
+  // Bez platné revize je hlavní akcí zápis první revize (předpis ještě nejde), jinak nový předpis.
+  { key: 'new-charge', label: t('nonprofitMembership.newCharge'), icon: 'plus', tier: valid.value.length ? 'primary' : 'secondary', variant: 'primary', show: manage.value, disabled: anyLocked.value || loading.value || !valid.value.length, disabledReason: t('nonprofitMembership.newChargeNeedsRevision'), run: () => { reverseClaim.value = null; issueOpen.value = true } },
+  { key: 'change-status', label: valid.value.length ? t('nonprofitMembership.changeStatus') : t('nonprofitMembership.firstRevision'), icon: valid.value.length ? 'edit' : 'plus',
+    tier: valid.value.length ? 'secondary' : 'primary', variant: valid.value.length ? 'neutral' : 'primary', show: manage.value && !revisionOpen.value, disabled: anyLocked.value || loading.value || correction.value !== null,
     disabledReason: t('nonprofitMembership.correction.closeCorrectionFirst'), run: () => { correction.value = null; revisionOpen.value = true } },
   // Zablokovaná oprava zůstává v „…“ zašedlá s důvodem ze serveru, aby bylo vidět, proč nejde.
   { key: 'fix-identity', label: t('nonprofitMembership.correction.title_identity'), icon: 'edit', tier: 'overflow',
@@ -266,6 +268,7 @@ function claimActions(claim: ClaimRow): RowAction[] {
             <span class="text-neutral-500">{{ t('nonprofitMembership.sinceDate', { date: formatDate(current.effective_from) }) }}</span>
           </dd>
           <dd v-else class="mt-1 text-warning-700" data-field="status-today">{{ t('nonprofitMembership.statusNoneToday', { date: formatDate(today) }) }}</dd>
+          <dd v-if="manage && !valid.length" class="mt-1 text-xs text-neutral-500" data-field="first-revision-hint">{{ t('nonprofitMembership.firstRevisionHint') }}</dd>
           <dd v-for="revision in upcoming" :key="revision.id" class="mt-1 text-warning-700" data-field="status-upcoming">
             {{ t('nonprofitMembership.statusUpcoming', { status: t(`nonprofitMembership.status_${revision.status}`), date: formatDate(revision.effective_from) }) }}
           </dd>
@@ -277,14 +280,6 @@ function claimActions(claim: ClaimRow): RowAction[] {
       <p class="mt-3 text-xs text-neutral-500" data-field="client-ref">{{ t('nonprofitMembership.clientRef', { client: displayLabel }) }}</p>
     </section>
 
-    <!-- První revize nového člena: formulář rovnou na stránce, bez ní se s členem nedá nic dělat. -->
-    <section v-if="manage && identity && !correction && (!valid.length || locks.revision) && !revisionOpen" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" data-section="first-revision">
-      <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitMembership.revisionTitle') }}</h2>
-      <MembershipRevisionForm
-        :supplier="supplier" :can-manage="canManage" :member="identity" :history="history"
-        @done="revisionFinished()" @close="revisionOpen = false" @lock="locks.revision = $event" @dirty="revisionDirty = $event"
-      />
-    </section>
 
     <section class="rounded-lg border border-neutral-200 bg-surface shadow-sm" data-section="history">
       <h2 class="px-5 pb-2 pt-4 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitMembership.history') }}</h2>

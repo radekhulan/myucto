@@ -41983,7 +41983,11 @@
       "settlement": "Úhrada"
     },
     "batchSelectionLimit": "Do hromadného předpisu jde vybrat nejvýše 500 členů. Pro všechny aktivní členy zvolte v hromadném předpisu možnost Všichni aktivní k účetnímu datu.",
-    "closeUnsavedConfirm": "Máte neuložené změny. Zavřít bez uložení?"
+    "closeUnsavedConfirm": "Máte neuložené změny. Zavřít bez uložení?",
+    "listYearShort": "Rok",
+    "listTitleAll": "Všechna označení",
+    "firstRevision": "Zapsat první revizi",
+    "firstRevisionHint": "Bez první revize nejde zapsat předpis. Zvolte Zapsat první revizi."
   },
   "propertyCharges": {
     "account": "Účet (volitelné)",

@@ -8,7 +8,7 @@ Stránka má záložky **Členové**, **Sazby**, **Kontrola s účetnictvím** (
 
 ## 120.1 Založení a historie člena
 
-Zvolte **Nový člen**, vyberte kontakt a vyplňte jedinečné členské číslo. Kontakt i číslo smí v organizaci patřit jen jednomu členovi. Založení člena samo nevytvoří pohledávku ani účetní zápis. V detailu přidejte první revizi členství s datem účinnosti, odkazem na stanovy nebo rozhodnutí a doložením členského vztahu bez vzájemného protiplnění. První revize musí mít stav **Aktivní**.
+Zvolte **Nový člen**, vyberte kontakt a vyplňte jedinečné členské číslo. Kontakt i číslo smí v organizaci patřit jen jednomu členovi. Založení člena samo nevytvoří pohledávku ani účetní zápis. V detailu zvolte **Zapsat první revizi** a přidejte první revizi členství s datem účinnosti, odkazem na stanovy nebo rozhodnutí a doložením členského vztahu bez vzájemného protiplnění. První revize musí mít stav **Aktivní**.
 
 Změny stavu se zapisují jako další revize přes **Změnit stav členství** v detailu člena. Nová revize musí začínat po datu účinnosti poslední platné revize. Původní historie zůstává zachovaná. Budoucí pozastavení nebo ukončení nemění dnešní stav ani starší předpisy. Detail odlišuje dnešní stav od budoucích změn.
 

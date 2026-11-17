@@ -520,18 +520,32 @@ watch(batchLocked, locked => {
 
     <section v-show="tab === 'members'" id="membership-panel-members" class="min-w-0 space-y-3" data-section="members" role="tabpanel" aria-labelledby="membership-tab-members" :aria-busy="loading ? 'true' : 'false'">
       <h2 tabindex="-1" class="sr-only" data-focus="members-heading">{{ t('nonprofitMembership.members') }}</h2>
-      <div class="flex flex-wrap items-start gap-2">
-        <FilterBar class="min-w-0 flex-1" :active-count="filterChips.length" collapsible :chips="filterChips" data-section="member-filters" @clear="clearFilter" @clear-all="clearFilter()">
-          <template #primary><label :class="formLabel">{{ t('nonprofitMembership.listSearch') }}<input v-model="search" :class="field" :disabled="batchLocked" maxlength="160" data-field="member-search" /></label></template>
-          <label :class="formLabel">{{ t('nonprofitMembership.listYear') }}<input v-model="filterYear" :class="field" :disabled="batchLocked" type="number" min="1900" max="9998" step="1" data-field="member-year" /></label>
-          <label :class="formLabel">{{ t('nonprofitMembership.titleKey') }}<SearchableSelect :model-value="titleKey || null" :options="titleOptions" :disabled="batchLocked" :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" data-field="member-title" @update:model-value="titleKey = typeof $event === 'string' ? $event : ''" /></label>
-          <label :class="formLabel">{{ t('nonprofitMembership.listPaymentStatus') }}<select v-model="paymentStatus" :class="field" :disabled="batchLocked" data-field="member-payment-status"><option v-for="status in ['all','paid','unpaid','unproven','none'] as const" :key="status" :value="status">{{ t(`nonprofitMembership.listStatus_${status}`) }}</option></select></label>
-        </FilterBar>
-        <div class="hidden items-center gap-2 md:flex">
-          <ColumnPicker :ctrl="tbl" />
-          <DensityToggle :ctrl="tbl" />
+      <!-- Lišta filtrů jako v seznamu faktur: hledání s lupou, ostatní filtry kompaktně v jednom řádku
+           (na telefonu za tlačítkem Filtry), sloupce a hustota vpravo. -->
+      <FilterBar :active-count="filterChips.length" :chips="filterChips" data-section="member-filters" @clear="clearFilter" @clear-all="clearFilter()">
+        <template #primary>
+          <div class="relative min-w-56 flex-1 max-md:min-w-0 max-md:basis-full">
+            <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
+            </svg>
+            <input v-model="search" type="search" :placeholder="t('nonprofitMembership.listSearch')" :aria-label="t('nonprofitMembership.listSearch')" :disabled="batchLocked" maxlength="160" data-field="member-search"
+              class="h-9 w-full rounded-md border border-neutral-300 pl-9 pr-3 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 disabled:opacity-50 max-md:h-10 max-md:text-base" />
+          </div>
+        </template>
+        <input v-model="filterYear" type="number" min="1900" max="9998" step="1" :placeholder="t('nonprofitMembership.listYearShort')" :aria-label="t('nonprofitMembership.listYear')" :title="t('nonprofitMembership.listYear')" :disabled="batchLocked" data-field="member-year"
+          class="h-9 w-28 rounded-md border border-neutral-300 bg-surface px-3 text-sm tabular-nums disabled:opacity-50" />
+        <div class="min-w-48 max-w-xs flex-1">
+          <SearchableSelect :model-value="titleKey || null" :options="titleOptions" :disabled="batchLocked" :placeholder="t('nonprofitMembership.listTitleAll')" :aria-label="t('nonprofitMembership.titleKey')" :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" data-field="member-title" @update:model-value="titleKey = typeof $event === 'string' ? $event : ''" />
         </div>
-      </div>
+        <select v-model="paymentStatus" :aria-label="t('nonprofitMembership.listPaymentStatus')" :title="t('nonprofitMembership.listPaymentStatus')" :disabled="batchLocked" data-field="member-payment-status"
+          class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm disabled:opacity-50">
+          <option v-for="status in ['all','paid','unpaid','unproven','none'] as const" :key="status" :value="status">{{ t(`nonprofitMembership.listStatus_${status}`) }}</option>
+        </select>
+        <template #actions>
+          <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+          <DensityToggle class="hidden md:block" :ctrl="tbl" />
+        </template>
+      </FilterBar>
       <p v-if="paymentStatus !== 'all'" class="text-xs text-neutral-500" data-section="status-year-help">{{ t('nonprofitMembership.listStatusNeedsYear') }}</p>
       <div v-if="titlesError" role="alert" :class="[errorBox, 'flex flex-wrap items-center gap-2']" data-section="titles-error">
         <span>{{ t('nonprofitMembership.titlesError') }}</span>

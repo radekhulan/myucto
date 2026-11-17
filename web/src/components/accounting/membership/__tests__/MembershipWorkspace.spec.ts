@@ -361,9 +361,16 @@ describe('Membership workspace', () => {
     w.unmount()
   })
 
-  it('hides the filters behind the shared toggle like other lists', async () => {
+  it('shows the few filters inline in the shared filter bar, search with a placeholder instead of a label', async () => {
     const w=mounted();await flushPromises()
-    expect(w.findComponent(FilterBar).props('collapsible')).toBe(true)
+    // Tři filtry se vejdou do řádku (na telefonu je schová lišta sama); sloupce a hustota jsou v liště vpravo.
+    expect(w.findComponent(FilterBar).props('collapsible')).toBeFalsy()
+    const search = w.get('[data-field="member-search"]')
+    expect(search.attributes('placeholder')).toBe(cs.nonprofitMembership.listSearch)
+    expect(search.attributes('aria-label')).toBe(cs.nonprofitMembership.listSearch)
+    expect(w.get('[data-field="member-year"]').attributes('aria-label')).toBe(cs.nonprofitMembership.listYear)
+    expect(w.get('[data-field="member-payment-status"]').attributes('aria-label')).toBe(cs.nonprofitMembership.listPaymentStatus)
+    expect(w.findComponent(FilterBar).findComponent({ name: 'ColumnPicker' }).exists()).toBe(true)
     w.unmount()
   })
 
