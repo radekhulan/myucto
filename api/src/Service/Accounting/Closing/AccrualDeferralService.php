@@ -12,6 +12,7 @@ use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
 use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 
@@ -632,7 +633,8 @@ final class AccrualDeferralService
      * Doklad se k období odkladu přiřazuje stejným datem, jakým ho rozpuštění vybírá
      * ({@see deferredByClosingSql()}): přijatá faktura datem nákladu
      * (`effective_cost_date`, {@see prepaidExpenseReleaseRows()}), výnosový doklad datem
-     * kteréhokoli svého živého zápisu ({@see deferredRevenueRows()}).
+     * svého přímého zápisu ({@see deferredRevenueRows()}); zápisy skupiny zaúčtování výběr
+     * neurčují.
      *
      * @param 'deferred_revenue_accrual'|'prepaid_expense_accrual' $sourceType zápis odkladu
      * @param array<string,mixed> $cache
@@ -876,9 +878,11 @@ final class AccrualDeferralService
 
     /**
      * Kombinace dimenzí výsledkových řádků (5xx, 6xx) živých zápisů dokladů po účtech,
-     * dávkově pro všechny doklady. Uloží je do `$cache` pod klíčem dokladu (i prázdné, ať se
-     * doklad bez zápisu nenačítá znovu) spolu s daty zápisů. Kombinace s nulovým obratem
-     * zůstává (váha 0): je kandidátem párování položky, do poměrného dělení nevstupuje.
+     * dávkově pro všechny doklady. Zápisy dokladu určuje skupina zaúčtování
+     * ({@see DocumentPostingGroup::activeMany()}): přímý zápis a zápisy převzatého dokladu. Uloží je
+     * do `$cache` pod klíčem dokladu (i prázdné, ať se doklad bez zápisu nenačítá znovu)
+     * spolu s daty zápisů. Kombinace s nulovým obratem zůstává (váha 0): je kandidátem
+     * párování položky, do poměrného dělení nevstupuje.
      *
      * @param 'invoice'|'purchase_invoice'|'nonprofit_membership' $docType
      * @param list<int> $docIds id dokladů, u členského předpisu id jeho zápisu
@@ -890,21 +894,41 @@ final class AccrualDeferralService
         if ($docIds === []) {
             return;
         }
+        // Zápis => doklad. Fakturu účtuje přímý zápis se zdrojem dokladu i zápisy, které
+        // doklad vlastní ve skupině zaúčtování (převod z programu, který účtuje po řádcích);
+        // informativní vazby „Souvisí“ zaúčtováním nejsou. Členský předpis je zápis sám.
+        // Datum pro starý odklad ({@see markLegacyDeferrals()}) jen z hlavičky přímého zápisu,
+        // podle kterého doklad vybírá i rozpuštění; převzatý doklad ho může mít bez řádku 5xx/6xx.
+        $entryDocs = [];
+        $dates = [];
+        if ($docType === 'nonprofit_membership') {
+            $entryDocs = array_combine($docIds, $docIds);
+        } else {
+            foreach (array_chunk($docIds, 500) as $chunk) {
+                foreach ((new DocumentPostingGroup($this->db))->activeMany($supplierId, $docType, $chunk) as $docId => $entries) {
+                    foreach ($entries as $entry) {
+                        $entryDocs[(int) $entry['id']] = (int) $docId;
+                        if ((string) $entry['source_type'] === $docType && (int) $entry['source_id'] === (int) $docId) {
+                            $dates[(int) $docId][(string) $entry['entry_date']] = true;
+                        }
+                    }
+                }
+            }
+        }
         $lines = [];
         // Definice účtu (rodič, daňová uznatelnost) k datu zápisu dokladu, jako přesměrování
         // na jedinou analytiku při zaúčtování ({@see PostingService::singleAnalyticRedirects()}).
         $definitions = AccountDefinitionRepository::journalJoin($supplierId);
-        foreach (array_chunk($docIds, 500) as $chunk) {
+        foreach (array_chunk(array_keys($entryDocs), 500) as $chunk) {
             $marks = implode(',', array_fill(0, count($chunk), '?'));
-            [$docSql, $docParams] = $docType === 'nonprofit_membership'
-                ? ["je.id AS doc_id, je.entry_date FROM journal_entries je WHERE je.supplier_id = ? AND je.id IN ({$marks})", [$supplierId, ...$chunk]]
-                : ["je.source_id AS doc_id, je.entry_date FROM journal_entries je WHERE je.supplier_id = ? AND je.source_type = ? AND je.source_id IN ({$marks})", [$supplierId, $docType, ...$chunk]];
-            // Nejdřív živé zápisy dokladů (idx_je_supplier_source), potom jejich řádky
+            // Nejdřív živé zápisy podle primárního klíče, potom jejich řádky
             // (idx_jel_supplier_entry), ať plán nezačíná u řádků deníku celé firmy.
             $stmt = $this->db->pdo()->prepare(
-                "SELECT l.id, l.side, l.signed_amount, a.account_code, e.doc_id, e.entry_date,
+                "SELECT l.id, l.side, l.signed_amount, a.account_code, e.entry_id, e.entry_date,
                         CASE WHEN a.tax_deductibility = 'deductible' THEN p.account_code END AS parent_code
-                   FROM (SELECT je.id AS entry_id, {$docSql}
+                   FROM (SELECT je.id AS entry_id, je.entry_date
+                           FROM journal_entries je
+                          WHERE je.supplier_id = ? AND je.id IN ({$marks})
                             AND je.posted_at IS NOT NULL
                             AND je.reversed_by IS NULL) e
                    JOIN journal_entry_lines l ON l.supplier_id = ? AND l.entry_id = e.entry_id
@@ -913,8 +937,9 @@ final class AccrualDeferralService
                   WHERE a.account_code LIKE '5%' OR a.account_code LIKE '6%'
                   ORDER BY l.id"
             );
-            $stmt->execute([...$docParams, $supplierId]);
+            $stmt->execute([$supplierId, ...$chunk, $supplierId]);
             foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $line) {
+                $line['doc_id'] = $entryDocs[(int) $line['entry_id']];
                 $lines[] = $line;
             }
         }
@@ -926,7 +951,6 @@ final class AccrualDeferralService
         $splitOrigins = $repo->lineSplitOrigins($supplierId, $lineIds);
 
         $groups = [];
-        $dates = [];
         $analytics = [];
         foreach ($lines as $line) {
             $id = (int) $line['id'];
@@ -937,7 +961,9 @@ final class AccrualDeferralService
                 'dimension_split_origins' => $splitOrigins[$id] ?? [],
             ], static fn (array $value): bool => $value !== []);
             $doc = (int) $line['doc_id'];
-            $dates[$doc][(string) $line['entry_date']] = true;
+            if ($docType === 'nonprofit_membership') {
+                $dates[$doc][(string) $line['entry_date']] = true;
+            }
             $account = (string) $line['account_code'];
             // Jen daňové analytiky syntetiky (nedaňová analytika z builderu ne), jako
             // PostingService::singleAnalyticMap. Další jeho výjimky (vyhrazené analytiky) se

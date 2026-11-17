@@ -652,6 +652,52 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
         self::assertSame(['501'], array_map('strval', array_keys($preview['by_account'])));
     }
 
+    /**
+     * Převzatá přijatá faktura nemá vlastní zápis: účtuje ji ruční zápis ve skupině
+     * zaúčtování dokladu (převod z jiného programu). Odklad i rozpuštění nesou střediska
+     * a poměr z tohoto zápisu. Zápis navázaný jen informativní vazbou „Souvisí“ (oprava,
+     * úhrada) zaúčtováním dokladu není a do poměru nevstupuje, stejně jako stornovaný člen
+     * skupiny.
+     */
+    public function testDeferralOfDocumentPostedByOwnedEntryCarriesItsCostCenters(): void
+    {
+        [$center, $a, $b] = $this->costCenters();
+        $c = (int) Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Dimension\DimensionService::class)
+            ->createValue($this->supplierId, $center, ['code' => 'S-C', 'name' => 'Středisko C'])['id'];
+        $pi = $this->purchase('PF-2091-OWNED', 36600.00, self::YEAR . '-11-15');
+        $this->item($pi, 36600.00, '2091-07-01', '2092-06-30', '548');
+        $opts = ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId];
+        $owned = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '548', 'side' => 'debit', 'amount' => 24400.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '548', 'side' => 'debit', 'amount' => 12200.00, 'dimensions' => [$center => $b]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 36600.00],
+        ], $opts);
+        $reversed = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '548', 'side' => 'debit', 'amount' => 5000.00, 'dimensions' => [$center => $c]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 5000.00],
+        ], $opts);
+        (new \MyInvoice\Service\Accounting\DocumentPostingGroup($this->db))->attach($this->supplierId, 'purchase_invoice', $pi, [$owned, $reversed]);
+        $this->posting->reverse($this->supplierId, $reversed);
+        $related = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '548', 'side' => 'debit', 'amount' => 5000.00, 'dimensions' => [$center => $c]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 5000.00],
+        ], $opts);
+        (new \MyInvoice\Repository\JournalEntryDocumentLinkRepository($this->db))->add($related, $this->supplierId, 'purchase_invoice', $pi, null, $this->userId);
+
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        // 36 600 × 182/366 = 18 200 v poměru zápisu 2 : 1.
+        $defer = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrual($this->periodId));
+        $release = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId));
+        self::assertNotNull($defer);
+        self::assertNotNull($release);
+        self::assertSame([['548', 'credit', 6066.67, $b], ['548', 'credit', 12133.33, $a]], $this->expenseByCenter((int) $defer['id'], $center));
+        self::assertSame([['548', 'debit', 6066.67, $b], ['548', 'debit', 12133.33, $a]], $this->expenseByCenter((int) $release['id'], $center));
+        self::assertEqualsWithDelta(0.0, $this->balance381AsOf('2092-12-31'), 0.005);
+    }
+
     /** Verzovaná změna účtu od data (stejná cesta jako úprava osnovy v aplikaci). */
     private function changeAccount(string $code, string $from, array $changes): void
     {

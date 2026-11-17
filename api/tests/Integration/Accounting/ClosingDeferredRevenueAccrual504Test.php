@@ -686,19 +686,36 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
     }
 
     /**
+     * Převzatá přijatá faktura: náklad s osami činnosti nese ruční zápis vlastněný dokladem
+     * ve skupině zaúčtování, vlastní zápis se zdrojem dokladu nemá. Odklad převezme osy
+     * z tohoto zápisu; bez nich by ho politika os ve 504 nepřijala.
+     */
+    public function testPrepaidDeferralOfImportedDocumentCarriesActivityAxesOfOwnedEntry(): void
+    {
+        $run = $this->postedPrepaidAndRun(owned: true);
+
+        self::assertNotNull($run['entry_id']);
+        $this->assertCarriesAxes((int) $run['entry_id'], '518', 'credit', 18200.00);
+    }
+
+    /**
      * Zaúčtovaná přijatá faktura s nákladem na 518 (osy hlavní činnosti) a obdobím přes
      * rozvahový den; rok se uzavírá a krok „Časové rozlišení nákladů" proběhne.
      *
      * @return array<string,mixed> výsledek kroku
      */
-    private function postedPrepaidAndRun(): array
+    private function postedPrepaidAndRun(bool $owned = false): array
     {
-        $this->postedPrepaid();
+        $this->postedPrepaid($owned);
         return $this->closing->runPrepaidExpenseAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
     }
 
-    /** Zaúčtovaná přijatá faktura z {@see postedPrepaidAndRun()}, rok ve stavu uzavírání. */
-    private function postedPrepaid(): void
+    /**
+     * Zaúčtovaná přijatá faktura z {@see postedPrepaidAndRun()}, rok ve stavu uzavírání.
+     * `$owned`: zápis nákladu jako po převodu z jiného programu (ruční zápis ve skupině
+     * zaúčtování dokladu).
+     */
+    private function postedPrepaid(bool $owned = false): void
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -724,10 +741,13 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
                  expense_account_code, accrual_from, accrual_to)
              VALUES (?, "Roční pojistné", 1, "ks", 36600, ?, 0, 36600, 0, 36600, 0, "518", ?, ?)'
         )->execute([$purchaseId, $this->vatRateId, $date, (self::YEAR + 1) . '-06-30']);
-        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $purchaseId, [
+        $entryId = $this->posting->postDocument($this->supplierId, $owned ? 'manual' : 'purchase_invoice', $owned ? null : $purchaseId, [
             ['account_code' => '518', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => $this->axes, 'dimension_origins' => $this->origins()],
             ['account_code' => '321', 'side' => 'credit', 'amount' => 36600.00],
         ], ['entry_date' => $date, 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        if ($owned) {
+            (new \MyInvoice\Service\Accounting\DocumentPostingGroup($this->db))->attach($this->supplierId, 'purchase_invoice', $purchaseId, [$entryId]);
+        }
         $pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
     }
 

@@ -533,6 +533,77 @@ final class ClosingDeferredRevenueAccrualTest extends TestCase
         self::assertSame(['602|-' => ['credit', 1_820_000]], $this->revenueByCenter((int) $release['id'], $center));
     }
 
+    /**
+     * Faktura zaúčtovaná dvěma zápisy skupiny zaúčtování (jako po převodu, který účtuje
+     * doklad po řádcích): přímý zápis nese výnos na středisku A, další zápis vlastněný
+     * dokladem výnos na středisku B. Odklad i rozpuštění se dělí podle obou zápisů.
+     */
+    public function testDeferralOfInvoicePostedByTwoGroupEntriesCarriesBothCostCenters(): void
+    {
+        [$center, $a, $b] = $this->centers();
+        $invoiceId = $this->invoice('20910031', 36600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $opts = ['entry_date' => self::YEAR . '-07-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId];
+        $direct = $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 24400.00],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 24400.00, 'dimensions' => [$center => $a]],
+        ], $opts);
+        $owned = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 12200.00],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 12200.00, 'dimensions' => [$center => $b]],
+        ], $opts);
+        (new \MyInvoice\Service\Accounting\DocumentPostingGroup($this->db))->attach($this->supplierId, 'invoice', $invoiceId, [$direct, $owned]);
+
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        // 36 600 × 182/366 = 18 200 v poměru zápisů 2 : 1.
+        $defer = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($this->periodId));
+        $release = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId));
+        self::assertNotNull($defer);
+        self::assertNotNull($release);
+        self::assertSame([
+            '602|' . $a => ['debit', 1_213_333],
+            '602|' . $b => ['debit', 606_667],
+        ], $this->revenueByCenter((int) $defer['id'], $center));
+        self::assertSame([
+            '602|' . $a => ['credit', 1_213_333],
+            '602|' . $b => ['credit', 606_667],
+        ], $this->revenueByCenter((int) $release['id'], $center));
+        self::assertEqualsWithDelta(0.0, $this->balance384AsOf('2092-12-31'), 0.005);
+    }
+
+    /**
+     * Rozpuštění vybírá výnosový doklad podle data přímého zápisu, a stejné datum proto
+     * rozhoduje i o starém odkladu bez dimenzí (markLegacyDeferrals). Člen skupiny
+     * zaúčtování s jiným datem do dat dokladu nepatří; přímý zápis převzatého dokladu
+     * přitom nemusí mít výnosový řádek (převod účtuje DPH a výnos zvlášť).
+     */
+    public function testEntryDatesOfInvoiceComeOnlyFromDirectEntry(): void
+    {
+        [$center, $a] = $this->centers();
+        $invoiceId = $this->invoice('20910032', 36600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $opts = ['posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId];
+        $direct = $this->posting->postDocument($this->supplierId, 'invoice', $invoiceId, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 7686.00],
+            ['account_code' => '343', 'side' => 'credit', 'amount' => 7686.00],
+        ], $opts + ['entry_date' => self::YEAR . '-07-01']);
+        $owned = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '311', 'side' => 'debit', 'amount' => 36600.00],
+            ['account_code' => '602', 'side' => 'credit', 'amount' => 36600.00, 'dimensions' => [$center => $a]],
+        ], $opts + ['entry_date' => self::YEAR . '-03-01']);
+        (new \MyInvoice\Service\Accounting\DocumentPostingGroup($this->db))->attach($this->supplierId, 'invoice', $invoiceId, [$direct, $owned]);
+
+        $cache = [];
+        Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Closing\AccrualDeferralService::class)
+            ->preloadDeferredRevenueAllocations($this->supplierId, [['source' => 'invoice', 'invoice_id' => $invoiceId]], $cache);
+
+        self::assertSame([self::YEAR . '-07-01'], $cache['invoice:' . $invoiceId]['entry_dates']);
+        self::assertCount(1, $cache['invoice:' . $invoiceId]['groups']['602'], 'Dimenze nese vlastněný zápis.');
+    }
+
     /** @return array{0:int,1:int,2:int,3:int} typ střediska a hodnoty A, B, C */
     private function centers(): array
     {
