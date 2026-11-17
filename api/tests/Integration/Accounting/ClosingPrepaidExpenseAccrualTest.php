@@ -826,6 +826,26 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
     }
 
     /**
+     * #384: období na řádku přijaté faktury se změní po uzavření knih. Rozpuštění zrcadlí
+     * zaúčtovaný odklad ze záznamu kroku, 381 se vynuluje.
+     */
+    public function testReleaseMirrorsPostedDeferralAfterAccrualChange(): void
+    {
+        $pi = $this->purchase('PF-2091-ZMENA', 36600.00, self::YEAR . '-11-15');
+        $itemId = $this->item($pi, 36600.00, '2091-07-01', '2092-06-30', '548');
+        $this->postPurchaseExpense($pi, '548', 36600.00, self::YEAR . '-11-15');
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->db->pdo()->prepare('UPDATE purchase_invoice_items SET accrual_to = ? WHERE id = ?')->execute(['2092-12-31', $itemId]);
+
+        $open = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $lines = $this->entryLines((int) $open['prepaid_expense_release_entry_id']);
+        self::assertEqualsWithDelta(18200.00, $this->sideAmount($lines, '548', 'debit'), 0.001);
+        self::assertEqualsWithDelta(0.0, $this->balance381AsOf('2092-12-31'), 0.005);
+    }
+
+    /**
      * Odklad zaúčtovaný mimo uzávěrku (faktura rozúčtovaná rovnou na 381, rozpuštění ručním
      * interním dokladem v N+1, typicky převzatá data) openNext nerozpouští podruhé.
      */
@@ -1055,8 +1075,9 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
     }
 
     /**
-     * Uzávěrka zaúčtovaná před opravou odložila jen základ a neuložila ocenění položek.
-     * Rozpuštění musí vyjít z téhož základu, jinak by 381 přečerpalo o daň.
+     * Uzávěrka zaúčtovaná před opravou odložila jen základ a neuložila ocenění položek ani
+     * rozpad odkladu po položkách. Rozpuštění musí vyjít z téhož základu, jinak by 381
+     * přečerpalo o daň.
      */
     public function testReleaseOfDeferralClosedWithoutCostSnapshotStaysOnBase(): void
     {
@@ -1067,7 +1088,7 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
         $this->driveCloseWithAccrual();
         $this->db->pdo()->prepare(
             "UPDATE accounting_closing_steps
-                SET payload = JSON_REMOVE(payload, '$.prepaid_expense_accrual.item_costs')
+                SET payload = JSON_REMOVE(payload, '$.prepaid_expense_accrual.item_costs', '$.prepaid_expense_accrual.items')
               WHERE supplier_id = ? AND period_id = ? AND step_key = 'deferrals'"
         )->execute([$this->supplierId, $this->periodId]);
 

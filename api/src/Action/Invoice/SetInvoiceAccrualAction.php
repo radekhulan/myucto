@@ -8,8 +8,9 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
-use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Accounting\Closing\AccrualDeferralService;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -20,8 +21,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  * Smí i u vystavené a zaúčtované faktury: zápis faktury se nemění (výnos jde celý do
  * dne plnění), období čte až uzávěrka. Proto netřeba force-edit s přeúčtováním jako
- * u změny částek. Odmítá se jen doklad v UZAVŘENÉM účetním období — jeho odklad už
- * je součástí uzavřených čísel.
+ * u změny částek. Odmítá se (409) doklad v uzavřeném, revidovaném či schváleném období
+ * a v uzavíraném období se zaúčtovaným odkladem: odklad už je součástí uzávěrky a změna
+ * by rozjela jeho rozpuštění ({@see AccrualDeferralService::accrualChangeBlocker()}).
  *
  * Body: { items: [{ id: number, accrual_from: "RRRR-MM-DD"|null, accrual_to: "RRRR-MM-DD"|null }] }
  * Řádky, které v těle nejsou, se nemění; vynechaný klíč řádku drží uloženou hodnotu.
@@ -30,7 +32,7 @@ final class SetInvoiceAccrualAction
 {
     public function __construct(
         private readonly InvoiceRepository $repo,
-        private readonly AccountingPeriodRepository $periods,
+        private readonly AccrualDeferralService $accruals,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
@@ -53,15 +55,6 @@ final class SetInvoiceAccrualAction
             return Json::error($response, 'not_editable', 'Stornovaný doklad nelze časově rozlišit.', 409);
         }
         $docDate = (string) ($existing['tax_date'] ?? $existing['issue_date'] ?? '');
-        $period = $docDate !== '' ? $this->periods->findForDate($supplierId, substr($docDate, 0, 10)) : null;
-        if ($period !== null && (string) $period['status'] === 'closed') {
-            return Json::error(
-                $response,
-                'period_closed',
-                'Faktura patří do uzavřeného účetního období, její časové rozlišení už je součástí uzávěrky.',
-                409,
-            );
-        }
 
         $body = (array) ($request->getParsedBody() ?? []);
         $items = $body['items'] ?? null;
@@ -109,15 +102,28 @@ final class SetInvoiceAccrualAction
             return Json::error($response, 'validation_failed', 'Neplatné období časového rozlišení.', 400, ['fields' => $errors]);
         }
 
-        $update = $this->db->pdo()->prepare('UPDATE invoice_items SET accrual_from = ?, accrual_to = ? WHERE id = ? AND invoice_id = ?');
-        $log = [];
-        foreach ($changes as $itemId => [$from, $to]) {
-            $before = [$known[$itemId]['accrual_from'] ?? null, $known[$itemId]['accrual_to'] ?? null];
-            if ($before === [$from, $to]) {
-                continue;
+        // Kontrola období a změna v jedné transakci pod zámkem období firmy: souběžná uzávěrka
+        // nesmí mezi nimi zaúčtovat odklad z původního období.
+        $guard = new DimensionPeriodGuard($this->db);
+        [$blocked, $log] = $guard->transaction(function () use ($guard, $supplierId, $id, $docDate, $changes, $known): array {
+            $blocked = $this->accruals->accrualChangeBlocker($supplierId, 'invoice', $id, $docDate, $guard->lockPeriods($supplierId));
+            if ($blocked !== null) {
+                return [$blocked, []];
             }
-            $update->execute([$from, $to, $itemId, $id]);
-            $log[] = ['item_id' => $itemId, 'from' => $before, 'to' => [$from, $to]];
+            $update = $this->db->pdo()->prepare('UPDATE invoice_items SET accrual_from = ?, accrual_to = ? WHERE id = ? AND invoice_id = ?');
+            $log = [];
+            foreach ($changes as $itemId => [$from, $to]) {
+                $before = [$known[$itemId]['accrual_from'] ?? null, $known[$itemId]['accrual_to'] ?? null];
+                if ($before === [$from, $to]) {
+                    continue;
+                }
+                $update->execute([$from, $to, $itemId, $id]);
+                $log[] = ['item_id' => $itemId, 'from' => $before, 'to' => [$from, $to]];
+            }
+            return [null, $log];
+        });
+        if ($blocked !== null) {
+            return Json::error($response, $blocked[0], $blocked[1], 409);
         }
 
         if ($log !== []) {

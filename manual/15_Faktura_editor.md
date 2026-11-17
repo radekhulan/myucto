@@ -733,8 +733,9 @@ Obsahuje-li text položky období (například `období 28. 9. 2026 – 28. 9. 2
 
 U vystavené a zaúčtované faktury se období nastaví v jejím **detailu**: stejný odkaz **Časové
 rozlišení** nad položkami otevře pole **Od** a **Do** u všech řádků a tlačítko **Uložit časové
-rozlišení** je uloží. Zápis faktury v deníku se tím nemění. Fakturu z uzavřeného účetního
-období takto upravit nelze.
+rozlišení** je uloží. Zápis faktury v deníku se tím nemění. Fakturu z uzavřeného, revidovaného či
+schváleného účetního období takto upravit nelze. Během uzávěrky jde období změnit jen do
+zaúčtování kroku **Časové rozlišení**; potom aplikace změnu odmítne, dokud krok nevrátíte.
 
 Období se přenáší ze zálohové faktury na vyúčtovací fakturu. Přes API se nastaví poli
 `accrual_from` a `accrual_to` u položky, u vystavené faktury endpointem

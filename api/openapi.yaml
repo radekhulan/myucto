@@ -5844,7 +5844,10 @@ paths:
         Smí i u vystavené a zaúčtované faktury: zápis faktury se nemění, období čte až
         uzávěrka (časové rozlišení výnosů příštích období, účet 384). Řádky, které
         v těle nejsou, zůstanou beze změny; `null` v obou datech rozlišení zruší.
-        Stornovaný doklad a faktura v uzavřeném účetním období vrací 409.
+        Stornovaný doklad vrací 409 `not_editable`. Faktura, jejíž datum nebo zápis leží
+        v uzavřeném, revidovaném či schváleném účetním období, vrací 409 `period_closed`;
+        v uzavíraném období, jehož krok Časové rozlišení už zaúčtoval odklad výnosů,
+        409 `accrual_deferral_posted`.
 
         Částečná aktualizace (viz úvod). V `items[]` je řádek bez `accrual_from` i `accrual_to` bez
         účinku. Je-li poslána jen jedna hranice, doplní se uloženou druhou; `null` v obou vymaže
@@ -5875,7 +5878,7 @@ paths:
               schema: { $ref: '#/components/schemas/Invoice' }
         '400': { description: Neplatné období nebo řádek nepatří k faktuře (validation_failed) }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: Stornovaný doklad nebo faktura v uzavřeném účetním období }
+        '409': { description: "Stornovaný doklad (not_editable), faktura v uzavřeném, revidovaném či schváleném období (period_closed) nebo v uzavíraném období se zaúčtovaným odkladem (accrual_deferral_posted)" }
 
   /api/v1/invoices/{id}/mark-paid:
     parameters:

@@ -678,6 +678,169 @@ final class ClosingDeferredRevenueAccrualTest extends TestCase
         self::assertEqualsWithDelta(0.0, $this->balance384AsOf('2092-12-31'), 0.005);
     }
 
+    /**
+     * #384, scénář 1: změna období výnosu v revidovaném či schváleném roce se odmítá stejně
+     * jako v uzavřeném; v otevřeném roce projde.
+     */
+    public function testAccrualChangeIsRejectedInReviewedAndApprovedPeriod(): void
+    {
+        $invoiceId = $this->invoice('20910050', 36600.00, self::YEAR . '-07-01');
+        $itemId = $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $this->postInvoice($invoiceId, 36600.00, self::YEAR . '-07-01');
+
+        self::assertSame(200, $this->putAccrual($invoiceId, $itemId, '2091-07-01', '2092-03-31')['status']);
+        foreach (['reviewed', 'approved', 'closed'] as $status) {
+            $this->db->pdo()->prepare('UPDATE accounting_periods SET status = ? WHERE id = ?')->execute([$status, $this->periodId]);
+            $res = $this->putAccrual($invoiceId, $itemId, '2091-07-01', '2092-12-31');
+            self::assertSame(409, $res['status'], $status);
+            self::assertSame('period_closed', $res['body']['error']['code'] ?? $res['body']['code'] ?? null, $status . ': ' . json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        }
+        self::assertSame(['2091-07-01', '2092-03-31'], $this->accrualOf($itemId));
+    }
+
+    /**
+     * #384, scénář 2: během uzávěrky, jakmile krok Časové rozlišení zaúčtoval odklad, se
+     * období na řádcích měnit nesmí; před zaúčtováním kroku projde.
+     */
+    public function testAccrualChangeIsRejectedOnceClosingPostedDeferral(): void
+    {
+        $invoiceId = $this->invoice('20910051', 36600.00, self::YEAR . '-07-01');
+        $itemId = $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $this->postInvoice($invoiceId, 36600.00, self::YEAR . '-07-01');
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        self::assertSame(200, $this->putAccrual($invoiceId, $itemId, '2091-07-01', '2092-06-30')['status']);
+
+        $this->closing->runDeferredRevenueAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $res = $this->putAccrual($invoiceId, $itemId, '2091-07-01', '2092-12-31');
+
+        self::assertSame(409, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(['2091-07-01', '2092-06-30'], $this->accrualOf($itemId));
+    }
+
+    /**
+     * #384, scénář 2: období na řádku se po zaúčtování kroku změnilo mimo pojistku akce.
+     * Uzavření knih se zastaralým odkladem neprojde, po novém spuštění kroku ano.
+     */
+    public function testCloseBooksRejectsDeferralStaleAgainstDocuments(): void
+    {
+        $invoiceId = $this->invoice('20910052', 36600.00, self::YEAR . '-07-01');
+        $itemId = $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $this->postInvoice($invoiceId, 36600.00, self::YEAR . '-07-01');
+        $this->driveCloseWithAccrual();
+        $this->db->pdo()->prepare('UPDATE invoice_items SET accrual_to = ? WHERE id = ?')->execute(['2092-03-31', $itemId]);
+
+        try {
+            $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+            self::fail('Zastaralý odklad nesmí projít uzavřením knih.');
+        } catch (\MyInvoice\Service\Accounting\Closing\ClosingException $e) {
+            self::assertSame('deferrals_stale', $e->errorCode);
+        }
+
+        $this->closing->runDeferredRevenueAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        self::assertSame('closed', (string) $this->periods->findById($this->supplierId, $this->periodId)['status']);
+    }
+
+    /**
+     * #384, scénář 3: krok potvrzený bez zápisu v přerušené uzávěrce se při novém startu vrací
+     * k potvrzení, a doklad zaúčtovaný mezitím uzavření knih bez odkladu nepustí.
+     */
+    public function testRestartedClosingDoesNotKeepDeferralConfirmedWithoutEntry(): void
+    {
+        $sid = $this->supplierId;
+        $pid = $this->periodId;
+        $this->closing->start($sid, $pid, $this->rv(), $this->meta());
+        $this->closing->confirmStep($sid, $pid, 'deferrals', 'done', null, $this->rv(), $this->meta());
+        $this->closing->abort($sid, $pid, $this->rv(), $this->meta());
+        $invoiceId = $this->invoice('20910053', 36600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $this->postInvoice($invoiceId, 36600.00, self::YEAR . '-07-01');
+
+        $this->closing->start($sid, $pid, $this->rv(), $this->meta());
+        $stmt = $this->db->pdo()->prepare("SELECT status FROM accounting_closing_steps WHERE period_id = ? AND step_key = 'deferrals'");
+        $stmt->execute([$pid]);
+        self::assertSame('pending', (string) $stmt->fetchColumn(), 'Nový start vrací potvrzení kroku bez zápisu.');
+
+        $this->closing->abort($sid, $pid, $this->rv(), $this->meta());
+        $this->driveCloseWithAccrual(false);
+        try {
+            $this->closing->closeBooks($sid, $pid, $this->rv(), $this->meta());
+            self::fail('Krok potvrzený bez zápisu nesmí pustit doklad s obdobím přes rozvahový den.');
+        } catch (\MyInvoice\Service\Accounting\Closing\ClosingException $e) {
+            self::assertSame('deferrals_stale', $e->errorCode);
+        }
+    }
+
+    /**
+     * #384, scénář 1 (a změny, které pojistka nepokryje): po zaúčtování odkladu se období na
+     * řádku změní. Rozpuštění zrcadlí zaúčtovaný odklad ze záznamu kroku, 384 se vynuluje.
+     */
+    public function testReleaseMirrorsPostedDeferralAfterAccrualChange(): void
+    {
+        $invoiceId = $this->invoice('20910054', 36600.00, self::YEAR . '-07-01');
+        $itemId = $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $this->postInvoice($invoiceId, 36600.00, self::YEAR . '-07-01');
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->db->pdo()->prepare('UPDATE invoice_items SET accrual_to = ? WHERE id = ?')->execute(['2092-12-31', $itemId]);
+
+        $open = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $release = $this->entryLines((int) $open['deferred_revenue_release_entry_id']);
+        self::assertEqualsWithDelta(18200.00, $this->sideAmount($release, '602', 'credit'), 0.001);
+        self::assertEqualsWithDelta(0.0, $this->balance384AsOf('2092-12-31'), 0.005);
+    }
+
+    /**
+     * #384, scénář 4: faktura odložená uzávěrkou se před openNext přeúčtuje (storno a nový
+     * zápis v dalším roce). Rozpuštění ji najde podle záznamu kroku a 384 nezůstane viset.
+     */
+    public function testReleaseOfInvoiceRepostedIntoNextYear(): void
+    {
+        $invoiceId = $this->invoice('20910055', 36600.00, self::YEAR . '-11-01');
+        $this->item($invoiceId, 36600.00, '2091-11-01', '2092-10-31');
+        $this->postInvoice($invoiceId, 36600.00, self::YEAR . '-11-01');
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $original = $this->journal->findBySource($this->supplierId, 'invoice', $invoiceId);
+        self::assertNotNull($original);
+        $this->posting->reverse($this->supplierId, (int) $original['id'], ['entry_date' => '2092-01-15', 'user_id' => $this->userId, 'posted_by' => $this->userId]);
+        $this->postInvoice($invoiceId, 36600.00, '2092-01-15');
+
+        $open = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        // 1. 1. – 31. 10. 2092 = 305 z 366 dnů → 36 600 × 305/366 = 30 500 Kč.
+        self::assertNotNull($open['deferred_revenue_release_entry_id']);
+        $release = $this->entryLines((int) $open['deferred_revenue_release_entry_id']);
+        self::assertEqualsWithDelta(30500.00, $this->sideAmount($release, '384', 'debit'), 0.001);
+        self::assertEqualsWithDelta(0.0, $this->balance384AsOf('2092-12-31'), 0.005);
+    }
+
+    /** @return array{status:int, body:array<string,mixed>} */
+    private function putAccrual(int $invoiceId, int $itemId, string $from, string $to): array
+    {
+        $request = (new \Slim\Psr7\Factory\ServerRequestFactory())
+            ->createServerRequest('PUT', '/api/invoices/' . $invoiceId . '/accrual')
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withParsedBody(['items' => [['id' => $itemId, 'accrual_from' => $from, 'accrual_to' => $to]]]);
+        $response = (Bootstrap::buildContainer()->get(\MyInvoice\Action\Invoice\SetInvoiceAccrualAction::class))(
+            $request, new \Slim\Psr7\Response(), ['id' => (string) $invoiceId]);
+        $response->getBody()->rewind();
+        $body = json_decode((string) $response->getBody(), true);
+        return ['status' => $response->getStatusCode(), 'body' => is_array($body) ? $body : []];
+    }
+
+    /** @return array{0:?string,1:?string} */
+    private function accrualOf(int $itemId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT accrual_from, accrual_to FROM invoice_items WHERE id = ?');
+        $stmt->execute([$itemId]);
+        $row = (array) $stmt->fetch(PDO::FETCH_ASSOC);
+        return [$row['accrual_from'] ?? null, $row['accrual_to'] ?? null];
+    }
+
     /** @return array{0:int,1:int,2:int,3:int} typ střediska a hodnoty A, B, C */
     private function centers(): array
     {

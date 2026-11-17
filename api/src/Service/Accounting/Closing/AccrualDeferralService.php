@@ -114,11 +114,14 @@ final class AccrualDeferralService
      * (openNext) našel i víceletý odklad pořízený v N (a rozpustil jen tranši N+1, ne celý
      * zbytek). `originEndsOn` = konec období, ze kterého openNext otevírá (deferováno za ním);
      * `targetEnd` = konec cílového období (rozlišení se týká jen položek začínajících do něj).
-     * Bere jen položky, jejichž odklad zaúčtovala uzávěrka ({@see deferredByClosingSql}).
+     * Bere jen položky, jejichž odklad zaúčtovala uzávěrka ({@see deferredByClosingSql}),
+     * a to v obdobích mimo `$mirroredPeriodIds`: odklad těch se rozpouští ze záznamu kroku
+     * ({@see closingDeferralSnapshots()}), ne z dnešního stavu dokladů.
      *
+     * @param list<int> $mirroredPeriodIds
      * @return list<array<string,mixed>>
      */
-    public function prepaidExpenseReleaseRows(int $supplierId, string $originEndsOn, string $targetEnd): array
+    public function prepaidExpenseReleaseRows(int $supplierId, string $originEndsOn, string $targetEnd, array $mirroredPeriodIds = []): array
     {
         $deferPrefix = $this->deferralAccountPrefix($supplierId, self::RULE_PREPAID_EXPENSE);
         $stmt = $this->db->pdo()->prepare(
@@ -141,7 +144,7 @@ final class AccrualDeferralService
                 AND pii.accrual_to IS NOT NULL
                 AND pii.accrual_to > ?
                 AND pii.accrual_from <= ?
-                AND ' . self::deferredByClosingSql('prepaid_expense_accrual', 'pi.supplier_id', 'pi.effective_cost_date') . '
+                AND ' . self::deferredByClosingSql('prepaid_expense_accrual', 'pi.supplier_id', 'pi.effective_cost_date', $mirroredPeriodIds) . '
                 AND NOT ' . self::deferredOnDocumentSql('purchase_invoice', 'pi.supplier_id', 'pi.id') . '
               ORDER BY pi.id, pii.order_index, pii.id'
         );
@@ -245,6 +248,136 @@ final class AccrualDeferralService
         return (float) $rate;
     }
 
+    // ── pojistka změny období na dokladu ──────────────────────────────────────
+
+    /**
+     * Smí se na dokladu změnit období časového rozlišení (accrual_from/accrual_to)? Vrací
+     * důvod odmítnutí `[kód, hláška]`, nebo null.
+     *
+     * Odklad zaúčtovaný uzávěrkou se počítal z období na řádcích. Změna po jeho zaúčtování
+     * by odklad a rozpuštění rozjela (na 381/384 by zůstal zůstatek), proto se odmítá:
+     * - v uzavřeném, revidovaném či schváleném období ({@see AccountingPeriodStatus::CLOSED}),
+     * - v uzavíraném období, jehož krok Časové rozlišení už zaúčtoval odklad daného druhu.
+     * Posuzuje se období data dokladu a období všech živých zápisů jeho skupiny zaúčtování
+     * (převzatý zápis může ležet jinde). Volá se v transakci se zamčenými obdobími firmy
+     * (`$statuses` z {@see \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard::lockPeriods()}),
+     * aby souběžná uzávěrka nemohla mezi kontrolou a změnou krok zaúčtovat.
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     * @param array<int,string> $statuses id období => stav (aktuální čtení pod zámkem)
+     * @return array{0:string,1:string}|null
+     */
+    public function accrualChangeBlocker(int $supplierId, string $docType, int $docId, ?string $docDate, array $statuses): ?array
+    {
+        $periodIds = [];
+        if ($docDate !== null && $docDate !== '') {
+            $stmt = $this->db->pdo()->prepare('SELECT id FROM accounting_periods WHERE supplier_id = ? AND starts_on <= ? AND ends_on >= ?');
+            $stmt->execute([$supplierId, substr($docDate, 0, 10), substr($docDate, 0, 10)]);
+            foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [] as $id) {
+                $periodIds[(int) $id] = true;
+            }
+        }
+        foreach ((new DocumentPostingGroup($this->db))->active($supplierId, $docType, $docId) as $entry) {
+            if ($entry['period_id'] !== null) {
+                $periodIds[(int) $entry['period_id']] = true;
+            }
+        }
+        $sourceType = $docType === 'invoice' ? 'deferred_revenue_accrual' : 'prepaid_expense_accrual';
+        $deferral = $this->db->pdo()->prepare(
+            'SELECT 1 FROM journal_entries
+              WHERE supplier_id = ? AND source_type = ? AND source_id = ?
+                AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1'
+        );
+        foreach (array_keys($periodIds) as $periodId) {
+            $status = $statuses[$periodId] ?? null;
+            if ($status !== null && \MyInvoice\Service\Accounting\AccountingPeriodStatus::isClosed($status)) {
+                return ['period_closed', 'Doklad patří do uzavřeného účetního období, jeho časové rozlišení už je součástí uzávěrky.'];
+            }
+            if ($status === 'closing') {
+                $deferral->execute([$supplierId, $sourceType, $docType === 'invoice'
+                    ? ClosingSourceId::deferredRevenueAccrual($periodId)
+                    : ClosingSourceId::prepaidExpenseAccrual($periodId)]);
+                if ($deferral->fetchColumn() !== false) {
+                    return ['accrual_deferral_posted', 'Uzávěrka období dokladu už zaúčtovala časové rozlišení. Období na řádcích změňte až po vrácení kroku Časové rozlišení, potom krok spusťte znovu.'];
+                }
+            }
+        }
+        return null;
+    }
+
+    // ── záznam zaúčtovaného odkladu ───────────────────────────────────────────
+
+    /**
+     * Rozpad odkladu po položkách, jak ho krok uzávěrky zaúčtoval: položka, doklad, období
+     * od–do, částka v Kč a účty s podíly. Ukládá se do záznamu kroku (`items`) a rozpuštění
+     * z něj počítá tranše, takže zrcadlí zaúčtovaný odklad i po změně dokladu (období na
+     * řádcích, přeúčtování, storno v dalším roce).
+     *
+     * @param array<string,float> $accounts účet => podíl
+     * @return array{item_id:int, doc_id:int, from:string, to:string, basis:float, accounts:array<string,float>}
+     */
+    public static function snapshotItem(int $itemId, int $docId, string $from, string $to, float $basis, array $accounts): array
+    {
+        return ['item_id' => $itemId, 'doc_id' => $docId, 'from' => $from, 'to' => $to, 'basis' => round($basis, 2), 'accounts' => $accounts];
+    }
+
+    /**
+     * Účty s podíly z rozpadu odkladu ({@see snapshotItem()}); JSON vrací číselné kódy jako čísla.
+     *
+     * @param array<string,mixed> $item
+     * @return array<string,float>
+     */
+    public static function snapshotAccounts(array $item): array
+    {
+        $out = [];
+        foreach ((array) ($item['accounts'] ?? []) as $account => $share) {
+            $out[(string) $account] = (float) $share;
+        }
+        return $out;
+    }
+
+    /**
+     * Odklady zaúčtované uzávěrkou v obdobích končících nejpozději `$originEndsOn`, jejichž
+     * krok uložil rozpad po položkách ({@see snapshotItem()}): id těchto období a položky
+     * k rozpuštění. Období se živým zápisem odkladu, ale bez rozpadu (uzávěrka starší verze),
+     * ve výsledku není a rozpouští se dál podle dnešního stavu dokladů.
+     *
+     * @param 'deferred_revenue_accrual'|'prepaid_expense_accrual' $sourceType
+     * @return array{periods: list<int>, items: list<array<string,mixed>>}
+     */
+    public function closingDeferralSnapshots(int $supplierId, string $sourceType, string $originEndsOn): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT dap.id, cs.payload
+               FROM accounting_periods dap
+               JOIN journal_entries dje
+                 ON dje.supplier_id = dap.supplier_id
+                AND dje.source_type = ?
+                AND dje.source_id = dap.id
+                AND dje.posted_at IS NOT NULL
+                AND dje.reversed_by IS NULL
+               JOIN accounting_closing_steps cs
+                 ON cs.supplier_id = dap.supplier_id AND cs.period_id = dap.id AND cs.step_key = 'deferrals'
+              WHERE dap.supplier_id = ? AND dap.ends_on <= ?
+              ORDER BY dap.starts_on"
+        );
+        $stmt->execute([$sourceType, $supplierId, $originEndsOn]);
+        $periods = [];
+        $items = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $row) {
+            $payload = is_string($row['payload']) ? json_decode($row['payload'], true) : null;
+            $snapshot = is_array($payload) ? ($payload[$sourceType]['items'] ?? null) : null;
+            if (!is_array($snapshot)) {
+                continue;
+            }
+            $periods[] = (int) $row['id'];
+            foreach ($snapshot as $item) {
+                $items[] = $item + ['period_id' => (int) $row['id']];
+            }
+        }
+        return ['periods' => $periods, 'items' => $items];
+    }
+
     // ── výnosy příštích období (384) ──────────────────────────────────────────
 
     /**
@@ -254,13 +387,16 @@ final class AccrualDeferralService
      * období; rozpuštění: zápis kdykoli do konce období, ze kterého se otevírá, a jen v období,
      * jehož odklad zaúčtovala uzávěrka (`$release`, {@see deferredByClosingSql}). Výkaz mimo
      * deník (`$asOfInJournal`) naopak vyřadí doklady, jejichž odklad k tomu dni zaúčtovala
-     * uzávěrka.
+     * uzávěrka. Faktury z období v `$mirroredPeriodIds` rozpuštění nevybírá: jejich odklad
+     * se rozpouští ze záznamu kroku ({@see closingDeferralSnapshots()}). Členské předpisy
+     * záznam nemají, vybírají se dál podle dnešního stavu.
      *
+     * @param list<int> $mirroredPeriodIds
      * @return list<array<string,mixed>>
      */
-    public function deferredRevenueRows(int $supplierId, string $afterDate, ?string $postedFrom, string $postedTo, ?string $startsBy = null, bool $release = false, ?string $asOfInJournal = null): array
+    public function deferredRevenueRows(int $supplierId, string $afterDate, ?string $postedFrom, string $postedTo, ?string $startsBy = null, bool $release = false, ?string $asOfInJournal = null, array $mirroredPeriodIds = []): array
     {
-        [$closingSql, $closingParams] = self::closingFilter($release, $asOfInJournal, $postedTo, 'je.entry_date');
+        [$closingSql, $closingParams] = self::closingFilter($release, $asOfInJournal, $postedTo, 'je.entry_date', $mirroredPeriodIds);
         $deferPrefix = $this->deferralAccountPrefix($supplierId, self::RULE_DEFERRED_REVENUE);
         $stmt = $this->db->pdo()->prepare(
             'SELECT ii.id AS item_id, ii.invoice_id, ii.description, ii.total_without_vat,
@@ -349,10 +485,10 @@ final class AccrualDeferralService
      *
      * @return array{0:string,1:list<string>}
      */
-    private static function closingFilter(bool $release, ?string $asOfInJournal, string $postedTo, string $dateSql): array
+    private static function closingFilter(bool $release, ?string $asOfInJournal, string $postedTo, string $dateSql, array $mirroredPeriodIds = []): array
     {
         if ($release) {
-            return ['AND ' . self::deferredByClosingSql('deferred_revenue_accrual', 'je.supplier_id', $dateSql), [$postedTo]];
+            return ['AND ' . self::deferredByClosingSql('deferred_revenue_accrual', 'je.supplier_id', $dateSql, $mirroredPeriodIds), [$postedTo]];
         }
         if ($asOfInJournal !== null) {
             return ['AND NOT ' . self::deferredByClosingSql('deferred_revenue_accrual', 'je.supplier_id', $dateSql), [$asOfInJournal]];
@@ -1488,8 +1624,11 @@ final class AccrualDeferralService
      * doklad, jehož odklad k tomu dni už v deníku je. Stejně čte odklad
      * {@see ClosingService::pendingDeferralRelease} v projekci pro náhled DPPO.
      */
-    private static function deferredByClosingSql(string $sourceType, string $supplierSql, string $dateSql): string
+    private static function deferredByClosingSql(string $sourceType, string $supplierSql, string $dateSql, array $skipPeriodIds = []): string
     {
+        // Období, jejichž odklad se rozpouští ze záznamu kroku ({@see closingDeferralSnapshots()}),
+        // se z výběru podle dnešního stavu dokladů vyřadí (id jsou celá čísla z deníku).
+        $skip = $skipPeriodIds === [] ? '' : ' AND dap.id NOT IN (' . implode(',', array_map('intval', $skipPeriodIds)) . ')';
         return "EXISTS (SELECT 1
                   FROM accounting_periods dap
                   JOIN journal_entries dje
@@ -1501,7 +1640,7 @@ final class AccrualDeferralService
                  WHERE dap.supplier_id = {$supplierSql}
                    AND dap.ends_on <= ?
                    AND {$dateSql} >= dap.starts_on
-                   AND {$dateSql} <= dap.ends_on)";
+                   AND {$dateSql} <= dap.ends_on{$skip})";
     }
 
     /**
