@@ -1795,6 +1795,9 @@ const mobileSheetActions = computed<SheetAction[]>(() => {
     if (!clientExperience.value && auth.canRead('purchase_invoices')) {
       actions.push({ key: 'payables', to: '/purchase-invoices?unpaid=1', label: t('nav.mobile.payables'), hint: t('nav.mobile.payables_hint'), icon: ICONS.payment_orders })
     }
+    if (!clientExperience.value && auth.canRead('bank')) {
+      actions.push({ key: 'bank_movements', to: '/bank?tab=all_movements', label: t('nav.mobile.bank_movements'), hint: t('nav.mobile.bank_movements_hint'), icon: ICONS.bank })
+    }
     // Kniha jízd je v sekci Dokumenty: zápis jízdy z auta je typicky telefonní úkon.
     const logbook = mobileSection('documents')?.items.find(item => item.to === '/logbook')
     if (logbook && canCreate(logbook)) {

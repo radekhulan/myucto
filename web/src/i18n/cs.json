@@ -2237,6 +2237,8 @@
       "receivables_hint": "Neuhrazené vydané",
       "payables": "Co zaplatit",
       "payables_hint": "Neuhrazené přijaté",
+      "bank_movements": "Všechny pohyby",
+      "bank_movements_hint": "Pohyby na účtech",
       "all_in_section": "Vše v sekci",
       "money_bank_total": "Na bankovních účtech celkem",
       "money_more": "Další účty ({n})",

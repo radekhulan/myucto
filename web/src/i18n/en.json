@@ -2237,6 +2237,8 @@
       "receivables_hint": "Unpaid issued invoices",
       "payables": "To pay",
       "payables_hint": "Unpaid received invoices",
+      "bank_movements": "All movements",
+      "bank_movements_hint": "Bank account transactions",
       "all_in_section": "Everything in this section",
       "money_bank_total": "Total in bank accounts",
       "money_more": "More accounts ({n})",
