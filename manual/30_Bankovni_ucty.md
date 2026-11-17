@@ -481,7 +481,7 @@ Přepínač **Načítat PDF výpisy z příloh** u IMAP účtu zapne třetí vě
 
 Aby se výpis naimportoval, musí splnit obě podmínky:
 
-1. **Je to výpis banky, kterou umíme přečíst** - Komerční banka, ČSOB, Česká spořitelna, MONETA Money Bank, Raiffeisenbank, Banka CREDITAS. Rozhoduje textová vrstva PDF, ne název souboru.
+1. **Je to výpis banky, kterou umíme přečíst** - Komerční banka, ČSOB, Česká spořitelna, MONETA Money Bank, Raiffeisenbank, Banka CREDITAS, Revolut Business. Rozhoduje textová vrstva PDF, ne název souboru.
 2. **Je k účtu vaší firmy** - číslo účtu z hlavičky výpisu musí sedět na právě jeden bankovní účet firmy (záložka *Měny a účty*). U víceměnového účtu se sdíleným číslem rozhoduje ještě měna výpisu.
 
 Cizí výpis se tím nikdy nestane vaším dokladem: kdyby vám někdo poslal do schránky výpis jiné firmy, skončí jako *Výpis k cizímu účtu* a nic nezaloží.

@@ -26400,7 +26400,7 @@
     "subtitle": "Import GPC/ABO statements + auto-matching to invoices by VS.",
     "scan_folder": "Scan folder",
     "upload_gpc": "Upload GPC/ABO or PDF",
-    "upload_hint": "GPC/ABO statements are imported directly; PDF (Creditas, ČSOB, Česká spořitelna, KB, MONETA, Raiffeisenbank) is automatically parsed into transactions.",
+    "upload_hint": "GPC/ABO statements are imported directly; PDF (Creditas, ČSOB, Česká spořitelna, KB, MONETA, Raiffeisenbank, Revolut) is automatically parsed into transactions.",
     "no_data": "No statements. Upload the first GPC file using the button above.",
     "no_data_filtered": "No statements match the selected filter.",
     "show_all": "Show all",

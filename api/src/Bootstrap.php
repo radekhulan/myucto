@@ -1236,6 +1236,10 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Bank\Pdf\CreditCard\RaiffeisenbankCreditCardStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CreditCard\CsobCreditCardStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CreditCard\ErsteCreditCardStatementPdfParser::class),
+                // Revolut před českými bankami: popis jeho pohybu může nést název nebo BIC
+                // české banky protistrany, jeho vlastní značky (Revolut Bank UAB, sloupec
+                // „Datum (UTC)") výpis české banky nemá.
+                $c->get(\MyInvoice\Service\Bank\Pdf\RevolutStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CreditasStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CsobStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\CeskaSporitelnaStatementPdfParser::class),
