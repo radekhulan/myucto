@@ -370,6 +370,30 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
         $report = $import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true);
         self::assertSame([['error', 'member_erased'], ['error', 'number_reserved'], ['error', 'number_reserved']],
             array_map(static fn (array $r): array => [$r['status'], $r['reason']], $report['rows']));
+
+        // Řádek vymazaného člena z exportu bez změny import ostatních nezablokuje.
+        $csv = "Členské číslo;ID kontaktu;IČO;Jméno / název;Nový stav;Platí od;Podklad;Doložení\n"
+            . MembershipErasureService::placeholderNumber($member) . ";;;;;;;\n"
+            . "SYN-XFER-OTHER;;;;suspended;2032-02-01;Synthetic decision;\n";
+        $report = $import->run($this->supplier, $this->actor, $csv, 'a.csv', true);
+        self::assertTrue($report['ok']);
+        self::assertSame([['unchanged', 'member_erased'], ['new_revision', null]],
+            array_map(static fn (array $r): array => [$r['status'], $r['reason'] ?? null], $report['rows']));
+    }
+
+    public function testReservedNumbersOfWholeImportFileTakeConstantNumberOfQueries(): void
+    {
+        $import = new MembershipImportService($this->db, new ActivityLogger($this->db), $this->members);
+        $questions = fn (): int => (int) $this->pdo->query("SHOW SESSION STATUS LIKE 'Questions'")->fetch(PDO::FETCH_NUM)[1];
+        $cost = function (int $rows) use ($import, $questions): int {
+            $csv = "Členské číslo;ID kontaktu;IČO;Jméno / název;Nový stav;Platí od;Podklad;Doložení\n";
+            for ($i = 0; $i < $rows; $i++) $csv .= "NEW-{$rows}-{$i};;;Synthetic new {$i};active;2032-02-01;Synthetic decision;\n";
+            $before = $questions();
+            $import->run($this->supplier, $this->actor, $csv, 'a.csv', true, canCreateContacts: true);
+            return $questions() - $before;
+        };
+        $cost(5);
+        self::assertSame($cost(10), $cost(200), 'Náhled importu nesmí klást dotaz na každý řádek.');
     }
 
     public function testNumberCollidingWithPseudonymInDatabaseCollationIsReserved(): void

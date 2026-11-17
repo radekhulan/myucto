@@ -171,10 +171,13 @@ final class MembershipImportService extends AbstractCodebookImportService
         }
         $known = $this->existingKeys($supplier, $candidates);
 
+        // Vyhrazená čísla nových členů (pseudonym vymazaného člena) jedním dotazem pro celý soubor.
+        $reserved = MembershipErasureService::reservedNumbers($this->db, array_filter(array_column($parsed, 'member_number', 'line'),
+            static fn (string $n, int $line): bool => $n !== '' && !isset($members[$line]), ARRAY_FILTER_USE_BOTH));
         $out = [];
         $seenNumbers = [];
         foreach ($parsed as $row) {
-            $out[] = $this->classify($row, $members[$row['line']] ?? null, $histories, $clients, $byIc, $known);
+            $out[] = $this->classify($row, $members[$row['line']] ?? null, $histories, $clients, $byIc, $known, $reserved[$row['line']] ?? false);
         }
         // Totéž číslo (podle kolace DB) nebo tentýž kontakt nového člena dvakrát v souboru.
         $groups = $this->numberGroups(array_filter(array_column($out, 'member_number', 'line'), static fn (string $n, int $line): bool => $n !== '' && mb_strlen($n) <= 80 && !isset($members[$line]), ARRAY_FILTER_USE_BOTH));
@@ -216,7 +219,7 @@ final class MembershipImportService extends AbstractCodebookImportService
         return ['status' => $status, 'effective_from' => $from, 'reference' => $reference, 'evidence' => $evidence];
     }
 
-    private function classify(array $row, ?array $member, array $histories, array $clients, array $byIc, array $known): array
+    private function classify(array $row, ?array $member, array $histories, array $clients, array $byIc, array $known, bool $reserved = false): array
     {
         $base = ['line' => $row['line'], 'member_number' => $row['member_number'], 'name' => mb_substr($row['name'], 0, 190)];
         if ($row['member_number'] === '') return $this->error($base, 'number_missing');
@@ -234,14 +237,17 @@ final class MembershipImportService extends AbstractCodebookImportService
         }
         if ($member !== null) {
             $base['member_id'] = $member['id'];
-            // Vymazaný člen (#321, krok 10) se nemění; náhled to řekne dřív, než zápis řádek odmítne.
-            if (MembershipErasureService::isErasedMember($member)) return $this->error($base, 'member_erased');
+            // Vymazaný člen (#321, krok 10) se nemění: řádek z exportu bez změny je beze změny (nezablokuje import
+            // ostatních), změnu stavu náhled odmítne dřív, než by ji odmítl zápis.
+            if (MembershipErasureService::isErasedMember($member)) {
+                return $change ? $this->error($base, 'member_erased') : $this->unchanged($base, 'member_erased', []);
+            }
             $client = $clients[$member['client_id']] ?? null;
             if (($clientId !== null && $clientId !== $member['client_id']) || ($ic !== null && ($client === null || $client['ic'] !== $ic))) {
                 return $this->error($base, 'contact_mismatch');
             }
             if (!$change) return $this->unchanged($base, 'no_change', []);
-        } elseif (MembershipErasureService::isReservedNumber($this->db, $row['member_number'])) {
+        } elseif ($reserved) {
             return $this->error($base, 'number_reserved');
         } elseif (!$change) {
             return $this->error($base, 'new_member_needs_change');
@@ -365,11 +371,7 @@ final class MembershipImportService extends AbstractCodebookImportService
         $values = 'SELECT ? line,? num' . str_repeat(' UNION ALL SELECT ?,?', count($numbers) - 1);
         $params = [];
         foreach ($numbers as $line => $number) array_push($params, $line, $number);
-        $collation = (string) $this->db->pdo()->query("SELECT COLLATION_NAME FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='nonprofit_members' AND COLUMN_NAME='member_number'")->fetchColumn();
-        // Struktura je daná migrací (utf8mb4_unicode_ci) a odchylku hlásí Diagnostika; jiná kolace je porušená
-        // instalace, ne vstup uživatele, proto chyba serveru místo validační hlášky.
-        if (preg_match('/^utf8mb4_[a-z0-9_]+$/D', $collation) !== 1) throw new \LogicException('Neznámá kolace členského čísla.');
+        $collation = MembershipErasureService::numberCollation($this->db);
         $q = $this->db->pdo()->prepare("WITH input AS ({$values})
             SELECT line, MIN(line) OVER (PARTITION BY CONVERT(num USING utf8mb4) COLLATE {$collation}) grp FROM input");
         $q->execute($params);

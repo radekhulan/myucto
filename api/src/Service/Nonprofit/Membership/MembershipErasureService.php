@@ -109,19 +109,48 @@ final class MembershipErasureService
      */
     public static function isReservedNumber(Connection $db, string $number): bool
     {
-        $collation = self::numberCollation($db);
-        $q = $db->pdo()->prepare("SELECT LEFT(WEIGHT_STRING(CONVERT(? USING utf8mb4) COLLATE {$collation}), LENGTH(WEIGHT_STRING(CONVERT(? USING utf8mb4) COLLATE {$collation})))
-            = WEIGHT_STRING(CONVERT(? USING utf8mb4) COLLATE {$collation})");
-        $q->execute([$number, 'vymazano-', 'vymazano-']);
-        return (int) $q->fetchColumn() === 1;
+        return self::reservedNumbers($db, [$number])[0];
     }
 
-    private static function numberCollation(Connection $db): string
+    /**
+     * Vyhrazená čísla celého souboru jedním dotazem (import).
+     * @param array<array-key,string> $numbers
+     * @return array<array-key,bool> stejné klíče
+     */
+    public static function reservedNumbers(Connection $db, array $numbers): array
     {
+        if ($numbers === []) return [];
+        $collation = self::numberCollation($db);
+        $keys = array_keys($numbers);
+        $values = 'SELECT 0 k,? num';
+        for ($i = 1; $i < count($keys); $i++) $values .= " UNION ALL SELECT {$i},?";
+        $q = $db->pdo()->prepare("WITH input AS ({$values}), prefix AS (SELECT WEIGHT_STRING(CONVERT('vymazano-' USING utf8mb4) COLLATE {$collation}) w)
+            SELECT input.k, LEFT(WEIGHT_STRING(CONVERT(input.num USING utf8mb4) COLLATE {$collation}), LENGTH(prefix.w)) = prefix.w reserved FROM input CROSS JOIN prefix");
+        $q->execute(array_values($numbers));
+        $out = [];
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) $out[$keys[(int) $row['k']]] = (int) $row['reserved'] === 1;
+        return $out;
+    }
+
+    /**
+     * Kolace sloupce member_number (SSOT pro rezervaci i pro skupiny čísel importu), čtená jednou za spojení.
+     * Struktura je daná migrací (utf8mb4_unicode_ci) a odchylku hlásí Diagnostika. Jiná nebo víceúrovňová kolace
+     * (_as_, _cs_: váhy úrovní jdou za sebou a prefix vah nesedí) je porušená instalace, proto chyba serveru.
+     */
+    public static function numberCollation(Connection $db): string
+    {
+        self::$collations ??= new \WeakMap();
+        if (isset(self::$collations[$db])) return self::$collations[$db];
         $name = (string) $db->pdo()->query("SELECT COLLATION_NAME FROM information_schema.COLUMNS
             WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='nonprofit_members' AND COLUMN_NAME='member_number'")->fetchColumn();
-        return preg_match('/^utf8mb4_[a-z0-9_]+$/D', $name) === 1 ? $name : 'utf8mb4_unicode_ci';
+        if (preg_match('/^utf8mb4_[a-z0-9_]+$/D', $name) !== 1 || preg_match('/_(as|cs)(_|$)/', $name) === 1) {
+            throw new \LogicException('Neznámá kolace členského čísla.');
+        }
+        return self::$collations[$db] = $name;
     }
+
+    /** @var \WeakMap<Connection,string>|null */
+    private static ?\WeakMap $collations = null;
 
     /** Posouzení ke dnešku: stránka ukončených členů a smazaní členové se stopou v auditu. */
     public function assessment(int $supplier, int $after, int $limit): array
