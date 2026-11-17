@@ -471,25 +471,63 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
         $member = $this->ended('PURGE', charge: 'reverse', voidReason: 'Synthetic wrong suspension of Jana Testovaci');
         $this->eraseAll();
         $from = (int) $this->pdo->query("SELECT MIN(id) FROM activity_log WHERE supplier_id={$this->supplier}")->fetchColumn();
+        $this->auditFrom = $from;
         self::assertGreaterThan(0, (int) $this->pdo->query("SELECT COUNT(*) FROM activity_log_redactions WHERE supplier_id={$this->supplier}")->fetchColumn());
         self::assertSame(MembershipErasureService::placeholderNumber($member), $this->repository->member($this->supplier, $member)['member_number']);
-        // Smazání firmy neběží v transakci: data fixture se commitnou a smaže je až purge.
+        // Smazání firmy neběží v transakci: data fixture se commitnou a smaže je až purge (při selhání tearDown).
         $this->pdo->commit();
+        $this->committed = true;
         $chain = new ActivityLogHashChain($this->db);
         $chain->sealPending();
+        (new CompanyPurgeService($this->db))->purge($this->supplier, true, false);
+        $this->committed = false;
+        foreach (['supplier', 'nonprofit_members', 'nonprofit_member_revisions', 'nonprofit_membership_charge_operations', 'nonprofit_membership_charge_commands',
+            'nonprofit_membership_erasure_items', 'nonprofit_membership_erasure_proposals'] as $table) {
+            $column = $table === 'supplier' ? 'id' : 'supplier_id';
+            self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM {$table} WHERE {$column}={$this->supplier}")->fetchColumn(), $table);
+        }
+        // Zachovaný řetěz s redakcemi a kotvou zůstává ověřitelný i bez dat firmy.
+        self::assertGreaterThan(0, (int) $this->pdo->query("SELECT COUNT(*) FROM activity_log_redactions WHERE supplier_id={$this->supplier}")->fetchColumn());
+        $verified = $chain->verify($from);
+        self::assertTrue($verified['ok'], (string) json_encode($verified['broken']));
+        $this->dropRetained();
+    }
+
+    /**
+     * V provozu auditní stopa smazané firmy zůstává; v testovací DB by ale její záznamy oprav členů viděly
+     * jiné testy (anonymizovaná kopie celé DB). Test proto po ověření smaže svůj úsek stopy (od `auditFrom`,
+     * sady běží sériově) a uživatele fixture.
+     */
+    private function dropRetained(): void
+    {
+        if ($this->auditFrom !== null) {
+            $this->pdo->prepare('DELETE FROM activity_log WHERE id >= ?')->execute([$this->auditFrom]);
+            $this->auditFrom = null;
+        }
+        try {
+            $this->pdo->prepare('DELETE FROM users WHERE id=?')->execute([$this->actor]);
+        } catch (\PDOException) {
+        }
+    }
+
+    /** Commitnutá data testu smazání firmy: když test skončí dřív, uklidí je purge tady. */
+    private bool $committed = false;
+    private ?int $auditFrom = null;
+
+    protected function tearDown(): void
+    {
+        parent::tearDown();
+        if (!$this->committed && $this->auditFrom === null) return;
         try {
             (new CompanyPurgeService($this->db))->purge($this->supplier, true, false);
-            foreach (['nonprofit_members', 'nonprofit_member_revisions', 'nonprofit_membership_charge_operations', 'nonprofit_membership_charge_commands',
-                'nonprofit_membership_erasure_items', 'nonprofit_membership_erasure_proposals'] as $table) {
-                self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM {$table} WHERE supplier_id={$this->supplier}")->fetchColumn(), $table);
-            }
-            // Zachovaný řetěz s redakcemi a kotvou zůstává ověřitelný i bez dat firmy.
-            self::assertGreaterThan(0, (int) $this->pdo->query("SELECT COUNT(*) FROM activity_log_redactions WHERE supplier_id={$this->supplier}")->fetchColumn());
-            $verified = $chain->verify($from);
-            self::assertTrue($verified['ok'], (string) json_encode($verified['broken']));
-        } finally {
-            $this->pdo->prepare('DELETE FROM users WHERE id=?')->execute([$this->actor]);
+        } catch (\Throwable) {
+            // Úklid nesmí přepsat původní chybu testu.
         }
+        try {
+            $this->dropRetained();
+        } catch (\Throwable) {
+        }
+        $this->committed = false;
     }
 
     public function testTriggerRejectsSealWithoutPendingItemOfThatMember(): void

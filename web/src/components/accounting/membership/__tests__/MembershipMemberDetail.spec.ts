@@ -176,7 +176,8 @@ describe('Membership member detail', () => {
   })
 
   it('shows an erased member read-only with a notice even with write rights', async () => {
-    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01'), revision(2, '2021-01-01', 'ended')], mixed), erased: true })
+    // Bez platné revize by se formulář revize jinak zobrazil hned; u vymazaného člena se nezobrazí.
+    api.member.mockResolvedValue({ ...detail([], mixed), erased: true })
     const w = mounted({ canManage: true })
     await flushPromises()
     expect(w.get('[data-section="detail-erased"]').text()).toBe(cs.nonprofitMembership.erasure.detailErased)
