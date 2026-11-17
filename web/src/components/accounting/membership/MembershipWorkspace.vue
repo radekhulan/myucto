@@ -17,6 +17,7 @@ import { appIsoDate } from '@/utils/date'
 import { errorBox, loudBadge, quietBadge, membershipError, memberStatusBadge, membershipMemberLabel } from './membershipFormat'
 import { clearListHandoff, MEMBERSHIP_LIST_PATH, memberDetailPath, readListHandoff, saveListHandoff } from './membershipPage'
 import { useRowLink } from '@/composables/useRowLink'
+import { usePaneId } from '@/workspace/paneActivity'
 import MembershipReconciliation from './MembershipReconciliation.vue'
 import MembershipRates from './MembershipRates.vue'
 import MembershipBatchFlow from './MembershipBatchFlow.vue'
@@ -150,6 +151,8 @@ const labelOf = (row: MemberRow) => row.erased
   : membershipMemberLabel(row) || t('nonprofitMembership.clientFallback', { id: row.client_id })
 
 const navigateRow = useRowLink()
+const paneId = usePaneId()
+const paneKey = () => (paneId.value === null ? null : String(paneId.value))
 /**
  * Detail člena je samostatná stránka jako detail kontaktu (Ctrl+klik a prostřední tlačítko ho otevřou v novém panelu).
  * Rozpracovaný hromadný předpis, import nebo běžící export by odchodem ze seznamu zmizel, proto se tehdy detail
@@ -158,10 +161,10 @@ const navigateRow = useRowLink()
 function goToMember(id: number, event?: MouseEvent) {
   const keepList = batchOpen.value || importOpen.value || exporting.value
   const newPanel = keepList || !!event && (event.ctrlKey || event.metaKey || event.button === 1)
-  if (!newPanel) saveListHandoff({ supplier: props.supplier, path: route?.fullPath || MEMBERSHIP_LIST_PATH, filters: appliedFilters.value, ids: [...checkedMembers.value], openedId: id })
+  if (!newPanel) saveListHandoff({ supplier: props.supplier, pane: paneKey(), path: route?.fullPath || MEMBERSHIP_LIST_PATH, filters: appliedFilters.value, ids: [...checkedMembers.value], openedId: id })
   navigateRow(memberDetailPath(id), keepList ? new MouseEvent('click', { ctrlKey: true }) : event)
 }
-function openMember(row: MemberRow, event?: MouseEvent) { goToMember(row.id, event) }
+function openMember(row: MemberRow, event?: MouseEvent) { if (event?.button === 2) return; goToMember(row.id, event) }
 
 /** Po návratu z detailu fokus na tlačítko řádku člena; tabulka i karty jsou v DOM, bere se viditelné. */
 function focusMember(id: number) {
@@ -195,7 +198,8 @@ function revisionState(row: MemberRow): RevisionState {
   if (row.effective_from > today.value) return { kind: 'future', full: t('nonprofitMembership.futureRevision', params), short: t('nonprofitMembership.listColumns.future', params) }
   return { kind: 'current', status: row.status, date: formatDate(row.effective_from) }
 }
-const checkDisabled = (id: number) => loading.value || batchLocked.value || (checkedMembers.value.length >= 500 && !checkedMembers.value.includes(id))
+const atSelectionLimit = (id: number) => checkedMembers.value.length >= 500 && !checkedMembers.value.includes(id)
+const checkDisabled = (id: number) => loading.value || batchLocked.value || atSelectionLimit(id)
 
 
 async function load(append = false) {
@@ -270,7 +274,7 @@ function onClientCreated(client: Client) {
 function openCreate() { createError.value = ''; createOpen.value = true }
 /** Okno se během ukládání nezavře: odpověď by jinak neměla kam ohlásit chybu. */
 function closeCreate() {
-  if (creating.value) return
+  if (creating.value || clientModalOpen.value) return
   createOpen.value = false; clientModalOpen.value = false
   clientId.value = null; clientLabel.value = ''; memberNumber.value = ''; createError.value = ''
 }
@@ -309,15 +313,20 @@ watch(() => props.supplier, () => {
 onBeforeUnmount(() => { cancelSearchTimer(); alive = false; titlesTicket++; generation++; createTicket++ })
 onMounted(async () => {
   // Návrat z detailu ve stejném panelu: výběr do dávky platí jen pro stejné filtry; load() ho ověří na serveru.
-  const handoff = readListHandoff(props.supplier)
-  let focusId: number | null = null
-  if (handoff && JSON.stringify(handoff.filters) === JSON.stringify(appliedFilters.value)) {
+  // Jen návrat odkazem Zpět z detailu: stejný panel, stejná adresa seznamu i filtry (menu ani jiný panel ne).
+  const handoff = readListHandoff(props.supplier, paneKey())
+  let restored = false, focusId: number | null = null
+  if (handoff && handoff.path === (route?.fullPath || MEMBERSHIP_LIST_PATH) && JSON.stringify(handoff.filters) === JSON.stringify(appliedFilters.value)) {
     clearListHandoff()
     checkedMembers.value = props.canManage ? handoff.ids : []
-    focusId = handoff.openedId
+    restored = true; focusId = handoff.openedId
   }
   await reloadAll()
-  if (focusId !== null && alive) { await nextTick(); focusMember(focusId) }
+  if (!restored || !alive) return
+  await nextTick()
+  // Otevřený člen mezitím zmizel (smazání): fokus na nadpis seznamu, aby klávesnice nespadla na začátek stránky.
+  if (focusId !== null) focusMember(focusId)
+  else root.value?.querySelector<HTMLElement>('[data-focus="members-heading"]')?.focus()
 })
 let firstActivation = true
 onActivated(() => {
@@ -449,7 +458,11 @@ watch([titleKey, paymentStatus], () => {
 tab.value = tabFromQuery()
 watch(() => route?.query.tab, () => { tab.value = tabFromQuery() })
 // Záložka, kterou stránka nenabízí (bez účetních období, bez práva na výmaz), vrací na seznam.
-watch(tabs, list => { if (!list.some(item => item.key === tab.value) && (tab.value !== 'reconciliation' || periodsLoaded.value)) tab.value = 'members' })
+watch(tabs, list => {
+  if (list.some(item => item.key === tab.value) || (tab.value === 'reconciliation' && !periodsLoaded.value)) return
+  tab.value = 'members'
+  if (router && route?.query.tab) void router.replace({ query: { ...route.query, tab: undefined } })
+})
 watch(() => route?.query, (now, before) => {
   // Přepnutí záložky filtry nemění.
   if (now && before && JSON.stringify({ ...now, tab: undefined }) === JSON.stringify({ ...before, tab: undefined })) return
@@ -491,7 +504,7 @@ watch(batchLocked, locked => {
 
     <!-- Přepínač agend je záložka, ne tlačítko: tlačítka na stránce jsou akce (vzor Uživatelé). -->
     <div role="tablist" class="mb-4 mt-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-neutral-200" :aria-label="t('nonprofitMembership.title')" data-section="membership-tabs">
-      <button v-for="item in tabs" :key="item.key" type="button" role="tab" :data-tab="item.key"
+      <button v-for="item in tabs" :id="`membership-tab-${item.key}`" :key="item.key" type="button" role="tab" :data-tab="item.key" :aria-controls="`membership-panel-${item.key}`"
         :aria-selected="tab === item.key" :tabindex="tab === item.key ? 0 : -1"
         class="-mb-px inline-flex cursor-pointer items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2 text-sm transition-colors"
         :class="tab === item.key ? 'border-primary-600 font-medium text-primary-700' : 'border-transparent text-neutral-600 hover:text-neutral-900'"
@@ -500,7 +513,7 @@ watch(batchLocked, locked => {
       </button>
     </div>
 
-    <section v-show="tab === 'members'" class="min-w-0 space-y-3" data-section="members" role="tabpanel" :aria-busy="loading ? 'true' : 'false'">
+    <section v-show="tab === 'members'" id="membership-panel-members" class="min-w-0 space-y-3" data-section="members" role="tabpanel" aria-labelledby="membership-tab-members" :aria-busy="loading ? 'true' : 'false'">
       <h2 tabindex="-1" class="sr-only" data-focus="members-heading">{{ t('nonprofitMembership.members') }}</h2>
       <div class="flex flex-wrap items-start gap-2">
         <FilterBar class="min-w-0 flex-1" :active-count="filterChips.length" collapsible :chips="filterChips" data-section="member-filters" @clear="clearFilter" @clear-all="clearFilter()">
@@ -560,7 +573,7 @@ watch(batchLocked, locked => {
                   <div class="flex items-center gap-3">
                     <label v-if="canManage" class="-my-2 flex shrink-0 cursor-pointer py-2" @click.stop>
                       <input type="checkbox" class="h-4 w-4 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30"
-                        :checked="checkedMembers.includes(row.id)" :disabled="checkDisabled(row.id)" :aria-label="t('nonprofitMembership.batchSelectMember', {name: labelOf(row)})"
+                        :checked="checkedMembers.includes(row.id)" :disabled="checkDisabled(row.id)" :title="atSelectionLimit(row.id) ? t('nonprofitMembership.batchSelectionLimit') : undefined" :aria-label="atSelectionLimit(row.id) ? `${t('nonprofitMembership.batchSelectMember', {name: labelOf(row)})}. ${t('nonprofitMembership.batchSelectionLimit')}` : t('nonprofitMembership.batchSelectMember', {name: labelOf(row)})"
                         data-action="batch-check-member" @change="checkMember(row.id, $event)" />
                     </label>
                     <span class="shrink-0 whitespace-nowrap font-mono text-xs text-neutral-500" data-field="member-number">{{ row.member_number }}</span>
@@ -602,7 +615,7 @@ watch(batchLocked, locked => {
             <div class="flex items-start gap-3">
               <label v-if="canManage" class="-m-3 flex shrink-0 cursor-pointer p-3" @click.stop>
                 <input type="checkbox" class="mt-0.5 h-5 w-5 cursor-pointer rounded border-neutral-300 text-primary-600"
-                  :checked="checkedMembers.includes(row.id)" :disabled="checkDisabled(row.id)" :aria-label="t('nonprofitMembership.batchSelectMember', {name: labelOf(row)})"
+                  :checked="checkedMembers.includes(row.id)" :disabled="checkDisabled(row.id)" :title="atSelectionLimit(row.id) ? t('nonprofitMembership.batchSelectionLimit') : undefined" :aria-label="atSelectionLimit(row.id) ? `${t('nonprofitMembership.batchSelectMember', {name: labelOf(row)})}. ${t('nonprofitMembership.batchSelectionLimit')}` : t('nonprofitMembership.batchSelectMember', {name: labelOf(row)})"
                   data-action="batch-check-member" @change="checkMember(row.id, $event)" />
               </label>
               <div class="min-w-0 flex-1 space-y-1 text-sm">
@@ -638,16 +651,17 @@ watch(batchLocked, locked => {
       </div>
     </section>
 
-    <section v-if="tab === 'rates'" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" role="tabpanel" data-section="rates-management">
+    <section v-if="tab === 'rates'" id="membership-panel-rates" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" role="tabpanel" aria-labelledby="membership-tab-rates" data-section="rates-management">
       <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitMembership.ratesTitle') }}</h2>
       <MembershipRates :key="supplier" :supplier="supplier" :can-manage="!!canManageRates" />
     </section>
 
-    <div v-if="tab === 'reconciliation' && periods.length" role="tabpanel">
+    <!-- v-show: zvolené období a výsledek kontroly přežijí přepnutí záložky. -->
+    <div v-if="periods.length" v-show="tab === 'reconciliation'" id="membership-panel-reconciliation" role="tabpanel" aria-labelledby="membership-tab-reconciliation">
       <MembershipReconciliation :supplier="supplier" :periods="periods" :data-version="dataVersion" />
     </div>
 
-    <section v-if="tab === 'erasure' && canReadErasure" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" role="tabpanel" data-section="erasure-management">
+    <section v-if="tab === 'erasure' && canReadErasure" id="membership-panel-erasure" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" role="tabpanel" aria-labelledby="membership-tab-erasure" data-section="erasure-management">
       <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitMembership.erasure.title') }}</h2>
       <MembershipErasure :key="supplier" :supplier="supplier" :can-write="!!canWriteErasure" :open="tab === 'erasure'" @erased="membersErased" />
     </section>

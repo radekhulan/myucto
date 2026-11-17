@@ -5,7 +5,8 @@ import { useI18n } from 'vue-i18n'
 import { accountingApi, type AccountingPeriod } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import MembershipMemberDetail from '@/components/accounting/membership/MembershipMemberDetail.vue'
-import { MEMBERSHIP_LIST_PATH, readListHandoff, useMembershipAccess } from '@/components/accounting/membership/membershipPage'
+import { forgetMemberInHandoff, MEMBERSHIP_LIST_PATH, readListHandoff, useMembershipAccess } from '@/components/accounting/membership/membershipPage'
+import { usePaneId } from '@/workspace/paneActivity'
 
 /** Detail člena jako samostatná stránka, stejně jako detail kontaktu: celá šířka, vlastní adresa, otevření v novém panelu. */
 const { t } = useI18n()
@@ -14,6 +15,8 @@ const route = useRoute(), router = useRouter()
 const { supplierId, canManage } = useMembershipAccess()
 // Člen patří firmě, pod kterou se stránka otevřela; po přepnutí firmy se pod novou nenačítá (odchází se na seznam).
 const pageSupplier = supplierId.value
+const paneId = usePaneId()
+const pane = paneId.value === null ? null : String(paneId.value)
 const memberId = computed(() => Number(route.params.id))
 const periods = ref<AccountingPeriod[]>([])
 let alive = true, ticket = 0
@@ -22,7 +25,7 @@ let alive = true, ticket = 0
  * Návrat na seznam i s filtry, ze kterých uživatel přišel. Panely mají router nad paměťovou historií, proto adresu
  * seznamu předává seznam sám (readListHandoff); přímý odkaz nebo nový panel vede na seznam bez filtrů.
  */
-const backTo = readListHandoff(pageSupplier)?.path ?? MEMBERSHIP_LIST_PATH
+const backTo = readListHandoff(pageSupplier, pane)?.path ?? MEMBERSHIP_LIST_PATH
 
 async function loadPeriods() {
   const run = ++ticket
@@ -36,6 +39,7 @@ async function loadPeriods() {
 
 /** Smazaný člen: zpět na seznam bez možnosti vrátit se na jeho adresu; oznámení přežije přechod. */
 function deleted() {
+  forgetMemberInHandoff(pageSupplier, pane, memberId.value)
   toast.success(t('nonprofitMembership.correction.done_delete'))
   void router.replace(backTo)
 }

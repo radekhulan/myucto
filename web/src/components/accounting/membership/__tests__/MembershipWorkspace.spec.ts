@@ -52,7 +52,7 @@ const SearchableSelect = defineComponent({ props: ['modelValue', 'options', 'dis
   onChange: (e: Event) => { const option = (p.options as {value: string | number}[]).find(x => String(x.value) === (e.target as HTMLSelectElement).value); emit('update:modelValue', option?.value ?? null) },
 }, [h('option', {value: ''}), ...(p.options as {value: string | number; label: string}[]).map(x => h('option', {value: x.value}, x.label))]) })
 const ClientFormModal = defineComponent({ name: 'ClientFormModal', emits: ['created', 'close'], setup: () => () => h('div', { 'data-stub': 'client-modal' }) })
-const ImportFlow = defineComponent({ name: 'MembershipImportFlow', props: ['supplier', 'canManage'], emits: ['changed', 'close'], setup: () => () => h('div', { 'data-stub': 'import' }) })
+const ImportFlow = defineComponent({ name: 'MembershipImportFlow', props: ['supplier', 'canManage'], emits: ['changed', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'import' }) })
 // Okno a lišta hromadných akcí se v testu vykreslí na místě (bez teleportu).
 const Modal = defineComponent({ name: 'Modal', props: ['title', 'widthClass'], emits: ['close'], setup: (p, { slots }) => () => h('div', { 'data-stub': 'modal', 'data-title': p.title }, slots.default?.()) })
 const BulkActionBar = defineComponent({ name: 'BulkActionBar', props: ['count'], emits: ['clear'], setup: (p, { slots }) => () => (p.count as number) > 0 ? h('div', { 'data-stub': 'bulk-bar', 'data-count': p.count }, slots.default?.()) : null })
@@ -220,7 +220,7 @@ describe('Membership workspace', () => {
     await first.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
     await first.get('[data-member="2"] [data-action="batch-check-member"]').setValue(true)
     await first.get('[data-member="3"] [data-action="open-member"]').trigger('click')
-    expect(readListHandoff(5)).toMatchObject({ path: '/accounting/nonprofit-membership?year=2026&search=Synthetic', ids: [1,2], openedId: 3 })
+    expect(readListHandoff(5, null)).toMatchObject({ path: '/accounting/nonprofit-membership?year=2026&search=Synthetic', ids: [1,2], openedId: 3 })
     first.unmount()
     // Návrat: výběr se obnoví jednou a jako u každé obnovy ověří na serveru (člen 2 mezitím filtru nevyhovuje).
     api.selectionCheck.mockResolvedValueOnce({member_ids: [1]})
@@ -232,7 +232,7 @@ describe('Membership workspace', () => {
     expect(toast.warning).toHaveBeenCalledWith(cs.nonprofitMembership.listSelectionRefreshed)
     // Fokus na řádek člena, ze kterého se detail otevřel.
     expect(document.activeElement).toBe(back.get('[data-member="3"] [data-action="open-member"]').element)
-    expect(readListHandoff(5)).toBeNull()
+    expect(readListHandoff(5, null)).toBeNull()
     back.unmount()
     const again=mounted();await flushPromises()
     expect((again.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
@@ -253,7 +253,7 @@ describe('Membership workspace', () => {
     expect((back.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
     back.unmount()
 
-    saveListHandoff({ supplier: 5, path: '/accounting/nonprofit-membership', filters: {search:'',year:Number(appIsoDate().slice(0,4)),title_key:'',payment_status:'all'}, ids: [1], openedId: 1 })
+    saveListHandoff({ supplier: 5, pane: null, path: '/accounting/nonprofit-membership', filters: {search:'',year:Number(appIsoDate().slice(0,4)),title_key:'',payment_status:'all'}, ids: [1], openedId: 1 })
     const other=mounted({supplier:6});await flushPromises()
     expect((other.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
     other.unmount()
@@ -263,7 +263,7 @@ describe('Membership workspace', () => {
     const w=mounted();await flushPromises()
     await w.get('[data-member="1"]').trigger('click', { ctrlKey: true })
     expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: true })
-    expect(readListHandoff(5)).toBeNull()
+    expect(readListHandoff(5, null)).toBeNull()
     // Běžící export by odchodem ze seznamu tiše skončil.
     api.exportMembers.mockReturnValueOnce(new Promise(() => {}))
     await w.get('[data-action="export-xlsx"]').trigger('click');await flushPromises()
@@ -596,9 +596,9 @@ describe('Membership workspace', () => {
     await flushPromises()
     expect(w.findAll('[role="tab"]').map(tab => tab.attributes('data-tab'))).toEqual(['members', 'rates', 'reconciliation'])
     expect(w.get('[data-tab="members"]').attributes('aria-selected')).toBe('true')
-    expect(w.find('[data-stub="reconciliation"]').exists()).toBe(false)
+    expect((w.get('#membership-panel-reconciliation').element as HTMLElement).style.display).toBe('none')
     await w.get('[data-tab="reconciliation"]').trigger('click'); await flushPromises()
-    expect(w.find('[data-stub="reconciliation"]').exists()).toBe(true)
+    expect((w.get('#membership-panel-reconciliation').element as HTMLElement).style.display).toBe('')
     expect((w.get('[data-section="members"]').element as HTMLElement).style.display).toBe('none')
     expect(navigation.route.query).toMatchObject({ tab: 'reconciliation' })
     // Přepnutí záložky seznam znovu nenačítá.
@@ -1022,4 +1022,104 @@ describe('Membership workspace', () => {
     }
   })
 
+
+  it('keeps every window open while its write is running and closes it otherwise', async () => {
+    const modalOf = (w: ReturnType<typeof mounted>, title: string) => w.findAllComponents(Modal).find(m => m.props('title') === title)
+    // Založení: rozběhnuté uložení ani otevřené okno nového kontaktu okno nezavře.
+    let finish: (v: unknown) => void = () => {}
+    api.createMember.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const w = mounted(); await flushPromises()
+    await w.get('[data-action="create-open"]').trigger('click')
+    await w.get('[data-action="member-new-client"]').trigger('click')
+    modalOf(w, cs.nonprofitMembership.createTitle)!.vm.$emit('close'); await flushPromises()
+    expect(w.find('[data-section="create-member"]').exists()).toBe(true)
+    w.findComponent(ClientFormModal).vm.$emit('close'); await flushPromises()
+    await w.get('[data-field="member-client"]').setValue('3')
+    await w.get('[data-section="create-member"] [data-field="member-number"]').setValue('M-9')
+    await w.get('[data-action="create-member"]').trigger('click')
+    modalOf(w, cs.nonprofitMembership.createTitle)!.vm.$emit('close'); await flushPromises()
+    expect(w.find('[data-section="create-member"]').exists()).toBe(true)
+    finish({ id: 9, supplier_id: 5, client_id: 3, member_number: 'M-9', created_by: 1 }); await flushPromises()
+    expect(w.find('[data-section="create-member"]').exists()).toBe(false)
+    // Bez rozběhnutého zápisu se okno zavře a formulář se vyprázdní.
+    await w.get('[data-action="create-open"]').trigger('click')
+    await w.get('[data-section="create-member"] [data-field="member-number"]').setValue('M-10')
+    modalOf(w, cs.nonprofitMembership.createTitle)!.vm.$emit('close'); await flushPromises()
+    expect(w.find('[data-section="create-member"]').exists()).toBe(false)
+
+    // Hromadný předpis a import: zamčený tok okno drží, odemčený ho pustí.
+    await w.get('[data-action="batch-open"]').trigger('click'); await flushPromises()
+    w.findComponent(MembershipBatchFlow).vm.$emit('lock', true); await flushPromises()
+    modalOf(w, cs.nonprofitMembership.batchTitle)!.vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(MembershipBatchFlow).exists()).toBe(true)
+    w.findComponent(MembershipBatchFlow).vm.$emit('lock', false); await flushPromises()
+    modalOf(w, cs.nonprofitMembership.batchTitle)!.vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(MembershipBatchFlow).exists()).toBe(false)
+    await w.get('[data-action="import-open"]').trigger('click'); await flushPromises()
+    w.findComponent(ImportFlow).vm.$emit('lock', true); await flushPromises()
+    modalOf(w, cs.nonprofitMembership.import.title)!.vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(ImportFlow).exists()).toBe(true)
+    w.findComponent(ImportFlow).vm.$emit('lock', false); await flushPromises()
+    modalOf(w, cs.nonprofitMembership.import.title)!.vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(ImportFlow).exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('restores a handed-over selection only on the way back to the same list in the same panel', async () => {
+    const filters = { search: '', year: Number(appIsoDate().slice(0, 4)), title_key: '', payment_status: 'all' as const }
+    // Jiný panel (sdílené sessionStorage) výběr nepřevezme.
+    saveListHandoff({ supplier: 5, pane: 'other-pane', path: '/accounting/nonprofit-membership', filters, ids: [1], openedId: 1 })
+    const otherPane = mounted(); await flushPromises()
+    expect((otherPane.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
+    otherPane.unmount()
+    // Seznam otevřený jinou cestou (menu bez filtrů v adrese) starý výběr tiše neobnoví.
+    saveListHandoff({ supplier: 5, pane: null, path: '/accounting/nonprofit-membership?year=2026', filters, ids: [1], openedId: 1 })
+    navigation.route = reactive({ query: {}, fullPath: '/accounting/nonprofit-membership' }) as typeof navigation.route
+    const viaMenu = mounted(); await flushPromises()
+    expect((viaMenu.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
+    // Pravé tlačítko nic neotevírá ani nepředává.
+    sessionStorage.clear()
+    await viaMenu.get('[data-member="2"]').trigger('auxclick', { button: 2 })
+    expect(rowLink.navigate).not.toHaveBeenCalled()
+    expect(readListHandoff(5, null)).toBeNull()
+    viaMenu.unmount()
+  })
+
+  it('after a member was deleted on its page, returns focus to the list heading without a selection warning', async () => {
+    const filters = { search: '', year: Number(appIsoDate().slice(0, 4)), title_key: '', payment_status: 'all' as const }
+    // Detail smazaného člena ho z předání vyřadil (forgetMemberInHandoff): zůstal jen člen 1, otevřený není žádný.
+    saveListHandoff({ supplier: 5, pane: null, path: '/accounting/nonprofit-membership', filters, ids: [1], openedId: null })
+    const w = mount(Workspace, { attachTo: document.body, props: { supplier: 5, canManage: true }, global: { plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })], stubs: { ActionBar, SearchableSelect, ClientSearchSelect, ClientFormModal, MembershipReconciliation: Reconciliation, MembershipBatchFlow: true, MembershipImportFlow: ImportFlow, Modal, BulkActionBar, MembershipRates: true } } })
+    await flushPromises()
+    expect(toast.warning).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(w.get('[data-focus="members-heading"]').element)
+    w.unmount()
+  })
+
+  it('explains the 500 member selection limit on a greyed checkbox', async () => {
+    const filters = { search: '', year: Number(appIsoDate().slice(0, 4)), title_key: '', payment_status: 'all' as const }
+    const ids = Array.from({ length: 500 }, (_, index) => 1000 + index)
+    saveListHandoff({ supplier: 5, pane: null, path: '/accounting/nonprofit-membership', filters, ids, openedId: null })
+    const w = mounted(); await flushPromises()
+    const box = w.get('[data-member="1"] [data-action="batch-check-member"]')
+    expect(box.attributes('disabled')).toBeDefined()
+    expect(box.attributes('title')).toBe(cs.nonprofitMembership.batchSelectionLimit)
+    expect(box.attributes('aria-label')).toContain(cs.nonprofitMembership.batchSelectionLimit)
+    w.unmount()
+  })
+
+  it('ties tabs to their panels and drops a tab the page does not offer from the address', async () => {
+    navigation.route = reactive({ query: { tab: 'erasure' } })
+    const w = mounted(); await flushPromises()
+    expect(w.get('[data-tab="members"]').attributes('aria-selected')).toBe('true')
+    expect(navigation.route.query.tab).toBeUndefined()
+    const members = w.get('[data-tab="members"]')
+    expect(w.get(`#${members.attributes('aria-controls')}`).attributes('aria-labelledby')).toBe(members.attributes('id'))
+    // Kontrola s účetnictvím přežije přepnutí záložky (zvolené období a výsledek).
+    await w.get('[data-tab="reconciliation"]').trigger('click'); await flushPromises()
+    const reconciliation = w.findComponent(Reconciliation)
+    await w.get('[data-tab="members"]').trigger('click'); await flushPromises()
+    expect(reconciliation.exists()).toBe(true)
+    w.unmount()
+  })
 })

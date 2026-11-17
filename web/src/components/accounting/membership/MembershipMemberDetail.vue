@@ -102,15 +102,17 @@ async function refreshClaim(row: ClaimRow) {
 }
 
 async function finished(message: string) {
-  issueOpen.value = false
-  reverseClaim.value = null
+  // Okno se zavře dřív, než formulář stihne ohlásit uvolnění zámku; jinak by akce detailu zůstaly zašedlé.
+  issueOpen.value = false; locks.value.issue = false
+  reverseClaim.value = null; locks.value.reverse = false
   confirmDone(message)
   await load()
   emit('changed')
 }
 
 async function revisionFinished() {
-  revisionOpen.value = false
+  // Stejně jako u předpisu: zámek uvolní detail, jinak by se pod přehledem objevil formulář první revize.
+  revisionOpen.value = false; locks.value.revision = false; revisionDirty.value = false
   confirmDone(t('nonprofitMembership.revisionDone'))
   await load()
   emit('changed')
@@ -229,7 +231,7 @@ function claimActions(claim: ClaimRow): RowAction[] {
       <div class="min-w-0">
         <slot name="back" />
         <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <h1 ref="heading" tabindex="-1" class="min-w-0 break-words text-2xl font-semibold focus:outline-none" data-focus="member-heading">{{ displayLabel }}</h1>
+          <h1 ref="heading" tabindex="-1" class="min-w-0 break-words text-2xl font-semibold focus:outline-none" data-focus="member-heading">{{ displayLabel || t('common.loading') }}</h1>
           <span v-if="current" :class="memberStatusBadge(current.status)" data-field="status-badge">{{ t(`nonprofitMembership.status_${current.status}`) }}</span>
         </div>
         <p v-if="identity" class="mt-0.5 text-sm text-neutral-500" data-field="member-identity">{{ t('nonprofitMembership.memberNumber') }} <span class="font-mono text-neutral-700">{{ identity.member_number }}</span></p>

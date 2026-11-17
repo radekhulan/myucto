@@ -3,6 +3,7 @@ import { computed, onMounted, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { usePaneActivity, usePaneId } from '@/workspace/paneActivity'
 import { lockBodyScroll, unlockBodyScroll } from '@/utils/bodyScrollLock'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
+import { closesOnEscape, pushModal, removeModal } from './modalStack'
 
 /**
  * Generic modal — backdrop, ESC close, click-outside close, sticky header/footer.
@@ -24,6 +25,8 @@ const paneActive = usePaneActivity()
 const titleId = useId()
 const paneId = usePaneId()
 let scrollLocked = false
+/** Pořadí otevřených oken: Escape zavírá jen to nejvrchnější (okno kontaktu nad oknem člena). */
+const stackId = Symbol('modal')
 
 /**
  * Otevřený náhled originálu vedle formuláře (DocumentPreviewSplit) modál nezakrývá: backdrop
@@ -49,16 +52,18 @@ function syncBodyScrollLock(active: boolean): void {
 }
 
 function onKey(e: KeyboardEvent) {
-  if (paneActive.value && e.key === 'Escape') emit('close')
+  if (paneActive.value && e.key === 'Escape' && closesOnEscape(stackId, e)) emit('close')
 }
 
 onMounted(() => {
+  pushModal(stackId, paneId.value)
   document.addEventListener('keydown', onKey)
   window.addEventListener('resize', measurePreview)
   measurePreview()
   syncBodyScrollLock(paneActive.value)
 })
 onBeforeUnmount(() => {
+  removeModal(stackId)
   document.removeEventListener('keydown', onKey)
   window.removeEventListener('resize', measurePreview)
   syncBodyScrollLock(false)

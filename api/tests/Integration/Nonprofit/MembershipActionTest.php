@@ -25,6 +25,7 @@ use PHPUnit\Framework\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureService;
 
 final class MembershipActionTest extends TestCase
 {
@@ -152,6 +153,16 @@ final class MembershipActionTest extends TestCase
         [$status, $error] = $this->call('POST', 'preview', ['operation' => 'issue', 'request' => $charge, 'unexpected' => true]);
         self::assertSame(422, $status);
         self::assertSame('nonprofit_membership_invalid', $error['error']['code']);
+
+        // Vymazaný člen (krok 10): jméno kontaktu detail nenese, ani když kontakt dál drží jiný doklad.
+        $this->pdo->prepare('UPDATE nonprofit_members SET member_number=? WHERE supplier_id=? AND id=?')
+            ->execute([MembershipErasureService::placeholderNumber((int) $member['id']), $this->supplier, $member['id']]);
+        [$status, $erased] = $this->call('GET', 'member', null, ['id' => (string) $member['id']], ['accounting' => 1], 'session');
+        self::assertSame(200, $status);
+        self::assertTrue($erased['erased']);
+        self::assertNull($erased['member']['company_name']);
+        self::assertNull($erased['member']['first_name']);
+        self::assertNull($erased['member']['last_name']);
     }
 
     public function testInvalidIssueAmountsReturnValidationErrorsWithoutWriting(): void

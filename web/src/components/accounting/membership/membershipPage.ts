@@ -13,7 +13,7 @@ export const memberDetailPath = (id: number) => `${MEMBERSHIP_LIST_PATH}/members
  * předpisu a otevřeného člena uloží sem. Detail z toho vezme odkaz zpět, seznam po návratu výběr a fokus.
  * Platí jen pro tutéž firmu a filtry a jen krátce; obnovený výběr seznam jako každou obnovu ověří na serveru.
  */
-export interface MembershipListHandoff { supplier: number; path: string; filters: MembershipListFilters; ids: number[]; openedId: number | null; at: number }
+export interface MembershipListHandoff { supplier: number; pane: string | null; path: string; filters: MembershipListFilters; ids: number[]; openedId: number | null; at: number }
 const HANDOFF_KEY = 'myinvoice.membership.listHandoff'
 const HANDOFF_TTL_MS = 30 * 60 * 1000
 
@@ -21,17 +21,27 @@ export function saveListHandoff(state: Omit<MembershipListHandoff, 'at'>): void 
   try { sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ ...state, at: Date.now() })) } catch { /* bez úložiště jen bez návratu stavu */ }
 }
 
-/** Platné předání pro firmu, nebo null (jiná firma, staré, poškozené). */
-export function readListHandoff(supplier: number): MembershipListHandoff | null {
+/**
+ * Platné předání pro firmu a panel, nebo null (jiná firma, jiný panel, staré, poškozené). Panely pracovní
+ * plochy sdílejí sessionStorage, proto předání nese panel, ze kterého seznam detail otevřel.
+ */
+export function readListHandoff(supplier: number, pane: string | null): MembershipListHandoff | null {
   try {
     const raw: unknown = JSON.parse(sessionStorage.getItem(HANDOFF_KEY) ?? 'null')
     if (!raw || typeof raw !== 'object') return null
     const h = raw as Partial<MembershipListHandoff>
-    if (h.supplier !== supplier || typeof h.at !== 'number' || Date.now() - h.at > HANDOFF_TTL_MS) return null
+    if (h.supplier !== supplier || (h.pane ?? null) !== pane || typeof h.at !== 'number' || Date.now() - h.at > HANDOFF_TTL_MS) return null
     if (typeof h.path !== 'string' || (h.path !== MEMBERSHIP_LIST_PATH && !h.path.startsWith(`${MEMBERSHIP_LIST_PATH}?`))) return null
     const ids = Array.isArray(h.ids) ? h.ids.filter((id): id is number => Number.isInteger(id) && id > 0).slice(0, 500) : []
-    return { supplier, path: h.path, filters: h.filters as MembershipListFilters, ids, openedId: Number.isInteger(h.openedId) ? h.openedId as number : null, at: h.at }
+    return { supplier, pane, path: h.path, filters: h.filters as MembershipListFilters, ids, openedId: Number.isInteger(h.openedId) ? h.openedId as number : null, at: h.at }
   } catch { return null }
+}
+
+/** Smazaný člen: z předání zmizí z výběru i jako otevřený (seznam pak nehlásí jeho vyřazení a fokus dá na nadpis). */
+export function forgetMemberInHandoff(supplier: number, pane: string | null, memberId: number): void {
+  const handoff = readListHandoff(supplier, pane)
+  if (!handoff) return
+  saveListHandoff({ ...handoff, ids: handoff.ids.filter(id => id !== memberId), openedId: handoff.openedId === memberId ? null : handoff.openedId })
 }
 
 export function clearListHandoff(): void {

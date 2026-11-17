@@ -672,3 +672,55 @@ function mountedWithCorrection(props: Record<string, unknown> = {}) {
     },
   })
 }
+
+describe('Membership member detail – zámky oken, vymazaný člen a načítání', () => {
+  it('uvolní zámek formuláře zavřeného po zápisu, aby akce detailu nezůstaly zašedlé', async () => {
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], [claim(31, 100000, unreconciled)]))
+    const w = mounted(); await flushPromises()
+    // Okno se zavře dřív, než formulář stihne ohlásit uvolnění zámku (done přijde před lock(false)).
+    await w.get('[data-action="change-status"]').trigger('click')
+    w.findComponent(RevisionForm).vm.$emit('lock', true)
+    w.findComponent(RevisionForm).vm.$emit('done'); await flushPromises()
+    expect(w.find('[data-section="first-revision"]').exists()).toBe(false)
+    expect(w.get('[data-action="new-charge"]').attributes('disabled')).toBeUndefined()
+    await w.get('[data-action="new-charge"]').trigger('click')
+    w.findComponent(IssueFlow).vm.$emit('lock', true)
+    w.findComponent(IssueFlow).vm.$emit('done'); await flushPromises()
+    expect(w.get('[data-action="new-charge"]').attributes('disabled')).toBeUndefined()
+    await w.get('[data-claim="31"] [data-action="reverse-claim"]').trigger('click')
+    w.findComponent(ReverseFlow).vm.$emit('lock', true)
+    w.findComponent(ReverseFlow).vm.$emit('done'); await flushPromises()
+    expect(w.get('[data-action="new-charge"]').attributes('disabled')).toBeUndefined()
+    w.unmount()
+  })
+
+  it('nechá okno otevřené, dokud ho drží rozběhnutý zápis', async () => {
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], []))
+    const w = mounted(); await flushPromises()
+    await w.get('[data-action="new-charge"]').trigger('click')
+    w.findComponent(IssueFlow).vm.$emit('lock', true); await flushPromises()
+    w.findComponent(Modal).vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(IssueFlow).exists()).toBe(true)
+    w.findComponent(IssueFlow).vm.$emit('lock', false); await flushPromises()
+    w.findComponent(Modal).vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(IssueFlow).exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('vymazaného člena neoznačí jménem kontaktu ani v nadpisu', async () => {
+    const named = detail([revision(1, '2020-01-01', 'ended')], [])
+    api.member.mockResolvedValue({ ...named, erased: true, member: { ...named.member, company_name: 'Synthetic leaked name' } })
+    const w = mounted(); await flushPromises()
+    expect(w.get('[data-focus="member-heading"]').text()).toBe(cs.nonprofitMembership.erasure.erasedMemberLabel.replace('{id}', '9'))
+    expect(w.text()).not.toContain('Synthetic leaked name')
+    expect(w.find('[data-section="detail-erased"]').exists()).toBe(true)
+    w.unmount()
+  })
+
+  it('nemá prázdný nadpis, dokud se člen načítá', async () => {
+    api.member.mockReturnValue(new Promise(() => {}))
+    const w = mounted({ label: undefined }); await flushPromises()
+    expect(w.get('[data-focus="member-heading"]').text()).toBe(cs.common.loading)
+    w.unmount()
+  })
+})

@@ -42296,7 +42296,8 @@
       "amount": "Amount",
       "dates": "Accounting and due date",
       "settlement": "Payment"
-    }
+    },
+    "batchSelectionLimit": "Up to 500 members can be selected for a batch charge. For all active members, choose All active on the accounting date in the batch charge."
   },
   "fx504": {
     "case_nominal_unproven": "The journal entry has no proven amount in the foreign currency. Verify the supporting evidence and any links to documents or payments, then refresh the preview.",
