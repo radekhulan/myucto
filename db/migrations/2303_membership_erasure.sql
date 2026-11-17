@@ -190,10 +190,3 @@ BEGIN
  END IF;
 END$$
 DELIMITER ;
-
--- Nové právo: nevratný výmaz patří ke správcovským rolím (vzor 2038). Výchozí účetní ho nedostane,
--- správce ho přidělí vlastní roli v editoru rolí.
-INSERT IGNORE INTO role_permissions (role_id, permission_key, access_level)
-SELECT r.id, 'accounting.membership_erasure', 2
-FROM roles r
-WHERE r.system_key IN ('admin', 'admin_plus');

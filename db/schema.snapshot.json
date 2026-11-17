@@ -1206,7 +1206,8 @@
         "2300_membership_variable_symbol.sql",
         "2301_membership_correctability.sql",
         "2302_activity_log_redactions.sql",
-        "2303_membership_erasure.sql"
+        "2303_membership_erasure.sql",
+        "2304_membership_erasure_permission.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
