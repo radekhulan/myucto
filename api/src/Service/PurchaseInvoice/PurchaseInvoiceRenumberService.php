@@ -210,6 +210,20 @@ final class PurchaseInvoiceRenumberService
                 AND (document_no IN (?, CONCAT('STORNO ', ?)) OR description REGEXP ?)"
         )->execute([$old, $new, $old, $new, $pattern, $new, $supplierId, $id, $old, $old, $pattern]);
 
+        // Storno nese source_id NULL (PostingService), k originálu ho váže jen reversed_by.
+        $pdo->prepare(
+            "UPDATE journal_entries r
+               JOIN journal_entries o ON o.supplier_id = r.supplier_id AND o.reversed_by = r.id
+                SET r.document_no = CASE
+                        WHEN r.document_no = CONCAT('STORNO ', ?) THEN CONCAT('STORNO ', ?)
+                        ELSE r.document_no END,
+                    r.description = REGEXP_REPLACE(r.description, ?, ?),
+                    r.row_version = r.row_version + 1
+              WHERE o.supplier_id = ? AND o.source_type = 'purchase_invoice' AND o.source_id = ?
+                AND r.source_id IS NULL
+                AND (r.document_no = CONCAT('STORNO ', ?) OR r.description REGEXP ?)"
+        )->execute([$old, $new, $pattern, $new, $supplierId, $id, $old, $pattern]);
+
         // Další zápisy, které doklad vlastní ve skupině zaúčtování (DPH, ruční člen).
         $pdo->prepare(
             "UPDATE journal_document_postings jdp
