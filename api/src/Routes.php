@@ -3272,6 +3272,15 @@ final class Routes
             $g->post('/nonprofit-membership/members/{id:[0-9]+}/revisions', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'appendRevision']);
             $g->put('/nonprofit-membership/members/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'updateMember']);
             $g->delete('/nonprofit-membership/members/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'deleteMember']);
+            // Výmaz osobních údajů bývalých členů (#321, krok 10); konkrétní cesty před `{id}`.
+            $g->get('/nonprofit-membership/erasure/assessment', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'assessment']);
+            $g->get('/nonprofit-membership/erasure', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'proposals']);
+            $g->post('/nonprofit-membership/erasure', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'create']);
+            $g->get('/nonprofit-membership/erasure/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'proposal']);
+            $g->post('/nonprofit-membership/erasure/{id:[0-9]+}/approve', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'approve']);
+            $g->post('/nonprofit-membership/erasure/{id:[0-9]+}/revoke', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'revoke']);
+            $g->post('/nonprofit-membership/erasure/{id:[0-9]+}/reject', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'reject']);
+            $g->post('/nonprofit-membership/erasure/{id:[0-9]+}/execute', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'execute']);
             $g->post('/nonprofit-membership/members/{id:[0-9]+}/revisions/{revisionId:[0-9]+}/void', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'voidRevision']);
             $g->post('/nonprofit-membership/charges/preview', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'preview']);
             $g->post('/nonprofit-membership/charges/confirm', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'confirm']);

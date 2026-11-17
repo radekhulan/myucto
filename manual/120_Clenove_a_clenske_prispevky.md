@@ -123,8 +123,44 @@ Při nejistém výsledku odeslání obnovte přehled nebo opakujte stejný zmraz
 
 ## 120.5 Čtení přes veřejné API a MCP
 
-Kurátorované katalogy členských rolí a pohledávek jsou dostupné s oprávněním ke čtení účetnictví také přes API token a MCP. Seznamy i detaily používají stejnou obálku; stránka obsahuje nejvýše 100 záznamů a pokračovací kurzor je vázaný na firmu a filtry. Výstup neobsahuje jména, členská čísla, právní podklady ani interní otisky a aktéry.
+Kurátorované katalogy členských rolí a pohledávek jsou dostupné s oprávněním ke čtení účetnictví také přes API token a MCP. Seznamy i detaily používají stejnou obálku; stránka obsahuje nejvýše 100 záznamů a pokračovací kurzor je vázaný na firmu a filtry. Výstup neobsahuje jména, členská čísla, právní podklady ani interní otisky a aktéry. U člena s vymazanými osobními údaji (oddíl 120.6) je `erased` true a `client_id` prázdné.
 
 U členských rolí zadejte rozhodné datum `as_of` a případně okamžik tehdejší znalosti `known_at`. Pokud jej vynecháte, připne jej první stránka. Později zaznamenaná revize ani její zrušení tak nezmění navazující stránky téhož čtení. Oprava kontaktu člena bez předpisu se projeví i pro dřívější okamžik znalosti. Předchozí revize role ukazuje na předchozí platnou revizi, zrušené revize přeskakuje. U pohledávek se čte aktuální účetní stav a doložená nativní bankovní nebo pokladní párování; historický okamžik úhrad se nepřijímá. U pohledávek k prověření zůstávají uhrazená i otevřená částka `null`. Katalog sám nepotvrzuje osvobození příjmu ani oprávnění k finanční operaci.
 
 Historické role vyžadují průkazný okamžik zaznamenání. Pokud jej starší záznam nemá doložený, časový katalog vrátí chybu místo odhadování časové zóny nebo vynechání člena. U pohledávky může být čas zaznamenání `null` se stavem `unproven`; ověření její částky a účetních podkladů tím zůstává samostatné. Původní časové údaje se při aktualizaci ani anonymizované kopii nepřepočítávají odhadem.
+
+## 120.6 Výmaz osobních údajů bývalých členů
+
+Osobní údaje bývalého člena se po uplynutí lhůt vymažou v sekci **Výmaz osobních údajů bývalých členů** pod sazbami. Sekce je vidět s právem **Schválit a provést výmaz osobních údajů bývalých členů**. Ve výchozím stavu ho má správce; jiné roli ho přidělí správce v editoru rolí. Nic se nemaže automaticky. Sestaví se návrh, člověk ho schválí a teprve pak se provede.
+
+**Kdy jde údaje vymazat.** Kandidátem je člen, jehož poslední platná revize má stav **Ukončeno**. Lhůta běží od ukončení členství a od konce účetního období posledního účetního záznamu, který na členovi stojí: předpisu, storna nebo úhrady spárované s jeho předpisem. Platí ta lhůta, která skončí později:
+
+- člen s účetním záznamem: 5 let od konce účetního období posledního záznamu (§ 31 odst. 2 písm. b zákona o účetnictví),
+- člen bez účetního záznamu: 1 rok od ukončení členství.
+
+Poslední den lhůty do ní patří; vymazat jde až den poté. Výmaz drží také neuhrazený nebo neprokázaný předpis, rozpracovaný hromadný předpis s členem a zadržení podle § 32 zákona o účetnictví na rok s jeho účetním záznamem (**Účetnictví → Retenční lhůty**). Zadržení celého účetnictví drží všechny členy. Sekce ukazuje, kolik členů lze k dnešku vymazat a co drží ostatní.
+
+**Návrh a schválení.** **Sestavit návrh výmazu** zařadí všechny členy, kterým lhůta uplynula a nic je nedrží (nejvýše 500 v jednom návrhu). Otevřený může být jen jeden návrh. Před provedením návrh ukazuje číslo a jméno každého člena, aby šlo zkontrolovat, koho se týká. Návrh jde **Schválit** nebo **Zamítnout**. Schválí-li ho tentýž uživatel, který ho sestavil, jde provést až po 72 hodinách a do té doby jde schválení **Vzít zpět**. Schválí-li ho jiný uživatel, provést ho jde hned.
+
+**Provedení.** Opište potvrzovací frázi a zvolte **Provést výmaz**. Každý člen se před výmazem posoudí znovu. Kdo se od schválení změnil (například znovu vstoupil, přibyl mu předpis nebo zadržení), se přeskočí s uvedeným důvodem a jeho údaje zůstanou. Stejně se přeskočí člen, u kterého výmaz narazí na technickou chybu. Jedno spuštění zpracuje nejvýše 50 členů; u většího návrhu pokračujte tlačítkem **Pokračovat ve výmazu**. Přerušený výmaz jde stejně dokončit. Schválený návrh, který dokončit nechcete, ukončete v nabídce **…** volbou **Ukončit návrh**; provedené položky zůstanou a ostatní členové půjdou do dalšího návrhu.
+
+**Co se vymaže a co zůstane.** Účetní záznamy zůstávají beze změny: deník, předpisy, storna, částky, saldokonto i podklady pro daňové přiznání. U člena se vymaže:
+
+- členské číslo (nahradí ho pseudonym `vymazano-…`),
+- odkaz a doložení v revizích členství a důvod zrušení revize,
+- kopie čísla a těchto textů v uložených podkladech předpisů, odkaz a doložení titulu předpisu a důvod storna v nich,
+- důvod předpisu a variabilní symbol v uložených požadavcích a u předpisů,
+- kontakt, pokud ho nepoužívá jiný doklad, modul ani k němu připojený dokument: zmizí jméno, adresa, e-mail, telefon, identifikátory, bankovní účty a e-mailové kontakty, kontakt se archivuje a z auditní stopy jeho založení a úprav zmizí název, IČO i e-mailové kontakty. Kontakt, na kterém stojí například faktura, zůstane beze změny, protože ho drží ten doklad,
+- členské číslo, kontakt a důvod v auditní stopě oprav člena.
+
+Důvod storna zapsaný jako popis účetního zápisu zůstává, protože je součástí účetního záznamu. Do důvodů storna proto nepište osobní údaje. Zůstávají také bankovní pohyby úhrad (jméno a účet plátce, variabilní symbol): jsou to účetní záznamy banky s vlastní lhůtou a přes ně jde vymazaného člena dohledat. Dokument připojený ke kontaktu (například sken přihlášky) výmaz nemění a kontakt kvůli němu zůstane; po kontrole ho smažte ručně.
+
+Výmaz anonymizuje jen kontakt, který má člen přiřazený v den výmazu. Kontakt, který měl člen přiřazený dřív a opravil se (oddíl 120.1), ani kontakt smazaného člena se nemění; pokud ho nic nepoužívá, smažte ho v adresáři ručně.
+
+Vymazaný člen zůstává v seznamu jako **Vymazaný člen č. …** bez jména, ani tehdy, když jeho kontakt drží jiný doklad. Podle jména ho najít nejde. V detailu je historie i předpisy, ale členství, předpisy, storno, opravu ani smazání už měnit nejde. Členské číslo ve tvaru `vymazano-…` je vyhrazené. Když vymazaný člen znovu vstoupí a jeho kontakt zůstal kvůli jinému dokladu, založte mu nový kontakt; původní kontakt zůstává svázaný s vymazaným členem. Zruší-li se po výmazu párování úhrady jeho předpisu, pohledávka se znovu otevře; spárujte ji s úhradou ručně (variabilní symbol už nemá).
+
+**Průkaznost.** Revize a podklady předpisů jsou zřetězené otisky. Výmaz uložené otisky nemění, takže řetěz i podklady daňového přiznání na ně dál odkazují. Před výmazem se celý řetěz člena ověří. Přepisu brání databáze, dokud nejde o schválený návrh, a i pak pustí změnu jen osobních údajů. Přepsané záznamy dostanou pečeť svázanou s návrhem výmazu a otisky pečetí se zapíšou do zřetězené auditní stopy. Detail a historie člena, předpisy, veřejný katalog i podklady daňového přiznání porovnají každý zapečetěný záznam s pečetí i s tímto zápisem; pozdější změna se ohlásí jako neprůkazná historie. Změnu samotného zápisu v auditní stopě odhalí kontrola řetězu v Diagnostice, v promazané části auditní stopy jen v rozsahu, v jakém tam řetěz ještě ověřitelný je. Redigované záznamy auditní stopy se ověřují stejně: každá redakce je sama zápisem v řetězu.
+
+**Doklad o výmazu.** Provedený návrh zůstává v přehledu návrhů jako doklad: kdo a kdy ho schválil a provedl, podle jaké lhůty a s jakým výsledkem u každé položky. Jméno, číslo ani kontakt v něm nejsou.
+
+**Smazaný člen.** U člena smazaného v evidenci (oddíl 120.1) zůstává v auditní stopě jeho číslo a kontakt. Rok po smazání ho návrh výmazu zařadí jako auditní stopu smazaného člena a provedení číslo i kontakt v auditu nahradí. Zadržení celého účetnictví (bez roku) drží i tyto stopy.

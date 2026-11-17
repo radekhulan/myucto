@@ -26,6 +26,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Nonprofit\Membership\MembershipChargeService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipCorrectionService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipException;
 use MyInvoice\Service\Nonprofit\Membership\MembershipChargeRequest;
 use MyInvoice\Service\Nonprofit\Membership\MembershipMemberService;
@@ -335,7 +336,7 @@ final class MembershipAction
             $after = $this->queryInteger($query['after_claim_id'] ?? 0, 'after_claim_id', 0);
             $limit = $this->queryInteger($query['limit'] ?? 100, 'limit', 1, 100);
             $history = $this->members->history($supplier, $member['id']);
-            $detail = ['member' => $member, 'history' => $history];
+            $detail = ['member' => $member, 'history' => $history, 'erased' => MembershipErasureService::isErasedMember($member)];
             // Dostupnost oprav čte předpisy, důkazy operací a dávky člena; počítá se jen pro toho, kdo smí opravovat.
             if (RequestAuthorization::allows($request, 'accounting.journal.post', AccessLevel::WRITE)) {
                 $detail['corrections'] = $this->corrections->availability($supplier, $member, $history);

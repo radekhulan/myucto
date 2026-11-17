@@ -130,8 +130,9 @@ final class MembershipBankMatchRepository
             $memberParams = [$supplier];
             foreach ($words as $word) {
                 $like = MembershipListFilter::containsPattern($word);
-                $memberSql .= " AND (sm.member_number LIKE ? ESCAPE '=' OR scl.company_name LIKE ? ESCAPE '='"
-                    . " OR scl.first_name LIKE ? ESCAPE '=' OR scl.last_name LIKE ? ESCAPE '=')";
+                // Vymazaného člena (krok 10) jméno sdíleného kontaktu nenajde.
+                $memberSql .= " AND (sm.member_number LIKE ? ESCAPE '=' OR (NOT " . MembershipListRepository::erasedSql('sm') . " AND (scl.company_name LIKE ? ESCAPE '='"
+                    . " OR scl.first_name LIKE ? ESCAPE '=' OR scl.last_name LIKE ? ESCAPE '=')))";
                 array_push($memberParams, $like, $like, $like, $like);
             }
             $members = "SELECT sm.id FROM nonprofit_members sm
@@ -240,7 +241,8 @@ final class MembershipBankMatchRepository
                 o.journal_entry_id,o.receivable_line_id,l.line_no,l.account_id,a.account_code,
                 e.posted_at,e.reversed_by,r.id reversal_claim_id," . MembershipBalanceRepository::receiptValiditySql() . " receipt_valid,
                 cc.title_key,cc.period_from,cc.period_to,cc.variable_symbol,cc.variable_symbol_match_key,
-                COALESCE(NULLIF(TRIM(cl.company_name),''),TRIM(CONCAT_WS(' ',cl.first_name,cl.last_name))) member_name,pi.pairing_id
+                IF(EXISTS(SELECT 1 FROM nonprofit_members em WHERE em.supplier_id=c.supplier_id AND em.id=c.member_id AND " . MembershipListRepository::erasedSql('em') . "),NULL,
+                  COALESCE(NULLIF(TRIM(cl.company_name),''),TRIM(CONCAT_WS(' ',cl.first_name,cl.last_name)))) member_name,pi.pairing_id
             FROM $from
             JOIN nonprofit_membership_charge_operations o ON o.supplier_id=c.supplier_id AND o.id=c.operation_id
                 AND o.operation='issue' AND cc.head_operation_id=o.id

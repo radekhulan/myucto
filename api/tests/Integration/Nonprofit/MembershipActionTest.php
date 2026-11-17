@@ -484,7 +484,35 @@ final class MembershipActionTest extends TestCase
         self::assertSame(['nonprofit_membership_member_update', 'nonprofit_membership_revision_void'], $q->fetchAll(\PDO::FETCH_COLUMN));
     }
 
-    private function call(string $httpMethod, string $method, ?array $body, array $args = [], ?array $permissions = null, string $auth = 'session', ?array $apiToken = null, ?array $query = null): array
+    public function testErasureRoutesRequireSessionAndErasurePermission(): void
+    {
+        $erasure = $this->container->get(\MyInvoice\Action\Nonprofit\MembershipErasureAction::class);
+        $read = ['accounting' => 1, 'accounting.journal.post' => 2, 'accounting.membership_erasure' => 1];
+        $write = ['accounting.membership_erasure' => 2] + $read;
+        [$status] = $this->call('GET', 'proposals', null, [], null, action: $erasure);
+        self::assertSame(403, $status, 'Bez práva výmazu nejde ani číst návrhy se jmény.');
+        [$status, $token] = $this->call('GET', 'proposals', null, [], $read, 'bearer', action: $erasure);
+        self::assertSame([403, 'token_endpoint_forbidden'], [$status, $token['error']['code']]);
+        [$status, $list] = $this->call('GET', 'proposals', null, [], $read, action: $erasure);
+        self::assertSame([200, []], [$status, $list['items']]);
+        [$status, $assessment] = $this->call('GET', 'assessment', null, [], $read, action: $erasure);
+        self::assertSame(200, $status);
+        self::assertSame([], $assessment['items']);
+        [$status] = $this->call('POST', 'create', [], [], $read, action: $erasure);
+        self::assertSame(403, $status, 'Čtení nestačí k sestavení návrhu.');
+        [$status, $denied] = $this->call('POST', 'create', [], [], $write, 'bearer', action: $erasure);
+        self::assertSame([403, 'session_required'], [$status, $denied['error']['code']]);
+        [$status, $nothing] = $this->call('POST', 'create', [], [], $write, action: $erasure);
+        self::assertSame([409, 'nonprofit_membership_erasure_nothing'], [$status, $nothing['error']['code']]);
+        [$status, $invalid] = $this->call('POST', 'create', ['note' => 5], [], $write, action: $erasure);
+        self::assertSame([422, 'nonprofit_membership_invalid'], [$status, $invalid['error']['code']]);
+        [$status, $missing] = $this->call('POST', 'execute', ['confirmation' => 'TRVALE SMAZAT'], ['id' => '999999999'], $write, action: $erasure);
+        self::assertSame([404, 'nonprofit_membership_erasure_not_found'], [$status, $missing['error']['code']]);
+        [$status, $phrase] = $this->call('POST', 'execute', ['confirmation' => 'smazat'], ['id' => '1'], $write, action: $erasure);
+        self::assertSame([422, 'nonprofit_membership_erasure_confirmation'], [$status, $phrase['error']['code']]);
+    }
+
+    private function call(string $httpMethod, string $method, ?array $body, array $args = [], ?array $permissions = null, string $auth = 'session', ?array $apiToken = null, ?array $query = null, ?object $action = null): array
     {
         $permissions ??= ['accounting' => 1, 'accounting.journal.post' => 2, 'accounting.templates' => 2];
         $request = (new ServerRequestFactory())->createServerRequest($httpMethod, '/api/accounting/nonprofit-membership')
@@ -495,7 +523,7 @@ final class MembershipActionTest extends TestCase
         if ($apiToken !== null) $request = $request->withAttribute(AuthMiddleware::ATTR_API_TOKEN, $apiToken);
         if ($body !== null) $request = $request->withParsedBody($body);
         if ($query !== null) $request = $request->withQueryParams($query);
-        $response = $this->action->{$method}($request, new Response(), $args);
+        $response = ($action ?? $this->action)->{$method}($request, new Response(), $args);
         return [$response->getStatusCode(), json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR)];
     }
 

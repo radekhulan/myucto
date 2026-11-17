@@ -81,6 +81,14 @@ final class ActivityLogHashChain
         'nonprofit_membership_revision_void',
         // Atestace redakce ({@see redact()}); bez ní by verify() redigovaný záznam nepřijal.
         self::REDACTION_ACTION,
+        // Výmaz osobních údajů členů (#321, krok 10): kdo návrh sestavil, schválil a provedl, a kotva
+        // pečetí, proti které se ověřují zapečetěné záznamy (MembershipErasureAnchor).
+        'nonprofit_membership_erasure_created',
+        'nonprofit_membership_erasure_approved',
+        'nonprofit_membership_erasure_revoked',
+        'nonprofit_membership_erasure_rejected',
+        'nonprofit_membership_erasure_executed',
+        'nonprofit_membership_erasure_sealed',
     ];
 
     /** Článek řetězu, který zapisuje každou redakci auditního záznamu. */

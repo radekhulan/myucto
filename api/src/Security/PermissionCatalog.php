@@ -86,6 +86,7 @@ final class PermissionCatalog
             ['accounting.period_lock', 'accounting', 'Posunout zámek účtování k datu', $staffOnly],
             ['accounting.offsets', 'accounting', 'Vzájemné zápočty', $staffOnly],
             ['accounting.templates', 'accounting', 'Účetní šablony', $staffOnly],
+            ['accounting.membership_erasure', 'accounting', 'Schválit a provést výmaz osobních údajů bývalých členů', $staffOnly],
             ['property', 'property', 'Registr SVJ', $staffOnly],
             ['property.registry.manage', 'property', 'Spravovat podklady registru SVJ', $staffOnly],
             ['property.registry.confirm', 'property', 'Potvrzovat právní podklady SVJ', $staffOnly],
@@ -253,6 +254,8 @@ final class PermissionCatalog
                 // ve výchozím stavu zůstávají: prodloužit lhůtu nebo zadržet výmaz
                 // je konzervativní směr, kterým se nic neztratí.
                 'payroll.erasure',
+                // Výmaz osobních údajů bývalých členů spolku je stejně nevratný jako výmaz mezd.
+                'accounting.membership_erasure',
                 // Pokladní certifikát s privátním klíčem podepisuje evidenci tržeb jménem firmy.
                 'eet.certificates',
                 // Rozsah klienta (předání dokladů, připravená podání, firemní podpisy)

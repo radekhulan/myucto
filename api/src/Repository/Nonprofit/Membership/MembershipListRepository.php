@@ -130,6 +130,7 @@ final class MembershipListRepository
             }
             $row['revision_no'] = $row['revision_no'] === null ? null : (int) $row['revision_no'];
             $row['all_revisions_voided'] = (int) $row['all_revisions_voided'] === 1;
+            $row['erased'] = (int) $row['erased'] === 1;
             $row['contribution'] = [
                 'status' => $row['dues_status'],
                 'claim_count' => (int) $row['dues_count'],
@@ -156,7 +157,7 @@ final class MembershipListRepository
         $params = [];
         foreach (MembershipListFilter::searchWords($filter['search']) as $word) {
             $like = MembershipListFilter::containsPattern($word);
-            $sql .= " AND (m.member_number LIKE ? ESCAPE '=' OR c.company_name LIKE ? ESCAPE '=' OR c.first_name LIKE ? ESCAPE '=' OR c.last_name LIKE ? ESCAPE '=')";
+            $sql .= " AND (m.member_number LIKE ? ESCAPE '=' OR (NOT " . self::erasedSql('m') . " AND (c.company_name LIKE ? ESCAPE '=' OR c.first_name LIKE ? ESCAPE '=' OR c.last_name LIKE ? ESCAPE '=')))";
             array_push($params, $like, $like, $like, $like);
         }
         return [$sql, $params];
@@ -235,8 +236,11 @@ final class MembershipListRepository
             $statusFilter = ' WHERE dues_status=?';
             $params[] = $filter['payment_status'];
         }
+        // Vymazaný člen (krok 10) nevrací jméno ani tehdy, když jeho kontakt drží jiný doklad.
+        $erased = self::erasedSql('m');
+        $names = "IF({$erased},NULL,c.company_name) company_name,IF({$erased},NULL,c.first_name) first_name,IF({$erased},NULL,c.last_name) last_name,{$erased} erased";
         $sql = "WITH scope AS (
-            SELECT m.*,c.company_name,c.first_name,c.last_name FROM {$scopeSql}{$scopeLimit}
+            SELECT m.*,{$names} FROM {$scopeSql}{$scopeLimit}
           ), claims AS (
             SELECT DISTINCT STRAIGHT_JOIN c.id claim_id,c.supplier_id,c.member_id,c.amount_cents,o.journal_entry_id,o.receivable_line_id,
               l.line_no,l.account_id,e.posted_at,e.reversed_by,{$receiptSql} receipt_valid
@@ -275,14 +279,29 @@ final class MembershipListRepository
             (r.id IS NULL AND EXISTS(SELECT 1 FROM nonprofit_member_revisions h FORCE INDEX(uq_nmr_revision)
               WHERE h.supplier_id=p.supplier_id AND h.member_id=p.id)) all_revisions_voided
           FROM paged p
-            LEFT JOIN nonprofit_member_revisions r ON r.supplier_id=p.supplier_id AND r.id=(
-              SELECT latest.id FROM nonprofit_member_revisions latest
-              WHERE latest.supplier_id=p.supplier_id AND latest.member_id=p.id AND latest.voids_revision_id IS NULL
-                AND NOT EXISTS(SELECT 1 FROM nonprofit_member_revisions v FORCE INDEX(uq_nmr_voids)
-                  WHERE v.supplier_id=latest.supplier_id AND v.member_id=latest.member_id AND v.voids_revision_id=latest.id)
-              ORDER BY latest.revision_no DESC LIMIT 1)
+            LEFT JOIN nonprofit_member_revisions r ON r.supplier_id=p.supplier_id AND r.id=" . self::latestValidRevisionIdSql('p') . "
           ORDER BY p.id";
         return [$sql, $params];
+    }
+
+    /** Vymazaný člen (MembershipErasureService::isErasedMember) jako SQL nad aliasem člena. */
+    public static function erasedSql(string $member): string
+    {
+        return "({$member}.member_number=CONCAT('vymazano-',{$member}.id))";
+    }
+
+    /**
+     * Poslední platná revize člena (zrušené a rušící články se vynechají) jako korelovaný poddotaz.
+     * SQL podoba MembershipRevisionTimeline::effective(); sdílí ji seznam i posouzení výmazu.
+     * `$member` je alias řádku s `supplier_id` a `id` člena.
+     */
+    public static function latestValidRevisionIdSql(string $member): string
+    {
+        return "(SELECT latest.id FROM nonprofit_member_revisions latest
+              WHERE latest.supplier_id={$member}.supplier_id AND latest.member_id={$member}.id AND latest.voids_revision_id IS NULL
+                AND NOT EXISTS(SELECT 1 FROM nonprofit_member_revisions v FORCE INDEX(uq_nmr_voids)
+                  WHERE v.supplier_id=latest.supplier_id AND v.member_id=latest.member_id AND v.voids_revision_id=latest.id)
+              ORDER BY latest.revision_no DESC LIMIT 1)";
     }
 
     /** Obnova ověřuje celý výběr, nikoli jen právě zobrazenou stránku. */

@@ -53,7 +53,8 @@ final class MembershipPublicCatalog
             if (($basis['organisation_form'] ?? null) !== 'association' || ($basis['relationship'] ?? null) !== 'nonreciprocal_membership') {
                 throw new MembershipException('nonprofit_membership_member_proof_changed', 'Zachycený členský podklad není průkazný.', 409);
             }
-            $items[] = ['member_id' => $member['id'], 'client_id' => $member['client_id'], 'revision_id' => $revision['id'],
+            // Vymazaný člen (krok 10): vazbu na kontakt katalog nevydá, kontakt mohl zůstat kvůli jinému dokladu.
+            $items[] = ['member_id' => $member['id'], 'client_id' => $member['erased'] ? null : $member['client_id'], 'erased' => $member['erased'], 'revision_id' => $revision['id'],
                 'revision_no' => $revision['revision_no'], 'previous_revision_id' => $revision['previous_valid_id'] ?? null, 'role' => 'association_member',
                 'status' => $revision['status'], 'effective_from' => $revision['effective_from'], 'effective_to' => $revision['effective_to'],
                 'recorded_at' => MembershipRecordedTime::requiredInstant($revision['recorded_at_utc'] ?? null),
@@ -80,6 +81,7 @@ final class MembershipPublicCatalog
         $operations = $this->charges->operationsMany($supplier, array_column($rows, 'operation_id'));
         if (count($claims) !== count($rows) || count($operations) !== count($rows)) self::proofChanged();
         (new MembershipStoredProof($this->db, $this->members))->assertMany($supplier, array_values($operations));
+        $erased = MembershipErasureService::isErasedMember($this->members->member($supplier, (int) $member) ?? []);
         $items = [];
         foreach ($rows as $row) {
             $claim = $claims[$row['claim_id']] ?? null;
@@ -88,7 +90,7 @@ final class MembershipPublicCatalog
             $settlement = $row['settlement'];
             $recorded = MembershipRecordedTime::projection($claim['recorded_at_utc'] ?? null);
             $items[] = ['claim_id' => $claim['id'], 'case_id' => $claim['case_id'], 'operation_id' => $operation['id'],
-                'member_id' => $claim['member_id'], 'client_id' => $claim['client_id'], 'member_revision_id' => $operation['member_revision_id'],
+                'member_id' => $claim['member_id'], 'client_id' => $erased ? null : $claim['client_id'], 'erased' => $erased, 'member_revision_id' => $operation['member_revision_id'],
                 'legal_profile_id' => $operation['legal_profile_id'], 'accounting_period_id' => $operation['accounting_period_id'],
                 'accounting_date' => $operation['accounting_date'], 'due_date' => $operation['due_date'],
                 'period_from' => $row['period_from'], 'period_to' => $row['period_to'], 'amount_cents' => (string) $claim['amount_cents'],

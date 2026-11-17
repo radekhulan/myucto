@@ -7,7 +7,7 @@ import type { AccountingPeriod } from '@/api/accounting'
 import { membershipApi, type ClaimRow, type MemberCorrections, type MemberIdentity, type MemberRevision } from '@/api/nonprofitMembership'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
-import { badgeBase, errorBox, errorCode, membershipError, formatDateRange, memberStatusBadge, revisionAt, validRevisions, voidedRevisions } from './membershipFormat'
+import { badgeBase, errorBox, errorCode, membershipError, formatDateRange, memberStatusBadge, revisionAt, validRevisions, voidedRevisions, warningBox } from './membershipFormat'
 import MembershipCorrectionFlow from './MembershipCorrectionFlow.vue'
 import MembershipIssueFlow from './MembershipIssueFlow.vue'
 import MembershipReverseFlow from './MembershipReverseFlow.vue'
@@ -21,6 +21,9 @@ const { t, te } = useI18n()
 const identity = ref<MemberIdentity | null>(null)
 const history = ref<MemberRevision[]>([])
 const corrections = ref<MemberCorrections | null>(null)
+/** Osobní údaje člena byly vymazány (krok 10); členství ani předpisy už měnit nejde. */
+const erased = ref(false)
+const manage = computed(() => props.canManage && !erased.value)
 /** Otevřená oprava (kontakt a číslo, smazání, zrušení revize); jen jedna najednou. */
 const correction = ref<'identity' | 'delete' | 'void' | null>(null)
 const heading = ref<HTMLElement | null>(null)
@@ -68,6 +71,7 @@ async function load(append = false) {
     identity.value = data.member
     history.value = data.history
     corrections.value = data.corrections ?? null
+    erased.value = data.erased === true
     claims.value = append ? [...claims.value, ...data.balance.items] : data.balance.items
     nextAfter.value = data.balance.next_after_claim_id
   } catch (e) {
@@ -163,8 +167,8 @@ watch(() => props.refreshVersion, () => {
 watch(refreshBlocked, blocked => {
   if (!blocked && refreshPending) { refreshPending = false; void load() }
 })
-watch(() => props.memberId, () => { generation++; refreshPending = false; identity.value = null; history.value = []; corrections.value = null; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; notice.value = ''; staleNotice.value = false; void load() })
-watch(() => props.supplier, () => { generation++; refreshPending = false; loading.value = false; identity.value = null; history.value = []; corrections.value = null; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; notice.value = ''; staleNotice.value = false })
+watch(() => props.memberId, () => { generation++; refreshPending = false; identity.value = null; history.value = []; corrections.value = null; erased.value = false; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; notice.value = ''; staleNotice.value = false; void load() })
+watch(() => props.supplier, () => { generation++; refreshPending = false; loading.value = false; identity.value = null; history.value = []; corrections.value = null; erased.value = false; correction.value = null; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; notice.value = ''; staleNotice.value = false })
 onBeforeUnmount(() => { alive = false; generation++ })
 onMounted(() => { void load() })
 let firstActivation = true
@@ -180,20 +184,20 @@ const formOpen = computed(() => issueOpen.value || reverseClaim.value !== null |
 const formReason = (block?: string | null) => (formOpen.value ? t('nonprofitMembership.correction.closeFormFirst') : blockReason(block))
 
 const actions = computed<ActionItem[]>(() => [
-  { key: 'new-charge', label: t('nonprofitMembership.newCharge'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: anyLocked.value || loading.value || !valid.value.length, disabledReason: t('nonprofitMembership.newChargeNeedsRevision'), run: () => { reverseClaim.value = null; issueOpen.value = true } },
-  { key: 'change-status', label: t('nonprofitMembership.changeStatus'), icon: 'edit', show: props.canManage && valid.value.length > 0 && !revisionOpen.value, disabled: anyLocked.value || loading.value || correction.value !== null,
+  { key: 'new-charge', label: t('nonprofitMembership.newCharge'), icon: 'plus', tier: 'primary', variant: 'primary', show: manage.value, disabled: anyLocked.value || loading.value || !valid.value.length, disabledReason: t('nonprofitMembership.newChargeNeedsRevision'), run: () => { reverseClaim.value = null; issueOpen.value = true } },
+  { key: 'change-status', label: t('nonprofitMembership.changeStatus'), icon: 'edit', show: manage.value && valid.value.length > 0 && !revisionOpen.value, disabled: anyLocked.value || loading.value || correction.value !== null,
     disabledReason: t('nonprofitMembership.correction.closeCorrectionFirst'), run: () => { correction.value = null; revisionOpen.value = true } },
   // Zablokovaná oprava zůstává v „…“ zašedlá s důvodem ze serveru, aby bylo vidět, proč nejde.
   { key: 'fix-identity', label: t('nonprofitMembership.correction.title_identity'), icon: 'edit', tier: 'overflow',
-    show: props.canManage && !!corrections.value && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !corrections.value?.can_edit_identity,
+    show: manage.value && !!corrections.value && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !corrections.value?.can_edit_identity,
     disabledReason: formReason(corrections.value?.edit_identity_block), run: () => startCorrection('identity') },
   { key: 'reload', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value || anyLocked.value || revisionDirty.value, disabledReason: revisionDirty.value ? t('nonprofitMembership.correction.closeFormFirst') : undefined, run: () => { staleNotice.value = false; void load() } },
   { key: 'close-detail', label: t('nonprofitMembership.close'), icon: 'x', disabled: anyLocked.value, run: () => emit('close') },
   { key: 'void-revision', label: t('nonprofitMembership.correction.title_void'), icon: 'uturn', tier: 'overflow', variant: 'danger',
-    show: props.canManage && (!!voidable.value || !!corrections.value?.void_block) && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !voidable.value,
+    show: manage.value && (!!voidable.value || !!corrections.value?.void_block) && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !voidable.value,
     disabledReason: formReason(corrections.value?.void_block), run: () => startCorrection('void') },
   { key: 'delete-member', label: t('nonprofitMembership.correction.title_delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
-    show: props.canManage && !!corrections.value && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !corrections.value?.can_delete,
+    show: manage.value && !!corrections.value && correction.value === null, disabled: anyLocked.value || loading.value || formOpen.value || !corrections.value?.can_delete,
     disabledReason: formReason(corrections.value?.delete_block), run: () => startCorrection('delete') },
 ])
 </script>
@@ -208,6 +212,7 @@ const actions = computed<ActionItem[]>(() => [
     <p v-if="loading && !identity" role="status" class="text-sm text-neutral-500" data-section="detail-loading">{{ t('common.loading') }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-600" data-section="detail-notice">{{ notice }}</p>
     <p v-if="staleNotice" role="alert" class="text-sm text-warning-700" data-section="detail-stale">{{ t('nonprofitMembership.correction.staleClosed') }}</p>
+    <p v-if="erased" role="status" :class="warningBox" data-section="detail-erased">{{ t('nonprofitMembership.erasure.detailErased') }}</p>
 
     <div v-if="identity" class="space-y-2" data-section="member-status">
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.clientRef', { client: label }) }}</p>
@@ -249,7 +254,7 @@ const actions = computed<ActionItem[]>(() => [
       </template>
     </div>
 
-    <div v-if="canManage && identity && correction" ref="correctionPane" class="scroll-mt-4">
+    <div v-if="manage && identity && correction" ref="correctionPane" class="scroll-mt-4">
       <MembershipCorrectionFlow
         :key="`${correction}-${identity.id}`"
         :supplier="supplier" :can-manage="canManage" :mode="correction" :member="identity" :label="label"
@@ -259,18 +264,18 @@ const actions = computed<ActionItem[]>(() => [
     </div>
 
     <MembershipRevisionForm
-      v-if="canManage && identity && !correction && (!valid.length || revisionOpen || locks.revision)"
+      v-if="manage && identity && !correction && (!valid.length || revisionOpen || locks.revision)"
       :supplier="supplier" :can-manage="canManage" :member="identity" :history="history"
       @done="revisionFinished()" @close="revisionOpen = false" @lock="locks.revision = $event" @dirty="revisionDirty = $event"
     />
 
     <MembershipIssueFlow
-      v-if="canManage && issueOpen"
+      v-if="manage && issueOpen"
       :supplier="supplier" :can-manage="canManage" :member="member" :history="history" :periods="periods" :case-symbols="caseSymbols"
       @done="finished(t('nonprofitMembership.issueDone'))" @close="issueOpen = false" @lock="locks.issue = $event"
     />
     <MembershipReverseFlow
-      v-if="canManage && reverseClaim"
+      v-if="manage && reverseClaim"
       :key="reverseClaim.claim_id"
       :supplier="supplier" :can-manage="canManage" :member="member" :claim="reverseClaim" :periods="periods"
       @done="finished(t('nonprofitMembership.reverseDone'))" @close="reverseClaim = null" @lock="locks.reverse = $event"
@@ -299,7 +304,7 @@ const actions = computed<ActionItem[]>(() => [
           <button type="button" :class="btnIconSm('neutral')" :title="t('nonprofitMembership.refreshClaim')" :aria-label="t('nonprofitMembership.refreshClaim')" data-action="refresh-claim" :disabled="loading || anyLocked" @click="refreshClaim(claim)">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
           </button>
-          <button v-if="canManage && claim.reversal_claim_id === null" type="button" :class="btnOutlineSm('danger')" data-action="reverse-claim" :disabled="anyLocked || claim.settlement.pairing_id !== null" :title="claim.settlement.pairing_id !== null ? t('nonprofitMembership.reversePaired') : undefined" @click="startReverse(claim)">
+          <button v-if="manage && claim.reversal_claim_id === null" type="button" :class="btnOutlineSm('danger')" data-action="reverse-claim" :disabled="anyLocked || claim.settlement.pairing_id !== null" :title="claim.settlement.pairing_id !== null ? t('nonprofitMembership.reversePaired') : undefined" @click="startReverse(claim)">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>{{ t('nonprofitMembership.reverse') }}
           </button>
         </div>

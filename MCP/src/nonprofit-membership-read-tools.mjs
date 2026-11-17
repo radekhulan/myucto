@@ -9,7 +9,7 @@ const limit = { type: 'integer', minimum: 1, maximum: 100 };
 const read = (name, title, properties, required, run) => ({
   api: false, apiReason: NOT_IN_CLIENT_CATALOG,
   name, title,
-  description: 'Kurátorované čtení členského subledgeru bez jmen, členských čísel, podkladových textů, interních požadavků a idempotency metadat. Nespárovaný předpis (unreconciled) je otevřený v celé částce; null u neprůkazného podkladu (ambiguous) zachovejte; výsledek neopravňuje k finanční mutaci.',
+  description: 'Kurátorované čtení členského subledgeru bez jmen, členských čísel, podkladových textů, interních požadavků a idempotency metadat. Nespárovaný předpis (unreconciled) je otevřený v celé částce; null u neprůkazného podkladu (ambiguous) zachovejte; u člena s vymazanými osobními údaji je erased true a client_id null (kontakt nedohledávejte); výsledek neopravňuje k finanční mutaci.',
   inputSchema: { type: 'object', properties, required, additionalProperties: false },
   write: false,
   run,

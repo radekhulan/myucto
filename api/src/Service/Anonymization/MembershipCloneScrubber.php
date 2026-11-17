@@ -9,6 +9,8 @@ use MyInvoice\Infrastructure\Database\TriggerMetadata;
 use MyInvoice\Repository\AccountDefinitionRepository;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipChargeRepository;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipRepository;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureSeal;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipClassification;
 use MyInvoice\Service\Nonprofit\Membership\MembershipJournalPlan;
 use MyInvoice\Service\Nonprofit\Membership\MembershipJournalProof;
@@ -165,6 +167,8 @@ final class MembershipCloneScrubber
             foreach ($rows as $old) {
                 $row = isset($current[$old['id']]) ? self::memberRow($current[$old['id']]) : null;
                 if ($row === null || !self::same($old, $row)) throw new \LogicException('Membership clone member changed after capture.');
+                // Pseudonym vymazaného člena (krok 10) nenese osobní údaj a určuje, že je člen vymazaný; klon ho zachová.
+                if (MembershipErasureService::isErasedMember($row)) continue;
                 $updates[] = ['id' => $old['id'], 'member_number' => 'clone-member-' . $old['id']];
             }
             self::bulkUpdate($pdo, 'nonprofit_members', (int) $supplier, $updates, ['member_number']);
@@ -193,11 +197,12 @@ final class MembershipCloneScrubber
                     $row['id'], $old['record_hash'], $row['record_hash']);
                 $updates[] = ['id' => $row['id'], 'legal_basis_json' => NonprofitTaxRules::canonicalJson($row['legal_basis']),
                     'request_json' => NonprofitTaxRules::canonicalJson($row['request']), 'idempotency_key' => $row['idempotency_key'],
-                    'request_hash' => $row['request_hash'], 'parent_hash' => $row['parent_hash'], 'record_hash' => $row['record_hash']];
+                    'request_hash' => $row['request_hash'], 'parent_hash' => $row['parent_hash'], 'record_hash' => $row['record_hash'],
+                    'erasure_item_id' => null, 'erased_digest' => null];
                 $state = $row;
             }
             self::bulkUpdate($pdo, 'nonprofit_member_revisions', (int) $supplier, $updates,
-                ['legal_basis_json', 'request_json', 'idempotency_key', 'request_hash', 'parent_hash', 'record_hash']);
+                ['legal_basis_json', 'request_json', 'idempotency_key', 'request_hash', 'parent_hash', 'record_hash', 'erasure_item_id', 'erased_digest']);
         }
     }
 
@@ -287,15 +292,15 @@ final class MembershipCloneScrubber
                     NonprofitTaxRules::hash($operation['proof']['classification']));
             }
             $commandUpdates[] = ['id' => $row['command']['id'], 'idempotency_key' => 'clone-membership-command-' . $row['command']['id'],
-                'request_json' => NonprofitTaxRules::canonicalJson($request), 'request_hash' => NonprofitTaxRules::hash($request)];
+                'request_json' => NonprofitTaxRules::canonicalJson($request), 'request_hash' => NonprofitTaxRules::hash($request), 'erasure_item_id' => null, 'erased_digest' => null];
             $operationUpdates[] = ['id' => $operation['id'], 'preview_hash' => $previewHash,
                 'proof_json' => NonprofitTaxRules::canonicalJson($operation['proof']), 'receipt_json' => NonprofitTaxRules::canonicalJson($operation['receipt']),
-                'parent_hash' => $parentHash, 'record_hash' => $operation['record_hash']];
+                'parent_hash' => $parentHash, 'record_hash' => $operation['record_hash'], 'erasure_item_id' => null, 'erased_digest' => null];
             $finalChain['operation'] = $operation;
             $finalChain['claim'] = $context['claims'][$operation['id']];
         }
-        self::bulkUpdate($pdo, 'nonprofit_membership_charge_commands', $supplier, $commandUpdates, ['idempotency_key', 'request_json', 'request_hash']);
-        self::bulkUpdate($pdo, 'nonprofit_membership_charge_operations', $supplier, $operationUpdates, ['preview_hash', 'proof_json', 'receipt_json', 'parent_hash', 'record_hash']);
+        self::bulkUpdate($pdo, 'nonprofit_membership_charge_commands', $supplier, $commandUpdates, ['idempotency_key', 'request_json', 'request_hash', 'erasure_item_id', 'erased_digest']);
+        self::bulkUpdate($pdo, 'nonprofit_membership_charge_operations', $supplier, $operationUpdates, ['preview_hash', 'proof_json', 'receipt_json', 'parent_hash', 'record_hash', 'erasure_item_id', 'erased_digest']);
     }
 
     private static function verifyAll(Connection $db): void
@@ -360,7 +365,7 @@ final class MembershipCloneScrubber
                 throw new \LogicException('Membership clone typed financial proof reference is invalid.');
             }
             $command = $context['commands'][$operation['command_id']] ?? throw new \LogicException('Membership clone command reference is invalid.');
-            if (!hash_equals($command['request_hash'], NonprofitTaxRules::hash($command['request']))
+            if (!MembershipErasureSeal::commandProven($command)
                 || !hash_equals($operation['preview_hash'], (string) ($command['request']['preview_hash'] ?? ''))
                 || ($command['request']['operation'] ?? null) !== $operation['operation']
                 || (int) ($command['request']['actor'] ?? 0) !== $operation['created_by']
@@ -390,7 +395,8 @@ final class MembershipCloneScrubber
                 throw new \LogicException('Membership clone reversal claim reference is invalid.');
             }
             if ($operation['operation'] === 'issue' && $claim['original_claim_id'] !== null) throw new \LogicException('Membership clone issue claim reference is invalid.');
-            if ($rebased) {
+            // Zapečetěná operace (výmaz, krok 10) má osobní texty náhledu přepsané; její obsah dokládá pečeť.
+            if ($rebased && !MembershipErasureSeal::sealed($operation)) {
                 $plan = MembershipJournalPlan::issue($operation['proof']['accounts']['receivable']['account_code'], $operation['proof']['accounts']['revenue']['account_code'], bcdiv((string) $operation['amount_cents'], '100', 2), $operation['proof']['classification']);
                 if ($operation['operation'] === 'reverse') $plan = MembershipJournalPlan::reverse($plan);
                 $previous = $chain['previous_operation'] ?? null;
@@ -550,8 +556,7 @@ final class MembershipCloneScrubber
         if ($row['revision_no'] !== ($previous['revision_no'] ?? 0) + 1 || $row['previous_id'] !== ($previous['id'] ?? null)
             || $dateInvalid
             || !hash_equals($row['parent_hash'], $previous['record_hash'] ?? str_repeat('0', 64))
-            || !hash_equals($row['request_hash'], NonprofitTaxRules::hash($row['request']))
-            || !hash_equals($row['record_hash'], NonprofitTaxRules::hash(MembershipRepository::revisionRecord($row)))) {
+            || !MembershipErasureSeal::revisionProven($row)) {
             throw new \LogicException('Membership clone revision history is invalid.');
         }
         return ['row' => $row, 'valid' => $valid];
@@ -819,8 +824,7 @@ final class MembershipCloneScrubber
             $row[$field] = json_decode($row[$field . '_json'], true, flags: JSON_THROW_ON_ERROR);
             unset($row[$field . '_json']);
         }
-        $record = self::operationRecord($row);
-        if (!hash_equals($row['record_hash'], NonprofitTaxRules::hash($record))) throw new \LogicException('Membership clone operation hash is invalid.');
+        if (!MembershipErasureSeal::operationProven($row)) throw new \LogicException('Membership clone operation hash is invalid.');
         return $row;
     }
 

@@ -3550,7 +3550,8 @@ paths:
       description: Pouze čtení s oprávněním accounting. Bez jmen, členských čísel, právních podkladů a interních otisků.
         Výsledek neopravňuje k finanční mutaci. Detail vrací stejnou obálku jako seznam. Role se ověřují k účinnosti
         a okamžiku tehdejší znalosti. Zrušená revize se nepočítá od okamžiku zápisu zrušení. Oprava kontaktu
-        člena bez předpisu se projeví i pro dřívější okamžik znalosti.
+        člena bez předpisu se projeví i pro dřívější okamžik znalosti. U člena s vymazanými osobními údaji
+        vrací client_id null a erased true; účetní údaje zůstávají.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: query
@@ -3599,7 +3600,8 @@ paths:
       description: Pouze čtení s oprávněním accounting. Bez jmen, členských čísel, právních podkladů a interních otisků.
         Výsledek neopravňuje k finanční mutaci. Detail vrací stejnou obálku jako seznam. Role se ověřují k účinnosti
         a okamžiku tehdejší znalosti. Zrušená revize se nepočítá od okamžiku zápisu zrušení. Oprava kontaktu
-        člena bez předpisu se projeví i pro dřívější okamžik znalosti.
+        člena bez předpisu se projeví i pro dřívější okamžik znalosti. U člena s vymazanými osobními údaji
+        vrací client_id null a erased true; účetní údaje zůstávají.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: path
@@ -54875,7 +54877,7 @@ components:
             properties:
               claim_id: { type: integer, minimum: 1 }
               member_id: { type: integer, minimum: 1 }
-              member_number: { type: string, description: Číslo člena pro odkaz na přehled příspěvků. }
+              member_number: { type: string, description: 'Číslo člena pro odkaz na přehled příspěvků; u člena s vymazanými osobními údaji pseudonym vymazano-{id}.' }
               title_key: { type: string }
               amount_cents: { type: string, pattern: '^[0-9]+$' }
         matched_varsymbol: { type: [string, "null"] }
@@ -70353,6 +70355,7 @@ components:
       required:
       - member_id
       - client_id
+      - erased
       - revision_id
       - revision_no
       - previous_revision_id
@@ -70368,8 +70371,14 @@ components:
           type: integer
           minimum: 1
         client_id:
-          type: integer
+          type:
+          - integer
+          - 'null'
           minimum: 1
+          description: Kontakt člena; u člena s vymazanými osobními údaji null.
+        erased:
+          type: boolean
+          description: Osobní údaje člena byly vymazány (výmaz bývalých členů); účetní údaje zůstávají a proof_status ověřuje i pečeti výmazu.
         revision_id:
           type: integer
           minimum: 1
@@ -70457,6 +70466,7 @@ components:
       - operation_id
       - member_id
       - client_id
+      - erased
       - member_revision_id
       - legal_profile_id
       - accounting_period_id
@@ -70488,8 +70498,14 @@ components:
           type: integer
           minimum: 1
         client_id:
-          type: integer
+          type:
+          - integer
+          - 'null'
           minimum: 1
+          description: Kontakt člena; u člena s vymazanými osobními údaji null.
+        erased:
+          type: boolean
+          description: Osobní údaje člena byly vymazány (výmaz bývalých členů); účetní údaje zůstávají a proof_status ověřuje i pečeti výmazu.
         member_revision_id:
           type: integer
           minimum: 1

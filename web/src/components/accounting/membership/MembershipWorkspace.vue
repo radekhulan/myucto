@@ -20,8 +20,10 @@ import MembershipReconciliation from './MembershipReconciliation.vue'
 import MembershipRates from './MembershipRates.vue'
 import MembershipBatchFlow from './MembershipBatchFlow.vue'
 import MembershipImportFlow from './MembershipImportFlow.vue'
+import MembershipErasure from './MembershipErasure.vue'
 
-const props = defineProps<{ supplier: number; canManage: boolean; canManageRates?: boolean }>()
+const props = defineProps<{ supplier: number; canManage: boolean; canManageRates?: boolean; canReadErasure?: boolean; canWriteErasure?: boolean }>()
+const erasureOpen = ref(false)
 const { t, te, tm, rt } = useI18n()
 
 const members = ref<MemberRow[]>([])
@@ -91,6 +93,13 @@ const checkedMembers = ref<number[]>([]), batchOpen = ref(false), batchLocked = 
 const detailVersion = ref(0)
 // Uložená dávka nebo předpis v detailu mohou založit nový titul, proto se obnoví i výběr titulů.
 function batchChanged() { dataVersion.value++; detailVersion.value++; void load(); void loadTitles(true) }
+/** Výmaz mění čísla a jména v seznamu i v otevřeném detailu. */
+async function membersErased() {
+  dataVersion.value++; detailVersion.value++
+  await load()
+  const row = members.value.find(x => x.id === selected.value?.id)
+  if (row && selected.value) selected.value = { ...selected.value, label: labelOf(row) }
+}
 function memberChanged() { dataVersion.value++; void load(); void loadTitles(true) }
 /** Smazaný člen zmizí z výběru i detailu; fokus jde na nadpis seznamu. */
 async function memberDeleted() {
@@ -115,7 +124,9 @@ let createTicket = 0
 
 const today = computed(() => appIsoDate())
 const numberValid = computed(() => memberNumber.value.trim().length > 0 && memberNumber.value.trim().length <= 80)
-const labelOf = (row: MemberRow) => membershipMemberLabel(row) || t('nonprofitMembership.clientFallback', { id: row.client_id })
+const labelOf = (row: MemberRow) => row.erased
+  ? t('nonprofitMembership.erasure.erasedMemberLabel', { id: row.id })
+  : membershipMemberLabel(row) || t('nonprofitMembership.clientFallback', { id: row.client_id })
 
 function openMember(row: MemberRow) {
   selected.value = { id: row.id, label: labelOf(row) }
@@ -400,6 +411,11 @@ watch(batchLocked, locked => {
     <details class="rounded-lg border border-neutral-200 bg-surface p-4" data-section="rates-management">
       <summary class="cursor-pointer font-semibold">{{ t('nonprofitMembership.ratesTitle') }}</summary>
       <MembershipRates :key="supplier" class="mt-3" :supplier="supplier" :can-manage="!!canManageRates" />
+    </details>
+
+    <details v-if="canReadErasure" class="rounded-lg border border-neutral-200 bg-surface p-4" data-section="erasure-management" @toggle="erasureOpen = ($event.target as HTMLDetailsElement).open">
+      <summary class="cursor-pointer font-semibold">{{ t('nonprofitMembership.erasure.title') }}</summary>
+      <MembershipErasure :key="supplier" class="mt-3" :supplier="supplier" :can-write="!!canWriteErasure" :open="erasureOpen" @erased="membersErased" />
     </details>
 
     <section v-if="canManage" class="space-y-3 rounded-lg border border-neutral-200 bg-surface p-4" data-section="create-member">

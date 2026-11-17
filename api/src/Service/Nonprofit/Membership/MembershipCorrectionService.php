@@ -35,6 +35,12 @@ final class MembershipCorrectionService
     /** Které opravy server u člena právě dovolí; detail podle toho ukazuje akce. */
     public function availability(int $supplier, array $member, array $history): array
     {
+        if (MembershipErasureService::isErasedMember($member)) {
+            $erased = 'nonprofit_membership_member_erased';
+            return ['can_edit_identity' => false, 'edit_identity_block' => $erased, 'can_delete' => false, 'delete_block' => $erased,
+                'voidable_revision_id' => null, 'void_block' => $history === [] ? null : $erased,
+                'head_revision_no' => $history === [] ? 0 : $history[array_key_last($history)]['revision_no']];
+        }
         $charged = $this->hasCharges($supplier, $member['id'], false);
         $effective = MembershipRevisionTimeline::effective($history);
         $last = $effective === [] ? null : $effective[array_key_last($effective)];
@@ -64,9 +70,11 @@ final class MembershipCorrectionService
         }
         $number = trim($input['member_number']);
         if ($number === '' || mb_strlen($number) > 80) throw new MembershipException('nonprofit_membership_invalid', 'Členské číslo musí mít 1–80 znaků.');
+        MembershipErasureService::assertMemberNumberAllowed($number);
         $client = $input['client_id'];
         return TransactionFailure::retrying($this->db->pdo(), fn (): array => (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplier, $member, $input, $number, $client, $actor, $ip, $userAgent): array {
             $current = $this->lockedMember($supplier, $member);
+            MembershipErasureService::assertNotErased($current);
             // Opakování po nejisté odpovědi: cílový stav už platí, vrátí se beze změny a bez dalšího auditu.
             // Záměrně před kontrolou původních hodnot: stejný cíl nastavený jiným uživatelem nic nepřepíše.
             if ($current['client_id'] === $client && $current['member_number'] === $number) return $current;
@@ -122,6 +130,7 @@ final class MembershipCorrectionService
             // Zámek mezery v indexu pozdrží i založení nové dávky, ale jen při REPEATABLE READ (výchozí izolace).
             $seeding = $this->seedingBatchIds($supplier, $member, true);
             $current = $this->lockedMember($supplier, $member);
+            MembershipErasureService::assertNotErased($current);
             if ($current['client_id'] !== $expected['client_id'] || $current['member_number'] !== $expected['member_number']) {
                 throw new MembershipException('nonprofit_membership_member_changed', 'Člen se mezitím změnil. Načtěte ho znovu.', 409);
             }
@@ -180,7 +189,7 @@ final class MembershipCorrectionService
                 if (!hash_equals($existing['request_hash'], $requestHash)) throw new MembershipException('nonprofit_membership_idempotency_conflict', 'Klíč požadavku už patří jiné revizi členství.', 409);
                 return $existing;
             }
-            $this->lockedMember($supplier, $member);
+            MembershipErasureService::assertNotErased($this->lockedMember($supplier, $member));
             $history = $this->members->history($supplier, $member, true);
             if (!in_array($revision, array_column($history, 'id'), true)) {
                 throw new MembershipException('nonprofit_membership_revision_not_found', 'Revize nepatří tomuto členovi.', 404);

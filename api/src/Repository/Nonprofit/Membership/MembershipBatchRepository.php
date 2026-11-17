@@ -310,7 +310,9 @@ final class MembershipBatchRepository
 
     public function page(int $supplier, int $batch, int $after, bool $current = false): array
     {
-        $q = $this->db->pdo()->prepare("SELECT i.member_id,i.status,i.amount_cents,i.operation_id,i.error_code,i.error_message,m.member_number,c.company_name
+        // Vymazaný člen (krok 10) nevrací jméno ani u kontaktu, který drží jiný doklad.
+        $q = $this->db->pdo()->prepare("SELECT i.member_id,i.status,i.amount_cents,i.operation_id,i.error_code,i.error_message,m.member_number,
+                IF(" . MembershipListRepository::erasedSql('m') . ",NULL,c.company_name) company_name
             FROM nonprofit_membership_batch_members i JOIN nonprofit_members m ON m.supplier_id=i.supplier_id AND m.id=i.member_id
             JOIN clients c ON c.supplier_id=m.supplier_id AND c.id=m.client_id
             WHERE i.supplier_id=? AND i.batch_id=? AND i.member_id>? ORDER BY i.member_id LIMIT 50" . ($current ? ' FOR UPDATE' : ''));

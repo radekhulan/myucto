@@ -1205,7 +1205,8 @@
         "2299_membership_list_indexes.sql",
         "2300_membership_variable_symbol.sql",
         "2301_membership_correctability.sql",
-        "2302_activity_log_redactions.sql"
+        "2302_activity_log_redactions.sql",
+        "2303_membership_erasure.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -9210,6 +9211,8 @@
                 "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
                 "created_by": "bigint(20) unsigned NOT NULL",
                 "effective_from": "date NOT NULL",
+                "erased_digest": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "erasure_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idempotency_key": "varchar(80) NOT NULL COLLATE ascii_bin",
                 "legal_basis_json": "longtext NOT NULL",
@@ -9229,6 +9232,7 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "created_by": "BTREE (created_by)",
                 "ix_nmr_effective_lookup": "BTREE (supplier_id, member_id, effective_from, id)",
+                "ix_nmr_erasure": "BTREE (supplier_id, erasure_item_id)",
                 "supplier_id": "BTREE (supplier_id, member_id, previous_id)",
                 "uq_nmr_chain": "UNIQUE BTREE (supplier_id, member_id, id)",
                 "uq_nmr_key": "UNIQUE BTREE (supplier_id, idempotency_key)",
@@ -9237,6 +9241,7 @@
                 "uq_nmr_voids": "UNIQUE BTREE (supplier_id, member_id, voids_revision_id)"
             },
             "foreign_keys": {
+                "fk_nmr_erasure": "(supplier_id, erasure_item_id) -> nonprofit_membership_erasure_items (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_nmr_voids": "(supplier_id, member_id, voids_revision_id) -> nonprofit_member_revisions (supplier_id, member_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "nonprofit_member_revisions_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "nonprofit_member_revisions_ibfk_2": "(supplier_id, member_id) -> nonprofit_members (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
@@ -9448,6 +9453,8 @@
             "columns": {
                 "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
                 "created_by": "bigint(20) unsigned NOT NULL",
+                "erased_digest": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "erasure_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idempotency_key": "varchar(80) NOT NULL COLLATE ascii_bin",
                 "rate_id": "int(10) unsigned NULL DEFAULT NULL",
@@ -9459,10 +9466,12 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "created_by": "BTREE (created_by)",
                 "idx_nmcmd_rate": "BTREE (supplier_id, rate_id, id)",
+                "ix_nmcmd_erasure": "BTREE (supplier_id, erasure_item_id)",
                 "uq_nmcmd_key": "UNIQUE BTREE (supplier_id, idempotency_key)",
                 "uq_nmcmd_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
+                "fk_nmcmd_erasure": "(supplier_id, erasure_item_id) -> nonprofit_membership_erasure_items (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_nmcmd_rate": "(supplier_id, rate_id) -> nonprofit_membership_rates (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "nonprofit_membership_charge_commands_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "nonprofit_membership_charge_commands_ibfk_2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
@@ -9484,6 +9493,8 @@
                 "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
                 "created_by": "bigint(20) unsigned NOT NULL",
                 "due_date": "date NOT NULL",
+                "erased_digest": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "erasure_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "journal_entry_id": "bigint(20) unsigned NOT NULL",
                 "legal_profile_id": "bigint(20) unsigned NOT NULL",
@@ -9505,6 +9516,7 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "created_by": "BTREE (created_by)",
+                "ix_nmop_erasure": "BTREE (supplier_id, erasure_item_id)",
                 "ix_nmop_period": "BTREE (supplier_id, accounting_period_id, operation, id)",
                 "supplier_id": "BTREE (supplier_id, case_id, previous_operation_id)",
                 "supplier_id_2": "BTREE (supplier_id, case_id, original_operation_id)",
@@ -9521,6 +9533,7 @@
                 "uq_nmop_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
+                "fk_nmop_erasure": "(supplier_id, erasure_item_id) -> nonprofit_membership_erasure_items (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "nonprofit_membership_charge_operations_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "nonprofit_membership_charge_operations_ibfk_10": "(supplier_id, revenue_account_id) -> chart_of_accounts (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "nonprofit_membership_charge_operations_ibfk_11": "(supplier_id, journal_entry_id) -> journal_entries (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
@@ -9541,6 +9554,83 @@
                 "CONSTRAINT_2": "`operation` = 'issue' and `original_operation_id` is null or `operation` = 'reverse' and `original_operation_id` is not null",
                 "proof_json": "json_valid(`proof_json`)",
                 "receipt_json": "json_valid(`receipt_json`)"
+            }
+        },
+        "nonprofit_membership_erasure_items": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "counts_json": "longtext NULL DEFAULT NULL",
+                "ended_on": "date NOT NULL",
+                "executed_at": "datetime NULL DEFAULT NULL",
+                "governing_rule": "enum('accounting_records','membership_only') NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "last_record_period_end": "date NULL DEFAULT NULL",
+                "member_id": "bigint(20) unsigned NOT NULL",
+                "outcome": "enum('pending','done','skipped_changed','skipped_hold') NOT NULL DEFAULT 'pending'",
+                "proposal_id": "bigint(20) unsigned NOT NULL",
+                "retained_until": "date NOT NULL",
+                "skip_reason": "varchar(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "subject": "enum('member','deleted_member') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_nmei_member": "BTREE (supplier_id, member_id, outcome)",
+                "uq_nmei_member": "UNIQUE BTREE (supplier_id, proposal_id, member_id)",
+                "uq_nmei_tenant": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_nmei_proposal": "(supplier_id, proposal_id) -> nonprofit_membership_erasure_proposals (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "counts_json": "`counts_json` is null or json_valid(`counts_json`)"
+            }
+        },
+        "nonprofit_membership_erasure_proposals": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "approved_at": "datetime NULL DEFAULT NULL",
+                "approved_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "as_of": "date NOT NULL",
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "executable_from": "datetime NULL DEFAULT NULL",
+                "executed_at": "datetime NULL DEFAULT NULL",
+                "executed_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "note": "varchar(500) NULL DEFAULT NULL",
+                "rejected_at": "datetime NULL DEFAULT NULL",
+                "rejected_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "revoked_at": "datetime NULL DEFAULT NULL",
+                "revoked_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "status": "enum('pending','approved','rejected','executed') NOT NULL DEFAULT 'pending'",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_nmep_approver": "BTREE (approved_by)",
+                "fk_nmep_creator": "BTREE (created_by)",
+                "fk_nmep_executor": "BTREE (executed_by)",
+                "fk_nmep_rejector": "BTREE (rejected_by)",
+                "fk_nmep_revoker": "BTREE (revoked_by)",
+                "ix_nmep_status": "BTREE (supplier_id, status, id)",
+                "uq_nmep_tenant": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_nmep_approver": "(approved_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_nmep_creator": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_nmep_executor": "(executed_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_nmep_rejector": "(rejected_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_nmep_revoker": "(revoked_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_nmep_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "CONSTRAINT_1": "`row_version` > 0"
             }
         },
         "nonprofit_membership_rates": {
@@ -30561,17 +30651,17 @@
         "trg_nfr_insert": "BEFORE INSERT ON nonprofit_funding_revisions #8ef193715bd5844a87d770d92e7eb9b550d9c2eb",
         "trg_nlp_immutable_delete": "BEFORE DELETE ON nonprofit_legal_profiles #14114d6f757030293ceadac8f5ac999e5e0188fa",
         "trg_nlp_immutable_update": "BEFORE UPDATE ON nonprofit_legal_profiles #14114d6f757030293ceadac8f5ac999e5e0188fa",
-        "trg_nm_immutable_update": "BEFORE UPDATE ON nonprofit_members #69061ceb0369e2e38736bc827c99cc1f0deb5f7e",
+        "trg_nm_immutable_update": "BEFORE UPDATE ON nonprofit_members #d97f6f2431d8724f6f75d20e3e1f0e79986aebcf",
         "trg_nmcc_guard_update": "BEFORE UPDATE ON nonprofit_membership_charge_cases #6c2a7a4e0c545851941b22f2f96d111a5263b2f5",
         "trg_nmcc_immutable_delete": "BEFORE DELETE ON nonprofit_membership_charge_cases #b6e16ca403b6b8a607604546967555ea319ac4e1",
         "trg_nmclaim_immutable_delete": "BEFORE DELETE ON nonprofit_membership_charge_claims #b6e16ca403b6b8a607604546967555ea319ac4e1",
         "trg_nmclaim_immutable_update": "BEFORE UPDATE ON nonprofit_membership_charge_claims #b6e16ca403b6b8a607604546967555ea319ac4e1",
         "trg_nmcmd_immutable_delete": "BEFORE DELETE ON nonprofit_membership_charge_commands #b6e16ca403b6b8a607604546967555ea319ac4e1",
-        "trg_nmcmd_immutable_update": "BEFORE UPDATE ON nonprofit_membership_charge_commands #b6e16ca403b6b8a607604546967555ea319ac4e1",
+        "trg_nmcmd_immutable_update": "BEFORE UPDATE ON nonprofit_membership_charge_commands #590b77a00aa2e345757bcb31a7108c963b6fab62",
         "trg_nmop_immutable_delete": "BEFORE DELETE ON nonprofit_membership_charge_operations #b6e16ca403b6b8a607604546967555ea319ac4e1",
-        "trg_nmop_immutable_update": "BEFORE UPDATE ON nonprofit_membership_charge_operations #b6e16ca403b6b8a607604546967555ea319ac4e1",
+        "trg_nmop_immutable_update": "BEFORE UPDATE ON nonprofit_membership_charge_operations #7b0c83bfe0c3f12a45e88a224df4ca327cf9994d",
         "trg_nmr_immutable_delete": "BEFORE DELETE ON nonprofit_member_revisions #b6e16ca403b6b8a607604546967555ea319ac4e1",
-        "trg_nmr_immutable_update": "BEFORE UPDATE ON nonprofit_member_revisions #b6e16ca403b6b8a607604546967555ea319ac4e1",
+        "trg_nmr_immutable_update": "BEFORE UPDATE ON nonprofit_member_revisions #8c5865135a6bd0ec61be3048adcabcb81a6e79a2",
         "trg_nonprofit_tax_immutable_delete": "BEFORE DELETE ON nonprofit_tax_assessments #f38c1e13859ea670801b2496d566bdd872f4cb06",
         "trg_nonprofit_tax_immutable_update": "BEFORE UPDATE ON nonprofit_tax_assessments #6bd110f6c67f9cdbbd20e50f624c033fcd65f7d3",
         "trg_nonprofit_tax_insert": "BEFORE INSERT ON nonprofit_tax_assessments #4e66f08f4b1f04a9c040cdde16a122b7ffcc8f1b",

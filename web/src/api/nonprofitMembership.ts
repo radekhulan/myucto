@@ -17,6 +17,8 @@ export interface MemberRow {
   company_name?: string; first_name?: string; last_name?: string; revision_no: number | null; effective_from: string | null; status: MemberStatus | null
   /** Člen má historii, ale všechny revize jsou zrušené (nemá členství). */
   all_revisions_voided?: boolean
+  /** Osobní údaje člena byly vymazány; jméno server nevrací (krok 10). */
+  erased?: boolean
 }
 export interface MemberPage { items: MemberRow[]; next_after_id: number | null }
 /** Řádek náhledu nebo výsledku importu seznamu členů; reason je strojový kód důvodu. */
@@ -65,7 +67,7 @@ export interface MemberCorrections {
 }
 export interface MemberIdentityInput { client_id: number; member_number: string; expected_client_id: number; expected_member_number: string }
 export interface MemberRevisionVoidInput { expected_revision: number; reason: string; idempotency_key: string }
-export interface MemberDetail { member: MemberIdentity; history: MemberRevision[]; corrections?: MemberCorrections; balance: MemberBalance }
+export interface MemberDetail { member: MemberIdentity; history: MemberRevision[]; corrections?: MemberCorrections; balance: MemberBalance; erased?: boolean }
 
 export interface ReconciliationTotals {
   claims: { row_count: number | string; cents: number | string }
@@ -150,13 +152,49 @@ export type MembershipBatchPhase = 'seeding' | 'preparing' | 'ready' | 'posting'
 export type MembershipBatchStatus = 'pending' | 'ready' | 'created' | 'existing' | 'rejected'
 export interface MembershipBatchCreate { template: MembershipBatchTemplate; selection_mode: 'active' | 'selected'; member_ids: number[]; idempotency_key: string }
 export interface MembershipBatchSummary { total: number; pending: number; ready: number; created: number; existing: number; rejected: number; planned_cents: string; created_cents: string; deferred_cents: string; deferral_date: string | null }
-export interface MembershipBatchItem { member_id: number; member_number: string; company_name: string; first_name?: string; last_name?: string; status: MembershipBatchStatus; amount_cents: number; operation_id: number | null; error_code: string | null; error_message: string | null }
+export interface MembershipBatchItem { member_id: number; member_number: string; company_name: string | null;first_name?: string; last_name?: string; status: MembershipBatchStatus; amount_cents: number; operation_id: number | null; error_code: string | null; error_message: string | null }
 export interface MembershipBatchDetail {
   batch: { id: number; supplier_id: number; phase: MembershipBatchPhase; template: MembershipBatchTemplate; approval_token?: string | null; approval_expires_at?: string | null; member_count: number; selection_mode: 'active' | 'selected' }
   summary: MembershipBatchSummary; items: MembershipBatchItem[]; next_after_member_id: number | null
   accounts: { account: string; side: 'debit' | 'credit'; amount_cents: string }[]
 }
 export interface MembershipBatchRecent { id: number; phase: MembershipBatchPhase; member_count: number; created_at: string; title_key: string; period_from: string; period_to: string }
+
+export type MembershipErasureStatus = 'pending' | 'approved' | 'rejected' | 'executed'
+export type MembershipErasureOutcome = 'pending' | 'done' | 'skipped_changed' | 'skipped_hold'
+export type MembershipErasureSubject = 'member' | 'deleted_member'
+export type MembershipErasureRule = 'accounting_records' | 'membership_only'
+export interface MembershipErasureAssessmentItem {
+  member_id: number; subject: MembershipErasureSubject; ended_on: string; last_record_period_end: string | null
+  retained_until: string; governing_rule: MembershipErasureRule; blocked_by: string | null; erasable: boolean
+}
+export interface MembershipErasureAssessment { as_of: string; items: MembershipErasureAssessmentItem[]; next_after: number | null; deleted_members: MembershipErasureAssessmentItem[] }
+export interface MembershipErasureProposal {
+  id: number; status: MembershipErasureStatus; as_of: string; note: string | null; row_version: number
+  created_by: number | null; created_at: string; approved_by: number | null; approved_at: string | null; executable_from: string | null
+  revoked_at: string | null; rejected_at: string | null; executed_at: string | null
+  item_count?: number; pending_count?: number; done_count?: number; skipped_count?: number
+}
+export interface MembershipErasureItem {
+  id: number; member_id: number; subject: MembershipErasureSubject; governing_rule: MembershipErasureRule; ended_on: string
+  last_record_period_end: string | null; retained_until: string; outcome: MembershipErasureOutcome; skip_reason: string | null
+  counts: Record<string, unknown> | null; executed_at: string | null
+  /** Jen u položky, která ještě neproběhla (kontrola před schválením). */
+  member_number: string | null; company_name: string | null; first_name: string | null; last_name: string | null
+}
+export interface MembershipErasureDetail { proposal: MembershipErasureProposal; items: MembershipErasureItem[]; next_after_member_id: number | null; confirmation: string; cooling_off_hours: number }
+export interface MembershipErasureExecution { proposal: MembershipErasureProposal; processed: number; remaining: number; summary: Record<'done' | 'skipped_changed' | 'skipped_hold', number> }
+
+export const membershipErasureApi = {
+  assessment: (supplier: number, afterId = 0) => api.get<MembershipErasureAssessment>(`${base}/erasure/assessment`, { ...options(supplier), params: { after_id: afterId } }).then(r => r.data),
+  proposals: (supplier: number) => api.get<{ items: MembershipErasureProposal[] }>(`${base}/erasure`, options(supplier)).then(r => r.data),
+  proposal: (supplier: number, id: number, afterMemberId = 0) => api.get<MembershipErasureDetail>(`${base}/erasure/${id}`, { ...options(supplier), params: { after_member_id: afterMemberId } }).then(r => r.data),
+  create: (supplier: number, note: string | null) => api.post<{ proposal: MembershipErasureProposal }>(`${base}/erasure`, { note }, options(supplier)).then(r => r.data),
+  approve: (supplier: number, id: number) => api.post<{ proposal: MembershipErasureProposal }>(`${base}/erasure/${id}/approve`, {}, options(supplier)).then(r => r.data),
+  revoke: (supplier: number, id: number) => api.post<{ proposal: MembershipErasureProposal }>(`${base}/erasure/${id}/revoke`, {}, options(supplier)).then(r => r.data),
+  reject: (supplier: number, id: number) => api.post<{ proposal: MembershipErasureProposal }>(`${base}/erasure/${id}/reject`, {}, options(supplier)).then(r => r.data),
+  execute: (supplier: number, id: number, confirmation: string) => api.post<MembershipErasureExecution>(`${base}/erasure/${id}/execute`, { confirmation }, options(supplier)).then(r => r.data),
+}
 
 export const membershipApi = {
   batches: (supplier: number, beforeId?: number) => api.get<{items: MembershipBatchRecent[]; next_before_id: number | null}>(`${base}/batches`, { ...options(supplier), params: { ...(beforeId ? {before_id: beforeId} : {}) } }).then(r => r.data),

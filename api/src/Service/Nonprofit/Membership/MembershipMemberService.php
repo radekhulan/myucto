@@ -24,6 +24,7 @@ final class MembershipMemberService
         if ($supplier <= 0 || $client <= 0 || $actor <= 0 || $memberNumber === '' || mb_strlen($memberNumber) > 80) {
             throw new MembershipException('nonprofit_membership_invalid', 'Člen vyžaduje klienta, členské číslo a autora.');
         }
+        MembershipErasureService::assertMemberNumberAllowed($memberNumber);
         return TransactionFailure::retrying($this->db->pdo(), fn (): array => (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplier, $client, $memberNumber, $actor): array {
             $q = $this->db->pdo()->prepare('SELECT id FROM supplier WHERE id=? FOR UPDATE');
             $q->execute([$supplier]);
@@ -64,7 +65,9 @@ final class MembershipMemberService
                 if (!hash_equals($existing['request_hash'], $requestHash)) throw new MembershipException('nonprofit_membership_idempotency_conflict', 'Klíč požadavku už patří jiné revizi členství.', 409);
                 return $existing;
             }
-            if ($this->members->member($supplier, $member, true) === null) throw new MembershipException('nonprofit_membership_member_not_found', 'Člen nebyl nalezen v této organizaci.', 404);
+            $row = $this->members->member($supplier, $member, true)
+                ?? throw new MembershipException('nonprofit_membership_member_not_found', 'Člen nebyl nalezen v této organizaci.', 404);
+            MembershipErasureService::assertNotErased($row);
             $history = $this->members->history($supplier, $member, true);
             $previous = $history === [] ? null : $history[array_key_last($history)];
             if (($previous['revision_no'] ?? 0) !== $input['expected_revision']) throw new MembershipException('nonprofit_membership_revision_changed', 'Historie členství se mezitím změnila.', 409);

@@ -156,6 +156,36 @@ final class MembershipCloneScrubberTest extends TestCase
             $legacyClaimHash = NonprofitTaxRules::hash(MembershipChargeRepository::claimRecord($legacyClaim));
             $target->pdo()->prepare('UPDATE nonprofit_membership_charge_claims SET recorded_at_utc=NULL,record_hash=? WHERE supplier_id=? AND id=?')
                 ->execute([$legacyClaimHash, $supplier, $legacyClaim['id']]);
+            // Krok 10: vymazaný člen s předpisem a stornem. Klon pečeť ověří, obsah přepíše a pečeť zahodí.
+            $q->execute([$supplier]);
+            $target->pdo()->prepare("INSERT INTO clients(supplier_id,company_name,street,city,zip,country_id,main_email,language,currency_default_id,is_customer,is_vendor) VALUES(?,'Private erased member','Private street','Private city','10000',203,'private-erased-client@example.test','cs',?,1,0)")
+                ->execute([$supplier, (int) $q->fetchColumn()]);
+            $erasedMember = $members->create($supplier, (int) $target->pdo()->lastInsertId(), 'PRIVATE-MEMBER-003', $actor)['id'];
+            $members->appendRevision($supplier, $erasedMember, ['status' => 'active', 'effective_from' => '2026-01-01', 'expected_revision' => 0,
+                'idempotency_key' => 'private-erased-active', 'legal_basis' => $this->basis('private-erased-active@example.test')], $actor);
+            $erasedRequest = $this->chargeRequest($erasedMember);
+            $erasedPreview = $charges->previewIssue($supplier, $erasedRequest);
+            $erasedIssue = $charges->confirmIssue($supplier, $erasedRequest, $erasedPreview['expected_case_version'], $erasedPreview['preview_hash'], 'private-erased-issue', $actor);
+            $erasedReverse = ['case_id' => $erasedIssue['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Private reversal private-erased-reversal@example.test'];
+            $erasedReversePreview = $charges->previewReverse($supplier, $erasedReverse);
+            $charges->confirmReverse($supplier, $erasedReverse, $erasedReversePreview['expected_case_version'], $erasedReversePreview['preview_hash'], 'private-erased-reverse', $actor);
+            $members->appendRevision($supplier, $erasedMember, ['status' => 'ended', 'effective_from' => '2026-12-31', 'expected_revision' => 1,
+                'idempotency_key' => 'private-erased-ended', 'legal_basis' => $this->basis('private-erased-ended@example.test')], $actor);
+            $erasures = new \MyInvoice\Repository\Nonprofit\Membership\MembershipErasureRepository($target);
+            $erasure = new \MyInvoice\Service\Nonprofit\Membership\MembershipErasureService($target, new MembershipRepository($target), new MembershipChargeRepository($target), $erasures,
+                new \MyInvoice\Service\Nonprofit\Membership\MembershipErasureAssessment($target, new \MyInvoice\Repository\Nonprofit\Membership\MembershipListRepository($target),
+                    new \MyInvoice\Repository\RetentionHoldRepository($target), $erasures),
+                new \MyInvoice\Service\Nonprofit\Membership\MembershipContactErasure($target), new ActivityLogger($target), new \MyInvoice\Service\ActivityLogHashChain($target), new \Psr\Log\NullLogger(), static fn (): string => '2032-01-02');
+            $erasureProposal = $erasure->create($supplier, $actor, null);
+            self::assertNotNull($erasureProposal);
+            // Ostatní ukončení členové fixture zůstávají nedotčení, aby jejich ověření níže platilo beze změny.
+            $target->pdo()->prepare('DELETE FROM nonprofit_membership_erasure_items WHERE supplier_id=? AND proposal_id=? AND member_id<>?')
+                ->execute([$supplier, $erasureProposal['id'], $erasedMember]);
+            $erasure->approve($supplier, $erasureProposal['id'], $actor);
+            $target->pdo()->prepare('UPDATE nonprofit_membership_erasure_proposals SET executable_from=UTC_TIMESTAMP() - INTERVAL 1 MINUTE WHERE id=?')->execute([$erasureProposal['id']]);
+            self::assertSame(1, $erasure->execute($supplier, $erasureProposal['id'], $actor, \MyInvoice\Service\Nonprofit\Membership\MembershipErasureService::EXECUTE_CONFIRMATION)['summary']['done']);
+            $erasedOperations = array_column($target->pdo()->query('SELECT o.id FROM nonprofit_membership_charge_operations o JOIN nonprofit_membership_charge_cases c ON c.id=o.case_id WHERE c.member_id=' . $erasedMember)->fetchAll(PDO::FETCH_ASSOC), 'id');
+            self::assertCount(2, $erasedOperations);
             [$membershipCapture, $manyQueries] = $this->captureWithQueryCount($target);
             self::assertLessThanOrEqual($smallQueries + 8, $manyQueries,
                 'Capture acquired per-operation queries: one=' . $smallQueries . ', many=' . $manyQueries);
@@ -180,6 +210,18 @@ final class MembershipCloneScrubberTest extends TestCase
             self::assertStringNotContainsString('private-void-reason', (string) $voidHistory[2]['request']['reason']);
             self::assertArrayNotHasKey('legal_basis', $voidHistory[2]['request']);
             $chargeRepository = new MembershipChargeRepository($target);
+            // Klon vymazaného člena: řetěz přepočtený bez pečeti a dál průkazný.
+            foreach ($repository->history($supplier, $erasedMember) as $erasedRevision) {
+                self::assertNull($erasedRevision['erasure_item_id']);
+                self::assertNull($erasedRevision['erased_digest']);
+            }
+            foreach ($erasedOperations as $erasedOperation) {
+                $clonedOperation = $chargeRepository->operation($supplier, (int) $erasedOperation);
+                self::assertNull($clonedOperation['erasure_item_id']);
+                self::assertSame('vymazano-' . $erasedMember, $clonedOperation['proof']['member']['member_number']);
+            }
+            self::assertSame('vymazano-' . $erasedMember, $repository->member($supplier, $erasedMember)['member_number'], 'Klon vymazaného člena zůstává vymazaný.');
+            self::assertSame(0, (int) $target->pdo()->query('SELECT COUNT(*) FROM nonprofit_membership_charge_commands m JOIN nonprofit_membership_charge_operations o ON o.command_id=m.id JOIN nonprofit_membership_charge_cases c ON c.id=o.case_id WHERE c.member_id=' . $erasedMember . ' AND m.erasure_item_id IS NOT NULL')->fetchColumn());
             $operation = $chargeRepository->operation($supplier, $issued['operation']['id']);
             self::assertNotNull($operation);
             self::assertNull($operation['proof']['membership_intervals'][0]['effective_to']);

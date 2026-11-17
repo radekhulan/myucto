@@ -815,6 +815,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/accounting/nonprofit-membership/(?:members(?:/[0-9]+/revisions(?:/[0-9]+/void)?)?|charges/(?:preview|confirm))$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['PUT', '#^/api/accounting/nonprofit-membership/members/[0-9]+$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['DELETE', '#^/api/accounting/nonprofit-membership/members/[0-9]+$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/nonprofit-membership/erasure(?:/assessment|/[0-9]+)?$#', 'accounting.membership_erasure', AccessLevel::READ],
+        ['POST', '#^/api/accounting/nonprofit-membership/erasure(?:/[0-9]+/(?:approve|revoke|reject|execute))?$#', 'accounting.membership_erasure', AccessLevel::WRITE],
         ['POST', '#^/api/accounting/nonprofit-membership/rates$#', 'accounting.templates', AccessLevel::WRITE],
         ['PUT', '#^/api/accounting/nonprofit-membership/rates/[0-9]+$#', 'accounting.templates', AccessLevel::WRITE],
         ['POST', '#^/api/accounting/nonprofit-membership/members/selection-check$#', 'accounting', AccessLevel::READ],

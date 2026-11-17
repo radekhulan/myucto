@@ -200,6 +200,7 @@ final class MembershipChargeService
         if ($loaded === null && isset($request['rate_id'])) (new MembershipRateService($this->db))->assertUsable($supplier, $request['rate_id'], $current, $request['period_from']);
         $member = $loaded['member'] ?? $this->members->member($supplier, $request['member_id'], $current)
             ?? throw new MembershipException('nonprofit_membership_member_not_found', 'Člen nebyl nalezen v této organizaci.', 404);
+        MembershipErasureService::assertNotErased($member);
         $history = $loaded['history'] ?? $this->members->history($supplier, $member['id'], $current);
         $revision = MembershipRevisionTimeline::at($history, $request['accounting_date']);
         if ($revision === null || $revision['status'] !== 'active') throw new MembershipException('nonprofit_membership_inactive', 'Členství není k účetnímu datu aktivní.', 409);
@@ -294,6 +295,7 @@ final class MembershipChargeService
     {
         $case = $this->charges->caseById($supplier, $request['case_id'], $current)
             ?? throw new MembershipException('nonprofit_membership_case_not_found', 'Účetní případ nebyl nalezen.', 404);
+        MembershipErasureService::assertNotErased($this->members->member($supplier, $case['member_id'], $current) ?? []);
         $head = $this->charges->head($supplier, $case, $current);
         if ($head === null || $head['operation'] !== 'issue') throw new MembershipException('nonprofit_membership_already_reversed', 'Členský předpis už není aktivní.', 409);
         $this->assertStoredProof($head, $current);
