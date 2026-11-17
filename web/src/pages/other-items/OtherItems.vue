@@ -94,6 +94,9 @@ const actions = computed<ActionItem[]>(() => [
   { key: 'kinds', label: t('other_items.kinds.title'), icon: 'tag', variant: 'neutral', run: () => { showKinds.value = true } },
   { key: 'documents', label: t('other_items.documents_settings.title'), icon: 'folderOpen', variant: 'neutral',
     show: auth.canRead('documents'), run: () => { showDocumentSettings.value = true } },
+  { key: 'renumber', label: t('common.renumber_by_date'), icon: 'cycle', tier: 'overflow', variant: 'warning',
+    show: auth.canWrite('other_items') && !auth.isClientRole,
+    to: { path: '/purchase-invoices/renumber', query: { agenda: side.value === 'payable' ? 'other_payable' : 'other_receivable' } } },
 ])
 
 function internalSourceUrl(item: OtherItem): string | null {

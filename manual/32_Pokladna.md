@@ -367,6 +367,7 @@ U valutové pokladny jsou všechny deníkové řádky vedené v CZK a řádek an
 - Vystavený doklad se needituje ani nemaže, jedinou opravou je storno s uvedením důvodu a případné vystavení nového dokladu. Výjimkou je rozpracovaný doklad (lze ho upravit i smazat) a doklad vzniklý z faktury ([§ 32.11.7](#32117-doklad-vznikly-z-faktury-hotovostni-vyrovnani)), který faktura umí zase zrušit.
 - Hotovostní vyrovnání z editoru faktury neumí zálohové faktury, pravidelné a hromadně vystavované faktury ani valutové pokladny; ty se hradí ručním dokladem tady.
 - Smazat lze jen pokladnu bez jediného dokladu; jinak nabídne systém deaktivaci.
+- Výdajové doklady bez DPH očíslované v jiném pořadí, než jsou data úhrady, srovnáte v nabídce „…" volbou **Přečíslovat podle data**. Příjmové doklady, doklady s DPH a doklady evidované v EET si číslo nechávají, viz [Přijaté faktury, přečíslování](23_Prijate_faktury.md).
 
 ## 32.12 Související kapitoly
 

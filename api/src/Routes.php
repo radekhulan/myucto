@@ -3357,6 +3357,13 @@ final class Routes
             $g->get   ('/cash-registers/{id:[0-9]+}/book',     [\MyInvoice\Action\Accounting\Cash\CashBookAction::class, 'get']);
             $g->get   ('/cash-registers/{id:[0-9]+}/book/pdf', [\MyInvoice\Action\Accounting\Cash\CashBookAction::class, 'pdf']);
             $g->get   ('/cash-documents',                      [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'list']);
+            // Přečíslování měsíce podle data (vzor /api/purchase-invoices/renumber), interní plumbing.
+            $g->get   ('/cash-documents/renumber',             [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'cashPreview']);
+            $g->post  ('/cash-documents/renumber',             [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'cashRenumber']);
+            $g->get   ('/other-items/renumber',                [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'otherItemsPreview']);
+            $g->post  ('/other-items/renumber',                [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'otherItemsRenumber']);
+            $g->get   ('/internal-documents/renumber',         [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'internalPreview']);
+            $g->post  ('/internal-documents/renumber',         [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'internalRenumber']);
             $g->get   ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'list']);
             $g->post  ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'create']);
             $g->get   ('/other-items/bank-candidates',         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'bankMatchCandidates']);

@@ -890,6 +890,10 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['GET', '/api/property/charges/issues/context'],
             ['POST', '/api/accounting/payroll/post'],
             ['POST', '/api/purchase-invoices/renumber'],
+            ['GET', '/api/accounting/cash-documents/renumber'],
+            ['POST', '/api/accounting/cash-documents/renumber'],
+            ['GET', '/api/accounting/other-items/renumber'],
+            ['POST', '/api/accounting/internal-documents/renumber'],
         ] as [$method, $path]) {
             $denied = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
             self::assertSame(403, $denied->getStatusCode(), $path);

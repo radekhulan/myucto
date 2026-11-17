@@ -22855,9 +22855,51 @@
         "period_closing": "closing in progress",
         "period_closed": "closed period",
         "date_locked": "locked to date",
-        "manual_number": "manual number"
+        "manual_number": "manual number",
+        "cash_in": "receipt document, the payer has the number",
+        "eet": "recorded in EET",
+        "vat_document": "document with VAT",
+        "linked_invoice": "linked to an issued invoice"
       },
-      "done": "Documents renumbered: {count}."
+      "done": "Documents renumbered: {count}.",
+      "page_title": "Renumbering documents",
+      "not_offered": "Issued invoices and bank statements are not renumbered: the customer already has the issued invoice number and the bank document number comes from the bank statement.",
+      "tabs": {
+        "label": "Agenda",
+        "purchase": "Received documents",
+        "cash": "Cash desk",
+        "other_receivable": "Other receivables",
+        "other_payable": "Other payables",
+        "internal": "Internal documents"
+      },
+      "agenda_intro": {
+        "cash": "A cash document gets its number when it is posted, so the numbers follow the order of entry. Renumbering takes the numbers the expense documents of the selected cash desk and month have in the number series and hands them out again by payment date. Other months and the series counter do not change.",
+        "other_receivable": "A receivable gets its number when it is confirmed, so the numbers follow the order of entry. Renumbering takes the numbers the receivables of the selected month have in the number series and hands them out again by date of origin. Other months and the series counter do not change.",
+        "other_payable": "A payable gets its number when it is confirmed, so the numbers follow the order of entry. Renumbering takes the numbers the payables of the selected month have in the number series and hands them out again by date of origin. Other months and the series counter do not change.",
+        "internal": "An internal document gets its number when it is posted, so the numbers follow the order of entry. Renumbering takes the numbers the internal documents of the selected month have in the number series and hands them out again by accounting date. Other months and the series counter do not change."
+      },
+      "agenda_note": {
+        "cash": "Receipt documents, expense documents with VAT and documents recorded in EET keep their numbers: the payer has the receipt and the number of a VAT document goes to the VAT records. The number and description of the journal entry, including its reversal, are rewritten too.",
+        "other": "A receivable linked to an issued invoice keeps its number. The number and description of the journal entry, including reversal and reposting, are rewritten too.",
+        "internal": "The number and description of the journal entry, including its reversal, are rewritten too. Manual journal entries without an internal document do not change."
+      },
+      "period_by": {
+        "cash": "Month by payment date",
+        "other": "Month by date of origin",
+        "internal": "Month by accounting date"
+      },
+      "col_date_by": {
+        "cash": "Paid",
+        "other": "Origin",
+        "internal": "Accounting date"
+      },
+      "register": "Cash desk",
+      "no_register": "The company has no cash desk.",
+      "col_partner": "Partner",
+      "col_description": "Description",
+      "col_reason": "Reason",
+      "in_order_agenda": "The numbers already follow the dates.",
+      "kept_hint_agenda": "Manually entered, taken over or handed-out numbers are not renumbered."
     },
     "extraction_review": {
       "title": "Review extracted documents",
@@ -24520,6 +24562,7 @@
     }
   },
   "common": {
+    "renumber_by_date": "Renumber by date",
     "window_data_changed": "The data has changed in the meantime.",
     "window_data_changed_reload": "Reload",
     "window_data_changed_confirm": "Reload the page? Unsaved changes in this window will be lost.",

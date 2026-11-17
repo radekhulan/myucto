@@ -750,6 +750,25 @@ dodavatele, takže přečíslování na daně vliv nemá. Po uzávěrce se čís
 uzavíraném účetním období, v roce s dokončenou roční uzávěrkou daňové evidence nebo v období uzamčeném k datu
 přečíslovat nejde. Přečíslování je vyhrazené účetní, klient ho nevidí.
 
+**Přečíslování dalších agend.** Stránka má záložky **Přijaté doklady**, **Pokladna**, **Ostatní pohledávky**,
+**Ostatní závazky** a **Interní doklady**. Záložka se ukáže jen tomu, kdo má právo zápisu do dané agendy; na stránku
+vede i položka **Přečíslovat podle data** v nabídce „…" seznamu pokladny, ostatních pohledávek a závazků a interních
+dokladů. Řady těchto agend běží po letech, proto se nečíslují od 1: přečíslování vezme čísla, která automaticky
+očíslované doklady měsíce v řadě už mají, a rozdá je dokladům znovu podle data. Ostatní měsíce ani počítadlo řady se
+nezmění a v řadě nevznikne díra. Rozhoduje datum úhrady u pokladny, datum vzniku u ostatních pohledávek a závazků
+a datum účetního případu u interních dokladů.
+
+- **Pokladna** se přečísluje po jednotlivých pokladnách a jen u výdajových dokladů bez DPH. Příjmový doklad si číslo
+  nechává, protože ho jako stvrzenku, zjednodušený daňový doklad nebo účtenku EET dostal plátce. Výdajový doklad s DPH
+  si číslo nechává, protože jde do evidence DPH a kontrolního hlášení. Číslo si nechává i doklad evidovaný v EET.
+- **Ostatní pohledávky a závazky** se přečíslují zvlášť. Pohledávka navázaná na vydanou fakturu si číslo nechává.
+- **Interní doklady** se přečíslují všechny automaticky očíslované. Ruční zápisy deníku bez interního dokladu se
+  nemění, i když čerpají z téže řady.
+
+Ve všech agendách se přepíše i číslo dokladu a popis zápisu v účetním deníku včetně storna a přeúčtování. Pravidla
+pro uzávěrky a zamčené období platí stejně jako u přijatých dokladů. Vydané faktury a bankovní výpisy se
+nepřečíslovávají: číslo vydané faktury už má odběratel a číslo bankovního dokladu určuje výpis banky.
+
 #### Rekapitulace DPH dle dokladu (§ 73 ZDPH)
 
 Pod položkami je box **Rekapitulace DPH** se základem a daní **za každou sazbu**. Hodnoty se dopočítají ze řádků, ale pokud

@@ -518,6 +518,7 @@
       "purchase_invoice"
     ],
     "purchase-invoices-renumber": [
+      "cash",
       "purchase_invoice"
     ],
     "purchase-invoice-ai-import": [
