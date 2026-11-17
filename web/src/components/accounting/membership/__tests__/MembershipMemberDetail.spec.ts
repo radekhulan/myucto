@@ -175,6 +175,17 @@ describe('Membership member detail', () => {
     w.unmount()
   })
 
+  it('shows an erased member read-only with a notice even with write rights', async () => {
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01'), revision(2, '2021-01-01', 'ended')], mixed), erased: true })
+    const w = mounted({ canManage: true })
+    await flushPromises()
+    expect(w.get('[data-section="detail-erased"]').text()).toBe(cs.nonprofitMembership.erasure.detailErased)
+    for (const action of ['new-charge', 'reverse-claim']) expect(w.find(`[data-action="${action}"]`).exists()).toBe(false)
+    expect(w.find('[data-stub="revision"]').exists()).toBe(false)
+    expect(w.findAll('[data-section="claim-row"]')).toHaveLength(4)
+    w.unmount()
+  })
+
   it('reverses the chosen existing claim and offers no reversal for a reversed one', async () => {
     const w = mounted()
     await flushPromises()

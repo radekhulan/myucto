@@ -116,6 +116,8 @@ final class MembershipErasureAssessment
             $onlySql = ' AND a.entity_id IN (' . implode(',', array_fill(0, count($only), '?')) . ')';
             array_push($params, ...array_map('intval', $only));
         }
+        // Index akce, ne firmy: smazání člena je vzácná akce, kdežto (supplier_id, created_at) by procházel celou
+        // auditní stopu firmy. created_at je TIMESTAMP a spojení běží v zóně aplikace, DATE() je tedy místní den.
         $q = $this->db->pdo()->prepare("SELECT a.entity_id member_id,MAX(DATE(a.created_at)) deleted_on
             FROM activity_log a FORCE INDEX(idx_al_action)
             WHERE a.action='nonprofit_membership_member_delete' AND a.supplier_id=? AND a.entity_type='nonprofit_member'{$onlySql}

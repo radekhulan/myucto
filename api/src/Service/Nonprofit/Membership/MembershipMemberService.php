@@ -24,7 +24,6 @@ final class MembershipMemberService
         if ($supplier <= 0 || $client <= 0 || $actor <= 0 || $memberNumber === '' || mb_strlen($memberNumber) > 80) {
             throw new MembershipException('nonprofit_membership_invalid', 'Člen vyžaduje klienta, členské číslo a autora.');
         }
-        MembershipErasureService::assertMemberNumberAllowed($this->db, $memberNumber);
         return TransactionFailure::retrying($this->db->pdo(), fn (): array => (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplier, $client, $memberNumber, $actor): array {
             $q = $this->db->pdo()->prepare('SELECT id FROM supplier WHERE id=? FOR UPDATE');
             $q->execute([$supplier]);
@@ -34,6 +33,8 @@ final class MembershipMemberService
             if ($q->fetchColumn() === false) throw new MembershipException('nonprofit_membership_client_not_found', 'Klient nebyl nalezen v této organizaci.', 404);
             $existing = $this->members->byIdentity($supplier, $client, $memberNumber, true);
             if ($existing !== null) return $existing;
+            // Až po idempotentním návratu: opakované založení člena se starším číslem „VYMAZANO-…“ vrátí jeho samého.
+            MembershipErasureService::assertMemberNumberAllowed($this->db, $memberNumber);
             try {
                 return $this->members->insertMember($supplier, $client, $memberNumber, $actor);
             } catch (\PDOException $e) {

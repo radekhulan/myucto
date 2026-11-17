@@ -12,6 +12,7 @@ use MyInvoice\Repository\RetentionHoldRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\ActivityLogHashChain;
 use MyInvoice\Service\Nonprofit\Membership\MembershipContactErasure;
+use MyInvoice\Service\System\CompanyPurgeService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipCorrectionService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipErasureAnchor;
 use MyInvoice\Service\Nonprofit\Membership\MembershipErasureAssessment;
@@ -87,6 +88,30 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
         $other = $this->member('HOLD-OTHER');
         $this->batches->create($this->supplier, $this->input([$plain, $other], 'hold-batch'), $this->actor);
         self::assertSame('open_batch', $this->assess()[$plain]['blocked_by']);
+    }
+
+    public function testSeedingBatchAndOpenProposalBlockErasure(): void
+    {
+        $inRange = $this->ended('SEED-IN');
+        $selected = $this->ended('SEED-SELECTED');
+        $outside = $this->ended('SEED-OUTSIDE');
+        $other = $this->member('SEED-OTHER');
+        $active = $this->batches->create($this->supplier, $this->input([$other], 'seed-active'), $this->actor)['batch']['id'];
+        $chosen = $this->batches->create($this->supplier, $this->input([$other], 'seed-selected'), $this->actor)['batch']['id'];
+        // Plnění dávky v půli: člen v rozsahu aktivní dávky ještě není v jejích řádcích, přesto ho dávka zasáhne.
+        $this->pdo->prepare("UPDATE nonprofit_membership_batches SET phase='seeding',selection_mode='active',seed_cursor=?,seed_until=? WHERE supplier_id=? AND id=?")
+            ->execute([$inRange - 1, $inRange, $this->supplier, $active]);
+        $this->pdo->prepare("UPDATE nonprofit_membership_batches SET phase='seeding',selection_mode='selected',selection_json=?,seed_cursor=0,seed_until=? WHERE supplier_id=? AND id=?")
+            ->execute([json_encode([$selected]), $outside, $this->supplier, $chosen]);
+        $items = $this->assess();
+        self::assertSame('open_batch', $items[$inRange]['blocked_by']);
+        self::assertSame('open_batch', $items[$selected]['blocked_by']);
+        self::assertTrue($items[$outside]['erasable'], 'Mimo rozsah aktivní dávky a mimo výběr druhé dávky výmaz nic nedrží.');
+
+        // Člen v otevřeném návrhu už do dalšího návrhu nejde.
+        $this->pdo->prepare("UPDATE nonprofit_membership_batches SET phase='cancelled' WHERE supplier_id=? AND id IN (?,?)")->execute([$this->supplier, $active, $chosen]);
+        $this->erasure->create($this->supplier, $this->actor, null);
+        self::assertSame('already_proposed', $this->assess()[$outside]['blocked_by']);
     }
 
     public function testErasurePseudonymizesMemberKeepsAccountingAndProofs(): void
@@ -405,7 +430,8 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
             self::assertFalse(MembershipErasureService::isReservedNumber($this->db, $number), $number);
         }
         $other = $this->member('COLL');
-        $this->assertRejected('nonprofit_membership_member_number_reserved', fn () => $this->members->create($this->supplier, (int) $this->pdo->query("SELECT client_id FROM nonprofit_members WHERE id={$other}")->fetchColumn(), "vymazáno-{$other}", $this->actor));
+        $client = $this->client('coll-free');
+        $this->assertRejected('nonprofit_membership_member_number_reserved', fn () => $this->members->create($this->supplier, $client, "vymazáno-{$other}", $this->actor));
     }
 
     public function testLegacyNumberLikePseudonymIsNotErasedAndCollisionSkipsErasure(): void
@@ -426,6 +452,8 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
         $same = ['client_id' => $current['client_id'], 'member_number' => $current['member_number'],
             'expected_client_id' => $current['client_id'], 'expected_member_number' => $current['member_number']];
         self::assertSame($own, $this->corrections->updateIdentity($this->supplier, $own, $same, $this->actor)['id']);
+        // Opakované založení téhož člena se starším číslem vrátí jeho samého (idempotence), ne „vyhrazené číslo“.
+        self::assertSame($own, $this->members->create($this->supplier, $current['client_id'], $current['member_number'], $this->actor)['id']);
 
         $this->eraseAll();
         $item = $this->itemOf($this->erasures->items($this->supplier, $this->lastProposal()), $victim);
@@ -436,6 +464,32 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
     private function lastProposal(): int
     {
         return (int) $this->pdo->query("SELECT MAX(id) FROM nonprofit_membership_erasure_proposals WHERE supplier_id={$this->supplier}")->fetchColumn();
+    }
+
+    public function testCompanyPurgeAfterErasureRemovesEverythingAndKeepsTheChainVerifiable(): void
+    {
+        $member = $this->ended('PURGE', charge: 'reverse', voidReason: 'Synthetic wrong suspension of Jana Testovaci');
+        $this->eraseAll();
+        $from = (int) $this->pdo->query("SELECT MIN(id) FROM activity_log WHERE supplier_id={$this->supplier}")->fetchColumn();
+        self::assertGreaterThan(0, (int) $this->pdo->query("SELECT COUNT(*) FROM activity_log_redactions WHERE supplier_id={$this->supplier}")->fetchColumn());
+        self::assertSame(MembershipErasureService::placeholderNumber($member), $this->repository->member($this->supplier, $member)['member_number']);
+        // Smazání firmy neběží v transakci: data fixture se commitnou a smaže je až purge.
+        $this->pdo->commit();
+        $chain = new ActivityLogHashChain($this->db);
+        $chain->sealPending();
+        try {
+            (new CompanyPurgeService($this->db))->purge($this->supplier, true, false);
+            foreach (['nonprofit_members', 'nonprofit_member_revisions', 'nonprofit_membership_charge_operations', 'nonprofit_membership_charge_commands',
+                'nonprofit_membership_erasure_items', 'nonprofit_membership_erasure_proposals'] as $table) {
+                self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM {$table} WHERE supplier_id={$this->supplier}")->fetchColumn(), $table);
+            }
+            // Zachovaný řetěz s redakcemi a kotvou zůstává ověřitelný i bez dat firmy.
+            self::assertGreaterThan(0, (int) $this->pdo->query("SELECT COUNT(*) FROM activity_log_redactions WHERE supplier_id={$this->supplier}")->fetchColumn());
+            $verified = $chain->verify($from);
+            self::assertTrue($verified['ok'], (string) json_encode($verified['broken']));
+        } finally {
+            $this->pdo->prepare('DELETE FROM users WHERE id=?')->execute([$this->actor]);
+        }
     }
 
     public function testTriggerRejectsSealWithoutPendingItemOfThatMember(): void
