@@ -157,8 +157,10 @@ final class ClientResolver
 
         // 2. ARES merge — pokud IČO je české (8 číslic) a ARES odpoví
         $aresData = null;
+        $aresUnavailable = false;
         if ($ic !== null && strlen($ic) === 8) {
             $resp = $this->ares->lookup($ic);
+            $aresUnavailable = $resp === null;
             if ($resp !== null && ($resp['found'] ?? false) && isset($resp['data'])) {
                 $aresData = $resp['data'];
             }
@@ -184,9 +186,10 @@ final class ClientResolver
         // Registr subjekt nepotvrdil (IČO není v ARES, typicky špatně přečtené; DIČ
         // neprošlo VIES). Než se založí karta jen z vytěžených údajů, zkusí se existující
         // karta podle názvu bez právní formy, diakritiky a interpunkce. Jinak by každé
-        // jinak přečtené IČO nebo název založilo další variantu téže firmy.
+        // jinak přečtené IČO nebo název založilo další variantu téže firmy. Při výpadku
+        // ARES se podle názvu nehledá: platné IČO by se přiřadilo stejnojmenné cizí kartě.
         $registryVerified = $aresData !== null || $viesValid;
-        if (!$registryVerified) {
+        if (!$registryVerified && !$aresUnavailable) {
             $byName = $this->findByNameKey($supplierId, $companyName);
             if ($byName !== null) {
                 return ['id' => $byName, 'created' => false, 'registry_verified' => false];
