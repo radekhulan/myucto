@@ -436,7 +436,7 @@ Zálohové faktury dostanou koncept finálního dokladu jako u běžné úhrady.
 
 U vystavených faktur jdou kombinace jen v rámci **jednoho klienta** a součet musí **odpovídat částce platby** (sloučená úhrada = uhradit všechny vybrané faktury celé; není to rozpouštění jedné platby na částečné úhrady). Zrušení spárování ([§ 29.7](#297-krok-za-krokem-oprava-chybneho-parovani)) smaže **všechny** platby té transakce a vrátí všechny faktury zpět mezi pohledávky.
 
-U přijatých faktur se vyrovnávají **zbývající částky**, takže předchozí částečné bankovní úhrady ve stejné měně se nezapočítají znovu. Pokud nelze bezpečně určit měnu předchozího vyrovnání, kombinace se nenabídne. Návrh ukazuje případný rozdíl proti částce pohybu. U platby CZK kartou za EUR faktury uvidíte i jejich CZK protihodnoty. Skutečně odepsaná částka se rozdělí mezi faktury poměrně; při zaúčtování se závazky vyrovnají v hodnotě jejich účetního předpisu a kurzový rozdíl se zachytí zvlášť. Korunová platba více cizoměnových faktur podporuje doklady bez předchozí částečné úhrady či zápočtu. Automatické zaúčtování vyžaduje zaúčtované předpisy a otevřené účetní období.
+U přijatých faktur se vyrovnávají **zbývající částky**, takže předchozí částečné bankovní úhrady ve stejné měně se nezapočítají znovu. Pokud nelze bezpečně určit měnu předchozího vyrovnání, kombinace se nenabídne. Návrh ukazuje případný rozdíl proti částce pohybu. U platby CZK kartou za EUR faktury uvidíte i jejich CZK protihodnoty. Skutečně odepsaná částka se rozdělí mezi faktury poměrně; při zaúčtování se závazky vyrovnají v hodnotě jejich účetního předpisu a kurzový rozdíl se zachytí zvlášť. Korunová platba více cizoměnových faktur nebo účtenek podporuje doklady bez předchozí částečné úhrady či zápočtu. Automatické zaúčtování vyžaduje zaúčtované předpisy a otevřené účetní období.
 
 ### 29.13.10 Ignorování a zrušení spárování
 
@@ -453,6 +453,8 @@ Funkce **Vytvořit fakturu** ([§ 29.6](#296-krok-za-krokem-platba-ktera-neni-pl
 ### 29.13.12 Ruční párování přijaté faktury s nižší platbou
 
 Přijatou fakturu označí ruční párování jako uhrazenou jen tehdy, když platba pokryje zbývající částku. Rozdíl do 1,00 (v měně faktury) banka dorovná na 548/648, korunovou platbu cizoměnové faktury bere v kurzové toleranci jako úhradu celé faktury a rozdíl zaúčtuje jako kurzový.
+
+Stejně se párují přijaté **účtenky**: účtenku v cizí měně zaplacenou z korunového účtu (převodem nebo kartou) nabídne párování mezi kandidáty s přepočtem na koruny, jde spárovat samostatně i ve sloučené úhradě a rozdíl proti kurzu účtenky se zaúčtuje na 563/663 jako u faktury. Evidenci DPH úhrada účtenky nemění.
 
 Je-li platba nižší, faktura zůstane **částečně uhrazená** a aplikace nabídne dvě možnosti:
 
@@ -516,7 +518,7 @@ Když některá podmínka nesedí (uzavřené období, faktura označená jako u
 
 #### 29.13.13.2 Cizoměnové spárované platby (kurzový rozdíl)
 
-Faktura v cizí měně (EUR, USD …) placená **stejnou cizí měnou** bankovní transakcí (na devizový účet) se zaúčtuje automaticky, včetně kurzového rozdílu. Stejně se zaúčtuje jednoznačně spárovaná **CZK karetní platba za cizoměnovou přijatou fakturu**; u ní nemusí být variabilní symbol a CZK částka se může lišit podle kurzu karetní asociace:
+Faktura v cizí měně (EUR, USD …) placená **stejnou cizí měnou** bankovní transakcí (na devizový účet) se zaúčtuje automaticky, včetně kurzového rozdílu. Stejně se zaúčtuje jednoznačně spárovaná **CZK platba za cizoměnovou přijatou fakturu nebo účtenku**; u ní nemusí být variabilní symbol a CZK částka se může lišit podle kurzu karetní asociace:
 
 - saldokonto (**311**/**321**) se odúčtuje v **CZK hodnotě předpisu**, tedy cizí částka přepočtená kurzem, který byl zafixovaný při zaúčtování faktury,
 - banka (**221**) se zaúčtuje v **CZK hodnotě skutečné úhrady**, tedy cizí částka přepočtená pevným měsíčním nebo ročním kurzem firmy, pokud je zvolený, jinak kurzem ČNB ke dni bankovní transakce,

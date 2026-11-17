@@ -390,7 +390,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
         let options: AnchorOption[]
         if (tx.amount < 0) {
           const result = await purchaseInvoicesApi.listGrouped({
-            q: query, status: ['received', 'booked', 'paid'], document_kind: ['invoice', 'advance'], per_page: 20,
+            q: query, status: ['received', 'booked', 'paid'], document_kind: ['invoice', 'advance', 'receipt'], per_page: 20,
           })
           options = result.data.flatMap(group => group.invoices).map(i => ({
             value: i.id,

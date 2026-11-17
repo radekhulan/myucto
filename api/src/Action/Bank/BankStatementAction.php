@@ -19,6 +19,7 @@ use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\Bank\GpcParser;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
+use MyInvoice\Service\Bank\PurchasePaymentKinds;
 use MyInvoice\Service\Bank\CreditRefundAllocation;
 use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
 use MyInvoice\Service\Bank\StatementReconciliationConfirmation;
@@ -2901,7 +2902,7 @@ final class BankStatementAction
                    FROM purchase_invoices
                   WHERE id = ? AND supplier_id = ?
                     AND status IN ('received','booked','paid')
-                    AND document_kind IN ('invoice','advance')"
+                    AND " . PurchasePaymentKinds::bankPayableSql('purchase_invoices')
             );
             $anchor->execute([$anchorId, $supplierId]);
             $anchorRefDate = $anchor->fetchColumn();
@@ -2940,7 +2941,7 @@ final class BankStatementAction
              LEFT JOIN clients c ON c.id = p.vendor_id
                  WHERE p.supplier_id = ?
                    AND p.status IN ('received','booked','paid')
-                   AND p.document_kind IN ('invoice','advance')";
+                   AND " . PurchasePaymentKinds::bankPayableSql('p');
         $params = [$supplierId];
         if ($window > 0 && $anchorId === 0) {
             $sql .= ' AND (ABS(DATEDIFF(p.due_date, ?)) <= ? OR ABS(DATEDIFF(p.issue_date, ?)) <= ?)';
@@ -2964,7 +2965,7 @@ final class BankStatementAction
             if ($invoiceCurrency !== $txCcy) {
                 if ($txCcy !== FxPaymentSettlement::LOCAL_CURRENCY
                     || (float) $row['exchange_rate'] <= 0
-                    || (string) $row['document_kind'] !== 'invoice'
+                    || !PurchasePaymentKinds::allowsCrossCurrency((string) $row['document_kind'])
                     || $paymentCount > 0
                     || $offsetCount > 0
                     || $cashCount > 0
@@ -4210,9 +4211,9 @@ final class BankStatementAction
                     self::rollbackAtomic($pdo, $own, $savepoint);
                     return Json::error($response, 'invalid_status', "Přijatou fakturu #$purchaseInvoiceId v jejím stavu nelze spárovat.", 409);
                 }
-                if (!in_array((string) $invoice['document_kind'], ['invoice', 'advance'], true)) {
+                if (!PurchasePaymentKinds::isBankPayable((string) $invoice['document_kind'])) {
                     self::rollbackAtomic($pdo, $own, $savepoint);
-                    return Json::error($response, 'invalid_type', "Doklad #$purchaseInvoiceId není faktura ani zálohová faktura.", 409);
+                    return Json::error($response, 'invalid_type', "Doklad #$purchaseInvoiceId není faktura, zálohová faktura ani účtenka.", 409);
                 }
 
                 $invoiceCurrency = strtoupper((string) $invoice['currency']);
@@ -4230,7 +4231,7 @@ final class BankStatementAction
                 if ($invoiceMode === 'cross') {
                     if ($txCurrency !== FxPaymentSettlement::LOCAL_CURRENCY
                         || (float) $invoice['exchange_rate'] <= 0
-                        || (string) $invoice['document_kind'] !== 'invoice'
+                        || !PurchasePaymentKinds::allowsCrossCurrency((string) $invoice['document_kind'])
                     ) {
                         self::rollbackAtomic($pdo, $own, $savepoint);
                         return Json::error($response, 'currency_mismatch', "Přijatou fakturu #$purchaseInvoiceId nelze převést do měny platby.", 409);

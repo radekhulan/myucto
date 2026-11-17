@@ -1928,8 +1928,8 @@ final class StatementMatcher
                    JOIN currencies cur ON cur.id = pi.currency_id
                   WHERE pi.supplier_id = ?
                     AND pi.status IN ('received', 'booked', 'paid')
-                    -- Zálohová faktura zaplacená kartou nemá na pohybu VS, jinak se chová jako faktura.
-                    AND pi.document_kind IN ('invoice', 'advance')
+                    -- Zálohová faktura i účtenka zaplacená kartou nemá na pohybu VS, jinak se chová jako faktura.
+                    AND " . PurchasePaymentKinds::bankPayableSql('pi') . "
                     AND pi.cash_register_id IS NULL
                     AND pi.payment_method IN ('bank_transfer', 'card', 'direct_debit')
                     AND (ABS(DATEDIFF(pi.due_date, ?)) <= ? OR ABS(DATEDIFF(pi.issue_date, ?)) <= ?)

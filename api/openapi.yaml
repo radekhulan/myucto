@@ -8322,7 +8322,9 @@ paths:
         Doklad se vybírá právě jedním z pěti způsobů (v tomto pořadí priority):
 
         - `purchase_invoice_ids` (2 a více): sloučená odchozí úhrada více přijatých
-          faktur, i od různých dodavatelů. Jediné ID degraduje na 1:1 párování.
+          faktur, zálohových faktur nebo účtenek, i od různých dodavatelů. CZK platbou
+          lze takto uhradit i cizoměnové faktury a účtenky (ne zálohové faktury).
+          Jediné ID degraduje na 1:1 párování.
         - `invoice_ids` (2 a více) — sloučená úhrada: jedna příchozí platba proti
           více vystavaným fakturám. Součet musí sedět na částku transakce.
           Jediné ID v poli degraduje na běžné 1:1 párování.
