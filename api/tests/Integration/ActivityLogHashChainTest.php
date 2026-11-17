@@ -461,14 +461,18 @@ final class ActivityLogHashChainTest extends TestCase
         $pipes = [];
         $child = proc_open([PHP_BINARY, $script], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env, ['bypass_shell' => true]);
         $exit = null;
+        $output = '';
         try {
             self::assertIsResource($child);
+            // Výstup potomka se čte průběžně: plná roura by ho zablokovala a příčina pádu by se ztratila.
+            foreach ([1, 2] as $stream) stream_set_blocking($pipes[$stream], false);
             // Čekání jen na zámek, který drží tato transakce redakce (sdílený server může mít jiná čekání).
             $waits = $pdo->prepare('SELECT COUNT(*) FROM information_schema.INNODB_LOCK_WAITS w
                 JOIN information_schema.INNODB_TRX blocker ON blocker.trx_id = w.blocking_trx_id
                 WHERE blocker.trx_mysql_thread_id = CONNECTION_ID()');
             $waited = false;
             for ($i = 0; $i < 600; $i++) {
+                foreach ([1, 2] as $stream) $output .= (string) stream_get_contents($pipes[$stream]);
                 $status = proc_get_status($child);
                 if (!$status['running']) {
                     $exit = $status['exitcode'];
@@ -481,13 +485,17 @@ final class ActivityLogHashChainTest extends TestCase
                 }
                 usleep(50_000);
             }
-            self::assertTrue($waited || $exit !== null, 'Pečetění ve druhém spojení nedoběhlo ani nečekalo.');
+            self::assertTrue($waited || $exit !== null, 'Pečetění ve druhém spojení nedoběhlo ani nečekalo: ' . $output);
             $pdo->commit();
+            foreach ([1, 2] as $stream) {
+                stream_set_blocking($pipes[$stream], true);
+                $output .= (string) stream_get_contents($pipes[$stream]);
+            }
             if ($exit === null) $exit = proc_close($child);
             else proc_close($child);
             $child = null;
             self::assertFalse($waited, 'Pečetění čekalo na nedokončenou redakci místo přeskočení řádku.');
-            self::assertSame(0, $exit);
+            self::assertSame(0, $exit, $output);
         } finally {
             if (is_resource($child)) {
                 proc_terminate($child);

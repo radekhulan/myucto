@@ -471,6 +471,7 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
         $member = $this->ended('PURGE', charge: 'reverse', voidReason: 'Synthetic wrong suspension of Jana Testovaci');
         $this->eraseAll();
         $from = (int) $this->pdo->query("SELECT MIN(id) FROM activity_log WHERE supplier_id={$this->supplier}")->fetchColumn();
+        self::assertGreaterThan(0, $from, 'Výmaz zapsal auditní stopu firmy.');
         $this->auditFrom = $from;
         self::assertGreaterThan(0, (int) $this->pdo->query("SELECT COUNT(*) FROM activity_log_redactions WHERE supplier_id={$this->supplier}")->fetchColumn());
         self::assertSame(MembershipErasureService::placeholderNumber($member), $this->repository->member($this->supplier, $member)['member_number']);
@@ -495,15 +496,15 @@ final class MembershipErasureTest extends MembershipBatchReviewFixture
 
     /**
      * V provozu auditní stopa smazané firmy zůstává; v testovací DB by ale její záznamy oprav členů viděly
-     * jiné testy (anonymizovaná kopie celé DB). Test proto po ověření smaže svůj úsek stopy (od `auditFrom`,
-     * sady běží sériově) a uživatele fixture.
+     * jiné testy (anonymizovaná kopie celé DB). Test proto po ověření smaže záznamy své firmy (i atestace
+     * redakcí a kotvy nesou její supplier_id), cizí záznamy ve stejném rozsahu id nechá, a uživatele fixture.
      */
     private function dropRetained(): void
     {
-        if ($this->auditFrom !== null) {
-            $this->pdo->prepare('DELETE FROM activity_log WHERE id >= ?')->execute([$this->auditFrom]);
-            $this->auditFrom = null;
+        if ($this->auditFrom !== null && $this->auditFrom > 0) {
+            $this->pdo->prepare('DELETE FROM activity_log WHERE supplier_id=? AND id >= ?')->execute([$this->supplier, $this->auditFrom]);
         }
+        $this->auditFrom = null;
         try {
             $this->pdo->prepare('DELETE FROM users WHERE id=?')->execute([$this->actor]);
         } catch (\PDOException) {
