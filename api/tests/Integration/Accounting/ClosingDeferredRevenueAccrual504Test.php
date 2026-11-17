@@ -137,9 +137,9 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
         $this->closing->runDeferredRevenueAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
         $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
 
-        $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-12-31');
+        $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
         self::assertEqualsWithDelta(18200.00, (float) $release['total'], 0.001);
-        $lines = $this->invokePrivate('deferredRevenueLines', $release['lines'], (float) $release['total'], true);
+        $lines = $this->invokePrivate('deferredRevenueLines', $release['lines'], (float) $release['total'], true, (self::YEAR + 1) . '-01-01');
         $entryId = $this->posting->postDocument($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId), $lines, [
             'entry_date' => (self::YEAR + 1) . '-01-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId,
         ]);
@@ -160,8 +160,8 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
         $this->assertCarriesAxes((int) $run['entry_id'], '684.100', 'debit', 18200.00);
 
         $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
-        $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-12-31');
-        $lines = $this->invokePrivate('deferredRevenueLines', $release['lines'], (float) $release['total'], true);
+        $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $lines = $this->invokePrivate('deferredRevenueLines', $release['lines'], (float) $release['total'], true, (self::YEAR + 1) . '-01-01');
         $entryId = $this->posting->postDocument($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId), $lines, [
             'entry_date' => (self::YEAR + 1) . '-01-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId,
         ]);
@@ -276,7 +276,7 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
             ->execute([(int) $run['entry_id']]);
         $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
 
-        $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-12-31');
+        $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
 
         self::assertCount(1, $release['lines']);
         $dims = $release['lines'][0]['dimensions'] ?? [];
@@ -322,7 +322,7 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
             ->execute([(int) $run['entry_id']]);
         $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
 
-        $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-12-31');
+        $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
 
         self::assertCount(1, $release['lines']);
         self::assertEqualsWithDelta(18200.00, (float) $release['lines'][0]['amount'], 0.001);

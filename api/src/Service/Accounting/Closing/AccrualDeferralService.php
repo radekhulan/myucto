@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Closing;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountDefinitionRepository;
+use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\DimensionAccountMapRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\PostingRuleRepository;
@@ -32,6 +34,8 @@ final class AccrualDeferralService
 
     /** Klíč mezipaměti výpočtu s účtotvornými typy dimenzí (vedle klíčů dokladů „druh:id"). */
     private const CACHE_DRIVING_TYPES = '@driving_types';
+    /** Datum zápisu odkladu či rozpuštění, které výpočet připravuje (aktivita účtů k němu). */
+    public const CACHE_POSTING_DATE = '@posting_date';
 
     /** Tolerance shody podílů rozpadu (podíl se ukládá na 10 desetinných míst). */
     private const SHARE_TOLERANCE = 0.000001;
@@ -417,10 +421,14 @@ final class AccrualDeferralService
      * Položka pak bere kombinace, které nesou právě dimenze, jaké jí dává zaúčtování
      * ({@see matchingGroups()}); kandidátem je i kombinace s nulovým obratem (položka
      * vyrovnaná slevou na témže středisku). Nevyhovuje-li žádná (doklad se po zaúčtování
-     * změnil bez přeúčtování), dělí se v poměru, v jakém zápis kombinace na účtu nese. Účet,
-     * který zápis nenese, nebo nese jen s nulovým obratem a položce nic nevyhovělo, zůstává
-     * bez dimenzí (dosavadní chování; u 504 pak zápis odmítne politika dimenzí srozumitelnou
-     * chybou).
+     * změnil bez přeúčtování), dělí se v poměru, v jakém zápis kombinace na účtu nese.
+     *
+     * Účet z trasy, který zápis nenese, protože ho zaúčtování přesměrovalo na analytiku
+     * syntetiky, se nahradí jedinou daňovou analytikou syntetiky v zápisu, jejíž kombinace
+     * položce vyhoví; je-li k datu zápisu odkladu či rozpuštění ({@see CACHE_POSTING_DATE})
+     * neaktivní, zůstane kód z trasy s dimenzemi položky. Jinak účet, který zápis nenese,
+     * nebo nese jen s nulovým obratem a položce nic nevyhovělo, zůstává bez dimenzí
+     * (dosavadní chování; u 504 pak zápis odmítne politika dimenzí srozumitelnou chybou).
      *
      * Doklad, jehož odklad zaúčtovala uzávěrka ještě bez dimenzí ({@see markLegacyDeferrals()}),
      * se rozpouští také bez dimenzí, aby rozpuštění zrcadlilo odklad. Zúžení na osy činnosti
@@ -444,9 +452,30 @@ final class AccrualDeferralService
         $out = [];
         foreach ($accounts as $account => $share) {
             $account = (string) $account;
-            $all = $groups[$account] ?? [];
             $candidates = [];
-            if (count($all) > 1 && $itemId !== null) {
+            if ($itemId !== null && !isset($cache[$key]['groups'][$account])) {
+                // Trasa vrací kód z pravidla (syntetiku), zápis ho ale přesměroval na analytiku.
+                // Platí analytika syntetiky, na které zápis dokladu nese kombinaci vyhovující
+                // položce, a to jediná: analytika jiné položky ani nejednoznačná volba se
+                // nepřebírá. Rozhoduje zápis, ne osnova, takže rozpuštění zrcadlí odklad i po
+                // přidání další analytiky. Analytika k datu zápisu odkladu neaktivní: zůstává
+                // kód z trasy (zaúčtování ho přesměruje podle osnovy k tomu dni) s dimenzemi
+                // položky.
+                $found = [];
+                foreach ($cache[$key]['analytics'][$account] ?? [] as $analytic) {
+                    $matching = self::matchingGroups($groups[$analytic] ?? [], $this->documentItems($supplierId, $docType, $docId, $cache), $itemId, $this->drivingTypes($supplierId, $cache));
+                    if ($matching !== []) {
+                        $found[$analytic] = $matching;
+                    }
+                }
+                if (count($found) === 1) {
+                    $analytic = (string) array_key_first($found);
+                    $candidates = $found[$analytic];
+                    $account = $this->activeOnPostingDate($supplierId, $analytic, $cache) ? $analytic : $account;
+                }
+            }
+            $all = $groups[$account] ?? [];
+            if ($candidates === [] && count($all) > 1 && $itemId !== null) {
                 $candidates = self::matchingGroups($all, $this->documentItems($supplierId, $docType, $docId, $cache), $itemId, $this->drivingTypes($supplierId, $cache));
             }
             if ($candidates === []) {
@@ -478,6 +507,19 @@ final class AccrualDeferralService
             }
         }
         return $out;
+    }
+
+    /**
+     * Je účet aktivní k datu zápisu odkladu či rozpuštění, který výpočet připravuje
+     * ({@see CACHE_POSTING_DATE})? Osnova se čte jednou za datum.
+     *
+     * @param array<string,mixed> $cache
+     */
+    private function activeOnPostingDate(int $supplierId, string $code, array &$cache): bool
+    {
+        $postingDate = (string) ($cache[self::CACHE_POSTING_DATE] ?? date('Y-m-d'));
+        $active = $cache['@active|' . $postingDate] ??= (new ChartOfAccountsRepository($this->db))->codeToIdMap($supplierId, $postingDate);
+        return $active[$code]['is_active'] ?? false;
     }
 
     /**
@@ -849,6 +891,9 @@ final class AccrualDeferralService
             return;
         }
         $lines = [];
+        // Definice účtu (rodič, daňová uznatelnost) k datu zápisu dokladu, jako přesměrování
+        // na jedinou analytiku při zaúčtování ({@see PostingService::singleAnalyticRedirects()}).
+        $definitions = AccountDefinitionRepository::journalJoin($supplierId);
         foreach (array_chunk($docIds, 500) as $chunk) {
             $marks = implode(',', array_fill(0, count($chunk), '?'));
             [$docSql, $docParams] = $docType === 'nonprofit_membership'
@@ -857,12 +902,14 @@ final class AccrualDeferralService
             // Nejdřív živé zápisy dokladů (idx_je_supplier_source), potom jejich řádky
             // (idx_jel_supplier_entry), ať plán nezačíná u řádků deníku celé firmy.
             $stmt = $this->db->pdo()->prepare(
-                "SELECT l.id, l.side, l.signed_amount, a.account_code, x.doc_id, x.entry_date
+                "SELECT l.id, l.side, l.signed_amount, a.account_code, e.doc_id, e.entry_date,
+                        CASE WHEN a.tax_deductibility = 'deductible' THEN p.account_code END AS parent_code
                    FROM (SELECT je.id AS entry_id, {$docSql}
                             AND je.posted_at IS NOT NULL
-                            AND je.reversed_by IS NULL) x
-                   JOIN journal_entry_lines l ON l.supplier_id = ? AND l.entry_id = x.entry_id
-                   JOIN chart_of_accounts a  ON a.id = l.account_id
+                            AND je.reversed_by IS NULL) e
+                   JOIN journal_entry_lines l ON l.supplier_id = ? AND l.entry_id = e.entry_id
+                   {$definitions}
+                   LEFT JOIN chart_of_accounts p ON p.id = a.parent_id AND p.supplier_id = a.supplier_id
                   WHERE a.account_code LIKE '5%' OR a.account_code LIKE '6%'
                   ORDER BY l.id"
             );
@@ -880,6 +927,7 @@ final class AccrualDeferralService
 
         $groups = [];
         $dates = [];
+        $analytics = [];
         foreach ($lines as $line) {
             $id = (int) $line['id'];
             $assignment = array_filter([
@@ -891,6 +939,12 @@ final class AccrualDeferralService
             $doc = (int) $line['doc_id'];
             $dates[$doc][(string) $line['entry_date']] = true;
             $account = (string) $line['account_code'];
+            // Jen daňové analytiky syntetiky (nedaňová analytika z builderu ne), jako
+            // PostingService::singleAnalyticMap. Další jeho výjimky (vyhrazené analytiky) se
+            // nepromítají: vedle cíle přesměrování dají dvě analytiky a výběr se nehádá.
+            if ($line['parent_code'] !== null) {
+                $analytics[$doc][(string) $line['parent_code']][$account] = true;
+            }
             $signature = (string) json_encode(self::assignmentOf($assignment));
             $signed = (float) $line['signed_amount'] * ((string) $line['side'] === 'debit' ? 1 : -1);
             $groups[$doc][$account][$signature]['assignment'] = $assignment;
@@ -904,7 +958,11 @@ final class AccrualDeferralService
                     $out[(string) $account][] = ['weight' => round(abs((float) $group['net']), 2), 'net' => round((float) $group['net'], 2), 'assignment' => $group['assignment'], 'line_ids' => $group['line_ids']];
                 }
             }
-            $cache[$docType . ':' . $docId] = ['groups' => $out, 'entry_dates' => array_map('strval', array_keys($dates[$docId] ?? []))];
+            $cache[$docType . ':' . $docId] = [
+                'groups' => $out,
+                'entry_dates' => array_map('strval', array_keys($dates[$docId] ?? [])),
+                'analytics' => array_map(static fn (array $codes): array => array_map('strval', array_keys($codes)), $analytics[$docId] ?? []),
+            ];
         }
     }
 

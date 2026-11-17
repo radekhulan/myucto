@@ -276,6 +276,460 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
         self::assertEqualsWithDelta(0.0, $this->sideAmount($lines, '381', 'debit') + $this->sideAmount($lines, '381', 'credit'), 0.001);
     }
 
+    /**
+     * Jednoduchá forma zápisu: faktura na středisku A a dobropis na středisku B dají v odkladu
+     * řádek 548 na obou stranách. Odklad i rozpuštění v openNext se musí rozložit na dvojice
+     * a zaúčtovat, jinak uzávěrka ani otevření dalšího roku neprojdou.
+     */
+    public function testSingleEntryFormDefersAndReleasesCreditNoteOnOtherCostCenter(): void
+    {
+        $this->useSingleEntryForm();
+        [$center, $a, $b] = $this->costCenters();
+        $this->postedCost('PF-2091-SF1', 36600.00, '548', $center, $a);
+        $this->postedCost('PF-2091-SF2', -12200.00, '548', $center, $b);
+
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        // 36 600 × 182/366 = 18 200; −12 200 × 182/366 = −6 066,67.
+        $defer = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrual($this->periodId));
+        $release = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId));
+        self::assertNotNull($defer);
+        self::assertNotNull($release);
+        self::assertSame([['548', 'debit', 6066.67, $b], ['548', 'credit', 18200.0, $a]], $this->expenseByCenter((int) $defer['id'], $center));
+        self::assertSame([['548', 'credit', 6066.67, $b], ['548', 'debit', 18200.0, $a]], $this->expenseByCenter((int) $release['id'], $center));
+        $lines = $this->entryLines((int) $defer['id']);
+        self::assertEqualsWithDelta(12133.33, $this->sideAmount($lines, '381', 'debit') - $this->sideAmount($lines, '381', 'credit'), 0.001);
+        self::assertEqualsWithDelta(0.0, $this->balance381AsOf('2092-12-31'), 0.005);
+        self::assertSame(['381|548|18200.00', '381|548|6066.67'], $this->pairsOf((int) $defer['id']));
+        self::assertSame(['381|548|18200.00', '381|548|6066.67'], $this->pairsOf((int) $release['id']));
+    }
+
+    /**
+     * Jednoduchá forma, nulový součet (faktura a dobropis stejné částky na různých
+     * střediscích): každý řádek 548 má protějšek na 381, ne druhý řádek 548.
+     */
+    public function testSingleEntryFormPairsZeroTotalDeferralWith381(): void
+    {
+        $this->useSingleEntryForm();
+        [$center, $a, $b] = $this->costCenters();
+        $this->postedCost('PF-2091-SFZ1', 36600.00, '548', $center, $a);
+        $this->postedCost('PF-2091-SFZ2', -36600.00, '548', $center, $b);
+
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $defer = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrual($this->periodId));
+        $release = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId));
+        self::assertNotNull($defer);
+        self::assertNotNull($release);
+        self::assertSame(['381|548|18200.00', '381|548|18200.00'], $this->pairsOf((int) $defer['id']));
+        self::assertSame([['548', 'credit', 18200.0, $a], ['548', 'debit', 18200.0, $b]], $this->expenseByCenter((int) $defer['id'], $center));
+        self::assertSame(['381|548|18200.00', '381|548|18200.00'], $this->pairsOf((int) $release['id']));
+        self::assertSame([['548', 'debit', 18200.0, $a], ['548', 'credit', 18200.0, $b]], $this->expenseByCenter((int) $release['id'], $center));
+    }
+
+    /**
+     * Složená forma: náklady na obou stranách nesou dál jeden řádek 381 (beze změny proti
+     * dosavadnímu zápisu), dvojice vznikají jen v jednoduché formě.
+     */
+    public function testCompositeEntryFormKeepsOneDeferralLineWithCreditNote(): void
+    {
+        [$center, $a, $b] = $this->costCenters();
+        $this->postedCost('PF-2091-CF1', 36600.00, '548', $center, $a);
+        $this->postedCost('PF-2091-CF2', -12200.00, '548', $center, $b);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
+
+        $run = $this->closing->runPrepaidExpenseAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $lines = $this->entryLines((int) $run['entry_id']);
+        self::assertCount(3, $lines);
+        self::assertEqualsWithDelta(12133.33, $this->sideAmount($lines, '381', 'debit'), 0.001);
+        self::assertEqualsWithDelta(0.0, $this->sideAmount($lines, '381', 'credit'), 0.001);
+    }
+
+    /**
+     * Položky na syntetice 501, kterou zápis faktury přesměroval na její jedinou daňovou
+     * analytiku (nedaňová 501.990 vedle ní se nepočítá). Dvě položky jedné faktury na S-A
+     * a S-B s různým obdobím: odklad každé položky nese středisko své položky, ne řádek bez
+     * dimenze. Rozpuštění zrcadlí odklad i poté, co syntetika dostala další analytiku.
+     */
+    public function testItemOnSyntheticRedirectedToSingleAnalyticKeepsItsCostCenter(): void
+    {
+        $pdo = $this->db->pdo();
+        [$center, $a, $b] = $this->costCenters();
+        $pdo->prepare("UPDATE chart_of_accounts SET is_active = 0 WHERE supplier_id = ? AND account_code = '501.900'")->execute([$this->supplierId]);
+        $pdo->prepare("UPDATE posting_rules SET debit_account_code = '501' WHERE supplier_id = ? AND rule_key = 'invoice.material.received'")->execute([$this->supplierId]);
+        $pi = $this->purchase('PF-2091-REDIR', 74200.00, self::YEAR . '-11-15');
+        // S-A: celé období v 2092 (odloží se celá); S-B: 182 z 366 dnů v 2092.
+        $first = $this->item($pi, 36600.00, '2092-01-01', '2092-12-31', null);
+        $this->item($pi, 36600.00, '2091-07-01', '2092-06-30', null);
+        $pdo->prepare("UPDATE purchase_invoice_items SET description = 'Syntetický materiál', expense_kind = 'material' WHERE purchase_invoice_id = ?")->execute([$pi]);
+        self::assertSame('501', (string) $this->posting->purchaseItemExpenseAccounts($this->supplierId, $pi)[$first], 'Sanity: trasa vrací syntetiku z předkontace.');
+        $entryId = $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            ['account_code' => '501', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '501', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => [$center => $b]],
+            ['account_code' => '501.990', 'side' => 'debit', 'amount' => 1000.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 74200.00],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        self::assertEqualsWithDelta(73200.00, $this->sideAmount($this->entryLines($entryId), '501.100', 'debit'), 0.001, 'Sanity: zápis leží na jediné analytice.');
+        (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))->replaceDocumentDimensions($this->supplierId, 'purchase_invoice', $pi, [], [
+            1 => [$center => $a],
+            2 => [$center => $b],
+        ]);
+
+        $this->driveCloseWithAccrual();
+        $defer = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrual($this->periodId));
+        self::assertNotNull($defer);
+        self::assertSame([['501.100', 'credit', 18200.0, $b], ['501.100', 'credit', 36600.0, $a]], $this->expenseByCenter((int) $defer['id'], $center));
+
+        // Po odkladu dostane syntetika další daňovou analytiku (osnova bez historie definic,
+        // jako u běžné firmy): přesměrování zmizí, rozpuštění se ale řídí zápisem faktury.
+        $pdo->prepare("UPDATE chart_of_accounts SET is_active = 1 WHERE supplier_id = ? AND account_code = '501.900'")->execute([$this->supplierId]);
+        self::assertArrayNotHasKey('501', $this->posting->singleAnalyticRedirects($this->supplierId, self::YEAR . '-11-15'), 'Sanity: přesměrování zmizelo i k datu faktury.');
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $release = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId));
+        self::assertNotNull($release);
+        self::assertSame([['501.100', 'debit', 18200.0, $b], ['501.100', 'debit', 36600.0, $a]], $this->expenseByCenter((int) $release['id'], $center));
+    }
+
+    /**
+     * Syntetika má dvě daňové analytiky, zápis ji tedy nepřesměroval. Analytika jiné položky
+     * (výslovný účet 501.900 se střediskem S-B) není přesměrování položky z trasy: odklad
+     * položky na 501 si cizí analytiku ani její středisko nepřebírá.
+     */
+    public function testAnalyticOfOtherItemIsNotTakenOver(): void
+    {
+        $pdo = $this->db->pdo();
+        [$center, $a, $b] = $this->costCenters();
+        $pdo->prepare("UPDATE posting_rules SET debit_account_code = '501' WHERE supplier_id = ? AND rule_key = 'invoice.material.received'")->execute([$this->supplierId]);
+        $pi = $this->purchase('PF-2091-FOREIGN', 73200.00, self::YEAR . '-11-15');
+        $first = $this->item($pi, 36600.00, '2092-01-01', '2092-12-31', null);
+        $this->item($pi, 36600.00, null, null, '501.900');
+        $pdo->prepare("UPDATE purchase_invoice_items SET description = 'Syntetický materiál', expense_kind = 'material' WHERE purchase_invoice_id = ?")->execute([$pi]);
+        self::assertSame('501', (string) $this->posting->purchaseItemExpenseAccounts($this->supplierId, $pi)[$first], 'Sanity: trasa vrací syntetiku z předkontace.');
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            ['account_code' => '548', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '501.900', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => [$center => $b]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 73200.00],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))->replaceDocumentDimensions($this->supplierId, 'purchase_invoice', $pi, [], [
+            1 => [$center => $a],
+            2 => [$center => $b],
+        ]);
+
+        $preview = $this->closing->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId);
+
+        self::assertSame(['501'], array_map('strval', array_keys($preview['by_account'])));
+    }
+
+    /**
+     * Osnova syntetiku 501 přesměrovává na 501.100, na které ale leží jen jiná položka
+     * (výslovný účet, středisko S-B). Položka z trasy zaúčtovaná ručně na 548 si analytiku
+     * ani středisko cizí položky nepřebírá: zůstává kód z trasy jako dosud.
+     */
+    public function testRedirectedAnalyticCarryingOnlyOtherItemIsNotTakenOver(): void
+    {
+        $pdo = $this->db->pdo();
+        [$center, $a, $b] = $this->costCenters();
+        $pdo->prepare("UPDATE chart_of_accounts SET is_active = 0 WHERE supplier_id = ? AND account_code = '501.900'")->execute([$this->supplierId]);
+        $pdo->prepare("UPDATE posting_rules SET debit_account_code = '501' WHERE supplier_id = ? AND rule_key = 'invoice.material.received'")->execute([$this->supplierId]);
+        $pi = $this->purchase('PF-2091-OTHER', 73200.00, self::YEAR . '-11-15');
+        $first = $this->item($pi, 36600.00, '2092-01-01', '2092-12-31', null);
+        $this->item($pi, 36600.00, null, null, '501.100');
+        $pdo->prepare("UPDATE purchase_invoice_items SET description = 'Syntetický materiál', expense_kind = 'material' WHERE purchase_invoice_id = ?")->execute([$pi]);
+        self::assertSame('501', (string) $this->posting->purchaseItemExpenseAccounts($this->supplierId, $pi)[$first], 'Sanity: trasa vrací syntetiku z předkontace.');
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            ['account_code' => '548', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '501.100', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => [$center => $b]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 73200.00],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))->replaceDocumentDimensions($this->supplierId, 'purchase_invoice', $pi, [], [
+            1 => [$center => $a],
+            2 => [$center => $b],
+        ]);
+        self::assertSame('501.100', $this->posting->singleAnalyticRedirects($this->supplierId, self::YEAR . '-11-15')['501'] ?? null, 'Sanity: osnova přesměrovává.');
+
+        $preview = $this->closing->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId);
+
+        self::assertSame(['501'], array_map('strval', array_keys($preview['by_account'])));
+    }
+
+    /**
+     * Přestavba osnovy k 1. 1.: analytika odkladu je od dalšího roku neaktivní a syntetiku
+     * přebírá jiná analytika. Rozpuštění se zaúčtuje podle osnovy k datu rozpuštění
+     * s dimenzemi položky, otevření roku nespadne.
+     */
+    public function testReleaseFallsBackWhenRedirectTargetIsDeactivatedFromNextYear(): void
+    {
+        $pdo = $this->db->pdo();
+        [$center, $a] = $this->costCenters();
+        $pdo->prepare("UPDATE chart_of_accounts SET is_active = 0 WHERE supplier_id = ? AND account_code = '501.900'")->execute([$this->supplierId]);
+        $pdo->prepare("UPDATE posting_rules SET debit_account_code = '501' WHERE supplier_id = ? AND rule_key = 'invoice.material.received'")->execute([$this->supplierId]);
+        $pi = $this->purchase('PF-2091-REORG', 36600.00, self::YEAR . '-11-15');
+        $this->item($pi, 36600.00, '2092-01-01', '2092-12-31', null);
+        $pdo->prepare("UPDATE purchase_invoice_items SET description = 'Syntetický materiál', expense_kind = 'material' WHERE purchase_invoice_id = ?")->execute([$pi]);
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            ['account_code' => '501', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 36600.00],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))->replaceDocumentDimensions($this->supplierId, 'purchase_invoice', $pi, [], [1 => [$center => $a]]);
+
+        $this->driveCloseWithAccrual();
+        $defer = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrual($this->periodId));
+        self::assertNotNull($defer);
+        self::assertSame([['501.100', 'credit', 36600.0, $a]], $this->expenseByCenter((int) $defer['id'], $center));
+        $this->changeAccount('501.100', (self::YEAR + 1) . '-01-01', ['is_active' => 0]);
+        $this->changeAccount('501.900', (self::YEAR + 1) . '-01-01', ['is_active' => 1]);
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $release = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId));
+        self::assertNotNull($release);
+        self::assertSame([['501.900', 'debit', 36600.0, $a]], $this->expenseByCenter((int) $release['id'], $center));
+    }
+
+    /**
+     * Zápis nese položce vyhovující řádky (S-A) na dvou analytikách syntetiky: není jasné,
+     * ze které se odkládá, odklad zůstává na kódu z trasy jako dosud.
+     */
+    public function testTwoMatchingAnalyticsAreNotGuessed(): void
+    {
+        $pdo = $this->db->pdo();
+        [$center, $a] = $this->costCenters();
+        $pdo->prepare("UPDATE posting_rules SET debit_account_code = '501' WHERE supplier_id = ? AND rule_key = 'invoice.material.received'")->execute([$this->supplierId]);
+        $pi = $this->purchase('PF-2091-TWO', 36600.00, self::YEAR . '-11-15');
+        $first = $this->item($pi, 36600.00, '2092-01-01', '2092-12-31', null);
+        $pdo->prepare("UPDATE purchase_invoice_items SET description = 'Syntetický materiál', expense_kind = 'material' WHERE purchase_invoice_id = ?")->execute([$pi]);
+        self::assertSame('501', (string) $this->posting->purchaseItemExpenseAccounts($this->supplierId, $pi)[$first], 'Sanity: trasa vrací syntetiku z předkontace.');
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            ['account_code' => '501.100', 'side' => 'debit', 'amount' => 18300.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '501.900', 'side' => 'debit', 'amount' => 18300.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 36600.00],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))->replaceDocumentDimensions($this->supplierId, 'purchase_invoice', $pi, [], [1 => [$center => $a]]);
+
+        $preview = $this->closing->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId);
+
+        self::assertSame(['501'], array_map('strval', array_keys($preview['by_account'])));
+    }
+
+    /**
+     * Jednoduchá forma, náklady jen na jedné straně: dvojice zůstávají stejné jako dřív, kdy
+     * párovač rozdělil jeden řádek 381 proti řádkům 548 sám.
+     */
+    public function testSingleEntryFormWithCostsOnOneSideKeepsSamePairs(): void
+    {
+        $this->useSingleEntryForm();
+        [$center, $a, $b] = $this->costCenters();
+        $this->postedCost('PF-2091-SF3', 36600.00, '548', $center, $a);
+        $this->postedCost('PF-2091-SF4', 12200.00, '548', $center, $b);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
+
+        $run = $this->closing->runPrepaidExpenseAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertSame(['381|548|18200.00', '381|548|6066.67'], $this->pairsOf((int) $run['entry_id']));
+        self::assertSame([['548', 'credit', 6066.67, $b], ['548', 'credit', 18200.0, $a]], $this->expenseByCenter((int) $run['entry_id'], $center));
+    }
+
+    /**
+     * Osnova syntetiku přesměrovává, zápis faktury ale cílovou analytiku nenese (položka je
+     * zaúčtovaná ručně jinam): odklad zůstává na kódu z trasy jako dosud.
+     */
+    public function testRedirectTargetMissingInEntryKeepsTraceCode(): void
+    {
+        $pdo = $this->db->pdo();
+        [$center, $a] = $this->costCenters();
+        $pdo->prepare("UPDATE chart_of_accounts SET is_active = 0 WHERE supplier_id = ? AND account_code = '501.900'")->execute([$this->supplierId]);
+        $pdo->prepare("UPDATE posting_rules SET debit_account_code = '501' WHERE supplier_id = ? AND rule_key = 'invoice.material.received'")->execute([$this->supplierId]);
+        $pi = $this->purchase('PF-2091-MISS', 36600.00, self::YEAR . '-11-15');
+        $this->item($pi, 36600.00, '2092-01-01', '2092-12-31', null);
+        $pdo->prepare("UPDATE purchase_invoice_items SET description = 'Syntetický materiál', expense_kind = 'material' WHERE purchase_invoice_id = ?")->execute([$pi]);
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            ['account_code' => '548', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 36600.00],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        self::assertSame('501.100', $this->posting->singleAnalyticRedirects($this->supplierId, self::YEAR . '-11-15')['501'] ?? null, 'Sanity: osnova přesměrovává.');
+
+        $preview = $this->closing->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId);
+
+        self::assertSame(['501'], array_map('strval', array_keys($preview['by_account'])));
+        $pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
+        $run = $this->closing->runPrepaidExpenseAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        self::assertSame([['501.100', 'credit', 36600.0, null]], $this->expenseByCenter((int) $run['entry_id'], $center), 'Zaúčtování přesměruje podle osnovy, bez dimenzí.');
+    }
+
+    /**
+     * Analytika, na kterou zápis faktury přesměroval, je k datu odkladu deaktivovaná: odklad
+     * zůstane na kódu z trasy (zaúčtování ho přesměruje podle osnovy k tomu dni) s dimenzemi
+     * položky a krok uzávěrky projde, místo aby padal na deaktivovaném účtu.
+     */
+    public function testDeactivatedRedirectTargetFallsBackToTraceCode(): void
+    {
+        $pdo = $this->db->pdo();
+        [$center, $a] = $this->costCenters();
+        $pdo->prepare("UPDATE chart_of_accounts SET is_active = 0 WHERE supplier_id = ? AND account_code = '501.900'")->execute([$this->supplierId]);
+        $pdo->prepare("UPDATE posting_rules SET debit_account_code = '501' WHERE supplier_id = ? AND rule_key = 'invoice.material.received'")->execute([$this->supplierId]);
+        $pi = $this->purchase('PF-2091-DEACT', 36600.00, self::YEAR . '-11-15');
+        $this->item($pi, 36600.00, '2092-01-01', '2092-12-31', null);
+        $pdo->prepare("UPDATE purchase_invoice_items SET description = 'Syntetický materiál', expense_kind = 'material' WHERE purchase_invoice_id = ?")->execute([$pi]);
+        $entryId = $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            ['account_code' => '501', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 36600.00],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        self::assertEqualsWithDelta(36600.00, $this->sideAmount($this->entryLines($entryId), '501.100', 'debit'), 0.001, 'Sanity: zápis leží na jediné analytice.');
+        $this->changeAccount('501.100', self::YEAR . '-12-01', ['is_active' => 0]);
+        $this->changeAccount('501.900', self::YEAR . '-12-01', ['is_active' => 1]);
+        $pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
+
+        $run = $this->closing->runPrepaidExpenseAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertSame([['501.900', 'credit', 36600.0, $a]], $this->expenseByCenter((int) $run['entry_id'], $center));
+    }
+
+    /**
+     * Daňová uznatelnost analytiky se čte k datu zápisu faktury (verzovaná osnova), stejně
+     * jako při přesměrování: analytika fyzicky vedená jako nedaňová, od začátku roku ale
+     * daňová, je cílem přesměrování a odklad nese středisko položky.
+     */
+    public function testDeductibilityOfAnalyticIsReadAtEntryDate(): void
+    {
+        $pdo = $this->db->pdo();
+        [$center, $a] = $this->costCenters();
+        $pdo->prepare("UPDATE chart_of_accounts SET is_active = 0 WHERE supplier_id = ? AND account_code = '501.900'")->execute([$this->supplierId]);
+        $pdo->prepare("UPDATE chart_of_accounts SET tax_deductibility = 'non_deductible' WHERE supplier_id = ? AND account_code = '501.100'")->execute([$this->supplierId]);
+        $this->changeAccount('501.100', self::STARTS_ON, ['tax_deductibility' => 'deductible']);
+        $pdo->prepare("UPDATE posting_rules SET debit_account_code = '501' WHERE supplier_id = ? AND rule_key = 'invoice.material.received'")->execute([$this->supplierId]);
+        $pi = $this->purchase('PF-2091-DATED', 36600.00, self::YEAR . '-11-15');
+        $this->item($pi, 36600.00, '2092-01-01', '2092-12-31', null);
+        $pdo->prepare("UPDATE purchase_invoice_items SET description = 'Syntetický materiál', expense_kind = 'material' WHERE purchase_invoice_id = ?")->execute([$pi]);
+        $entryId = $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            ['account_code' => '501', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 36600.00],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        self::assertEqualsWithDelta(36600.00, $this->sideAmount($this->entryLines($entryId), '501.100', 'debit'), 0.001, 'Sanity: přesměrování podle definice k datu.');
+        (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))->replaceDocumentDimensions($this->supplierId, 'purchase_invoice', $pi, [], [1 => [$center => $a]]);
+        $pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
+
+        $run = $this->closing->runPrepaidExpenseAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertSame([['501.100', 'credit', 36600.0, $a]], $this->expenseByCenter((int) $run['entry_id'], $center));
+    }
+
+    /**
+     * Nese-li zápis řádek přímo na syntetice z trasy, odkládá se z ní, i když osnova dnes
+     * syntetiku přesměrovává na analytiku, kterou zápis také nese (jiný řádek dokladu,
+     * přesměrování bylo při zaúčtování vypnuté).
+     */
+    public function testSyntheticWithOwnLineInEntryKeepsIt(): void
+    {
+        $pdo = $this->db->pdo();
+        [$center, $a, $b] = $this->costCenters();
+        $pdo->prepare('INSERT INTO accounting_supplier_settings (supplier_id, single_analytic_redirect) VALUES (?, 0)
+                       ON DUPLICATE KEY UPDATE single_analytic_redirect = 0')->execute([$this->supplierId]);
+        $pdo->prepare("UPDATE chart_of_accounts SET is_active = 0 WHERE supplier_id = ? AND account_code = '501.900'")->execute([$this->supplierId]);
+        $pdo->prepare("UPDATE posting_rules SET debit_account_code = '501' WHERE supplier_id = ? AND rule_key = 'invoice.material.received'")->execute([$this->supplierId]);
+        $pi = $this->purchase('PF-2091-OWN', 37600.00, self::YEAR . '-11-15');
+        $first = $this->item($pi, 36600.00, '2092-01-01', '2092-12-31', null);
+        $this->item($pi, 1000.00, null, null, null);
+        $pdo->prepare("UPDATE purchase_invoice_items SET description = 'Syntetický materiál', expense_kind = 'material' WHERE purchase_invoice_id = ?")->execute([$pi]);
+        self::assertSame('501', (string) $this->posting->purchaseItemExpenseAccounts($this->supplierId, $pi)[$first], 'Sanity: trasa vrací syntetiku.');
+        $entryId = $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            ['account_code' => '501', 'side' => 'debit', 'amount' => 36600.00, 'dimensions' => [$center => $a]],
+            ['account_code' => '501.100', 'side' => 'debit', 'amount' => 1000.00, 'dimensions' => [$center => $b]],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 37600.00],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        self::assertEqualsWithDelta(36600.00, $this->sideAmount($this->entryLines($entryId), '501', 'debit'), 0.001, 'Sanity: řádek zůstal na syntetice.');
+        // Přepínač přesměrování není verzovaný: po zapnutí mapa k datu faktury 501 → 501.100 vrací.
+        $pdo->prepare('UPDATE accounting_supplier_settings SET single_analytic_redirect = 1 WHERE supplier_id = ?')->execute([$this->supplierId]);
+
+        $preview = $this->closing->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId);
+
+        self::assertSame(['501'], array_map('strval', array_keys($preview['by_account'])));
+    }
+
+    /** Verzovaná změna účtu od data (stejná cesta jako úprava osnovy v aplikaci). */
+    private function changeAccount(string $code, string $from, array $changes): void
+    {
+        $id = (int) $this->db->pdo()->query('SELECT id FROM chart_of_accounts WHERE supplier_id = ' . $this->supplierId . " AND account_code = '" . $code . "'")->fetchColumn();
+        $definitions = new \MyInvoice\Repository\AccountDefinitionRepository($this->db);
+        $definitions->change($this->supplierId, $id, $from, $changes, $definitions->stateHash($this->supplierId, $id, true), $this->userId, 'account_configuration');
+    }
+
+    /** @return list<string> dvojice jednoduchého zápisu „účet|účet|částka“, seřazené */
+    private function pairsOf(int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT l.pair_no, a.account_code, l.amount
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.entry_id = ? AND l.supplier_id = ?
+              ORDER BY l.pair_no, a.account_code'
+        );
+        $stmt->execute([$entryId, $this->supplierId]);
+        $pairs = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $pairs[(string) $row['pair_no']][] = $row;
+        }
+        $out = array_map(static fn (array $rows): string => implode('|', array_column($rows, 'account_code')) . '|' . number_format((float) $rows[0]['amount'], 2, '.', ''), $pairs);
+        sort($out);
+        return array_values($out);
+    }
+
+    private function useSingleEntryForm(): void
+    {
+        $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")->execute([$this->supplierId]);
+        Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\EntryForm\EntryFormService::class)
+            ->schedule($this->supplierId, self::STARTS_ON, \MyInvoice\Service\Accounting\EntryForm\EntryForm::Single, $this->userId);
+    }
+
+    /** @return array{0:int,1:int,2:int} typ středisko, hodnota S-A, hodnota S-B */
+    private function costCenters(): array
+    {
+        $dimensions = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Dimension\DimensionService::class);
+        $dimensions->setEnabled($this->supplierId, true);
+        $center = (int) $dimensions->ensureDefaultTypes($this->supplierId, ['stredisko'])['cost_center'];
+        $a = (int) $dimensions->createValue($this->supplierId, $center, ['code' => 'S-A', 'name' => 'Středisko A'])['id'];
+        $b = (int) $dimensions->createValue($this->supplierId, $center, ['code' => 'S-B', 'name' => 'Středisko B'])['id'];
+        return [$center, $a, $b];
+    }
+
+    /** Zaúčtovaná přijatá faktura (záporná = dobropis) s jednou rozlišenou položkou na středisku. */
+    private function postedCost(string $number, float $base, string $account, int $center, int $value): void
+    {
+        $pi = $this->purchase($number, $base, self::YEAR . '-11-15');
+        $this->item($pi, $base, '2091-07-01', '2092-06-30', $account);
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            ['account_code' => $account, 'side' => $base > 0 ? 'debit' : 'credit', 'amount' => abs($base), 'dimensions' => [$center => $value]],
+            ['account_code' => '321', 'side' => $base > 0 ? 'credit' : 'debit', 'amount' => abs($base)],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))->replaceDocumentDimensions($this->supplierId, 'purchase_invoice', $pi, [], [1 => [$center => $value]]);
+    }
+
+    /** @return list<array{0:string,1:string,2:float,3:?int}> nákladové řádky zápisu: účet, strana, částka, středisko */
+    private function expenseByCenter(int $entryId, int $center): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT a.account_code, l.side, l.amount, d.dimension_value_id
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id
+               LEFT JOIN journal_entry_line_dimensions d ON d.line_id = l.id AND d.dimension_type_id = ?
+              WHERE l.entry_id = ? AND l.supplier_id = ? AND a.account_code LIKE \'5%\'
+              ORDER BY l.amount, l.id'
+        );
+        $stmt->execute([$center, $entryId, $this->supplierId]);
+        return array_map(static fn (array $r): array => [
+            (string) $r['account_code'],
+            (string) $r['side'],
+            (float) $r['amount'],
+            $r['dimension_value_id'] === null ? null : (int) $r['dimension_value_id'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
     public function testAccrualIsReleasedInNextPeriodOnOpenNext(): void
     {
         $pi = $this->purchase('PF-2091-ALLIANZ', 36600.00, self::YEAR . '-11-15');

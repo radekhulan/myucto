@@ -40,6 +40,9 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\TaxReturnRepository;
 use MyInvoice\Repository\SaldoRepository;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
+use MyInvoice\Repository\AccountingModeRepository;
+use MyInvoice\Security\FrameworkScopePolicy;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\Pair\PairGroups;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -172,6 +175,7 @@ final class ClosingService
 
     /** Hloubka vnoření {@see tx()}: počet uvolněných párování se čte jen v nejvnějším volání. */
     private int $txDepth = 0;
+    private ?EntryFormService $entryForms = null;
 
     public function __construct(
         private readonly Connection $db,
@@ -1675,7 +1679,7 @@ final class ClosingService
         $total = 0.0;
         $accountsByInvoice = [];
         $costsByInvoice = [];
-        $dimensionCache = [];
+        $dimensionCache = [AccrualDeferralService::CACHE_POSTING_DATE => $endsOn];
         $rows = $this->accruals->prepaidExpenseRows($supplierId, $endsOn, $startsOn, $endsOn);
         $this->accruals->preloadPrepaidExpenseAllocations($supplierId, $rows, $dimensionCache);
         foreach ($rows as $row) {
@@ -1801,7 +1805,7 @@ final class ClosingService
 
             // MD 381 z pravidla accrual.prepaid.expense (tenant si účet 381 může přesměrovat);
             // D strana = nákladové účty a dimenze řádků faktur, NE credit z pravidla (221).
-            $lines = $this->prepaidExpenseLines($supplierId, $preview['lines'], $total, false);
+            $lines = $this->prepaidExpenseLines($supplierId, $preview['lines'], $total, false, $endsOn);
             $this->assertKnownCodes($supplierId, $lines);
 
             $existing = $this->journal->findBySource($supplierId, 'prepaid_expense_accrual', $sourceId);
@@ -1843,32 +1847,65 @@ final class ClosingService
      * Zrcadlo {@see deferredRevenueLines()}. Účet 381 je debet pravidla accrual.prepaid.expense.
      *
      * @param list<array<string,mixed>> $byLine řádky s `account_code`, `amount` a dimenzemi
+     * @param string $entryDate datum zápisu (forma zápisu {@see accrualPairs()})
      * @return list<array<string,mixed>>
      */
-    private function prepaidExpenseLines(int $supplierId, array $byLine, float $total, bool $release): array
+    private function prepaidExpenseLines(int $supplierId, array $byLine, float $total, bool $release, string $entryDate): array
     {
         $deferAccount = $this->accruals->deferralAccount($supplierId, AccrualDeferralService::RULE_PREPAID_EXPENSE);
         $expenseSide = static fn (float $amount): string => (($amount >= 0.0) !== $release) ? 'credit' : 'debit';
-        $deferLine = [
-            'account_code' => $deferAccount,
-            'side' => $expenseSide($total) === 'credit' ? 'debit' : 'credit',
-            'amount' => abs(round($total, 2)),
-        ];
-        // Pořadí řádků jako dosud: odklad 381 první, rozpuštění 381 poslední. Nulový součet
-        // (doklady s opačným znaménkem a různou dimenzí) řádek 381 nemá.
-        $hasDeferLine = (int) round($total * 100) !== 0;
-        $lines = $release || !$hasDeferLine ? [] : [$deferLine];
+        $expenseLines = [];
         foreach ($byLine as $line) {
             $amount = round((float) $line['amount'], 2);
             if ((int) round($amount * 100) === 0) {
                 continue;
             }
-            $lines[] = ['side' => $expenseSide($amount), 'amount' => abs($amount)] + $line;
+            $expenseLines[] = ['side' => $expenseSide($amount), 'amount' => abs($amount)] + $line;
         }
-        if ($release && $hasDeferLine) {
-            $lines[] = $deferLine;
+        $pairs = $this->accrualPairs($supplierId, $entryDate, $expenseLines, $deferAccount, !$release);
+        if ($pairs !== null) {
+            return $pairs;
+        }
+        // Pořadí řádků jako dosud: odklad 381 první, rozpuštění 381 poslední. Nulový součet
+        // (doklady s opačným znaménkem a různou dimenzí) řádek 381 nemá.
+        if ((int) round($total * 100) === 0) {
+            return $expenseLines;
+        }
+        $deferLine = [
+            'account_code' => $deferAccount,
+            'side' => $expenseSide($total) === 'credit' ? 'debit' : 'credit',
+            'amount' => abs(round($total, 2)),
+        ];
+        return $release ? [...$expenseLines, $deferLine] : [$deferLine, ...$expenseLines];
+    }
+
+    /**
+     * Jednoduchá forma zápisu: výsledkové řádky odkladu či rozpuštění na obou stranách
+     * (dobropis nebo sleva na jiné dimenzi) nejde rozložit 1 : N proti jedinému řádku
+     * 381/384. Každý výsledkový řádek proto dostane vlastní protějšek na účtu časového
+     * rozlišení se stejnou částkou; takové dvojice párovač spáruje v pořadí sám. Řádky na
+     * jedné straně by rozdělil na tytéž dvojice. Složená forma zůstává beze změny (null):
+     * jeden řádek 381/384 proti výsledkovým řádkům.
+     *
+     * @param list<array<string,mixed>> $resultLines výsledkové řádky se stranou a kladnou částkou
+     * @return list<array<string,mixed>>|null
+     */
+    private function accrualPairs(int $supplierId, string $entryDate, array $resultLines, string $deferAccount, bool $deferFirst): ?array
+    {
+        if (!$this->entryForms()->formAt($supplierId, $entryDate, currentRead: true)->isSingle()) {
+            return null;
+        }
+        $lines = [];
+        foreach ($resultLines as $line) {
+            $counterpart = ['account_code' => $deferAccount, 'side' => $line['side'] === 'credit' ? 'debit' : 'credit', 'amount' => $line['amount']];
+            array_push($lines, ...($deferFirst ? [$counterpart, $line] : [$line, $counterpart]));
         }
         return $lines;
+    }
+
+    private function entryForms(): EntryFormService
+    {
+        return $this->entryForms ??= new EntryFormService($this->db, $this->activity, new AccountingModeRepository($this->db), new FrameworkScopePolicy($this->db));
     }
 
     /**
@@ -1886,7 +1923,7 @@ final class ClosingService
         $byLine = [];
         $total = 0.0;
         $accountsByInvoice = [];
-        $dimensionCache = [];
+        $dimensionCache = [AccrualDeferralService::CACHE_POSTING_DATE => $targetStart];
         $rows = $this->accruals->prepaidExpenseReleaseRows($supplierId, $originEndsOn, $targetEnd);
         $this->accruals->preloadPrepaidExpenseAllocations($supplierId, $rows, $dimensionCache);
         // Starý odklad bez dimenzí se zrcadlí; ve 504 si rozpuštění ponechá osy činnosti dokladu.
@@ -1964,7 +2001,7 @@ final class ClosingService
         $byLine = [];
         $total = 0.0;
         $contexts = [];
-        $dimensionCache = [];
+        $dimensionCache = [AccrualDeferralService::CACHE_POSTING_DATE => $endsOn];
         $rows = $this->accruals->deferredRevenueRows($supplierId, $endsOn, $startsOn, $endsOn);
         $this->accruals->preloadDeferredRevenueAllocations($supplierId, $rows, $dimensionCache);
         foreach ($rows as $row) {
@@ -2084,7 +2121,7 @@ final class ClosingService
                 return ['entry_id' => null, 'total' => 0.0, 'items' => $preview['items'], 'removed' => true];
             }
 
-            $lines = $this->deferredRevenueLines($supplierId, $preview['lines'], $total, false);
+            $lines = $this->deferredRevenueLines($supplierId, $preview['lines'], $total, false, $endsOn);
             $this->assertKnownCodes($supplierId, $lines);
 
             $existing = $this->journal->findBySource($supplierId, 'deferred_revenue_accrual', $sourceId);
@@ -2125,9 +2162,10 @@ final class ClosingService
      * Výnosové řádky nesou dimenze řádků dokladů ({@see AccrualDeferralService::dimensionAllocations()}).
      *
      * @param list<array<string,mixed>> $byLine řádky s `account_code`, `amount` a dimenzemi
+     * @param string $entryDate datum zápisu (forma zápisu {@see accrualPairs()})
      * @return list<array<string,mixed>>
      */
-    private function deferredRevenueLines(int $supplierId, array $byLine, float $total, bool $release): array
+    private function deferredRevenueLines(int $supplierId, array $byLine, float $total, bool $release, string $entryDate): array
     {
         $deferAccount = $this->accruals->deferralAccount($supplierId, AccrualDeferralService::RULE_DEFERRED_REVENUE);
         $revenueSide = static fn (float $amount): string => (($amount >= 0.0) !== $release) ? 'debit' : 'credit';
@@ -2138,6 +2176,10 @@ final class ClosingService
                 continue;
             }
             $lines[] = ['side' => $revenueSide($amount), 'amount' => abs($amount)] + $line;
+        }
+        $pairs = $this->accrualPairs($supplierId, $entryDate, $lines, $deferAccount, false);
+        if ($pairs !== null) {
+            return $pairs;
         }
         // Nulový součet (doklady s opačným znaménkem a různou dimenzí) řádek 384 nemá.
         if ((int) round($total * 100) !== 0) {
@@ -2157,16 +2199,15 @@ final class ClosingService
      *
      * @return array{by_account: array<string,float>, lines: list<array<string,mixed>>, total: float}
      */
-    private function deferredRevenueReleaseForPeriod(int $supplierId, string $originEndsOn, string $targetEnd): array
+    private function deferredRevenueReleaseForPeriod(int $supplierId, string $originEndsOn, string $targetStart, string $targetEnd): array
     {
         $byLine = [];
         $total = 0.0;
         $contexts = [];
-        $dimensionCache = [];
+        $dimensionCache = [AccrualDeferralService::CACHE_POSTING_DATE => $targetStart];
         $rows = $this->accruals->deferredRevenueRows($supplierId, $originEndsOn, null, $originEndsOn, $targetEnd, true);
         $this->accruals->preloadDeferredRevenueAllocations($supplierId, $rows, $dimensionCache);
         // Starý odklad bez dimenzí se zrcadlí; ve 504 si rozpuštění ponechá osy činnosti dokladu.
-        $targetStart = (new \DateTimeImmutable($originEndsOn))->modify('+1 day')->format('Y-m-d');
         $this->accruals->markLegacyDeferrals($supplierId, 'deferred_revenue_accrual', $originEndsOn,
             $this->roleProfile($supplierId, $targetStart)->framework === AccountingFrameworkService::CZ_504, $dimensionCache);
         foreach ($rows as $row) {
@@ -4463,7 +4504,7 @@ final class ClosingService
             $relSourceId = ClosingSourceId::prepaidExpenseAccrualRelease($periodId);
             $peRelease = $this->prepaidExpenseReleaseForPeriod($supplierId, (string) $period['ends_on'], $nextStart, $nextEnds);
             if (AccrualDeferralService::hasNonZeroLine($peRelease['lines'])) {
-                $relLines = $this->prepaidExpenseLines($supplierId, $peRelease['lines'], (float) $peRelease['total'], true);
+                $relLines = $this->prepaidExpenseLines($supplierId, $peRelease['lines'], (float) $peRelease['total'], true, $nextStart);
                 $this->assertKnownCodes($supplierId, $relLines);
                 $existingRel = $this->journal->findBySource($supplierId, 'prepaid_expense_accrual', $relSourceId);
                 $relDocNo = $existingRel !== null && $existingRel['document_no'] !== null
@@ -4488,9 +4529,9 @@ final class ClosingService
             // nákladové strany výše. Reverte se s open_next.
             $deferredRevenueReleaseId = null;
             $revRelSourceId = ClosingSourceId::deferredRevenueAccrualRelease($periodId);
-            $revRelease = $this->deferredRevenueReleaseForPeriod($supplierId, (string) $period['ends_on'], $nextEnds);
+            $revRelease = $this->deferredRevenueReleaseForPeriod($supplierId, (string) $period['ends_on'], $nextStart, $nextEnds);
             if (AccrualDeferralService::hasNonZeroLine($revRelease['lines'])) {
-                $revRelLines = $this->deferredRevenueLines($supplierId, $revRelease['lines'], $revRelease['total'], true);
+                $revRelLines = $this->deferredRevenueLines($supplierId, $revRelease['lines'], $revRelease['total'], true, $nextStart);
                 $this->assertKnownCodes($supplierId, $revRelLines);
                 $existingRevRel = $this->journal->findBySource($supplierId, 'deferred_revenue_accrual', $revRelSourceId);
                 $revRelDocNo = $existingRevRel !== null && $existingRevRel['document_no'] !== null

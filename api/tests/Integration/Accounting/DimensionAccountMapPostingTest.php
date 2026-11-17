@@ -583,6 +583,7 @@ final class DimensionAccountMapPostingTest extends TestCase
             $this->releaseLines('prepaidExpenseReleaseForPeriod', [self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31'])['lines'],
             round($positive - $negative, 2),
             true,
+            (self::YEAR + 1) . '-01-01',
         ]);
         $sides = [];
         foreach ($release as $line) {
@@ -717,7 +718,7 @@ final class DimensionAccountMapPostingTest extends TestCase
 
         // Rozpuštění: řádky po střediscích na opačných stranách, bez řádku 381.
         $release = $this->releaseLines('prepaidExpenseReleaseForPeriod', [self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31']);
-        $lines = $this->releaseLines('prepaidExpenseLines', [$release['lines'], (float) $release['total'], true]);
+        $lines = $this->releaseLines('prepaidExpenseLines', [$release['lines'], (float) $release['total'], true, (self::YEAR + 1) . '-01-01']);
         $sides = [];
         foreach ($lines as $line) {
             $sides[$line['account_code'] . '|' . ($line['dimensions'][$this->centerType] ?? '-')] = [$line['side'], (int) round($line['amount'] * 100)];

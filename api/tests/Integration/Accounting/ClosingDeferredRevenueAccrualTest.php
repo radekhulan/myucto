@@ -15,6 +15,7 @@ use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\PostingService;
 use PDO;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -298,11 +299,185 @@ final class ClosingDeferredRevenueAccrualTest extends TestCase
             '602|' . $a => ['debit', 1_820_000],
             '602|' . $c => ['credit', 910_000],
         ], $this->revenueByCenter((int) $defer['id'], $center), 'Odklad jen z rozlišených položek, dobropis na D.');
+        self::assertCount(1, array_filter($this->entryLines((int) $defer['id']), static fn (array $l): bool => $l['account_code'] === '384'), 'Složená forma: jeden řádek 384.');
         self::assertSame([
             '602|' . $a => ['credit', 1_820_000],
             '602|' . $c => ['debit', 910_000],
         ], $this->revenueByCenter((int) $release['id'], $center), 'Rozpuštění zrcadlí odklad po středisku.');
         self::assertEqualsWithDelta(0.0, $this->balance384AsOf('2092-12-31'), 0.005);
+    }
+
+    /**
+     * Jednoduchá forma zápisu: faktura na středisku A a dobropis na středisku C dají v odkladu
+     * řádek 602 na obou stranách. Odklad i rozpuštění v openNext se musí rozložit na dvojice
+     * a zaúčtovat se stejnými středisky jako ve složené formě.
+     */
+    public function testSingleEntryFormDefersAndReleasesCreditNoteOnOtherCostCenter(): void
+    {
+        $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")->execute([$this->supplierId]);
+        Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\EntryForm\EntryFormService::class)
+            ->schedule($this->supplierId, self::STARTS_ON, \MyInvoice\Service\Accounting\EntryForm\EntryForm::Single, $this->userId);
+        [$center, $a, , $c] = $this->centers();
+        $dimensions = $this->dimensionService();
+
+        $invoiceId = $this->invoice('20910031', 36600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $dimensions->saveDocument($this->supplierId, 'invoice', $invoiceId, [$center => $a], []);
+        $this->postBuilt($invoiceId, self::YEAR . '-07-01');
+        $creditId = $this->invoice('20910032', -18300.00, self::YEAR . '-08-01', 'credit_note', $invoiceId);
+        $this->item($creditId, -18300.00, '2091-07-01', '2092-06-30');
+        $dimensions->saveDocument($this->supplierId, 'invoice', $creditId, [$center => $c], []);
+        $this->postBuilt($creditId, self::YEAR . '-08-01');
+
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $defer = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($this->periodId));
+        $release = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId));
+        self::assertNotNull($defer);
+        self::assertNotNull($release);
+        self::assertSame([
+            '602|' . $a => ['debit', 1_820_000],
+            '602|' . $c => ['credit', 910_000],
+        ], $this->revenueByCenter((int) $defer['id'], $center));
+        self::assertSame([
+            '602|' . $a => ['credit', 1_820_000],
+            '602|' . $c => ['debit', 910_000],
+        ], $this->revenueByCenter((int) $release['id'], $center));
+        self::assertEqualsWithDelta(0.0, $this->balance384AsOf('2092-12-31'), 0.005);
+        self::assertSame(['384|602|18200.00', '384|602|9100.00'], $this->pairsOf((int) $defer['id']));
+        self::assertSame(['384|602|18200.00', '384|602|9100.00'], $this->pairsOf((int) $release['id']));
+    }
+
+    /**
+     * Jednoduchá forma, nulový součet (faktura a dobropis stejné částky na různých
+     * střediscích): každý řádek 602 má protějšek na 384.
+     */
+    public function testSingleEntryFormPairsZeroTotalDeferralWith384(): void
+    {
+        $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")->execute([$this->supplierId]);
+        Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\EntryForm\EntryFormService::class)
+            ->schedule($this->supplierId, self::STARTS_ON, \MyInvoice\Service\Accounting\EntryForm\EntryForm::Single, $this->userId);
+        [$center, $a, , $c] = $this->centers();
+        $dimensions = $this->dimensionService();
+        $invoiceId = $this->invoice('20910041', 36600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $dimensions->saveDocument($this->supplierId, 'invoice', $invoiceId, [$center => $a], []);
+        $this->postBuilt($invoiceId, self::YEAR . '-07-01');
+        $creditId = $this->invoice('20910042', -36600.00, self::YEAR . '-08-01', 'credit_note', $invoiceId);
+        $this->item($creditId, -36600.00, '2091-07-01', '2092-06-30');
+        $dimensions->saveDocument($this->supplierId, 'invoice', $creditId, [$center => $c], []);
+        $this->postBuilt($creditId, self::YEAR . '-08-01');
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
+
+        $run = $this->closing->runDeferredRevenueAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertSame(['384|602|18200.00', '384|602|18200.00'], $this->pairsOf((int) $run['entry_id']));
+        self::assertSame(['602|' . $a => ['debit', 1_820_000], '602|' . $c => ['credit', 1_820_000]], $this->revenueByCenter((int) $run['entry_id'], $center));
+    }
+
+    /**
+     * Analytika výnosu, na kterou zápis faktury přesměroval, je neaktivní k datu odkladu,
+     * resp. od 1. 1. dalšího roku: odklad i rozpuštění jdou s dimenzemi položky na účet, na
+     * který syntetiku k tomu dni přesměruje osnova.
+     */
+    #[DataProvider('deactivationDates')]
+    public function testDeactivatedRevenueAnalyticFallsBackWithItemDimensions(string $deactivatedFrom, string $deferAccount, ?string $releaseAccount): void
+    {
+        [$center, $a] = $this->centers();
+        $accounts = Bootstrap::buildContainer()->get(\MyInvoice\Repository\ChartOfAccountsRepository::class);
+        $parent = (int) $this->db->pdo()->query('SELECT id FROM chart_of_accounts WHERE supplier_id = ' . $this->supplierId . " AND account_code = '602'")->fetchColumn();
+        foreach (['602.100' => 1, '602.200' => 0] as $code => $active) {
+            $accounts->insert($this->supplierId, [
+                'account_code' => $code, 'name' => 'Syntetické služby ' . $code, 'account_type' => 'revenue', 'normal_side' => 'credit',
+                'tax_deductibility' => 'deductible', 'parent_id' => $parent, 'is_synthetic' => false, 'is_active' => (bool) $active,
+            ], self::STARTS_ON, $this->userId);
+        }
+        $invoiceId = $this->invoice('20910043', 46600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $second = $this->item($invoiceId, 10000.00, null, null);
+        $this->db->pdo()->prepare("UPDATE invoice_items SET revenue_account_code = '604' WHERE id = ?")->execute([$second]);
+        $this->dimensionService()->saveDocument($this->supplierId, 'invoice', $invoiceId, [], [1 => [$center => $a]]);
+        $this->postBuilt($invoiceId, self::YEAR . '-07-01');
+        $this->changeAccount('602.100', $deactivatedFrom, ['is_active' => 0]);
+        $this->changeAccount('602.200', $deactivatedFrom, ['is_active' => 1]);
+
+        $this->driveCloseWithAccrual();
+        $defer = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($this->periodId));
+        self::assertNotNull($defer);
+        self::assertSame([$deferAccount . '|' . $a => ['debit', 1_820_000]], $this->revenueByCenter((int) $defer['id'], $center));
+        if ($releaseAccount === null) {
+            // Účet deaktivovaný se zůstatkem v uzavíraném roce uzávěrka knih nepřevede. Rozpuštění
+            // takového odkladu jde stejnou cestou jako u nákladů (testReleaseFallsBack… v 381).
+            return;
+        }
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $release = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId));
+        self::assertNotNull($release);
+        self::assertSame([$releaseAccount . '|' . $a => ['credit', 1_820_000]], $this->revenueByCenter((int) $release['id'], $center));
+    }
+
+    /** @return array<string,array{0:string,1:string,2:?string}> */
+    public static function deactivationDates(): array
+    {
+        return [
+            'k datu odkladu' => [self::YEAR . '-12-01', '602.200', null],
+            'od dalšího roku' => [(self::YEAR + 1) . '-01-01', '602.100', '602.200'],
+        ];
+    }
+
+    /** Verzovaná změna účtu od data (stejná cesta jako úprava osnovy v aplikaci). */
+    private function changeAccount(string $code, string $from, array $changes): void
+    {
+        $id = (int) $this->db->pdo()->query('SELECT id FROM chart_of_accounts WHERE supplier_id = ' . $this->supplierId . " AND account_code = '" . $code . "'")->fetchColumn();
+        $definitions = new \MyInvoice\Repository\AccountDefinitionRepository($this->db);
+        $definitions->change($this->supplierId, $id, $from, $changes, $definitions->stateHash($this->supplierId, $id, true), $this->userId, 'account_configuration');
+    }
+
+    /**
+     * Výnos z předkontace na syntetiku 602, kterou zápis faktury přesměroval na její jedinou
+     * analytiku, vedle druhého výnosového účtu: odklad leží na analytice se střediskem
+     * položky, ne na řádku bez dimenze.
+     */
+    public function testRevenueOnSyntheticRedirectedToSingleAnalyticKeepsItsCostCenter(): void
+    {
+        [$center, $a, $b, $c] = $this->centers();
+        $accounts = Bootstrap::buildContainer()->get(\MyInvoice\Repository\ChartOfAccountsRepository::class);
+        $parent = (int) $this->db->pdo()->query('SELECT id FROM chart_of_accounts WHERE supplier_id = ' . $this->supplierId . " AND account_code = '602'")->fetchColumn();
+        $accounts->insert($this->supplierId, [
+            'account_code' => '602.100', 'name' => 'Syntetické služby', 'account_type' => 'revenue', 'normal_side' => 'credit',
+            'tax_deductibility' => 'deductible', 'parent_id' => $parent, 'is_synthetic' => false,
+        ], self::STARTS_ON, $this->userId);
+        $invoiceId = $this->invoice('20910033', 64900.00, self::YEAR . '-07-01');
+        $first = $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $second = $this->item($invoiceId, 10000.00, null, null);
+        $this->item($invoiceId, 18300.00, '2091-07-01', '2092-06-30');
+        $this->db->pdo()->prepare("UPDATE invoice_items SET revenue_account_code = '604' WHERE id = ?")->execute([$second]);
+        self::assertSame('602', (string) $this->posting->issuedItemRevenueAccounts($this->supplierId, $invoiceId)['accounts'][$first], 'Sanity: trasa vrací syntetiku z předkontace.');
+        $this->dimensionService()->saveDocument($this->supplierId, 'invoice', $invoiceId, [], [1 => [$center => $a], 2 => [$center => $b], 3 => [$center => $c]]);
+        $this->postBuilt($invoiceId, self::YEAR . '-07-01');
+        $posted = $this->journal->findBySource($this->supplierId, 'invoice', $invoiceId);
+        self::assertSame(['602.100|' . $a => ['credit', 3_660_000], '602.100|' . $c => ['credit', 1_830_000], '604|' . $b => ['credit', 1_000_000]], $this->revenueByCenter((int) $posted['id'], $center), 'Sanity: zápis leží na jediné analytice.');
+
+        $this->driveCloseWithAccrual();
+        // Od dalšího roku má 602 druhou analytiku: rozpuštění se řídí zápisem faktury.
+        $accounts->insert($this->supplierId, [
+            'account_code' => '602.200', 'name' => 'Syntetické služby 2', 'account_type' => 'revenue', 'normal_side' => 'credit',
+            'tax_deductibility' => 'deductible', 'parent_id' => $parent, 'is_synthetic' => false,
+        ], (self::YEAR + 1) . '-01-01', $this->userId);
+        self::assertArrayNotHasKey('602', $this->posting->singleAnalyticRedirects($this->supplierId, (self::YEAR + 1) . '-01-01'), 'Sanity: v dalším roce bez přesměrování.');
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $defer = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($this->periodId));
+        $release = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId));
+        self::assertNotNull($defer);
+        self::assertNotNull($release);
+        self::assertSame(['602.100|' . $a => ['debit', 1_820_000], '602.100|' . $c => ['debit', 910_000]], $this->revenueByCenter((int) $defer['id'], $center));
+        self::assertSame(['602.100|' . $a => ['credit', 1_820_000], '602.100|' . $c => ['credit', 910_000]], $this->revenueByCenter((int) $release['id'], $center));
     }
 
     /**
@@ -535,6 +710,26 @@ final class ClosingDeferredRevenueAccrualTest extends TestCase
         }
         ksort($out);
         return $out;
+    }
+
+    /** @return list<string> dvojice jednoduchého zápisu „účet|účet|částka“, seřazené */
+    private function pairsOf(int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT l.pair_no, a.account_code, l.amount
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.entry_id = ? AND l.supplier_id = ?
+              ORDER BY l.pair_no, a.account_code'
+        );
+        $stmt->execute([$entryId, $this->supplierId]);
+        $pairs = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $pairs[(string) $row['pair_no']][] = $row;
+        }
+        $out = array_map(static fn (array $rows): string => implode('|', array_column($rows, 'account_code')) . '|' . number_format((float) $rows[0]['amount'], 2, '.', ''), $pairs);
+        sort($out);
+        return array_values($out);
     }
 
     private function balance384AsOf(string $date): float
