@@ -240,10 +240,13 @@ describe('CashRegister.vue', () => {
     const actions = (wrapper.vm as any).headerActions as any[]
 
     expect(wrapper.findComponent({ name: 'ActionBar' }).exists()).toBe(true)
-    expect(actions.map(a => a.key)).toEqual(['new-in', 'new-out', 'book', 'registers'])
+    expect(actions.map(a => a.key)).toEqual(['new-in', 'new-out', 'book', 'registers', 'renumber'])
     expect(actions.every(a => a.icon && a.variant)).toBe(true)
-    // Správa pokladen je utility → patří do „…", ne mezi tlačítka hlavičky.
+    // Správa pokladen a přečíslování jsou utility → patří do „…", ne mezi tlačítka hlavičky.
     expect(actions.find(a => a.key === 'registers').tier).toBe('overflow')
+    expect(actions.find(a => a.key === 'renumber')).toMatchObject({
+      tier: 'overflow', to: { path: '/purchase-invoices/renumber', query: { agenda: 'cash' } },
+    })
   })
 
   it('znaménko částky nese číslo, ne ručně slepený prefix', async () => {

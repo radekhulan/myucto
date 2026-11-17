@@ -191,6 +191,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/accounting/periods/[0-9]+/closing/(asset-reserve|legal-provisions)/workspace$#',
         // Přečíslování přijatých dokladů přepisuje čísla i v deníku — jen účetní v aplikaci.
         '#^/api/purchase-invoices/renumber$#',
+        '#^/api/accounting/(cash-documents|other-items|internal-documents)/renumber$#',
         // Výchozí číselná řada je volba přihlášeného uživatele v editoru, ne integrace.
         '#^/api/(invoices|purchase-invoices|accounting/(cash|internal)-documents)/number-series/default$#',
     ];

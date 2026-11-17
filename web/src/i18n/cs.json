@@ -22855,9 +22855,51 @@
         "period_closing": "probíhá uzávěrka",
         "period_closed": "uzavřené období",
         "date_locked": "uzamčeno k datu",
-        "manual_number": "ruční číslo"
+        "manual_number": "ruční číslo",
+        "cash_in": "příjmový doklad, číslo má plátce",
+        "eet": "evidováno v EET",
+        "vat_document": "doklad s DPH",
+        "linked_invoice": "navázáno na vydanou fakturu"
       },
-      "done": "Přečíslováno dokladů: {count}."
+      "done": "Přečíslováno dokladů: {count}.",
+      "page_title": "Přečíslování dokladů",
+      "not_offered": "Vydané faktury a bankovní výpisy se nepřečíslovávají: číslo vydané faktury už má odběratel a číslo bankovního dokladu určuje výpis banky.",
+      "tabs": {
+        "label": "Agenda",
+        "purchase": "Přijaté doklady",
+        "cash": "Pokladna",
+        "other_receivable": "Ostatní pohledávky",
+        "other_payable": "Ostatní závazky",
+        "internal": "Interní doklady"
+      },
+      "agenda_intro": {
+        "cash": "Pokladní doklad dostane číslo při zaúčtování, takže pořadí čísel odpovídá pořadí zápisu. Přečíslování vezme čísla, která výdajové doklady zvolené pokladny a měsíce v číselné řadě mají, a rozdá je dokladům znovu podle data úhrady. Ostatní měsíce ani počítadlo řady se nemění.",
+        "other_receivable": "Pohledávka dostane číslo při potvrzení, takže pořadí čísel odpovídá pořadí zápisu. Přečíslování vezme čísla, která pohledávky zvoleného měsíce v číselné řadě mají, a rozdá je znovu podle data vzniku. Ostatní měsíce ani počítadlo řady se nemění.",
+        "other_payable": "Závazek dostane číslo při potvrzení, takže pořadí čísel odpovídá pořadí zápisu. Přečíslování vezme čísla, která závazky zvoleného měsíce v číselné řadě mají, a rozdá je znovu podle data vzniku. Ostatní měsíce ani počítadlo řady se nemění.",
+        "internal": "Interní doklad dostane číslo při zaúčtování, takže pořadí čísel odpovídá pořadí zápisu. Přečíslování vezme čísla, která interní doklady zvoleného měsíce v číselné řadě mají, a rozdá je znovu podle data účetního případu. Ostatní měsíce ani počítadlo řady se nemění."
+      },
+      "agenda_note": {
+        "cash": "Příjmové doklady, výdajové doklady s DPH a doklady evidované v EET si číslo nechávají: příjmový doklad má plátce a číslo dokladu s DPH jde do evidence DPH. Přepíše se i číslo a popis zápisu v účetním deníku včetně storna.",
+        "other": "Pohledávka navázaná na vydanou fakturu si číslo nechává. Přepíše se i číslo a popis zápisu v účetním deníku včetně storna a přeúčtování.",
+        "internal": "Přepíše se i číslo a popis zápisu v účetním deníku včetně storna. Ruční zápisy deníku bez interního dokladu se nemění."
+      },
+      "period_by": {
+        "cash": "Měsíc podle data úhrady",
+        "other": "Měsíc podle data vzniku",
+        "internal": "Měsíc podle data účetního případu"
+      },
+      "col_date_by": {
+        "cash": "Uhrazeno",
+        "other": "Vznik",
+        "internal": "Účetní případ"
+      },
+      "register": "Pokladna",
+      "no_register": "Firma nemá žádnou pokladnu.",
+      "col_partner": "Partner",
+      "col_description": "Popis",
+      "col_reason": "Důvod",
+      "in_order_agenda": "Čísla už odpovídají pořadí podle data.",
+      "kept_hint_agenda": "Ručně zadaná, převzatá nebo předaná čísla, přečíslování se jich netýká."
     },
     "extraction_review": {
       "title": "Kontrola vytěžených dokladů",
@@ -24520,6 +24562,7 @@
     }
   },
   "common": {
+    "renumber_by_date": "Přečíslovat podle data",
     "window_data_changed": "Data se mezitím změnila.",
     "window_data_changed_reload": "Obnovit",
     "window_data_changed_confirm": "Znovu načíst stránku? Neuložené změny v tomto okně se ztratí.",
