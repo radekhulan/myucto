@@ -344,6 +344,10 @@ Na Windows a Linuxu jsou výchozí kombinace **Alt+Q** pro hledání, **Alt+1** 
 
 Ve spodní liště jsou vedle sebe jediná přepínací vlaječka jazyka a ikona motivu (slunce nebo měsíc podle aktuálního režimu). Vlaječka ukazuje jazyk, na který se kliknutím přepnete, druhé tlačítko pro aktuální jazyk se nezobrazuje. Ikona motivu přepíná mezi **světlým** a **tmavým** tématem.
 
+Na telefonu jsou tyto přepínače v **Menu**. Vedle ikony motivu je tlačítko
+**Celá obrazovka**, které zapne fullscreen; dalším klepnutím jej opustíte.
+Pokud prohlížeč tuto funkci nepodporuje, tlačítko je neaktivní.
+
 Dokud v prohlížeči není uložená žádná volba (první návštěva), aplikace se řídí nastavením operačního systému nebo prohlížeče. Jakmile ikonu poprvé použijete, volba se uloží v prohlížeči (per zařízení) a platí napříč celou aplikací včetně grafů, dokud ji znovu nezměníte.
 
 ### 10.10.13 Aktualizace dat

@@ -20,6 +20,7 @@ import GlobalSearch from './GlobalSearch.vue'
 import CommandPalette from './CommandPalette.vue'
 import FooterTip from './FooterTip.vue'
 import ThemeToggle from './ThemeToggle.vue'
+import FullscreenToggle from './FullscreenToggle.vue'
 import LanguageToggle from './LanguageToggle.vue'
 import AppBrand from './AppBrand.vue'
 import AppMenuToggle from './AppMenuToggle.vue'
@@ -2368,10 +2369,11 @@ onBeforeUnmount(() => {
           <!-- Na telefonu nemá jazyk, motiv ani oblíbené místo ve spodní liště, žijí tady
                v jednom řádku s odhlášením, ať menu zůstane co nejvíc místa. Okna jsou v hlavičce.
                Zamknutí a odhlášení jsou pro obě podoby tatáž tlačítka, mění se jen vzhled. -->
-          <div :class="phoneNavigation ? 'flex items-center gap-1.5' : ['grid gap-2', canLockSession ? 'grid-cols-2' : 'grid-cols-1']">
+          <div :class="phoneNavigation ? 'flex flex-wrap items-center gap-1.5' : ['grid gap-2', canLockSession ? 'grid-cols-2' : 'grid-cols-1']">
             <template v-if="phoneNavigation">
               <LanguageToggle class="h-9! w-10!" />
               <ThemeToggle class="h-9! w-10!" />
+              <FullscreenToggle />
               <WorkspaceFavoritesButton class="h-9! w-10! border border-neutral-200" />
             </template>
             <button

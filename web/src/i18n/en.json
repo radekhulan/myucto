@@ -2222,6 +2222,10 @@
     "email_documents": "Documents from email",
     "mobile": {
       "menu": "Menu",
+      "fullscreen": "Fullscreen",
+      "fullscreen_exit": "Exit fullscreen",
+      "fullscreen_unsupported": "Fullscreen is not supported by this browser",
+      "fullscreen_failed": "Could not switch fullscreen mode.",
       "search": "Search",
       "issue_invoice": "Issue invoice",
       "receipt": "Receipt",

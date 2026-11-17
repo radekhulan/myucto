@@ -2222,6 +2222,10 @@
     "email_documents": "Doklady z e-mailu",
     "mobile": {
       "menu": "Menu",
+      "fullscreen": "Celá obrazovka",
+      "fullscreen_exit": "Opustit celou obrazovku",
+      "fullscreen_unsupported": "Prohlížeč nepodporuje celou obrazovku",
+      "fullscreen_failed": "Režim celé obrazovky se nepodařilo přepnout.",
       "search": "Hledat",
       "issue_invoice": "Vystavit fakturu",
       "receipt": "Účtenka",
