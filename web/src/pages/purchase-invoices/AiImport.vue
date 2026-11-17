@@ -74,6 +74,8 @@ const aiPdfFile = ref<File | null>(null)
 const aiExtracting = ref(false)
 const aiResult = ref<AiExtractResult | null>(null)
 const aiPerRequestModel = ref('')  // empty = použít default
+// Jednorázová volba pro toto nahrání: doklad bez rozpisu položek, jeden řádek na sazbu DPH.
+const aiWithoutItems = ref(false)
 
 /** Celý výběr; výřezy se do něj vrátí na svá místa a extrakce se spustí najednou. */
 const crop = usePhotoCropQueue(files => useAiFiles(files))
@@ -166,7 +168,7 @@ async function runAiBatch() {
       item.status = 'processing'
       try {
         const model = requestModel.value
-        const r = await integrationsApi.extractPdfAi(item.file, model, aiBatchId.value)
+        const r = await integrationsApi.extractPdfAi(item.file, model, aiBatchId.value, aiWithoutItems.value)
         if (version !== contextVersion) return
         item.result = r
         item.status = r.ok ? 'ok' : 'failed'
@@ -268,7 +270,7 @@ async function runAiExtract() {
   try {
     const model = requestModel.value
     // I jednotlivý doklad je dávka (o jednom kusu) — jinak by ho „Poslední import" neukázal.
-    const result = await integrationsApi.extractPdfAi(aiPdfFile.value, model, newBatchId())
+    const result = await integrationsApi.extractPdfAi(aiPdfFile.value, model, newBatchId(), aiWithoutItems.value)
     if (version !== contextVersion) return
     aiResult.value = result
     if (aiResult.value.ok) {
@@ -341,6 +343,7 @@ watch(() => suppliers.currentSupplierId, () => {
   aiPdfFile.value = null
   aiResult.value = null
   aiPerRequestModel.value = ''
+  aiWithoutItems.value = false
   aiBatchQueue.value = []
   aiBatchId.value = ''
   aiBatchRunning.value = false
@@ -417,6 +420,15 @@ watch(() => suppliers.currentSupplierId, () => {
             <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
           </select>
         </div>
+
+        <label data-test="ai-without-items" class="flex items-start gap-2 text-sm text-neutral-700 cursor-pointer">
+          <input v-model="aiWithoutItems" type="checkbox" :disabled="aiExtracting || aiBatchRunning"
+                 class="mt-0.5 w-4 h-4 accent-primary-600" />
+          <span>
+            {{ t('integrations.ai.without_items') }}
+            <span class="block text-xs text-neutral-500">{{ t('integrations.ai.without_items_hint') }}</span>
+          </span>
+        </label>
 
         <button type="button" @click="runAiExtract" :disabled="!canStartExtraction || !aiPdfFile || aiExtracting || aiBatchRunning"
                 :class="[btnFilled('primary'), 'w-full whitespace-nowrap']">

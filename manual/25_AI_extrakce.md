@@ -103,6 +103,7 @@ Volitelné kroky:
 2. Vyberte nebo přetáhněte jeden nebo více souborů (PDF, obrázek), nebo klikněte na **Vyfotit**: doklad se vyfotí, zmenší a po potvrzení náhledu se použije jako vybraný soubor. Na telefonu a tabletu se otevře fotoaparát. Na počítači je tlačítko vidět, jen když je připojená kamera; otevře živý náhled z webkamery (při více kamerách s výběrem kamery), doklad podržte před kamerou a klikněte na **Vyfotit**. Prohlížeč se napoprvé zeptá na povolení kamery; když ho odmítnete nebo kameru používá jiná aplikace, dialog to oznámí a doklad můžete nahrát ze souboru. U vybrané nebo přetažené fotky se otevře stejná obrazovka s návrhem ořezu jako u **Vyfotit**; ořez v ní jde vypnout. U více fotek najednou nabídne **Přeskočit ořez u ostatních**, které zbývající fotky nahraje beze změny. Na počítači se při výběru více než tří fotek ořez nenabízí. Při více souborech vznikne dávka, která se zpracuje
    postupně po jednom.
    Nahrané obrázky se pro vytěžení a archivaci převedou do PDF se zachovaným poměrem stran, bez deformace či ořezu.
+   Když u dokladů nepotřebujete rozpis položek, zaškrtněte před spuštěním **Načíst bez položek** (viz níže).
 3. Počkejte na zpracování. U každého souboru uvidíte stav, dodavatele, částku a **typ dokladu**.
 4. Případně změňte **Typ dokladu** přímo v tabulce (například účtenku placenou kartou, kterou AI zařadila jako
    *Účtenka / paragon*, chcete vést jako *Faktura*).
@@ -120,6 +121,13 @@ zapnuté vypořádání plateb kartou: při importu pracovníkem se hned uhradí
 Klient zkontroluje údaje a na detailu použije **Označit jako přijaté**, stejně jako u ručního zadání. Vyžaduje-li firma
 schválení, doklad nejprve projde schvalováním. Koncept se do souhrnu nákladů nezapočítává; přijatý doklad se zahrne podle
 stejných pravidel jako ručně zadaná faktura. Doklad jiné firmy se při klientském importu automaticky nepřesouvá.
+
+**Načíst bez položek.** Zaškrtávátko platí jen pro právě spouštěné vytěžení (jeden soubor i celou dávku), není to
+nastavení firmy ani dodavatele. Koncept dostane místo rozpisu položek **jeden řádek na každou sazbu DPH**: řádky téže sazby
+se sečtou včetně slev, takže základ daně, DPH i celková částka odpovídají dokladu. Popis řádku nese názvy sloučených plnění.
+Odpočet zálohy zůstává jako bez volby: nedaňová záloha se jen naváže jako odpočet a odpočet zálohy s DPH zůstane
+samostatným záporným řádkem. Stejná volba je u příchozích dokladů vedle **Vytěžit a vytvořit** i **Vytěžit označené**
+(viz [§ 23](23_Prijate_faktury.md)). Doklad se strukturovaným ISDOC se zakládá vždy z vlastních položek.
 
 Pokud brána ještě není vůbec nakonfigurovaná a pokusíte se o AI import v [Import přijatých](21_Importy.md#21914-import-prijatych-faktur-pravidla-a-scan-inbox),
 zobrazí se upozornění s odkazem na **AI nastavení**.

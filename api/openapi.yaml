@@ -12188,6 +12188,15 @@ paths:
           required: false
           description: Model AI poskytovatele firmy. Musí být mezi povolenými modely, jinak 400 `validation_failed`.
           schema: { type: string }
+        - in: query
+          name: without_items
+          required: false
+          description: |
+            `1` = načíst doklad bez rozpisu položek. Koncept dostane jeden řádek na každou sazbu DPH
+            (součet řádků dané sazby), základ, daň i celková částka odpovídají dokladu. Odpočet zdaněné
+            zálohy zůstává samostatným záporným řádkem. Platí jen pro AI vytěžení, doklad s ISDOC
+            se zakládá vždy z vlastních položek.
+          schema: { type: string, enum: ['0', '1'] }
       requestBody:
         required: true
         content:

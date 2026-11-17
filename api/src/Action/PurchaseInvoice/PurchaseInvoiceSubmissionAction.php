@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Action\Admin\Import\AiExtractPdfAction;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SubmitsDocumentOriginals;
 use MyInvoice\Http\SupplierGuard;
@@ -363,12 +364,14 @@ final class PurchaseInvoiceSubmissionAction
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
         $userId = $this->userId($request);
+        $body = (array) ($request->getParsedBody() ?? []);
         try {
             $result = $this->processing->extract(
                 $id,
                 $supplierId,
                 $userId,
                 RequestAuthorization::allows($request, 'purchase_invoices.scan', AccessLevel::WRITE),
+                AiExtractPdfAction::withoutItemsRequested($body),
             );
         } catch (PurchaseInvoiceSubmissionException $e) {
             $this->audit($request, 'purchase_invoice_submission.extraction_failed', $id, [
