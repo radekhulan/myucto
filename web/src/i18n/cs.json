@@ -41455,7 +41455,6 @@
     "listStatus_none": "Bez předpisu pro zvolený titul nebo rok",
     "backToList": "← Zpět na seznam členů",
     "listColumns": {
-      "selectedCount": "Vybráno pro dávku: {count} z 500",
       "name": "Člen",
       "membership": "Členství",
       "payment": "Stav úhrady",
@@ -41867,7 +41866,6 @@
     "batchSelected": "Zaškrtnutí členové ({count})",
     "batchActive": "Všichni aktivní k účetnímu datu",
     "batchSelectionRequired": "Zaškrtněte v seznamu alespoň jednoho člena (nejvýše 500), nebo vyberte všechny aktivní.",
-    "batchSelectedCount": "Vybráno pro dávku: {count} z nejvýše 500. Pro všechny aktivní použijte volbu v hromadném předpisu.",
     "batchSelectMember": "Vybrat člena {name} pro hromadný předpis",
     "batchContinuePreview": "Pokračovat v přípravě náhledu",
     "batchConfirm": "Potvrdit dávku a zapsat předpisy",
@@ -41966,6 +41964,23 @@
       "reason_duplicate_client": "Kontakt nebo IČO je v souboru u víc nových členů (řádky {lines}).",
       "reason_contact_create_forbidden": "Kontakt by se musel založit, ale nemáte právo zakládat kontakty. Uveďte ID nebo IČO existujícího kontaktu.",
       "status_already_imported": "Už zapsáno"
+    },
+    "tabs": {
+      "members": "Členové",
+      "rates": "Sazby",
+      "reconciliation": "Kontrola s účetnictvím",
+      "erasure": "Výmaz údajů"
+    },
+    "detailColumns": {
+      "summary": "Přehled",
+      "revision": "Revize",
+      "status": "Stav",
+      "from": "Platí od",
+      "basis": "Podklad",
+      "title": "Příspěvek",
+      "amount": "Částka",
+      "dates": "Účetní datum a splatnost",
+      "settlement": "Úhrada"
     }
   },
   "propertyCharges": {

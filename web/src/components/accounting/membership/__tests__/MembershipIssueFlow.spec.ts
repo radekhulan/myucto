@@ -309,7 +309,7 @@ describe('Membership issue flow', () => {
     const w = mounted({}, locale)
     await fill(w)
     const messages = (locale === 'cs' ? cs : en).nonprofitMembership
-    expect(w.text()).toContain(messages.issueTitle)
+    expect(w.text()).toContain(messages.issueHelp)
     expect(w.text()).not.toContain('nonprofitMembership.')
     expect(w.get('[data-field="receivable"]').text()).toContain('311 Receivables')
     expect(w.get('[data-field="receivable"]').text()).not.toContain('684')

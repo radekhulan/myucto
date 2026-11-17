@@ -79,7 +79,7 @@ describe('Membership revision form', () => {
 
   it.each(['cs', 'en'])('renders translated %s texts', async locale => {
     const w = mounted({}, locale)
-    expect(w.text()).toContain((locale === 'cs' ? cs : en).nonprofitMembership.revisionTitle)
+    expect(w.text()).toContain((locale === 'cs' ? cs : en).nonprofitMembership.revisionHelp)
     expect(w.text()).not.toContain('nonprofitMembership.')
     w.unmount()
   })

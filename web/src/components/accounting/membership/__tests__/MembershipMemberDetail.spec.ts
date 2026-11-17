@@ -15,11 +15,22 @@ const api = vi.hoisted(() => ({ member: vi.fn(), claim: vi.fn() }))
 vi.mock('@/api/nonprofitMembership', () => ({ membershipApi: api }))
 vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: vi.fn() } }))
 vi.mock('@/api/nonprofitDppo', () => ({ nonprofitDppoApi: { profile: vi.fn() } }))
+// Potvrzení akcí jde jako v celé aplikaci do toastu.
+const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => toast }))
 
 const ActionBar = defineComponent({
   props: ['actions'],
   setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; disabledReason?: string; tier?: string; show?: unknown; run: () => void }>)
     .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, 'data-tier': a.tier, disabled: a.disabled, 'data-reason': a.disabled ? a.disabledReason : undefined, onClick: a.run }, a.label))),
+})
+// Formuláře detailu jsou v okně; v testu se vykreslí na místě i s nadpisem.
+const Modal = defineComponent({ name: 'Modal', props: ['title', 'widthClass'], emits: ['close'], setup: (p, { slots }) => () => h('div', { 'data-stub': 'modal', 'data-title': p.title }, slots.default?.()) })
+// Akce řádku předpisu jako tlačítka s klíčem, stavem a důvodem zašednutí.
+const RowActionsMenu = defineComponent({
+  props: ['actions', 'inlineCount', 'iconOnly'],
+  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; disabledReason?: string; show?: unknown; run: () => void }>)
+    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, title: a.disabled ? a.disabledReason : undefined, onClick: a.run }, a.label))),
 })
 const RevisionForm = defineComponent({ name: 'MembershipRevisionForm', props: ['supplier', 'canManage', 'member', 'history'], emits: ['done', 'close', 'lock', 'dirty'], setup: () => () => h('div', { 'data-stub': 'revision' }) })
 const IssueFlow = defineComponent({ name: 'MembershipIssueFlow', props: ['supplier', 'canManage', 'member', 'history', 'periods'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'issue' }) })
@@ -52,13 +63,14 @@ function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
     props: { supplier: 5, canManage: true, memberId: 9, label: 'Synthetic member', periods: [period], ...props },
     global: {
       plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })],
-      stubs: { ActionBar, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow },
+      stubs: { ActionBar, Modal, RowActionsMenu, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow },
     },
   })
 }
 const mixed = [claim(31, 100000, unreconciled), claim(32, 80000, ambiguous), claim(33, 120050, partial), claim(34, 70000, reversed, { reversal_claim_id: 99 })]
 
 beforeEach(() => {
+  toast.success.mockClear()
   vi.clearAllMocks()
   api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], mixed))
 })
@@ -68,13 +80,16 @@ describe('Membership member detail', () => {
     const named = detail([revision(1, '2020-01-01')], [])
     api.member.mockResolvedValue({ ...named, member: { ...named.member, company_name: '', first_name: 'Syntetická', last_name: 'Osoba' } })
     const w = mounted({ label: undefined }); await flushPromises()
-    expect(w.get('[data-focus="member-heading"]').text()).toBe('M-1 · Syntetická Osoba')
+    // Hlavička jako detail kontaktu: jméno v nadpisu, členské číslo pod ním.
+    expect(w.get('[data-focus="member-heading"]').text()).toBe('Syntetická Osoba')
     expect(w.get('[data-focus="member-heading"]').element.tagName).toBe('H1')
+    expect(w.get('[data-field="member-identity"]').text()).toContain('M-1')
+    expect(w.get('[data-field="status-badge"]').text()).toBe(cs.nonprofitMembership.status_active)
     w.unmount()
     // Bez jména kontaktu i bez popisku ze seznamu: náhradní označení podle kontaktu.
     api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], []))
     const fallback = mounted({ label: undefined }); await flushPromises()
-    expect(fallback.get('[data-focus="member-heading"]').text()).toBe(`M-1 · ${cs.nonprofitMembership.clientFallback.replace('{id}', '3')}`)
+    expect(fallback.get('[data-focus="member-heading"]').text()).toBe(cs.nonprofitMembership.clientFallback.replace('{id}', '3'))
     fallback.unmount()
   })
 
@@ -109,7 +124,7 @@ describe('Membership member detail', () => {
     const w = mounted()
     await flushPromises()
     expect(w.get('[data-field="status-today"]').text()).toContain(cs.nonprofitMembership.status_active)
-    expect(w.get('[data-field="status-today"]').text()).toContain(formatDate(appIsoDate()))
+    expect(w.get('[data-section="member-status"]').text()).toContain(formatDate(appIsoDate()))
     expect(w.get('[data-field="status-today"]').text()).not.toContain(cs.nonprofitMembership.status_ended)
     expect(w.get('[data-field="status-upcoming"]').text()).toContain(formatDate('2999-01-01'))
     expect(w.get('[data-field="status-upcoming"]').text()).toContain(cs.nonprofitMembership.status_ended)
@@ -238,7 +253,6 @@ describe('Membership member detail', () => {
     await flushPromises()
     expect(w.get('[data-claim="31"] [data-action="reverse-claim"]').attributes('disabled')).toBeDefined()
     expect(w.get('[data-action="new-charge"]').attributes('disabled')).toBeDefined()
-    expect(w.get('[data-action="close-detail"]').attributes('disabled')).toBeDefined()
     issue.vm.$emit('lock', false)
     await flushPromises()
     expect(w.get('[data-claim="31"] [data-action="reverse-claim"]').attributes('disabled')).toBeUndefined()
@@ -254,7 +268,7 @@ describe('Membership member detail', () => {
     expect(api.member).toHaveBeenCalledTimes(2)
     expect(w.emitted('changed')).toHaveLength(1)
     expect(w.find('[data-stub="issue"]').exists()).toBe(false)
-    expect(w.get('[data-section="detail-notice"]').text()).toBe(cs.nonprofitMembership.issueDone)
+    expect(toast.success).toHaveBeenCalledWith(cs.nonprofitMembership.issueDone)
     w.unmount()
   })
 
@@ -363,7 +377,7 @@ describe('Membership member detail', () => {
     w.findComponent(RevisionForm).vm.$emit('done')
     await flushPromises()
     expect(w.find('[data-stub="revision"]').exists()).toBe(false)
-    expect(w.get('[data-section="detail-notice"]').text()).toBe(cs.nonprofitMembership.revisionDone)
+    expect(toast.success).toHaveBeenCalledWith(cs.nonprofitMembership.revisionDone)
     expect(w.emitted('changed')).toHaveLength(1)
     w.unmount()
   })
@@ -389,12 +403,9 @@ describe('Membership member detail', () => {
     expect(w.find('[data-action="void-revision"]').exists()).toBe(true)
     expect(w.get('[data-action="delete-member"]').attributes('disabled')).toBeDefined()
     expect(w.get('[data-action="delete-member"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_revisions)
-    const scroll = vi.fn()
-    Element.prototype.scrollIntoView = scroll
     await w.get('[data-action="void-revision"]').trigger('click'); await flushPromises()
-    // Formulář je pod historií; otevření ho posune na obrazovku.
-    expect(scroll).toHaveBeenCalledTimes(1)
-    expect(scroll.mock.contexts[0]).toBe(w.findComponent(CorrectionFlow).element.parentElement)
+    // Oprava se otevře v okně s nadpisem režimu a člena.
+    expect(w.get('[data-stub="modal"]').attributes('data-title')).toBe(`${cs.nonprofitMembership.correction.title_void} · M-1 · Synthetic member`)
     const flow = w.findComponent(CorrectionFlow)
     expect(flow.props('mode')).toBe('void')
     expect(flow.props('revision')).toMatchObject({ id: 1 })
@@ -591,7 +602,7 @@ describe('Membership member detail after a correction', () => {
     expect(w.find('[data-section="detail-stale"]').exists()).toBe(true)
     await w.get('[data-action="change-status"]').trigger('click'); await flushPromises()
     w.findComponent(RevisionForm).vm.$emit('done'); await flushPromises()
-    expect(w.find('[data-section="detail-notice"]').exists()).toBe(true)
+    expect(toast.success).toHaveBeenCalledWith(cs.nonprofitMembership.revisionDone)
     expect(w.find('[data-section="detail-stale"]').exists()).toBe(false)
     w.unmount()
   })
@@ -657,7 +668,7 @@ function mountedWithCorrection(props: Record<string, unknown> = {}) {
     props: { supplier: 5, canManage: true, memberId: 9, label: 'Synthetic member', periods: [period], ...props },
     global: {
       plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
-      stubs: { ActionBar, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow, MembershipCorrectionFlow: CorrectionFlow },
+      stubs: { ActionBar, Modal, RowActionsMenu, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow, MembershipCorrectionFlow: CorrectionFlow },
     },
   })
 }

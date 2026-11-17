@@ -55,8 +55,8 @@ const actions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <details class="rounded-lg border border-neutral-200 bg-surface p-4" data-section="reconciliation">
-    <summary class="cursor-pointer font-semibold">{{ t('nonprofitMembership.reconcileTitle') }}</summary>
+  <section class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" data-section="reconciliation">
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitMembership.reconcileTitle') }}</h2>
     <div class="mt-3 space-y-3">
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.reconcileHelp') }}</p>
       <label :class="[formLabel, 'max-w-lg']">{{ t('nonprofitMembership.accountingPeriod') }}
@@ -78,5 +78,5 @@ const actions = computed<ActionItem[]>(() => [
         <p v-if="!data.proof_complete" class="text-sm text-warning-700">{{ t('nonprofitMembership.reconcileIncomplete') }}</p>
       </div>
     </div>
-  </details>
+  </section>
 </template>

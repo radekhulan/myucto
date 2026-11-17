@@ -219,8 +219,7 @@ onBeforeUnmount(() => {alive = false; epoch++; recentTicket++; dimensionsTicket+
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" data-section="membership-batch">
-    <h2 class="font-semibold">{{ t('nonprofitMembership.batchTitle') }}</h2>
+  <section class="space-y-4" data-section="membership-batch">
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.batchHelp') }}</p>
     <p v-if="error" role="alert" :class="errorBox" data-section="batch-error">{{ error }}</p>
     <p v-if="notice" role="status" class="text-sm text-warning-700">{{ notice }}</p>

@@ -8,14 +8,14 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { formInput as field, formLabel } from '@/components/ui/formStyles'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
-import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnIconSm, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { accountingApi, type AccountingPeriod } from '@/api/accounting'
 import { membershipApi, type MemberRow, type MembershipListFilters } from '@/api/nonprofitMembership'
 import type { Client } from '@/api/clients'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
-import { badgeBase, errorBox, membershipError, memberStatusBadge, membershipMemberLabel } from './membershipFormat'
-import { clearListHandoff, MEMBERSHIP_LIST_PATH, memberDetailPath, membershipDetailNotice, membershipListNotice, readListHandoff, saveListHandoff } from './membershipPage'
+import { errorBox, loudBadge, quietBadge, membershipError, memberStatusBadge, membershipMemberLabel } from './membershipFormat'
+import { clearListHandoff, MEMBERSHIP_LIST_PATH, memberDetailPath, readListHandoff, saveListHandoff } from './membershipPage'
 import { useRowLink } from '@/composables/useRowLink'
 import MembershipReconciliation from './MembershipReconciliation.vue'
 import MembershipRates from './MembershipRates.vue'
@@ -23,33 +23,67 @@ import MembershipBatchFlow from './MembershipBatchFlow.vue'
 import MembershipImportFlow from './MembershipImportFlow.vue'
 import MembershipErasure from './MembershipErasure.vue'
 import TableSkeleton from '@/components/ui/TableSkeleton.vue'
+import Modal from '@/components/ui/Modal.vue'
+import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import { useToast } from '@/composables/useToast'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 const props = defineProps<{ supplier: number; canManage: boolean; canManageRates?: boolean; canReadErasure?: boolean; canWriteErasure?: boolean }>()
-const erasureOpen = ref(false)
 const { t, te, tm, rt } = useI18n()
+const toast = useToast()
 
 const members = ref<MemberRow[]>([])
 const nextAfter = ref<number | null>(null)
 const periods = ref<AccountingPeriod[]>([])
+const periodsLoaded = ref(false)
 const loading = ref(false)
 const error = ref('')
-const notice = ref('')
 // Chyba exportu: vlastní hláška, aby nemazala chybu načtení seznamu (ta blokuje hromadný předpis).
 const exportError = ref('')
 /** Pořadí spuštěných exportů: stažení i odemčení akcí patří jen poslednímu (změna firmy ho také zneplatní). */
 let exportRun = 0
-const selectionNotice = ref('')
 const clientId = ref<number | null>(null)
 const clientLabel = ref('')
 const memberNumber = ref('')
 const creating = ref(false)
+const createOpen = ref(false), createError = ref('')
 const root = ref<HTMLElement | null>(null)
 const dataVersion = ref(0)
 const route = useRoute(), router = useRouter()
+
+/**
+ * Stránka má záložky jako Uživatelé: seznam členů a vedle něj agendy, které se seznamem souvisí, ale nejsou jeho
+ * součástí (sazby, kontrola s účetnictvím, výmaz údajů). Záložka je v adrese (?tab=), aby šla otevřít odkazem.
+ */
+type WorkspaceTab = 'members' | 'rates' | 'reconciliation' | 'erasure'
+const tab = ref<WorkspaceTab>('members')
+const tabs = computed(() => [
+  { key: 'members' as const, label: t('nonprofitMembership.tabs.members'), icon: ICONS.user },
+  { key: 'rates' as const, label: t('nonprofitMembership.tabs.rates'), icon: ICONS.coin },
+  ...(periods.value.length ? [{ key: 'reconciliation' as const, label: t('nonprofitMembership.tabs.reconciliation'), icon: ICONS.badgeCheck }] : []),
+  ...(props.canReadErasure ? [{ key: 'erasure' as const, label: t('nonprofitMembership.tabs.erasure'), icon: ICONS.trash }] : []),
+])
+function tabFromQuery(): WorkspaceTab {
+  const value = route?.query.tab
+  return value === 'rates' || value === 'reconciliation' || value === 'erasure' ? value : 'members'
+}
+function setTab(next: WorkspaceTab) {
+  if (tab.value === next) return
+  tab.value = next
+  if (router) void router.replace({ query: { ...route?.query, tab: next === 'members' ? undefined : next } })
+}
+function onTabKey(event: KeyboardEvent) {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  event.preventDefault()
+  const list = tabs.value, index = list.findIndex(item => item.key === tab.value)
+  const next = list[(index + (event.key === 'ArrowRight' ? 1 : list.length - 1)) % list.length]!
+  setTab(next.key)
+  const host = (event.currentTarget as HTMLElement | null)?.parentElement
+  void nextTick(() => host?.querySelector<HTMLElement>(`[data-tab="${next.key}"]`)?.focus())
+}
 const titles = ref<string[]>([]), titlesError = ref(false)
 let titlesTicket = 0, hydrating = false, titlesYear: number | null | undefined
 let searchTimeout: ReturnType<typeof setTimeout> | null = null
@@ -89,7 +123,7 @@ function applyFilters(syncUrl = true, forceTitles = false) {
   // Tituly závisí na použitém roku; bez změny roku je volání díky deduplikaci v loadTitles levné.
   void loadTitles(forceTitles)
   if (syncUrl && router) void router.replace({query: {...route?.query, search: next.search || undefined, year: year || '', title_key: title || undefined, payment_status: next.payment_status === 'all' ? undefined : next.payment_status}})
-  if (checkedMembers.value.length) selectionNotice.value = t('nonprofitMembership.listSelectionCleared')
+  if (checkedMembers.value.length) toast.warning(t('nonprofitMembership.listSelectionCleared'))
   checkedMembers.value = []; members.value = []; nextAfter.value = null
   void load()
 }
@@ -101,7 +135,6 @@ async function membersErased() { dataVersion.value++; await load() }
 
 function checkMember(id: number, event: Event) {
   if (!props.canManage || batchLocked.value || loading.value) return
-  selectionNotice.value = ''
   const checked = (event.target as HTMLInputElement).checked
   if (checked && !checkedMembers.value.includes(id) && checkedMembers.value.length < 500) checkedMembers.value.push(id)
   else if (!checked) checkedMembers.value = checkedMembers.value.filter(x => x !== id)
@@ -148,8 +181,9 @@ const COLUMNS: ColumnDef[] = [
 const tbl = useTablePrefs('nonprofit-members', COLUMNS)
 const hasListFilters = computed(() => !!appliedFilters.value.search || !!appliedFilters.value.title_key || appliedFilters.value.payment_status !== 'all')
 const money = (cents: string | null) => formatMoneyMinor(cents === null ? null : Number(cents))
-const contributionBadge = (status: NonNullable<MemberRow['contribution']>['status']) => [badgeBase,
-  status === 'paid' ? 'bg-success-50 text-success-700' : status === 'unpaid' ? 'bg-danger-50 text-danger-600' : status === 'unproven' ? 'bg-warning-50 text-warning-700' : 'bg-neutral-100 text-neutral-600']
+/** Uhrazeno a bez předpisu jsou běžné stavy; neuhrazeno a neověřeno chtějí pozornost, proto mají výplň. */
+const contributionBadge = (status: NonNullable<MemberRow['contribution']>['status']) =>
+  status === 'paid' ? quietBadge('success') : status === 'unpaid' ? loudBadge('danger') : status === 'unproven' ? loudBadge('warning') : quietBadge('neutral')
 type RevisionState = { kind: 'current'; status: NonNullable<MemberRow['status']>; date: string } | { kind: 'future' | 'none' | 'voided'; full: string; short: string }
 function revisionState(row: MemberRow): RevisionState {
   if (row.revision_no === null || row.effective_from === null || row.status === null) {
@@ -180,7 +214,7 @@ async function load(append = false) {
       if (!alive || ticket !== generation || supplier !== props.supplier) return
       const valid = new Set(checked.member_ids)
       const remaining = selectedIds.filter(id => valid.has(id))
-      if (remaining.length !== selectedIds.length) selectionNotice.value = t('nonprofitMembership.listSelectionRefreshed')
+      if (remaining.length !== selectedIds.length) toast.warning(t('nonprofitMembership.listSelectionRefreshed'))
       checkedMembers.value = remaining
     }
     if (!alive || ticket !== generation || supplier !== props.supplier) return
@@ -198,9 +232,9 @@ async function loadPeriods() {
   try {
     const rows = await accountingApi.listPeriods()
     if (!alive || ticket !== generation || supplier !== props.supplier) return
-    periods.value = rows
+    periods.value = rows; periodsLoaded.value = true
   } catch {
-    if (alive && ticket === generation) periods.value = []
+    if (alive && ticket === generation) { periods.value = []; periodsLoaded.value = true }
   }
 }
 
@@ -233,20 +267,27 @@ function onClientCreated(client: Client) {
   clientModalOpen.value = false
 }
 
+function openCreate() { createError.value = ''; createOpen.value = true }
+/** Okno se během ukládání nezavře: odpověď by jinak neměla kam ohlásit chybu. */
+function closeCreate() {
+  if (creating.value) return
+  createOpen.value = false; clientModalOpen.value = false
+  clientId.value = null; clientLabel.value = ''; memberNumber.value = ''; createError.value = ''
+}
 async function create() {
   if (!props.canManage || creating.value || !clientId.value || !numberValid.value) return
   const ticket = ++createTicket, supplier = props.supplier, body = { client_id: clientId.value, member_number: memberNumber.value.trim() }
-  creating.value = true; error.value = ''; notice.value = ''
+  creating.value = true; createError.value = ''
   try {
     const created = await membershipApi.createMember(supplier, body)
     if (!alive || ticket !== createTicket || supplier !== props.supplier) return
-    notice.value = t('nonprofitMembership.memberCreated')
-    clientId.value = null; clientLabel.value = ''; memberNumber.value = ''
-    // Jako u kontaktu rovnou detail nového člena (tam se zapisuje jeho první revize); potvrzení ukáže detail.
-    membershipDetailNotice.value = t('nonprofitMembership.memberCreated')
+    creating.value = false
+    closeCreate()
+    // Jako u kontaktu rovnou detail nového člena (tam se zapisuje jeho první revize); oznámení přežije přechod.
+    toast.success(t('nonprofitMembership.memberCreated'))
     goToMember(created.id)
   } catch (e) {
-    if (alive && ticket === createTicket) error.value = membershipError({t, te}, e)
+    if (alive && ticket === createTicket) createError.value = membershipError({t, te}, e)
   } finally {
     if (alive && ticket === createTicket) creating.value = false
   }
@@ -257,18 +298,16 @@ watch(() => props.supplier, () => {
   generation++; createTicket++; titlesTicket++; hydrating = true
   checkedMembers.value = []; batchOpen.value = false; batchLocked.value = false; importOpen.value = false; exportError.value = ''; exporting.value = false; exportRun++
   search.value = ''; filterYear.value = appIsoDate().slice(0, 4); titleKey.value = ''; paymentStatus.value = 'all'
-  selectionNotice.value = ''
   appliedFilters.value = {search: '', year: Number(filterYear.value), title_key: '', payment_status: 'all'}
   hydrating = false; titles.value = []
   members.value = []; nextAfter.value = null; periods.value = []
   clientId.value = null; clientLabel.value = ''; memberNumber.value = ''
-  creating.value = false; error.value = ''; notice.value = ''
+  creating.value = false; createOpen.value = false; clientModalOpen.value = false; error.value = ''; createError.value = ''
+  periodsLoaded.value = false
   void reloadAll()
 })
 onBeforeUnmount(() => { cancelSearchTimer(); alive = false; titlesTicket++; generation++; createTicket++ })
 onMounted(async () => {
-  // Hláška akce z detailu, který se zavřel (smazání člena).
-  if (membershipListNotice.value) { notice.value = membershipListNotice.value; membershipListNotice.value = '' }
   // Návrat z detailu ve stejném panelu: výběr do dávky platí jen pro stejné filtry; load() ho ověří na serveru.
   const handoff = readListHandoff(props.supplier)
   let focusId: number | null = null
@@ -286,7 +325,7 @@ onActivated(() => {
   void reloadAll()
 })
 
-const importOpen = ref(false), exporting = ref(false)
+const importOpen = ref(false), importLocked = ref(false), exporting = ref(false)
 /**
  * Export použije filtry, podle kterých je seznam právě načtený, ne rozepsaný formulář.
  * Chyba exportu má vlastní hlášku: nesmí smazat chybu načtení seznamu (ta blokuje hromadný předpis) ani ji zastoupit.
@@ -313,15 +352,22 @@ function importChanged() {
   dataVersion.value++
   void load()
 }
+/** Hlavička jako u seznamu kontaktů: plná primární akce, ostatní obrysové, export a obnova v nabídce „…“. */
 const actions = computed<ActionItem[]>(() => [
-  { key: 'batch-open', label: t('nonprofitMembership.batchTitle'), icon: 'plus', variant: 'primary', show: props.canManage, disabled: batchLocked.value || loading.value || !!error.value, run: () => { batchOpen.value = true } },
+  { key: 'create-open', label: t('nonprofitMembership.createTitle'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: batchLocked.value, run: openCreate },
+  { key: 'batch-open', label: t('nonprofitMembership.batchTitle'), icon: 'doc', variant: 'primary', show: props.canManage, disabled: batchLocked.value || loading.value || !!error.value, run: openBatch },
   { key: 'import-open', label: t('nonprofitMembership.import.open'), icon: 'upload', show: props.canManage, disabled: importOpen.value, run: () => { importOpen.value = true } },
-  { key: 'export-xlsx', label: t('nonprofitMembership.exportXlsx'), icon: 'download', disabled: exporting.value || loading.value, run: () => { void exportMembers('xlsx') } },
-  { key: 'export-csv', label: t('nonprofitMembership.exportCsv'), icon: 'download', disabled: exporting.value || loading.value, run: () => { void exportMembers('csv') } },
-  { key: 'reload-members', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value, run: reloadMembers },
+  { key: 'export-xlsx', label: t('nonprofitMembership.exportXlsx'), icon: 'download', tier: 'overflow', disabled: exporting.value || loading.value, run: () => { void exportMembers('xlsx') } },
+  { key: 'export-csv', label: t('nonprofitMembership.exportCsv'), icon: 'download', tier: 'overflow', disabled: exporting.value || loading.value, run: () => { void exportMembers('csv') } },
+  { key: 'reload-members', label: t('nonprofitMembership.reload'), icon: 'cycle', tier: 'overflow', disabled: loading.value, run: reloadMembers },
 ])
+/** Hromadný předpis patří k seznamu: otevře se na záložce členů nad aktuálním výběrem. */
+function openBatch() { setTab('members'); batchOpen.value = true }
+/** Rozpracovanou dávku (zamčený výběr a filtry) okno nezavře, jinak by běžící kroky ztratily kontext. */
+function closeBatch() { if (!batchLocked.value) batchOpen.value = false }
 const createActions = computed<ActionItem[]>(() => [
   { key: 'create-member', label: t('nonprofitMembership.createMember'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: creating.value || !clientId.value || !numberValid.value, disabledReason: t('nonprofitMembership.createNeedsInput'), run: () => { void create() } },
+  { key: 'create-cancel', label: t('common.cancel'), icon: 'x', disabled: creating.value, run: closeCreate },
 ])
 
 /** Tituly závisí jen na firmě a roce; bez vynucení je pro rok, který se už načítá nebo načetl, nečteme znovu. */
@@ -400,7 +446,13 @@ watch([titleKey, paymentStatus], () => {
   cancelSearchTimer()
   searchTimeout = setTimeout(() => {searchTimeout = null; if (alive) applyFilters()}, 300)
 }, {flush: 'sync'})
-watch(() => route?.query, () => {
+tab.value = tabFromQuery()
+watch(() => route?.query.tab, () => { tab.value = tabFromQuery() })
+// Záložka, kterou stránka nenabízí (bez účetních období, bez práva na výmaz), vrací na seznam.
+watch(tabs, list => { if (!list.some(item => item.key === tab.value) && (tab.value !== 'reconciliation' || periodsLoaded.value)) tab.value = 'members' })
+watch(() => route?.query, (now, before) => {
+  // Přepnutí záložky filtry nemění.
+  if (now && before && JSON.stringify({ ...now, tab: undefined }) === JSON.stringify({ ...before, tab: undefined })) return
   cancelSearchTimer()
   // Navigace má přednost před rozepsaným hledáním; během dávky ji použijeme až po odemčení.
   if (batchLocked.value) {pendingRouteFilters = true; return}
@@ -422,66 +474,46 @@ watch(batchLocked, locked => {
 </script>
 
 <template>
-  <div ref="root" class="space-y-5">
-    <h1 class="text-xl font-semibold">{{ t('nonprofitMembership.title') }}</h1>
-    <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.help') }}</p>
-    <p v-if="!canManage" role="status" class="text-sm text-neutral-500" data-section="readonly">{{ t('nonprofitMembership.readonly') }}</p>
-    <p v-if="error" role="alert" :class="errorBox" data-section="workspace-error">{{ error }}</p>
-    <p v-if="notice" role="status" class="text-sm text-success-600" data-section="workspace-notice">{{ notice }}</p>
-    <p v-if="selectionNotice" role="status" class="text-sm text-warning-700">{{ selectionNotice }}</p>
-    <ActionBar :actions="actions" />
-    <p v-if="exportError" role="alert" :class="errorBox" data-section="export-error">{{ exportError }}</p>
-    <MembershipBatchFlow v-if="batchOpen" :key="supplier" :supplier="supplier" :can-manage="canManage" :periods="periods" :selected-member-ids="checkedMembers"
-      @changed="batchChanged" @lock="batchLocked = $event" @close="batchOpen = false" />
-    <MembershipImportFlow v-if="importOpen && canManage" :key="`import-${supplier}`" :supplier="supplier" :can-manage="canManage" @changed="importChanged" @close="importOpen = false" />
+  <div ref="root">
+    <!-- Hlavička jako u seznamu kontaktů: nadpis s popisem vlevo, akce vpravo. -->
+    <header class="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+      <div class="min-w-0">
+        <h1 class="text-2xl font-semibold">{{ t('nonprofitMembership.title') }}</h1>
+        <p class="mt-0.5 text-sm text-neutral-500">{{ t('nonprofitMembership.help') }}</p>
+      </div>
+      <ActionBar :actions="actions" />
+    </header>
+    <div class="space-y-3">
+      <p v-if="!canManage" role="status" class="text-sm text-neutral-500" data-section="readonly">{{ t('nonprofitMembership.readonly') }}</p>
+      <p v-if="error" role="alert" :class="errorBox" data-section="workspace-error">{{ error }}</p>
+      <p v-if="exportError" role="alert" :class="errorBox" data-section="export-error">{{ exportError }}</p>
+    </div>
 
-    <details class="rounded-lg border border-neutral-200 bg-surface p-4" data-section="rates-management">
-      <summary class="cursor-pointer font-semibold">{{ t('nonprofitMembership.ratesTitle') }}</summary>
-      <MembershipRates :key="supplier" class="mt-3" :supplier="supplier" :can-manage="!!canManageRates" />
-    </details>
+    <!-- Přepínač agend je záložka, ne tlačítko: tlačítka na stránce jsou akce (vzor Uživatelé). -->
+    <div role="tablist" class="mb-4 mt-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-neutral-200" :aria-label="t('nonprofitMembership.title')" data-section="membership-tabs">
+      <button v-for="item in tabs" :key="item.key" type="button" role="tab" :data-tab="item.key"
+        :aria-selected="tab === item.key" :tabindex="tab === item.key ? 0 : -1"
+        class="-mb-px inline-flex cursor-pointer items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2 text-sm transition-colors"
+        :class="tab === item.key ? 'border-primary-600 font-medium text-primary-700' : 'border-transparent text-neutral-600 hover:text-neutral-900'"
+        @click="setTab(item.key)" @keydown="onTabKey">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" /></svg>{{ item.label }}
+      </button>
+    </div>
 
-    <details v-if="canReadErasure" class="rounded-lg border border-neutral-200 bg-surface p-4" data-section="erasure-management" @toggle="erasureOpen = ($event.target as HTMLDetailsElement).open">
-      <summary class="cursor-pointer font-semibold">{{ t('nonprofitMembership.erasure.title') }}</summary>
-      <MembershipErasure :key="supplier" class="mt-3" :supplier="supplier" :can-write="!!canWriteErasure" :open="erasureOpen" @erased="membersErased" />
-    </details>
-
-    <section v-if="canManage" class="space-y-3 rounded-lg border border-neutral-200 bg-surface p-4" data-section="create-member">
-      <h2 class="font-semibold">{{ t('nonprofitMembership.createTitle') }}</h2>
-      <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.createHelp') }}</p>
-      <fieldset :disabled="creating" class="grid gap-3 sm:grid-cols-2">
-        <div :class="formLabel">
-          <span id="membership-client-label">{{ t('nonprofitMembership.client') }}</span>
-          <div class="mt-1 flex items-start gap-2">
-            <div class="min-w-0 flex-1" role="group" aria-labelledby="membership-client-label">
-              <ClientSearchSelect v-model="clientId" :selected-label="clientLabel || null" data-field="member-client" @selected="chooseClient" />
-            </div>
-            <button type="button" class="cursor-pointer shrink-0 h-9 px-3 inline-flex items-center gap-1.5 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md text-sm font-medium" :title="t('client.new_title')" :aria-label="t('client.new_title')" data-action="member-new-client" @click="clientModalOpen = true">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
-              <span class="hidden sm:inline">{{ t('client.new_title') }}</span>
-            </button>
-          </div>
-        </div>
-        <label :class="formLabel">{{ t('nonprofitMembership.memberNumber') }}<input v-model="memberNumber" :class="field" maxlength="80" data-field="member-number" /></label>
-      </fieldset>
-      <ActionBar :actions="createActions" />
-      <ClientFormModal v-if="clientModalOpen" @created="onClientCreated" @close="clientModalOpen = false" />
-    </section>
-
-    <section class="min-w-0 space-y-3" data-section="members" :aria-busy="loading ? 'true' : 'false'">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <h2 tabindex="-1" class="font-semibold focus:outline-none" data-focus="members-heading">{{ t('nonprofitMembership.members') }}</h2>
-        <p v-if="canManage && members.length" class="min-w-0 flex-1 text-sm text-neutral-500" :title="t('nonprofitMembership.batchSelectedCount', {count: checkedMembers.length})" data-section="batch-selected-count">{{ t('nonprofitMembership.listColumns.selectedCount', {count: checkedMembers.length}) }}<span class="sr-only">. {{ t('nonprofitMembership.batchSelectedCount', {count: checkedMembers.length}) }}</span></p>
-        <div class="flex flex-wrap items-center gap-2">
-          <ColumnPicker class="hidden md:block" :ctrl="tbl" />
-          <DensityToggle class="hidden md:block" :ctrl="tbl" />
+    <section v-show="tab === 'members'" class="min-w-0 space-y-3" data-section="members" role="tabpanel" :aria-busy="loading ? 'true' : 'false'">
+      <h2 tabindex="-1" class="sr-only" data-focus="members-heading">{{ t('nonprofitMembership.members') }}</h2>
+      <div class="flex flex-wrap items-start gap-2">
+        <FilterBar class="min-w-0 flex-1" :active-count="filterChips.length" collapsible :chips="filterChips" data-section="member-filters" @clear="clearFilter" @clear-all="clearFilter()">
+          <template #primary><label :class="formLabel">{{ t('nonprofitMembership.listSearch') }}<input v-model="search" :class="field" :disabled="batchLocked" maxlength="160" data-field="member-search" /></label></template>
+          <label :class="formLabel">{{ t('nonprofitMembership.listYear') }}<input v-model="filterYear" :class="field" :disabled="batchLocked" type="number" min="1900" max="9998" step="1" data-field="member-year" /></label>
+          <label :class="formLabel">{{ t('nonprofitMembership.titleKey') }}<SearchableSelect :model-value="titleKey || null" :options="titleOptions" :disabled="batchLocked" :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" data-field="member-title" @update:model-value="titleKey = typeof $event === 'string' ? $event : ''" /></label>
+          <label :class="formLabel">{{ t('nonprofitMembership.listPaymentStatus') }}<select v-model="paymentStatus" :class="field" :disabled="batchLocked" data-field="member-payment-status"><option v-for="status in ['all','paid','unpaid','unproven','none'] as const" :key="status" :value="status">{{ t(`nonprofitMembership.listStatus_${status}`) }}</option></select></label>
+        </FilterBar>
+        <div class="hidden items-center gap-2 md:flex">
+          <ColumnPicker :ctrl="tbl" />
+          <DensityToggle :ctrl="tbl" />
         </div>
       </div>
-      <FilterBar :active-count="filterChips.length" collapsible :chips="filterChips" data-section="member-filters" @clear="clearFilter" @clear-all="clearFilter()">
-        <template #primary><label :class="formLabel">{{ t('nonprofitMembership.listSearch') }}<input v-model="search" :class="field" :disabled="batchLocked" maxlength="160" data-field="member-search" /></label></template>
-        <label :class="formLabel">{{ t('nonprofitMembership.listYear') }}<input v-model="filterYear" :class="field" :disabled="batchLocked" type="number" min="1900" max="9998" step="1" data-field="member-year" /></label>
-        <label :class="formLabel">{{ t('nonprofitMembership.titleKey') }}<SearchableSelect :model-value="titleKey || null" :options="titleOptions" :disabled="batchLocked" :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" data-field="member-title" @update:model-value="titleKey = typeof $event === 'string' ? $event : ''" /></label>
-        <label :class="formLabel">{{ t('nonprofitMembership.listPaymentStatus') }}<select v-model="paymentStatus" :class="field" :disabled="batchLocked" data-field="member-payment-status"><option v-for="status in ['all','paid','unpaid','unproven','none'] as const" :key="status" :value="status">{{ t(`nonprofitMembership.listStatus_${status}`) }}</option></select></label>
-      </FilterBar>
       <p v-if="paymentStatus !== 'all'" class="text-xs text-neutral-500" data-section="status-year-help">{{ t('nonprofitMembership.listStatusNeedsYear') }}</p>
       <div v-if="titlesError" role="alert" :class="[errorBox, 'flex flex-wrap items-center gap-2']" data-section="titles-error">
         <span>{{ t('nonprofitMembership.titlesError') }}</span>
@@ -497,7 +529,7 @@ watch(batchLocked, locked => {
         <div v-else-if="!members.length && !error" data-section="members-empty">
           <EmptyState v-if="hasListFilters" variant="filtered" :title="t('nonprofitMembership.listNoResults')" :cta="batchLocked ? undefined : t('common.empty_state.clear_filters')" dense @action="clearFilter()" />
           <template v-else>
-            <EmptyState icon="user" :title="t('nonprofitMembership.membersEmpty')" dense />
+            <EmptyState icon="user" :title="t('nonprofitMembership.membersEmpty')" :cta="canManage ? t('nonprofitMembership.createTitle') : undefined" dense @action="openCreate" />
             <ol class="mx-auto max-w-md list-decimal space-y-1 px-4 pb-6 pl-9 text-sm text-neutral-600" data-section="members-steps">
               <li v-for="(step, index) in tm('nonprofitMembership.firstSteps')" :key="index">{{ rt(step) }}</li>
             </ol>
@@ -538,7 +570,7 @@ watch(batchLocked, locked => {
                 </td>
                 <td v-if="tbl.isVisible('membership')" class="whitespace-nowrap px-3 py-2.5 text-xs">
                   <template v-for="rev in [revisionState(row)]" :key="rev.kind">
-                    <span v-if="rev.kind === 'current'" class="flex items-center gap-2" data-field="member-revision"><span :class="memberStatusBadge(rev.status)" data-field="member-status">{{ t(`nonprofitMembership.status_${rev.status}`) }}</span><span class="text-neutral-600">{{ t('nonprofitMembership.sinceDate', { date: rev.date }) }}</span></span>
+                    <span v-if="rev.kind === 'current'" class="flex items-center gap-2" data-field="member-revision"><span :class="memberStatusBadge(rev.status)" data-field="member-status">{{ t(`nonprofitMembership.status_${rev.status}`) }}</span><span class="text-neutral-500">{{ t('nonprofitMembership.sinceDate', { date: rev.date }) }}</span></span>
                     <span v-else class="text-warning-700" :title="rev.full" data-field="member-revision">{{ rev.short }}<span class="sr-only">. {{ rev.full }}</span></span>
                   </template>
                 </td>
@@ -553,9 +585,9 @@ watch(batchLocked, locked => {
                 <td v-if="tbl.isVisible('paid')" class="whitespace-nowrap px-3 py-2.5 text-right font-mono tabular-nums" data-field="contribution-paid">{{ row.contribution?.claim_count ? money(row.contribution.paid_cents) : '—' }}</td>
                 <td v-if="tbl.isVisible('open')" class="whitespace-nowrap px-3 py-2.5 text-right font-mono tabular-nums" data-field="contribution-open">{{ row.contribution?.claim_count ? money(row.contribution.open_cents) : '—' }}</td>
                 <td class="px-3 py-1.5 text-right">
-                  <!-- Pod šířkou xl jen ikona, aby se tabulka vešla; popisek nese aria-label a title. -->
-                  <button type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" :aria-label="t('nonprofitMembership.openMember')" :title="t('nonprofitMembership.openMember')" data-action="open-member" @click.stop="openMember(row, $event)" @auxclick.stop.prevent="openMember(row, $event)">
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg><span class="hidden xl:inline">{{ t('nonprofitMembership.openMember') }}</span>
+                  <!-- Ikona jako v ostatních hustých seznamech; popisek nese aria-label a title. -->
+                  <button type="button" :class="btnIconSm('primary')" :aria-label="t('nonprofitMembership.openMember')" :title="t('nonprofitMembership.openMember')" data-action="open-member" @click.stop="openMember(row, $event)" @auxclick.stop.prevent="openMember(row, $event)">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
                   </button>
                 </td>
               </tr>
@@ -576,7 +608,7 @@ watch(batchLocked, locked => {
               <div class="min-w-0 flex-1 space-y-1 text-sm">
                 <p class="break-words font-medium text-neutral-900"><span class="font-mono text-xs text-neutral-500">{{ row.member_number }}</span> · {{ labelOf(row) }}</p>
                 <template v-for="rev in [revisionState(row)]" :key="rev.kind">
-                  <p v-if="rev.kind === 'current'" class="flex flex-wrap items-center gap-2 text-xs" data-field="member-revision"><span :class="memberStatusBadge(rev.status)" data-field="member-status">{{ t(`nonprofitMembership.status_${rev.status}`) }}</span><span class="text-neutral-600">{{ t('nonprofitMembership.sinceDate', { date: rev.date }) }}</span></p>
+                  <p v-if="rev.kind === 'current'" class="flex flex-wrap items-center gap-2 text-xs" data-field="member-revision"><span :class="memberStatusBadge(rev.status)" data-field="member-status">{{ t(`nonprofitMembership.status_${rev.status}`) }}</span><span class="text-neutral-500">{{ t('nonprofitMembership.sinceDate', { date: rev.date }) }}</span></p>
                   <p v-else class="text-xs text-warning-700" data-field="member-revision">{{ rev.full }}</p>
                 </template>
                 <template v-if="row.contribution">
@@ -591,14 +623,14 @@ watch(batchLocked, locked => {
                   </p>
                 </template>
               </div>
-              <button type="button" :class="[btnOutline('primary'), 'shrink-0 whitespace-nowrap']" data-action="open-member" @click.stop="openMember(row, $event)" @auxclick.stop.prevent="openMember(row, $event)">
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>{{ t('nonprofitMembership.openMember') }}
+              <button type="button" :class="[btnIconSm('primary'), 'shrink-0']" :aria-label="t('nonprofitMembership.openMember')" :title="t('nonprofitMembership.openMember')" data-action="open-member" @click.stop="openMember(row, $event)" @auxclick.stop.prevent="openMember(row, $event)">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
               </button>
             </div>
           </div>
         </div>
 
-        <div v-if="nextAfter !== null" class="flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200 px-4 py-3">
+        <div v-if="nextAfter !== null" class="flex flex-wrap items-center justify-center gap-2 border-t border-neutral-200 px-4 py-3">
           <button type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" data-action="more-members" :disabled="loading || exporting" @click="load(true)">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>{{ t('nonprofitMembership.moreMembers') }}
           </button>
@@ -606,6 +638,57 @@ watch(batchLocked, locked => {
       </div>
     </section>
 
-    <MembershipReconciliation v-if="periods.length" :supplier="supplier" :periods="periods" :data-version="dataVersion" />
+    <section v-if="tab === 'rates'" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" role="tabpanel" data-section="rates-management">
+      <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitMembership.ratesTitle') }}</h2>
+      <MembershipRates :key="supplier" :supplier="supplier" :can-manage="!!canManageRates" />
+    </section>
+
+    <div v-if="tab === 'reconciliation' && periods.length" role="tabpanel">
+      <MembershipReconciliation :supplier="supplier" :periods="periods" :data-version="dataVersion" />
+    </div>
+
+    <section v-if="tab === 'erasure' && canReadErasure" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" role="tabpanel" data-section="erasure-management">
+      <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitMembership.erasure.title') }}</h2>
+      <MembershipErasure :key="supplier" :supplier="supplier" :can-write="!!canWriteErasure" :open="tab === 'erasure'" @erased="membersErased" />
+    </section>
+
+    <!-- Výběr do hromadného předpisu: lišta u spodní hrany jako ve výpisu banky a automatizaci. -->
+    <BulkActionBar v-if="canManage && tab === 'members' && !batchOpen" :count="checkedMembers.length" @clear="checkedMembers = []">
+      <button type="button" :class="[btnFilled('primary'), 'whitespace-nowrap']" data-action="bulk-batch-open" :disabled="batchLocked || loading || !!error" @click="openBatch">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>{{ t('nonprofitMembership.batchTitle') }}
+      </button>
+    </BulkActionBar>
+
+    <Modal v-if="createOpen && canManage" :title="t('nonprofitMembership.createTitle')" width-class="max-w-xl" @close="closeCreate">
+      <form class="space-y-4" data-section="create-member" @submit.prevent="create()">
+        <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.createHelp') }}</p>
+        <p v-if="createError" role="alert" :class="errorBox" data-section="create-error">{{ createError }}</p>
+        <fieldset :disabled="creating" class="grid gap-3">
+          <div :class="formLabel">
+            <span id="membership-client-label">{{ t('nonprofitMembership.client') }}</span>
+            <div class="mt-1 flex items-start gap-2">
+              <div class="min-w-0 flex-1" role="group" aria-labelledby="membership-client-label">
+                <ClientSearchSelect v-model="clientId" :selected-label="clientLabel || null" data-field="member-client" @selected="chooseClient" />
+              </div>
+              <button type="button" :class="[btnOutline('primary'), 'shrink-0 whitespace-nowrap']" :title="t('client.new_title')" :aria-label="t('client.new_title')" data-action="member-new-client" @click="clientModalOpen = true">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                <span class="hidden sm:inline">{{ t('client.new_title') }}</span>
+              </button>
+            </div>
+          </div>
+          <label :class="formLabel">{{ t('nonprofitMembership.memberNumber') }}<input v-model="memberNumber" :class="field" maxlength="80" data-field="member-number" /></label>
+        </fieldset>
+        <ActionBar :actions="createActions" />
+      </form>
+      <ClientFormModal v-if="clientModalOpen" @created="onClientCreated" @close="clientModalOpen = false" />
+    </Modal>
+
+    <Modal v-if="batchOpen" :title="t('nonprofitMembership.batchTitle')" width-class="max-w-4xl" @close="closeBatch">
+      <MembershipBatchFlow :key="supplier" :supplier="supplier" :can-manage="canManage" :periods="periods" :selected-member-ids="checkedMembers"
+        @changed="batchChanged" @lock="batchLocked = $event" @close="batchOpen = false" />
+    </Modal>
+    <Modal v-if="importOpen && canManage" :title="t('nonprofitMembership.import.title')" width-class="max-w-3xl" @close="!importLocked && (importOpen = false)">
+      <MembershipImportFlow :key="`import-${supplier}`" :supplier="supplier" :can-manage="canManage" @changed="importChanged" @lock="importLocked = $event" @close="importOpen = false; importLocked = false" />
+    </Modal>
   </div>
 </template>

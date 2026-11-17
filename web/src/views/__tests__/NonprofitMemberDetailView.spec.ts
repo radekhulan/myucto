@@ -5,18 +5,21 @@ import { createI18n } from 'vue-i18n'
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
 import View from '../NonprofitMemberDetailView.vue'
-import { membershipDetailNotice, membershipListNotice, saveListHandoff } from '@/components/accounting/membership/membershipPage'
+import { saveListHandoff } from '@/components/accounting/membership/membershipPage'
 
 const auth = vi.hoisted(() => ({ user: { id: 1 } as { id: number } | null, csrfToken: 'synthetic-csrf', can: vi.fn() }))
 // Reaktivní jako skutečný store: přepnutí firmy musí stránka zaznamenat.
 const supplier = await vi.hoisted(async () => { const { reactive } = await import('vue'); return reactive({ currentSupplierId: 5 as number | null }) })
 const nav = vi.hoisted(() => ({ route: { params: { id: '7' } } as { params: Record<string, string> }, push: vi.fn(), replace: vi.fn() }))
 const accounting = vi.hoisted(() => ({ listPeriods: vi.fn() }))
+const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => auth }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => supplier }))
 vi.mock('@/api/accounting', () => ({ accountingApi: accounting }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => toast }))
 vi.mock('vue-router', async importOriginal => ({ ...await importOriginal<typeof import('vue-router')>(), useRoute: () => nav.route, useRouter: () => ({ push: nav.push, replace: nav.replace }) }))
-const Detail = defineComponent({ name: 'MembershipMemberDetail', props: ['supplier', 'canManage', 'memberId', 'label', 'periods'], emits: ['close', 'deleted', 'changed'], setup: () => () => h('div') })
+// Odkaz zpět patří do hlavičky detailu (slot), proto ho stub vykreslí.
+const Detail = defineComponent({ name: 'MembershipMemberDetail', props: ['supplier', 'canManage', 'memberId', 'label', 'periods'], emits: ['deleted', 'changed'], setup: (_p, { slots }) => () => h('div', slots.back?.()) })
 
 const period = { id: 11, supplier_id: 5, fiscal_year: 2026, starts_on: '2026-01-01', ends_on: '2026-12-31', status: 'open', closed_at: null, created_at: '' }
 const mounted = () => mount(View, { global: { plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })], stubs: { RouterLink: RouterLinkStub, MembershipMemberDetail: Detail } } })
@@ -27,7 +30,6 @@ beforeEach(() => {
   supplier.currentSupplierId = 5
   nav.route = { params: { id: '7' } }
   accounting.listPeriods.mockResolvedValue([period])
-  membershipListNotice.value = ''; membershipDetailNotice.value = ''
   sessionStorage.clear()
 })
 
@@ -52,8 +54,6 @@ it('returns to the list with the filters the list handed over, otherwise to the 
   const w = mounted(); await flushPromises()
   expect(w.get('[data-action="back-to-list"]').text()).toBe(cs.nonprofitMembership.backToList)
   expect(w.getComponent(RouterLinkStub).props('to')).toBe('/accounting/nonprofit-membership?year=2026&search=Synthetic')
-  w.findComponent(Detail).vm.$emit('close'); await flushPromises()
-  expect(nav.push).toHaveBeenCalledWith('/accounting/nonprofit-membership?year=2026&search=Synthetic')
   w.unmount()
 
   // Předání jiné firmy nebo cizí adresa: přímý odkaz vede na seznam bez filtrů.
@@ -67,12 +67,13 @@ it('returns to the list with the filters the list handed over, otherwise to the 
   foreign.unmount()
 })
 
-it('leaves a deleted member without a way back to its address and lets the list confirm the deletion', async () => {
+it('leaves a deleted member without a way back to its address and confirms the deletion', async () => {
   const w = mounted(); await flushPromises()
   w.findComponent(Detail).vm.$emit('deleted'); await flushPromises()
   expect(nav.replace).toHaveBeenCalledWith('/accounting/nonprofit-membership')
   expect(nav.push).not.toHaveBeenCalled()
-  expect(membershipListNotice.value).toBe(cs.nonprofitMembership.correction.done_delete)
+  // Oznámení je toast, ten přežije přechod na seznam ve stejném panelu.
+  expect(toast.success).toHaveBeenCalledWith(cs.nonprofitMembership.correction.done_delete)
   w.unmount()
 })
 
@@ -83,14 +84,6 @@ it('goes to the list when the company changes, because the member belongs to the
   expect(w.findComponent(Detail).exists()).toBe(false)
   await flushPromises()
   expect(nav.replace).toHaveBeenCalledWith('/accounting/nonprofit-membership')
-  w.unmount()
-})
-
-it('confirms a member created on the list once its page is shown', async () => {
-  membershipDetailNotice.value = cs.nonprofitMembership.memberCreated
-  const w = mounted(); await flushPromises()
-  expect(w.get('[data-section="member-page-notice"]').text()).toBe(cs.nonprofitMembership.memberCreated)
-  expect(membershipDetailNotice.value).toBe('')
   w.unmount()
 })
 

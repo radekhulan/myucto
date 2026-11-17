@@ -76,8 +76,7 @@ const actions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" data-section="revision-form">
-    <h3 class="font-semibold">{{ t('nonprofitMembership.revisionTitle') }}</h3>
+  <section class="space-y-4" data-section="revision-form">
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.revisionHelp') }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-600">{{ notice }}</p>
     <p v-if="commit.error.value" role="alert" :class="errorBox" data-section="rev-error">{{ commit.error.value }}</p>

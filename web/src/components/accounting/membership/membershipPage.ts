@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import type { MembershipListFilters } from '@/api/nonprofitMembership'
@@ -6,13 +6,6 @@ import type { MembershipListFilters } from '@/api/nonprofitMembership'
 /** Seznam členů a samostatná stránka detailu člena (jako seznam a detail kontaktu). */
 export const MEMBERSHIP_LIST_PATH = '/accounting/nonprofit-membership'
 export const memberDetailPath = (id: number) => `${MEMBERSHIP_LIST_PATH}/members/${id}`
-
-/**
- * Hlášky pro stránku, která se zobrazí po akci na té druhé (smazání člena ohlásí seznam, založení detail).
- * Stránka se připojí znovu, proto je drží modul; stránka ji při připojení přečte a vymaže.
- */
-export const membershipListNotice = ref('')
-export const membershipDetailNotice = ref('')
 
 /**
  * Předání stavu seznamu detailu otevřenému ve stejném panelu. Panely mají router nad paměťovou historií

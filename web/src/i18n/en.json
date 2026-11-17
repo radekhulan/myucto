@@ -41770,7 +41770,6 @@
     "listStatus_none": "No charge for the selected title or year",
     "backToList": "← Back to members",
     "listColumns": {
-      "selectedCount": "Selected for batch: {count} of 500",
       "name": "Member",
       "membership": "Membership",
       "payment": "Payment status",
@@ -42182,7 +42181,6 @@
     "batchSelected": "Selected members ({count})",
     "batchActive": "All active on the accounting date",
     "batchSelectionRequired": "Select at least one member in the list (up to 500), or choose all active members.",
-    "batchSelectedCount": "Selected for batch: {count} of up to 500. To include all active members, use the option in batch charges.",
     "batchSelectMember": "Select member {name} for batch charges",
     "batchContinuePreview": "Continue preparing preview",
     "batchConfirm": "Confirm batch and post charges",
@@ -42281,6 +42279,23 @@
       "reason_duplicate_client": "The contact or company ID appears with more than one new member (rows {lines}).",
       "reason_contact_create_forbidden": "A contact would have to be created, but you are not allowed to create contacts. Enter the ID or company ID of an existing contact.",
       "status_already_imported": "Already written"
+    },
+    "tabs": {
+      "members": "Members",
+      "rates": "Rates",
+      "reconciliation": "Accounting check",
+      "erasure": "Data erasure"
+    },
+    "detailColumns": {
+      "summary": "Overview",
+      "revision": "Revision",
+      "status": "Status",
+      "from": "Valid from",
+      "basis": "Basis",
+      "title": "Contribution",
+      "amount": "Amount",
+      "dates": "Accounting and due date",
+      "settlement": "Payment"
     }
   },
   "fx504": {

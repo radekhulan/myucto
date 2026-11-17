@@ -92,8 +92,7 @@ const actions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" data-section="reverse-flow">
-    <h3 class="break-words font-semibold">{{ t('nonprofitMembership.reverseTitle') }} · {{ member.member_number }} · {{ member.label }}</h3>
+  <section class="space-y-4" data-section="reverse-flow">
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.reverseHelp') }}</p>
     <dl class="grid gap-3 sm:grid-cols-4" data-section="reverse-claim">
       <div class="min-w-0"><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.titleKey') }}</dt><dd class="break-words">{{ claim.title_key }}</dd></div>

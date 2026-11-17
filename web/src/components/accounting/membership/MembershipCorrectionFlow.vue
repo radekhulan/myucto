@@ -91,7 +91,6 @@ watch(() => props.supplier, () => commit.reset())
 watch(commit.errorKind, kind => { if (STALE.includes(kind)) emit('stale') })
 watch(commit.locked, locked => emit('lock', locked))
 
-const title = computed(() => t(`nonprofitMembership.correction.title_${props.mode}`))
 const tone = computed(() => (props.mode === 'identity' ? 'success' : 'danger'))
 const actions = computed<ActionItem[]>(() => [
   { key: 'corr-close', label: t('nonprofitMembership.close'), icon: 'x', disabled: commit.locked.value, run: () => emit('close') },
@@ -102,8 +101,7 @@ const pending = computed(() => commit.review.value)
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" :data-section="`correction-${mode}`">
-    <h3 class="font-semibold">{{ title }}</h3>
+  <section class="space-y-4" :data-section="`correction-${mode}`">
     <p class="text-sm text-neutral-500">{{ t(`nonprofitMembership.correction.help_${mode}`) }}</p>
     <p v-if="commit.error.value" role="alert" :class="errorBox" data-section="corr-error">{{ commit.error.value }}</p>
 

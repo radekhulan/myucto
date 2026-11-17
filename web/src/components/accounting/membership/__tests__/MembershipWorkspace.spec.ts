@@ -5,7 +5,7 @@ import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatDate } from '@/composables/useFormat'
 import Workspace from '../MembershipWorkspace.vue'
-import { membershipDetailNotice, membershipListNotice, readListHandoff, saveListHandoff } from '../membershipPage'
+import { readListHandoff, saveListHandoff } from '../membershipPage'
 import MembershipBatchFlow from '../MembershipBatchFlow.vue'
 import FilterBar from '@/components/ui/FilterBar.vue'
 import type { MemberPage, MemberRow } from '@/api/nonprofitMembership'
@@ -27,6 +27,9 @@ vi.mock('@/api/clients', () => ({ clientsApi: {} }))
 const rowLink = vi.hoisted(() => ({ navigate: vi.fn() }))
 vi.mock('@/composables/useRowLink', () => ({ useRowLink: () => rowLink.navigate }))
 config.global.stubs = { ...config.global.stubs, RouterLink: RouterLinkStub }
+// Potvrzení a varování jdou jako v celé aplikaci do toastu.
+const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => toast }))
 vi.mock('@/api/nonprofitDppo', () => ({ nonprofitDppoApi: { profile: vi.fn() } }))
 
 const ActionBar = defineComponent({
@@ -50,6 +53,9 @@ const SearchableSelect = defineComponent({ props: ['modelValue', 'options', 'dis
 }, [h('option', {value: ''}), ...(p.options as {value: string | number; label: string}[]).map(x => h('option', {value: x.value}, x.label))]) })
 const ClientFormModal = defineComponent({ name: 'ClientFormModal', emits: ['created', 'close'], setup: () => () => h('div', { 'data-stub': 'client-modal' }) })
 const ImportFlow = defineComponent({ name: 'MembershipImportFlow', props: ['supplier', 'canManage'], emits: ['changed', 'close'], setup: () => () => h('div', { 'data-stub': 'import' }) })
+// Okno a lišta hromadných akcí se v testu vykreslí na místě (bez teleportu).
+const Modal = defineComponent({ name: 'Modal', props: ['title', 'widthClass'], emits: ['close'], setup: (p, { slots }) => () => h('div', { 'data-stub': 'modal', 'data-title': p.title }, slots.default?.()) })
+const BulkActionBar = defineComponent({ name: 'BulkActionBar', props: ['count'], emits: ['clear'], setup: (p, { slots }) => () => (p.count as number) > 0 ? h('div', { 'data-stub': 'bulk-bar', 'data-count': p.count }, slots.default?.()) : null })
 const Reconciliation = defineComponent({ name: 'MembershipReconciliation', props: ['supplier', 'periods', 'dataVersion'], setup: () => () => h('div', { 'data-stub': 'reconciliation' }) })
 
 const row = (id: number, revision: Partial<MemberRow> = {}): MemberRow => ({
@@ -64,19 +70,23 @@ function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
     props: { supplier: 5, canManage: true, ...props },
     global: {
       plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })],
-      stubs: { ActionBar, SearchableSelect, ClientSearchSelect, ClientFormModal, MembershipReconciliation: Reconciliation, MembershipBatchFlow: true, MembershipImportFlow: ImportFlow },
+      stubs: { ActionBar, SearchableSelect, ClientSearchSelect, ClientFormModal, MembershipReconciliation: Reconciliation, MembershipBatchFlow: true, MembershipImportFlow: ImportFlow, Modal, BulkActionBar, MembershipRates: true, MembershipErasure: true },
     },
   })
 }
 
 const DETAIL = (id: number) => `/accounting/nonprofit-membership/members/${id}`
 /** Poslední navigace řádku: cíl a zda jde do nového panelu (Ctrl). */
+/** Kontrola s účetnictvím je na vlastní záložce; verze dat se čte z ní. */
+async function reconciliationVersion(w: ReturnType<typeof mounted>) {
+  await w.get('[data-tab="reconciliation"]').trigger('click'); await flushPromises()
+  return w.getComponent(Reconciliation).props('dataVersion')
+}
 const lastNavigation = () => { const [to, event] = rowLink.navigate.mock.lastCall ?? []; return { to, newPanel: !!(event as MouseEvent | undefined)?.ctrlKey } }
 
 beforeEach(() => {
   vi.clearAllMocks()
   sessionStorage.clear()
-  membershipListNotice.value = ''; membershipDetailNotice.value = ''
   navigation.route = reactive({query: {}})
   navigation.replace.mockImplementation(({query}: {query: Record<string, string>}) => {navigation.route.query = query; return Promise.resolve()})
   api.titles.mockResolvedValue({items: ['SYNTHETIC'], next_after_title_key: null})
@@ -159,14 +169,14 @@ describe('Membership workspace', () => {
     expect(first.get('[data-field="member-number"]').text()).toBe('M-1')
     expect(first.get('[data-field="member-name"]').text()).toBe('Synthetic member 1')
     expect(w.findAll('thead th').map(th => th.text())).toEqual(expect.arrayContaining([cs.nonprofitMembership.listColumns.name, cs.nonprofitMembership.listColumns.prescribed, cs.nonprofitMembership.listColumns.paid, cs.nonprofitMembership.listColumns.open]))
-    const count = w.get('[data-section="members"] [data-section="batch-selected-count"]')
-    expect(count.text()).toContain(cs.nonprofitMembership.listColumns.selectedCount.replace('{count}', '0'))
-    expect(count.attributes('title')).toBe(cs.nonprofitMembership.batchSelectedCount.replace('{count}', '0'))
+    // Počet vybraných nese lišta hromadných akcí; bez výběru se nevykresluje.
+    expect(w.find('[data-stub="bulk-bar"]').exists()).toBe(false)
     // Sudé řádky mají neprůhledné pozadí, jinak by pod lepivou buňkou prosvítal posunutý obsah.
     expect(w.get('[data-member="2"]').classes()).toContain('even:bg-neutral-50')
     expect(w.get('[data-member="1"] [data-action="open-member"]').attributes('aria-label')).toBe(cs.nonprofitMembership.openMember)
     await w.get('[data-member-card="1"] [data-action="batch-check-member"]').setValue(true)
     expect((w.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(true)
+    expect(w.get('[data-stub="bulk-bar"]').attributes('data-count')).toBe('1')
     // Zaškrtnutí detail neotevírá; klik na kartu i na buňku řádku otevře samostatnou stránku člena.
     expect(rowLink.navigate).not.toHaveBeenCalled()
     await w.get('[data-member-card="2"]').trigger('click');await flushPromises()
@@ -219,7 +229,7 @@ describe('Membership workspace', () => {
     expect(api.selectionCheck).toHaveBeenCalledWith(5, [1,2], expect.objectContaining({search:'Synthetic'}))
     expect((back.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(true)
     expect((back.get('[data-member="2"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
-    expect(back.text()).toContain(cs.nonprofitMembership.listSelectionRefreshed)
+    expect(toast.warning).toHaveBeenCalledWith(cs.nonprofitMembership.listSelectionRefreshed)
     // Fokus na řádek člena, ze kterého se detail otevřel.
     expect(document.activeElement).toBe(back.get('[data-member="3"] [data-action="open-member"]').element)
     expect(readListHandoff(5)).toBeNull()
@@ -234,7 +244,7 @@ describe('Membership workspace', () => {
     await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
     await w.get('[data-member="2"] [data-action="batch-check-member"]').setValue(true)
     await w.get('[data-field="member-payment-status"]').setValue('unpaid');await flushPromises()
-    expect(w.text()).toContain(cs.nonprofitMembership.listSelectionCleared)
+    expect(toast.warning).toHaveBeenCalledWith(cs.nonprofitMembership.listSelectionCleared)
     await w.get('[data-member="1"] [data-action="open-member"]').trigger('click')
     w.unmount()
     navigation.route = reactive({query: {}})
@@ -260,15 +270,11 @@ describe('Membership workspace', () => {
     await w.get('[data-member="2"] [data-action="open-member"]').trigger('click')
     expect(lastNavigation()).toEqual({ to: DETAIL(2), newPanel: true })
     w.unmount()
-    // Založení člena s otevřeným hromadným předpisem: dávka zůstane, detail v novém panelu s potvrzením.
+    // Rozběhnutý hromadný předpis zamyká založení člena: jeho okno by se otevřelo nad dávkou.
     const b=mounted();await flushPromises()
     await b.get('[data-action="batch-open"]').trigger('click');await flushPromises()
-    await b.get('[data-field="member-client"]').setValue('3')
-    await b.get('[data-field="member-number"]').setValue('M-9')
-    await b.get('[data-action="create-member"]').trigger('click');await flushPromises()
-    expect(lastNavigation()).toEqual({ to: DETAIL(9), newPanel: true })
-    expect(b.findComponent(MembershipBatchFlow).exists()).toBe(true)
-    expect(membershipDetailNotice.value).toBe(cs.nonprofitMembership.memberCreated)
+    b.findComponent(MembershipBatchFlow).vm.$emit('lock', true);await flushPromises()
+    expect(b.get('[data-action="create-open"]').attributes('disabled')).toBeDefined()
     b.unmount()
   })
   it('hides the selection column without write access', async () => {
@@ -299,16 +305,6 @@ describe('Membership workspace', () => {
     locked.unmount()
   })
 
-  it('confirms a member deleted on its detail page once the list is shown again', async () => {
-    membershipListNotice.value = cs.nonprofitMembership.correction.done_delete
-    const w=mounted();await flushPromises()
-    expect(w.get('[data-section="workspace-notice"]').text()).toBe(cs.nonprofitMembership.correction.done_delete)
-    expect(membershipListNotice.value).toBe('')
-    w.unmount()
-    const again=mounted();await flushPromises()
-    expect(again.find('[data-section="workspace-notice"]').exists()).toBe(false)
-    again.unmount()
-  })
   it('clears batch selection when a data refresh removes members from the current filter', async () => {
     const w=mounted();await flushPromises()
     await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
@@ -345,7 +341,7 @@ describe('Membership workspace', () => {
     await new Promise(resolve => setTimeout(resolve,320));await flushPromises()
     expect(api.members).toHaveBeenLastCalledWith(5,0,50,{search:'Synthetic',year:Number(appIsoDate().slice(0,4)),title_key:'SYNTHETIC',payment_status:'unpaid'})
     expect((w.get('[data-member="1"] [data-action="batch-check-member"]').element as HTMLInputElement).checked).toBe(false)
-    expect(w.text()).toContain(cs.nonprofitMembership.listSelectionCleared)
+    expect(toast.warning).toHaveBeenCalledWith(cs.nonprofitMembership.listSelectionCleared)
     w.unmount()
   })
 
@@ -385,9 +381,12 @@ describe('Membership workspace', () => {
     await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
     const batch=w.findComponent(MembershipBatchFlow)
     expect(batch.props('selectedMemberIds')).toEqual([1])
+    // Hromadný předpis je v okně nad seznamem, hromadná lišta se pod ním skryje.
+    expect(w.get('[data-stub="modal"]').attributes('data-title')).toBe(cs.nonprofitMembership.batchTitle)
+    expect(w.find('[data-stub="bulk-bar"]').exists()).toBe(false)
     batch.vm.$emit('changed');await flushPromises()
     expect(api.members).toHaveBeenCalledTimes(2)
-    expect(w.findComponent(Reconciliation).props('dataVersion')).toBe(1)
+    expect(await reconciliationVersion(w)).toBe(1)
     w.unmount()
   })
   it('refreshes the register and accounting periods after returning to a cached workspace', async () => {
@@ -426,7 +425,8 @@ describe('Membership workspace', () => {
     expect(current.text()).toContain(cs.nonprofitMembership.status_active)
     expect(current.text()).toContain(formatDate('2020-01-01'))
     expect(current.text()).not.toContain('2020-01-01')
-    expect(current.get('[data-field="member-status"]').classes()).toEqual(expect.arrayContaining(['rounded-full', 'bg-success-50', 'text-success-600']))
+    // Běžný stav je tichý štítek s tečkou jako na fakturách.
+    expect(current.get('[data-field="member-status"]').classes()).toEqual(expect.arrayContaining(['badge', 'badge-quiet']))
     expect(current.classes()).not.toContain('text-warning-700')
     const future = w.get('[data-member="2"] [data-field="member-revision"]')
     const futureFull = cs.nonprofitMembership.futureRevision.replace('{status}', cs.nonprofitMembership.status_ended).replace('{date}', formatDate('2999-01-01'))
@@ -482,10 +482,14 @@ describe('Membership workspace', () => {
   it('creates a member only on explicit request from a chosen contact and a member number', async () => {
     const w = mounted()
     await flushPromises()
+    // Založení je v okně jako u ostatních seznamů; nad seznamem není formulář.
+    expect(w.find('[data-section="create-member"]').exists()).toBe(false)
+    await w.get('[data-action="create-open"]').trigger('click')
+    expect(w.get('[data-stub="modal"]').attributes('data-title')).toBe(cs.nonprofitMembership.createTitle)
     expect(api.createMember).not.toHaveBeenCalled()
     expect(w.get('[data-action="create-member"]').attributes('disabled')).toBeDefined()
     await w.get('[data-field="member-client"]').setValue('3')
-    await w.get('[data-field="member-number"]').setValue(' M-9 ')
+    await w.get('[data-section="create-member"] [data-field="member-number"]').setValue(' M-9 ')
     expect(api.createMember).not.toHaveBeenCalled()
     await w.get('[data-action="create-member"]').trigger('click')
     await flushPromises()
@@ -493,7 +497,8 @@ describe('Membership workspace', () => {
     expect(api.createMember).toHaveBeenCalledWith(5, { client_id: 3, member_number: 'M-9' })
     // Jako u kontaktu: po založení rovnou stránka nového člena (zapíše se mu první revize).
     expect(lastNavigation()).toEqual({ to: DETAIL(9), newPanel: false })
-    expect(w.get('[data-section="workspace-notice"]').text()).toBe(cs.nonprofitMembership.memberCreated)
+    expect(toast.success).toHaveBeenCalledWith(cs.nonprofitMembership.memberCreated)
+    expect(w.find('[data-section="create-member"]').exists()).toBe(false)
     w.unmount()
   })
 
@@ -501,13 +506,14 @@ describe('Membership workspace', () => {
     api.createMember.mockResolvedValue({ id: 9, client_id: 44 })
     const w = mounted()
     await flushPromises()
+    await w.get('[data-action="create-open"]').trigger('click')
     expect(w.find('[data-stub="client-modal"]').exists()).toBe(false)
     await w.get('[data-action="member-new-client"]').trigger('click')
     w.findComponent(ClientFormModal).vm.$emit('created', { id: 44, company_name: 'Synthetic new contact' })
     await flushPromises()
     expect(w.find('[data-stub="client-modal"]').exists()).toBe(false)
     expect(w.findComponent(ClientSearchSelect).props()).toMatchObject({ modelValue: 44, selectedLabel: 'Synthetic new contact' })
-    await w.get('[data-field="member-number"]').setValue('M-44')
+    await w.get('[data-section="create-member"] [data-field="member-number"]').setValue('M-44')
     await w.get('[data-action="create-member"]').trigger('click')
     await flushPromises()
     expect(api.createMember).toHaveBeenCalledWith(5, { client_id: 44, member_number: 'M-44' })
@@ -518,11 +524,14 @@ describe('Membership workspace', () => {
     api.createMember.mockRejectedValue({ response: { status: 409, data: { error: { code: 'nonprofit_membership_identity_conflict', message: 'Synthetic identity conflict' } } } })
     const w = mounted()
     await flushPromises()
+    await w.get('[data-action="create-open"]').trigger('click')
     await w.get('[data-field="member-client"]').setValue('3')
-    await w.get('[data-field="member-number"]').setValue('M-1')
+    await w.get('[data-section="create-member"] [data-field="member-number"]').setValue('M-1')
     await w.get('[data-action="create-member"]').trigger('click')
     await flushPromises()
-    expect(w.get('[data-section="workspace-error"]').text()).toContain(cs.nonprofitMembership.serverErrors.nonprofit_membership_identity_conflict)
+    // Chyba zůstává v okně u formuláře, rozepsané údaje se neztratí.
+    expect(w.get('[data-section="create-error"]').text()).toContain(cs.nonprofitMembership.serverErrors.nonprofit_membership_identity_conflict)
+    expect((w.get('[data-section="create-member"] [data-field="member-number"]').element as HTMLInputElement).value).toBe('M-1')
     expect(rowLink.navigate).not.toHaveBeenCalled()
     w.unmount()
   })
@@ -582,12 +591,30 @@ describe('Membership workspace', () => {
     w.unmount()
   })
 
-  it('places the period check below the member list', async () => {
+  it('splits the register, rates, accounting check and erasure into tabs kept in the address', async () => {
     const w = mounted()
     await flushPromises()
-    const sections = Array.from<Element>(w.element.querySelectorAll('[data-section="members"], [data-stub="reconciliation"]')).map(el => el.getAttribute('data-section') ?? 'reconciliation')
-    expect(sections).toEqual(['members', 'reconciliation'])
+    expect(w.findAll('[role="tab"]').map(tab => tab.attributes('data-tab'))).toEqual(['members', 'rates', 'reconciliation'])
+    expect(w.get('[data-tab="members"]').attributes('aria-selected')).toBe('true')
+    expect(w.find('[data-stub="reconciliation"]').exists()).toBe(false)
+    await w.get('[data-tab="reconciliation"]').trigger('click'); await flushPromises()
+    expect(w.find('[data-stub="reconciliation"]').exists()).toBe(true)
+    expect((w.get('[data-section="members"]').element as HTMLElement).style.display).toBe('none')
+    expect(navigation.route.query).toMatchObject({ tab: 'reconciliation' })
+    // Přepnutí záložky seznam znovu nenačítá.
+    expect(api.members).toHaveBeenCalledTimes(1)
+    await w.get('[data-tab="reconciliation"]').trigger('keydown', { key: 'ArrowRight' }); await flushPromises()
+    expect(w.get('[data-tab="members"]').attributes('aria-selected')).toBe('true')
+    expect(navigation.route.query.tab).toBeUndefined()
     w.unmount()
+
+    // Záložka z adresy; výmaz jen s právem ke čtení.
+    navigation.route = reactive({ query: { tab: 'rates' } })
+    const rates = mounted({ canReadErasure: true }); await flushPromises()
+    expect(rates.get('[data-tab="rates"]').attributes('aria-selected')).toBe('true')
+    expect(rates.find('[data-section="rates-management"]').exists()).toBe(true)
+    expect(rates.findAll('[role="tab"]').map(tab => tab.attributes('data-tab'))).toContain('erasure')
+    rates.unmount()
   })
 
   it('waits until the year is typed before loading members or titles', async () => {
@@ -879,7 +906,7 @@ describe('Membership workspace', () => {
     const calls = api.members.mock.calls.length
     panel.vm.$emit('changed'); await flushPromises()
     expect(api.members).toHaveBeenCalledTimes(calls + 1)
-    expect(w.findComponent(Reconciliation).props('dataVersion')).toBeGreaterThan(0)
+    expect(await reconciliationVersion(w)).toBeGreaterThan(0)
     api.exportMembers.mockRejectedValueOnce({ response: { data: { error: { code: 'nonprofit_membership_export_too_large' } } } })
     await w.get('[data-action="export-xlsx"]').trigger('click'); await flushPromises()
     expect(w.find('[data-section="export-error"]').exists()).toBe(true)

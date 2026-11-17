@@ -405,8 +405,7 @@ const actions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" data-section="issue-flow">
-    <h3 v-if="!batchMode" class="break-words font-semibold">{{ t('nonprofitMembership.issueTitle') }} · {{ member.member_number }} · {{ member.label }}</h3>
+  <section class="space-y-4" data-section="issue-flow">
     <div ref="ratePicker"><MembershipRates :key="supplier" :supplier="supplier" :can-manage="false" selectable :allow-manual="!batchMode" :disabled="inputsLocked || !!pendingRate" @selected="applyRate" /></div>
     <div v-if="pendingRate" :class="warningBox" role="alert" data-section="rate-overwrite">
       <p>{{ t('nonprofitMembership.rateOverwriteDimensions') }}</p>

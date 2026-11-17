@@ -52,7 +52,8 @@ describe('Membership correction flow', () => {
     for (const mode of ['identity', 'delete', 'void'] as const) {
       const w = mounted({ mode, revision }, locale)
       const messages = (locale === 'cs' ? cs : en).nonprofitMembership.correction as Record<string, string>
-      expect(w.text()).toContain(messages[`title_${mode}`])
+      // Nadpis nese okno detailu; tok sám ukazuje nápovědu režimu.
+      expect(w.text()).toContain(messages[`help_${mode}`])
       w.unmount()
     }
   })
