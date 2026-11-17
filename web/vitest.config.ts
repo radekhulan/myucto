@@ -52,7 +52,7 @@ const nativeDomTests = [
   'src/components/workspace/__tests__/{WorkspaceWindowSwitcher,WorkspaceFavorites}.spec.ts',
   'src/pages/tax-evidence/__tests__/CashJournal.spec.ts',
   'src/components/accounting/__tests__/SecuritiesDebt504Workspace.spec.ts',
-  'src/components/accounting/membership/__tests__/MembershipWorkspace.spec.ts',
+  'src/components/accounting/membership/__tests__/{MembershipWorkspace,MembershipMemberDetail}.spec.ts',
   'src/api/__tests__/{payrollRegzel,payrollDocuments}.spec.ts',
   'src/pages/documents/__tests__/ScanAttach.spec.ts',
   'src/pages/clients/__tests__/{ClientForm.emailFormat,ClientForm.validation}.spec.ts',

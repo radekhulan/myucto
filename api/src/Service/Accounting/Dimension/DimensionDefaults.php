@@ -666,11 +666,94 @@ final class DimensionDefaults
                 ];
             }
         }
+        array_push($documents, ...$this->membershipClaims($supplierId, $transactionId, $withOrigins));
         return [
             'incoming' => (float) $tx['amount'] > 0,
             'documents' => $documents,
             'statement_account' => ['number' => (string) ($tx['account_number'] ?? ''), 'bank' => (string) ($tx['bank_code'] ?? '')],
         ];
+    }
+
+    /** @var array{0:int,1:int,2:list<int>}|null firma, pohyb a předpisy, které právě zaúčtovávané párování hradí */
+    private static ?array $pendingMembershipClaims = null;
+
+    /**
+     * Jen pro {@see \MyInvoice\Service\Nonprofit\Membership\MembershipBankMatchService::match()}: párování
+     * zaúčtovává dosud nezaúčtovaný pohyb dřív, než může vzniknout okruh. Razítka zápisu i kontrola pravidel
+     * dimenzí tak vidí dimenze hrazených předpisů už při zaúčtování (jinak by povinné pravidlo na 315
+     * nebo systémové dimenze zápis odmítly, i když je předpis nese). Platí jen pro tento pohyb a dokud
+     * okruh neexistuje.
+     *
+     * @param list<int> $claimIds
+     */
+    public static function withPendingMembershipClaims(int $supplierId, int $transactionId, array $claimIds, callable $post): mixed
+    {
+        $previous = self::$pendingMembershipClaims;
+        self::$pendingMembershipClaims = [$supplierId, $transactionId, array_values(array_map('intval', $claimIds))];
+        try {
+            return $post();
+        } finally {
+            self::$pendingMembershipClaims = $previous;
+        }
+    }
+
+    /**
+     * Členské předpisy hrazené pohybem (nativní párování bankovního zápisu s řádkem pohledávky,
+     * {@see \MyInvoice\Service\Nonprofit\Membership\MembershipBankPaymentGuard::entryUsedSql()}).
+     * Předpis nemá vlastní dimenze dokladu: hlavičkou jsou dimenze jeho řádku pohledávky,
+     * aby se úhrada vyrovnala s pohledávkou i po dimenzi (stejný požadavek jako saldokonto
+     * faktur, #312). Jen podvojné účetnictví; daňová evidence předpisy nemá.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function membershipClaims(int $supplierId, int $transactionId, bool $withOrigins): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT c.id, c.amount_cents, l.id AS line_id
+               FROM journal_entries be
+               JOIN journal_line_pairing_items bp ON bp.supplier_id = be.supplier_id AND bp.entry_id = be.id
+               JOIN journal_line_pairing_items cp ON cp.supplier_id = bp.supplier_id AND cp.pairing_id = bp.pairing_id
+                AND cp.entry_id <> be.id
+               JOIN nonprofit_membership_charge_operations mop ON mop.supplier_id = cp.supplier_id
+                AND mop.journal_entry_id = cp.entry_id AND mop.operation = 'issue'
+               JOIN journal_entry_lines l ON l.supplier_id = cp.supplier_id AND l.entry_id = cp.entry_id
+                AND l.line_no = cp.line_no AND l.account_id = cp.account_id AND l.id = mop.receivable_line_id
+               JOIN nonprofit_membership_charge_claims c ON c.supplier_id = mop.supplier_id
+                AND c.operation_id = mop.id AND c.kind = 'issue'
+              WHERE be.supplier_id = ? AND be.source_type = 'bank' AND be.source_id = ? AND be.reversed_by IS NULL
+           GROUP BY c.id, c.amount_cents, l.id
+           ORDER BY c.id"
+        );
+        $stmt->execute([$supplierId, $transactionId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $pending = self::$pendingMembershipClaims;
+        if ($rows === [] && $pending !== null && $pending[0] === $supplierId && $pending[1] === $transactionId && $pending[2] !== []) {
+            $marks = implode(',', array_fill(0, count($pending[2]), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT c.id, c.amount_cents, mop.receivable_line_id AS line_id
+                   FROM nonprofit_membership_charge_claims c
+                   JOIN nonprofit_membership_charge_operations mop ON mop.supplier_id = c.supplier_id
+                    AND mop.id = c.operation_id AND mop.operation = 'issue'
+                  WHERE c.supplier_id = ? AND c.kind = 'issue' AND c.id IN ($marks)
+               ORDER BY c.id"
+            );
+            $stmt->execute([$supplierId, ...$pending[2]]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+        if ($rows === []) {
+            return [];
+        }
+        $assignments = new DimensionAssignmentRepository($this->db);
+        $lineIds = array_map(static fn (array $r): int => (int) $r['line_id'], $rows);
+        $dims = $assignments->lineDimensions($supplierId, $lineIds);
+        $origins = $withOrigins ? $assignments->lineOrigins($supplierId, $lineIds) : [];
+        return array_map(static fn (array $r): array => [
+            'doc_type' => 'membership_claim',
+            'doc_id' => (int) $r['id'],
+            'amount' => round((int) $r['amount_cents'] / 100, 2),
+            'header' => $dims[(int) $r['line_id']] ?? [],
+            ...($withOrigins ? ['origins' => $origins[(int) $r['line_id']] ?? []] : []),
+        ], $rows);
     }
 
     /**

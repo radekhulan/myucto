@@ -12,7 +12,9 @@ use MyInvoice\Repository\OtherItemRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
+use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
 use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
+use MyInvoice\Service\Nonprofit\Membership\MembershipBankPaymentGuard;
 use PDO;
 
 final class OtherItemService
@@ -1123,6 +1125,7 @@ final class OtherItemService
 
     private function bankPayment(int $supplierId, int $id, string $side): array
     {
+        (new MembershipBankPaymentGuard($this->db))->assertSourceMutable($supplierId, 'bank', $id);
         $stmt = $this->db->pdo()->prepare(
             'SELECT bt.amount, bt.posted_at payment_on, COALESCE(bt.currency, bs.currency, \'CZK\') currency,
                     bt.matched_invoice_id, bt.match_status
@@ -1168,12 +1171,13 @@ final class OtherItemService
 
     /**
      * Bankovní pohyb je volný k přiřazení ostatní položce: CZK, nespárovaný s fakturou,
-     * mzdou ani zálohou na daň a má nevyčerpanou částku. Předpokládá aliasy `bt`
+     * mzdou, zálohou na daň ani členským předpisem a má nevyčerpanou částku. Členské párování
+     * smí členskou úhradu zopakovat (`$membershipReplay`); shodu předpisů ověří samo. Předpokládá aliasy `bt`
      * (bank_transactions), `bs` (bank_statements) a `a` (součet aktivních přiřazení
      * pohybu jako `used_amount`). Sdílí ji výběr plateb z detailu položky i párování
      * z banky ({@see OtherItemBankMatchService}), aby se pravidla nerozešla.
      */
-    public static function freeBankPaymentSql(): string
+    public static function freeBankPaymentSql(bool $membershipReplay = false): string
     {
         return 'COALESCE(bt.currency, bs.currency, \'CZK\') = \'CZK\'
                     AND bt.match_status = \'unmatched\' AND bt.matched_invoice_id IS NULL
@@ -1185,7 +1189,8 @@ final class OtherItemService
                     AND NOT EXISTS (SELECT 1 FROM payroll_payment_matches ppm
                                      WHERE ppm.bank_transaction_id = bt.id AND ppm.supplier_id = bs.supplier_id)
                     AND NOT EXISTS (SELECT 1 FROM tax_advance_schedules tas
-                                     WHERE tas.matched_transaction_id = bt.id AND tas.supplier_id = bs.supplier_id)';
+                                     WHERE tas.matched_transaction_id = bt.id AND tas.supplier_id = bs.supplier_id)'
+            . ($membershipReplay ? '' : ' AND NOT ' . NonInvoiceBankTransactionScope::membershipSql('bs.supplier_id', 'bt.id'));
     }
 
     /**

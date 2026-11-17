@@ -39,6 +39,7 @@ use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Bank\Match\MatchSuggestionException;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
 use MyInvoice\Service\Bank\Match\SubsetSumSolver;
+use MyInvoice\Service\Bank\OtherItemPaymentMatchReader;
 use MyInvoice\Service\Bank\StatementScanner;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\IpMatcher;
@@ -1946,7 +1947,8 @@ final class BankStatementAction
             }
 
             $matchedPurchasesByTx = PurchasePaymentMatchReader::byTransactions($this->db->pdo(), $sid, $txIds);
-            $matchedOtherItemsByTx = \MyInvoice\Service\Bank\OtherItemPaymentMatchReader::byTransactions($this->db->pdo(), $sid, $txIds);
+            $matchedOtherItemsByTx = OtherItemPaymentMatchReader::byTransactions($this->db->pdo(), $sid, $txIds);
+            $matchedMembershipByTx = OtherItemPaymentMatchReader::membershipByTransactions($this->db->pdo(), $sid, $txIds);
         }
 
         // Automatizace: stav zaúčtování per transakce (jen double_entry, §3.7 #6).
@@ -1974,6 +1976,10 @@ final class BankStatementAction
             $t['matched_invoices'] = $matchedByTx[$t['id']] ?? [];
             $t['matched_purchase_invoices'] = $matchedPurchasesByTx[$t['id']] ?? [];
             $t['matched_other_items'] = $matchedOtherItemsByTx[$t['id']] ?? [];
+            $t['matched_membership_claims'] = array_map(static function (array $claim): array {
+                unset($claim['pairing_id'], $claim['entry_id']);
+                return $claim;
+            }, $matchedMembershipByTx[$t['id']] ?? []);
             $t['posting'] = $postingByTx[$t['id']] ?? null;
             // Stav zpracování po importu nese výpis (`processing_failed`), ne pohyb.
             unset($t['processing_pending_at'], $t['processing_error']);

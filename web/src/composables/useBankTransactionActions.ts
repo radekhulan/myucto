@@ -5,8 +5,9 @@ import { useToast } from '@/composables/useToast'
 import { useHotkey } from '@/composables/useHotkey'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
+import { hasFrameworkScope } from '@/security/frameworkScope'
 import { formatMoney, formatDate } from '@/composables/useFormat'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import {
   bankApi,
   type BankTransaction,
@@ -18,6 +19,7 @@ import {
 } from '@/api/bank'
 import { invoicesApi } from '@/api/invoices'
 import { otherItemsApi } from '@/api/otherItems'
+import { membershipBankApi, type MembershipBankCandidate } from '@/api/membershipBank'
 import { purchaseInvoicesApi } from '@/api/purchaseInvoices'
 import { documentRequestsApi } from '@/api/documentRequests'
 import { gopayApi, type GoPayPayoutCandidate } from '@/api/gopay'
@@ -48,7 +50,15 @@ type AnchorOption = { value: number; label: string; secondary?: string }
  * jen aktuální stránku (+ přepočet countů v záložkách).
  */
 export function useBankTransactionActions(opts: { reload: () => Promise<void> | void; refresh?: () => Promise<void> | void }) {
-  const { t } = useI18n()
+  const { t, te } = useI18n()
+  // Chyby členského párování podle stabilního kódu, aby je anglické rozhraní nehlásilo česky (#345.12).
+  const membershipMatchError = (error: unknown) => {
+    const key = `bank.membership_errors.${apiErrorCode(error)}`
+    return te(key) ? t(key) : apiErrorMessage(error, t('bank.match_failed'))
+  }
+  // Pohyb dokládající členskou úhradu odmítne i ignorování, odúčtování či jiné párování; hláška podle kódu.
+  const bankActionError = (error: unknown, fallback?: string) => apiErrorCode(error) === 'nonprofit_membership_payment_in_use'
+    ? t('bank.membership_errors.nonprofit_membership_payment_in_use') : apiErrorMessage(error, fallback)
   const toast = useToast()
   const router = useRouter()
   const matchSupplier = useSupplierStore()
@@ -74,6 +84,21 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       : auth.canRead('purchase_invoices') && auth.canWrite('purchase_invoices.transition')))
   }
 
+  function canSeeMembershipCandidates(): boolean {
+    const auth = useAuthStore()
+    // Členství je agenda NNO (stejný rámec jako stránka členství); běžná s.r.o. sekci ani dotaz nevidí.
+    return !auth.isClientRole && auth.canRead('accounting') && auth.canRead('bank')
+      && matchSupplier.currentSupplier?.accounting_mode === 'double_entry'
+      && hasFrameworkScope(matchSupplier.currentSupplier, 'nonprofit504')
+  }
+
+  function canMatchMembership(): boolean {
+    const auth = useAuthStore()
+    // Nezaúčtovaný pohyb služba nejdřív zaúčtuje; to server dovolí jen s bank.post a accounting (MembershipBankMatchAction).
+    const mayPost = matchCtx.value?.posting?.status === 'posted' || (auth.canWrite('bank.post') && auth.canWrite('accounting'))
+    return canSeeMembershipCandidates() && canMatchBank() && auth.canWrite('accounting.journal.post') && mayPost
+  }
+
   function canMatchAnyDocument(): boolean {
     return canMatchDocument('invoice') || canMatchDocument('purchase_invoice')
   }
@@ -94,6 +119,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
 
   function canRunDetailAction(tx: BankTransaction, action: BankDetailAction): boolean {
     if (tx.resolution === 'payroll' || tx.posting?.payroll_matched) return false
+    if (tx.resolution === 'membership' || tx.matched_membership_claims?.length) return false
     // Pohyb přiřazený ostatní položce jde jen doplnit do další položky z jeho volné části.
     const allocated = tx.matched_other_items?.reduce((sum, item) => sum + item.amount, 0) ?? 0
     if (allocated > 0 && (action !== 'match' || allocated >= Math.abs(tx.amount) - 0.005)) return false
@@ -195,7 +221,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       toastPosting(result.posting)
       await opts.reload()
     } catch (e) {
-      const message = apiErrorMessage(e, t('bank.match_failed'))
+      const message = bankActionError(e, t('bank.match_failed'))
       matchError.value = message
       toast.error(message)
     } finally {
@@ -214,7 +240,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       toast.success(t('bank.match_v2.rejected'))
       await opts.reload()
     } catch (e) {
-      const message = apiErrorMessage(e)
+      const message = bankActionError(e)
       matchError.value = message
       toast.error(message)
     } finally {
@@ -240,6 +266,84 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const matchCandidates = ref<MatchCandidate[]>([])
   const loadingCandidates = ref(false)
   const matchingCandidate = ref(false)
+  const membershipCandidates = ref<MembershipBankCandidate[]>([])
+  const selectedMembershipClaims = ref<MembershipBankCandidate[]>([])
+  const membershipNextCursor = ref<string | null>(null)
+  const loadingMembershipCandidates = ref(false)
+  const membershipCandidateError = ref('')
+  // Pohyb nelze párovat s předpisem (měna, směr, už použitý): stav, ne chyba k opakování.
+  const membershipUnavailable = ref(false)
+  let membershipLoadVersion = 0
+  let membershipMatchVersion = 0
+  const matchingMembership = ref(false)
+  const membershipSelectedCents = computed(() => selectedMembershipClaims.value.reduce((sum, claim) => sum + BigInt(claim.amount_cents), 0n).toString())
+  const membershipSelectionValid = computed(() => {
+    const count = selectedMembershipClaims.value.length
+    const payment = BigInt(Math.round((matchCtx.value?.amount ?? 0) * 100))
+    const selected = BigInt(membershipSelectedCents.value)
+    return count > 0 && count <= 100 && payment > 0n && (count === 1 ? selected >= payment : selected === payment)
+  })
+
+  function toggleMembershipClaim(candidate: MembershipBankCandidate) {
+    if (matchBusy.value || !canMatchMembership()) return
+    const selected = selectedMembershipClaims.value
+    selectedMembershipClaims.value = selected.some(c => c.id === candidate.id)
+      ? selected.filter(c => c.id !== candidate.id) : [...selected, candidate]
+  }
+
+  async function loadMembershipCandidates(more = false) {
+    const transaction = matchingTx.value, supplier = matchSupplier.currentSupplierId
+    if (!transaction || !supplier || !canSeeMembershipCandidates() || (matchCtx.value?.amount ?? 0) <= 0) return
+    const version = ++membershipLoadVersion
+    loadingMembershipCandidates.value = true
+    membershipCandidateError.value = ''
+    membershipUnavailable.value = false
+    try {
+      const search = matchSearch.value.trim()
+      const stale = () => disposed || version !== membershipLoadVersion || matchingTx.value !== transaction || matchSupplier.currentSupplierId !== supplier
+      let page = await membershipBankApi.candidates(supplier, transaction, search, more ? membershipNextCursor.value ?? '0' : '0')
+      // Stránka může zůstat prázdná, když serverové okno obsadí uhrazené předpisy; pokračujeme omezeně za uživatele.
+      for (let hop = 0; !page.candidates.length && page.next_cursor !== null && hop < 10; hop++) {
+        if (stale()) return
+        page = await membershipBankApi.candidates(supplier, transaction, search, page.next_cursor)
+      }
+      if (stale()) return
+      membershipCandidates.value = more ? [...membershipCandidates.value, ...page.candidates] : page.candidates
+      membershipNextCursor.value = page.next_cursor
+    } catch (error) {
+      if (version !== membershipLoadVersion) return
+      if (apiErrorCode(error) === 'nonprofit_membership_payment_unavailable') {
+        membershipCandidates.value = []
+        membershipNextCursor.value = null
+        membershipUnavailable.value = true
+      } else {
+        membershipCandidateError.value = membershipMatchError(error)
+      }
+    } finally {
+      if (version === membershipLoadVersion) loadingMembershipCandidates.value = false
+    }
+  }
+
+  async function confirmMembershipMatch() {
+    const transaction = matchingTx.value, supplier = matchSupplier.currentSupplierId
+    if (!transaction || !supplier || matchBusy.value || !canMatchMembership() || !membershipSelectionValid.value) return
+    const version = ++membershipMatchVersion
+    matchingMembership.value = true
+    matchError.value = ''
+    try {
+      await membershipBankApi.match(supplier, transaction, selectedMembershipClaims.value.map(c => c.id))
+      if (supplier !== matchSupplier.currentSupplierId || disposed || version !== membershipMatchVersion) return
+      if (matchingTx.value === transaction) { detailReturnTarget.value = null; dismissMatch() }
+      toast.success(t('bank.membership_matched'))
+      await opts.reload()
+    } catch (error) {
+      if (supplier === matchSupplier.currentSupplierId && version === membershipMatchVersion && matchingTx.value === transaction) {
+        matchError.value = membershipMatchError(error)
+      }
+    } finally {
+      if (version === membershipMatchVersion) matchingMembership.value = false
+    }
+  }
   let candidateSearchTimer: ReturnType<typeof setTimeout> | null = null
   let candidateLoadVersion = 0
   const gopayCandidate = ref<GoPayPayoutCandidate | null>(null)
@@ -284,7 +388,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       // Varování o širším okně patří jen k nalezeným fakturám, ne k ostatním položkám.
       candidatesFallback.value = result.fallback && result.candidates.length > 0
     } catch (error) {
-      if (version === candidateLoadVersion && matchingTx.value === txId) matchError.value = apiErrorMessage(error, t('bank.match_failed'))
+      if (version === candidateLoadVersion && matchingTx.value === txId) matchError.value = bankActionError(error, t('bank.match_failed'))
     } finally {
       if (version === candidateLoadVersion) loadingCandidates.value = false
     }
@@ -295,10 +399,14 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     candidateLoadVersion++
     matchCandidates.value = []
     candidatesFallback.value = false
+    membershipLoadVersion++
+    membershipCandidates.value = []
+    membershipNextCursor.value = null
     if (!matchingTx.value) return
     loadingCandidates.value = true
     candidateSearchTimer = setTimeout(() => {
       if (matchingTx.value) void loadMatchCandidates(matchingTx.value)
+      if (matchingTx.value) void loadMembershipCandidates()
     }, 300)
   }, { flush: 'sync' })
   watch(() => matchSupplier.currentSupplierId, () => {
@@ -309,13 +417,15 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   })
   onBeforeUnmount(() => {
     disposed = true
+    membershipLoadVersion++
+    membershipMatchVersion++
     detailReturnTarget.value = null
     candidateLoadVersion++
     if (candidateSearchTimer) clearTimeout(candidateSearchTimer)
   })
 
   function startMatch(tx: BankTransaction) {
-    if (!canRunDetailAction(tx, 'match')) return
+    if (matchBusy.value || !canRunDetailAction(tx, 'match')) return
     if (anchorSearchTimer) clearTimeout(anchorSearchTimer)
     anchorSearchVersion++
     anchorLoading.value = false
@@ -325,6 +435,11 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     matchVarsymbol.value = tx.variable_symbol || ''
     matchError.value = ''
     matchCandidates.value = []
+    membershipCandidates.value = []
+    selectedMembershipClaims.value = []
+    membershipNextCursor.value = null
+    membershipCandidateError.value = ''
+    membershipUnavailable.value = false
     gopayCandidate.value = null
     loadingGoPayCandidate.value = !useAuthStore().isClientRole && tx.amount > 0 && tx.source !== 'idoklad'
     if (loadingGoPayCandidate.value) {
@@ -339,6 +454,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     }
     candidatesFallback.value = false
     void loadMatchCandidates(tx.id)
+    void loadMembershipCandidates()
     splitSuggestions.value = []
     splitWindow.value = 7
     anchorInvoiceId.value = null
@@ -362,7 +478,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
         }
       })
       .catch(e => {
-        if (matchingTx.value === tx.id && version === splitLoadVersion) matchError.value = apiErrorMessage(e, t('bank.match_failed'))
+        if (matchingTx.value === tx.id && version === splitLoadVersion) matchError.value = bankActionError(e, t('bank.match_failed'))
       })
       .finally(() => { if (version === splitLoadVersion) loadingSplit.value = false })
   }
@@ -428,7 +544,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   }
 
   const matchingManual = ref(false)
-  const matchBusy = computed(() => matchingManual.value || matchingCandidate.value || matchingGoPay.value || reviewingSuggestion.value !== null)
+  const matchBusy = computed(() => matchingManual.value || matchingCandidate.value || matchingMembership.value || matchingGoPay.value || reviewingSuggestion.value !== null)
 
   function closeMatch() {
     if (matchBusy.value || matchingTx.value === null) return
@@ -442,6 +558,13 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     if (candidateSearchTimer) clearTimeout(candidateSearchTimer)
     candidateSearchTimer = null
     loadingCandidates.value = false
+    membershipLoadVersion++
+    membershipMatchVersion++
+    matchingMembership.value = false
+    loadingMembershipCandidates.value = false
+    membershipCandidates.value = []
+    selectedMembershipClaims.value = []
+    membershipNextCursor.value = null
   }
 
   async function confirmGoPayCandidate() {
@@ -457,7 +580,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
         : t('bank.gopay_match.statement_matched'))
       await opts.reload()
     } catch (e) {
-      matchError.value = apiErrorMessage(e, t('bank.gopay_match.failed'))
+      matchError.value = bankActionError(e, t('bank.gopay_match.failed'))
     } finally {
       matchingGoPay.value = false
     }
@@ -477,7 +600,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       toastPosting(r.posting)
       await opts.reload()
     } catch (e: any) {
-      matchError.value = apiErrorMessage(e, t('bank.match_failed'))
+      matchError.value = bankActionError(e, t('bank.match_failed'))
     } finally {
       matchingManual.value = false
     }
@@ -531,7 +654,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       await opts.reload()
       return true
     } catch (e: any) {
-      if (supplierId === matchSupplier.currentSupplierId) matchError.value = apiErrorMessage(e, t('bank.match_failed'))
+      if (supplierId === matchSupplier.currentSupplierId) matchError.value = bankActionError(e, t('bank.match_failed'))
       return false
     } finally {
       matchingCandidate.value = false
@@ -568,7 +691,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       await opts.reload()
       return true
     } catch (e: any) {
-      if (supplierId === matchSupplier.currentSupplierId) matchError.value = apiErrorMessage(e, t('bank.match_failed'))
+      if (supplierId === matchSupplier.currentSupplierId) matchError.value = bankActionError(e, t('bank.match_failed'))
       return false
     } finally {
       matchingCandidate.value = false
@@ -596,7 +719,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       notePurchaseShortfall(r, vs)
       await opts.reload()
     } catch (e: any) {
-      matchError.value = apiErrorMessage(e, t('bank.match_failed'))
+      matchError.value = bankActionError(e, t('bank.match_failed'))
     } finally {
       matchingManual.value = false
     }
@@ -632,7 +755,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       createTx.value = null
       router.push(`/purchase-invoices/${r.purchase_invoice_id}`)
     } catch (e) {
-      toast.error(apiErrorMessage(e))
+      toast.error(bankActionError(e))
     } finally {
       creatingPi.value = false
     }
@@ -663,7 +786,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       requestDocTx.value = null
       await opts.reload()
     } catch (e) {
-      toast.error(apiErrorMessage(e, t('bank.document_request.failed')))
+      toast.error(bankActionError(e, t('bank.document_request.failed')))
     } finally {
       requestingDoc.value = false
     }
@@ -675,7 +798,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     try {
       await (opts.refresh ?? opts.reload)()
     } catch (e) {
-      toast.error(apiErrorMessage(e))
+      toast.error(bankActionError(e))
     }
   }
 
@@ -711,7 +834,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       ignoreTarget.value = null
       await refreshAfterMutation()
     } catch (e) {
-      ignoreError.value = apiErrorMessage(e, t('bank.ignore_failed'))
+      ignoreError.value = bankActionError(e, t('bank.ignore_failed'))
     } finally {
       ignoring.value = false
     }
@@ -750,7 +873,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
       unmatchTarget.value = null
       await refreshAfterMutation()
     } catch (e) {
-      unmatchError.value = apiErrorMessage(e, t('bank.unmatch_failed'))
+      unmatchError.value = bankActionError(e, t('bank.unmatch_failed'))
     } finally {
       unmatching.value = false
     }
@@ -771,6 +894,9 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     expandedDocs, toggleDocs,
     // manuální match modal
     matchingTx, matchCtx, matchVarsymbol, matchSearch, matchCandidates, loadingCandidates, candidatesFallback, matchingCandidate,
+    membershipCandidates, selectedMembershipClaims, membershipNextCursor, loadingMembershipCandidates, membershipCandidateError, membershipUnavailable,
+    membershipSelectedCents, membershipSelectionValid, canSeeMembershipCandidates, canMatchMembership,
+    toggleMembershipClaim, loadMembershipCandidates, confirmMembershipMatch,
     gopayCandidate, loadingGoPayCandidate, matchingGoPay,
     splitSuggestions, loadingSplit, splitWindow,
     anchorInvoiceId, anchorOptions, anchorSelected, anchorLoading,

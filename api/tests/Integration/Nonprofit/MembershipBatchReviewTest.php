@@ -347,6 +347,16 @@ final class MembershipBatchReviewTest extends TestCase
         catch (MembershipException $e) { self::assertSame(422, $e->httpStatus); self::assertSame('nonprofit_membership_batch_selection_invalid', $e->errorCode); }
     }
 
+    public function testBatchTemplateRejectsSharedVariableSymbol(): void
+    {
+        $id = $this->member('SHARED-VS');
+        $input = $this->input([$id], 'shared-vs');
+        $input['template']['variable_symbol'] = '5';
+        try { $this->batches->create($this->supplier, $input, $this->actor); self::fail('Dávka přijala společný VS pro všechny členy.'); }
+        catch (MembershipException $e) { self::assertSame(422, $e->httpStatus); }
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_membership_batches WHERE supplier_id=' . $this->supplier)->fetchColumn());
+    }
+
     private function member(string $number): int
     {
         $q = $this->pdo->prepare('SELECT default_currency_id FROM supplier WHERE id=?'); $q->execute([$this->supplier]);

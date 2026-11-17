@@ -28,6 +28,9 @@ use MyInvoice\Service\Nonprofit\Membership\MembershipChargeService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipClassification;
 use MyInvoice\Service\Nonprofit\Membership\MembershipJournalProof;
 use MyInvoice\Service\Nonprofit\Membership\MembershipMemberService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipCorrectionService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipRevisionTimeline;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitLegalProfileService;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxRules;
 use MyInvoice\Service\Tax\Nonprofit\SourceFacts\MembershipJ6SourceFacts;
@@ -35,6 +38,8 @@ use MyInvoice\Tests\Support\OwnedTestDatabaseCleanup;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use MyInvoice\Tests\Support\CloneSandbox;
+use MyInvoice\Service\Anonymization\AnonymizationOptions;
+use MyInvoice\Service\Anonymization\AnonymizationService;
 
 final class MembershipCloneScrubberTest extends TestCase
 {
@@ -76,6 +81,7 @@ final class MembershipCloneScrubberTest extends TestCase
                 'classification' => $this->classification, 'is_active' => true, 'row_version' => 0,
             ]);
             $request = $this->chargeRequest($memberId);
+            $request['variable_symbol'] = '0012345678';
             $request['rate_id'] = $rate['id'];
             $preview = $charges->previewIssue($supplier, $request);
             $issued = $charges->confirmIssue($supplier, $request, $preview['expected_case_version'], $preview['preview_hash'], 'private-issue', $actor);
@@ -85,6 +91,20 @@ final class MembershipCloneScrubberTest extends TestCase
                 'idempotency_key' => 'private-reactivate', 'legal_basis' => $this->basis('private-reactivate@example.test')], $actor);
             $members->appendRevision($supplier, $memberId, ['status' => 'ended', 'effective_from' => '2028-01-01', 'expected_revision' => 3,
                 'idempotency_key' => 'private-ended', 'legal_basis' => $this->basis('private-ended@example.test')], $actor);
+            // Krok 7: zrušená revize a oprava ke stejnému dni; klon musí řetěz zachovat a důvod pseudonymizovat.
+            $q = $target->pdo()->prepare('SELECT default_currency_id FROM supplier WHERE id=?');
+            $q->execute([$supplier]);
+            $target->pdo()->prepare("INSERT INTO clients(supplier_id,company_name,street,city,zip,country_id,main_email,language,currency_default_id,is_customer,is_vendor) VALUES(?,'Private voided member','Private street','Private city','10000',203,'private-void-client@example.test','cs',?,1,0)")
+                ->execute([$supplier, (int) $q->fetchColumn()]);
+            $voidMember = $members->create($supplier, (int) $target->pdo()->lastInsertId(), 'PRIVATE-MEMBER-002', $actor)['id'];
+            $members->appendRevision($supplier, $voidMember, ['status' => 'active', 'effective_from' => '2026-01-01', 'expected_revision' => 0,
+                'idempotency_key' => 'private-void-active', 'legal_basis' => $this->basis('private-void-active@example.test')], $actor);
+            $wrong = $members->appendRevision($supplier, $voidMember, ['status' => 'suspended', 'effective_from' => '2026-07-01', 'expected_revision' => 1,
+                'idempotency_key' => 'private-void-wrong', 'legal_basis' => $this->basis('private-void-wrong@example.test')], $actor);
+            (new MembershipCorrectionService($target, new MembershipRepository($target), new ActivityLogger($target)))->voidRevision($supplier, $voidMember, $wrong['id'],
+                ['expected_revision' => 2, 'reason' => 'Private reason private-void-reason@example.test', 'idempotency_key' => 'private-void'], $actor);
+            $members->appendRevision($supplier, $voidMember, ['status' => 'ended', 'effective_from' => '2026-07-01', 'expected_revision' => 3,
+                'idempotency_key' => 'private-void-ended', 'legal_basis' => $this->basis('private-void-ended@example.test')], $actor);
             $replay = $charges->confirmIssue($supplier, $request, $preview['expected_case_version'], $preview['preview_hash'], 'private-issue', $actor);
             self::assertTrue($replay['idempotent_replay']);
             self::assertSame($issued['operation']['id'], $replay['operation']['id']);
@@ -136,6 +156,36 @@ final class MembershipCloneScrubberTest extends TestCase
             $legacyClaimHash = NonprofitTaxRules::hash(MembershipChargeRepository::claimRecord($legacyClaim));
             $target->pdo()->prepare('UPDATE nonprofit_membership_charge_claims SET recorded_at_utc=NULL,record_hash=? WHERE supplier_id=? AND id=?')
                 ->execute([$legacyClaimHash, $supplier, $legacyClaim['id']]);
+            // Krok 10: vymazaný člen s předpisem a stornem. Klon pečeť ověří, obsah přepíše a pečeť zahodí.
+            $q->execute([$supplier]);
+            $target->pdo()->prepare("INSERT INTO clients(supplier_id,company_name,street,city,zip,country_id,main_email,language,currency_default_id,is_customer,is_vendor) VALUES(?,'Private erased member','Private street','Private city','10000',203,'private-erased-client@example.test','cs',?,1,0)")
+                ->execute([$supplier, (int) $q->fetchColumn()]);
+            $erasedMember = $members->create($supplier, (int) $target->pdo()->lastInsertId(), 'PRIVATE-MEMBER-003', $actor)['id'];
+            $members->appendRevision($supplier, $erasedMember, ['status' => 'active', 'effective_from' => '2026-01-01', 'expected_revision' => 0,
+                'idempotency_key' => 'private-erased-active', 'legal_basis' => $this->basis('private-erased-active@example.test')], $actor);
+            $erasedRequest = $this->chargeRequest($erasedMember);
+            $erasedPreview = $charges->previewIssue($supplier, $erasedRequest);
+            $erasedIssue = $charges->confirmIssue($supplier, $erasedRequest, $erasedPreview['expected_case_version'], $erasedPreview['preview_hash'], 'private-erased-issue', $actor);
+            $erasedReverse = ['case_id' => $erasedIssue['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Private reversal private-erased-reversal@example.test'];
+            $erasedReversePreview = $charges->previewReverse($supplier, $erasedReverse);
+            $charges->confirmReverse($supplier, $erasedReverse, $erasedReversePreview['expected_case_version'], $erasedReversePreview['preview_hash'], 'private-erased-reverse', $actor);
+            $members->appendRevision($supplier, $erasedMember, ['status' => 'ended', 'effective_from' => '2026-12-31', 'expected_revision' => 1,
+                'idempotency_key' => 'private-erased-ended', 'legal_basis' => $this->basis('private-erased-ended@example.test')], $actor);
+            $erasures = new \MyInvoice\Repository\Nonprofit\Membership\MembershipErasureRepository($target);
+            $erasure = new \MyInvoice\Service\Nonprofit\Membership\MembershipErasureService($target, new MembershipRepository($target), new MembershipChargeRepository($target), $erasures,
+                new \MyInvoice\Service\Nonprofit\Membership\MembershipErasureAssessment($target, new \MyInvoice\Repository\Nonprofit\Membership\MembershipListRepository($target),
+                    new \MyInvoice\Repository\RetentionHoldRepository($target), $erasures),
+                new \MyInvoice\Service\Nonprofit\Membership\MembershipContactErasure($target), new ActivityLogger($target), new \MyInvoice\Service\ActivityLogHashChain($target), new \Psr\Log\NullLogger(), static fn (): string => '2032-01-02');
+            $erasureProposal = $erasure->create($supplier, $actor, null);
+            self::assertNotNull($erasureProposal);
+            // Ostatní ukončení členové fixture zůstávají nedotčení, aby jejich ověření níže platilo beze změny.
+            $target->pdo()->prepare('DELETE FROM nonprofit_membership_erasure_items WHERE supplier_id=? AND proposal_id=? AND member_id<>?')
+                ->execute([$supplier, $erasureProposal['id'], $erasedMember]);
+            $erasure->approve($supplier, $erasureProposal['id'], $actor);
+            $target->pdo()->prepare('UPDATE nonprofit_membership_erasure_proposals SET executable_from=UTC_TIMESTAMP() - INTERVAL 1 MINUTE WHERE id=?')->execute([$erasureProposal['id']]);
+            self::assertSame(1, $erasure->execute($supplier, $erasureProposal['id'], $actor, \MyInvoice\Service\Nonprofit\Membership\MembershipErasureService::EXECUTE_CONFIRMATION)['summary']['done']);
+            $erasedOperations = array_column($target->pdo()->query('SELECT o.id FROM nonprofit_membership_charge_operations o JOIN nonprofit_membership_charge_cases c ON c.id=o.case_id WHERE c.member_id=' . $erasedMember)->fetchAll(PDO::FETCH_ASSOC), 'id');
+            self::assertCount(2, $erasedOperations);
             [$membershipCapture, $manyQueries] = $this->captureWithQueryCount($target);
             self::assertLessThanOrEqual($smallQueries + 8, $manyQueries,
                 'Capture acquired per-operation queries: one=' . $smallQueries . ', many=' . $manyQueries);
@@ -154,7 +204,24 @@ final class MembershipCloneScrubberTest extends TestCase
             self::assertNotNull($history[0]['recorded_at_utc']);
             self::assertNull($history[array_key_last($history)]['recorded_at_utc']);
             self::assertSame('clone-member-' . $memberId, $repository->member($supplier, $memberId)['member_number']);
+            $voidHistory = $repository->history($supplier, $voidMember);
+            self::assertSame([null, null, $wrong['id'], null], array_column($voidHistory, 'voids_revision_id'));
+            self::assertSame(['active', 'ended'], array_column(MembershipRevisionTimeline::effective($voidHistory), 'status'));
+            self::assertStringNotContainsString('private-void-reason', (string) $voidHistory[2]['request']['reason']);
+            self::assertArrayNotHasKey('legal_basis', $voidHistory[2]['request']);
             $chargeRepository = new MembershipChargeRepository($target);
+            // Klon vymazaného člena: řetěz přepočtený bez pečeti a dál průkazný.
+            foreach ($repository->history($supplier, $erasedMember) as $erasedRevision) {
+                self::assertNull($erasedRevision['erasure_item_id']);
+                self::assertNull($erasedRevision['erased_digest']);
+            }
+            foreach ($erasedOperations as $erasedOperation) {
+                $clonedOperation = $chargeRepository->operation($supplier, (int) $erasedOperation);
+                self::assertNull($clonedOperation['erasure_item_id']);
+                self::assertSame('vymazano-' . $erasedMember, $clonedOperation['proof']['member']['member_number']);
+            }
+            self::assertSame('vymazano-' . $erasedMember, $repository->member($supplier, $erasedMember)['member_number'], 'Klon vymazaného člena zůstává vymazaný.');
+            self::assertSame(0, (int) $target->pdo()->query('SELECT COUNT(*) FROM nonprofit_membership_charge_commands m JOIN nonprofit_membership_charge_operations o ON o.command_id=m.id JOIN nonprofit_membership_charge_cases c ON c.id=o.case_id WHERE c.member_id=' . $erasedMember . ' AND m.erasure_item_id IS NOT NULL')->fetchColumn());
             $operation = $chargeRepository->operation($supplier, $issued['operation']['id']);
             self::assertNotNull($operation);
             self::assertNull($operation['proof']['membership_intervals'][0]['effective_to']);
@@ -167,6 +234,8 @@ final class MembershipCloneScrubberTest extends TestCase
             $commandRequest->execute([$supplier, $operation['command_id']]);
             $command = json_decode((string) $commandRequest->fetchColumn(), true, flags: JSON_THROW_ON_ERROR);
             self::assertSame($rate['id'], $command['request']['rate_id']);
+            self::assertNotSame('0012345678', $command['request']['variable_symbol']);
+            self::assertSame($scrubber->byStrategy('symbol', '0012345678'), $command['request']['variable_symbol']);
             self::assertArrayNotHasKey('rate_id', $operation['proof']);
             self::assertSame('Synthetic standard', (new \MyInvoice\Repository\Nonprofit\Membership\MembershipRateRepository($target))->find($supplier, $rate['id'])['name']);
             self::assertSame(NonprofitTaxRules::hash([
@@ -266,6 +335,72 @@ final class MembershipCloneScrubberTest extends TestCase
                 if ($target instanceof Connection && $target->pdo()->inTransaction()) $target->pdo()->rollBack();
                 $hashMap->drop();
             }
+            if ($target instanceof Connection) $target->close();
+            CloneSandbox::release($server, $schema);
+        }
+    }
+
+    /**
+     * Celá anonymizace kopie (fáze strukturovaných hodnot před symboly): VS předpisu a bankovní platby
+     * dostane stejný pseudonym jádra, takže párování podle VS v kopii funguje; krátký VS zůstává.
+     */
+    public function testAnonymizedCopyKeepsVariableSymbolMatchBetweenChargeAndBankPayment(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $config = $container->get(Config::class);
+        $sourceSchema = (string) $container->get(Connection::class)->pdo()->query('SELECT DATABASE()')->fetchColumn();
+        self::assertStringEndsWith('_test', $sourceSchema);
+        $server = new PDO('mysql:host=' . $config->get('db.host') . ';port=' . $config->get('db.port', 3306) . ';charset=utf8mb4',
+            $config->get('db.user'), $config->get('db.pass', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $schema = CloneSandbox::acquire($server, $sourceSchema);
+        $target = null;
+        try {
+            $oldName = getenv('MYINVOICE_DB_NAME');
+            $oldMysqlName = getenv('MYSQL_DATABASE');
+            putenv('MYINVOICE_DB_NAME=' . $schema);
+            putenv('MYSQL_DATABASE=' . $schema);
+            try {
+                $targetContainer = Connection::withoutSharedTestConnection(fn () => Bootstrap::buildContainer());
+                $target = $targetContainer->get(Connection::class);
+                $posting = $targetContainer->get(PostingService::class);
+            } finally {
+                $oldName === false ? putenv('MYINVOICE_DB_NAME') : putenv('MYINVOICE_DB_NAME=' . $oldName);
+                $oldMysqlName === false ? putenv('MYSQL_DATABASE') : putenv('MYSQL_DATABASE=' . $oldMysqlName);
+            }
+            [$supplier, $memberId, , $actor, $charges] = $this->fixture($target, $posting);
+            $cases = [];
+            foreach (['long' => '0012345678', 'short' => '00123'] as $key => $symbol) {
+                $request = $this->chargeRequest($memberId);
+                $request['title_key'] = 'synthetic-vs-' . $key;
+                $request['variable_symbol'] = $symbol;
+                $preview = $charges->previewIssue($supplier, $request);
+                $cases[$key] = (int) $charges->confirmIssue($supplier, $request, $preview['expected_case_version'], $preview['preview_hash'], 'vs-' . $key, $actor)['case']['id'];
+            }
+            $pdo = $target->pdo();
+            $pdo->prepare("INSERT INTO bank_statements(supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date,imported_by)
+                VALUES(?,'synthetic-clone-vs.gpc',?,'1000000005','0100','CZK','2026-02-01',?)")->execute([$supplier, hash('sha256', 'clone-vs'), $actor]);
+            $statement = (int) $pdo->lastInsertId();
+            $payments = [];
+            foreach (['long' => '12345678', 'short' => '123'] as $key => $symbol) {
+                $pdo->prepare("INSERT INTO bank_transactions(statement_id,posted_at,amount,currency,description,match_status,variable_symbol)
+                    VALUES(?,'2026-02-01','200.00','CZK','Synthetic clone payment','unmatched',?)")->execute([$statement, $symbol]);
+                $payments[$key] = (int) $pdo->lastInsertId();
+            }
+            $target->close();
+            $target = null;
+
+            (new AnonymizationService($config))->anonymizeCopy(
+                new AnonymizationOptions(source: $schema, target: $schema, seed: 'membership-vs'), static function (): void {});
+
+            $value = fn (string $sql): string => (string) $server->query(str_replace('{s}', DatabaseCloner::quote($schema), $sql))->fetchColumn();
+            $case = fn (string $key): string => $value('SELECT variable_symbol FROM {s}.nonprofit_membership_charge_cases WHERE id=' . $cases[$key]);
+            $bank = fn (string $key): string => $value('SELECT variable_symbol FROM {s}.bank_transactions WHERE id=' . $payments[$key]);
+            self::assertNotSame('0012345678', $case('long'));
+            self::assertStringStartsWith('00', $case('long'), 'Vodicí nuly VS předpisu zůstávají.');
+            self::assertSame(ltrim($case('long'), '0'), $bank('long'), 'Klíč VS předpisu a platby musí v kopii zůstat shodný.');
+            self::assertSame('00123', $case('short'), 'Krátký VS by jako náhodné číslo přepsal výskyty v textech, zůstává.');
+            self::assertSame('123', $bank('short'));
+        } finally {
             if ($target instanceof Connection) $target->close();
             CloneSandbox::release($server, $schema);
         }

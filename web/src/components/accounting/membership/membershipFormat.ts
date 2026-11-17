@@ -45,8 +45,31 @@ export const errorBox = 'rounded-lg border border-danger-500/30 bg-danger-50 p-3
 /** Upozornění ve stejném tvaru jako chybová hláška. */
 export const warningBox = 'rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-700'
 
+/**
+ * Platné revize v pořadí řetězu. Zrcadlí `MembershipRevisionTimeline::effective()`: rušící článek
+ * odebere poslední platnou revizi; zrušená revize ani rušící článek stav členství nemění.
+ */
+export function validRevisions(history: readonly MemberRevision[]): MemberRevision[] {
+  const valid: MemberRevision[] = []
+  for (const row of [...history].sort((a, b) => a.revision_no - b.revision_no || a.id - b.id)) {
+    if (row.voids_revision_id == null) valid.push(row)
+    else if (valid[valid.length - 1]?.id === row.voids_revision_id) valid.pop()
+  }
+  return valid
+}
+
+/** Zrušená revize → rušící článek (pro zobrazení historie). */
+export function voidedRevisions(history: readonly MemberRevision[]): Map<number, MemberRevision> {
+  return new Map(history.filter(row => row.voids_revision_id != null).map(row => [row.voids_revision_id as number, row]))
+}
+
+/** Poslední platná revize: od ní se posuzuje datum a stav další revize. */
+export function lastValidRevision(history: readonly MemberRevision[]): MemberRevision | null {
+  return validRevisions(history).at(-1) ?? null
+}
+
 function ordered(history: readonly MemberRevision[]): MemberRevision[] {
-  return [...history].sort((a, b) => a.effective_from.localeCompare(b.effective_from) || a.id - b.id)
+  return validRevisions(history).sort((a, b) => a.effective_from.localeCompare(b.effective_from) || a.id - b.id)
 }
 
 /** Revize platná k datu: poslední, která už začala. Budoucí revize dnešní stav nemění. */
@@ -72,6 +95,7 @@ export function activeThroughout(history: readonly MemberRevision[], from: strin
   return covered[0]!.row.effective_from <= from
 }
 
+/** Hlava řetězu (i rušící článek): její číslo je očekávaná revize dalšího zápisu. */
 export function lastRevision(history: readonly MemberRevision[]): MemberRevision | null {
   return history.reduce<MemberRevision | null>((last, row) => (last === null || row.revision_no > last.revision_no ? row : last), null)
 }

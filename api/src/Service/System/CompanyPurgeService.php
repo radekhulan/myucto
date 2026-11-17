@@ -36,8 +36,13 @@ use PDOException;
  */
 final class CompanyPurgeService
 {
-    /** @var list<string> */
-    public const RETAINED_TABLES = ['activity_log'];
+    /**
+     * Otisky redakcí (výmaz osobních údajů, #321 krok 10) dokládají redigované záznamy řetězu;
+     * bez nich by zachovaný řetěz po smazání firmy hlásil redigované záznamy jako změněné.
+     *
+     * @var list<string>
+     */
+    public const RETAINED_TABLES = ['activity_log', 'activity_log_redactions'];
 
     private const LOCK = 'myucto_company_purge';
     private const MAX_PASSES = 10;

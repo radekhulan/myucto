@@ -411,6 +411,7 @@ final class TenantPredicateTest extends TestCase
         'LedgerInvariantService.php::ledgerIsEmpty' => 'invariant nad deníkem celé instance (viz docblock služby)',
         'LedgerInvariantService.php::i25AccumulatedNotAboveInputPrice' => 'invariant nad veškerým majetkem instance',
         'ActivityLogHashChain.php::verify' => 'hash chain auditního logu je jeden pro celou instanci',
+        'ActivityLogHashChain.php::redactionAttestations' => 'atestace redakcí pro verify() jediného hash chainu celé instance',
         'ActivityLogHashChain.php::prune' => 'retence spravovaného provozu promazává jediný hash chain celé instance',
         'ActivityLogHashChain.php::lastIdCreatedBefore' => 'hledá hranici retence v jediném hash chainu celé instance',
         'AnonymizationService.php::resealAuditChain' => 'znovu zapečetí jediný hash chain celé anonymizované kopie instance',

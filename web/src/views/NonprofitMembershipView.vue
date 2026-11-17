@@ -7,5 +7,7 @@ const supplier = useSupplierStore(), auth = useAuthStore()
 const id = computed(() => Number(supplier.currentSupplierId))
 const canManage = computed(() => Boolean(auth.user && auth.csrfToken && auth.can('accounting.journal.post', 'write')))
 const canManageRates = computed(() => Boolean(auth.user && auth.csrfToken && auth.can('accounting.templates', 'write')))
+const canReadErasure = computed(() => Boolean(auth.user && auth.can('accounting.membership_erasure', 'read')))
+const canWriteErasure = computed(() => Boolean(auth.user && auth.csrfToken && auth.can('accounting.membership_erasure', 'write')))
 </script>
-<template><MembershipWorkspace v-if="id" :key="id" :supplier="id" :can-manage="canManage" :can-manage-rates="canManageRates" /></template>
+<template><MembershipWorkspace v-if="id" :key="id" :supplier="id" :can-manage="canManage" :can-manage-rates="canManageRates" :can-read-erasure="canReadErasure" :can-write-erasure="canWriteErasure" /></template>

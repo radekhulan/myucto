@@ -78,6 +78,7 @@ final class BankProcessingRetryTest extends TestCase
         $pdo->exec('CREATE TABLE invoice_payments (id INTEGER PRIMARY KEY, bank_transaction_id INTEGER)');
         $pdo->exec('CREATE TABLE payment_matches (id INTEGER PRIMARY KEY, bank_transaction_id INTEGER)');
         $pdo->exec('CREATE TABLE nonprofit_tax_saving_cost_bindings (supplier_id INTEGER, source_id INTEGER, event_id INTEGER, cost_line_id INTEGER)');
+        $pdo->exec('CREATE TABLE nonprofit_membership_charge_claims (id INTEGER PRIMARY KEY, supplier_id INTEGER)');
 
         return $pdo;
     }

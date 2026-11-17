@@ -3248,6 +3248,12 @@ final class Routes
             $g->get('/nonprofit-dppo/acceptance', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'acceptance']);
             $g->post('/nonprofit-dppo/acceptance/{operation:accept|revoke}', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'changeAcceptance']);
             $g->get('/nonprofit-membership/members', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'members']);
+            $g->get('/nonprofit-membership/members/export', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'exportMembers']);
+            $g->post('/nonprofit-membership/members/import', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'importMembers']);
+            $g->get('/nonprofit-membership/titles', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'titles']);
+            $g->post('/nonprofit-membership/members/selection-check', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'selectionCheck']);
+            $g->get('/nonprofit-membership/bank-candidates', [\MyInvoice\Action\Nonprofit\MembershipBankMatchAction::class, 'candidates']);
+            $g->post('/nonprofit-membership/bank-match', [\MyInvoice\Action\Nonprofit\MembershipBankMatchAction::class, 'match']);
             $g->get('/nonprofit-membership/rates', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'rates']);
             $g->get('/nonprofit-membership/batches', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'batches']);
             $g->get('/nonprofit-membership/batches/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'batch']);
@@ -3264,6 +3270,18 @@ final class Routes
             $g->get('/periods/{id:[0-9]+}/nonprofit-membership/reconciliation', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'reconciliation']);
             $g->post('/nonprofit-membership/members', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'createMember']);
             $g->post('/nonprofit-membership/members/{id:[0-9]+}/revisions', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'appendRevision']);
+            $g->put('/nonprofit-membership/members/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'updateMember']);
+            $g->delete('/nonprofit-membership/members/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'deleteMember']);
+            // Výmaz osobních údajů bývalých členů (#321, krok 10); konkrétní cesty před `{id}`.
+            $g->get('/nonprofit-membership/erasure/assessment', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'assessment']);
+            $g->get('/nonprofit-membership/erasure', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'proposals']);
+            $g->post('/nonprofit-membership/erasure', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'create']);
+            $g->get('/nonprofit-membership/erasure/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'proposal']);
+            $g->post('/nonprofit-membership/erasure/{id:[0-9]+}/approve', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'approve']);
+            $g->post('/nonprofit-membership/erasure/{id:[0-9]+}/revoke', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'revoke']);
+            $g->post('/nonprofit-membership/erasure/{id:[0-9]+}/reject', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'reject']);
+            $g->post('/nonprofit-membership/erasure/{id:[0-9]+}/execute', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'execute']);
+            $g->post('/nonprofit-membership/members/{id:[0-9]+}/revisions/{revisionId:[0-9]+}/void', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'voidRevision']);
             $g->post('/nonprofit-membership/charges/preview', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'preview']);
             $g->post('/nonprofit-membership/charges/confirm', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'confirm']);
             $g->get('/nonprofit-tax-savings', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'savings']);

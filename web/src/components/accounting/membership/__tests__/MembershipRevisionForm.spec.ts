@@ -55,6 +55,18 @@ beforeEach(() => {
 })
 
 describe('Membership revision form', () => {
+  it('hlásí rodiči rozepsaný formulář a po vyprázdnění i odpojení ho uvolní', async () => {
+    const w = mounted()
+    expect(w.emitted('dirty')?.at(-1)).toEqual([false])
+    await w.get('[data-field="rev-reference"]').setValue('Synthetic draft')
+    expect(w.emitted('dirty')?.at(-1)).toEqual([true])
+    await w.get('[data-field="rev-reference"]').setValue('  ')
+    expect(w.emitted('dirty')?.at(-1)).toEqual([false])
+    await w.get('[data-field="rev-evidence"]').setValue('Synthetic draft')
+    w.unmount()
+    expect(w.emitted('dirty')?.at(-1)).toEqual([false])
+  })
+
   it('does not arm a revision while the visible effective date is invalid', async () => {
     const w = mounted()
     await fill(w)
@@ -91,6 +103,26 @@ describe('Membership revision form', () => {
     expect(api.appendRevision).toHaveBeenCalledTimes(1)
     expect(api.appendRevision.mock.calls[0]).toEqual([5, 9, body])
     expect(w.emitted('done')).toHaveLength(1)
+    w.unmount()
+  })
+
+  it('after a voided revision follows the chain head but checks the date against the last valid revision', async () => {
+    const voiding = { ...revision(3, '2026-07-01', 'suspended'), voids_revision_id: 2 }
+    const w = mounted({ history: [revision(1, '2020-01-01'), revision(2, '2026-07-01', 'suspended'), voiding] })
+    expect(w.findAll('[data-field="rev-status"] option').map(o => o.attributes('value'))).toEqual(['active', 'suspended', 'ended'])
+    await fill(w, '2026-07-01')
+    expect(w.get('[data-action="rev-review"]').attributes('disabled')).toBeUndefined()
+    await review(w)
+    await w.get('[data-field="ack"]').setValue(true)
+    await w.get('[data-action="confirm"]').trigger('click')
+    await flushPromises()
+    expect(api.appendRevision.mock.calls[0]).toEqual([5, 9, { ...body, effective_from: '2026-07-01', expected_revision: 3 }])
+    w.unmount()
+  })
+
+  it('offers only activation when every revision was voided', () => {
+    const w = mounted({ history: [revision(1, '2026-01-01'), { ...revision(2, '2026-01-01'), voids_revision_id: 1 }] })
+    expect(w.findAll('[data-field="rev-status"] option').map(o => o.attributes('value'))).toEqual(['active'])
     w.unmount()
   })
 

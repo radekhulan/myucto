@@ -74,7 +74,8 @@ final class MembershipBatchService
         if (count($ids) > 5000 || ($body['selection_mode'] === 'active' ? $ids !== [] : $ids === [])) self::invalid();
         foreach ($ids as $id) if (!is_int($id) || $id <= 0) self::invalid();
         $ids = array_values(array_unique($ids)); sort($ids, SORT_NUMERIC);
-        if (array_key_exists('member_id', $body['template'])) self::invalid();
+        // VS je platební identifikace konkrétního člena; dávka ho určí každému zvlášť.
+        if (array_key_exists('member_id', $body['template']) || array_key_exists('variable_symbol', $body['template'])) self::invalid();
         $key = MembershipChargeRequest::key($body['idempotency_key']);
         // Hash vstupu je nezávislý na měnitelné sazbě. Odvozená šablona má vlastní
         // uložený snapshot; replay nesmí znovu odvozovat ani kontrolovat dnešní sazbu.

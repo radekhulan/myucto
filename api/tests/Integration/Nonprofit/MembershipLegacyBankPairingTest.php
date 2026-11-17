@@ -59,12 +59,20 @@ final class MembershipLegacyBankPairingTest extends TestCase
             $paymentEntry = $this->entry($period, 'bank', $transaction, $actor);
             $this->line($paymentEntry, $accounts['221'], 'debit', 1);
             $paymentReceivable = $this->line($paymentEntry, $accounts['315.100'], 'credit', 2);
+            $this->pdo->prepare("INSERT INTO nonprofit_membership_charge_cases(supplier_id,member_id,title_key,period_from,period_to,created_by)
+                VALUES(?,1,'synthetic-legacy','2026-01-01','2026-12-31',?)")->execute([$this->supplier, $actor]);
+            $case = (int) $this->pdo->lastInsertId();
             $this->pdo->prepare("INSERT INTO nonprofit_membership_charge_operations
                 (supplier_id,case_id,command_id,operation,member_revision_id,legal_profile_id,accounting_period_id,accounting_date,due_date,
                  amount_cents,receivable_account_id,revenue_account_id,journal_entry_id,receivable_line_id,revenue_line_id,preview_hash,proof_json,
                  receipt_json,parent_hash,record_hash,created_by)
-                VALUES(?,1,1,'issue',1,1,?,'2026-01-01','2026-01-31',10000,?,?,?,?,?,REPEAT('1',64),'{}','{}',REPEAT('2',64),REPEAT('3',64),?)")
-                ->execute([$this->supplier, $period, $accounts['315.100'], $accounts['684.100'], $issueEntry, $issueReceivable, $issueRevenue, $actor]);
+                VALUES(?,?,1,'issue',1,1,?,'2026-01-01','2026-01-31',10000,?,?,?,?,?,REPEAT('1',64),'{}','{}',REPEAT('2',64),REPEAT('3',64),?)")
+                ->execute([$this->supplier, $case, $period, $accounts['315.100'], $accounts['684.100'], $issueEntry, $issueReceivable, $issueRevenue, $actor]);
+            $operation = (int) $this->pdo->lastInsertId();
+            $this->pdo->prepare("INSERT INTO nonprofit_membership_charge_claims(supplier_id,case_id,operation_id,member_id,client_id,kind,amount_cents,record_hash)
+                VALUES(?,?,?,1,1,'issue',10000,REPEAT('4',64))")->execute([$this->supplier, $case, $operation]);
+            $this->pdo->prepare('UPDATE nonprofit_membership_charge_cases SET head_operation_id=?,row_version=row_version+1 WHERE supplier_id=? AND id=?')
+                ->execute([$operation, $this->supplier, $case]);
             $this->pdo->prepare("INSERT INTO journal_line_pairings(supplier_id,account_id,note,origin,created_by) VALUES(?,?,'Synthetic exact legacy payment','manual',?)")
                 ->execute([$this->supplier, $accounts['315.100'], $actor]);
             $pairing = (int) $this->pdo->lastInsertId();

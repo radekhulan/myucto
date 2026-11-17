@@ -16,7 +16,7 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: () => m.permis
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => m.supplier }))
 vi.mock('@/composables/useHotkey', () => ({ useHotkey: () => undefined }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number, currency: string) => `${v} ${currency}` }))
-vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: { message?: string }, fallback: string) => e.message || fallback }))
+vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: { message?: string }, fallback: string) => e.message || fallback, apiErrorCode: () => undefined }))
 vi.mock('@/composables/useBankTransactionActions', async () => {
   const { ref } = await import('vue')
   return {

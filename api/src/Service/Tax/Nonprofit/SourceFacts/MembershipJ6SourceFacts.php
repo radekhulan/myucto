@@ -6,8 +6,9 @@ namespace MyInvoice\Service\Tax\Nonprofit\SourceFacts;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipChargeRepository;
-use MyInvoice\Repository\Nonprofit\Membership\MembershipRepository;
 use MyInvoice\Service\Nonprofit\Membership\MembershipClassification;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureAnchor;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureSeal;
 use MyInvoice\Service\Nonprofit\Membership\MembershipException;
 use MyInvoice\Service\Nonprofit\Membership\MembershipJournalProof;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxRules;
@@ -46,6 +47,7 @@ final class MembershipJ6SourceFacts implements NonprofitTaxSourceFactProvider
                 mr.idempotency_key AS revision_idempotency_key,mr.request_hash AS revision_request_hash,
                 mr.parent_hash AS revision_parent_hash,mr.created_by AS revision_created_by,
                 mr.recorded_at_utc AS revision_recorded_at_utc,
+                mr.erasure_item_id AS revision_erasure_item_id,mr.erased_digest AS revision_erased_digest,
                 lp.record_hash AS legal_profile_hash
             FROM nonprofit_membership_charge_operations o
             JOIN nonprofit_membership_charge_cases c ON c.supplier_id=o.supplier_id AND c.id=o.case_id
@@ -55,9 +57,9 @@ final class MembershipJ6SourceFacts implements NonprofitTaxSourceFactProvider
             WHERE o.supplier_id=? AND o.revenue_line_id IN ({$marks}) ORDER BY o.revenue_line_id" . ($currentRead ? ' FOR UPDATE' : ''));
         $stmt->execute([$supplierId, ...array_keys($page)]);
         $operations = [];
+        $anchored = [];
         $joined = [];
         $classifications = [];
-        $chargeRepository = new MembershipChargeRepository($this->db);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $raw) {
             $operation = $raw;
             foreach (['id', 'supplier_id', 'case_id', 'command_id', 'member_revision_id', 'legal_profile_id', 'accounting_period_id',
@@ -67,7 +69,7 @@ final class MembershipJ6SourceFacts implements NonprofitTaxSourceFactProvider
             foreach (['previous_operation_id', 'original_operation_id'] as $field) $operation[$field] = $operation[$field] === null ? null : (int) $operation[$field];
             foreach (['proof', 'receipt'] as $field) $operation[$field] = json_decode($operation[$field . '_json'], true, flags: JSON_THROW_ON_ERROR);
             unset($operation['proof_json'], $operation['receipt_json']);
-            if (!hash_equals($operation['record_hash'], NonprofitTaxRules::hash($chargeRepository->operationRecord($operation)))) self::corrupt();
+            if (!MembershipErasureSeal::operationProven($operation)) self::corrupt();
             $lineId = $operation['revenue_line_id'];
             if (!isset($page[$lineId]) || isset($operations[$operation['id']])) self::corrupt();
             $proof = $operation['proof'];
@@ -99,7 +101,12 @@ final class MembershipJ6SourceFacts implements NonprofitTaxSourceFactProvider
                 'idempotency_key' => $raw['revision_idempotency_key'], 'request_hash' => $raw['revision_request_hash'],
                 'parent_hash' => $raw['revision_parent_hash'], 'created_by' => (int) $raw['revision_created_by'],
                 'recorded_at_utc' => $raw['revision_recorded_at_utc']];
-            if (!hash_equals((string) $raw['member_revision_hash'], NonprofitTaxRules::hash(MembershipRepository::revisionRecord($revisionRecord)))) self::corrupt();
+            // Pečeť výmazu (krok 10) drží původní hash revize; obsah ověřuje stejné pravidlo jako historie člena.
+            $revisionRow = $revisionRecord + ['id' => $operation['member_revision_id'], 'record_hash' => (string) $raw['member_revision_hash'],
+                'erasure_item_id' => $raw['revision_erasure_item_id'], 'erased_digest' => $raw['revision_erased_digest']];
+            if (!MembershipErasureSeal::revisionProven($revisionRow)) self::corrupt();
+            $anchored[] = [MembershipErasureAnchor::OPERATION, $operation];
+            $anchored[] = [MembershipErasureAnchor::REVISION, $revisionRow];
             $row = $page[$lineId];
             $expected = $operation['operation'] === 'issue' ? $operation['amount_cents'] : -$operation['amount_cents'];
             if ((int) $row['entry_id'] !== $operation['journal_entry_id'] || $row['date'] !== $operation['accounting_date']
@@ -116,6 +123,11 @@ final class MembershipJ6SourceFacts implements NonprofitTaxSourceFactProvider
             $classifications[$operation['id']] = $proof['classification'];
         }
         if (count($operations) !== count($page)) self::corrupt();
+        try {
+            (new MembershipErasureAnchor($this->db))->assertRows($supplierId, $anchored, 'nonprofit_membership_j6_proof_invalid', 'J6 proof is invalid.');
+        } catch (MembershipException) {
+            self::corrupt();
+        }
         (new MembershipJournalProof($this->db))->assertOperations($supplierId, array_values($operations), $currentRead);
         (new MembershipClassification($this->db))->assertStoredMany($supplierId, $classifications, $currentRead);
         $out = [];
