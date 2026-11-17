@@ -247,9 +247,13 @@ final class ActivityLogHashChain
                 return 0;
             }
 
+            // Zamykající čtení se SKIP LOCKED: řádek, který právě drží redakce ({@see redact()}) do commitu výmazu,
+            // se přeskočí a zapečetí dalším během nad redigovaným obsahem. Prosté čtení by vzalo původní payload
+            // a UPDATE by po čekání na redakci zapečetil obsah, který už v řádku není. Čekat (bez SKIP LOCKED) nejde:
+            // pečetění by se řadilo za každou nedokončenou obchodní transakci. Pořadí pečetí na id nezávisí.
             $rows = $pdo->prepare(
                 'SELECT ' . self::selectList() . ' FROM activity_log
-                  WHERE hash IS NULL AND id >= ? ORDER BY id LIMIT ' . self::SEAL_BATCH
+                  WHERE hash IS NULL AND id >= ? ORDER BY id LIMIT ' . self::SEAL_BATCH . ' FOR UPDATE SKIP LOCKED'
             );
             $rows->execute([(int) $head['deferred_from_id']]);
 
@@ -463,9 +467,9 @@ final class ActivityLogHashChain
             throw new \LogicException('Redakce auditního záznamu musí běžet v transakci výmazu.');
         }
         // Hlava řetězu se uvnitř obchodní transakce ZÁMĚRNĚ nezamyká (pod REPEATABLE READ by redakce končila
-        // chybou 1020 a řadila za sebe pečetění celé instance, viz hlavička třídy). Redigují se záznamy staré
-        // nejméně rok: zapečetěné, nebo nechráněná historie, kterou pečetění nečte. Souběh s pečetěním čerstvého
-        // záznamu by zapečetil původní obsah bez otisku redakce; verify() ho pak ohlásí, tiše neprojde.
+        // chybou 1020 a řadila za sebe pečetění celé instance, viz hlavička třídy). Redigovat jde i čerstvý,
+        // ještě nezapečetěný záznam (úprava kontaktu těsně před výmazem): zámek řádku níže a SKIP LOCKED
+        // v sealBatch() zajistí, že pečetění zapečetí buď původní obsah před redakcí, nebo redigovaný po ní.
         $stmt = $pdo->prepare('SELECT ' . self::selectList() . ', prev_hash, hash FROM activity_log WHERE id = ? FOR UPDATE');
         $stmt->execute([$id]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);

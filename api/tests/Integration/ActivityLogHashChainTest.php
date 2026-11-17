@@ -438,6 +438,49 @@ final class ActivityLogHashChainTest extends TestCase
         self::assertSame('{"reason":"[vymazáno]"}', $this->payload($id));
     }
 
+    /**
+     * Souběh s odloženým pečetěním: pečetění během nedokončené redakce nesmí zapečetit původní obsah
+     * (verify() by pak hlásil podvržený záznam); řádek přeskočí a zapečetí ho až nad redigovaným.
+     */
+    public function testSealingWaitingOnRedactionSealsTheRedactedContent(): void
+    {
+        $this->write('test.a');
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO activity_log (action, payload) VALUES ('client.updated', ?)")->execute(['{"name":"Synthetic Person"}']);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->beginTransaction();
+        $this->chain->redact($id, ['name' => '[vymazáno]'], 'test', 1);
+
+        $script = tempnam(sys_get_temp_dir(), 'seal') . '.php';
+        file_put_contents($script, '<?php require ' . var_export(dirname(__DIR__, 2) . '/vendor/autoload.php', true) . ';'
+            . ' \MyInvoice\Bootstrap::buildContainer()->get(\MyInvoice\Service\ActivityLogHashChain::class)->sealPending();');
+        $env = getenv();
+        $env['MYINVOICE_DB_NAME'] = (string) $pdo->query('SELECT DATABASE()')->fetchColumn();
+        $pipes = [];
+        $child = proc_open([PHP_BINARY, $script], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env, ['bypass_shell' => true]);
+        self::assertIsResource($child);
+        try {
+            // Pečetění druhého spojení buď doběhne bez čekání (řádek redakce přeskočí), nebo na řádek čeká;
+            // redakce se commitne až potom, takže čekající pečetění by bez opravy zapečetilo přečtený původní obsah.
+            $waits = $this->db->pdo()->prepare('SELECT COUNT(*) FROM information_schema.INNODB_LOCK_WAITS');
+            for ($i = 0; $i < 200; $i++) {
+                if (!proc_get_status($child)['running']) break;
+                $waits->execute();
+                if ((int) $waits->fetchColumn() > 0) break;
+                usleep(50_000);
+            }
+            $pdo->commit();
+            $output = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+            self::assertSame(0, proc_close($child), $output);
+        } finally {
+            @unlink($script);
+        }
+        $this->chain->sealPending();
+        self::assertNotNull($this->row($id)['hash']);
+        self::assertSame('{"name":"[vymazáno]"}', $this->payload($id));
+        self::assertTrue($this->chain->verify($this->from)['ok']);
+    }
+
     private function redactionDigestOf(int $id): string
     {
         $method = new \ReflectionMethod(ActivityLogHashChain::class, 'redactionDigest');
