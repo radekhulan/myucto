@@ -440,9 +440,10 @@ final class ActivityLogHashChainTest extends TestCase
 
     /**
      * Souběh s odloženým pečetěním: pečetění během nedokončené redakce nesmí zapečetit původní obsah
-     * (verify() by pak hlásil podvržený záznam); řádek přeskočí a zapečetí ho až nad redigovaným.
+     * (verify() by pak hlásil podvržený záznam) ani na redakci čekat; řádek přeskočí a zapečetí ho až
+     * další běh nad redigovaným obsahem.
      */
-    public function testSealingWaitingOnRedactionSealsTheRedactedContent(): void
+    public function testSealingSkipsRecordUnderRedactionAndSealsItsRedactedContent(): void
     {
         $this->write('test.a');
         $pdo = $this->db->pdo();
@@ -451,30 +452,52 @@ final class ActivityLogHashChainTest extends TestCase
         $pdo->beginTransaction();
         $this->chain->redact($id, ['name' => '[vymazáno]'], 'test', 1);
 
-        $script = tempnam(sys_get_temp_dir(), 'seal') . '.php';
+        $base = tempnam(sys_get_temp_dir(), 'seal');
+        $script = $base . '.php';
         file_put_contents($script, '<?php require ' . var_export(dirname(__DIR__, 2) . '/vendor/autoload.php', true) . ';'
             . ' \MyInvoice\Bootstrap::buildContainer()->get(\MyInvoice\Service\ActivityLogHashChain::class)->sealPending();');
         $env = getenv();
         $env['MYINVOICE_DB_NAME'] = (string) $pdo->query('SELECT DATABASE()')->fetchColumn();
         $pipes = [];
         $child = proc_open([PHP_BINARY, $script], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env, ['bypass_shell' => true]);
-        self::assertIsResource($child);
+        $exit = null;
         try {
-            // Pečetění druhého spojení buď doběhne bez čekání (řádek redakce přeskočí), nebo na řádek čeká;
-            // redakce se commitne až potom, takže čekající pečetění by bez opravy zapečetilo přečtený původní obsah.
-            $waits = $this->db->pdo()->prepare('SELECT COUNT(*) FROM information_schema.INNODB_LOCK_WAITS');
-            for ($i = 0; $i < 200; $i++) {
-                if (!proc_get_status($child)['running']) break;
+            self::assertIsResource($child);
+            // Čekání jen na zámek, který drží tato transakce redakce (sdílený server může mít jiná čekání).
+            $waits = $pdo->prepare('SELECT COUNT(*) FROM information_schema.INNODB_LOCK_WAITS w
+                JOIN information_schema.INNODB_TRX blocker ON blocker.trx_id = w.blocking_trx_id
+                WHERE blocker.trx_mysql_thread_id = CONNECTION_ID()');
+            $waited = false;
+            for ($i = 0; $i < 600; $i++) {
+                $status = proc_get_status($child);
+                if (!$status['running']) {
+                    $exit = $status['exitcode'];
+                    break;
+                }
                 $waits->execute();
-                if ((int) $waits->fetchColumn() > 0) break;
+                if ((int) $waits->fetchColumn() > 0) {
+                    $waited = true;
+                    break;
+                }
                 usleep(50_000);
             }
+            self::assertTrue($waited || $exit !== null, 'Pečetění ve druhém spojení nedoběhlo ani nečekalo.');
             $pdo->commit();
-            $output = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
-            self::assertSame(0, proc_close($child), $output);
+            if ($exit === null) $exit = proc_close($child);
+            else proc_close($child);
+            $child = null;
+            self::assertFalse($waited, 'Pečetění čekalo na nedokončenou redakci místo přeskočení řádku.');
+            self::assertSame(0, $exit);
         } finally {
+            if (is_resource($child)) {
+                proc_terminate($child);
+                proc_close($child);
+            }
+            foreach ($pipes as $pipe) if (is_resource($pipe)) fclose($pipe);
             @unlink($script);
+            @unlink($base);
         }
+        // Commit redakce záznam zapečetí sám (háček po commitu); jinak ho dopečetí další běh.
         $this->chain->sealPending();
         self::assertNotNull($this->row($id)['hash']);
         self::assertSame('{"name":"[vymazáno]"}', $this->payload($id));
