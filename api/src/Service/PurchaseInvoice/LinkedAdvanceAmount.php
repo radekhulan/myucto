@@ -19,18 +19,25 @@ use PDO;
  * po propojení ({@see fillFinalsOfAdvance()}). Jinak by konečná faktura dál chtěla
  * doplatit i zálohu, přestože je účetně vyrovnaná (issue #313). Nenulová částka se
  * nepřepisuje: může jít o ruční korekci z úpravy faktury.
+ *
+ * Konečná faktura, která zálohu odečítá odpočtovým řádkem ({@see PurchaseAdvanceDeduction}),
+ * má zálohu odečtenou už v celkové částce. Hlavička ji pak neodečítá (0), jinak by
+ * `amount_to_pay` zálohu odečetl podruhé.
  */
 final class LinkedAdvanceAmount
 {
     public function __construct(private readonly Connection $db) {}
 
     /**
-     * Částka zálohy pro konečnou fakturu.
+     * Částka zálohy pro konečnou fakturu (`$finalId` = konečná faktura, je-li už uložená).
      *
      * @param array<string,mixed> $advance řádek zálohy (id, status, total_with_vat, paid_amount_invoice_ccy)
      */
-    public function forFinal(int $supplierId, array $advance, float $finalTotal): float
+    public function forFinal(int $supplierId, array $advance, float $finalTotal, ?int $finalId = null): float
     {
+        if ($finalId !== null && $this->finalDeductsAdvance($finalId, (int) $advance['id'])) {
+            return 0.0;
+        }
         $paid = $this->paidAdvanceAmount((int) $advance['id'], $supplierId);
         $paidInInvoiceCurrency = (float) ($advance['paid_amount_invoice_ccy'] ?? 0);
         $base = $paidInInvoiceCurrency > 0.0
@@ -60,10 +67,11 @@ final class LinkedAdvanceAmount
             return [];
         }
         $finals = $pdo->prepare(
-            "SELECT id, total_with_vat FROM purchase_invoices
-              WHERE supplier_id = ? AND advance_purchase_invoice_id = ? AND document_kind = 'invoice'
-                AND status IN ('received', 'booked', 'paid') AND advance_paid_amount = 0
-              ORDER BY id"
+            "SELECT f.id, f.total_with_vat FROM purchase_invoices f
+              WHERE f.supplier_id = ? AND f.advance_purchase_invoice_id = ? AND f.document_kind = 'invoice'
+                AND f.status IN ('received', 'booked', 'paid') AND f.advance_paid_amount = 0
+                AND NOT " . PurchaseAdvanceDeduction::finalHasDeductionSql('f') . '
+              ORDER BY f.id'
         );
         $finals->execute([$supplierId, $advanceId]);
         $update = $pdo->prepare(
@@ -123,7 +131,8 @@ final class LinkedAdvanceAmount
                JOIN purchase_invoices a ON a.id = f.advance_purchase_invoice_id AND a.supplier_id = f.supplier_id
               WHERE f.document_kind = 'invoice' AND f.status IN ('received', 'booked', 'paid')
                 AND f.advance_paid_amount = 0
-                AND a.document_kind IN ('advance', 'tax_document') AND a.status <> 'cancelled'"
+                AND a.document_kind IN ('advance', 'tax_document') AND a.status <> 'cancelled'
+                AND NOT " . PurchaseAdvanceDeduction::finalHasDeductionSql('f')
             . ($supplierId !== null ? ' AND f.supplier_id = ?' : '')
             . ' ORDER BY f.supplier_id, f.id'
         );
@@ -140,6 +149,17 @@ final class LinkedAdvanceAmount
             $out[] = ['supplier_id' => $sid, 'final_id' => (int) $r['final_id'], 'advance_id' => (int) $r['id'], 'amount' => $amount];
         }
         return $out;
+    }
+
+    private function finalDeductsAdvance(int $finalId, int $advanceId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM purchase_invoice_items pii
+              WHERE pii.purchase_invoice_id = ? AND pii.advance_purchase_invoice_id = ? AND '
+                . PurchaseAdvanceDeduction::deductionLineSql('pii') . ' LIMIT 1'
+        );
+        $stmt->execute([$finalId, $advanceId]);
+        return $stmt->fetchColumn() !== false;
     }
 
     /** Zaúčtované úhrady zálohy z banky a pokladny v měně zálohy. */

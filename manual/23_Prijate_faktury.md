@@ -241,7 +241,34 @@ Bez propojení by se náklad počítal dvakrát.
 **Jak poznáte, že je hotovo:** v boxu je odkaz na zálohu a tlačítko **Zrušit propojení**. V detailu zálohy
 vidíte, kterou fakturou je vyúčtována.
 
+Zálohu můžete navázat i přímo v editoru finální faktury: v boxu pod druhem dokladu klikněte na **Spárovat se zálohou**.
+U nové faktury se vazba uloží spolu s dokladem.
+
 Pravidla propojení a jejich dopad na náklady, daň a DPH jsou v [§ 23.11.16](#231116-propojeni-zalohy-s-vyuctovaci-fakturou-proti-dvojimu-zapocteni).
+
+### 23.8.1 Vyúčtování zálohy, ke které dodavatel vystavil daňový doklad k platbě
+
+Dělejte to, když jste zálohu zaplatili, dodavatel k ní vystavil daňový doklad k přijaté platbě (DDKP) a pak poslal
+konečnou fakturu, která zálohu odečítá. DPH ze zálohy jste uplatnili už z DDKP, konečná faktura proto smí do přiznání
+přinést jen rozdíl.
+
+1. Zadejte zálohovou fakturu, zaplaťte ji z banky nebo pokladny (zaúčtuje se na 314) a zadejte k ní DDKP s vazbou
+   na zálohu (typ dokladu *Daňový doklad k platbě*). DDKP zaúčtujte.
+2. Zadejte konečnou fakturu tak, jak ji poslal dodavatel, tedy položky plnění v plné výši.
+3. Navažte ji na zálohu (**Spárovat se zálohou** v editoru nebo v detailu).
+4. Klikněte na **Doplnit odpočet zálohy z DDKP**. Aplikace přidá za každý DDKP a sazbu DPH záporný řádek se základem
+   a daní DDKP, označený jako **Odpočet zálohy**. Částky porovnejte s odpočtem zálohy na dokladu dodavatele.
+5. Doklad uložte a zaúčtujte.
+
+**Jak poznáte, že je hotovo:** faktura má celkovou částku po odečtu zálohy (při přeplatku zápornou), **Uhrazená záloha**
+v hlavičce je nulová a zápis v deníku obsahuje náklad za plnění, DPH faktury (MD 343), vrácení DPH z DDKP (D 343)
+a zúčtování zbytku zálohy (MD 321 / D 314). Účet 314 zálohy skončí na nule. V přiznání k DPH a v kontrolním hlášení
+je za období konečné faktury jen rozdíl mezi daní faktury a DDKP.
+
+Příklad: záloha 890 Kč (735,54 + 154,46 DPH), DDKP v září. Konečná faktura v říjnu: plnění 665,66 + 139,79 DPH,
+odpočet zálohy −735,54 a −154,46 DPH, celkem −84,55 Kč. Za říjen jde do DPH základ −69,88 a daň −14,67.
+V deníku je náklad 665,66, MD 343 139,79, D 343 154,46, D 321 650,99 a zúčtování MD 321 / D 314 735,54.
+Na 321 zůstane přeplatek 84,55 Kč, který vám dodavatel vrátí (po zaokrouhlení dokladu 84,38 Kč).
 
 ## 23.9 Krok za krokem: automatický import ze složky (scan inbox)
 
@@ -275,7 +302,9 @@ Tento postup je pro správce. Dodavatelé vám posílají PDF e-mailem nebo mát
 | Při nahrání hláška, že soubor už byl zpracován | Soubor se stejným otiskem v systému už je | Otevřete existující doklad podle čísla faktury v hlášce |
 | Při skenu inbox hláška „Koncept z tohoto souboru byl smazán“ | Smazaný koncept si aplikace pamatuje | Chcete-li soubor přesto zpracovat, nahrajte ho ručně |
 | Hláška „Nemáte založenou žádnou korunovou pokladnu - doklad zůstane neuhrazený“ | Pro platbu hotově není korunová pokladna | Založte pokladnu v [Pokladně](32_Pokladna.md) |
-| Zaúčtování zálohy neproběhlo automaticky | Záloha nebo DDKP s vlastním daňovým dokladem | Postupujte podle hlášky, zúčtování zapište ručním zápisem |
+| Konečnou fakturu k záloze s DDKP nejde zaúčtovat, detail hlásí chybějící odpočet zálohy | Faktura zálohu neodečítá, DPH z DDKP by se uplatnila podruhé | Klikněte na **Doplnit odpočet zálohy z DDKP**, viz [§ 23.8.1](#2381-vyuctovani-zalohy-ke-ktere-dodavatel-vystavil-danovy-doklad-k-platbe) |
+| Zaúčtování konečné faktury hlásí, že odpočet zálohy nesedí s DDKP nebo s úhradou zálohy | Odpočtový řádek má jiný základ nebo daň než DDKP, nebo úhrada zálohy není celá zaúčtovaná | Opravte odpočtový řádek podle DDKP, zaúčtujte úhradu zálohy, případně zapište zúčtování ručním zápisem |
+| Zaúčtování zálohy neproběhlo automaticky | Odpočet zálohy s DDKP u faktury bez plného nároku na odpočet, s přenesenou daňovou povinností nebo s rozpisem DPH | Postupujte podle hlášky, zúčtování zapište ručním zápisem |
 
 ## 23.11 Podrobnosti a pravidla
 
@@ -1113,10 +1142,20 @@ faktury se zúčtováním, dokud záloha uhrazená není, říká, že se zaúč
 neúčtuje záměrně, automatické účtování ji proto ani nezkouší a nehlásí chybu.
 
 **Záloha (nebo samostatný DDKP) s vlastním daňovým dokladem k platbě.** Má-li navázaná záloha svůj DDKP, nebo je-li
-zálohou přímo samostatný DDKP, část účtu 314 už vyčerpala DPH (343/314), kterou DDKP uplatnil při platbě. Automatické
-zúčtování na plnou zaplacenou částku by pak 314 přečerpalo do minusu o tuhle už uplatněnou daň, takže se v tomto případě
-**nezaúčtuje automaticky**. Hláška u zaúčtování rovnou spočítá, kolik DPH z finální faktury zbývá doúčtovat na 343 nad rámec
-toho, co DDKP uplatnil už při platbě. Zúčtování zálohy pak zapište ručním zápisem podle této částky.
+zálohou přímo samostatný DDKP, část účtu 314 už vyčerpala DPH (343/314), kterou DDKP uplatnil při platbě. Finální faktura
+pak musí zálohu odečíst **odpočtovým řádkem** se základem a daní DDKP (postup v [§ 23.8.1](#2381-vyuctovani-zalohy-ke-ktere-dodavatel-vystavil-danovy-doklad-k-platbe)).
+Řádek se pozná jen podle označení **Odpočet zálohy**, samotná záporná částka nestačí. Při zaúčtování se základ odpočtu
+nevede na náklad, daň odpočtu vrací DPH uplatněnou z DDKP a zbytek zálohy (zaplaceno minus DPH DDKP) se zúčtuje
+MD 321 / D 314. Odpočet musí s DDKP sedět s tolerancí 1 Kč a zbytek zálohy se základem odpočtu, jinak zaúčtování skončí
+hláškou s čísly. Uhrazenou zálohu v hlavičce faktura s odpočtovým řádkem neodečítá, aby se záloha neodečetla dvakrát.
+
+Finální faktura navázaná na zálohu s DDKP **bez** odpočtového řádku se nezaúčtuje: hláška spočítá, kolik DPH z faktury
+zbývá doúčtovat nad rámec toho, co DDKP uplatnil, a detail faktury nabídne **Doplnit odpočet zálohy z DDKP**. Takové
+doklady (i ze starších období) najdete v [Měsíční kontrole](62_Mesicni_kontrola.md) jako konečné přijaté faktury bez odpočtu
+zálohy, protože v evidenci DPH by se daň zálohy uplatnila podruhé.
+
+Automaticky se neúčtuje odpočet zálohy s DDKP u faktury bez plného nároku na odpočet, s přenesenou daňovou povinností
+nebo s rozpisem DPH podle druhu plnění. Zúčtování zálohy pak zapište ručním zápisem.
 
 **Co propojení (a zaplacení) ovlivní:**
 

@@ -35,6 +35,7 @@ final class SetPurchaseInvoiceItemsAction
         private readonly IpMatcher $ipMatcher,
         private readonly DocumentLockService $locks,
         private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
+        private readonly \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction $advanceDeduction,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -102,8 +103,9 @@ final class SetPurchaseInvoiceItemsAction
             $this->itemDimensions->realign($supplierId, 'purchase_invoice', $id, $dimensionsBefore, $items);
         }
         $this->calc->recompute($id);
+        $this->advanceDeduction->clearHeaderAdvanceWhenDeducted($supplierId, $id);
 
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $user =(array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('purchase_invoice.items_updated', $user['id'] ?? null, 'purchase_invoice', $id,
             ['count' => count($items)], $ip, $request->getHeaderLine('User-Agent'));

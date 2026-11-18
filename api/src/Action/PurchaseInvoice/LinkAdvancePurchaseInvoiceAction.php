@@ -76,9 +76,7 @@ final class LinkAdvancePurchaseInvoiceAction
         ], $ip, $request->getHeaderLine('User-Agent'));
 
         $invoice = $this->repo->find($id, $supplierId);
-        if (is_array($invoice)
-            && (string) ($invoice['document_kind'] ?? 'invoice') === 'invoice'
-            && CreatePurchaseInvoiceAction::advanceHasActiveTaxDocument($this->db, $advanceId, $supplierId)) {
+        if (is_array($invoice) && CreatePurchaseInvoiceAction::finalRisksDoubleVatDeduction($this->db, $invoice, $supplierId)) {
             $invoice['_warnings'] = ['advance_has_tax_document'];
         }
 

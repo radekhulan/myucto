@@ -758,8 +758,9 @@ final class AdvanceCycleTest extends BankPostingTestCase
         $this->assertBalancedEntry($entryId);
     }
 
-    // (f3) — přijatá strana: DDKP + vyúčtovací PF na tutéž zálohu = hlasitá chyba (out of scope
-    //        v1, zrcadlo (f1) na vydané straně) — jinak by settlement 321/314 přečerpal 314.
+    // (f3) — přijatá strana: DDKP + vyúčtovací PF BEZ odpočtu zálohy = hlasitá chyba — jinak by
+    //        settlement 321/314 přečerpal 314 a DPH zálohy se uplatnila podruhé. Vyúčtování
+    //        s odpočtovým řádkem pokrývá PurchaseAdvanceDeductionTest.
     public function testPurchaseFinalWithTaxDocumentThrowsAmbiguous(): void
     {
         $vendor  = $this->client('Dodavatel s.r.o.');

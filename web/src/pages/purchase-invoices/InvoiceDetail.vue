@@ -8,6 +8,7 @@ import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vu
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
 import PurchaseItemMeta from '@/components/purchase/PurchaseItemMeta.vue'
+import AdvancePickerModal from '@/components/purchase/AdvancePickerModal.vue'
 import CreditNoteOffsetNotice from '@/components/invoices/CreditNoteOffsetNotice.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
@@ -202,24 +203,26 @@ async function dismissWarning(section?: string) {
 // vyúčtovací fakturu (advance_purchase_invoice_id).
 const advanceModalOpen = ref(false)
 const pairMode = ref<'advance' | 'final'>('advance')
-const advanceCandidates = ref<PurchaseInvoiceBrief[]>([])
-const loadingCandidates = ref(false)
 const linkingAdvance = ref(false)
 
-async function openPairModal(mode: 'advance' | 'final') {
+function openPairModal(mode: 'advance' | 'final') {
   if (!invoice.value) return
   pairMode.value = mode
   advanceModalOpen.value = true
-  loadingCandidates.value = true
-  try {
-    advanceCandidates.value = mode === 'advance'
-      ? await purchaseInvoicesApi.advanceCandidates(invoice.value.id)
-      : await purchaseInvoicesApi.settlementCandidates(invoice.value.id)
-  } catch (e) {
-    toast.error(apiErrorMessage(e))
-  } finally {
-    loadingCandidates.value = false
-  }
+}
+
+function loadPairCandidates(): Promise<PurchaseInvoiceBrief[]> {
+  const current = invoice.value
+  if (!current) return Promise.resolve([])
+  return pairMode.value === 'advance'
+    ? purchaseInvoicesApi.advanceCandidates(current.id)
+    : purchaseInvoicesApi.settlementCandidates(current.id)
+}
+
+// Konečná faktura k záloze s DDKP bez odpočtu zálohy: odpočtové řádky vloží editor.
+function addAdvanceDeduction() {
+  if (!invoice.value) return
+  router.push({ name: 'purchase-invoice-edit', params: { id: invoice.value.id }, query: { advance_deduction: '1' } })
 }
 
 // Jsem na vyúčtovací faktuře, advanceId = záloha → vazba na current (i AI návrh).
@@ -1287,6 +1290,17 @@ useWindowRefresh(async () => {
           {{ t('purchase_invoice.advance_link.unlink') }}
         </button>
       </div>
+      <!-- Záloha s DDKP, ale faktura zálohu neodečítá → dvojí odpočet DPH, doklad nejde zaúčtovat -->
+      <div v-if="invoice.linked_advance && invoice.advance_deduction_missing"
+        class="flex flex-wrap items-center justify-between gap-3 bg-warning-50 border border-warning-200 rounded-lg px-4 py-2.5 text-sm"
+        data-test="advance-deduction-missing">
+        <span class="text-warning-700 min-w-0">{{ t('purchase_invoice.advance_deduction.missing') }}</span>
+        <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe && invoice.status !== 'cancelled'" type="button"
+          @click="addAdvanceDeduction" :class="btnFilledSm('warning')">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+          {{ t('purchase_invoice.advance_deduction.add') }}
+        </button>
+      </div>
 
       <!-- ═══ Vazba dobropisu ↔ opravovaná faktura (migrace 1096) — čti-only banner ═══ -->
       <!-- Tento doklad JE dobropis → odkaz na opravovanou fakturu -->
@@ -1942,28 +1956,12 @@ useWindowRefresh(async () => {
         </template>
       </div>
 
-      <!-- Modal výběru zálohy k propojení -->
-      <div v-if="advanceModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="advanceModalOpen = false">
-        <div class="bg-surface rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
-          <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between">
-            <h3 class="font-medium">{{ pairMode === 'advance' ? t('purchase_invoice.advance_link.modal_title') : t('purchase_invoice.advance_link.modal_title_settlement') }}</h3>
-            <button type="button" @click="advanceModalOpen = false" class="cursor-pointer text-neutral-400 hover:text-neutral-600">✕</button>
-          </div>
-          <div class="p-4 overflow-y-auto">
-            <div v-if="loadingCandidates" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
-            <div v-else-if="advanceCandidates.length === 0" class="text-sm text-neutral-500">{{ pairMode === 'advance' ? t('purchase_invoice.advance_link.no_candidates') : t('purchase_invoice.advance_link.no_candidates_settlement') }}</div>
-            <ul v-else class="space-y-2">
-              <li v-for="cand in advanceCandidates" :key="cand.id">
-                <button type="button" @click="pickCandidate(cand.id)" :disabled="linkingAdvance"
-                  class="cursor-pointer w-full text-left px-3 py-2 border border-neutral-200 rounded-md hover:border-primary-400 hover:bg-primary-50 disabled:opacity-50 flex justify-between items-center gap-3">
-                  <span class="font-mono text-sm">{{ cand.varsymbol || cand.vendor_invoice_number || ('#' + cand.id) }}</span>
-                  <span class="text-sm text-neutral-500">{{ cand.issue_date ? formatDate(cand.issue_date) : '' }} · {{ formatMoney(cand.total_with_vat, cand.currency) }}</span>
-                </button>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </div>
+      <!-- Modal výběru zálohy k propojení (sdílený s editorem konečné faktury) -->
+      <AdvancePickerModal :open="advanceModalOpen"
+        :title="pairMode === 'advance' ? t('purchase_invoice.advance_link.modal_title') : t('purchase_invoice.advance_link.modal_title_settlement')"
+        :empty-text="pairMode === 'advance' ? t('purchase_invoice.advance_link.no_candidates') : t('purchase_invoice.advance_link.no_candidates_settlement')"
+        :load="loadPairCandidates" :busy="linkingAdvance"
+        @pick="pickCandidate" @close="advanceModalOpen = false" />
 
       <!-- Modal: Zaplatit pomocí QR -->
       <div v-if="qrOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="qrOpen = false">

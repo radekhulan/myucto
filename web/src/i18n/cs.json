@@ -21795,6 +21795,7 @@
         "fx_footprint_missing": "Cizoměnové řádky na devizovém účtu bez úplné měnové stopy (currency_code/amount_foreign)",
         "paid_proformas_no_advance": "Zaplacené proformy bez zaúčtované přijaté zálohy",
         "paid_advances_no_payment": "Zaplacené zálohové faktury dodavatelům bez zaúčtované úhrady na 314",
+        "purchase_final_missing_advance_deduction": "Konečné přijaté faktury k záloze s daňovým dokladem k platbě bez odpočtu zálohy (hrozí dvojí odpočet DPH)",
         "settled_but_unpaid": "Doklady se stavem Odeslaná, ale s úhradou už v deníku (aktualizujte stav na Zaplacená)",
         "cancelled_with_entry": "Stornované doklady, jejichž zápis je v deníku pořád aktivní (knihy a evidence si protiřečí)",
         "entries_without_description": "Zaúčtované zápisy bez obsahu účetního případu (§ 11 odst. 1 písm. b) ZoÚ) - doplňte popis",
@@ -22980,6 +22981,15 @@
       "ai_suggestion_body": "Tato faktura zřejmě vyúčtovává zálohu",
       "confirm": "Potvrdit",
       "dismiss": "Zamítnout"
+    },
+    "advance_deduction": {
+      "missing": "K záloze je daňový doklad k platbě (DDKP) a jeho DPH je už uplatněná. Faktura musí zálohu odečíst, jinak se DPH uplatní podruhé a doklad nepůjde zaúčtovat.",
+      "add": "Doplnit odpočet zálohy z DDKP",
+      "present": "Faktura odečítá zálohu odpočtovým řádkem podle daňového dokladu k platbě.",
+      "pick_vendor": "Zálohu lze navázat po výběru dodavatele a měny.",
+      "line_description": "Odpočet zálohy, daňový doklad {number}",
+      "badge": "Odpočet zálohy",
+      "badge_hint": "Řádek odečítá zálohu s daňovým dokladem k platbě. Nejde na náklad, zúčtuje zálohu na 314."
     },
     "bank_payment": {
       "title": "Úhrada v bance",

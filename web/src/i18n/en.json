@@ -21787,6 +21787,7 @@
         "fx_footprint_missing": "Foreign-currency lines on an FX account without a complete currency footprint (currency_code/amount_foreign)",
         "paid_proformas_no_advance": "Paid proformas without a booked received advance",
         "paid_advances_no_payment": "Paid supplier advance invoices without a booked payment on 314",
+        "purchase_final_missing_advance_deduction": "Final purchase invoices for an advance with a tax document on payment that do not deduct the advance (VAT may be deducted twice)",
         "settled_but_unpaid": "Documents in the Sent state but with a payment already in the journal (update the status to Paid)",
         "cancelled_with_entry": "Cancelled documents whose journal entry is still active (books and records contradict each other)",
         "entries_without_description": "Posted journal entries with no description of the accounting case (§ 11(1)(b) of the Accounting Act) — add a description",
@@ -22980,6 +22981,15 @@
       "ai_suggestion_body": "This invoice likely settles advance",
       "confirm": "Confirm",
       "dismiss": "Dismiss"
+    },
+    "advance_deduction": {
+      "missing": "The advance has a tax document on payment and its VAT has already been deducted. The invoice must deduct the advance, otherwise the VAT is deducted twice and the document cannot be posted.",
+      "add": "Add advance deduction from the tax document",
+      "present": "The invoice deducts the advance with a deduction line based on the tax document on payment.",
+      "pick_vendor": "Choose the supplier and currency to link an advance.",
+      "line_description": "Advance deduction, tax document {number}",
+      "badge": "Advance deduction",
+      "badge_hint": "The line deducts an advance with a tax document on payment. It is not an expense, it settles the advance on 314."
     },
     "bank_payment": {
       "title": "Bank payment",

@@ -1209,7 +1209,8 @@
         "2303_membership_correctability.sql",
         "2304_activity_log_redactions.sql",
         "2305_membership_erasure.sql",
-        "2306_membership_erasure_permission.sql"
+        "2306_membership_erasure_permission.sql",
+        "2307_purchase_item_advance_deduction.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -23713,6 +23714,7 @@
             "columns": {
                 "accrual_from": "date NULL DEFAULT NULL",
                 "accrual_to": "date NULL DEFAULT NULL",
+                "advance_purchase_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "counter_account_code": "varchar(10) NULL DEFAULT NULL",
                 "description": "text NOT NULL",
                 "duration_minutes": "int(11) NULL DEFAULT NULL",
@@ -23753,9 +23755,11 @@
                 "fk_pii_vat": "BTREE (vat_rate_id)",
                 "idx_pii_accrual_to": "BTREE (accrual_to)",
                 "idx_pii_expense_rule": "BTREE (expense_rule_id)",
-                "idx_pii_invoice": "BTREE (purchase_invoice_id, order_index)"
+                "idx_pii_invoice": "BTREE (purchase_invoice_id, order_index)",
+                "ix_pii_advance_purchase_invoice": "BTREE (advance_purchase_invoice_id, purchase_invoice_id)"
             },
             "foreign_keys": {
+                "fk_pii_advance_purchase_invoice": "(advance_purchase_invoice_id) -> purchase_invoices (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_pii_invoice": "(purchase_invoice_id) -> purchase_invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_pii_pol": "(purchase_order_line_id) -> purchase_order_lines (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_pii_stock_item": "(stock_item_id) -> stock_items (id) ON UPDATE RESTRICT ON DELETE SET NULL",

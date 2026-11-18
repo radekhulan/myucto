@@ -25,6 +25,7 @@ use MyInvoice\Service\Ares\CrpDphClient;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionCompletionService;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
 use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
@@ -261,6 +262,17 @@ final class CreatePurchaseInvoiceAction
             // Až PO recompute — volba dominantního kódu váží podle total_with_vat, které
             // kalkulátor dopočítává.
             $this->repo->syncHeaderClassificationFromItems($id, $supplierId);
+            // Záloha vybraná už v editoru nového dokladu: vazba vzniká v téže transakci,
+            // aby přijetí dokladu níž zaúčtovalo konečnou fakturu i s vyúčtováním zálohy.
+            $advanceToLink = (int) ($body['advance_purchase_invoice_id'] ?? 0);
+            if ($advanceToLink > 0) {
+                try {
+                    $this->repo->linkAdvance($id, $advanceToLink, $supplierId);
+                } catch (\RuntimeException $e) {
+                    throw new PurchaseInvoiceSubmissionException('link_failed', $e->getMessage(), 409);
+                }
+            }
+            (new PurchaseAdvanceDeduction($this->db))->clearHeaderAdvanceWhenDeducted($supplierId, $id);
             // Zaokrouhlení dokladu jako v PUT ({@see UpdatePurchaseInvoiceAction}), až po přepočtu.
             if (array_key_exists('rounding', $body) && is_numeric($body['rounding'])) {
                 $this->repo->setRounding($id, $supplierId, (float) $body['rounding']);
@@ -360,9 +372,8 @@ final class CreatePurchaseInvoiceAction
         if ($vendorUnreliablePayer) {
             $warnings[] = 'vendor_unreliable_payer';
         }
-        // Finální faktura na zálohu s DDKP → DPH ze zálohy už odečtena (dvojí odpočet, viz helper).
-        if (is_array($invoice) && (string) ($invoice['document_kind'] ?? 'invoice') === 'invoice'
-            && self::advanceHasActiveTaxDocument($this->db, $invoice['advance_purchase_invoice_id'] ?? null, $supplierId)) {
+        // Finální faktura na zálohu s DDKP bez odpočtu zálohy → dvojí odpočet DPH (viz helper).
+        if (is_array($invoice) && self::finalRisksDoubleVatDeduction($this->db, $invoice, $supplierId)) {
             $warnings[] = 'advance_has_tax_document';
         }
         // Účtenka, která vypadá jako doklad k přijaté záloze → nejspíš má být DDKP/záloha.
@@ -462,11 +473,26 @@ final class CreatePurchaseInvoiceAction
     }
 
     /**
-     * Varování `advance_has_tax_document`: finální faktura navázaná na zálohu, která má DDKP
-     * (daňový doklad k platbě). DPH ze zálohy už byla odečtena (343/314 na DDKP), takže
-     * vyúčtovací faktura smí v DPH/KH nárokovat jen DOPLATKOVOU daň — jinak dvojí odpočet.
-     * Deník to blokuje (advance_settlement_ambiguous), evidence DPH ale ne → měkké upozornění
-     * při uložení. Vrací true, když má navázaná záloha aspoň jeden živý DDKP.
+     * Varování `advance_has_tax_document`: konečná faktura navázaná na zálohu s DDKP, která
+     * zálohu neodečítá odpočtovým řádkem ({@see PurchaseAdvanceDeduction}). DPH ze zálohy už
+     * uplatnil DDKP, faktura s daní v plné výši by ji v evidenci DPH a KH uplatnila podruhé.
+     * Deník takovou fakturu nezaúčtuje (advance_settlement_ambiguous), evidenci DPH to ale
+     * nezastaví. Táž podmínka hlídá staré doklady v Měsíční kontrole
+     * ({@see PurchaseAdvanceDeduction::finalsMissingDeduction()}).
+     *
+     * @param array<string,mixed> $invoice
+     */
+    public static function finalRisksDoubleVatDeduction(Connection $db, array $invoice, int $supplierId): bool
+    {
+        if ((string) ($invoice['document_kind'] ?? 'invoice') !== 'invoice' || (int) ($invoice['id'] ?? 0) <= 0) {
+            return false;
+        }
+        return (new PurchaseAdvanceDeduction($db))->finalMissingDeduction($supplierId, (int) $invoice['id']);
+    }
+
+    /**
+     * Má navázaná záloha aspoň jeden DDKP (daňový doklad k platbě), nebo je sama
+     * samostatným DDKP? DPH ze zálohy je pak už uplatněná (343/314 na DDKP).
      */
     public static function advanceHasActiveTaxDocument(Connection $db, mixed $advanceId, int $supplierId): bool
     {

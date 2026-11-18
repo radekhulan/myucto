@@ -810,6 +810,9 @@ final class Routes
         $app->get    ('/api/purchase-invoices/export',                     ExportPurchaseInvoicesAction::class);
         $app->get    ('/api/purchase-invoices/book',                       [\MyInvoice\Action\Invoice\InvoiceBookAction::class, 'received']);
         $app->get    ('/api/purchase-invoices/import-batches',             PurchaseInvoiceImportBatchesAction::class);
+        // Řádky odpočtu poskytnuté zálohy z jejích DDKP pro editor konečné faktury.
+        $app->get    ('/api/purchase-invoices/advance-deduction-lines',    \MyInvoice\Action\PurchaseInvoice\AdvanceDeductionLinesAction::class);
+        $app->get    ('/api/purchase-invoices/advance-candidates',         \MyInvoice\Action\PurchaseInvoice\NewInvoiceAdvanceCandidatesAction::class);
         // Přečíslování měsíce podle data vystavení (náhled + provedení).
         $app->get    ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'preview']);
         $app->post   ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'renumber']);

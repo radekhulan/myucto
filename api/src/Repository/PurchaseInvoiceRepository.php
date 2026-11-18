@@ -24,6 +24,7 @@ use MyInvoice\Support\PaymentMethods;
 use MyInvoice\Support\PublicAuthorityFeeText;
 use MyInvoice\Support\Sql\PayablePredicate;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
+use MyInvoice\Support\Sql\PurchaseCostSql;
 use PDO;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
 
@@ -225,6 +226,11 @@ final class PurchaseInvoiceRepository
         // stopy. U DDKP rovnou spočítá, kolik DPH zbývá doúčtovat na 343 — stejné číslo, které
         // dnes uživatel dostane až z hlášky advance_settlement_ambiguous při neúspěšném pokusu
         // o zaúčtování (viz PostingService::appendAdvanceSettlementPurchase).
+        // Konečná faktura k záloze s DDKP bez odpočtu zálohy: detail nabídne „Doplnit odpočet
+        // zálohy z DDKP" (jinak dvojí odpočet DPH a doklad nejde zaúčtovat).
+        $row['advance_deduction_missing'] = $documentKind === 'invoice' && $row['advance_purchase_invoice_id'] !== null
+            && (new \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction($this->db))->finalMissingDeduction($supplierId, $id);
+
         $row['unsettled_notice'] = null;
         if ($isAdvanceLike && $row['status'] !== 'cancelled' && $row['settled_by'] === null) {
             $paid = $this->paidAdvanceAmount($id, $supplierId);
@@ -542,7 +548,7 @@ final class PurchaseInvoiceRepository
                     pii.accrual_from, pii.accrual_to,
                     pii.stock_item_id, si.sku AS stock_sku, si.name AS stock_name,
                     pii.seller_item_code, pii.item_ean,
-                    pii.intrastat_cn8_code, pii.intrastat_country_of_origin,
+                    pii.intrastat_cn8_code, pii.intrastat_country_of_origin, pii.advance_purchase_invoice_id,
                     vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en,
                     sa.id AS small_asset_id, sa.name AS small_asset_name, sa.status AS small_asset_status
                FROM purchase_invoice_items pii
@@ -1218,7 +1224,7 @@ final class PurchaseInvoiceRepository
                     ? ['months' => array_keys($grouped)]
                     : ['ids' => $pageIds];
             }
-            $summaries = $this->monthSummaries($whereSql, $params, $groupByMonth, $scope);
+            $summaries = $this->monthSummaries($whereSql, $params, $groupByMonth, $scope, (int) ($filters['supplier_id'] ?? 0) ?: null);
             foreach ($grouped as $month => &$g) {
                 $g['count'] = $summaries[$month]['count'] ?? count($g['invoices']);
                 $g['totals_per_currency'] = $summaries[$month]['totals_per_currency'] ?? [];
@@ -1261,7 +1267,7 @@ final class PurchaseInvoiceRepository
      *        (YYYY-MM) nebo ID dokladů stránky; null = celý výběr
      * @return array<string, array{count:int, totals_per_currency: list<array<string,mixed>>}>
      */
-    public function monthSummaries(string $whereSql, array $params, bool $groupByMonth, ?array $scope = null): array
+    public function monthSummaries(string $whereSql, array $params, bool $groupByMonth, ?array $scope = null, ?int $supplierId = null): array
     {
         if (isset($scope['months'])) {
             $months = array_values(array_filter(
@@ -1286,15 +1292,16 @@ final class PurchaseInvoiceRepository
         $bucket = $groupByMonth ? "DATE_FORMAT(pi.issue_date, '%Y-%m')" : "''";
         $excludedAdvance = "(pi.document_kind = 'advance' AND (pi.status = 'paid' OR " . AdvanceSettledSql::purchase('pi') . '))';
         $cost = "pi.status NOT IN ('draft', 'cancelled') AND pi.document_kind <> 'tax_document' AND NOT $excludedAdvance";
-        $sum = static fn (string $col): string => "ROUND(COALESCE(SUM(CASE WHEN $cost THEN pi.$col END), 0), 2)";
+        // Odpočet zálohy z DDKP na konečné faktuře nákladem není ({@see PurchaseCostSql}).
+        $sum = static fn (string $expr): string => "ROUND(COALESCE(SUM(CASE WHEN $cost THEN $expr END), 0), 2)";
 
         $stmt = $this->db->pdo()->prepare(
             "SELECT $bucket AS month_bucket, cur.code AS currency, COUNT(*) AS cnt,
                     SUM(CASE WHEN $cost THEN 1 ELSE 0 END) AS cost_rows,
-                    " . $sum('total_without_vat') . " AS without_vat,
-                    " . $sum('total_vat') . " AS vat,
-                    " . $sum('total_with_vat') . " AS with_vat
-               FROM purchase_invoices pi
+                    " . $sum(PurchaseCostSql::net('pi')) . " AS without_vat,
+                    " . $sum(PurchaseCostSql::vat('pi')) . " AS vat,
+                    " . $sum(PurchaseCostSql::gross('pi')) . " AS with_vat
+               FROM purchase_invoices pi" . PurchaseCostSql::deductionJoinFor($this->db->pdo(), 'pi', $supplierId) . "
                JOIN clients c ON c.id = pi.vendor_id
                JOIN currencies cur ON cur.id = pi.currency_id
               WHERE $whereSql
@@ -2255,8 +2262,8 @@ final class PurchaseInvoiceRepository
                  vat_classification_code, is_fixed_asset, expense_kind, expense_account_code,
                  counter_account_code, posting_rule_key,
                  accrual_from, accrual_to, stock_item_id, seller_item_code, item_ean,
-                 intrastat_cn8_code, intrastat_country_of_origin)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 intrastat_cn8_code, intrastat_country_of_origin, advance_purchase_invoice_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
 
         $vatRates = $this->vatRateMap();
@@ -2315,6 +2322,7 @@ final class PurchaseInvoiceRepository
             $q->execute(array_merge([$supplierId], $stockIds));
             $ownedStock = array_flip(array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN) ?: []));
         }
+        $ownedAdvances = $this->ownedDeductibleAdvances($supplierId, $items);
         // Základní sazba pro rok dokladu (číselník daňových konstant) — určuje, kdy
         // sazba znamená "tuzemská základní" v auto-klasifikaci.
         $docYear = !empty($meta['doc_date']) ? (int) substr((string) $meta['doc_date'], 0, 4) : (int) date('Y');
@@ -2403,6 +2411,10 @@ final class PurchaseInvoiceRepository
                 self::itemEan($item['item_ean'] ?? null),
                 self::cn8Code($item['intrastat_cn8_code'] ?? null),
                 self::originCountry($item['intrastat_country_of_origin'] ?? null, $originCountries),
+                // Odpočet zálohy (migrace 2307): jen záloha firmy, kterou lze vyúčtovat.
+                isset($ownedAdvances[(int) ($item['advance_purchase_invoice_id'] ?? 0)])
+                    ? (int) $item['advance_purchase_invoice_id']
+                    : null,
             ]);
 
             if ($keepDomesticItemCodes && in_array((string) $code, self::MIXED_DOCUMENT_DOMESTIC_CODES, true)) {
@@ -2428,6 +2440,36 @@ final class PurchaseInvoiceRepository
         if ($supplierId > 0) {
             (new ExtractionReviewSync($this->db))->afterItemsChanged($supplierId, $purchaseInvoiceId);
         }
+    }
+
+    /**
+     * Zálohy firmy, jejichž odpočet smí řádek nést (zálohová faktura nebo samostatný DDKP,
+     * stejně jako {@see linkAdvance()}). Cizí nebo neexistující id se zahodí, stejně jako
+     * skladová karta jiné firmy. Shodu s vazbou dokladu hlídá zaúčtování.
+     *
+     * @param list<array<string,mixed>> $items
+     * @return array<int,true>
+     */
+    private function ownedDeductibleAdvances(int $supplierId, array $items): array
+    {
+        $ids = [];
+        foreach ($items as $it) {
+            $id = is_array($it) ? (int) ($it['advance_purchase_invoice_id'] ?? 0) : 0;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+        if ($ids === [] || $supplierId <= 0) {
+            return [];
+        }
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $q = $this->db->pdo()->prepare(
+            "SELECT id FROM purchase_invoices
+              WHERE supplier_id = ? AND id IN ({$ph})
+                AND (document_kind = 'advance' OR (document_kind = 'tax_document' AND parent_purchase_invoice_id IS NULL))"
+        );
+        $q->execute([$supplierId, ...array_values($ids)]);
+        return array_fill_keys(array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN) ?: []), true);
     }
 
     /** Tuzemské kódy přijatého plnění — u dokladu s přenesenou povinností nikdy nepatří na řádek. */
@@ -2984,7 +3026,7 @@ final class PurchaseInvoiceRepository
         }
 
         $advanceTotal = (new \MyInvoice\Service\PurchaseInvoice\LinkedAdvanceAmount($this->db))
-            ->forFinal($supplierId, $advance, (float) $final['total_with_vat']);
+            ->forFinal($supplierId, $advance, (float) $final['total_with_vat'], $finalId);
         $setAdvancePaid = ((float) ($final['advance_paid_amount'] ?? 0)) == 0.0;
 
         $sql = 'UPDATE purchase_invoices
@@ -3063,6 +3105,19 @@ final class PurchaseInvoiceRepository
     {
         $final = $this->find($finalId, $supplierId);
         if ($final === null) return [];
+        return $this->advanceCandidatesFor(
+            (int) $final['vendor_id'], (int) $final['currency_id'], (float) $final['total_with_vat'], $supplierId, $finalId,
+        );
+    }
+
+    /**
+     * Jádro {@see advanceCandidates()} pro doklad, který ještě nemusí být uložený (editor
+     * nové konečné faktury): dodavatel, měna a částka z formuláře, `$excludeId` = doklad sám.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function advanceCandidatesFor(int $vendorId, int $currencyId, float $totalWithVat, int $supplierId, int $excludeId = 0): array
+    {
         // Řazení: nejdřív stejná měna, pak nejbližší HRUBÁ částka (total_with_vat) k
         // finální faktuře — záloha bývá ve výši celé/části faktury. Porovnáváme proti
         // total_with_vat (před odečtem zálohy), NE amount_to_pay (to bývá 0, když je
@@ -3088,10 +3143,7 @@ final class PurchaseInvoiceRepository
                        pi.issue_date DESC, pi.id DESC
               LIMIT 50"
         );
-        $stmt->execute([
-            $supplierId, (int) $final['vendor_id'], $finalId,
-            (int) $final['currency_id'], (float) $final['total_with_vat'],
-        ]);
+        $stmt->execute([$supplierId, $vendorId, $excludeId, $currencyId, $totalWithVat]);
         return array_map(fn (array $r) => [
             'id'                    => (int) $r['id'],
             'varsymbol'             => $r['varsymbol'] !== null ? (string) $r['varsymbol'] : null,
@@ -4136,6 +4188,9 @@ final class PurchaseInvoiceRepository
             if (isset($row[$f])) $row[$f] = (int) $row[$f];
         }
         $row['duration_minutes'] = $row['duration_minutes'] !== null ? (int) $row['duration_minutes'] : null;
+        if (array_key_exists('advance_purchase_invoice_id', $row)) {
+            $row['advance_purchase_invoice_id'] = $row['advance_purchase_invoice_id'] !== null ? (int) $row['advance_purchase_invoice_id'] : null;
+        }
         foreach ([
             'quantity', 'unit_price_without_vat', 'vat_rate_snapshot',
             'total_without_vat', 'total_vat', 'total_with_vat',

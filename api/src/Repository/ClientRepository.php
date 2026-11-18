@@ -14,6 +14,7 @@ use MyInvoice\Service\Oss\OssClientContext;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
+use MyInvoice\Support\Sql\PurchaseCostSql;
 
 final class ClientRepository
 {
@@ -206,11 +207,12 @@ final class ClientRepository
                                      -- DDKP (daňový doklad k platbě) = jen odpočet DPH ze zálohy,
                                      -- nikdy náklad → bezpodmínečně ven (shoda s CRM/dashboard).
                                      AND COALESCE(pi.document_kind, '') <> 'tax_document',
-                                     pi.total_with_vat * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1),
+                                     -- Odpočet zálohy z DDKP na konečné faktuře nákladem není (PurchaseCostSql).
+                                     " . PurchaseCostSql::gross('pi') . " * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1),
                                      0)) AS costs,
                               SUM(IF(pi.status != 'cancelled', 1, 0)) AS purchase_count,
                               MAX(IF(pi.status != 'cancelled', pi.issue_date, NULL)) AS last_purchase_date
-                         FROM purchase_invoices pi
+                         FROM purchase_invoices pi" . PurchaseCostSql::deductionJoin('pi', (int) ($filters['supplier_id'] ?? 0)) . "
                     LEFT JOIN currencies cur ON cur.id = pi.currency_id
                         WHERE pi.supplier_id = ?
                      GROUP BY pi.vendor_id

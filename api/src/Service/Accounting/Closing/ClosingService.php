@@ -2622,8 +2622,9 @@ final class ClosingService
                     pi.effective_cost_date,
                     -- CZK pojistka jako ve zbytku kódu: bez ní by se korunový doklad
                     -- se zbloudilým `exchange_rate` vynásobil kurzem.
-                    ROUND(pi.total_without_vat * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1), 2) AS net_base
-               FROM purchase_invoices pi
+                    -- Odpočet zálohy z DDKP nákladem není ({@see PurchaseCostSql}).
+                    ROUND(" . \MyInvoice\Support\Sql\PurchaseCostSql::net('pi') . " * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1), 2) AS net_base
+               FROM purchase_invoices pi" . \MyInvoice\Support\Sql\PurchaseCostSql::deductionJoin('pi', $supplierId) . "
                LEFT JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = pi.supplier_id
                LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
@@ -5624,6 +5625,19 @@ final class ClosingService
                 'value' => ['count' => count($paidAdvances), 'items' => $paidAdvances],
             ];
 
+        }
+        // Konečná přijatá faktura navázaná na zálohu s DDKP, která zálohu neodečítá: daň
+        // z DDKP je uplatněná a faktura ji v evidenci DPH uplatní podruhé. Deník takovou
+        // fakturu nezaúčtuje, evidenci DPH to ale nezastaví, proto i starší období.
+        if ($wants('purchase_final_missing_advance_deduction')) {
+            $missingDeduction = (new \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction($this->db))
+                ->finalsMissingDeduction($supplierId, $rangeTo);
+            $checks[] = [
+                'key' => 'purchase_final_missing_advance_deduction',
+                'severity' => 'warning',
+                'ok' => $missingDeduction === [],
+                'value' => ['count' => count($missingDeduction), 'items' => $missingDeduction],
+            ];
         }
         // § 11 odst. 1 písm. b) ZoÚ — zaúčtovaný zápis bez OBSAHU účetního případu. Částky
         // i účty sedí, ale z deníku nejde poznat, čeho se případ týkal; auditní stopa pak
