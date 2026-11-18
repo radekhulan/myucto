@@ -5625,6 +5625,19 @@ final class ClosingService
             ];
 
         }
+        // Konečná přijatá faktura navázaná na zálohu s DDKP, která zálohu neodečítá: daň
+        // z DDKP je uplatněná a faktura ji v evidenci DPH uplatní podruhé. Deník takovou
+        // fakturu nezaúčtuje, evidenci DPH to ale nezastaví, proto i starší období.
+        if ($wants('purchase_final_missing_advance_deduction')) {
+            $missingDeduction = (new \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction($this->db))
+                ->finalsMissingDeduction($supplierId, $rangeTo);
+            $checks[] = [
+                'key' => 'purchase_final_missing_advance_deduction',
+                'severity' => 'warning',
+                'ok' => $missingDeduction === [],
+                'value' => ['count' => count($missingDeduction), 'items' => $missingDeduction],
+            ];
+        }
         // § 11 odst. 1 písm. b) ZoÚ — zaúčtovaný zápis bez OBSAHU účetního případu. Částky
         // i účty sedí, ale z deníku nejde poznat, čeho se případ týkal; auditní stopa pak
         // doloží jen kdy a kolik, ne co. Nové zápisy sem spadnout nemůžou (PostingService

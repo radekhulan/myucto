@@ -55953,6 +55953,9 @@ components:
         item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží z dokladu (jen číslice v délce 8, 12, 13 nebo 14), použije se při párování se skladovou kartou." }
         intrastat_cn8_code: { type: [string, "null"], minLength: 8, maxLength: 8, description: "Kód KN8 z dokladu. Příjemka ho doplní na kartu, pokud tam chybí." }
         intrastat_country_of_origin: { type: [string, "null"], minLength: 2, maxLength: 2, description: "Země původu (ISO alpha-2) z dokladu. Příjemka ji doplní na kartu, pokud tam chybí." }
+        advance_purchase_invoice_id:
+          type: [integer, "null"]
+          description: "Odpočet poskytnuté zálohy: záporný řádek konečné faktury se základem a daní daňového dokladu k platbě (DDKP) zálohy, kterou faktura vyúčtovává (`advance_purchase_invoice_id` dokladu). Základ odpočtu nejde na náklad, zaúčtování z něj zúčtuje zálohu 321/314. NULL = běžná položka."
         is_fixed_asset:
           type: boolean
           default: false
@@ -55976,7 +55979,7 @@ components:
 
     PurchaseInvoiceItemPayload:
       type: object
-      description: "Uložení řádků faktury je náhrada celého seznamu (DELETE + INSERT). Pole, která klient nepošle zpět, zaniknou. Výjimkou jsou `stock_item_id`, `seller_item_code`, `item_ean`, `intrastat_cn8_code`, `intrastat_country_of_origin`, `expense_account_code`, `counter_account_code` a `posting_rule_key`: chybí-li klíč v položce, která odpovídá uloženému řádku, převezme se uložená hodnota. Řádek se páruje podle `id`, bez něj podle pořadí, ale jen při shodném popisu. Explicitní `null` hodnotu smaže."
+      description: "Uložení řádků faktury je náhrada celého seznamu (DELETE + INSERT). Pole, která klient nepošle zpět, zaniknou. Výjimkou jsou `stock_item_id`, `seller_item_code`, `item_ean`, `intrastat_cn8_code`, `intrastat_country_of_origin`, `expense_account_code`, `counter_account_code`, `posting_rule_key` a `advance_purchase_invoice_id`: chybí-li klíč v položce, která odpovídá uloženému řádku, převezme se uložená hodnota. Řádek se páruje podle `id`, bez něj podle pořadí, ale jen při shodném popisu. Explicitní `null` hodnotu smaže."
       required: [description, quantity, unit_price_without_vat, vat_rate_id]
       properties:
         id: { type: integer, description: "Volitelné id uloženého řádku (z detailu dokladu). Slouží jen ke spárování pro převzetí vynechaných sloupců; řádek se uloží s novým id." }
@@ -55999,6 +56002,7 @@ components:
         item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží, jen číslice v délce 8, 12, 13 nebo 14, jinak se uloží null. Vynechání a `null` stejně jako u `seller_item_code`." }
         intrastat_cn8_code: { type: [string, "null"], description: "Kód KN8, tečky se odstraní; co nemá 8 číslic, se neuloží. Vynechání a `null` stejně jako u `seller_item_code`." }
         intrastat_country_of_origin: { type: [string, "null"], description: "Země původu (ISO alpha-2); jiný tvar se neuloží. Vynechání a `null` stejně jako u `seller_item_code`." }
+        advance_purchase_invoice_id: { type: [integer, "null"], description: "Označí záporný řádek jako odpočet poskytnuté zálohy (zálohová faktura nebo samostatný DDKP firmy, jinak se uloží null). Záloha musí být ta, kterou faktura vyúčtovává, jinak zaúčtování vrátí `advance_settlement_ambiguous`. Vynechání a `null` stejně jako u `seller_item_code`." }
         stock_item_id:
           type: [integer, "null"]
           description: |
@@ -56516,6 +56520,9 @@ components:
         settled_by: { type: [object, "null"], description: "Jen u zálohy — brief finální faktury, která ji vyúčtovává" }
         has_advance_candidates: { type: boolean }
         has_settlement_candidates: { type: boolean }
+        advance_deduction_missing:
+          type: boolean
+          description: "Konečná faktura navázaná na zálohu s daňovým dokladem k platbě (DDKP) neodečítá zálohu odpočtovým řádkem: DPH zálohy by se uplatnila podruhé a doklad nejde zaúčtovat."
         linked_advance_unpaid:
           type: boolean
           description: |

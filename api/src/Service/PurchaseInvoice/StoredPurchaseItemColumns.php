@@ -40,6 +40,7 @@ final class StoredPurchaseItemColumns
         'expense_account_code',
         'counter_account_code',
         'posting_rule_key',
+        'advance_purchase_invoice_id',
     ];
 
     /**

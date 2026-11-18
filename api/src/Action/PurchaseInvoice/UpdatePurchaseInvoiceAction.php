@@ -30,6 +30,7 @@ use MyInvoice\Service\Currency\PurchaseInvoiceRateReloader;
 use MyInvoice\Service\Invoice\DocumentItemsPayload;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatment;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatmentConflict;
 use MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns;
@@ -431,6 +432,9 @@ final class UpdatePurchaseInvoiceAction
             // Až PO recompute — volba dominantního kódu váží podle total_with_vat, které
             // kalkulátor dopočítává.
             $this->repo->syncHeaderClassificationFromItems($id, $supplierId);
+            // Odpočet zálohy na řádku už zálohu z celkové částky odečetl; hlavička ji
+            // odečíst nesmí, jinak by K úhradě zálohu odečetlo podruhé.
+            (new PurchaseAdvanceDeduction($this->db))->clearHeaderAdvanceWhenDeducted($supplierId, $id);
             if (array_key_exists('rounding', $body)) {
                 $this->repo->setRounding($id, $supplierId, (float) $body['rounding']);
             }
@@ -635,9 +639,8 @@ final class UpdatePurchaseInvoiceAction
                 $invoice['_warning_meta']['exchange_rate_cnb_deviation'] = $dev;
             }
         }
-        // Finální faktura na zálohu s DDKP → DPH ze zálohy už odečtena (dvojí odpočet).
-        if (is_array($invoice) && (string) ($invoice['document_kind'] ?? 'invoice') === 'invoice'
-            && CreatePurchaseInvoiceAction::advanceHasActiveTaxDocument($this->db, $invoice['advance_purchase_invoice_id'] ?? null, $supplierId)) {
+        // Finální faktura na zálohu s DDKP bez odpočtu zálohy → dvojí odpočet DPH.
+        if (is_array($invoice) && CreatePurchaseInvoiceAction::finalRisksDoubleVatDeduction($this->db, $invoice, $supplierId)) {
             $warnings[] = 'advance_has_tax_document';
         }
         // Účtenka, která vypadá jako doklad k přijaté záloze → nejspíš má být DDKP/záloha.

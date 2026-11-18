@@ -21787,6 +21787,7 @@
         "fx_footprint_missing": "Foreign-currency lines on an FX account without a complete currency footprint (currency_code/amount_foreign)",
         "paid_proformas_no_advance": "Paid proformas without a booked received advance",
         "paid_advances_no_payment": "Paid supplier advance invoices without a booked payment on 314",
+        "purchase_final_missing_advance_deduction": "Final purchase invoices for an advance with a tax document on payment that do not deduct the advance (VAT may be deducted twice)",
         "settled_but_unpaid": "Documents in the Sent state but with a payment already in the journal (update the status to Paid)",
         "cancelled_with_entry": "Cancelled documents whose journal entry is still active (books and records contradict each other)",
         "entries_without_description": "Posted journal entries with no description of the accounting case (§ 11(1)(b) of the Accounting Act) — add a description",
