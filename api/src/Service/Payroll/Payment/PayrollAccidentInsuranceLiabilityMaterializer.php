@@ -137,36 +137,12 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
             }
             $year = (int) substr($periodStart, 0, 4);
             $quarterMonths = [$month - 2, $month - 1, $month];
-            $startPeriod = $this->historical->startPeriod($supplierId);
-            $takeoverYear = null;
-            $liabilityBaseMinor = 0;
-            $hasEmployees = false;
-            $takeoverPeriods = [];
-            $missingTakeoverPeriods = [];
-            foreach ($quarterMonths as $quarterMonth) {
-                $monthStart = sprintf('%04d-%02d-01', $year, $quarterMonth);
-                $calculated = $this->monthLiabilityAssessmentBase($supplierId, $monthStart);
-                if ($calculated === null) {
-                    if (!PayrollHistoricalPeriodService::precedesStart($startPeriod, $monthStart)) {
-                        throw new \DomainException(sprintf(
-                            'Čtvrtletí není kompletní: měsíc %s nemá schválenou mzdovou revizi.',
-                            $monthStart,
-                        ));
-                    }
-                    $takeoverYear ??= $this->takeovers->forSupplier($supplierId, $year);
-                    $calculated = $this->takeoverMonthAssessmentBase(
-                        $supplierId,
-                        $takeoverYear,
-                        $monthStart,
-                    );
-                    $takeoverPeriods[] = substr($monthStart, 0, 7);
-                    if ($calculated['missing_base']) {
-                        $missingTakeoverPeriods[] = substr($monthStart, 0, 7);
-                    }
-                }
-                $liabilityBaseMinor += $calculated['base'];
-                $hasEmployees = $hasEmployees || $calculated['has_employees'];
-            }
+            $quarter = $this->quarterBases($supplierId, $year, $quarterMonths);
+            $liabilityBaseMinor = $quarter['base'];
+            $hasEmployees = $quarter['has_employees'];
+            $takeoverPeriods = $quarter['takeover_periods'];
+            $missingTakeoverPeriods = $quarter['missing_takeover_periods'];
+            $costKey = $quarter['cost_key'];
             $quarterStart = sprintf('%04d-%02d-01', $year, $quarterMonths[0]);
             $reference = sprintf(
                 'accident-insurance:quarter:%04d-%02d',
@@ -350,6 +326,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                         $amount,
                         $periodStart,
                         $actorUserId,
+                        $costKey,
                     ),
                 ];
             }
@@ -381,9 +358,102 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                     $amount,
                     $periodStart,
                     $actorUserId,
+                    $costKey,
                 ),
             ];
         });
+    }
+
+    /**
+     * Klíč rozpadu nákladu čtvrtletí na střediska a dimenze z aktuálních
+     * schválených revizí jeho měsíců — tentýž, se kterým materializace
+     * předepisuje pojistné do deníku. `null`, když čtvrtletí nejde doložit
+     * (chybí revize nebo výsledek sociálního pojištění).
+     *
+     * @param string $quarterEndPeriod první den posledního měsíce čtvrtletí
+     */
+    public function quarterCostKey(int $supplierId, string $quarterEndPeriod): ?PayrollAccidentInsuranceCostKey
+    {
+        $month = (int) substr($quarterEndPeriod, 5, 2);
+        if (!in_array($month, [3, 6, 9, 12], true)) {
+            throw new \InvalidArgumentException('Čtvrtletí končí březnem, červnem, zářím nebo prosincem.');
+        }
+        try {
+            return $this->quarterBases(
+                $supplierId,
+                (int) substr($quarterEndPeriod, 0, 4),
+                [$month - 2, $month - 1, $month],
+            )['cost_key'];
+        } catch (\DomainException) {
+            return null;
+        }
+    }
+
+    /**
+     * Základ zákonného pojištění odpovědnosti za tři měsíce čtvrtletí.
+     *
+     * @param list<int> $quarterMonths
+     * @return array{
+     *   base:int,
+     *   has_employees:bool,
+     *   takeover_periods:list<string>,
+     *   missing_takeover_periods:list<string>,
+     *   cost_key:PayrollAccidentInsuranceCostKey
+     * }
+     */
+    private function quarterBases(int $supplierId, int $year, array $quarterMonths): array
+    {
+        $startPeriod = $this->historical->startPeriod($supplierId);
+        $takeoverYear = null;
+        $base = 0;
+        $hasEmployees = false;
+        $takeoverPeriods = [];
+        $missingTakeoverPeriods = [];
+        $costMonths = [];
+        foreach ($quarterMonths as $quarterMonth) {
+            $monthStart = sprintf('%04d-%02d-01', $year, $quarterMonth);
+            $calculated = $this->monthLiabilityAssessmentBase($supplierId, $monthStart);
+            if ($calculated !== null) {
+                $costMonths[] = [
+                    'revision_id' => $calculated['revision_id'],
+                    'employment_bases' => $calculated['employment_bases'],
+                    'unattributed_base' => $calculated['unattributed_base'],
+                ];
+            } else {
+                if (!PayrollHistoricalPeriodService::precedesStart($startPeriod, $monthStart)) {
+                    throw new \DomainException(sprintf(
+                        'Čtvrtletí není kompletní: měsíc %s nemá schválenou mzdovou revizi.',
+                        $monthStart,
+                    ));
+                }
+                $takeoverYear ??= $this->takeovers->forSupplier($supplierId, $year);
+                $calculated = $this->takeoverMonthAssessmentBase(
+                    $supplierId,
+                    $takeoverYear,
+                    $monthStart,
+                );
+                $takeoverPeriods[] = substr($monthStart, 0, 7);
+                if ($calculated['missing_base']) {
+                    $missingTakeoverPeriods[] = substr($monthStart, 0, 7);
+                }
+                // Převzatý měsíc revizi nemá, jeho základ zůstane v nákladu bez dimenzí.
+                $costMonths[] = [
+                    'revision_id' => null,
+                    'employment_bases' => [],
+                    'unattributed_base' => $calculated['base'],
+                ];
+            }
+            $base += $calculated['base'];
+            $hasEmployees = $hasEmployees || $calculated['has_employees'];
+        }
+
+        return [
+            'base' => $base,
+            'has_employees' => $hasEmployees,
+            'takeover_periods' => $takeoverPeriods,
+            'missing_takeover_periods' => $missingTakeoverPeriods,
+            'cost_key' => new PayrollAccidentInsuranceCostKey($costMonths),
+        ];
     }
 
     /**
@@ -439,7 +509,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
      * rozhoduje volající podle hranice `start_period`: převzatý měsíc revizi
      * mít nemůže a jeho základ nese převzatá mzda.
      *
-     * @return array{base:int,has_employees:bool,missing_base:bool}|null
+     * @return array{base:int,has_employees:bool,missing_base:bool,employment_bases:array<int,int>,unattributed_base:int,revision_id:int}|null
      */
     private function monthLiabilityAssessmentBase(int $supplierId, string $monthStart): ?array
     {
@@ -485,16 +555,27 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
         }
         // Osoby a vztahy výpočet neukládá do hlavičky výsledku, ale jako samostatné
         // řádky výsledku ({@see PayrollStatutoryResultRepository::find()}); výsledek
-        // vztahu je jeho `result_snapshot`.
+        // vztahu je jeho `result_snapshot`, pracovní vztah nese řádek.
         $people = [];
+        $employmentIds = [];
         foreach ((array) ($result['people'] ?? []) as $person) {
+            $relationships = array_values(array_filter((array) ($person['relationships'] ?? []), 'is_array'));
             $people[] = ['relationships' => array_map(
                 static fn (array $relationship): mixed => $relationship['result_snapshot'] ?? null,
-                array_values(array_filter((array) ($person['relationships'] ?? []), 'is_array')),
+                $relationships,
             )];
+            $employmentIds[] = array_map(
+                static fn (array $relationship): ?int => is_int($relationship['employment_id'] ?? null)
+                    ? $relationship['employment_id']
+                    : null,
+                $relationships,
+            );
         }
 
-        return $this->sumLiabilityRelationships(['people' => $people], $monthStart);
+        return [
+            ...$this->sumLiabilityRelationships(['people' => $people], $monthStart, $employmentIds),
+            'revision_id' => (int) $revisionId,
+        ];
     }
 
     /**
@@ -516,10 +597,16 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
      * (pracovní poměr, DPP, DPČ), i když se sociálního pojištění neúčastnil:
      * povinnost pojištění odpovědnosti vzniká zaměstnáváním, ne výší základu.
      *
+     * `employment_bases` je týž základ po pracovních vztazích — klíč rozpadu
+     * nákladu na střediska a dimenze ({@see PayrollAccidentInsuranceCostKey}).
+     * Základ vztahu, o kterém výsledek neví, ke kterému pracovnímu vztahu patří,
+     * jde do `unattributed_base`.
+     *
      * @param array<string,mixed> $root
-     * @return array{base:int,has_employees:bool,missing_base:bool}
+     * @param list<list<?int>> $employmentIds pracovní vztahy ve stejném pořadí jako `people.*.relationships.*`
+     * @return array{base:int,has_employees:bool,missing_base:bool,employment_bases:array<int,int>,unattributed_base:int}
      */
-    private function sumLiabilityRelationships(array $root, string $monthStart): array
+    private function sumLiabilityRelationships(array $root, string $monthStart, array $employmentIds = []): array
     {
         $people = $root['people'] ?? null;
         if (!is_array($people)) {
@@ -531,12 +618,14 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
 
         $base = 0;
         $hasEmployees = false;
-        foreach ($people as $person) {
+        $employmentBases = [];
+        $unattributed = 0;
+        foreach ($people as $personIndex => $person) {
             $relationships = is_array($person) ? ($person['relationships'] ?? null) : null;
             if (!is_array($relationships)) {
                 continue;
             }
-            foreach ($relationships as $relationship) {
+            foreach ($relationships as $relationshipIndex => $relationship) {
                 if (!is_array($relationship)) {
                     continue;
                 }
@@ -558,10 +647,23 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                     ));
                 }
                 $base += $relationshipBase;
+                $employmentId = $employmentIds[$personIndex][$relationshipIndex] ?? null;
+                if ($employmentId === null) {
+                    $unattributed += $relationshipBase;
+                } else {
+                    $employmentBases[$employmentId] = ($employmentBases[$employmentId] ?? 0) + $relationshipBase;
+                }
             }
         }
+        ksort($employmentBases, SORT_NUMERIC);
 
-        return ['base' => $base, 'has_employees' => $hasEmployees, 'missing_base' => false];
+        return [
+            'base' => $base,
+            'has_employees' => $hasEmployees,
+            'missing_base' => false,
+            'employment_bases' => $employmentBases,
+            'unattributed_base' => $unattributed,
+        ];
     }
 
     /**

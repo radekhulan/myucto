@@ -115,7 +115,8 @@ final class PostingPairCoverageTest extends TestCase
             'Service/Ai/AiInternalDocumentValidator.php::validate::prepareDocumentLines' => ['shape' => 'out', 'reason' => 'kontrola návrhu interního dokladu nanečisto'],
             'Service/Nonprofit/Capital/CapitalService.php::plan::prepareDocumentLines' => ['shape' => 'out', 'reason' => 'neziskovky: vlastní kapitál (typovaný zapisovač)'],
             'Service/Nonprofit/Membership/MembershipChargeService.php::confirmIssue::postDocument' => ['shape' => 'out', 'reason' => 'neziskovky: členské příspěvky'],
-            'Service/Payroll/Payment/PayrollAccidentInsurancePosting.php::post::postDocument' => ['shape' => 'one', 'test' => $one],
+            // Bez dimenzí jedna dvojice 548/379, s rozpadem na střediska N řádků 548 proti jednomu 379.
+            'Service/Payroll/Payment/PayrollAccidentInsurancePosting.php::post::postDocument' => ['shape' => 'hub', 'test' => $hub],
             'Service/Payroll/Payment/PayrollPaymentPostingService.php::resolve::postDocument' => ['shape' => 'one', 'test' => $one],
             'Service/Payroll/Posting/PayrollPostingAdapter.php::post::postDocument' => ['shape' => 'grouped', 'test' => 'Unit\Payroll\Posting\PayrollPostingLineBuilderTest::testSingleEntryLinesArePairsWithTheSameTotals'],
             'Service/Payroll/Travel/BusinessTripCashPosting.php::post::postDocument' => ['shape' => 'one', 'test' => $one],

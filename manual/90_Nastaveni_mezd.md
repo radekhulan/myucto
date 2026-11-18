@@ -460,6 +460,19 @@ se zaúčtuje i předpis k poslednímu dni čtvrtletí (výchozí 548 / 379.400,
 spárovaná se závazkem se účtuje proti účtu předpisu. Zamčené účetní období
 předpis přeskočí a další příprava plateb ho doplní.
 
+Nese-li některý pracovní vztah středisko nebo firemní dimenzi (zakázku,
+činnost), náklad 548 se rozdělí stejně jako pojistné zaměstnavatele na 524:
+poměrem vyměřovacích základů vztahů za jednotlivé měsíce čtvrtletí a dál podle
+procentního rozpadu vztahu na střediska a zakázky. Sazba je firemní, takže
+poměr základů je přesně poměr pojistného; součet řádků 548 sedí na haléř.
+Závazek 379.400 zůstává jeden řádek bez dimenzí. Opravná revize rozdělí
+doměrek klíčem opraveného čtvrtletí, už zaúčtovaný předpis se nepřeúčtovává.
+Základ převzatého měsíce před zahájením mezd v MyÚčtu zůstane bez dimenze.
+Firma, jejíž vztahy žádnou dimenzi nenesou, účtuje dál jednu dvojici
+548 / 379.400. Sestava **Náklady na zaměstnance po dimenzi** započte pojistné
+čtvrtletí (předpis i opravy) do sloupce pojistného u jednotlivých vztahů týmž
+klíčem.
+
 ### 90.14.5 Automatické účtování
 
 Výchozí účty se rozlišují pro mzdu zaměstnance mimo výkon funkce, příjem
