@@ -100,6 +100,23 @@ se objeví na dokladech.
 1. Rozbalte zápis v účetním deníku.
 2. Klikněte na **Upravit dimenze** a uložte hodnoty.
 
+**Více vydaných faktur najednou:**
+
+1. Otevřete `Prodej → Vydané faktury` a zaškrtněte doklady. Mohou to být koncepty
+   i vystavené a zaúčtované faktury.
+2. V liště hromadných akcí klikněte na **Nastavit dimenze (N)**.
+3. U každého typu zvolte **Ponechat**, **Nastavit** (a vyberte hodnotu) nebo **Odebrat**.
+4. Klikněte na **Uložit dimenze**.
+
+Změna se týká dimenzí celého dokladu, dimenze položek zůstávají. Položka s vlastní
+hodnotou stejného typu si ji ponechá. Každý doklad se uloží stejně jako z panelu
+**Dimenze** na detailu, takže se změna promítne i do zaúčtovaných řádků deníku.
+Doklad, u kterého změna neprojde (uzavřené účetní období, rozdělení řádku nebo jiný
+analytický účet v zamčeném období), se přeskočí. Souhrn ukáže počet upravených,
+nezměněných a přeskočených dokladů a u každého přeskočeného důvod. Přeskočené doklady
+zůstanou vybrané. Najednou lze upravit nejvýše 500 dokladů. Akci vidí uživatel s právem
+zápisu do účetnictví.
+
 **Jak poznáte, že je hotovo:** doklad nebo pohyb ukazuje dimenze jako štítky a sestavy po dimenzi je zahrnují.
 
 > [!WARNING]
@@ -945,8 +962,9 @@ pracovat, dokud nebude licence znovu platná.
 měnit je smí uživatel s právem zápisu do účetnictví. Zapnutí dimenzí patří
 k nastavení firmy, skupinu firem spravuje správce firmy. Výchozí dimenze klienta
 a zakázky smí měnit ten, kdo smí upravovat klienta, resp. zakázku. Výchozí
-dimenze bankovního účtu smí měnit uživatel s právem zápisu do účetnictví.
-Schvalování přijatých dokladů řídí oprávnění **Schvalovat přijaté doklady**;
+dimenze bankovního účtu smí měnit uživatel s právem zápisu do účetnictví, stejně
+jako hromadně nastavit dimenze vybraným vydaným fakturám. Přes API token hromadná
+úprava dimenzí nejde. Schvalování přijatých dokladů řídí oprávnění **Schvalovat přijaté doklady**;
 odeslání ke schválení a jeho zrušení patří ke změně stavu přijaté faktury.
 
 ### 114.11.16 Převod z Money S3

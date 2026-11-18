@@ -10,6 +10,10 @@ import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
   type OssBulkResult, type OssBulkScope, type OssBulkSet, type OssBulkFailure, type OssReviewScope } from '@/api/invoices'
 import { formatMoney, formatMoneyWhole, formatUnitPrice, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
 import { isCalendarType } from '@/utils/invoiceCalendar'
+import { bulkIssueConfirmMessage } from '@/pages/invoices/invoiceBulkIssue'
+import BulkDimensionsModal from '@/components/dimensions/BulkDimensionsModal.vue'
+import { bulkDimensionsSummary } from '@/components/dimensions/bulkDimensions'
+import type { BulkDocumentDimensionsResult } from '@/api/dimensions'
 import { mergeMonthGroups } from '@/utils/monthGroups'
 import { useRowLink } from '@/composables/useRowLink'
 import { useListNavigationSource } from '@/composables/useListNavigation'
@@ -770,7 +774,7 @@ async function bulkIssue() {
     toast.warning(t('invoice.bulk_issue_no_eligible'))
     return
   }
-  if (!confirm(t('invoice.bulk_issue_confirm', { n: list.length }))) return
+  if (!confirm(bulkIssueConfirmMessage(list, t))) return
   bulkBusy.value = true
   let okCount = 0
   const errors: string[] = []
@@ -794,6 +798,25 @@ async function bulkIssue() {
   } finally {
     bulkBusy.value = false
   }
+}
+
+// Hromadné dimenze — koncepty i vystavené a zaúčtované doklady, stejné právo jako panel
+// Dimenze na detailu (účetnictví, zápis). Co server odmítne, vrátí v souhrnu s důvodem.
+const bulkDimsOpen = ref(false)
+
+async function onBulkDimensionsDone(r: BulkDocumentDimensionsResult) {
+  bulkDimsOpen.value = false
+  markRowsTouched('invoice', r.updated)
+  const msg = bulkDimensionsSummary(r, t)
+  if (r.skipped.length || r.needs_repost.length) toast.warning(msg)
+  else toast.success(msg)
+  if (r.skipped.length === 0) selectedIds.value = []
+  else selectedIds.value = r.skipped.map(s => s.id)
+  await load()
+}
+
+function onBulkDimensionsFailed(e: any) {
+  toast.error(e?.response?.data?.error?.message || t('dimensions.bulk_failed'))
 }
 
 // Hromadné zaúčtování (A2) — jen podvojné účetnictví, jen nezaúčtované (booked_at NULL)
@@ -1421,6 +1444,15 @@ useWindowRefresh(refreshLoadedPages,
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           {{ t('invoice.bulk_oss', { n: selectedIds.length }) }}
         </button>
+        <button v-if="(selectedIds.length > 0) && dimensions.canEdit.value && !auth.isClientRole"
+          @click="bulkDimsOpen = true"
+          :disabled="bulkBusy"
+          :class="btnOutline('primary')"
+          class="whitespace-nowrap"
+          data-test="invoice-bulk-dimensions">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5a1.99 1.99 0 011.41.59l7 7a2 2 0 010 2.82l-7 7a2 2 0 01-2.82 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" /></svg>
+          {{ t('dimensions.bulk_button', { n: selectedIds.length }) }}
+        </button>
         <button v-if="(postableSelected.length > 0) && auth.canWrite('accounting.journal.post') && !auth.isClientRole"
           @click="bulkPost"
           :disabled="bulkBusy"
@@ -1969,6 +2001,9 @@ useWindowRefresh(refreshLoadedPages,
         </div>
       </div>
     </div>
+
+    <BulkDimensionsModal v-if="bulkDimsOpen" :ids="selectedIds"
+      @close="bulkDimsOpen = false" @done="onBulkDimensionsDone" @failed="onBulkDimensionsFailed" />
 
     <!-- Hromadné nastavení OSS — dvoufázové: náhled, teprve pak provedení (OSS-7) -->
     <div v-if="ossBulkOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
