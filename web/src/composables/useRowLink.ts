@@ -18,13 +18,14 @@ import { windowContextKey } from '@/workspace/windowContext'
  *   // v šabloně: @click="openInvoice(inv, $event)" @auxclick.prevent="openInvoice(inv, $event)"
  *
  * Chování dle eventu:
- *   - Ctrl/⌘ + klik nebo prostřední tlačítko (button 1) → nový panel (window.open)
+ *   - pravé a další tlačítka (button > 1, např. Zpět/Vpřed) → ignorováno i s Ctrl/⌘;
+ *     pravé tlačítko patří kontextovému menu
+ *   - Ctrl/⌘ + levý klik nebo prostřední tlačítko (button 1) → nový panel (window.open)
  *   - běžný levý klik (button 0) → router.push
- *   - pravé/jiné tlačítko bez modifikátoru → ignorováno (nenaviguje)
  *
  * Volba `newPanel: true` otevře cíl v novém panelu i při běžném kliku (nebo bez události)
  * a má přednost před navigací v panelu pracovní plochy, např. když by odchod ze stránky zahodil
- * rozpracovanou práci. Pravé/jiné tlačítko bez modifikátoru ani s volbou nenaviguje.
+ * rozpracovanou práci.
  */
 export function useRowLink() {
   const router = useRouter()
@@ -34,13 +35,9 @@ export function useRowLink() {
   const openNewPanel = (to: RouteLocationRaw) => { window.open(router.resolve(to).href, '_blank', 'noopener') }
 
   return function navigate(to: RouteLocationRaw, e?: MouseEvent, options?: { newPanel?: boolean }): void {
-    if (e && (e.metaKey || e.ctrlKey || e.button === 1)) {
-      openNewPanel(to)
-      return
-    }
-    // Aux/pravé tlačítko (button != 0) bez modifikátoru — nenaviguj (nechováme se jako odkaz)
-    if (e && e.button !== undefined && e.button !== 0) return
-    if (options?.newPanel) {
+    // Pravé a další tlačítka nenavigují ani s modifikátorem (auxclick přichází i pro pravé tlačítko)
+    if (e && e.button > 1) return
+    if (options?.newPanel || e && (e.metaKey || e.ctrlKey || e.button === 1)) {
       openNewPanel(to)
       return
     }

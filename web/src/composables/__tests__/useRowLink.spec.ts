@@ -61,8 +61,15 @@ describe('useRowLink', () => {
     navigate('/b', new MouseEvent('auxclick', { button: 2 }), { newPanel: true })
     expect(open).not.toHaveBeenCalled()
     expect(push).not.toHaveBeenCalled()
-    // Modifikátor má přednost před tlačítkem (stávající chování pro všechny seznamy).
-    navigate('/c', new MouseEvent('auxclick', { button: 2, ctrlKey: true }))
-    expect(open.mock.calls.map(c => c[0])).toEqual(['/c'])
+  })
+
+  it('ignores the right button and the back/forward buttons even with Ctrl or ⌘, so only the context menu opens', () => {
+    const { navigate, push } = setup()
+    navigate('/a', new MouseEvent('auxclick', { button: 2, ctrlKey: true }))
+    navigate('/b', new MouseEvent('auxclick', { button: 2, metaKey: true }))
+    navigate('/c', new MouseEvent('auxclick', { button: 3, ctrlKey: true }))
+    navigate('/d', new MouseEvent('auxclick', { button: 4 }))
+    expect(open).not.toHaveBeenCalled()
+    expect(push).not.toHaveBeenCalled()
   })
 })
