@@ -166,9 +166,10 @@ function goToMember(id: number, event?: MouseEvent) {
   const keepList = batchOpen.value || importOpen.value || exporting.value
   const newPanel = keepList || !!event && (event.ctrlKey || event.metaKey || event.button === 1)
   if (!newPanel) saveListHandoff({ supplier: props.supplier, pane: paneKey(), returning: false, path: route?.fullPath || MEMBERSHIP_LIST_PATH, filters: appliedFilters.value, ids: [...checkedMembers.value], openedId: id })
-  navigateRow(memberDetailPath(id), keepList ? new MouseEvent('click', { ctrlKey: true }) : event)
+  navigateRow(memberDetailPath(id), event, { newPanel: keepList })
 }
-function openMember(row: MemberRow, event?: MouseEvent) { if (event?.button === 2) return; goToMember(row.id, event) }
+// Pravé tlačítko a tlačítka myši Zpět/Vpřed řádek neotevírají (stejně jako `useRowLink`), ani nezapíší předání seznamu.
+function openMember(row: MemberRow, event?: MouseEvent) { if (event && event.button > 1) return; goToMember(row.id, event) }
 
 /** Výběr řádku do dávky klávesou (x) se stejnými podmínkami jako zaškrtávátko. */
 function toggleMember(id: number) {
