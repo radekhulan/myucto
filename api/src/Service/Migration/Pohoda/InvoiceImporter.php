@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Pohoda;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Migration\OssMigrationPolicy;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyDecision;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
@@ -350,7 +351,7 @@ final class InvoiceImporter
         }
         $pay = $type === 'tax_document'
             ? ['paid' => $amounts['total'], 'settled' => true, 'paid_at' => $doc['tax'] ?? $doc['issue']]
-            : self::payment($doc, $amounts);
+            : self::payment($doc, $amounts, $type === 'proforma');
         $status = $review ? 'draft' : ($pay['settled'] ? 'paid' : 'sent');
         $booked = !$review && $type !== 'proforma' && !self::postedLater($doc);
         if ($doc['foreign'] !== '') {
@@ -859,17 +860,23 @@ final class InvoiceImporter
      *
      * @param array<string,mixed> $doc
      * @param array{total:float,advance:float} $amounts
+     * @param bool $proforma zálohový list: nedoplatek do {@see InvoicePaymentService::TOLERANCE} je uhrazeno
+     *                       stejně jako u platby zadané v MyÚčtu. POHODA ho nechává otevřený, když klient
+     *                       zaplatí kulatou částku proformy s haléři; účetní doklad to není, v deníku nic nezbývá.
+     *                       Faktury zůstávají přesně: jejich nedoplatek je i v hlavní knize 311.
      * @return array{paid:float,settled:bool,paid_at:?string}
      */
-    private static function payment(array $doc, array $amounts): array
+    private static function payment(array $doc, array $amounts, bool $proforma = false): array
     {
         $toPay = round($amounts['total'] - $amounts['advance'], 2);
         $remaining = is_numeric($doc['remaining']) ? round((float) $doc['remaining'], 2) : 0.0;
-        $settled = abs($remaining) < 0.005;
+        $paid = round($toPay - $remaining, 2);
+        $settled = abs($remaining) < 0.005
+            || ($proforma && $remaining > 0 && $paid > 0 && $remaining <= InvoicePaymentService::TOLERANCE + 0.0001);
         return [
-            'paid' => round($toPay - $remaining, 2),
+            'paid' => $paid,
             'settled' => $settled,
-            'paid_at' => $doc['paid_date'] ?? ($settled && abs($toPay) < 0.005 ? $doc['issue'] : null),
+            'paid_at' => $doc['paid_date'] ?? ($settled && (abs($toPay) < 0.005 || abs($remaining) >= 0.005) ? $doc['issue'] : null),
         ];
     }
 

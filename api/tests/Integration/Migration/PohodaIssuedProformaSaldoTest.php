@@ -120,6 +120,23 @@ final class PohodaIssuedProformaSaldoTest extends TestCase
         self::assertSame(0, self::cents($acc['difference']), 'Saldokonto 324 = hlavní kniha.');
     }
 
+    public function testProformaUnderpaidByHalerIsPaidLikeNativePayment(): void
+    {
+        [$protocol] = $this->import();
+        $row = function (string $number): array {
+            $stmt = $this->db->pdo()->prepare("SELECT status, paid_total, paid_at FROM invoices WHERE supplier_id = ? AND varsymbol = ? AND invoice_type = 'proforma'");
+            $stmt->execute([$this->supplierId, $number]);
+            return (array) $stmt->fetch(\PDO::FETCH_ASSOC);
+        };
+        $haler = $row(X::PROFORMA_HALER);
+        self::assertSame('paid', $haler['status'] ?? null, 'Nedoplatek 0,01 je v toleranci úhrady: ' . $this->explain($protocol));
+        self::assertSame(100000, self::cents($haler['paid_total']), 'Evidovaná úhrada zůstává skutečně zaplacená částka.');
+        self::assertSame('2026-03-05', substr((string) $haler['paid_at'], 0, 10));
+        $under = $row(X::PROFORMA_UNDERPAID);
+        self::assertSame('sent', $under['status'] ?? null, 'Nedoplatek 0,10 je nad tolerancí, proforma zůstává neuhrazená.');
+        self::assertSame(0, self::cents($this->account('311')['difference']));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /** @return array{0:ImportProtocol,1:string} */

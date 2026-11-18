@@ -1254,30 +1254,37 @@ final class SyntheticPohodaExport
     public const PROFORMA_PREVIOUS = '125ZL0001';
     public const PROFORMA_DRAWN_UNPAID = '126ZL0001';
     public const PROFORMA_FINAL = '26FV0201';
+    public const PROFORMA_HALER = '126ZL0002';
+    public const PROFORMA_UNDERPAID = '126ZL0003';
 
     /**
      * Vydané zálohové listy bez zaúčtování (předkontace „Bez“), jak je POHODA přenáší:
      *  - 125ZL0001 (1 210, z minulého roku, neuhrazený): v počátečních stavech 311 není;
      *  - 126ZL0001 (605, neuhrazený), který konečná faktura 26FV0201 (500 + 105 DPH) odečetla
-     *    položkou odpočtu ještě před platbou: zápis 324/311 nechá na 324 debet 605.
+     *    položkou odpočtu ještě před platbou: zápis 324/311 nechá na 324 debet 605;
+     *  - 126ZL0002 (1 000,01) zaplacený kulatou částkou, v POHODĚ nedoplatek 0,01;
+     *  - 126ZL0003 (1 000,10) zaplacený 1 000, nedoplatek 0,10 je nad tolerancí.
      */
     public static function withIssuedProformas(string $agendaDir): void
     {
         $customer = self::partner('inv', 'Odběratel Test s.r.o.', self::CUSTOMER_ICO, 'CZ' . self::CUSTOMER_ICO);
-        $proforma = static fn (string $number, string $date, float $amount): string =>
+        $proforma = static fn (string $number, string $date, float $amount, ?float $remaining = null): string =>
             '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedProformaInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . $number . '</typ:numberRequested></inv:number>'
             . '<inv:symVar>' . preg_replace('/\D/', '', $number) . '</inv:symVar><inv:date>' . $date . '</inv:date><inv:dateAccounting>' . $date . '</inv:dateAccounting>'
             . '<inv:dateDue>' . date('Y-m-d', (int) strtotime($date . ' +14 days')) . '</inv:dateDue>'
             . '<inv:accounting><typ:ids>Bez</typ:ids><typ:accountingType>withoutAccounting</typ:accountingType></inv:accounting>'
             . '<inv:text>Záloha ' . $number . '</inv:text>' . $customer
             . '<inv:paymentType><typ:paymentType>draft</typ:paymentType></inv:paymentType>'
-            . '<inv:liquidation><typ:amountHome>' . $amount . '</typ:amountHome></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:liquidation><typ:amountHome>' . ($remaining ?? $amount) . '</typ:amountHome>'
+            . ($remaining !== null ? '<typ:date>' . date('Y-m-d', (int) strtotime($date . ' +3 days')) . '</typ:date>' : '') . '</inv:liquidation></inv:invoiceHeader>'
             . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>' . $amount . '</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT rate="12">0</typ:priceLowVAT>'
             . '<typ:priceLowSum>0</typ:priceLowSum><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT rate="21">0</typ:priceHighVAT><typ:priceHighSum>0</typ:priceHighSum>'
             . '<typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency></inv:invoiceSummary></lst:invoice>';
         self::file($agendaDir . '/16_faktury_issuedProformaInvoice.xml', '<lst:listInvoice version="2.0" state="ok">'
             . $proforma(self::PROFORMA_PREVIOUS, '2025-11-10', 1210)
             . $proforma(self::PROFORMA_DRAWN_UNPAID, '2026-02-01', 605)
+            . $proforma(self::PROFORMA_HALER, '2026-03-02', 1000.01, 0.01)
+            . $proforma(self::PROFORMA_UNDERPAID, '2026-03-02', 1000.10, 0.10)
             . '</lst:listInvoice>');
         self::append($agendaDir . '/02_uctova_osnova.xml', '</lst:listAccount>', '<lst:itemAccount id="324000" code="324000" name="Přijaté zálohy"/>');
         $final = '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . self::PROFORMA_FINAL . '</typ:numberRequested></inv:number>'
