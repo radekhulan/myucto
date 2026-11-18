@@ -152,6 +152,7 @@ final class PurchaseInvoiceExportService
             'bank_snapshot'     => $this->paymentBankSnapshot($pi, $paymentVariableSymbol),
             'payment_variable_symbol' => $paymentVariableSymbol !== '' ? $paymentVariableSymbol : null,
             'payment_constant_symbol' => $pi['payment_constant_symbol'] ?? null,
+            'payment_method'    => $pi['payment_method'] ?? null,
             'items'             => $items,
             // Rekapitulace DPH + souhrny — oba exportéry je čtou z `vat_breakdown`/`totals`
             // (bez nich byly summary/TaxTotal nulové). Repo je dodává ve find(), ale jiným

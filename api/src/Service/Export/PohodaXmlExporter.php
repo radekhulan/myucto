@@ -10,6 +10,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\InvoiceItemKind;
 use MyInvoice\Support\CompanyIdNormalizer;
+use MyInvoice\Support\PohodaPaymentType;
 
 /**
  * Stormware Pohoda XML data package exporter.
@@ -286,6 +287,13 @@ final class PohodaXmlExporter
             $orderNumber = trim((string) ($invoice['supplier_order_number'] ?? $invoice['project_number'] ?? ''));
             if ($orderNumber !== '') {
                 $this->el($dom, $hdr, self::NS_INV, 'inv:numberOrder', mb_substr($orderNumber, 0, self::DOCUMENT_NUMBER_LIMIT));
+            }
+
+            $paymentType = PohodaPaymentType::toPohoda($invoice['payment_method'] ?? null);
+            if ($paymentType !== null) {
+                $payment = $dom->createElementNS(self::NS_INV, 'inv:paymentType');
+                $this->el($dom, $payment, self::NS_TYP, 'typ:paymentType', $paymentType);
+                $hdr->appendChild($payment);
             }
 
             // Účet / středisko / činnost / zakázka (per-supplier)

@@ -20,6 +20,7 @@ use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
 use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
 use MyInvoice\Repository\Section74bCorrectionRepository;
 use MyInvoice\Service\Stats\StatsRecomputer;
+use MyInvoice\Support\PohodaPaymentType;
 use MyInvoice\Support\Sql\PayablePredicate;
 
 /**
@@ -103,17 +104,6 @@ final class InvoiceImporter
         'received_advance' => 'advance',
         'received_proforma' => 'advance',
         'commitment' => 'invoice',
-    ];
-
-    /** `typ:paymentType` Pohody → způsob úhrady MyÚčta. */
-    private const PAYMENT_TYPES = [
-        '' => 'bank_transfer',
-        'draft' => 'bank_transfer',
-        'cash' => 'cash',
-        'creditcard' => 'card',
-        'delivery' => 'cash_on_delivery',
-        'encashment' => 'direct_debit',
-        'compensation' => 'offset',
     ];
 
     /** Přihrádky rekapitulace a jejich výchozí sazba, když export `@rate` nenese. */
@@ -654,7 +644,7 @@ final class InvoiceImporter
             'kh_number' => PohodaXml::text($h, 'numberKHDPH'),
             'account_no' => PohodaXml::text($h, 'paymentAccount/accountNo'),
             'bank_code' => PohodaXml::text($h, 'paymentAccount/bankCode'),
-            'payment' => self::PAYMENT_TYPES[PohodaXml::text($h, 'paymentType/paymentType')] ?? 'other',
+            'payment' => PohodaPaymentType::fromPohoda(PohodaXml::text($h, 'paymentType/paymentType')),
             'remaining' => PohodaXml::text($h, 'liquidation/amountHome'),
             'paid_date' => PohodaXml::date($h, 'liquidation/date'),
             'foreign' => PohodaXml::text($r, $prefix . 'Summary/foreignCurrency/currency/ids'),
