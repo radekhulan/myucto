@@ -62,6 +62,7 @@ import { reverseChargeCodeForKind } from '@/utils/reverseChargeSupplyCode'
 import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
 import VendorPicker from '@/components/purchase/VendorPicker.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
+import ClientRegistryCheck from '@/components/clients/ClientRegistryCheck.vue'
 import { clientsApi, type Client } from '@/api/clients'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
@@ -565,6 +566,19 @@ function onVendorVatPayerToggle() {
 
 // === Quick "New vendor" modal — vytvoří klienta s is_vendor=true, is_customer=false ===
 const vendorModalOpen = ref(false)
+const vendorPickerRef = ref<InstanceType<typeof VendorPicker> | null>(null)
+
+// Karta dodavatele aktualizovaná z ARES/VIES: obnov popisek výběru a plátcovství
+// na dokladu stejně jako při výběru dodavatele (neplátce ⇒ bez odpočtu).
+function onVendorRegistryUpdated(client: Client, fields: string[]) {
+  vendorPickerRef.value?.upsert(client)
+  if (form.value.vendor_id !== client.id) return
+  windowVendor.value = { id: client.id, name: client.company_name }
+  if (fields.includes('is_vat_payer') && client.is_vat_payer !== undefined) {
+    applyVendorVatStatus(client.is_vat_payer, true)
+  }
+}
+
 async function onVendorCreated(client: Client) {
   form.value.vendor_id = client.id
   vendorModalOpen.value = false
@@ -2104,10 +2118,12 @@ useWindowTitle(
             <div class="flex gap-2">
               <div class="flex-1 min-w-0">
                 <VendorPicker
+                  ref="vendorPickerRef"
                   v-model="form.vendor_id"
                   @selected="onVendorSelected"
                 />
               </div>
+              <ClientRegistryCheck :client-id="form.vendor_id" button-class="mt-[26px]" @updated="onVendorRegistryUpdated" />
               <button type="button" @click="vendorModalOpen = true"
                 class="cursor-pointer shrink-0 h-9 px-3 mt-[26px] inline-flex items-center gap-1.5 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md text-sm font-medium"
                 :title="t('purchase_invoice.new_vendor')">

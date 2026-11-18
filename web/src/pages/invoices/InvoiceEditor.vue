@@ -55,6 +55,7 @@ import { isReturnRow, preselectFromSearch, takenByOtherRows, trackingChoices, tr
 import { applyLineDiscount, canDiscountUnitPrice, legacyListPrice, lineDiscountInputValue, lineDiscountPct, parseLineDiscountInput, quotedListPrice } from './invoiceLineDiscount'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
+import ClientRegistryCheck from '@/components/clients/ClientRegistryCheck.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
 import { stockApi, type StockItemPackagingUnit, type StockItemSearchResult, type Warehouse } from '@/api/stock'
 import { stockSearchMatchLabel } from '@/utils/stockSearchMatch'
@@ -1804,6 +1805,16 @@ async function onClientCreatedInModal(client: Client) {
   await onClientChange()
 }
 
+// Karta aktualizovaná z ARES/VIES: rozpracovaný doklad čte odběratele z cache, takže
+// stačí ji nahradit, obnovit popisek výběru a znovu ověřit DIČ.
+async function onClientRegistryUpdated(client: Client) {
+  mergeClients([client])
+  clientOptions.value = clientOptions.value.map(o => o.value === client.id ? clientToOption(client) : o)
+  if (form.value.client_id !== client.id) return
+  selectedClientOption.value = clientToOption(client)
+  await verifyClientVies(client.id)
+}
+
 async function onProjectCreatedInModal(project: Project) {
   projects.value = [project, ...projects.value.filter(p => p.id !== project.id)]
   form.value.project_id = project.id
@@ -3376,6 +3387,7 @@ useWindowTitle(
                     :clearable="form.is_simplified"
                   />
                 </div>
+                <ClientRegistryCheck :client-id="form.client_id" :client="selectedClient" @updated="onClientRegistryUpdated" />
                 <button type="button" @click="clientModalOpen = true"
                   class="cursor-pointer shrink-0 h-9 px-3 inline-flex items-center gap-1.5 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md text-sm font-medium"
                   :title="t('client.new_title')">

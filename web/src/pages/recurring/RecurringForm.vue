@@ -22,6 +22,7 @@ import { focusLastRow } from '@/composables/useRowFocus'
 import { usePaneDom } from '@/composables/usePaneDom'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
+import ClientRegistryCheck from '@/components/clients/ClientRegistryCheck.vue'
 import ProjectFormModal from '@/components/modals/ProjectFormModal.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -668,6 +669,17 @@ async function onClientCreatedInModal(client: Client) {
   // watch na client_id zavolá ensureClientLoaded (najde v cache) + loadProjects + name
 }
 
+const selectedClient = computed(() => clients.value.find(c => c.id === form.value.client_id) ?? null)
+
+// Karta aktualizovaná z ARES/VIES — zrcadlí InvoiceEditor.
+async function onClientRegistryUpdated(client: Client) {
+  mergeClients([client])
+  clientOptions.value = clientOptions.value.map(o => o.value === client.id ? clientToOption(client) : o)
+  if (form.value.client_id !== client.id) return
+  selectedClientOption.value = clientToOption(client)
+  await verifyClientVies(client.id)
+}
+
 async function onProjectCreatedInModal(project: Project) {
   projects.value = [project, ...projects.value.filter(p => p.id !== project.id)]
   form.value.project_id = project.id
@@ -1057,6 +1069,7 @@ async function submit() {
                   :placeholder="t('recurring.client')"
                 />
               </div>
+              <ClientRegistryCheck :client-id="form.client_id" :client="selectedClient" @updated="onClientRegistryUpdated" />
               <button type="button" @click="clientModalOpen = true"
                 class="cursor-pointer shrink-0 h-9 px-3 inline-flex items-center gap-1.5 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md text-sm font-medium"
                 :title="t('client.new_title')">
