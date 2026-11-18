@@ -291,6 +291,13 @@ v [Platebních příkazech](26_Platebni_prikazy.md) a doklad placený hotově se
 výdajovým pokladním dokladem; v [Pokladně](32_Pokladna.md) jde výdajový doklad s účelem „Úhrada faktury"
 navázat na doklad k vyplacení. Bez volby se nic z toho nenabízí a editor dál vyžaduje kladnou částku k úhradě.
 
+**Výkazy práce na úvodní stránce** (ve výchozím stavu zapnuté):
+
+1. Na záložce **Fakturace** v sekci **Fakturace a e-maily** vypněte **Zobrazovat na úvodní stránce Výkazy práce**, pokud koncepty vystavených faktur nepoužíváte jako rozpracované výkazy.
+2. Uložte.
+
+Se zapnutou volbou ukazuje [Přehled](10_Prehled.md) blok **Výkazy práce** s rozpracovanými koncepty vystavených faktur za poslední dva měsíce, které stačí doplnit a vystavit. Vypnutí blok jen skryje, koncepty zůstávají v seznamu vydaných faktur.
+
 **Kdo fakturu vystavil** (ve výchozím stavu vypnuté):
 
 1. Na záložce **Fakturace** zapněte **Tisknout na faktuře, kdo ji vystavil**.

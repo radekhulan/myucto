@@ -45,7 +45,7 @@ final class SupplierResponseFields
         'default_note_below_items_en', 'default_hourly_rate', 'auto_send_reminders',
         'reminder_days_after_due', 'auto_generate_recurring', 'embed_isdoc', 'public_isdoc_enabled',
         'email_attach_isdoc', 'invoice_qr_include_due_date', 'purchase_invoice_qr_include_due_date',
-        'proforma_payment_document', 'allow_refund_invoices', 'purchase_import_received_at',
+        'proforma_payment_document', 'allow_refund_invoices', 'dashboard_work_reports', 'purchase_import_received_at',
         'pohoda_account_code', 'pohoda_centre_code', 'pohoda_activity_code', 'pohoda_contract_code',
         'pohoda_accounting_code', 'invoice_number_format', 'proforma_number_format',
         'credit_note_number_format', 'simplified_number_format', 'simplified_hide_customer_default',

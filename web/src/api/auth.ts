@@ -61,6 +61,8 @@ export interface SupplierBrief {
   default_rounding_mode?: InvoiceRoundingMode
   /** Vyúčtování s výsledkem k vyplacení (migrace 1937): editor povolí zápornou fakturu. */
   allow_refund_invoices: boolean
+  /** Výkazy práce (rozpracované koncepty) na úvodní stránce, výchozí zapnuto. */
+  dashboard_work_reports?: boolean
   /** Rozpis slevy z ceníkové ceny na PDF (migrace 2035); editor podle ní ukáže u řádku pole „Sleva %". */
   work_report_display_options?: import('./invoices').WorkReportDisplayOptions
   invoice_pdf_show_line_discount?: boolean

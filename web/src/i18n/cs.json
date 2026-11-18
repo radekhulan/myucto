@@ -28305,6 +28305,8 @@
     "tab_accounting": "Daně a účetnictví",
     "tab_email-templates": "E-mailové šablony",
     "documents_section": "Fakturace a e-maily",
+    "dashboard_work_reports": "Zobrazovat na úvodní stránce Výkazy práce",
+    "dashboard_work_reports_hint": "Rozpracované koncepty vystavených faktur za poslední dva měsíce, které stačí doplnit a vystavit. Vypnutí blok jen skryje, koncepty zůstávají v seznamu vydaných faktur.",
     "supplier": "Dodavatel",
     "currencies_banks": "Měny + bankovní účty",
     "company_name": "Obchodní jméno",

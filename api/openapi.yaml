@@ -55354,6 +55354,7 @@ components:
           enum: [auto, none, whole_czk]
           description: "Režim zaokrouhlení, který dostane nová faktura bez pole rounding_mode (migrace 2031)."
         allow_refund_invoices: { type: boolean, default: false, description: "Vyúčtování s výsledkem k vyplacení (migrace 1937): faktura s aspoň jedním kladným řádkem smí skončit zápornou částkou k úhradě (dlužíme zákazníkovi). Proforma nikdy." }
+        dashboard_work_reports: { type: boolean, default: true, description: "Zobrazovat na úvodní stránce Výkazy práce, tedy rozpracované koncepty vystavených faktur k doplnění (migrace 2312)." }
         default_note_below_items_enabled: { type: boolean, default: false, description: "Předvyplňovat poznámku pod položkami na nově zakládaných vystavených dokladech (#79, migrace 1855). Text se vybírá podle jazyka dokladu, ne podle měny; doplní se jen tehdy, když POST /api/v1/invoices klíč `note_below_items` vůbec nepošle." }
         default_note_below_items_cs: { type: [string, "null"], maxLength: 5000, description: "Výchozí text poznámky pod položkami pro doklady v češtině. Prázdný text se ukládá jako null." }
         default_note_below_items_en: { type: [string, "null"], maxLength: 5000, description: "Výchozí text poznámky pod položkami pro doklady v angličtině. Prázdný text se ukládá jako null." }
@@ -55561,6 +55562,7 @@ components:
           default: auto
           description: "Režim zaokrouhlení nových faktur a dobropisů, když ho volající nepošle: API, MCP, pravidelná fakturace, faktura z objednávky; editor ho předvyplní (migrace 2031)."
         allow_refund_invoices: { type: boolean, default: false, description: "Vyúčtování s výsledkem k vyplacení (migrace 1937): faktura smí skončit zápornou částkou k úhradě, pokud má aspoň jeden kladný řádek." }
+        dashboard_work_reports: { type: boolean, default: true, description: "Zobrazovat na úvodní stránce Výkazy práce, tedy rozpracované koncepty vystavených faktur k doplnění (migrace 2312)." }
         default_note_below_items_enabled: { type: boolean, default: false, description: "Předvyplňovat poznámku pod položkami na nově zakládaných vystavených dokladech (#79, migrace 1855). Vypnuto = nic se nepředvyplňuje." }
         default_note_below_items_cs: { type: [string, "null"], maxLength: 5000, description: "Výchozí text poznámky pod položkami pro doklady v češtině (invoices.language='cs')." }
         default_note_below_items_en: { type: [string, "null"], maxLength: 5000, description: "Výchozí text poznámky pod položkami pro doklady v angličtině (invoices.language='en')." }

@@ -1197,6 +1197,13 @@ async function confirmTaxRepDelete() {
             </label>
             <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('refundInvoice.settings_hint') }}</p>
           </div>
+          <div class="md:col-span-2">
+            <label class="flex items-center gap-2 text-sm">
+              <input v-model="supplier.dashboard_work_reports" type="checkbox" class="rounded border-neutral-300 text-primary-600" data-test="dashboard-work-reports" />
+              <span class="font-medium">{{ t('settings.dashboard_work_reports') }}</span>
+            </label>
+            <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.dashboard_work_reports_hint') }}</p>
+          </div>
           <PdfAppearanceSettings v-if="auth.canWrite('settings.branding')" class="md:col-span-2" :model-value="supplier" part="main"
             @change="Object.assign(supplier, $event)" />
           <div v-if="auth.canWrite('settings.payment_qr')" class="md:col-span-2 border-t border-neutral-200 pt-4 space-y-3">

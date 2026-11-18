@@ -224,7 +224,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
       </div>
 
       <!-- ═══ Výkazy práce — rozpracované (draft) vystavené faktury k doplnění (skryto pro readonly) ═══ -->
-      <section v-if="auth.canWrite('dashboard') && summary.draft_invoices && summary.draft_invoices.length" class="space-y-3">
+      <section v-if="auth.canWrite('dashboard') && supplierStore.currentSupplier?.dashboard_work_reports !== false && summary.draft_invoices && summary.draft_invoices.length" class="space-y-3">
         <!-- Sekční štítek: caps popisek + hairline k pravému okraji (.rule-label).
              Plovoucí barevné pilulky přetahovaly pozornost na nadpisy sekcí,
              i když nesou nejmíň informace na stránce. -->

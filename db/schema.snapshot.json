@@ -27470,6 +27470,7 @@
                 "cssz_ossz_code": "varchar(3) NULL DEFAULT NULL",
                 "cssz_vsdp": "varchar(20) NULL DEFAULT NULL",
                 "cz_nace_code": "varchar(8) NULL DEFAULT NULL",
+                "dashboard_work_reports": "tinyint(1) NOT NULL DEFAULT 1",
                 "data_box_id": "varchar(16) NULL DEFAULT NULL",
                 "data_box_type": "varchar(8) NULL DEFAULT NULL",
                 "default_branding_profile_id": "int(10) unsigned NULL DEFAULT NULL",

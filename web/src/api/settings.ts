@@ -277,6 +277,8 @@ export interface Supplier {
    * v platebních příkazech a výplatu v hotovosti.
    */
   allow_refund_invoices: boolean
+  /** Výkazy práce (rozpracované koncepty) na úvodní stránce, výchozí zapnuto. */
+  dashboard_work_reports: boolean
   /**
    * Datum přijetí u importovaných přijatých dokladů (migrace 1848). 'issue_date' =
    * datum z dokladu (vystavení, jinak DUZP) — výchozí; 'import_date' = den importu.
