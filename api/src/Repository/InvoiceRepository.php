@@ -1350,26 +1350,28 @@ final class InvoiceRepository
         $sum = static fn (string $cond, string $col): string =>
             "ROUND(COALESCE(SUM(CASE WHEN $cond THEN " . $signed($col) . " END), 0), 2)";
 
+        // Agregace čte všechny doklady měsíce: klienta, zakázku a měnu připojí jen filtr,
+        // který na ně odkazuje, kódy měn se dohledají až pro výsledné skupiny
+        // ({@see MonthSummaryCurrencies}). JOIN na každý doklad by znásobil čtení klíčů.
+        $joins = (preg_match('/\bc\./', $whereSql) === 1 ? ' JOIN clients c ON c.id = i.client_id' : '')
+            . (preg_match('/\bp\./', $whereSql) === 1 ? ' LEFT JOIN projects p ON p.id = i.project_id' : '')
+            . (preg_match('/\bcur\./', $whereSql) === 1 ? ' JOIN currencies cur ON cur.id = i.currency_id' : '');
         $stmt = $this->db->pdo()->prepare(
-            "SELECT $bucket AS month_bucket, cur.code AS currency, COUNT(*) AS cnt,
+            "SELECT $bucket AS month_bucket, i.currency_id, COUNT(*) AS cnt,
                     " . $sum($turnover, 'total_without_vat') . " AS without_vat,
                     " . $sum($turnover, 'total_vat') . " AS vat,
                     " . $sum($turnover, 'total_with_vat') . " AS with_vat,
                     " . $sum($draft, 'total_without_vat') . " AS draft_without_vat,
                     " . $sum($draft, 'total_vat') . " AS draft_vat,
                     " . $sum($draft, 'total_with_vat') . " AS draft_with_vat
-               FROM invoices i
-               JOIN clients c ON c.id = i.client_id
-          LEFT JOIN projects p ON p.id = i.project_id
-               JOIN currencies cur ON cur.id = i.currency_id
+               FROM invoices i{$joins}
               WHERE $whereSql
-              GROUP BY month_bucket, cur.code
-              ORDER BY month_bucket, cur.code"
+              GROUP BY month_bucket, i.currency_id"
         );
         $stmt->execute($params);
 
         $out = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        foreach (\MyInvoice\Support\MonthSummaryCurrencies::attach($this->db->pdo(), $stmt->fetchAll(PDO::FETCH_ASSOC)) as $r) {
             $month = (string) $r['month_bucket'];
             $out[$month] ??= ['count' => 0, 'totals_per_currency' => []];
             $out[$month]['count'] += (int) $r['cnt'];

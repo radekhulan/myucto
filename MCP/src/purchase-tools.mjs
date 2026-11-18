@@ -79,6 +79,7 @@ export const PURCHASE_ITEM_FIELDS = [
   'expense_kind', 'expense_account_code', 'counter_account_code', 'posting_rule_key',
   'accrual_from', 'accrual_to', 'stock_item_id',
   'seller_item_code', 'item_ean', 'intrastat_cn8_code', 'intrastat_country_of_origin',
+  'advance_purchase_invoice_id',
 ];
 
 /** Účetní pole řádku přijaté faktury, která jde zadat nebo změnit. */

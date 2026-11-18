@@ -1295,23 +1295,26 @@ final class PurchaseInvoiceRepository
         // Odpočet zálohy z DDKP na konečné faktuře nákladem není ({@see PurchaseCostSql}).
         $sum = static fn (string $expr): string => "ROUND(COALESCE(SUM(CASE WHEN $cost THEN $expr END), 0), 2)";
 
+        // Agregace čte všechny doklady měsíce: protistranu připojí jen filtr, který na ni
+        // odkazuje, a kódy měn se dohledají až pro výsledné skupiny. JOIN na každý doklad
+        // by jinak znásobil čtení klíčů celého měsíce.
+        $vendorJoin = (preg_match('/\bc\./', $whereSql) === 1 ? ' JOIN clients c ON c.id = pi.vendor_id' : '')
+            . (preg_match('/\bcur\./', $whereSql) === 1 ? ' JOIN currencies cur ON cur.id = pi.currency_id' : '');
         $stmt = $this->db->pdo()->prepare(
-            "SELECT $bucket AS month_bucket, cur.code AS currency, COUNT(*) AS cnt,
+            "SELECT $bucket AS month_bucket, pi.currency_id, COUNT(*) AS cnt,
                     SUM(CASE WHEN $cost THEN 1 ELSE 0 END) AS cost_rows,
                     " . $sum(PurchaseCostSql::net('pi')) . " AS without_vat,
                     " . $sum(PurchaseCostSql::vat('pi')) . " AS vat,
                     " . $sum(PurchaseCostSql::gross('pi')) . " AS with_vat
-               FROM purchase_invoices pi" . PurchaseCostSql::deductionJoinFor($this->db->pdo(), 'pi', $supplierId) . "
-               JOIN clients c ON c.id = pi.vendor_id
-               JOIN currencies cur ON cur.id = pi.currency_id
+               FROM purchase_invoices pi" . PurchaseCostSql::deductionJoinFor($this->db->pdo(), 'pi', $supplierId) . $vendorJoin . "
               WHERE $whereSql
-              GROUP BY month_bucket, cur.code
-              ORDER BY month_bucket, cur.code"
+              GROUP BY month_bucket, pi.currency_id"
         );
         $stmt->execute($params);
+        $rows = \MyInvoice\Support\MonthSummaryCurrencies::attach($this->db->pdo(), $stmt->fetchAll(PDO::FETCH_ASSOC));
 
         $out = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        foreach ($rows as $r) {
             $month = (string) $r['month_bucket'];
             $out[$month] ??= ['count' => 0, 'totals_per_currency' => []];
             $out[$month]['count'] += (int) $r['cnt'];
