@@ -182,6 +182,27 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
         }
     }
 
+    public function testPagedConfirmationKeepsConfirmedGiftElection(): void
+    {
+        // #399: stránkované potvrzení musí držet potvrzenou volbu osvobození daru stejně
+        // jako původní cesta (nonprofit_tax_gift_election_locked).
+        $this->postReferenceYear();
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-gift'), $this->actor);
+        $first = $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-gift-1-' . $this->supplier);
+
+        $changed = $this->referenceAssessment();
+        $changed['decisions'][$this->lines['O-05']] = ['title' => 'gift', 'evidence' => 'Syntetický doklad etalonu TJ Příklad',
+            'legal_basis' => 'zdp_18a', 'deductible_cents' => 0, 'facts' => ['claim_exemption' => false,
+                'income_treatment' => 'nonbusiness_activity', 'income_attribution_evidence' => 'Syntetické zařazení daru do nepodnikatelské činnosti']];
+        [$status, $body] = $this->confirmPagedRaw($this->period, $changed, 'tj-gift-2-' . $this->supplier, (int) $first['assessment_id']);
+        self::assertSame(409, $status, json_encode($body));
+        self::assertSame('nonprofit_tax_gift_election_locked', $body['error']['code'] ?? null, json_encode($body));
+
+        // Stejná volba jako v potvrzené revizi projde.
+        [$status, $body] = $this->confirmPagedRaw($this->period, $this->referenceAssessment(), 'tj-gift-3-' . $this->supplier, (int) $first['assessment_id']);
+        self::assertSame(200, $status, json_encode($body));
+    }
+
     public function testPagedNextPeriodUsesWholeSavingWithoutAddback(): void
     {
         $this->pagedReferenceYearFinal();
@@ -332,6 +353,14 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
 
     private function confirmPaged(int $period, array $assessment, string $key): array
     {
+        [$status, $confirmed] = $this->confirmPagedRaw($period, $assessment, $key, null);
+        self::assertSame(200, $status, json_encode($confirmed));
+        return $confirmed;
+    }
+
+    /** @return array{0:int, 1:array<string,mixed>} */
+    private function confirmPagedRaw(int $period, array $assessment, string $key, ?int $expectedAssessmentId): array
+    {
         $base = '/periods/' . $period . '/nonprofit-tax';
         [$status, $opened] = $this->http('POST', $base . '/draft', ['profile' => $assessment['profile']]);
         self::assertSame(200, $status, json_encode($opened));
@@ -352,10 +381,8 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
             self::assertSame(200, $status, $collection . ': ' . json_encode($changed));
             $revision = $changed['draft']['revision_no'];
         }
-        [$status, $confirmed] = $this->http('POST', $path . '/confirm', ['expected_revision' => $revision, 'expected_assessment_id' => null,
+        return $this->http('POST', $path . '/confirm', ['expected_revision' => $revision, 'expected_assessment_id' => $expectedAssessmentId,
             'reason' => 'Syntetické stránkované posouzení', 'idempotency_key' => $key]);
-        self::assertSame(200, $status, json_encode($confirmed));
-        return $confirmed;
     }
 
     private function http(string $method, string $path, array $body = []): array
