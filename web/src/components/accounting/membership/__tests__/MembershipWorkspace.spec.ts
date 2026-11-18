@@ -24,7 +24,7 @@ config.global.directives = { ...config.global.directives, 'column-labels': {} }
 vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: () => Promise.resolve(), getPagePrefs: () => ({ value: {} }), patchPagePrefs: vi.fn() }))
 vi.mock('@/api/clients', () => ({ clientsApi: {} }))
 // Detail člena je samostatná stránka; řádek jen naviguje (Ctrl+klik a prostřední tlačítko do nového panelu).
-const rowLink = vi.hoisted(() => ({ navigate: vi.fn(() => true) }))
+const rowLink = vi.hoisted(() => ({ navigate: vi.fn((..._args: unknown[]): boolean => true) }))
 vi.mock('@/composables/useRowLink', () => ({ useRowLink: () => rowLink.navigate }))
 config.global.stubs = { ...config.global.stubs, RouterLink: RouterLinkStub }
 // Potvrzení a varování jdou jako v celé aplikaci do toastu.
