@@ -300,15 +300,10 @@ final class J6AuthoritativePagedCalculatorTest extends TestCase
     {
         $header = $this->sourceProvider($rows)->header();
         $hasher = new NonprofitTaxSnapshotHasher();
-        $root = $hasher->startRoot();
-        $ordinal = $count = 0;
-        foreach (array_chunk($rows, 500) as $pageRows) {
-            $chunk = $hasher->chunk($ordinal, new SnapshotPageV2($pageRows, [], null, null, null, count($pageRows)));
-            $hasher->updateRoot($root, $chunk['descriptor']);
-            $count += count($pageRows);
-            ++$ordinal;
-        }
-        return $hasher->input($header, $hasher->header($header), $hasher->finishRoot($root, $ordinal), $count, 0, $ordinal);
+        // Otisk podkladů je obsahový: nezávisí na rozdělení do stránek (#397).
+        $content = $hasher->startContent();
+        $hasher->updateContent($content, $rows, []);
+        return $hasher->contentInput($header, $hasher->header($header), $hasher->finishContent($content), count($rows), 0);
     }
 
     private function sink(): object

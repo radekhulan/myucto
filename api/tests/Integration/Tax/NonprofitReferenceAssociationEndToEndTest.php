@@ -270,6 +270,49 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
         }
     }
 
+    public function testBalanceSheetEntriesDoNotStaleConfirmedAssessment(): void
+    {
+        // #397: otisk podkladů závisí jen na řádcích, které do posouzení vstupují, ne na
+        // stránkování deníku. Rozvahový zápis potvrzené posouzení nezneplatní, výnos ano.
+        $this->postReferenceYear();
+        $main = $this->catalog['activity']['values']['main'];
+        $subject = $this->catalog['tax_regime']['values']['subject'];
+        // Víc než jedna stránka deníku (500 řádků): 300 nákladových zápisů po dvou řádcích.
+        $expense = [];
+        for ($i = 0; $i < 300; ++$i) {
+            $expense[] = $this->entry('X-' . $i, '2025-06-01', [['518', 'debit', '10.00', [$main, $this->kinds['sport'], $subject]], ['221', 'credit', '10.00']]);
+        }
+        $assessment = $this->referenceAssessment();
+        foreach (range(0, 299) as $i) {
+            $assessment['decisions'][$this->lines['X-' . $i]] = ['title' => 'nonbusiness_cost', 'evidence' => 'Syntetický doklad etalonu TJ Příklad',
+                'legal_basis' => 'zdp_24_25', 'deductible_cents' => 1000];
+        }
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-stale'), $this->actor);
+        $this->confirmPaged($this->period, $assessment, 'tj-stale-' . $this->supplier);
+        $guard = $this->container->get(\MyInvoice\Service\Tax\Nonprofit\NonprofitTaxAssessmentGuard::class);
+        $fingerprint = fn (): string => $this->container->get(\MyInvoice\Service\Tax\Nonprofit\Authoritative\J6CurrentProviderFactory::class)
+            ->fingerprint($this->supplier, $this->period)->inputHash;
+        self::assertTrue($guard->closingCheck($this->supplier, $this->period)['complete']);
+        $hash = $fingerprint();
+
+        // Úhrada závazku v lednu posune hranice všech stránek.
+        $this->entry('B-01', '2025-01-15', [['321', 'debit', '50.00'], ['221', 'credit', '50.00']]);
+        self::assertSame($hash, $fingerprint(), 'Rozvahový zápis změnil otisk podkladů.');
+        // Zápis daně 591/341 k poslednímu dni období (řádky 59x se z podkladů vyřazují).
+        $this->pdo->prepare('INSERT INTO chart_of_accounts(supplier_id,account_code,name,account_type) VALUES(?,?,?,?),(?,?,?,?)')
+            ->execute([$this->supplier, '591', 'Syntetická daň', 'expense', $this->supplier, '341', 'Syntetický závazek daně', 'liability']);
+        $this->accounts['591'] = (int) $this->pdo->query("SELECT id FROM chart_of_accounts WHERE supplier_id={$this->supplier} AND account_code='591'")->fetchColumn();
+        $this->accounts['341'] = (int) $this->pdo->query("SELECT id FROM chart_of_accounts WHERE supplier_id={$this->supplier} AND account_code='341'")->fetchColumn();
+        $this->entry('T-01', '2025-12-31', [['591', 'debit', '21000.00'], ['341', 'credit', '21000.00']]);
+        self::assertSame($hash, $fingerprint(), 'Zápis daně změnil otisk podkladů.');
+        self::assertTrue($guard->closingCheck($this->supplier, $this->period)['complete'], 'Rozvahové zápisy zneplatnily posouzení.');
+
+        // Nový výnos do posouzení vstupuje: posouzení zastará.
+        $this->entry('R-01', '2025-07-01', [['602', 'credit', '1.00', [$main, $this->kinds['education'], $subject]], ['221', 'debit', '1.00']]);
+        self::assertNotSame($hash, $fingerprint());
+        self::assertSame('assessment_stale', $guard->closingCheck($this->supplier, $this->period)['findings'][0]['code'] ?? null);
+    }
+
     public function testPagedNextPeriodUsesWholeSavingWithoutAddback(): void
     {
         $this->pagedReferenceYearFinal();

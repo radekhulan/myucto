@@ -29,17 +29,11 @@ final readonly class LegacyArrayJ6SourceProvider implements J6AuthoritativeSourc
         $this->header = new SnapshotHeaderV2($data);
         $this->context = new J6ReadContext($supplierId, $periodId, J6ReadMode::CURRENT);
         $hasher = new NonprofitTaxSnapshotHasher();
-        $root = $hasher->startRoot();
-        $ordinal = $rows = 0;
-        foreach (array_chunk(array_values((array) ($snapshot['sources'] ?? [])), 500) as $pageRows) {
-            $page = new SnapshotPageV2($pageRows, $ordinal === 0 ? (array) ($snapshot['findings'] ?? []) : [], null, null, null, count($pageRows));
-            $chunk = $hasher->chunk($ordinal, $page);
-            $hasher->updateRoot($root, $chunk['descriptor']);
-            $rows += count($pageRows);
-            ++$ordinal;
-        }
-        $this->inputHash = $hasher->input($this->header, $hasher->header($this->header),
-            $hasher->finishRoot($root, $ordinal), $rows, count((array) ($snapshot['findings'] ?? [])), $ordinal);
+        $content = $hasher->startContent();
+        $sources = array_values((array) ($snapshot['sources'] ?? []));
+        $hasher->updateContent($content, $sources, (array) ($snapshot['findings'] ?? []));
+        $this->inputHash = $hasher->contentInput($this->header, $hasher->header($this->header),
+            $hasher->finishContent($content), count($sources), count((array) ($snapshot['findings'] ?? [])));
     }
 
     public function context(): J6ReadContext { return $this->context; }

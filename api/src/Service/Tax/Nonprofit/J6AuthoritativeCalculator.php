@@ -89,6 +89,7 @@ final class J6AuthoritativeCalculator
             $decisionQueue = $queues[] = new J6ExternalSortQueue();
             $snapshotHasher = new NonprofitTaxSnapshotHasher();
             $snapshotRoot = $snapshotHasher->startRoot();
+            $snapshotContent = $snapshotHasher->startContent();
             $snapshotOrdinal = $snapshotRows = $snapshotFindings = 0;
             $sourceHash = hash_init('sha256');
             hash_update($sourceHash, "J6SOURCEINPUT2\0" . NonprofitTaxRules::canonicalJson($sourceHeader->data) . "\0");
@@ -96,6 +97,7 @@ final class J6AuthoritativeCalculator
                 if ($page->rows !== [] || $page->findings !== []) {
                     $chunk = $snapshotHasher->chunk($snapshotOrdinal, $page);
                     $snapshotHasher->updateRoot($snapshotRoot, $chunk['descriptor']);
+                    $snapshotHasher->updateContent($snapshotContent, $page->rows, $page->findings);
                     $snapshotRows += $chunk['descriptor']['row_count'];
                     $snapshotFindings += $chunk['descriptor']['finding_count'];
                     ++$snapshotOrdinal;
@@ -109,8 +111,8 @@ final class J6AuthoritativeCalculator
                 }
             }
             $snapshotRootHash = $snapshotHasher->finishRoot($snapshotRoot, $snapshotOrdinal);
-            $snapshotInputHash = $snapshotHasher->input($sourceHeader, $snapshotHasher->header($sourceHeader),
-                $snapshotRootHash, $snapshotRows, $snapshotFindings, $snapshotOrdinal);
+            $snapshotInputHash = $snapshotHasher->contentInput($sourceHeader, $snapshotHasher->header($sourceHeader),
+                $snapshotHasher->finishContent($snapshotContent), $snapshotRows, $snapshotFindings);
             if (!hash_equals($decisions->context()->sourceInputHash, $snapshotInputHash)) {
                 throw new NonprofitTaxAssessmentException('nonprofit_tax_draft_changed',
                     'Koncept posouzení nebo jeho účetní podklad se změnil.', 409);

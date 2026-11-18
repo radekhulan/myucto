@@ -123,6 +123,7 @@ final class NonprofitTaxSnapshotManifestRepository
         $headerHash = $this->hasher->header($header);
         if (!hash_equals($manifest['header_hash'], $headerHash)) throw new \UnexpectedValueException('Snapshot header hash mismatch.');
         $root = $this->hasher->startRoot();
+        $content = $this->hasher->startContent();
         $ordinal = 0;
         $rows = 0;
         $findings = 0;
@@ -142,6 +143,7 @@ final class NonprofitTaxSnapshotManifestRepository
                     throw new \UnexpectedValueException('Snapshot chunk metadata mismatch.');
                 }
                 $this->hasher->updateRoot($root, $descriptor);
+                $this->hasher->updateContent($content, $payload['rows'], $payload['findings']);
                 $rows += $descriptor['row_count'];
                 $findings += $descriptor['finding_count'];
                 ++$ordinal;
@@ -149,9 +151,12 @@ final class NonprofitTaxSnapshotManifestRepository
             if (count($page) < self::VERIFY_CHUNK_BATCH) break;
         }
         $rootHash = $this->hasher->finishRoot($root, $ordinal);
-        $inputHash = $this->hasher->input($header, $headerHash, $rootHash, $rows, $findings, $ordinal);
+        $inputHash = $this->hasher->contentInput($header, $headerHash, $this->hasher->finishContent($content), $rows, $findings);
+        // Manifest uložený před obsahovým otiskem (#397) nese původní otisk nad kořenem stránek.
+        $inputMatches = hash_equals($manifest['input_hash'], $inputHash)
+            || hash_equals($manifest['input_hash'], $this->hasher->input($header, $headerHash, $rootHash, $rows, $findings, $ordinal));
         if ($ordinal !== $manifest['chunk_count'] || $rows !== $manifest['row_count'] || $findings !== $manifest['finding_count']
-            || !hash_equals($manifest['root_hash'], $rootHash) || !hash_equals($manifest['input_hash'], $inputHash)) {
+            || !hash_equals($manifest['root_hash'], $rootHash) || !$inputMatches) {
             throw new \UnexpectedValueException('Snapshot manifest totals or hashes do not match.');
         }
         return $this->reference($manifest);
