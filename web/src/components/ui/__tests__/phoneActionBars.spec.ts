@@ -46,6 +46,15 @@ describe('ActionBar na telefonu', () => {
     wrapper.unmount()
   })
 
+  it('sekundární akce v řádku se na úzkém displeji skryje, nepřebije ji inline-flex základu (#395)', () => {
+    const wrapper = mount(ActionBar, { props: { actions }, global: { plugins: [i18n] } })
+    const pdf = wrapper.findAll('button, a').find(b => b.text() === 'PDF')!
+    const classes = pdf.classes()
+    expect(classes).toContain('hidden')
+    expect(classes).toContain('sm:inline-flex')
+    expect(classes).not.toContain('inline-flex')
+  })
+
   it('na desktopu zůstává nabídka vedle tlačítka', async () => {
     const wrapper = mount(ActionBar, { props: { actions }, global: { plugins: [i18n] }, attachTo: document.body })
     await wrapper.get('button[aria-expanded]').trigger('click')

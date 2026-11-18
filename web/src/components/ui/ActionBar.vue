@@ -147,6 +147,9 @@ function attrsOf(a: ActionItem): Record<string, unknown> {
 }
 
 const inlineBase = BTN_BASE
+// Sekundární akce inline až od sm: `inline-flex` ze základu tlačítka by v Tailwindu
+// přebilo `hidden` a na telefonu by akce byly v řádku i v nabídce (#395).
+const inlineBaseFromSm = BTN_BASE.split(' ').filter(c => c !== 'inline-flex').join(' ')
 
 // ─── dropdown ───
 const open = ref(false)
@@ -226,7 +229,7 @@ onBeforeUnmount(() => {
 
     <!-- SECONDARY (zbytek): inline jen na sm+; na mobilu jsou v menu -->
     <component :is="tagOf(a)" v-for="a in secondaryDesktop" :key="a.key" v-bind="attrsOf(a)"
-      :class="['hidden sm:inline-flex', inlineBase, OUTLINE[a.variant ?? 'neutral']]"
+      :class="['hidden sm:inline-flex', inlineBaseFromSm, OUTLINE[a.variant ?? 'neutral']]"
       :disabled="a.disabled" :title="titleOf(a)"
       @click="a.run && a.run()">
       <svg v-if="a.icon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
