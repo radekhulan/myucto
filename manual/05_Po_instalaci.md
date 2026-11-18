@@ -204,6 +204,7 @@ viz [§ 95.11](95_Multi_supplier.md#9511-krok-za-krokem-smazat-firmu)); auditní
 | `cron-payment-thanks` | každou minutu; fronta poděkování za přijaté platby |
 | `cron-scan-purchase-inbox` | každých 10 min |
 | `cron-send-reminders` | 1× denně 09:00, Po-Pá |
+| `cron-scheduled-pohoda-export` | 1× denně 06:30; jen se zapnutou volbou `export.scheduled_pohoda` (automatický export do Pohody), jinak skončí bez práce |
 | `cron-send-approval-reminders` | 1× denně 09:15, Po-Pá |
 | `cron-purchase-approval-reminders` | 1× denně 09:20, Po-Pá |
 | `cron-document-request-reminders` | 1× denně 09:30, Po-Pá |

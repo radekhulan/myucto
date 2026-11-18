@@ -38,6 +38,8 @@ final class ConfigSnapshot
         'f895751b4f374e3e91d0620f2cf1a4db0ae7e14da7e38c773d83c36fd7693288',
         // api.allow_system_write_tokens a jeho ENV; DB, údaje ani runtime cesty beze změny.
         'b21b33782fa0f0fdb2ce28afce54e6693afb4f8cdfa7e0c9a3aada758512c023',
+        // export.scheduled_pohoda a jeho ENV; DB, údaje ani runtime cesty beze změny.
+        '304466d01b10d1423650cde85efe1ff197f8b8dd27dc3566fd93a746d0548f86',
     ];
 
     private static ?Config $config = null;
