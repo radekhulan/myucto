@@ -155,6 +155,30 @@ final class ClosingSourceId
     }
 
     /**
+     * Je zápis `closing` skladovým slotem kroku „Zásoby" (uzavření, manko, přebytek,
+     * otevření v N+1), a ne zápisem uzavření knih?
+     */
+    public static function isStockSlot(?int $sourceId): bool
+    {
+        return $sourceId !== null && $sourceId >= self::STOCK_SLOT_BASE && $sourceId < self::SMALL_ASSET_RELEASE_BASE;
+    }
+
+    /**
+     * SQL podmínka „zápis uzavírající období" nad aliasem `$alias` deníku: každý zápis
+     * source_type 'closing' kromě skladových slotů. Skladové sloty nesou týž source_type,
+     * ale jen zaúčtovávají zásoby; období neuzavírají a nesmí zmrazit jeho dimenze ani
+     * alokace (#398).
+     *
+     * Záměrně ne „source_id = period_id": uzávěrka převzatá z jiného programu (POHODA,
+     * starší instalace) nese zápisy 'closing' bez source_id a období uzavírá stejně.
+     */
+    public static function closeBooksSql(string $alias): string
+    {
+        return "{$alias}.source_type = 'closing' AND ({$alias}.source_id IS NULL OR {$alias}.source_id < " . self::STOCK_SLOT_BASE
+            . " OR {$alias}.source_id >= " . self::SMALL_ASSET_RELEASE_BASE . ')';
+    }
+
+    /**
      * Sloty kroku „Zásoby" účtované DO uzavíraného období (source_type 'closing');
      * opening release (SLOT_STOCK_OPENING) žije až v N+1 a reverte se s open_next.
      *

@@ -119,7 +119,9 @@ final class JointAllocationPreviewService
         if (is_string($lockedUntil) && $date <= $lockedUntil) {
             throw new JointAllocationException('date_locked', 'Datum přeúčtování je zamčené.', 409);
         }
-        $stmt = $this->db->pdo()->prepare("SELECT id FROM journal_entries WHERE supplier_id = ? AND period_id = ? AND source_type = 'closing' AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1 FOR UPDATE");
+        // Období uzavírá zápis uzavření knih, ne skladové sloty kroku Zásoby (#398).
+        $stmt = $this->db->pdo()->prepare("SELECT je.id FROM journal_entries je WHERE je.supplier_id = ? AND je.period_id = ? AND "
+            . \MyInvoice\Service\Accounting\Closing\ClosingSourceId::closeBooksSql('je') . " AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL LIMIT 1 FOR UPDATE");
         $stmt->execute([$supplierId, $period['id']]);
         if ($stmt->fetchColumn() !== false) {
             throw new JointAllocationException('period_not_open', 'Období již obsahuje účinný závěrkový zápis.', 409);

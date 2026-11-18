@@ -106,8 +106,11 @@ final class DimensionPeriodGuard
         $frozen = [];
         if ($withDimensionFreeze) {
             $closing = $pdo->prepare(
-                "SELECT id FROM journal_entries FORCE INDEX (idx_je_supplier_period_source) WHERE supplier_id = ? AND period_id = ?
-                    AND source_type = 'closing' AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1 FOR UPDATE"
+                // Dimenze zmrazí až uzavření knih; skladové sloty (`closing` s vlastním source_id)
+                // období neuzavírají (#398).
+                "SELECT je.id FROM journal_entries je FORCE INDEX (idx_je_supplier_period_source) WHERE je.supplier_id = ? AND je.period_id = ?
+                    AND " . \MyInvoice\Service\Accounting\Closing\ClosingSourceId::closeBooksSql('je') . "
+                    AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL LIMIT 1 FOR UPDATE"
             );
             $entryPeriods = array_flip(array_map('intval', array_column($entryRows, 'period_id')));
             foreach ($statuses as $periodId => $_) {

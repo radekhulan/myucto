@@ -94,7 +94,11 @@ final class DimensionRuleService
      */
     public function applyDefaults(int $supplierId, string $sourceType, ?int $sourceId, array $lines, string $entryDate): array
     {
-        if (!in_array($sourceType, self::RULE_SOURCES, true)) {
+        // Zápis zásob (sloty `closing` kroku Zásoby) nese změnu stavu zásob na nákladech 5xx;
+        // ty potřebují dimenze stejně jako ruční zápis 112/501, u 504 i pro daňové posouzení (#398).
+        // Vynucení povinných dimenzí ({@see check()}) se na závěrku dál nevztahuje.
+        if (!in_array($sourceType, self::RULE_SOURCES, true)
+            && !($sourceType === 'closing' && \MyInvoice\Service\Accounting\Closing\ClosingSourceId::isStockSlot($sourceId))) {
             return $lines;
         }
         $rules = $this->usableRules($supplierId);

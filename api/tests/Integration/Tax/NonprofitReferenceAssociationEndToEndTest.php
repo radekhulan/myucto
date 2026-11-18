@@ -203,6 +203,40 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
         self::assertSame(200, $status, json_encode($body));
     }
 
+    public function testStockSlotsTakeRuleDefaultsAndDoNotFreezeDimensions(): void
+    {
+        // #398: zápis zásob (slot `closing`) dostane výchozí dimenze pravidel na 5xx a dimenze
+        // období zmrazí až uzavření knih, ne skladový slot.
+        $this->postReferenceYear();
+        $this->pdo->prepare('UPDATE supplier SET dimensions_enabled = 1 WHERE id = ?')->execute([$this->supplier]);
+        $regime = $this->catalog['tax_regime']['values'];
+        $rules = $this->container->get(\MyInvoice\Service\Accounting\Dimension\DimensionRuleService::class);
+        foreach (['activity' => $this->catalog['activity']['values']['main'], 'activity_kind' => $this->kinds['sport'], 'tax_regime' => $regime['subject']] as $type => $value) {
+            $rules->create($this->supplier, ['dimension_type_id' => $this->catalog[$type]['id'], 'account_mask' => '501',
+                'default_value_id' => $value, 'enforcement' => 'warning']);
+        }
+        $this->pdo->prepare('INSERT INTO chart_of_accounts(supplier_id,account_code,name,account_type) VALUES(?,?,?,?)')
+            ->execute([$this->supplier, '112', 'Syntetický materiál na skladě', 'asset']);
+        $stock = $this->container->get(\MyInvoice\Service\Accounting\PostingService::class)->postDocument($this->supplier, 'closing',
+            \MyInvoice\Service\Accounting\Closing\ClosingSourceId::stockClosing($this->period),
+            [['account_code' => '112', 'side' => 'debit', 'amount' => 5000.0], ['account_code' => '501', 'side' => 'credit', 'amount' => 5000.0]],
+            ['entry_date' => '2025-12-31', 'posted' => true, 'user_id' => $this->actor, 'description' => 'Syntetický konečný stav zásob']);
+        $dims = $this->pdo->prepare('SELECT COUNT(*) FROM journal_entry_line_dimensions d JOIN journal_entry_lines l ON l.id = d.line_id
+            WHERE l.entry_id = ? AND l.account_id = ?');
+        $dims->execute([$stock, $this->accounts['501']]);
+        self::assertSame(3, (int) $dims->fetchColumn(), 'Řádek 501 zápisu zásob nemá výchozí dimenze pravidel.');
+
+        $guard = new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db);
+        $regular = $this->lineEntry($this->lines['O-09']);
+        $frozen = fn (): bool => (bool) $guard->transaction(fn (): array => $guard->lockEntries($this->supplier, [$regular]))[$regular]['dimensions_frozen'];
+        self::assertFalse($frozen(), 'Skladový slot zmrazil dimenze období.');
+
+        // Uzávěrka převzatá z jiného programu nemá source_id, období ale uzavírá stejně.
+        $this->pdo->prepare("INSERT INTO journal_entries(supplier_id,period_id,entry_date,source_type,source_id,description,posted_at)
+            VALUES(?,?,'2025-12-31','closing',NULL,'Syntetické převzaté uzavření knih',NOW())")->execute([$this->supplier, $this->period]);
+        self::assertTrue($frozen(), 'Uzavření knih dimenze období nezmrazilo.');
+    }
+
     public function testPagedNextPeriodUsesWholeSavingWithoutAddback(): void
     {
         $this->pagedReferenceYearFinal();
