@@ -452,15 +452,52 @@ final class DimensionService
     public function saveDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items, bool $forRepost = false, ?array $splits = null): array
     {
         $this->requireEnabled($supplierId);
-        return $this->atomically(function () use ($supplierId, $docType, $docId, $header, $items, $forRepost, $splits): array {
-            $result = $this->applyDocument($supplierId, $docType, $docId, $header, $items, $splits);
-            if (!$forRepost && $result['restamp']['needs_repost'] && $result['restamp']['locked']) {
-                throw !empty($result['restamp']['account_change'])
-                    ? new DimensionException('account_change_in_locked_period', self::ACCOUNT_CHANGE_LOCKED_MESSAGE, 409)
-                    : new DimensionException('split_in_locked_period', self::SPLIT_LOCKED_MESSAGE, 409);
+        return $this->atomically(fn (): array => self::refuseLockedRepost(
+            $this->applyDocument($supplierId, $docType, $docId, $header, $items, $splits),
+            $forRepost,
+        ));
+    }
+
+    /**
+     * Změní jen vybrané typy dimenzí hlavičky dokladu, ostatní ponechá. Hromadná úprava
+     * ze seznamu dokladů: dosavadní hlavička se čte až pod zámky uložení, takže souběžná
+     * změna jiného typu se nepřepíše. Odebraný typ zmizí z hlavičky i z jejího rozpadu;
+     * dimenze položek zůstávají. Pravidla zámků i promítnutí do deníku jsou tatáž jako
+     * u {@see saveDocument()}.
+     *
+     * @param array<int,int> $set typ => nová hodnota
+     * @param list<int> $remove typy k odebrání
+     * @return array{header:array<int,int>, items:array<int,array<int,int>>, splits:array<int,array<int,list<array{value_id:int, share:float}>>>, restamp:array{lines:int,needs_repost:bool,account_change:bool,locked:bool}, changed:bool}
+     */
+    public function patchDocumentHeader(int $supplierId, string $docType, int $docId, array $set, array $remove): array
+    {
+        $this->requireEnabled($supplierId);
+        $patch = static function (array $current) use ($set, $remove): array {
+            $header = array_replace($current, $set);
+            foreach ($remove as $typeId) {
+                unset($header[$typeId]);
             }
-            return $result;
-        });
+            return $header;
+        };
+        return $this->atomically(fn (): array => self::refuseLockedRepost(
+            $this->applyDocument($supplierId, $docType, $docId, $patch, null, null, $remove),
+            false,
+        ));
+    }
+
+    /**
+     * @template T of array{restamp:array{needs_repost:bool,account_change?:bool,locked:bool}}
+     * @param T $result
+     * @return T
+     */
+    private static function refuseLockedRepost(array $result, bool $forRepost): array
+    {
+        if (!$forRepost && $result['restamp']['needs_repost'] && $result['restamp']['locked']) {
+            throw !empty($result['restamp']['account_change'])
+                ? new DimensionException('account_change_in_locked_period', self::ACCOUNT_CHANGE_LOCKED_MESSAGE, 409)
+                : new DimensionException('split_in_locked_period', self::SPLIT_LOCKED_MESSAGE, 409);
+        }
+        return $result;
     }
 
     public const SPLIT_LOCKED_MESSAGE = 'Položky dokladu mají různé dimenze, ale zaúčtovaný řádek je jen jeden a zápis '
@@ -507,12 +544,17 @@ final class DimensionService
     }
 
     /**
-     * @param array<int|string,mixed> $header
+     * `$header` jako closure dostane dosavadní hlavičku (přečtenou pod zámky) a vrátí
+     * novou. `$dropHeaderSplitTypes` = typy, kterým se při ponechaném rozpadu
+     * (`$splits` null) zahodí rozpad hlavičky.
+     *
+     * @param array<int|string,mixed>|\Closure(array<int,int>):array<int|string,mixed> $header
      * @param array<int|string,mixed>|null $items
      * @param array<int|string,mixed>|null $splits
-     * @return array{header:array<int,int>, items:array<int,array<int,int>>, splits:array<int,array<int,list<array{value_id:int, share:float}>>>, restamp:array{lines:int,needs_repost:bool,account_change:bool,locked:bool}}
+     * @param list<int> $dropHeaderSplitTypes
+     * @return array{header:array<int,int>, items:array<int,array<int,int>>, splits:array<int,array<int,list<array{value_id:int, share:float}>>>, restamp:array{lines:int,needs_repost:bool,account_change:bool,locked:bool}, changed:bool}
      */
-    private function applyDocument(int $supplierId, string $docType, int $docId, array $header, ?array $items, ?array $splits = null): array
+    private function applyDocument(int $supplierId, string $docType, int $docId, array|\Closure $header, ?array $items, ?array $splits = null, array $dropHeaderSplitTypes = []): array
     {
         $guard = new DimensionPeriodGuard($this->db);
         (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->lockClaims($supplierId);
@@ -532,6 +574,9 @@ final class DimensionService
                 array_push($currentIds, ...array_keys($shares));
             }
         }
+        if ($header instanceof \Closure) {
+            $header = $header($current['header']);
+        }
         $normHeader = $this->normalize($supplierId, $header, $currentIds);
         $normItems = $items === null ? $current['items'] : [];
         foreach ($items ?? [] as $itemNo => $dims) {
@@ -547,7 +592,7 @@ final class DimensionService
             // Rozpad se ponechá, jen typ, kterému teď volba dala jedinou hodnotu, ho ztratí.
             $normSplits = $currentSplits;
             foreach ($normSplits as $itemNo => $byType) {
-                $single = $itemNo === 0 ? $normHeader : ($normItems[$itemNo] ?? []);
+                $single = $itemNo === 0 ? $normHeader + array_fill_keys($dropHeaderSplitTypes, 0) : ($normItems[$itemNo] ?? []);
                 $normSplits[$itemNo] = array_diff_key($byType, $single);
             }
         } else {
@@ -580,8 +625,9 @@ final class DimensionService
             if ($entry['reversed_by'] === null && isset($sourceKeys[$entry['source_type'] . ':' . $entry['source_id']])) $dates[(string) $entry['entry_date']] = (string) $entry['entry_date'];
         }
         if ($dates === []) $dates = [$context['date']];
+        $changed = $normHeader != $current['header'] || $normItems != $current['items'] || $normSplits != $currentSplits;
         try {
-            if ($normHeader != $current['header'] || $normItems != $current['items'] || $normSplits != $currentSplits) {
+            if ($changed) {
                 (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertSourcesMutable($supplierId, [...$sources, ...$cascade]);
                 (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertSourcesMutable($supplierId, [...$sources, ...$cascade]);
                 (new JointAllocationUseGuard($this->db))->assertSourcesMutable($supplierId, [...$sources, ...$cascade]);
@@ -635,6 +681,7 @@ final class DimensionService
             'items' => $normItems,
             'splits' => array_map([self::class, 'splitsForApi'], $normSplits),
             'restamp' => $restamp,
+            'changed' => $changed,
         ];
     }
 

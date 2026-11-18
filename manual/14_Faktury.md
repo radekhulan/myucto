@@ -125,6 +125,21 @@ Jen pro podvojné účetnictví.
 hodnotou **Nezaúčtováno** je prázdný. Na dávku je limit 500 dokladů. Podrobnosti o
 zaúčtování viz [§ 16.10.3](16_Faktura_PDF.md#16103-zauctovani-do-deniku).
 
+### 14.6.1 Hromadně nastavit dimenze
+
+Jen se zapnutými dimenzemi firmy a s právem zápisu do účetnictví.
+
+1. V seznamu zaškrtněte faktury. Mohou to být koncepty i vystavené a zaúčtované doklady.
+2. Klikněte na **Nastavit dimenze (N)**.
+3. U každého typu dimenze zvolte **Ponechat**, **Nastavit** (a vyberte hodnotu) nebo **Odebrat**.
+4. Klikněte na **Uložit dimenze**.
+
+**Jak poznáte, že je hotovo:** aplikace ukáže souhrn, kolik dokladů upravila, kolik se
+nezměnilo a kolik přeskočila. U přeskočeného dokladu uvede důvod, typicky uzavřené účetní
+období, a přeskočené doklady nechá vybrané. Změna se týká dimenzí celého dokladu a u
+zaúčtovaných dokladů i řádků deníku. Pravidla popisuje
+[§ 114.4](114_Dimenze.md#1144-krok-za-krokem-zadat-dimenze-na-dokladu).
+
 ## 14.7 Krok za krokem: sloučené PDF z více faktur
 
 1. V seznamu zaškrtněte vystavené faktury nebo dobropisy (nejvýše 100 najednou).
@@ -471,6 +486,7 @@ Po zaškrtnutí více faktur se nahoře objeví lišta s akcemi:
 | **PDF export (N)** | Sloučí PDF vybraných vystavených dokladů do jednoho souboru, volitelně jej elektronicky podepíše nastaveným profilem | Vystavené faktury a dobropisy, maximálně 100 dokladů |
 | **Zaúčtovat (N)** | Zaúčtuje vybrané do deníku jednu po druhé (chyba jedné neblokuje ostatní), na konci souhrn. Max 500 dokladů na dávku | Vystavené a dosud nezaúčtované, jen podvojné účetnictví, viz [§ 16.10.3](16_Faktura_PDF.md#16103-zauctovani-do-deniku) |
 | **Nastavit OSS (N)** | Hromadně nastaví režim OSS, zemi spotřeby, typ sazby a typ plnění na položkách. Náhled je povinný. Max 200 dokladů na dávku | Doklady, které nejsou stornované, zamčené ani v podaném období |
+| **Nastavit dimenze (N)** | U každého typu dimenze zvolíte Ponechat, Nastavit hodnotu nebo Odebrat. Mění dimenze celého dokladu a promítne je i do zaúčtovaných řádků deníku. Doklad v uzavřeném období se přeskočí s důvodem. Max 500 dokladů na dávku, postup v [§ 14.6.1](#1461-hromadne-nastavit-dimenze) | Koncepty, vystavené i zaúčtované doklady, jen se zapnutými dimenzemi a právem zápisu do účetnictví |
 
 Při hromadném odeslání můžete být dotázáni, zda se má poslat i poděkování za úhradu u již
 zaplacených faktur.

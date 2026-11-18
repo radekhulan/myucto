@@ -37,6 +37,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET    /api/accounting/dimensions/responsible-candidates   — uživatelé firmy (odpovědná osoba)
  *   GET|PUT /api/accounting/dimensions/documents/{doc}/{id}    — dimenze dokladu (hlavička + položky)
  *   POST   /api/accounting/dimensions/documents/{doc}/{id}/preview — náhled dimenzí zaúčtovaných řádků
+ *   POST   /api/accounting/dimensions/documents/invoices/bulk  — hromadná změna dimenzí hlavičky vydaných faktur
  *   GET|PUT /api/accounting/dimensions/journal/{id}            — dimenze řádků účetního zápisu
  *   GET|POST|PUT|DELETE /api/accounting/dimensions/group       — skupina firem (globální dimenze)
  *   GET|POST /api/accounting/dimensions/rules, PUT|DELETE …/rules/{id} — pravidla dimenzí podle účtu
@@ -333,6 +334,118 @@ final class DimensionAction
             $this->logDocument($request, $docId, $docType, $result, 'document');
             return self::withSplitObject($result);
         });
+    }
+
+    /** Nejvýš tolik dokladů v jedné hromadné úpravě dimenzí. */
+    private const BULK_LIMIT = 500;
+
+    /**
+     * POST …/documents/invoices/bulk — hromadná změna dimenzí hlavičky vydaných faktur
+     * ze seznamu. Tělo `{ids: [...], dimensions: {typ: hodnota | null}}`: hodnota typ
+     * nastaví, null ho odebere, typ mimo mapu zůstane beze změny. Každý doklad se ukládá
+     * zvlášť stejnou cestou jako panel Dimenze na detailu (zámky období, promítnutí do
+     * zaúčtovaných řádků, audit), odmítnutý se přeskočí s důvodem a ostatní to nezastaví.
+     * Přes API token se hromadná úprava nepouští (token smí jen koncept, viz níže).
+     */
+    public function bulkDocuments(Request $request, Response $response, array $args): Response
+    {
+        return $this->run($request, $response, function (int $supplierId) use ($request, $args): array {
+            $docType = self::DOCUMENTS[(string) ($args['doc'] ?? '')] ?? '';
+            if ($docType !== 'invoice') {
+                throw new DimensionException('not_found', 'Neznámý typ dokladu.', 404);
+            }
+            if (RequestAuthorization::isRestrictedBearer($request)) {
+                throw new DimensionException('token_write_forbidden', 'Hromadnou úpravu dimenzí nelze provést přes API token.', 403);
+            }
+            $this->dimensions->requireEnabledFor($supplierId);
+            $body = (array) ($request->getParsedBody() ?? []);
+            $ids = array_values(array_unique(array_filter(
+                array_map('intval', is_array($body['ids'] ?? null) ? $body['ids'] : []),
+                static fn (int $id): bool => $id > 0,
+            )));
+            if ($ids === []) {
+                throw new DimensionException('no_items', 'Vyberte alespoň jeden doklad.', 400);
+            }
+            if (count($ids) > self::BULK_LIMIT) {
+                throw new DimensionException('too_many_items', 'Najednou lze upravit nejvýše ' . self::BULK_LIMIT . ' dokladů.', 413);
+            }
+            [$set, $remove] = $this->bulkChanges($supplierId, is_array($body['dimensions'] ?? null) ? $body['dimensions'] : []);
+
+            $marks = implode(',', array_fill(0, count($ids), '?'));
+            $stmt = $this->db->pdo()->prepare("SELECT id, varsymbol FROM invoices WHERE supplier_id = ? AND id IN ({$marks})");
+            $stmt->execute([$supplierId, ...$ids]);
+            $numbers = [];
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                $numbers[(int) $row['id']] = $row['varsymbol'] === null ? null : (string) $row['varsymbol'];
+            }
+
+            $updated = [];
+            $unchanged = [];
+            $needsRepost = [];
+            $skipped = [];
+            foreach ($ids as $id) {
+                if (!array_key_exists($id, $numbers)) {
+                    $skipped[] = ['id' => $id, 'varsymbol' => null, 'code' => 'not_found', 'message' => 'Doklad nenalezen.'];
+                    continue;
+                }
+                try {
+                    $result = $this->dimensions->patchDocumentHeader($supplierId, $docType, $id, $set, $remove);
+                } catch (DimensionException $e) {
+                    $skipped[] = ['id' => $id, 'varsymbol' => $numbers[$id], 'code' => $e->errorCode, 'message' => $e->getMessage()];
+                    continue;
+                }
+                if (!$result['changed']) {
+                    $unchanged[] = $id;
+                    continue;
+                }
+                $this->logDocument($request, $id, $docType, $result, 'bulk');
+                $updated[] = $id;
+                if ($result['restamp']['needs_repost']) {
+                    $needsRepost[] = $id;
+                }
+            }
+            return [
+                'updated' => $updated,
+                'unchanged' => $unchanged,
+                'needs_repost' => $needsRepost,
+                'skipped' => $skipped,
+            ];
+        });
+    }
+
+    /**
+     * Mapa typ => hodnota | null z těla hromadné úpravy: hodnoty ověří číselník firmy
+     * (aktivní hodnota správného typu), odebírané typy musí patřit firmě.
+     *
+     * @param array<int|string,mixed> $raw
+     * @return array{0:array<int,int>, 1:list<int>}
+     */
+    private function bulkChanges(int $supplierId, array $raw): array
+    {
+        $toSet = [];
+        $remove = [];
+        foreach ($raw as $typeId => $valueId) {
+            $typeId = (int) $typeId;
+            if ($typeId <= 0) {
+                continue;
+            }
+            if ($valueId === null || $valueId === '' || (int) $valueId <= 0) {
+                $remove[] = $typeId;
+            } else {
+                $toSet[$typeId] = (int) $valueId;
+            }
+        }
+        $set = $this->dimensions->normalize($supplierId, $toSet);
+        $known = array_fill_keys(array_map(static fn (array $t): int => (int) $t['id'], $this->repo->listTypes($supplierId)), true);
+        foreach ($remove as $typeId) {
+            if (!isset($known[$typeId])) {
+                throw new DimensionException('invalid_dimension', 'Neplatný typ dimenze #' . $typeId . '.', 400);
+            }
+        }
+        if ($set === [] && $remove === []) {
+            throw new DimensionException('no_dimensions', 'Zvolte alespoň jednu dimenzi, kterou chcete nastavit nebo odebrat.', 400);
+        }
+        return [$set, $remove];
     }
 
     /**
