@@ -346,7 +346,8 @@ export const clientsApi = {
     api.get<VatStatusResult>(`/clients/${id}/vat-status`).then((r) => r.data),
 
   create: (payload: ClientPayload) => api.post<Client>('/clients', payload).then((r) => r.data),
-  update: (id: number, payload: ClientPayload) =>
+  /** Částečný payload je platný: chybějící klíč server ponechá beze změny (#113). */
+  update: (id: number, payload: Partial<ClientPayload>) =>
     api.put<Client>(`/clients/${id}`, payload).then((r) => r.data),
 
   archive:   (id: number) => api.post(`/clients/${id}/archive`),

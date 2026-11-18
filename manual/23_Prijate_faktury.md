@@ -127,6 +127,9 @@ v sekci **Originální PDF od dodavatele**.
    a **Daňově uznatelný náklad**.
 2. Pokud je dodavatel neplátce, nastavte přepínač **Dodavatel je plátce DPH** podle skutečnosti.
    Aplikace ho vyplní podle ARES a VIES, u neplátce nastaví **Bez nároku na odpočet**.
+   Tlačítko **ARES** (u zahraničního dodavatele bez IČO **VIES**) vedle výběru dodavatele porovná
+   jeho kartu s registrem a zaškrtnuté rozdíly (název, adresa, IČO, DIČ, plátcovství DPH) uloží
+   do karty. Změněné plátcovství se promítne i do rozpracovaného dokladu.
 3. Je-li doklad v režimu přenesené daňové povinnosti, zaškrtněte **Reverse charge** a postupujte podle
    [§ 23.11.10](#231110-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba).
 4. U položek vyberte **Druh nákladu** (**Služba**, **Materiál**, **Drobný majetek**, **Drobný nehmotný majetek**,

@@ -327,6 +327,12 @@ Jedna faktura odečítá vždy jen jednu zálohu.
 - **Klient** (povinný) se vybírá z nabídky, vyhledávat lze podle jména nebo IČO. Při psaní
   se nabízí také firmy vedené pouze jako dodavatelé. Po vystavení faktury se jim doplní role
   odběratele. Prázdný seznam zůstává jen pro odběratele.
+- **ARES / VIES** vedle vybraného klienta porovná jeho kartu s registrem: český klient s IČO
+  se hledá v ARES, ostatní podle DIČ ve VIES. Dialog ukáže uložené a registrové hodnoty názvu,
+  adresy, země, IČO, DIČ a plátcovství DPH (u českého plátce i spolehlivost), rozdíly zvýrazní.
+  Zaškrtnuté rozdíly uloží **Aktualizovat údaje** do karty klienta a editor s nimi dál pracuje.
+  Tlačítko vidí jen uživatel s právem upravovat klienty. Bez IČO i DIČ je neaktivní.
+  Stejné tlačítko mají přijatá faktura u dodavatele a šablona opakované faktury.
 - **Zakázka** (volitelná): má-li klient zakázky, nabídne se jen jeho vlastní. Po výběru
   zakázky se předvyplní hodinová sazba a splatnost.
 - **Cenová hladina dokladu** (jen se zapnutým skladem): nahradí pro tento doklad hladinu
