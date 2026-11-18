@@ -158,7 +158,30 @@ function nameError(): string | null {
   return name === '' || name.length > 190 ? t('payroll.employer.dimensions.validation.name') : null
 }
 
+/** Vazba a typ upravované dimenze při otevření editoru. */
+const originalLink = ref<{ valueId: number | null, type: PayrollDimensionType } | null>(null)
+
+/**
+ * Zakázka smí ukazovat jen na Projekt, středisko jen na Středisko a činnost na
+ * jiný druh (stejné pravidlo jako server). Dřív uloženou vazbu, kterou úprava
+ * nemění, editor neblokuje.
+ */
+const companyKindError = computed((): string | null => {
+  const valueId = form.value.dimension_value_id ?? null
+  if (valueId === null) return null
+  const original = originalLink.value
+  if (original !== null && original.valueId === valueId && original.type === form.value.dimension_type) return null
+  const value = companyValues.value.find(item => item.id === valueId)
+  if (!value) return null
+  const type = form.value.dimension_type
+  const fits = type === 'activity'
+    ? value.type_kind !== 'cost_center' && value.type_kind !== 'project'
+    : value.type_kind === type
+  return fits ? null : t(`payroll.employer.dimensions.validation.company_kind.${type}`)
+})
+
 const valid = computed(() => {
+  if (companyKindError.value !== null) return false
   if (codeError() !== null) return false
   if (nameError() !== null) return false
   if (!/^\d{4}-\d{2}-\d{2}$/.test(form.value.valid_from)) return false
@@ -184,6 +207,7 @@ function dimensionIsEffective(dimension: PayrollDimension): boolean {
 function openNew() {
   editingId.value = null
   form.value = newDimension()
+  originalLink.value = null
   saveError.value = ''
   conflict.value = false
   historyLocked.value = false
@@ -205,6 +229,7 @@ function edit(dimension: PayrollDimension) {
     dimension_value_id: dimension.dimension_value_id ?? null,
     row_version: dimension.row_version,
   }
+  originalLink.value = { valueId: dimension.dimension_value_id ?? null, type: dimension.dimension_type }
   saveError.value = ''
   conflict.value = false
   historyLocked.value = false
@@ -570,6 +595,17 @@ onMounted(() => {
               ? t('payroll.employer.dimensions.company_value_empty')
               : t('payroll.employer.dimensions.company_value_hint') }}
           </span>
+          <span
+            v-if="companyKindError"
+            class="mt-1 block text-xs text-danger-600"
+            role="alert"
+            data-test="dimension-company-kind-error"
+          >{{ companyKindError }}</span>
+          <span
+            v-else-if="form.dimension_type === 'project' && (form.dimension_value_id ?? null) === null"
+            class="mt-1 block text-xs text-warning-700"
+            data-test="dimension-project-link-missing"
+          >{{ t('payroll.employer.dimensions.company_value_project_missing') }}</span>
         </div>
         <div>
           <span class="mb-1 block text-sm font-medium text-neutral-700">

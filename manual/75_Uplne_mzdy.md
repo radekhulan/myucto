@@ -112,6 +112,11 @@ obrazovky; přeskočený krok obvykle skončí blokací při výpočtu nebo pod�
    registrace u ČSSZ, zdravotních pojišťoven a finančního úřadu, bankovní účty
    institucí a předkontace (podrobně v [Nastavení mezd](90_Nastaveni_mezd.md)).
    Registrační a sériová čísla opište přesně tak, jak je přidělila instituce.
+   Chcete-li mzdové náklady vidět na střediscích nebo zakázkách, založte na
+   záložce **Dimenze** mzdové dimenze a navažte je na firemní dimenze; mzdová
+   zakázka se do deníku a do Ekonomiky zakázky dostane jen přes hodnotu
+   firemní dimenze druhu Projekt navázanou na zakázku (postup
+   v [Mzdy na zakázky krok za krokem](114_Dimenze.md#mzdy-na-zakazky-krok-za-krokem)).
 5. **Datová schránka.** V `Mzdy → Datová schránka` na záložce **Přístup**
    nastavte schránku firmy (viz [§ 75.7.3](#7573-datova-schranka-firmy)
    a [Datová schránka](97_Datova_schranka.md)).
