@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository;
+use MyInvoice\Repository\Payroll\PayrollPostingBatchRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
@@ -43,9 +44,17 @@ final class PayrollAccidentInsurancePosting
         private readonly JournalEntryRepository $journal,
         private readonly PayrollEmployerSettingsRepository $settings,
         private readonly Connection $db,
+        private readonly PayrollAccidentInsuranceCostAllocation $costAllocation,
+        private readonly PayrollPostingBatchRepository $batches,
     ) {}
 
     /**
+     * Náklad se s klíčem `$costKey` rozpadá na střediska a firemní dimenze
+     * pracovních vztahů stejně jako pojistné zaměstnavatele na 524; závazek
+     * (379) zůstává jeden řádek bez dimenzí. Opravný (rozdílový) řádek závazku
+     * se dělí klíčem opraveného čtvrtletí. Rozpad vzniká jednou, při zaúčtování
+     * řádku závazku: už zaúčtovaný předpis se nepřeúčtovává.
+     *
      * @param 'outgoing'|'incoming' $direction
      * @return array{status:string,journal_entry_id:?int,reason:?string}
      */
@@ -56,6 +65,7 @@ final class PayrollAccidentInsurancePosting
         int $amountMinor,
         string $quarterEndMonth,
         ?int $userId,
+        ?PayrollAccidentInsuranceCostKey $costKey = null,
     ): array {
         if ($amountMinor <= 0) {
             return self::outcome('not_applicable');
@@ -74,17 +84,33 @@ final class PayrollAccidentInsurancePosting
         $accounts = $this->settings->get($supplierId)['accounts'] ?? [];
         $expense = self::account($accounts, 'accident_insurance_debit');
         $liability = self::account($accounts, 'accident_insurance_credit');
-        $amount = number_format($amountMinor / 100, 2, '.', '');
         $outgoing = $direction === 'outgoing';
+        $lines = [];
+        foreach ($this->expenseParts($supplierId, $costKey, $amountMinor) as $part) {
+            $line = [
+                'account_code' => $expense,
+                'side' => $outgoing ? 'debit' : 'credit',
+                'amount' => self::decimal($part['amount_minor']),
+            ];
+            if ($part['cost_center'] !== null) {
+                $line['cost_center'] = $part['cost_center'];
+            }
+            if ($part['dimensions'] !== []) {
+                $line['dimensions'] = $part['dimensions'];
+            }
+            $lines[] = $line;
+        }
+        $lines[] = [
+            'account_code' => $liability,
+            'side' => $outgoing ? 'credit' : 'debit',
+            'amount' => self::decimal($amountMinor),
+        ];
         try {
             $entryId = $this->posting->postDocument(
                 $supplierId,
                 self::SOURCE_TYPE,
                 $liabilityId,
-                [
-                    ['account_code' => $expense, 'side' => $outgoing ? 'debit' : 'credit', 'amount' => $amount],
-                    ['account_code' => $liability, 'side' => $outgoing ? 'credit' : 'debit', 'amount' => $amount],
-                ],
+                $lines,
                 [
                     'entry_date' => $entryDate,
                     'document_no' => 'ZPO-' . $liabilityId,
@@ -134,6 +160,53 @@ final class PayrollAccidentInsurancePosting
         $code = $statement->fetchColumn();
 
         return is_string($code) && $code !== '' ? $code : null;
+    }
+
+    /**
+     * Nákladové části předpisu. Bez klíče, nebo když se náklad na střediska
+     * a dimenze nerozpadá, je to jedna část za celou částku, tedy přesně
+     * dosavadní dvojice 548 / 379.
+     *
+     * Hodnota firemní dimenze, kterou firma už použít nemůže (smazaná, jiný typ,
+     * hodnota skupiny, kterou firma opustila), se z části vypustí: rozpad je
+     * analytika navíc a kvůli ní nesmí předpis pojistného zůstat nezaúčtovaný.
+     *
+     * @return list<array{cost_center:?string,dimensions:array<int,int>,amount_minor:int}>
+     */
+    private function expenseParts(int $supplierId, ?PayrollAccidentInsuranceCostKey $costKey, int $amountMinor): array
+    {
+        $plain = [['cost_center' => null, 'dimensions' => [], 'amount_minor' => $amountMinor]];
+        if ($costKey === null) {
+            return $plain;
+        }
+        $parts = $this->costAllocation->allocate($supplierId, $costKey, $amountMinor);
+        $pairs = [];
+        foreach ($parts as $part) {
+            foreach ($part['dimensions'] as $typeId => $valueId) {
+                $pairs["{$typeId}:{$valueId}"] = ['type_id' => $typeId, 'value_id' => $valueId];
+            }
+        }
+        $unusable = [];
+        foreach ($this->batches->unusableDimensionValues($supplierId, array_values($pairs)) as $pair) {
+            $unusable["{$pair['type_id']}:{$pair['value_id']}"] = true;
+        }
+        if ($unusable !== []) {
+            foreach ($parts as $index => $part) {
+                foreach ($part['dimensions'] as $typeId => $valueId) {
+                    if (isset($unusable["{$typeId}:{$valueId}"])) {
+                        unset($parts[$index]['dimensions'][$typeId]);
+                    }
+                }
+            }
+        }
+        $grouped = PayrollAccidentInsuranceCostAllocation::byAnalytics(array_values($parts));
+
+        return $grouped === [] ? $plain : $grouped;
+    }
+
+    private static function decimal(int $minor): string
+    {
+        return number_format($minor / 100, 2, '.', '');
     }
 
     /** @param array<string,mixed> $accounts */
