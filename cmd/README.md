@@ -62,7 +62,7 @@ má vždy přednost před oběma.
 | `cron-scan-purchase-inbox.{cmd,sh}` | Import nových přijatých dokladů z nastaveného inbox adresáře |
 | `cron-payment-thanks.{cmd,sh}` | Každou minutu zpracuje poděkování za potvrzené úhrady a odložené e-maily; během otevřené účetní transakce se nic neodesílá |
 | `cron-send-reminders.{cmd,sh}` | Odeslání upomínkových e-mailů na faktury po splatnosti (`--days=N`, `--cooldown=N`, `--dry-run`) |
-| `cron-scheduled-pohoda-export.{cmd,sh}` | Plánovaný export vydaných dokladů do Pohody e-mailem účetní (nastavení: Export → Automatický export do Pohody; `--dry-run`) |
+| `cron-scheduled-pohoda-export.{cmd,sh}` | Plánovaný export vydaných dokladů do Pohody e-mailem účetní (nastavení: Export → Automatický export do Pohody; `--dry-run`). Jen se zapnutou volbou instalace `export.scheduled_pohoda`, jinak skončí bez práce |
 | `cron-send-approval-reminders.{cmd,sh}` | Upomínky zákazníkům, kteří neschválili výkaz víceprací (`--days=N`, `--dry-run`) |
 | `cron-purchase-approval-reminders.{cmd,sh}` | Připomínky schvalovatelům přijatých dokladů (schvalování manažerem střediska; `--days=N`, `--dry-run`) |
 | `cron-document-request-reminders.{cmd,sh}` | Upomínky na nevyřízené požadavky na dodání dokladů |
@@ -159,7 +159,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-scan-purchase-inbox` | každých 10 minut | `*/10 * * * *` |
 | `cron-payment-thanks` | každou minutu | `* * * * *` |
 | `cron-send-reminders` | 1× denně (pracovní dny) | 09:00, Po–Pá |
-| `cron-scheduled-pohoda-export` | 1× denně | 06:30 |
+| `cron-scheduled-pohoda-export` | 1× denně; jen po zapnutí `export.scheduled_pohoda` | 06:30 |
 | `cron-send-approval-reminders` | 1× denně (pracovní dny) | 09:15, Po–Pá |
 | `cron-purchase-approval-reminders` | 1× denně (pracovní dny) | 09:20, Po–Pá |
 | `cron-document-request-reminders` | 1× denně (pracovní dny) | 09:30, Po–Pá |

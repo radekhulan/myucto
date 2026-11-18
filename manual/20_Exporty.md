@@ -345,6 +345,14 @@ doklady s nimi vyřaďte.
 
 Doklady do Pohody může aplikace posílat účetní sama, jednou za měsíc.
 
+**Zapnutí na instalaci.** Funkce je dostupná jen tehdy, když ji zapne správce
+instalace volbou `export.scheduled_pohoda = true` v `cfg.php` (proměnná prostředí
+`MYINVOICE_SCHEDULED_POHODA_EXPORT=1`). Ve výchozím stavu je vypnutá: panel na
+stránce Export se nezobrazí, nastavení ani ruční spuštění přes API nejsou dostupné
+a úloha `cron-scheduled-pohoda-export` skončí bez práce. Nastavení, která si firmy
+uložily dřív, se vypnutím nemažou a po opětovném zapnutí platí dál. V Dockeru se
+úloha po zapnutí volby naplánuje až po restartu kontejneru.
+
 **Kde se nastavuje.** `Prodej → Export`, panel **Automatický export do Pohody**
 pod ručním exportem. Zapněte **Zapnout automatický export**, vyplňte **E-mail
 účetní**, zvolte **Den v měsíci** (1 až 28) a jestli posílat i dobropisy. Nastavení

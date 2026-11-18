@@ -120,14 +120,14 @@ onMounted(() => { load().catch(e => { error.value = apiError(e) }) })
     <div v-if="message" class="rounded-md bg-primary-50 border border-primary-200 px-3 py-2 text-sm text-primary-700">{{ message }}</div>
 
     <div class="flex flex-wrap items-center justify-between gap-2">
-      <div v-if="canRun" class="flex items-center gap-2">
+      <div v-if="canRun" class="flex flex-wrap items-center gap-2">
         <input v-model="month" type="month" :max="lastClosedMonth" class="rounded-md border border-neutral-300 px-3 py-2 text-sm" />
-        <button type="button" :disabled="busy || !month || month > lastClosedMonth" :class="btnOutline('primary')" data-test="pohoda-run-now" @click="runNow">
+        <button type="button" :disabled="busy || !month || month > lastClosedMonth" :class="btnOutline('primary')" class="whitespace-nowrap" data-test="pohoda-run-now" @click="runNow">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send" /></svg>
           {{ t('pohodaSchedule.run_now') }}
         </button>
       </div>
-      <button type="button" :disabled="busy || !canSave" :title="canSave ? undefined : t('pohodaSchedule.no_rights')" :class="btnFilled('primary')" @click="save">
+      <button type="button" :disabled="busy || !canSave" :title="canSave ? undefined : t('pohodaSchedule.no_rights')" :class="btnFilled('primary')" class="whitespace-nowrap" @click="save">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
         {{ t('pohodaSchedule.save') }}
       </button>

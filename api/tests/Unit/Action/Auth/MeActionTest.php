@@ -353,6 +353,21 @@ final class MeActionTest extends TestCase
         self::assertTrue($enabled['save_and_post_enabled']);
     }
 
+    /** Automatický export do Pohody: výchozí vypnuto, zapíná ho volba instalace export.scheduled_pohoda. */
+    public function testScheduledPohodaExportFlagFollowsInstallationConfig(): void
+    {
+        $default = $this->meBodyForClient(new Config([
+            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
+        ]));
+        $enabled = $this->meBodyForClient(new Config([
+            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
+            'export' => ['scheduled_pohoda' => true],
+        ]));
+
+        self::assertFalse($default['scheduled_pohoda_export_enabled']);
+        self::assertTrue($enabled['scheduled_pohoda_export_enabled']);
+    }
+
     /** @return array<string,mixed> */
     private function meBodyForClient(Config $config): array
     {

@@ -30407,9 +30407,11 @@ paths:
     get:
       tags: [Reports]
       summary: Plánovaný export do Pohody — nastavení a poslední běhy
+      description: Jen se zapnutou volbou instalace `export.scheduled_pohoda` (ENV MYINVOICE_SCHEDULED_POHODA_EXPORT), jinak 404 `scheduled_pohoda_export_disabled` u všech operací plánovaného exportu.
       responses:
         '200': { description: 'config (enabled, run_day, include_credit_notes, recipient_email, start_month), runs po měsících (period_label, status sending|ok|queued|error, doc_count, attempts, changed_after = změny po odeslání, které denně ukládá cron) a problem (poslední selhání měsíce bez úspěšného běhu). Příjemce a texty chyb jen s právem číst nastavení firmy. Právo: utilities.export' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'Automatický export do Pohody není na instalaci zapnutý (scheduled_pohoda_export_disabled, volba export.scheduled_pohoda)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     put:
       tags: [Reports]
       summary: Uložení nastavení plánovaného exportu do Pohody
@@ -30417,6 +30419,7 @@ paths:
       responses:
         '200': { description: 'Uložené nastavení' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'Automatický export do Pohody není na instalaci zapnutý (scheduled_pohoda_export_disabled, volba export.scheduled_pohoda)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/reports/pohoda-schedule/run:
     parameters:
@@ -30428,6 +30431,7 @@ paths:
       responses:
         '200': { description: 'Výsledek běhu (status ok|queued|error, doc_count, error)' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: 'Automatický export do Pohody není na instalaci zapnutý (scheduled_pohoda_export_disabled, volba export.scheduled_pohoda)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: 'Měsíc už byl exportován (already_exported) nebo export firmy právě běží (busy)' }
         '429': { description: 'Opakování dřív než 5 minut po posledním odeslání (too_soon)' }
         '422': { $ref: '#/components/responses/ValidationFailed' }

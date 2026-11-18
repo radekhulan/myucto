@@ -101,4 +101,18 @@ describe('Uložit a zaúčtovat v auth store', () => {
     expect(await auth.refresh()).toBe(true)
     expect(auth.saveAndPostEnabled).toBe(true)
   })
+
+  it('automatický export do Pohody je bez pole ze serveru vypnutý', async () => {
+    const auth = useAuthStore()
+    mocks.me.mockResolvedValue(session())
+    expect(await auth.refresh()).toBe(true)
+    expect(auth.scheduledPohodaExportEnabled).toBe(false)
+  })
+
+  it('převezme zapnutý automatický export do Pohody', async () => {
+    const auth = useAuthStore()
+    mocks.me.mockResolvedValue(session({ scheduled_pohoda_export_enabled: true }))
+    expect(await auth.refresh()).toBe(true)
+    expect(auth.scheduledPohodaExportEnabled).toBe(true)
+  })
 })

@@ -22,6 +22,7 @@ use MyInvoice\Security\InstanceAdminRoutePolicy;
 use MyInvoice\Service\Auth\MfaOfferService;
 use MyInvoice\Service\Invoice\DefaultInvoiceNote;
 use MyInvoice\Service\Invoice\InvoiceRounding;
+use MyInvoice\Service\Export\ScheduledPohodaExportFeature;
 use MyInvoice\Service\Invoice\InvoicePublicLinkFeature;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionAuthContext;
@@ -343,6 +344,9 @@ final class MeAction
             // Tlačítko „Uložit a zaúčtovat“ v editorech faktur (volba instalace, výchozí vypnuto).
             'save_and_post_enabled' => !$isInstanceAdmin
                 && filter_var($this->config->get('accounting.save_and_post', false), FILTER_VALIDATE_BOOL),
+            // Automatický export do Pohody (volba instalace, výchozí vypnuto) — vypnutá panel skryje.
+            'scheduled_pohoda_export_enabled' => !$isInstanceAdmin
+                && (new ScheduledPohodaExportFeature($this->config))->isEnabled(),
         ]);
     }
 

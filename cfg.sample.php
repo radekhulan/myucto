@@ -543,6 +543,14 @@ return [
         // ENV varianta: MYINVOICE_ACCOUNTING_SAVE_AND_POST=1
         'save_and_post' => false,
     ],
+    'export' => [
+        // Automatický měsíční export vydaných dokladů do Pohody e-mailem účetní
+        // (Prodej → Export, panel Automatický export do Pohody, a úloha
+        // cron-scheduled-pohoda-export). Výchozí je vypnuto: panel se nezobrazí,
+        // API vrací 404 a cron skončí bez práce. Uložená nastavení firem zůstávají.
+        // ENV varianta: MYINVOICE_SCHEDULED_POHODA_EXPORT=1
+        'scheduled_pohoda' => false,
+    ],
     'pagination' => [
         // Velikost stránky pro tlačítko "Další" v UI seznamech.
         // Min/max hranice (5 / 200) se enforcují v API; mimo rozsah API hodnotu clampuje.

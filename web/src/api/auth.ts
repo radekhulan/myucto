@@ -238,6 +238,8 @@ export interface MeResponse extends AuthSessionContract {
   invoice_public_links_enabled?: boolean
   /** Je na instalaci zapnuté tlačítko Uložit a zaúčtovat v editorech faktur? */
   save_and_post_enabled?: boolean
+  /** Je na instalaci zapnutý automatický export do Pohody e-mailem účetní? */
+  scheduled_pohoda_export_enabled?: boolean
 }
 
 export interface DomainLoginStart {

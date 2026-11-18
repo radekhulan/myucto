@@ -449,6 +449,11 @@ final class Config
                 // Výchozí vypnuto; zaúčtování z detailu dokladu funguje vždy.
                 'save_and_post' => false,
             ],
+            // Automatický měsíční export dokladů do Pohody e-mailem účetní.
+            // Výchozí vypnuto; viz ScheduledPohodaExportFeature.
+            'export' => [
+                'scheduled_pohoda' => false,
+            ],
             'ares' => [
                 'api'       => 'https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty',
                 'cache_ttl' => 86400,
@@ -490,6 +495,7 @@ final class Config
             'MYINVOICE_OVERDUE_INCLUDES_TODAY' => ['invoices.overdue_includes_today', 'bool'],
             'MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM' => ['accounting.default_entry_form', 'string'],
             'MYINVOICE_ACCOUNTING_SAVE_AND_POST' => ['accounting.save_and_post', 'bool'],
+            'MYINVOICE_SCHEDULED_POHODA_EXPORT' => ['export.scheduled_pohoda', 'bool'],
             'MYINVOICE_INVOICE_PUBLIC_LINKS' => ['invoices.public_links', 'bool'],
             'MYINVOICE_API_ALLOW_SYSTEM_WRITE_TOKENS' => ['api.allow_system_write_tokens', 'bool'],
             'MYINVOICE_APP_URL'     => ['app.url', 'string'],

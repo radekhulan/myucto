@@ -263,9 +263,11 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
-                // Plánovaný export dokladů do Pohody e-mailem účetní. Bez zapnutého
-                // nastavení u firmy skončí hned, takže běží vždy.
+                // Plánovaný export dokladů do Pohody e-mailem účetní. Volba instalace,
+                // výchozí vypnuto (ScheduledPohodaExportFeature); bez zapnutého
+                // nastavení u firmy skončí hned.
                 'script' => 'cron-scheduled-pohoda-export',
+                'requires_config_flag' => \MyInvoice\Service\Export\ScheduledPohodaExportFeature::CONFIG_KEY,
                 'recommended' => 'daily_0630',
                 'linux_cron' => '30 6 * * *',
                 'windows_schtasks' => '/sc daily /st 06:30',

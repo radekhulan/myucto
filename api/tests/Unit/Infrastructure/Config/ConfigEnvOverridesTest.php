@@ -142,6 +142,16 @@ PHP);
         self::assertFalse(Config::load($this->tmpDir)->get('accounting.save_and_post'));
     }
 
+    public function testScheduledPohodaExportDefaultsToOffAndCanBeEnabledByEnvironment(): void
+    {
+        $this->unsetEnv('MYINVOICE_SCHEDULED_POHODA_EXPORT');
+        self::assertFalse(Config::load($this->tmpDir)->get('export.scheduled_pohoda'));
+        $this->setEnv('MYINVOICE_SCHEDULED_POHODA_EXPORT', '1');
+        self::assertTrue(Config::load($this->tmpDir)->get('export.scheduled_pohoda'));
+        $this->setEnv('MYINVOICE_SCHEDULED_POHODA_EXPORT', '0');
+        self::assertFalse(Config::load($this->tmpDir)->get('export.scheduled_pohoda'));
+    }
+
     public function testInvoicePublicLinksDefaultOnAndCanBeDisabledByEnvironment(): void
     {
         $this->unsetEnv('MYINVOICE_INVOICE_PUBLIC_LINKS');

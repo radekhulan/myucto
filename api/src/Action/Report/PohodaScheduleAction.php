@@ -9,6 +9,7 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Export\ScheduledPohodaExportFeature;
 use MyInvoice\Service\Export\ScheduledPohodaExportService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -21,13 +22,21 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   PUT  /api/reports/pohoda-schedule       → uložení nastavení
  *   POST /api/reports/pohoda-schedule/run   → spustit teď (month=YYYY-MM uzavřeného měsíce, confirm_repeat=true při opakování;
  *                                            409 already_exported a 429 too_soon nesou `last`: kdy a komu se posílalo)
+ *
+ * Bez zapnuté volby instalace (ScheduledPohodaExportFeature) vrací všechny tři 404 scheduled_pohoda_export_disabled.
  */
 final class PohodaScheduleAction
 {
-    public function __construct(private readonly ScheduledPohodaExportService $service) {}
+    public function __construct(
+        private readonly ScheduledPohodaExportService $service,
+        private readonly ScheduledPohodaExportFeature $feature,
+    ) {}
 
     public function get(Request $request, Response $response): Response
     {
+        if (!$this->feature->isEnabled()) {
+            return self::disabled($response);
+        }
         $sid = SupplierGuard::currentId($request);
         $config = $this->service->config($sid);
         $history = $this->service->history($sid);
@@ -48,6 +57,9 @@ final class PohodaScheduleAction
 
     public function save(Request $request, Response $response): Response
     {
+        if (!$this->feature->isEnabled()) {
+            return self::disabled($response);
+        }
         $sid = SupplierGuard::currentId($request);
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         try {
@@ -60,6 +72,9 @@ final class PohodaScheduleAction
 
     public function run(Request $request, Response $response): Response
     {
+        if (!$this->feature->isEnabled()) {
+            return self::disabled($response);
+        }
         $sid = SupplierGuard::currentId($request);
         $body = (array) ($request->getParsedBody() ?? []);
         $month = (string) ($body['month'] ?? '');
@@ -85,5 +100,11 @@ final class PohodaScheduleAction
             return Json::error($response, 'busy', 'Export této firmy právě běží.', 409);
         }
         return Json::ok($response, $result);
+    }
+
+    /** Volba instalace je vypnutá: funkce navenek neexistuje, uložená nastavení firem zůstávají. */
+    private static function disabled(Response $response): Response
+    {
+        return Json::error($response, 'scheduled_pohoda_export_disabled', 'Automatický export do Pohody není na této instalaci zapnutý.', 404);
     }
 }
