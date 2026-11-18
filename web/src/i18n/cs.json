@@ -41930,6 +41930,8 @@
     "createMember": "Založit člena",
     "createNeedsInput": "Vyberte kontakt a zadejte členské číslo.",
     "memberCreated": "Člen je založen. Doplňte první revizi členství.",
+    "memberCreatedOpenBlocked": "Člen je založený. Detail se nepodařilo otevřít v novém panelu, prohlížeč ho zablokoval.",
+    "openMemberDetail": "Otevřít detail",
     "members": "Členové",
     "membersEmpty": "Zatím není evidován žádný člen.",
     "firstSteps": [
