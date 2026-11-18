@@ -153,7 +153,13 @@ final class CsasApiClient
     public function createPayment(#[\SensitiveParameter] array $credentials, array $payment): array
     {
         $this->assertEnvironment($credentials);
-        $data = $this->paymentRequest('POST', $this->paymentsBaseUrl() . '/my/payments', $credentials, 'payment_create', ['json' => $payment], true);
+        try {
+            $body = BankPaymentJson::encode($payment);
+        } catch (\JsonException|\LogicException) {
+            throw new BankConnectorException(BankConnectorException::INVALID_PAYMENT_ORDER, 'Platbu pro Českou spořitelnu nelze sestavit.');
+        }
+        $data = $this->paymentRequest('POST', $this->paymentsBaseUrl() . '/my/payments', $credentials, 'payment_create',
+            ['body' => $body, 'headers' => ['Content-Type' => 'application/json']], true);
         $status = $data['instructionStatus'] ?? null;
         if ($status === 'RJCT') {
             throw new BankConnectorException(BankConnectorException::PAYMENT_REJECTED, 'Česká spořitelna platbu odmítla.');

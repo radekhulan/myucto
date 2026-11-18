@@ -9,6 +9,8 @@ use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
+use MyInvoice\Service\Bank\Connector\BankPaymentAmount;
+use MyInvoice\Service\Bank\Connector\CsasAboBatchMapper;
 use MyInvoice\Service\Bank\Connector\CsasApiClient;
 use MyInvoice\Service\Bank\Connector\BankConnectorException;
 use PHPUnit\Framework\TestCase;
@@ -211,7 +213,8 @@ final class CsasApiClientTest extends TestCase
         $history = [];
         $client = $this->client([new Response(200, [], json_encode(['instructionStatus' => 'ACTC',
             'signInfo' => ['state' => 'OPEN', 'signId' => '166609107206666', 'hash' => 'synthetic-hash']]))], $history);
-        $payment = ['paymentIdentification' => ['instructionIdentification' => 'MU001synthetic'], 'amount' => ['instructedAmount' => ['value' => 1.5, 'currency' => 'CZK']]];
+        $payment = ['paymentIdentification' => ['instructionIdentification' => 'MU001synthetic'],
+            'amount' => ['instructedAmount' => ['value' => BankPaymentAmount::fromMinor(150), 'currency' => 'CZK']]];
 
         self::assertSame(['sign_id' => '166609107206666', 'hash' => 'synthetic-hash', 'instruction_status' => 'ACTC'],
             $client->createPayment($this->credentials(), $payment));
@@ -221,7 +224,9 @@ final class CsasApiClientTest extends TestCase
         self::assertSame('https://www.csas.cz/webapi/api/v1/payments/my/payments', (string) $request->getUri());
         self::assertSame('synthetic-key', $request->getHeaderLine('WEB-API-key'));
         self::assertSame('Bearer synthetic-access', $request->getHeaderLine('Authorization'));
-        self::assertSame($payment, json_decode((string) $request->getBody(), true));
+        self::assertSame('application/json', $request->getHeaderLine('Content-Type'));
+        self::assertSame('{"paymentIdentification":{"instructionIdentification":"MU001synthetic"},"amount":{"instructedAmount":{"value":1.5,"currency":"CZK"}}}',
+            (string) $request->getBody());
         self::assertFalse($history[0]['options']['allow_redirects']);
         self::assertTrue($history[0]['options']['verify']);
     }
