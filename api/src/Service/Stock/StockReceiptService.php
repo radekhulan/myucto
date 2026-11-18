@@ -61,7 +61,10 @@ final class StockReceiptService
     /**
      * Návrh příjemky: řádky PF s kartou (ručně přiřazenou, nebo spárovanou podle kódu;
      * zbývá přijmout, návrh PC), řádky bez karty jako kandidáti na vedlejší náklady.
-     * Nespárované řádky s kódem jdou navíc do `unmatched_lines`, ať jim člověk kartu vybere.
+     * Nespárované řádky s kódem jdou navíc do `unmatched_lines`, řádky bez kódu a bez EAN
+     * do `uncoded_lines`, ať jim člověk kartu vybere. Bez kódu se nabízí jen řádek, který může být
+     * zboží (materiál, drobný majetek, ne dlouhodobý majetek); neurčený druh jen tehdy, když faktura
+     * nemá jiný skladový řádek. `has_lines_to_receive` říká UI, jestli má příjem nabídnout.
      *
      * @param array<int,int> $cardOverrides purchase_invoice_item_id => karta, kterou člověk vybral: návrh
      *                                      řádku se přepočte podle balení této karty (množství, cena)
@@ -80,6 +83,8 @@ final class StockReceiptService
                 'purchase_invoice_id' => $piId,
                 'lines'               => [],
                 'unmatched_lines'     => [],
+                'uncoded_lines'       => [],
+                'has_lines_to_receive' => false,
                 'cost_candidates'     => [],
                 'not_receivable_kind' => (string) $pi['document_kind'],
             ];
@@ -90,6 +95,10 @@ final class StockReceiptService
 
         $stockLines    = [];
         $unmatchedLines = [];
+        $uncodedLines   = [];
+        // Řádky bez druhu nákladu (doprava, poplatek i zboží bez klasifikace): nabídnou se,
+        // jen když faktura nemá jiný skladový řádek.
+        $unclassifiedLines = [];
         $costCandidates = [];
         $items = $this->purchaseInvoiceItems($supplierId, $piId, $this->ownGoodsCards($supplierId, $cardOverrides));
         $codeHolders = $this->matcher->cardsHoldingCodes($supplierId, (int) $pi['vendor_id'], array_column($items, 'seller_item_code'));
@@ -129,9 +138,8 @@ final class StockReceiptService
                     'invoice_unit'             => (string) $it['unit'],
                 ];
             } else {
-                if ($it['stock_item_id'] === null && $remaining > 0 && $it['expense_kind'] !== 'service'
-                    && ($it['seller_item_code'] !== null || $it['item_ean'] !== null)) {
-                    $unmatchedLines[] = [
+                if ($it['stock_item_id'] === null && $remaining > 0 && $it['expense_kind'] !== 'service') {
+                    $openLine = [
                         'order_index'              => (int) $it['order_index'],
                         'vendor_code_cards'        => $holders,
                         'purchase_invoice_item_id' => (int) $it['id'],
@@ -148,6 +156,15 @@ final class StockReceiptService
                         'remaining_qty'            => number_format($remaining, 3, '.', ''),
                         'unit_cost'                => number_format($this->costs->unitCost($costContext, ['quantity' => $it['base_quantity']] + $it), 6, '.', ''),
                     ];
+                    if ($it['seller_item_code'] !== null || $it['item_ean'] !== null) {
+                        $unmatchedLines[] = $openLine;
+                    } elseif ((int) $it['is_fixed_asset'] === 1) {
+                        // Dlouhodobý majetek se na sklad nepřijímá.
+                    } elseif (in_array($it['expense_kind'], ['material', 'small_asset'], true)) {
+                        $uncodedLines[] = $openLine;
+                    } elseif ($it['expense_kind'] === null) {
+                        $unclassifiedLines[] = $openLine;
+                    }
                 }
                 $base = $this->costs->amount($costContext, $it);
                 $costCandidates[] = [
@@ -156,6 +173,10 @@ final class StockReceiptService
                     'amount'                   => number_format($base, 2, '.', ''),
                 ];
             }
+        }
+
+        if ($stockLines === [] && $unmatchedLines === [] && $uncodedLines === []) {
+            $uncodedLines = $unclassifiedLines;
         }
 
         return [
@@ -169,6 +190,9 @@ final class StockReceiptService
             ],
             'lines'                    => $stockLines,
             'unmatched_lines'          => $unmatchedLines,
+            'uncoded_lines'            => $uncodedLines,
+            'has_lines_to_receive'     => $unmatchedLines !== [] || $uncodedLines !== []
+                || array_filter($stockLines, static fn (array $l): bool => (float) $l['remaining_qty'] > 0) !== [],
             'cost_candidates'          => $costCandidates,
             // B6: existuje posted příjemka k této PF, jejíž zdrojový řádek PF byl
             // od té doby přepsán (SetPurchaseInvoiceItemsAction je replace-all,
@@ -395,7 +419,7 @@ final class StockReceiptService
         $stmt = $this->db->pdo()->prepare(
             'SELECT pii.id, pii.order_index, pii.stock_item_id, pii.purchase_order_line_id, pii.description,
                     pii.quantity, pii.unit, pii.total_without_vat, pii.total_with_vat, si.item_type,
-                    pii.seller_item_code, pii.item_ean, pii.expense_kind, pi.vendor_id,
+                    pii.seller_item_code, pii.item_ean, pii.expense_kind, pii.is_fixed_asset, pi.vendor_id,
                     pii.intrastat_cn8_code, pii.intrastat_country_of_origin
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id

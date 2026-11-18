@@ -17022,6 +17022,7 @@
       "match_code_ean": "Suggested by code as EAN, please check",
       "match_ean": "Matched by EAN",
       "match_none": "Item not found, please select it",
+      "match_uncoded": "Line without a code, please select the item",
       "recalc_failed": "Quantity and price for the selected item could not be loaded. Select the item again, or exclude the line by entering quantity 0.",
       "remember_code": "Remember code {code} for this item after posting so the line is matched automatically next time",
       "remember_moves_from": "The code will be removed from: {cards}",

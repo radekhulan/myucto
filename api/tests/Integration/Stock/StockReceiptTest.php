@@ -42,6 +42,7 @@ final class StockReceiptTest extends StockTestCase
             $proposal = $this->receipts->proposeForPurchaseInvoice($supplierId, $piId);
             self::assertSame([], $proposal['lines'], "Návrh pro {$kind} musí být prázdný (UI tlačítko se nenabídne).");
             self::assertSame($kind, $proposal['not_receivable_kind'] ?? null);
+            self::assertSame([], $proposal['uncoded_lines']);
 
             try {
                 $this->receipts->createReceipt($supplierId, $piId, [

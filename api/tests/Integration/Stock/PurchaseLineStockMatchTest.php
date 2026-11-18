@@ -164,6 +164,80 @@ final class PurchaseLineStockMatchTest extends StockTestCase
         self::assertEqualsCanonicalizing([$freight, $service], array_column($proposal['cost_candidates'], 'purchase_invoice_item_id'));
     }
 
+    public function testCodelessGoodsLineIsOfferedSeparatelyAndNeedsExplicitCard(): void
+    {
+        $wh = $this->warehouse($this->sid);
+        $card = $this->item($this->sid, 'KARTA-BEZ-KODU');
+        $piId = $this->purchaseInvoice($this->sid, $this->vendorId);
+        $coded = $this->line($piId, 'NEZNAMY-KOD', null);
+        $codeless = $this->purchaseInvoiceItem($piId, null);
+        $this->setKind($codeless, 'material');
+        $service = $this->purchaseInvoiceItem($piId, null);
+        $this->setKind($service, 'service');
+
+        $proposal = $this->receipts->proposeForPurchaseInvoice($this->sid, $piId);
+        self::assertSame([$coded], array_column($proposal['unmatched_lines'], 'purchase_invoice_item_id'), 'Význam unmatched_lines zůstává.');
+        self::assertSame([$codeless], array_column($proposal['uncoded_lines'], 'purchase_invoice_item_id'), 'Služba se nenabízí.');
+        self::assertNull($proposal['uncoded_lines'][0]['stock_item_id']);
+        self::assertNull($proposal['uncoded_lines'][0]['matched_stock_item_id'], 'Bez párování podle názvu.');
+        self::assertSame([], $proposal['lines']);
+
+        $withCard = $this->receipts->proposeForPurchaseInvoice($this->sid, $piId, [$codeless => $card]);
+        self::assertSame($card, $this->linesById($withCard)[$codeless]['stock_item_id']);
+        self::assertSame([], $withCard['uncoded_lines']);
+
+        $doc = $this->receipts->createReceipt($this->sid, $piId, [
+            'warehouse_id' => $wh,
+            'doc_date'     => '2099-01-10',
+            'lines'        => [['purchase_invoice_item_id' => $codeless, 'stock_item_id' => $card, 'quantity' => '1.000']],
+        ], $this->userId, true);
+        $this->documents->post($this->sid, (int) $doc['id'], $this->userId);
+        self::assertSame([], $this->receipts->proposeForPurchaseInvoice($this->sid, $piId)['uncoded_lines'], 'Přijatý řádek se znovu nenabízí.');
+    }
+
+    public function testCodelessOfferSkipsFreightAndFixedAssetsNextToGoods(): void
+    {
+        $wh = $this->warehouse($this->sid);
+        $card = $this->item($this->sid, 'ZBOZI-S-DOPRAVOU');
+        $piId = $this->purchaseInvoice($this->sid, $this->vendorId);
+        $goods = $this->purchaseInvoiceItem($piId, $card, '2.000');
+        $freight = $this->purchaseInvoiceItem($piId, null);
+        $fixedAsset = $this->purchaseInvoiceItem($piId, null);
+        $this->setKind($fixedAsset, 'fixed_asset');
+        $flaggedAsset = $this->purchaseInvoiceItem($piId, null);
+        $this->setKind($flaggedAsset, 'material');
+        $this->db->pdo()->prepare('UPDATE purchase_invoice_items SET is_fixed_asset = 1 WHERE id = ?')->execute([$flaggedAsset]);
+
+        $proposal = $this->receipts->proposeForPurchaseInvoice($this->sid, $piId);
+        self::assertSame([], $proposal['uncoded_lines'], 'Doprava ani dlouhodobý majetek se na sklad nenabízí.');
+        self::assertTrue($proposal['has_lines_to_receive']);
+
+        $doc = $this->receipts->createReceipt($this->sid, $piId, [
+            'warehouse_id' => $wh,
+            'doc_date'     => '2099-01-10',
+            'lines'        => [['purchase_invoice_item_id' => $goods, 'stock_item_id' => $card, 'quantity' => '2.000']],
+        ], $this->userId, true);
+        $this->documents->post($this->sid, (int) $doc['id'], $this->userId);
+        $received = $this->receipts->proposeForPurchaseInvoice($this->sid, $piId);
+        self::assertSame([], $received['uncoded_lines']);
+        self::assertFalse($received['has_lines_to_receive'], 'Po příjmu zboží řádek za dopravu tlačítko nedrží.');
+        self::assertContains($freight, array_column($received['cost_candidates'], 'purchase_invoice_item_id'));
+    }
+
+    public function testUnclassifiedCodelessLineIsOfferedOnlyWithoutOtherStockLine(): void
+    {
+        $piId = $this->purchaseInvoice($this->sid, $this->vendorId);
+        $unclassified = $this->purchaseInvoiceItem($piId, null);
+
+        $proposal = $this->receipts->proposeForPurchaseInvoice($this->sid, $piId);
+        self::assertSame([$unclassified], array_column($proposal['uncoded_lines'], 'purchase_invoice_item_id'));
+        self::assertTrue($proposal['has_lines_to_receive']);
+
+        $smallAsset = $this->purchaseInvoiceItem($piId, null);
+        $this->setKind($smallAsset, 'small_asset');
+        self::assertSame([$smallAsset], array_column($this->receipts->proposeForPurchaseInvoice($this->sid, $piId)['uncoded_lines'], 'purchase_invoice_item_id'));
+    }
+
     public function testRememberedCodePairsNextInvoiceAndMovesFromOtherCard(): void
     {
         $wh = $this->warehouse($this->sid);
@@ -875,6 +949,11 @@ final class PurchaseLineStockMatchTest extends StockTestCase
         $id = $this->purchaseInvoiceItem($piId, null, $qty);
         $this->setCodes($id, $code, $ean);
         return $id;
+    }
+
+    private function setKind(int $lineId, string $kind): void
+    {
+        $this->db->pdo()->prepare('UPDATE purchase_invoice_items SET expense_kind = ? WHERE id = ?')->execute([$kind, $lineId]);
     }
 
     private function setCodes(int $lineId, ?string $code, ?string $ean): void

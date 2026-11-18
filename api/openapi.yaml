@@ -47748,6 +47748,13 @@ components:
               type: array
               description: Řádky s kódem bez karty použitelné samy, včetně návrhů podle kódu karty (`match_source` sku nebo code_ean, karta v `matched_stock_item_id`). Do příjemky jdou jen s výslovně zadaným `stock_item_id`. Stejné řádky jsou i v `cost_candidates`.
               items: { $ref: '#/components/schemas/StockReceiptProposalLine' }
+            uncoded_lines:
+              type: array
+              description: Řádky bez kódu a bez EAN, které mohou být zboží (`expense_kind` material nebo small_asset, ne dlouhodobý majetek) a zbývá je přijmout. Řádek bez `expense_kind` se nabídne, jen když faktura nemá jiný skladový řádek. Karta se u nich sama nehledá, do příjemky jdou jen s výslovně zadaným `stock_item_id`. Stejné řádky jsou i v `cost_candidates`.
+              items: { $ref: '#/components/schemas/StockReceiptProposalLine' }
+            has_lines_to_receive:
+              type: boolean
+              description: Faktura má řádek, který zbývá přijmout na sklad (s kartou, v `unmatched_lines` nebo v `uncoded_lines`). Podle něj UI nabízí příjem.
             cost_candidates:
               type: array
               items: { $ref: '#/components/schemas/StockReceiptCostCandidate' }
@@ -47758,6 +47765,8 @@ components:
             purchase_invoice_id: { type: integer, format: int64 }
             lines: { type: array, maxItems: 0 }
             unmatched_lines: { type: array, maxItems: 0 }
+            uncoded_lines: { type: array, maxItems: 0 }
+            has_lines_to_receive: { type: boolean, const: false }
             cost_candidates: { type: array, maxItems: 0 }
             not_receivable_kind: { type: string, enum: [advance, tax_document, credit_note] }
     StockReceiptCreate:

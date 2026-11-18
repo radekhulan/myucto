@@ -41,6 +41,8 @@ interface LineState {
   recalcFailed: boolean
   newName: string
   seller_item_code: string | null
+  /** Řádek faktury bez kódu a bez EAN: karta se k němu sama nehledá. */
+  uncoded: boolean
   matched_stock_item_id: number | null
   match_source: 'vendor_sku' | 'ean' | 'sku' | 'code_ean' | null
   remember: boolean
@@ -68,7 +70,8 @@ async function load() {
     proposal.value = prop
     warehouses.value = whs
     warehouseId.value = whs.find(w => w.is_default)?.id ?? whs[0]?.id ?? null
-    const proposedLines = [...prop.lines, ...(prop.unmatched_lines ?? [])]
+    const uncodedIds = new Set((prop.uncoded_lines ?? []).map(l => l.purchase_invoice_item_id))
+    const proposedLines = [...prop.lines, ...(prop.unmatched_lines ?? []), ...(prop.uncoded_lines ?? [])]
       .sort((a, b) => a.order_index - b.order_index || a.purchase_invoice_item_id - b.purchase_invoice_item_id)
     lines.value = proposedLines.map(l => ({
       purchase_invoice_item_id: l.purchase_invoice_item_id,
@@ -84,6 +87,7 @@ async function load() {
       recalcFailed: false,
       newName: l.description,
       seller_item_code: l.seller_item_code ?? null,
+      uncoded: uncodedIds.has(l.purchase_invoice_item_id),
       matched_stock_item_id: l.matched_stock_item_id ?? null,
       match_source: l.match_source ?? null,
       // Předvolené jen u karty vybrané v tomto okně (onSelect), návrh se sám nezapamatuje.
@@ -215,7 +219,7 @@ function intrastatValues(l: LineState): string {
   ].filter(Boolean).join(', ')
 }
 function matchLabel(l: LineState): string {
-  if (l.stock_item_id == null) return l.seller_item_code ? t('stock.receipt.match_none') : ''
+  if (l.stock_item_id == null) return l.uncoded ? t('stock.receipt.match_uncoded') : l.seller_item_code ? t('stock.receipt.match_none') : ''
   if (l.stock_item_id !== l.matched_stock_item_id || !l.match_source) return ''
   return t(`stock.receipt.match_${l.match_source}`)
 }

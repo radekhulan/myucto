@@ -493,6 +493,7 @@ describe('InvoiceDetail.vue — skladové příjemky', () => {
     m.receiptPropose.mockResolvedValue({
       purchase_invoice: { id: 258, varsymbol: '2026258', vendor_invoice_number: 'FP-258', vendor_name: 'Dodavatel s.r.o.', currency_code: 'CZK', exchange_rate: null },
       lines: [{ purchase_invoice_item_id: 1, purchase_order_line_id: null, stock_item_id: 10, description: 'Zboží', quantity: '2', already_received: '0', remaining_qty: '2', unit_cost: '100' }],
+      has_lines_to_receive: true,
       cost_candidates: [],
       pf_changed_after_receipt: false,
     })
@@ -523,6 +524,24 @@ describe('InvoiceDetail.vue — skladové příjemky', () => {
     await flushPromises()
     await wrapper.find('[data-test="create-receipt"]').trigger('click')
     expect(m.push).toHaveBeenCalledWith('/stock/documents/777')
+  })
+
+  it('nabídne příjemku i faktuře, která má jen řádky bez kódu a bez karty', async () => {
+    const line = { purchase_invoice_item_id: 2, purchase_order_line_id: null, stock_item_id: null, description: 'Zboží bez kódu', quantity: '1', already_received: '0', remaining_qty: '1', unit_cost: '100' }
+    m.receiptPropose.mockResolvedValue({ lines: [], unmatched_lines: [], uncoded_lines: [line], has_lines_to_receive: true, cost_candidates: [], pf_changed_after_receipt: false })
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    const action = (wrapper.findComponent({ name: 'ActionBar' }).props('actions') as Array<{ key: string; show?: boolean }>).find(a => a.key === 'stock-receipt')
+    expect(action?.show).toBe(true)
+  })
+
+  it('nenabídne příjemku, když server hlásí, že není co přijmout (zboží přijaté, zbývá jen doprava)', async () => {
+    const received = { purchase_invoice_item_id: 1, purchase_order_line_id: null, stock_item_id: 10, description: 'Zboží', quantity: '2', already_received: '2', remaining_qty: '0', unit_cost: '100' }
+    m.receiptPropose.mockResolvedValue({ lines: [received], unmatched_lines: [], uncoded_lines: [], has_lines_to_receive: false, cost_candidates: [{ purchase_invoice_item_id: 2, description: 'Doprava', amount: '150.00' }], pf_changed_after_receipt: false })
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    const action = (wrapper.findComponent({ name: 'ActionBar' }).props('actions') as Array<{ key: string; show?: boolean }>).find(a => a.key === 'stock-receipt')
+    expect(action?.show).toBe(false)
   })
 
   it('zobrazí historii draft, posted i reversed příjemek a rozliší prázdný stav', async () => {
