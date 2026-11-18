@@ -508,7 +508,7 @@ describe('Membership workspace', () => {
     expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: false })
     w.unmount()
   })
-  it('opens a member created during an open batch in a new panel without a handoff, so the batch stays', async () => {
+  it('offers opening a member created during an open batch from the notice, so the batch stays and no late panel is blocked', async () => {
     const w = mounted()
     await flushPromises()
     await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
@@ -517,12 +517,51 @@ describe('Membership workspace', () => {
     await w.get('[data-section="create-member"] [data-field="member-number"]').setValue('M-9')
     await w.get('[data-action="create-member"]').trigger('click')
     await flushPromises()
+    // Nový panel otevřený až po odpovědi serveru by prohlížeč zablokoval; detail se tedy sám neotevírá.
+    expect(rowLink.navigate).not.toHaveBeenCalled()
+    const [text, action] = toast.success.mock.lastCall ?? []
+    expect(text).toBe(cs.nonprofitMembership.memberCreated)
+    expect(action).toMatchObject({ label: cs.nonprofitMembership.openMember })
+    expect(w.findComponent(MembershipBatchFlow).exists()).toBe(true)
+    // Klik na tlačítko je nová akce uživatele: detail jde do nového panelu i po zavření dávky.
+    w.findComponent(MembershipBatchFlow).vm.$emit('close');await flushPromises()
+    await (action as { handler: () => void }).handler()
     expect(lastNavigation()).toEqual({ to: DETAIL(9), newPanel: true })
     expectNewPanelOption()
     expect(readListHandoff(5, null)).toBeNull()
-    expect(w.findComponent(MembershipBatchFlow).exists()).toBe(true)
     w.unmount()
   })
+
+  it('offers opening a member created during an export from the notice and ignores the notice after a company switch', async () => {
+    const w = mounted()
+    await flushPromises()
+    let finishExport!: (v: unknown) => void
+    api.exportMembers.mockReturnValueOnce(new Promise(done => { finishExport = done }))
+    await w.get('[data-action="export-xlsx"]').trigger('click');await flushPromises()
+    await w.get('[data-action="create-open"]').trigger('click')
+    await w.get('[data-field="member-client"]').setValue('3')
+    await w.get('[data-section="create-member"] [data-field="member-number"]').setValue('M-9')
+    const membersCallsBefore = api.members.mock.calls.length
+    await w.get('[data-action="create-member"]').trigger('click')
+    await flushPromises()
+    expect(rowLink.navigate).not.toHaveBeenCalled()
+    const [, action] = toast.success.mock.lastCall ?? []
+    expect(action).toMatchObject({ label: cs.nonprofitMembership.openMember })
+    // Seznam se během exportu neobnovuje: obnova by přebila hlášku o chybě exportu.
+    expect(api.members).toHaveBeenCalledTimes(membersCallsBefore)
+    // Tlačítko funguje i po doběhnutí exportu (nový panel, bez předání seznamu).
+    finishExport({ blob: new Blob(['x']), filename: 'members.xlsx' });await flushPromises()
+    await (action as { handler: () => void }).handler()
+    expect(lastNavigation()).toEqual({ to: DETAIL(9), newPanel: true })
+    expectNewPanelOption()
+    expect(readListHandoff(5, null)).toBeNull()
+    // Přepnutí firmy seznam odmontuje (:key podle firmy); adresa detailu firmu nenese, tlačítko nic neotevře.
+    rowLink.navigate.mockClear()
+    w.unmount()
+    await (action as { handler: () => void }).handler()
+    expect(rowLink.navigate).not.toHaveBeenCalled()
+  })
+
   it('creates a member only on explicit request from a chosen contact and a member number', async () => {
     const w = mounted()
     await flushPromises()

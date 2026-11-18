@@ -157,13 +157,15 @@ const labelOf = (row: MemberRow) => row.erased
 const navigateRow = useRowLink()
 const paneId = usePaneId()
 const paneKey = () => (paneId.value === null ? null : String(paneId.value))
+/** Rozpracovaný hromadný předpis, import nebo běžící export by odchodem ze seznamu zmizel. */
+const keepsList = () => batchOpen.value || importOpen.value || exporting.value
 /**
  * Detail člena je samostatná stránka jako detail kontaktu (Ctrl+klik a prostřední tlačítko ho otevřou v novém panelu).
  * Rozpracovaný hromadný předpis, import nebo běžící export by odchodem ze seznamu zmizel, proto se tehdy detail
  * otevře v novém panelu. Při odchodu ve stejném panelu seznam předá adresu s filtry, výběr a otevřeného člena.
  */
 function goToMember(id: number, event?: MouseEvent) {
-  const keepList = batchOpen.value || importOpen.value || exporting.value
+  const keepList = keepsList()
   const newPanel = keepList || !!event && (event.ctrlKey || event.metaKey || event.button === 1)
   if (!newPanel) saveListHandoff({ supplier: props.supplier, pane: paneKey(), returning: false, path: route?.fullPath || MEMBERSHIP_LIST_PATH, filters: appliedFilters.value, ids: [...checkedMembers.value], openedId: id })
   navigateRow(memberDetailPath(id), event, { newPanel: keepList })
@@ -310,8 +312,16 @@ async function create() {
     creating.value = false; draft.reset()
     closeCreate()
     // Jako u kontaktu rovnou detail nového člena (tam se zapisuje jeho první revize); oznámení přežije přechod.
-    toast.success(t('nonprofitMembership.memberCreated'))
-    goToMember(created.id)
+    if (!keepsList()) {
+      toast.success(t('nonprofitMembership.memberCreated'))
+      goToMember(created.id)
+      return
+    }
+    // Nový panel otevřený až po odpovědi serveru by prohlížeč zablokoval, proto ho otevře tlačítko v oznámení.
+    // Po přepnutí firmy (seznam má :key podle firmy) tlačítko nic neotevře: odkaz na detail firmu nenese.
+    toast.success(t('nonprofitMembership.memberCreated'), { label: t('nonprofitMembership.openMember'), handler: () => {
+      if (alive) navigateRow(memberDetailPath(created.id), undefined, { newPanel: true })
+    } })
   } catch (e) {
     if (alive && ticket === createTicket) createError.value = membershipError({t, te}, e)
   } finally {
