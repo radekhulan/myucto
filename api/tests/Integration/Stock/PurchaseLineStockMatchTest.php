@@ -231,11 +231,24 @@ final class PurchaseLineStockMatchTest extends StockTestCase
 
         $proposal = $this->receipts->proposeForPurchaseInvoice($this->sid, $piId);
         self::assertSame([$unclassified], array_column($proposal['uncoded_lines'], 'purchase_invoice_item_id'));
-        self::assertTrue($proposal['has_lines_to_receive']);
+        self::assertFalse($proposal['has_lines_to_receive'], 'Řádek bez druhu nákladu příjem sám nenabídne.');
 
         $smallAsset = $this->purchaseInvoiceItem($piId, null);
         $this->setKind($smallAsset, 'small_asset');
-        self::assertSame([$smallAsset], array_column($this->receipts->proposeForPurchaseInvoice($this->sid, $piId)['uncoded_lines'], 'purchase_invoice_item_id'));
+        $proposal = $this->receipts->proposeForPurchaseInvoice($this->sid, $piId);
+        self::assertSame([$smallAsset], array_column($proposal['uncoded_lines'], 'purchase_invoice_item_id'));
+        self::assertTrue($proposal['has_lines_to_receive']);
+    }
+
+    public function testInvoiceWithOnlyUnclassifiedAndServiceLinesDoesNotOfferReceipt(): void
+    {
+        $piId = $this->purchaseInvoice($this->sid, $this->vendorId);
+        $this->purchaseInvoiceItem($piId, null);
+        $service = $this->purchaseInvoiceItem($piId, null);
+        $this->setKind($service, 'service');
+
+        $proposal = $this->receipts->proposeForPurchaseInvoice($this->sid, $piId);
+        self::assertFalse($proposal['has_lines_to_receive'], 'Faktura za služby a režii bez druhu nákladu nemá nabízet příjem na sklad.');
     }
 
     public function testRememberedCodePairsNextInvoiceAndMovesFromOtherCard(): void

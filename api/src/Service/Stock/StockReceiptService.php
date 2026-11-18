@@ -64,7 +64,8 @@ final class StockReceiptService
      * Nespárované řádky s kódem jdou navíc do `unmatched_lines`, řádky bez kódu a bez EAN
      * do `uncoded_lines`, ať jim člověk kartu vybere. Bez kódu se nabízí jen řádek, který může být
      * zboží (materiál, drobný majetek, ne dlouhodobý majetek); neurčený druh jen tehdy, když faktura
-     * nemá jiný skladový řádek. `has_lines_to_receive` říká UI, jestli má příjem nabídnout.
+     * nemá jiný skladový řádek. `has_lines_to_receive` říká UI, jestli má příjem nabídnout;
+     * řádky neurčeného druhu ho samy nezapnou.
      *
      * @param array<int,int> $cardOverrides purchase_invoice_item_id => karta, kterou člověk vybral: návrh
      *                                      řádku se přepočte podle balení této karty (množství, cena)
@@ -175,6 +176,11 @@ final class StockReceiptService
             }
         }
 
+        // Řádky bez druhu nákladu se v průvodci ukážou, ale příjem samy nenabídnou: na faktuře
+        // bez jiného skladového řádku jde typicky o služby a režii (energie, nájem, telefon),
+        // u nichž druh nákladu chybí. Tlačítko zapne až řádek s kartou, s kódem, nebo řádek
+        // označený jako materiál či drobný majetek.
+        $receivableUncoded = $uncodedLines !== [];
         if ($stockLines === [] && $unmatchedLines === [] && $uncodedLines === []) {
             $uncodedLines = $unclassifiedLines;
         }
@@ -191,7 +197,7 @@ final class StockReceiptService
             'lines'                    => $stockLines,
             'unmatched_lines'          => $unmatchedLines,
             'uncoded_lines'            => $uncodedLines,
-            'has_lines_to_receive'     => $unmatchedLines !== [] || $uncodedLines !== []
+            'has_lines_to_receive'     => $unmatchedLines !== [] || $receivableUncoded
                 || array_filter($stockLines, static fn (array $l): bool => (float) $l['remaining_qty'] > 0) !== [],
             'cost_candidates'          => $costCandidates,
             // B6: existuje posted příjemka k této PF, jejíž zdrojový řádek PF byl
